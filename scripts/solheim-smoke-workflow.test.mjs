@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import fs from "node:fs"
 import { URL } from "node:url"
 import { describe, it } from "node:test"
-import { spawnSync } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import os from "node:os"
 import path from "node:path"
 const workflow = fs.readFileSync(new URL("../.github/workflows/solheim-provider-smoke.yml", import.meta.url), "utf8")
@@ -64,23 +64,52 @@ describe("Project A provider smoke workflow", () => {
 		assert.match(workflow, /timeout-minutes: 8/)
 		assert.match(workflow, /^ {8}timeout-minutes: 25$/m)
 	})
-	it("uploads only the verdict, the structured trace, and video, never host logs or storage", () => {
-		const paths = workflow.split("path: |\n")[1]?.split("                  if-no-files-found:")[0]
+	it("uploads metadata and the recording as separate validated artifacts", () => {
+		const metadataStep =
+			workflow.split("- name: Upload provider smoke verdict and trace")[1]?.split("- name:")[0] ?? ""
+		const recordingStep = workflow.split("- name: Upload provider smoke recording")[1]?.split("- name:")[0] ?? ""
+		assert.ok(metadataStep.length > 0)
+		assert.ok(recordingStep.length > 0)
 		assert.deepEqual(
-			paths
-				?.trim()
+			metadataStep
+				.split("path: |")[1]
+				?.split("if-no-files-found:")[0]
+				.trim()
 				.split("\n")
 				.map((line) => line.trim()),
 			[
 				"${{ runner.temp }}/solheim-provider-smoke/verdict.json",
 				"${{ runner.temp }}/solheim-provider-smoke/trace.json",
-				"${{ runner.temp }}/solheim-provider-smoke/smoke.mp4",
+				"${{ runner.temp }}/solheim-provider-smoke/recording-status.txt",
 			],
 		)
-		assert.match(workflow, /!cancelled\(\)/)
-		assert.match(workflow, /if-no-files-found: error/)
+		// The recording artifact carries only the exact validated final path.
+		assert.equal(
+			recordingStep.split("path: ")[1]?.split("\n")[0].trim(),
+			"${{ runner.temp }}/solheim-provider-smoke/smoke.mp4",
+		)
+		for (const step of [metadataStep, recordingStep]) {
+			assert.match(step, /!cancelled\(\)/)
+			assert.match(step, /if-no-files-found: error/)
+			assert.match(step, /retention-days: 7/)
+			assert.match(step, /actions\/upload-artifact@[0-9a-f]{40}/)
+			assert.ok(!step.includes("*"))
+		}
+		// A missing recording cannot hide behind a multi-path if-no-files-found.
+		assert.match(workflow, /name: solheim-provider-smoke-recording-\$\{\{ github\.sha \}\}/)
+		// Temporary recorder output is never an upload path.
+		assert.ok(!workflow.includes(".tmp"))
 		assert.ok(!driver.includes("console.error("))
 		assert.ok(!driver.includes("stderrLog"))
+	})
+	it("reports a missing or failed recording explicitly before the uploads", () => {
+		const checkStep = workflow.split("- name: Verify recording integrity")[1]?.split("- name:")[0] ?? ""
+		assert.match(checkStep, /recording-status\.txt/)
+		assert.match(checkStep, /test "\$status" = ok/)
+		assert.match(checkStep, /!cancelled\(\)/)
+		const checkIndex = workflow.indexOf("- name: Verify recording integrity")
+		const uploadIndex = workflow.indexOf("- name: Upload provider smoke verdict and trace")
+		assert.ok(checkIndex >= 0 && checkIndex < uploadIndex)
 	})
 	it("records a fresh display with credential-free ffmpeg and bounded teardown", () => {
 		assert.match(workflow, /install -y xvfb ffmpeg/)
@@ -92,6 +121,16 @@ describe("Project A provider smoke workflow", () => {
 		assert.match(recorder, /attempt < 50/)
 		assert.ok(!recorder.includes("SOLHEIM_API_KEY"))
 		assert.match(workflow, /retention-days: 7/)
+		// The recorder writes a unique temporary file inside the output
+		// directory, forces the mp4 muxer because the name has no mp4 suffix,
+		// and publishes only validated output with an atomic rename.
+		assert.match(recorder, /temp_recording="\$SOLHEIM_SMOKE_OUT_DIR\/\.smoke\.mp4\.\$\$\.tmp"/)
+		assert.match(recorder, /-f mp4 "\$temp_recording"/)
+		assert.match(recorder, /ffprobe -v error "\$temp_recording"/)
+		assert.match(recorder, /mv -f "\$temp_recording" "\$final_recording"/)
+		assert.match(recorder, /rm -f "\$final_recording"/)
+		// ffmpeg must never write the final path directly.
+		assert.ok(!/ffmpeg[^\n]*\$final_recording/.test(recorder))
 	})
 	it("keeps Code QA and package commands focused on smoke contracts", () => {
 		for (const command of [
@@ -137,43 +176,230 @@ describe("Project A provider smoke workflow", () => {
 })
 
 // Runs record.sh with stub ffmpeg and ffprobe, so no display or codec is needed.
-function runRecorder(args, { ffmpegWrites = true, ffprobeOk = true } = {}) {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "record-sh-"))
+const defaultFfmpeg = (writes) =>
+	`${writes ? 'for a; do :; done; echo data > "$a"' : ":"}\ntrap 'exit 0' TERM\nwhile true; do sleep 0.05; done`
+
+function stubRecorderBin(dir, { ffmpeg, ffmpegWrites = true, ffprobeOk = true } = {}) {
 	const bin = path.join(dir, "bin")
-	fs.mkdirSync(bin)
+	fs.mkdirSync(bin, { recursive: true })
 	const stub = (name, body) =>
 		fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 })
-	// The stub ffmpeg writes the last argument, stops on INT, and exits.
-	stub(
-		"ffmpeg",
-		`${ffmpegWrites ? 'for a; do :; done; echo data > "$a"' : ":"}\ntrap 'exit 0' INT\nwhile true; do sleep 0.05; done`,
-	)
+	// The stub ffmpeg writes the last argument (the recorder's output path),
+	// stops on TERM, and exits.
+	stub("ffmpeg", ffmpeg ?? defaultFfmpeg(ffmpegWrites))
 	stub("ffprobe", ffprobeOk ? "exit 0" : "exit 1")
-	const result = spawnSync("bash", [new URL("./solheim-smoke/record.sh", import.meta.url).pathname, ...args], {
-		env: { PATH: `${bin}:${process.env.PATH}`, DISPLAY: ":99", SOLHEIM_SMOKE_OUT_DIR: path.join(dir, "out") },
+	return bin
+}
+
+function recorderPaths(dir) {
+	const outDir = path.join(dir, "out")
+	return {
+		outDir,
+		statusFile: path.join(outDir, "recording-status.txt"),
+		finalRecording: path.join(outDir, "smoke.mp4"),
+	}
+}
+
+function recorderEnv(bin, outDir, providerMarker) {
+	return {
+		PATH: `${bin}:${process.env.PATH}`,
+		DISPLAY: ":99",
+		SOLHEIM_SMOKE_OUT_DIR: outDir,
+		...(providerMarker ? { PROVIDER_MARKER: providerMarker } : {}),
+	}
+}
+
+const recorderScript = new URL("./solheim-smoke/record.sh", import.meta.url).pathname
+
+function runRecorder(args, { ffmpeg, ffmpegWrites = true, ffprobeOk = true, seedFinal, providerMarker } = {}) {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "record-sh-"))
+	const bin = stubRecorderBin(dir, { ffmpeg, ffmpegWrites, ffprobeOk })
+	const paths = recorderPaths(dir)
+	fs.mkdirSync(paths.outDir, { recursive: true })
+	if (seedFinal !== undefined) fs.writeFileSync(paths.finalRecording, seedFinal)
+	const result = spawnSync("bash", [recorderScript, ...args], {
+		env: recorderEnv(bin, paths.outDir, providerMarker),
 		encoding: "utf8",
 		timeout: 20_000,
 	})
-	fs.rmSync(dir, { recursive: true, force: true })
-	return result
+	return { result, ...paths, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) }
 }
+
+function runRecorderSignalled(args, { ffmpeg, ffprobeOk = true, delayMs, providerMarker } = {}) {
+	return new Promise((resolve) => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "record-sh-"))
+		const bin = stubRecorderBin(dir, { ffmpeg, ffprobeOk })
+		const paths = recorderPaths(dir)
+		const child = spawn("bash", [recorderScript, ...args], {
+			env: recorderEnv(bin, paths.outDir, providerMarker),
+		})
+		let stdout = ""
+		child.stdout.on("data", (chunk) => {
+			stdout += chunk
+		})
+		const watchdog = setTimeout(() => child.kill("SIGKILL"), 15_000)
+		const timer = setTimeout(() => child.kill("SIGTERM"), delayMs)
+		child.on("close", (code) => {
+			clearTimeout(watchdog)
+			clearTimeout(timer)
+			resolve({ code, stdout, ...paths, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) })
+		})
+	})
+}
+
+const tempFilesLeft = (run) => fs.readdirSync(run.outDir).filter((name) => name.includes(".tmp"))
+const recordingStatus = (run) => fs.readFileSync(run.statusFile, "utf8").trim()
 
 describe("record.sh exit and validation behavior", () => {
 	it("passes when the command succeeds and the recording is valid", () => {
-		assert.equal(runRecorder(["true"]).status, 0)
+		const run = runRecorder(["true"])
+		try {
+			assert.equal(run.result.status, 0)
+			assert.equal(recordingStatus(run), "ok")
+			assert.equal(fs.readFileSync(run.finalRecording, "utf8"), "data\n")
+			assert.deepEqual(tempFilesLeft(run), [])
+		} finally {
+			run.cleanup()
+		}
 	})
-	it("keeps the exit code of a failing command", () => {
-		assert.equal(runRecorder(["bash", "-c", "exit 7"]).status, 7)
+	it("keeps the exit code of a failing command and still publishes a valid recording", () => {
+		const run = runRecorder(["bash", "-c", "exit 7"])
+		try {
+			assert.equal(run.result.status, 7)
+			assert.equal(recordingStatus(run), "ok")
+			assert.equal(fs.readFileSync(run.finalRecording, "utf8"), "data\n")
+		} finally {
+			run.cleanup()
+		}
 	})
 	it("fails when the recording is missing", () => {
-		const result = runRecorder(["true"], { ffmpegWrites: false })
-		assert.equal(result.status, 1)
-		assert.match(result.stdout, /recording failed/)
+		const run = runRecorder(["true"], { ffmpegWrites: false })
+		try {
+			assert.equal(run.result.status, 1)
+			assert.match(run.result.stdout, /recording failed/)
+			assert.ok(!fs.existsSync(run.finalRecording))
+			assert.notEqual(recordingStatus(run), "ok")
+		} finally {
+			run.cleanup()
+		}
 	})
-	it("fails when ffprobe rejects the recording", () => {
-		assert.equal(runRecorder(["true"], { ffprobeOk: false }).status, 1)
+	it("fails and cleans the temporary file when ffprobe rejects the recording", () => {
+		const run = runRecorder(["true"], { ffprobeOk: false })
+		try {
+			assert.equal(run.result.status, 1)
+			assert.ok(!fs.existsSync(run.finalRecording))
+			assert.deepEqual(tempFilesLeft(run), [])
+			assert.notEqual(recordingStatus(run), "ok")
+		} finally {
+			run.cleanup()
+		}
 	})
 	it("keeps a failing command code when the recording is also invalid", () => {
-		assert.equal(runRecorder(["bash", "-c", "exit 7"], { ffprobeOk: false }).status, 7)
+		const run = runRecorder(["bash", "-c", "exit 7"], { ffprobeOk: false })
+		try {
+			assert.equal(run.result.status, 7)
+			assert.ok(!fs.existsSync(run.finalRecording))
+		} finally {
+			run.cleanup()
+		}
+	})
+	it("removes a stale final recording when the new recording fails", () => {
+		const run = runRecorder(["true"], { ffmpegWrites: false, seedFinal: "STALE" })
+		try {
+			assert.equal(run.result.status, 1)
+			assert.ok(!fs.existsSync(run.finalRecording))
+		} finally {
+			run.cleanup()
+		}
+	})
+	it("replaces a stale final recording with the validated new recording", () => {
+		const run = runRecorder(["true"], { seedFinal: "STALE" })
+		try {
+			assert.equal(run.result.status, 0)
+			assert.equal(fs.readFileSync(run.finalRecording, "utf8"), "data\n")
+		} finally {
+			run.cleanup()
+		}
+	})
+	it("aborts before the command when the recorder dies at startup", () => {
+		const marker = path.join(os.tmpdir(), `record-sh-marker-${process.pid}-${Math.random()}`)
+		const run = runRecorder(["bash", "-c", 'echo ran > "$PROVIDER_MARKER"'], {
+			ffmpeg: 'for a; do :; done; echo partial > "$a"\nexit 1',
+			providerMarker: marker,
+		})
+		try {
+			assert.equal(run.result.status, 1)
+			assert.ok(!fs.existsSync(marker))
+			assert.ok(!fs.existsSync(run.finalRecording))
+			assert.match(recordingStatus(run), /stopped on its own/)
+		} finally {
+			run.cleanup()
+			fs.rmSync(marker, { force: true })
+		}
+	})
+	it("rejects recorder output that stopped on its own with a failure status", () => {
+		const run = runRecorder(["bash", "-c", "sleep 2"], {
+			// The content is readable and would pass ffprobe, so the rejection
+			// must come from the recorder's own non-zero exit status.
+			ffmpeg: 'for a; do :; done\nsleep 0.7\necho data > "$a"\nexit 1',
+		})
+		try {
+			assert.equal(run.result.status, 1)
+			assert.ok(!fs.existsSync(run.finalRecording))
+			assert.deepEqual(tempFilesLeft(run), [])
+			assert.match(recordingStatus(run), /stopped on its own/)
+		} finally {
+			run.cleanup()
+		}
+	})
+	it("publishes when the recorder stops on its own with success (size or time limit)", () => {
+		const run = runRecorder(["bash", "-c", "sleep 2"], {
+			ffmpeg: 'for a; do :; done\nsleep 0.7\necho data > "$a"\nexit 0',
+		})
+		try {
+			assert.equal(run.result.status, 0)
+			assert.equal(recordingStatus(run), "ok")
+			assert.equal(fs.readFileSync(run.finalRecording, "utf8"), "data\n")
+		} finally {
+			run.cleanup()
+		}
+	})
+})
+
+describe("record.sh signal teardown behavior", () => {
+	it("stops the recorder and the command on SIGTERM and keeps the signal exit code", async () => {
+		const marker = path.join(os.tmpdir(), `record-sh-marker-${process.pid}-${Math.random()}`)
+		const run = await runRecorderSignalled(
+			// The inner wait makes the stub command respond to TERM promptly, the
+			// way a signal-safe driver does. The trap exits so the "normal" write
+			// cannot run after a handled signal.
+			[
+				"bash",
+				"-c",
+				`trap 'printf killed > "$PROVIDER_MARKER"; exit 143' TERM; sleep 5 & wait; printf normal > "$PROVIDER_MARKER"`,
+			],
+			{ delayMs: 800, providerMarker: marker },
+		)
+		try {
+			assert.equal(run.code, 143)
+			assert.equal(fs.readFileSync(run.finalRecording, "utf8"), "data\n")
+			assert.equal(recordingStatus(run), "ok")
+			assert.equal(fs.readFileSync(marker, "utf8"), "killed")
+			assert.deepEqual(tempFilesLeft(run), [])
+		} finally {
+			run.cleanup()
+			fs.rmSync(marker, { force: true })
+		}
+	})
+	it("leaves no final recording when the interrupted output fails validation", async () => {
+		const run = await runRecorderSignalled(["bash", "-c", "sleep 5"], { delayMs: 800, ffprobeOk: false })
+		try {
+			assert.equal(run.code, 143)
+			assert.ok(!fs.existsSync(run.finalRecording))
+			assert.deepEqual(tempFilesLeft(run), [])
+			assert.notEqual(recordingStatus(run), "ok")
+		} finally {
+			run.cleanup()
+		}
 	})
 })

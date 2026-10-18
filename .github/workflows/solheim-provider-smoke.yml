@@ -48,7 +48,20 @@ jobs:
                   SOLHEIM_SMOKE_OUT_DIR: ${{ runner.temp }}/solheim-provider-smoke
               run: xvfb-run -a -s "-screen 0 1280x720x24 -nolisten tcp" bash scripts/solheim-smoke/record.sh
 
-            - name: Upload provider smoke verdict and recording
+            # The recorder publishes smoke.mp4 only after a nonempty check and
+            # ffprobe validation, so any other status is a recording failure.
+            - name: Verify recording integrity
+              if: ${{ !cancelled() && (steps.provider.outcome == 'success' || steps.provider.outcome == 'failure') }}
+              env:
+                  SOLHEIM_SMOKE_OUT_DIR: ${{ runner.temp }}/solheim-provider-smoke
+              run: |
+                  status="$(cat "$SOLHEIM_SMOKE_OUT_DIR/recording-status.txt" 2>/dev/null || echo missing)"
+                  echo "Recording status: $status"
+                  test "$status" = ok
+
+            # Verdict and trace evidence must survive even when the recording
+            # is missing, so metadata and video are uploaded separately.
+            - name: Upload provider smoke verdict and trace
               if: ${{ !cancelled() && (steps.provider.outcome == 'success' || steps.provider.outcome == 'failure') }}
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
               with:
@@ -56,6 +69,17 @@ jobs:
                   path: |
                       ${{ runner.temp }}/solheim-provider-smoke/verdict.json
                       ${{ runner.temp }}/solheim-provider-smoke/trace.json
-                      ${{ runner.temp }}/solheim-provider-smoke/smoke.mp4
+                      ${{ runner.temp }}/solheim-provider-smoke/recording-status.txt
+                  if-no-files-found: error
+                  retention-days: 7
+
+            # Exact validated final path only; the recorder leaves no temporary
+            # file behind, so a failed upload here reports the missing recording.
+            - name: Upload provider smoke recording
+              if: ${{ !cancelled() && (steps.provider.outcome == 'success' || steps.provider.outcome == 'failure') }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              with:
+                  name: solheim-provider-smoke-recording-${{ github.sha }}
+                  path: ${{ runner.temp }}/solheim-provider-smoke/smoke.mp4
                   if-no-files-found: error
                   retention-days: 7

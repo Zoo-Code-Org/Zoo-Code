@@ -54,8 +54,24 @@ eight minutes / approximately 120 MiB, with bounded shutdown and seven-day artif
 contains the visible smoke UI, potentially including the fixed prompt and model answer; unlike the verdict
 and the trace, it is not text-redacted. No settings screen is opened, and no host logs, storage, task
 configuration or credential files are uploaded. Fragmented MP4 preserves completed fragments on abrupt
-interruption. Ordinary success and failure runs upload all three artifacts; cancellation may prevent
-finalization/upload.
+interruption.
+
+The recorder writes ffmpeg output to a unique temporary file inside the smoke output directory, with the
+MP4 muxer forced because the temporary name has no mp4 suffix. After bounded shutdown it publishes the
+recording only when the file is non-empty and `ffprobe` accepts it, through an atomic same-directory
+rename onto `smoke.mp4`. Every failed check removes the temporary file and leaves no final recording, and
+a stale `smoke.mp4` from an earlier attempt in a reused directory is removed before recording starts.
+ffmpeg exits non-zero after its graceful INT or TERM shutdown, so a recorder that was still alive at
+shutdown is judged by content validation alone. A recorder that stopped on its own before shutdown must
+have exited zero (the `-t` time or `-fs` size limits); any other self-chosen status fails the recording
+even when the fragments would still probe. The wrapper records the outcome in `recording-status.txt`
+(`ok`, or the failure reason), reports the reason on stdout, and keeps the provider exit code unchanged.
+
+Metadata (`verdict.json`, `trace.json`, `recording-status.txt`) and the video are uploaded as two separate
+artifacts, each with `if-no-files-found: error`. A missing recording therefore fails its own upload step
+and the explicit integrity check step, instead of hiding behind a multi-path upload. Verdict and trace
+evidence stay available when the provider failed and the video is missing. Cancellation may prevent
+finalization and upload.
 
 Checks, without a provider key or network calls:
 

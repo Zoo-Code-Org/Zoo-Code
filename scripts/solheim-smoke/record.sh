@@ -4,33 +4,87 @@ set -euo pipefail
 : "${DISPLAY:?Run this wrapper under xvfb-run}"
 : "${SOLHEIM_SMOKE_OUT_DIR:?Set a scratch output directory}"
 mkdir -p "$SOLHEIM_SMOKE_OUT_DIR"
-recording="$SOLHEIM_SMOKE_OUT_DIR/smoke.mp4"
+final_recording="$SOLHEIM_SMOKE_OUT_DIR/smoke.mp4"
+status_file="$SOLHEIM_SMOKE_OUT_DIR/recording-status.txt"
+
+# A stale final from an earlier attempt must never survive into this attempt's
+# upload. Remove only this exact path.
+rm -f "$final_recording"
+echo pending > "$status_file"
 
 # The recorder needs display access, not provider/GitHub credentials. Fragmented
 # MP4 keeps completed fragments readable if the action is forcibly interrupted.
+# The output muxer is forced with -f mp4 because the temporary file name has no
+# mp4 suffix for ffmpeg to infer the format from.
+temp_recording="$SOLHEIM_SMOKE_OUT_DIR/.smoke.mp4.$$.tmp"
 env -i "PATH=$PATH" "DISPLAY=$DISPLAY" "XAUTHORITY=${XAUTHORITY:-}" \
     ffmpeg -nostdin -hide_banner -loglevel error -y \
     -f x11grab -video_size 1280x720 -framerate 12 -i "$DISPLAY" \
     -an -c:v libx264 -preset ultrafast -crf 28 -pix_fmt yuv420p -g 24 \
     -t 480 -fs 125829120 -movflags +frag_keyframe+empty_moov \
-    "$recording" >/dev/null 2>&1 &
+    -f mp4 "$temp_recording" >/dev/null 2>&1 &
 recorder_pid=$!
+
+provider_pid=""
+
+# Accepted normal shutdown semantics: ffmpeg exits non-zero after its graceful
+# INT or TERM shutdown, so a recorder that was still alive when shutdown started
+# is judged by content validation, not by its interrupted exit status. A recorder
+# that stopped on its own before shutdown must have exited zero (the -t or -fs
+# limits); any other self-chosen non-zero status fails the recording even when
+# ffprobe can still read the fragments.
+report_recording_failure() {
+    echo "Solheim smoke recording failed: $1"
+    echo "$1" > "$status_file"
+    [[ "$result" -ne 0 ]] || result=1
+}
+
+stop_provider() {
+    [[ -n "$provider_pid" ]] || return 0
+    kill -TERM "$provider_pid" 2>/dev/null || return 0
+    for ((attempt = 0; attempt < 30; attempt++)); do
+        kill -0 "$provider_pid" 2>/dev/null || break
+        sleep 0.1
+    done
+    kill -KILL "$provider_pid" 2>/dev/null || true
+    wait "$provider_pid" 2>/dev/null || true
+}
 
 finish() {
     result=$?
     trap - EXIT
-    kill -INT "$recorder_pid" 2>/dev/null || true
+    # Teardown must run to completion once it starts.
+    trap '' INT TERM
+    local recorder_status=0 recorder_was_alive=0
+    if kill -0 "$recorder_pid" 2>/dev/null; then
+        recorder_was_alive=1
+    fi
+    # TERM is a graceful stop for ffmpeg: it finalizes the fragments before exit.
+    kill -TERM "$recorder_pid" 2>/dev/null || true
     # A hung recorder must not hold the action open indefinitely.
     for ((attempt = 0; attempt < 50; attempt++)); do
         kill -0 "$recorder_pid" 2>/dev/null || break
         sleep 0.1
     done
     kill -KILL "$recorder_pid" 2>/dev/null || true
-    wait "$recorder_pid" 2>/dev/null || true
-    if [[ ! -s "$recording" ]] || ! env -i "PATH=$PATH" \
-        ffprobe -v error "$recording" >/dev/null 2>&1; then
-        echo "Solheim smoke recording failed"
-        [[ "$result" -ne 0 ]] || result=1
+    wait "$recorder_pid" 2>/dev/null || recorder_status=$?
+    # An interrupted provider must not outlive the wrapper.
+    stop_provider
+    if [[ "$recorder_was_alive" -eq 0 ]] && [[ "$recorder_status" -ne 0 ]]; then
+        rm -f "$temp_recording"
+        report_recording_failure "recorder stopped on its own with exit status $recorder_status"
+    elif [[ ! -s "$temp_recording" ]]; then
+        rm -f "$temp_recording"
+        report_recording_failure "recorder output is missing or empty"
+    elif ! env -i "PATH=$PATH" ffprobe -v error "$temp_recording" >/dev/null 2>&1; then
+        rm -f "$temp_recording"
+        report_recording_failure "recorder output failed ffprobe validation"
+    elif mv -f "$temp_recording" "$final_recording"; then
+        # Same-directory rename: atomic, so no partially written final exists.
+        echo ok > "$status_file"
+    else
+        rm -f "$temp_recording"
+        report_recording_failure "validated recording could not be published"
     fi
     exit "$result"
 }
@@ -41,4 +95,13 @@ sleep 0.5
 kill -0 "$recorder_pid" 2>/dev/null || exit 1
 
 # Arguments are used for credential-free recorder tests; CI supplies none.
-if [[ "$#" -gt 0 ]]; then "$@"; else pnpm solheim:smoke; fi
+# Backgrounding the provider keeps the signal traps responsive during the run.
+if [[ "$#" -gt 0 ]]; then
+    "$@" &
+else
+    pnpm solheim:smoke &
+fi
+provider_pid=$!
+provider_status=0
+wait "$provider_pid" || provider_status=$?
+exit "$provider_status"
