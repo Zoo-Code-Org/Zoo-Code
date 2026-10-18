@@ -411,6 +411,12 @@
 		"getOpencodeGoApiKey": "Opencode Go APIキーを取得",
 		"kenariApiKey": "Kenari APIキー",
 		"getKenariApiKey": "Kenari APIキーを取得",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "IO Intelligence APIキー",
+			"getApiKey": "IO Intelligence APIキーを取得",
+			"model": "モデル"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT APIキー",
@@ -579,6 +585,16 @@
 		"enablePromptCaching": "プロンプトキャッシュを有効化",
 		"enablePromptCachingTitle": "サポートされているモデルのパフォーマンスを向上させ、コストを削減するためにプロンプトキャッシュを有効化します。",
 		"cacheUsageNote": "注意：キャッシュの使用が表示されない場合は、別のモデルを選択してから希望のモデルを再度選択してみてください。",
+		"githubCopilot": {
+			"accountActions": "GitHub Copilot アカウントの操作",
+			"signIn": "GitHub にサインイン",
+			"reconnect": "GitHub に再接続",
+			"signedIn": "{{account}} としてサインイン中",
+			"connecting": "接続中...",
+			"noModels": "利用可能な Copilot モデルがありません。GitHub Copilot Chat をインストールまたは有効化し、対象の GitHub アカウントでサインインしてから更新してください。サインインしても Copilot のサブスクリプションが確認されるわけではありません。GitHub のプラン、プレミアムリクエスト、レート制限が適用されます。",
+			"manageAccount": "GitHub アカウントを管理",
+			"manageAccountDescription": "VS Code のアカウントメニューを開きます。ここから GitHub からサインアウトできます。サインアウトすると、Copilot とこのアカウントを使用する他の拡張機能に影響します。"
+		},
 		"vscodeLmModel": "言語モデル",
 		"vscodeLmWarning": "注意: VS Code Language Model API を通じて利用されるモデルは、プロバイダーによってラップまたは微調整されている場合があります。したがって、一般的なプロバイダーやルーターから同じモデルを直接使用する場合と挙動が異なることがあります。『Language Model』ドロップダウンのモデルを使用するには、まずそのモデルに切り替え、Copilot Chat のプロンプトで『承認』をクリックしてください。そうしないと、400『The requested model is not supported』などのエラーが表示されることがあります。",
 		"googleCloudSetup": {
@@ -1002,8 +1018,14 @@
 		"rangeDescription": "高い値は出力をよりランダムに、低い値はより決定論的にします。"
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "画像サポートが報告されていません",
+		"toolSupportUnknown": "ツールサポートが報告されていません",
+		"promptCacheManagedByCopilot": "プロンプトキャッシュは GitHub Copilot が管理します",
+		"promptCacheCopilotDetails": "キャッシュの動作はモデルと GitHub Copilot のバックエンドに依存します。Zoo Code は VS Code API を通じて、キャッシュの保持期間を設定したりキャッシュヒットを確認したりすることはできません。",
 		"supportsImages": "画像をサポート",
 		"noImages": "画像をサポートしていません",
+		"supportsTools": "ツールをサポート",
+		"noTools": "ツールをサポートしていません",
 		"supportsPromptCache": "プロンプトキャッシュをサポート",
 		"noPromptCache": "プロンプトキャッシュをサポートしていません",
 		"contextWindow": "コンテキストウィンドウ:",

@@ -56,6 +56,7 @@ import {
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	getModelId,
 	isRetiredProvider,
+	modelIdKeys,
 	providerIdentifiers,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
@@ -142,10 +143,6 @@ import { PendingEditOperationStore, type PendingEditOperationInput } from "./Pen
  * https://github.com/KumarVariable/vscode-extension-sidebar-html/blob/master/src/customSidebarViewProvider.ts
  */
 
-export type ClineProviderEvents = {
-	clineCreated: [cline: Task]
-}
-
 type DelegatedChildContext = TaskExecutionContext
 
 function runDelegationTransition<T>(
@@ -190,6 +187,22 @@ function scheduleTask(
 		}
 	})
 }
+
+// Keys a model-selector patch may touch: model IDs plus settings reset on model change.
+const PROFILE_MODEL_ID_PATCH_KEYS: ReadonlySet<string> = new Set(modelIdKeys)
+
+const BEDROCK_CUSTOM_ARN_MODEL_ID = "custom-arn"
+
+// These keys can only be cleared. Setting `awsCustomArn` would let a patch invoke a Bedrock
+// resource that the organization allow-list never checked, because the allow-list sees `apiModelId`.
+const PROFILE_MODEL_RESET_ONLY_KEYS: ReadonlySet<string> = new Set([
+	"reasoningEffort",
+	"modelMaxTokens",
+	"modelMaxThinkingTokens",
+	"awsCustomArn",
+	"awsCustomArnBaseModelId",
+	"awsModelContextWindow",
+])
 
 type GetStateOptions = {
 	includeTaskHistory?: boolean
@@ -258,7 +271,15 @@ export class ClineProvider
 		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
 	}
 
-	private enqueueProviderProfileMutation<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+	/**
+	 * With `runToCompletion`, a timeout only rejects the caller: the mutation is not aborted and the
+	 * queue advances once it settles. Use it for multi-write mutations that must not stop halfway
+	 * (storage saved but not activated) or overlap with the next mutation.
+	 */
+	private enqueueProviderProfileMutation<T>(
+		fn: (signal: AbortSignal) => Promise<T>,
+		options: { runToCompletion?: boolean } = {},
+	): Promise<T> {
 		const controller = new AbortController()
 		// Run fn after either outcome so a rejected mutation never poisons the queue.
 		const run = this.providerProfileMutationQueue.then(
@@ -266,6 +287,11 @@ export class ClineProvider
 			() => fn(controller.signal),
 		)
 		const callerResult = this.withProviderProfileMutationTimeout(run, () => {
+			if (options.runToCompletion) {
+				this.log("Provider profile mutation timed out; waiting for it to finish before the next mutation")
+				return
+			}
+
 			controller.abort()
 			this.log("Provider profile mutation timed out; aborting in-flight mutation")
 		})
@@ -289,7 +315,7 @@ export class ClineProvider
 
 		// Advance from the timeout-bounded result. Each fn checks its AbortSignal before
 		// writing state, so advancing the queue on timeout cannot produce stale overwrites.
-		this.providerProfileMutationQueue = callerResult.then(
+		this.providerProfileMutationQueue = (options.runToCompletion ? run : callerResult).then(
 			() => undefined,
 			() => undefined,
 		)
@@ -326,7 +352,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "oct-2026-v3.88.0-providers-tasks-speed" // v3.88.0 provider/model support, task reliability, faster editing and chat
+	public readonly latestAnnouncementId = "oct-2026-v3.90.0-providers-tools-reasoning" // v3.90.0 providers and models, safer tool execution, reasoning and streaming
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -1859,49 +1885,10 @@ export class ClineProvider
 		activate: boolean = true,
 	): Promise<string | undefined> {
 		try {
-			return await this.enqueueProviderProfileMutation(async (signal) => {
-				// TODO: Do we need to be calling `activateProfile`? It's not
-				// clear to me what the source of truth should be; in some cases
-				// we rely on the `ContextProxy`'s data store and in other cases
-				// we rely on the `ProviderSettingsManager`'s data store. It might
-				// be simpler to unify these two.
-				const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
-
-				if (signal.aborted) return id
-
-				if (activate) {
-					const { mode } = await this.getState()
-
-					// These promises do the following:
-					// 1. Adds or updates the list of provider profiles.
-					// 2. Sets the current provider profile.
-					// 3. Sets the current mode's provider profile.
-					// 4. Copies the provider settings to the context.
-					//
-					// Note: 1, 2, and 4 can be done in one `ContextProxy` call:
-					// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
-					// We should probably switch to that and verify that it works.
-					// I left the original implementation in just to be safe.
-					await Promise.all([
-						this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
-						this.updateGlobalState("currentApiConfigName", name),
-						this.providerSettingsManager.setModeConfig(mode, id),
-						this.contextProxy.setProviderSettings(providerSettings),
-					])
-
-					// Change the provider for the current task.
-					// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
-					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
-
-					// Keep the current task's sticky provider profile in sync with the newly-activated profile.
-					await this.persistStickyProviderProfileToCurrentTask(name)
-				} else {
-					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
-				}
-
-				await this.postStateToWebview()
-				return id
-			})
+			return await this.enqueueProviderProfileMutation(
+				(signal) => this.persistProviderProfile(name, providerSettings, activate, signal),
+				{ runToCompletion: true },
+			)
 		} catch (error) {
 			this.log(
 				`Error create new api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
@@ -1910,6 +1897,167 @@ export class ClineProvider
 			vscode.window.showErrorMessage(t("common:errors.create_api_config"))
 			return undefined
 		}
+	}
+
+	/**
+	 * Applies a model change to the latest stored profile inside the mutation queue,
+	 * so a stale webview snapshot cannot overwrite newer profile settings.
+	 * A `null` patch value clears the key.
+	 */
+	async updateProfileModel(name: string, expectedProvider: string, patch: Record<string, unknown>): Promise<void> {
+		let partialState = false
+
+		try {
+			await this.enqueueProviderProfileMutation(
+				async (signal) => {
+					const { name: _name, ...stored } = await this.providerSettingsManager.getProfile({ name })
+
+					// Unset provider (e.g. the seeded default profile) resolves to anthropic, matching getState().
+					const storedProvider = stored.apiProvider ?? providerIdentifiers.anthropic
+
+					if (storedProvider !== expectedProvider) {
+						throw new Error(
+							`Profile "${name}" provider changed from "${expectedProvider}" to "${storedProvider}"`,
+						)
+					}
+
+					const merged: Record<string, unknown> = { ...stored, apiProvider: storedProvider }
+
+					for (const [key, value] of Object.entries(patch)) {
+						if (PROFILE_MODEL_ID_PATCH_KEYS.has(key)) {
+							if (typeof value !== "string" || value.length === 0) {
+								throw new Error(`Key "${key}" must be a non-empty string in a model patch`)
+							}
+
+							merged[key] = value
+						} else if (PROFILE_MODEL_RESET_ONLY_KEYS.has(key)) {
+							if (value !== null && value !== undefined) {
+								throw new Error(`Key "${key}" can only be cleared in a model patch`)
+							}
+
+							delete merged[key]
+						} else {
+							throw new Error(`Key "${key}" is not allowed in a model patch`)
+						}
+					}
+
+					if (storedProvider === providerIdentifiers.bedrock) {
+						if (merged.apiModelId === BEDROCK_CUSTOM_ARN_MODEL_ID) {
+							// The allow-list only sees apiModelId, so a patch must not select an ARN it cannot supply.
+							if (!merged.awsCustomArn) {
+								throw new Error(
+									`Model "${BEDROCK_CUSTOM_ARN_MODEL_ID}" requires an existing custom ARN`,
+								)
+							}
+						} else {
+							// A retained ARN would override the allow-listed model, so drop it with its context fields.
+							for (const key of PROFILE_MODEL_RESET_ONLY_KEYS) {
+								if (key.startsWith("aws")) delete merged[key]
+							}
+						}
+					}
+
+					const { organizationAllowList } = await this.getState()
+
+					if (!ProfileValidator.isProfileAllowed(merged as ProviderSettings, organizationAllowList)) {
+						throw new OrganizationAllowListViolationError(
+							t("common:errors.violated_organization_allowlist"),
+						)
+					}
+
+					if (signal.aborted) return
+
+					try {
+						await this.persistProviderProfile(name, merged as ProviderSettings, true, signal)
+					} catch (persistError) {
+						// Saving and activating are separate writes. Put the previous profile back so
+						// storage, context settings, and the task do not disagree about the model.
+						try {
+							await this.persistProviderProfile(name, stored as ProviderSettings, true, signal)
+						} catch (restoreError) {
+							partialState = true
+							this.log(
+								`Error restoring profile after failed model update: ${JSON.stringify(restoreError, Object.getOwnPropertyNames(restoreError), 2)}`,
+							)
+						}
+
+						throw persistError
+					}
+				},
+				{ runToCompletion: true },
+			)
+		} catch (error) {
+			this.log(`Error update profile model: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`)
+
+			vscode.window.showErrorMessage(
+				partialState
+					? t("common:errors.update_profile_model_partial")
+					: error instanceof OrganizationAllowListViolationError
+						? error.message
+						: t("common:errors.create_api_config"),
+			)
+		}
+	}
+
+	private async persistProviderProfile(
+		name: string,
+		providerSettings: ProviderSettings,
+		activate: boolean,
+		signal: AbortSignal,
+	): Promise<string | undefined> {
+		// TODO: Do we need to be calling `activateProfile`? It's not
+		// clear to me what the source of truth should be; in some cases
+		// we rely on the `ContextProxy`'s data store and in other cases
+		// we rely on the `ProviderSettingsManager`'s data store. It might
+		// be simpler to unify these two.
+		const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
+
+		if (signal.aborted) return id
+
+		if (activate) {
+			const { mode } = await this.getState()
+
+			if (signal.aborted) return id
+
+			// These promises do the following:
+			// 1. Adds or updates the list of provider profiles.
+			// 2. Sets the current provider profile.
+			// 3. Sets the current mode's provider profile.
+			// 4. Copies the provider settings to the context.
+			//
+			// Note: 1, 2, and 4 can be done in one `ContextProxy` call:
+			// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
+			// We should probably switch to that and verify that it works.
+			// I left the original implementation in just to be safe.
+			// `allSettled` so a caller that rolls back after a failure never races a write still in flight.
+			const activationResults = await Promise.allSettled([
+				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+				this.updateGlobalState("currentApiConfigName", name),
+				this.providerSettingsManager.setModeConfig(mode, id),
+				this.contextProxy.setProviderSettings(providerSettings),
+			])
+			const failedActivation = activationResults.find(
+				(result): result is PromiseRejectedResult => result.status === "rejected",
+			)
+
+			if (failedActivation) throw failedActivation.reason
+
+			if (signal.aborted) return id
+
+			// Change the provider for the current task.
+			// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
+			this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+
+			// Keep the current task's sticky provider profile in sync with the newly-activated profile.
+			await this.persistStickyProviderProfileToCurrentTask(name)
+		} else {
+			await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+		}
+
+		if (signal.aborted) return id
+
+		await this.postStateToWebview()
+		return id
 	}
 
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {

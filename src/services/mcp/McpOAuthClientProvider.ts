@@ -236,7 +236,9 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 
 		// Check if we have a cached client_id from previous registration
 		const cachedData = await this._secretStorage.getOAuthData(this._serverUrl)
-		if (cachedData?.client_info) {
+		// Reuse the cached registration only for the issuer that created it. Otherwise
+		// the stored client_secret would go to an authorization server the MCP server chose.
+		if (cachedData?.client_info && cachedData.issuer === this._authServerMeta?.issuer) {
 			// Use the full DCR response, override redirect_uris with the
 			// current port (which may have changed between sessions).
 			this._clientInfo = {
@@ -279,6 +281,12 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 
 		// Access token is expired or near expiry. Try to refresh if we have a refresh token.
 		if (data.tokens.refresh_token) {
+			// Never send the refresh token to an authorization server other than the one
+			// that issued it. Data without an issuer (saved by older versions) is cleared.
+			if (data.issuer !== this._authServerMeta?.issuer) {
+				await this._secretStorage.deleteOAuthData(this._serverUrl)
+				return undefined
+			}
 			if (this._refreshPromise) {
 				return this._refreshPromise
 			}
@@ -317,6 +325,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		await this._secretStorage.saveOAuthData(this._serverUrl, {
 			tokens,
 			expires_at,
+			...(this._authServerMeta?.issuer ? { issuer: this._authServerMeta.issuer as string } : {}),
 			...(clientInfo ? { client_info: clientInfo } : {}),
 		})
 	}

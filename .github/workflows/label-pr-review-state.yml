@@ -11,6 +11,11 @@ on:
                 description: Pull request number to reconcile
                 required: true
                 type: number
+            stale_dry_run:
+                description: Set to false to let the stale clock write labels, comments, and closes
+                required: false
+                type: string
+                default: "true"
     # This workflow only reads PR metadata and never checks out or executes PR code.
     # pull_request_target gives fork PRs a token that can update labels and comments.
     pull_request_target:
@@ -32,6 +37,10 @@ on:
     # provides a trusted base-repository event that can reconcile those PRs promptly.
     issue_comment:
         types: [created, edited]
+    # Fork pull_request_review runs get a read-only token and skip their label
+    # writes (issue #2046). The privileged follow-up for those runs lives in
+    # label-pr-review-state-fork-review-followup.yml: GitHub rejects a workflow
+    # that lists itself in workflow_run.workflows (issue #2086).
     workflow_run:
         workflows: ["Code QA Roo Code", "E2E Tests (Mocked)", "Webview Visual Regression", "CodeQL Advanced"]
         types: [completed]
@@ -129,7 +138,8 @@ jobs:
                       // number in the payload; sweep triggers (hourly schedule, pushes to
                       // main) list every open PR; workflow_run events use the run's
                       // associated PRs, with a fork-safe backfill by exact head owner,
-                      // branch, and SHA when GitHub left pull_requests empty.
+                      // branch, and SHA when GitHub left pull_requests empty. Keep the
+                      // backfill in sync with label-pr-review-state-fork-review-followup.yml.
                       let prNumbers = [];
                       if (context.payload.pull_request?.number) {
                         prNumbers = [context.payload.pull_request.number];
@@ -354,11 +364,15 @@ jobs:
                         }
                       }
 
-                      // Strips stateLabels from a PR, optionally keeping one.
-                      // Also removes stale-awaiting-author when not keeping awaiting-author.
+                      // Strips stateLabels from a PR, optionally keeping one desired label
+                      // plus any labels in keepLabels (e.g. has-conflicts while mergeability
+                      // is unknown — kept, never added, per the hoisted check below).
+                      // Stale-clock labels are owned by the stale step below and are never
+                      // touched here: stripping one on a transient CI or mergeability flap
+                      // would erase a live warning and restart its close grace (issue #2076).
                       // Only skipped when this run's own token is read-only (see isReadOnlyRun) —
                       // schedule/workflow_dispatch runs reconcile fork PRs normally.
-                      async function reconcileLabels(pr, desiredLabel) {
+                      async function reconcileLabels(pr, desiredLabel, keepLabels = []) {
                         if (isReadOnlyRun && isForkPR(pr)) {
                           core.info(`PR #${pr.number}: fork PR on a read-only run — skipping label mutation`);
                           return;
@@ -379,7 +393,7 @@ jobs:
                           }
                         }
                         for (const label of stateLabels) {
-                          if (label !== desiredLabel && currentLabels.has(label)) {
+                          if (label !== desiredLabel && !keepLabels.includes(label) && currentLabels.has(label)) {
                             try {
                               await github.rest.issues.removeLabel({
                                 owner, repo, issue_number: pr.number, name: label,
@@ -393,22 +407,6 @@ jobs:
                               } else {
                                 labelErrors.push(err);
                               }
-                            }
-                          }
-                        }
-                        if (desiredLabel !== 'awaiting-author' && currentLabels.has('stale-awaiting-author')) {
-                          try {
-                            await github.rest.issues.removeLabel({
-                              owner, repo, issue_number: pr.number, name: 'stale-awaiting-author',
-                            });
-                            currentLabels.delete('stale-awaiting-author');
-                            pr.labels = pr.labels.filter(current => current.name !== 'stale-awaiting-author');
-                          } catch (err) {
-                            if (err.status === 404) {
-                              currentLabels.delete('stale-awaiting-author');
-                              pr.labels = pr.labels.filter(current => current.name !== 'stale-awaiting-author');
-                            } else {
-                              labelErrors.push(err);
                             }
                           }
                         }
@@ -752,6 +750,26 @@ jobs:
                             continue;
                           }
 
+                          // Unknown mergeability is handled once here, ahead of every
+                          // branch that reconciles labels (issue #2045). GitHub recomputes
+                          // mergeability asynchronously after each push and transiently
+                          // reports `mergeable: null` / `mergeable_state: "unknown"` while
+                          // the background job runs, so unknown says nothing about
+                          // conflicts: an existing has-conflicts label is kept through
+                          // reconciliation — unknown is not evidence the conflicts went
+                          // away — and it is never added, since unknown is not evidence
+                          // of conflicts either. Known-dirty never reaches here (the
+                          // conflict check above handles it first); known-clean keeps the
+                          // strip. The awaiting-maintainer branch below still refetches
+                          // mergeability before the maintainer handoff, because a push
+                          // between this fetch and labeling can change the answer.
+                          // A kept has-conflicts label can sit next to other state labels
+                          // until mergeability is known. This is intended.
+                          const mergeabilityUnknown =
+                            prDetail.mergeable === null || prDetail.mergeable_state === 'unknown';
+                          const keepHasConflicts = mergeabilityUnknown &&
+                            pr.labels.some(label => label.name === 'has-conflicts');
+
                           // Check CI status for required checks on the PR's head commit only.
                           // Scoping to required checks avoids advisory checks (e.g. codecov/patch)
                           // incorrectly blocking label assignment on otherwise-ready PRs.
@@ -851,16 +869,10 @@ jobs:
                           // Exception (issue #2025): while GitHub is still computing
                           // mergeability, a missing required check can simply mean a
                           // conflicting PR got no merge-ref CI run — not that its
-                          // conflicts went away. Keep an existing has-conflicts label
-                          // through this branch instead of stripping it with the other
-                          // state labels. Known-clean mergeability keeps the strip, and
-                          // known-dirty never reaches here (the conflict check above
-                          // handles it first).
+                          // conflicts went away. keepHasConflicts (computed once above)
+                          // keeps an existing has-conflicts label through this branch
+                          // instead of stripping it with the other state labels.
                           if (ciPending || ciFailed) {
-                            const mergeabilityUnknown =
-                              prDetail.mergeable === null || prDetail.mergeable_state === 'unknown';
-                            const keepHasConflicts = mergeabilityUnknown &&
-                              pr.labels.some(label => label.name === 'has-conflicts');
                             core.info(
                               `PR #${pr.number}: CI ${ciPending ? 'pending' : 'failed'} — stripping state labels` +
                               (keepHasConflicts ? ' (keeping has-conflicts while mergeability is unknown)' : '')
@@ -1133,6 +1145,7 @@ jobs:
 
                           core.info(
                             `PR #${pr.number}: CI passing, reviews=${latest.size}, ` +
+                            `mergeable=${prDetail.mergeable}, mergeable_state=${prDetail.mergeable_state}, ` +
                             `coderabbit=${freshCodeRabbitReview?.state ?? (codeRabbitEligibleAuthor ? 'pending' : 'optional')}, ` +
                             `maintainer=${maintainerApproval?.state ?? 'pending'}, blockers=${maintainerBlockers.size} → ${desiredLabel ?? '(none)'}`
                           );
@@ -1153,7 +1166,7 @@ jobs:
                           if (recyclingActiveLabel) {
                             await updateReviewGuide(pr, phase, existingGuide);
                           }
-                          await reconcileLabels(pr, desiredLabel);
+                          await reconcileLabels(pr, desiredLabel, keepHasConflicts ? ['has-conflicts'] : []);
                           await reconcileCommunityApproval(pr, communityDecision);
                           if (readyForMaintainer) {
                             await updateReviewGate(pr, phase, true);
@@ -1198,3 +1211,434 @@ jobs:
                       if (failures.length > 0) {
                         core.setFailed(`Failed to reconcile ${failures.length} PR(s): ${failures.join('; ')}`);
                       }
+
+            - name: Reconcile stale PR clock
+              if: ${{ !cancelled() }}
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  retries: 3
+                  script: |
+                      const { owner, repo } = context.repo;
+
+                      // A queue-superseded shard leaves no other trace in the logs.
+                      core.info(`Concurrency group: ${process.env.CONCURRENCY_GROUP}`);
+
+                      // Issue #2076: this workflow owns the stale clock (policy C). Only
+                      // author activity resets it: the author's latest commit, the
+                      // author's latest comment or review, and ready_for_review events
+                      // the author marked. Bot comments and label flips (including this
+                      // workflow's own review-status updates) never move the clock, so
+                      // hourly reconciliation cannot keep an inactive PR open forever.
+                      // Bot-authored PRs (user.type 'Bot') sit outside the clock
+                      // entirely: their commits are commonly applied by a different
+                      // bot login, so the commit clock cannot see their real activity.
+                      const dayMs = 24 * 60 * 60 * 1000;
+                      const closeGraceDays = 7;
+                      const exemptLabels = new Set(['do-not-close', 'pinned', 'work-in-progress']);
+                      const stalePolicies = {
+                        inactive: {
+                          label: 'stale-inactive',
+                          staleDays: 60,
+                          staleMessage:
+                            'This PR has had no activity for 60 days and will be automatically ' +
+                            'closed in 7 days unless there is new activity. If you\'d like to ' +
+                            'continue, please rebase and leave a comment.',
+                          closeMessage:
+                            'Closing due to 60+ days of inactivity. Feel free to reopen if ' +
+                            'you\'d like to resume this work.',
+                        },
+                        awaitingAuthor: {
+                          label: 'stale-awaiting-author',
+                          staleDays: 14,
+                          staleMessage:
+                            'This PR has been awaiting author changes for 14 days and will be ' +
+                            'automatically closed in 7 days. Please address the review comments ' +
+                            'or leave a comment if you need more time.',
+                          closeMessage:
+                            'Closing due to author inactivity after requested changes. Feel free ' +
+                            'to reopen once the requested changes have been addressed.',
+                        },
+                      };
+                      const staleLabels = [stalePolicies.inactive.label, stalePolicies.awaitingAuthor.label];
+                      const minStaleDays = stalePolicies.awaitingAuthor.staleDays;
+
+                      // The clock starts in observation mode. An operator must pass
+                      // stale_dry_run=false on a workflow_dispatch, or set the
+                      // STALE_DRY_RUN repository variable to false, before anything is
+                      // written. With neither override present, every run — schedule
+                      // included — only logs proposed actions.
+                      const dryRun = String(process.env.STALE_DRY_RUN ?? 'true').trim().toLowerCase() !== 'false';
+
+                      const { data: pr } = await github.rest.pulls.get({
+                        owner, repo, pull_number: Number(process.env.PR_NUMBER),
+                      });
+                      if (pr.state !== 'open') {
+                        core.info(`PR #${pr.number}: not open. Skipping stale reconciliation`);
+                        return;
+                      }
+
+                      // Fork pull_request_review runs hold a read-only token; sweep and
+                      // pull_request_target runs reconcile fork PRs normally.
+                      const isReadOnlyRun = context.eventName === 'pull_request_review' &&
+                        Boolean(pr.head?.repo?.full_name) &&
+                        pr.head.repo.full_name !== pr.base?.repo?.full_name;
+                      if (isReadOnlyRun) {
+                        core.info(`PR #${pr.number}: fork PR on a read-only run. Skipping stale reconciliation`);
+                        return;
+                      }
+
+                      const now = Date.now();
+
+                      try {
+                        const currentLabels = new Set(pr.labels.map(label => label.name));
+                        const presentStaleLabels = staleLabels.filter(label => currentLabels.has(label));
+                        const exempt = [...exemptLabels].some(label => currentLabels.has(label));
+                        // The awaiting-author policy also applies while its stale label
+                        // is present without awaiting-author: a transient CI, conflict,
+                        // or mergeability flap strips awaiting-author and replaces it
+                        // with no state label, and the preserved warning must still
+                        // close on its promised clock (issue #2076). The policy stops
+                        // only on a definitive maintainer handoff: awaiting-maintainer
+                        // means the reconcile step moved the PR to the maintainer
+                        // queue, so the author no longer owes changes. There the
+                        // 14-day clock is retired, the cleanup below removes the stale
+                        // warning, and the ordinary 60/67-day inactive clock governs.
+                        // Tradeoff: a blocker cleared without author action now
+                        // survives to 67 days instead of 21.
+                        const awaitingClockApplies = currentLabels.has('awaiting-author') ||
+                          (currentLabels.has(stalePolicies.awaitingAuthor.label) &&
+                           !currentLabels.has('awaiting-maintainer'));
+                        const policy = awaitingClockApplies
+                          ? stalePolicies.awaitingAuthor
+                          : stalePolicies.inactive;
+                        const closeAfterDays = policy.staleDays + closeGraceDays;
+                        // The policy window covers both decision thresholds: activity
+                        // older than this can affect neither mark-stale nor close.
+                        const windowStartMs = now - closeAfterDays * dayMs;
+                        const authorLogin = pr.user?.login?.toLowerCase() ?? null;
+                        // GitHub sets user.type 'Bot' on automated accounts (for
+                        // example zoomote[bot], whose commits are applied by a
+                        // different login such as roomote). No mapping from a bot to
+                        // its owner login exists, so the commit clock cannot see real
+                        // activity on these PRs. Exempt them from stale marking and
+                        // closure; the cleanup below still removes leftover stale
+                        // labels. user.type is authoritative. No [bot] suffix
+                        // heuristic: suffix matching would miss custom bot names and
+                        // misclassify human logins. A PR with no user keeps the
+                        // ordinary human behavior.
+                        const botAuthor = pr.user?.type === 'Bot';
+
+                        core.info(`PR #${pr.number}: stale clock dry run: ${dryRun}`);
+
+                        // Cheap pre-check: opening the PR is author activity, so
+                        // created_at floors the author clock. A nonexempt PR with no
+                        // stale label that is younger than its policy's stale threshold
+                        // can need no action, so it costs no further API work.
+                        const prAgeDays = (now - Date.parse(pr.created_at ?? '')) / dayMs;
+                        if (!exempt && presentStaleLabels.length === 0 &&
+                            !Number.isNaN(prAgeDays) && prAgeDays < policy.staleDays) {
+                          core.info(
+                            `PR #${pr.number}: PR age ${Math.floor(Math.max(prAgeDays, 0))} days is below ` +
+                            `the ${policy.staleDays}-day stale threshold and no stale label is present. Skipping`
+                          );
+                          return;
+                        }
+
+                        // Opening the PR is author activity, so created_at is the clock
+                        // floor. Anything not attributable to the author is ignored.
+                        let lastActivity = Date.parse(pr.created_at ?? '');
+                        if (Number.isNaN(lastActivity)) lastActivity = 0;
+                        const consider = (value) => {
+                          const at = Date.parse(value ?? '');
+                          if (!Number.isNaN(at) && at > lastActivity) lastActivity = at;
+                        };
+
+                        const removeStaleLabel = async (label) => {
+                          if (!currentLabels.has(label)) return;
+                          if (dryRun) {
+                            core.info(`PR #${pr.number}: [dry-run] would remove label ${label}`);
+                            return;
+                          }
+                          try {
+                            await github.rest.issues.removeLabel({
+                              owner, repo, issue_number: pr.number, name: label,
+                            });
+                          } catch (error) {
+                            if (error.status !== 404) throw error;
+                          }
+                          currentLabels.delete(label);
+                        };
+                        const addStaleLabel = async (label) => {
+                          if (dryRun) {
+                            core.info(`PR #${pr.number}: [dry-run] would add label ${label}`);
+                            return;
+                          }
+                          await github.rest.issues.addLabels({
+                            owner, repo, issue_number: pr.number, labels: [label],
+                          });
+                          currentLabels.add(label);
+                        };
+                        const postComment = async (body) => {
+                          if (dryRun) {
+                            core.info(`PR #${pr.number}: [dry-run] would comment: ${body}`);
+                            return;
+                          }
+                          await github.rest.issues.createComment({
+                            owner, repo, issue_number: pr.number, body,
+                          });
+                        };
+                        const closePullRequest = async () => {
+                          if (dryRun) {
+                            core.info(`PR #${pr.number}: [dry-run] would close the PR`);
+                            return;
+                          }
+                          await github.rest.pulls.update({
+                            owner, repo, pull_number: pr.number, state: 'closed',
+                          });
+                        };
+
+                        async function applyDecision(decision) {
+                          // Clock skew can date activity in the future; clamp it so
+                          // the log and the reason show a present-time floor.
+                          if (lastActivity > now) lastActivity = now;
+                          core.info(
+                            `PR #${pr.number}: last author activity ${new Date(lastActivity).toISOString()} ` +
+                            `(${decision.reason}) → ${decision.action}`
+                          );
+                          if (decision.action === 'close') {
+                            // Close first. A failed close leaves no close comment
+                            // behind, so the next sweep cannot post a duplicate
+                            // close notice.
+                            await closePullRequest();
+                            await postComment(decision.policy.closeMessage);
+                          } else if (decision.action === 'mark-stale') {
+                            await removeStaleLabel(staleLabels.find(label => label !== decision.policy.label));
+                            if (!currentLabels.has(decision.policy.label)) {
+                              // Warn before labeling. A failed warning leaves no
+                              // label and no close timer; a failed label write only
+                              // reposts the warning on the next sweep.
+                              await postComment(decision.policy.staleMessage);
+                              await addStaleLabel(decision.policy.label);
+                            }
+                          } else if (decision.action === 'clear') {
+                            for (const label of decision.clearLabels ?? staleLabels) {
+                              await removeStaleLabel(label);
+                            }
+                          }
+                        }
+
+                        // Pure decision over the author clock. Closing needs three
+                        // gates at once: the author clock past the close threshold, the
+                        // policy stale label currently present, and its latest labeled
+                        // timeline event at least closeGraceDays old. An unlabeled PR
+                        // and a fresh warning never close, whatever the clock says: an
+                        // unlabeled PR is only eligible for a warning now, closure
+                        // becomes possible no earlier than closeGraceDays after that
+                        // warning label is applied, and only if the policy conditions
+                        // still hold then. A dry run therefore never proposes an
+                        // immediate close for an unlabeled PR.
+                        function decideStaleAction(authorAgeDays, applicableLabeledAgeDays) {
+                          const age = Math.floor(Math.max(authorAgeDays, 0));
+                          const applicablePresent = currentLabels.has(policy.label);
+                          if (botAuthor) {
+                            return presentStaleLabels.length > 0
+                              ? { action: 'clear', clearLabels: presentStaleLabels, reason: 'bot-authored PR' }
+                              : { action: 'none', reason: 'bot-authored PR' };
+                          }
+                          if (exempt) {
+                            return presentStaleLabels.length > 0
+                              ? { action: 'clear', clearLabels: presentStaleLabels, reason: 'exempt label present' }
+                              : { action: 'none', reason: 'exempt label present' };
+                          }
+                          const labeledOldEnough = applicableLabeledAgeDays !== null &&
+                            applicableLabeledAgeDays >= closeGraceDays;
+                          if (authorAgeDays >= closeAfterDays && applicablePresent && labeledOldEnough) {
+                            return {
+                              action: 'close',
+                              policy,
+                              reason: `author inactive for ${age} days; ` +
+                                `${policy.label} applied ${Math.floor(applicableLabeledAgeDays)} days ago`,
+                            };
+                          }
+                          if (authorAgeDays >= policy.staleDays) {
+                            return applicablePresent
+                              ? { action: 'none', reason: `author inactive for ${age} days; ${policy.label} warning is inside its grace window` }
+                              : { action: 'mark-stale', policy, reason: `author inactive for ${age} days` };
+                          }
+                          if (authorAgeDays < minStaleDays) {
+                            return presentStaleLabels.length > 0
+                              ? { action: 'clear', clearLabels: presentStaleLabels, reason: `author active ${age} days ago` }
+                              : { action: 'none', reason: `author active ${age} days ago` };
+                          }
+                          // Here the author clock sits between the two thresholds under
+                          // the inactive policy, so no close clock is live. Clear
+                          // whatever stale labels the PR carries: stale-inactive is
+                          // leftover from an earlier inactive cycle, and
+                          // stale-awaiting-author can only be a warning retired by the
+                          // maintainer handoff above.
+                          const leftoverStaleLabels = staleLabels.filter(label => currentLabels.has(label));
+                          const reason = `author inactive for ${age} days; ` +
+                            `${stalePolicies.inactive.label} applies at 60 days`;
+                          return leftoverStaleLabels.length > 0
+                            ? { action: 'clear', clearLabels: leftoverStaleLabels, reason }
+                            : { action: 'none', reason };
+                        }
+
+                        // Ordering differs by endpoint. pulls.listCommits returns the
+                        // PR commits oldest-first and caps the whole list at 250, so
+                        // the walk must reach the last page or it can miss the newest
+                        // commits; three pages cover the cap. Past the cap the PR
+                        // endpoint cannot return the newest commits at all, so those
+                        // PRs switch to the repository commits endpoint from the head
+                        // SHA: newest-first, no 250-commit cap, and a server-side
+                        // since filter. That endpoint also walks main-line history
+                        // merged into the branch; attribution below still counts only
+                        // PR-author commits, so the worst case is a recent author
+                        // commit on main keeping the PR open longer.
+                        async function recentCommits() {
+                          const perPage = 100;
+                          // Bounded walk: maxPages keeps the loop finite when commit
+                          // dates are missing or badly skewed.
+                          const maxPages = 10;
+                          let useHeadListing = (pr.commits ?? 0) > 250;
+                          const commits = [];
+                          for (let page = 1; page <= maxPages; page++) {
+                            let data;
+                            if (useHeadListing) {
+                              try {
+                                ({ data } = await github.rest.repos.listCommits({
+                                  owner, repo, sha: pr.head.sha, per_page: perPage, page,
+                                  since: new Date(windowStartMs).toISOString(),
+                                }));
+                              } catch (error) {
+                                // A fork head SHA may not resolve through the base
+                                // repository endpoint. Fall back to the PR endpoint
+                                // and its 250-commit truncation instead of failing
+                                // the sweep; the truncation can hide a newest commit
+                                // on PRs above the cap, so say so in the log.
+                                core.warning(
+                                  `PR #${pr.number}: head commit listing failed (${error.message}); ` +
+                                  `falling back to the PR commit endpoint (250-commit cap)`
+                                );
+                                useHeadListing = false;
+                              }
+                            }
+                            if (!data) {
+                              ({ data } = await github.rest.pulls.listCommits({
+                                owner, repo, pull_number: pr.number, per_page: perPage, page,
+                              }));
+                            }
+                            commits.push(...data);
+                            if (data.length < perPage) break;
+                            if (useHeadListing) {
+                              // Newest-first: once a page dips past the policy
+                              // window, older pages cannot hold author activity
+                              // that changes a decision.
+                              const oldestDate = data.reduce((oldest, commit) => {
+                                const at = Date.parse(commit.commit?.committer?.date ?? commit.commit?.author?.date ?? '');
+                                return !Number.isNaN(at) && (oldest === null || at < oldest) ? at : oldest;
+                              }, null);
+                              if (oldestDate !== null && oldestDate < windowStartMs) break;
+                            }
+                            // Oldest-first PR listing: every later page is newer,
+                            // so no date-based break is safe here; the 250-commit
+                            // cap bounds the walk at three pages.
+                          }
+                          return commits;
+                        }
+
+                        let applicableLabeledAgeDays = null;
+                        let skipRemainingScans = false;
+
+                        if (!exempt && !botAuthor) {
+                          // Comments first: the cheapest recency source. The policy
+                          // window is the server-side since filter.
+                          const comments = await github.paginate(github.rest.issues.listComments, {
+                            owner, repo, issue_number: pr.number, per_page: 100,
+                            since: new Date(windowStartMs).toISOString(),
+                          });
+                          if (authorLogin !== null) {
+                            for (const comment of comments) {
+                              if (comment.user?.login?.toLowerCase() !== authorLogin) continue;
+                              // since filters on the update time, so an author edit
+                              // counts as activity too.
+                              consider(comment.updated_at ?? comment.created_at);
+                              consider(comment.created_at);
+                            }
+                          }
+
+                          const timeline = await github.paginate(github.rest.issues.listEventsForTimeline, {
+                            owner, repo, issue_number: pr.number, per_page: 100,
+                          });
+                          let applicableLabeledAt = null;
+                          for (const event of timeline) {
+                            if (event.event === 'labeled') {
+                              if (event.label?.name !== policy.label) continue;
+                              const at = Date.parse(event.created_at ?? '');
+                              if (Number.isNaN(at)) continue;
+                              // The latest labeled event wins, so a removal and re-add
+                              // or a policy swap restarts the close grace.
+                              if (applicableLabeledAt === null || at > applicableLabeledAt) applicableLabeledAt = at;
+                            } else if (event.event === 'ready_for_review' && authorLogin !== null) {
+                              // Only the author marking the PR ready moves the clock.
+                              // A maintainer readying a draft is not author activity.
+                              if (event.actor?.login?.toLowerCase() !== authorLogin) continue;
+                              consider(event.created_at);
+                            }
+                          }
+                          applicableLabeledAgeDays = applicableLabeledAt === null
+                            ? null
+                            : (now - applicableLabeledAt) / dayMs;
+
+                          // Seen sources bound the clock: unseen commits or reviews can
+                          // only make it fresher. Inside the 14-day awaiting-author
+                          // window the only possible action is clearing leftover stale
+                          // labels, and that needs no further scans, so skip the commit
+                          // and review work.
+                          skipRemainingScans = (now - lastActivity) / dayMs < minStaleDays;
+
+                          if (!skipRemainingScans && authorLogin !== null) {
+                            for (const commit of await recentCommits()) {
+                              const gitAuthor = commit.author?.login?.toLowerCase() ?? null;
+                              const gitCommitter = commit.committer?.login?.toLowerCase() ?? null;
+                              if (gitCommitter !== null && gitCommitter === authorLogin) {
+                                // The author applied the commit (push, rebase, amend,
+                                // web edit). The committer date is the moment of that
+                                // activity; the author date covers skewed clocks.
+                                consider(commit.commit?.committer?.date);
+                                consider(commit.commit?.author?.date);
+                              } else if (gitAuthor !== null && gitAuthor === authorLogin) {
+                                // The author wrote the patch but someone else applied
+                                // it. Only the author date counts, so a maintainer
+                                // rebase never resets the clock.
+                                consider(commit.commit?.author?.date);
+                              }
+                              // Commits with no linked login on either side never
+                              // count. A contributor pushing from an unlinked email
+                              // address stays invisible to the commit clock; comments
+                              // and reviews still count. Commits by other users never
+                              // count either.
+                            }
+
+                            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+                              owner, repo, pull_number: pr.number, per_page: 100,
+                            });
+                            for (const review of reviews) {
+                              if (review.user?.login?.toLowerCase() !== authorLogin) continue;
+                              consider(review.submitted_at);
+                            }
+                          }
+                        }
+
+                        const authorAgeDays = (now - lastActivity) / dayMs;
+                        const decision = decideStaleAction(authorAgeDays, applicableLabeledAgeDays);
+                        await applyDecision(decision);
+                      } catch (error) {
+                        core.setFailed(`Failed to reconcile stale state for PR #${pr.number}: ${error.message}`);
+                      }
+              env:
+                  # The clock starts in observation mode: writes need an explicit
+                  # stale_dry_run=false through the workflow_dispatch input, or the
+                  # STALE_DRY_RUN repository variable set to false. The dispatch
+                  # input wins over the repository variable when both are set.
+                  STALE_DRY_RUN: ${{ github.event.inputs.stale_dry_run || vars.STALE_DRY_RUN || 'true' }}
