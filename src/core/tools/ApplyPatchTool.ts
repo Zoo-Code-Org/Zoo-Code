@@ -488,6 +488,27 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				return false
 			}
 
+			// Capture the destination state before either supported write path: a
+			// failed move must restore an existing destination instead of deleting
+			// whatever lived there. A read error other than ENOENT means the
+			// destination cannot be inspected, so the move is refused before any
+			// write rather than risking an unrecoverable clobber.
+			let destinationBackup: Buffer | undefined
+			try {
+				destinationBackup = await fs.readFile(moveAbsolutePath)
+			} catch (error) {
+				const code = (error as NodeJS.ErrnoException).code
+				if (code !== "ENOENT") {
+					task.consecutiveMistakeCount++
+					task.recordToolError("apply_patch")
+					const inspectErrorMessage = `Cannot inspect move destination '${change.movePath}': ${error instanceof Error ? error.message : String(error)}`
+					await task.say("error", inspectErrorMessage)
+					pushToolResult(formatResponse.toolError(inspectErrorMessage))
+					await task.diffViewProvider.reset()
+					return false
+				}
+			}
+
 			// Save new content to the new path
 			if (isPreventFocusDisruptionEnabled) {
 				await task.diffViewProvider.saveDirectly(
@@ -511,9 +532,15 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				// The source is still present (locked or protected): undo the destination
 				// write so the file does not live in two places, and report the move as
 				// failed. Returning true here would let the whole-patch checkpoint
-				// persist a duplicated file as if the move had succeeded.
+				// persist a duplicated file as if the move had succeeded. An existing
+				// destination is restored to its captured content; the destination is
+				// removed only when it was confirmed absent before the write.
 				try {
-					await fs.rm(moveAbsolutePath, { force: true })
+					if (destinationBackup !== undefined) {
+						await fs.writeFile(moveAbsolutePath, destinationBackup)
+					} else {
+						await fs.rm(moveAbsolutePath, { force: true })
+					}
 				} catch (restoreError) {
 					console.error(`Failed to restore pre-move state after source deletion failure: ${restoreError}`)
 				}
