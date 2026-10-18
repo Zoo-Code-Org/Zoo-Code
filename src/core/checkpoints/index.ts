@@ -126,6 +126,15 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 		const service = RepoPerTaskCheckpointService.create(options)
 		task.checkpointServiceInitializing = true
 		await checkGitInstallation(task, service, log, provider)
+		if (!service.isInitialized) {
+			// checkGitInstallation disables checkpoints when Git is unavailable and
+			// logs initShadowGit failures without throwing: storing such a service
+			// would hand later saves (and the fast path above) an uninitialized
+			// handle whose isInitialized can never flip, so a failed
+			// initialization must resolve to no service at all.
+			task.checkpointServiceInitializing = false
+			return undefined
+		}
 		task.checkpointService = service
 		if (task.enableCheckpoints) {
 			sendCheckpointInitWarn(task)
@@ -213,6 +222,10 @@ async function checkGitInstallation(
 		} catch (err) {
 			log(`[Task#getCheckpointService] initShadowGit -> ${err.message}`)
 			disableCheckpointsAfterFailure(task)
+			// The "initialize" event never fires for a failed initShadowGit, so
+			// clear the flag here or later lookups wait on an initialization
+			// that already died.
+			task.checkpointServiceInitializing = false
 		}
 	} catch (err) {
 		log(`[Task#getCheckpointService] Unexpected error during Git check: ${err.message}`)
@@ -301,7 +314,15 @@ export async function checkpointSave(
 			// not retroactively fail writes that were never promised a
 			// checkpoint.
 			task.enableCheckpoints = true
-			service = task.checkpointService ?? (await getCheckpointService(task))
+			// Only a live, initialized handle may be reused: an uninitialized
+			// stored service would go straight to saveCheckpoint (which throws)
+			// instead of retrying initialization.
+			const live = task.checkpointService?.isInitialized ? task.checkpointService : undefined
+			if (!live) {
+				task.checkpointService = undefined
+				task.checkpointServiceInitializing = false
+			}
+			service = live ?? (await getCheckpointService(task))
 		}
 		if (!service) {
 			if (hasWriteMetadata && (checkpointsRequested || task.checkpointsDisabledByFailure)) {

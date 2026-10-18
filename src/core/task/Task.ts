@@ -3867,22 +3867,37 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// An already-aborted task skips it too: the loop will never run, so the
 		// save would only add latency to a task that is being disposed.
 		if (!this.taskStartBaselineDone && !this._isHistoryTask && !this.abort) {
-			this.taskStartBaselineDone = true
+			let baselineEnabled: boolean | undefined
 			try {
-				const baselineEnabled = (await this.providerRef.deref()?.getState())?.perWriteCheckpoints
-				// Cancellation can arrive while the state lookup is pending; recheck
-				// before the save so a canceled task performs no checkpoint work.
-				if (baselineEnabled !== false && !this.abort) {
+				baselineEnabled = (await this.providerRef.deref()?.getState())?.perWriteCheckpoints
+			} catch (error) {
+				// A rejected state lookup must not abort task startup: fall back
+				// to the default-on semantics used when the setting is absent.
+				console.error("[Task] task-start baseline settings read failed:", error)
+			}
+			// Cancellation can arrive while the state lookup is pending; recheck
+			// before the save so a canceled task performs no checkpoint work.
+			if (baselineEnabled === false || this.abort) {
+				this.taskStartBaselineDone = true
+			} else {
+				try {
 					// allowEmpty=true so a clean workspace still produces the baseline
 					// commit; awaited so the first per-write checkpoint cannot interleave.
-					await this.checkpointSave(true, true)
+					const baseline = await this.checkpointSave(true, true)
+					// The flag is set only once the baseline actually committed: a save
+					// that no-ops behind a failed or timed-out service initialization is
+					// retried on a later loop entry instead of being marked done without
+					// a rollback point.
+					if (baseline?.commit) {
+						this.taskStartBaselineDone = true
+					}
+				} catch (error) {
+					// The baseline is best-effort and runs before TaskStarted: a
+					// checkpoint error must not abort task startup (startTask rethrows
+					// non-abort errors from initiateTaskLoop). Log and continue; the
+					// next loop entry retries the baseline.
+					console.error("[Task] task-start checkpoint baseline failed:", error)
 				}
-			} catch (error) {
-				// The baseline is best-effort and runs before TaskStarted: a rejected
-				// state lookup or a checkpoint error must not abort task startup
-				// (startTask rethrows non-abort errors from initiateTaskLoop). Log
-				// and continue; per-write saves still report their own failures.
-				console.error("[Task] task-start checkpoint baseline failed:", error)
 			}
 		}
 
