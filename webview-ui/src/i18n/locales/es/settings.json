@@ -737,7 +737,7 @@
 		},
 		"perWrite": {
 			"label": "Punto de control después de cada escritura de archivo",
-			"description": "Registra una instantánea de punto de control después de cada escritura de archivo exitosa del agente"
+			"description": "Registra una instantánea de punto de control después de cada operación de escritura exitosa; un parche de varios archivos produce un único punto de control."
 		},
 		"changeCardDetail": {
 			"label": "Mostrar la diff completa en las tarjetas de cambios",

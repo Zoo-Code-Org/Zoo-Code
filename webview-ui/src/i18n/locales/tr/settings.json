@@ -737,7 +737,7 @@
 		},
 		"perWrite": {
 			"label": "Her dosya yazımından sonra kontrol noktası",
-			"description": "Ajanın her başarılı dosya yazımından sonra bir kontrol noktası görüntüsü kaydeder"
+			"description": "Her başarılı yazma işleminden sonra bir kontrol noktası anlık görüntüsü kaydeder; çok dosyalı bir yama tek bir kontrol noktası üretir."
 		},
 		"changeCardDetail": {
 			"label": "Değişiklik kartlarında tam diff'i göster",

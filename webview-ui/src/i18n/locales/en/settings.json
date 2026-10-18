@@ -817,7 +817,7 @@
 		},
 		"perWrite": {
 			"label": "Checkpoint after each file write",
-			"description": "Record a checkpoint snapshot after every successful file write by the agent"
+			"description": "Record a checkpoint snapshot after each successful write operation; a multi-file patch produces a single checkpoint."
 		},
 		"changeCardDetail": {
 			"label": "Show full diff in change cards",

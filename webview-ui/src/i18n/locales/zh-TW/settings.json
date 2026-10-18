@@ -764,7 +764,7 @@
 		},
 		"perWrite": {
 			"label": "每次檔案寫入後建立檢查點",
-			"description": "代理每次成功寫入檔案後都會記錄一個檢查點快照"
+			"description": "在每次成功的寫入操作後記錄檢查點快照；多檔案修補程式只會產生一個檢查點。"
 		},
 		"changeCardDetail": {
 			"label": "在變更卡片中顯示完整 diff",
