@@ -180,7 +180,7 @@ function sanitizeSchemaForGemini(
 // range check, because Number() of a non-numeric string is NaN, which is not
 // <= 255.
 function isOctet(octet: string): boolean {
-	// Stryker disable next-line Regex,LogicalOperator,ConditionalExpression: a malformed octet newly accepted by a mutated regex or operand is non-numeric (Number() is NaN, failing <= 255), out of range (e.g. 256), or 4+ digits, all of which are unreachable because new URL() rejects the all-digit host; the ->false and stricter-regex variants are killed by the 127.0.0.1 and 127.255.255.255 accept tests
+	// Stryker disable next-line Regex,LogicalOperator,ConditionalExpression: equivalent mutants, new URL() rejects malformed or out-of-range octets before this check
 	return /^\d{1,3}$/.test(octet) && Number(octet) <= 255
 }
 
@@ -195,7 +195,7 @@ function isLoopbackHostname(hostname: string): boolean {
 		return true
 	}
 	const parts = hostname.split(".")
-	// Stryker disable next-line ConditionalExpression: the ->true variants of isOctet(parts[1]) and isOctet(parts[2]) are unobservable because any four-part host with a non-numeric or out-of-range middle octet is rejected by new URL() before reaching this check; the remaining variants are killed by the 127.0.0.1, 127.255.255.255, 10.0.0.1, 127.0.0.a and 127.0.0.1.a tests
+	// Stryker disable next-line ConditionalExpression: equivalent mutants, new URL() rejects non-numeric or out-of-range middle octets before this check
 	return parts.length === 4 && parts[0] === "127" && isOctet(parts[1]) && isOctet(parts[2]) && isOctet(parts[3])
 }
 

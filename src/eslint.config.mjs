@@ -23,6 +23,13 @@ export default [
 		},
 	},
 	{
+		// A Stryker directive gives a short reason. Put longer rationale in the test or a code comment.
+		// ignorePattern skips every line that does not contain "Stryker", so only directives are measured.
+		rules: {
+			"max-len": ["error", { code: 300, ignorePattern: "^(?!.*Stryker).*" }],
+		},
+	},
+	{
 		files: ["core/assistant-message/presentAssistantMessage.ts", "core/webview/webviewMessageHandler.ts"],
 		rules: {
 			"no-case-declarations": "off",
