@@ -22,7 +22,10 @@ interface HarnessOptions {
 	workflowRunEvent?: string
 	fork?: boolean
 	associatedPrNumbers?: number[]
-	fallback?: "match" | "sha-mismatch" | "none"
+	fallback?: "match" | "sha-mismatch" | "base-mismatch" | "none"
+	headRepository?: null
+	headSha?: string
+	failDispatchFor?: number
 }
 
 function buildForkPr() {
@@ -42,9 +45,15 @@ async function runFollowup(options: HarnessOptions = {}) {
 		if (state !== "open") return []
 		if (options.fallback === "match") return [pr]
 		if (options.fallback === "sha-mismatch") return [{ ...pr, head: { ...pr.head, sha: OLD_SHA } }]
+		if (options.fallback === "base-mismatch") {
+			return [{ ...pr, base: { ...pr.base, repo: { full_name: "someone-else/Zoo-Code" } } }]
+		}
 		return []
 	})
-	const createWorkflowDispatch = vi.fn(async () => ({ status: 204 }))
+	const createWorkflowDispatch = vi.fn(async ({ inputs }: { inputs: { pull_request_number: string } }) => {
+		if (Number(inputs.pull_request_number) === options.failDispatchFor) throw new Error("dispatch rejected")
+		return { status: 204 }
+	})
 	const github = {
 		paginate: vi.fn(async (target: unknown, args: unknown) => {
 			if (typeof target !== "function") throw new Error("Unexpected paginate target")
@@ -63,12 +72,15 @@ async function runFollowup(options: HarnessOptions = {}) {
 				id: 987654,
 				event: options.workflowRunEvent ?? "pull_request_review",
 				pull_requests: (options.associatedPrNumbers ?? []).map((number) => ({ number })),
-				head_repository: {
-					owner: { login: fork ? "contributor" : "Zoo-Code-Org" },
-					fork,
-				},
+				head_repository:
+					options.headRepository === null
+						? null
+						: {
+								owner: { login: fork ? "contributor" : "Zoo-Code-Org" },
+								fork,
+							},
 				head_branch: "feature/test",
-				head_sha: SHA,
+				head_sha: options.headSha ?? SHA,
 			},
 		},
 	}
@@ -90,7 +102,22 @@ describe("fork review follow-up workflow (#2046, #2086)", () => {
 		expect(workflow.name).toBe("Label PR review state fork review follow-up")
 		expect(workflow.on.workflow_run.workflows).toEqual(["Label PR review state"])
 		expect(workflow.on.workflow_run.workflows).not.toContain(workflow.name)
-		expect(String(workflow.jobs.dispatch.if)).toContain("github.event.workflow_run.event == 'pull_request_review'")
+		expect(String(workflow.jobs.dispatch.if).trim()).toBe(
+			"github.event.workflow_run.event == 'pull_request_review'",
+		)
+	})
+
+	it("dispatches an input and workflow that the label workflow declares", () => {
+		const label = parse(
+			fs.readFileSync(path.join(repositoryRoot, ".github/workflows/label-pr-review-state.yml"), "utf8"),
+		)
+		const call = /createWorkflowDispatch\(\{[\s\S]*?workflow_id: '([^']+)'[\s\S]*?inputs: \{ (\w+):/.exec(
+			dispatchScript,
+		)
+
+		expect(call?.[1]).toBe("label-pr-review-state.yml")
+		expect(Object.keys(label.on.workflow_dispatch.inputs)).toContain(call?.[2])
+		expect(workflow.on.workflow_run.workflows).toEqual([label.name])
 	})
 
 	it("dispatches a privileged reconciliation for the fork PR a read-only review run targeted", async () => {
@@ -102,13 +129,13 @@ describe("fork review follow-up workflow (#2046, #2086)", () => {
 			expect.objectContaining({ head: "contributor:feature/test", state: "open" }),
 		)
 		expect(result.createWorkflowDispatch).toHaveBeenCalledTimes(1)
-		expect(result.createWorkflowDispatch).toHaveBeenCalledWith(
-			expect.objectContaining({
-				workflow_id: "label-pr-review-state.yml",
-				ref: "main",
-				inputs: { pull_request_number: "1437" },
-			}),
-		)
+		expect(result.createWorkflowDispatch).toHaveBeenCalledWith({
+			owner: "Zoo-Code-Org",
+			repo: "Zoo-Code",
+			workflow_id: "label-pr-review-state.yml",
+			ref: "main",
+			inputs: { pull_request_number: "1437" },
+		})
 		expect(result.setFailed).not.toHaveBeenCalled()
 	})
 
@@ -117,6 +144,18 @@ describe("fork review follow-up workflow (#2046, #2086)", () => {
 
 		expect(result.listPullRequests).not.toHaveBeenCalled()
 		expect(result.createWorkflowDispatch).toHaveBeenCalledTimes(1)
+	})
+
+	it("dispatches every PR a run targets and reports a failed dispatch without skipping the rest", async () => {
+		const both = await runFollowup({ associatedPrNumbers: [1, 2] })
+
+		expect(both.createWorkflowDispatch).toHaveBeenCalledTimes(2)
+		expect(both.setFailed).not.toHaveBeenCalled()
+
+		const partial = await runFollowup({ associatedPrNumbers: [1, 2], failDispatchFor: 1 })
+
+		expect(partial.createWorkflowDispatch).toHaveBeenCalledTimes(2)
+		expect(partial.setFailed).toHaveBeenCalledWith(expect.stringContaining("#1: dispatch rejected"))
 	})
 
 	it("ignores a completed run that was not triggered by pull_request_review", async () => {
@@ -142,5 +181,21 @@ describe("fork review follow-up workflow (#2046, #2086)", () => {
 
 		expect(result.listPullRequests).toHaveBeenCalledTimes(1)
 		expect(result.createWorkflowDispatch).not.toHaveBeenCalled()
+	})
+
+	it("dispatches nothing when the matching PR targets another base repository", async () => {
+		const result = await runFollowup({ fallback: "base-mismatch" })
+
+		expect(result.listPullRequests).toHaveBeenCalledTimes(1)
+		expect(result.createWorkflowDispatch).not.toHaveBeenCalled()
+	})
+
+	it("dispatches nothing when the run has no head repository or head SHA to resolve", async () => {
+		for (const options of [{ headRepository: null }, { headSha: "" }] as const) {
+			const result = await runFollowup({ ...options, fallback: "match" })
+
+			expect(result.listPullRequests).not.toHaveBeenCalled()
+			expect(result.createWorkflowDispatch).not.toHaveBeenCalled()
+		}
 	})
 })

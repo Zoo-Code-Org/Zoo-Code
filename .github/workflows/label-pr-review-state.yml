@@ -138,7 +138,8 @@ jobs:
                       // number in the payload; sweep triggers (hourly schedule, pushes to
                       // main) list every open PR; workflow_run events use the run's
                       // associated PRs, with a fork-safe backfill by exact head owner,
-                      // branch, and SHA when GitHub left pull_requests empty.
+                      // branch, and SHA when GitHub left pull_requests empty. Keep the
+                      // backfill in sync with label-pr-review-state-fork-review-followup.yml.
                       let prNumbers = [];
                       if (context.payload.pull_request?.number) {
                         prNumbers = [context.payload.pull_request.number];

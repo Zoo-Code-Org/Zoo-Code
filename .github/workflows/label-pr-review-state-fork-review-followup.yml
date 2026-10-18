@@ -63,7 +63,7 @@ jobs:
                       // Resolve which PRs the completed run targeted. Fork runs
                       // backfill pull_requests empty, so fall back to the exact head
                       // owner, branch, and SHA lookup used by the resolve job of
-                      // label-pr-review-state.yml.
+                      // label-pr-review-state.yml. Keep both copies in sync.
                       let prNumbers = [];
                       if (run.pull_requests?.length > 0) {
                         prNumbers = run.pull_requests.map(pr => pr.number);
@@ -94,13 +94,23 @@ jobs:
                       // Each dispatch starts a privileged workflow_dispatch run of the
                       // reconciliation workflow for one PR. Its completion re-triggers
                       // this workflow, but the loop guard above filters it out.
+                      // A failed dispatch must not skip the PRs after it: collect the
+                      // failures and fail the step once, naming each PR.
+                      const failures = [];
                       for (const prNumber of prNumbers) {
-                        await github.rest.actions.createWorkflowDispatch({
-                          owner,
-                          repo,
-                          workflow_id: 'label-pr-review-state.yml',
-                          ref: 'main',
-                          inputs: { pull_request_number: String(prNumber) },
-                        });
-                        core.info(`Dispatched label-pr-review-state.yml for PR #${prNumber}`);
+                        try {
+                          await github.rest.actions.createWorkflowDispatch({
+                            owner,
+                            repo,
+                            workflow_id: 'label-pr-review-state.yml',
+                            ref: 'main',
+                            inputs: { pull_request_number: String(prNumber) },
+                          });
+                          core.info(`Dispatched label-pr-review-state.yml for PR #${prNumber}`);
+                        } catch (error) {
+                          failures.push(`#${prNumber}: ${error.message}`);
+                        }
+                      }
+                      if (failures.length > 0) {
+                        core.setFailed(`Failed to dispatch ${failures.length} PR(s): ${failures.join('; ')}`);
                       }
