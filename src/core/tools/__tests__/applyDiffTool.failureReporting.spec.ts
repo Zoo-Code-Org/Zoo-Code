@@ -4,6 +4,7 @@ import path from "path"
 import type { DiffResult, ToolResponse } from "../../../shared/tools"
 import type { Task } from "../../task/Task"
 import { fileExistsAtPath } from "../../../utils/fs"
+import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 import type { ToolCallbacks } from "../BaseTool"
 import { applyDiffTool } from "../ApplyDiffTool"
 
@@ -213,15 +214,15 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).toContain("Unknown apply_diff failure")
 		})
 
-		it("appends Details for detailed failures and omits them for abbreviated ones", async () => {
+		it("never renders the details object of any failure", async () => {
 			const failures = makeFailureSet(6)
 			failures[0] = makeFailure("FAILURE-MARKER-1\nsecond line of failure 1", { bestMatch: "DETAIL-FIRST" })
 			failures[5] = makeFailure("FAILURE-MARKER-6\nsecond line of failure 6", { bestMatch: "DETAIL-SIXTH" })
 
 			const output = await runApplyDiff({ success: false, failParts: failures }, 6)
 
-			expect(output).toContain("Details:")
-			expect(output).toContain("DETAIL-FIRST")
+			expect(output).not.toContain("Details:")
+			expect(output).not.toContain("DETAIL-FIRST")
 			expect(output).not.toContain("DETAIL-SIXTH")
 		})
 
@@ -306,70 +307,93 @@ describe("ApplyDiffTool failure reporting", () => {
 		})
 	})
 
-	describe("file content exposure", () => {
-		const SECRET = "SECRET_TOKEN=abc123"
+	describe("file content exposure (real strategy)", () => {
+		const FILE_SECRETS = ["FILE-SECRET-ORIGINAL", "FILE-SECRET-BESTMATCH"]
+		const SEARCH_SECRET = "SEARCH-SECRET"
+		const DETAIL_SECRET = "DETAIL-SECRET"
+		const fileText = [
+			"const header = 1",
+			`token = "${FILE_SECRETS[0]}"`,
+			`apiKey = "${FILE_SECRETS[1]}"`,
+			"const footer = 2",
+		].join("\n")
 
-		function makeContentFailure(index: number): FailPart {
-			return makeFailure(
-				`No sufficiently similar match found ${index}\n\nDebug Info:\n- Similarity Score: 10%` +
-					`\n\nSearch Content:\nsearch-${index}\n\nBest Match Found:\n${SECRET}\n\nOriginal Content:\n${SECRET}`,
-				{ similarity: 0.1 },
-			)
+		function failingBlock(index: number): string {
+			return `<<<<<<< SEARCH\n:start_line:2\n-------\napiKey = "${SEARCH_SECRET}-${index}"\n=======\nx${index}\n>>>>>>> REPLACE`
 		}
 
-		it("keeps file content for only the first failed block on the failure path", async () => {
+		const applyingBlock = "<<<<<<< SEARCH\nconst header = 1\n=======\nconst header = 3\n>>>>>>> REPLACE"
+
+		async function runRealStrategy(diff: string): Promise<string> {
+			vi.mocked(fs.readFile).mockResolvedValue(fileText)
+			const strategy = new MultiSearchReplaceDiffStrategy()
+			const realResult = await strategy.applyDiff(fileText, diff)
+			// Synthetic details exercise the tool's own guard against forwarding strategy detail objects.
+			const withDetails = (part: DiffResult): DiffResult =>
+				part.success ? part : { ...part, details: { searchContent: DETAIL_SECRET, bestMatch: DETAIL_SECRET } }
+			const result: DiffResult = realResult.success
+				? { ...realResult, failParts: realResult.failParts?.map(withDetails) }
+				: {
+						...realResult,
+						failParts: realResult.failParts?.map(withDetails) ?? [],
+						details: { bestMatch: DETAIL_SECRET },
+					}
+			return runApplyDiff(result, 0, diff)
+		}
+
+		function collectUiAndModelOutputs(output: string): string {
+			const sayText = vi.mocked(mockTask.say).mock.calls.map((call) => String(call[1] ?? ""))
+			const recordedErrors = vi.mocked(mockTask.recordToolError).mock.calls.map((call) => String(call[1] ?? ""))
+			return [output, ...sayText, ...recordedErrors].join("\n")
+		}
+
+		function expectNoSecrets(text: string): void {
+			for (const secret of [...FILE_SECRETS, SEARCH_SECRET, DETAIL_SECRET]) {
+				expect(text).not.toContain(secret)
+			}
+			expect(text).not.toMatch(/Search Content:|Best Match Found:|Original Content:|Details:/)
+		}
+
+		it("excludes file, search and detail text from a single failure in model and UI output", async () => {
+			await runRealStrategy(failingBlock(1))
+			const output = await runRealStrategy(failingBlock(1))
+
+			expect(output).toContain("No sufficiently similar match found at line: 2")
+			expect(output).toContain("- Similarity Score:")
+			expect(mockTask.say).toHaveBeenCalledWith("diff_error", output)
+			expectNoSecrets(collectUiAndModelOutputs(output))
+		})
+
+		it("excludes sensitive text from every block when multiple blocks fail", async () => {
+			const diff = [1, 2, 3].map(failingBlock).join("\n")
+			await runRealStrategy(diff)
+			const output = await runRealStrategy(diff)
+
+			expect(output).toContain("3 diff blocks failed to apply")
+			expect(output).toContain("--- Diff block 3 of 3 ---")
+			expectNoSecrets(collectUiAndModelOutputs(output))
+		})
+
+		it("excludes sensitive text from the partial-apply result", async () => {
+			const output = await runRealStrategy(`${applyingBlock}\n${failingBlock(1)}`)
+
+			expect(output).toContain("Applied 1 of 2 diff blocks")
+			expect(output).toContain("No sufficiently similar match found")
+			expectNoSecrets(collectUiAndModelOutputs(output))
+			// The approval payload intentionally echoes the model's own diff, so only detail text is checked.
+			for (const call of vi.mocked(mockAskApproval).mock.calls) {
+				expect(String(call[1])).not.toContain(DETAIL_SECRET)
+			}
+		})
+
+		it("drops top-level details on the fallback path without failParts", async () => {
 			const output = await runApplyDiff(
-				{ success: false, failParts: [1, 2, 3].map((index) => makeContentFailure(index)) },
-				3,
+				{ success: false, error: "Invalid diff format", details: { bestMatch: DETAIL_SECRET } },
+				1,
 			)
 
-			expect(output.split("Original Content:").length - 1).toBe(1)
-			expect(output.split(SECRET).length - 1).toBe(2)
-			expect(output.split("Details:").length - 1).toBe(1)
-			expect(output).toContain("No sufficiently similar match found 2\n\nDebug Info:\n- Similarity Score: 10%")
-			expect(output).toContain("No sufficiently similar match found 3\n\nDebug Info:\n- Similarity Score: 10%")
-		})
-
-		it("keeps the full content of a single failed block", async () => {
-			const output = await runApplyDiff({ success: false, failParts: [makeContentFailure(1)] }, 1)
-
-			expect(output).toContain(`Original Content:\n${SECRET}`)
-		})
-
-		it("cuts at the strategy heading even when the search text repeats it", async () => {
-			const repeated = makeFailure(
-				`Diagnostics kept\n\nSearch Content:\nx\n\nSearch Content:\ny\n\nOriginal Content:\n${SECRET}`,
-			)
-			const output = await runApplyDiff({ success: false, failParts: [makeContentFailure(1), repeated] }, 2)
-			const secondSection = output.split("--- Diff block 2 of 2 ---\n")[1]
-
-			expect(secondSection).toContain("Diagnostics kept")
-			expect(secondSection).not.toContain("Search Content:")
-			expect(secondSection).not.toContain(SECRET)
-		})
-
-		it("shows the same content-limited text in the diff_error message", async () => {
-			const result: DiffResult = { success: false, failParts: [1, 2].map((index) => makeContentFailure(index)) }
-			await runApplyDiff(result, 2)
-			const secondOutput = await runApplyDiff(result, 2)
-
-			expect(mockTask.say).toHaveBeenCalledWith("diff_error", secondOutput)
-			expect(secondOutput.split(SECRET).length - 1).toBe(2)
-		})
-
-		it("excludes all file content from the partial-apply result", async () => {
-			const output = await runApplyDiff(
-				{ success: true, content: "x", blockCount: 3, failParts: [makeContentFailure(1)] },
-				3,
-			)
-
-			expect(output).toContain("Applied 2 of 3 diff blocks")
-			expect(output).toContain("No sufficiently similar match found 1\n\nDebug Info:\n- Similarity Score: 10%")
-			expect(output).not.toContain("Search Content:")
-			expect(output).not.toContain("Best Match Found:")
-			expect(output).not.toContain("Original Content:")
-			expect(output).not.toContain("Details:")
-			expect(output).not.toContain(SECRET)
+			expect(output).toContain("Invalid diff format")
+			expectNoSecrets(collectUiAndModelOutputs(output))
 		})
 	})
 

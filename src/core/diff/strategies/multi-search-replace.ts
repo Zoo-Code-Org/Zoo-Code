@@ -2,7 +2,7 @@ import { distance } from "fastest-levenshtein"
 
 import { ToolProgressStatus, DEFAULT_DIFF_FUZZY_THRESHOLD } from "@roo-code/types"
 
-import { addLineNumbers, everyLineHasLineNumbers, stripLineNumbers } from "../../../integrations/misc/extract-text"
+import { everyLineHasLineNumbers, stripLineNumbers } from "../../../integrations/misc/extract-text"
 import { ToolUse, DiffStrategy, DiffResult } from "../../../shared/tools"
 import { normalizeString } from "../../../utils/text-normalization"
 
@@ -468,8 +468,6 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 				continue
 			}
 
-			const endLine = replacement.startLine + searchLines.length - 1
-
 			// Initialize search variables
 			let matchIndex = -1
 			let bestMatchScore = 0
@@ -538,38 +536,12 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 					searchLines = aggressiveSearchLines
 					replaceLines = replaceContent ? replaceContent.split(/\r?\n/) : []
 				} else {
-					// No match found with either method
-					const originalContentSection =
-						startLine && endLine
-							? `\n\nOriginal Content:\n${addLineNumbers(
-									resultLines
-										.slice(
-											Math.max(0, startLine - 1 - this.bufferLines),
-											Math.min(resultLines.length, endLine + this.bufferLines),
-										)
-										.join("\n"),
-									Math.max(1, startLine - this.bufferLines),
-								)}`
-							: `\n\nOriginal Content:\n${addLineNumbers(
-									resultLines
-										.slice(
-											Math.max(0, (matchIndex >= 0 ? matchIndex : 0) - this.bufferLines),
-											Math.min(
-												resultLines.length,
-												(matchIndex >= 0 ? matchIndex : 0) +
-													searchLines.length +
-													this.bufferLines,
-											),
-										)
-										.join("\n"),
-									Math.max(1, (matchIndex >= 0 ? matchIndex : 0) - this.bufferLines + 1),
-								)}`
-
-					const bestMatchSection = bestMatchContent
-						? `\n\nBest Match Found:\n${addLineNumbers(bestMatchContent, matchIndex + 1)}`
-						: `\n\nBest Match Found:\n(no match)`
-
+					// File and search text are never echoed: they may hold secrets. Report only numbers and constants.
 					const lineRange = startLine ? ` at line: ${startLine}` : ""
+					const bestMatchLocation =
+						bestMatchContent && matchIndex >= 0
+							? `lines ${matchIndex + 1}-${matchIndex + bestMatchContent.split("\n").length}`
+							: "none"
 
 					const levenDist = bestMatchContent
 						? distance(normalizeString(searchChunk), normalizeString(bestMatchContent))
@@ -596,13 +568,13 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 							`- Search Range: ${startLine ? `starting at line ${startLine}` : "start to end"}\n` +
 							`- Levenshtein Distance: ${levenDist >= 0 ? `${levenDist} characters` : "N/A"}\n` +
 							`- Search Length: ${searchChunk.length} characters\n` +
+							`- Best Match Location: ${bestMatchLocation}\n` +
 							`- Best Match Length: ${bestMatchContent ? bestMatchContent.length : 0} characters\n` +
 							`- Tried both standard and aggressive line number stripping${malformedMarkerHint}\n` +
 							`- Tip: Use the read_file tool to get the latest content of the file before attempting ` +
 							`to use the apply_diff tool again, as the file content may have changed\n` +
 							`- Tip: The SEARCH block must contain complete, whole lines — partial-line (substring) matching is not supported. ` +
-							`If the target line is very long, copy the entire line into the SEARCH block\n\n` +
-							`Search Content:\n${searchChunk}${bestMatchSection}${originalContentSection}`,
+							`If the target line is very long, copy the entire line into the SEARCH block`,
 					})
 					continue
 				}

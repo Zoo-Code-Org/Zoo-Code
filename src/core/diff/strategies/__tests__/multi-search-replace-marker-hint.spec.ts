@@ -135,7 +135,7 @@ describe("MultiSearchReplaceDiffStrategy malformed start-line marker hint", () =
 				"- Tip: Use the read_file tool to get the latest content of the file before attempting " +
 				"to use the apply_diff tool again, as the file content may have changed\n" +
 				"- Tip: The SEARCH block must contain complete, whole lines — partial-line (substring) matching is not supported. " +
-				"If the target line is very long, copy the entire line into the SEARCH block\n\n",
+				"If the target line is very long, copy the entire line into the SEARCH block",
 		)
 	})
 
