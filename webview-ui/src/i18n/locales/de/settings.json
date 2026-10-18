@@ -737,7 +737,7 @@
 		},
 		"perWrite": {
 			"label": "Kontrollpunkt nach jedem Dateischreibvorgang",
-			"description": "Ein Kontrollpunkt-Snapshot wird nach jedem erfolgreichen Dateischreibvorgang des Agents erfasst"
+			"description": "Erstellt nach jedem erfolgreichen Schreibvorgang einen Checkpoint-Schnappschuss; ein Patch mit mehreren Dateien erzeugt genau einen Checkpoint."
 		},
 		"changeCardDetail": {
 			"label": "Volle Diff in Änderungskarten anzeigen",
