@@ -31,6 +31,7 @@ import {
 	KimiCodeHandler,
 	MistralHandler,
 	VsCodeLmHandler,
+	GitHubCopilotHandler,
 	RequestyHandler,
 	UnboundHandler,
 	FakeAIHandler,
@@ -44,6 +45,7 @@ import {
 	VercelAiGatewayHandler,
 	OpencodeGoHandler,
 	KenariHandler,
+	IOIntelligenceHandler,
 	NanoGptHandler,
 	ZooGatewayHandler,
 	MiniMaxHandler,
@@ -184,6 +186,8 @@ export interface ApiHandler {
 	getModelCacheScope(): ModelCacheScope
 }
 
+export { disposeApiHandler } from "./dispose-api-handler"
+
 export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 	const { apiProvider, ...options } = configuration
 
@@ -230,6 +234,8 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new KimiCodeHandler(options)
 		case providerIdentifiers.vscodeLm:
 			return new VsCodeLmHandler(options)
+		case providerIdentifiers.githubCopilot:
+			return new GitHubCopilotHandler(options)
 		case providerIdentifiers.mistral:
 			return new MistralHandler(options)
 		case providerIdentifiers.requesty:
@@ -258,6 +264,8 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new OpencodeGoHandler(options)
 		case providerIdentifiers.kenari:
 			return new KenariHandler(options)
+		case providerIdentifiers.ioIntelligence:
+			return new IOIntelligenceHandler(options)
 		case providerIdentifiers.nanogpt:
 			return new NanoGptHandler(options)
 		case providerIdentifiers.zooGateway:

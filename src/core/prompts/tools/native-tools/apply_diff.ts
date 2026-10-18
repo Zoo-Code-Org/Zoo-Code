@@ -14,6 +14,7 @@ const DIFF_PARAMETER_DESCRIPTION = `A string containing one or more search/repla
 CRITICAL:
 - The ':start_line:[line_number]' header is strongly recommended for accurate matching. When provided, it must follow the exact syntax ':start_line:[integer]' (for example: ':start_line:220'). Do not write headers with shorthand forms like ':220' or variations like ':start_line=220'.
 - Copy the exact lines from the source file for a 100% string match including all whitespace, indentation, and newlines.
+- The SEARCH block must contain complete, whole lines — partial-line (substring) matching is not supported. When the target line is very long (e.g. a Markdown paragraph), copy the entire line into the SEARCH block.
 - Ensure the separator '-------' is on its own line immediately following ':start_line:[line_number]' with a newline.`
 
 export const apply_diff = {

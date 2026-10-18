@@ -411,6 +411,12 @@
 		"getOpencodeGoApiKey": "Uzyskaj klucz API Opencode Go",
 		"kenariApiKey": "Klucz API Kenari",
 		"getKenariApiKey": "Uzyskaj klucz API Kenari",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "Klucz API IO Intelligence",
+			"getApiKey": "Uzyskaj klucz API IO Intelligence",
+			"model": "Model"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Klucz API NanoGPT",
@@ -579,6 +585,16 @@
 		"enablePromptCaching": "Włącz buforowanie podpowiedzi",
 		"enablePromptCachingTitle": "Włącz buforowanie podpowiedzi, aby poprawić wydajność i zmniejszyć koszty dla obsługiwanych modeli.",
 		"cacheUsageNote": "Uwaga: Jeśli nie widzisz użycia bufora, spróbuj wybrać inny model, a następnie ponownie wybrać żądany model.",
+		"githubCopilot": {
+			"accountActions": "Akcje konta GitHub Copilot",
+			"signIn": "Zaloguj się do GitHub",
+			"reconnect": "Połącz ponownie z GitHub",
+			"signedIn": "Zalogowano jako {{account}}",
+			"connecting": "Łączenie...",
+			"noModels": "Brak dostępnych modeli Copilot. Zainstaluj lub włącz GitHub Copilot Chat, zaloguj się na uprawnione konto GitHub, a następnie odśwież. Zalogowanie nie potwierdza subskrypcji Copilot. Obowiązują limity planu GitHub, żądań premium i częstotliwości żądań.",
+			"manageAccount": "Zarządzaj kontem GitHub",
+			"manageAccountDescription": "Otwiera menu kont VS Code, w którym możesz wylogować się z GitHub. Wylogowanie wpływa na Copilot i inne rozszerzenia korzystające z tego konta."
+		},
 		"vscodeLmModel": "Model językowy",
 		"vscodeLmWarning": "Uwaga: Modele dostępne przez interfejs VS Code Language Model API mogą być opakowane lub dostrojone przez dostawcę, dlatego ich działanie może różnić się od bezpośredniego użycia tego samego modelu u typowego dostawcy lub routera. Aby użyć modelu z listy «Language Model», najpierw przełącz się na ten model, a następnie kliknij «Akceptuj» w monicie Copilot Chat; w przeciwnym razie możesz zobaczyć błąd, np. 400 „The requested model is not supported”.",
 		"googleCloudSetup": {
@@ -1002,8 +1018,14 @@
 		"rangeDescription": "Wyższe wartości sprawiają, że wyjście jest bardziej losowe, niższe wartości czynią je bardziej deterministycznym."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Obsługa obrazów nie została zgłoszona",
+		"toolSupportUnknown": "Obsługa narzędzi nie została zgłoszona",
+		"promptCacheManagedByCopilot": "Buforowaniem promptów zarządza GitHub Copilot",
+		"promptCacheCopilotDetails": "Buforowanie zależy od modelu i zaplecza GitHub Copilot. Zoo Code nie może skonfigurować czasu przechowywania pamięci podręcznej ani obserwować trafień w pamięci podręcznej przez API VS Code.",
 		"supportsImages": "Obsługuje obrazy",
 		"noImages": "Nie obsługuje obrazów",
+		"supportsTools": "Obsługuje narzędzia",
+		"noTools": "Nie obsługuje narzędzi",
 		"supportsPromptCache": "Obsługuje buforowanie podpowiedzi",
 		"noPromptCache": "Nie obsługuje buforowania podpowiedzi",
 		"contextWindow": "Okno kontekstowe:",
