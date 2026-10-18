@@ -175,6 +175,8 @@ function buildEventPayload(eventName: string, options: HarnessOptions) {
 				: eventName === "workflow_run"
 					? {
 							workflow_run: {
+								name: "Code QA Roo Code",
+								event: "pull_request",
 								pull_requests:
 									options.workflowRunAssociated === false
 										? []
@@ -978,6 +980,35 @@ describe("PR review-state workflow", () => {
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+	})
+
+	// Regression: GitHub transiently reports mergeable: null / "unknown" after
+	// each push while it recomputes mergeability. With CI passing, the final
+	// reconcile must keep an existing has-conflicts label instead of stripping
+	// it with the other state labels — the label previously flapped off until
+	// a later run restored it. Each operand of the unknown check counts alone.
+	it.each([
+		{ mergeable: null, mergeableState: "unknown" },
+		{ mergeable: null, mergeableState: "clean" },
+		{ mergeable: true, mergeableState: "unknown" },
+	])(
+		"keeps has-conflicts while mergeability is unknown ($mergeable, $mergeableState) and required CI passes (#2045)",
+		async ({ mergeable, mergeableState }) => {
+			const result = await runWorkflow({ mergeable, mergeableState, labels: ["has-conflicts"] })
+
+			expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+			expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+			expect(result.addLabels).toHaveBeenCalledWith(
+				expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+			)
+		},
+	)
+
+	it("strips has-conflicts when mergeability is known clean and required CI passes", async () => {
+		const result = await runWorkflow({ labels: ["has-conflicts"] })
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 
 	it("keeps has-conflicts while mergeability is unknown and required CI is missing (#2025)", async () => {
@@ -1872,7 +1903,7 @@ describe("PR review-state workflow", () => {
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
 	})
 
-	it("attempts every stale label removal when one cleanup fails", async () => {
+	it("attempts every state label removal when one cleanup fails and leaves stale labels to the stale step", async () => {
 		const result = await runWorkflow({
 			permissionErrorStatus: 500,
 			labels: ["awaiting-coderabbit", "awaiting-maintainer", "stale-awaiting-author"],
@@ -1881,7 +1912,7 @@ describe("PR review-state workflow", () => {
 
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-coderabbit" }))
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
-		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "stale-awaiting-author" }))
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stale-awaiting-author" }))
 		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("could not clear review metadata"))
 	})
 
@@ -2128,6 +2159,18 @@ describe("PR review-state workflow", () => {
 			expect.objectContaining({ head: "Zoo-Code-Org:feature/test", state: "open" }),
 		)
 		expect(resolution.prNumbers()).toEqual([])
+	})
+
+	describe("fork review follow-up handoff (#2046, #2086)", () => {
+		it("does not listen to itself; the privileged fork review follow-up lives in its own workflow", () => {
+			// GitHub rejects a workflow that lists itself in
+			// workflow_run.workflows (issue #2086), so the follow-up for fork
+			// pull_request_review runs lives in
+			// label-pr-review-state-fork-review-followup.yml (issue #2046).
+			expect(workflow.on.workflow_run.workflows).not.toContain("Label PR review state")
+			expect(String(workflow.jobs.resolve.if)).not.toContain("github.event.workflow_run.name")
+			expect(String(workflow.jobs.reconcile.if)).not.toContain("github.event.workflow_run.name")
+		})
 	})
 
 	it("invalidates prior automated and human reviews after a new push", async () => {

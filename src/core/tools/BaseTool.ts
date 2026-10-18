@@ -10,7 +10,7 @@ export interface ToolCallbacks {
 	askApproval: AskApproval
 	handleError: HandleError
 	pushToolResult: PushToolResult
-	toolCallId?: string
+	toolCallId: string
 }
 
 /**
