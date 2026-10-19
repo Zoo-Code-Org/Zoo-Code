@@ -50,7 +50,9 @@ describe("MultiSearchReplaceDiffStrategy malformed start-line marker hint", () =
 			const diffContent = buildDiff(`${markerVariant}\nnot-in-the-file`, "replacement")
 			const result = await strategy.applyDiff(nonMatchingFile, diffContent)
 
-			expect(firstFailureError(result)).toContain(`first line of your search content is "${markerVariant}"`)
+			const errorText = firstFailureError(result)
+			expect(errorText).toContain("first line of your search content looks like a malformed start-line marker")
+			expect(errorText).not.toContain(markerVariant)
 		},
 	)
 
