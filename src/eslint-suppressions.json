@@ -296,7 +296,7 @@
 	},
 	"api/providers/bedrock.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 32
+			"count": 31
 		}
 	},
 	"api/providers/deepseek.ts": {
