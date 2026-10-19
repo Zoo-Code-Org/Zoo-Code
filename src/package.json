@@ -556,7 +556,7 @@
 		"@types/vscode": "1.100.0",
 		"@vitest/coverage-v8": "4.1.11",
 		"@vscode/vsce": "3.9.2",
-		"ai": "7.0.142",
+		"ai": "7.0.143",
 		"esbuild-wasm": "0.28.1",
 		"execa": "9.6.1",
 		"mkdirp": "3.0.1",
