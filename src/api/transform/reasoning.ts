@@ -18,7 +18,18 @@ export type RooReasoningParams = {
 }
 
 export type AnthropicReasoningParams = BetaThinkingConfigParam
-export type AnthropicProviderReasoningParams = AnthropicReasoningParams | { type: "adaptive" }
+/**
+ * Adaptive thinking models (the `supportsReasoningBinary` class) reject
+ * `budget_tokens` payloads and use `thinking: { type: "adaptive" }`.
+ *
+ * `display` is carried explicitly because the API default for this model
+ * class is `"omitted"` — thinking blocks then arrive as empty text (still
+ * billed, but invisible to the user). `"summarized"` returns the
+ * server-side summarized thinking text with no extra cost (billing is on
+ * full thinking tokens, not the summary).
+ */
+export type AnthropicProviderReasoningParams =
+	AnthropicReasoningParams | { type: "adaptive"; display?: "summarized" | "omitted" }
 
 export type OpenAiReasoningParams = { reasoning_effort: OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"] }
 
@@ -56,6 +67,9 @@ export const getOpenRouterReasoning = ({
 				: undefined
 			: undefined
 
+/**
+ * @internal
+ */
 export const getRooReasoning = ({
 	model,
 	reasoningEffort,
@@ -118,7 +132,7 @@ export const getAnthropicProviderReasoning = ({
 	settings,
 }: GetModelReasoningOptions): AnthropicProviderReasoningParams | undefined => {
 	if (model.supportsReasoningBinary && settings.enableReasoningEffort) {
-		return { type: "adaptive" }
+		return { type: "adaptive", display: "summarized" }
 	}
 
 	return getAnthropicReasoning({ model, reasoningBudget, settings })
@@ -160,7 +174,6 @@ export const getOpenAiReasoning = ({
 export const getGeminiReasoning = ({
 	model,
 	reasoningBudget,
-	reasoningEffort,
 	settings,
 }: GetModelReasoningOptions): GeminiReasoningParams | undefined => {
 	// Budget-based (2.5) models: use thinkingBudget, not thinkingLevel.
@@ -173,9 +186,7 @@ export const getGeminiReasoning = ({
 	// efforts in the UI (e.g. "High" for gemini-3-pro-preview) always translate
 	// into a thinkingConfig, regardless of legacy boolean flags.
 	const selectedEffort = (settings.reasoningEffort ?? model.reasoningEffort) as
-		| ReasoningEffortExtended
-		| "disable"
-		| undefined
+		ReasoningEffortExtended | "disable" | undefined
 
 	// Respect "off" / unset semantics from the effort selector itself.
 	if (!selectedEffort || selectedEffort === "disable") {

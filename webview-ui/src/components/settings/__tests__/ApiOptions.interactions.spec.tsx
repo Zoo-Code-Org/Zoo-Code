@@ -1,5 +1,10 @@
 import { act, fireEvent, render, screen, within } from "@/utils/test-utils"
-import { bedrockDefaultModelId, providerIdentifiers, type ProviderSettings } from "@roo-code/types"
+import {
+	bedrockDefaultModelId,
+	DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
+	providerIdentifiers,
+	type ProviderSettings,
+} from "@roo-code/types"
 import type { ChangeEventHandler, ComponentProps, InputHTMLAttributes, ReactNode } from "react"
 
 import { requestLmStudioModels } from "@src/components/ui/hooks/useLmStudioModels"
@@ -35,13 +40,11 @@ type UseSelectedModelReturn = { provider?: string; id?: string; info: Record<str
 const { modelPickerMock, useOpenRouterModelProvidersMock, useSelectedModelMock } = vi.hoisted(() => ({
 	modelPickerMock: vi.fn((_props: ComponentProps<typeof ModelPicker>) => null),
 	useOpenRouterModelProvidersMock: vi.fn<() => OpenRouterModelProvidersQueryResult>(() => ({ data: undefined })),
-	useSelectedModelMock: vi.fn(
-		(configuration: ProviderSettings): UseSelectedModelReturn => ({
-			provider: configuration.apiProvider,
-			id: configuration.apiModelId,
-			info: {},
-		}),
-	),
+	useSelectedModelMock: vi.fn((configuration: ProviderSettings): UseSelectedModelReturn => ({
+		provider: configuration.apiProvider,
+		id: configuration.apiModelId,
+		info: {},
+	})),
 }))
 
 vi.mock("@src/context/ExtensionStateContext", () => ({
@@ -106,6 +109,7 @@ vi.mock("../providers", () => {
 		VercelAiGateway: provider("provider-vercel-ai-gateway"),
 		OpenCodeGo: provider("provider-opencode-go"),
 		Kenari: provider("provider-kenari"),
+		IOIntelligence: provider("provider-io-intelligence"),
 		NanoGPT: provider("provider-nanogpt"),
 		ZooGateway: provider("provider-zoo-gateway"),
 		MiniMax: provider("provider-minimax"),
@@ -169,6 +173,13 @@ vi.mock("@/components/ui", () => ({
 	SelectItem: ({ value, children }: { value?: string; children?: ReactNode }) => (
 		<option value={value}>{children}</option>
 	),
+	Slider: ({ value, onValueChange }: { value?: number[]; onValueChange?: (value: number[]) => void }) => (
+		<input
+			type="range"
+			value={value?.[0] ?? 0}
+			onChange={(event) => onValueChange?.([Number(event.target.value)])}
+		/>
+	),
 }))
 
 const renderApiOptions = (props: Partial<ApiOptionsProps> = {}) =>
@@ -229,6 +240,14 @@ describe("ApiOptions interactions", () => {
 				provider: providerIdentifiers.vscodeLm,
 				configuration: {},
 				expectedMessage: { type: "requestVsCodeLmModels" },
+			},
+			{
+				provider: providerIdentifiers.githubCopilot,
+				configuration: {},
+				expectedMessage: {
+					type: "requestVsCodeLmModels",
+					apiConfiguration: { apiProvider: providerIdentifiers.githubCopilot },
+				},
 			},
 			{
 				provider: providerIdentifiers.litellm,
@@ -360,6 +379,7 @@ describe("ApiOptions interactions", () => {
 		providerIdentifiers.vercelAiGateway,
 		providerIdentifiers.opencodeGo,
 		providerIdentifiers.kenari,
+		providerIdentifiers.ioIntelligence,
 		providerIdentifiers.nanogpt,
 		providerIdentifiers.zooGateway,
 		providerIdentifiers.fireworks,
@@ -539,6 +559,116 @@ describe("ApiOptions interactions", () => {
 		})
 
 		expect(setApiConfigurationField).toHaveBeenCalledWith("consecutiveMistakeLimit", 7)
+	})
+
+	it("re-clamps the soft limit when a lower consecutive mistake limit makes it unreachable", () => {
+		const setApiConfigurationField = vi.fn()
+		renderApiOptions({
+			apiConfiguration: { consecutiveMistakeLimit: 5, toolRepetitionSoftLimit: 4 },
+			setApiConfigurationField,
+		})
+
+		// Lowering the hard limit to 2 forces the soft limit (4) down to hardLimit - 1 (1).
+		fireEvent.change(within(screen.getByTestId("consecutive-mistake-limit-control")).getByRole("slider"), {
+			target: { value: "2" },
+		})
+
+		expect(setApiConfigurationField).toHaveBeenCalledWith("consecutiveMistakeLimit", 2)
+		expect(setApiConfigurationField).toHaveBeenCalledWith("toolRepetitionSoftLimit", 1)
+	})
+
+	it("disables the soft limit when the consecutive mistake limit is set to 0", () => {
+		const setApiConfigurationField = vi.fn()
+		renderApiOptions({
+			apiConfiguration: { consecutiveMistakeLimit: 5, toolRepetitionSoftLimit: 2 },
+			setApiConfigurationField,
+		})
+
+		fireEvent.change(within(screen.getByTestId("consecutive-mistake-limit-control")).getByRole("slider"), {
+			target: { value: "0" },
+		})
+
+		expect(setApiConfigurationField).toHaveBeenCalledWith("consecutiveMistakeLimit", 0)
+		expect(setApiConfigurationField).toHaveBeenCalledWith("toolRepetitionSoftLimit", 0)
+	})
+
+	it("does not touch the soft limit when the new hard limit keeps it reachable", () => {
+		const setApiConfigurationField = vi.fn()
+		renderApiOptions({
+			apiConfiguration: { consecutiveMistakeLimit: 5, toolRepetitionSoftLimit: 2 },
+			setApiConfigurationField,
+		})
+
+		// Raising the hard limit leaves the soft limit (2) untouched.
+		fireEvent.change(within(screen.getByTestId("consecutive-mistake-limit-control")).getByRole("slider"), {
+			target: { value: "8" },
+		})
+
+		expect(setApiConfigurationField).toHaveBeenCalledWith("consecutiveMistakeLimit", 8)
+		expect(setApiConfigurationField.mock.calls.filter(([field]) => field === "toolRepetitionSoftLimit")).toEqual([])
+	})
+
+	it("falls back to the default soft limit when re-clamping and none is configured", () => {
+		const setApiConfigurationField = vi.fn()
+		// No toolRepetitionSoftLimit is configured, so the onChange handler must
+		// fall back to DEFAULT_TOOL_REPETITION_SOFT_LIMIT before re-clamping.
+		renderApiOptions({
+			apiConfiguration: { consecutiveMistakeLimit: 5 },
+			setApiConfigurationField,
+		})
+
+		// Lowering the hard limit to 1 forces even the default soft limit down to
+		// hardLimit - 1 (0), proving the undefined fallback branch is exercised.
+		fireEvent.change(within(screen.getByTestId("consecutive-mistake-limit-control")).getByRole("slider"), {
+			target: { value: "1" },
+		})
+
+		expect(setApiConfigurationField).toHaveBeenCalledWith("consecutiveMistakeLimit", 1)
+		expect(setApiConfigurationField).toHaveBeenCalledWith("toolRepetitionSoftLimit", 0)
+	})
+
+	it("falls back to the default hard limit when clamping the soft limit and none is configured", () => {
+		const setApiConfigurationField = vi.fn()
+		// No consecutiveMistakeLimit is configured, so onSoftChange must fall back
+		// to DEFAULT_CONSECUTIVE_MISTAKE_LIMIT when clamping the requested value.
+		renderApiOptions({
+			apiConfiguration: { toolRepetitionSoftLimit: 1 },
+			setApiConfigurationField,
+		})
+
+		const mistakeSlider = within(screen.getByTestId("consecutive-mistake-limit-control")).getByRole("slider")
+		const softSlider = screen.getAllByRole("slider").find((slider) => slider !== mistakeSlider)
+		expect(softSlider).toBeDefined()
+
+		// Requesting a very large soft limit is clamped against the default hard
+		// limit, so the resulting value is DEFAULT_CONSECUTIVE_MISTAKE_LIMIT - 1.
+		fireEvent.change(softSlider!, { target: { value: "9" } })
+
+		const softCalls = setApiConfigurationField.mock.calls.filter(([field]) => field === "toolRepetitionSoftLimit")
+		expect(softCalls).toHaveLength(1)
+		const clampedValue = softCalls[0][1] as number
+		// With no hard limit configured, the fallback default (3) clamps the
+		// requested soft limit to exactly hardLimit - 1.
+		expect(clampedValue).toBe(DEFAULT_CONSECUTIVE_MISTAKE_LIMIT - 1)
+	})
+
+	it("updates and clamps the tool repetition soft limit from its control", () => {
+		const setApiConfigurationField = vi.fn()
+		renderApiOptions({
+			apiConfiguration: { consecutiveMistakeLimit: 3, toolRepetitionSoftLimit: 1 },
+			setApiConfigurationField,
+		})
+
+		// The tool repetition soft-limit slider is the range input that is not
+		// inside the mocked consecutive-mistake-limit control.
+		const mistakeSlider = within(screen.getByTestId("consecutive-mistake-limit-control")).getByRole("slider")
+		const softSlider = screen.getAllByRole("slider").find((slider) => slider !== mistakeSlider)
+		expect(softSlider).toBeDefined()
+
+		// Requesting a soft limit of 9 is clamped to hardLimit - 1 (2).
+		fireEvent.change(softSlider!, { target: { value: "9" } })
+
+		expect(setApiConfigurationField).toHaveBeenCalledWith("toolRepetitionSoftLimit", 2)
 	})
 
 	it("renders and updates the Poe base URL in advanced settings", () => {

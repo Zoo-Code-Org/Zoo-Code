@@ -62,13 +62,7 @@ export const shouldUseReasoningEffort = ({
 
 	// Selected effort from settings or model default
 	const selectedEffort = (settings?.reasoningEffort ?? (model as any).reasoningEffort) as
-		| "disable"
-		| "none"
-		| "minimal"
-		| "low"
-		| "medium"
-		| "high"
-		| undefined
+		"disable" | "none" | "minimal" | "low" | "medium" | "high" | undefined
 
 	// "disable" explicitly omits reasoning
 	if (selectedEffort === "disable") return false
@@ -88,12 +82,7 @@ export const shouldUseReasoningEffort = ({
 	// Not explicitly supported: only allow when the model itself defines a default effort
 	// Ignore settings-only selections when capability is absent/false
 	const modelDefaultEffort = (model as any).reasoningEffort as
-		| "none"
-		| "minimal"
-		| "low"
-		| "medium"
-		| "high"
-		| undefined
+		"none" | "minimal" | "low" | "medium" | "high" | undefined
 	return !!modelDefaultEffort
 }
 
@@ -183,7 +172,7 @@ type CommonFetchParams = {
 // Exhaustive, value-level map for all dynamic providers.
 // If a new dynamic provider is added in packages/types, this will fail to compile
 // until a corresponding entry is added here.
-const dynamicProviderExtras = {
+const _dynamicProviderExtras = {
 	[providerIdentifiers.openrouter]: {} as {}, // eslint-disable-line @typescript-eslint/no-empty-object-type
 	[providerIdentifiers.vercelAiGateway]: {} as {}, // eslint-disable-line @typescript-eslint/no-empty-object-type
 	[providerIdentifiers.zooGateway]: {} as { apiKey?: string; baseUrl?: string },
@@ -197,6 +186,7 @@ const dynamicProviderExtras = {
 	[providerIdentifiers.moonshot]: {} as { apiKey?: string; baseUrl?: string },
 	[providerIdentifiers.opencodeGo]: {} as { apiKey?: string },
 	[providerIdentifiers.kenari]: {} as { apiKey?: string },
+	[providerIdentifiers.ioIntelligence]: {} as { apiKey?: string },
 	[providerIdentifiers.nanogpt]: {} as { apiKey?: string },
 	[providerIdentifiers.kimiCode]: {} as { apiKey?: string },
 } as const satisfies Record<RouterName, object>
@@ -204,5 +194,6 @@ const dynamicProviderExtras = {
 // Build the dynamic options union from the map, intersected with CommonFetchParams
 // so extra fields are always allowed while required ones are enforced.
 export type GetModelsOptions = {
-	[P in keyof typeof dynamicProviderExtras]: ({ provider: P } & (typeof dynamicProviderExtras)[P]) & CommonFetchParams
+	[P in keyof typeof _dynamicProviderExtras]: ({ provider: P } & (typeof _dynamicProviderExtras)[P]) &
+		CommonFetchParams
 }[RouterName]

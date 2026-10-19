@@ -99,7 +99,7 @@ const createServerTypeSchema = () => {
 			command: z.string().min(1, "Command cannot be empty"),
 			args: z.array(z.string()).optional(),
 			cwd: z.string().default(() => vscode.workspace.workspaceFolders?.at(0)?.uri.fsPath ?? process.cwd()),
-			env: z.record(z.string()).optional(),
+			env: z.record(z.string(), z.string()).optional(),
 			// Ensure no SSE fields are present
 			url: z.undefined().optional(),
 			headers: z.undefined().optional(),
@@ -113,7 +113,7 @@ const createServerTypeSchema = () => {
 		BaseConfigSchema.extend({
 			type: z.enum(["sse"]).optional(),
 			url: z.string().url("URL must be a valid URL format"),
-			headers: z.record(z.string()).optional(),
+			headers: z.record(z.string(), z.string()).optional(),
 			// Ensure no stdio fields are present
 			command: z.undefined().optional(),
 			args: z.undefined().optional(),
@@ -128,7 +128,7 @@ const createServerTypeSchema = () => {
 		BaseConfigSchema.extend({
 			type: z.enum(["streamable-http"]).optional(),
 			url: z.string().url("URL must be a valid URL format"),
-			headers: z.record(z.string()).optional(),
+			headers: z.record(z.string(), z.string()).optional(),
 			// Ensure no stdio fields are present
 			command: z.undefined().optional(),
 			args: z.undefined().optional(),
@@ -149,7 +149,7 @@ export const ServerConfigSchema = createServerTypeSchema()
 
 // Settings schema
 const McpSettingsSchema = z.object({
-	mcpServers: z.record(ServerConfigSchema),
+	mcpServers: z.record(z.string(), ServerConfigSchema),
 })
 
 export class McpHub {
@@ -270,7 +270,7 @@ export class McpHub {
 		} catch (validationError) {
 			if (validationError instanceof z.ZodError) {
 				// Extract and format validation errors
-				const errorMessages = validationError.errors
+				const errorMessages = validationError.issues
 					.map((err) => `${err.path.join(".")}: ${err.message}`)
 					.join("; ")
 				throw new Error(
@@ -349,7 +349,7 @@ export class McpHub {
 			const result = McpSettingsSchema.safeParse(config)
 
 			if (!result.success) {
-				const errorMessages = result.error.errors
+				const errorMessages = result.error.issues
 					.map((err) => `${err.path.join(".")}: ${err.message}`)
 					.join("\n")
 				vscode.window.showErrorMessage(t("mcp:errors.invalid_settings_validation", { errorMessages }))
@@ -438,7 +438,7 @@ export class McpHub {
 				await this.updateServerConnections(result.data.mcpServers || {}, "project")
 			} else {
 				// Format validation errors for better user feedback
-				const errorMessages = result.error.errors
+				const errorMessages = result.error.issues
 					.map((err) => `${err.path.join(".")}: ${err.message}`)
 					.join("\n")
 				console.error("Invalid project MCP settings format:", errorMessages)
@@ -550,7 +550,6 @@ export class McpHub {
 		}
 
 		const settingsPath = await this.getMcpSettingsFilePath()
-		const settingsUri = vscode.Uri.file(settingsPath)
 		const settingsPattern = new vscode.RelativePattern(path.dirname(settingsPath), path.basename(settingsPath))
 
 		// Create a file system watcher for the global MCP settings file
@@ -590,7 +589,7 @@ export class McpHub {
 				// Pass all servers including disabled ones - they'll be handled in updateServerConnections
 				await this.updateServerConnections(result.data.mcpServers || {}, source, false)
 			} else {
-				const errorMessages = result.error.errors
+				const errorMessages = result.error.issues
 					.map((err) => `${err.path.join(".")}: ${err.message}`)
 					.join("\n")
 				console.error(`Invalid ${source} MCP settings format:`, errorMessages)
@@ -1303,7 +1302,7 @@ export class McpHub {
 
 	private async _completeOAuthFlow(
 		authProvider: McpOAuthClientProvider,
-		transport: StreamableHTTPClientTransport,
+		_transport: StreamableHTTPClientTransport,
 		connection: ConnectedMcpConnection,
 		name: string,
 		source: "global" | "project",
@@ -1513,7 +1512,7 @@ export class McpHub {
 			}
 			const response = await connection.client.request({ method: "resources/list" }, ListResourcesResultSchema)
 			return response?.resources || []
-		} catch (error) {
+		} catch {
 			// console.error(`Failed to fetch resources for ${serverName}:`, error)
 			return []
 		}
@@ -1533,7 +1532,7 @@ export class McpHub {
 				ListResourceTemplatesResultSchema,
 			)
 			return response?.resourceTemplates || []
-		} catch (error) {
+		} catch {
 			// console.error(`Failed to fetch resource templates for ${serverName}:`, error)
 			return []
 		}
@@ -1801,30 +1800,6 @@ export class McpHub {
 		this.isConnecting = true
 
 		try {
-			const globalPath = await this.getMcpSettingsFilePath()
-			let globalServers: Record<string, any> = {}
-			try {
-				const globalContent = await fs.readFile(globalPath, "utf-8")
-				const globalConfig = JSON.parse(globalContent)
-				globalServers = globalConfig.mcpServers || {}
-				const globalServerNames = Object.keys(globalServers)
-			} catch (error) {
-				console.log("Error reading global MCP config:", error)
-			}
-
-			const projectPath = await this.getProjectMcpPath()
-			let projectServers: Record<string, any> = {}
-			if (projectPath) {
-				try {
-					const projectContent = await fs.readFile(projectPath, "utf-8")
-					const projectConfig = JSON.parse(projectContent)
-					projectServers = projectConfig.mcpServers || {}
-					const projectServerNames = Object.keys(projectServers)
-				} catch (error) {
-					console.log("Error reading project MCP config:", error)
-				}
-			}
-
 			// Clear all existing connections first
 			const existingConnections = [...this.connections]
 			for (const conn of existingConnections) {
@@ -1861,7 +1836,7 @@ export class McpHub {
 				const projectContent = await fs.readFile(projectMcpPath, "utf-8")
 				const projectConfig = JSON.parse(projectContent)
 				projectServerOrder = Object.keys(projectConfig.mcpServers || {})
-			} catch (error) {
+			} catch {
 				// Silently continue with empty project server order
 			}
 		}
@@ -2151,7 +2126,7 @@ export class McpHub {
 			// Ensure the settings file exists and is accessible
 			try {
 				await fs.access(configPath)
-			} catch (error) {
+			} catch {
 				throw new Error("Settings file not accessible")
 			}
 

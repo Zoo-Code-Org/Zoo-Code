@@ -24,23 +24,23 @@ describe("HTML Source Code Definition Tests", () => {
 	})
 
 	it("should parse document definition", () => {
-		expect(parseResult).toMatch(/2--2 \|\s*<html lang=\"en\">/)
+		expect(parseResult).toMatch(/2--2 \|\s*<html lang="en">/)
 	})
 
 	it("should parse element definition", () => {
-		expect(parseResult).toMatch(/17--17 \|\s*<div class=\"test-element\"/)
+		expect(parseResult).toMatch(/17--17 \|\s*<div class="test-element"/)
 	})
 
 	it("should parse script definition", () => {
-		expect(parseResult).toMatch(/32--32 \|\s*<script type=\"text\/javascript\">/)
+		expect(parseResult).toMatch(/32--32 \|\s*<script type="text\/javascript">/)
 	})
 
 	it("should parse style definition", () => {
-		expect(parseResult).toMatch(/39--39 \|\s*<style type=\"text\/css\">/)
+		expect(parseResult).toMatch(/39--39 \|\s*<style type="text\/css">/)
 	})
 
 	it("should parse attribute definition", () => {
-		expect(parseResult).toMatch(/24--24 \|\s*<div class=\"test-attribute\"/)
+		expect(parseResult).toMatch(/24--24 \|\s*<div class="test-attribute"/)
 	})
 
 	it("should parse comment definition", () => {
@@ -56,14 +56,14 @@ describe("HTML Source Code Definition Tests", () => {
 	})
 
 	it("should parse void element definition", () => {
-		expect(parseResult).toMatch(/61--61 \|\s*<img src=\"test\.jpg\"/)
+		expect(parseResult).toMatch(/61--61 \|\s*<img src="test\.jpg"/)
 	})
 
 	it("should parse self closing tag definition", () => {
-		expect(parseResult).toMatch(/66--66 \|\s*<br class=\"test-self-closing\" \/>/)
+		expect(parseResult).toMatch(/66--66 \|\s*<br class="test-self-closing" \/>/)
 	})
 
 	it("should parse nested elements definition", () => {
-		expect(parseResult).toMatch(/77--77 \|\s*<div class=\"test-nested\"/)
+		expect(parseResult).toMatch(/77--77 \|\s*<div class="test-nested"/)
 	})
 })

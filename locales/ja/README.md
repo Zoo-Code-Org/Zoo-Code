@@ -46,11 +46,11 @@ Zoo Code は Roo Code が築いた基盤を引き継ぎ、次の機能で拡張�
 - **より信頼性の高いターミナルと編集ワークフロー** — ターミナルの早期完了、タスク状態の競合、コンテキスト管理、diff 編集、プロバイダー固有のツール利用に関する問題を修正。
 - **ワークスペースをより細かく制御** — ルール管理、モードごとの MCP 制限、マルチルートのパス制御、モデルの reasoning オプション、完了時の変更レビュー操作を追加。
 
-## v3.88.0 の新機能
+## v3.90.0 の新機能
 
-- ✨ **Provider とモデルへの対応:** Grok Build を利用でき、カスタムモデルのサポートが向上しました。このリリースでは、Bedrock のモデル上限の修正と、Codex の verbosity 設定の送信も行われます。
-- 🧭 **タスクの信頼性:** このリリースでは、キャンセル処理、tool turn の継続、タスクメッセージの保存を修正しました。
-- ⚡ **より速い編集とチャット:** ファイルへの書き込みは、デフォルトでは人為的な遅延を行わなくなりました。チャットメッセージはファイルデータを減らして伝え、code action は最後にアクティブなチャットに届きます。
+- ✨ **Provider とモデル:** GitHub Copilot が provider になりました。サインインすると、Zoo Code が Copilot モデルを読み込みます。IO Intelligence は専用の API キーを使う provider です。Gemini 4 Argon は Gemini と Vertex にあります。GPT-6 Luna は OpenCode Go にあります。Gemini 4 Argon と GPT-6 Luna は Zoo Gateway にもあります。
+- 🧭 **ツール実行:** 同じツール呼び出しを繰り返すと警告が出て、その後 Zoo Code がそのループを止めます。`attempt_completion` を無効にしても、タスクが完了できない状態にはなりません。キュー内のメッセージは、直接送るコマンドと同じコマンド保護チェックを通ります。
+- ⚡ **推論とストリーミング:** Anthropic の adaptive thinking がチャットに表示され、thinking token がカウントされます。R1 トグルは llama.cpp、Ollama、LM Studio の推論を保持します。Codex は、表示される要約とともに暗号化された推論を保持します。VS Code の language model ストリームは、ストリームが失敗したときに guarded recovery を使います。
 
 ## Zoo Codeがあなたのためにできること
 
