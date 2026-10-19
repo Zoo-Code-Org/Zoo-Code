@@ -32,6 +32,28 @@ describe("Project A provider smoke workflow", () => {
 		assert.match(workflow, /persist-credentials: false/)
 		assert.match(workflow, /environment: final-vscode-review-smoke/)
 	})
+	it("gates the provider secret behind an environment-bound, main-only smoke job", () => {
+		const jobs = workflow.split("jobs:\n")[1] ?? ""
+		const smokeJob = jobs.split("\n        steps:")[0] ?? ""
+		assert.ok(smokeJob.length > 0)
+		// The job runs only on main, so no other ref reaches the secret step.
+		assert.match(smokeJob, /^ {8}if: github\.ref == 'refs\/heads\/main'$/m)
+		// The secret-holding environment gates the whole job, so GitHub
+		// applies its protection rules before the first step runs.
+		assert.match(smokeJob, /^ {8}environment: final-vscode-review-smoke$/m)
+		// The environment reference must precede the credential-bearing step.
+		assert.ok(smokeJob.indexOf("environment: final-vscode-review-smoke") < jobs.indexOf("secrets."))
+		// The workflow must consume the secret scoped to that environment.
+		assert.match(workflow, /secrets\.FINAL_SMOKE_OPENAI_API_KEY/)
+	})
+	it("documents the required environment protection policy for the secret", () => {
+		const readme = fs.readFileSync(new URL("./solheim-smoke/README.md", import.meta.url), "utf8")
+		// The environment requires the same reviewer approval as the deploy
+		// environment, and the workflow keeps the main-only deployment guard.
+		assert.match(readme, /same reviewer approval as the `marketplace-production` deploy environment/)
+		assert.match(readme, /must approve each deployment before GitHub releases the secret/)
+		assert.match(readme, /runs only on `refs\/heads\/main`/)
+	})
 	it("has one credential-bearing step, no GitHub write permissions, and no posting", () => {
 		assert.equal((workflow.match(/secrets\./g) ?? []).length, 1)
 		const before = workflow.slice(0, workflow.indexOf("- name: Run Solheim provider smoke"))

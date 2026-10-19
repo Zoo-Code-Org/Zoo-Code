@@ -18,8 +18,11 @@ and `contents: read` is the only GitHub permission. This deliberately validates 
 on main, not arbitrary PR artifacts. It is not a required PR review check.
 
 The protected environment `final-vscode-review-smoke` and its secret `FINAL_SMOKE_OPENAI_API_KEY`
-retain their existing names to avoid an unnecessary repository-settings migration. Restrict its deployment
-policy to main and require approval. No environment or secret settings have been changed by this cleanup.
+retain their existing names to avoid an unnecessary repository-settings migration. The environment
+requires the same reviewer approval as the `marketplace-production` deploy environment: a member of
+the `Zoo-Code-Org/admins` team must approve each deployment before GitHub releases the secret. The
+main-only deployment restriction stays in the workflow: the smoke job runs only on `refs/heads/main`.
+Workflow files cannot declare reviewer rules; repository settings own them.
 
 The provider endpoint and model are fixed: `https://api.solheim.ai/v1`, `qwen3.8-27b`. The task has no tool
 groups; delegation, follow-ups, writes, shell and MCP are disabled. The driver opens an empty temporary

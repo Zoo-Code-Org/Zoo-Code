@@ -18,7 +18,10 @@ jobs:
         runs-on: ubuntu-24.04
         timeout-minutes: 25
         # Retain the existing protected environment and secret names for compatibility.
-        # Repository policy must restrict deployments to main and require approval.
+        # The environment requires reviewer approval, matching the deploy
+        # environment. The job guard above restricts runs to main, so the
+        # secret is released only for an approved main run. See
+        # scripts/solheim-smoke/README.md.
         environment: final-vscode-review-smoke
         steps:
             - name: Checkout exact trusted main revision
