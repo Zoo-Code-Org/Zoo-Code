@@ -107,6 +107,8 @@ export function isIpv4LoopbackHost(host: string): boolean {
 	return values[0] === 127 && values.every((value) => value <= 255)
 }
 
+const keyDropWarnedOrigins = new Set<string>()
+
 export async function getOllamaModels(
 	baseUrl = "http://localhost:11434",
 	apiKey?: string,
@@ -126,6 +128,16 @@ export async function getOllamaModels(
 		// when the endpoint is HTTPS or loopback; sending it over plaintext HTTP
 		// to a remote host would leak it (CWE-319).
 		const credentialGated = Boolean(apiKey && isSecureOllamaEndpoint(baseUrl))
+		if (apiKey && !credentialGated) {
+			// Model discovery runs on every request, so warn once per origin.
+			const origin = getLoggableOrigin(baseUrl)
+			if (!keyDropWarnedOrigins.has(origin)) {
+				keyDropWarnedOrigins.add(origin)
+				console.warn(
+					`[Ollama] API key is set but the endpoint ${origin} is not https or loopback; the Authorization header is not sent.`,
+				)
+			}
+		}
 		const headers: Record<string, string> = {}
 		if (credentialGated) {
 			headers["Authorization"] = `Bearer ${apiKey}`

@@ -2274,6 +2274,54 @@ describe("NativeOllamaHandler", () => {
 			expect(warned).not.toContain("token")
 		})
 
+		it("should warn about the dropped key once per handler, not once per request", async () => {
+			mockChat.mockResolvedValue({ message: { content: "Response" } })
+			const warnSpy = vitest.spyOn(console, "warn").mockImplementation(() => {})
+
+			const handler = new NativeOllamaHandler({
+				apiModelId: "llama2",
+				ollamaModelId: "llama2",
+				ollamaBaseUrl: "http://ollama.example.com:11434",
+				ollamaApiKey: "test-api-key-123",
+			})
+
+			await handler.completePrompt("one")
+			await handler.completePrompt("two")
+
+			const dropWarnings = warnSpy.mock.calls.filter(([m]) => String(m).includes("[NativeOllama] ollamaApiKey"))
+			expect(dropWarnings).toHaveLength(1)
+		})
+
+		it("should use a fixed phrase in the warning when the host does not parse", async () => {
+			mockChat.mockResolvedValue({ message: { content: "Response" } })
+			const warnSpy = vitest.spyOn(console, "warn").mockImplementation(() => {})
+
+			const handler = new NativeOllamaHandler({
+				apiModelId: "llama2",
+				ollamaModelId: "llama2",
+				ollamaBaseUrl: "secret-host:11434/path?token=abc",
+				ollamaApiKey: "test-api-key-123",
+			})
+
+			await handler.completePrompt("Test prompt")
+
+			const warned = warnSpy.mock.calls.flat().join(" ")
+			expect(warned).toContain('the endpoint "the configured endpoint" is not https or loopback')
+			expect(warned).not.toContain("secret-host")
+			expect(warned).not.toContain("token")
+		})
+
+		it("should wrap an error thrown while the client is created", async () => {
+			OllamaMock.mockImplementationOnce(function () {
+				throw new Error("constructor boom")
+			})
+			const handler = new NativeOllamaHandler({ apiModelId: "llama2", ollamaModelId: "llama2" })
+
+			await expect(handler.completePrompt("Test prompt")).rejects.toThrow(
+				"Ollama completion error: constructor boom",
+			)
+		})
+
 		it("should not warn when the API key is attached to a secure endpoint", async () => {
 			mockChat.mockResolvedValue({
 				message: { content: "Response" },

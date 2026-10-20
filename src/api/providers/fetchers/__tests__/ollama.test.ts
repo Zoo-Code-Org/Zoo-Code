@@ -147,6 +147,20 @@ describe("Ollama Fetcher", () => {
 		it("should treat unparseable endpoints as unsafe", () => {
 			expect(isSecureOllamaEndpoint("not a url")).toBe(false)
 		})
+
+		it("should judge the real host, not look-alike text", () => {
+			// userinfo spoof: the host is evil.com
+			expect(isSecureOllamaEndpoint("http://127.0.0.1@evil.com:11434")).toBe(false)
+			expect(isSecureOllamaEndpoint("http://localhost@evil.com:11434")).toBe(false)
+			// look-alike host names
+			expect(isSecureOllamaEndpoint("http://localhost.evil.com:11434")).toBe(false)
+			expect(isSecureOllamaEndpoint("http://notlocalhost:11434")).toBe(false)
+		})
+
+		it("should fail closed for a schemeless host", () => {
+			expect(isSecureOllamaEndpoint("localhost:11434")).toBe(false)
+			expect(isSecureOllamaEndpoint("127.0.0.1:11434")).toBe(false)
+		})
 	})
 
 	describe("isIpv4LoopbackHost", () => {
@@ -154,6 +168,13 @@ describe("Ollama Fetcher", () => {
 			expect(isIpv4LoopbackHost("127.0.0.1")).toBe(true)
 			expect(isIpv4LoopbackHost("127.255.255.255")).toBe(true)
 			expect(isIpv4LoopbackHost("0.0.0.1")).toBe(false)
+		})
+
+		it("should accept an octet of 255 and reject 256", () => {
+			expect(isIpv4LoopbackHost("127.255.255.255")).toBe(true)
+			expect(isIpv4LoopbackHost("127.0.0.256")).toBe(false)
+			expect(isIpv4LoopbackHost("127.0.256.0")).toBe(false)
+			expect(isIpv4LoopbackHost("127.256.0.0")).toBe(false)
 		})
 
 		it("should reject hosts with the wrong octet count", () => {
@@ -433,6 +454,34 @@ describe("Ollama Fetcher", () => {
 			expect(result).toEqual({})
 
 			consoleInfoSpy.mockRestore() // Restore original console.info
+		})
+
+		it("should warn once per origin when the API key is dropped for a remote HTTP endpoint", async () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(function () {})
+			mockedAxios.get.mockResolvedValue({ data: { models: [] } })
+			const url = "http://user:secret@drop-warn.example.com:11434/v1?token=abc"
+
+			await getOllamaModels(url, "test-api-key")
+			await getOllamaModels(url, "test-api-key")
+
+			const dropWarnings = warnSpy.mock.calls.filter(([m]) => String(m).includes("API key is set"))
+			expect(dropWarnings).toHaveLength(1)
+			const text = String(dropWarnings[0][0])
+			expect(text).toContain("http://drop-warn.example.com:11434")
+			expect(text).not.toMatch(/secret|test-api-key|token/)
+			expect(mockedAxios.get.mock.calls[0][1]).toEqual(expect.objectContaining({ headers: {} }))
+			warnSpy.mockRestore()
+		})
+
+		it("should not warn about a dropped key when none is set or the endpoint is secure", async () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(function () {})
+			mockedAxios.get.mockResolvedValue({ data: { models: [] } })
+
+			await getOllamaModels("http://nokey-warn.example.com:11434")
+			await getOllamaModels("https://secure-warn.example.com", "test-api-key")
+
+			expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("API key is set"))
+			warnSpy.mockRestore()
 		})
 
 		it("should log only the origin of a base URL that holds credentials and a query", async () => {

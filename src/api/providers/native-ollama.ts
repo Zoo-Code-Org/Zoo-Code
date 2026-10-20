@@ -233,6 +233,7 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 export class NativeOllamaHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 	protected models: Record<string, ModelInfo> = {}
+	private warnedKeyDropped = false
 
 	constructor(options: ApiHandlerOptions) {
 		super()
@@ -276,10 +277,14 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 				// logged: a base URL can embed credentials or sensitive query
 				// values, so only the WHATWG origin (protocol/host:port) is
 				// echoed, and an unparseable host falls back to a fixed phrase.
-				const endpointOrigin = getLoggableOrigin(clientOptions.host)
-				console.warn(
-					`[NativeOllama] ollamaApiKey is set but the endpoint "${endpointOrigin}" is not https or loopback; the Authorization header is not sent (the credential would leak over plaintext). Use an https:// or loopback endpoint to authenticate.`,
-				)
+				// Every request builds a client, so warn once per handler.
+				if (!this.warnedKeyDropped) {
+					this.warnedKeyDropped = true
+					const endpointOrigin = getLoggableOrigin(clientOptions.host)
+					console.warn(
+						`[NativeOllama] ollamaApiKey is set but the endpoint "${endpointOrigin}" is not https or loopback; the Authorization header is not sent (the credential would leak over plaintext). Use an https:// or loopback endpoint to authenticate.`,
+					)
+				}
 			}
 		}
 
@@ -451,10 +456,12 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		}
 
 		const requestController = new AbortController()
-		const client = this._createOllamaClient(requestController.signal)
 
 		let onExternalAbort: (() => void) | undefined
 		try {
+			// Inside the try so a constructor error gets the same handling as a
+			// request error.
+			const client = this._createOllamaClient(requestController.signal)
 			if (externalAbortSignal) {
 				onExternalAbort = () => {
 					requestController.abort()
@@ -665,14 +672,17 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		// per-request controller drives the abortable transport injected into the
 		// client, so the in-flight POST itself is cancellable.
 		const requestController = new AbortController()
-		const client = this._createOllamaClient(requestController.signal)
 		let timeoutId: ReturnType<typeof setTimeout> | undefined
 		let onAbort: (() => void) | undefined
 		const abortSignal = options?.abortSignal
 
 		try {
-			// Handle timeoutMs if provided (client already exists above, so the
-			// timer can abort both the per-request transport and the client)
+			// Inside the try so a constructor error gets the same wrap as a
+			// request error.
+			const client = this._createOllamaClient(requestController.signal)
+
+			// Handle timeoutMs if provided (the client exists, so the timer can
+			// abort both the per-request transport and the client)
 			const timeoutMs = options?.timeoutMs
 			if (timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0) {
 				// Node clamps delays above 2^31-1 ms to 1 ms (and coerces
