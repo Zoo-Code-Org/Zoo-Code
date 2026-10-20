@@ -435,6 +435,18 @@ describe("Ollama Fetcher", () => {
 			consoleInfoSpy.mockRestore() // Restore original console.info
 		})
 
+		it("should log only the origin of a base URL that holds credentials and a query", async () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(function () {})
+			const error = new Error("Connection refused")
+			;(error as NodeJS.ErrnoException).code = "ECONNREFUSED"
+			mockedAxios.get.mockRejectedValueOnce(error)
+
+			await getOllamaModels("http://user:pass@localhost:11434/path?token=secret")
+
+			expect(warnSpy).toHaveBeenCalledWith("Failed connecting to Ollama at http://localhost:11434")
+			warnSpy.mockRestore()
+		})
+
 		it("should handle models with null families field in API response", async () => {
 			const baseUrl = "http://localhost:11434"
 			const modelName = "test-model:latest"

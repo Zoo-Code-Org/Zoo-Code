@@ -479,6 +479,18 @@ describe("LMStudio Fetcher", () => {
 			consoleInfoSpy.mockRestore()
 		})
 
+		it("should log only the origin of a base URL that holds credentials and a query", async () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(function () {})
+			const error = new Error("Connection refused")
+			;(error as NodeJS.ErrnoException).code = "ECONNREFUSED"
+			mockedAxios.get.mockRejectedValueOnce(error)
+
+			await getLMStudioModels("http://user:pass@localhost:1234/path?token=secret")
+
+			expect(warnSpy).toHaveBeenCalledWith("Error connecting to LMStudio at http://localhost:1234")
+			warnSpy.mockRestore()
+		})
+
 		it("should return an empty object and log error if listDownloadedModels fails", async () => {
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 			const listError = new Error("LMStudio SDK internal error")

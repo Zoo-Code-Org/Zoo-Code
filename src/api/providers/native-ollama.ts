@@ -7,6 +7,7 @@ import { BaseProvider } from "./base-provider"
 import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { getOllamaModels, isSecureOllamaEndpoint } from "./fetchers/ollama"
 import { createAbortError, mergeAbortSignalAndTimeout, rejectOnAbort } from "./utils/abort-signal"
+import { getLoggableOrigin } from "./utils/endpoint-origin"
 import { TagMatcher } from "../../utils/tag-matcher"
 import type {
 	SingleCompletionHandler,
@@ -275,14 +276,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 				// logged: a base URL can embed credentials or sensitive query
 				// values, so only the WHATWG origin (protocol/host:port) is
 				// echoed, and an unparseable host falls back to a fixed phrase.
-				let endpointOrigin = "the configured endpoint"
-				try {
-					const parsed = new URL(clientOptions.host)
-					endpointOrigin = `${parsed.protocol}//${parsed.host}`
-				} catch {
-					// Unparseable host: keep the fixed phrase rather than echo
-					// a raw value that could carry credentials.
-				}
+				const endpointOrigin = getLoggableOrigin(clientOptions.host)
 				console.warn(
 					`[NativeOllama] ollamaApiKey is set but the endpoint "${endpointOrigin}" is not https or loopback; the Authorization header is not sent (the credential would leak over plaintext). Use an https:// or loopback endpoint to authenticate.`,
 				)

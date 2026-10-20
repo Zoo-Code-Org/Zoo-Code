@@ -359,16 +359,6 @@
 			"count": 1
 		}
 	},
-	"api/providers/fetchers/lmstudio.ts": {
-		"no-restricted-syntax": {
-			"count": 2
-		}
-	},
-	"api/providers/fetchers/ollama.ts": {
-		"no-restricted-syntax": {
-			"count": 1
-		}
-	},
 	"api/providers/gemini.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 3
