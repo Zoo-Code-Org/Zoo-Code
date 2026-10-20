@@ -152,8 +152,9 @@ describe("ApplyDiffTool failure reporting", () => {
 
 			expect(output).toContain("FAILURE-MARKER-1")
 			expect(output).toContain("FAILURE-MARKER-2")
-			expect(output).toContain("--- Diff block 1 of 2 ---")
-			expect(output).toContain("--- Diff block 2 of 2 ---")
+			expect(output).toContain("--- Failure 1 of 2 ---")
+			expect(output).toContain("--- Failure 2 of 2 ---")
+			expect(output).not.toContain("Diff block")
 		})
 
 		it("names the target file before the multi-block failure details", async () => {
@@ -265,9 +266,9 @@ describe("ApplyDiffTool failure reporting", () => {
 			const output = await runApplyDiff({ success: false, failParts: mixedParts }, 3)
 
 			expect(output).toContain(
-				"<error_details>\n2 diff blocks failed to apply. Fix the failures below before retrying.\n\n--- Diff block 1 of 2 ---\n",
+				"<error_details>\n2 diff blocks failed to apply. Fix the failures below before retrying.\n\n--- Failure 1 of 2 ---\n",
 			)
-			expect(output).toContain("second line of failure 1\n\n--- Diff block 2 of 2 ---\nFAILURE-MARKER-2")
+			expect(output).toContain("second line of failure 1\n\n--- Failure 2 of 2 ---\nFAILURE-MARKER-2")
 		})
 
 		it("renders a single failure verbatim with no summary, label, details or trailer", async () => {
@@ -370,7 +371,7 @@ describe("ApplyDiffTool failure reporting", () => {
 			const output = await runRealStrategy(diff)
 
 			expect(output).toContain("3 diff blocks failed to apply")
-			expect(output).toContain("--- Diff block 3 of 3 ---")
+			expect(output).toContain("--- Failure 3 of 3 ---")
 			expectNoSecrets(collectUiAndModelOutputs(output))
 		})
 
@@ -456,6 +457,20 @@ describe("ApplyDiffTool failure reporting", () => {
 				"The other 2 did NOT apply. Inspect the saved file before retrying, since an earlier block may already contain the intended change. ",
 			)
 			expect(output).not.toContain("NOT in the file")
+		})
+
+		it.each([
+			{ name: "every block fails", failures: 2, blockCount: 2 },
+			{ name: "failures outnumber parsed blocks", failures: 3, blockCount: 2 },
+		])("reports zero applied blocks when $name", async ({ failures, blockCount }) => {
+			const output = await runApplyDiff(
+				{ success: true, content: "updated content", failParts: makeFailureSet(failures), blockCount },
+				blockCount,
+			)
+
+			expect(output).toContain(`Applied 0 of ${blockCount} diff blocks`)
+			expect(output).toContain(`The other ${failures} did NOT apply.`)
+			expect(output).not.toMatch(/Applied -\d/)
 		})
 
 		it("tolerates a successful result without failParts or SEARCH markers", async () => {

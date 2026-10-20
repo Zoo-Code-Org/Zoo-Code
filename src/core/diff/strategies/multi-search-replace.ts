@@ -7,6 +7,8 @@ import { ToolUse, DiffStrategy, DiffResult } from "../../../shared/tools"
 import { normalizeString } from "../../../utils/text-normalization"
 
 const BUFFER_LINES = 40 // Number of extra context lines to show before and after matches
+// Real malformed markers are short; longer lines skip the hint regex entirely.
+const MAX_MARKER_HINT_LINE_LENGTH = 64
 
 function getSimilarity(original: string, search: string): number {
 	// Empty searches are no longer supported
@@ -551,9 +553,10 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 					const hintLines = searchChunk.split("\n")
 					const firstSearchLine = hintLines[0]?.trim() ?? ""
 					const separatorSwallowed = hintLines[1]?.trim() === "-------"
-					const malformedMarkerHint = /^(?::\s*\d{1,9}:?|:?\s*start[_-]?line\s*:?\s*\d{1,9}:?)$/i.test(
-						firstSearchLine,
-					)
+					// Length guard: adjacent `\s*` groups backtrack quadratically on long whitespace runs.
+					const malformedMarkerHint =
+						firstSearchLine.length <= MAX_MARKER_HINT_LINE_LENGTH &&
+						/^(?::\s*\d{1,9}:?|:?\s*start[_-]?line\s*:?\s*\d{1,9}:?)$/i.test(firstSearchLine)
 						? `\n- LIKELY CAUSE: the first line of your search content looks like a malformed start-line marker and was therefore searched for as literal file text${separatorSwallowed ? ', together with the "-------" line after it' : ""}. The only recognized form is ":start_line:<number>" on the line immediately after "<<<<<<< SEARCH", optionally followed by a "-------" line. Remove or correct that line and retry.`
 						: ""
 

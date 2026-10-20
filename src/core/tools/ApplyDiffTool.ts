@@ -284,7 +284,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 	private formatFailedParts(failedParts: Extract<DiffResult, { success: false }>[]): string {
 		const renderedCount = Math.min(failedParts.length, MAX_ABBREVIATED_FAILURES)
 		const sections = failedParts.slice(0, renderedCount).map((failPart, index) => {
-			const label = failedParts.length > 1 ? `--- Diff block ${index + 1} of ${failedParts.length} ---\n` : ""
+			const label = failedParts.length > 1 ? `--- Failure ${index + 1} of ${failedParts.length} ---\n` : ""
 			const error = failPart.error ?? "Unknown apply_diff failure"
 
 			if (index >= DETAILED_APPLY_DIFF_FAILURES) {

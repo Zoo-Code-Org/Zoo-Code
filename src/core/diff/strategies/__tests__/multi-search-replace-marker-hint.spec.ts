@@ -56,6 +56,23 @@ describe("MultiSearchReplaceDiffStrategy malformed start-line marker hint", () =
 		},
 	)
 
+	it("skips the marker hint for an overlong whitespace-padded first line", async () => {
+		const paddedLine = `startline${" ".repeat(40_000)}`
+		const diffContent = buildDiff(`${paddedLine}\nnot-in-the-file`, "replacement")
+
+		const startedAt = performance.now()
+		const errorText = firstFailureError(await strategy.applyDiff(nonMatchingFile, diffContent))
+
+		expect(errorText).not.toContain("LIKELY CAUSE")
+		expect(performance.now() - startedAt).toBeLessThan(2_000)
+	})
+
+	it("still hints for a padded marker within the length guard", async () => {
+		const diffContent = buildDiff(`start_line:${" ".repeat(40)}3\nnot-in-the-file`, "replacement")
+
+		expect(firstFailureError(await strategy.applyDiff(nonMatchingFile, diffContent))).toContain("LIKELY CAUSE")
+	})
+
 	it.each(["value:3", ":3 trailing", "x start_line:3"])(
 		"omits LIKELY CAUSE when %j only contains a marker-like fragment",
 		async (firstLine) => {
