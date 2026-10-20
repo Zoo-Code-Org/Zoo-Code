@@ -753,10 +753,22 @@ jobs:
                           ) {
                             await sleep(mergeabilityRetryDelayMs);
                             core.info(`PR #${pr.number}: mergeability unknown — retrying read (${attempt}/3)`);
-                            const { data: retryDetail } = await github.rest.pulls.get({
-                              owner, repo, pull_number: pr.number,
-                            });
-                            prDetail = retryDetail;
+                            try {
+                              const { data: retryDetail } = await github.rest.pulls.get({
+                                owner, repo, pull_number: pr.number,
+                              });
+                              prDetail = retryDetail;
+                            } catch (error) {
+                              // The loop condition guarantees mergeability was still
+                              // unknown when this retry started. A failed retry (for
+                              // example HTTP 503) adds no new mergeability answer, so
+                              // the outer cleanup must keep the current state labels
+                              // exactly like the still-unknown path below (issue
+                              // #2089). Gate invalidation and failure reporting still
+                              // happen in the outer catch.
+                              error.preserveStateLabels = true;
+                              throw error;
+                            }
                           }
 
                           if (prDetail.mergeable === false && prDetail.mergeable_state === 'dirty') {

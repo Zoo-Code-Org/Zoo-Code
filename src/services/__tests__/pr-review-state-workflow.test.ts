@@ -28,6 +28,11 @@ interface HarnessOptions {
 	mergeableState?: string
 	mergeabilitySequence?: Array<{ mergeable: boolean | null; mergeableState: string }>
 	mergeabilityRetryDelayMs?: number
+	// The timer regression test omits MERGEABILITY_RETRY_DELAY_MS so the
+	// script takes its production 5000 ms default instead of a test override.
+	productionMergeabilityDelay?: boolean
+	// Fails every pulls.get read from this 0-based call onward with the status.
+	pullsGetError?: { fromCall: number; status: number }
 	headShaSequence?: string[]
 	fork?: boolean
 	eventName?: string
@@ -200,8 +205,15 @@ function buildEventPayload(eventName: string, options: HarnessOptions) {
 						}
 }
 
-/** Executes the embedded github-script workflow against deterministic GitHub API doubles. */
-async function runWorkflow(options: HarnessOptions = {}) {
+/** Runs pending microtask turns so a started script reaches its next await suspension point. */
+async function flushMicrotasks(turns = 50) {
+	for (let index = 0; index < turns; index++) {
+		await Promise.resolve()
+	}
+}
+
+/** Builds the reconcile job's GitHub API doubles without starting the embedded script. */
+function buildReconcileHarness(options: HarnessOptions = {}) {
 	const eventName = options.eventName ?? "pull_request_target"
 	const pr = buildHarnessPr(options)
 	const requiredContexts = options.requiredContexts ?? ["tests"]
@@ -376,6 +388,9 @@ async function runWorkflow(options: HarnessOptions = {}) {
 	let pullRequestGetIndex = 0
 	const getPullRequest = vi.fn(async () => {
 		const index = pullRequestGetIndex++
+		if (options.pullsGetError && index >= options.pullsGetError.fromCall) {
+			throw Object.assign(new Error("Pull request read failed"), { status: options.pullsGetError.status })
+		}
 		const mergeability = options.mergeabilitySequence?.[index]
 		const headSha = options.headShaSequence?.[index]
 		let data = pr
@@ -500,10 +515,14 @@ async function runWorkflow(options: HarnessOptions = {}) {
 	process.env.CONCURRENCY_GROUP = `label-pr-review-state-reconcile-${pr.number}`
 	// The workflow waits 5s between mergeability retries in production; tests
 	// override the delay so the retries run without real waits.
-	process.env.MERGEABILITY_RETRY_DELAY_MS = String(options.mergeabilityRetryDelayMs ?? 0)
-	try {
-		await new AsyncFunction("github", "context", "core", workflowScript)(github, context, core)
-	} finally {
+	if (options.productionMergeabilityDelay) {
+		delete process.env.MERGEABILITY_RETRY_DELAY_MS
+	} else {
+		process.env.MERGEABILITY_RETRY_DELAY_MS = String(options.mergeabilityRetryDelayMs ?? 0)
+	}
+
+	const execute = () => new AsyncFunction("github", "context", "core", workflowScript)(github, context, core)
+	const restoreEnv = () => {
 		for (const [key, value] of [
 			["PR_NUMBER", previousEnv.prNumber],
 			["CONCURRENCY_GROUP", previousEnv.group],
@@ -518,6 +537,8 @@ async function runWorkflow(options: HarnessOptions = {}) {
 	}
 
 	return {
+		execute,
+		restoreEnv,
 		addLabels,
 		removeLabel,
 		createComment,
@@ -535,6 +556,17 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		listCommitStatusesForRef: github.rest.repos.listCommitStatusesForRef,
 		permissionFor,
 	}
+}
+
+/** Executes the reconcile job's embedded script against deterministic GitHub API doubles. */
+async function runWorkflow(options: HarnessOptions = {}) {
+	const { execute, restoreEnv, ...result } = buildReconcileHarness(options)
+	try {
+		await execute()
+	} finally {
+		restoreEnv()
+	}
+	return result
 }
 
 /** Executes the resolve job's embedded script against deterministic GitHub API doubles. */
@@ -1325,6 +1357,83 @@ describe("PR review-state workflow", () => {
 			"has-conflicts",
 		]) {
 			expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: [label] }))
+		}
+	})
+
+	// Issue #2091: a failed mergeability retry adds no mergeability answer, so
+	// the run keeps every state label exactly like the still-unknown path,
+	// while gate invalidation and failure reporting still happen.
+	it("keeps state labels when the mergeability retry read fails (#2091)", async () => {
+		const result = await runWorkflow({
+			eventName: "push",
+			labels: ["awaiting-author", "has-conflicts", "community-approved"],
+			mergeabilitySequence: [{ mergeable: null, mergeableState: "unknown" }],
+			pullsGetError: { fromCall: 1, status: 503 },
+		})
+
+		// The shard read plus one failed retry; the 503 stops further retries.
+		expect(result.getPullRequest).toHaveBeenCalledTimes(2)
+
+		// No label mutation at all: exclusive state labels and the advisory
+		// community signal survive the failed retry.
+		expect(result.removeLabel).not.toHaveBeenCalled()
+		expect(result.addLabels).not.toHaveBeenCalled()
+
+		// Gate invalidation is retained.
+		expect(result.createCommitStatus).toHaveBeenCalledTimes(1)
+		expect(result.createCommitStatus.mock.calls[0][0]).toMatchObject({
+			state: "pending",
+			context: "Zoo Code / PR review gate",
+		})
+
+		// Failure reporting is retained.
+		expect(result.setFailed).toHaveBeenCalledTimes(1)
+		expect(result.setFailed.mock.calls[0][0]).toMatch(/#1437/)
+		expect(result.setFailed.mock.calls[0][0]).toMatch(/503/)
+	})
+
+	// Issue #2091: the retry read must stay gated behind the full production
+	// wait. A controlled fake timer holds the sleep pending, so the test can
+	// prove no retry request leaves before 5000 ms elapse. Removing the await
+	// on the sleep alone fails here: the retry read runs while the timer is
+	// still pending, and deleting the sleep leaves no timer at all.
+	it("waits the full five second default before retrying an unknown mergeability read (#2091)", async () => {
+		const harness = buildReconcileHarness({
+			eventName: "push",
+			labels: ["awaiting-author"],
+			mergeabilitySequence: [
+				{ mergeable: null, mergeableState: "unknown" },
+				{ mergeable: true, mergeableState: "clean" },
+			],
+			productionMergeabilityDelay: true,
+		})
+		vi.useFakeTimers()
+		try {
+			const runPromise = harness.execute()
+			await flushMicrotasks()
+
+			// The script is suspended on its production wait: exactly one pending
+			// timer and no retry read yet.
+			expect(vi.getTimerCount()).toBe(1)
+			expect(harness.getPullRequest).toHaveBeenCalledTimes(1)
+
+			// A shorter default would already have fired the timer and issued the
+			// retry read before the full interval.
+			await vi.advanceTimersByTimeAsync(4999)
+			expect(harness.getPullRequest).toHaveBeenCalledTimes(1)
+
+			await vi.advanceTimersByTimeAsync(1)
+			expect(vi.getTimerCount()).toBe(0)
+			await runPromise
+
+			// The wait gated the retry: shard read plus one clean retry read, and
+			// the reconcile continued normally.
+			expect(harness.getPullRequest).toHaveBeenCalledTimes(2)
+			expect(harness.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
+			expect(harness.setFailed).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+			harness.restoreEnv()
 		}
 	})
 
