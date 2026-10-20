@@ -38,7 +38,7 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 // Create a variable to hold the mock state
 const mockExtensionState: {
 	apiConfiguration: ProviderSettings
-	currentTaskItem: { id: string } | null
+	currentTaskItem: { id: string; task?: string; title?: string } | null
 	clineMessages: any[]
 	taskHistory: any[]
 } = {
@@ -269,6 +269,44 @@ describe("TaskHeader", () => {
 
 			expect(screen.getByText("chat:task.waitingOnSubtask")).toBeInTheDocument()
 			expect(screen.queryByText("history:abandonSubtask")).not.toBeInTheDocument()
+		})
+	})
+
+	describe("Rename", () => {
+		beforeEach(() => {
+			mockPostMessage.mockClear()
+			mockExtensionState.currentTaskItem = { id: "test-task-id", task: "Test task" }
+		})
+
+		afterEach(() => {
+			mockExtensionState.currentTaskItem = { id: "test-task-id" }
+		})
+
+		it("shows the custom title instead of the first message when the task is renamed", () => {
+			mockExtensionState.currentTaskItem = { id: "test-task-id", task: "Test task", title: "My title" }
+			renderTaskHeader()
+
+			expect(screen.getByText("My title")).toBeInTheDocument()
+			expect(screen.queryByText("Test task")).not.toBeInTheDocument()
+		})
+
+		it("renames from the expanded header without collapsing it", () => {
+			renderTaskHeader()
+			fireEvent.click(screen.getByText("Test task"))
+
+			fireEvent.click(screen.getByTestId("rename-current-task-button"))
+			const input = screen.getByTestId("task-title-input")
+			fireEvent.click(input)
+			fireEvent.change(input, { target: { value: "Renamed" } })
+			fireEvent.keyDown(input, { key: "Enter" })
+
+			expect(mockPostMessage).toHaveBeenCalledWith({
+				type: "renameTaskWithId",
+				taskId: "test-task-id",
+				text: "Renamed",
+			})
+			expect(screen.queryByTestId("task-title-input")).not.toBeInTheDocument()
+			expect(screen.getByTestId("rename-current-task-button")).toBeInTheDocument()
 		})
 	})
 

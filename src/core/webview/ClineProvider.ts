@@ -2450,6 +2450,21 @@ export class ClineProvider
 		}
 	}
 
+	/*
+	 * Sets a user-assigned display title for a history item. A blank title
+	 * clears it so the history falls back to the original prompt.
+	 */
+	async renameTaskWithId(id: string, title: string | undefined) {
+		const historyItem = this.taskHistoryStore.get(id)
+		if (!historyItem) {
+			this.log(`[renameTaskWithId] task ${id} not found in history`)
+			return
+		}
+
+		const trimmed = title?.trim()
+		await this.updateTaskHistory({ ...historyItem, title: trimmed ? trimmed : undefined })
+	}
+
 	/* Condenses a task's message history to use fewer tokens. */
 	async condenseTaskContext(taskId: string) {
 		const task = this.taskRegistry.getById(taskId)

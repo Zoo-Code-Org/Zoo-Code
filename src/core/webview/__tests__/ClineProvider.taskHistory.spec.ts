@@ -597,6 +597,56 @@ describe("ClineProvider Task History Synchronization", () => {
 		})
 	})
 
+	describe("renameTaskWithId", () => {
+		const getStored = (id: string) => provider.taskHistoryStore.get(id)
+
+		it("stores a trimmed title and broadcasts the updated item", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			provider.isViewLaunched = true
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-rename", task: "Original prompt" }))
+			mockPostMessage.mockClear()
+
+			await provider.renameTaskWithId("task-rename", "  Renamed  ")
+
+			expect(getStored("task-rename")).toMatchObject({ title: "Renamed", task: "Original prompt" })
+			const updates = findCallsByType(mockPostMessage.mock.calls, "taskHistoryItemUpdated")
+			expect(updates.at(-1)?.[0].taskHistoryItem).toMatchObject({ id: "task-rename", title: "Renamed" })
+		})
+
+		it.each([
+			["an empty string", ""],
+			["whitespace", "   "],
+			["undefined", undefined],
+		])("clears the title when given %s", async (_label, title) => {
+			await provider.updateTaskHistory(
+				createHistoryItem({ id: "task-clear", task: "Original prompt", title: "Old title" }),
+				{ broadcast: false },
+			)
+
+			await provider.renameTaskWithId("task-clear", title)
+
+			expect(getStored("task-clear")?.title).toBeUndefined()
+			expect(getStored("task-clear")?.task).toBe("Original prompt")
+		})
+
+		it("keeps the title when the task later saves metadata without one", async () => {
+			const item = createHistoryItem({ id: "task-keep", task: "Original prompt", status: "active" })
+			await provider.updateTaskHistory(item, { broadcast: false })
+			await provider.renameTaskWithId("task-keep", "Renamed")
+
+			// Mirrors Task.saveClineMessages(), whose taskMetadata() result never carries a title.
+			await provider.updateTaskHistory({ ...item, tokensIn: 500 }, { broadcast: false })
+
+			expect(getStored("task-keep")).toMatchObject({ title: "Renamed", tokensIn: 500 })
+		})
+
+		it("does nothing for an unknown task", async () => {
+			await provider.renameTaskWithId("missing-task", "Renamed")
+
+			expect(getStored("missing-task")).toBeUndefined()
+		})
+	})
+
 	describe("broadcastTaskHistoryUpdate", () => {
 		it("sends taskHistoryUpdated message with sorted history", async () => {
 			await provider.resolveWebviewView(mockWebviewView)

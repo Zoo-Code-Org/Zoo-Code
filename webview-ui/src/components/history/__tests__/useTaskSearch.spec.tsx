@@ -154,6 +154,22 @@ describe("useTaskSearch", () => {
 		expect((result.current.tasks[0] as any).highlight).toBe("<mark>Create a React component</mark>")
 	})
 
+	it("searches and highlights the custom title of a renamed task", () => {
+		mockUseExtensionState.mockReturnValue({
+			taskHistory: [{ ...mockTaskHistory[1], title: "Coverage sprint" }],
+			cwd: "/workspace/project1",
+		})
+		const { result } = renderHook(() => useTaskSearch())
+
+		act(() => {
+			result.current.setSearchQuery("Coverage")
+		})
+
+		expect(result.current.tasks).toEqual([
+			expect.objectContaining({ id: "task-2", highlight: "<mark>Coverage sprint</mark>" }),
+		])
+	})
+
 	it("automatically switches to mostRelevant when searching", () => {
 		const { result } = renderHook(() => useTaskSearch())
 
