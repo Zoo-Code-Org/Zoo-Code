@@ -474,7 +474,7 @@
 	},
 	"dependencies": {
 		"@anthropic-ai/sdk": "^0.109.0",
-		"@anthropic-ai/vertex-sdk": "^0.19.0",
+		"@anthropic-ai/vertex-sdk": "0.19.0",
 		"@aws-sdk/client-bedrock-runtime": "^3.922.0",
 		"@aws-sdk/credential-providers": "^3.922.0",
 		"@smithy/node-http-handler": "^4.0.0",
