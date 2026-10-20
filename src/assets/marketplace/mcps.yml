@@ -2971,6 +2971,28 @@ items:
                 - name: Local Timezone
                   key: LOCAL_TIMEZONE
                   placeholder: America/New_York
+    - id: toolrouter
+      name: ToolRouter
+      description:
+          The OpenRouter for tools. One connection gives an agent a hosted catalog of 250+ specialist tools for web
+          search, scraping, image and video generation, SEO, finance, property and compliance, discovered at runtime
+          and billed per call.
+      author: Humanleap
+      url: https://github.com/Humanleap/toolrouter-mcp
+      tags:
+          - tool-gateway
+          - web-search
+          - web-scraping
+          - image-generation
+          - video-generation
+          - seo
+      content:
+          - name: Remote Server
+            content: |
+                {
+                  "type": "streamable-http",
+                  "url": "https://api.toolrouter.com/mcp"
+                }
     - id: verodat
       name: Verodat
       description:
