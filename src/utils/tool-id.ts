@@ -54,3 +54,26 @@ export function sanitizeOpenAiCallId(id: string, maxLength: number = OPENAI_CALL
 	const sanitized = sanitizeToolUseId(id)
 	return truncateOpenAiCallId(sanitized, maxLength)
 }
+
+/**
+ * LiteLLM carries a Gemini thought signature inside the tool call id, as
+ * `<call id>__thought__<signature>`. Truncating such an id corrupts the signature.
+ */
+export const LITELLM_THOUGHT_SIGNATURE_MARKER = "__thought__"
+
+/**
+ * Normalize a tool call id for LiteLLM. For ids that carry a thought signature only the
+ * call id before the marker is character-sanitized; the marker and the Base64 signature
+ * (which may contain `+`, `/` and `=`) pass through unchanged, because Gemini must receive
+ * the signature intact. Every other id gets the usual OpenAI 64-character treatment.
+ *
+ * @param id - The original call_id
+ * @returns The id to send to LiteLLM
+ */
+export function sanitizeLiteLlmCallId(id: string): string {
+	const markerIndex = id.indexOf(LITELLM_THOUGHT_SIGNATURE_MARKER)
+	if (markerIndex === -1) {
+		return sanitizeOpenAiCallId(id)
+	}
+	return sanitizeToolUseId(id.slice(0, markerIndex)) + id.slice(markerIndex)
+}
