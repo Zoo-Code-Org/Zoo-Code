@@ -79,6 +79,26 @@ describe("LMStudio Fetcher", () => {
 			)
 			expect(hasLoadedFullDetails(modelId)).toBe(true)
 		})
+
+		it("warns with only the origin when the connection is refused for a URL with credentials and a query", async () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(function () {})
+			try {
+				const error = new Error("Connection refused")
+				;(error as NodeJS.ErrnoException).code = "ECONNREFUSED"
+				mockedAxios.get.mockRejectedValueOnce(error)
+				const handler = { fetchModels: vi.fn() } as unknown as ApiHandler
+
+				await forceFullModelDetailsLoad(
+					"http://user:pass@localhost:1234/path?token=secret",
+					"any-model",
+					handler,
+				)
+
+				expect(warnSpy).toHaveBeenCalledWith("Error connecting to LMStudio at http://localhost:1234")
+			} finally {
+				warnSpy.mockRestore()
+			}
+		})
 	})
 
 	describe("parseLMStudioModel", () => {

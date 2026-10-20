@@ -8,6 +8,7 @@ import { getOllamaModels } from "../fetchers/ollama"
 
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { collectStream } from "../../../test-utils/stream"
 
 // Mock the ollama package
 const mockChat = vitest.fn()
@@ -54,6 +55,17 @@ const mockGetOllamaModels = vitest.mocked(getOllamaModels)
 // that would hang under a mutant must fail fast instead. Capture the native
 // setTimeout at module load so a lingering setTimeout spy cannot swallow it.
 const nativeSetTimeout = globalThis.setTimeout
+// Spin until the mocked SDK chat() has been invoked. The mocked SDK never
+// uses the transport, so tests hold chat() manually.
+const makeHandler = (overrides: Partial<ApiHandlerOptions> = {}) =>
+	new NativeOllamaHandler({ apiModelId: "llama2", ollamaModelId: "llama2", ...overrides })
+
+const untilChatCalled = async () => {
+	for (let i = 0; i < 50 && mockChat.mock.calls.length === 0; i++) {
+		await Promise.resolve()
+	}
+}
+
 const withDeadline = async <T>(promise: Promise<T>, ms = 500): Promise<T> =>
 	Promise.race([
 		promise,
@@ -169,11 +181,7 @@ describe("NativeOllamaHandler", () => {
 				yield { message: { content: "ok" } }
 			})
 			const stream = handler.createMessage("You are terse", [{ role: "user" as const, content: "Hi" }])
-			const consume = (async () => {
-				for await (const _ of stream) {
-					// drain
-				}
-			})()
+			const consume = collectStream(stream)
 			await withDeadline(consume, 500)
 			// documented narrow cast: mockChat is an untyped vi.fn()
 			const callArgs = mockChat.mock.calls[0][0] as { messages: { role: string; content: string }[] }
@@ -210,9 +218,7 @@ describe("NativeOllamaHandler", () => {
 			]
 
 			const stream = handler.createMessage("System", messages)
-			for await (const _ of stream) {
-				// consume stream
-			}
+			await collectStream(stream)
 
 			// Text blocks are joined with "\n"; the image emits a placeholder.
 			// Tool results are text-only in Ollama, so the image is flushed onto a
@@ -264,9 +270,7 @@ describe("NativeOllamaHandler", () => {
 			]
 
 			const stream = handler.createMessage("System", messages)
-			for await (const _ of stream) {
-				// consume
-			}
+			await collectStream(stream)
 
 			// The unknown block contributes "" so the join produces "before\n\nafter"
 			expect(mockChat).toHaveBeenCalledWith(
@@ -290,9 +294,7 @@ describe("NativeOllamaHandler", () => {
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
 
 			// Consume the stream
-			for await (const _ of stream) {
-				// consume stream
-			}
+			await collectStream(stream)
 
 			// Verify that num_ctx was NOT included in the options
 			expect(mockChat).toHaveBeenCalledWith(
@@ -322,9 +324,7 @@ describe("NativeOllamaHandler", () => {
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
 
 			// Consume the stream
-			for await (const _ of stream) {
-				// consume stream
-			}
+			await collectStream(stream)
 
 			// Verify that num_ctx was included with the specified value
 			expect(mockChat).toHaveBeenCalledWith(
@@ -401,9 +401,7 @@ describe("NativeOllamaHandler", () => {
 			})
 
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Hi" }])
-			for await (const _ of stream) {
-				// consume
-			}
+			await collectStream(stream)
 
 			expect(mockChat).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -445,9 +443,7 @@ describe("NativeOllamaHandler", () => {
 
 				handler = new NativeOllamaHandler(options)
 				const stream = handler.createMessage("System", [{ role: "user" as const, content: "Hi" }])
-				for await (const _ of stream) {
-					// consume
-				}
+				await collectStream(stream)
 
 				expect(mockChat).toHaveBeenCalledWith(
 					expect.objectContaining({
@@ -463,9 +459,7 @@ describe("NativeOllamaHandler", () => {
 			})
 
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Hi" }])
-			for await (const _ of stream) {
-				// consume
-			}
+			await collectStream(stream)
 
 			const callArgs = mockChat.mock.calls[0][0] as Record<string, unknown>
 			expect(callArgs.think).toBeUndefined()
@@ -492,9 +486,7 @@ describe("NativeOllamaHandler", () => {
 			})
 
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Hi" }])
-			for await (const _ of stream) {
-				// consume
-			}
+			await collectStream(stream)
 
 			const callArgs = mockChat.mock.calls[0][0] as Record<string, unknown>
 			expect(callArgs.think).toBeUndefined()
@@ -519,9 +511,7 @@ describe("NativeOllamaHandler", () => {
 			})
 
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Hi" }])
-			for await (const _ of stream) {
-				// consume
-			}
+			await collectStream(stream)
 
 			const callArgs = mockChat.mock.calls[0][0] as Record<string, unknown>
 			expect(callArgs.think).toBeUndefined()
@@ -545,9 +535,7 @@ describe("NativeOllamaHandler", () => {
 			})
 
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Hi" }])
-			for await (const _ of stream) {
-				// consume
-			}
+			await collectStream(stream)
 
 			expect(mockChat).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -573,9 +561,7 @@ describe("NativeOllamaHandler", () => {
 			]
 
 			const stream = handler.createMessage("System", messages)
-			for await (const _ of stream) {
-				// consume
-			}
+			await collectStream(stream)
 
 			expect(mockChat).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -608,9 +594,7 @@ describe("NativeOllamaHandler", () => {
 			]
 
 			const stream = handler.createMessage("System", messages)
-			for await (const _ of stream) {
-				// consume
-			}
+			await collectStream(stream)
 
 			expect(mockChat).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -644,9 +628,7 @@ describe("NativeOllamaHandler", () => {
 			]
 
 			const stream = handler.createMessage("System", messages)
-			for await (const _ of stream) {
-				// consume
-			}
+			await collectStream(stream)
 
 			expect(mockChat).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -680,9 +662,7 @@ describe("NativeOllamaHandler", () => {
 			]
 
 			const stream = handler.createMessage("System", messages)
-			for await (const _ of stream) {
-				// consume
-			}
+			await collectStream(stream)
 
 			expect(mockChat).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -720,9 +700,7 @@ describe("NativeOllamaHandler", () => {
 			]
 
 			const stream = handler.createMessage("System", messages)
-			for await (const _ of stream) {
-				// consume
-			}
+			await collectStream(stream)
 
 			expect(mockChat).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -754,9 +732,7 @@ describe("NativeOllamaHandler", () => {
 			})
 
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Hi" }])
-			for await (const _ of stream) {
-				// consume
-			}
+			await collectStream(stream)
 
 			const callArgs = mockChat.mock.calls[0][0] as Record<string, unknown>
 			expect(callArgs.think).toBeUndefined()
@@ -782,9 +758,7 @@ describe("NativeOllamaHandler", () => {
 		})
 
 		const stream = handler.createMessage("System", [{ role: "user" as const, content: "Hi" }])
-		for await (const _ of stream) {
-			// consume
-		}
+		await collectStream(stream)
 
 		const callArgs = mockChat.mock.calls[0][0] as Record<string, unknown>
 		expect(callArgs.think).toBeUndefined()
@@ -1287,9 +1261,7 @@ describe("NativeOllamaHandler", () => {
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
 
 			await expect(async () => {
-				for await (const _ of stream) {
-					// consume stream
-				}
+				await collectStream(stream)
 			}).rejects.toThrow("Ollama service is not running")
 		})
 
@@ -1301,9 +1273,7 @@ describe("NativeOllamaHandler", () => {
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
 
 			await expect(async () => {
-				for await (const _ of stream) {
-					// consume stream
-				}
+				await collectStream(stream)
 			}).rejects.toThrow("Model llama2 not found in Ollama")
 		})
 
@@ -1320,9 +1290,7 @@ describe("NativeOllamaHandler", () => {
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
 
 			await expect(async () => {
-				for await (const _ of stream) {
-					// consume stream
-				}
+				await collectStream(stream)
 			}).rejects.toThrow("Ollama stream processing error: stream blew up")
 		})
 
@@ -1337,9 +1305,7 @@ describe("NativeOllamaHandler", () => {
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
 
 			await expect(async () => {
-				for await (const _ of stream) {
-					// consume stream
-				}
+				await collectStream(stream)
 			}).rejects.toThrow("Ollama stream processing error: Unknown error")
 		})
 
@@ -1353,9 +1319,7 @@ describe("NativeOllamaHandler", () => {
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
 
 			await expect(async () => {
-				for await (const _ of stream) {
-					// consume stream
-				}
+				await collectStream(stream)
 			}).rejects.toThrow("something else")
 		})
 		it("should rethrow stream AbortError without logging it", async () => {
@@ -1365,11 +1329,7 @@ describe("NativeOllamaHandler", () => {
 				throw new DOMException("This operation was aborted", "AbortError")
 			})
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
-			const consume = (async () => {
-				for await (const _ of stream) {
-					// drain
-				}
-			})()
+			const consume = collectStream(stream)
 			try {
 				const settledStream = expect(consume).rejects.toMatchObject({ name: "AbortError" })
 				await withDeadline(settledStream, 500)
@@ -1439,9 +1399,7 @@ describe("NativeOllamaHandler", () => {
 			)
 
 			// Consume the stream
-			for await (const _ of stream) {
-				// consume stream
-			}
+			await collectStream(stream)
 
 			// Verify tools were passed to the API
 			expect(mockChat).toHaveBeenCalledWith(
@@ -1499,9 +1457,7 @@ describe("NativeOllamaHandler", () => {
 			})
 
 			// Consume the stream
-			for await (const _ of stream) {
-				// consume stream
-			}
+			await collectStream(stream)
 
 			// Verify tools were passed
 			expect(mockChat).toHaveBeenCalledWith(
@@ -1540,9 +1496,7 @@ describe("NativeOllamaHandler", () => {
 			})
 
 			// Consume the stream
-			for await (const _ of stream) {
-				// consume stream
-			}
+			await collectStream(stream)
 
 			// Verify tools were NOT passed
 			expect(mockChat).toHaveBeenCalledWith(
@@ -1764,9 +1718,7 @@ describe("NativeOllamaHandler", () => {
 			]
 
 			const stream = handler.createMessage("System", messages)
-			for await (const _ of stream) {
-				// consume stream
-			}
+			await collectStream(stream)
 
 			// The tool result should use Ollama's native "tool" role with tool_name
 			expect(mockChat).toHaveBeenCalledWith(
@@ -1801,9 +1753,7 @@ describe("NativeOllamaHandler", () => {
 			]
 
 			const stream = handler.createMessage("System", messages)
-			for await (const _ of stream) {
-				// consume stream
-			}
+			await collectStream(stream)
 
 			// No preceding tool_use -> fall back to "user" role
 			expect(mockChat).toHaveBeenCalledWith(
@@ -1864,9 +1814,7 @@ describe("NativeOllamaHandler", () => {
 				tools,
 			})
 
-			for await (const _ of stream) {
-				// consume stream
-			}
+			await collectStream(stream)
 
 			// additionalProperties should be stripped from the parameters
 			expect(mockChat).toHaveBeenCalledWith(
@@ -1950,9 +1898,7 @@ describe("NativeOllamaHandler", () => {
 				tools,
 			})
 
-			for await (const _ of stream) {
-				// consume stream
-			}
+			await collectStream(stream)
 
 			const callArgs = mockChat.mock.calls[0][0] as any
 			const params = callArgs.tools[0].function.parameters
@@ -2006,9 +1952,7 @@ describe("NativeOllamaHandler", () => {
 			]
 
 			const stream = handler.createMessage("System", messages)
-			for await (const _ of stream) {
-				// consume stream
-			}
+			await collectStream(stream)
 
 			const callArgs = mockChat.mock.calls[0][0] as any
 
@@ -2062,9 +2006,7 @@ describe("NativeOllamaHandler", () => {
 			]
 
 			const stream = handler.createMessage("System", messages)
-			for await (const _ of stream) {
-				// consume stream
-			}
+			await collectStream(stream)
 
 			const callArgs = mockChat.mock.calls[0][0] as any
 			const toolMessages = callArgs.messages.filter((m: any) => m.role === "tool")
@@ -2157,9 +2099,7 @@ describe("NativeOllamaHandler", () => {
 				message: { content: "Response" },
 			})
 
-			const handler = new NativeOllamaHandler({
-				apiModelId: "llama2",
-				ollamaModelId: "llama2",
+			const handler = makeHandler({
 				ollamaBaseUrl: "http://localhost:11434",
 			})
 
@@ -2178,9 +2118,7 @@ describe("NativeOllamaHandler", () => {
 				message: { content: "Response" },
 			})
 
-			const handler = new NativeOllamaHandler({
-				apiModelId: "llama2",
-				ollamaModelId: "llama2",
+			const handler = makeHandler({
 				ollamaBaseUrl: "http://localhost:11434",
 				ollamaApiKey: "test-api-key-123",
 			})
@@ -2202,9 +2140,7 @@ describe("NativeOllamaHandler", () => {
 				message: { content: "Response" },
 			})
 
-			const handler = new NativeOllamaHandler({
-				apiModelId: "llama2",
-				ollamaModelId: "llama2",
+			const handler = makeHandler({
 				ollamaBaseUrl: "http://localhost:11434",
 			})
 
@@ -2226,9 +2162,7 @@ describe("NativeOllamaHandler", () => {
 				message: { content: "Response" },
 			})
 
-			const handler = new NativeOllamaHandler({
-				apiModelId: "llama2",
-				ollamaModelId: "llama2",
+			const handler = makeHandler({
 				ollamaBaseUrl: "http://custom-ollama:11434",
 			})
 
@@ -2256,59 +2190,69 @@ describe("NativeOllamaHandler", () => {
 				ollamaApiKey: "test-api-key-123",
 			})
 
-			await handler.completePrompt("Test prompt")
+			try {
+				await handler.completePrompt("Test prompt")
 
-			// Plaintext HTTP to a remote host would leak the credential (CWE-319),
-			// so the Authorization header must be omitted.
-			const callArgs = OllamaMock.mock.calls[0][0]
-			expect(callArgs.headers).toBeUndefined()
-			// The silent drop is a diagnosis trap (bare 401 behind an auth
-			// proxy), so the gate warns - without echoing the key or any URL
-			// credential/query material, only the protocol/host:port origin.
-			const warned = warnSpy.mock.calls.flat().join(" ")
-			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ollamaApiKey"))
-			expect(warned).not.toContain("test-api-key-123")
-			expect(warned).toContain("ollama.example.com:11434")
-			expect(warned).not.toContain("secret")
-			expect(warned).not.toContain("abc123")
-			expect(warned).not.toContain("token")
+				// Plaintext HTTP to a remote host would leak the credential (CWE-319),
+				// so the Authorization header must be omitted.
+				const callArgs = OllamaMock.mock.calls[0][0]
+				expect(callArgs.headers).toBeUndefined()
+				// The silent drop is a diagnosis trap (bare 401 behind an auth
+				// proxy), so the gate warns - without echoing the key or any URL
+				// credential/query material, only the protocol/host:port origin.
+				const warned = warnSpy.mock.calls.flat().join(" ")
+				expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ollamaApiKey"))
+				expect(warned).not.toContain("test-api-key-123")
+				expect(warned).toContain("ollama.example.com:11434")
+				expect(warned).not.toContain("secret")
+				expect(warned).not.toContain("abc123")
+				expect(warned).not.toContain("token")
+			} finally {
+				warnSpy.mockRestore()
+			}
 		})
 
 		it("should warn about the dropped key once per handler, not once per request", async () => {
 			mockChat.mockResolvedValue({ message: { content: "Response" } })
 			const warnSpy = vitest.spyOn(console, "warn").mockImplementation(() => {})
 
-			const handler = new NativeOllamaHandler({
-				apiModelId: "llama2",
-				ollamaModelId: "llama2",
+			const handler = makeHandler({
 				ollamaBaseUrl: "http://ollama.example.com:11434",
 				ollamaApiKey: "test-api-key-123",
 			})
 
-			await handler.completePrompt("one")
-			await handler.completePrompt("two")
+			try {
+				await handler.completePrompt("one")
+				await handler.completePrompt("two")
 
-			const dropWarnings = warnSpy.mock.calls.filter(([m]) => String(m).includes("[NativeOllama] ollamaApiKey"))
-			expect(dropWarnings).toHaveLength(1)
+				const dropWarnings = warnSpy.mock.calls.filter(([m]) =>
+					String(m).includes("[NativeOllama] ollamaApiKey"),
+				)
+				expect(dropWarnings).toHaveLength(1)
+			} finally {
+				warnSpy.mockRestore()
+			}
 		})
 
 		it("should use a fixed phrase in the warning when the host does not parse", async () => {
 			mockChat.mockResolvedValue({ message: { content: "Response" } })
 			const warnSpy = vitest.spyOn(console, "warn").mockImplementation(() => {})
 
-			const handler = new NativeOllamaHandler({
-				apiModelId: "llama2",
-				ollamaModelId: "llama2",
+			const handler = makeHandler({
 				ollamaBaseUrl: "secret-host:11434/path?token=abc",
 				ollamaApiKey: "test-api-key-123",
 			})
 
-			await handler.completePrompt("Test prompt")
+			try {
+				await handler.completePrompt("Test prompt")
 
-			const warned = warnSpy.mock.calls.flat().join(" ")
-			expect(warned).toContain('the endpoint "the configured endpoint" is not https or loopback')
-			expect(warned).not.toContain("secret-host")
-			expect(warned).not.toContain("token")
+				const warned = warnSpy.mock.calls.flat().join(" ")
+				expect(warned).toContain('the endpoint "the configured endpoint" is not https or loopback')
+				expect(warned).not.toContain("secret-host")
+				expect(warned).not.toContain("token")
+			} finally {
+				warnSpy.mockRestore()
+			}
 		})
 
 		it("should wrap an error thrown while the client is created", async () => {
@@ -2337,11 +2281,15 @@ describe("NativeOllamaHandler", () => {
 				ollamaApiKey: "test-api-key-123",
 			})
 
-			await handler.completePrompt("Test prompt")
+			try {
+				await handler.completePrompt("Test prompt")
 
-			const callArgs = OllamaMock.mock.calls[0][0]
-			expect(callArgs.headers).toEqual({ Authorization: "Bearer test-api-key-123" })
-			expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("ollamaApiKey"))
+				const callArgs = OllamaMock.mock.calls[0][0]
+				expect(callArgs.headers).toEqual({ Authorization: "Bearer test-api-key-123" })
+				expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("ollamaApiKey"))
+			} finally {
+				warnSpy.mockRestore()
+			}
 		})
 
 		it("should attach the API key for an HTTPS endpoint", async () => {
@@ -2349,9 +2297,7 @@ describe("NativeOllamaHandler", () => {
 				message: { content: "Response" },
 			})
 
-			const handler = new NativeOllamaHandler({
-				apiModelId: "llama2",
-				ollamaModelId: "llama2",
+			const handler = makeHandler({
 				ollamaBaseUrl: "https://ollama.example.com:11434",
 				ollamaApiKey: "test-api-key-123",
 			})
@@ -2373,9 +2319,7 @@ describe("NativeOllamaHandler", () => {
 				message: { content: "Response" },
 			})
 
-			const handler = new NativeOllamaHandler({
-				apiModelId: "llama2",
-				ollamaModelId: "llama2",
+			const handler = makeHandler({
 				ollamaBaseUrl: "http://127.0.0.1:11434",
 				ollamaApiKey: "test-api-key-123",
 			})
@@ -2393,10 +2337,7 @@ describe("NativeOllamaHandler", () => {
 		})
 
 		it("should default the client host to localhost when no base URL is configured", async () => {
-			const bareHandler = new NativeOllamaHandler({
-				apiModelId: "llama2",
-				ollamaModelId: "llama2",
-			})
+			const bareHandler = makeHandler()
 			mockChat.mockResolvedValue({ message: { content: "Response" } })
 			await bareHandler.completePrompt("Test prompt")
 			expect(OllamaMock.mock.calls[0][0]).toEqual(expect.objectContaining({ host: "http://localhost:11434" }))
@@ -2459,17 +2400,11 @@ describe("NativeOllamaHandler", () => {
 				[{ role: "user" as const, content: "Test" }],
 				makeCreateMessageMetadata({ abortSignal: controller.signal }),
 			)
-			const consume = (async () => {
-				for await (const _ of stream) {
-					// consume stream
-				}
-			})()
+			const consume = collectStream(stream)
 
 			// Spin until the mocked SDK chat() has been invoked (the mocked SDK
 			// never uses the transport, so its chat() is held manually).
-			for (let i = 0; i < 50 && mockChat.mock.calls.length === 0; i++) {
-				await Promise.resolve()
-			}
+			await untilChatCalled()
 			expect(mockChat).toHaveBeenCalledTimes(1)
 
 			const clientOptions = OllamaMock.mock.calls[0][0] as ConstructorOptions
@@ -2539,9 +2474,7 @@ describe("NativeOllamaHandler", () => {
 			const promise = handler.completePrompt("Test prompt", { timeoutMs: 100 })
 
 			// Spin until the mocked SDK chat() has been invoked.
-			for (let i = 0; i < 50 && mockChat.mock.calls.length === 0; i++) {
-				await Promise.resolve()
-			}
+			await untilChatCalled()
 			expect(mockChat).toHaveBeenCalledTimes(1)
 
 			const clientOptions = OllamaMock.mock.calls[0][0] as ConstructorOptions
@@ -2670,16 +2603,10 @@ describe("NativeOllamaHandler", () => {
 				yield { message: { content: "ok" } }
 			})
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
-			for (let i = 0; i < 50 && mockChat.mock.calls.length === 0; i++) {
-				await Promise.resolve()
-			}
+			await untilChatCalled()
 			// Consume the stream to completion; the finally block aborts the
 			// per-request controller, which must release the held transport.
-			const consume = (async () => {
-				for await (const _ of stream) {
-					// drain
-				}
-			})()
+			const consume = collectStream(stream)
 			await withDeadline(consume, 500)
 			const clientOptions = OllamaMock.mock.calls[0][0] as ConstructorOptions
 			const heldPost = clientOptions.fetch!("http://localhost:11434/api/chat")
@@ -2798,9 +2725,7 @@ describe("NativeOllamaHandler", () => {
 			)
 
 			const settledPreAbort = expect(async () => {
-				for await (const _ of stream) {
-					// consume stream
-				}
+				await collectStream(stream)
 			}).rejects.toMatchObject({ name: "AbortError" })
 			await withDeadline(settledPreAbort, 500)
 
@@ -2837,16 +2762,10 @@ describe("NativeOllamaHandler", () => {
 				makeCreateMessageMetadata({ abortSignal: controller.signal }),
 			)
 
-			const consume = (async () => {
-				for await (const _ of stream) {
-					// consume stream
-				}
-			})()
+			const consume = collectStream(stream)
 
 			// Wait until the in-flight request has actually started.
-			for (let i = 0; i < 50 && mockChat.mock.calls.length === 0; i++) {
-				await Promise.resolve()
-			}
+			await untilChatCalled()
 			expect(mockChat).toHaveBeenCalledTimes(1)
 
 			controller.abort()
@@ -2875,11 +2794,7 @@ describe("NativeOllamaHandler", () => {
 				[{ role: "user" as const, content: "Test" }],
 				makeCreateMessageMetadata({ abortSignal: controller.signal }),
 			)
-			const consume = (async () => {
-				for await (const _ of stream) {
-					// drain
-				}
-			})()
+			const consume = collectStream(stream)
 			await withDeadline(consume, 500)
 			// The listener must be detached in the finally block, so a late abort
 			// after settlement must not reach the per-request client.
@@ -2919,11 +2834,7 @@ describe("NativeOllamaHandler", () => {
 				makeCreateMessageMetadata({ abortSignal: controller.signal }),
 			)
 
-			const consume = (async () => {
-				for await (const _ of stream) {
-					// consume stream
-				}
-			})()
+			const consume = collectStream(stream)
 
 			// Abort while the model list is still being fetched. The race must
 			// reject the generator with AbortError before chat() is attempted.
@@ -2968,11 +2879,7 @@ describe("NativeOllamaHandler", () => {
 				makeCreateMessageMetadata({ abortSignal: controller.signal }),
 			)
 
-			const consume = (async () => {
-				for await (const _ of stream) {
-					// consume stream
-				}
-			})()
+			const consume = collectStream(stream)
 
 			const settledDispose = expect(consume).rejects.toMatchObject({ name: "AbortError" })
 			await withDeadline(settledDispose, 500)
@@ -2993,9 +2900,7 @@ describe("NativeOllamaHandler", () => {
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
 
 			const settledPassthrough = expect(async () => {
-				for await (const _ of stream) {
-					// consume stream
-				}
+				await collectStream(stream)
 			}).rejects.toMatchObject({ name: "AbortError" })
 			await withDeadline(settledPassthrough, 500)
 		})
