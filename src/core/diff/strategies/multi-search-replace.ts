@@ -554,9 +554,10 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 					const firstSearchLine = hintLines[0]?.trim() ?? ""
 					const separatorSwallowed = hintLines[1]?.trim() === "-------"
 					// Length guard: adjacent `\s*` groups backtrack quadratically on long whitespace runs.
-					const malformedMarkerHint =
+					const looksLikeMalformedMarker =
 						firstSearchLine.length <= MAX_MARKER_HINT_LINE_LENGTH &&
 						/^(?::\s*\d{1,9}:?|:?\s*start[_-]?line\s*:?\s*\d{1,9}:?)$/i.test(firstSearchLine)
+					const malformedMarkerHint = looksLikeMalformedMarker
 						? `\n- LIKELY CAUSE: the first line of your search content looks like a malformed start-line marker and was therefore searched for as literal file text${separatorSwallowed ? ', together with the "-------" line after it' : ""}. The only recognized form is ":start_line:<number>" on the line immediately after "<<<<<<< SEARCH", optionally followed by a "-------" line. Remove or correct that line and retry.`
 						: ""
 
