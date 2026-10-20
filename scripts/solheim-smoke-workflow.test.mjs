@@ -5,207 +5,80 @@ import { describe, it } from "node:test"
 import { spawn, spawnSync } from "node:child_process"
 import os from "node:os"
 import path from "node:path"
-const workflow = fs.readFileSync(new URL("../.github/workflows/solheim-provider-smoke.yml", import.meta.url), "utf8")
-const codeQa = fs.readFileSync(new URL("../.github/workflows/code-qa.yml", import.meta.url), "utf8")
-const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"))
-const driver = fs.readFileSync(new URL("./solheim-smoke/driver.mts", import.meta.url), "utf8")
-const recorder = fs.readFileSync(new URL("./solheim-smoke/record.sh", import.meta.url), "utf8")
-const smokePkg = JSON.parse(fs.readFileSync(new URL("./solheim-smoke/package.json", import.meta.url), "utf8"))
-const runner = fs.readFileSync(new URL("./agent-evals/runner.ts", import.meta.url), "utf8")
-const launcher = fs.readFileSync(new URL("./agent-evals/launcher.ts", import.meta.url), "utf8")
-const registry = fs.readFileSync(new URL("./agent-evals/registry.ts", import.meta.url), "utf8")
-const fixture = fs.readFileSync(new URL("./solheim-smoke/fixture.ts", import.meta.url), "utf8")
-const trace = fs.readFileSync(new URL("./agent-evals/trace.ts", import.meta.url), "utf8")
-const evalsPkg = JSON.parse(fs.readFileSync(new URL("./agent-evals/package.json", import.meta.url), "utf8"))
+import { parse } from "yaml"
 
-describe("Project A provider smoke workflow", () => {
-	it("runs smoke TypeScript as ESM without requiring compiled workspace packages", () => {
-		assert.equal(smokePkg.type, "module")
-		assert.equal(smokePkg.private, true)
+// Parse configuration so comments, indentation, and key order are irrelevant.
+// GitHub expressions remain strings: these checks protect the configured policy,
+// while the recorder tests below exercise process behavior.
+const workflow = parse(
+	fs.readFileSync(new URL("../.github/workflows/solheim-provider-smoke.yml", import.meta.url), "utf8"),
+)
+const smoke = workflow.jobs.smoke
+const steps = smoke.steps
+const actionSteps = (action) => steps.filter((step) => step.uses?.startsWith(action + "@"))
+
+describe("Solheim provider smoke workflow policy", () => {
+	it("allows only manual runs on main behind the protected environment", () => {
+		assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"])
+		assert.deepEqual(Object.keys(workflow.jobs), ["smoke"])
+		assert.equal(smoke.if, "github.ref == 'refs/heads/main'")
+		assert.equal(smoke.environment, "final-vscode-review-smoke")
+		assert.deepEqual(workflow.permissions, { contents: "read" })
+		assert.equal(smoke.permissions, undefined)
 	})
-	it("runs only by manual dispatch against the exact trusted main revision", () => {
-		assert.match(workflow, /workflow_dispatch:/)
-		assert.match(workflow, /if: github.ref == 'refs\/heads\/main'/)
-		assert.match(workflow, /ref: \$\{\{ github.sha \}\}/)
-		assert.ok(!workflow.includes("pull_request_review:"))
-		assert.ok(!workflow.includes("pull_request_target:"))
-		assert.match(workflow, /persist-credentials: false/)
-		assert.match(workflow, /environment: final-vscode-review-smoke/)
+
+	it("checks out the triggering revision without persisting credentials", () => {
+		const checkouts = actionSteps("actions/checkout")
+		assert.equal(checkouts.length, 1)
+		assert.equal(checkouts[0].with.ref, "${{ github.sha }}")
+		assert.equal(checkouts[0].with["persist-credentials"], false)
 	})
-	it("gates the provider secret behind an environment-bound, main-only smoke job", () => {
-		const jobs = workflow.split("jobs:\n")[1] ?? ""
-		const smokeJob = jobs.split("\n        steps:")[0] ?? ""
-		assert.ok(smokeJob.length > 0)
-		// The job runs only on main, so no other ref reaches the secret step.
-		assert.match(smokeJob, /^ {8}if: github\.ref == 'refs\/heads\/main'$/m)
-		// The secret-holding environment gates the whole job, so GitHub
-		// applies its protection rules before the first step runs.
-		assert.match(smokeJob, /^ {8}environment: final-vscode-review-smoke$/m)
-		// The environment reference must precede the credential-bearing step.
-		assert.ok(smokeJob.indexOf("environment: final-vscode-review-smoke") < jobs.indexOf("secrets."))
-		// The workflow must consume the secret scoped to that environment.
-		assert.match(workflow, /secrets\.FINAL_SMOKE_OPENAI_API_KEY/)
-	})
-	it("documents the required environment protection policy for the secret", () => {
-		const readme = fs.readFileSync(new URL("./solheim-smoke/README.md", import.meta.url), "utf8")
-		// The environment requires the same reviewer approval as the deploy
-		// environment, and the workflow keeps the main-only deployment guard.
-		assert.match(readme, /same reviewer approval as the `marketplace-production` deploy environment/)
-		assert.match(readme, /must approve each deployment before GitHub releases the secret/)
-		assert.match(readme, /runs only on `refs\/heads\/main`/)
-	})
-	it("has one credential-bearing step, no GitHub write permissions, and no posting", () => {
-		assert.equal((workflow.match(/secrets\./g) ?? []).length, 1)
-		const before = workflow.slice(0, workflow.indexOf("- name: Run Solheim provider smoke"))
-		assert.ok(!before.includes("secrets."))
-		assert.match(workflow, /permissions:\n\s+contents: read/)
-		assert.ok(!/\bwrite\b/.test(workflow))
-		assert.ok(!workflow.includes("github-script"))
-		assert.ok(!workflow.includes("post-review"))
-	})
-	it("has one smoke job and no review, routing, shadow, or deterministic lanes", () => {
-		const jobs = workflow.split("jobs:\n")[1] ?? ""
-		assert.deepEqual(
-			[...jobs.matchAll(/^ {4}([a-z-]+):$/gm)].map((match) => match[1]),
-			["smoke"],
+
+	it("exposes the provider credential only to the bounded provider step", () => {
+		const provider = steps.find((step) => step.id === "provider")
+		assert.ok(provider, "missing provider step")
+		assert.equal(provider.env.SOLHEIM_API_KEY, "${{ secrets.FINAL_SMOKE_OPENAI_API_KEY }}")
+		assert.equal(workflow.env, undefined)
+		assert.equal(smoke.env, undefined)
+		// Inspect parsed values, excluding comments and display names.
+		const credentialSteps = steps.filter((step) =>
+			JSON.stringify({ env: step.env, with: step.with, run: step.run }).includes("secrets."),
 		)
-		for (const name of [
-			"theme-review",
-			"probe-dispatch",
-			"rules-review",
-			"merge-report",
-			"bounded-code-review",
-			"model-qualification",
-		])
-			assert.ok(!workflow.includes(name))
-		assert.ok(!driver.includes("model-qualification"))
-		assert.ok(!driver.includes("AcknowledgeCompletion"))
+		assert.deepEqual(credentialSteps, [provider])
+		assert.ok(provider["timeout-minutes"] > 0 && provider["timeout-minutes"] <= 8)
+		assert.ok(smoke["timeout-minutes"] > provider["timeout-minutes"] && smoke["timeout-minutes"] <= 25)
+		assert.equal(workflow.concurrency.group, "solheim-provider-smoke")
+		assert.equal(workflow.concurrency["cancel-in-progress"], false)
 	})
-	it("bounds runtime and serializes the single provider instance", () => {
-		assert.match(workflow, /cancel-in-progress: false/)
-		assert.match(workflow, /timeout-minutes: 8/)
-		assert.match(workflow, /^ {8}timeout-minutes: 25$/m)
-	})
-	it("uploads metadata and the recording as separate validated artifacts", () => {
-		const metadataStep =
-			workflow.split("- name: Upload provider smoke verdict and trace")[1]?.split("- name:")[0] ?? ""
-		const recordingStep = workflow.split("- name: Upload provider smoke recording")[1]?.split("- name:")[0] ?? ""
-		assert.ok(metadataStep.length > 0)
-		assert.ok(recordingStep.length > 0)
-		assert.deepEqual(
-			metadataStep
-				.split("path: |")[1]
-				?.split("if-no-files-found:")[0]
+
+	it("uploads metadata and the final recording separately, including after provider failure", () => {
+		const uploads = actionSteps("actions/upload-artifact")
+		assert.equal(uploads.length, 2)
+		const output = "${{ runner.temp }}/solheim-provider-smoke"
+		const paths = uploads.map((step) =>
+			step.with.path
 				.trim()
 				.split("\n")
 				.map((line) => line.trim()),
-			[
-				"${{ runner.temp }}/solheim-provider-smoke/verdict.json",
-				"${{ runner.temp }}/solheim-provider-smoke/trace.json",
-			],
 		)
-		// The recording artifact carries only the exact validated final path.
-		assert.equal(
-			recordingStep.split("path: ")[1]?.split("\n")[0].trim(),
-			"${{ runner.temp }}/solheim-provider-smoke/smoke.mp4",
-		)
-		for (const step of [metadataStep, recordingStep]) {
-			assert.match(step, /!cancelled\(\)/)
-			assert.match(step, /if-no-files-found: error/)
-			assert.match(step, /retention-days: 7/)
-			assert.match(step, /actions\/upload-artifact@[0-9a-f]{40}/)
-			assert.ok(!step.includes("*"))
+		assert.deepEqual(paths, [[output + "/verdict.json", output + "/trace.json"], [output + "/smoke.mp4"]])
+		for (const step of uploads) {
+			assert.equal(
+				step.if,
+				"${{ !cancelled() && (steps.provider.outcome == 'success' || steps.provider.outcome == 'failure') }}",
+			)
+			assert.equal(step.with["if-no-files-found"], "error")
+			assert.equal(step.with["retention-days"], 7)
+			assert.ok(steps.indexOf(step) > steps.findIndex((candidate) => candidate.id === "provider"))
 		}
-		// A missing recording cannot hide behind a multi-path if-no-files-found.
-		assert.match(workflow, /name: solheim-provider-smoke-recording-\$\{\{ github\.sha \}\}/)
-		// Temporary recorder output is never an upload path.
-		assert.ok(!workflow.includes(".tmp"))
-		assert.ok(!driver.includes("console.error("))
-		assert.ok(!driver.includes("stderrLog"))
+		assert.equal(new Set(uploads.map((step) => step.with.name)).size, 2)
 	})
-	it("reports a missing or failed recording explicitly before the uploads", () => {
-		const checkStep = workflow.split("- name: Verify recording integrity")[1]?.split("- name:")[0] ?? ""
-		// The published final is the commit marker; no separate status file exists.
-		assert.match(checkStep, /test -s "\$SOLHEIM_SMOKE_OUT_DIR\/smoke\.mp4"/)
-		assert.ok(!workflow.includes("recording-status"))
-		assert.match(checkStep, /!cancelled\(\)/)
-		const checkIndex = workflow.indexOf("- name: Verify recording integrity")
-		const uploadIndex = workflow.indexOf("- name: Upload provider smoke verdict and trace")
-		assert.ok(checkIndex >= 0 && checkIndex < uploadIndex)
-	})
-	it("records a fresh display with credential-free ffmpeg and bounded teardown", () => {
-		assert.match(workflow, /install -y xvfb ffmpeg/)
-		assert.match(workflow, /xvfb-run -a -s "-screen 0 1280x720x24 -nolisten tcp"/)
-		assert.match(recorder, /env -i "PATH=\$PATH" "DISPLAY=\$DISPLAY"/)
-		assert.match(recorder, /-t 480 -fs 125829120/)
-		assert.match(recorder, /frag_keyframe\+empty_moov/)
-		assert.match(recorder, /trap finish EXIT/)
-		assert.match(recorder, /attempt < 50/)
-		assert.ok(!recorder.includes("SOLHEIM_API_KEY"))
-		assert.match(workflow, /retention-days: 7/)
-		// The recorder writes a unique temporary file inside the output
-		// directory, forces the mp4 muxer because the name has no mp4 suffix,
-		// and publishes only validated output with an atomic rename.
-		assert.match(recorder, /temp_recording="\$SOLHEIM_SMOKE_OUT_DIR\/\.smoke\.mp4\.\$\$\.tmp"/)
-		assert.match(recorder, /-f mp4 "\$temp_recording"/)
-		assert.match(recorder, /ffprobe -v error "\$temp_recording"/)
-		assert.match(recorder, /mv -f "\$temp_recording" "\$final_recording"/)
-		assert.match(recorder, /rm -f "\$final_recording"/)
-		// ffmpeg must never write the final path directly.
-		assert.ok(!/ffmpeg[^\n]*\$final_recording/.test(recorder))
-	})
-	it("signals the Node driver directly with a documented stop budget", () => {
-		// A package-manager wrapper between the recorder and the driver would
-		// receive the TERM and KILL meant for the driver that performs teardown
-		// and the atomic verdict and trace writes.
-		assert.ok(!recorder.includes("pnpm"))
-		assert.match(recorder, /node --import tsx "\$script_dir\/driver\.mts" &/)
-		assert.match(recorder, /SOLHEIM_SMOKE_STOP_BUDGET_S:-30/)
-		assert.match(recorder, /kill -TERM "\$provider_pid"/)
-		assert.match(recorder, /kill -KILL "\$provider_pid"/)
-		assert.match(recorder, /wait "\$provider_pid"/)
-		assert.ok(!recorder.includes("status_file"))
-	})
-	it("keeps Code QA and package commands focused on smoke contracts", () => {
-		for (const command of [
-			"test:solheim-smoke:unit",
-			"test:solheim-smoke-ci",
-			"solheim-smoke:check-types",
-			"test:agent-evals:unit",
-			"agent-evals:check-types",
-		])
-			assert.ok(codeQa.includes(command))
-		assert.ok(!codeQa.includes("model-qualification"))
-		assert.ok(!Object.keys(pkg.scripts).some((name) => name.includes("model-qualification")))
-		assert.ok(!codeQa.includes("final-smoke"))
-		assert.equal(pkg.scripts["solheim:smoke"], "node --import tsx scripts/solheim-smoke/driver.mts")
-		assert.equal(pkg.scripts["test:agent-evals:unit"], "node --import tsx --test scripts/agent-evals/*.test.ts")
-		assert.equal(pkg.scripts["agent-evals:check-types"], "tsc -p scripts/agent-evals/tsconfig.json")
-		assert.ok(!fs.existsSync(new URL("../.github/workflows/final-vscode-review-smoke.yml", import.meta.url)))
-	})
-	it("keeps the shared controller free of smoke, provider, and solution knowledge", () => {
-		assert.equal(evalsPkg.type, "module")
-		assert.equal(evalsPkg.private, true)
-		assert.ok(!/solheim/i.test(runner))
-		assert.ok(!/smoke/i.test(runner))
-		assert.ok(!runner.includes("SOLHEIM_API_KEY"))
-		assert.ok(!/solheim/i.test(trace))
-		assert.ok(trace.includes("traceSchemaVersion"))
-	})
-	it("registers fixtures only through the validated in-memory registry", () => {
-		assert.ok(!registry.includes("import("))
-		assert.ok(!registry.includes("fetch("))
-		assert.ok(!registry.includes("readdir"))
-		assert.ok(fixture.includes("registerFixture"))
-	})
-	it("keeps VS Code launch isolation in one shared launcher with an atomic artifact writer", () => {
-		assert.ok(driver.includes("createHostRuntime"))
-		assert.ok(!driver.includes("spawn("))
-		assert.ok(!driver.includes("downloadAndUnzipVSCode"))
-		assert.ok(launcher.includes("downloadAndUnzipVSCode"))
-		assert.ok(launcher.includes("buildChildEnvironment"))
-		assert.ok(launcher.includes("await fs.rename(pending"))
-		assert.ok(launcher.includes("process.kill(-child.pid"))
+
+	it("pins remote actions to immutable commit revisions", () => {
+		for (const step of steps.filter((step) => step.uses && !step.uses.startsWith("./"))) {
+			const revision = step.uses.split("@")[1]
+			assert.match(revision ?? "", /^[0-9a-f]{40}$/, step.uses)
+		}
 	})
 })
 

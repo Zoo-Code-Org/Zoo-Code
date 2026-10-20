@@ -21,8 +21,9 @@ The protected environment `final-vscode-review-smoke` and its secret `FINAL_SMOK
 retain their existing names to avoid an unnecessary repository-settings migration. The environment
 requires the same reviewer approval as the `marketplace-production` deploy environment: a member of
 the `Zoo-Code-Org/admins` team must approve each deployment before GitHub releases the secret. The
-main-only deployment restriction stays in the workflow: the smoke job runs only on `refs/heads/main`.
-Workflow files cannot declare reviewer rules; repository settings own them.
+environment also allows deployments from one selected branch, `main`, and no tag policies. The
+workflow keeps its own guard: the smoke job runs only on `refs/heads/main`. Workflow files cannot
+declare reviewer rules; repository settings own both protections.
 
 The provider endpoint and model are fixed: `https://api.solheim.ai/v1`, `qwen3.8-27b`. The task has no tool
 groups; delegation, follow-ups, writes, shell and MCP are disabled. The driver opens an empty temporary
