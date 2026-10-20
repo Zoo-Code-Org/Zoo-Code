@@ -27,6 +27,12 @@ interface HarnessOptions {
 	mergeable?: boolean | null
 	mergeableState?: string
 	mergeabilitySequence?: Array<{ mergeable: boolean | null; mergeableState: string }>
+	mergeabilityRetryDelayMs?: number
+	// The timer regression test omits MERGEABILITY_RETRY_DELAY_MS so the
+	// script takes its production 5000 ms default instead of a test override.
+	productionMergeabilityDelay?: boolean
+	// Fails every pulls.get read from this 0-based call onward with the status.
+	pullsGetError?: { fromCall: number; status: number }
 	headShaSequence?: string[]
 	fork?: boolean
 	eventName?: string
@@ -175,6 +181,8 @@ function buildEventPayload(eventName: string, options: HarnessOptions) {
 				: eventName === "workflow_run"
 					? {
 							workflow_run: {
+								name: "Code QA Roo Code",
+								event: "pull_request",
 								pull_requests:
 									options.workflowRunAssociated === false
 										? []
@@ -197,8 +205,15 @@ function buildEventPayload(eventName: string, options: HarnessOptions) {
 						}
 }
 
-/** Executes the embedded github-script workflow against deterministic GitHub API doubles. */
-async function runWorkflow(options: HarnessOptions = {}) {
+/** Runs pending microtask turns so a started script reaches its next await suspension point. */
+async function flushMicrotasks(turns = 50) {
+	for (let index = 0; index < turns; index++) {
+		await Promise.resolve()
+	}
+}
+
+/** Builds the reconcile job's GitHub API doubles without starting the embedded script. */
+function buildReconcileHarness(options: HarnessOptions = {}) {
 	const eventName = options.eventName ?? "pull_request_target"
 	const pr = buildHarnessPr(options)
 	const requiredContexts = options.requiredContexts ?? ["tests"]
@@ -373,6 +388,9 @@ async function runWorkflow(options: HarnessOptions = {}) {
 	let pullRequestGetIndex = 0
 	const getPullRequest = vi.fn(async () => {
 		const index = pullRequestGetIndex++
+		if (options.pullsGetError && index >= options.pullsGetError.fromCall) {
+			throw Object.assign(new Error("Pull request read failed"), { status: options.pullsGetError.status })
+		}
 		const mergeability = options.mergeabilitySequence?.[index]
 		const headSha = options.headShaSequence?.[index]
 		let data = pr
@@ -488,15 +506,27 @@ async function runWorkflow(options: HarnessOptions = {}) {
 	// The reconcile job runs one matrix shard per PR and receives the target
 	// through the job's PR_NUMBER env mapping, plus the job's concurrency group
 	// through CONCURRENCY_GROUP.
-	const previousEnv = { prNumber: process.env.PR_NUMBER, group: process.env.CONCURRENCY_GROUP }
+	const previousEnv = {
+		prNumber: process.env.PR_NUMBER,
+		group: process.env.CONCURRENCY_GROUP,
+		mergeabilityRetryDelayMs: process.env.MERGEABILITY_RETRY_DELAY_MS,
+	}
 	process.env.PR_NUMBER = String(pr.number)
 	process.env.CONCURRENCY_GROUP = `label-pr-review-state-reconcile-${pr.number}`
-	try {
-		await new AsyncFunction("github", "context", "core", workflowScript)(github, context, core)
-	} finally {
+	// The workflow waits 5s between mergeability retries in production; tests
+	// override the delay so the retries run without real waits.
+	if (options.productionMergeabilityDelay) {
+		delete process.env.MERGEABILITY_RETRY_DELAY_MS
+	} else {
+		process.env.MERGEABILITY_RETRY_DELAY_MS = String(options.mergeabilityRetryDelayMs ?? 0)
+	}
+
+	const execute = () => new AsyncFunction("github", "context", "core", workflowScript)(github, context, core)
+	const restoreEnv = () => {
 		for (const [key, value] of [
 			["PR_NUMBER", previousEnv.prNumber],
 			["CONCURRENCY_GROUP", previousEnv.group],
+			["MERGEABILITY_RETRY_DELAY_MS", previousEnv.mergeabilityRetryDelayMs],
 		] as const) {
 			if (value === undefined) {
 				delete process.env[key]
@@ -507,6 +537,8 @@ async function runWorkflow(options: HarnessOptions = {}) {
 	}
 
 	return {
+		execute,
+		restoreEnv,
 		addLabels,
 		removeLabel,
 		createComment,
@@ -524,6 +556,17 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		listCommitStatusesForRef: github.rest.repos.listCommitStatusesForRef,
 		permissionFor,
 	}
+}
+
+/** Executes the reconcile job's embedded script against deterministic GitHub API doubles. */
+async function runWorkflow(options: HarnessOptions = {}) {
+	const { execute, restoreEnv, ...result } = buildReconcileHarness(options)
+	try {
+		await execute()
+	} finally {
+		restoreEnv()
+	}
+	return result
 }
 
 /** Executes the resolve job's embedded script against deterministic GitHub API doubles. */
@@ -980,10 +1023,40 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
 	})
 
-	it("keeps has-conflicts while mergeability is unknown and required CI is missing (#2025)", async () => {
+	// Regression: GitHub transiently reports mergeable: null / "unknown" after
+	// each push while it recomputes mergeability. With CI passing, the final
+	// reconcile must keep an existing has-conflicts label instead of stripping
+	// it with the other state labels — the label previously flapped off until
+	// a later run restored it. Each operand of the unknown check counts alone.
+	it.each([
+		{ mergeable: null, mergeableState: "unknown" },
+		{ mergeable: null, mergeableState: "clean" },
+		{ mergeable: true, mergeableState: "unknown" },
+	])(
+		"keeps has-conflicts while mergeability is unknown ($mergeable, $mergeableState) and required CI passes (#2045)",
+		async ({ mergeable, mergeableState }) => {
+			const result = await runWorkflow({ mergeable, mergeableState, labels: ["has-conflicts"] })
+
+			expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+			expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+			expect(result.addLabels).toHaveBeenCalledWith(
+				expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+			)
+		},
+	)
+
+	it("strips has-conflicts when mergeability is known clean and required CI passes", async () => {
+		const result = await runWorkflow({ labels: ["has-conflicts"] })
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+	})
+
+	it("changes no state label while mergeability is unknown and required CI is missing (#2025, #2089)", async () => {
 		// A conflicting PR gets no merge-ref CI run, so its required checks are
-		// missing. Unknown mergeability must not read that as a reason to strip
-		// an existing has-conflicts label; the other state labels still clear.
+		// missing. Unknown mergeability must not read that as a reason to change
+		// any state label: has-conflicts stays, and so does every other state
+		// label until a later run reads a known mergeability value.
 		const result = await runWorkflow({
 			eventName: "push",
 			mergeable: null,
@@ -992,13 +1065,12 @@ describe("PR review-state workflow", () => {
 			omitRequiredRuns: true,
 		})
 
-		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		expect(result.removeLabel).not.toHaveBeenCalled()
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
-		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-author" }))
 		expect(latestGateStatus(result)?.description).toContain("required CI checks")
 	})
 
-	it("keeps has-conflicts while mergeability is unknown and required CI has failed (#2025)", async () => {
+	it("changes no state label while mergeability is unknown and required CI has failed (#2025, #2089)", async () => {
 		const result = await runWorkflow({
 			mergeable: null,
 			mergeableState: "unknown",
@@ -1006,13 +1078,12 @@ describe("PR review-state workflow", () => {
 			requiredConclusion: "failure",
 		})
 
-		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		expect(result.removeLabel).not.toHaveBeenCalled()
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
-		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-author" }))
 		expect(latestGateStatus(result)?.description).toContain("failing required CI checks")
 	})
 
-	it("does not add has-conflicts while mergeability is unknown and required CI is missing (#2025)", async () => {
+	it("adds no state label while mergeability is unknown and required CI is missing (#2025, #2089)", async () => {
 		const result = await runWorkflow({
 			mergeable: null,
 			mergeableState: "unknown",
@@ -1021,7 +1092,7 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
-		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-author" }))
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-author" }))
 		expect(latestGateStatus(result)?.description).toContain("required CI checks")
 	})
 
@@ -1229,8 +1300,10 @@ describe("PR review-state workflow", () => {
 		const result = await runWorkflow({
 			eventName: "push",
 			labels: ["awaiting-maintainer"],
+			// The first read is known-clean, so no retry runs; the maintainer-handoff
+			// recheck then catches the fresh dirty read before tagging.
 			mergeabilitySequence: [
-				{ mergeable: null, mergeableState: "unknown" },
+				{ mergeable: true, mergeableState: "clean" },
 				{ mergeable: false, mergeableState: "dirty" },
 			],
 			reviews: [
@@ -1247,14 +1320,131 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
 	})
 
+	// Issue #2089: the first read reports unknown, one retry reads dirty, and the
+	// run must not change any state label because of the unknown read itself.
+	it("retries an unknown mergeability read and handles the dirty retry normally (#2089)", async () => {
+		const result = await runWorkflow({
+			eventName: "push",
+			labels: ["awaiting-maintainer"],
+			mergeabilitySequence: [
+				{ mergeable: null, mergeableState: "unknown" },
+				{ mergeable: false, mergeableState: "dirty" },
+			],
+		})
+
+		expect(result.getPullRequest).toHaveBeenCalledTimes(2)
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+	})
+
+	// Issue #2089: unknown on the first read and on every retry means the run
+	// changes no state label at all.
+	it("changes no state label when mergeability stays unknown across all retries (#2089)", async () => {
+		const result = await runWorkflow({
+			eventName: "push",
+			labels: ["has-conflicts", "awaiting-author"],
+			mergeable: null,
+			mergeableState: "unknown",
+		})
+
+		expect(result.getPullRequest).toHaveBeenCalledTimes(4)
+		expect(result.removeLabel).not.toHaveBeenCalled()
+		for (const label of [
+			"awaiting-author",
+			"awaiting-coderabbit",
+			"awaiting-ready",
+			"awaiting-maintainer",
+			"has-conflicts",
+		]) {
+			expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: [label] }))
+		}
+	})
+
+	// Issue #2091: a failed mergeability retry adds no mergeability answer, so
+	// the run keeps every state label exactly like the still-unknown path,
+	// while gate invalidation and failure reporting still happen.
+	it("keeps state labels when the mergeability retry read fails (#2091)", async () => {
+		const result = await runWorkflow({
+			eventName: "push",
+			labels: ["awaiting-author", "has-conflicts", "community-approved"],
+			mergeabilitySequence: [{ mergeable: null, mergeableState: "unknown" }],
+			pullsGetError: { fromCall: 1, status: 503 },
+		})
+
+		// The shard read plus one failed retry; the 503 stops further retries.
+		expect(result.getPullRequest).toHaveBeenCalledTimes(2)
+
+		// No label mutation at all: exclusive state labels and the advisory
+		// community signal survive the failed retry.
+		expect(result.removeLabel).not.toHaveBeenCalled()
+		expect(result.addLabels).not.toHaveBeenCalled()
+
+		// Gate invalidation is retained.
+		expect(result.createCommitStatus).toHaveBeenCalledTimes(1)
+		expect(result.createCommitStatus.mock.calls[0][0]).toMatchObject({
+			state: "pending",
+			context: "Zoo Code / PR review gate",
+		})
+
+		// Failure reporting is retained.
+		expect(result.setFailed).toHaveBeenCalledTimes(1)
+		expect(result.setFailed.mock.calls[0][0]).toMatch(/#1437/)
+		expect(result.setFailed.mock.calls[0][0]).toMatch(/503/)
+	})
+
+	// Issue #2091: the retry read must stay gated behind the full production
+	// wait. A controlled fake timer holds the sleep pending, so the test can
+	// prove no retry request leaves before 5000 ms elapse. Removing the await
+	// on the sleep alone fails here: the retry read runs while the timer is
+	// still pending, and deleting the sleep leaves no timer at all.
+	it("waits the full five second default before retrying an unknown mergeability read (#2091)", async () => {
+		const harness = buildReconcileHarness({
+			eventName: "push",
+			labels: ["awaiting-author"],
+			mergeabilitySequence: [
+				{ mergeable: null, mergeableState: "unknown" },
+				{ mergeable: true, mergeableState: "clean" },
+			],
+			productionMergeabilityDelay: true,
+		})
+		vi.useFakeTimers()
+		try {
+			const runPromise = harness.execute()
+			await flushMicrotasks()
+
+			// The script is suspended on its production wait: exactly one pending
+			// timer and no retry read yet.
+			expect(vi.getTimerCount()).toBe(1)
+			expect(harness.getPullRequest).toHaveBeenCalledTimes(1)
+
+			// A shorter default would already have fired the timer and issued the
+			// retry read before the full interval.
+			await vi.advanceTimersByTimeAsync(4999)
+			expect(harness.getPullRequest).toHaveBeenCalledTimes(1)
+
+			await vi.advanceTimersByTimeAsync(1)
+			expect(vi.getTimerCount()).toBe(0)
+			await runPromise
+
+			// The wait gated the retry: shard read plus one clean retry read, and
+			// the reconcile continued normally.
+			expect(harness.getPullRequest).toHaveBeenCalledTimes(2)
+			expect(harness.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
+			expect(harness.setFailed).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+			harness.restoreEnv()
+		}
+	})
+
 	it("preserves the current state while mergeability is unknown", async () => {
 		const result = await runWorkflow({
 			eventName: "push",
 			labels: ["awaiting-maintainer", "coderabbit-review-active"],
-			mergeabilitySequence: [
-				{ mergeable: null, mergeableState: "unknown" },
-				{ mergeable: null, mergeableState: "unknown" },
-			],
+			// Every read — the shard fetch, each retry, and the maintainer-handoff
+			// recheck — reports unknown.
+			mergeable: null,
+			mergeableState: "unknown",
 			reviews: [
 				{
 					login: "coderabbitai[bot]",
@@ -1276,10 +1466,10 @@ describe("PR review-state workflow", () => {
 		const result = await runWorkflow({
 			eventName: "push",
 			labels: ["awaiting-maintainer", "coderabbit-review-active"],
-			mergeabilitySequence: [
-				{ mergeable: null, mergeableState: "unknown" },
-				{ mergeable: null, mergeableState: "unknown" },
-			],
+			// Every read reports unknown, so the run reaches the maintainer-handoff
+			// recheck and tries to publish the mergeability-pending metadata.
+			mergeable: null,
+			mergeableState: "unknown",
 			removeLabelStatus: 500,
 			reviews: [
 				{
@@ -1872,7 +2062,7 @@ describe("PR review-state workflow", () => {
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
 	})
 
-	it("attempts every stale label removal when one cleanup fails", async () => {
+	it("attempts every state label removal when one cleanup fails and leaves stale labels to the stale step", async () => {
 		const result = await runWorkflow({
 			permissionErrorStatus: 500,
 			labels: ["awaiting-coderabbit", "awaiting-maintainer", "stale-awaiting-author"],
@@ -1881,7 +2071,7 @@ describe("PR review-state workflow", () => {
 
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-coderabbit" }))
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
-		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "stale-awaiting-author" }))
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stale-awaiting-author" }))
 		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("could not clear review metadata"))
 	})
 
@@ -2128,6 +2318,18 @@ describe("PR review-state workflow", () => {
 			expect.objectContaining({ head: "Zoo-Code-Org:feature/test", state: "open" }),
 		)
 		expect(resolution.prNumbers()).toEqual([])
+	})
+
+	describe("fork review follow-up handoff (#2046, #2086)", () => {
+		it("does not listen to itself; the privileged fork review follow-up lives in its own workflow", () => {
+			// GitHub rejects a workflow that lists itself in
+			// workflow_run.workflows (issue #2086), so the follow-up for fork
+			// pull_request_review runs lives in
+			// label-pr-review-state-fork-review-followup.yml (issue #2046).
+			expect(workflow.on.workflow_run.workflows).not.toContain("Label PR review state")
+			expect(String(workflow.jobs.resolve.if)).not.toContain("github.event.workflow_run.name")
+			expect(String(workflow.jobs.reconcile.if)).not.toContain("github.event.workflow_run.name")
+		})
 	})
 
 	it("invalidates prior automated and human reviews after a new push", async () => {
@@ -2930,10 +3132,9 @@ describe("PR review-state workflow", () => {
 			const result = await runWorkflow({
 				eventName: "push",
 				labels: ["awaiting-maintainer", "community-approved"],
-				mergeabilitySequence: [
-					{ mergeable: null, mergeableState: "unknown" },
-					{ mergeable: null, mergeableState: "unknown" },
-				],
+				// Every read reports unknown.
+				mergeable: null,
+				mergeableState: "unknown",
 				reviews: [coderabbitApproval, communityApproval],
 			})
 
@@ -2951,11 +3152,12 @@ describe("PR review-state workflow", () => {
 			const result = await runWorkflow({
 				eventName: "push",
 				labels: ["community-approved"],
-				mergeabilitySequence: [
-					{ mergeable: null, mergeableState: "unknown" },
-					{ mergeable: null, mergeableState: "unknown" },
-				],
-				headShaSequence: [SHA, NEW_SHA],
+				// Every read reports unknown; the head moves to a new SHA on the first
+				// retry and stays there, so the maintainer-handoff recheck still sees
+				// the new head.
+				mergeable: null,
+				mergeableState: "unknown",
+				headShaSequence: [SHA, NEW_SHA, NEW_SHA, NEW_SHA, NEW_SHA],
 				reviews: [coderabbitApproval, communityApproval],
 			})
 
@@ -3067,7 +3269,7 @@ describe("PR review-state workflow", () => {
 					eventName: "push",
 					labels: ["awaiting-maintainer", "community-approved"],
 					mergeabilitySequence: [
-						{ mergeable: null, mergeableState: "unknown" },
+						{ mergeable: true, mergeableState: "clean" },
 						{ mergeable: false, mergeableState: "dirty" },
 					],
 				},
@@ -3124,10 +3326,9 @@ describe("PR review-state workflow", () => {
 			const result = await runWorkflow({
 				eventName: "push",
 				labels: ["awaiting-maintainer", "community-approved"],
-				mergeabilitySequence: [
-					{ mergeable: null, mergeableState: "unknown" },
-					{ mergeable: null, mergeableState: "unknown" },
-				],
+				// Every read reports unknown.
+				mergeable: null,
+				mergeableState: "unknown",
 				reviews: [
 					coderabbitApproval,
 					{ ...communityApproval, id: 1 },

@@ -438,6 +438,12 @@
 		"getOpencodeGoApiKey": "取得 Opencode Go API 金鑰",
 		"kenariApiKey": "Kenari API 金鑰",
 		"getKenariApiKey": "取得 Kenari API 金鑰",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "IO Intelligence API 金鑰",
+			"getApiKey": "取得 IO Intelligence API 金鑰",
+			"model": "模型"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API 金鑰",
@@ -872,6 +878,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "預設摺疊命令輸出",
+			"description": "預設摺疊命令輸出，包括內嵌終端機輸出。需要時可手動展開。此設定不會變更命令執行方式。"
+		},
 		"basic": {
 			"label": "終端機設定：基本",
 			"description": "基本終端機設定"

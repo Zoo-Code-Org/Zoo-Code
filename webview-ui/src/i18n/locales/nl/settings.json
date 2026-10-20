@@ -411,6 +411,12 @@
 		"getOpencodeGoApiKey": "Opencode Go API-sleutel ophalen",
 		"kenariApiKey": "Kenari API-sleutel",
 		"getKenariApiKey": "Kenari API-sleutel ophalen",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "IO Intelligence API-sleutel",
+			"getApiKey": "IO Intelligence API-sleutel ophalen",
+			"model": "Model"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API-sleutel",
@@ -845,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Opdrachtuitvoer standaard inklappen",
+			"description": "Toon opdrachtuitvoer ingeklapt, ook van de inline-terminal. Klap deze indien nodig handmatig uit. Dit verandert de uitvoering van opdrachten niet."
+		},
 		"basic": {
 			"label": "Terminalinstellingen: Basis",
 			"description": "Basis terminalinstellingen"

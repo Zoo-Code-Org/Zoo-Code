@@ -411,6 +411,12 @@
 		"getOpencodeGoApiKey": "Uzyskaj klucz API Opencode Go",
 		"kenariApiKey": "Klucz API Kenari",
 		"getKenariApiKey": "Uzyskaj klucz API Kenari",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "Klucz API IO Intelligence",
+			"getApiKey": "Uzyskaj klucz API IO Intelligence",
+			"model": "Model"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Klucz API NanoGPT",
@@ -845,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Domyślnie zwijaj wyniki poleceń",
+			"description": "Wyniki poleceń, także z terminala wbudowanego, są początkowo zwinięte. Można je ręcznie rozwinąć. Nie zmienia to sposobu wykonywania poleceń."
+		},
 		"basic": {
 			"label": "Ustawienia terminala: Podstawowe",
 			"description": "Podstawowe ustawienia terminala"

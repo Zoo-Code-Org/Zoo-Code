@@ -149,6 +149,12 @@ import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
 import { initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
 import { applyRunEvent, type RunRejection } from "./run-state/runStateShadow"
+import {
+	divergenceKey,
+	findDivergences,
+	isDivergenceCheckEnabled,
+	reportDivergence,
+} from "./run-state/runStateDivergence"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
@@ -186,10 +192,7 @@ export const BLANKET_DENY_AUTO_DENY_KINDS: ReadonlySet<AutoDenyDetail["kind"]> =
  * decided against the auto-approval policy as it stands NOW.
  */
 type QueuedCommandPolicyAction =
-	| { action: "consume" }
-	| { action: "approve" }
-	| { action: "deny"; detail?: AutoDenyDetail }
-	| { action: "release" }
+	{ action: "consume" } | { action: "approve" } | { action: "deny"; detail?: AutoDenyDetail } | { action: "release" }
 
 /**
  * Whether blanket auto-deny currently engages. The three settings act as a
@@ -412,6 +415,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	runState: RunState = initialRunState
 	readonly runRejections: RunRejection[] = []
+	private readonly divergenceCheckEnabled: boolean
+	private readonly reportedDivergences = new Set<string>()
 
 	// API
 	apiConfiguration: ProviderSettings
@@ -757,6 +762,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		)
 		this.providerRef = new WeakRef(provider)
 		this.globalStoragePath = provider.context.globalStorageUri.fsPath
+		this.divergenceCheckEnabled = isDivergenceCheckEnabled(Package.releaseChannel, provider.context.extensionMode)
 		this.diffViewProvider = new DiffViewProvider(this.cwd, this)
 		this.enableCheckpoints = enableCheckpoints
 		this.checkpointTimeout = checkpointTimeout
@@ -3736,7 +3742,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	private driveRunEvent(event: RunEvent): void {
-		this.runState = applyRunEvent(this.runState, event, this.runRejections)
+		const { state, rejected } = applyRunEvent(this.runState, event, this.runRejections)
+		this.runState = state
+
+		if (this.divergenceCheckEnabled) {
+			const fields = {
+				abort: this.abort,
+				abandoned: this.abandoned,
+				abortReason: this.abortReason,
+				isInitialized: this.isInitialized,
+				isStreaming: this.isStreaming,
+				didFinishAbortingStream: this.didFinishAbortingStream,
+			}
+			for (const divergence of findDivergences({ event, state, fields, rejected })) {
+				if (this.reportedDivergences.has(divergenceKey(divergence))) {
+					continue
+				}
+				this.reportedDivergences.add(divergenceKey(divergence))
+				reportDivergence(this.taskId, divergence)
+			}
+		}
 	}
 
 	public abortTask(isAbandoned = false): Promise<void> {
@@ -4472,7 +4497,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// under the canonical name slip past a name comparison. The first call wins.
 										const idAlreadyUsed = this.assistantMessageContent.some(
 											(entry) =>
-												// Stryker disable next-line ConditionalExpression: only tool_use and mcp_tool_use entries ever carry an id — the text block pushed in the text case has no id field and the start events reaching this guard always carry the string id locked in by processRawChunk — so the type check cannot change the outcome of entry.id === event.id for any entry this pipeline produces; the false replacement is additionally killed by the rejection tests.
+												// Stryker disable next-line ConditionalExpression: equivalent mutant, only tool_use and mcp_tool_use entries carry an id, so the type check cannot change entry.id === event.id
 												(entry.type === "tool_use" || entry.type === "mcp_tool_use") &&
 												(entry as { id?: string }).id === event.id,
 										)
@@ -4525,7 +4550,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// keep the deprecated single-entry-per-ID lookup.
 										let streamingKey: string | undefined
 
-										// Stryker disable next-line ConditionalExpression: event.name is always a string on this path — the only delta events reaching this handler are emitted by processRawChunk with the tracked start name (never undefined), so the legacy nameless branch below is unreachable defensive code and the conditional always takes the named side.
+										// Stryker disable next-line ConditionalExpression: equivalent mutant, event.name is always a string here, so the legacy nameless branch is unreachable
 										if (event.name !== undefined) {
 											streamingKey = NativeToolCallParser.makeStreamingKey(event.id, event.name)
 										} else {
@@ -4542,7 +4567,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										}
 
 										const partialToolUse =
-											// Stryker disable next-line ConditionalExpression: streamingKey can never be undefined here — makeStreamingKey always returns a string and the legacy lookup branch above is unreachable (see the directive on the event.name check) — so the null side is unreachable defensive code.
+											// Stryker disable next-line ConditionalExpression: equivalent mutant, streamingKey is always a string here (makeStreamingKey), so the null side is unreachable
 											streamingKey === undefined
 												? null
 												: NativeToolCallParser.processStreamingChunk(
@@ -4551,7 +4576,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 														nativeToolCallParserScope,
 													)
 
-										// Stryker disable next-line ConditionalExpression, EqualityOperator: streamingKey is always a defined string on this path (makeStreamingKey never returns undefined; the legacy branch is unreachable per the directives above), and processStreamingChunk returns a partial ToolUse for a known key, so both defensive conditions reduce to the partialToolUse check and cannot change the observed behavior.
+										// Stryker disable next-line ConditionalExpression, EqualityOperator: equivalent mutants, streamingKey is always defined here, so both conditions reduce to the partialToolUse check
 										if (partialToolUse && streamingKey !== undefined) {
 											// Reuse the compound key built above: it is exactly the key the start event
 											// registered under, so the delta lookup needs no second encoding.
@@ -4948,7 +4973,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					if (event.type === "tool_call_end") {
 						// Create compound key for deduplication (same pattern as streaming handler).
 						// End events carry the tool name; fall back to the id for events that don't.
-						// Stryker disable next-line LogicalOperator: event.name is always a string on this path — finalizeRawChunks emits end events with the tracked start name (a string, set before the tracker can start), so the ?? event.id fallback guards a nameless end event this pipeline cannot produce.
+						// Stryker disable next-line LogicalOperator: equivalent mutant, finalizeRawChunks emits end events with a string name, so the ?? event.id fallback is unreachable
 						let eventName = event.name ?? event.id
 						let dedupKey = NativeToolCallParser.makeStreamingKey(event.id, eventName)
 
@@ -4965,7 +4990,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// name (provider quirk), the compound-key lookup above misses and both the
 						// parser entry and the dedup tracking would stay stale. Resolve the tracked
 						// entry by id and target the real compound key for finalization and cleanup.
-						// Stryker disable next-line ConditionalExpression, LogicalOperator, EqualityOperator: the both-miss case is unreachable via the raw-chunk pipeline — end events carry the locked start name so the compound key resolves the registered entry, and a same-ID rejected-start end is always processed after the accepted start's end has already removed that entry; this defensive path protects against a cross-name end event the pipeline cannot produce.
+						// Stryker disable next-line ConditionalExpression, LogicalOperator, EqualityOperator: equivalent mutants, the both-miss case is unreachable via the raw-chunk pipeline
 						if (finalToolUse === null && toolUseIndex === undefined) {
 							const resolved = NativeToolCallParser.getStreamingToolCallById(
 								event.id,

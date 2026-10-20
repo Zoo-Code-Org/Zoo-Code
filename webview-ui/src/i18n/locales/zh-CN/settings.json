@@ -411,6 +411,12 @@
 		"getOpencodeGoApiKey": "获取 Opencode Go API 密钥",
 		"kenariApiKey": "Kenari API 密钥",
 		"getKenariApiKey": "获取 Kenari API 密钥",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "IO Intelligence API 密钥",
+			"getApiKey": "获取 IO Intelligence API 密钥",
+			"model": "模型"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API 密钥",
@@ -845,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "默认折叠命令输出",
+			"description": "默认折叠命令输出，包括内联终端输出。需要时可手动展开。此设置不会改变命令执行方式。"
+		},
 		"basic": {
 			"label": "终端设置：基础",
 			"description": "基础终端设置"

@@ -17,6 +17,13 @@ export default [
 		},
 	},
 	{
+		// A Stryker directive gives a short reason. Put longer rationale in the test or a code comment.
+		// ignorePattern skips every line that does not contain "Stryker", so only directives are measured.
+		rules: {
+			"max-len": ["error", { code: 300, ignorePattern: "^(?!.*Stryker).*" }],
+		},
+	},
+	{
 		files: ["core/assistant-message/presentAssistantMessage.ts", "core/webview/webviewMessageHandler.ts"],
 		rules: {
 			"no-case-declarations": "off",
@@ -58,10 +65,15 @@ export default [
 		// Tests inside __tests__/ directories must not traverse 3+ levels above
 		// the test file. That escapes the src/ package root and makes Turbo
 		// invisible to cache changes in those files.
-		// pr-review-state-workflow.test.ts is the intentional exception: it reads
-		// root-level config and runs in a dedicated non-Turbo CI step.
+		// The workflow test files below are the intentional exceptions: they read
+		// root-level config and run in a dedicated non-Turbo CI step.
 		files: ["**/__tests__/**/*.test.ts", "**/__tests__/**/*.spec.ts"],
-		ignores: ["**/services/__tests__/pr-review-state-workflow.test.ts"],
+		ignores: [
+			"**/services/__tests__/pr-review-state-workflow.test.ts",
+			"**/services/__tests__/stale-pr-clock-workflow.test.ts",
+			"**/services/__tests__/fork-review-followup-workflow.test.ts",
+			"**/services/__tests__/workflow-self-listen.test.ts",
+		],
 		rules: {
 			"no-restricted-syntax": [
 				"error",

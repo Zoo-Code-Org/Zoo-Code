@@ -140,6 +140,7 @@
 	},
 	"selectMode": "Select mode for interaction",
 	"selectApiConfig": "Select API configuration",
+	"selectModel": "Select model",
 	"lockApiConfigAcrossModes": "Lock API configuration across all modes in this workspace",
 	"unlockApiConfigAcrossModes": "API configuration is locked across all modes in this workspace (click to unlock)",
 	"enhancePrompt": "Enhance prompt with additional context",
@@ -150,6 +151,14 @@
 		"description": "Specialized personas that tailor Zoo's behavior.",
 		"searchPlaceholder": "Search modes...",
 		"noResults": "No results found"
+	},
+	"modelSelector": {
+		"title": "Models",
+		"settings": "Model Settings",
+		"description": "Choose the model used for this API configuration.",
+		"searchPlaceholder": "Search models...",
+		"unsupportedTooltip": "This provider's model is configured in Settings",
+		"loading": "Loading models..."
 	},
 	"enhancePromptDescription": "The 'Enhance Prompt' button helps improve your prompt by providing additional context, clarification, or rephrasing. Try typing a prompt in here and clicking the button again to see how it works.",
 	"addImages": "Add images to message",
@@ -362,10 +371,10 @@
 		"title": "Zoo Code {{version}} Released",
 		"support": "Please support Zoo Code by starring us on <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "What is new in Zoo Code v3.88.0",
-			"highlight1": "✨ Provider and model support: Use Grok Build and improved custom-model support. This release also fixes Bedrock model limits and sends the Codex verbosity setting.",
-			"highlight2": "🧭 Task reliability: This release fixes cancellation handling, tool-turn continuation, and task-message saving.",
-			"highlight3": "⚡ Faster editing and chat: File writes no longer use artificial delays by default. Chat messages carry less file data, and code actions reach the last active chat."
+			"heading": "What is new in Zoo Code v3.90.0",
+			"highlight1": "✨ Providers and models: GitHub Copilot is now a provider: sign in and Zoo Code loads your Copilot models. IO Intelligence is a provider with its own API key. Gemini 4 Argon is on Gemini and Vertex. GPT-6 Luna is on OpenCode Go. Gemini 4 Argon and GPT-6 Luna are on Zoo Gateway as well.",
+			"highlight2": "🧭 Tool execution: Repeating the same tool call gets a warning, then Zoo Code stops that loop. Disabling attempt_completion no longer leaves a task unable to finish. Queued messages run the same command-protection checks as commands you send directly.",
+			"highlight3": "⚡ Reasoning and streaming: Anthropic adaptive thinking shows in chat, and thinking tokens are counted. The R1 toggle keeps reasoning from llama.cpp, Ollama, and LM Studio. Codex keeps encrypted reasoning with the summary you see. VS Code language-model streams use guarded recovery when a stream fails."
 		},
 		"cloudAgents": {
 			"heading": "New in the Cloud:",

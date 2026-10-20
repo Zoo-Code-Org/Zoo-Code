@@ -411,6 +411,12 @@
 		"getOpencodeGoApiKey": "Получить ключ API Opencode Go",
 		"kenariApiKey": "Ключ API Kenari",
 		"getKenariApiKey": "Получить ключ API Kenari",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "API-ключ IO Intelligence",
+			"getApiKey": "Получить API-ключ IO Intelligence",
+			"model": "Модель"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Ключ API NanoGPT",
@@ -845,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Сворачивать вывод команд по умолчанию",
+			"description": "Вывод команд, включая встроенный терминал, сначала свёрнут. При необходимости разверните его вручную. Способ выполнения команд не меняется."
+		},
 		"basic": {
 			"label": "Настройки терминала: Основные",
 			"description": "Основные настройки терминала"
