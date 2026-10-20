@@ -1074,26 +1074,32 @@ describe("AwsBedrockHandler", () => {
 			expect(model.maxTokens).toBe(8192)
 		})
 
-		it("should apply inference profile prefixes for Claude Haiku 5.5", () => {
-			// The user-verified invocation path: regional (us.) and global prefixes
+		it.each([
+			{
+				label: "regional (us.)",
+				option: { awsUseCrossRegionInference: true },
+				expectedId: "us.anthropic.claude-haiku-5-5",
+			},
+			{
+				label: "global",
+				option: { awsUseGlobalInference: true },
+				expectedId: "global.anthropic.claude-haiku-5-5",
+			},
+		])("should apply the $label inference profile prefix for Claude Haiku 5.5", ({ option, expectedId }) => {
+			// The user-verified invocation path: regional and global prefixes
 			// must keep the known catalog entry's prompt-cache capability.
-			for (const [option, expectedId] of [
-				[{ awsUseCrossRegionInference: true }, "us.anthropic.claude-haiku-5-5"],
-				[{ awsUseGlobalInference: true }, "global.anthropic.claude-haiku-5-5"],
-			] as const) {
-				const handler = new AwsBedrockHandler({
-					apiModelId: "anthropic.claude-haiku-5-5",
-					awsAccessKey: "",
-					awsSecretKey: "",
-					awsRegion: "us-east-1",
-					...option,
-				})
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-haiku-5-5",
+				awsAccessKey: "",
+				awsSecretKey: "",
+				awsRegion: "us-east-1",
+				...option,
+			})
 
-				const model = handler.getModel()
-				expect(model.id).toBe(expectedId)
-				expect(model.info.supportsPromptCache).toBe(true)
-				expect(model.info.minTokensPerCachePoint).toBe(512)
-			}
+			const model = handler.getModel()
+			expect(model.id).toBe(expectedId)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.minTokensPerCachePoint).toBe(512)
 		})
 
 		it("should resolve a stored us.-prefixed Claude Haiku 5.5 id to catalog info", () => {
@@ -1107,19 +1113,6 @@ describe("AwsBedrockHandler", () => {
 			const model = handler.getModel()
 			expect(model.info.supportsPromptCache).toBe(true)
 			expect(model.info.inputPrice).toBe(0.1)
-		})
-
-		it("should apply global inference prefix for Claude Haiku 5.5 when awsUseGlobalInference is true", () => {
-			const handler = new AwsBedrockHandler({
-				apiModelId: "anthropic.claude-haiku-5-5",
-				awsAccessKey: "",
-				awsSecretKey: "",
-				awsRegion: "us-east-1",
-				awsUseGlobalInference: true,
-			})
-
-			const model = handler.getModel()
-			expect(model.id).toBe("global.anthropic.claude-haiku-5-5")
 		})
 	})
 
@@ -1879,6 +1872,34 @@ describe("AwsBedrockHandler", () => {
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
 
+		it("should send adaptive thinking and omit temperature for Claude Haiku 5.5 when reasoning is enabled", async () => {
+			// Haiku 5.5 shares the Sonnet 5 / Opus 5 adaptive-thinking contract:
+			// budget_tokens causes a 400, so thinking.type must be "adaptive".
+			// effort and display are handler-internal defaults, not part of this
+			// scenario, so only the thinking type is pinned here.
+			const haiku55Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-haiku-5-5",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+			})
+
+			const generator = haiku55Handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+
+			expect(commandArg.additionalModelRequestFields).toEqual(
+				expect.objectContaining({
+					thinking: expect.objectContaining({ type: "adaptive" }),
+				}),
+			)
+			// Haiku 5.5 rejects sampling parameters: temperature must be omitted.
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
 		it("should omit thinking and temperature for Claude Opus 4.8 when reasoning is disabled", async () => {
 			const provider = new AwsBedrockHandler({
 				apiModelId: "anthropic.claude-opus-4-8",
@@ -2001,6 +2022,28 @@ describe("AwsBedrockHandler", () => {
 			const commandArg = mockConverseCommand.mock.calls[0][0] as any
 
 			// 4.8 must NOT receive temperature in the non-stream inferenceConfig.
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("completePrompt should omit temperature for Claude Haiku 5.5 (non-stream path)", async () => {
+			// Regression guard for the non-stream path: completePrompt must guard
+			// temperature the same way createMessage does, otherwise adaptive-thinking
+			// models like Haiku 5.5 return a 400 from Bedrock.
+			const mockConverseCommand = vi.mocked(ConverseCommand)
+
+			const haiku55Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-haiku-5-5",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			await haiku55Handler.completePrompt("Test prompt")
+
+			expect(mockConverseCommand).toHaveBeenCalled()
+			const commandArg = mockConverseCommand.mock.calls[0][0]
+
+			// Haiku 5.5 must NOT receive temperature in the non-stream inferenceConfig.
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
 

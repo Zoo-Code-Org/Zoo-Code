@@ -292,7 +292,8 @@ export const bedrockModels = {
 		// Standard pricing (prompts of 100,000 tokens or fewer) from Anthropic's
 		// pricing page, which lists the same Claude list prices billed on Bedrock:
 		// https://platform.claude.com/docs/en/about-claude/pricing
-		// Prompts over 100,000 tokens bill at tiered long-context rates.
+		// These fields price the standard tier only. This entry does not model
+		// the tiered long-context rates that prompts over 100,000 tokens bill at.
 		inputPrice: 0.1, // $0.10 per million input tokens
 		outputPrice: 0.5, // $0.50 per million output tokens
 		cacheWritesPrice: 0.125, // $0.125 per million tokens (5m cache writes)
@@ -713,6 +714,10 @@ export const BEDROCK_1M_CONTEXT_MODEL_IDS = [
 export const BEDROCK_THINKING_DISABLE_MODEL_IDS = [
 	"anthropic.claude-sonnet-5",
 	"anthropic.claude-opus-5",
+	// Unlike adaptive-only Opus 5.5, Haiku 5.5 accepts an explicit
+	// `thinking: { type: "disabled" }` and turns its default adaptive thinking
+	// off. AWS caps effort at "high" while thinking is disabled.
+	// https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html
 	"anthropic.claude-haiku-5-5",
 ] as const
 
