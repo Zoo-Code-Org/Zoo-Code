@@ -261,9 +261,14 @@ describe("OpenRouterHandler", () => {
 			// Mock OpenAI chat.completions.create
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
 
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const systemPrompt = "test system prompt"
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "test message" }]
@@ -320,9 +325,14 @@ describe("OpenRouterHandler", () => {
 			])
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{ role: "user", content: "message 1" },
@@ -355,9 +365,14 @@ describe("OpenRouterHandler", () => {
 			const mockStream = asyncStreamFrom([{ error: { message: "API Error", code: 500 } }])
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow("OpenRouter API Error 500: API Error")
@@ -377,9 +392,14 @@ describe("OpenRouterHandler", () => {
 		it("captures telemetry when createMessage throws an exception", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const mockCreate = vitest.fn().mockRejectedValue(new Error("Connection failed"))
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow()
@@ -396,13 +416,17 @@ describe("OpenRouterHandler", () => {
 
 		it("passes SDK exceptions with status 429 to telemetry (filtering happens in PostHogTelemetryClient)", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
-			const error = new Error("Rate limit exceeded: free-models-per-day") as any
-			error.status = 429
+			const error = Object.assign(new Error("Rate limit exceeded: free-models-per-day"), { status: 429 })
 
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow("Rate limit exceeded")
@@ -421,9 +445,14 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const error = new Error("429 Rate limit exceeded: free-models-per-day")
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow("429 Rate limit exceeded")
@@ -442,9 +471,14 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const error = new Error("Request failed due to rate limit")
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow("rate limit")
@@ -464,9 +498,14 @@ describe("OpenRouterHandler", () => {
 			const mockStream = asyncStreamFrom([{ error: { message: "Rate limit exceeded", code: 429 } }])
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow("OpenRouter API Error 429: Rate limit exceeded")
@@ -521,9 +560,14 @@ describe("OpenRouterHandler", () => {
 			])
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("test", [])
 			const parserScope = NativeToolCallParser.createScope()
@@ -707,7 +751,11 @@ describe("OpenRouterHandler", () => {
 			)
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
 
@@ -726,7 +774,11 @@ describe("OpenRouterHandler", () => {
 			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			// The constructor loads models in the background; the pre-aborted path must fail
 			// fast without starting a second discovery lookup.
@@ -754,7 +806,11 @@ describe("OpenRouterHandler", () => {
 			const mockCreate = vitest.fn()
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			// Model discovery is deferred: capture the resolver and settle it only at the end of
 			// the test, so the abort deterministically lands while the lookup is still pending.
@@ -817,7 +873,11 @@ describe("OpenRouterHandler", () => {
 					})()
 				})
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
 			const generator = handler.createMessage("test", [{ role: "user" as const, content: "hi" }], metadata)
@@ -864,7 +924,11 @@ describe("OpenRouterHandler", () => {
 				})
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("test", [{ role: "user" as const, content: "hi" }])
 
@@ -906,7 +970,11 @@ describe("OpenRouterHandler", () => {
 				})
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
 			const generator = handler.createMessage("test", [{ role: "user" as const, content: "hi" }], metadata)
@@ -930,7 +998,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const controller = new AbortController()
 			const addSpy = vi.spyOn(controller.signal, "addEventListener")
@@ -960,7 +1032,11 @@ describe("OpenRouterHandler", () => {
 			const mockCreate = vitest.fn()
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			// Request 1: a Gemini stream with reasoning_details populates the handler's
 			// accumulator when the stream completes.
@@ -997,7 +1073,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
 			await collectStream(stream)
@@ -1020,7 +1100,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
 			await collectStream(stream)
@@ -1043,7 +1127,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
 			await collectStream(stream)
@@ -1065,7 +1153,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			// The constructor already consumed the default model-cache mock; serve a Gemini
 			// entry that advertises reasoning-budget support to fetchModel so getModelParams
@@ -1099,7 +1191,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
 			await collectStream(stream)
@@ -1124,7 +1220,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const stream = handler.createMessage("system prompt", [{ role: "user" as const, content: "hi" }])
 			await collectStream(stream)
@@ -1146,7 +1246,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const stream = handler.createMessage("system prompt", [{ role: "user" as const, content: "hi" }])
 			await collectStream(stream)
@@ -1168,7 +1272,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
 			await collectStream(stream)
@@ -1195,7 +1303,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
 			await collectStream(stream)
@@ -1211,7 +1323,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
 			await collectStream(stream)
@@ -1232,7 +1348,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			// reasoning_details is an OpenRouter extension field round-tripped on assistant
 			// messages; the Anthropic SDK types do not include it, hence the structural cast.
@@ -1276,7 +1396,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const assistantMessage = {
 				role: "assistant" as const,
@@ -1315,7 +1439,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const assistantMessage = {
 				role: "assistant" as const,
@@ -1350,7 +1478,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const assistantMessage = {
 				role: "assistant" as const,
@@ -1440,7 +1572,11 @@ describe("OpenRouterHandler", () => {
 			)
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const chunks = await collectStream(
 				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
@@ -1468,7 +1604,11 @@ describe("OpenRouterHandler", () => {
 			)
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const chunks = await collectStream(
 				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
@@ -1508,7 +1648,11 @@ describe("OpenRouterHandler", () => {
 			)
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await collectStream(handler.createMessage("system", [{ role: "user" as const, content: "hi" }]))
 
@@ -1549,7 +1693,11 @@ describe("OpenRouterHandler", () => {
 			)
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await collectStream(handler.createMessage("system", [{ role: "user" as const, content: "hi" }]))
 
@@ -1573,7 +1721,11 @@ describe("OpenRouterHandler", () => {
 			)
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await collectStream(handler.createMessage("system", [{ role: "user" as const, content: "hi" }]))
 
@@ -1601,7 +1753,11 @@ describe("OpenRouterHandler", () => {
 			)
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const chunks = await collectStream(
 				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
@@ -1628,7 +1784,11 @@ describe("OpenRouterHandler", () => {
 			)
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const chunks = await collectStream(
 				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
@@ -1651,7 +1811,11 @@ describe("OpenRouterHandler", () => {
 			)
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const chunks = await collectStream(
 				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
@@ -1670,7 +1834,11 @@ describe("OpenRouterHandler", () => {
 			)
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const chunks = await collectStream(
 				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
@@ -1708,7 +1876,11 @@ describe("OpenRouterHandler", () => {
 				})
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
 			const generator = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], metadata)
@@ -1736,7 +1908,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const stream = handler.createMessage("system", [
 				{
@@ -1768,7 +1944,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const stream = handler.createMessage("system prompt", [
 				{ role: "assistant" as const, content: "earlier reply" },
@@ -1793,7 +1973,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const stream = handler.createMessage("sys-k1", [{ role: "user" as const, content: "hello" }])
 			await collectStream(stream)
@@ -1822,7 +2006,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			// No reasoning_details at all: gemini sanitization would drop this tool call, so a
 			// surviving tool call proves the sanitization path was skipped.
@@ -1855,7 +2043,11 @@ describe("OpenRouterHandler", () => {
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			// The first assistant mixes a text detail with an encrypted one; the second carries
 			// only encrypted details so the every()/==/-!== variants each diverge somewhere.
@@ -1926,7 +2118,11 @@ describe("OpenRouterHandler", () => {
 			)
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const chunks = await collectStream(
 				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
@@ -1969,7 +2165,11 @@ describe("OpenRouterHandler", () => {
 			)
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const chunks = await collectStream(
 				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
@@ -2013,7 +2213,11 @@ describe("OpenRouterHandler", () => {
 			)
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const chunks = await collectStream(
 				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
@@ -2036,7 +2240,11 @@ describe("OpenRouterHandler", () => {
 			)
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const chunks = await collectStream(
 				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
@@ -2061,7 +2269,11 @@ describe("OpenRouterHandler", () => {
 			)
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const chunks = await collectStream(
 				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
@@ -2080,7 +2292,11 @@ describe("OpenRouterHandler", () => {
 			)
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const chunks = await collectStream(
 				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
@@ -2099,7 +2315,11 @@ describe("OpenRouterHandler", () => {
 			)
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const chunks = await collectStream(
 				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
@@ -2118,7 +2338,11 @@ describe("OpenRouterHandler", () => {
 			})
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
 
@@ -2137,7 +2361,11 @@ describe("OpenRouterHandler", () => {
 			})
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
 
@@ -2163,7 +2391,11 @@ describe("OpenRouterHandler", () => {
 			})
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
 
@@ -2187,7 +2419,11 @@ describe("OpenRouterHandler", () => {
 			})
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const generator = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
 
@@ -2209,9 +2445,14 @@ describe("OpenRouterHandler", () => {
 			const mockResponse = { choices: [{ message: { content: "test completion" } }] }
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockResponse)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const result = await handler.completePrompt("test prompt")
 
@@ -2239,9 +2480,14 @@ describe("OpenRouterHandler", () => {
 			}
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockError)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("OpenRouter API Error 500: API Error")
 
@@ -2262,9 +2508,14 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const error = new Error("Unexpected error")
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("Unexpected error")
 
@@ -2281,12 +2532,16 @@ describe("OpenRouterHandler", () => {
 
 		it("passes SDK exceptions with status 429 to telemetry (filtering happens in PostHogTelemetryClient)", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
-			const error = new Error("Rate limit exceeded: free-models-per-day") as any
-			error.status = 429
+			const error = Object.assign(new Error("Rate limit exceeded: free-models-per-day"), { status: 429 })
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("Rate limit exceeded")
 
@@ -2305,9 +2560,14 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const error = new Error("429 Rate limit exceeded: free-models-per-day")
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("429 Rate limit exceeded")
 
@@ -2326,9 +2586,14 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const error = new Error("Request failed due to rate limit")
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("rate limit")
 
@@ -2353,9 +2618,14 @@ describe("OpenRouterHandler", () => {
 			}
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockError)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			// Typed per-instance injection: a prototype mutation would outlive the test
+			// and hand later tests a stale mockCreate.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow(
 				"OpenRouter API Error 429: Rate limit exceeded",
@@ -2378,7 +2648,11 @@ describe("OpenRouterHandler", () => {
 			const controller = new AbortController()
 			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
 			expect(mockCreate).toHaveBeenCalledWith(
@@ -2391,7 +2665,11 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
 			expect(mockCreate).toHaveBeenCalledWith(
@@ -2404,7 +2682,11 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const result = await handler.completePrompt("test prompt")
 			expect(result).toBe("response")
@@ -2420,7 +2702,11 @@ describe("OpenRouterHandler", () => {
 			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await handler.completePrompt("test prompt")
 			const options = mockCreate.mock.calls[0][1] as { headers?: Record<string, string> }
@@ -2432,7 +2718,11 @@ describe("OpenRouterHandler", () => {
 			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await handler.completePrompt("test prompt", { timeoutMs: 0 })
 			const options = mockCreate.mock.calls[0][1] as { signal?: AbortSignal; timeout?: number }
@@ -2445,7 +2735,11 @@ describe("OpenRouterHandler", () => {
 			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			// The constructor's background discovery consumed the default mock; make the next
 			// lookup (completePrompt's own fetchModel) reject with a non-abort failure.
@@ -2456,21 +2750,28 @@ describe("OpenRouterHandler", () => {
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
-		it("maps an abort-named model-discovery failure to a canonical AbortError in completePrompt", async () => {
+		it("propagates an abort-named model-discovery failure unchanged in completePrompt", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			// The constructor's background discovery consumed the default mock; make the next
 			// lookup (completePrompt's own fetchModel) reject with an abort-named failure.
 			const { getModels } = await import("../fetchers/modelCache")
 			vitest.mocked(getModels).mockRejectedValueOnce(Object.assign(new Error("aborted"), { name: "AbortError" }))
 
+			// An abort-shaped discovery failure with no caller cancellation is a
+			// discovery failure: it keeps its original identity instead of being
+			// reported as a cancellation.
 			await expect(handler.completePrompt("test prompt")).rejects.toMatchObject({
 				name: "AbortError",
-				message: "The OpenRouter request was aborted",
+				message: "aborted",
 			})
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
@@ -2494,7 +2795,11 @@ describe("OpenRouterHandler", () => {
 			})
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
 			await createStarted
@@ -2511,7 +2816,11 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const controller = new AbortController()
 			controller.abort()
@@ -2531,9 +2840,17 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const controller = new AbortController()
 
+			// Wait for create() to actually start before aborting: aborting during
+			// model lookup would exercise the discovery race instead of the
+			// in-flight SDK catch path this test names.
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
 			const mockCreate = vitest
 				.fn()
 				.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+					notifyCreateStarted()
 					// Emulate the OpenAI SDK: the in-flight request rejects when the signal aborts.
 					await new Promise<void>((resolve) => {
 						if (options?.signal?.aborted) {
@@ -2547,15 +2864,22 @@ describe("OpenRouterHandler", () => {
 					throw abortError
 				})
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			await createStarted
 			controller.abort()
 
 			await expect(promise).rejects.toMatchObject({
 				name: "AbortError",
 				message: "The OpenRouter request was aborted",
 			})
+			// The in-flight catch path must have run: create() was entered exactly once.
+			expect(mockCreate).toHaveBeenCalledTimes(1)
 		})
 		it("rejects with AbortError when only a timeout is provided and it elapses", async () => {
 			// Non-Anthropic model: also exercises the no-beta-header branch of requestOptions.
@@ -2582,7 +2906,11 @@ describe("OpenRouterHandler", () => {
 				})
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			await expect(handler.completePrompt("test prompt", { timeoutMs: 50 })).rejects.toMatchObject({
 				name: "AbortError",
@@ -2619,7 +2947,11 @@ describe("OpenRouterHandler", () => {
 				})
 			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
-			client.chat = { completions: { create: mockCreate } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
 
 			const promise = handler.completePrompt("test prompt", {
 				abortSignal: controller.signal,

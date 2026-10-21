@@ -42,7 +42,7 @@ import type {
 	SingleCompletionHandler,
 } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
-import { createAbortError, isRequestAborted, mergeAbortSignalAndTimeout, rejectOnAbort } from "./utils/abort-signal"
+import { createAbortError, mergeAbortSignalAndTimeout, rejectOnAbort } from "./utils/abort-signal"
 import { generateImageWithProvider, ImageGenerationResult } from "./utils/image-generation"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 
@@ -697,7 +697,11 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 				? await rejectOnAbort(this.fetchModel(), requestAbortSignal, this.providerName)
 				: await this.fetchModel()
 		} catch (error) {
-			if (isRequestAborted(error, requestAbortSignal)) {
+			// Only our own merged signal marks this as a cancellation. An
+			// abort-shaped failure from the model cache's internal timeout is a
+			// discovery failure, not a caller cancellation, so it propagates with
+			// its original identity.
+			if (requestAbortSignal?.aborted) {
 				throw createAbortError(this.providerName)
 			}
 			throw error
