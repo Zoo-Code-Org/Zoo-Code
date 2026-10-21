@@ -4009,6 +4009,9 @@ describe("VsCodeLmHandler", () => {
 
 			expect(result).toBe("Completed text")
 			const tokenSource = tokenSourceInstance()
+			// The completion must send the bridged token, not a fresh one: pin the
+			// same third argument createMessage already asserts.
+			expect(mockLanguageModelChat.sendRequest.mock.calls[0][2]).toBe(tokenSource.token)
 			expect(tokenSource.cancel).not.toHaveBeenCalled()
 			expect(tokenSource.dispose).toHaveBeenCalled()
 		})
