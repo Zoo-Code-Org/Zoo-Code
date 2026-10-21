@@ -1585,7 +1585,9 @@ describe("writeToFileTool", () => {
 			// path. Writing a different path through that session would update and save
 			// the old document while asking approval for the new one, so the call is
 			// rejected before any cleanup which could reset the retained session.
-			mockCline.diffViewProvider.isEditingDifferentPath = vi.fn((_relPath: string) => _relPath !== "test/path.txt")
+			mockCline.diffViewProvider.isEditingDifferentPath = vi.fn(
+				(_relPath: string) => _relPath !== "test/path.txt",
+			)
 			mockCline.diffViewProvider.editingRelPath = "test/path.txt"
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
