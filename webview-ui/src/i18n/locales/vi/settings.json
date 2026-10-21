@@ -737,7 +737,7 @@
 		},
 		"perWrite": {
 			"label": "Điểm kiểm tra sau mỗi lần ghi file",
-			"description": "Ghi ảnh chụp điểm kiểm tra sau mỗi thao tác ghi thành công; một vá nhiều tệp chỉ tạo một điểm kiểm tra."
+			"description": "Ghi ảnh chụp điểm kiểm tra sau mỗi thao tác ghi thành công; một bản vá nhiều tệp chỉ tạo một điểm kiểm tra."
 		}
 	},
 	"notifications": {
