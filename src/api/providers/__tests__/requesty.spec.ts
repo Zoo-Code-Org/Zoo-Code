@@ -908,6 +908,9 @@ describe("RequestyHandler", () => {
 
 			await expect(handler.completePrompt("test prompt", { timeoutMs: 50 })).rejects.toMatchObject({
 				name: "AbortError",
+				// Pin the complete contract: the timeout must be normalized to the
+				// provider abort message, not merely to a generic AbortError name.
+				message: "The Requesty request was aborted",
 			})
 		})
 
