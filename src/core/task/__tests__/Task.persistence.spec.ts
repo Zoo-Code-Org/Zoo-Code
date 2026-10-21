@@ -2509,10 +2509,16 @@ describe("Task persistence", () => {
 			)
 		}
 
+		/** The interrupted resume prepares through the conditional write. The first call lands. */
+		function prepareLands(): void {
+			mockRestoreApiMessagesIfUnchanged.mockResolvedValueOnce({ outcome: "restored" })
+		}
+
 		it("stops before activation when the prepared api history fails to persist", async () => {
 			mockReadTaskMessages.mockResolvedValue([])
 			mockReadApiMessages.mockResolvedValue([{ role: "user", content: "Continue" }])
-			mockSaveApiMessages.mockRejectedValueOnce(new Error("disk full"))
+			mockRestoreApiMessagesIfUnchanged.mockRejectedValueOnce(new Error("disk full"))
+			vi.spyOn(console, "error").mockImplementation(() => {})
 
 			const task = makeResumeTask()
 			const loop = vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
@@ -2523,8 +2529,9 @@ describe("Task persistence", () => {
 
 			expect(mockProvider.resumeInterruptedTask).not.toHaveBeenCalled()
 			expect(loop).not.toHaveBeenCalled()
-			// Only the failed preparation write ran. The disk file never changed.
-			expect(mockSaveApiMessages).toHaveBeenCalledTimes(1)
+			// Only the failed conditional preparation write ran.
+			expect(mockSaveApiMessages).not.toHaveBeenCalled()
+			expect(mockRestoreApiMessagesIfUnchanged).toHaveBeenCalledTimes(1)
 			// The durable pre-resume copy exists and stays, because the
 			// safeWriteJson rollback that restored the original on disk may
 			// itself have failed.
@@ -2547,6 +2554,7 @@ describe("Task persistence", () => {
 			mockProvider.resumeInterruptedTask = vi
 				.fn()
 				.mockRejectedValue(new LifecycleTransitionError("parent linkage changed"))
+			prepareLands()
 			runGateInsideRestore()
 
 			const task = makeResumeTask()
@@ -2557,12 +2565,16 @@ describe("Task persistence", () => {
 			expect(mockProvider.resumeInterruptedTask).toHaveBeenCalledTimes(1)
 			expect(loop).not.toHaveBeenCalled()
 			// The preparation slice is the only content that reached the disk layer.
-			const savedMessages = vi.mocked(mockSaveApiMessages).mock.calls.map((call) => call[0].messages)
-			expect(savedMessages).toEqual([[]])
+			expect(mockSaveApiMessages).not.toHaveBeenCalled()
+			const prepareOptions = vi.mocked(mockRestoreApiMessagesIfUnchanged).mock.calls[0][0]
+			expect(prepareOptions.expected).toEqual([
+				{ role: "user", content: "Continue", messageId: expect.any(String) },
+			])
+			expect(prepareOptions.replacement).toEqual([])
 			// The restore compared against the prepared slice and carried the
 			// authoritative history as its replacement.
-			expect(mockRestoreApiMessagesIfUnchanged).toHaveBeenCalledTimes(1)
-			const restoreOptions = vi.mocked(mockRestoreApiMessagesIfUnchanged).mock.calls[0][0]
+			expect(mockRestoreApiMessagesIfUnchanged).toHaveBeenCalledTimes(2)
+			const restoreOptions = vi.mocked(mockRestoreApiMessagesIfUnchanged).mock.calls[1][0]
 			expect(restoreOptions.expected).toEqual([])
 			expect(restoreOptions.replacement).toEqual([
 				{ role: "user", content: "Continue", messageId: expect.any(String) },
@@ -2577,7 +2589,7 @@ describe("Task persistence", () => {
 				.mockResolvedValueOnce([{ role: "user", content: "Continue" }])
 				.mockResolvedValueOnce([{ role: "user", content: "Continue" }])
 			// The preparation write lands. The locked restore write then fails.
-			mockSaveApiMessages.mockResolvedValueOnce(undefined)
+			prepareLands()
 			mockRestoreApiMessagesIfUnchanged.mockRejectedValueOnce(new Error("restore disk full"))
 			mockProvider.resumeInterruptedTask = vi
 				.fn()
@@ -2597,8 +2609,7 @@ describe("Task persistence", () => {
 			// through the Task save helper.
 			expect(retry).not.toHaveBeenCalled()
 			// The prepared slice is the last content that reached the disk layer.
-			const savedMessages = vi.mocked(mockSaveApiMessages).mock.calls.map((call) => call[0].messages)
-			expect(savedMessages).toEqual([[]])
+			expect(mockSaveApiMessages).not.toHaveBeenCalled()
 			const recoveryCopyPath = await mockCreateResumeHistoryRecoveryCopy.mock.results[0].value
 			// The partial-failure log names the durable recovery copy, so the
 			// original history stays identifiable on disk after a restart.
@@ -2619,6 +2630,7 @@ describe("Task persistence", () => {
 			mockProvider.taskHistoryStore.readValidatedDiskStatus = vi
 				.fn()
 				.mockRejectedValue(new LifecycleTransitionError("no valid disk record"))
+			prepareLands()
 			runGateInsideRestore()
 			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 
@@ -2626,10 +2638,10 @@ describe("Task persistence", () => {
 
 			await expect(task["resumeTaskFromHistory"]()).rejects.toThrow("parent linkage changed")
 
-			expect(mockRestoreApiMessagesIfUnchanged).toHaveBeenCalledTimes(1)
+			expect(mockRestoreApiMessagesIfUnchanged).toHaveBeenCalledTimes(2)
 			// The gate rejected inside the lock scope, so the restore never
 			// compared or wrote, and the recovery copy stays on disk.
-			expect(mockSaveApiMessages).toHaveBeenCalledTimes(1)
+			expect(mockSaveApiMessages).not.toHaveBeenCalled()
 			expect(mockRemoveResumeHistoryRecoveryCopy).not.toHaveBeenCalled()
 			expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("failed closed"), expect.anything())
 			consoleError.mockRestore()
@@ -2644,6 +2656,7 @@ describe("Task persistence", () => {
 				.fn()
 				.mockRejectedValue(new LifecycleTransitionError("parent linkage changed"))
 			mockProvider.taskHistoryStore.readValidatedDiskStatus = vi.fn().mockResolvedValue("active")
+			prepareLands()
 			runGateInsideRestore()
 			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 
@@ -2670,6 +2683,7 @@ describe("Task persistence", () => {
 			mockProvider.resumeInterruptedTask = vi
 				.fn()
 				.mockRejectedValue(new LifecycleTransitionError("parent linkage changed"))
+			prepareLands()
 			mockRestoreApiMessagesIfUnchanged.mockResolvedValueOnce({ outcome: "foreign_write" })
 			const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {})
 
@@ -2677,7 +2691,7 @@ describe("Task persistence", () => {
 
 			await expect(task["resumeTaskFromHistory"]()).rejects.toThrow("parent linkage changed")
 
-			expect(mockRestoreApiMessagesIfUnchanged).toHaveBeenCalledTimes(1)
+			expect(mockRestoreApiMessagesIfUnchanged).toHaveBeenCalledTimes(2)
 			// The newer disk content is never clobbered, and the original stays
 			// recoverable in the copy.
 			expect(mockRemoveResumeHistoryRecoveryCopy).not.toHaveBeenCalled()
@@ -2699,7 +2713,8 @@ describe("Task persistence", () => {
 
 			expect(mockProvider.resumeInterruptedTask).toHaveBeenCalledTimes(1)
 			expect(loop).toHaveBeenCalledTimes(1)
-			expect(mockRestoreApiMessagesIfUnchanged).not.toHaveBeenCalled()
+			// Only the conditional preparation write ran. No restore ran.
+			expect(mockRestoreApiMessagesIfUnchanged).toHaveBeenCalledTimes(1)
 			expect(mockRemoveResumeHistoryRecoveryCopy).toHaveBeenCalledTimes(1)
 			// The copy is removed only after the activation commit landed.
 			expect(mockRemoveResumeHistoryRecoveryCopy.mock.invocationCallOrder[0]).toBeLessThan(

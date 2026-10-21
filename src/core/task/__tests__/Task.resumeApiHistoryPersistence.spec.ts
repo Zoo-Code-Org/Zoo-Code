@@ -127,6 +127,7 @@ vi.mock("../../condense", () => ({
 type TaskTestAccess = {
 	initiateTaskLoop: (userContent: unknown[]) => Promise<void>
 	retrySaveApiConversationHistory: () => Promise<boolean>
+	prepareInterruptedResumeHistory: (original: ApiMessage[], prepared: ApiMessage[]) => Promise<boolean>
 }
 
 function taskAccess(task: Task): TaskTestAccess {
@@ -453,9 +454,9 @@ describe("Task resume api-history persistence on real files", () => {
 		const { task, loop, resumeActivation } = prepareResumedTask(
 			makeChildRecord({ parentTaskId: undefined, rootTaskId: undefined }),
 		)
-		const realOverwrite = task.overwriteApiConversationHistory.bind(task)
-		vi.spyOn(task, "overwriteApiConversationHistory").mockImplementation(async (history, persist) => {
-			const result = await realOverwrite(history, persist)
+		const realPrepare = taskAccess(task).prepareInterruptedResumeHistory.bind(task)
+		vi.spyOn(taskAccess(task), "prepareInterruptedResumeHistory").mockImplementation(async (original, prepared) => {
+			const result = await realPrepare(original, prepared)
 			await task.abortTask(true)
 			return result
 		})
@@ -469,6 +470,81 @@ describe("Task resume api-history persistence on real files", () => {
 		const persistedRecord = await readPersistedRecord(storagePath, childId)
 		expect(persistedRecord.status).toBe("interrupted")
 		expect(await findRecoveryCopyName(taskDir)).toBeUndefined()
+	})
+
+	describe.each([
+		["standalone", true],
+		["linked child", false],
+	])("two accepted resumes of one interrupted %s record", (_name, isStandalone) => {
+		const standalone = () =>
+			isStandalone ? makeChildRecord({ parentTaskId: undefined, rootTaskId: undefined }) : makeChildRecord()
+
+		async function raceTwoResumes() {
+			if (!isStandalone) {
+				await provider.taskHistoryStore.upsert({
+					id: parentId,
+					number: 2,
+					ts: 1,
+					task: "Parent task",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					status: "delegated",
+					awaitingChildId: childId,
+					delegatedToId: childId,
+					childIds: [childId],
+				} as HistoryItem)
+			}
+			await provider.taskHistoryStore.upsert(standalone())
+			await seedTaskFiles(storagePath, childId, authoritativeApiHistory)
+			const first = prepareResumedTask(standalone())
+			const second = prepareResumedTask(standalone())
+			// Hold both attempts at the resume prompt, so both read the same
+			// original history before either one prepares.
+			let release!: () => void
+			const gate = new Promise<void>((resolve) => (release = resolve))
+			let waiting = 0
+			for (const { task } of [first, second]) {
+				vi.spyOn(task, "ask").mockImplementation(async () => {
+					if (++waiting === 2) {
+						release()
+					}
+					await gate
+					return { response: "yesButtonClicked" }
+				})
+			}
+			const results = await Promise.allSettled([
+				first.task["resumeTaskFromHistory"](),
+				second.task["resumeTaskFromHistory"](),
+			])
+			return { first, second, results }
+		}
+
+		it("lets only one attempt prepare and activate", async () => {
+			const { first, second, results } = await raceTwoResumes()
+
+			expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1)
+			const rejected = results.find((r) => r.status === "rejected") as PromiseRejectedResult
+			expect(String(rejected.reason)).toContain("Failed to persist the prepared API conversation history")
+			expect(first.loop.mock.calls.length + second.loop.mock.calls.length).toBe(1)
+			// Both tasks share the one provider spy.
+			expect(first.resumeActivation).toHaveBeenCalledTimes(1)
+		})
+
+		it("leaves the winner's prepared history on disk and never the loser's", async () => {
+			const { first, second, results } = await raceTwoResumes()
+
+			const winner = results[0].status === "fulfilled" ? first : second
+			const loser = winner === first ? second : first
+			expect(await readPersistedApiHistory(storagePath, childId)).toEqual(preparedApiHistory)
+			expect(winner.task.apiConversationHistory.map(({ role }) => role)).toEqual(
+				preparedApiHistory.map(({ role }) => role),
+			)
+			// The loser wrote nothing and holds the original history in memory.
+			expect(loser.task.apiConversationHistory.map(({ role }) => role)).toEqual(
+				authoritativeApiHistory.map(({ role }) => role),
+			)
+		})
 	})
 
 	it("reports a partial failure and proves the original bytes in the recovery copy when the restore write fails", async () => {

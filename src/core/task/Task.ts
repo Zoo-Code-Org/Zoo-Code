@@ -3409,7 +3409,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				messages: existingApiConversationHistory,
 			})
 
-			const persisted = await this.overwriteApiConversationHistory(modifiedApiConversationHistory)
+			let persisted: boolean
+			if (this.initialStatus === "interrupted") {
+				// Compare-and-set under the API-history file lock. Only one of two
+				// accepted resumes can replace the original history, so a rejected
+				// attempt never leaves its own prepared history on disk.
+				persisted = await this.prepareInterruptedResumeHistory(
+					existingApiConversationHistory,
+					modifiedApiConversationHistory,
+				)
+			} else {
+				persisted = await this.overwriteApiConversationHistory(modifiedApiConversationHistory)
+			}
 			if (!persisted) {
 				// The failed write leaves the disk file with the authoritative
 				// history or its safeWriteJson backup. Keep the recovery copy so
@@ -3496,6 +3507,34 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 			throw error
 		}
+	}
+
+	private async prepareInterruptedResumeHistory(original: ApiMessage[], prepared: ApiMessage[]): Promise<boolean> {
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			return false
+		}
+		let result: ResumeHistoryRestoreResult
+		try {
+			result = await restoreApiMessagesIfUnchanged({
+				taskId: this.taskId,
+				globalStoragePath: this.globalStoragePath,
+				expected: original,
+				replacement: prepared,
+				verifyCanRestore: async () =>
+					(await provider.taskHistoryStore.readValidatedDiskStatus(this.taskId)) === "interrupted"
+						? "proceed"
+						: "abort",
+			})
+		} catch (error) {
+			console.error(`[Task#${this.taskId}] prepareInterruptedResumeHistory: write failed`, error)
+			return false
+		}
+		if (result.outcome !== "restored") {
+			return false
+		}
+		this.hydrateApiConversationHistory(prepared)
+		return true
 	}
 
 	/**
