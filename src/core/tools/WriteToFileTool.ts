@@ -249,9 +249,19 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 */
 	private async cleanupFailedPartialStream(task: Task): Promise<void> {
 		const reverted = await this.discardUnapprovedStreamBeforeReset(task)
-		await this.resetDiffViewAfterWrite(task)
+		// A failed rollback that still owns the placeholder must keep the session:
+		// reset() would forget that ownership and strand the empty file unowned, so it
+		// is skipped and the hazard reported instead - the same discipline execute()
+		// uses on its error path.
+		const strandedPlaceholder = !reverted && task.diffViewProvider.ownsPlaceholder
+		if (!strandedPlaceholder) {
+			await this.resetDiffViewAfterWrite(task)
+		}
 		if (!reverted) {
 			await this.reportRevertFailure(task)
+		}
+		if (strandedPlaceholder) {
+			await this.reportPlaceholderStranded(task)
 		}
 	}
 
@@ -285,12 +295,20 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		// to exist while the outcome is decided and reported.
 		const reverted = await this.discardUnapprovedStreamBeforeReset(task)
 		this.resetTaskPartialState(task)
-		await this.resetDiffViewAfterWrite(task)
+		// The same ownership guard as execute(): a rollback that could not remove the
+		// placeholder leaves it owned, and reset() would strand it unowned.
+		const strandedPlaceholder = !reverted && task.diffViewProvider.ownsPlaceholder
+		if (!strandedPlaceholder) {
+			await this.resetDiffViewAfterWrite(task)
+		}
 		if (!reverted) {
 			// Do not report a completed teardown: the editor may still show content this
 			// task never approved, and saving it would land a write the user never
 			// authorized. The user has to be able to tell that from the UI.
 			await this.reportRevertFailure(task)
+		}
+		if (strandedPlaceholder) {
+			await this.reportPlaceholderStranded(task)
 		}
 		if (!state.streamError) {
 			return false
@@ -337,6 +355,23 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// the call, and tear down the diff view an earlier streaming delta may have opened.
 			this.resetTaskPartialState(task)
 			await this.cleanupFailedPartialStream(task)
+			return
+		}
+
+		// A retained session belongs to ITS path: when a rollback could not complete,
+		// the provider keeps the dirty buffer and relPath so the user's content survives
+		// a retry. Writing a DIFFERENT path through that session would update and save
+		// the old document while asking approval for the new one, so the write is
+		// rejected before any cleanup path can reset the retained session.
+		if (task.diffViewProvider.isEditingDifferentPath(relPath)) {
+			task.consecutiveMistakeCount++
+			task.recordToolError("write_to_file")
+			const retainedPath = task.diffViewProvider.editingRelPath ?? "another file"
+			const retainedErrorMessage =
+				`Cannot write '${relPath}': an unfinished write to '${retainedPath}' must be resolved first. ` +
+				"Save or close that editor, then retry this write."
+			await task.say("error", retainedErrorMessage)
+			pushToolResult(formatResponse.toolError(retainedErrorMessage))
 			return
 		}
 

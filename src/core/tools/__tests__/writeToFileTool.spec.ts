@@ -166,6 +166,11 @@ describe("writeToFileTool", () => {
 			editType: undefined,
 			isEditing: false,
 			originalContent: "",
+			// A retained-session contract used by execute(): the double reports no
+			// retained session and mirrors the provider's path comparison.
+			isEditingDifferentPath: vi.fn((_relPath: string) => false),
+			editingRelPath: undefined as string | undefined,
+			ownsPlaceholder: false,
 			open: vi.fn().mockResolvedValue(undefined),
 			update: vi.fn().mockResolvedValue(undefined),
 			reset: vi.fn().mockResolvedValue(undefined),
@@ -1563,8 +1568,38 @@ describe("writeToFileTool", () => {
 				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
 				// Ownership survives: reset() did not run to forget it...
 				expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
-				// ...the rollback hazard and the stranded placeholder are both user-visible.
+				// ...the rollback hazard and the stranded placeholder are both user-visible:
+				// assert each report separately, so dropping one cannot hide behind the other.
 				expect(mockCline.say).toHaveBeenCalledWith("error", expect.stringContaining("placeholder"))
+				expect(mockCline.say).toHaveBeenCalledWith(
+					"error",
+					expect.stringContaining("could not be restored after the failed tool call"),
+				)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+
+		it("rejects a write for a different path while a session is retained", async () => {
+			// A refused rollback keeps isEditing + the dirty buffer for a retry of ITS
+			// path. Writing a different path through that session would update and save
+			// the old document while asking approval for the new one, so the call is
+			// rejected before any cleanup which could reset the retained session.
+			mockCline.diffViewProvider.isEditingDifferentPath = vi.fn((_relPath: string) => _relPath !== "test/path.txt")
+			mockCline.diffViewProvider.editingRelPath = "test/path.txt"
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				await executeWriteFileTool({ path: "other/path.txt" }, { fileExists: false })
+
+				expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+				expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+				expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+				expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
+				expect(mockCline.say).toHaveBeenCalledWith(
+					"error",
+					expect.stringContaining("unfinished write to 'test/path.txt' must be resolved first"),
+				)
 			} finally {
 				consoleErrorSpy.mockRestore()
 			}

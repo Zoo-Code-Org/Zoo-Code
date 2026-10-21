@@ -585,6 +585,29 @@ export class DiffViewProvider {
 	}
 
 	/**
+	 * Whether an active edit session belongs to a different path than the one a
+	 * call is about to write. A session is retained when its rollback could not
+	 * complete (a refused save keeps \`isEditing\` and the dirty buffer so the
+	 * user's content survives); a later write for ANOTHER path must not reuse
+	 * that session: it would update and save the old document while requesting
+	 * approval for the new path.
+	 */
+	isEditingDifferentPath(relPath: string): boolean {
+		if (!this.isEditing || this.relPath === undefined) {
+			return false
+		}
+		return this.relPath !== relPath
+	}
+
+	/**
+	 * The path of the retained edit session, when one is active. Used to tell the
+	 * caller which write must be resolved before another path can be written.
+	 */
+	get editingRelPath(): string | undefined {
+		return this.isEditing ? this.relPath : undefined
+	}
+
+	/**
 	 * Release the placeholder this edit owns when the approved write never committed:
 	 * saveChanges() threw before its commit point, so the file on disk is still the empty
 	 * placeholder open() created. Leaving it behind unowned would make a later attempt
@@ -703,6 +726,10 @@ export class DiffViewProvider {
 				// A refused save of the restored placeholder must leave the artifacts exactly
 				// as they are - owned, on disk - for the retry, so it bypasses the sweep below.
 				if (stopBeforeArtifacts) {
+					// The rollback stopped before the artifact sweep: the placeholder and the
+					// directories this edit created are still on disk and still owned, so
+					// restore the snapshot the retry's cleanup needs.
+					this.createdDirs = createdDirs
 					throw error
 				}
 				// Do NOT stop here: the placeholder and the created directories still have
