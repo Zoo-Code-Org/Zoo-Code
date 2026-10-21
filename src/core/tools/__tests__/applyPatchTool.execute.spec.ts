@@ -655,7 +655,10 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				expect.arrayContaining([expect.objectContaining({ path: "src/test.ts", operation: "update" })]),
 			)
 			expect(mockPushToolResult).not.toHaveBeenCalledWith("File saved successfully")
-			expect(mockHandleError).toHaveBeenCalledWith("apply patch", expect.anything())
+			expect(mockHandleError).toHaveBeenCalledWith(
+				"apply patch",
+				expect.objectContaining({ message: "tracker boom" }),
+			)
 			// The finally-block handoff still runs for the recorded write.
 			expect(mockTask.processQueuedMessages).toHaveBeenCalled()
 		})
@@ -701,7 +704,10 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			})
 
 			expect(mockedCheckpointSave).not.toHaveBeenCalled()
-			expect(mockHandleError).toHaveBeenCalledWith("apply patch", expect.anything())
+			expect(mockHandleError).toHaveBeenCalledWith(
+				"apply patch",
+				expect.objectContaining({ message: "tracker boom" }),
+			)
 			expect(mockTask.processQueuedMessages).toHaveBeenCalled()
 		})
 

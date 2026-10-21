@@ -298,6 +298,26 @@ describe("checkpointSave change-card emission (B3a)", () => {
 		])
 	})
 
+	it("waits on an in-flight initialization during failure-driven recovery instead of creating a second service", async () => {
+		// A failure disabled checkpoints while an earlier initialization is still
+		// running. Recovery must not create a competing service: it waits on the same
+		// initialization (bounded by checkpointTimeout) and leaves the flag set.
+		const { task } = makeTask({})
+		task.checkpointService = undefined
+		task.checkpointsDisabledByFailure = true
+		task.enableCheckpoints = false
+		task.checkpointServiceInitializing = true
+		task.checkpointTimeout = 0.01
+		vi.mocked(RepoPerTaskCheckpointService.create).mockClear()
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
+		).rejects.toThrow(/could not initialize the checkpoint service/)
+
+		expect(RepoPerTaskCheckpointService.create).not.toHaveBeenCalled()
+		expect(task.checkpointServiceInitializing).toBe(true)
+	})
+
 	it("does not reuse an uninitialized stored service during recovery", async () => {
 		// A stored service whose shadow-git init never completed must not be
 		// handed to saveCheckpoint by the recovery path: recovery must clear
