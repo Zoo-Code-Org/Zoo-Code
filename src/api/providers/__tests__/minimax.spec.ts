@@ -286,15 +286,18 @@ describe("MiniMaxHandler", () => {
 			})
 		})
 
-		it("should pass timeout when timeoutMs=0 (defined check)", async () => {
-			mockCreate.mockResolvedValueOnce({
-				content: [{ type: "text", text: "response" }],
-			})
-			await handler.completePrompt("test prompt", { timeoutMs: 0 })
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({ model: expect.any(String) }),
-				{ timeout: 0 }, // !== undefined check means 0 is passed through
-			)
+		it("should not forward an unusable timeoutMs", async () => {
+			// "No explicit timeout" must leave the option absent: timeout: 0 aborts
+			// immediately and negative/non-finite delays throw inside the SDK.
+			for (const timeoutMs of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+				mockCreate.mockClear()
+				mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
+				await handler.completePrompt("test prompt", { timeoutMs })
+				expect(mockCreate).toHaveBeenCalledWith(
+					expect.objectContaining({ model: expect.any(String) }),
+					undefined,
+				)
+			}
 		})
 
 		it("completePrompt should send the configured temperature, user message and stream flag", async () => {

@@ -3,6 +3,7 @@ import {
 	createAbortError,
 	isRequestAborted,
 	mergeAbortSignalAndTimeout,
+	hasUsableTimeout,
 	mergeAbortSignals,
 	rejectOnAbort,
 	resolveModelWithAbort,
@@ -511,5 +512,21 @@ describe("bridgeExternalAbortSignal", () => {
 		// signal stays live, proving the exact retained callback was detached.
 		controller.abort()
 		expect(signal?.aborted).toBe(false)
+	})
+})
+
+describe("hasUsableTimeout", () => {
+	it("accepts only finite positive values", () => {
+		expect(hasUsableTimeout(1)).toBe(true)
+		expect(hasUsableTimeout(50)).toBe(true)
+		expect(hasUsableTimeout(12.5)).toBe(true)
+	})
+
+	it("rejects values the SDK timeout option cannot take", () => {
+		expect(hasUsableTimeout(undefined)).toBe(false)
+		expect(hasUsableTimeout(0)).toBe(false)
+		expect(hasUsableTimeout(-5)).toBe(false)
+		expect(hasUsableTimeout(Number.NaN)).toBe(false)
+		expect(hasUsableTimeout(Number.POSITIVE_INFINITY)).toBe(false)
 	})
 })

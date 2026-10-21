@@ -1089,7 +1089,7 @@ describe("VertexHandler", () => {
 			)
 		})
 
-		it("completePrompt should pass timeout when timeoutMs=0 (defined check)", async () => {
+		it("completePrompt should not forward an unusable timeoutMs", async () => {
 			handler = new AnthropicVertexHandler({
 				apiModelId: "claude-3-5-sonnet-v2@20241022",
 				vertexProjectId: "test-project",
@@ -1100,13 +1100,13 @@ describe("VertexHandler", () => {
 				.spyOn(handler["client"].messages, "create")
 				.mockResolvedValue({ content: [{ type: "text", text: "response" }] } as never)
 
-			await handler.completePrompt("test prompt", { timeoutMs: 0 })
-			// 0 is a defined value: it must reach the client as `timeout: 0`,
-			// not be dropped by a truthiness check.
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({ model: expect.any(String) }),
-				expect.objectContaining({ timeout: 0 }),
-			)
+			// The SDK turns timeout: 0 into an immediate abort and rejects
+			// negative/non-finite delays, so "no explicit timeout" means no option.
+			for (const timeoutMs of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+				mockCreate.mockClear()
+				await handler.completePrompt("test prompt", { timeoutMs })
+				expect(mockCreate).toHaveBeenCalledWith(expect.any(Object), undefined)
+			}
 		})
 
 		it("should handle empty content array for Claude", async () => {

@@ -13,7 +13,7 @@ import { getModelParams } from "../transform/model-params"
 import { mergeEnvironmentDetailsForMiniMax } from "../transform/minimax-format"
 
 import { BaseProvider } from "./base-provider"
-import { bridgeExternalAbortSignal } from "./utils/abort-signal"
+import { bridgeExternalAbortSignal, hasUsableTimeout } from "./utils/abort-signal"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { calculateApiCostAnthropic } from "../../shared/cost"
 import { convertOpenAIToolsToAnthropic } from "../../core/prompts/tools/native-tools/converters"
@@ -316,8 +316,12 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 		if (options?.abortSignal) {
 			requestOptions.signal = options.abortSignal
 		}
-		if (options?.timeoutMs !== undefined) {
-			requestOptions.timeout = options.timeoutMs
+		const timeoutMs = options?.timeoutMs
+		// Only a usable finite positive timeout may be forwarded: the SDKs treat
+		// timeout: 0 as an immediate abort and throw on negative/non-finite values.
+		// Fractional delays are rounded up, matching mergeAbortSignalAndTimeout.
+		if (hasUsableTimeout(timeoutMs)) {
+			requestOptions.timeout = Math.ceil(timeoutMs)
 		}
 
 		const message = await this.client.messages.create(

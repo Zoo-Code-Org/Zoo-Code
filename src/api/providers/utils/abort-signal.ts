@@ -1,4 +1,17 @@
 /**
+ * Whether a timeout value is usable as an SDK `timeout` option: a finite
+ * number greater than zero.
+ *
+ * The value `0` means "no explicit timeout" across this series (the SDKs turn
+ * `timeout: 0` into an immediate abort), and negative, `NaN`, `Infinity` and
+ * fractional values make the SDK's own validation throw — so none of them may
+ * be forwarded.
+ */
+export function hasUsableTimeout(timeoutMs?: number): timeoutMs is number {
+	return typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
+}
+
+/**
  * Merge an optional external abort signal with an optional timeout.
  *
  * Timeout values <= 0 and non-finite values are treated as disabled; finite
@@ -12,7 +25,7 @@ export function mergeAbortSignalAndTimeout(externalSignal?: AbortSignal, timeout
 	// abort almost immediately; treat non-finite values as "no timeout",
 	// round fractional delays up to whole milliseconds (uint32 validation
 	// throws for 1500.5), and cap the rest.
-	const hasTimeout = typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
+	const hasTimeout = hasUsableTimeout(timeoutMs)
 
 	if (!hasTimeout) {
 		return externalSignal

@@ -396,14 +396,18 @@ describe("XAIHandler", () => {
 		})
 	})
 
-	it("completePrompt should pass timeout when timeoutMs=0 (defined check)", async () => {
-		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
-
-		await handler.completePrompt("test prompt", { timeoutMs: 0 })
-		expect(mockResponsesCreate).toHaveBeenCalledWith(
-			expect.objectContaining({ model: expect.any(String) }),
-			{ timeout: 0 }, // !== undefined check means 0 is passed through
-		)
+	it("completePrompt should not forward an unusable timeoutMs", async () => {
+		// "No explicit timeout" must leave the option absent: timeout: 0 aborts
+		// immediately and negative/non-finite delays throw inside the SDK.
+		for (const timeoutMs of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+			mockResponsesCreate.mockClear()
+			mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
+			await handler.completePrompt("test prompt", { timeoutMs })
+			expect(mockResponsesCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				undefined,
+			)
+		}
 	})
 
 	it("should include reasoning effort for mini models in Responses API format", async () => {

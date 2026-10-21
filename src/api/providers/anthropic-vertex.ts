@@ -24,7 +24,7 @@ import {
 } from "../../core/prompts/tools/native-tools/converters"
 
 import { BaseProvider } from "./base-provider"
-import { bridgeExternalAbortSignal } from "./utils/abort-signal"
+import { bridgeExternalAbortSignal, hasUsableTimeout } from "./utils/abort-signal"
 import { NOT_PROVIDED } from "./constants"
 import { parseVertexJsonCredentials } from "./utils/vertex-credentials"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
@@ -340,8 +340,12 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 			if (options?.abortSignal) {
 				requestOptions.signal = options.abortSignal
 			}
-			if (options?.timeoutMs !== undefined) {
-				requestOptions.timeout = options.timeoutMs
+			const timeoutMs = options?.timeoutMs
+			// Only a usable finite positive timeout may be forwarded: the SDKs treat
+			// timeout: 0 as an immediate abort and throw on negative/non-finite values.
+			// Fractional delays are rounded up, matching mergeAbortSignalAndTimeout.
+			if (hasUsableTimeout(timeoutMs)) {
+				requestOptions.timeout = Math.ceil(timeoutMs)
 			}
 
 			const response = await this.client.messages.create(
