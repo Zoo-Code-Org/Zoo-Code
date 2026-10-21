@@ -593,6 +593,9 @@ export async function guardedWrite(
 
 /**
  * Reset the per-path tail-promise chains (test hook).
+ *
+ * @internal Test-only: production code never resets the chains, so the production
+ * dead-code check must not report this export as unused.
  */
 export function resetChain(): void {
 	pendingChains.clear()
