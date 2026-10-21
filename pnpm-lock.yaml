@@ -283,7 +283,7 @@ importers:
         specifier: 0.28.2
         version: 0.28.2
       execa:
-        specifier: ^9.5.2
+        specifier: 9.6.1
         version: 9.6.1
       ignore:
         specifier: ^7.0.3
