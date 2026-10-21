@@ -722,6 +722,51 @@ describe("OpencodeGoHandler", () => {
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
+		it("aborts the request when the caller's signal fires after model resolution but before the bridge", async () => {
+			// resolveModelWithAbort removes its listener when the lookup settles. An abort
+			// landing in the window before createMessage installs its bridge is caught by
+			// the already-aborted guard; without that guard the listener would be attached
+			// after the event, the internal controller would stay live, and the request
+			// could start without cancellation.
+			const controller = new AbortController()
+			const handler = new OpencodeGoHandler(mockOptions)
+			// The resolution value's id getter fires the abort while createMessage reads
+			// the resolved fields - exactly the post-resolution window.
+			const resolved = {
+				get id() {
+					controller.abort()
+					return "glm-5.1"
+				},
+				info: { ...opencodeGoModels["glm-5.1"] },
+				format: "openai" as const,
+				temperature: undefined,
+				reasoningEffort: undefined,
+				maxTokens: undefined,
+			}
+			vi.spyOn(handler as unknown as { resolveModel: () => Promise<unknown> }, "resolveModel").mockResolvedValue(
+				resolved,
+			)
+			mockCreate.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				// The guard must have aborted the internal controller before the request.
+				expect(options?.signal?.aborted).toBe(true)
+				throw new APIUserAbortError()
+			})
+
+			const error = await collectStream(
+				handler.createMessage(
+					"sys",
+					[{ role: "user", content: "hi" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+		})
+
 		it("propagates a raw model-lookup failure unchanged when no abort signal is present", async () => {
 			// Without an abort signal the resolution must not be wrapped or
 			// normalized: a catalog failure keeps its own identity so callers

@@ -249,9 +249,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		const controller = new AbortController()
 		const abortListener = () => controller.abort()
 		if (externalAbortSignal) {
-			// Equivalent mutant: this abort branch is not observable from the public API.
 			if (externalAbortSignal.aborted) {
-				// Equivalent mutant: this abort branch is not observable from the public API.
 				controller.abort()
 			} else {
 				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
@@ -504,9 +502,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			// isRequestAborted covers the signal-aborted case plus the OpenAI
 			// SDK's APIUserAbortError (name "APIUserAbortError" / "Request was
 			// aborted.").
-			// Equivalent mutant: this abort branch is not observable from the public API.
 			if (isRequestAborted(error, abortSignal)) {
-				// Equivalent mutant: this abort branch is not observable from the public API.
 				throw createAbortError("Opencode Go")
 			}
 			if (error instanceof Error) {
@@ -645,7 +641,6 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			// completion error. isRequestAborted also covers the Anthropic
 			// SDK's APIUserAbortError (name "APIUserAbortError").
 			if (isRequestAborted(error, abortSignal)) {
-				// Equivalent mutant: this abort branch is not observable from the public API.
 				throw createAbortError("Opencode Go")
 			}
 			if (error instanceof Error) {
