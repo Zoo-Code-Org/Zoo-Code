@@ -57,7 +57,7 @@ describe("MultiSearchReplaceDiffStrategy malformed start-line marker hint", () =
 	)
 
 	it("skips the marker hint for an overlong whitespace-padded first line", async () => {
-		const paddedLine = `startline${" ".repeat(40_000)}`
+		const paddedLine = `startline${" ".repeat(40_000)}3`
 		const diffContent = buildDiff(`${paddedLine}\nnot-in-the-file`, "replacement")
 
 		const startedAt = performance.now()
