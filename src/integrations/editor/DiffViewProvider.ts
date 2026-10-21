@@ -1301,7 +1301,16 @@ export class DiffViewProvider {
 					// version, so a peer publish landing after the check was silently
 					// overwritten. On a CAS rejection the peer's bytes stay on disk and the
 					// rollback reports the conflict.
-					const originalBytes = this.stripAllBOMs(this.originalContent ?? "")
+					// Encode with the document's own codec: replaceIfVersion takes bytes and
+					// a plain string would be UTF-8-encoded, writing different bytes than the
+					// forward save used for a non-UTF-8 document. vscode.workspace.encode
+					// mirrors the editor's codec; the UTF-8 fallback keeps environments whose
+					// host does not expose it working.
+					const originalText = this.stripAllBOMs(this.originalContent ?? "")
+					const encodedOriginal = vscode.workspace.encode
+						? await vscode.workspace.encode(originalText, { encoding: updatedDocument.encoding })
+						: undefined
+					const originalBytes = encodedOriginal ?? new Uint8Array(Buffer.from(originalText, "utf8"))
 					const expectedToken = this.lastWrittenToken
 					// The CAS needs both sides of the comparison: the version this session
 					// left and the version the disk reports. The probe below only decides
