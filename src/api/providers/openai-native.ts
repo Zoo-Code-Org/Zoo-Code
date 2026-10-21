@@ -31,8 +31,8 @@ import { NOT_PROVIDED } from "./constants"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { isMcpTool } from "../../utils/mcp-name"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
-import { RequestConfigBuilder } from "./config-builder/request-config-builder"
-import { createAbortError, isRequestAborted } from "./utils/abort-signal"
+import { createAbortError, isRequestAborted, mergeAbortSignalAndTimeout } from "./utils/abort-signal"
+import { hasNumericHttpStatus } from "./utils/error-handler"
 
 export type OpenAiNativeModel = ReturnType<OpenAiNativeHandler["getModel"]>
 
@@ -769,6 +769,12 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				throw error
 			}
 
+			// A status-carrying API failure keeps its own identity: wrapping it
+			// would drop the numeric status that retry, backoff and the UI read.
+			if (hasNumericHttpStatus(error)) {
+				throw error
+			}
+
 			const model = this.getModel()
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")
@@ -1281,6 +1287,12 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			// before any wrapping so the caller's AbortError guard sees one correctly
 			// named error instead of a wrapped DOMException, and the stop is not
 			// captured as an exception here or again by the caller.
+			// A terminal API failure can land in the same tick as the abort. It is
+			// not a cancellation then: keep its own identity (status and message) so
+			// retry, backoff and the UI still see the provider error.
+			if (hasNumericHttpStatus(error)) {
+				throw error
+			}
 			if (requestController.signal.aborted) {
 				throw new DOMException(`The ${this.providerName} request was aborted`, "AbortError")
 			}
@@ -1672,7 +1684,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	 * Completes a prompt using the Responses API (non-streaming).
 	 *
 	 * The request signal is built request-locally from the caller's abort
-	 * signal and optional timeout (RequestConfigBuilder.mergeAbortSignalAndTimeout),
+	 * signal and optional timeout (mergeAbortSignalAndTimeout),
 	 * so cancellations never touch this.abortController, which streaming
 	 * requests own. Cancellations are classified from the error alone via
 	 * isRequestAborted (the SDK's own APIUserAbortError never satisfies the
@@ -1687,8 +1699,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		// Request-local abort signal: merges the external abort signal with an optional
 		// timeout without touching this.abortController (owned by streaming requests).
 		const requestSignal =
-			RequestConfigBuilder.mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs) ??
-			new AbortController().signal
+			mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs) ?? new AbortController().signal
 
 		try {
 			const model = this.getModel()

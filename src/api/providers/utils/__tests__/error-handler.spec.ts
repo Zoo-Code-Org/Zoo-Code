@@ -1,4 +1,4 @@
-import { handleProviderError, handleOpenAIError } from "../error-handler"
+import { handleProviderError, handleOpenAIError, hasNumericHttpStatus } from "../error-handler"
 
 describe("handleProviderError", () => {
 	const providerName = "TestProvider"
@@ -354,5 +354,20 @@ describe("handleOpenAIError (backward compatibility)", () => {
 
 		expect(result.message).toBe("Roo Code Cloud completion error: Authentication failed")
 		expect((result as any).status).toBe(401)
+	})
+})
+
+describe("hasNumericHttpStatus", () => {
+	it("recognizes a numeric status or statusCode", () => {
+		expect(hasNumericHttpStatus(Object.assign(new Error("401"), { status: 401 }))).toBe(true)
+		expect(hasNumericHttpStatus(Object.assign(new Error("429"), { statusCode: 429 }))).toBe(true)
+	})
+
+	it("rejects non-numeric, non-finite, and non-object values", () => {
+		expect(hasNumericHttpStatus(Object.assign(new Error("x"), { status: "429" }))).toBe(false)
+		expect(hasNumericHttpStatus(Object.assign(new Error("x"), { status: Number.NaN }))).toBe(false)
+		expect(hasNumericHttpStatus(new Error("plain"))).toBe(false)
+		expect(hasNumericHttpStatus(undefined)).toBe(false)
+		expect(hasNumericHttpStatus("429")).toBe(false)
 	})
 })

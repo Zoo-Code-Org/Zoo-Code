@@ -821,6 +821,43 @@ describe("OpenAICompatibleHandler abort wiring", () => {
 			await expect(collectStream(stream)).rejects.toMatchObject({ name: "AbortError" })
 		})
 
+		it("should keep a status-carrying API failure that races the abort instead of reporting a cancellation", async () => {
+			// A 429 can land in the same tick the caller's signal aborts. Classifying
+			// purely by the signal would swallow the provider error and its retry
+			// hints, so the failure keeps its status and provider wrapping.
+			const rateLimited = Object.assign(new Error("Rate limit exceeded"), { status: 429 })
+			mockStreamText.mockImplementation((options: { abortSignal?: AbortSignal }) => ({
+				fullStream: {
+					[Symbol.asyncIterator]: async function* () {
+						await new Promise<void>((resolve) => {
+							options.abortSignal?.addEventListener("abort", () => resolve(), { once: true })
+						})
+						yield* []
+						throw rateLimited
+					},
+				},
+				usage: Promise.resolve(undefined),
+			}))
+
+			const controller = new AbortController()
+			const stream = handler.createMessage("You are helpful.", [], {
+				taskId: "test",
+				abortSignal: controller.signal,
+			})
+			const collected = collectStream(stream)
+			setTimeout(() => controller.abort(), 10)
+
+			const error = await collected.then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).not.toMatchObject({ name: "AbortError" })
+			expect(error).toMatchObject({ status: 429 })
+			// The provider wrapping must survive too, not just the raw throw.
+			expect((error as Error).message).toContain("TestProvider")
+			expect((error as Error).message).toContain("Rate limit exceeded")
+		})
+
 		it("should abort the stream when the external abortSignal is aborted mid-request", async () => {
 			mockStreamText.mockImplementation((options: { abortSignal?: AbortSignal }) => ({
 				fullStream: {

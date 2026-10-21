@@ -1209,6 +1209,49 @@ describe("OpenAiNativeHandler", () => {
 				)
 			})
 
+			it("should keep a status-carrying API failure that races the caller's abort", async () => {
+				// A 429 can land in the same tick the caller's signal aborts. Reporting
+				// it as a cancellation would hide the provider error and its retry
+				// hints, so the failure keeps its status and message.
+				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+				const rateLimited = Object.assign(new Error("Rate limit exceeded"), { status: 429 })
+				let releaseStream!: () => void
+				const streamGate = new Promise<void>((resolve) => {
+					releaseStream = resolve
+				})
+				const mockFetch = vitest.fn().mockImplementation(() => {
+					const body = new ReadableStream<Uint8Array>({
+						pull: async () => {
+							await streamGate
+							throw rateLimited
+						},
+					})
+					return Promise.resolve({ ok: true, body })
+				})
+				global.fetch = mockFetch as typeof fetch
+
+				const controller = new AbortController()
+				const collected = collectStream(
+					handler.createMessage(
+						systemPrompt,
+						messages,
+						makeCreateMessageMetadata({ abortSignal: controller.signal }),
+					),
+				)
+				// Abort first, then let the stream fail: the failure is the real outcome.
+				await new Promise((resolve) => setTimeout(resolve, 10))
+				controller.abort()
+				releaseStream()
+
+				const error = await collected.then(
+					() => undefined,
+					(e: unknown) => e,
+				)
+				expect(error).not.toMatchObject({ name: "AbortError" })
+				expect(error).toMatchObject({ status: 429 })
+				expect((error as Error).message).toContain("Rate limit exceeded")
+			})
+
 			it("should not let an earlier request's external abort affect a later request on the same handler", async () => {
 				// Request 1 streams under external signal A while request 2 starts under
 				// external signal B. Aborting A while both are in flight must abort only
