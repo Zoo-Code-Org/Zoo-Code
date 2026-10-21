@@ -7,9 +7,10 @@ mkdir -p "$SOLHEIM_SMOKE_OUT_DIR"
 final_recording="$SOLHEIM_SMOKE_OUT_DIR/smoke.mp4"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# A stale final from an earlier attempt must never survive into this attempt's
-# upload. Remove only this exact path.
-rm -f "$final_recording"
+# Stale output from an earlier attempt must never survive into this attempt's
+# upload. Remove only these exact paths and pending artifact writes.
+rm -f "$final_recording" "$SOLHEIM_SMOKE_OUT_DIR/verdict.json" "$SOLHEIM_SMOKE_OUT_DIR/trace.json" \
+    "$SOLHEIM_SMOKE_OUT_DIR"/verdict.json.*.tmp "$SOLHEIM_SMOKE_OUT_DIR"/trace.json.*.tmp
 
 # The recorder needs display access, not provider/GitHub credentials. Fragmented
 # MP4 keeps completed fragments readable if the action is forcibly interrupted.
@@ -103,8 +104,13 @@ sleep 0.5
 kill -0 "$recorder_pid" 2>/dev/null || exit 1
 
 # Arguments are used for credential-free recorder tests; CI supplies none.
+# An injected command would inherit the provider credential, so reject it.
 # Backgrounding the provider keeps the signal traps responsive during the run.
 if [[ "$#" -gt 0 ]]; then
+    if [[ -n "${SOLHEIM_API_KEY:-}" ]]; then
+        echo "Refusing to run a supplied command while SOLHEIM_API_KEY is set" >&2
+        exit 2
+    fi
     "$@" &
 else
     # Invoke the Node driver directly: a package-manager wrapper would sit

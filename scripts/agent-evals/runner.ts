@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { RooCodeEventName, TaskCommandName, taskEventSchema, type TaskCommand, type TaskEvent } from "@roo-code/types"
-import type { AgentFixtureWorkspaceFile } from "./contract.ts"
+import { configurationMatchesToolPolicy, type AgentFixtureWorkspaceFile } from "./contract.ts"
 import { getFixture } from "./registry.ts"
 import { createTaskStartWaiter, type TaskStartWaiter } from "./task-start.ts"
 import {
@@ -82,7 +82,11 @@ const traceSettings = (fixtureProjection: Record<string, unknown>, credential: s
 		if (projectionJson === undefined) return { available: false, reason: "projectionNotSerializable" }
 		if (credential.length > 0 && projectionJson.includes(credential))
 			return { available: false, reason: "credentialInProjection" }
-		return { available: true, projection: fixtureProjection, digest: digestProjection(fixtureProjection) }
+		return {
+			available: true,
+			projection: JSON.parse(projectionJson) as Record<string, unknown>,
+			digest: digestProjection(fixtureProjection),
+		}
 	} catch {
 		return { available: false, reason: "projectionNotSerializable" }
 	}
@@ -224,11 +228,16 @@ export async function runAgentFixture(runtime: AgentRuntime, options: AgentRunOp
 			settings = { available: false, reason: "credentialMissing" }
 		} else {
 			settings = traceSettings(fixture.settingsProjection, credential)
+			const configuration = fixture.buildConfiguration(credential)
+			if (settings.available && !configurationMatchesToolPolicy(configuration, fixture.toolPolicy))
+				settings = { available: false, reason: "configurationViolatesToolPolicy" }
 			if (!settings.available) {
 				stopReason = "fixtureRejected"
 			} else {
 				host = await runtime.launch(fixture.workspace.files)
 				host.onExit(markLost)
+				// An interrupt during launch must not connect or send a task.
+				if (sessionLost) throw new Error("startup interrupted")
 				client = runtime.connect()
 				client.onDisconnect(() => {
 					sessionLost = true
@@ -244,6 +253,7 @@ export async function runAgentFixture(runtime: AgentRuntime, options: AgentRunOp
 					code = "ACTIVATION_FAILED"
 					stopReason = "activationFailed"
 				} else {
+					if (sessionLost) throw new Error("startup interrupted")
 					const requestId = randomUUID()
 					waiter = createTaskStartWaiter({ requestId, timeoutMs: fixture.limits.taskStartTimeoutMs })
 					// A synchronous send failure must not leave a rejected timer promise.
@@ -255,7 +265,7 @@ export async function runAgentFixture(runtime: AgentRuntime, options: AgentRunOp
 							requestId,
 							text: fixture.prompt,
 							newTab: false,
-							configuration: fixture.buildConfiguration(credential),
+							configuration,
 						},
 					})
 					try {

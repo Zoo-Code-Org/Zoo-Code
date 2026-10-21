@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import fs from "node:fs"
-import { URL } from "node:url"
+import { URL, fileURLToPath } from "node:url"
 import { describe, it } from "node:test"
 import { spawn, spawnSync } from "node:child_process"
 import os from "node:os"
@@ -118,19 +118,29 @@ function recorderEnv(bin, outDir, providerMarker, extraEnv) {
 
 const stopBudgetEnv = (stopBudget) => (stopBudget ? { SOLHEIM_SMOKE_STOP_BUDGET_S: String(stopBudget) } : {})
 
-const recorderScript = new URL("./solheim-smoke/record.sh", import.meta.url).pathname
+const recorderScript = fileURLToPath(new URL("./solheim-smoke/record.sh", import.meta.url))
 
 function runRecorder(
 	args,
-	{ ffmpeg, ffmpegWrites = true, ffprobeOk = true, seedFinal, providerMarker, stopBudget } = {},
+	{
+		ffmpeg,
+		ffmpegWrites = true,
+		ffprobeOk = true,
+		seedFinal,
+		seedMetadata,
+		providerMarker,
+		stopBudget,
+		extraEnv,
+	} = {},
 ) {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "record-sh-"))
 	const bin = stubRecorderBin(dir, { ffmpeg, ffmpegWrites, ffprobeOk })
 	const paths = recorderPaths(dir)
 	fs.mkdirSync(paths.outDir, { recursive: true })
 	if (seedFinal !== undefined) fs.writeFileSync(paths.finalRecording, seedFinal)
+	for (const name of seedMetadata ?? []) fs.writeFileSync(path.join(paths.outDir, name), "stale")
 	const result = spawnSync("bash", [recorderScript, ...args], {
-		env: recorderEnv(bin, paths.outDir, providerMarker, stopBudgetEnv(stopBudget)),
+		env: recorderEnv(bin, paths.outDir, providerMarker, { ...stopBudgetEnv(stopBudget), ...extraEnv }),
 		encoding: "utf8",
 		timeout: 20_000,
 	})
@@ -193,6 +203,28 @@ describe("record.sh exit and validation behavior", () => {
 			run.cleanup()
 		}
 	})
+	it("removes stale verdict and trace metadata at start", () => {
+		const run = runRecorder(["true"], {
+			seedMetadata: ["verdict.json", "trace.json", "verdict.json.1.tmp"],
+		})
+		try {
+			for (const name of ["verdict.json", "trace.json", "verdict.json.1.tmp"])
+				assert.equal(fs.existsSync(path.join(run.outDir, name)), false, name)
+		} finally {
+			run.cleanup()
+		}
+	})
+
+	it("refuses a supplied command while the provider credential is set", () => {
+		const run = runRecorder(["true"], { extraEnv: { SOLHEIM_API_KEY: "sk-test" } })
+		try {
+			assert.equal(run.result.status, 2)
+			assert.match(run.result.stderr, /Refusing/)
+		} finally {
+			run.cleanup()
+		}
+	})
+
 	it("fails when the recording is missing", () => {
 		const run = runRecorder(["true"], { ffmpegWrites: false })
 		try {

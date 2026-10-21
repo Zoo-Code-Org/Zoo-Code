@@ -126,6 +126,22 @@ const serializeProjection = (projection: Record<string, unknown>): string | unde
 	}
 }
 
+// The built configuration is what the extension runs. It must carry exactly the
+// declared tool policy, so a drifted builder cannot widen tool access.
+export function configurationMatchesToolPolicy(
+	config: Record<string, unknown>,
+	policy: AgentFixture["toolPolicy"],
+): boolean {
+	const sameList = (a: unknown, b: readonly string[]) =>
+		Array.isArray(a) && a.length === b.length && b.every((item) => a.includes(item))
+	if (config["mode"] !== policy.mode || !sameList(config["disabledTools"], policy.disabledTools)) return false
+	const modes = config["customModes"]
+	const custom = Array.isArray(modes) ? modes.find((m) => isPlainObject(m) && m["slug"] === policy.mode) : undefined
+	if (!isPlainObject(custom) || custom["roleDefinition"] !== policy.roleDefinition) return false
+	if (!sameList(custom["groups"], policy.groups)) return false
+	return ALLOW_KEYS.every((key) => config[`alwaysAllow${key[0]!.toUpperCase()}${key.slice(1)}`] === policy.allow[key])
+}
+
 export function validateFixture(fixture: AgentFixture): void {
 	if (!isPlainObject(fixture)) fail("fixture must be an object")
 	if (!isPlainObject(fixture.identity)) fail("fixture identity missing")

@@ -41,7 +41,23 @@ function registerTestFixture(name: string, overrides: Partial<AgentFixture> = {}
 			teardownStepMs: 5_000,
 		},
 		settingsProjection: { provider: "test", model: `model-${name}` },
-		buildConfiguration: () => ({ apiProvider: "openai", openAiApiKey: CREDENTIAL }),
+		buildConfiguration: () => ({
+			apiProvider: "openai",
+			openAiApiKey: CREDENTIAL,
+			mode: "test",
+			customModes: [{ slug: "test", name: "Test", roleDefinition: "Run one synthetic task.", groups: [] }],
+			disabledTools: ["new_task"],
+			alwaysAllowReadOnly: false,
+			alwaysAllowReadOnlyOutsideWorkspace: false,
+			alwaysAllowWrite: false,
+			alwaysAllowWriteOutsideWorkspace: false,
+			alwaysAllowWriteProtected: false,
+			alwaysAllowExecute: false,
+			alwaysAllowMcp: false,
+			alwaysAllowModeSwitch: false,
+			alwaysAllowSubtasks: false,
+			alwaysAllowFollowupQuestions: false,
+		}),
 		...overrides,
 	}
 	registerFixture(fixture)
@@ -464,6 +480,18 @@ describe("agent fixture controller", () => {
 		// The settings section must name the real cause, not claim a
 		// fixture rejection that never happened.
 		assert.deepEqual(trace.settings, { available: false, reason: "credentialMissing" })
+	})
+
+	it("rejects a configuration that widens the declared tool policy, and never launches", async () => {
+		const base = registerTestFixture("controller-policy-base")
+		registerTestFixture("controller-policy", {
+			buildConfiguration: (credential) => ({ ...base.buildConfiguration(credential), alwaysAllowExecute: true }),
+		})
+		const f = harness("success")
+		const result = await runAgentFixture(f.runtime, { fixtureName: "controller-policy", credential: CREDENTIAL })
+		assert.equal(result.execution.stopReason, "fixtureRejected")
+		assert.equal(f.launched, false)
+		assert.deepEqual(writtenTrace(f).settings, { available: false, reason: "configurationViolatesToolPolicy" })
 	})
 
 	it("rejects a fixture whose projection carries the credential, and never launches", async () => {

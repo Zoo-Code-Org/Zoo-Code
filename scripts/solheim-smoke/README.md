@@ -13,7 +13,7 @@ about Solheim, the prompt, or the expected completion.
 
 The active workflow is `.github/workflows/solheim-provider-smoke.yml`. It is manual-only, restricted to
 `refs/heads/main`, and checks out the exact triggering SHA. It builds trusted extension code before the
-single credential-bearing step. There is one job, no PR input or approval gate, no review/posting job,
+single credential-bearing step. There is one job, no PR input, no review/posting job,
 and `contents: read` is the only GitHub permission. This deliberately validates the provider integration
 on main, not arbitrary PR artifacts. It is not a required PR review check.
 
