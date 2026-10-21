@@ -1061,6 +1061,50 @@ describe("safeWriteText", () => {
 			expect(fs.rename).not.toHaveBeenCalled()
 		})
 	})
+
+	it("a failed post-commit directory fsync never unlinks the committed target", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const dirPath = path.dirname(targetPath)
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockImplementation((target) => {
+			if (String(target) === dirPath) throw new Error("EBADF")
+			return 1
+		})
+
+		await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow(
+			PostCommitDurabilityError,
+		)
+
+		// The commit state is what cleanup is allowed to act on: the staging file may be
+		// unlinked only while it is still the staging file. Once the rename has committed,
+		// the only path this write owns at the target is the published content itself, and
+		// removing it would turn a durability warning into data loss.
+		expect(fs.unlink).not.toHaveBeenCalledWith(targetPath)
+	})
+
+	it("a failed post-commit directory fsync does not unlink the staging path this write no longer owns", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const dirPath = path.dirname(targetPath)
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		// A caller-supplied staging file: the name is the caller's, not one this write made
+		// up, so after the commit it is a path another writer may already be using again.
+		// The caller's staging file sits beside the target, as this contract requires.
+		const suppliedTemp = path.join(dirPath, "caller.new_data.json")
+		vi.mocked(fsSync.openSync).mockImplementation((target) => {
+			if (String(target) === dirPath) throw new Error("EBADF")
+			return 1
+		})
+
+		await expect(
+			safeWriteText(targetPath, "new data", { backup: true, platform: "linux", tempPath: suppliedTemp }),
+		).rejects.toThrow(PostCommitDurabilityError)
+
+		// The rename consumed the staging file; the commit is what says so. Unlinking the
+		// staging NAME afterwards is an unlink of whatever now answers to that name.
+		expect(fs.unlink).not.toHaveBeenCalledWith(suppliedTemp)
+		expect(fs.unlink).not.toHaveBeenCalledWith(targetPath)
+	})
+
 	describe("content bytes", () => {
 		const targetPath = "/tmp/enc-dir/target.txt"
 
@@ -1186,6 +1230,15 @@ describe("safeWriteText", () => {
 		}
 		expect(fs.copyFile).not.toHaveBeenCalled()
 		expect(fs.rename).not.toHaveBeenCalled()
+		// Every code reached the link path (the first call plus the three codes
+		// below), so the loop above really exercised all four refusals.
+		expect(fs.link).toHaveBeenCalledTimes(4)
+		// The refusal must not leave its staging file or directory beside the
+		// target: a regression here would drop a .file-safety-staging_* directory
+		// on FAT32/exFAT/SMB volumes after every refused create.
+		expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		const stagedDirs = vi.mocked(fsSync.mkdirSync).mock.calls.map((call) => String(call[0]))
+		expect(vi.mocked(fs.rmdir).mock.calls.map((call) => String(call[0]))).toEqual(stagedDirs)
 	})
 	it("still reports success when the staged copy cannot be unlinked after the link", async () => {
 		// An antivirus handle on Windows can make unlink fail with EBUSY after link(2)
@@ -1280,6 +1333,30 @@ describe("safeWriteText", () => {
 		expect(error).toBeInstanceOf(AncestorReplacedError)
 		expect((error as AncestorReplacedError).message).toContain("no longer resolves to the authorized location")
 		// Nothing was published at either location.
+		expect(fs.rename).not.toHaveBeenCalled()
+		expect(fs.link).not.toHaveBeenCalled()
+	})
+
+	it("propagates a transient realpath failure instead of reporting a replaced ancestor", async () => {
+		// EACCES/EIO while re-validating the authorized ancestry is not a containment
+		// violation: reporting AncestorReplacedError would point the user (and the
+		// model) at a security problem that is not there.
+		const dir = path.resolve("/tmp/test-dir")
+		const targetPath = path.join(dir, "target.txt")
+		const denied = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+		vi.mocked(fs.realpath).mockImplementation(async (p) => {
+			if (path.resolve(String(p)) === dir) throw denied
+			return targetPath
+		})
+		vi.mocked(fs.stat).mockResolvedValue(_dirIdentity(100n))
+
+		const error = await safeWriteText(targetPath, "new data", {
+			expectedResolvedPath: targetPath,
+			expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBe(denied)
 		expect(fs.rename).not.toHaveBeenCalled()
 		expect(fs.link).not.toHaveBeenCalled()
 	})

@@ -429,6 +429,11 @@ export async function safeWriteText(
 	// write created so its cleanup removes its own directory, not a shared one.
 	let stagingDir: string | null = null
 	let tempPath: string
+	// Whether the commit rename has consumed the staging file. Cleanup is allowed to unlink
+	// the staging path only while this write still owns it: after the rename the name belongs to
+	// whatever is filed under it next, and a caller-supplied staging name is reused by the next
+	// write to the same target.
+	let stagingCommitted = false
 	if (options?.tempPath) {
 		// A caller-supplied staging file is only safe when it is the file this
 		// write is staging, not an arbitrary path. Two properties are checked:
@@ -579,7 +584,17 @@ export async function safeWriteText(
 					// below takes path strings and would follow it too, publishing at the
 					// moved location outside the chain the caller walked. Require that the
 					// authorized name still resolves to the very location it named.
-					const resolvedDir = await fs.realpath(expected.dir).catch(() => undefined)
+					// Only a vanished name is a containment violation. A transient EACCES
+					// or EIO would otherwise be reported as a replaced ancestor, pointing
+					// the user at a security problem that is not there - mirror the stat
+					// call above, which maps only ENOENT and rethrows the rest.
+					const resolvedDir = await fs.realpath(expected.dir).catch((error: unknown) => {
+						const code = errorCode(error)
+						if (code === "ENOENT" || code === "ENOTDIR") {
+							return undefined
+						}
+						throw error
+					})
 					if (resolvedDir === undefined || path.resolve(resolvedDir) !== path.resolve(expected.dir)) {
 						throw new AncestorReplacedError(expected.dir, "no longer resolves to the authorized location")
 					}
@@ -697,6 +712,11 @@ export async function safeWriteText(
 				await fs.unlink(tempPath).catch(() => undefined)
 			}
 
+			// Marked once the commit has consumed the staging name: on the rename path the
+			// rename consumed it, on the link path the removal just did. Every step after
+			// this one is a post-commit step, and none of them may remove the staging path
+			// or the published content.
+			stagingCommitted = true
 			// -- Step 4b (POSIX): fsync the parent directory so the directory entry
 			// changed by the commit rename is durable, not just the file content.
 			if (platform !== "win32") {
@@ -763,10 +783,12 @@ export async function safeWriteText(
 			await fs.unlink(backupPath).catch(() => {})
 			backupPath = null
 		}
-		try {
-			await fs.unlink(tempPath).catch(() => {})
-		} catch {
-			// cleanup failure is non-fatal
+		if (!stagingCommitted) {
+			try {
+				await fs.unlink(tempPath).catch(() => {})
+			} catch {
+				// cleanup failure is non-fatal
+			}
 		}
 
 		// A failed self-staged write must not leave its staging directory behind.
