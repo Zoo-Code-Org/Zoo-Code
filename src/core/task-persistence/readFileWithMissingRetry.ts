@@ -1,8 +1,10 @@
 import * as fs from "fs/promises"
 
-// safeWriteJson replaces a file in two renames (target to backup, new file to
-// target) because a single rename over an open file fails with EPERM on
-// Windows. A reader can see ENOENT between the two renames, so retry once.
+// safeWriteJson commits a replacement with a single atomic rename. Only the
+// Windows EPERM fallback replaces a file in two renames (target to backup,
+// new file to target), because a single rename over an open file fails with
+// EPERM on Windows. A reader can see ENOENT between those two renames, so
+// retry once.
 const READ_RETRY_MIN_MS = 1
 const READ_RETRY_MAX_MS = 10
 const READ_RETRY_RANGE_MS = READ_RETRY_MAX_MS - READ_RETRY_MIN_MS + 1
