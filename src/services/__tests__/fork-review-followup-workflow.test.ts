@@ -15,7 +15,7 @@ const workflow = parse(
 )
 const dispatchScript = workflow.jobs.dispatch.steps[0].with.script as string
 
-// Head commit and branch of fork PR #1662 (PierrunoYT/Zoo-Code), the run
+// Head commit and branch of fork PR #1662 (fork-owner/Zoo-Code), the run
 // documented in issue #2133.
 const SHA = "029ea76b91f0c784087989470c81ade55b13c82f"
 const HEAD_BRANCH = "fix/1591-openai-compatible-cache-reads"
@@ -34,7 +34,7 @@ function buildForkPr() {
 	return {
 		number: 1662,
 		state: "open",
-		head: { ref: HEAD_BRANCH, sha: SHA, repo: { full_name: "PierrunoYT/Zoo-Code" } },
+		head: { ref: HEAD_BRANCH, sha: SHA, repo: { full_name: "fork-owner/Zoo-Code" } },
 		base: { ref: "main", repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
 	}
 }
@@ -42,8 +42,11 @@ function buildForkPr() {
 /** Executes the embedded github-script follow-up against deterministic GitHub API doubles. */
 async function runFollowup(options: HarnessOptions = {}) {
 	const pr = buildForkPr()
-	const listPullRequests = vi.fn(async ({ state }: { state?: string }) => {
+	// Like the GitHub API, honor a `head` filter ("owner:branch"). A base-owner filter
+	// matches no fork PR, so the broken request cannot pass the regression scenario.
+	const listPullRequests = vi.fn(async ({ state, head }: { state?: string; head?: string }) => {
 		if (state !== "open") return []
+		if (head !== undefined && head !== `fork-owner:${HEAD_BRANCH}`) return []
 		if (options.fallback === "match") return [pr]
 		if (options.fallback === "sha-mismatch") return [{ ...pr, head: { ...pr.head, sha: OLD_SHA } }]
 		if (options.fallback === "ref-mismatch") {
@@ -133,9 +136,12 @@ describe("fork review follow-up workflow (#2046, #2086, #2133)", () => {
 		// exact head branch, SHA, and base repository.
 		const result = await runFollowup({ associatedPrNumbers: [], fallback: "match" })
 
-		expect(result.listPullRequests).toHaveBeenCalledWith(
-			expect.objectContaining({ owner: "Zoo-Code-Org", repo: "Zoo-Code", state: "open", per_page: 100 }),
-		)
+		expect(result.listPullRequests).toHaveBeenCalledWith({
+			owner: "Zoo-Code-Org",
+			repo: "Zoo-Code",
+			state: "open",
+			per_page: 100,
+		})
 		expect(result.createWorkflowDispatch).toHaveBeenCalledTimes(1)
 		expect(result.createWorkflowDispatch).toHaveBeenCalledWith({
 			owner: "Zoo-Code-Org",
