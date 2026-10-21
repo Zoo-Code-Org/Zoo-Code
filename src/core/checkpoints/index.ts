@@ -141,12 +141,20 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 		}
 		return service
 	} catch (err) {
+		// pWaitFor rejects on timeout while the original initialization can still be
+		// running. Clearing the flag here would let a recovery call create a second
+		// service alongside the one already initializing; keeping it set lets the
+		// recovery path wait on that same initialization instead (each wait stays
+		// bounded by checkpointTimeout).
+		const initializationStillRunning = task.checkpointServiceInitializing
 		if (err.name === "TimeoutError" && task.enableCheckpoints) {
 			sendCheckpointInitWarn(task, "INIT_TIMEOUT", task.checkpointTimeout)
 		}
 		log(`[Task#getCheckpointService] ${err.message}`)
 		disableCheckpointsAfterFailure(task)
-		task.checkpointServiceInitializing = false
+		if (!initializationStillRunning) {
+			task.checkpointServiceInitializing = false
+		}
 		return undefined
 	}
 }
@@ -320,7 +328,9 @@ export async function checkpointSave(
 			const live = task.checkpointService?.isInitialized ? task.checkpointService : undefined
 			if (!live) {
 				task.checkpointService = undefined
-				task.checkpointServiceInitializing = false
+				// The initializing flag is deliberately left as-is: when an earlier
+				// initialization is still running, the retry below waits on it instead of
+				// creating a competing service.
 			}
 			service = live ?? (await getCheckpointService(task))
 		}

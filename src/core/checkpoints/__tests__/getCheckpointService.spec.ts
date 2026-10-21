@@ -95,6 +95,21 @@ describe("getCheckpointService initialization failures", () => {
 		expect(task.checkpointsDisabledByFailure).toBe(true)
 	})
 
+	it("keeps the in-flight initialization flag when a wait times out", async () => {
+		// pWaitFor rejects on timeout while the original initialization can still be
+		// running. Clearing the flag would let the next lookup create a second
+		// service beside the one already initializing, so the flag must stay set and
+		// the retry must wait on the same initialization (bounded by checkpointTimeout).
+		const task = makeTask()
+		task.checkpointServiceInitializing = true
+		task.checkpointTimeout = 0.01
+
+		const service = await getCheckpointService(task)
+
+		expect(service).toBeUndefined()
+		expect(task.checkpointServiceInitializing).toBe(true)
+	})
+
 	it("does not store a service when Git is not installed", async () => {
 		vi.mocked(checkGitInstalled).mockResolvedValue(false)
 		const svc = serviceDouble(async () => {})

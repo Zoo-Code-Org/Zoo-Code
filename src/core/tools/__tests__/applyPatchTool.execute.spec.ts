@@ -684,6 +684,46 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			)
 		})
 
+		it("honors perWriteCheckpoints: false on the catch path when a handler throws first", async () => {
+			// The user turned per-write checkpoints off and a handler threw before the
+			// success path could read the setting: the catch path must read it and
+			// suppress the checkpoint/journal/card instead of treating the unread
+			// undefined as default-on.
+			vi.mocked(mockTask.fileContextTracker.trackFileContext).mockRejectedValueOnce(new Error("tracker boom"))
+			const getState = vi.fn().mockResolvedValue({ perWriteCheckpoints: false })
+			mockTask.providerRef = { deref: vi.fn().mockReturnValue({ getState }) } as unknown as Task["providerRef"]
+
+			await tool.execute({ patch: updatePatch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+			expect(mockHandleError).toHaveBeenCalledWith("apply patch", expect.anything())
+			expect(mockTask.processQueuedMessages).toHaveBeenCalled()
+		})
+
+		it("does not re-read a rejected settings lookup on the catch path", async () => {
+			// The success path attempted the read and it rejected: the catch path must
+			// keep the unread default-on value rather than asking again, because a
+			// later false would wrongly suppress persistence of writes already on disk.
+			const getState = vi.fn().mockResolvedValueOnce({}).mockRejectedValueOnce(new Error("state boom"))
+			mockTask.providerRef = { deref: vi.fn().mockReturnValue({ getState }) } as unknown as Task["providerRef"]
+
+			await tool.execute({ patch: updatePatch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(mockedCheckpointSave).toHaveBeenCalledTimes(1)
+			// Only the handler's read and the success-path read: no third lookup.
+			expect(getState).toHaveBeenCalledTimes(2)
+		})
+
 		it("reports the catch-path flush failure alongside the bookkeeping error", async () => {
 			vi.mocked(mockTask.fileContextTracker.trackFileContext).mockRejectedValueOnce(new Error("tracker boom"))
 			mockedCheckpointSave.mockRejectedValueOnce(new Error("journal boom"))

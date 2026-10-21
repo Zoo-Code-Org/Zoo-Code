@@ -90,6 +90,10 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		// the catch flush: the catch must not call getState() again, because a
 		// rejecting settings read must not skip persisting writes already on disk.
 		let perWriteCheckpoints: boolean | undefined
+		// Whether the success path actually attempted that read. A rejected read must
+		// keep default-on semantics in the catch path; re-reading it there could
+		// return false and wrongly suppress persistence of writes already on disk.
+		let perWriteCheckpointsRead = false
 		// Journal payload builder shared by the success-path flush and the
 		// catch-path flush for writes recorded before an unexpected throw.
 		const journalEntries = () =>
@@ -258,6 +262,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// pushToolResult. A fully failed patch (nothing written) leaves no
 			// checkpoint behind.
 			if (patchSucceeded || successfulChanges.length > 0) {
+				perWriteCheckpointsRead = true
 				perWriteCheckpoints = (await task.providerRef?.deref()?.getState())?.perWriteCheckpoints
 				if (perWriteCheckpoints !== false) {
 					writeMetadataFlushed = true
@@ -294,6 +299,15 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// failure keeps the documented drop-buffered-results behavior.
 			let reportedError: unknown = error
 			if (!writeMetadataFlushed && successfulChanges.length > 0) {
+				// The success path skipped its settings read (a handler threw first), so
+				// read it here: a user who turned per-write checkpoints off must not get
+				// a checkpoint, journal entry and change card for a failed patch. A
+				// rejected read keeps the unread default-on value.
+				if (!perWriteCheckpointsRead) {
+					perWriteCheckpoints = await Promise.resolve(task.providerRef?.deref()?.getState())
+						.then((state) => state?.perWriteCheckpoints)
+						.catch(() => undefined)
+				}
 				if (perWriteCheckpoints !== false) {
 					let flushError: unknown
 					await checkpointSave(task, false, true, journalEntries()).catch((flushFailure) => {
