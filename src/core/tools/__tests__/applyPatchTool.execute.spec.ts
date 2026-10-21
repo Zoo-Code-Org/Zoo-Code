@@ -23,6 +23,9 @@ const mockedFsPromises = vi.mocked(
 			access: MockedFunction<typeof fsPromises.access>
 			stat: ReturnType<typeof vi.fn>
 			unlink: MockedFunction<typeof fsPromises.unlink>
+			lstat: ReturnType<typeof vi.fn>
+			readlink: ReturnType<typeof vi.fn>
+			realpath: ReturnType<typeof vi.fn>
 		}
 	},
 )
