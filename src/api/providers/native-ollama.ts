@@ -9,6 +9,7 @@ import { getOllamaModels, isSecureOllamaEndpoint } from "./fetchers/ollama"
 import { createAbortError, mergeAbortSignalAndTimeout, rejectOnAbort } from "./utils/abort-signal"
 import { getLoggableOrigin } from "./utils/endpoint-origin"
 import { TagMatcher } from "../../utils/tag-matcher"
+import { isProxyEnabled } from "../../utils/networkProxy"
 import type {
 	SingleCompletionHandler,
 	ApiHandlerCreateMessageMetadata,
@@ -265,8 +266,11 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		// Use constructor `headers` option instead of mutating (request as any).config.
 		// The credential is only attached when the endpoint is HTTPS or loopback;
 		// sending it over plaintext HTTP to a remote host would leak it (CWE-319).
+		// The debug proxy patches globalThis.fetch, so a plaintext loopback request
+		// would reach the proxy in cleartext; treat that case as insecure too.
 		if (this.options.ollamaApiKey) {
-			if (isSecureOllamaEndpoint(clientOptions.host)) {
+			const viaCleartextProxy = isProxyEnabled() && !/^https:/i.test(clientOptions.host ?? "")
+			if (isSecureOllamaEndpoint(clientOptions.host) && !viaCleartextProxy) {
 				clientOptions.headers = {
 					Authorization: `Bearer ${this.options.ollamaApiKey}`,
 				}
@@ -282,7 +286,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 					this.warnedKeyDropped = true
 					const endpointOrigin = getLoggableOrigin(clientOptions.host)
 					console.warn(
-						`[NativeOllama] ollamaApiKey is set but the endpoint "${endpointOrigin}" is not https or loopback; the Authorization header is not sent (the credential would leak over plaintext). Use an https:// or loopback endpoint to authenticate.`,
+						`[NativeOllama] ollamaApiKey is set but the endpoint "${endpointOrigin}" is not https or loopback, or the debug proxy is active; the Authorization header is not sent (the credential would leak over plaintext). Use an https:// endpoint, or a loopback endpoint without the debug proxy, to authenticate.`,
 					)
 				}
 			}

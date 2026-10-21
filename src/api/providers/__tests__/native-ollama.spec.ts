@@ -12,6 +12,8 @@ import { collectStream } from "../../../test-utils/stream"
 
 // Mock the ollama package
 const mockChat = vitest.fn()
+const mockIsProxyEnabled = vi.hoisted(() => vitest.fn(() => false))
+vitest.mock("../../../utils/networkProxy", () => ({ isProxyEnabled: mockIsProxyEnabled }))
 
 // Use vi.hoisted to define mocks that can be referenced both inside and outside the hoisted vi.mock
 const mockedOllama = vi.hoisted(() => ({
@@ -2334,6 +2336,42 @@ describe("NativeOllamaHandler", () => {
 					},
 				}),
 			)
+		})
+
+		it.each([
+			["completePrompt", (h: NativeOllamaHandler) => h.completePrompt("Test prompt")],
+			["createMessage", (h: NativeOllamaHandler) => collectStream(h.createMessage("sys", []))],
+		])("should not send the API key to the debug proxy over cleartext loopback (%s)", async (_name, run) => {
+			mockIsProxyEnabled.mockReturnValue(true)
+			const warnSpy = vitest.spyOn(console, "warn").mockImplementation(() => {})
+			mockChat.mockImplementation(async (req: { stream?: boolean }) =>
+				req.stream
+					? (async function* () {
+							yield { message: { content: "Response" } }
+						})()
+					: { message: { content: "Response" } },
+			)
+			try {
+				await run(makeHandler({ ollamaBaseUrl: "http://127.0.0.1:11434", ollamaApiKey: "test-api-key-123" }))
+				expect(OllamaMock.mock.calls[0][0].headers).toBeUndefined()
+			} finally {
+				mockIsProxyEnabled.mockReturnValue(false)
+				warnSpy.mockRestore()
+			}
+		})
+
+		it("should still send the API key over HTTPS when the debug proxy is active", async () => {
+			mockIsProxyEnabled.mockReturnValue(true)
+			mockChat.mockResolvedValue({ message: { content: "Response" } })
+			try {
+				await makeHandler({
+					ollamaBaseUrl: "https://ollama.example.com:11434",
+					ollamaApiKey: "test-api-key-123",
+				}).completePrompt("Test prompt")
+				expect(OllamaMock.mock.calls[0][0].headers).toEqual({ Authorization: "Bearer test-api-key-123" })
+			} finally {
+				mockIsProxyEnabled.mockReturnValue(false)
+			}
 		})
 
 		it("should default the client host to localhost when no base URL is configured", async () => {
