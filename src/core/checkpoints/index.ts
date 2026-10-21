@@ -141,6 +141,11 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 		}
 		return service
 	} catch (err) {
+		// A protected workspace directory can never host a shadow repository for
+		// this task: treat it as permanent rather than as a transient init failure.
+		if (err instanceof Error && err.message.startsWith("Cannot use checkpoints in")) {
+			task.checkpointsPermanentlyUnavailable = true
+		}
 		if (err.name === "TimeoutError" && task.enableCheckpoints) {
 			sendCheckpointInitWarn(task, "INIT_TIMEOUT", task.checkpointTimeout)
 		}
@@ -162,6 +167,10 @@ async function checkGitInstallation(
 
 		if (!gitInstalled) {
 			log("[Task#getCheckpointService] Git is not installed, disabling checkpoints")
+			// Permanent for this task: Git will not become installed mid-task, so
+			// later writes must not retry initialization and report failures for
+			// rollback metadata this environment cannot produce.
+			task.checkpointsPermanentlyUnavailable = true
 			disableCheckpointsAfterFailure(task)
 			task.checkpointServiceInitializing = false
 
@@ -323,6 +332,15 @@ export async function checkpointSave(
 				task.checkpointServiceInitializing = false
 			}
 			service = live ?? (await getCheckpointService(task))
+		}
+		if (!service && task.checkpointsPermanentlyUnavailable) {
+			// This environment can never provide rollback metadata (Git is not
+			// installed, or the workspace is protected). The user already saw the
+			// one-time warning; retrying and throwing would turn every write in the
+			// task into a reported failure over a condition the user cannot fix
+			// from here, so the write-metadata save resolves silently like a
+			// user-disabled checkpoint setting.
+			return
 		}
 		if (!service) {
 			if (hasWriteMetadata && (checkpointsRequested || task.checkpointsDisabledByFailure)) {

@@ -516,6 +516,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// user who never enabled checkpoints, without inferring it from live
 	// settings (which can change after the task started).
 	checkpointsDisabledByFailure = false
+	// Set when this environment can never provide checkpoints (Git is not
+	// installed, or the workspace is a protected directory): the condition is
+	// permanent for the task, so checkpointSave must not retry initialization
+	// and fail every later write over rollback metadata it can never produce.
+	checkpointsPermanentlyUnavailable = false
 
 	// Message Queue Service
 	public readonly messageQueueService: MessageQueueService

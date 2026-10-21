@@ -684,6 +684,29 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			)
 		})
 
+		it("honors perWriteCheckpoints: false on the catch path when a handler throws", async () => {
+			// The user turned per-write checkpoints off. A handler that throws after
+			// recording its write skips the success-path settings read, so the catch
+			// path must read the setting itself instead of treating the unread
+			// undefined as default-on - otherwise the failed patch still commits a
+			// checkpoint, journals an entry and emits a change card.
+			vi.mocked(mockTask.fileContextTracker.trackFileContext).mockRejectedValueOnce(new Error("tracker boom"))
+			const getState = vi.fn().mockResolvedValue({ perWriteCheckpoints: false })
+			mockTask.providerRef = { deref: vi.fn().mockReturnValue({ getState }) } as unknown as Task["providerRef"]
+
+			await tool.execute({ patch: updatePatch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+			expect(mockHandleError).toHaveBeenCalledWith("apply patch", expect.anything())
+			// The recorded write still hands the queue off.
+			expect(mockTask.processQueuedMessages).toHaveBeenCalled()
+		})
+
 		it("reports the catch-path flush failure alongside the bookkeeping error", async () => {
 			vi.mocked(mockTask.fileContextTracker.trackFileContext).mockRejectedValueOnce(new Error("tracker boom"))
 			mockedCheckpointSave.mockRejectedValueOnce(new Error("journal boom"))

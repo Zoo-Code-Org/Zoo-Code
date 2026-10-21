@@ -294,6 +294,16 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// failure keeps the documented drop-buffered-results behavior.
 			let reportedError: unknown = error
 			if (!writeMetadataFlushed && successfulChanges.length > 0) {
+				// A handler that threw before the success-path read left the setting
+				// unread: read it here so a user who turned per-write checkpoints off
+				// does not get a checkpoint, journal entry and change card for a patch
+				// that failed. A rejected read keeps the default-on behaviour: a failed
+				// settings read must not skip persistence of writes that already landed.
+				if (perWriteCheckpoints === undefined) {
+					perWriteCheckpoints = await Promise.resolve(task.providerRef?.deref()?.getState())
+						.then((state) => state?.perWriteCheckpoints)
+						.catch(() => undefined)
+				}
 				if (perWriteCheckpoints !== false) {
 					let flushError: unknown
 					await checkpointSave(task, false, true, journalEntries()).catch((flushFailure) => {

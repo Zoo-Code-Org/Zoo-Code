@@ -254,6 +254,45 @@ describe("checkpointSave change-card emission (B3a)", () => {
 		expect(say).not.toHaveBeenCalled()
 	})
 
+	it("resolves a write-metadata save when this environment can never provide checkpoints", async () => {
+		// Git not installed / protected workspace: permanent for the task. Retrying
+		// and throwing would turn every write into a reported failure over
+		// rollback metadata this environment cannot produce; the user already saw
+		// the one-time warning, so the write must still succeed.
+		const { task, say } = makeTask({ storageDir: null })
+		task.checkpointsPermanentlyUnavailable = true
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
+		).resolves.toBeUndefined()
+
+		expect(say).not.toHaveBeenCalled()
+	})
+
+	it("marks checkpoints permanently unavailable when Git is not installed", async () => {
+		// The condition cannot heal mid-task, so the flag is set from the
+		// installation check rather than inferred per save from live state: no
+		// stored service exists yet, so checkpointSave takes the initialization
+		// path that runs the check.
+		const { task } = makeTask({})
+		// Fresh task with no service yet: the save runs the real initialization
+		// path, which is where the installation check lives.
+		task.checkpointService = undefined
+		task.checkpointsDisabledByFailure = false
+		task.enableCheckpoints = true
+		vi.mocked(checkGitInstalled).mockResolvedValueOnce(false)
+		vi.mocked(RepoPerTaskCheckpointService.create).mockReturnValueOnce({
+			on: vi.fn(),
+			isInitialized: false,
+		} as unknown as RepoPerTaskCheckpointService)
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
+		).resolves.toBeUndefined()
+
+		expect(task.checkpointsPermanentlyUnavailable).toBe(true)
+	})
+
 	it("fails a write-metadata save when the checkpoint-service lookup fails and emits no card", async () => {
 		// Documented contract: with checkpoints requested (enableCheckpoints
 		// true) a failed service lookup is a genuine init-failure - the write
