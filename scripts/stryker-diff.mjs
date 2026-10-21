@@ -475,27 +475,37 @@ export function loadEquivalences(repoRoot) {
 export function applyEquivalences(counts, equivalences, packageEntry, reportedFiles = new Set()) {
 	// The key includes the replacement: one condition yields both `=> true` and `=> false`
 	// ConditionalExpression mutants, and only the reviewed replacement may be accepted.
-	const index = new Map(
-		equivalences.map((entry) => [`${entry.file}:${entry.line}:${entry.mutator}:${entry.replacement}`, entry]),
-	)
-	const used = new Set()
+	// Matching is count-limited: a compound condition emits several mutants that share the key
+	// (same line, mutator and replacement, different column), so one registry entry accepts
+	// exactly one mutant and any further mutant with that key stays blocking.
+	const entryKey = (entry) => `${entry.file}:${entry.line}:${entry.mutator}:${entry.replacement}`
+	const remaining = new Map()
+	for (const entry of equivalences) {
+		const key = entryKey(entry)
+		remaining.set(key, (remaining.get(key) ?? 0) + 1)
+	}
+	const accepted = new Map()
 	const blocking = []
 	let equivalent = 0
 	for (const mutant of counts.blocking) {
 		const key = `${packageEntry.root}/${mutant.filePath}:${mutant.location?.start?.line}:${mutant.mutatorName}:${mutant.replacement}`
-		if (index.has(key)) {
-			used.add(key)
+		const left = remaining.get(key) ?? 0
+		if (left > 0) {
+			remaining.set(key, left - 1)
+			accepted.set(key, (accepted.get(key) ?? 0) + 1)
 			equivalent++
 		} else {
 			blocking.push(mutant)
 		}
 	}
-	const unusedEquivalences = equivalences.filter(
-		(entry) =>
-			entry.file.startsWith(packageEntry.sourceRoot) &&
-			reportedFiles.has(entry.file) &&
-			!used.has(`${entry.file}:${entry.line}:${entry.mutator}:${entry.replacement}`),
-	)
+	const seen = new Map()
+	const unusedEquivalences = equivalences.filter((entry) => {
+		if (!entry.file.startsWith(packageEntry.sourceRoot) || !reportedFiles.has(entry.file)) return false
+		const key = entryKey(entry)
+		const ordinal = (seen.get(key) ?? 0) + 1
+		seen.set(key, ordinal)
+		return (accepted.get(key) ?? 0) < ordinal
+	})
 	return { ...counts, blocking, equivalent, unusedEquivalences }
 }
 

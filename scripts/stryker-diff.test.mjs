@@ -1080,6 +1080,77 @@ describe("accepted equivalent mutants", () => {
 		assert.equal(counts.blocking[0].replacement, "false")
 	})
 
+	it("limits each registry entry to a single accepted mutant", () => {
+		// A compound condition emits several ConditionalExpression/true mutants on one line that
+		// differ only by column. One reviewed entry must not accept all of them.
+		const threeSameKey = {
+			files: {
+				"utils/pathUtils.ts": {
+					mutants: [1, 2, 3].map((column) => ({
+						status: "Survived",
+						mutatorName: "ConditionalExpression",
+						replacement: "true",
+						location: { start: { line: 50, column } },
+					})),
+				},
+			},
+		}
+		const oneEntry = [
+			{
+				file: "src/utils/pathUtils.ts",
+				line: 50,
+				mutator: "ConditionalExpression",
+				replacement: "true",
+				reason: "the first sub-expression is equivalent here",
+			},
+		]
+		const limited = evaluateReport(threeSameKey, packageEntry, oneEntry)
+		assert.equal(limited.equivalent, 1)
+		assert.equal(limited.blocking.length, 2)
+		assert.deepEqual(
+			limited.blocking.map((mutant) => mutant.location.start.column),
+			[2, 3],
+		)
+		assert.deepEqual(limited.advisories, [])
+
+		const twoEntries = [...oneEntry, { ...oneEntry[0], reason: "the second sub-expression is also equivalent" }]
+		const both = evaluateReport(threeSameKey, packageEntry, twoEntries)
+		assert.equal(both.equivalent, 2)
+		assert.equal(both.blocking.length, 1)
+		assert.deepEqual(both.advisories, [])
+	})
+
+	it("flags registry duplicates that no extra mutant consumed", () => {
+		const singleMutant = {
+			files: {
+				"utils/pathUtils.ts": {
+					mutants: [
+						{
+							status: "Survived",
+							mutatorName: "ConditionalExpression",
+							replacement: "true",
+							location: { start: { line: 50, column: 1 } },
+						},
+					],
+				},
+			},
+		}
+		const oneEntry = {
+			file: "src/utils/pathUtils.ts",
+			line: 50,
+			mutator: "ConditionalExpression",
+			replacement: "true",
+			reason: "only one mutant carries this key",
+		}
+		const counts = evaluateReport(singleMutant, packageEntry, [
+			oneEntry,
+			{ ...oneEntry, reason: "duplicate entry with no second mutant to accept" },
+		])
+		assert.equal(counts.equivalent, 1)
+		assert.equal(counts.unusedEquivalences.length, 1)
+		assert.equal(counts.unusedEquivalences[0].reason, "duplicate entry with no second mutant to accept")
+	})
+
 	it("advises about stale entries only for files present in the report", () => {
 		const advisories = evaluateReport(report, packageEntry, equivalences).advisories.join("\n")
 		assert.match(advisories, /src\/utils\/pathUtils\.ts:99:BlockStatement/)
