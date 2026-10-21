@@ -52,43 +52,44 @@ jobs:
                         return;
                       }
 
-                      // Same-repository review runs already ran with a privileged
-                      // token and wrote their labels; only fork runs need the
-                      // follow-up.
-                      if (run.head_repository && run.head_repository.fork === false) {
-                        core.info('Ignoring same-repository pull_request_review run');
-                        return;
-                      }
-
-                      // Resolve which PRs the completed run targeted. Fork runs
-                      // backfill pull_requests empty, so fall back to the exact head
-                      // owner, branch, and SHA lookup used by the resolve job of
-                      // label-pr-review-state.yml. Keep both copies in sync.
+                      // GitHub reports the base repository as head_repository on
+                      // every pull_request_review run, fork PR or not (issue
+                      // #2133), so the payload cannot tell fork from same-repo
+                      // runs. Dispatching for a same-repo PR is idempotent: the
+                      // reconciliation writes the same labels, and its completion
+                      // carries event 'workflow_dispatch', which the guard above
+                      // filters out.
+                      //
+                      // Resolve which PRs the completed run targeted. Review runs
+                      // backfill pull_requests empty for fork PRs, and the head
+                      // owner is not recoverable from head_repository, so the
+                      // fallback lists open PRs and matches the exact head branch,
+                      // SHA, and base repository. The workflow_run branch of
+                      // label-pr-review-state.yml keeps an owner-and-branch query
+                      // instead: its runs are CI runs triggered by pull_request,
+                      // whose head_repository is the real fork.
                       let prNumbers = [];
                       if (run.pull_requests?.length > 0) {
                         prNumbers = run.pull_requests.map(pr => pr.number);
-                      } else {
-                        const headOwner = run.head_repository?.owner?.login;
-                        if (headOwner && run.head_branch && run.head_sha) {
-                          const candidates = await github.paginate(github.rest.pulls.list, {
-                            owner,
-                            repo,
-                            state: 'open',
-                            head: `${headOwner}:${run.head_branch}`,
-                            per_page: 100,
-                          });
-                          const baseRepository = `${owner}/${repo}`.toLowerCase();
-                          prNumbers = candidates
-                            .filter(pr =>
-                              pr.head?.sha === run.head_sha &&
-                              pr.base?.repo?.full_name?.toLowerCase() === baseRepository
-                            )
-                            .map(pr => pr.number);
-                          core.info(
-                            `Resolved workflow_run ${run.id ?? '(unknown)'} to ` +
-                            `${prNumbers.length} PR(s) by exact head owner, branch, and SHA`
-                          );
-                        }
+                      } else if (run.head_branch && run.head_sha) {
+                        const candidates = await github.paginate(github.rest.pulls.list, {
+                          owner,
+                          repo,
+                          state: 'open',
+                          per_page: 100,
+                        });
+                        const baseRepository = `${owner}/${repo}`.toLowerCase();
+                        prNumbers = candidates
+                          .filter(pr =>
+                            pr.head?.sha === run.head_sha &&
+                            pr.head?.ref === run.head_branch &&
+                            pr.base?.repo?.full_name?.toLowerCase() === baseRepository
+                          )
+                          .map(pr => pr.number);
+                        core.info(
+                          `Resolved workflow_run ${run.id ?? '(unknown)'} to ` +
+                          `${prNumbers.length} PR(s) by exact head branch, SHA, and base repository`
+                        );
                       }
 
                       // Each dispatch starts a privileged workflow_dispatch run of the
