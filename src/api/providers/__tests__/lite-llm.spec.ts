@@ -1541,6 +1541,49 @@ describe("LiteLLMHandler", () => {
 			expect(elapsed).toBeLessThan(1000)
 		})
 
+		it("settles caller cancellation during a non-signal-aware SDK retry sleep", async () => {
+			// Regression: the settle race watched only the deadline signal, so a
+			// caller cancelling while the SDK slept between retries waited for the
+			// sleep to finish. The race must settle on the caller's abort.
+			let attempt = 0
+			let releaseSleep!: () => void
+			const sleepGate = new Promise<void>((resolve) => {
+				releaseSleep = resolve
+			})
+			mockCreate.mockImplementation((_body: unknown, options?: { signal?: AbortSignal }) => {
+				attempt += 1
+				return new Promise<never>((_resolve, reject) => {
+					if (options?.signal?.aborted) {
+						reject(Object.assign(new Error("Request was aborted."), { name: "APIUserAbortError" }))
+						return
+					}
+					// First attempt fails like a retryable 429; the SDK then sleeps
+					// without watching the signal, which the gate models.
+					void sleepGate.then(() => {
+						reject(Object.assign(new Error("Request was aborted."), { name: "APIUserAbortError" }))
+					})
+				})
+			})
+
+			const controller = new AbortController()
+			const startedAt = Date.now()
+			const completion = handler
+				.completePrompt("test prompt", { abortSignal: controller.signal })
+				.catch((e: unknown) => e)
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			controller.abort()
+
+			const error = await completion
+			const elapsed = Date.now() - startedAt
+
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
+			// Settled on the abort, not on the retry sleep.
+			expect(elapsed).toBeLessThan(1000)
+			expect(attempt).toBe(1)
+			releaseSleep()
+		})
+
 		it("reports deadline expiry as a timeout, not as caller cancellation, when the SDK aborts at the deadline", async () => {
 			// The SDK surfaces deadline expiry as an abort-shaped error
 			// (APIUserAbortError). With no caller abort in play it must surface as

@@ -554,7 +554,11 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 				requestOptions,
 				Object.keys(createOptions).length > 0 ? createOptions : undefined,
 			)
-			const response = deadlineSignal ? await rejectOnAbort(request, deadlineSignal, "LiteLLM") : await request
+			// Race the merged signal, not just the deadline: the SDK's retry backoff
+			// sleep is not signal-aware, so a caller cancellation during a retry
+			// wait must settle immediately instead of waiting the sleep out. The
+			// catch above keeps deadline expiry classified as a timeout first.
+			const response = requestSignal ? await rejectOnAbort(request, requestSignal, "LiteLLM") : await request
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
 			// Deadline expiry is distinct from caller cancellation: the SDK reports
