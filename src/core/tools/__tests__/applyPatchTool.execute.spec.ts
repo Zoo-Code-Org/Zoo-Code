@@ -785,8 +785,47 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 
 		expect(mockHandleError).not.toHaveBeenCalled()
 		const lockKeys = vi.mocked(withFileLock).mock.calls.map((call) => String(call[0]))
-		expect(lockKeys.some((key) => key.toLowerCase().endsWith("old.ts"))).toBe(true)
+		// Exact key, not a suffix match: a key such as /elsewhere/old.ts would have
+		// satisfied the old assertion while serializing the wrong path.
+		expect(lockKeys).toContain(sourceKey)
+		// The source name is what the deletion names; nothing else may be unlinked.
 		expect(mockedFsPromises.default.unlink).toHaveBeenCalledWith(sourceKey)
+		for (const call of mockedFsPromises.default.unlink.mock.calls) {
+			expect(String(call[0])).toBe(sourceKey)
+		}
+	})
+
+	it("move: keeps a symlinked source when its referent is not what the move named", async () => {
+		// resolveLockKey returns the symlink REFERENT for a symlinked source. The
+		// lock must use that key, but the deletion must still name the source path:
+		// unlinking the referent would destroy a file the user never moved.
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		const referentKey = path.resolve("/workspace/project", "src/real/old.ts")
+		const reg = mockTask.observationRegistry
+		reg.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+		mockedFsPromises.default.lstat.mockImplementation(async (p: unknown) => ({
+			isSymbolicLink: () => String(p) === sourceKey,
+		}))
+		mockedFsPromises.default.readlink.mockImplementation(async (p: unknown) => {
+			if (String(p) === sourceKey) return "real/old.ts"
+			throw new Error("not a symbolic link")
+		})
+		mockedFsPromises.default.realpath.mockImplementation(async (p: unknown) => {
+			const value = String(p)
+			return value === path.resolve("/workspace/project", "src/real")
+				? path.resolve("/workspace/project", "src/real")
+				: value
+		})
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		const unlinked = mockedFsPromises.default.unlink.mock.calls.map((call) => String(call[0]))
+		expect(unlinked).not.toContain(referentKey)
 	})
 
 	it("update: surfaces the unobserved-existing remediation as a tool error", async () => {

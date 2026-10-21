@@ -558,10 +558,13 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// await, where TypeScript no longer tracks the movePath narrowing.
 			const sourceRelPath = change.path
 			const destRelPath = change.movePath
-			await withFileLock(await resolveLockKey(absolutePath), async (lockedSourcePath) => {
+			// The lock key is the symlink referent (see resolveLockKey), so it is used only
+			// to acquire the lock: stat/unlink act on the source path this move names.
+			// Deleting the referent would destroy a file the user never asked to move.
+			await withFileLock(await resolveLockKey(absolutePath), async () => {
 				let sourceToken: string
 				try {
-					sourceToken = versionTokenOfStat(await fs.stat(lockedSourcePath, { bigint: true }))
+					sourceToken = versionTokenOfStat(await fs.stat(absolutePath, { bigint: true }))
 				} catch (error: unknown) {
 					// The source vanished after the destination was published: whatever
 					// removed it owns that removal, and this move must not report a
@@ -580,7 +583,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					)
 				}
 				try {
-					await fs.unlink(lockedSourcePath)
+					await fs.unlink(absolutePath)
 				} catch (error: unknown) {
 					throw new PartialMoveError(sourceRelPath, destRelPath, error)
 				}
