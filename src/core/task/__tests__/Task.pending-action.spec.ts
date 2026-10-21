@@ -249,6 +249,69 @@ describe("Task pending action replay", () => {
 		expect(resume.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(initiateTaskLoop).mock.invocationCallOrder[0])
 	})
 
+	it("re-interrupts an abandoned delegated child after the denial activation commits", async () => {
+		const provider = {
+			resumeInterruptedTask: vi.fn().mockResolvedValue(undefined),
+			reinterruptAbandonedChild: vi.fn().mockResolvedValue(undefined),
+		}
+		const task = createTask(provider)
+		const state = task as unknown as {
+			initialStatus?: string
+			parentTaskId?: string
+			abandoned?: boolean
+			apiConversationHistory: unknown[]
+			addToApiConversationHistory: ReturnType<typeof vi.fn>
+		}
+		state.initialStatus = "interrupted"
+		state.parentTaskId = "parent-1"
+		state.abandoned = true
+		state.apiConversationHistory = []
+		state.addToApiConversationHistory = vi.fn().mockResolvedValue(true)
+		task.ask = vi.fn().mockResolvedValue({ response: "noButtonClicked" })
+		const initiateTaskLoop = (task as unknown as { initiateTaskLoop: ReturnType<typeof vi.fn> }).initiateTaskLoop
+
+		await getPendingActionAccess(task).resumePendingTaskAction(createAction)
+
+		expect(provider.resumeInterruptedTask).toHaveBeenCalledWith("task-1", "parent-1")
+		expect(provider.reinterruptAbandonedChild).toHaveBeenCalledWith({
+			childTaskId: "task-1",
+			parentTaskId: "parent-1",
+		})
+		const resume = vi.mocked(provider.resumeInterruptedTask)
+		expect(resume.mock.invocationCallOrder[0]).toBeLessThan(
+			vi.mocked(provider.reinterruptAbandonedChild).mock.invocationCallOrder[0],
+		)
+		expect(initiateTaskLoop).not.toHaveBeenCalled()
+	})
+
+	it("does not re-interrupt a standalone task when the activation lands after an abort", async () => {
+		const provider = {
+			resumeInterruptedTask: vi.fn().mockResolvedValue(undefined),
+			reinterruptAbandonedChild: vi.fn().mockResolvedValue(undefined),
+		}
+		const task = createTask(provider)
+		const state = task as unknown as {
+			initialStatus?: string
+			parentTaskId?: string
+			abort?: boolean
+			apiConversationHistory: unknown[]
+			addToApiConversationHistory: ReturnType<typeof vi.fn>
+		}
+		state.initialStatus = "interrupted"
+		state.parentTaskId = undefined
+		state.abort = true
+		state.apiConversationHistory = []
+		state.addToApiConversationHistory = vi.fn().mockResolvedValue(true)
+		task.ask = vi.fn().mockResolvedValue({ response: "noButtonClicked" })
+		const initiateTaskLoop = (task as unknown as { initiateTaskLoop: ReturnType<typeof vi.fn> }).initiateTaskLoop
+
+		await getPendingActionAccess(task).resumePendingTaskAction(createAction)
+
+		expect(provider.resumeInterruptedTask).toHaveBeenCalledWith("task-1", undefined)
+		expect(provider.reinterruptAbandonedChild).not.toHaveBeenCalled()
+		expect(initiateTaskLoop).toHaveBeenCalledTimes(1)
+	})
+
 	it("stops before activation when the denial result fails to persist", async () => {
 		const provider = { resumeInterruptedTask: vi.fn().mockResolvedValue(undefined) }
 		const task = createTask(provider)

@@ -74,6 +74,22 @@ describe("ClineProvider.resumeInterruptedTask()", () => {
 		expect(taskHistoryStore.resumeInterruptedTask).toHaveBeenCalledWith("child-1", "parent-1")
 	})
 
+	it("reinterruptAbandonedChild delegates to markDelegatedChildInterrupted", async () => {
+		const markDelegatedChildInterrupted = vi.fn().mockResolvedValue(undefined)
+		const log = vi.fn()
+		const provider = makeProviderStub({ markDelegatedChildInterrupted, log })
+
+		await ClineProvider.prototype.reinterruptAbandonedChild.call(provider, {
+			childTaskId: "child-1",
+			parentTaskId: "parent-1",
+		})
+
+		expect(markDelegatedChildInterrupted).toHaveBeenCalledWith({
+			childTaskId: "child-1",
+			parentTaskId: "parent-1",
+		})
+	})
+
 	it("rejects abandonment committed by another host after the parent precheck", async () => {
 		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "resume-abandon-"))
 		const storeA = new TaskHistoryStore(storagePath)

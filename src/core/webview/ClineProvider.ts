@@ -758,6 +758,27 @@ export class ClineProvider
 		}
 	}
 
+	/**
+	 * Re-interrupts a delegated child whose interrupted-resume commit landed
+	 * after the child's runner was already aborted or abandoned, so the
+	 * cancelling flow skipped its own interruption marking and left an active
+	 * record with no runner. Delegates to markDelegatedChildInterrupted(),
+	 * which holds the parent transition lock and only flips a child that is
+	 * still active and still awaited by its parent.
+	 */
+	public async reinterruptAbandonedChild({
+		childTaskId,
+		parentTaskId,
+	}: {
+		childTaskId: string
+		parentTaskId: string
+	}): Promise<void> {
+		this.log(
+			`[reinterruptAbandonedChild] Resume committed after child ${childTaskId} was aborted or abandoned — re-interrupting under parent ${parentTaskId}`,
+		)
+		await this.markDelegatedChildInterrupted({ childTaskId, parentTaskId })
+	}
+
 	getTaskStackSize(): number {
 		return this.taskRegistry.length
 	}

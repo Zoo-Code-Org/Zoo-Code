@@ -3457,6 +3457,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					)
 					throw error
 				}
+
+				if ((this.abort || this.abandoned) && this.parentTaskId) {
+					// The commit activated a child whose runner was aborted or
+					// abandoned while the commit was in flight, so the cancel or
+					// eviction skipped its own interruption marking. Re-interrupt
+					// first, then restore the pre-resume history while the record
+					// status still matches this resume's starting status. The
+					// restore removes the recovery copy only when it succeeds.
+					await provider.reinterruptAbandonedChild({
+						childTaskId: this.taskId,
+						parentTaskId: this.parentTaskId,
+					})
+					await this.restorePreparedResumeHistory(
+						recoveryCopyPath,
+						existingApiConversationHistory,
+						modifiedApiConversationHistory,
+					)
+					return
+				}
 			}
 
 			// The resume committed, so the prepared history is the accepted
@@ -3648,6 +3667,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// No API-history restore runs: the denial is a committed user
 			// decision, not an unaccepted prepared slice.
 			await provider.resumeInterruptedTask(this.taskId, this.parentTaskId)
+			if ((this.abort || this.abandoned) && this.parentTaskId) {
+				// The commit activated a child whose runner was aborted or
+				// abandoned while the commit was in flight. The denial result
+				// is a committed decision, so only the record needs
+				// re-interruption.
+				await provider.reinterruptAbandonedChild({
+					childTaskId: this.taskId,
+					parentTaskId: this.parentTaskId,
+				})
+				return
+			}
 			// The denial result is already persisted, so the loop must not
 			// append it again.
 			await this.initiateTaskLoop(denialUserContent, { userContentAlreadyPersisted: true })
