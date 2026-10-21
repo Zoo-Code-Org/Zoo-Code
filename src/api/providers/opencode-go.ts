@@ -1,11 +1,7 @@
 import { v7 as uuidv7 } from "uuid"
-import {
-	Anthropic,
-	APIConnectionTimeoutError as AnthropicTimeoutError,
-	APIUserAbortError as AnthropicAbortError,
-} from "@anthropic-ai/sdk"
+import { Anthropic, APIConnectionTimeoutError as AnthropicTimeoutError } from "@anthropic-ai/sdk"
 import { CacheControlEphemeral } from "@anthropic-ai/sdk/resources"
-import OpenAI, { APIConnectionTimeoutError, APIUserAbortError } from "openai"
+import OpenAI, { APIConnectionTimeoutError } from "openai"
 
 import {
 	type ModelInfo,
@@ -832,7 +828,18 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	 * @throws Error with an Opencode Go-specific prefix if the request fails.
 	 */
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
-		const { id: modelId, format, temperature, reasoningEffort, maxTokens } = await this.resolveModel()
+		// Establish the cancellation scope around model resolution, matching
+		// createMessage: a pre-aborted signal rejects before the /models lookup
+		// starts, a signal that fires mid-lookup settles on the standardized
+		// AbortError instead of the raw lookup failure, and timeoutMs bounds
+		// this phase too.
+		const {
+			id: modelId,
+			format,
+			temperature,
+			reasoningEffort,
+			maxTokens,
+		} = await resolveModelWithAbort(() => this.resolveModel(), options?.abortSignal, "Opencode Go")
 
 		if (format === "anthropic") {
 			try {
@@ -872,12 +879,10 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				// Anthropic SDK reports both with messages ending in a period
 				// ("Request was aborted.", "Request timed out."), which would not
 				// match task-level abort detection (message ending in "aborted").
-				if (
-					options?.abortSignal?.aborted ||
-					error instanceof AnthropicAbortError ||
-					error instanceof AnthropicTimeoutError ||
-					(error instanceof Error && error.name === "AbortError")
-				) {
+				// isRequestAborted covers the caller's signal plus the SDK abort
+				// names/messages (AbortError, APIUserAbortError); the Anthropic
+				// SDK timeout keeps its series-standard abort identity.
+				if (isRequestAborted(error, options?.abortSignal) || error instanceof AnthropicTimeoutError) {
 					throw createAbortError("Opencode Go")
 				}
 				if (error instanceof Error) {
@@ -987,12 +992,10 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			// OpenAI SDK reports both with messages ending in a period
 			// ("Request was aborted.", "Request timed out."), which would not
 			// match task-level abort detection (message ending in "aborted").
-			if (
-				options?.abortSignal?.aborted ||
-				error instanceof APIUserAbortError ||
-				error instanceof APIConnectionTimeoutError ||
-				(error instanceof Error && error.name === "AbortError")
-			) {
+			// isRequestAborted covers the caller's signal plus the SDK abort
+			// names/messages (AbortError, APIUserAbortError); the OpenAI SDK
+			// timeout keeps its series-standard abort identity.
+			if (isRequestAborted(error, options?.abortSignal) || error instanceof APIConnectionTimeoutError) {
 				throw createAbortError("Opencode Go")
 			}
 			if (error instanceof Error) {

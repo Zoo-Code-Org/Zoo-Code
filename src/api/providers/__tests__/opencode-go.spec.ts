@@ -989,6 +989,57 @@ describe("OpencodeGoHandler", () => {
 			)
 		})
 
+		it("rejects with the standardized AbortError when the caller aborts while completePrompt is resolving the model", async () => {
+			// completePrompt must scope model resolution like createMessage does:
+			// a catalog lookup parked on a gate has to settle on the standardized
+			// AbortError as soon as the caller's signal fires, without waiting for
+			// the lookup to finish and without starting the completion request.
+			let releaseResolution!: () => void
+			const resolutionGate = new Promise<void>((resolve) => {
+				releaseResolution = resolve
+			})
+			vitest.mocked(getModels).mockImplementationOnce(async () => {
+				await resolutionGate
+				return { "glm-5.1": { ...opencodeGoModels["glm-5.1"] } }
+			})
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const controller = new AbortController()
+
+			const completion = handler.completePrompt("ping", { abortSignal: controller.signal })
+
+			// Park the lookup on the gate, then abort while it is still pending.
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			controller.abort()
+
+			await expect(completion).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Opencode Go request was aborted",
+			})
+			// The lookup was attempted but the completion request must never start.
+			expect(vitest.mocked(getModels)).toHaveBeenCalledTimes(1)
+			expect(mockCreate).not.toHaveBeenCalled()
+
+			// Releasing the lookup afterwards must not start a late request.
+			releaseResolution()
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("rejects with the AbortError before the model lookup when completePrompt gets a pre-aborted signal", async () => {
+			const handler = new OpencodeGoHandler(mockOptions)
+			const controller = new AbortController()
+			controller.abort()
+
+			await expect(handler.completePrompt("ping", { abortSignal: controller.signal })).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Opencode Go request was aborted",
+			})
+			// The catalog must be skipped entirely, not merely raced.
+			expect(vitest.mocked(getModels)).not.toHaveBeenCalled()
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
 		it("sends the per-instance session ID on non-streaming completions", async () => {
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
 			const handler = new OpencodeGoHandler(mockOptions)
@@ -1366,11 +1417,10 @@ describe("OpencodeGoHandler", () => {
 			)
 		})
 
-		it("completePrompt preserves abort identity when the signal is pre-aborted with a plain error", async () => {
-			// The aborted-signal disjunct alone must normalize a plain
-			// rejection (not just SDK abort classes) to the DOM-standard
-			// AbortError.
-			mockAnthropicCreate.mockRejectedValueOnce(new Error("boom"))
+		it("completePrompt settles a pre-aborted signal before the Anthropic request starts", async () => {
+			// Model resolution runs inside the cancellation scope, so a signal
+			// that is already aborted rejects before the Anthropic request is
+			// built: the SDK must never be called.
 			const controller = new AbortController()
 			controller.abort()
 			const handler = new OpencodeGoHandler(anthropicOptions)
@@ -1381,6 +1431,7 @@ describe("OpencodeGoHandler", () => {
 			)
 			expect(error).toMatchObject({ name: "AbortError" })
 			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+			expect(mockAnthropicCreate).not.toHaveBeenCalled()
 		})
 
 		it("completePrompt preserves abort identity for a name-based AbortError rejection (Anthropic path)", async () => {
@@ -1534,11 +1585,10 @@ describe("OpencodeGoHandler", () => {
 				)
 			})
 
-			it("completePrompt preserves abort identity when the signal is pre-aborted with a plain error", async () => {
-				// The aborted-signal disjunct alone must normalize a plain
-				// rejection (not just SDK abort classes) to the DOM-standard
-				// AbortError.
-				mockCreate.mockRejectedValueOnce(new Error("boom"))
+			it("completePrompt settles a pre-aborted signal before the OpenAI request starts", async () => {
+				// Model resolution runs inside the cancellation scope, so a signal
+				// that is already aborted rejects before the chat completion is
+				// issued: the SDK must never be called.
 				const controller = new AbortController()
 				controller.abort()
 				const handler = new OpencodeGoHandler(openaiOptions)
@@ -1549,6 +1599,7 @@ describe("OpencodeGoHandler", () => {
 				)
 				expect(error).toMatchObject({ name: "AbortError" })
 				expect((error as Error).message).toBe("The Opencode Go request was aborted")
+				expect(mockCreate).not.toHaveBeenCalled()
 			})
 
 			it("completePrompt preserves abort identity for a name-based AbortError rejection (OpenAI path)", async () => {
