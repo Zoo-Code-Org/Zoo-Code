@@ -509,7 +509,9 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			deadline !== undefined && Number.isFinite(deadline)
 				? Math.min(2_147_483_647, Math.max(1, Math.ceil(deadline - Date.now())))
 				: undefined
-		const deadlineSignal = remainingMs !== undefined ? AbortSignal.timeout(remainingMs) : undefined
+		// The shared helper applies the series' timeout semantics (cap at 2^31-1 ms,
+		// finite positive only) instead of handing a raw delay to AbortSignal.timeout.
+		const deadlineSignal = mergeAbortSignalAndTimeout(undefined, remainingMs)
 
 		try {
 			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
