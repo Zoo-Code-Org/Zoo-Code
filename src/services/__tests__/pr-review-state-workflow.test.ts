@@ -736,6 +736,25 @@ describe("PR review-state workflow", () => {
 		expect(result.setFailed).not.toHaveBeenCalled()
 	})
 
+	it("adds the conflict flag for fork PRs from pull_request_target", async () => {
+		const result = await runWorkflow({ eventName: "pull_request_target", fork: true, conflict: true })
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		expect(result.setFailed).not.toHaveBeenCalled()
+	})
+
+	it("removes the conflict flag for fork PRs from pull_request_target", async () => {
+		const result = await runWorkflow({
+			eventName: "pull_request_target",
+			fork: true,
+			conflict: false,
+			labels: ["has-conflicts"],
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		expect(result.setFailed).not.toHaveBeenCalled()
+	})
+
 	it("creates missing workflow labels", async () => {
 		const result = await runWorkflow({ existingRepoLabels: [] })
 
@@ -1297,6 +1316,15 @@ describe("PR review-state workflow", () => {
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
 		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.setFailed).toHaveBeenCalledWith(
+			expect.stringContaining("Could not reconcile has-conflicts label"),
+		)
+	})
+
+	it("reports a 404 when adding the has-conflicts flag", async () => {
+		const result = await runWorkflow({ conflict: true, addLabelsStatus: 404 })
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
 		expect(result.setFailed).toHaveBeenCalledWith(
 			expect.stringContaining("Could not reconcile has-conflicts label"),
 		)
