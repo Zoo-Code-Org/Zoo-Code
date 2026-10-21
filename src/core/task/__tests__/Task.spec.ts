@@ -6995,6 +6995,34 @@ describe("Cline", () => {
 			expect(requestSpy).toHaveBeenCalled()
 		})
 
+		it("enters the request loop when the baseline save stalls past checkpointTimeout", async () => {
+			// A stalled git add/commit must not hold startup before TaskStarted. The
+			// await is bounded; the late baseline is left to the per-task checkpoint
+			// lock, which serializes it with the first per-write save.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "baseline stall task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			type SaveResult = Awaited<ReturnType<typeof task.checkpointSave>>
+			vi.spyOn(task, "checkpointSave").mockImplementation(() => new Promise<SaveResult>(() => {}))
+			const requestSpy = vi.spyOn(task, "recursivelyMakeClineRequests").mockResolvedValue(true)
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+			task.checkpointTimeout = 0.01
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			await taskAccess.initiateTaskLoop([])
+
+			expect(requestSpy).toHaveBeenCalled()
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("task-start checkpoint baseline still running"),
+			)
+			warnSpy.mockRestore()
+		})
+
 		it("continues task startup when the baseline checkpoint fails", async () => {
 			const task = new Task({
 				provider: mockProvider,

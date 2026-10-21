@@ -3869,12 +3869,37 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				try {
 					// allowEmpty=true so a clean workspace still produces the baseline
 					// commit; awaited so the first per-write checkpoint cannot interleave.
-					const baseline = await this.checkpointSave(true, true)
-					// The flag is set only once the baseline actually committed: a save
-					// that no-ops behind a failed or timed-out service initialization is
-					// retried on a later loop entry instead of being marked done without
-					// a rollback point.
-					if (baseline?.commit) {
+					// The await is bounded: a stalled git add/commit must not hold task
+					// startup before TaskStarted. A baseline that finishes late is
+					// harmless - checkpointSave serializes per task, so a still-running
+					// baseline cannot interleave with the first per-write save.
+					const savePromise = this.checkpointSave(true, true)
+					// A timeout that wins must not leave an unhandled rejection behind.
+					savePromise.catch(() => undefined)
+					const BASELINE_TIMED_OUT = Symbol("baseline-timed-out")
+					let baselineTimer: ReturnType<typeof setTimeout> | undefined
+					const baseline = await Promise.race([
+						savePromise,
+						new Promise<typeof BASELINE_TIMED_OUT>((resolve) => {
+							baselineTimer = setTimeout(
+								() => resolve(BASELINE_TIMED_OUT),
+								Math.max(1, this.checkpointTimeout * 1000),
+							)
+						}),
+					]).finally(() => {
+						if (baselineTimer !== undefined) {
+							clearTimeout(baselineTimer)
+						}
+					})
+					if (baseline === BASELINE_TIMED_OUT) {
+						console.warn(
+							`[Task] task-start checkpoint baseline still running after ${this.checkpointTimeout}s; entering the request loop and leaving the baseline to the per-task checkpoint lock.`,
+						)
+					} else if (baseline?.commit) {
+						// The flag is set only once the baseline actually committed: a save
+						// that no-ops behind a failed or timed-out service initialization is
+						// retried on a later loop entry instead of being marked done without
+						// a rollback point.
 						this.taskStartBaselineDone = true
 					}
 				} catch (error) {
