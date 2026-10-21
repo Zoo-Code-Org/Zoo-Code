@@ -1,10 +1,12 @@
 name: Weekly release kickoff
 
-# Kicks off the weekly Zoo Code release. The message @mentions zoomote, which
-# starts the Roomote release prep (release PR per .roo/commands/release.md,
-# posted in the release channel). It also pings one maintainer per week as a
-# reminder to review and approve the release PR, tag the release branch, and
-# approve the marketplace-production deployment.
+# Kicks off the weekly Zoo Code release. The message pings one maintainer per
+# week as a reminder to review and approve the release PR, tag the release
+# branch, and approve the marketplace-production deployment, then @mentions
+# zoomote as the visible cue of who cuts the release. Webhook-posted mentions
+# do not trigger Roomote (confirmed by test), so the release prep (release PR
+# per .roo/commands/release.md, posted in the release channel) runs from the
+# separate Roomote automation at the same time.
 #
 # Requires two repo secrets:
 # - DISCORD_RELEASE_WEBHOOK_URL: Discord webhook for the channel that receives
@@ -58,8 +60,6 @@ jobs:
                   message=$(cat <<EOF
                   **Weekly release kickoff**
 
-                  ${ZOOMOTE_MENTION} prepare this week's Zoo Code release per \`.roo/commands/release.md\` and post the release PR in this channel.
-
                   ${on_deck} — reminder: you are on deck for this week's release. When the release PR is up:
 
                   1. Review and approve the release PR.
@@ -67,13 +67,15 @@ jobs:
                   3. Approve the deployment when the \`marketplace-production\` environment requests it.
                   4. After publishing succeeds, add the release PR to the merge queue.
 
+                  ${ZOOMOTE_MENTION} prepare this week's Zoo Code release per \`.roo/commands/release.md\` and post the release PR in this channel.
+
                   Avoid merging or rebasing the release branch before publishing, so the approved tag keeps the intended commit SHA.
 
                   More detail: https://discord.com/channels/1497384592494297201/1498024845945081999/1512914847124291667
                   EOF
                   )
 
-                  payload=$(jq -n --arg content "$message" '{content: $content}')
+                  payload=$(jq -n --arg content "$message" '{content: $content, allowed_mentions: {parse: ["users"]}}')
                   curl --fail-with-body --silent --show-error \
                     --header 'Content-Type: application/json' \
                     --data "$payload" \
