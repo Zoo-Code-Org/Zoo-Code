@@ -121,6 +121,12 @@ export class DiffViewProvider {
 		// after editing to see if cline needs to fix anything.
 		this.preDiagnostics = vscode.languages.getDiagnostics()
 
+		// Capture the on-disk version token for the content the user is about to
+		// review BEFORE reading it: computing it afterwards would fold a concurrent
+		// change into both the snapshot and the token, so the guarded publish would
+		// accept a state the user never reviewed.
+		const observedVersionToken = fileExists ? await computeVersionToken(absolutePath) : undefined
+
 		if (fileExists) {
 			this.originalContent = await fs.readFile(absolutePath, "utf-8")
 		} else {
@@ -142,7 +148,12 @@ export class DiffViewProvider {
 		// stale instead of silently overwriting the newer content.
 		const openTask = this.taskRef.deref()
 		if (openTask) {
-			openTask.observationRegistry.observe(absolutePath, await computeVersionToken(absolutePath))
+			// A file created by this diff flow has no pre-read token: compute it now,
+			// after the empty file exists, so the publish CAS-checks what it created.
+			openTask.observationRegistry.observe(
+				absolutePath,
+				observedVersionToken ?? (await computeVersionToken(absolutePath)),
+			)
 		}
 
 		// If the file was already open, close it (must happen after showing the

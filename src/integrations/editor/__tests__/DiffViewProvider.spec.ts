@@ -1177,6 +1177,27 @@ describe("DiffViewProvider", () => {
 					expect(mockTask.observationRegistry.get(`${mockCwd}/test.ts`)?.version).toBe("tok-open")
 				})
 
+				it("captures the version token before reading the original content", async () => {
+					// A change between the read and the token computation would otherwise be
+					// folded into both the snapshot and the token, so the guarded publish
+					// would accept content the user never reviewed. Pinning the order makes
+					// the CAS cover exactly the reviewed bytes.
+					mockTask.observationRegistry.clear()
+					diffViewProvider.editType = "modify"
+					vi.mocked(computeVersionToken).mockResolvedValue("tok-before")
+					// The original-content read changes the on-disk version: a token taken
+					// after the read would observe "tok-after".
+					vi.mocked(fs.readFile).mockImplementationOnce(async () => {
+						vi.mocked(computeVersionToken).mockResolvedValue("tok-after")
+						return "disk content"
+					})
+
+					stubDiffEditorOpen(`${mockCwd}/test.ts`)
+					await diffViewProvider.open("test.ts")
+
+					expect(mockTask.observationRegistry.get(`${mockCwd}/test.ts`)?.version).toBe("tok-before")
+				})
+
 				it("publishes a diff-flow-created file through the CAS (regression: e2e write_to_file)", async () => {
 					mockTask.observationRegistry.clear()
 					diffViewProvider.editType = "create"
