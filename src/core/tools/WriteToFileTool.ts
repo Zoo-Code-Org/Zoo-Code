@@ -367,11 +367,18 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			task.consecutiveMistakeCount++
 			task.recordToolError("write_to_file")
 			const retainedPath = task.diffViewProvider.editingRelPath ?? "another file"
+			// The retained session is only released by a retry of ITS path (which reuses the
+			// session and reaches reset()) - saving or closing the editor does not clear
+			// isEditing/relPath in this process, so that remedy would loop.
 			const retainedErrorMessage =
 				`Cannot write '${relPath}': an unfinished write to '${retainedPath}' must be resolved first. ` +
-				"Save or close that editor, then retry this write."
+				`Retry the write to '${retainedPath}' to reuse and finish that session, then retry this write.`
 			await task.say("error", retainedErrorMessage)
 			pushToolResult(formatResponse.toolError(retainedErrorMessage))
+			// This return skips the try/finally below, so the per-task stream state a delta may
+			// have created for the rejected path must be released here: otherwise its TaskAborted
+			// listener leaks and a streamFailed flag would suppress every later write_to_file delta.
+			this.resetTaskPartialState(task)
 			return
 		}
 
@@ -709,6 +716,13 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		if (newContent) {
 			try {
+				// A retained session belongs to its own path: streaming a different path's
+				// deltas would skip open() (isEditing is true) and write this path's content
+				// into the old document. Leave the preview alone and let execute() report the
+				// rejection with the remediation.
+				if (task.diffViewProvider.isEditingDifferentPath(relPath!)) {
+					return
+				}
 				if (!task.diffViewProvider.isEditing) {
 					await task.diffViewProvider.open(relPath!)
 				}

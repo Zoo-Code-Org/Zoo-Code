@@ -335,6 +335,20 @@ describe("writeToFileTool", () => {
 			},
 		)
 
+		it("does not stream a different path's delta into a retained session", async () => {
+			// The retained session keeps isEditing true, so a different path's delta would
+			// skip open() and write its partial content into the old document. The streaming
+			// guard must leave the preview untouched and let execute() report the rejection.
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.isEditingDifferentPath = vi.fn(() => true)
+
+			await executeWriteFileTool({ path: "other.txt" }, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({ path: "other.txt" }, { fileExists: false, isPartial: true })
+
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+		})
+
 		it("does not create directories when file exists", async () => {
 			await executeWriteFileTool({}, { fileExists: true })
 
@@ -1601,6 +1615,11 @@ describe("writeToFileTool", () => {
 				expect(mockCline.say).toHaveBeenCalledWith(
 					"error",
 					expect.stringContaining("unfinished write to 'test/path.txt' must be resolved first"),
+				)
+				// The remedy must name the only path that actually releases the session.
+				expect(mockCline.say).toHaveBeenCalledWith(
+					"error",
+					expect.stringContaining("Retry the write to 'test/path.txt'"),
 				)
 			} finally {
 				consoleErrorSpy.mockRestore()
