@@ -249,9 +249,9 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		const controller = new AbortController()
 		const abortListener = () => controller.abort()
 		if (externalAbortSignal) {
-			// Stryker disable next-line ConditionalExpression: externalAbortSignal.aborted can never be true here - the entry guard rejects a pre-aborted signal and the rejectOnAbort race rejects an abort during model resolution, and no await sits between the race settling and this bridge, so the branch is unreachable
+			// Equivalent mutant: this abort branch is not observable from the public API.
 			if (externalAbortSignal.aborted) {
-				// Stryker disable next-line CallExpression: unreachable branch body - a pre-aborted external signal is rejected by the entry guard (and a mid-resolution abort by the race) before this bridge registers
+				// Equivalent mutant: this abort branch is not observable from the public API.
 				controller.abort()
 			} else {
 				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
@@ -504,9 +504,9 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			// isRequestAborted covers the signal-aborted case plus the OpenAI
 			// SDK's APIUserAbortError (name "APIUserAbortError" / "Request was
 			// aborted.").
-			// Stryker disable next-line ConditionalExpression: abort normalization is subsumed by createMessage's outer catch, which applies the identical isRequestAborted check to the same controller signal and re-throws the standardized AbortError - this condition's mutation is unobservable (the inner layer's unique behavior is the non-abort wrap below)
+			// Equivalent mutant: this abort branch is not observable from the public API.
 			if (isRequestAborted(error, abortSignal)) {
-				// Stryker disable next-line StringLiteral: the thrown error is re-caught by createMessage's outer catch, which re-standardizes with the correct provider name (the standardized error's name AbortError matches the outer isRequestAborted) - this literal is unobservable
+				// Equivalent mutant: this abort branch is not observable from the public API.
 				throw createAbortError("Opencode Go")
 			}
 			if (error instanceof Error) {
@@ -645,7 +645,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			// completion error. isRequestAborted also covers the Anthropic
 			// SDK's APIUserAbortError (name "APIUserAbortError").
 			if (isRequestAborted(error, abortSignal)) {
-				// Stryker disable next-line StringLiteral: the thrown error is re-caught by createMessage's outer catch, which re-standardizes with the correct provider name (the standardized error's name AbortError matches the outer isRequestAborted) - this literal is unobservable
+				// Equivalent mutant: this abort branch is not observable from the public API.
 				throw createAbortError("Opencode Go")
 			}
 			if (error instanceof Error) {
