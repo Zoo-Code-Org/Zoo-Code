@@ -2236,7 +2236,12 @@ Instructions`)
 			mockMkdir.mockResolvedValue(undefined)
 			mockWriteFile.mockResolvedValue(undefined)
 
-			const createdPath = await skillsManager.createSkill("new-skill", "global", "A new skill description")
+			// Longer than js-yaml's default 80-column fold width: createSkill must
+			// write it as a single description line, not a folded scalar.
+			const description =
+				'Use when implementing features. Triggers on: "TDD", "test-driven development" and "refactoring" workflows'
+
+			const createdPath = await skillsManager.createSkill("new-skill", "global", description)
 
 			expect(createdPath).toBe(p(GLOBAL_ROO_DIR, "skills", "new-skill", "SKILL.md"))
 			expect(mockMkdir).toHaveBeenCalledWith(p(GLOBAL_ROO_DIR, "skills", "new-skill"), { recursive: true })
@@ -2245,8 +2250,12 @@ Instructions`)
 			// Verify the content written
 			const writeCall = mockWriteFile.mock.calls[0]
 			expect(writeCall[0]).toBe(p(GLOBAL_ROO_DIR, "skills", "new-skill", "SKILL.md"))
-			expect(writeCall[1]).toContain("name: new-skill")
-			expect(writeCall[1]).toContain("description: A new skill description")
+			const written = String(writeCall[1])
+			expect(written).toContain("name: new-skill")
+			const descriptionLine = written.split("\n").find((line) => line.startsWith("description:"))
+			// Long descriptions are quoted (js-yaml quotes strings containing quotes).
+			expect(descriptionLine).toBe(`description: '${description}'`)
+			expect(written).not.toContain("> ")
 		})
 
 		it("should create a mode-specific skill with modeSlugs array", async () => {
@@ -2330,7 +2339,10 @@ Instructions`)
 			mockMkdir.mockResolvedValue(undefined)
 			mockWriteFile.mockResolvedValue(undefined)
 
-			const description = 'Use when implementing features. Triggers on: "TDD", "test-driven development"'
+			// Deliberately longer than js-yaml's default 80-column fold width: without
+			// lineWidth: -1 the serializer wraps this into a rolled scalar.
+			const description =
+				'Use when implementing features. Triggers on: "TDD", "test-driven development", "red-green-refactor" and "refactoring" workflows'
 			const createdPath = await skillsManager.createSkill("test-skill", "global", description)
 
 			// The written frontmatter must be valid YAML that round-trips the
@@ -2424,7 +2436,11 @@ Body here.`
 			// The new modeSlugs were written and the body is preserved.
 			expect(parsed.data.modeSlugs).toEqual(["code"])
 			expect(rewritten).toContain("Body here.")
-			// lineWidth: -1 keeps the value on a single line (no folded block scalar).
+			// lineWidth: -1 keeps the value on a single line: without it js-yaml folds
+			// a description this long across several lines, so pin the exact line and
+			// the absence of any continuation.
+			const descriptionLine = rewritten.split("\n").find((line) => line.startsWith("description:"))
+			expect(descriptionLine).toBe(`description: '${description}'`)
 			expect(rewritten).not.toContain("> ")
 
 			// Clearing the restriction removes modeSlugs from the frontmatter.
