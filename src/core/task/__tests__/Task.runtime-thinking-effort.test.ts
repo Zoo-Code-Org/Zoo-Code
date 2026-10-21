@@ -11,6 +11,7 @@ import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import { Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { buildApiHandler } from "../../../api"
+import { disposeApiHandler } from "../../../api/dispose-api-handler"
 
 // Mock dependencies (same lightweight set as Task.throttle.test.ts)
 vi.mock("../../webview/ClineProvider")
@@ -24,6 +25,7 @@ vi.mock("../../protect/RooProtectedController")
 vi.mock("../../context-tracking/FileContextTracker")
 vi.mock("../../../integrations/editor/DiffViewProvider")
 vi.mock("../../tools/ToolRepetitionDetector")
+vi.mock("../../../api/dispose-api-handler", () => ({ disposeApiHandler: vi.fn() }))
 vi.mock("../../../api", () => ({
 	// Returns a fresh handler object per call so tests can assert on the exact
 	// configuration each rebuild received (via vi.mocked(buildApiHandler).mock.calls).
@@ -127,6 +129,28 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 		if (task) {
 			await task.dispose().catch(() => {})
 		}
+	})
+
+	describe("dispose", () => {
+		it("clears an active override without rebuilding or double-disposing the handler", async () => {
+			task.setRuntimeThinkingEffort("xhigh", "test-source")
+			const access = getPrivateAccess(task)
+			const handlerBefore = (task as unknown as { api: unknown }).api
+			const buildsBefore = vi.mocked(buildApiHandler).mock.calls.length
+			vi.mocked(disposeApiHandler).mockClear()
+
+			await task.dispose()
+
+			expect(access.runtimeThinkingEffort).toBeUndefined()
+			expect(access.runtimeThinkingEffortSource).toBeUndefined()
+			// A disposed task never serves another request: disposal must not rebuild
+			// a replacement handler it would then have to collect and dispose.
+			expect(vi.mocked(buildApiHandler).mock.calls.length).toBe(buildsBefore)
+			// The handler the task owned is disposed exactly once, not retired a
+			// second time by the clearing path.
+			const disposedHandlers = vi.mocked(disposeApiHandler).mock.calls.map(([api]) => api)
+			expect(disposedHandlers.filter((api) => api === handlerBefore)).toHaveLength(1)
+		})
 	})
 
 	describe("setRuntimeThinkingEffort", () => {

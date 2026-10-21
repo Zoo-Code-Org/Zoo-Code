@@ -3819,11 +3819,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			console.error("Error reverting diff changes:", error)
 		}
 
-		// Clear the DTE runtime-effort override via the standard clearing call so a
-		// retained disposed task never serves a stale override: the override also
-		// lives in apiConfiguration.reasoningEffort and the built api handler, and
-		// the clearing call restores both before clearing the runtime fields.
-		this.setRuntimeThinkingEffort(undefined)
+		// Clear the DTE runtime-effort override so a retained disposed task never
+		// reports a stale override. The fields are cleared directly instead of via
+		// setRuntimeThinkingEffort: that setter rebuilds the handler, and during
+		// disposal the rebuild would (a) create a replacement handler this pass has
+		// already collected and disposed, and (b) retire the just-disposed handler a
+		// second time. `apiConfiguration` never carries the override (it stays the
+		// profile-derived projection), so there is nothing to restore.
+		this.runtimeThinkingEffort = undefined
+		this.runtimeThinkingEffortSource = undefined
 
 		await pendingCleanup
 		await this.diffReversionPromise
