@@ -1581,6 +1581,33 @@ describe("safeWriteText", () => {
 			)
 
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+			// The commit landed, so the failure cleanup must not touch the published file.
+			expect(fs.unlink).not.toHaveBeenCalledWith(targetPath)
+		})
+
+		it("never deletes the published file when a post-commit step fails", async () => {
+			// Everything after the commit rename (directory fsync, DACL restore) can fail
+			// while the bytes are already at the target. The failure cleanup may only
+			// unlink the staging name - and only while the rename did not complete - so a
+			// reported failure never turns into data loss.
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync)
+				.mockReturnValueOnce(1)
+				.mockImplementationOnce(() => {
+					throw new Error("EBADF")
+				})
+			vi.mocked(fs.unlink).mockClear()
+
+			await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toBeInstanceOf(
+				PostCommitDurabilityError,
+			)
+
+			const unlinkedPaths = vi.mocked(fs.unlink).mock.calls.map((call) => String(call[0]))
+			expect(unlinkedPaths).not.toContain(targetPath)
+			// The committed staging name is gone with the rename; removing it again could
+			// delete whatever the next write filed under the same name.
+			expect(unlinkedPaths.filter((candidate) => candidate.includes("safeWriteText_"))).toHaveLength(0)
 		})
 
 		it("propagates realpath errors (EACCES and code-less) instead of the fallback path", async () => {

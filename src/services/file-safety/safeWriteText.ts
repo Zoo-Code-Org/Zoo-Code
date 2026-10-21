@@ -479,6 +479,11 @@ export async function safeWriteText(
 	// write created so its cleanup removes its own directory, not a shared one.
 	let stagingDir: string | null = null
 	let tempPath: string
+	// Whether the commit rename consumed the staging name. The failure cleanup may only
+	// unlink the staging path while this write still owns that name: after the rename
+	// the name belongs to whatever is filed under it next, and a caller-supplied
+	// staging name is reused by the next write to the same target.
+	let stagingCommitted = false
 	if (options?.tempPath) {
 		// A caller-supplied staging file is only safe when it is the file this
 		// write is staging, not an arbitrary path. Two properties are checked:
@@ -806,6 +811,7 @@ export async function safeWriteText(
 
 			// -- Step 4: atomic rename temp -> target ---------------------
 			await fs.rename(tempPath, targetPath)
+			stagingCommitted = true
 
 			// -- Step 4b (POSIX): fsync the parent directory so the directory entry
 			// changed by the commit rename is durable, not just the file content.
@@ -933,10 +939,16 @@ export async function safeWriteText(
 			await fs.unlink(backupPath).catch(() => {})
 			backupPath = null
 		}
-		try {
-			await fs.unlink(tempPath).catch(() => {})
-		} catch {
-			// cleanup failure is non-fatal
+		// Never touch the target: a post-commit durability or DACL failure leaves the
+		// published bytes at the target, and a cleanup that deleted them would turn a
+		// reported failure into data loss. The staging name is removed only while this
+		// write still owns it (the rename did not complete).
+		if (!stagingCommitted) {
+			try {
+				await fs.unlink(tempPath).catch(() => {})
+			} catch {
+				// cleanup failure is non-fatal
+			}
 		}
 
 		// A failed self-staged write must not leave its staging directory behind.
