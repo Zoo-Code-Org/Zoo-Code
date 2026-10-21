@@ -91,7 +91,7 @@
 	},
 	"api/providers/__tests__/anthropic.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 9
+			"count": 7
 		}
 	},
 	"api/providers/__tests__/base-openai-compatible-provider-timeout.spec.ts": {
@@ -296,7 +296,7 @@
 	},
 	"api/providers/bedrock.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 34
+			"count": 32
 		}
 	},
 	"api/providers/deepseek.ts": {
@@ -369,11 +369,6 @@
 			"count": 8
 		}
 	},
-	"api/providers/lm-studio.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
 	"api/providers/mimo.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 5
@@ -386,7 +381,7 @@
 	},
 	"api/providers/native-ollama.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 3
+			"count": 2
 		}
 	},
 	"api/providers/openai-codex.ts": {
@@ -396,7 +391,7 @@
 	},
 	"api/providers/openai-native.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 28
+			"count": 27
 		}
 	},
 	"api/providers/openai.ts": {
@@ -691,7 +686,7 @@
 	},
 	"core/mentions/__tests__/processUserContentMentions.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 2
+			"count": 1
 		}
 	},
 	"core/mentions/index.ts": {
@@ -752,11 +747,6 @@
 	"core/prompts/tools/__tests__/filter-tools-for-mode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 14
-		}
-	},
-	"core/prompts/tools/filter-tools-for-mode.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
 		}
 	},
 	"core/prompts/tools/native-tools/__tests__/converters.spec.ts": {
@@ -936,7 +926,7 @@
 	},
 	"core/tools/__tests__/executeCommand.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 12
+			"count": 10
 		}
 	},
 	"core/tools/__tests__/executeCommandTool.spec.ts": {
@@ -1036,7 +1026,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.sticky-profile.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 16
+			"count": 15
 		}
 	},
 	"core/webview/__tests__/ClineProvider.taskHistory.spec.ts": {
@@ -1174,16 +1164,6 @@
 			"count": 1
 		}
 	},
-	"integrations/misc/__tests__/extract-text.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"integrations/misc/__tests__/line-counter.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
 	"integrations/misc/__tests__/open-file.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 11
@@ -1236,7 +1216,7 @@
 	},
 	"integrations/terminal/__tests__/TerminalProfile.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 35
+			"count": 34
 		}
 	},
 	"integrations/terminal/__tests__/TerminalRegistry.spec.ts": {
@@ -1501,7 +1481,7 @@
 	},
 	"services/mcp/McpHub.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 10
+			"count": 8
 		}
 	},
 	"services/mcp/McpOAuthClientProvider.ts": {
@@ -1646,7 +1626,7 @@
 	},
 	"utils/__tests__/autoImportSettings.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 16
+			"count": 15
 		}
 	},
 	"utils/__tests__/enhance-prompt.spec.ts": {
@@ -1707,11 +1687,6 @@
 	"utils/safeWriteJson.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 4
-		}
-	},
-	"utils/tts.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
 		}
 	},
 	"vitest.setup.ts": {

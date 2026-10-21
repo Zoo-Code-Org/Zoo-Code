@@ -18,6 +18,16 @@ When writing new code:
 - After editing a file, run `pnpm --dir src exec eslint --prune-suppressions --max-warnings=0 <relative-file>` and confirm the count for that file did not increase.
 - If a suppression is truly unavoidable (e.g. `vi.spyOn(Cls.prototype as any, "privateMethod")` where no typed alternative exists), document why in a comment next to the cast.
 
+### Typed test files
+
+New or substantially changed test files must not add `@typescript-eslint/no-explicit-any` suppression entries to `src/eslint-suppressions.json`:
+
+- Prefer typed structural doubles: type mock context/proxy classes against the real public types they stand in for (e.g. `vscode.ExtensionContext`), and use `unknown` for storage values and mock callback parameters instead of `any`.
+- Access private members with bracket notation (`provider["view"]`) and call public members without casts so their generic signatures keep checking arguments.
+- When a partial double cannot be assigned to the real type, cast it once at the construction site (`as unknown as T`) with a comment naming the members the double provides; do not repeat `as any` at every use site.
+- Validate with `pnpm --dir src run check-types`, the narrowest affected Vitest suite, and `pnpm --dir src exec eslint --prune-suppressions --max-warnings=0 <relative-test-file>`; the run must not add a new entry or raise an existing count.
+- An exception requires a comment next to the cast explaining why no typed alternative exists and maintainer approval in review.
+
 ## Persisted Setting Checklist
 
 When adding or changing a user setting, trace the complete round trip. A setting is not complete merely because its control renders or its value reaches storage.
@@ -44,6 +54,9 @@ Prefer the narrowest test layer that proves the behavior. This follows standard 
 - Use `apps/vscode-e2e` only when the behavior depends on the real VS Code extension host, VS Code workspace APIs, extension activation, webview/extension messaging, file watcher behavior, or a complete user workflow.
 - Keep e2e tests focused on high-value smoke coverage across boundaries. Avoid placing detailed protocol, parsing, storage, retry, or edge-case assertions in e2e when they can be covered reliably at a lower layer.
 - When fixing a regression, add the regression test at the lowest layer that would have failed for the bug. Add an e2e test only if lower-level tests cannot represent the failure mode.
+- For a guard or validator, test the accept path and the reject path through every public entry point. A test that only rejects bad input does not prove the guard still accepts good input.
+- Use `it.each` for repeated cases and share the setup in a helper. Do not copy a test body per input.
+- A `Stryker disable` comment states the reason in one sentence. ESLint `max-len` limits it to 300 characters.
 
 ## Task Lifecycle Changes
 

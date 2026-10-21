@@ -1,9 +1,7 @@
 // npx vitest src/core/assistant-message/__tests__/presentAssistantMessage-images.spec.ts
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { Anthropic } from "@anthropic-ai/sdk"
 import { presentAssistantMessage } from "../presentAssistantMessage"
-import { Task } from "../../task/Task"
 import { validateToolUse } from "../../tools/validateToolUse"
 import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
 
@@ -50,6 +48,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			didCompleteReadingStream: false,
 			didRejectTool: false,
 			didAlreadyUseTool: false,
+			activeToolContexts: new Map(),
 			consecutiveMistakeCount: 0,
 			getTaskMode: vi.fn().mockResolvedValue("code"),
 			api: {
@@ -102,15 +101,6 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 		]
 
 		// Create a mock askApproval that includes images in the response
-		const imageBlock: Anthropic.ImageBlockParam = {
-			type: "image",
-			source: {
-				type: "base64",
-				media_type: "image/png",
-				data: "base64ImageData",
-			},
-		}
-
 		mockTask.ask = vi.fn().mockResolvedValue({
 			response: "yesButtonClicked",
 			text: "I see a cat",
