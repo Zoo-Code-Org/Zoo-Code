@@ -798,7 +798,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		}
 	})
 
-	it("move: keeps a symlinked source when its referent is not what the move named", async () => {
+	it("move: locks the symlink referent but unlinks only the named source path", async () => {
 		// resolveLockKey returns the symlink REFERENT for a symlinked source. The
 		// lock must use that key, but the deletion must still name the source path:
 		// unlinking the referent would destroy a file the user never moved.
@@ -813,11 +813,14 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			if (String(p) === sourceKey) return "real/old.ts"
 			throw new Error("not a symbolic link")
 		})
+		// The referent is a distinct path: resolvePublishTarget follows the link, so
+		// resolveLockKey returns the referent key the lock must use.
 		mockedFsPromises.default.realpath.mockImplementation(async (p: unknown) => {
 			const value = String(p)
-			return value === path.resolve("/workspace/project", "src/real")
-				? path.resolve("/workspace/project", "src/real")
-				: value
+			if (value === sourceKey) return referentKey
+			if (value === path.resolve("/workspace/project", "src/real"))
+				return path.resolve("/workspace/project", "src/real")
+			return value
 		})
 
 		await tool.execute({ patch: movePatch }, mockTask as Task, {
@@ -827,7 +830,13 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			toolCallId: "test-tool-call-id",
 		})
 
+		// Both halves of the contract: the advisory lock is taken on the referent
+		// (the path a peer writer of the real file uses) while the deletion names only
+		// the source path this move asked to remove.
+		const lockKeys = vi.mocked(withFileLock).mock.calls.map((call) => String(call[0]))
+		expect(lockKeys).toContain(referentKey)
 		const unlinked = mockedFsPromises.default.unlink.mock.calls.map((call) => String(call[0]))
+		expect(unlinked).toContain(sourceKey)
 		expect(unlinked).not.toContain(referentKey)
 	})
 
