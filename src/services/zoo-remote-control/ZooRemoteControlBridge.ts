@@ -77,6 +77,10 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	private eventSeqPersistFailed = false
 	/** Bumped on deactivate/dispose so in-flight polls/flushes become no-ops. */
 	private lifecycleEpoch = 0
+	/** Serializes eligibility sync so activate and deactivate cannot overlap. */
+	private syncChain: Promise<void> = Promise.resolve()
+	/** Set before the identity await so a second activate cannot pass the first check. */
+	private activating = false
 	private commandPollInFlight = false
 	/** At-most-once delivery for remote commands (esp. start_task) within an active session. */
 	private handledCommandIds = new Set<string>()
@@ -293,6 +297,21 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private async syncActiveState(): Promise<void> {
+		let release!: () => void
+		const gate = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		const previous = this.syncChain
+		this.syncChain = gate
+		await previous
+		try {
+			await this.applyEligibility()
+		} finally {
+			release()
+		}
+	}
+
+	private async applyEligibility(): Promise<void> {
 		if (this.disposed) {
 			return
 		}
@@ -312,32 +331,39 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private async activate(): Promise<void> {
-		if (this.active || this.disposed) {
+		if (this.active || this.activating || this.disposed) {
 			return
 		}
 
-		const identityOk = await this.identityReady
-		if (!identityOk || this.disposed) {
-			this.log("[ZooRemoteControl] refusing to activate: instance id is not persisted")
-			return
+		this.activating = true
+		try {
+			const identityOk = await this.identityReady
+			if (!identityOk || this.disposed || this.active) {
+				if (!identityOk && !this.disposed) {
+					this.log("[ZooRemoteControl] refusing to activate: instance id is not persisted")
+				}
+				return
+			}
+
+			this.active = true
+			this.setServerAvailable(true)
+			this.bindApiListeners(true)
+			this.presenceTimer = setInterval(() => {
+				void this.publishPresence(true)
+			}, PRESENCE_INTERVAL_MS)
+			this.commandTimer = setInterval(() => {
+				void this.pollCommands()
+			}, COMMAND_POLL_INTERVAL_MS)
+			this.flushTimer = setInterval(() => {
+				void this.flushEvents()
+			}, EVENT_FLUSH_INTERVAL_MS)
+
+			this.log("[ZooRemoteControl] enabled")
+			await this.publishPresence(true)
+			await this.publishSnapshot()
+		} finally {
+			this.activating = false
 		}
-
-		this.active = true
-		this.setServerAvailable(true)
-		this.bindApiListeners(true)
-		this.presenceTimer = setInterval(() => {
-			void this.publishPresence(true)
-		}, PRESENCE_INTERVAL_MS)
-		this.commandTimer = setInterval(() => {
-			void this.pollCommands()
-		}, COMMAND_POLL_INTERVAL_MS)
-		this.flushTimer = setInterval(() => {
-			void this.flushEvents()
-		}, EVENT_FLUSH_INTERVAL_MS)
-
-		this.log("[ZooRemoteControl] enabled")
-		await this.publishPresence(true)
-		await this.publishSnapshot()
 	}
 
 	private async deactivate({ notifyOffline }: { notifyOffline: boolean }): Promise<void> {
@@ -671,6 +697,13 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 					return {
 						taskId: task.taskId,
 						hasPendingAsk: () => task.hasPendingAsk(),
+						pendingAskTs: () => {
+							if (!task.hasPendingAsk()) {
+								return undefined
+							}
+							const last = task.clineMessages.at(-1)
+							return typeof last?.ts === "number" ? last.ts : undefined
+						},
 						approveAsk: (payload) => task.approveAsk(payload),
 						denyAsk: (payload) => task.denyAsk(payload),
 					}

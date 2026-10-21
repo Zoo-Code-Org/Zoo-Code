@@ -125,6 +125,21 @@ describe("ZooRemoteControlBridge", () => {
 		})
 	}
 
+	function useLiveTask(options?: { taskId?: string; pendingAskTs?: number }) {
+		const task = {
+			taskId: options?.taskId ?? "task-1",
+			clineMessages:
+				options?.pendingAskTs === undefined
+					? []
+					: [{ ts: options.pendingAskTs, type: "ask", ask: "command", partial: false }],
+			hasPendingAsk: () => options?.pendingAskTs !== undefined,
+			approveAsk: vi.fn(),
+			denyAsk: vi.fn(),
+		}
+		provider.getCurrentTask.mockReturnValue(task)
+		return task
+	}
+
 	it("stays inactive when remote control is disabled", async () => {
 		const bridge = createBridge()
 		await vi.advanceTimersByTimeAsync(0)
@@ -184,6 +199,47 @@ describe("ZooRemoteControlBridge", () => {
 		]
 	})
 
+	it("does not leave a duplicate listener when eligibility drops during activation", async () => {
+		sessionActive = true
+		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
+		provider.contextProxy.getProviderSettings.mockReturnValue({
+			apiProvider: providerIdentifiers.zooGateway,
+		})
+		context.globalState.get.mockImplementation((key: string) => {
+			if (key === "zooRemoteControl.eventSeq") return 0
+			if (key === "zooRemoteControl.sessionActive") return true
+			return undefined
+		})
+		let releaseId: () => void = () => {}
+		const idGate = new Promise<void>((resolve) => {
+			releaseId = resolve
+		})
+		context.globalState.update.mockImplementation(async (key: string, value: unknown) => {
+			if (key === "zooRemoteControl.instanceId") {
+				await idGate
+			}
+			if (key === "zooRemoteControl.sessionActive") {
+				sessionActive = value === true
+			}
+		})
+
+		const bridge = createBridge()
+		await Promise.resolve()
+		provider.contextProxy.getProviderSettings.mockReturnValue({
+			apiProvider: providerIdentifiers.anthropic,
+		})
+		provider.emit(RooCodeEventName.ProviderProfileChanged, {
+			name: "Anthropic",
+			provider: providerIdentifiers.anthropic,
+		})
+		releaseId()
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(bridge.isActive()).toBe(false)
+		expect(api.listenerCount(RooCodeEventName.Message)).toBe(0)
+		bridge.dispose()
+	})
+
 	it("does not activate when the provider is not eligible", async () => {
 		sessionActive = true
 		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
@@ -204,6 +260,7 @@ describe("ZooRemoteControlBridge", () => {
 		provider.contextProxy.getProviderSettings.mockReturnValue({
 			apiProvider: providerIdentifiers.zooGateway,
 		})
+		useLiveTask()
 		client.getCommands.mockResolvedValue({
 			ok: true,
 			status: 200,
@@ -212,6 +269,7 @@ describe("ZooRemoteControlBridge", () => {
 					{
 						commandId: "cmd-1",
 						type: "message",
+						taskId: "task-1",
 						payload: { text: "hello from remote" },
 					},
 				],
@@ -316,20 +374,14 @@ describe("ZooRemoteControlBridge", () => {
 	}
 
 	it("approves and denies asks on the current task", async () => {
-		const task = {
-			taskId: "task-1",
-			hasPendingAsk: vi.fn(() => true),
-			approveAsk: vi.fn(),
-			denyAsk: vi.fn(),
-		}
-		provider.getCurrentTask.mockReturnValue(task)
+		const task = useLiveTask({ pendingAskTs: 42 })
 		client.getCommands.mockResolvedValueOnce({
 			ok: true,
 			status: 200,
 			body: {
 				commands: [
-					{ commandId: "a1", type: "approve_ask", payload: { text: "ok" } },
-					{ commandId: "d1", type: "deny_ask", payload: { text: "no" } },
+					{ commandId: "a1", type: "approve_ask", taskId: "task-1", payload: { text: "ok", askTs: 42 } },
+					{ commandId: "d1", type: "deny_ask", taskId: "task-1", payload: { text: "no", askTs: 42 } },
 				],
 			},
 		})
@@ -344,7 +396,7 @@ describe("ZooRemoteControlBridge", () => {
 		bridge.dispose()
 	})
 
-	it("fails ask commands when there is no current task", async () => {
+	it("fails ask commands that do not name a task", async () => {
 		provider.getCurrentTask.mockReturnValue(undefined)
 		client.getCommands.mockResolvedValueOnce({
 			ok: true,
@@ -363,12 +415,12 @@ describe("ZooRemoteControlBridge", () => {
 		expect(client.ackCommand).toHaveBeenCalledWith({
 			commandId: "a1",
 			status: "failed",
-			errorCode: "no_current_task",
+			errorCode: "missing_task_id",
 		})
 		expect(client.ackCommand).toHaveBeenCalledWith({
 			commandId: "d1",
 			status: "failed",
-			errorCode: "no_current_task",
+			errorCode: "missing_task_id",
 		})
 		bridge.dispose()
 	})
@@ -397,13 +449,14 @@ describe("ZooRemoteControlBridge", () => {
 	})
 
 	it("cancels, resumes, starts, and switches mode from remote commands", async () => {
+		useLiveTask()
 		provider.handleModeSwitch = vi.fn().mockResolvedValue(undefined)
 		client.getCommands.mockResolvedValueOnce({
 			ok: true,
 			status: 200,
 			body: {
 				commands: [
-					{ commandId: "c1", type: "cancel_task" },
+					{ commandId: "c1", type: "cancel_task", taskId: "task-1" },
 					{ commandId: "r1", type: "resume_task", taskId: "task-9" },
 					{ commandId: "s1", type: "start_task", payload: { text: "new work" } },
 					{ commandId: "m1", type: "switch_mode", payload: { mode: "code" } },
@@ -471,11 +524,12 @@ describe("ZooRemoteControlBridge", () => {
 	})
 
 	it("acks execution_failed when a command throws", async () => {
+		useLiveTask()
 		api.sendMessage.mockRejectedValueOnce(new Error("boom"))
 		client.getCommands.mockResolvedValueOnce({
 			ok: true,
 			status: 200,
-			body: { commands: [{ commandId: "m1", type: "message", payload: { text: "x" } }] },
+			body: { commands: [{ commandId: "m1", type: "message", taskId: "task-1", payload: { text: "x" } }] },
 		})
 
 		const bridge = await activateEligibleBridge()
@@ -544,11 +598,14 @@ describe("ZooRemoteControlBridge", () => {
 	})
 
 	it("sends message commands to the local API", async () => {
+		useLiveTask()
 		client.getCommands.mockResolvedValueOnce({
 			ok: true,
 			status: 200,
 			body: {
-				commands: [{ commandId: "m1", type: "message", payload: { text: "hello", images: ["img"] } }],
+				commands: [
+					{ commandId: "m1", type: "message", taskId: "task-1", payload: { text: "hello", images: ["img"] } },
+				],
 			},
 		})
 
@@ -561,6 +618,7 @@ describe("ZooRemoteControlBridge", () => {
 	})
 
 	it("answers follow-ups and can switch mode from the payload", async () => {
+		useLiveTask()
 		provider.handleModeSwitch = vi.fn().mockResolvedValue(undefined)
 		client.getCommands.mockResolvedValueOnce({
 			ok: true,
@@ -570,6 +628,7 @@ describe("ZooRemoteControlBridge", () => {
 					{
 						commandId: "f1",
 						type: "answer_followup",
+						taskId: "task-1",
 						payload: { text: "option a", mode: "architect" },
 					},
 				],

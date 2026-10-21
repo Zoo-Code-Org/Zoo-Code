@@ -219,7 +219,9 @@ const TaskHeader = ({
 					className="mb-2 flex items-center justify-between gap-2 rounded border border-vscode-dropdown-border bg-vscode-editor-background p-2 text-sm"
 					onClick={(e) => e.stopPropagation()}
 					data-testid="remote-steer-offer">
-					<span className="text-vscode-descriptionForeground">{t("chat:task.steerRemotelyHint")}</span>
+					<span className="min-w-0 flex-1 text-vscode-descriptionForeground">
+						{t("chat:task.steerRemotelyHint")}
+					</span>
 					<button
 						type="button"
 						className="shrink-0 rounded bg-vscode-button-background px-2 py-1 text-xs font-medium text-vscode-button-foreground hover:bg-vscode-button-hoverBackground"

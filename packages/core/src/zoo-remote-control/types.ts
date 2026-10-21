@@ -30,6 +30,8 @@ export const zooRemoteCommandSchema = z.object({
 			text: z.string().optional(),
 			images: z.array(z.string()).optional(),
 			mode: z.string().optional(),
+			/** Timestamp of the ask the user approved or denied. */
+			askTs: z.number().optional(),
 		})
 		.optional(),
 	timestamp: z.number().optional(),

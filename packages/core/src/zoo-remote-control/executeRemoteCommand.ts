@@ -4,6 +4,8 @@ import type { ZooRemoteControlClient } from "./ZooRemoteControlClient.js"
 export type ZooRemoteCommandHostTask = {
 	taskId: string
 	hasPendingAsk: () => boolean
+	/** Timestamp of the ask currently blocking the task, when one is pending. */
+	pendingAskTs: () => number | undefined
 	approveAsk: (payload?: { text?: string; images?: string[] }) => void
 	denyAsk: (payload?: { text?: string; images?: string[] }) => void
 }
@@ -40,7 +42,7 @@ async function failCommand(
 	})
 }
 
-/** When a command targets a task id, require it to match the live task. */
+/** Task-mutating commands must name the live task. A missing id is not "current task". */
 async function ensureTaskTarget(options: {
 	command: ZooRemoteCommand
 	epoch: number
@@ -49,7 +51,8 @@ async function ensureTaskTarget(options: {
 }): Promise<boolean> {
 	const { command, epoch, client, host } = options
 	if (!command.taskId) {
-		return true
+		await failCommand(client, host, epoch, command.commandId, "missing_task_id")
+		return false
 	}
 	const currentId = host.getCurrentTask()?.taskId
 	if (currentId === command.taskId) {
@@ -122,6 +125,15 @@ export async function executeRemoteCommand(options: {
 					}
 					if (!task.hasPendingAsk()) {
 						await failCommand(client, host, epoch, command.commandId, "no_pending_ask")
+						return
+					}
+					const askTs = command.payload?.askTs
+					if (askTs === undefined) {
+						await failCommand(client, host, epoch, command.commandId, "missing_ask_id")
+						return
+					}
+					if (task.pendingAskTs() !== askTs) {
+						await failCommand(client, host, epoch, command.commandId, "ask_mismatch")
 						return
 					}
 					if (!host.isLifecycleCurrent(epoch)) {

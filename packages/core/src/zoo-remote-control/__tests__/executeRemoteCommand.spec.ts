@@ -1,7 +1,18 @@
 import { describe, expect, it, vi } from "vitest"
 
 import { executeRemoteCommand } from "../executeRemoteCommand.js"
-import type { ZooRemoteCommandHost } from "../executeRemoteCommand.js"
+import type { ZooRemoteCommandHost, ZooRemoteCommandHostTask } from "../executeRemoteCommand.js"
+
+function liveTask(overrides: Partial<ZooRemoteCommandHostTask> = {}): ZooRemoteCommandHostTask {
+	return {
+		taskId: "t1",
+		hasPendingAsk: () => false,
+		pendingAskTs: () => undefined,
+		approveAsk: vi.fn(),
+		denyAsk: vi.fn(),
+		...overrides,
+	}
+}
 
 function makeHost(overrides: Partial<ZooRemoteCommandHost> = {}): ZooRemoteCommandHost {
 	return {
@@ -24,10 +35,10 @@ describe("executeRemoteCommand", () => {
 		const sendMessage = vi.fn().mockResolvedValue(undefined)
 
 		await executeRemoteCommand({
-			command: { commandId: "c1", type: "message", payload: { text: "hi" } },
+			command: { commandId: "c1", type: "message", taskId: "t1", payload: { text: "hi" } },
 			epoch: 1,
 			client: { ackCommand },
-			host: makeHost({ sendMessage }),
+			host: makeHost({ sendMessage, getCurrentTask: () => liveTask() }),
 		})
 
 		expect(sendMessage).toHaveBeenCalledWith("hi", undefined)
@@ -39,10 +50,10 @@ describe("executeRemoteCommand", () => {
 		const handleModeSwitch = vi.fn().mockResolvedValue(undefined)
 
 		await executeRemoteCommand({
-			command: { commandId: "c1", type: "message", payload: { text: "hi", mode: "code" } },
+			command: { commandId: "c1", type: "message", taskId: "t1", payload: { text: "hi", mode: "code" } },
 			epoch: 1,
 			client: { ackCommand },
-			host: makeHost({ handleModeSwitch }),
+			host: makeHost({ handleModeSwitch, getCurrentTask: () => liveTask() }),
 		})
 
 		expect(handleModeSwitch).toHaveBeenCalledWith("code")
@@ -84,20 +95,24 @@ describe("executeRemoteCommand", () => {
 		})
 	})
 
-	it("acks no_current_task when approve_ask has no task", async () => {
+	it("acks missing_task_id when approve_ask omits the task id", async () => {
 		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+		const approveAsk = vi.fn()
 
 		await executeRemoteCommand({
-			command: { commandId: "c1", type: "approve_ask" },
+			command: { commandId: "c1", type: "approve_ask", payload: { askTs: 1 } },
 			epoch: 1,
 			client: { ackCommand },
-			host: makeHost(),
+			host: makeHost({
+				getCurrentTask: () => liveTask({ hasPendingAsk: () => true, pendingAskTs: () => 1, approveAsk }),
+			}),
 		})
 
+		expect(approveAsk).not.toHaveBeenCalled()
 		expect(ackCommand).toHaveBeenCalledWith({
 			commandId: "c1",
 			status: "failed",
-			errorCode: "no_current_task",
+			errorCode: "missing_task_id",
 		})
 	})
 
@@ -106,16 +121,11 @@ describe("executeRemoteCommand", () => {
 		const approveAsk = vi.fn()
 
 		await executeRemoteCommand({
-			command: { commandId: "c1", type: "approve_ask" },
+			command: { commandId: "c1", type: "approve_ask", taskId: "t1", payload: { askTs: 1 } },
 			epoch: 1,
 			client: { ackCommand },
 			host: makeHost({
-				getCurrentTask: () => ({
-					taskId: "t1",
-					hasPendingAsk: () => false,
-					approveAsk,
-					denyAsk: vi.fn(),
-				}),
+				getCurrentTask: () => liveTask({ approveAsk }),
 			}),
 		})
 
@@ -136,12 +146,7 @@ describe("executeRemoteCommand", () => {
 			epoch: 1,
 			client: { ackCommand },
 			host: makeHost({
-				getCurrentTask: () => ({
-					taskId: "t1",
-					hasPendingAsk: () => false,
-					approveAsk: vi.fn(),
-					denyAsk: vi.fn(),
-				}),
+				getCurrentTask: () => liveTask(),
 				cancelCurrentTask,
 			}),
 		})
@@ -207,11 +212,12 @@ describe("executeRemoteCommand", () => {
 		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
 
 		await executeRemoteCommand({
-			command: { commandId: "c1", type: "message", payload: { text: "hi" } },
+			command: { commandId: "c1", type: "message", taskId: "t1", payload: { text: "hi" } },
 			epoch: 1,
 			client: { ackCommand },
 			host: makeHost({
 				sendMessage: vi.fn().mockRejectedValue(new Error("boom")),
+				getCurrentTask: () => liveTask(),
 			}),
 		})
 
@@ -228,16 +234,11 @@ describe("executeRemoteCommand", () => {
 		const approveAsk = vi.fn()
 
 		await executeRemoteCommand({
-			command: { commandId: "c1", type: "approve_ask", payload: { text: "ok" } },
+			command: { commandId: "c1", type: "approve_ask", taskId: "t1", payload: { text: "ok", askTs: 42 } },
 			epoch: 1,
 			client: { ackCommand },
 			host: makeHost({
-				getCurrentTask: () => ({
-					taskId: "t1",
-					hasPendingAsk: () => true,
-					approveAsk,
-					denyAsk: vi.fn(),
-				}),
+				getCurrentTask: () => liveTask({ hasPendingAsk: () => true, pendingAskTs: () => 42, approveAsk }),
 			}),
 		})
 
@@ -250,16 +251,11 @@ describe("executeRemoteCommand", () => {
 		const denyAsk = vi.fn()
 
 		await executeRemoteCommand({
-			command: { commandId: "c1", type: "deny_ask", payload: { text: "no" } },
+			command: { commandId: "c1", type: "deny_ask", taskId: "t1", payload: { text: "no", askTs: 42 } },
 			epoch: 1,
 			client: { ackCommand },
 			host: makeHost({
-				getCurrentTask: () => ({
-					taskId: "t1",
-					hasPendingAsk: () => true,
-					approveAsk: vi.fn(),
-					denyAsk,
-				}),
+				getCurrentTask: () => liveTask({ hasPendingAsk: () => true, pendingAskTs: () => 42, denyAsk }),
 			}),
 		})
 
@@ -276,12 +272,7 @@ describe("executeRemoteCommand", () => {
 			epoch: 1,
 			client: { ackCommand },
 			host: makeHost({
-				getCurrentTask: () => ({
-					taskId: "t1",
-					hasPendingAsk: () => false,
-					approveAsk: vi.fn(),
-					denyAsk: vi.fn(),
-				}),
+				getCurrentTask: () => liveTask(),
 				cancelCurrentTask,
 			}),
 		})
@@ -405,5 +396,66 @@ describe("executeRemoteCommand", () => {
 		expect(startNewTask).toHaveBeenCalledTimes(2)
 		expect(handledCommandIds.has("retry-me")).toBe(true)
 		expect(ackCommand).toHaveBeenLastCalledWith({ commandId: "retry-me", status: "acked" })
+	})
+
+	it("acks missing_task_id for a message that does not name a task", async () => {
+		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+		const sendMessage = vi.fn()
+
+		await executeRemoteCommand({
+			command: { commandId: "c1", type: "message", payload: { text: "hi" } },
+			epoch: 1,
+			client: { ackCommand },
+			host: makeHost({ sendMessage, getCurrentTask: () => liveTask() }),
+		})
+
+		expect(sendMessage).not.toHaveBeenCalled()
+		expect(ackCommand).toHaveBeenCalledWith({
+			commandId: "c1",
+			status: "failed",
+			errorCode: "missing_task_id",
+		})
+	})
+
+	it("acks missing_ask_id when approve_ask omits the ask timestamp", async () => {
+		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+		const approveAsk = vi.fn()
+
+		await executeRemoteCommand({
+			command: { commandId: "c1", type: "approve_ask", taskId: "t1", payload: { text: "ok" } },
+			epoch: 1,
+			client: { ackCommand },
+			host: makeHost({
+				getCurrentTask: () => liveTask({ hasPendingAsk: () => true, pendingAskTs: () => 42, approveAsk }),
+			}),
+		})
+
+		expect(approveAsk).not.toHaveBeenCalled()
+		expect(ackCommand).toHaveBeenCalledWith({
+			commandId: "c1",
+			status: "failed",
+			errorCode: "missing_ask_id",
+		})
+	})
+
+	it("acks ask_mismatch when approve_ask names a different ask", async () => {
+		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+		const approveAsk = vi.fn()
+
+		await executeRemoteCommand({
+			command: { commandId: "c1", type: "approve_ask", taskId: "t1", payload: { askTs: 7 } },
+			epoch: 1,
+			client: { ackCommand },
+			host: makeHost({
+				getCurrentTask: () => liveTask({ hasPendingAsk: () => true, pendingAskTs: () => 42, approveAsk }),
+			}),
+		})
+
+		expect(approveAsk).not.toHaveBeenCalled()
+		expect(ackCommand).toHaveBeenCalledWith({
+			commandId: "c1",
+			status: "failed",
+			errorCode: "ask_mismatch",
+		})
 	})
 })
