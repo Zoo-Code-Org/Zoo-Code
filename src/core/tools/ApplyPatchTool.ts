@@ -535,6 +535,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				// persist a duplicated file as if the move had succeeded. An existing
 				// destination is restored to its captured content; the destination is
 				// removed only when it was confirmed absent before the write.
+				let restoreFailure: unknown
 				try {
 					if (destinationBackup !== undefined) {
 						await fs.writeFile(moveAbsolutePath, destinationBackup)
@@ -542,9 +543,18 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						await fs.rm(moveAbsolutePath, { force: true })
 					}
 				} catch (restoreError) {
+					// The failed operation is reported through the tool result below; a
+					// failed rollback means the destination may now hold the new content
+					// while the source still exists, and both the model and the user must
+					// know that instead of a console-only note.
+					restoreFailure = restoreError
 					console.error(`Failed to restore pre-move state after source deletion failure: ${restoreError}`)
 				}
-				const moveErrorMessage = `Failed to delete original file after move '${relPath}': ${error instanceof Error ? error.message : String(error)}`
+				const restoreSuffix =
+					restoreFailure === undefined
+						? ""
+						: ` The destination could not be restored and may still contain the new content: ${restoreFailure instanceof Error ? restoreFailure.message : String(restoreFailure)}`
+				const moveErrorMessage = `Failed to delete original file after move '${relPath}': ${error instanceof Error ? error.message : String(error)}${restoreSuffix}`
 				await task.say("error", moveErrorMessage)
 				pushToolResult(formatResponse.toolError(moveErrorMessage))
 				await task.diffViewProvider.reset()

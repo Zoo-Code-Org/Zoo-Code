@@ -181,10 +181,16 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			expect(mockedFsPromises.default.rm).toHaveBeenCalledWith(expect.stringContaining("new.ts"), { force: true })
 			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to restore pre-move state"))
 			errorSpy.mockRestore()
-			// The move is reported as failed rather than as a successful write...
+			// The move is reported as failed rather than as a successful write, and the
+			// failed rollback is part of the message: the destination may still hold the
+			// new content, which the model and user must know.
 			expect(mockPushToolResult).toHaveBeenCalledWith(
 				expect.stringContaining("Failed to delete original file after move"),
 			)
+			expect(mockPushToolResult).toHaveBeenCalledWith(
+				expect.stringContaining("could not be restored and may still contain the new content"),
+			)
+			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("EROFS"))
 			// ...and no whole-patch checkpoint is recorded for the failed move.
 			expect(mockedCheckpointSave).not.toHaveBeenCalled()
 			// Restore the default readFile behavior for later tests.
