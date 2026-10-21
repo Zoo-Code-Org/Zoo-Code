@@ -1112,6 +1112,78 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("ok.txt"), "hello")
 		})
 
+		it.each(["edit", "update"] as const)(
+			"guardedWrite runs the allowlist against the retained target on the %s path",
+			async (kind) => {
+				// The replaceIfVersion call sites (edit/update) pass authorizeTarget too:
+				// without these cases a regression dropping it there would go unnoticed.
+				const reg = new ObservationRegistry()
+				reg.observe(abs("alias.txt"), "v1", true)
+				const validateAccess = vi.fn((p: string) => p === abs("alias.txt"))
+				const task = createMockTask({
+					observationRegistry: reg,
+					rooIgnoreController: { validateAccess },
+				})
+				mockedFsAccess.mockResolvedValue(undefined)
+				mockedComputeVersionToken.mockResolvedValue("v1")
+				mockedResolvePublishTarget.mockResolvedValue(abs("ignored/secret.txt"))
+
+				await expect(guardedWrite(task, "alias.txt", "hello", kind)).rejects.toBeInstanceOf(GuardRejectedError)
+
+				expect(validateAccess).toHaveBeenCalledWith(abs("ignored/secret.txt"))
+				expect(mockedSafeWriteText).not.toHaveBeenCalled()
+			},
+		)
+
+		it.each(["edit", "update"] as const)(
+			"guardedWrite publishes on the %s path when the retained target passes the allowlist",
+			async (kind) => {
+				const reg = new ObservationRegistry()
+				reg.observe(abs("alias.txt"), "v1", true)
+				const validateAccess = vi.fn().mockReturnValue(true)
+				const task = createMockTask({
+					observationRegistry: reg,
+					rooIgnoreController: { validateAccess },
+				})
+				mockedFsAccess.mockResolvedValue(undefined)
+				mockedComputeVersionToken.mockResolvedValue("v1")
+				mockedResolvePublishTarget.mockResolvedValue(abs("ok.txt"))
+
+				await guardedWrite(task, "alias.txt", "hello", kind)
+
+				expect(validateAccess).toHaveBeenCalledWith(abs("ok.txt"))
+				expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("ok.txt"), "hello")
+			},
+		)
+
+		it("guardedWrite rejects a retained target outside the workspace when the alias is inside", async () => {
+			// validateAccess enforces .rooignore only: a workspace symlink retargeted to
+			// an external file must not send the approved bytes outside the workspace.
+			const reg = new ObservationRegistry()
+			reg.observe(abs("inside.txt"), "v1", true)
+			const task = createMockTask({ observationRegistry: reg })
+			mockedFsAccess.mockResolvedValue(undefined)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			mockedResolvePublishTarget.mockResolvedValue(path.resolve("/outside/workspace/secret.txt"))
+
+			await expect(guardedWrite(task, "inside.txt", "hello", "update")).rejects.toBeInstanceOf(GuardRejectedError)
+
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("guardedWrite publishes a retained target inside the workspace", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("inside.txt"), "v1", true)
+			const task = createMockTask({ observationRegistry: reg })
+			mockedFsAccess.mockResolvedValue(undefined)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			mockedResolvePublishTarget.mockResolvedValue(abs("kept.txt"))
+
+			await guardedWrite(task, "inside.txt", "hello", "update")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("kept.txt"), "hello")
+		})
+
 		it("takes both the alias and the referent lock in sorted order when they differ", async () => {
 			// A protocol writer that swaps the link itself holds the alias entry
 			// lock; a guarded write holding only the referent lock could publish

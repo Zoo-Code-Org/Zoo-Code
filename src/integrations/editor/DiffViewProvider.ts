@@ -1271,11 +1271,20 @@ export class DiffViewProvider {
 								diskToken ?? "<absent>",
 							)
 						}
-						// No save before the delete: saving the diff buffer would publish the
-						// cancelled edit's content to disk immediately before deleting it -
-						// a write the rollback never intended, unbound to the placeholder
-						// check above, and a visible flash of cancelled content for anyone
-						// reading the path in that window.
+						// Discard the rejected edit from the buffer BEFORE closing and
+						// deleting: update() leaves the create preview dirty and both close
+						// helpers skip dirty tabs, so the cancelled content would stay in an
+						// open tab over a file that no longer exists - one Save or Auto Save
+						// away from recreating it. Reloading the empty placeholder from disk
+						// is the discard the rejected-save cleanup uses; it writes nothing
+						// (the placeholder is already empty) and clears the dirty flag.
+						const discarded = await this.revertDocument(updatedDocument)
+						if (!discarded) {
+							// Keep the placeholder rather than deleting a file whose buffer
+							// still holds the cancelled edit: the hazard is reported instead.
+							await this.closeAllDiffViews()
+							throw new RollbackConflictError(absolutePath, oursToken, diskToken ?? "<absent>")
+						}
 						await this.closeAllDiffViews()
 						// The file was newly created for this edit; close its transiently
 						// opened tab before deleting it from disk.
@@ -1322,9 +1331,24 @@ export class DiffViewProvider {
 						// recorded what it left (a publish whose token read failed), or the
 						// disk reports no version at all. There is nothing to bind a publish
 						// to, and an unguarded save here could overwrite a peer's bytes with
-						// originalContent - the exact loss the CAS exists to prevent. Preserve
-						// the disk state and report the conflict explicitly instead.
+						// originalContent - the exact loss the CAS exists to prevent.
 						const diskToken = diskStat === undefined ? "<absent>" : versionTokenOfStat(diskStat)
+						// Exception: the session never published, and the disk still carries
+						// exactly the version open() read. There is no peer content to protect,
+						// so the rejected edit is discarded by reloading the original bytes
+						// instead of stranding it in a dirty tab that Save or Auto Save could
+						// write. The conflict path stays for a missing disk version, a changed
+						// one, or a failed reload.
+						const diskMatchesOpen =
+							expectedToken === undefined &&
+							diskStat !== undefined &&
+							this.openToken !== undefined &&
+							diskToken === this.openToken
+						if (diskMatchesOpen && (await this.revertDocument(updatedDocument))) {
+							await this.closeAllDiffViews()
+							return
+						}
+						// Preserve the disk state and report the conflict explicitly.
 						await this.closeAllDiffViews()
 						throw new RollbackConflictError(
 							absolutePath,
@@ -1354,7 +1378,9 @@ export class DiffViewProvider {
 						updatedDocument.positionAt(updatedDocument.getText().length),
 					)
 
-					edit.replace(updatedDocument.uri, fullRange, originalBytes)
+					// The buffer restore takes text; the bytes published through the CAS are
+					// the codec-encoded form of the same original text.
+					edit.replace(updatedDocument.uri, fullRange, originalText)
 					await vscode.workspace.applyEdit(edit)
 
 					// The CAS published the original bytes outside VS Code's save path:

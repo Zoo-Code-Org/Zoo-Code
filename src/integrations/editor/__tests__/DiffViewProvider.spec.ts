@@ -3576,14 +3576,17 @@ describe("DiffViewProvider", () => {
 			})
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
 
-			// The new contract: a session with no baseline has no version to bind a
-			// restore to, so the rollback preserves the disk and reports the conflict
-			// explicitly instead of saving bytes it cannot tie to a checked version.
-			await expect(diffViewProvider.revertChanges()).rejects.toMatchObject({
-				name: "RollbackConflictError",
-				oursToken: "<no-session-version>",
-			})
-			expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
+			// A session with no baseline, whose disk still carries exactly the version
+			// open() read, has no peer content to protect: the rollback reloads the
+			// original bytes (the same workbench revert the success path uses) and the
+			// session is finalized instead of stranding the rejected edit in a dirty tab.
+			await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
+
+			expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.files.revert")
+			// No CAS publish ran: nothing was ever written by this session to bind to.
+			expect(safeWriteText).not.toHaveBeenCalled()
+			// The session is finalized: a later rollback has nothing left to restore.
+			expect(diffViewProvider.isEditing).toBe(false)
 		})
 
 		it("drops the rollback baseline when the session is finalized", async () => {
@@ -3633,7 +3636,8 @@ describe("DiffViewProvider", () => {
 			// Saving the dirty diff buffer before the delete would publish the
 			// cancelled edit's content to disk for one moment before removing it -
 			// a write the rollback never intended and one that is not bound to the
-			// placeholder check. The delete must be the only disk action.
+			// placeholder check. The buffer must be discarded by reloading, and the delete
+			// must be the only disk write action.
 			const documentSave = vi.fn().mockResolvedValue(undefined)
 			const dirtyEditor = {
 				document: {
@@ -3655,9 +3659,18 @@ describe("DiffViewProvider", () => {
 			diffViewProvider["placeholderVersion"] = versionTokenOfStat(previewStats)
 			// The path still carries this session's placeholder token.
 			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			// The buffer is discarded by reloading the empty placeholder from disk (the
+			// editor clears the dirty flag), never by saving it: the placeholder file is
+			// already empty, so the reload writes nothing.
+			vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command: string) => {
+				if (command === "workbench.action.files.revert") {
+					;(dirtyEditor.document as unknown as { isDirty: boolean }).isDirty = false
+				}
+			})
 
 			await diffViewProvider.revertChanges()
 
+			expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.files.revert")
 			expect(documentSave).not.toHaveBeenCalled()
 			expect(fs.unlink).toHaveBeenCalledWith(`${mockCwd}/test.ts`)
 		})

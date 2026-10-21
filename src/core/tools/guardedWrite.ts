@@ -391,6 +391,21 @@ function resolveAbsolutePath(task: Task, relPathOrAbsolute: string): string {
 }
 
 /**
+ * Whether `candidate` resolves inside `root`. Used to keep a symlink-retargeted
+ * publish target inside the workspace when the caller's alias is inside it.
+ */
+function isInsideDirectory(root: string, candidate: string): boolean {
+	// Compare forward-slash forms so the check works for Windows and POSIX roots
+	// alike without relying on path.relative (test doubles may not provide it).
+	const toForward = (value: string): string => value.replace(/\\/g, "/")
+	const normalizedRoot = toForward(path.resolve(root)).replace(/\/+$/, "")
+	const normalizedCandidate = toForward(path.resolve(candidate))
+	const compareRoot = process.platform === "win32" ? normalizedRoot.toLowerCase() : normalizedRoot
+	const compareCandidate = process.platform === "win32" ? normalizedCandidate.toLowerCase() : normalizedCandidate
+	return compareCandidate === compareRoot || compareCandidate.startsWith(`${compareRoot}/`)
+}
+
+/**
  * Guarded write entry point.
  *
  * 1. Resolves the absolute path against task.cwd.
@@ -435,6 +450,16 @@ export async function guardedWrite(
 		// referent the version token cannot tell apart - cannot send the approved
 		// bytes to an ignored or external file.
 		const authorizeTarget = (retainedTarget: string): void => {
+			// Containment: validateAccess enforces .rooignore only (its own tests allow
+			// absolute and ../ paths), so a workspace symlink retargeted after the tool's
+			// check could otherwise send the approved bytes to an external file. When the
+			// caller's alias is inside the workspace, the retained target must be too.
+			if (isInsideDirectory(task.cwd, absolutePath) && !isInsideDirectory(task.cwd, retainedTarget)) {
+				throw new GuardRejectedError(
+					"The resolved publish target is outside the workspace -- nothing was written.",
+					displayPath,
+				)
+			}
 			if (task.rooIgnoreController && !task.rooIgnoreController.validateAccess(retainedTarget)) {
 				throw new GuardRejectedError(
 					"The ignore allowlist denied access to the resolved publish target -- nothing was written.",
