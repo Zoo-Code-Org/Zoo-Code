@@ -1345,7 +1345,20 @@ export class DiffViewProvider {
 							this.openToken !== undefined &&
 							diskToken === this.openToken
 						if (diskMatchesOpen && (await this.revertDocument(updatedDocument))) {
+							// Same tail as the normal modify rollback: the restore re-showed a file
+							// that was open before the edit (open() closed its tab), restores the pin
+							// state, and applies the auto-close preferences to the transient tab.
 							await this.closeAllDiffViews()
+							const restoreTask = this.taskRef.deref()
+							const restoreState = await restoreTask?.providerRef.deref()?.getState()
+							await this.keepOrCloseEditedFile(
+								absolutePath,
+								false,
+								restoreState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
+								restoreState?.autoCloseZooOpenedFilesAfterUserEdited ??
+									DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+								restoreState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
+							)
 							return
 						}
 						// Preserve the disk state and report the conflict explicitly.

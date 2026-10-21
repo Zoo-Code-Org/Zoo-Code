@@ -27,6 +27,9 @@ import type { Task } from "../../task/Task"
 vi.mock("fs/promises", () => ({
 	access: vi.fn(),
 	stat: vi.fn(),
+	// The containment check canonicalizes the workspace root and the caller's alias;
+	// identity keeps every fixture's paths stable.
+	realpath: vi.fn(async (value: string) => String(value)),
 }))
 
 vi.mock("../../../utils/versionToken", () => ({
@@ -1169,6 +1172,41 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await expect(guardedWrite(task, "inside.txt", "hello", "update")).rejects.toBeInstanceOf(GuardRejectedError)
 
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it.each([path.resolve("/test/workspace-evil/secret.txt"), path.resolve("./workspace", "../escape.txt")])(
+			"guardedWrite rejects a retained target outside the workspace: %s",
+			async (target) => {
+				// Containment boundaries: a sibling directory that shares the workspace's name
+				// prefix, and a target that only escapes through ../ normalization.
+				const reg = new ObservationRegistry()
+				reg.observe(abs("inside.txt"), "v1", true)
+				const task = createMockTask({ observationRegistry: reg })
+				mockedFsAccess.mockResolvedValue(undefined)
+				mockedComputeVersionToken.mockResolvedValue("v1")
+				mockedResolvePublishTarget.mockResolvedValue(target)
+
+				await expect(guardedWrite(task, "inside.txt", "hello", "update")).rejects.toBeInstanceOf(
+					GuardRejectedError,
+				)
+				expect(mockedSafeWriteText).not.toHaveBeenCalled()
+			},
+		)
+
+		it("guardedWrite does not apply containment to an alias that is already outside the workspace", async () => {
+			// An approved outside-workspace write keeps working: the check only binds a
+			// retained target when the caller's own alias is inside the workspace.
+			const reg = new ObservationRegistry()
+			const outsideAlias = path.resolve("/outside/alias.txt")
+			reg.observe(outsideAlias, "v1", true)
+			const task = createMockTask({ observationRegistry: reg })
+			mockedFsAccess.mockResolvedValue(undefined)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			mockedResolvePublishTarget.mockResolvedValue(outsideAlias)
+
+			await guardedWrite(task, outsideAlias, "hello", "update")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(outsideAlias, "hello")
 		})
 
 		it("guardedWrite publishes a retained target inside the workspace", async () => {

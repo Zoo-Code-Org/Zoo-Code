@@ -449,12 +449,22 @@ export async function guardedWrite(
 		// retargeted after the tool's check - or a hard-link alias whose new
 		// referent the version token cannot tell apart - cannot send the approved
 		// bytes to an ignored or external file.
+		// Canonical workspace root and alias: resolvePublishTarget returns a real path,
+		// while absolutePath is lexical. A workspace whose path contains a symlinked
+		// ancestor would otherwise compare a real target against a lexical root and
+		// reject an in-workspace write. Both fall back to the lexical form when the
+		// filesystem cannot resolve them.
+		const canonicalWorkspaceRoot = await fs.realpath(task.cwd).catch(() => path.resolve(task.cwd))
+		const canonicalAlias = await fs.realpath(absolutePath).catch(() => absolutePath)
 		const authorizeTarget = (retainedTarget: string): void => {
 			// Containment: validateAccess enforces .rooignore only (its own tests allow
 			// absolute and ../ paths), so a workspace symlink retargeted after the tool's
 			// check could otherwise send the approved bytes to an external file. When the
 			// caller's alias is inside the workspace, the retained target must be too.
-			if (isInsideDirectory(task.cwd, absolutePath) && !isInsideDirectory(task.cwd, retainedTarget)) {
+			if (
+				isInsideDirectory(canonicalWorkspaceRoot, canonicalAlias) &&
+				!isInsideDirectory(canonicalWorkspaceRoot, retainedTarget)
+			) {
 				throw new GuardRejectedError(
 					"The resolved publish target is outside the workspace -- nothing was written.",
 					displayPath,

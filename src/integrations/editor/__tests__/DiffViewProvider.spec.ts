@@ -38,6 +38,9 @@ vi.mock("fs/promises", () => ({
 	rename: vi.fn().mockResolvedValue(undefined),
 	unlink: vi.fn().mockResolvedValue(undefined),
 	rmdir: vi.fn().mockResolvedValue(undefined),
+	// guardedWrite canonicalizes the workspace root and the caller's alias for the
+	// containment check; identity keeps every fixture's paths stable.
+	realpath: vi.fn(async (value: string) => String(value)),
 }))
 
 // Mock safeWriteText (used by saveDirectly)
