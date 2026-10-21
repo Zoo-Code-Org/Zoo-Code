@@ -374,6 +374,41 @@ describe("Task resume api-history persistence on real files", () => {
 		expect(await findRecoveryCopyName(taskDir)).toBeUndefined()
 	})
 
+	it("keeps a standalone aborted task active and retains the recovery copy after the commit lands", async () => {
+		// A standalone record has no parent transition, so the committed
+		// active status stands. The restore must still run so its
+		// committed_elsewhere gate retains the recovery copy, and the task
+		// loop must not start on the aborted runner.
+		const standaloneRecord = makeChildRecord({ parentTaskId: undefined, rootTaskId: undefined })
+		await provider.taskHistoryStore.upsert(standaloneRecord)
+		const taskDir = await seedTaskFiles(storagePath, childId, authoritativeApiHistory)
+
+		const { task, loop, resumeActivation } = prepareResumedTask(standaloneRecord)
+		const reinterrupt = vi.spyOn(provider, "reinterruptAbandonedChild")
+		// A cancel racing the commit flips the abort flag while the
+		// activation is in flight.
+		resumeActivation.mockImplementation(async (taskId: string, parentTaskId?: string) => {
+			await ClineProvider.prototype.resumeInterruptedTask.call(provider, taskId, parentTaskId)
+			task.abort = true
+		})
+
+		await task["resumeTaskFromHistory"]()
+
+		expect(reinterrupt).not.toHaveBeenCalled()
+		expect(loop).not.toHaveBeenCalled()
+		const persisted = await readPersistedApiHistory(storagePath, childId)
+		expect(persisted).toEqual(preparedApiHistory)
+		const persistedRecord = await readPersistedRecord(storagePath, childId)
+		expect(persistedRecord.status).toBe("active")
+		expect(provider.taskHistoryStore.get(childId)?.status).toBe("active")
+		// The record is active, so no restore write ran. The recovery copy
+		// stays on disk with the pre-resume history for recovery.
+		const recoveryCopyName = await findRecoveryCopyName(taskDir)
+		expect(recoveryCopyName).toBeDefined()
+		const recoveryCopy = JSON.parse(await fs.readFile(path.join(taskDir, recoveryCopyName as string), "utf8"))
+		expect(recoveryCopy).toEqual(authoritativeApiHistory)
+	})
+
 	it("stops before activation and keeps the persisted api history when the preparation write fails", async () => {
 		await provider.taskHistoryStore.upsert(makeChildRecord({ parentTaskId: undefined, rootTaskId: undefined }))
 		const taskDir = await seedTaskFiles(storagePath, childId, authoritativeApiHistory)

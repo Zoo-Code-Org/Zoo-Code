@@ -3458,17 +3458,21 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					throw error
 				}
 
-				if ((this.abort || this.abandoned) && this.parentTaskId) {
-					// The commit activated a child whose runner was aborted or
+				if (this.abort || this.abandoned) {
+					// The commit activated a task whose runner was aborted or
 					// abandoned while the commit was in flight, so the cancel or
-					// eviction skipped its own interruption marking. Re-interrupt
-					// first, then restore the pre-resume history while the record
-					// status still matches this resume's starting status. The
-					// restore removes the recovery copy only when it succeeds.
-					await provider.reinterruptAbandonedChild({
-						childTaskId: this.taskId,
-						parentTaskId: this.parentTaskId,
-					})
+					// eviction skipped its own interruption marking. A linked child
+					// is re-interrupted under its parent transition lock. A
+					// standalone record has no parent transition, so it stays
+					// active and the restore's committed_elsewhere gate keeps the
+					// recovery copy available. Either way the restore runs, and it
+					// removes the recovery copy only when it succeeds.
+					if (this.parentTaskId) {
+						await provider.reinterruptAbandonedChild({
+							childTaskId: this.taskId,
+							parentTaskId: this.parentTaskId,
+						})
+					}
 					await this.restorePreparedResumeHistory(
 						recoveryCopyPath,
 						existingApiConversationHistory,
