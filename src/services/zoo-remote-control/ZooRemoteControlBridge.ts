@@ -188,18 +188,14 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 
 	/** Awaitable teardown so offline presence can finish before extension deactivate returns. */
 	public async shutdown(): Promise<void> {
-		if (this.disposed) {
-			return
-		}
+		if (this.disposed) return
 		this.lifecycleEpoch += 1
 		await this.deactivate({ notifyOffline: true })
 		this.releaseResources()
 	}
 
 	public dispose(): void {
-		if (this.disposed) {
-			return
-		}
+		if (this.disposed) return
 		this.lifecycleEpoch += 1
 		void this.deactivate({ notifyOffline: true })
 		this.releaseResources()
@@ -298,9 +294,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 
 	private async syncActiveState(): Promise<void> {
 		let release!: () => void
-		const gate = new Promise<void>((resolve) => {
-			release = resolve
-		})
+		const gate = new Promise<void>((resolve) => (release = resolve))
 		const previous = this.syncChain
 		this.syncChain = gate
 		await previous
@@ -312,9 +306,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private async applyEligibility(): Promise<void> {
-		if (this.disposed) {
-			return
-		}
+		if (this.disposed) return
 
 		try {
 			const eligible = this.evaluateEligible()
@@ -331,9 +323,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private async activate(): Promise<void> {
-		if (this.active || this.activating || this.disposed) {
-			return
-		}
+		if (this.active || this.activating || this.disposed) return
 
 		this.activating = true
 		try {
@@ -348,15 +338,9 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			this.active = true
 			this.setServerAvailable(true)
 			this.bindApiListeners(true)
-			this.presenceTimer = setInterval(() => {
-				void this.publishPresence(true)
-			}, PRESENCE_INTERVAL_MS)
-			this.commandTimer = setInterval(() => {
-				void this.pollCommands()
-			}, COMMAND_POLL_INTERVAL_MS)
-			this.flushTimer = setInterval(() => {
-				void this.flushEvents()
-			}, EVENT_FLUSH_INTERVAL_MS)
+			this.presenceTimer = setInterval(() => void this.publishPresence(true), PRESENCE_INTERVAL_MS)
+			this.commandTimer = setInterval(() => void this.pollCommands(), COMMAND_POLL_INTERVAL_MS)
+			this.flushTimer = setInterval(() => void this.flushEvents(), EVENT_FLUSH_INTERVAL_MS)
 
 			this.log("[ZooRemoteControl] enabled")
 			await this.publishPresence(true)
@@ -416,9 +400,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		action?: string
 		message: ClineMessage
 	}): Promise<void> {
-		if (!this.active) {
-			return
-		}
+		if (!this.active) return
 
 		const shaped = {
 			taskId: payload.taskId,
@@ -448,9 +430,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private flushPendingPartials(): void {
-		if (this.pendingPartials.size === 0) {
-			return
-		}
+		if (this.pendingPartials.size === 0) return
 		this.lastPartialFlushAt = this.now()
 		for (const shaped of this.pendingPartials.values()) {
 			this.enqueueMessageEvent(shaped)
@@ -469,9 +449,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private enqueueEvent(event: Omit<ZooRemoteEvent, "seq">): void {
-		if (!this.active || this.eventSeqPersistFailed) {
-			return
-		}
+		if (!this.active || this.eventSeqPersistFailed) return
 
 		this.pendingEvents.push({ ...event, seq: this.eventSeq++ })
 		this.persistEventSeq()
@@ -493,9 +471,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 
 	private publishAvailabilityToWebview(): void {
 		const available = this.active && this.canCallServer()
-		if (this.lastPostedAvailability === available) {
-			return
-		}
+		if (this.lastPostedAvailability === available) return
 		this.lastPostedAvailability = available
 		setZooRemoteControlAvailable(available)
 		void this.provider.postStateToWebview()
@@ -506,12 +482,8 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private async publishPresence(online: boolean, options?: { force?: boolean }): Promise<void> {
-		if (!options?.force && !this.canCallServer() && online) {
-			return
-		}
-		if (!getCachedZooCodeToken()) {
-			return
-		}
+		if (!options?.force && !this.canCallServer() && online) return
+		if (!getCachedZooCodeToken()) return
 
 		// Nickname only — never send an absolute disk path (home dir / username fingerprint).
 		const workspacePath = workspaceNicknameFromFsPath(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath)
@@ -555,14 +527,10 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private async publishSnapshot(): Promise<void> {
-		if (!this.active || !this.canCallServer()) {
-			return
-		}
+		if (!this.active || !this.canCallServer()) return
 
 		const task = this.provider.getCurrentTask()
-		if (!task?.taskId || !Array.isArray(task.clineMessages)) {
-			return
-		}
+		if (!task?.taskId || !Array.isArray(task.clineMessages)) return
 
 		let mode: string | undefined
 		try {
@@ -691,18 +659,13 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				handleModeSwitch: (mode) => this.provider.handleModeSwitch(mode),
 				getCurrentTask: () => {
 					const task = this.provider.getCurrentTask()
-					if (!task) {
-						return undefined
-					}
+					if (!task) return undefined
 					return {
 						taskId: task.taskId,
 						hasPendingAsk: () => task.hasPendingAsk(),
 						pendingAskTs: () => {
-							if (!task.hasPendingAsk()) {
-								return undefined
-							}
-							const last = task.clineMessages.at(-1)
-							return typeof last?.ts === "number" ? last.ts : undefined
+							const ts = task.clineMessages.at(-1)?.ts
+							return task.hasPendingAsk() && typeof ts === "number" ? ts : undefined
 						},
 						approveAsk: (payload) => task.approveAsk(payload),
 						denyAsk: (payload) => task.denyAsk(payload),
@@ -710,9 +673,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				},
 				cancelCurrentTask: () => this.api.cancelCurrentTask(),
 				resumeTask: (taskId) => this.api.resumeTask(taskId),
-				startNewTask: async (payload) => {
-					await this.api.startNewTask(payload)
-				},
+				startNewTask: (payload) => this.api.startNewTask(payload),
 				endRemoteSession: () => this.setSessionActive(false),
 			},
 		})
