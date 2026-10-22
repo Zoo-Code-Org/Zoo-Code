@@ -54,12 +54,17 @@ describe("ZooRemoteControlBridge", () => {
 		secrets: { onDidChange: ReturnType<typeof vi.fn> }
 	}
 	let sessionActive = false
+	let storedState: Record<string, unknown>
 
 	beforeEach(() => {
 		vi.useFakeTimers()
 		vi.clearAllMocks()
 
 		sessionActive = false
+		storedState = {
+			"zooRemoteControl.instanceId": "other-window",
+			"zooRemoteControl.eventSeq": 0,
+		}
 		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
 			get: vi.fn((_key: string, defaultValue?: boolean) => defaultValue ?? false),
 			update: vi.fn().mockResolvedValue(undefined),
@@ -94,15 +99,14 @@ describe("ZooRemoteControlBridge", () => {
 		context = {
 			globalState: {
 				get: vi.fn((key: string) => {
-					if (key === "zooRemoteControl.instanceId") return "instance-1"
-					if (key === "zooRemoteControl.eventSeq") return 0
 					if (key === "zooRemoteControl.sessionActive") return sessionActive
-					return undefined
+					return storedState[key]
 				}),
 				update: vi.fn(async (key: string, value: unknown) => {
 					if (key === "zooRemoteControl.sessionActive") {
 						sessionActive = value === true
 					}
+					storedState[key] = value
 				}),
 			},
 			secrets: {
@@ -144,6 +148,15 @@ describe("ZooRemoteControlBridge", () => {
 		return task
 	}
 
+	it("does not publish presence on shutdown when the user never opted in", async () => {
+		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
+		const bridge = createBridge()
+		await vi.advanceTimersByTimeAsync(0)
+		await bridge.shutdown()
+		bridge.dispose()
+		expect(client.postPresence).not.toHaveBeenCalled()
+	})
+
 	it("stays inactive when remote control is disabled", async () => {
 		const bridge = createBridge()
 		await vi.advanceTimersByTimeAsync(0)
@@ -165,7 +178,7 @@ describe("ZooRemoteControlBridge", () => {
 		expect(bridge.isActive()).toBe(true)
 		expect(client.postPresence).toHaveBeenCalledWith(
 			expect.objectContaining({
-				instanceId: "instance-1",
+				instanceId: "test-session-id",
 				apiProvider: providerIdentifiers.zooGateway,
 				online: true,
 				workspacePath: "project",
@@ -329,7 +342,7 @@ describe("ZooRemoteControlBridge", () => {
 		await vi.advanceTimersByTimeAsync(100)
 
 		expect(client.postEvents).toHaveBeenCalledWith(
-			"instance-1",
+			"test-session-id",
 			expect.arrayContaining([
 				expect.objectContaining({
 					type: "message",
@@ -374,7 +387,7 @@ describe("ZooRemoteControlBridge", () => {
 		})
 		await vi.advanceTimersByTimeAsync(100)
 		expect(client.postEvents).toHaveBeenCalledWith(
-			"instance-1",
+			"test-session-id",
 			expect.arrayContaining([
 				expect.objectContaining({ taskId: "task-1", message: expect.objectContaining({ text: "kept" }) }),
 			]),
@@ -636,7 +649,7 @@ describe("ZooRemoteControlBridge", () => {
 		await vi.advanceTimersByTimeAsync(100)
 
 		expect(client.postEvents).toHaveBeenCalledWith(
-			"instance-1",
+			"test-session-id",
 			expect.arrayContaining([
 				expect.objectContaining({ type: "task_interactive", taskId: "task-1" }),
 				expect.objectContaining({ type: "task_idle", taskId: "task-1" }),
@@ -662,7 +675,7 @@ describe("ZooRemoteControlBridge", () => {
 		await vi.advanceTimersByTimeAsync(100)
 
 		expect(client.postEvents).toHaveBeenCalledWith(
-			"instance-1",
+			"test-session-id",
 			expect.arrayContaining([expect.objectContaining({ type: "task_idle", taskId: "task-1" })]),
 		)
 		bridge.dispose()
@@ -790,7 +803,7 @@ describe("ZooRemoteControlBridge", () => {
 
 		expect(client.postSnapshot).toHaveBeenCalledWith(
 			expect.objectContaining({
-				instanceId: "instance-1",
+				instanceId: "test-session-id",
 				taskId: "task-snap",
 				mode: "code",
 				messages: expect.arrayContaining([expect.objectContaining({ text: "hello" })]),
@@ -811,7 +824,7 @@ describe("ZooRemoteControlBridge", () => {
 		await vi.advanceTimersByTimeAsync(100)
 
 		expect(client.postEvents).toHaveBeenCalledWith(
-			"instance-1",
+			"test-session-id",
 			expect.arrayContaining([
 				expect.objectContaining({
 					type: "message",
@@ -840,7 +853,7 @@ describe("ZooRemoteControlBridge", () => {
 
 		await vi.advanceTimersByTimeAsync(100)
 		expect(client.postEvents).toHaveBeenCalledTimes(1)
-		expect(client.postEvents).toHaveBeenCalledWith("instance-1", [
+		expect(client.postEvents).toHaveBeenCalledWith("test-session-id", [
 			expect.objectContaining({
 				type: "message",
 				taskId: "task-1",
@@ -876,7 +889,7 @@ describe("ZooRemoteControlBridge", () => {
 		// not-eligible backoff is 30s; flush only retries after canCallServer() opens again.
 		await vi.advanceTimersByTimeAsync(30_000 + 100)
 		expect(client.postEvents).toHaveBeenCalledWith(
-			"instance-1",
+			"test-session-id",
 			expect.arrayContaining([expect.objectContaining({ type: "task_idle", taskId: "task-1" })]),
 		)
 		bridge.dispose()
@@ -922,13 +935,8 @@ describe("ZooRemoteControlBridge", () => {
 		bridge.dispose()
 	})
 
-	it("generates and persists an instance id when none is stored", async () => {
+	it("uses this window's session id when another window stored an instance id", async () => {
 		sessionActive = true
-		context.globalState.get.mockImplementation((key: string) => {
-			if (key === "zooRemoteControl.eventSeq") return -1
-			if (key === "zooRemoteControl.sessionActive") return sessionActive
-			return undefined
-		})
 		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
 		provider.contextProxy.getProviderSettings.mockReturnValue({
 			apiProvider: providerIdentifiers.zooGateway,
@@ -937,35 +945,8 @@ describe("ZooRemoteControlBridge", () => {
 		const bridge = createBridge()
 		await vi.advanceTimersByTimeAsync(0)
 		expect(bridge.getInstanceId()).toBe("test-session-id")
-		expect(context.globalState.update).toHaveBeenCalledWith("zooRemoteControl.instanceId", "test-session-id")
-		expect(bridge.isActive()).toBe(true)
-		bridge.dispose()
-	})
-
-	it("does not activate when instance id persistence fails", async () => {
-		sessionActive = true
-		context.globalState.get.mockImplementation((key: string) => {
-			if (key === "zooRemoteControl.eventSeq") return 0
-			if (key === "zooRemoteControl.sessionActive") return sessionActive
-			return undefined
-		})
-		context.globalState.update.mockImplementation(async (key: string) => {
-			if (key === "zooRemoteControl.instanceId") {
-				throw new Error("storage unavailable")
-			}
-			if (key === "zooRemoteControl.sessionActive") {
-				sessionActive = true
-			}
-		})
-		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
-		provider.contextProxy.getProviderSettings.mockReturnValue({
-			apiProvider: providerIdentifiers.zooGateway,
-		})
-
-		const bridge = createBridge()
-		await vi.advanceTimersByTimeAsync(0)
-		expect(bridge.isActive()).toBe(false)
-		expect(client.postPresence).not.toHaveBeenCalled()
+		expect(context.globalState.update).not.toHaveBeenCalledWith("zooRemoteControl.instanceId", expect.anything())
+		expect(client.postPresence).toHaveBeenCalledWith(expect.objectContaining({ instanceId: "test-session-id" }))
 		bridge.dispose()
 	})
 
@@ -1108,6 +1089,29 @@ describe("ZooRemoteControlBridge", () => {
 
 		await vi.advanceTimersByTimeAsync(2_000)
 		expect(client.getCommands).toHaveBeenCalledTimes(2)
+		bridge.dispose()
+	})
+
+	it("acks invalid commands from the poll and still runs the valid ones", async () => {
+		useLiveTask()
+		client.getCommands.mockResolvedValueOnce({
+			ok: true,
+			status: 200,
+			body: {
+				commands: [{ commandId: "good", type: "message", taskId: "task-1", payload: { text: "hi" } }],
+				invalidCommandIds: ["bad"],
+			},
+		})
+
+		const bridge = await activateEligibleBridge()
+		await vi.advanceTimersByTimeAsync(2_000)
+
+		expect(client.ackCommand).toHaveBeenCalledWith({
+			commandId: "bad",
+			status: "failed",
+			errorCode: "invalid_command",
+		})
+		expect(api.sendMessage).toHaveBeenCalledWith("hi", undefined)
 		bridge.dispose()
 	})
 

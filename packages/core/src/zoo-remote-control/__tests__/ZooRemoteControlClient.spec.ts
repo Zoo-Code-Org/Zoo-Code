@@ -35,7 +35,8 @@ describe("ZooRemoteControlClient", () => {
 		expect(fetchFn).not.toHaveBeenCalled()
 	})
 
-	it("aborts a remote request that does not finish", async () => {
+	it("attaches a 30s abort deadline to every request", async () => {
+		const timeoutSpy = vi.spyOn(AbortSignal, "timeout")
 		fetchFn.mockResolvedValue({ ok: true, status: 200 })
 		await client.postPresence({
 			instanceId: "i1",
@@ -43,8 +44,9 @@ describe("ZooRemoteControlClient", () => {
 			online: true,
 		})
 		const init = fetchFn.mock.calls[0]?.[1] as { signal?: AbortSignal }
-		expect(init.signal).toBeInstanceOf(AbortSignal)
-		expect(init.signal?.aborted).toBe(false)
+		expect(timeoutSpy).toHaveBeenCalledWith(30_000)
+		expect(init.signal).toBe(timeoutSpy.mock.results[0]?.value)
+		timeoutSpy.mockRestore()
 	})
 
 	it("posts presence with bearer auth", async () => {
@@ -111,13 +113,32 @@ describe("ZooRemoteControlClient", () => {
 		const result = await client.getCommands("inst-1")
 		expect(result.ok).toBe(true)
 		expect(result.body?.commands).toHaveLength(1)
+		expect(result.body?.invalidCommandIds).toEqual([])
 		expect(fetchFn).toHaveBeenCalledWith(
 			"https://www.zoocode.dev/api/extension/remote/commands?instanceId=inst-1",
 			expect.objectContaining({ method: "GET" }),
 		)
 	})
 
-	it("rejects a command batch that exceeds the size bound", async () => {
+	it("keeps a valid command when another command in the batch is invalid", async () => {
+		fetchFn.mockResolvedValue({
+			ok: true,
+			status: 200,
+			json: async () => ({
+				commands: [
+					{ commandId: "bad", type: "not_a_real_command" },
+					{ commandId: "huge", type: "message", payload: { text: "x".repeat(100_001) } },
+					{ commandId: "good", type: "message", taskId: "t1", payload: { text: "hi" } },
+				],
+			}),
+		})
+		const result = await client.getCommands("inst-1")
+		expect(result.ok).toBe(true)
+		expect(result.body?.commands.map((command) => command.commandId)).toEqual(["good"])
+		expect(result.body?.invalidCommandIds).toEqual(["bad", "huge"])
+	})
+
+	it("retains only the first 25 commands from an oversized batch", async () => {
 		fetchFn.mockResolvedValue({
 			ok: true,
 			status: 200,
@@ -130,7 +151,10 @@ describe("ZooRemoteControlClient", () => {
 			}),
 		})
 		const result = await client.getCommands("inst-1")
-		expect(result).toEqual({ ok: false, status: 0 })
+		expect(result.ok).toBe(true)
+		expect(result.body?.commands).toHaveLength(25)
+		expect(result.body?.commands[24]?.commandId).toBe("c24")
+		expect(result.body?.invalidCommandIds).toEqual([])
 	})
 
 	it("returns status 0 when getCommands JSON body is malformed", async () => {
@@ -146,17 +170,15 @@ describe("ZooRemoteControlClient", () => {
 		expect(log).toHaveBeenCalledWith(expect.stringContaining("Unexpected token"))
 	})
 
-	it("returns status 0 when getCommands body fails schema validation", async () => {
+	it("returns status 0 when the command envelope is not a list", async () => {
 		fetchFn.mockResolvedValue({
 			ok: true,
 			status: 200,
-			json: async () => ({
-				commands: [{ commandId: "c1", type: "not_a_real_command" }],
-			}),
+			json: async () => ({ commands: "nope" }),
 		})
 		const result = await client.getCommands("inst-1")
 		expect(result).toEqual({ ok: false, status: 0 })
-		expect(log).toHaveBeenCalled()
+		expect(log).toHaveBeenCalledWith(expect.stringContaining("invalid command envelope"))
 	})
 
 	it("acks commands", async () => {

@@ -74,6 +74,36 @@ export function resolveZooRemoteEventSeq(existing: number | undefined) {
 	return typeof existing === "number" && Number.isFinite(existing) && existing >= 0 ? existing : 0
 }
 
+import { zooRemoteCommandSchema, type ZooRemoteCommand, type ZooRemoteCommandsResponse } from "./types.js"
+
+/** How many commands one poll may retain. The rest stay queued for the next poll. */
+export const MAX_REMOTE_COMMAND_BATCH = 25
+
+/**
+ * Validate each command on its own. One invalid entry must not drop the rest of the batch,
+ * because the server has already claimed the whole poll and will only release what we ack.
+ */
+export function partitionRemoteCommands(data: unknown): ZooRemoteCommandsResponse | undefined {
+	if (!data || typeof data !== "object" || Array.isArray(data) || !("commands" in data)) return undefined
+	const entries = data.commands ?? []
+	if (!Array.isArray(entries)) return undefined
+
+	const commands: ZooRemoteCommand[] = []
+	const invalidCommandIds: string[] = []
+	for (const entry of entries.slice(0, MAX_REMOTE_COMMAND_BATCH)) {
+		const parsed = zooRemoteCommandSchema.safeParse(entry)
+		if (parsed.success) {
+			commands.push(parsed.data)
+			continue
+		}
+		const commandId = entry && typeof entry === "object" && "commandId" in entry ? entry.commandId : undefined
+		if (typeof commandId === "string" && commandId.length > 0 && commandId.length <= 200) {
+			invalidCommandIds.push(commandId)
+		}
+	}
+	return { commands, invalidCommandIds }
+}
+
 /** Timestamp of the ask `lastMessageTs` still points at, even if a later say was appended. */
 export function blockingAskTimestamp(
 	messages: ReadonlyArray<{ ts?: number; type?: string; partial?: boolean }>,

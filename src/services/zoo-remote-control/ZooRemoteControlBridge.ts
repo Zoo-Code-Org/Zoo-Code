@@ -36,7 +36,6 @@ const EVENT_FLUSH_INTERVAL_MS = 100
 const PARTIAL_EVENT_MIN_INTERVAL_MS = 75
 const UNAVAILABLE_BACKOFF_MS = 60_000
 const NOT_ELIGIBLE_BACKOFF_MS = 30_000
-const INSTANCE_ID_STATE_KEY = "zooRemoteControl.instanceId"
 const EVENT_SEQ_STATE_KEY = "zooRemoteControl.eventSeq"
 /** Built-in remote session flag (not a VS Code Configuration setting). */
 const SESSION_ACTIVE_STATE_KEY = "zooRemoteControl.sessionActive"
@@ -72,7 +71,6 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	private lastPartialFlushAt = 0
 	private pendingPartials = new Map<string, { taskId: string; action?: string; message: ClineMessage }>()
 	/** Resolves true once instance id is durable in globalState (or already was). */
-	private readonly identityReady: Promise<boolean>
 	/** Serializes event-seq writes so updates cannot complete out of order. */
 	private eventSeqPersistChain: Promise<void> = Promise.resolve()
 	private eventSeqPersistFailed = false
@@ -84,8 +82,6 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	private activating = false
 	private commandPollInFlight = false
 	private flushInFlight = false
-	/** Task the user opted in for. Other tasks are not uploaded. Unset means a session from before this was stored. */
-	private consentedTaskId: string | undefined
 	/** At-most-once delivery for remote commands (esp. start_task) within an active session. */
 	private handledCommandIds = new Set<string>()
 
@@ -124,12 +120,9 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		this.context = deps.context
 		this.log = deps.log ?? (() => {})
 		this.now = deps.now ?? (() => Date.now())
-		const identity = this.resolveInstanceId()
-		this.instanceId = identity.id
-		this.identityReady = identity.needsPersist ? this.persistInstanceId(identity.id) : Promise.resolve(true)
+		// sessionId is per window. A shared globalState id lets a second window ack the first window's commands.
+		this.instanceId = generateZooRemoteInstanceId(this.now(), vscode.env.sessionId)
 		this.eventSeq = this.resolveEventSeq()
-		const consented = this.context.globalState.get<string>(CONSENTED_TASK_STATE_KEY)
-		this.consentedTaskId = typeof consented === "string" && consented.length > 0 ? consented : undefined
 		this.client =
 			deps.client ??
 			new ZooRemoteControlClient({
@@ -162,9 +155,9 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 
 	/** Start or end remote session (does not cancel the task). */
 	public async setSessionActive(active: boolean): Promise<void> {
-		this.consentedTaskId = active ? this.provider.getCurrentTask()?.taskId : undefined
+		const consentedTaskId = active ? this.provider.getCurrentTask()?.taskId : undefined
 		await this.context.globalState.update(SESSION_ACTIVE_STATE_KEY, active)
-		await this.context.globalState.update(CONSENTED_TASK_STATE_KEY, this.consentedTaskId)
+		await this.context.globalState.update(CONSENTED_TASK_STATE_KEY, consentedTaskId)
 		await this.syncActiveState()
 		await this.provider.postStateToWebview()
 	}
@@ -233,29 +226,6 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	/** Test helper */
 	public getInstanceId(): string {
 		return this.instanceId
-	}
-
-	private resolveInstanceId(): { id: string; needsPersist: boolean } {
-		const existing = this.context.globalState.get<string>(INSTANCE_ID_STATE_KEY)
-		if (existing) {
-			return { id: existing, needsPersist: false }
-		}
-		return {
-			id: generateZooRemoteInstanceId(this.now(), vscode.env.sessionId),
-			needsPersist: true,
-		}
-	}
-
-	private async persistInstanceId(id: string): Promise<boolean> {
-		try {
-			await this.context.globalState.update(INSTANCE_ID_STATE_KEY, id)
-			return true
-		} catch (error) {
-			this.log(
-				`[ZooRemoteControl] failed to persist instance id: ${error instanceof Error ? error.message : String(error)}`,
-			)
-			return false
-		}
 	}
 
 	private resolveEventSeq(): number {
@@ -331,13 +301,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 
 		this.activating = true
 		try {
-			const identityOk = await this.identityReady
-			if (!identityOk || this.disposed || this.active) {
-				if (!identityOk && !this.disposed) {
-					this.log("[ZooRemoteControl] refusing to activate: instance id is not persisted")
-				}
-				return
-			}
+			if (this.disposed) return
 
 			this.active = true
 			this.setServerAvailable(true)
@@ -355,7 +319,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private async deactivate({ notifyOffline }: { notifyOffline: boolean }): Promise<void> {
-		if (!this.active && !notifyOffline) {
+		if (!this.active) {
 			this.clearTimers()
 			this.bindApiListeners(false)
 			return
@@ -400,7 +364,9 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private acceptsTaskContent(taskId: string | undefined): boolean {
-		return this.consentedTaskId === undefined || taskId === this.consentedTaskId
+		const consented = this.context.globalState.get<string>(CONSENTED_TASK_STATE_KEY)
+		const consentedTaskId = typeof consented === "string" && consented.length > 0 ? consented : undefined
+		return consentedTaskId === undefined || taskId === consentedTaskId
 	}
 
 	private async handleMessageEvent(payload: {
@@ -632,6 +598,11 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			if (kind !== "success" || !result.body) return
 
 			this.setServerAvailable(true)
+
+			for (const commandId of result.body.invalidCommandIds ?? []) {
+				if (!this.isLifecycleCurrent(epoch)) return
+				await this.client.ackCommand({ commandId, status: "failed", errorCode: "invalid_command" })
+			}
 
 			for (const command of result.body.commands) {
 				if (!this.isLifecycleCurrent(epoch)) return

@@ -10,11 +10,25 @@ import {
 	requeueRemoteEventsKeepingNewest,
 	resolveRemoteMessageAction,
 	blockingAskTimestamp,
+	partitionRemoteCommands,
 	resolveZooRemoteEventSeq,
 	workspaceNicknameFromFsPath,
 } from "../bridgeHelpers.js"
 
 describe("bridgeHelpers", () => {
+	it("keeps valid commands when one entry in the batch is invalid", () => {
+		const batch = partitionRemoteCommands({
+			commands: [
+				{ commandId: "bad", type: "nope" },
+				{ commandId: "good", type: "message", payload: { text: "hi" } },
+			],
+		})
+		expect(batch?.commands.map((command) => command.commandId)).toEqual(["good"])
+		expect(batch?.invalidCommandIds).toEqual(["bad"])
+		expect(partitionRemoteCommands({ commands: "nope" })).toBeUndefined()
+		expect(partitionRemoteCommands(null)).toBeUndefined()
+	})
+
 	it("finds a blocking ask when a later say was appended", () => {
 		const messages = [
 			{ ts: 42, type: "ask", partial: false },

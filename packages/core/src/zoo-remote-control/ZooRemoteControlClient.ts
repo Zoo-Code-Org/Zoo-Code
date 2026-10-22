@@ -1,10 +1,10 @@
-import {
-	zooRemoteCommandsResponseSchema,
-	type ZooRemoteCommandAck,
-	type ZooRemoteCommandsResponse,
-	type ZooRemoteEvent,
-	type ZooRemotePresence,
-	type ZooRemoteSnapshot,
+import { partitionRemoteCommands } from "./bridgeHelpers.js"
+import type {
+	ZooRemoteCommandAck,
+	ZooRemoteCommandsResponse,
+	ZooRemoteEvent,
+	ZooRemotePresence,
+	ZooRemoteSnapshot,
 } from "./types.js"
 
 const REQUEST_TIMEOUT_MS = 30_000
@@ -55,9 +55,16 @@ export class ZooRemoteControlClient {
 			"GET",
 			`/api/extension/remote/commands?instanceId=${encodeURIComponent(instanceId)}`,
 			undefined,
-			zooRemoteCommandsResponseSchema,
+			{ parse: (data: unknown) => data },
 		)
-		return result
+		if (!result.ok || result.body === undefined) return { ok: result.ok, status: result.status }
+
+		const batch = partitionRemoteCommands(result.body)
+		if (!batch) {
+			this.log(`[ZooRemoteControl] GET /api/extension/remote/commands failed: invalid command envelope`)
+			return { ok: false, status: 0 }
+		}
+		return { ok: true, status: result.status, body: batch }
 	}
 
 	async ackCommand(ack: ZooRemoteCommandAck): Promise<{ ok: boolean; status: number }> {

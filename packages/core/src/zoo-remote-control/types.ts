@@ -39,11 +39,11 @@ export const zooRemoteCommandSchema = z.object({
 
 export type ZooRemoteCommand = z.infer<typeof zooRemoteCommandSchema>
 
-export const zooRemoteCommandsResponseSchema = z.object({
-	commands: z.array(zooRemoteCommandSchema).max(25).default([]),
-})
-
-export type ZooRemoteCommandsResponse = z.infer<typeof zooRemoteCommandsResponseSchema>
+/** Commands kept from one poll. Invalid entries are returned separately so they can be acked. */
+export type ZooRemoteCommandsResponse = {
+	commands: ZooRemoteCommand[]
+	invalidCommandIds: string[]
+}
 
 export const zooRemoteEventTypeSchema = z.enum([
 	"message",
