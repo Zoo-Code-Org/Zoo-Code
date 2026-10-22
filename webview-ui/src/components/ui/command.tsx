@@ -1,11 +1,8 @@
 import * as React from "react"
-import { type DialogProps } from "@radix-ui/react-dialog"
 import { Command as CommandPrimitive } from "cmdk"
 import { MagnifyingGlassIcon } from "@radix-ui/react-icons"
 
 import { cn } from "@/lib/utils"
-
-import { Dialog, DialogContent } from "@/components/ui/dialog"
 
 const Command = React.forwardRef<
 	React.ElementRef<typeof CommandPrimitive>,
@@ -21,18 +18,6 @@ const Command = React.forwardRef<
 	/>
 ))
 Command.displayName = CommandPrimitive.displayName
-
-const CommandDialog = ({ children, ...props }: DialogProps) => {
-	return (
-		<Dialog {...props}>
-			<DialogContent className="overflow-hidden p-0">
-				<Command className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5">
-					{children}
-				</Command>
-			</DialogContent>
-		</Dialog>
-	)
-}
 
 const CommandInput = React.forwardRef<
 	React.ElementRef<typeof CommandPrimitive.Input>,
@@ -143,7 +128,6 @@ CommandShortcut.displayName = "CommandShortcut"
 
 export {
 	Command,
-	CommandDialog,
 	CommandInput,
 	CommandList,
 	CommandEmpty,
