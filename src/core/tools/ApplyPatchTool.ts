@@ -509,6 +509,17 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				}
 			}
 
+			// Capture the destination mode before replacing it: the atomic staging write
+			// would otherwise install the process-default permissions and widen a 0600
+			// or executable destination.
+			let destinationMode: number | undefined
+			if (destinationBackup !== undefined) {
+				destinationMode = await fs.stat(moveAbsolutePath).then(
+					(stat) => stat.mode,
+					() => undefined,
+				)
+			}
+
 			// Stage the move so it is all-or-nothing: the pre-move destination bytes
 			// stay on disk under a backup name, the new content is written to a
 			// staging file and renamed into place atomically, and only then is the
@@ -524,6 +535,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			let destinationCommitted = false
 			try {
 				await fs.writeFile(stagingPath, newContent, "utf8")
+				if (destinationMode !== undefined) {
+					await fs.chmod(stagingPath, destinationMode)
+				}
 				if (destinationBackup !== undefined) {
 					// Preserve the pre-move bytes on disk (atomic rename): the in-memory
 					// copy alone cannot restore the destination after a crash.
@@ -569,6 +583,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				// a duplicated file as if the move had succeeded.
 				let restoreFailure: unknown
 				let recoveryPath: string | undefined
+				let recoveryFailure: unknown
 				try {
 					if (destinationBackup !== undefined) {
 						// Atomic restore of the captured destination bytes: the rename
@@ -582,18 +597,28 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					restoreFailure = restoreError
 				}
 				if (restoreFailure !== undefined) {
-					// The destination could not be restored. Persist the approved
-					// content under a recovery name instead of dropping it, so a
-					// half-applied move still has a deterministic recovery artifact.
-					const recoveryCandidate = path.join(moveDir, `${moveBase}.zoo-recovery-${moveStamp}`)
-					try {
-						await fs.writeFile(recoveryCandidate, newContent, "utf8")
-						recoveryPath = recoveryCandidate
+					if (destinationBackup !== undefined) {
+						// The original destination bytes are still on disk under the backup
+						// name: keep them as the recovery artifact and report where they are.
+						// Writing a copy of the approved new content here would hide the
+						// original content that this branch is supposed to preserve.
 						console.error(
-							`Failed to restore pre-move state: ${restoreFailure instanceof Error ? restoreFailure.message : String(restoreFailure)}; kept the approved content at ${recoveryCandidate}`,
+							`Failed to restore pre-move state: ${restoreFailure instanceof Error ? restoreFailure.message : String(restoreFailure)}; the original content is preserved at ${backupPath}`,
 						)
-					} catch (recoveryError) {
-						console.error(`Failed to persist a move recovery copy: ${recoveryError}`)
+					} else {
+						// There was no pre-existing destination, so the approved content is
+						// the only thing that could be lost: persist it under a recovery name.
+						const recoveryCandidate = path.join(moveDir, `${moveBase}.zoo-recovery-${moveStamp}`)
+						try {
+							await fs.writeFile(recoveryCandidate, newContent, "utf8")
+							recoveryPath = recoveryCandidate
+							console.error(
+								`Failed to restore pre-move state: ${restoreFailure instanceof Error ? restoreFailure.message : String(restoreFailure)}; kept the approved content at ${recoveryCandidate}`,
+							)
+						} catch (recoveryError) {
+							recoveryFailure = recoveryError
+							console.error(`Failed to persist a move recovery copy: ${recoveryError}`)
+						}
 					}
 				}
 				// Best-effort cleanup of the staging file; the backup is gone once the
@@ -604,9 +629,11 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						? ""
 						: ` The destination could not be restored and may still contain the new content: ${restoreFailure instanceof Error ? restoreFailure.message : String(restoreFailure)}`
 				const recoverySuffix =
-					recoveryPath === undefined
-						? ""
-						: ` The approved new content was kept at '${getReadablePath(task.cwd, path.relative(task.cwd, recoveryPath))}'.`
+					recoveryFailure !== undefined && recoveryPath === undefined
+						? ` The original content is preserved at '${getReadablePath(task.cwd, path.relative(task.cwd, backupPath))}'.`
+						: recoveryPath === undefined
+							? ""
+							: ` The approved new content was kept at '${getReadablePath(task.cwd, path.relative(task.cwd, recoveryPath))}'.`
 				const moveErrorMessage = `Failed to delete original file after move '${relPath}': ${error instanceof Error ? error.message : String(error)}${restoreSuffix}${recoverySuffix}`
 				await task.say("error", moveErrorMessage)
 				pushToolResult(formatResponse.toolError(moveErrorMessage))

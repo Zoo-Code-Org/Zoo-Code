@@ -14,6 +14,7 @@ import {
 } from "@roo-code/types"
 
 import { createDirectoriesForFile } from "../../utils/fs"
+import { writeFileAtomically } from "./atomicWrite"
 import { arePathsEqual, getReadablePath } from "../../utils/path"
 import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
@@ -25,28 +26,6 @@ export const DIFF_VIEW_URI_SCHEME = "cline-diff"
 export const DIFF_VIEW_LABEL_CHANGES = "Original ↔ Zoo's Changes"
 
 // TODO: https://github.com/cline/cline/pull/3354
-/**
- * Write a file so readers only ever observe the previous bytes or the complete
- * new bytes: the content goes to a sibling staging file first and is renamed
- * into place (same directory, so the rename is atomic on one volume).
- */
-async function writeFileAtomically(absolutePath: string, content: string): Promise<void> {
-	// Derive the sibling staging path with plain string operations: this helper runs
-	// under unit tests that mock the "path" module down to the few functions the
-	// provider itself uses.
-	const separatorIndex = Math.max(absolutePath.lastIndexOf("/"), absolutePath.lastIndexOf("\\"))
-	const directory = separatorIndex >= 0 ? absolutePath.slice(0, separatorIndex) : "."
-	const baseName = separatorIndex >= 0 ? absolutePath.slice(separatorIndex + 1) : absolutePath
-	const stagingPath = `${directory}/.${baseName}.${process.pid}.${Date.now()}.staging`
-	try {
-		await fs.writeFile(stagingPath, content, "utf-8")
-		await fs.rename(stagingPath, absolutePath)
-	} catch (error) {
-		await fs.rm(stagingPath, { force: true }).catch(() => {})
-		throw error
-	}
-}
-
 export class DiffViewProvider {
 	// Properties to store the results of saveChanges
 	newProblemsMessage?: string

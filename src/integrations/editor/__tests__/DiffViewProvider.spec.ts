@@ -17,6 +17,12 @@ vi.mock("fs/promises", () => ({
 	rename: vi.fn().mockResolvedValue(undefined),
 	rm: vi.fn().mockResolvedValue(undefined),
 	access: vi.fn().mockResolvedValue(undefined),
+	// The atomic writer resolves an existing destination and preserves its mode;
+	// the default double behaves like a brand-new file (ENOENT).
+	realpath: vi.fn().mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" })),
+	stat: vi.fn().mockResolvedValue({ mode: 0o644, uid: 0, gid: 0 }),
+	chmod: vi.fn().mockResolvedValue(undefined),
+	chown: vi.fn().mockResolvedValue(undefined),
 }))
 
 // Mock utils
@@ -816,6 +822,23 @@ describe("DiffViewProvider", () => {
 			expect(result.newProblemsMessage).toBe("")
 			expect(result.userEdits).toBeUndefined()
 			expect(result.finalContent).toBe("new content")
+		})
+
+		it("keeps the same error and cleans up the staging file when the final rename fails", async () => {
+			const fs = await import("fs/promises")
+			const renameError = Object.assign(new Error("EPERM: rename blocked"), { code: "EPERM" })
+			vi.mocked(fs.rename).mockRejectedValueOnce(renameError)
+
+			await expect(diffViewProvider.saveDirectly("test.ts", "new content", true, true, 1000)).rejects.toBe(
+				renameError,
+			)
+
+			const stagingPath = (fs.writeFile as unknown as { mock: { calls: [string, string, string][] } }).mock.calls.find(
+				(call) => call[1] === "new content",
+			)?.[0]
+			expect(renameError).toBeInstanceOf(Error)
+			expect(fs.rename).toHaveBeenCalledWith(stagingPath, `${mockCwd}/test.ts`)
+			expect(fs.rm).toHaveBeenCalledWith(stagingPath, { force: true })
 		})
 
 		it("should not open file when openWithoutFocus is false", async () => {
