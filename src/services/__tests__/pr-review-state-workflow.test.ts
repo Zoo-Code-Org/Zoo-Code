@@ -750,19 +750,32 @@ describe("PR review-state workflow", () => {
 		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
 	})
 
-	it("leaves an existing stacked label untouched on a self-match", async () => {
+	it("leaves an existing stacked label untouched on a self-match while review state reconciles", async () => {
 		// A valid label must survive a run whose open-PR map still contains this PR's own
-		// previous head: a self-match is not evidence that the relationship is stale.
+		// previous head: a self-match is not evidence that the relationship is stale. The
+		// review-state turn still runs and must move awaiting-maintainer independently.
 		const result = await runWorkflow({
-			labels: ["stacked"],
+			labels: ["stacked", "awaiting-maintainer"],
 			commitParents: [OLD_SHA],
 			openPrHeads: [{ number: 1437, sha: OLD_SHA }],
+			permissions: { maintainer: "write" },
+			reviews: [
+				{
+					login: "maintainer",
+					type: "User",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
 		})
 
 		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["stacked"] }))
+		// The review-state reconciliation still removes the review-state label on its own.
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
 		const labels = ((await result.getPullRequest()).data.labels || []).map((label: { name: string }) => label.name)
 		expect(labels).toContain("stacked")
+		expect(labels).not.toContain("awaiting-maintainer")
 	})
 
 	it("keeps a valid stacked label through review-state reconciliation", async () => {
@@ -782,7 +795,8 @@ describe("PR review-state workflow", () => {
 		})
 
 		// The reconcileLabels turn may replace review-state labels; the orthogonal stacked
-		// label must be neither removed nor re-added.
+		// label must be neither removed nor re-added, while the review-state label is removed.
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
 		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
 		const labels = ((await result.getPullRequest()).data.labels || []).map((label: { name: string }) => label.name)
 		expect(labels).toContain("stacked")
