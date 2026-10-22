@@ -111,6 +111,10 @@ describe("safeWriteText", () => {
 			expect(failure?.cause?.message).toBe("rollback failed")
 			expect(failure?.message).toContain("commit failed")
 			expect(failure?.message).toContain("rollback failed")
+			// The failure path still cleans up: the staged temp is unlinked and the staging
+			// directory is released, so a double-failure does not leave write artifacts behind.
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+			expect(fsSync.rmdirSync).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
 			expect(failure?.message).toContain(failure?.backupPath)
 		})
 	})
@@ -148,6 +152,14 @@ describe("safeWriteText", () => {
 
 			// atomic rename happened — realpath mock returns targetPath, so that's the dest
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+
+			// Ordering contract: the content is fsynced, the descriptor closed, and only then
+			// the temp is renamed over the target, so a crash cannot publish unflushed bytes.
+			const fsyncOrder = vi.mocked(fsSync.fsyncSync).mock.invocationCallOrder[0]
+			const closeOrder = vi.mocked(fsSync.closeSync).mock.invocationCallOrder[0]
+			const renameOrder = vi.mocked(fs.rename).mock.invocationCallOrder[0]
+			expect(fsyncOrder).toBeLessThan(closeOrder)
+			expect(closeOrder).toBeLessThan(renameOrder)
 
 			// no unlink of temp (it's now the committed file; DACL skipped via platform:linux)
 			expect(fs.unlink).not.toHaveBeenCalled()

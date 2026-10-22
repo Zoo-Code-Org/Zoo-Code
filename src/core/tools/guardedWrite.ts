@@ -125,24 +125,16 @@ async function fileIsAbsent(absolutePath: string): Promise<boolean> {
 
 /** Build the read-first remediation error for an existing target. */
 function alreadyExistsError(absolutePath: string): GuardRejectedError {
-	return new GuardRejectedError(
-		"File already exists at " +
-			absolutePath +
-			" and was not read before this write -- read the file first, then retry.",
-		absolutePath,
-	)
+	// Exact remediation text required by the S4a tracking issue (#1399).
+	return new GuardRejectedError("file not read yet — read the file, then retry", absolutePath)
 }
 
 /** Build the stale-version remediation error. */
 function staleVersionError(absolutePath: string, expectedVersion: string, currentVersion: string): GuardRejectedError {
-	return new GuardRejectedError(
-		"Stale version -- the file changed since you read it (expected " +
-			expectedVersion +
-			", current " +
-			currentVersion +
-			"); re-read the file, then retry.",
-		absolutePath,
-	)
+	// Exact remediation text required by #1399; the version detail is diagnostic only.
+	void expectedVersion
+	void currentVersion
+	return new GuardRejectedError("stale version — re-read the file, then retry", absolutePath)
 }
 
 /** Build the deleted-after-read remediation error. */
@@ -225,11 +217,10 @@ export async function replaceIfVersion(absolutePath: string, expectedVersion: st
 		currentVersion = await computeVersionToken(absolutePath)
 	} catch (error: unknown) {
 		if (errorCode(error) === "ENOENT") {
-			// The observed file was deleted after the read: the version recorded
-			// at read time no longer exists on disk. Normalize the raw ENOENT
-			// into the guard's re-read-then-retry contract so the caller gets a
-			// remediation it can act on, not a raw errno.
-			throw deletedAfterReadError(absolutePath, expectedVersion)
+			// Observed + absent is a create row of the #1399 decision table: the file the
+			// caller read was deleted before this write, so creating it is the safe action.
+			await createIfAbsent(absolutePath, content)
+			return
 		}
 		// A real I/O failure (EACCES, EIO, ...) -- not a guard verdict.
 		throw error
@@ -279,7 +270,8 @@ async function verifyVersionUnchanged(absolutePath: string, expectedVersion: str
  * never resolves.
  */
 export async function unobservedEditGuard(absolutePath: string): Promise<never> {
-	throw new GuardRejectedError("File not read yet -- read the file, then retry.", absolutePath)
+	// Exact remediation text required by #1399.
+	throw new GuardRejectedError("file not read yet — read the file, then retry", absolutePath)
 }
 
 // -- Public API --------------------------------------------------------------

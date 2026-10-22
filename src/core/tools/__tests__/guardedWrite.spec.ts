@@ -106,9 +106,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			const task = createMockTask()
 
 			await expect(guardedWrite(task, "existing.txt", "hello", "create")).rejects.toThrow(
-				"File already exists at " +
-					abs("existing.txt") +
-					" and was not read before this write -- read the file first, then retry.",
+				"file not read yet — read the file, then retry",
 			)
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
@@ -123,21 +121,22 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		})
 	})
 
-	describe("deleted-after-read target", () => {
-		it("normalizes an ENOENT from the version token into the re-read remediation", async () => {
+	describe("deleted-after-read target (observed + absent)", () => {
+		it("creates the file when it vanished after the read", async () => {
 			const reg = new ObservationRegistry()
 			reg.observe(abs("vanished.txt"), "v1")
 			const task = createMockTask({ observationRegistry: reg })
 
-			// The file was deleted after the read: the token computation fails
-			// with a raw ENOENT, which the guard must convert into the standard
-			// re-read-then-retry contract.
+			// Observed + absent is the create row of the #1399 decision table: the file the
+			// caller read was deleted before this write, so the guard recreates it.
 			mockedComputeVersionToken.mockRejectedValue({ code: "ENOENT" })
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
 
-			await expect(guardedWrite(task, "vanished.txt", "next", "update")).rejects.toThrow(
-				"File was deleted after it was read",
-			)
-			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+			await guardedWrite(task, "vanished.txt", "next", "update")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("vanished.txt"), "next", {
+				verifyBeforeCommit: expect.any(Function),
+			})
 		})
 
 		it("rethrows non-ENOENT token failures verbatim from replaceIfVersion", async () => {
@@ -165,9 +164,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			const task = createMockTask()
 
 			await expect(guardedWrite(task, "existing.txt", "hello", "update")).rejects.toThrow(
-				"File already exists at " +
-					abs("existing.txt") +
-					" and was not read before this write -- read the file first, then retry.",
+				"file not read yet — read the file, then retry",
 			)
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
@@ -228,7 +225,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			const task = createMockTask({ observationRegistry: reg })
 
 			await expect(guardedWrite(task, "kept.txt", "rewritten", "create")).rejects.toThrow(
-				"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
+				"stale version — re-read the file, then retry",
 			)
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
@@ -241,7 +238,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			const task = createMockTask({ observationRegistry: reg })
 
 			await expect(guardedWrite(task, "locked.txt", "rewritten", "create")).rejects.toThrow(
-				"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
+				"stale version — re-read the file, then retry",
 			)
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
@@ -269,29 +266,25 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			const task = createMockTask({ observationRegistry: reg })
 
 			await expect(guardedWrite(task, "doc.txt", "new content", "update")).rejects.toThrow(
-				"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
+				"stale version — re-read the file, then retry",
 			)
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
 
-		it("does not probe existence or recreate when an updated file vanished after the read", async () => {
+		it("recreates when an updated file vanished after the read", async () => {
 			const reg = new ObservationRegistry()
 			reg.observe(abs("doc.txt"), "v1")
 			const task = createMockTask({ observationRegistry: reg })
-			// The file vanished: the CAS token recomputation rejects with ENOENT,
-			// which the version guard reports as the deleted-file remediation.
+			// Observed + absent is the create row of the #1399 decision table: the
+			// file vanished between the read and this write, so the guard recreates it.
 			mockedComputeVersionToken.mockRejectedValue({ code: "ENOENT" })
 			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
 
-			await expect(guardedWrite(task, "doc.txt", "new content", "update")).rejects.toThrow(
-				"File was deleted after it was read -- the version recorded at read time (v1) no longer exists; re-read the file, then retry.",
-			)
+			await guardedWrite(task, "doc.txt", "new content", "update")
 
-			// The existence probe is a "create"-only step: an "update" must not run
-			// it (the branch condition short-circuits on kind) and must not recreate
-			// the vanished file - only the CAS branch may decide the write.
-			expect(mockedFsAccess).not.toHaveBeenCalled()
-			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "new content", {
+				verifyBeforeCommit: expect.any(Function),
+			})
 		})
 	})
 
@@ -300,7 +293,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			const task = createMockTask()
 
 			await expect(guardedWrite(task, "any.txt", "patched", "edit")).rejects.toThrow(
-				"File not read yet -- read the file, then retry.",
+				"file not read yet — read the file, then retry",
 			)
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 			expect(mockedComputeVersionToken).not.toHaveBeenCalled()
@@ -327,7 +320,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			const task = createMockTask({ observationRegistry: reg })
 
 			await expect(guardedWrite(task, "doc.txt", "patched", "edit")).rejects.toThrow(
-				"Stale version -- the file changed since you read it (expected v1, current v3); re-read the file, then retry.",
+				"stale version — re-read the file, then retry",
 			)
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
@@ -430,7 +423,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			}
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
 			expect(r2.reason.message).toBe(
-				"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
+				"stale version — re-read the file, then retry",
 			)
 		})
 
@@ -468,7 +461,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			// content derived from the v1 read over the v2 file. An execution-time
 			// registry lookup would rescue it with the refreshed token and lose the
 			// first write's update.
-			await expect(second).rejects.toThrow("Stale version")
+			await expect(second).rejects.toThrow("stale version")
 			expect(publishes).toBe(1)
 		})
 
@@ -496,8 +489,8 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 				throw new Error("expected exactly one publish, got " + r1.status + " / " + r2.status)
 			}
 			expect(publishes).toBe(1)
-			expect(r2.reason.message).toContain("Stale version")
-			expect(r2.reason.message).toContain("re-read the file, then retry.")
+			expect(r2.reason.message).toContain("stale version")
+			expect(r2.reason.message).toContain("re-read the file, then retry")
 		})
 
 		it("the chain settles after a rejection - a later matching write still runs", async () => {
@@ -507,7 +500,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			const task = createMockTask({ observationRegistry: reg })
 
 			const p1 = guardedWrite(task, "settle.txt", "first", "update")
-			await expect(p1).rejects.toThrow("Stale version")
+			await expect(p1).rejects.toThrow("stale version")
 
 			// No resetChain: the rejected link must not wedge the chain. The
 			// caller re-reads the file (observation refreshed to v2) and retries.
@@ -592,9 +585,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			})
 
 			await expect(guardedWrite(task, "raced.txt", "mine", "create")).rejects.toThrow(
-				"File already exists at " +
-					abs("raced.txt") +
-					" and was not read before this write -- read the file first, then retry.",
+				"file not read yet — read the file, then retry",
 			)
 			// nothing was published: the competing writer's file is preserved
 			expect(published()).toBe(false)
@@ -613,7 +604,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			})
 
 			await expect(guardedWrite(task, "raced.txt", "mine", "update")).rejects.toThrow(
-				"Stale version -- the file changed since you read it (expected v1, current v-external); re-read the file, then retry.",
+				"stale version — re-read the file, then retry",
 			)
 			expect(published()).toBe(false)
 		})
@@ -704,7 +695,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			}
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
 			expect(r2.reason.message).toBe(
-				"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
+				"stale version — re-read the file, then retry",
 			)
 		})
 	})
