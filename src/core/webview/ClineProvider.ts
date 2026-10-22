@@ -3121,7 +3121,10 @@ export class ClineProvider
 			// failure is what the caller sees.
 			if (previousRecord) {
 				try {
-					const { name: _previousName, id: _previousId, ...previousSettings } = previousRecord
+					// Keep the record's original id: the manager record identity is what the next
+					// getProfile/saveConfig round-trips use, so dropping it would hand a stale
+					// entry to the manager. Only the name is stripped because it is the key.
+					const { name: _previousName, ...previousSettings } = previousRecord
 					await this.providerSettingsManager.saveConfig(profileToDelete.name, previousSettings)
 				} catch (restoreError) {
 					this.log(
