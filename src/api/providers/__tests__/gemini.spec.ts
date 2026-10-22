@@ -596,25 +596,65 @@ describe("GeminiHandler", () => {
 			expect((error as Error).message).toBe("The Gemini request was aborted")
 		})
 
+		it("reports a configured request timeout as TimeoutError, not as caller cancellation", async () => {
+			// The SDK's HTTP timeout rejects with an abort-shaped error while the
+			// caller's signal stays live: that is a timeout, not a user stop. The
+			// LiteLLM unit in this PR sets the same contract.
+			const controller = new AbortController()
+			vi.mocked(handler["client"].models.generateContent).mockRejectedValue(
+				Object.assign(new Error("Request was aborted."), { name: "AbortError" }),
+			)
+
+			const error = await handler
+				.completePrompt("Test prompt", { abortSignal: controller.signal, timeoutMs: 50 })
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("TimeoutError")
+			expect((error as Error).message).toBe("The Gemini completion request timed out")
+		})
+
+		it("keeps AbortError when the caller cancels a request that also has a timeout", async () => {
+			const controller = new AbortController()
+			vi.mocked(handler["client"].models.generateContent).mockImplementationOnce(() => {
+				controller.abort()
+				return Promise.reject(Object.assign(new Error("Request was aborted."), { name: "AbortError" }))
+			})
+
+			const error = await handler
+				.completePrompt("Test prompt", { abortSignal: controller.signal, timeoutMs: 50 })
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Gemini request was aborted")
+		})
+
 		it("should surface the wrapped provider error when the request fails without options", async () => {
-			vi.mocked(handler["client"].models.generateContent).mockRejectedValue(new Error("Gemini API error"))
+			const mockError = new Error("Gemini API error")
+			vi.mocked(handler["client"].models.generateContent).mockRejectedValue(mockError)
 
 			const error = await handler.completePrompt("Test prompt").catch((e: unknown) => e)
 			expect(error).toBeInstanceOf(Error)
-			// The catch must take the non-abort wrapping path (not the abort
-			// DOMException path) and must not crash reading a missing signal.
-			// The i18n message itself is asserted by the error telemetry tests.
-			expect((error as Error).message).not.toContain("Cannot read properties")
+			// The catch must take the non-abort wrapping path (not a raw rethrow and
+			// not the abort path). i18next is not initialized with resources here, so
+			// pin the wrapping path by its observable shape: a NEW Error with a
+			// non-raw message and a non-AbortError name (same shape as the
+			// createMessage sibling tests below).
+			expect(error).not.toBe(mockError)
+			expect((error as Error).name).not.toBe("AbortError")
+			expect((error as Error).message).not.toBe("Gemini API error")
 		})
 
 		it("should surface the wrapped provider error when the request fails with options but no signal", async () => {
-			vi.mocked(handler["client"].models.generateContent).mockRejectedValue(new Error("Gemini API error"))
+			const mockError = new Error("Gemini API error")
+			vi.mocked(handler["client"].models.generateContent).mockRejectedValue(mockError)
 
 			const error = await handler.completePrompt("Test prompt", { timeoutMs: 0 }).catch((e: unknown) => e)
 			expect(error).toBeInstanceOf(Error)
-			// Options exist but no signal: exercises the second optional-chain
-			// position, which would crash here if the `?.` were removed.
-			expect((error as Error).message).not.toContain("Cannot read properties")
+			// Options exist but no signal: `options?.abortSignal` yields undefined
+			// and the catch must still take the non-abort wrapping path.
+			expect(error).not.toBe(mockError)
+			expect((error as Error).name).not.toBe("AbortError")
+			expect((error as Error).message).not.toBe("Gemini API error")
 		})
 	})
 

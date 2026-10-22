@@ -29,7 +29,7 @@ import { NOT_PROVIDED } from "./constants"
 import { parseVertexJsonCredentials } from "./utils/vertex-credentials"
 import { createAbortError, isRequestAborted, throwIfAborted } from "./utils/abort-signal"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
-import { getRequestTimeoutMs } from "./utils/request-timeout"
+import { createTimeoutError, getRequestTimeoutMs } from "./utils/request-timeout"
 
 type GeminiHandlerOptions = ApiHandlerOptions & {
 	isVertex?: boolean
@@ -681,16 +681,17 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 
 		const { id: model, info } = this.getModel()
 
+		// Per the abort-signal series contract, timeoutMs <= 0 means 'no per-request
+		// timeout': the option is omitted entirely (some SDKs treat 0 as an
+		// immediate timeout).
+		const timeoutMs = getRequestTimeoutMs(options?.timeoutMs)
+
 		try {
 			const supportsTemperature = info.supportsTemperature !== false
 			const temperatureConfig: number | undefined = supportsTemperature
 				? (this.options.modelTemperature ?? info.defaultTemperature ?? 1)
 				: info.defaultTemperature
 			const httpOpts: { timeout?: number; baseUrl?: string } = {}
-			// Per the abort-signal series contract, timeoutMs <= 0 means 'no per-request
-			// timeout': the option is omitted entirely (some SDKs treat 0 as an
-			// immediate timeout).
-			const timeoutMs = getRequestTimeoutMs(options?.timeoutMs)
 			if (timeoutMs !== undefined) {
 				httpOpts.timeout = timeoutMs
 			}
@@ -739,6 +740,13 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			// Aborted request: covers both the external signal and SDK-native
 			// abort errors that may surface before the signal flag propagates.
 			if (isRequestAborted(error, options?.abortSignal)) {
+				// A live caller signal means this abort-shaped error is not a
+				// cancellation: it is the configured per-request HTTP timeout
+				// elapsing. Report it distinctly (same contract as the LiteLLM
+				// unit) so a stalled request is not mistaken for a user stop.
+				if (timeoutMs !== undefined && !options?.abortSignal?.aborted) {
+					throw createTimeoutError("Gemini", "completion request")
+				}
 				throw createAbortError("Gemini")
 			}
 			const errorMessage = error instanceof Error ? error.message : String(error)

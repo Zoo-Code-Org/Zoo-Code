@@ -1,4 +1,4 @@
-import { getRequestTimeoutMs } from "../request-timeout"
+import { createTimeoutError, getRequestTimeoutMs } from "../request-timeout"
 
 describe("getRequestTimeoutMs", () => {
 	it("forwards positive timeout values unchanged", () => {
@@ -34,5 +34,14 @@ describe("getRequestTimeoutMs", () => {
 		// Non-number values can only reach this helper through untyped callers
 		// (e.g. user settings); the double cast exercises the typeof guard.
 		expect(getRequestTimeoutMs("5000" as unknown as number)).toBeUndefined()
+	})
+})
+
+describe("createTimeoutError", () => {
+	it("names the error TimeoutError and includes provider and phase", () => {
+		const error = createTimeoutError("Gemini", "completion request")
+		expect(error).toBeInstanceOf(Error)
+		expect(error.name).toBe("TimeoutError")
+		expect(error.message).toBe("The Gemini completion request timed out")
 	})
 })

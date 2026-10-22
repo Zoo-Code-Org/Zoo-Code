@@ -38,7 +38,7 @@ import {
 	throwIfAborted,
 } from "./utils/abort-signal"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
-import { getRequestTimeoutMs } from "./utils/request-timeout"
+import { createTimeoutError, getRequestTimeoutMs } from "./utils/request-timeout"
 
 /**
  * LiteLLM provider handler
@@ -427,17 +427,6 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		}
 	}
 
-	/**
-	 * Fresh error for the per-request absolute deadline elapsing in a given
-	 * phase. Distinct from the abort contract error on purpose: a timeout is
-	 * not a user cancellation, and callers treat the two differently.
-	 */
-	private createTimeoutError(providerName: string, phase: "model discovery" | "completion request"): Error {
-		const timeoutError = new Error(`The ${providerName} ${phase} timed out`)
-		timeoutError.name = "TimeoutError"
-		return timeoutError
-	}
-
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		// Fast-fail if the request was already aborted before building, so an
 		// already-aborted request fails with AbortError before provider model
@@ -482,7 +471,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 					// misreported as a user cancellation.
 					throw callerAbortSignal?.aborted
 						? createAbortError("LiteLLM")
-						: this.createTimeoutError("LiteLLM", "model discovery")
+						: createTimeoutError("LiteLLM", "model discovery")
 				}
 				// The signal never aborted: the fetcher itself failed with an
 				// AbortError-shaped error; normalize to the standard AbortError.
@@ -568,7 +557,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			// the deadline first — with the caller still running it must surface as
 			// a timeout, never masquerade as the cancellation AbortError.
 			if (deadlineSignal?.aborted && !callerAbortSignal?.aborted) {
-				throw this.createTimeoutError("LiteLLM", "completion request")
+				throw createTimeoutError("LiteLLM", "completion request")
 			}
 			// Aborted request: covers both the external signal and SDK-native
 			// abort errors that may surface before the signal flag propagates.

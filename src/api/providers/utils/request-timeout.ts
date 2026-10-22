@@ -13,3 +13,15 @@ export function getRequestTimeoutMs(timeoutMs?: number): number | undefined {
 		? Math.ceil(timeoutMs)
 		: undefined
 }
+
+/**
+ * Fresh error for a per-request deadline elapsing in a given phase.
+ *
+ * Distinct from the abort contract error on purpose: a timeout is not a user
+ * cancellation, and callers treat the two differently.
+ */
+export function createTimeoutError(providerName: string, phase: "model discovery" | "completion request"): Error {
+	const timeoutError = new Error(`The ${providerName} ${phase} timed out`)
+	timeoutError.name = "TimeoutError"
+	return timeoutError
+}
