@@ -4329,7 +4329,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// under the canonical name slip past a name comparison. The first call wins.
 										const idAlreadyUsed = this.assistantMessageContent.some(
 											(entry) =>
-
 												(entry.type === "tool_use" || entry.type === "mcp_tool_use") &&
 												(entry as { id?: string }).id === event.id,
 										)
@@ -4382,7 +4381,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// keep the deprecated single-entry-per-ID lookup.
 										let streamingKey: string | undefined
 
-
 										if (event.name !== undefined) {
 											streamingKey = NativeToolCallParser.makeStreamingKey(event.id, event.name)
 										} else {
@@ -4399,7 +4397,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										}
 
 										const partialToolUse =
-
 											streamingKey === undefined
 												? null
 												: NativeToolCallParser.processStreamingChunk(
@@ -4407,7 +4404,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 														event.delta,
 														nativeToolCallParserScope,
 													)
-
 
 										if (partialToolUse && streamingKey !== undefined) {
 											// Reuse the compound key built above: it is exactly the key the start event
