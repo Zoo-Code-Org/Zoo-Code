@@ -394,11 +394,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	providerRef: WeakRef<ClineProvider>
 	private readonly globalStoragePath: string
 	abort: boolean = false
-	// Monotonic cancellation counter. `abort` is a mutable flag that resumeAfterDelegation
-	// resets to false, so a write still waiting on a path chain cannot tell from `abort`
-	// alone that the task was cancelled while it waited - the flag may be back to false by
-	// the time its turn comes. Every cancellation bumps this counter, and the guarded-write
-	// path compares the value it captured when the write was queued.
+	// Monotonic cancellation counter. `requestAbort()` and `requestDispose()` advance
+	// this fence, and the guarded-write path compares the value it captured when the
+	// write was queued with the value at publish time, so a queued write cannot publish
+	// after the task was cancelled or disposed.
 	cancellationGeneration: number = 0
 	currentRequestAbortController?: AbortController
 	/**

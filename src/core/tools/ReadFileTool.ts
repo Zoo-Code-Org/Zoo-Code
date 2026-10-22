@@ -11,6 +11,7 @@
 import { markToolRejected } from "../task/toolExecutionContext"
 import path from "path"
 import * as fs from "fs/promises"
+import type { BigIntStats } from "fs"
 import { isBinaryFile } from "isbinaryfile"
 
 import type { ReadFileParams, ReadFileMode, ReadFileToolParams, FileEntry, LineRange } from "@roo-code/types"
@@ -69,6 +70,47 @@ interface FileResult {
 }
 
 // ─── Tool Implementation ──────────────────────────────────────────────────────
+
+/**
+ * Stat a file for the read-observation fence. The token from before the read is
+ * compared with the token after the read, and the target is observed only when both
+ * match; a stat failure leaves the target unobserved and never fails the read.
+ */
+async function statForObservation(fullPath: string): Promise<BigIntStats | undefined> {
+	// The bigint overload is selected by the literal option; the catch widens the type.
+	return (await fs.stat(fullPath, { bigint: true }).catch(() => undefined)) as BigIntStats | undefined
+}
+
+/**
+ * Decode file bytes the way the read tool always has: UTF-8 with replacement
+ * characters. A lossy decode is a partial view and must never be observed as a
+ * complete read.
+ */
+function decodeReadText(buffer: Buffer): { text: string; lossy: boolean } {
+	const text = buffer.toString("utf-8")
+	return { text, lossy: !Buffer.from(text).equals(buffer) }
+}
+
+/**
+ * Record the observation for a completed read. The invariant is shared by the native
+ * and legacy read formats: observe only when the pre-read and post-read tokens match,
+ * because a mutation between them means the returned content is not the on-disk state.
+ */
+async function recordObservation(
+	task: Task,
+	fullPath: string,
+	preReadStats: BigIntStats | undefined,
+	complete: boolean,
+): Promise<void> {
+	const postReadStats = await statForObservation(fullPath)
+	if (!preReadStats || !postReadStats) {
+		return
+	}
+	const preReadToken = versionTokenOfStat(preReadStats)
+	if (preReadToken === versionTokenOfStat(postReadStats)) {
+		task.observationRegistry.observe(fullPath, preReadToken, complete)
+	}
+}
 
 export class ReadFileTool extends BaseTool<"read_file"> {
 	readonly name = "read_file" as const
@@ -218,11 +260,10 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					// (they become U+FFFD replacement characters instead of throwing)
 					// A2 (epic #1375): capture the on-disk token before the read so a mutation
 					// landing mid-read is detected by the post-read stat below.
-					const preReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
+					const preReadStats = await statForObservation(fullPath)
 					const buffer = await fs.readFile(fullPath)
-					const fileContent = buffer.toString("utf-8")
 					// A lossy decode is not the whole file: the model never saw those bytes.
-					const lossyDecode = !Buffer.from(fileContent).equals(buffer)
+					const { text: fileContent, lossy: lossyDecode } = decodeReadText(buffer)
 					// S4b follow-up (#46 / epic #1375): processTextFile reports whether the
 					// returned content is the whole file; the observation below records that
 					// scope so the write guard can deny full-file updates built on a partial view.
@@ -230,19 +271,9 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 
 					await task.fileContextTracker.trackFileContext(relPath, "read_tool" as RecordSource)
 
-					// A2 (plan #33 / epic #1375): record the observed on-disk version for the future write guard.
-					// The token is captured before AND after the read; the target is observed only
-					// when both match — a mutation between the two stats means the content the model
-					// received is not the on-disk state, and observing it would let a later write
-					// match a token the model never saw. A stat failure leaves the target
-					// unobserved and never fails the read.
-					const postReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
-					if (preReadStats && postReadStats) {
-						const preReadToken = versionTokenOfStat(preReadStats)
-						if (preReadToken === versionTokenOfStat(postReadStats)) {
-							task.observationRegistry.observe(fullPath, preReadToken, processed.complete && !lossyDecode)
-						}
-					}
+					// A2 (plan #33 / epic #1375): record the observed on-disk version for the future
+					// write guard; see recordObservation for the pre/post token invariant.
+					await recordObservation(task, fullPath, preReadStats, processed.complete && !lossyDecode)
 
 					updateFileResult(relPath, {
 						nativeContent: `File: ${relPath}\n${processed.content}`,
@@ -823,11 +854,10 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				// Read text file
 				// A2 (epic #1375): capture the on-disk token before the read so a mutation
 				// landing mid-read is detected by the post-read stat below.
-				const preReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
+				const preReadStats = await statForObservation(fullPath)
 				const rawBuffer = await fs.readFile(fullPath)
-				const rawContent = rawBuffer.toString("utf-8")
 				// Same contract: a lossy decode is a partial view.
-				const lossyDecode = !Buffer.from(rawContent).equals(rawBuffer)
+				const { text: rawContent, lossy: lossyDecode } = decodeReadText(rawBuffer)
 
 				// Handle line ranges if specified
 				// S4b follow-up (#46 / epic #1375): a line-range read returns only the requested
@@ -872,18 +902,9 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				// Track file in context
 				await task.fileContextTracker.trackFileContext(relPath, "read_tool")
 
-				// A2 (plan #33 / epic #1375): mirror the native path — record the observed
-				// on-disk version so legacy-format reads also feed the future write guard.
-				// Observe only when the pre-read and post-read tokens match (a mutation between
-				// them means the returned content is not the on-disk state). A stat failure
-				// leaves the target unobserved and never fails the read.
-				const postReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
-				if (preReadStats && postReadStats) {
-					const preReadToken = versionTokenOfStat(preReadStats)
-					if (preReadToken === versionTokenOfStat(postReadStats)) {
-						task.observationRegistry.observe(fullPath, preReadToken, readComplete && !lossyDecode)
-					}
-				}
+				// A2 (plan #33 / epic #1375): mirror the native path so legacy-format reads also
+				// feed the future write guard; see recordObservation for the invariant.
+				await recordObservation(task, fullPath, preReadStats, readComplete && !lossyDecode)
 			} catch (error) {
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				results.push(`File: ${relPath}\nError: ${errorMsg}`)

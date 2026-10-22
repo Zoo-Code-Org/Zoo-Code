@@ -24,7 +24,12 @@
 import * as fs from "fs/promises"
 import * as path from "path"
 
-import { safeWriteText, TargetExistsError, type DirectoryIdentity } from "../../services/file-safety/safeWriteText"
+import {
+	safeWriteText,
+	PostCommitDurabilityError,
+	TargetExistsError,
+	type DirectoryIdentity,
+} from "../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../utils/versionToken"
 import { withFileLock } from "../../utils/fileLock"
 import { resolveLockKey } from "../../services/file-safety/safeWriteText"
@@ -505,11 +510,11 @@ export async function guardedWrite(
 	const displayPath = relPathOrAbsolute
 
 	// Captured before the FIRST await in this function. The chain is FIFO, so this write
-	// may not run until long after it was submitted, and task.abort can be raised and then
-	// cleared by a resume in the meantime; the generation is what tells the two apart.
-	// Capturing it after the containment awaits would leave a cancel that lands during
-	// those awaits invisible: the write would capture the POST-cancel generation, sail
-	// through the dequeue comparison, and publish work that belongs to the cancelled run.
+	// may not run until long after it was submitted: the generation is an independent
+	// cancellation fence advanced by requestAbort()/requestDispose(). Capturing it after
+	// the containment awaits would leave a cancel that lands during those awaits
+	// invisible: the write would store the POST-cancel generation, sail through the
+	// dequeue comparison, and publish work that belongs to the cancelled run.
 	const cancellationGeneration = task.cancellationGeneration
 	if (task.abort) {
 		throw new GuardRejectedError(
@@ -610,35 +615,53 @@ export async function guardedWrite(
 				)
 			}
 
-			if (obs === undefined) {
-				// Never read: only an absent target may be created.
-				publishedToken = await createIfAbsent(
-					absolutePath,
-					content,
-					displayPath,
-					() => task.abort || task.cancellationGeneration !== cancellationGeneration,
-					verifyTarget,
-				)
-			} else if (absent) {
-				// A "create" on a file that vanished after the read recreates it.
-				publishedToken = await createIfAbsent(
-					absolutePath,
-					content,
-					displayPath,
-					() => task.abort || task.cancellationGeneration !== cancellationGeneration,
-					verifyTarget,
-				)
-			} else {
-				// The version recorded at read time must still match the on-disk
-				// token.
-				publishedToken = await replaceIfVersion(
-					absolutePath,
-					obs.version,
-					content,
-					displayPath,
-					() => task.abort || task.cancellationGeneration !== cancellationGeneration,
-					verifyTarget,
-				)
+			try {
+				if (obs === undefined) {
+					// Never read: only an absent target may be created.
+					publishedToken = await createIfAbsent(
+						absolutePath,
+						content,
+						displayPath,
+						() => task.abort || task.cancellationGeneration !== cancellationGeneration,
+						verifyTarget,
+					)
+				} else if (absent) {
+					// A "create" on a file that vanished after the read recreates it.
+					publishedToken = await createIfAbsent(
+						absolutePath,
+						content,
+						displayPath,
+						() => task.abort || task.cancellationGeneration !== cancellationGeneration,
+						verifyTarget,
+					)
+				} else {
+					// The version recorded at read time must still match the on-disk
+					// token.
+					publishedToken = await replaceIfVersion(
+						absolutePath,
+						obs.version,
+						content,
+						displayPath,
+						() => task.abort || task.cancellationGeneration !== cancellationGeneration,
+						verifyTarget,
+					)
+				}
+			} catch (error) {
+				// A durability failure happens AFTER the content reached the target. Refresh
+				// the observation with the token that is now on disk so a later write by this
+				// task does not fail stale against a token that no longer exists, then rethrow:
+				// the durability problem must stay visible to the caller.
+				if (error instanceof PostCommitDurabilityError) {
+					const publishedOnDurabilityFailure = await computeVersionToken(absolutePath).catch(() => undefined)
+					if (publishedOnDurabilityFailure !== undefined) {
+						task.observationRegistry.observe(
+							absolutePath,
+							publishedOnDurabilityFailure,
+							completeOverride ?? !staysPartial,
+						)
+					}
+				}
+				throw error
 			}
 		}
 

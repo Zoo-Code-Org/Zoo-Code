@@ -392,7 +392,12 @@ async function canonicalizeNearestAncestor(absoluteFilePath: string): Promise<st
 			return missing.length > 0 ? path.join(realPath, ...missing.reverse()) : realPath
 		} catch (error: unknown) {
 			const code = errorCode(error)
-			if (code !== "ENOENT" && code !== "ENOTDIR") return absoluteFilePath
+			if (code !== "ENOENT" && code !== "ENOTDIR") {
+				// A real inspection failure (EACCES, EIO) says nothing about the path's
+				// identity. Returning a lexical key here would silently canonicalize a
+				// different path than the guard's pin, so fail closed instead.
+				throw error
+			}
 			const parent = path.dirname(cursor)
 			if (parent === cursor) return absoluteFilePath
 			missing.push(path.basename(cursor))
