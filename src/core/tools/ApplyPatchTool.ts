@@ -21,6 +21,9 @@ interface ApplyPatchParams {
 	patch: string
 }
 
+/** Result of one file operation: `mutated` is true when the workspace changed even if the operation eventually failed. */
+type PatchFileResult = { ok: boolean; mutated: boolean }
+
 export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 	readonly name = "apply_patch" as const
 
@@ -134,7 +137,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 				if (change.type === "add") {
 					// Create new file
-					const ok = await this.handleAddFile(
+					const result = await this.handleAddFile(
 						change,
 						absolutePath,
 						relPath,
@@ -142,16 +145,16 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						callbacks,
 						isWriteProtected,
 					)
-					handoffPending = handoffPending || ok
-					patchSucceeded = ok && patchSucceeded
+					handoffPending = handoffPending || result.mutated
+					patchSucceeded = result.ok && patchSucceeded
 				} else if (change.type === "delete") {
 					// Delete file
-					const ok = await this.handleDeleteFile(absolutePath, relPath, task, callbacks, isWriteProtected)
-					handoffPending = handoffPending || ok
-					patchSucceeded = ok && patchSucceeded
+					const result = await this.handleDeleteFile(absolutePath, relPath, task, callbacks, isWriteProtected)
+					handoffPending = handoffPending || result.mutated
+					patchSucceeded = result.ok && patchSucceeded
 				} else if (change.type === "update") {
 					// Update file
-					const ok = await this.handleUpdateFile(
+					const result = await this.handleUpdateFile(
 						change,
 						absolutePath,
 						relPath,
@@ -159,8 +162,8 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						callbacks,
 						isWriteProtected,
 					)
-					handoffPending = handoffPending || ok
-					patchSucceeded = ok && patchSucceeded
+					handoffPending = handoffPending || result.mutated
+					patchSucceeded = result.ok && patchSucceeded
 				}
 			}
 
@@ -224,8 +227,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
-	): Promise<boolean> {
+	): Promise<PatchFileResult> {
 		const { askApproval, pushToolResult } = callbacks
+		let mutated = false
 
 		// Check if file already exists
 		const fileExists = await fileExistsAtPath(absolutePath)
@@ -235,7 +239,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `File already exists: ${relPath}. Use Update File instead.`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return false
+			return { ok: false, mutated }
 		}
 
 		const newContent = change.newContent || ""
@@ -289,7 +293,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			}
 			pushToolResult("Changes were rejected by the user.")
 			await task.diffViewProvider.reset()
-			return false
+			return { ok: false, mutated }
 		}
 
 		// Save the changes
@@ -301,12 +305,13 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 		// Track file edit operation
 		await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
+		mutated = true
 		task.didEditFile = true
 
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, true)
 		pushToolResult(message)
 		await task.diffViewProvider.reset()
-		return true
+		return { ok: true, mutated }
 	}
 
 	private async handleDeleteFile(
@@ -315,8 +320,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
-	): Promise<boolean> {
+	): Promise<PatchFileResult> {
 		const { askApproval, pushToolResult } = callbacks
+		let mutated = false
 
 		// Check if file exists
 		const fileExists = await fileExistsAtPath(absolutePath)
@@ -326,7 +332,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `File not found: ${relPath}. Cannot delete a non-existent file.`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return false
+			return { ok: false, mutated }
 		}
 
 		const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
@@ -348,7 +354,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 		if (!didApprove) {
 			pushToolResult("Delete operation was rejected by the user.")
-			return false
+			return { ok: false, mutated }
 		}
 
 		// Delete the file
@@ -358,12 +364,13 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `Failed to delete file '${relPath}': ${error instanceof Error ? error.message : String(error)}`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return false
+			return { ok: false, mutated }
 		}
 
+		mutated = true
 		task.didEditFile = true
 		pushToolResult(`Successfully deleted ${relPath}`)
-		return true
+		return { ok: true, mutated }
 	}
 
 	private async handleUpdateFile(
@@ -373,8 +380,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
-	): Promise<boolean> {
+	): Promise<PatchFileResult> {
 		const { askApproval, pushToolResult } = callbacks
+		let mutated = false
 
 		// Check if file exists
 		const fileExists = await fileExistsAtPath(absolutePath)
@@ -384,7 +392,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `File not found: ${relPath}. Cannot update a non-existent file.`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return false
+			return { ok: false, mutated }
 		}
 
 		const originalContent = change.originalContent || ""
@@ -402,7 +410,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// nothing was written, so the whole-patch success state is kept.
 			pushToolResult(`No changes needed for '${relPath}'`)
 			await task.diffViewProvider.reset()
-			return true
+			return { ok: true, mutated }
 		}
 
 		// Check experiment settings
@@ -448,7 +456,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			}
 			pushToolResult("Changes were rejected by the user.")
 			await task.diffViewProvider.reset()
-			return false
+			return { ok: false, mutated }
 		}
 
 		// Handle file move if specified
@@ -461,7 +469,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.say("rooignore_error", change.movePath)
 				pushToolResult(formatResponse.rooIgnoreError(change.movePath))
 				await task.diffViewProvider.reset()
-				return false
+				return { ok: false, mutated }
 			}
 
 			// Check if destination path is write-protected
@@ -473,7 +481,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.say("error", errorMessage)
 				pushToolResult(formatResponse.toolError(errorMessage))
 				await task.diffViewProvider.reset()
-				return false
+				return { ok: false, mutated }
 			}
 
 			// Check if destination path is outside workspace
@@ -485,7 +493,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.say("error", errorMessage)
 				pushToolResult(formatResponse.toolError(errorMessage))
 				await task.diffViewProvider.reset()
-				return false
+				return { ok: false, mutated }
 			}
 
 			// Capture the destination state before either supported write path: a
@@ -505,7 +513,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					await task.say("error", inspectErrorMessage)
 					pushToolResult(formatResponse.toolError(inspectErrorMessage))
 					await task.diffViewProvider.reset()
-					return false
+					return { ok: false, mutated }
 				}
 			}
 
@@ -534,7 +542,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 			let destinationCommitted = false
 			try {
-				await fs.writeFile(stagingPath, newContent, "utf8")
+				// Owner-only from creation: the staged content must never be readable by
+				// others, even between the write and the rename.
+				await fs.writeFile(stagingPath, newContent, { encoding: "utf8", mode: 0o600 })
 				if (destinationMode !== undefined) {
 					await fs.chmod(stagingPath, destinationMode)
 				}
@@ -545,6 +555,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				}
 				await fs.rename(stagingPath, moveAbsolutePath)
 				destinationCommitted = true
+				// The destination content changed: even a later failed source unlink (which
+				// rolls the destination back) is a workspace mutation the checkpoint must see.
+				mutated = true
 				if (isPreventFocusDisruptionEnabled) {
 					// Diagnostics/bookkeeping only: the bytes were committed above, and
 					// saveDirectly writes the same content through the same atomic write.
@@ -570,7 +583,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.say("error", writeErrorMessage)
 				pushToolResult(formatResponse.toolError(writeErrorMessage))
 				await task.diffViewProvider.reset()
-				return false
+				return { ok: false, mutated }
 			}
 
 			// Delete the original file
@@ -583,7 +596,6 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				// a duplicated file as if the move had succeeded.
 				let restoreFailure: unknown
 				let recoveryPath: string | undefined
-				let recoveryFailure: unknown
 				try {
 					if (destinationBackup !== undefined) {
 						// Atomic restore of the captured destination bytes: the rename
@@ -616,7 +628,6 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 								`Failed to restore pre-move state: ${restoreFailure instanceof Error ? restoreFailure.message : String(restoreFailure)}; kept the approved content at ${recoveryCandidate}`,
 							)
 						} catch (recoveryError) {
-							recoveryFailure = recoveryError
 							console.error(`Failed to persist a move recovery copy: ${recoveryError}`)
 						}
 					}
@@ -629,7 +640,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						? ""
 						: ` The destination could not be restored and may still contain the new content: ${restoreFailure instanceof Error ? restoreFailure.message : String(restoreFailure)}`
 				const recoverySuffix =
-					recoveryFailure !== undefined && recoveryPath === undefined
+					destinationBackup !== undefined && restoreFailure !== undefined && recoveryPath === undefined
 						? ` The original content is preserved at '${getReadablePath(task.cwd, path.relative(task.cwd, backupPath))}'.`
 						: recoveryPath === undefined
 							? ""
@@ -638,7 +649,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.say("error", moveErrorMessage)
 				pushToolResult(formatResponse.toolError(moveErrorMessage))
 				await task.diffViewProvider.reset()
-				return false
+				return { ok: false, mutated }
 			}
 
 			// The move committed: drop the destination backup.
@@ -653,6 +664,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
 			}
 
+			mutated = true
 			await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
 		}
 
@@ -661,7 +673,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, false)
 		pushToolResult(message)
 		await task.diffViewProvider.reset()
-		return true
+		return { ok: true, mutated }
 	}
 
 	override async handlePartial(task: Task, block: ToolUse<"apply_patch">): Promise<void> {

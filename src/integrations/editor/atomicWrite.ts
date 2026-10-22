@@ -32,7 +32,9 @@ export async function writeFileAtomically(absolutePath: string, content: string,
 	const baseName = separatorIndex >= 0 ? targetPath.slice(separatorIndex + 1) : targetPath
 	const stagingPath = `${directory}/.${baseName}.${process.pid}.${Date.now()}.staging`
 	try {
-		await fs.writeFile(stagingPath, content, "utf-8")
+		// Owner-only from creation: staged content must never be readable by others,
+		// even between this write and the final rename.
+		await fs.writeFile(stagingPath, content, { encoding: "utf-8", mode: 0o600 })
 		if (targetMode !== undefined) {
 			await fs.chmod(stagingPath, targetMode)
 		}
