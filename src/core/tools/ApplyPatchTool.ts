@@ -509,20 +509,54 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				}
 			}
 
-			// Save new content to the new path
-			if (isPreventFocusDisruptionEnabled) {
-				await task.diffViewProvider.saveDirectly(
-					change.movePath,
-					newContent,
-					false,
-					diagnosticsEnabled,
-					writeDelayMs,
-				)
-			} else {
-				// Write to new path and delete old file
-				const parentDir = path.dirname(moveAbsolutePath)
-				await fs.mkdir(parentDir, { recursive: true })
-				await fs.writeFile(moveAbsolutePath, newContent, "utf8")
+			// Stage the move so it is all-or-nothing: the pre-move destination bytes
+			// stay on disk under a backup name, the new content is written to a
+			// staging file and renamed into place atomically, and only then is the
+			// source unlinked. Any failure renames the backup back, so the workspace
+			// never shows a half-applied move.
+			const moveStamp = `${process.pid}.${Date.now()}`
+			const moveDir = path.dirname(moveAbsolutePath)
+			const moveBase = path.basename(moveAbsolutePath)
+			const stagingPath = path.join(moveDir, `.${moveBase}.${moveStamp}.staging`)
+			const backupPath = path.join(moveDir, `.${moveBase}.${moveStamp}.backup`)
+			await fs.mkdir(moveDir, { recursive: true })
+
+			let destinationCommitted = false
+			try {
+				await fs.writeFile(stagingPath, newContent, "utf8")
+				if (destinationBackup !== undefined) {
+					// Preserve the pre-move bytes on disk (atomic rename): the in-memory
+					// copy alone cannot restore the destination after a crash.
+					await fs.rename(moveAbsolutePath, backupPath)
+				}
+				await fs.rename(stagingPath, moveAbsolutePath)
+				destinationCommitted = true
+				if (isPreventFocusDisruptionEnabled) {
+					// Diagnostics/bookkeeping only: the bytes were committed above, and
+					// saveDirectly writes the same content through the same atomic write.
+					await task.diffViewProvider.saveDirectly(
+						change.movePath,
+						newContent,
+						false,
+						diagnosticsEnabled,
+						writeDelayMs,
+					)
+				}
+			} catch (writeError) {
+				await fs.rm(stagingPath, { force: true }).catch(() => {})
+				if (destinationCommitted) {
+					await fs.rm(moveAbsolutePath, { force: true }).catch(() => {})
+				}
+				if (destinationBackup !== undefined) {
+					await fs.rename(backupPath, moveAbsolutePath).catch(() => {})
+				}
+				task.consecutiveMistakeCount++
+				task.recordToolError("apply_patch")
+				const writeErrorMessage = `Failed to write move destination '${change.movePath}': ${writeError instanceof Error ? writeError.message : String(writeError)}`
+				await task.say("error", writeErrorMessage)
+				pushToolResult(formatResponse.toolError(writeErrorMessage))
+				await task.diffViewProvider.reset()
+				return false
 			}
 
 			// Delete the original file
@@ -530,36 +564,58 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await fs.unlink(absolutePath)
 			} catch (error) {
 				// The source is still present (locked or protected): undo the destination
-				// write so the file does not live in two places, and report the move as
-				// failed. Returning true here would let the whole-patch checkpoint
-				// persist a duplicated file as if the move had succeeded. An existing
-				// destination is restored to its captured content; the destination is
-				// removed only when it was confirmed absent before the write.
+				// so the file does not live in two places, and report the move as
+				// failed. Returning true here would let the whole-patch checkpoint persist
+				// a duplicated file as if the move had succeeded.
 				let restoreFailure: unknown
+				let recoveryPath: string | undefined
 				try {
 					if (destinationBackup !== undefined) {
-						await fs.writeFile(moveAbsolutePath, destinationBackup)
+						// Atomic restore of the captured destination bytes: the rename
+						// replaces the clobbered destination in one step, so there is no
+						// window where the file is missing.
+						await fs.rename(backupPath, moveAbsolutePath)
 					} else {
 						await fs.rm(moveAbsolutePath, { force: true })
 					}
 				} catch (restoreError) {
-					// The failed operation is reported through the tool result below; a
-					// failed rollback means the destination may now hold the new content
-					// while the source still exists, and both the model and the user must
-					// know that instead of a console-only note.
 					restoreFailure = restoreError
-					console.error(`Failed to restore pre-move state after source deletion failure: ${restoreError}`)
 				}
+				if (restoreFailure !== undefined) {
+					// The destination could not be restored. Persist the approved
+					// content under a recovery name instead of dropping it, so a
+					// half-applied move still has a deterministic recovery artifact.
+					const recoveryCandidate = path.join(moveDir, `${moveBase}.zoo-recovery-${moveStamp}`)
+					try {
+						await fs.writeFile(recoveryCandidate, newContent, "utf8")
+						recoveryPath = recoveryCandidate
+						console.error(
+							`Failed to restore pre-move state: ${restoreFailure instanceof Error ? restoreFailure.message : String(restoreFailure)}; kept the approved content at ${recoveryCandidate}`,
+						)
+					} catch (recoveryError) {
+						console.error(`Failed to persist a move recovery copy: ${recoveryError}`)
+					}
+				}
+				// Best-effort cleanup of the staging file; the backup is gone once the
+				// restore rename committed (or is the only copy left on failure).
+				await fs.rm(stagingPath, { force: true }).catch(() => {})
 				const restoreSuffix =
 					restoreFailure === undefined
 						? ""
 						: ` The destination could not be restored and may still contain the new content: ${restoreFailure instanceof Error ? restoreFailure.message : String(restoreFailure)}`
-				const moveErrorMessage = `Failed to delete original file after move '${relPath}': ${error instanceof Error ? error.message : String(error)}${restoreSuffix}`
+				const recoverySuffix =
+					recoveryPath === undefined
+						? ""
+						: ` The approved new content was kept at '${getReadablePath(task.cwd, path.relative(task.cwd, recoveryPath))}'.`
+				const moveErrorMessage = `Failed to delete original file after move '${relPath}': ${error instanceof Error ? error.message : String(error)}${restoreSuffix}${recoverySuffix}`
 				await task.say("error", moveErrorMessage)
 				pushToolResult(formatResponse.toolError(moveErrorMessage))
 				await task.diffViewProvider.reset()
 				return false
 			}
+
+			// The move committed: drop the destination backup.
+			await fs.rm(backupPath, { force: true }).catch(() => {})
 
 			await task.fileContextTracker.trackFileContext(change.movePath, "roo_edited" as RecordSource)
 		} else {
