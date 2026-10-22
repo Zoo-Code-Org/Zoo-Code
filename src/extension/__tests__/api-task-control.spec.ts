@@ -341,7 +341,11 @@ describe("API task controls", () => {
 			// The per-task TaskStarted listener re-emits the event on the API and records it
 			// through fileLog: spy on the prototype so the message content is observable
 			// (fileLog is a no-op without the enableLogging flag).
-			const fileLogSpy = vi.spyOn(API.prototype, "fileLog" as keyof API).mockResolvedValue(undefined)
+			// fileLog is private: name it through a structural type (a double assertion
+			// is the only way to address a private member in a spy without `any`).
+			const fileLogSpy = vi
+				.spyOn(API.prototype as unknown as { fileLog: (message: string) => Promise<void> }, "fileLog")
+				.mockResolvedValue(undefined)
 			const task = createTask("task-to-start")
 			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
 
