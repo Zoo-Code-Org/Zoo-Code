@@ -448,30 +448,27 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 		context.subscriptions, // Register listener for disposal
 	)
 
+	// Drop a tab panel from the live registry. Re-point the tracked ref at the best
+	// remaining live tab: an active panel first, then a visible one, then any remaining
+	// panel — a panel can be open but hidden behind another editor group (neither active
+	// nor visible), and clearing the tracked ref would let the next open create a second
+	// panel instead of revealing the one already serving a task. The identity guard keeps
+	// a late disposal of an already-replaced panel from clobbering the replacement's ref.
+	const untrackNewPanel = () => {
+		liveTabPanels.delete(newPanel)
+		if (tabPanel === newPanel) {
+			const remaining =
+				[...liveTabPanels].find((panel) => panel.active) ||
+				[...liveTabPanels].find((panel) => panel.visible) ||
+				[...liveTabPanels][0]
+			setPanel(remaining, "tab")
+		}
+	}
+
 	// Handle panel closing events: clear the tracked ref only if this panel
 	// is still the tracked one, so a late disposal of an already-replaced
 	// panel cannot clobber the replacement's ref.
-	newPanel.onDidDispose(
-		() => {
-			liveTabPanels.delete(newPanel)
-			if (tabPanel === newPanel) {
-				// Re-point the tracked ref at the best remaining live tab: an active
-				// panel first, then a visible one, then any remaining panel — a panel
-				// can be open but hidden behind another editor group (neither active
-				// nor visible), and clearing the tracked ref here would let the next
-				// open create a second panel instead of revealing the one already
-				// serving a task. The identity guard above keeps a late disposal of an
-				// already-replaced panel from clobbering the replacement's ref.
-				const remaining =
-					[...liveTabPanels].find((panel) => panel.active) ||
-					[...liveTabPanels].find((panel) => panel.visible) ||
-					[...liveTabPanels][0]
-				setPanel(remaining, "tab")
-			}
-		},
-		null,
-		context.subscriptions, // Also register dispose listener
-	)
+	newPanel.onDidDispose(untrackNewPanel, null, context.subscriptions) // Also register dispose listener
 
 	try {
 		await tabProvider.resolveWebviewView(newPanel)
@@ -481,11 +478,15 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 		// and dispose the provider so the failed surface leaves no listeners or
 		// state behind. The panel's own disposal listener (installed above) has
 		// already handled a user close that landed during initialization.
-		liveTabPanels.delete(newPanel)
-		if (tabPanel === newPanel) {
-			setPanel(undefined, "tab")
+		untrackNewPanel()
+		try {
+			await tabProvider.dispose()
+		} catch (disposeError) {
+			// The caller needs the initialization error, not the cleanup failure.
+			outputChannel.appendLine(
+				`[openClineInNewTab] provider dispose failed after initialization error: ${disposeError}`,
+			)
 		}
-		await tabProvider.dispose()
 		throw error
 	}
 

@@ -1400,4 +1400,28 @@ describe("openClineInNewTab initialization failure", () => {
 		resolveSpy.mockRestore()
 		disposeSpy.mockRestore()
 	})
+
+	it("keeps the initialization error when provider disposal also fails", async () => {
+		const resolveSpy = vi
+			.spyOn(ClineProvider.prototype, "resolveWebviewView")
+			.mockRejectedValue(new Error("init failed"))
+		const disposeSpy = vi.spyOn(ClineProvider.prototype, "dispose").mockRejectedValue(new Error("dispose failed"))
+
+		// A cleanup failure must not replace the error the caller has to handle.
+		await expect(
+			openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			}),
+		).rejects.toThrow("init failed")
+
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+			expect.stringContaining("provider dispose failed after initialization error"),
+		)
+		expect(__getLiveTabPanelCountForTests()).toBe(0)
+
+		resolveSpy.mockRestore()
+		disposeSpy.mockRestore()
+	})
 })
