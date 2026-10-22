@@ -189,6 +189,12 @@ describe("safeWriteText", () => {
 				"backup chmod failed",
 			)
 
+			// The private-mode failure happens after the copy exists: the partial backup is
+			// removed (retried once), and the never-committed staged file plus this write's own
+			// staging directory are released before the original error propagates.
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".safeWriteText.bak_"))
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".safeWriteText_"))
+			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging_"))
 			expect(fs.rename).not.toHaveBeenCalled()
 		})
 
