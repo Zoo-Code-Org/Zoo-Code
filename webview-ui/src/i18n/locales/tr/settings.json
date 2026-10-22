@@ -1013,7 +1013,7 @@
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Dinamik düşünme çabası",
-			"description": "set_thinking_effort aracını etkinleştirir; böylece model her adımda kendi düşünme çabasını belirler. Sohbetteki manuel kontrol her zaman kullanılabilir. (deneysel)"
+			"description": "set_thinking_effort aracını sonraki destek için hazırlar: bu ayar yalnızca tercihi saklar, istek başına davranış sonraki çalışmada gelir. Sohbetteki manuel kontrol her zaman kullanılabilir. (deneysel)"
 		}
 	},
 	"promptCaching": {

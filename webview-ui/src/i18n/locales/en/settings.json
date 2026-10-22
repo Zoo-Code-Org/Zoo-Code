@@ -1093,7 +1093,7 @@
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Dynamic thinking effort",
-			"description": "Enables the set_thinking_effort tool so the model can decide its thinking effort per step. The manual in-chat control is always available. (experimental)"
+			"description": "Prepares the set_thinking_effort tool for later support: this setting stores the preference only, and the tool's per-request behavior arrives in follow-up work. The manual in-chat control is always available. (experimental)"
 		}
 	},
 	"promptCaching": {

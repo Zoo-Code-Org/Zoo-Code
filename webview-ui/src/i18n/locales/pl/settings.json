@@ -1013,7 +1013,7 @@
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Dynamiczny wysiłek myślowy",
-			"description": "Włącza narzędzie set_thinking_effort, aby model samodzielnie decydował o wysiłku myślowym na każdym kroku. Ręczna regulacja w czacie jest zawsze dostępna. (eksperymentalne)"
+			"description": "Przygotowuje narzędzie set_thinking_effort do późniejszego wsparcia: to ustawienie zapisuje tylko preferencję, zachowanie na żądanie pojawi się w kolejnych pracach. Ręczna regulacja w czacie jest zawsze dostępna. (eksperymentalne)"
 		}
 	},
 	"promptCaching": {

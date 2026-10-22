@@ -1013,7 +1013,7 @@
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Usaha berpikir dinamis",
-			"description": "Mengaktifkan alat set_thinking_effort agar model dapat memutuskan usaha berpikirnya per langkah. Kontrol manual di obrolan selalu tersedia. (eksperimental)"
+			"description": "Menyiapkan alat set_thinking_effort untuk dukungan berikutnya: pengaturan ini hanya menyimpan preferensi, perilaku per permintaan akan datang pada pekerjaan lanjutan. Kontrol manual di obrolan selalu tersedia. (eksperimental)"
 		}
 	},
 	"promptCaching": {

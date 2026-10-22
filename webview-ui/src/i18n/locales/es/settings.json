@@ -1013,7 +1013,7 @@
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Esfuerzo de pensamiento dinámico",
-			"description": "Habilita la herramienta set_thinking_effort para que el modelo decida su esfuerzo de pensamiento por paso. El control manual en el chat siempre está disponible. (experimental)"
+			"description": "Prepara la herramienta set_thinking_effort para un soporte posterior: esta opción solo guarda la preferencia y el comportamiento por solicitud llegará en trabajo posterior. El control manual en el chat siempre está disponible. (experimental)"
 		}
 	},
 	"promptCaching": {

@@ -1013,7 +1013,7 @@
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Dynamische Denkintensität",
-			"description": "Aktiviert das set_thinking_effort-Tool, damit das Modell die Denkintensität pro Schritt selbst bestimmt. Die manuelle Anpassung im Chat ist immer verfügbar. (experimentell)"
+			"description": "Bereitet das set_thinking_effort-Tool für spätere Unterstützung vor: Diese Einstellung speichert nur die Präferenz, das Verhalten pro Anfrage folgt in späterer Arbeit. Die manuelle Anpassung im Chat ist immer verfügbar. (experimentell)"
 		}
 	},
 	"promptCaching": {
