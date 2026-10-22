@@ -4088,17 +4088,30 @@ describe("Cline", () => {
 				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
 				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-				const settleSpy = vi.fn().mockResolvedValue(undefined)
+				// Deferred settlement: the test asserts the in-flight state (nothing delivered
+				// while the queued mutation is still settling) instead of racing a resolved mock.
+				let releaseSettle!: () => void
+				const settlePending = new Promise<void>((resolve) => {
+					releaseSettle = resolve
+				})
+				const settleSpy = vi.fn(() => settlePending)
 				Object.assign(mockProvider, { awaitProfileMutationSettled: settleSpy })
 				const responseOrder: string[] = []
 				handleResponseSpy.mockImplementation(() => {
 					responseOrder.push("delivered")
 				})
-				settleSpy.mockImplementation(async () => {
-					responseOrder.push("settled")
-				})
 
-				await task.submitUserMessage("still delivered", undefined, "code")
+				const submitting = task.submitUserMessage("still delivered", undefined, "code")
+				// Flush pending microtasks until the delivery path reaches the deferred settle: the
+				// message must not be delivered while settlement is pending.
+				for (let turn = 0; turn < 50 && settleSpy.mock.calls.length === 0; turn++) {
+					await Promise.resolve()
+				}
+				expect(settleSpy).toHaveBeenCalledOnce()
+				expect(responseOrder).toEqual([])
+
+				releaseSettle()
+				await submitting
 
 				// The mode-switch rejection is caught and logged locally...
 				expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -4108,7 +4121,7 @@ describe("Cline", () => {
 				// ...the queued run-to-completion mutation is awaited before the message is
 				// delivered, so a timed-out switch cannot move the task's mode mid-delivery.
 				expect(settleSpy).toHaveBeenCalledOnce()
-				expect(responseOrder).toEqual(["settled", "delivered"])
+				expect(responseOrder).toEqual(["delivered"])
 				// ...and the pending ask is still answered, so the submitted text is not lost.
 				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "still delivered", [])
 				consoleErrorSpy.mockRestore()
