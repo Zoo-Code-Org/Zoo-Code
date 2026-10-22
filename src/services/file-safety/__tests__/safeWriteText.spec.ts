@@ -446,14 +446,18 @@ describe("safeWriteText", () => {
 				}
 			})
 
-			const error = await safeWriteText(targetPath, "new data", { backup: true }).catch((caught: unknown) => caught)
+			const error = await safeWriteText(targetPath, "new data", { backup: true }).catch(
+				(caught: unknown) => caught,
+			)
 
 			expect(error).toBeInstanceOf(OrphanedPublishedBackupError)
 			const orphan = error as OrphanedPublishedBackupError
 			expect(orphan.orphanedBackupPath).toContain("safeWriteText.bak_")
 			expect(orphan.publishedPath).toBe(targetPath)
 			// Two attempts, then the failure is reported instead of swallowed.
-			expect(vi.mocked(fs.unlink).mock.calls.filter((call) => String(call[0]).includes("safeWriteText.bak_"))).toHaveLength(2)
+			expect(
+				vi.mocked(fs.unlink).mock.calls.filter((call) => String(call[0]).includes("safeWriteText.bak_")),
+			).toHaveLength(2)
 		})
 
 		it("creates the backup privately before its content exists, then fsyncs it", async () => {
