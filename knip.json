@@ -30,6 +30,7 @@
 				"!utils/WorkspacePathResolver.ts!",
 				"!test-utils/**!",
 				"!utils/versionToken.ts!",
+				"!core/tools/guardedWrite.ts!",
 				"!core/tools/helpers/toolResultFormatting.ts!"
 			],
 			"ignoreDependencies": [

@@ -31,6 +31,7 @@ vi.mock("fs/promises", () => {
 })
 
 // Import safeWriteJson to use in mocks
+import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 // Mock safeWriteJson
 vi.mock("../../../utils/safeWriteJson", () => ({
@@ -1043,6 +1044,106 @@ describe("McpHub", () => {
 			expect(writtenConfig.mcpServers["test-server"].alwaysAllow).toContain("new-tool")
 		})
 
+		describe("symlink policy on MCP settings writes", () => {
+			it("refuses a symlinked target when deleteServer omits the source but the server is a project server", async () => {
+				vi.mocked(fs.readFile).mockResolvedValue(
+					JSON.stringify({
+						mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"] } },
+					}),
+				)
+				// Typed close doubles: updateServerConnections tears the connection
+				// down through transport.close() and client.close(). Empty doubles
+				// raise a TypeError that deleteConnection swallows, so the teardown
+				// would silently do nothing and the test would still pass.
+				const transportClose = vi.fn(async () => {})
+				const clientClose = vi.fn(async () => {})
+				mcpHub.connections = [
+					{
+						type: "connected",
+						server: {
+							name: "test-server",
+							type: "stdio",
+							command: "node",
+							args: ["test.js"],
+							source: "project",
+						},
+						client: { close: clientClose },
+						transport: { close: transportClose },
+					} as unknown as ConnectedMcpConnection,
+				]
+
+				// deleteServer("name") takes no source: findConnection resolves the connection and
+				// configPath is chosen from THAT source. The write policy must be derived from the same
+				// value, or a project server reached through an omitted argument loses symlink refusal.
+				await mcpHub.deleteServer("test-server")
+
+				// The teardown ran to completion rather than dying on a TypeError.
+				expect(transportClose).toHaveBeenCalledTimes(1)
+				expect(clientClose).toHaveBeenCalledTimes(1)
+
+				const write = vi.mocked(safeWriteJson).mock.calls.at(-1)
+				expect(write && write[2]).toEqual(expect.objectContaining({ refuseSymlinkTarget: true }))
+			})
+
+			it("refuses a symlinked target for a project toggleToolAlwaysAllow write", async () => {
+				vi.mocked(fs.readFile).mockResolvedValue(
+					JSON.stringify({
+						mcpServers: {
+							"test-server": { type: "stdio", command: "node", args: ["test.js"], alwaysAllow: [] },
+						},
+					}),
+				)
+				mcpHub.connections = [
+					{
+						type: "connected",
+						server: {
+							name: "test-server",
+							type: "stdio",
+							command: "node",
+							args: ["test.js"],
+							source: "project",
+						},
+						client: {},
+						transport: {},
+					} as unknown as ConnectedMcpConnection,
+				]
+
+				await mcpHub.toggleToolAlwaysAllow("test-server", "project", "new-tool", true)
+
+				const write = vi.mocked(safeWriteJson).mock.calls.at(-1)
+				expect(write && write[2]).toEqual(expect.objectContaining({ refuseSymlinkTarget: true }))
+			})
+
+			it("leaves the global toggleToolAlwaysAllow write without a symlink refusal", async () => {
+				vi.mocked(fs.readFile).mockResolvedValue(
+					JSON.stringify({
+						mcpServers: {
+							"test-server": { type: "stdio", command: "node", args: ["test.js"], alwaysAllow: [] },
+						},
+					}),
+				)
+				mcpHub.connections = [
+					{
+						type: "connected",
+						server: {
+							name: "test-server",
+							type: "stdio",
+							command: "node",
+							args: ["test.js"],
+							source: "global",
+						},
+						client: {},
+						transport: {},
+					} as unknown as ConnectedMcpConnection,
+				]
+
+				await mcpHub.toggleToolAlwaysAllow("test-server", "global", "new-tool", true)
+
+				const write = vi.mocked(safeWriteJson).mock.calls.at(-1)
+				expect(write && write[2]).not.toHaveProperty("refuseSymlinkTarget")
+			})
+		})
+
 		it("should remove tool from always allow list when disabling", async () => {
 			const mockConfig = {
 				mcpServers: {
@@ -1763,6 +1864,75 @@ describe("McpHub", () => {
 		})
 
 		describe("updateServerTimeout", () => {
+			it("refuses a symlinked target for a project-scoped timeout write", async () => {
+				vi.mocked(fs.readFile).mockResolvedValueOnce(
+					JSON.stringify({
+						mcpServers: {
+							"test-server": { type: "stdio", command: "node", args: ["test.js"], timeout: 60 },
+						},
+					}),
+				)
+				// The SDK client/transport are never touched by this write path (it reads only
+				// server.name and server.source), so the literal is projected onto the connection
+				// type through unknown rather than adding another `as any` to this file.
+				mcpHub.connections = [
+					{
+						type: "connected",
+						server: {
+							name: "test-server",
+							type: "stdio",
+							command: "node",
+							args: ["test.js"],
+							timeout: 60,
+							source: "project",
+						},
+						client: {},
+						transport: {},
+					} as unknown as ConnectedMcpConnection,
+				]
+
+				await mcpHub.updateServerTimeout("test-server", 120)
+
+				// A project .roo/mcp.json is repository-controlled: if it is a symlink, the merged
+				// settings (secrets + server commands) must NOT land at the referent outside the
+				// workspace, so this write refuses the link instead of following it.
+				const write = vi.mocked(safeWriteJson).mock.calls.at(-1)
+				expect(write && write[2]).toEqual(expect.objectContaining({ refuseSymlinkTarget: true }))
+			})
+
+			it("leaves the global settings write without a symlink refusal", async () => {
+				vi.mocked(fs.readFile).mockResolvedValueOnce(
+					JSON.stringify({
+						mcpServers: {
+							"test-server": { type: "stdio", command: "node", args: ["test.js"], timeout: 60 },
+						},
+					}),
+				)
+				mcpHub.connections = [
+					{
+						type: "connected",
+						server: {
+							name: "test-server",
+							type: "stdio",
+							command: "node",
+							args: ["test.js"],
+							timeout: 60,
+							source: "global",
+						},
+						client: {},
+						transport: {},
+					} as unknown as ConnectedMcpConnection,
+				]
+
+				await mcpHub.updateServerTimeout("test-server", 120)
+
+				// The global file lives in the extension global storage and users legitimately link
+				// it, so this writer does not opt into the symlink refusal; what the assertion
+				// covers is that the option is absent, not what the filesystem then does.
+				const write = vi.mocked(safeWriteJson).mock.calls.at(-1)
+				expect(write && write[2]).not.toHaveProperty("refuseSymlinkTarget")
+			})
+
 			it("should update server timeout in settings file", async () => {
 				const mockConfig = {
 					mcpServers: {
