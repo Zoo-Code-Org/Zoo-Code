@@ -931,6 +931,106 @@ describe("safeWriteJson", () => {
 		expect(fsSyncActual.readdirSync(parent)).toEqual(["replaced-ancestor.json"])
 	})
 
+	test("refuses the publish when an ancestor disappears before the commit", async () => {
+		const parent = path.join(tempDir, "gone-parent")
+		await fs.mkdir(parent, { recursive: true })
+		const target = path.join(parent, "gone-ancestor.json")
+		await fsPromisesActuals.writeFile!(target, JSON.stringify({ own: true }))
+		const asDir = { isSymbolicLink: () => false, dev: 1n, ino: 1n } as unknown as fsSyncActual.BigIntStats
+		// The walk authorizes the directory; by publication time it is gone, so a path-based
+		// rename would resolve an ancestry nobody checked. The guard must fail closed.
+		let parentLooks = 0
+		vi.spyOn(fs, "lstat").mockImplementation(((p: unknown) => {
+			if (String(p) === parent) {
+				parentLooks++
+				if (parentLooks === 1) return Promise.resolve(asDir)
+				return Promise.reject(Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }))
+			}
+			return Promise.resolve(asDir)
+		}) as unknown as typeof fs.lstat)
+
+		await expect(safeWriteJson(target, { leaked: true }, { refuseSymlinkTarget: true })).rejects.toThrow(
+			/no longer exists/,
+		)
+
+		vi.restoreAllMocks()
+		expect(await readFileContent(target)).toEqual({ own: true })
+		expect(fsSyncActual.readdirSync(parent)).toEqual(["gone-ancestor.json"])
+	})
+
+	test("fails closed when an ancestor re-check fails for a non-ENOENT reason", async () => {
+		const parent = path.join(tempDir, "eacces-parent")
+		await fs.mkdir(parent, { recursive: true })
+		const target = path.join(parent, "eacces-ancestor.json")
+		await fsPromisesActuals.writeFile!(target, JSON.stringify({ own: true }))
+		const asDir = { isSymbolicLink: () => false, dev: 1n, ino: 1n } as unknown as fsSyncActual.BigIntStats
+		const failure = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+		let parentLooks = 0
+		vi.spyOn(fs, "lstat").mockImplementation(((p: unknown) => {
+			if (String(p) === parent) {
+				parentLooks++
+				if (parentLooks === 1) return Promise.resolve(asDir)
+				return Promise.reject(failure)
+			}
+			return Promise.resolve(asDir)
+		}) as unknown as typeof fs.lstat)
+
+		// A stat failure says nothing about whether the entry is safe: the original error
+		// propagates instead of publishing blind.
+		await expect(safeWriteJson(target, { leaked: true }, { refuseSymlinkTarget: true })).rejects.toThrow(/EACCES/)
+
+		vi.restoreAllMocks()
+		expect(await readFileContent(target)).toEqual({ own: true })
+	})
+
+	test("fails closed when the destination re-check fails with a non-ENOENT error", async () => {
+		const parent = path.join(tempDir, "recheck-parent")
+		await fs.mkdir(parent, { recursive: true })
+		const target = path.join(parent, "recheck-eacces.json")
+		const asDir = { isSymbolicLink: () => false, dev: 1n, ino: 1n } as unknown as fsSyncActual.BigIntStats
+		const failure = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+		// Only ENOENT means "nothing there that could be a link"; any other lstat failure says
+		// nothing about the destination, so the re-check must stop the write.
+		vi.spyOn(fs, "lstat").mockImplementation(((p: unknown) => {
+			if (String(p) === target) return Promise.reject(failure)
+			return Promise.resolve(asDir)
+		}) as unknown as typeof fs.lstat)
+
+		await expect(safeWriteJson(target, { written: true }, { refuseSymlinkTarget: true })).rejects.toThrow(/EACCES/)
+
+		vi.restoreAllMocks()
+		expect(await fileExists(target)).toBe(false)
+	})
+
+	test("returns early when an ancestor vanishes during the authorizing walk", async () => {
+		const parent = path.join(tempDir, "vanish-parent")
+		await fs.mkdir(parent, { recursive: true })
+		const target = path.join(parent, "vanish-during-walk.json")
+		await fsPromisesActuals.writeFile!(target, JSON.stringify({ own: true }))
+		const asDir = { isSymbolicLink: () => false, dev: 1n, ino: 1n } as unknown as fsSyncActual.BigIntStats
+		const asFile = { isSymbolicLink: () => false } as unknown as fsSyncActual.Stats
+		// The walk stops once a directory no longer exists: nothing above it needs identity
+		// recording, and the publication re-checks only the recorded ancestors.
+		let parentLooks = 0
+		vi.spyOn(fs, "lstat").mockImplementation(((p: unknown) => {
+			if (String(p) === parent) {
+				parentLooks++
+				if (parentLooks === 1) {
+					return Promise.reject(
+						Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+					)
+				}
+				return Promise.resolve(asDir)
+			}
+			return Promise.resolve(asFile)
+		}) as unknown as typeof fs.lstat)
+
+		await safeWriteJson(target, { written: true }, { refuseSymlinkTarget: true })
+
+		vi.restoreAllMocks()
+		expect(await readFileContent(target)).toEqual({ written: true })
+	})
+
 	test("publishes when every recorded ancestor keeps its identity", async () => {
 		const parent = path.join(tempDir, "stable-parent")
 		await fs.mkdir(parent, { recursive: true })

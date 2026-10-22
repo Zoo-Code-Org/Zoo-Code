@@ -79,6 +79,29 @@ describe("safeWriteText", () => {
 	})
 
 	describe("rollback failure", () => {
+		it("renders non-Error failures through the rollback message", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.closeSync).mockReturnValue(undefined)
+			// Non-Error throwables are legal in JavaScript: the message must still render both
+			// the primary and rollback failures instead of failing to build the text.
+			vi.mocked(fs.rename)
+				.mockResolvedValueOnce(undefined)
+				.mockRejectedValueOnce("commit failed")
+				.mockRejectedValueOnce("rollback failed")
+
+			const failure = await safeWriteText(targetPath, "hello", { backup: true, platform: "linux" }).then(
+				() => undefined,
+				(error: unknown) => error as Error & { name: string; cause?: unknown },
+			)
+
+			expect(failure?.name).toBe("RollbackFailedError")
+			expect(failure?.message).toContain("commit failed")
+			expect(failure?.message).toContain("rollback failed")
+			expect(failure?.cause).toBe("rollback failed")
+		})
+
 		it("throws RollbackFailedError with the backup path when the rollback rename also fails", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
