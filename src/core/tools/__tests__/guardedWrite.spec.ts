@@ -623,6 +623,21 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(published()).toBe(false)
 		})
 
+		it("rethrows a non-ENOENT token failure from the pre-commit verification", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("raced.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+			const failure = { code: "EACCES" }
+			const published = mockPublishWithRace(() => {
+				// A real I/O failure in the window is not a guard verdict: it must propagate.
+				mockedComputeVersionToken.mockRejectedValue(failure)
+			})
+
+			await expect(guardedWrite(task, "raced.txt", "mine", "update")).rejects.toBe(failure)
+			expect(published()).toBe(false)
+		})
+
 		it("rethrows non-guard I/O failures from the pre-commit verification verbatim", async () => {
 			const failure = { code: "EACCES" }
 			mockedFsAccess.mockRejectedValue({ code: "ENOENT" }) // absent at entry
