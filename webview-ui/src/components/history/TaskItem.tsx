@@ -1,4 +1,4 @@
-import { memo, useCallback, useState } from "react"
+import { memo, useState } from "react"
 import { ArrowRight, Folder } from "lucide-react"
 import { getTaskDisplayTitle, type DisplayHistoryItem } from "./types"
 
@@ -34,8 +34,6 @@ const TaskItem = ({
 	className,
 }: TaskItemProps) => {
 	const [isRenaming, setIsRenaming] = useState(false)
-	const startRename = useCallback(() => setIsRenaming(true), [])
-	const stopRename = useCallback(() => setIsRenaming(false), [])
 
 	const handleClick = () => {
 		if (isRenaming) {
@@ -81,7 +79,7 @@ const TaskItem = ({
 				<div className="flex-1 min-w-0">
 					<div className="flex items-start gap-1">
 						{isRenaming ? (
-							<TaskTitleEditor item={item} onDone={stopRename} />
+							<TaskTitleEditor item={item} onDone={() => setIsRenaming(false)} />
 						) : item.highlight ? (
 							<div
 								className={cn(
@@ -126,7 +124,7 @@ const TaskItem = ({
 						isSelectionMode={isSelectionMode}
 						isSubtask={item.isSubtask}
 						onDelete={onDelete}
-						onRename={isRenaming ? undefined : startRename}
+						onRename={isRenaming ? undefined : () => setIsRenaming(true)}
 					/>
 				</div>
 			</div>

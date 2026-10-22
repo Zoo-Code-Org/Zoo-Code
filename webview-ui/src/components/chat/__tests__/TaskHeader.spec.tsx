@@ -290,6 +290,30 @@ describe("TaskHeader", () => {
 			expect(screen.queryByText("Test task")).not.toBeInTheDocument()
 		})
 
+		it.each([
+			["the custom title", "My title", "My title"],
+			["the default label without a custom title", undefined, "chat:task.title"],
+		])("shows %s as the expanded heading", (_label, title, expected) => {
+			mockExtensionState.currentTaskItem = { id: "test-task-id", task: "Test task", title }
+			renderTaskHeader()
+			fireEvent.click(screen.getByText(title ?? "Test task"))
+
+			expect(screen.getByText(expected)).toHaveClass("font-bold")
+			expect(screen.queryByTestId("task-title-input")).not.toBeInTheDocument()
+		})
+
+		it("closes the header editor on Escape without saving", () => {
+			renderTaskHeader()
+			fireEvent.click(screen.getByText("Test task"))
+			fireEvent.click(screen.getByTestId("rename-current-task-button"))
+
+			fireEvent.keyDown(screen.getByTestId("task-title-input"), { key: "Escape" })
+
+			expect(screen.queryByTestId("task-title-input")).not.toBeInTheDocument()
+			expect(screen.getByText("chat:task.title")).toBeInTheDocument()
+			expect(mockPostMessage).not.toHaveBeenCalled()
+		})
+
 		it("renames from the expanded header without collapsing it", () => {
 			renderTaskHeader()
 			fireEvent.click(screen.getByText("Test task"))

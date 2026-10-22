@@ -168,6 +168,43 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"history-rename": async () => {
+		const [{ AppProviders }, { default: HistoryView }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/history/HistoryView"),
+		])
+		// The visual test freezes the clock at this time so "time ago" labels stay stable.
+		const now = new Date("2026-06-01T12:00:00Z").getTime()
+		const workspace = "/workspace/demo"
+		const baseItem = { tokensIn: 1200, tokensOut: 800, totalCost: 0.12, workspace }
+		return (
+			<AppProviders
+				initialState={{
+					cwd: workspace,
+					taskHistory: [
+						{
+							...baseItem,
+							id: "task-renamed",
+							number: 2,
+							ts: now - 2 * 60 * 60 * 1000,
+							task: "Refactor the authentication middleware to use the new session store",
+							title: "Auth refactor",
+						},
+						{
+							...baseItem,
+							id: "task-original",
+							number: 1,
+							ts: now - 26 * 60 * 60 * 1000,
+							task: "Write unit tests for the billing service",
+						},
+					],
+				}}>
+				<div className="h-[640px] w-[480px] max-w-full bg-vscode-editor-background">
+					<HistoryView onDone={() => undefined} />
+				</div>
+			</AppProviders>
+		)
+	},
 	"ignored-disabled-tools-warning": async () => {
 		const [{ AppProviders }, { ChatRowContent }] = await Promise.all([
 			import("../AppProviders"),

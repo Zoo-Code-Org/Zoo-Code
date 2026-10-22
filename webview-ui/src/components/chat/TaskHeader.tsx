@@ -1,4 +1,4 @@
-import { memo, useCallback, useRef, useState, useMemo } from "react"
+import { memo, useRef, useState, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import {
 	ChevronUp,
@@ -68,8 +68,6 @@ const TaskHeader = ({
 	const { id: modelId, info: model } = useSelectedModel(apiConfiguration)
 	const [isTaskExpanded, setIsTaskExpanded] = useState(false)
 	const [isRenaming, setIsRenaming] = useState(false)
-	const startRename = useCallback(() => setIsRenaming(true), [])
-	const stopRename = useCallback(() => setIsRenaming(false), [])
 	const customTitle = currentTaskItem?.title
 
 	const textContainerRef = useRef<HTMLDivElement>(null)
@@ -186,7 +184,11 @@ const TaskHeader = ({
 						<div className="grow min-w-0">
 							{isTaskExpanded &&
 								(isRenaming && currentTaskItem ? (
-									<TaskTitleEditor item={currentTaskItem} onDone={stopRename} className="text-sm" />
+									<TaskTitleEditor
+										item={currentTaskItem}
+										onDone={() => setIsRenaming(false)}
+										className="text-sm"
+									/>
 								) : (
 									<span className="font-bold">{customTitle || t("chat:task.title")}</span>
 								))}
@@ -353,7 +355,7 @@ const TaskHeader = ({
 							<TaskActions
 								item={currentTaskItem}
 								buttonsDisabled={buttonsDisabled}
-								onRename={isRenaming ? undefined : startRename}
+								onRename={isRenaming ? undefined : () => setIsRenaming(true)}
 							/>
 						</div>
 

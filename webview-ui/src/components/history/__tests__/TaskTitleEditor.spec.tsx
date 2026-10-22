@@ -50,6 +50,32 @@ describe("TaskTitleEditor", () => {
 		expect(onDone).toHaveBeenCalled()
 	})
 
+	it("collapses line breaks and repeated spaces into one line", () => {
+		const { input } = renderEditor()
+
+		submit(input, "  First line\n\nsecond   line ")
+
+		expect(vscode.postMessage).toHaveBeenCalledWith({
+			type: "renameTaskWithId",
+			taskId: "task-1",
+			text: "First line second line",
+		})
+	})
+
+	it("starts with a multi-line prompt shown on one line", () => {
+		render(<TaskTitleEditor item={{ id: "task-1", task: "Line one\nLine two" }} onDone={vi.fn()} />)
+
+		expect(screen.getByTestId("task-title-input")).toHaveValue("Line one Line two")
+	})
+
+	it("does not send a message when a multi-line prompt is saved unchanged", () => {
+		render(<TaskTitleEditor item={{ id: "task-1", task: "Line one\nLine two" }} onDone={vi.fn()} />)
+
+		fireEvent.keyDown(screen.getByTestId("task-title-input"), { key: "Enter" })
+
+		expect(vscode.postMessage).not.toHaveBeenCalled()
+	})
+
 	it.each([
 		["a blank value", "   "],
 		["the original prompt", "Original prompt"],
@@ -71,6 +97,20 @@ describe("TaskTitleEditor", () => {
 
 		expect(vscode.postMessage).not.toHaveBeenCalled()
 		expect(onDone).toHaveBeenCalled()
+	})
+
+	it.each([
+		["isComposing is set", { isComposing: true }],
+		["the IME keyCode 229 is reported", { keyCode: 229 }],
+	])("ignores Enter while an IME composition is active (%s)", (_label, imeState) => {
+		const { input, onDone } = renderEditor()
+
+		fireEvent.change(input, { target: { value: "にほん" } })
+		fireEvent.keyDown(input, { key: "Enter", ...imeState })
+
+		expect(vscode.postMessage).not.toHaveBeenCalled()
+		expect(onDone).not.toHaveBeenCalled()
+		expect(input).toBeInTheDocument()
 	})
 
 	it("lets keydown reach window so VS Code can run clipboard shortcuts", () => {

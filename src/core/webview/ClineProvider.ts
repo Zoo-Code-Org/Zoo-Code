@@ -2455,14 +2455,26 @@ export class ClineProvider
 	 * clears it so the history falls back to the original prompt.
 	 */
 	async renameTaskWithId(id: string, title: string | undefined) {
-		const historyItem = this.taskHistoryStore.get(id)
-		if (!historyItem) {
+		if (!this.taskHistoryStore.get(id)) {
 			this.log(`[renameTaskWithId] task ${id} not found in history`)
 			return
 		}
 
+		// Read and write under the store lock so a queued task save or delegation
+		// transition cannot be overwritten by a stale snapshot of the item.
 		const trimmed = title?.trim()
-		await this.updateTaskHistory({ ...historyItem, title: trimmed ? trimmed : undefined })
+		await this.taskHistoryStore.atomicReadAndUpdate(id, (historyItem) => ({
+			...historyItem,
+			title: trimmed ? trimmed : undefined,
+		}))
+		this.recentTasksCache = undefined
+
+		if (this.isViewLaunched) {
+			const updatedItem = this.taskHistoryStore.get(id)
+			if (updatedItem) {
+				await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
+			}
+		}
 	}
 
 	/* Condenses a task's message history to use fewer tokens. */

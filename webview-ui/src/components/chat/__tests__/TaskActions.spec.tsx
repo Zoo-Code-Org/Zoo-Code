@@ -87,7 +87,7 @@ describe("TaskActions", () => {
 		const onRename = vi.fn()
 		render(<TaskActions item={mockItem} buttonsDisabled={false} onRename={onRename} />)
 
-		fireEvent.click(screen.getByTestId("rename-current-task-button"))
+		fireEvent.click(screen.getByLabelText("history:renameTask"))
 
 		expect(onRename).toHaveBeenCalledTimes(1)
 	})

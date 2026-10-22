@@ -18,7 +18,7 @@ describe("RenameButton", () => {
 			</div>,
 		)
 
-		fireEvent.click(screen.getByTestId("rename-task-button"))
+		fireEvent.click(screen.getByRole("button", { name: "history:renameTask" }))
 
 		expect(onRename).toHaveBeenCalledTimes(1)
 		expect(onRowClick).not.toHaveBeenCalled()

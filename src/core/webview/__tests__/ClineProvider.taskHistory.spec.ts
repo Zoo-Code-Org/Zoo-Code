@@ -640,10 +640,25 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(getStored("task-keep")).toMatchObject({ title: "Renamed", tokensIn: 500 })
 		})
 
+		it("keeps a concurrent task save that is queued before the rename", async () => {
+			const item = createHistoryItem({ id: "task-race", task: "Original prompt", status: "active" })
+			await provider.updateTaskHistory(item, { broadcast: false })
+
+			// Start the save without awaiting it, so the rename runs while the save is queued.
+			const save = provider.updateTaskHistory({ ...item, tokensIn: 500 }, { broadcast: false })
+			const rename = provider.renameTaskWithId("task-race", "Renamed")
+			await Promise.all([save, rename])
+
+			expect(getStored("task-race")).toMatchObject({ title: "Renamed", tokensIn: 500 })
+		})
+
 		it("does nothing for an unknown task", async () => {
+			const logSpy = vi.spyOn(provider, "log")
+
 			await provider.renameTaskWithId("missing-task", "Renamed")
 
 			expect(getStored("missing-task")).toBeUndefined()
+			expect(logSpy).toHaveBeenCalledWith("[renameTaskWithId] task missing-task not found in history")
 		})
 	})
 

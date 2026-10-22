@@ -1,5 +1,3 @@
-import { useCallback } from "react"
-
 import { Button, StandardTooltip } from "@/components/ui"
 import { useAppTranslation } from "@/i18n/TranslationContext"
 
@@ -9,23 +7,20 @@ type RenameButtonProps = {
 
 export const RenameButton = ({ onRename }: RenameButtonProps) => {
 	const { t } = useAppTranslation()
-
-	const handleRenameClick = useCallback(
-		(e: React.MouseEvent) => {
-			e.stopPropagation()
-			onRename()
-		},
-		[onRename],
-	)
+	const label = t("history:renameTask")
 
 	return (
-		<StandardTooltip content={t("history:renameTask")}>
+		<StandardTooltip content={label}>
 			<Button
 				data-testid="rename-task-button"
+				aria-label={label}
 				variant="ghost"
 				size="icon"
 				className="group-hover:opacity-100 opacity-50 transition-opacity"
-				onClick={handleRenameClick}>
+				onClick={(e) => {
+					e.stopPropagation()
+					onRename()
+				}}>
 				<span className="codicon codicon-edit scale-80" />
 			</Button>
 		</StandardTooltip>
