@@ -475,6 +475,8 @@ describe("Cline", () => {
 			apiConfiguration: mockApiConfig,
 			autoApprovalEnabled: false,
 		})
+		// A persistent mid-stream failure asks the user; these tests confirm the retry.
+		vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
 		vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
 		return task
 	}
@@ -619,6 +621,49 @@ describe("Cline", () => {
 
 			expect(attemptApiRequestSpy.mock.calls.slice(0, 2).map(([retryAttempt]) => retryAttempt)).toEqual([0, 0])
 		})
+	})
+
+	describe("persistent mid-stream failure", () => {
+		async function* idleTimeoutStream(): AsyncGenerator<ApiStreamChunk> {
+			yield { type: "text", text: "partial answer" }
+			throw new Error("Provider ended the request: Upstream idle timeout exceeded.")
+		}
+
+		// 5 is MAX_MID_STREAM_AUTO_RETRIES: the first attempt plus 5 automatic retries.
+		it.each([
+			{ autoApprovalEnabled: true, expectedAttempts: 6, expectedBackoffs: 5 },
+			{ autoApprovalEnabled: false, expectedAttempts: 1, expectedBackoffs: 0 },
+		])(
+			"asks the user instead of retrying forever (autoApprovalEnabled=$autoApprovalEnabled)",
+			async ({ autoApprovalEnabled, expectedAttempts, expectedBackoffs }) => {
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(
+					providerStateWith({ autoApprovalEnabled, requestDelaySeconds: 0 }),
+				)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+				vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+				vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+				const backoffSpy = vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce").mockResolvedValue(undefined)
+				const askSpy = vi
+					.spyOn(task, "ask")
+					.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+				const attemptApiRequestSpy = vi
+					.spyOn(task, "attemptApiRequest")
+					.mockImplementation(() => idleTimeoutStream())
+
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }]).catch(() => {})
+
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(expectedAttempts)
+				expect(backoffSpy).toHaveBeenCalledTimes(expectedBackoffs)
+				expect(askSpy).toHaveBeenCalledOnce()
+				expect(askSpy).toHaveBeenCalledWith("api_req_failed", expect.stringContaining("idle timeout"))
+			},
+		)
 	})
 
 	describe("native tool-call request isolation", () => {
@@ -1163,6 +1208,8 @@ describe("Cline", () => {
 				startTask: false,
 			})
 
+			// Mid-stream failures ask the user; confirm the retry.
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
 			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
 			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
 			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
@@ -1211,6 +1258,8 @@ describe("Cline", () => {
 				startTask: false,
 			})
 
+			// Mid-stream failures ask the user; confirm the retry.
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
 			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
 			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
 			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
@@ -1303,6 +1352,8 @@ describe("Cline", () => {
 				startTask: false,
 			})
 
+			// Mid-stream failures ask the user; confirm the retry.
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
 			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
 			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
 			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
