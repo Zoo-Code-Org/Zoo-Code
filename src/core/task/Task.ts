@@ -2375,7 +2375,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				queuedMessageId,
 				autoDenyDetail: this.pendingAutoDenyDetail,
 			}
-			this.askResponse = undefined
+			// Keep askResponse set so hasPendingAsk stays false until the next ask clears it.
 			this.askResponseText = undefined
 			this.askResponseImages = undefined
 			this.pendingAutoDenyDetail = undefined

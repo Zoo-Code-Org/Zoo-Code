@@ -103,15 +103,26 @@ export async function executeRemoteCommand(options: {
 						return
 					}
 					await host.sendMessage(command.payload?.text, command.payload?.images)
+					// The message has landed. Keep the claim if the follow-up mode switch fails.
+					applied = true
 					if (command.payload?.mode) {
 						if (!host.isLifecycleCurrent(epoch)) {
-							// Message already landed — keep the claim.
-							applied = true
 							return
 						}
-						await host.handleModeSwitch(command.payload.mode)
+						try {
+							await host.handleModeSwitch(command.payload.mode)
+						} catch (error) {
+							await failCommand(
+								client,
+								host,
+								epoch,
+								command.commandId,
+								"mode_switch_failed",
+								error instanceof Error ? error.message : String(error),
+							)
+							return
+						}
 					}
-					applied = true
 					break
 				case "approve_ask":
 				case "deny_ask": {
@@ -196,8 +207,10 @@ export async function executeRemoteCommand(options: {
 						return
 					}
 					await host.endRemoteSession()
+					// Ending the session invalidates this epoch, so the shared ack below would be skipped.
+					await client.ackCommand({ commandId: command.commandId, status: "acked" })
 					applied = true
-					break
+					return
 				default: {
 					const _exhaustive: never = command.type
 					await failCommand(client, host, epoch, command.commandId, "unknown_command", String(_exhaustive))

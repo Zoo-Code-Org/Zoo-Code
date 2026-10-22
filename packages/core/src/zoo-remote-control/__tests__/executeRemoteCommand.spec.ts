@@ -176,6 +176,32 @@ describe("executeRemoteCommand", () => {
 		})
 	})
 
+	it("keeps the claim when a follow-up mode switch fails after the message lands", async () => {
+		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+		const sendMessage = vi.fn().mockResolvedValue(undefined)
+		const handleModeSwitch = vi.fn().mockRejectedValue(new Error("bad mode"))
+		const handledCommandIds = new Set<string>()
+		const command = {
+			commandId: "c1",
+			type: "message" as const,
+			taskId: "t1",
+			payload: { text: "hi", mode: "code" },
+		}
+		const host = makeHost({ sendMessage, handleModeSwitch, getCurrentTask: () => liveTask() })
+
+		await executeRemoteCommand({ command, epoch: 1, client: { ackCommand }, host, handledCommandIds })
+		await executeRemoteCommand({ command, epoch: 1, client: { ackCommand }, host, handledCommandIds })
+
+		expect(sendMessage).toHaveBeenCalledTimes(1)
+		expect(ackCommand).toHaveBeenNthCalledWith(1, {
+			commandId: "c1",
+			status: "failed",
+			errorCode: "mode_switch_failed",
+			message: "bad mode",
+		})
+		expect(ackCommand).toHaveBeenNthCalledWith(2, { commandId: "c1", status: "acked" })
+	})
+
 	it("acks end_remote_session and leaves the remote session", async () => {
 		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
 		const endRemoteSession = vi.fn().mockResolvedValue(undefined)
@@ -189,6 +215,41 @@ describe("executeRemoteCommand", () => {
 
 		expect(endRemoteSession).toHaveBeenCalled()
 		expect(ackCommand).toHaveBeenCalledWith({ commandId: "c1", status: "acked" })
+	})
+
+	it("acks end_remote_session after the host invalidates the lifecycle", async () => {
+		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+		let current = true
+		const endRemoteSession = vi.fn(async () => {
+			current = false
+		})
+
+		await executeRemoteCommand({
+			command: { commandId: "c1", type: "end_remote_session" },
+			epoch: 1,
+			client: { ackCommand },
+			host: makeHost({ endRemoteSession, isLifecycleCurrent: () => current }),
+		})
+
+		expect(ackCommand).toHaveBeenCalledWith({ commandId: "c1", status: "acked" })
+	})
+
+	it("does not ack end_remote_session when the host rejects", async () => {
+		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+
+		await executeRemoteCommand({
+			command: { commandId: "c1", type: "end_remote_session" },
+			epoch: 1,
+			client: { ackCommand },
+			host: makeHost({ endRemoteSession: vi.fn().mockRejectedValue(new Error("nope")) }),
+		})
+
+		expect(ackCommand).toHaveBeenCalledWith({
+			commandId: "c1",
+			status: "failed",
+			errorCode: "execution_failed",
+			message: "nope",
+		})
 	})
 
 	it("acks missing_mode for switch_mode without a mode", async () => {
