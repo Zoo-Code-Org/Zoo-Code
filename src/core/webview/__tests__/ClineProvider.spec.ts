@@ -2023,7 +2023,7 @@ describe("ClineProvider", () => {
 			// A claim-less entry is adoptable at the first read, but a concurrent registration
 			// binds the key while this launch's queued re-bind is waiting its turn.
 			await provider.contextProxy.setValue("viewStates", { "legacy-view": { updatedAt: 1 } })
-			ClineProvider.persistedViewStateWriteQueue = Promise.resolve().then(async () => {
+			ClineProvider["persistedViewStateWriteQueue"] = Promise.resolve().then(async () => {
 				await provider.contextProxy.setValue("viewStates", {
 					"legacy-view": { claimToken: "winner", updatedAt: 2 },
 				})
@@ -2037,7 +2037,7 @@ describe("ClineProvider", () => {
 			expect(provider["viewStateId"]).toBe(beforeViewStateId)
 			const states = provider.contextProxy.getValue("viewStates") as Record<string, { claimToken?: string }>
 			expect(states["legacy-view"].claimToken).toBe("winner")
-			ClineProvider.persistedViewStateWriteQueue = Promise.resolve()
+			ClineProvider["persistedViewStateWriteQueue"] = Promise.resolve()
 			postSpy.mockRestore()
 			await provider.dispose()
 		})
