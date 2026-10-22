@@ -27,7 +27,6 @@ export function mergeAbortSignalAndTimeout(externalSignal?: AbortSignal, timeout
 	// throws for 1500.5), and cap the rest.
 	const hasTimeout = hasUsableTimeout(timeoutMs)
 
-
 	if (!hasTimeout) {
 		return externalSignal
 	}
