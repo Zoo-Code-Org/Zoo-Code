@@ -19,6 +19,8 @@ const mockedFsPromises = vi.mocked(
 			unlink: MockedFunction<typeof fsPromises.unlink>
 			rm: MockedFunction<typeof fsPromises.rm>
 			rename: MockedFunction<typeof fsPromises.rename>
+			stat: MockedFunction<typeof fsPromises.stat>
+			chmod: MockedFunction<typeof fsPromises.chmod>
 			writeFile: MockedFunction<typeof fsPromises.writeFile>
 		}
 	},
@@ -30,6 +32,8 @@ vi.mock("fs/promises", () => ({
 		unlink: vi.fn().mockResolvedValue(undefined),
 		rm: vi.fn().mockResolvedValue(undefined),
 		rename: vi.fn().mockResolvedValue(undefined),
+		stat: vi.fn().mockResolvedValue({ mode: 0o755, uid: 0, gid: 0 }),
+		chmod: vi.fn().mockResolvedValue(undefined),
 		mkdir: vi.fn().mockResolvedValue(undefined),
 		writeFile: vi.fn().mockResolvedValue(undefined),
 	},
@@ -239,6 +243,9 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				expect.stringContaining(".backup"),
 				expect.stringMatching(/[\\/]new\.ts$/),
 			)
+			// The replacement keeps the destination's mode instead of installing the
+			// process defaults on the staging file.
+			expect(mockedFsPromises.default.chmod).toHaveBeenCalledWith(expect.stringContaining(".staging"), 0o755)
 			expect(mockPushToolResult).toHaveBeenCalledWith(
 				expect.stringContaining("Failed to delete original file after move"),
 			)
