@@ -16,6 +16,7 @@ import {
 	registerCommands,
 	setPanel,
 } from "../registerCommands"
+import { focusPanel } from "../../utils/focusPanel"
 
 vi.mock("execa", () => ({
 	execa: vi.fn(),
@@ -538,11 +539,29 @@ describe("registerCommands handlers", () => {
 		setPanel({} as vscode.WebviewView, "sidebar")
 		// The tracked view's instance is gone: nothing may receive the input focus.
 		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
+		vi.mocked(focusPanel).mockClear()
 
 		await handlers["zoo-code.focusInput"]()
 
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 		expect(mockVisibleProvider.postMessageToWebview).not.toHaveBeenCalled()
+		// The disposed view must not even be handed to focusPanel: no post is not enough.
+		expect(focusPanel).toHaveBeenCalledWith(undefined, undefined)
+	})
+
+	it("focusPanel command targets the tracked live surfaces", async () => {
+		const sidebarPanel = {} as vscode.WebviewView
+		setPanel(sidebarPanel, "sidebar")
+		const tabPanel = {} as vscode.WebviewPanel
+		setPanel(tabPanel, "tab")
+		;(ClineProvider.getInstanceForView as Mock).mockImplementation((view: unknown) =>
+			view === tabPanel || view === sidebarPanel ? {} : undefined,
+		)
+		vi.mocked(focusPanel).mockClear()
+
+		await handlers["zoo-code.focusPanel"]()
+
+		expect(focusPanel).toHaveBeenCalledWith(tabPanel, sidebarPanel)
 	})
 
 	// Coverage for the .catch arm on the sidebar title-bar post sites
