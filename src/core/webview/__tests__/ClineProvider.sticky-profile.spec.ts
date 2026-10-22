@@ -1050,10 +1050,8 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			expect(remaining.some((config) => config.name === "subtask-child-profile")).toBe(false)
 			const afterDeletion = provider.contextProxy.getValues()
 			expect(afterDeletion.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default"])
-			expect(logSpy).toHaveBeenCalledWith(
-				expect.stringContaining("deletion committed, but posting state failed"),
-			)
-		});
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("deletion committed, but posting state failed"))
+		})
 
 		it("removes the stored profile so a dangling mode mapping can no longer re-activate it", async () => {
 			await provider.resolveWebviewView(mockWebviewView)

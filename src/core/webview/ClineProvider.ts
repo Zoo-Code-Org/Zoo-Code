@@ -3328,8 +3328,11 @@ export class ClineProvider
 					.filter(
 						(
 							snapshot,
-						): snapshot is { task: Task; apiConfigName: string | undefined; historyItem: HistoryItem | undefined } =>
-							snapshot !== undefined,
+						): snapshot is {
+							task: Task
+							apiConfigName: string | undefined
+							historyItem: HistoryItem | undefined
+						} => snapshot !== undefined,
 					)
 				await this.rePinViewLocalStateForDeletedProfile(
 					profileToDelete.name,
