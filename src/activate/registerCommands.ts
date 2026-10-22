@@ -39,6 +39,7 @@ let pendingTabPanelCreation: Promise<ClineProvider> | undefined
 /**
  * Get the currently active panel
  * @returns WebviewPanel或WebviewView
+ * @internal Test-only seam: the extension host no longer reads this directly.
  */
 export function getPanel(): vscode.WebviewPanel | vscode.WebviewView | undefined {
 	return tabPanel || sidebarPanel
