@@ -495,9 +495,12 @@ jobs:
                         try {
                           const { data: commit } = await github.rest.git.getCommit({ owner, repo, commit_sha: pr.head.sha });
                           const parents = Array.isArray(commit.parents) ? commit.parents : [];
-                          const parentPr = parents.length === 1
+                          const matchedPr = parents.length === 1
                             ? openPrHeads.get(String(parents[0].sha).toLowerCase())
                             : undefined;
+                          // The open-PR map can predate a push to this PR: its own previous (or now
+                          // base) head is not a parent PR, so a self-match must not label it stacked.
+                          const parentPr = matchedPr === pr.number ? undefined : matchedPr;
                           const hasLabel = pr.labels.some(label => label.name === stackedLabel);
                           if (hasLabel && parentPr === undefined) {
                             await github.rest.issues.removeLabel({ owner, repo, issue_number: pr.number, name: stackedLabel });

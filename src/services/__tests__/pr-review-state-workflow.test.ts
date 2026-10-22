@@ -739,6 +739,17 @@ describe("PR review-state workflow", () => {
 		expect(result.warning).not.toHaveBeenCalled()
 	})
 
+	it("does not label a PR stacked when the matched open head is its own", async () => {
+		const result = await runWorkflow({
+			commitParents: [OLD_SHA],
+			// The open-PR map predates this PR's latest push: its own previous head is listed.
+			openPrHeads: [{ number: 1437, sha: OLD_SHA }],
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["stacked"] }))
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
+	})
+
 	it("removes a stale stacked label when the parent is not another open PR head", async () => {
 		const result = await runWorkflow({
 			labels: ["stacked"],
