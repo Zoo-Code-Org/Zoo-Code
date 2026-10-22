@@ -1,5 +1,0 @@
-test(e2e): drop the redundant fixed wait before the rehydration poll
-
-The waitFor below already polls for the reloaded webview's state; the extra
-5_000 ms sleep only lengthened the suite. Keep the settle waits around the
-toggle pair, where the recreation must land before polling starts.
