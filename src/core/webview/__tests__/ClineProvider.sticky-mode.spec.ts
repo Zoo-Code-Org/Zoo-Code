@@ -820,7 +820,11 @@ describe("ClineProvider - Sticky Mode", () => {
 			await fresh.saveViewState("mode", "code")
 
 			const states = fresh["getPersistedViewStates"]({ fresh: true })
-			expect(states[tempId]).toEqual({ mode: "code", updatedAt: expect.any(Number) })
+			expect(states[tempId]).toEqual({
+				mode: "code",
+				updatedAt: expect.any(Number),
+				claimToken: expect.any(String),
+			})
 			expect(fresh["viewLocalState"].currentApiConfigName).toBeUndefined()
 		})
 

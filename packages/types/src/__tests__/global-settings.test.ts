@@ -56,10 +56,24 @@ describe("viewStates global setting", () => {
 		expect(GLOBAL_SETTINGS_KEYS).toContain("viewStates")
 	})
 
+	it("parses an entry that carries the host-minted claim token", () => {
+		// The claim binds the entry to the webview that wrote it; a legacy entry without one
+		// still parses, because refusing it is setViewStateId's job, not the schema's.
+		const parsed = globalSettingsSchema.parse({
+			viewStates: {
+				"stable-view-1": { mode: "code", updatedAt: 1730000000000, claimToken: "7f9c-host-minted" },
+				"stable-view-2": { mode: "code" },
+			},
+		})
+		expect(parsed.viewStates?.["stable-view-1"]?.claimToken).toBe("7f9c-host-minted")
+		expect(parsed.viewStates?.["stable-view-2"]).toEqual({ mode: "code" })
+	})
+
 	it("rejects invalid field values inside a view entry", () => {
 		expect(() => globalSettingsSchema.parse({ viewStates: { v: { mode: 42 } } })).toThrow()
 		expect(() => globalSettingsSchema.parse({ viewStates: { v: { currentApiConfigName: 42 } } })).toThrow()
 		expect(() => globalSettingsSchema.parse({ viewStates: { v: { updatedAt: "soon" } } })).toThrow()
+		expect(() => globalSettingsSchema.parse({ viewStates: { v: { claimToken: 42 } } })).toThrow()
 	})
 
 	it("rejects non-object viewStates values", () => {

@@ -373,6 +373,10 @@ export class ClineProvider
 	/**
 	 * Stable identifier for persisted per-view state keys.
 	 * Defaults to viewId until the webview reports its VS Code-persisted id.
+	 * A durable entry under this id is bound to the webview that wrote it by a host-minted
+	 * claim token (see setViewStateId), so the entry - and the profile its pin brings back
+	 * into the state post - can outlive this instance without becoming adoptable by any
+	 * other webview.
 	 */
 	private viewStateId: string
 
@@ -607,6 +611,8 @@ export class ClineProvider
 		// Capture the id at change time: a write belongs to the view that was active
 		// when the change was made, even if a newer id is registered while it is queued.
 		const viewStateId = this.viewStateId
+		// Set by the queued write when it had to mint a claim, delivered after it lands.
+		let mintedClaimToken: string | undefined
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 			const states = this.getPersistedViewStates({ fresh: true })
 			// The first write to an unowned temporary id claims the slot instead of merging
@@ -639,6 +645,15 @@ export class ClineProvider
 				delete states[viewStateId]
 			} else {
 				next.updatedAt = values.updatedAt ?? Date.now()
+				// Bind the entry to this webview. An existing entry keeps the token it was
+				// adopted with (so a reload can still prove ownership); a new entry - or one
+				// written before claims existed - gets a fresh host-minted token. The token is
+				// never taken from `values`: it is host-owned, and webview input must not be
+				// able to choose or supply one.
+				if (!next.claimToken) {
+					next.claimToken = crypto.randomUUID()
+					mintedClaimToken = next.claimToken
+				}
 				states[viewStateId] = next
 				wroteEntry = true
 			}
@@ -654,6 +669,12 @@ export class ClineProvider
 
 		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
 		await write
+
+		// Delivered only once the durable write landed: a webview must never hold a claim the
+		// host did not store, or the next launch would present a token the entry cannot match.
+		if (mintedClaimToken) {
+			this.postViewStateClaimToWebview(viewStateId, mintedClaimToken)
+		}
 	}
 
 	/**
@@ -669,6 +690,37 @@ export class ClineProvider
 
 		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
 		await write
+	}
+
+	/**
+	 * Re-binds a claim-less viewStates entry to this webview with a freshly minted claim.
+	 * Entries written before claims existed cannot be attributed to any webview, so their
+	 * selections are dropped instead of being carried over: keeping them would let the new
+	 * token re-expose them on a later launch, which is exactly the disclosure this binding
+	 * exists to prevent. Runs through the serialized write queue like every other mutation.
+	 */
+	private async rebindUnboundViewStateEntry(viewStateId: string): Promise<string> {
+		const claimToken = crypto.randomUUID()
+
+		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			const states = this.getPersistedViewStates({ fresh: true })
+			states[viewStateId] = { claimToken, updatedAt: Date.now() }
+			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+		})
+
+		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
+		await write
+
+		return claimToken
+	}
+
+	/**
+	 * Delivers the host-minted claim that governs a durable viewStates key to this view's
+	 * webview. The webview only stores it and echoes it back on the next launch: it can
+	 * never mint or choose a claim itself.
+	 */
+	private postViewStateClaimToWebview(viewStateId: string, claimToken: string): void {
+		void this.postMessageToWebview({ type: "viewStateClaim", viewStateId, viewStateClaim: claimToken })
 	}
 
 	/**
@@ -733,8 +785,14 @@ export class ClineProvider
 	/**
 	 * Registers this provider's stable view identifier and loads any persisted selections it owns.
 	 * The identifier is sanitized so it remains a safe object key in the shared viewStates map.
+	 *
+	 * `presentedClaim` is the host-minted token this webview was given for that id. It is the
+	 * only proof of ownership: an entry that carries a claim is loaded only when the presented
+	 * token matches it, so a webview cannot adopt another (e.g. disposed, still durable) view's
+	 * id and read that view's pinned profile - and the profile secrets copied into the state
+	 * post - back out of it. The check runs before any re-keying or loading.
 	 */
-	public async setViewStateId(viewStateId: string | undefined): Promise<void> {
+	public async setViewStateId(viewStateId: string | undefined, presentedClaim?: string): Promise<void> {
 		// The webview generates this id on purpose - it has to survive a webview reload,
 		// which recreates the view on both sides - so the host cannot mint it instead.
 		// What the host owns is which view may hold a given persisted key, so everything
@@ -783,6 +841,36 @@ export class ClineProvider
 			return
 		}
 
+		// Claim binding, checked before any re-key or load so a refused registration can
+		// neither read nor mutate a persisted entry. Read fresh from storage rather than
+		// through the ContextProxy cache: a security check must not trust a stale copy.
+		const persistedEntry = this.getPersistedViewStates({ fresh: true })[normalizedViewStateId]
+
+		if (persistedEntry) {
+			const storedClaim = persistedEntry.claimToken
+
+			if (typeof storedClaim !== "string" || !storedClaim) {
+				// A pre-claim entry cannot be attributed to any webview, so its selections are
+				// never loaded. Re-establish the binding with a fresh host-minted claim and hand
+				// that claim to this webview: the key becomes adoptable again (no upgrade brick)
+				// and the unbound selections are gone, so the new token cannot resurrect them.
+				const reboundClaim = await this.rebindUnboundViewStateEntry(normalizedViewStateId)
+
+				this.postViewStateClaimToWebview(normalizedViewStateId, reboundClaim)
+				this.log(
+					`[setViewStateId] Re-bound claim-less viewStates entry ${normalizedViewStateId} for view ${this.viewId}: unbound selections were not loaded.`,
+				)
+			} else if (typeof presentedClaim !== "string" || presentedClaim !== storedClaim) {
+				// Fail closed: the entry belongs to a webview that never presented this view's
+				// claim. Rejection is side-effect free, so presenting an id cannot probe, mutate
+				// or delete another view's entry.
+				this.log(
+					`[setViewStateId] Refusing viewStateId ${normalizedViewStateId} for view ${this.viewId}: claim missing or mismatched.`,
+				)
+				return
+			}
+		}
+
 		const previousViewStateId = this.viewStateId
 
 		this.viewStateId = normalizedViewStateId
@@ -793,6 +881,15 @@ export class ClineProvider
 			await this.rekeyPersistedViewStateEntry(this.viewStateId)
 
 			await this.loadViewState()
+
+			// Re-affirm the binding for the id just adopted: a claim minted while this view was
+			// still on its temporary id now governs this key (the entry was re-keyed), so the
+			// webview is told the canonical (viewStateId, claim) pair to echo on its next launch.
+			const adoptedClaim = this.getPersistedViewStates({ fresh: true })[this.viewStateId]?.claimToken
+
+			if (adoptedClaim) {
+				this.postViewStateClaimToWebview(this.viewStateId, adoptedClaim)
+			}
 		} catch (error) {
 			// A persistence failure must not leave the provider holding an id that was
 			// never registered: restore the previous id so a later launch retries the
@@ -1311,6 +1408,12 @@ export class ClineProvider
 		this.taskHistoryStore.dispose()
 		this.log("Disposed all disposables")
 		ClineProvider.activeInstances.delete(this)
+
+		// The durable viewStates entry is deliberately left in place, together with the claim
+		// that binds it: the claim is the owner's re-entry ticket, so a closed and reopened
+		// view keeps its pinned mode/profile. Dropping this instance stops a *live* id from
+		// being claimed twice; the claim stops the durable entry from being adopted by any
+		// webview that cannot present it. clearPersistedViewState (reset) still removes both.
 
 		// Clean up any event listeners attached to this provider
 		this.removeAllListeners()

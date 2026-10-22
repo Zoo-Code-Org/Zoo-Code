@@ -462,6 +462,14 @@ function stallProviderSettingsProfile(provider: ClineProvider) {
 	return { getProfile: getProfileSpy, resolveProfile: (value: StalledProfile) => resolveProfile(value) }
 }
 
+/**
+ * The host-minted claim stored with a durable view-states entry. A test that adopts an
+ * entry another provider wrote has to present it, exactly like a webview does on launch.
+ */
+function persistedViewStateClaim(context: vscode.ExtensionContext, viewStateId: string): string | undefined {
+	return context.globalState.get<RooCodeSettings["viewStates"]>("viewStates")?.[viewStateId]?.claimToken
+}
+
 describe("ClineProvider", () => {
 	beforeAll(() => {
 		vi.mocked(Task).mockImplementation(function (options: any) {
@@ -1994,10 +2002,192 @@ describe("ClineProvider", () => {
 			await provider["setViewStateId"]("stable-sidebar-view")
 			expect(provider["viewStateId"]).toBe("stable-sidebar-view")
 			expect(mockContext.globalState.get("viewStates")).toEqual({
-				"stable-sidebar-view": { mode: "architect", updatedAt: 1 },
+				"stable-sidebar-view": { mode: "architect", updatedAt: 1, claimToken: expect.any(String) },
 			})
 
 			await provider.dispose()
+		})
+	})
+
+	describe("view state claim binding", () => {
+		const createProvider = () =>
+			new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+		const storedEntries = () =>
+			mockContext.globalState.get<Record<string, { claimToken?: string; mode?: string }>>("viewStates") ?? {}
+
+		test("refuses a disposed view's id when no claim is presented, and loads nothing", async () => {
+			// The vulnerable path: a view registers a durable entry, is disposed, and a second
+			// webview presents the same id. dispose() removes the instance but leaves the entry,
+			// so only the claim can stop the second webview from loading the first one's pinned
+			// profile (and the profile's secrets) through the state post.
+			const owner = createProvider()
+			await owner["setViewStateId"]("closed-view")
+			await owner.saveViewState("mode", "architect")
+			await owner.saveViewState("currentApiConfigName", "profile-with-secrets")
+
+			const storedClaim = storedEntries()["closed-view"]?.claimToken
+			expect(storedClaim).toEqual(expect.any(String))
+
+			await owner.dispose()
+
+			const intruder = createProvider()
+			const postMessageSpy = vi.spyOn(intruder, "postMessageToWebview").mockResolvedValue(undefined)
+
+			await intruder["setViewStateId"]("closed-view")
+
+			// Fail closed: the id is not adopted, no selections reach this view and no state is
+			// posted back to the webview that asked for it.
+			expect(intruder["viewStateId"]).toBe(intruder.viewId)
+			expect(intruder["viewLocalState"]).toStrictEqual({})
+			expect((await intruder.getState()).currentApiConfigName).not.toBe("profile-with-secrets")
+			expect(postMessageSpy).not.toHaveBeenCalled()
+
+			// A refused adoption is side-effect free: presenting an id must not probe or rewrite
+			// the entry that a different webview owns.
+			expect(storedEntries()["closed-view"]).toMatchObject({
+				mode: "architect",
+				currentApiConfigName: "profile-with-secrets",
+				claimToken: storedClaim,
+			})
+
+			await intruder.dispose()
+		})
+
+		test("refuses a mismatched claim", async () => {
+			const owner = createProvider()
+			await owner["setViewStateId"]("closed-view")
+			await owner.saveViewState("currentApiConfigName", "profile-with-secrets")
+			await owner.dispose()
+
+			const intruder = createProvider()
+			const postMessageSpy = vi.spyOn(intruder, "postMessageToWebview").mockResolvedValue(undefined)
+
+			// A webview-generated value is not a claim: only the token the host minted matches.
+			await intruder["setViewStateId"]("closed-view", "webview-chosen-claim")
+
+			expect(intruder["viewStateId"]).toBe(intruder.viewId)
+			expect(intruder["viewLocalState"]).toStrictEqual({})
+			expect(postMessageSpy).not.toHaveBeenCalled()
+
+			await intruder.dispose()
+		})
+
+		test("adopts the id when the host-minted claim is presented", async () => {
+			const owner = createProvider()
+			const ownerPostMessageSpy = vi.spyOn(owner, "postMessageToWebview").mockResolvedValue(undefined)
+			await owner["setViewStateId"]("live-claim-view")
+			await owner.saveViewState("mode", "architect")
+
+			// The claim is minted with the entry and delivered to the webview that wrote it.
+			const delivered = ownerPostMessageSpy.mock.calls
+				.map(([message]) => message)
+				.filter((message) => message.type === "viewStateClaim")
+			expect(delivered).toHaveLength(1)
+			expect(delivered[0]).toMatchObject({ type: "viewStateClaim", viewStateId: "live-claim-view" })
+			const claim = delivered[0]?.viewStateClaim
+			expect(claim).toEqual(expect.any(String))
+			expect(claim).toBe(storedEntries()["live-claim-view"]?.claimToken)
+
+			await owner.dispose()
+
+			// The same webview (same durable id + claim) re-opens its view after the reload.
+			// Production providers share the initialized ContextProxy singleton; a test provider
+			// starts with a cold cache, so seed it from storage or the load would see no entry.
+			const reopened = createProvider()
+			await reopened.contextProxy.setValue("viewStates", storedEntries())
+			await reopened["setViewStateId"]("live-claim-view", claim)
+
+			expect(reopened["viewStateId"]).toBe("live-claim-view")
+			expect(reopened["viewLocalState"].mode).toBe("architect")
+
+			await reopened.dispose()
+		})
+
+		test("does not churn the claim on later writes to the same entry", async () => {
+			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			await provider["setViewStateId"]("minted-view")
+			await provider.saveViewState("mode", "architect")
+
+			const mintedClaim = storedEntries()["minted-view"]?.claimToken
+			expect(mintedClaim).toEqual(expect.any(String))
+
+			await provider.saveViewState("currentApiConfigName", "profile-b")
+
+			// A merge into an entry this view already owns keeps its token, so the claim the
+			// webview holds keeps working and is not re-sent.
+			expect(storedEntries()["minted-view"]?.claimToken).toBe(mintedClaim)
+			expect(
+				postMessageSpy.mock.calls.map(([message]) => message).filter((m) => m.type === "viewStateClaim"),
+			).toHaveLength(1)
+		})
+
+		test("re-binds a claim-less legacy entry instead of loading its selections", async () => {
+			// An entry written before claims existed cannot be attributed to any webview: its
+			// selections are refused, and the key is re-bound with a fresh host-minted claim so
+			// the upgrade does not brick per-view persistence.
+			await provider.contextProxy.setValue("viewStates", {
+				"legacy-view": { mode: "architect", currentApiConfigName: "profile-a", updatedAt: 1 },
+			})
+
+			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+
+			await provider["setViewStateId"]("legacy-view")
+
+			// No stored selection is adopted...
+			expect(provider["viewStateId"]).toBe("legacy-view")
+			expect(provider["viewLocalState"]).toStrictEqual({})
+
+			// ...the old entry is replaced by a claim-bearing one with the unbound selections gone...
+			const rebound = storedEntries()["legacy-view"]
+			expect(rebound).toEqual({ claimToken: expect.any(String), updatedAt: expect.any(Number) })
+			expect(rebound).not.toHaveProperty("mode")
+			expect(rebound).not.toHaveProperty("currentApiConfigName")
+
+			// ...and the fresh claim is handed to this webview so the next launch can prove ownership.
+			expect(postMessageSpy).toHaveBeenCalledWith({
+				type: "viewStateClaim",
+				viewStateId: "legacy-view",
+				viewStateClaim: rebound?.claimToken,
+			})
+
+			await provider.dispose()
+
+			const reopened = createProvider()
+			await reopened["setViewStateId"]("legacy-view", rebound?.claimToken)
+
+			expect(reopened["viewStateId"]).toBe("legacy-view")
+			expect(reopened["viewLocalState"]).toStrictEqual({})
+
+			await reopened.dispose()
+		})
+
+		test("still refuses an id a live view holds, even when the claim matches", async () => {
+			const owner = createProvider()
+			await owner["setViewStateId"]("shared-live-view")
+			await owner.saveViewState("mode", "architect")
+			const claim = storedEntries()["shared-live-view"]?.claimToken
+
+			const sibling = createProvider()
+
+			try {
+				await sibling["setViewStateId"]("shared-live-view", claim)
+
+				// The live-instance guard runs first and keeps working: a second live view never
+				// shares a key with the view that holds it.
+				expect(sibling["viewStateId"]).toBe(sibling.viewId)
+				expect(sibling["viewLocalState"]).toStrictEqual({})
+				expect(owner["viewStateId"]).toBe("shared-live-view")
+			} finally {
+				await sibling.dispose()
+				await owner.dispose()
+			}
 		})
 	})
 
@@ -2050,6 +2240,7 @@ describe("ClineProvider", () => {
 			expect(states()["stable-sidebar-view"]).toStrictEqual({
 				currentApiConfigName: "profile-a",
 				updatedAt: expect.any(Number),
+				claimToken: expect.any(String),
 			})
 			await save("mode", null)
 			expect(states()["stable-sidebar-view"]).not.toHaveProperty("mode")
@@ -2058,6 +2249,7 @@ describe("ClineProvider", () => {
 			expect(states()["stable-sidebar-view"]).toStrictEqual({
 				mode: "architect",
 				updatedAt: expect.any(Number),
+				claimToken: expect.any(String),
 			})
 			await provider.saveViewState("currentApiConfigName", "profile-c")
 			await provider.saveViewState("mode", "architect")
@@ -2086,7 +2278,8 @@ describe("ClineProvider", () => {
 			await provider["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
 			await provider["setViewStateId"]("stable-sidebar-view")
 			expect(mockContext.globalState.get("viewStates")).toEqual({
-				"stable-sidebar-view": { mode: "architect", updatedAt: 1 },
+				// The minted claim travels with the re-keyed entry, so the webview's token keeps working.
+				"stable-sidebar-view": { mode: "architect", updatedAt: 1, claimToken: expect.any(String) },
 			})
 			await provider.dispose()
 		})
@@ -2104,11 +2297,11 @@ describe("ClineProvider", () => {
 			await provider["savePersistedViewState"]({ mode: "temp-mode", updatedAt: 1 })
 			await provider.contextProxy.setValue("viewStates", {
 				[provider.viewId]: { mode: "temp-mode", updatedAt: 1 },
-				"stable-sidebar-view": { mode: "stable-mode", updatedAt: 5 },
+				"stable-sidebar-view": { mode: "stable-mode", updatedAt: 5, claimToken: "stable-claim" },
 			})
-			await provider["setViewStateId"]("stable-sidebar-view")
+			await provider["setViewStateId"]("stable-sidebar-view", "stable-claim")
 			expect(mockContext.globalState.get("viewStates")).toEqual({
-				"stable-sidebar-view": { mode: "stable-mode", updatedAt: 5 },
+				"stable-sidebar-view": { mode: "stable-mode", updatedAt: 5, claimToken: "stable-claim" },
 			})
 			await provider.dispose()
 		})
@@ -2211,7 +2404,8 @@ describe("ClineProvider", () => {
 				"viewStates",
 				mockContext.globalState.get<RooCodeSettings["viewStates"]>("viewStates"),
 			)
-			await provider["setViewStateId"]("shared-view")
+			// The host-minted claim the writer received is what lets this view re-adopt its entry.
+			await provider["setViewStateId"]("shared-view", persistedViewStateClaim(mockContext, "shared-view"))
 			expect(provider["viewLocalState"]).toEqual({
 				mode: "architect",
 				currentApiConfigName: "my-profile",
@@ -2354,7 +2548,8 @@ describe("ClineProvider", () => {
 				"viewStates",
 				mockContext.globalState.get<RooCodeSettings["viewStates"]>("viewStates"),
 			)
-			await provider["setViewStateId"]("shared-view")
+			// The host-minted claim the writer received is what lets this view re-adopt its entry.
+			await provider["setViewStateId"]("shared-view", persistedViewStateClaim(mockContext, "shared-view"))
 			expect(provider["viewLocalState"].mode).toBe("code")
 			expect(provider["viewLocalState"].currentApiConfigName).toBe("my-profile")
 			expect(provider["viewLocalState"].apiConfiguration).toEqual({
@@ -2780,7 +2975,8 @@ describe("ClineProvider", () => {
 				"viewStates",
 				mockContext.globalState.get<RooCodeSettings["viewStates"]>("viewStates"),
 			)
-			await provider["setViewStateId"]("shared-view")
+			// The host-minted claim the writer received is what lets this view re-adopt its entry.
+			await provider["setViewStateId"]("shared-view", persistedViewStateClaim(mockContext, "shared-view"))
 			expect(provider.getValues().currentApiConfigName).toBe("old-profile")
 
 			await provider.activateProviderProfile({ name: "new-profile" })
