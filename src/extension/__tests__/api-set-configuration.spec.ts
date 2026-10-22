@@ -106,6 +106,62 @@ describe("API.setConfiguration", () => {
 		})
 	})
 
+	it("reports a failed shared-settings restore on the first write path", async () => {
+		const provider = Object.assign({} as ClineProvider, {
+			context: {},
+			on: vi.fn(),
+			getValue: vi.fn(() => undefined),
+			setValues: vi.fn().mockRejectedValueOnce(new Error("shared write failed")).mockRejectedValueOnce(new Error("shared restore failed")),
+			contextProxy: { setValues: vi.fn().mockResolvedValue(undefined) },
+			providerSettingsManager: {
+				getProfile: vi.fn().mockRejectedValue(new Error("profile not found")),
+				hasConfig: vi.fn().mockResolvedValue(false),
+				saveConfig: vi.fn().mockResolvedValue("default-id"),
+			},
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		})
+		const api = new API(Object.assign({} as OutputChannel, { appendLine: vi.fn() }), provider, makeClineProviderFactory())
+
+		const failure = await api
+			.setConfiguration({ currentApiConfigName: "default", apiProvider: providerIdentifiers.openai })
+			.then(
+				() => undefined,
+				(error: unknown) => error as Error & { restoreFailures?: string[] },
+			)
+
+		expect(failure?.restoreFailures).toHaveLength(1)
+		expect(failure?.message).toContain("restore the shared settings")
+		expect((failure?.cause as Error).message).toBe("shared write failed")
+	})
+
+	it("reports a failed shared-settings restore on the profile-save path", async () => {
+		const provider = Object.assign({} as ClineProvider, {
+			context: {},
+			on: vi.fn(),
+			getValue: vi.fn(() => undefined),
+			setValues: vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("shared restore failed")),
+			contextProxy: { setValues: vi.fn().mockResolvedValue(undefined) },
+			providerSettingsManager: {
+				getProfile: vi.fn().mockRejectedValue(new Error("profile not found")),
+				hasConfig: vi.fn().mockResolvedValue(false),
+				saveConfig: vi.fn().mockRejectedValue(new Error("profile write failed")),
+			},
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		})
+		const api = new API(Object.assign({} as OutputChannel, { appendLine: vi.fn() }), provider, makeClineProviderFactory())
+
+		const failure = await api
+			.setConfiguration({ currentApiConfigName: "default", apiProvider: providerIdentifiers.openai })
+			.then(
+				() => undefined,
+				(error: unknown) => error as Error & { restoreFailures?: string[] },
+			)
+
+		expect(failure?.restoreFailures).toHaveLength(1)
+		expect(failure?.message).toContain("restore the shared settings")
+		expect((failure?.cause as Error).message).toBe("profile write failed")
+	})
+
 	it("compensates the landed writes when a later write fails", async () => {
 		const provider = Object.assign({} as ClineProvider, {
 			context: {},

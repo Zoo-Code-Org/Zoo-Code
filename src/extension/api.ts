@@ -248,32 +248,21 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			// A launch message (`viewLaunched`) proves a webview exists even when the provider's
 			// view reference was cleared, so it keeps the barrier too.
 			if (newTab || provider.hasResolvedView || provider.viewLaunched) {
+				// Reaching this block means a webview exists or is being created, so the bound is
+				// a real failure condition: reject task creation instead of falling back to the
+				// shared state, which would start the task against defaults the view never loaded.
 				let readinessTimer: ReturnType<typeof setTimeout> | undefined
-				try {
-					await Promise.race([
-						provider.viewStateReadiness,
-						new Promise<never>((_, reject) => {
-							readinessTimer = setTimeout(
-								() => reject(new Error("Timed out waiting for the view state to become ready")),
-								3000,
-							)
-						}),
-					]).finally(() => {
-						clearTimeout(readinessTimer)
-					})
-				} catch (error) {
-					if (
-						provider.viewLaunched ||
-						!(error instanceof Error) ||
-						error.message !== "Timed out waiting for the view state to become ready"
-					) {
-						throw error
-					}
-					// Headless API callers create tasks without ever launching a webview: the
-					// readiness bound expiring keeps the pre-existing shared-state fallback.
-					// A launched view whose readiness failed is a real failure and rethrows.
-					this.log("[API#startNewTask] webview not launched; continuing in headless mode")
-				}
+				await Promise.race([
+					provider.viewStateReadiness,
+					new Promise<never>((_, reject) => {
+						readinessTimer = setTimeout(
+							() => reject(new Error("Timed out waiting for the view state to become ready")),
+							3000,
+						)
+					}),
+				]).finally(() => {
+					clearTimeout(readinessTimer)
+				})
 			}
 
 			// Disposal resolves viewStateReadiness to release waiters: a provider torn down while
@@ -915,8 +904,9 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			// ContextProxy.setValues persists keys one at a time: a rejection can
 			// leave a durable subset of `values` behind, so undo every field whose
 			// write may have landed before surfacing the failure.
-			await this.restoreConfigurationValues(previousValues)
-			throw error
+			const restoreFailures: string[] = []
+			await this.restoreConfigurationValues(previousValues, restoreFailures)
+			this.failWithCompensation(error, restoreFailures)
 		}
 
 		try {
@@ -929,8 +919,9 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			)
 		} catch (error) {
 			// Only the shared write landed: undo it before surfacing the failure.
-			await this.restoreConfigurationValues(previousValues)
-			throw error
+			const restoreFailures: string[] = []
+			await this.restoreConfigurationValues(previousValues, restoreFailures)
+			this.failWithCompensation(error, restoreFailures)
 		}
 
 		if (values.modeApiConfigs) {
@@ -984,29 +975,38 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 					recordRestoreFailure(`restore the profile "${profileName}"`, restoreError)
 				}
 				await this.restoreConfigurationValues(previousValues, restoreFailures)
-				if (restoreFailures.length > 0) {
-					const compensationError = new Error(
-						`Configuration write failed and ${restoreFailures.length} compensation step(s) also failed: ${restoreFailures.join("; ")}`,
-						{ cause: error },
-					)
-					;(compensationError as Error & { restoreFailures?: string[] }).restoreFailures = restoreFailures
-					throw compensationError
-				}
-				throw error
+				this.failWithCompensation(error, restoreFailures)
 			}
 		}
 
 		await this.sidebarProvider.postStateToWebview()
 	}
 
-	private async restoreConfigurationValues(previous: RooCodeSettings, restoreFailures?: string[]): Promise<void> {
+	private async restoreConfigurationValues(previous: RooCodeSettings, restoreFailures: string[]): Promise<void> {
 		try {
 			await this.sidebarProvider.setValues(previous)
 		} catch (restoreError) {
 			const message = restoreError instanceof Error ? restoreError.message : String(restoreError)
 			this.log(`[API#setConfiguration] failed to restore shared settings: ${message}`)
-			restoreFailures?.push(`restore the shared settings: ${message}`)
+			restoreFailures.push(`restore the shared settings: ${message}`)
 		}
+	}
+
+	/**
+	 * Surfaces a configuration write failure together with any compensation step that also
+	 * failed: the caller must know the durable state is partially applied, so the original
+	 * write error becomes the cause and the failed restores are named on the error.
+	 */
+	private failWithCompensation(error: unknown, restoreFailures: string[]): never {
+		if (restoreFailures.length === 0) {
+			throw error
+		}
+		const compensationError = new Error(
+			`Configuration write failed and ${restoreFailures.length} compensation step(s) also failed: ${restoreFailures.join("; ")}`,
+			{ cause: error },
+		) as Error & { restoreFailures?: string[] }
+		compensationError.restoreFailures = restoreFailures
+		throw compensationError
 	}
 
 	public getGlobalState<K extends keyof GlobalState>(key: K): GlobalState[K] {

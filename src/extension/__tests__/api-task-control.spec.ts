@@ -241,7 +241,9 @@ describe("API task controls", () => {
 			sidebarProvider.viewStateReadiness = new Promise<void>(() => {})
 
 			const started = api.startNewTask({ configuration, text: "headless task" })
-			await vi.advanceTimersByTimeAsync(3000)
+			// No timer advance: the headless fast path must not wait for the readiness bound at
+			// all. Advancing here would let a regression back into the timeout fallback pass.
+
 
 			try {
 				await expect(started).resolves.toBe("sidebar-task")
