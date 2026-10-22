@@ -422,9 +422,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 				throw new Error("expected exactly one publish, got " + r1.status + " / " + r2.status)
 			}
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
-			expect(r2.reason.message).toBe(
-				"stale version — re-read the file, then retry",
-			)
+			expect(r2.reason.message).toBe("stale version — re-read the file, then retry")
 		})
 
 		it("holds the submission-time token when the registry moves on while the write waits", async () => {
@@ -694,9 +692,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 				throw new Error("expected exactly one publish, got " + r1.status + " / " + r2.status)
 			}
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
-			expect(r2.reason.message).toBe(
-				"stale version — re-read the file, then retry",
-			)
+			expect(r2.reason.message).toBe("stale version — re-read the file, then retry")
 		})
 	})
 
