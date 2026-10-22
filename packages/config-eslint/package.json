@@ -6,13 +6,14 @@
 		"./base": "./base.js",
 		"./react": "./react.js",
 		"./next-js": "./next.js",
-		"./provider-identifiers": "./provider-identifiers.js"
+		"./provider-identifiers": "./provider-identifiers.js",
+		"./api-provider-hygiene": "./api-provider-hygiene.js"
 	},
 	"scripts": {
-		"test": "node --test provider-identifiers.test.js"
+		"test": "node --test provider-identifiers.test.js api-provider-hygiene.test.js"
 	},
 	"devDependencies": {
-		"@eslint/js": "9.39.4",
+		"@eslint/js": "9.39.5",
 		"@next/eslint-plugin-next": "15.5.20",
 		"eslint": "9.39.5",
 		"eslint-config-prettier": "10.1.8",

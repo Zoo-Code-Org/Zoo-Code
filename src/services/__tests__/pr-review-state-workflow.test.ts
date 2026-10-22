@@ -736,6 +736,25 @@ describe("PR review-state workflow", () => {
 		expect(result.setFailed).not.toHaveBeenCalled()
 	})
 
+	it("adds the conflict flag for fork PRs from pull_request_target", async () => {
+		const result = await runWorkflow({ eventName: "pull_request_target", fork: true, conflict: true })
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		expect(result.setFailed).not.toHaveBeenCalled()
+	})
+
+	it("removes the conflict flag for fork PRs from pull_request_target", async () => {
+		const result = await runWorkflow({
+			eventName: "pull_request_target",
+			fork: true,
+			conflict: false,
+			labels: ["has-conflicts"],
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		expect(result.setFailed).not.toHaveBeenCalled()
+	})
+
 	it("creates missing workflow labels", async () => {
 		const result = await runWorkflow({ existingRepoLabels: [] })
 
@@ -1113,6 +1132,7 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
 		expect(latestGateStatus(result)?.description).toContain("merge conflicts")
 	})
 
@@ -1282,18 +1302,32 @@ describe("PR review-state workflow", () => {
 		expect(resolution.prNumbers()).toEqual([1437])
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		// A conflicted PR always owes the author action (issue #2089): the turn
+		// label lands on awaiting-author, never back on the maintainer queue.
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
 	})
 
-	it("preserves awaiting-maintainer when adding has-conflicts fails", async () => {
+	it("preserves awaiting-maintainer when adding the has-conflicts flag fails (#2089)", async () => {
 		const result = await runWorkflow({
 			conflict: true,
 			labels: ["awaiting-maintainer"],
-			addLabelsStatus: 500,
+			addLabelsFailOnceName: "has-conflicts",
 		})
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
 		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
-		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("Could not add desired label"))
+		expect(result.setFailed).toHaveBeenCalledWith(
+			expect.stringContaining("Could not reconcile has-conflicts label"),
+		)
+	})
+
+	it("reports a 404 when adding the has-conflicts flag", async () => {
+		const result = await runWorkflow({ conflict: true, addLabelsStatus: 404 })
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		expect(result.setFailed).toHaveBeenCalledWith(
+			expect.stringContaining("Could not reconcile has-conflicts label"),
+		)
 	})
 
 	it("rechecks mergeability before tagging a PR awaiting maintainer", async () => {
@@ -1318,6 +1352,8 @@ describe("PR review-state workflow", () => {
 
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		// The recheck-routed conflict branch also forces awaiting-author (#2089).
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
 	})
 
 	// Issue #2089: the first read reports unknown, one retry reads dirty, and the
@@ -1335,6 +1371,7 @@ describe("PR review-state workflow", () => {
 		expect(result.getPullRequest).toHaveBeenCalledTimes(2)
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
 	})
 
 	// Issue #2089: unknown on the first read and on every retry means the run
@@ -1358,6 +1395,97 @@ describe("PR review-state workflow", () => {
 		]) {
 			expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: [label] }))
 		}
+	})
+
+	// Issue #2089 steps 3-4: the conflict flag is independent of the turn
+	// labels, and a conflicted PR always owes the author action. A known dirty
+	// read therefore sets has-conflicts and awaiting-author together. The
+	// shared-state harness carries run 1's actual writes into run 2, which
+	// then rewrites neither label.
+	it("carries awaiting-author and has-conflicts together, stable across consecutive runs (#2089)", async () => {
+		const sharedState: SharedState = {
+			labels: new Set(["awaiting-maintainer"]),
+			guide: { body: null },
+			gate: { status: null },
+		}
+		const first = await runWorkflow({
+			sharedState,
+			conflict: true,
+			labels: ["awaiting-maintainer"],
+		})
+
+		expect(first.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		expect(first.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
+		expect(first.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		// Run 2 starts from run 1's real label state, not a hand-written copy.
+		expect([...sharedState.labels].sort()).toEqual(["awaiting-author", "has-conflicts"])
+
+		const second = await runWorkflow({
+			sharedState,
+			conflict: true,
+			labels: [...sharedState.labels],
+		})
+
+		expect(second.addLabels).not.toHaveBeenCalled()
+		expect(second.removeLabel).not.toHaveBeenCalled()
+		expect(second.setFailed).not.toHaveBeenCalled()
+	})
+
+	// Issue #2089: a 404 on the flag removal means the label vanished between
+	// the read and the write. The removal goal is already met, so the run
+	// tolerates the 404 and keeps reconciling instead of failing closed.
+	it("tolerates a 404 when removing the has-conflicts flag on a known clean read (#2089)", async () => {
+		const result = await runWorkflow({
+			labels: ["has-conflicts"],
+			removeLabelStatus: 404,
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		expect(result.setFailed).not.toHaveBeenCalled()
+		// The turn-label reconcile still runs after the tolerated removal.
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
+	})
+
+	// Issue #2089: the conflict-flag reconcile must honor the fork read-only
+	// guard in both directions. A dirty read wants to add the flag. A clean
+	// read with the flag present wants to remove it. The guard returns early;
+	// it is not a failure, so the run writes nothing and still succeeds.
+	it.each([
+		{ name: "known dirty read with the flag absent", options: { conflict: true } },
+		{ name: "known clean read with the flag present", options: { labels: ["has-conflicts"] } },
+	])("skips the has-conflicts reconcile for a fork PR on a read-only run: $name (#2089)", async ({ options }) => {
+		const result = await runWorkflow({
+			...options,
+			eventName: "pull_request_review",
+			fork: true,
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalled()
+		expect(result.removeLabel).not.toHaveBeenCalled()
+		expect(result.setFailed).not.toHaveBeenCalled()
+	})
+
+	// Issue #2089 step 3: a known read that is not dirty removes the conflict
+	// flag on its own; the turn label keeps reconciling independently of it.
+	it("removes the has-conflicts flag on a known clean read without touching the turn label (#2089)", async () => {
+		const result = await runWorkflow({
+			labels: ["has-conflicts", "awaiting-maintainer"],
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		// awaiting-maintainer was already present and stays: the flag removal
+		// neither re-adds nor strips the turn label.
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.setFailed).not.toHaveBeenCalled()
 	})
 
 	// Issue #2091: a failed mergeability retry adds no mergeability answer, so
@@ -2077,13 +2205,32 @@ describe("PR review-state workflow", () => {
 
 	it("outer cleanup removes a label added before partial reconciliation failure", async () => {
 		const result = await runWorkflow({
-			labels: ["has-conflicts"],
-			removeLabelFailOnceName: "has-conflicts",
+			labels: ["awaiting-maintainer"],
+			removeLabelFailOnceName: "awaiting-maintainer",
 		})
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-coderabbit" }))
 		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("Remove label failed once"))
+	})
+
+	// Issue #2089: a failed has-conflicts flag write must fail closed like the
+	// unknown-mergeability freeze — the outer cleanup keeps the current state
+	// labels instead of stripping them, because no known clean read decided
+	// anything this run.
+	it("keeps state labels when removing the has-conflicts flag fails (#2089)", async () => {
+		const result = await runWorkflow({
+			labels: ["has-conflicts", "awaiting-maintainer"],
+			removeLabelFailOnceName: "has-conflicts",
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		// The turn-label reconcile never ran: the flag failure happens first.
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.setFailed).toHaveBeenCalledWith(
+			expect.stringContaining("Could not reconcile has-conflicts label"),
+		)
 	})
 
 	it("does not exclude a reconcile check from another integration", async () => {

@@ -2971,6 +2971,25 @@ items:
                 - name: Local Timezone
                   key: LOCAL_TIMEZONE
                   placeholder: America/New_York
+    - id: tradehand
+      name: Tradehand
+      description:
+          Find and book local tradespeople. Search traders by trade and area, compare fixed prices and reviews, get
+          instant quotes, book and pay through a secure checkout link. Tradespeople use it to manage their business.
+      author: Outside HQ LTD
+      url: https://github.com/Humanleap/tradehand-agent-plugin
+      tags:
+          - local-services
+          - bookings
+          - quotes
+          - tradespeople
+      content:
+          - name: Remote Server
+            content: |
+                {
+                  "type": "streamable-http",
+                  "url": "https://tradehand.com/api/mcp"
+                }
     - id: verodat
       name: Verodat
       description:

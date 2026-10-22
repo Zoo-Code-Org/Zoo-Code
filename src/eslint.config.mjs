@@ -1,4 +1,5 @@
 import { config } from "@roo-code/config-eslint/base"
+import { apiProviderHygieneConfig } from "@roo-code/config-eslint/api-provider-hygiene"
 import { createProviderIdentifierConfig } from "@roo-code/config-eslint/provider-identifiers"
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
@@ -6,6 +7,7 @@ import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types
 export default [
 	...config,
 	createProviderIdentifierConfig({ providerIdentifiers, retiredProviderIdentifiers }),
+	apiProviderHygieneConfig,
 	{
 		rules: {
 			"prefer-const": ["error", { destructuring: "all" }],

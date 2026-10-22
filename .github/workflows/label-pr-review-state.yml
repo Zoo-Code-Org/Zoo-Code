@@ -262,13 +262,19 @@ jobs:
 
                       // A queue-superseded shard leaves no other trace in the logs.
                       core.info(`Concurrency group: ${process.env.CONCURRENCY_GROUP}`);
+                      // Turn labels reconcile exclusively among themselves: exactly one
+                      // can be true. has-conflicts is deliberately NOT in this group
+                      // (issue #2089) — whether the branch has conflicts is an
+                      // independent fact that can coexist with any turn. It is managed
+                      // only by reconcileConflictFlag below: set on a known dirty read,
+                      // removed on a known read that is not dirty, untouched while
+                      // mergeability is unknown.
                       const stateLabels = [
                         'awaiting-author',
                         'awaiting-coderabbit',
                         'awaiting-ready',
                         'awaiting-maintainer',
                         'awaiting-review', // Legacy label removed during reconciliation.
-                        'has-conflicts',
                       ];
                       const labelDefinitions = [
                         {
@@ -364,9 +370,13 @@ jobs:
                         }
                       }
 
-                      // Strips stateLabels from a PR, optionally keeping one desired label.
-                      // Callers skip this entirely while mergeability is unknown (see the
-                      // hoisted check below), so no keep-list is needed.
+                      // Strips stateLabels (turn labels) from a PR, optionally keeping
+                      // one desired label. Callers skip this entirely while mergeability
+                      // is unknown (see the hoisted check below), so no keep-list is
+                      // needed. has-conflicts lives outside this group: it is the
+                      // independent conflict flag managed by reconcileConflictFlag, so
+                      // turn-label reconciliation — including the outer failure cleanup
+                      // — never strips or sets it.
                       // Stale-clock labels are owned by the stale step below and are never
                       // touched here: stripping one on a transient CI or mergeability flap
                       // would erase a live warning and restart its close grace (issue #2076).
@@ -412,6 +422,50 @@ jobs:
                         }
                         if (labelErrors.length > 0) {
                           throw new Error(`Could not reconcile labels: ${labelErrors.map(err => err.message).join('; ')}`);
+                        }
+                      }
+
+                      // Reconciles the independent has-conflicts flag (issue #2089).
+                      // `present` is a mergeability fact, so callers pass a known read
+                      // only: true for a known dirty read, false for a known read that
+                      // is not dirty. While mergeability is unknown no caller runs, so
+                      // the flag freezes together with the turn labels. A conflicted PR
+                      // must never sit in the maintainer queue, so every conflict
+                      // branch pairs this call with reconcileLabels(pr, 'awaiting-author').
+                      async function reconcileConflictFlag(pr, present) {
+                        if (isReadOnlyRun && isForkPR(pr)) {
+                          core.info(`PR #${pr.number}: fork PR on a read-only run — skipping label mutation`);
+                          return;
+                        }
+                        const hasLabel = pr.labels.some(label => label.name === 'has-conflicts');
+                        if (present === hasLabel) return;
+                        try {
+                          if (present) {
+                            await github.rest.issues.addLabels({
+                              owner, repo, issue_number: pr.number, labels: ['has-conflicts'],
+                            });
+                            if (!pr.labels.some(label => label.name === 'has-conflicts')) {
+                              pr.labels.push({ name: 'has-conflicts' });
+                            }
+                          } else {
+                            await github.rest.issues.removeLabel({
+                              owner, repo, issue_number: pr.number, name: 'has-conflicts',
+                            });
+                            pr.labels = pr.labels.filter(label => label.name !== 'has-conflicts');
+                          }
+                        } catch (err) {
+                          if (err.status === 404 && !present) {
+                            pr.labels = pr.labels.filter(label => label.name !== 'has-conflicts');
+                            return;
+                          }
+                          // The flag already decided this run's label state, so a
+                          // failed flag write must fail closed: mark the wrapper
+                          // error so the outer cleanup keeps the current state
+                          // labels exactly like the unknown-mergeability freeze
+                          // instead of stripping them.
+                          const error = new Error(`Could not reconcile has-conflicts label: ${err.message}`);
+                          error.preserveStateLabels = true;
+                          throw error;
                         }
                       }
 
@@ -772,10 +826,18 @@ jobs:
                           }
 
                           if (prDetail.mergeable === false && prDetail.mergeable_state === 'dirty') {
-                            core.info(`PR #${pr.number}: has merge conflicts — labeling has-conflicts`);
+                            core.info(
+                              `PR #${pr.number}: has merge conflicts — ` +
+                              'labeling has-conflicts and awaiting-author'
+                            );
                             await updateReviewGate(pr, 'conflict', false);
                             await setCodeRabbitReviewActive(pr, false);
-                            await reconcileLabels(pr, 'has-conflicts');
+                            // Conflicts are an independent flag, and a conflicted PR
+                            // always owes the author action (issue #2089): set the
+                            // flag and force the awaiting-author turn label — never
+                            // has-conflicts alone, and never a maintainer-queue label.
+                            await reconcileConflictFlag(pr, true);
+                            await reconcileLabels(pr, 'awaiting-author');
                             await reconcileCommunityApproval(pr, 'remove');
                             await updateReviewGuide(pr, 'conflict', existingGuide);
                             continue;
@@ -787,15 +849,17 @@ jobs:
                           // `mergeable_state: "unknown"`, GitHub has not finished computing
                           // the answer, so it says nothing about conflicts and nothing about
                           // whose turn it is. This run then changes NO state label for the
-                          // PR: every state-label reconcile below is skipped. Acting on
+                          // PR: every state-label reconcile below is skipped, and the
+                          // has-conflicts flag freezes with the turn labels. Acting on
                           // unknown previously let the normal reconcile swap labels (for
                           // example has-conflicts to awaiting-author and back on the next
                           // run's `dirty` read), which flapped labels on unchanged PRs.
                           // Known-dirty never reaches here (the conflict check above
-                          // handles it first); known-clean reconciles normally. The
-                          // awaiting-maintainer branch below still refetches mergeability
-                          // before the maintainer handoff, because a push between this
-                          // fetch and labeling can change the answer; a known read there
+                          // handles it first); a known read that is not dirty removes
+                          // the flag in the branches below. The awaiting-maintainer
+                          // branch below still refetches mergeability before the
+                          // maintainer handoff, because a push between this fetch and
+                          // labeling can change the answer; a known read there
                           // re-enables the final reconcile.
                           let mergeabilityUnknown =
                             prDetail.mergeable === null || prDetail.mergeable_state === 'unknown';
@@ -907,8 +971,11 @@ jobs:
                           // mean a conflicting PR got no merge-ref CI run — not that its
                           // conflicts went away. Unknown mergeability changes no state
                           // label in this run, so this branch keeps every existing state
-                          // label (has-conflicts included) instead of stripping them; a
-                          // later run with a known read reconciles them.
+                          // label (the has-conflicts flag included) instead of stripping
+                          // them; a later run with a known read reconciles them. On a
+                          // known read the branch got here only because the PR is not
+                          // dirty (the conflict check handles dirty first), so the
+                          // conflict flag is removed along with the turn labels.
                           if (ciPending || ciFailed) {
                             core.info(
                               `PR #${pr.number}: CI ${ciPending ? 'pending' : 'failed'} — ` +
@@ -919,6 +986,7 @@ jobs:
                             await updateReviewGate(pr, ciPending ? 'ci-pending' : 'ci-failed', false);
                             await setCodeRabbitReviewActive(pr, false);
                             if (!mergeabilityUnknown) {
+                              await reconcileConflictFlag(pr, false);
                               await reconcileLabels(pr, null);
                             }
                             await reconcileCommunityApproval(pr, 'remove');
@@ -1147,10 +1215,18 @@ jobs:
                             const headChanged = Boolean(latestPrDetail.head?.sha) &&
                               latestPrDetail.head.sha !== pr.head.sha;
                             if (latestPrDetail.mergeable === false && latestPrDetail.mergeable_state === 'dirty') {
-                              core.info(`PR #${pr.number}: has merge conflicts — labeling has-conflicts`);
+                              core.info(
+                                `PR #${pr.number}: has merge conflicts — ` +
+                                'labeling has-conflicts and awaiting-author'
+                              );
                               await updateReviewGate(pr, 'conflict', false);
                               await setCodeRabbitReviewActive(pr, false);
-                              await reconcileLabels(pr, 'has-conflicts');
+                              // Same invariant as the first conflict branch (issue
+                              // #2089): the flag plus the awaiting-author turn label,
+                              // so a conflicted PR can never land in the maintainer
+                              // queue this run was about to grant.
+                              await reconcileConflictFlag(pr, true);
+                              await reconcileLabels(pr, 'awaiting-author');
                               await reconcileCommunityApproval(pr, 'remove');
                               await updateReviewGuide(pr, 'conflict', existingGuide);
                               continue;
@@ -1212,6 +1288,10 @@ jobs:
                             await updateReviewGuide(pr, phase, existingGuide);
                           }
                           if (!mergeabilityUnknown) {
+                            // The read that re-enabled this reconcile is known and not
+                            // dirty (the conflict branches handle dirty first), so the
+                            // conflict flag comes off whenever the turn labels reconcile.
+                            await reconcileConflictFlag(pr, false);
                             await reconcileLabels(pr, desiredLabel);
                           }
                           await reconcileCommunityApproval(pr, communityDecision);

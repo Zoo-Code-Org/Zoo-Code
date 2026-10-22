@@ -36,7 +36,7 @@
 		"test:knip-policy": "node --test scripts/knip-policy.test.mjs"
 	},
 	"devDependencies": {
-		"@changesets/cli": "2.31.0",
+		"@changesets/cli": "2.31.1",
 		"@roo-code/config-typescript": "workspace:^",
 		"@stryker-mutator/core": "10.0.0",
 		"@stryker-mutator/vitest-runner": "10.0.0",
@@ -55,6 +55,39 @@
 		"typescript": "5.9.3"
 	},
 	"lint-staged": {
+		"src/**/*.ts": [
+			"pnpm --dir src exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"webview-ui/src/**/*.{ts,tsx}": [
+			"pnpm --dir webview-ui exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"apps/cli/src/**/*.ts": [
+			"pnpm --dir apps/cli exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"apps/vscode-e2e/src/**/*.ts": [
+			"pnpm --dir apps/vscode-e2e exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"packages/build/src/**/*.ts": [
+			"pnpm --dir packages/build exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"packages/cloud/src/**/*.ts": [
+			"pnpm --dir packages/cloud exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"packages/core/src/**/*.ts": [
+			"pnpm --dir packages/core exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"packages/ipc/src/**/*.ts": [
+			"pnpm --dir packages/ipc exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"packages/telemetry/src/**/*.ts": [
+			"pnpm --dir packages/telemetry exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"packages/types/src/**/*.ts": [
+			"pnpm --dir packages/types exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"packages/vscode-shim/src/**/*.ts": [
+			"pnpm --dir packages/vscode-shim exec eslint --max-warnings=0 --no-warn-ignored"
+		],
 		"*.{js,jsx,ts,tsx,json,css,md}": [
 			"prettier --write"
 		]

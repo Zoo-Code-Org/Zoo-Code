@@ -3,8 +3,8 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"lint": "eslint src --ext=ts,tsx --max-warnings=0",
-		"check-types": "tsc",
+		"lint": "eslint src --ext=ts,tsx --max-warnings=0 --cache --cache-strategy content --cache-location node_modules/.cache/eslint/.eslintcache",
+		"check-types": "tsc --noEmit",
 		"pretest": "turbo run bundle --cwd ..",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage",
@@ -15,7 +15,7 @@
 		"dev": "vite",
 		"build": "tsc -b && vite build",
 		"preview": "vite preview",
-		"clean": "rimraf ../src/webview-ui tsconfig.tsbuildinfo .turbo"
+		"clean": "rimraf ../src/webview-ui tsconfig.tsbuildinfo node_modules/.cache/tsc .turbo"
 	},
 	"dependencies": {
 		"@radix-ui/react-alert-dialog": "^1.1.6",
@@ -98,7 +98,7 @@
 		"@types/react-dom": "18.3.7",
 		"@types/stacktrace-js": "2.0.3",
 		"@types/vscode-webview": "1.57.5",
-		"@tailwindcss/vite": "^4.0.0",
+		"@tailwindcss/vite": "4.3.3",
 		"@vitejs/plugin-react": "5.2.0",
 		"@vitest/coverage-v8": "4.1.11",
 		"@vitest/ui": "4.1.11",

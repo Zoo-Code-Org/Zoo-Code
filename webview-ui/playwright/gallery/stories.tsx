@@ -255,6 +255,11 @@ export const stories: Record<string, Story> = {
 		const { ModelInfoViewFixture } = await import("@/components/settings/__tests__/ModelInfoView.visual.fixture")
 		return <ModelInfoViewFixture />
 	},
+	"ollama-api-key-help": async () => {
+		const { OllamaApiKeyHelpFixture } =
+			await import("@/components/settings/providers/__tests__/Ollama.visual.fixture")
+		return <OllamaApiKeyHelpFixture />
+	},
 	"openai-codex": async () => {
 		const { OpenAICodexFixture } =
 			await import("@/components/settings/providers/__tests__/OpenAICodex.visual.fixture")

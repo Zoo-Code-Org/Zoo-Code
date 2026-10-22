@@ -439,7 +439,7 @@
 		}
 	},
 	"scripts": {
-		"lint": "eslint . --ext=ts --max-warnings=0",
+		"lint": "eslint . --ext=ts --max-warnings=0 --cache --cache-strategy content --cache-location node_modules/.cache/eslint/.eslintcache",
 		"check-types": "tsc --noEmit",
 		"test": "vitest run",
 		"verify:coverage-contract": "node scripts/verify-coverage-contract.mjs",
