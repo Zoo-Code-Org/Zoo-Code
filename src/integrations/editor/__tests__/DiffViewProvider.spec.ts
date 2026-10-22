@@ -1145,6 +1145,8 @@ describe("DiffViewProvider", () => {
 			const openDirtyDoc = {
 				uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
 				isDirty: true,
+				// The buffer already holds the published content, so reloading it loses no edits.
+				getText: () => "new content",
 				save: vi.fn().mockResolvedValue(undefined),
 			}
 			const docDouble = openDirtyDoc as unknown as vscode.TextDocument // Structural double: the revert path only reads uri and dirty state.
@@ -1171,6 +1173,33 @@ describe("DiffViewProvider", () => {
 			}
 		})
 
+		it("keeps a dirty buffer with different unsaved edits and reports the conflict", async () => {
+			// The user has unsaved edits in the open target that differ from what the guard
+			// published. Reverting would discard them, so the buffer is retained and the
+			// conflict is reported instead; the published content stays on disk.
+			const userEditedDoc = {
+				uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+				isDirty: true,
+				getText: () => "user unsaved edit",
+				save: vi.fn().mockResolvedValue(undefined),
+			}
+			const docDouble = userEditedDoc as unknown as vscode.TextDocument
+			const documents = vscode.workspace.textDocuments as vscode.TextDocument[]
+			documents.push(docDouble)
+			try {
+				await expect(diffViewProvider.saveDirectly("test.ts", "new content", false, false, 0)).rejects.toThrow(
+					/unsaved edits that differ from the guarded publish/,
+				)
+
+				// No revert ran: the user's edits are still in the buffer.
+				expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.files.revert")
+				expect(documents).toContain(docDouble)
+				expect(userEditedDoc.save).not.toHaveBeenCalled()
+			} finally {
+				documents.splice(documents.indexOf(docDouble), 1)
+			}
+		})
+
 		it("fails the write when the reconcile leaves the target dirty", async () => {
 			// The revert command rejects and the buffer stays dirty: reporting
 			// success would leave VS Code's ordinary save path free to republish
@@ -1181,6 +1210,7 @@ describe("DiffViewProvider", () => {
 			const staleDoc = {
 				uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
 				isDirty: true,
+				getText: () => "new content",
 				save: vi.fn().mockResolvedValue(undefined),
 			}
 			const docDouble = staleDoc as unknown as vscode.TextDocument // Structural double: the reconcile path only reads uri and dirty state.

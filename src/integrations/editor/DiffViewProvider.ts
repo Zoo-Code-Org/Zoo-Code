@@ -1791,6 +1791,17 @@ export class DiffViewProvider {
 			arePathsEqual(document.uri.fsPath, absolutePath),
 		)
 		if (openTarget !== undefined) {
+			// A dirty buffer holds edits the user has not saved. The guarded publish wrote the
+			// accepted content to disk, so reverting would discard those edits. Only a clean
+			// buffer (or one whose text already equals the published content) may be reloaded;
+			// a buffer with different unsaved edits is retained and the conflict is reported.
+			if (openTarget.isDirty && openTarget.getText() !== content) {
+				throw new Error(
+					`saveDirectly: ${absolutePath} is open with unsaved edits that differ from the guarded publish; ` +
+						"the buffer was kept so those edits are not lost. Save or discard it, then retry. " +
+						"The published content is already on disk.",
+				)
+			}
 			const reconciled = await this.revertDocument(openTarget).catch(() => false)
 			if (!reconciled) {
 				// The revert failed or the buffer stayed dirty: its stale bytes could
