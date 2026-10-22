@@ -37,7 +37,9 @@ let tabPanel: vscode.WebviewPanel | undefined = undefined
 let pendingTabPanelCreation: Promise<ClineProvider> | undefined
 
 /**
- * Get the currently active panel
+ * Get the currently active panel.
+ *
+ * @internal Exported for focused implementation tests.
  * @returns WebviewPanel或WebviewView
  */
 export function getPanel(): vscode.WebviewPanel | vscode.WebviewView | undefined {
