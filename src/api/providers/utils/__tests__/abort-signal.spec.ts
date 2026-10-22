@@ -299,7 +299,6 @@ describe("abort-signal utilities", () => {
 			expect(result?.aborted).toBe(false)
 		})
 
-
 		it("rounds a fractional timeoutMs up before scheduling", async () => {
 			// Node validates AbortSignal.timeout delays as uint32: 1.5 or 0.5
 			// would throw ERR_OUT_OF_RANGE. Pin the rounded delay that actually
@@ -326,7 +325,6 @@ describe("abort-signal utilities", () => {
 			expect(tiny).toBeInstanceOf(AbortSignal)
 			await vi.waitFor(() => expect(result?.aborted).toBe(true))
 		})
-
 	})
 
 	describe("mergeAbortSignals", () => {
