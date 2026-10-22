@@ -155,11 +155,26 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 
 	/** Start or end remote session (does not cancel the task). */
 	public async setSessionActive(active: boolean): Promise<void> {
-		const consentedTaskId = active ? this.provider.getCurrentTask()?.taskId : undefined
-		await this.context.globalState.update(SESSION_ACTIVE_STATE_KEY, active)
-		await this.context.globalState.update(CONSENTED_TASK_STATE_KEY, consentedTaskId)
-		await this.syncActiveState()
-		await this.provider.postStateToWebview()
+		try {
+			if (active) {
+				// Record the task before the flag. A failed consent write must not turn the session on,
+				// or an unset id is treated as opted-in for every task.
+				await this.context.globalState.update(CONSENTED_TASK_STATE_KEY, this.provider.getCurrentTask()?.taskId)
+				await this.context.globalState.update(SESSION_ACTIVE_STATE_KEY, true)
+			} else {
+				await this.context.globalState.update(SESSION_ACTIVE_STATE_KEY, false)
+				try {
+					await this.context.globalState.update(CONSENTED_TASK_STATE_KEY, undefined)
+				} catch (error) {
+					this.log(
+						`[ZooRemoteControl] failed to clear consented task: ${error instanceof Error ? error.message : String(error)}`,
+					)
+				}
+			}
+			await this.syncActiveState()
+		} finally {
+			await this.provider.postStateToWebview()
+		}
 	}
 
 	private async migrateLegacySettingThenSync(): Promise<void> {

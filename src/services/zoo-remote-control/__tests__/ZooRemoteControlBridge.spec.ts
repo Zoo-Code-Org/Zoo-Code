@@ -41,6 +41,7 @@ describe("ZooRemoteControlBridge", () => {
 		contextProxy: { getProviderSettings: ReturnType<typeof vi.fn> }
 		getCurrentTask: ReturnType<typeof vi.fn>
 		handleModeSwitch: ReturnType<typeof vi.fn>
+		postStateToWebview: ReturnType<typeof vi.fn>
 	}
 	let client: {
 		postPresence: ReturnType<typeof vi.fn>
@@ -392,6 +393,48 @@ describe("ZooRemoteControlBridge", () => {
 				expect.objectContaining({ taskId: "task-1", message: expect.objectContaining({ text: "kept" }) }),
 			]),
 		)
+		bridge.dispose()
+	})
+
+	it("stops the session when clearing the consented task fails", async () => {
+		const bridge = await activateEligibleBridge()
+		client.postPresence.mockClear()
+		provider.postStateToWebview.mockClear()
+		context.globalState.update.mockImplementation(async (key: string, value: unknown) => {
+			if (key === "zooRemoteControl.consentedTaskId") {
+				throw new Error("consent write failed")
+			}
+			if (key === "zooRemoteControl.sessionActive") {
+				sessionActive = value === true
+			}
+			storedState[key] = value
+		})
+
+		await bridge.setSessionActive(false)
+
+		expect(bridge.isActive()).toBe(false)
+		expect(client.postPresence).toHaveBeenCalledWith(expect.objectContaining({ online: false }))
+		expect(provider.postStateToWebview).toHaveBeenCalled()
+		bridge.dispose()
+	})
+
+	it("does not start a session when the consented task cannot be stored", async () => {
+		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
+		provider.contextProxy.getProviderSettings.mockReturnValue({
+			apiProvider: providerIdentifiers.zooGateway,
+		})
+		useLiveTask({ taskId: "task-1" })
+		context.globalState.update.mockImplementation(async (key: string) => {
+			if (key === "zooRemoteControl.consentedTaskId") {
+				throw new Error("consent write failed")
+			}
+		})
+
+		const bridge = createBridge()
+		await expect(bridge.setSessionActive(true)).rejects.toThrow("consent write failed")
+		expect(bridge.isActive()).toBe(false)
+		expect(client.postPresence).not.toHaveBeenCalled()
+		expect(provider.postStateToWebview).toHaveBeenCalled()
 		bridge.dispose()
 	})
 
