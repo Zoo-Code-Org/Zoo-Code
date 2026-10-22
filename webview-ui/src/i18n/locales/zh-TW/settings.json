@@ -649,7 +649,7 @@
 			"baseUrl": "基礎 URL（選用）",
 			"modelId": "模型 ID",
 			"apiKey": "Ollama API 金鑰",
-			"apiKeyHelp": "用於已驗證 Ollama 執行個體或雲端服務的選用 API 金鑰。本機安裝請留空。",
+			"apiKeyHelp": "選用的 API 金鑰,用於需要驗證的 Ollama 執行個體或雲端服務。Zoo Code 只把金鑰傳送到 HTTPS 或迴路端點。遠端 HTTP 端點不會收到金鑰,因為金鑰會以明文傳輸。需要金鑰的遠端執行個體請使用 HTTPS。本機安裝請留空。",
 			"numCtx": "上下文視窗大小（num_ctx）",
 			"numCtxHelp": "覆寫模型的預設上下文視窗大小。留空以使用模型的 Modelfile 設定。最小值為 128。",
 			"thinking": "啟用思考",
@@ -878,6 +878,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "預設摺疊命令輸出",
+			"description": "預設摺疊命令輸出，包括內嵌終端機輸出。需要時可手動展開。此設定不會變更命令執行方式。"
+		},
 		"basic": {
 			"label": "終端機設定：基本",
 			"description": "基本終端機設定"

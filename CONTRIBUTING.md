@@ -119,6 +119,7 @@ pnpm install
 - Follow the ESLint and TypeScript best practices.
 - Write clear, descriptive commits that reference issues (for example, `Fixes #123`). Follow the [Writing Style](#writing-style).
 - Test your change fully (`npm test`).
+- Run both dead-code checks: `pnpm knip` and `pnpm knip:production`. See [Dead-code checks before review](docs/development-quality-checks.md) for findings, exceptions, and verification.
 - Rebase onto the latest `main` branch before you submit.
 
 ### Submitting a Pull Request
