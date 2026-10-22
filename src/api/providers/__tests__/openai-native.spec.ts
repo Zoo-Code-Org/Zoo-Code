@@ -3052,7 +3052,7 @@ describe("OpenAiNativeHandler", () => {
 					},
 				}),
 			})
-			global.fetch = mockFetch as any
+			vitest.stubGlobal("fetch", mockFetch)
 
 			// Force the SSE fallback path (the SDK stream is unavailable).
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
