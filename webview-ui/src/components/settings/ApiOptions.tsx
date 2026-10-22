@@ -85,6 +85,7 @@ import {
 	VercelAiGateway,
 	OpenCodeGo,
 	Kenari,
+	IOIntelligence,
 	NanoGPT,
 	ZooGateway,
 	MiniMax,
@@ -246,8 +247,17 @@ const ApiOptions = ({
 				})
 			} else if (selectedProvider === providerIdentifiers.lmstudio) {
 				requestLmStudioModels(apiConfiguration?.lmStudioBaseUrl)
-			} else if (selectedProvider === providerIdentifiers.vscodeLm) {
-				vscode.postMessage({ type: VsCodeLmModelsMessageType.requestVsCodeLmModels })
+			} else if (
+				selectedProvider === providerIdentifiers.vscodeLm ||
+				selectedProvider === providerIdentifiers.githubCopilot
+			) {
+				vscode.postMessage({
+					type: VsCodeLmModelsMessageType.requestVsCodeLmModels,
+					// Only Copilot needs scoping; the legacy provider keeps its original unscoped request.
+					...(selectedProvider === providerIdentifiers.githubCopilot && {
+						apiConfiguration: { apiProvider: selectedProvider },
+					}),
+				})
 			} else if (selectedProvider === providerIdentifiers.litellm) {
 				vscode.postMessage({
 					type: RouterModelsMessageType.requestRouterModels,
@@ -624,8 +634,10 @@ const ApiOptions = ({
 						<Mimo apiConfiguration={apiConfiguration} setApiConfigurationField={setApiConfigurationField} />
 					)}
 
-					{selectedProvider === providerIdentifiers.vscodeLm && (
+					{(selectedProvider === providerIdentifiers.vscodeLm ||
+						selectedProvider === providerIdentifiers.githubCopilot) && (
 						<VSCodeLM
+							key={selectedProvider}
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 						/>
@@ -687,6 +699,17 @@ const ApiOptions = ({
 
 					{selectedProvider === providerIdentifiers.kenari && (
 						<Kenari
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							routerModels={routerModels}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
+							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
+					{selectedProvider === providerIdentifiers.ioIntelligence && (
+						<IOIntelligence
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 							routerModels={routerModels}

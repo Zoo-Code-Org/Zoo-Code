@@ -12,6 +12,33 @@ const mermaidGantt = `gantt
     Ship release :active, release, after scope, 3d`
 
 export const stories: Record<string, Story> = {
+	"terminal-settings": async () => {
+		const [{ AppProviders }, { TerminalSettings }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/TerminalSettings"),
+		])
+		function Settings() {
+			const [collapsed, setCollapsed] = useState(false)
+			return (
+				<div
+					className="w-[420px] p-4 bg-vscode-editor-background text-vscode-foreground"
+					data-testid="terminal-settings-story">
+					<TerminalSettings
+						terminalShellIntegrationDisabled={true}
+						collapseCommandOutputByDefault={collapsed}
+						setCachedStateField={(field, value) => {
+							if (field === "collapseCommandOutputByDefault") setCollapsed(Boolean(value))
+						}}
+					/>
+				</div>
+			)
+		}
+		return (
+			<AppProviders>
+				<Settings />
+			</AppProviders>
+		)
+	},
 	"bedrock-output-budget": async ({ model = "anthropic.claude-opus-5" }) => {
 		const [{ AppProviders }, { ThinkingBudget }, { bedrockModels, providerIdentifiers }] = await Promise.all([
 			import("../AppProviders"),
@@ -141,6 +168,70 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"ignored-disabled-tools-warning": async () => {
+		const [{ AppProviders }, { ChatRowContent }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/chat/ChatRow"),
+		])
+		// Same payload shape Task.startTask emits, so the snapshot covers ChatRow's
+		// dispatch and locale lookup, not just the isolated warning row.
+		const message: import("@roo-code/types").ClineMessage = {
+			type: "say",
+			say: "ignored_disabled_tools_warning",
+			ts: 0,
+			text: JSON.stringify({ ignoredTools: ["attempt_completion"] }),
+		}
+		return (
+			<AppProviders>
+				<div className="w-full bg-vscode-editor-background px-[15px] py-[10px] text-vscode-foreground">
+					<ChatRowContent
+						message={message}
+						isExpanded={false}
+						isLast={false}
+						isStreaming={false}
+						onToggleExpand={() => undefined}
+						onSuggestionClick={() => undefined}
+						onBatchFileResponse={() => undefined}
+						onFollowUpUnmount={() => undefined}
+						isFollowUpAnswered={false}
+					/>
+				</div>
+			</AppProviders>
+		)
+	},
+	"io-intelligence-settings": async () => {
+		const [{ AppProviders }, { IOIntelligence }, { providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/providers/IOIntelligence"),
+			import("@roo-code/types"),
+		])
+		type ProviderSettings = React.ComponentProps<typeof IOIntelligence>["apiConfiguration"]
+
+		function IOIntelligenceSettingsStory() {
+			const [apiConfiguration, setApiConfiguration] = useState<ProviderSettings>({
+				apiProvider: providerIdentifiers.ioIntelligence,
+			})
+			return (
+				<div className="w-full p-4 bg-vscode-editor-background" data-testid="io-intelligence-settings-story">
+					<div className="flex flex-col gap-3">
+						<IOIntelligence
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={(field, value) =>
+								setApiConfiguration((current) => ({ ...current, [field]: value }))
+							}
+							organizationAllowList={{ allowAll: true, providers: {} }}
+						/>
+					</div>
+				</div>
+			)
+		}
+
+		return (
+			<AppProviders initialState={{ apiConfiguration: { apiProvider: providerIdentifiers.ioIntelligence } }}>
+				<IOIntelligenceSettingsStory />
+			</AppProviders>
+		)
+	},
 	"layout-clipped-text": () => (
 		<div className="w-40">
 			<span data-testid="clipped-direct-text" className="block w-8 overflow-hidden whitespace-nowrap">
@@ -163,6 +254,11 @@ export const stories: Record<string, Story> = {
 	"model-info": async () => {
 		const { ModelInfoViewFixture } = await import("@/components/settings/__tests__/ModelInfoView.visual.fixture")
 		return <ModelInfoViewFixture />
+	},
+	"ollama-api-key-help": async () => {
+		const { OllamaApiKeyHelpFixture } =
+			await import("@/components/settings/providers/__tests__/Ollama.visual.fixture")
+		return <OllamaApiKeyHelpFixture />
 	},
 	"openai-codex": async () => {
 		const { OpenAICodexFixture } =
@@ -247,6 +343,34 @@ export const stories: Record<string, Story> = {
 				</button>
 				<Checkbox aria-label="Include optional context" variant="description" checked />
 			</div>
+		)
+	},
+	"github-copilot-settings": async () => {
+		const [{ AppProviders }, { VSCodeLM }, { providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/providers/VSCodeLM"),
+			import("@roo-code/types"),
+		])
+		function CopilotSettings() {
+			const [config, setConfig] = useState<import("@roo-code/types").ProviderSettings>({
+				apiProvider: providerIdentifiers.githubCopilot,
+				vsCodeLmModelSelector: { vendor: "copilot", id: "gpt-5.5", family: "gpt-5.5", version: "1" },
+			})
+			return (
+				<div data-testid="github-copilot-settings" className="w-[420px] p-4 bg-vscode-editor-background">
+					<VSCodeLM
+						apiConfiguration={config}
+						setApiConfigurationField={(field, value) =>
+							setConfig((previous) => ({ ...previous, [field]: value }))
+						}
+					/>
+				</div>
+			)
+		}
+		return (
+			<AppProviders>
+				<CopilotSettings />
+			</AppProviders>
 		)
 	},
 	"ui-settings": async () => {
