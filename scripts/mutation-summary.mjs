@@ -45,6 +45,14 @@ export function escapeMarkdownCell(value) {
 }
 
 /**
+ * Render a report directory name for diagnostics. Package directory names are simple slugs; a
+ * name that does not match that shape is not rendered verbatim.
+ */
+function renderReportName(name) {
+	return /^[A-Za-z0-9._@+-]+$/.test(name) ? name : "report"
+}
+
+/**
  * Return the normalised repo-relative path for one report entry, or undefined when the entry
  * cannot be trusted for display.
  */
@@ -72,8 +80,9 @@ export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = 
 
 	try {
 		directories = fs.existsSync(reportRoot) ? fs.readdirSync(reportRoot, { withFileTypes: true }) : []
-	} catch (error) {
-		unreadable.push("reports/mutation: " + error.message)
+	} catch {
+		// Raw filesystem error text is untrusted input for the summary; keep a fixed diagnostic.
+		unreadable.push("reports/mutation: directory could not be read")
 	}
 
 	for (const directory of directories) {
@@ -83,8 +92,9 @@ export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = 
 		let report
 		try {
 			report = JSON.parse(fs.readFileSync(reportFile, "utf8"))
-		} catch (error) {
-			unreadable.push(directory.name + ": " + error.message)
+		} catch {
+			// The parser message can quote report content; render a fixed, bounded diagnostic.
+			unreadable.push(renderReportName(directory.name) + ": invalid JSON")
 			continue
 		}
 		if (
@@ -93,7 +103,7 @@ export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = 
 			report.files === null ||
 			typeof report.files !== "object"
 		) {
-			unreadable.push(directory.name + ": report has no files map")
+			unreadable.push(renderReportName(directory.name) + ": report has no files map")
 			continue
 		}
 		for (const [filePath, file] of Object.entries(report.files)) {
@@ -112,7 +122,7 @@ export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = 
 			if (counts.mutants === 0) continue
 			const relative = normalizeReportPath(filePath, report.projectRoot, cwd)
 			if (relative === undefined) {
-				unreadable.push(directory.name + ": rejected unsafe report path")
+				unreadable.push(renderReportName(directory.name) + ": rejected unsafe report path")
 				continue
 			}
 			rows.push({ file: relative, ...counts })
@@ -183,20 +193,35 @@ export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = 
 function appendSummaryAtomically(outputFile, summary) {
 	const existing = fs.existsSync(outputFile) ? fs.readFileSync(outputFile, "utf8") : ""
 	const directory = path.dirname(outputFile)
-	const temporary = path.join(
-		directory,
-		"." + path.basename(outputFile) + "." + process.pid + "." + Date.now() + ".tmp",
-	)
-	fs.writeFileSync(temporary, existing + summary)
+	const baseName = path.basename(outputFile)
+	const temporary = path.join(directory, "." + baseName + "." + process.pid + "." + Date.now() + ".tmp")
+	let renamed = false
 	try {
+		fs.writeFileSync(temporary, existing + summary)
 		fs.renameSync(temporary, outputFile)
-	} catch (error) {
-		try {
-			fs.unlinkSync(temporary)
-		} catch {
-			// Best effort: the caller is already failing the write.
+		renamed = true
+	} finally {
+		if (!renamed) {
+			try {
+				fs.unlinkSync(temporary)
+			} catch {
+				// Best effort: the caller is already failing the write.
+			}
 		}
-		throw error
+	}
+	// A cancelled earlier run can leave its temp file beside the summary; clean those up.
+	try {
+		for (const entry of fs.readdirSync(directory)) {
+			if (entry.startsWith("." + baseName + ".") && entry.endsWith(".tmp")) {
+				try {
+					fs.unlinkSync(path.join(directory, entry))
+				} catch {
+					// Another writer may own it; never fail the summary for the sweep.
+				}
+			}
+		}
+	} catch {
+		// The directory sweep is best effort.
 	}
 }
 

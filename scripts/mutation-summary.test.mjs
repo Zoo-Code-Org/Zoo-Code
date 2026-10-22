@@ -86,7 +86,8 @@ test("keeps processing when one report is malformed and reports it", (t) => {
 	const { rows, unreadable } = summarizeMutationReports({ reportRoot: root, cwd: root })
 	assert.equal(rows.length, 1)
 	assert.equal(unreadable.length, 1)
-	assert.match(unreadable[0], /broken/)
+	// Parser messages can quote report content: only the fixed diagnostic is rendered.
+	assert.equal(unreadable[0], "broken: invalid JSON")
 })
 
 test("rejects reports whose files map is missing or not an object", (t) => {
@@ -201,4 +202,47 @@ test("writeMutationSummary warns instead of throwing when the output cannot be w
 		writeMutationSummary({ reportRoot, cwd: root, outputFile: path.join(root, "missing", "summary.md") }),
 	)
 	assert.match(logs.join("\n"), /Could not write the per-file mutation summary/)
+})
+
+test("writeMutationSummary removes a stale summary temp sibling", (t) => {
+	const root = makeRoot(t)
+	const reportRoot = path.join(root, "reports", "mutation")
+	writeReport(reportRoot, "pkg", { files: { "src/a.ts": { mutants: mutants("Killed") } } })
+	const outputFile = path.join(root, "summary.md")
+	fs.writeFileSync(outputFile, "existing summary\n", "utf8")
+	const stale = path.join(root, ".summary.md.other.123.tmp")
+	fs.writeFileSync(stale, "stale", "utf8")
+
+	writeMutationSummary({ reportRoot, cwd: root, outputFile })
+
+	assert.equal(fs.existsSync(stale), false)
+	assert.deepEqual(
+		fs.readdirSync(root).filter((entry) => entry.includes(".tmp")),
+		[],
+	)
+})
+
+test("writeMutationSummary cleans its temp file when the rename fails", (t) => {
+	const root = makeRoot(t)
+	const reportRoot = path.join(root, "reports", "mutation")
+	writeReport(reportRoot, "pkg", { files: { "src/a.ts": { mutants: mutants("Killed") } } })
+	// The target is a directory, so the atomic rename fails after the temp file exists.
+	const outputFile = path.join(root, "summary.md")
+	fs.mkdirSync(outputFile, { recursive: true })
+	const logs = []
+	const originalLog = console.log
+	console.log = (message) => {
+		logs.push(String(message))
+	}
+	t.after(() => {
+		console.log = originalLog
+	})
+
+	assert.doesNotThrow(() => writeMutationSummary({ reportRoot, cwd: root, outputFile }))
+
+	assert.match(logs.join("\n"), /Could not write the per-file mutation summary/)
+	assert.deepEqual(
+		fs.readdirSync(root).filter((entry) => entry.includes(".tmp")),
+		[],
+	)
 })
