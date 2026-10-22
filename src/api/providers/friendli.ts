@@ -31,10 +31,7 @@ type FriendliReasoningParams = {
 	include_reasoning?: boolean
 	// Friendli's reasoning_effort supports a broader enum than OpenAI's type allows
 	reasoning_effort?:
-		| OpenAI.Chat.Completions.ChatCompletionCreateParams["reasoning_effort"]
-		| "minimal"
-		| "xhigh"
-		| "max"
+		OpenAI.Chat.Completions.ChatCompletionCreateParams["reasoning_effort"] | "minimal" | "xhigh" | "max"
 }
 
 type FriendliChatCompletionParams = Omit<

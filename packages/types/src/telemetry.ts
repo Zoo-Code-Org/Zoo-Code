@@ -273,8 +273,7 @@ export type RooCodeTelemetryEvent = z.infer<typeof rooCodeTelemetryEventSchema>
  */
 
 export type TelemetryEventSubscription =
-	| { type: "include"; events: TelemetryEventName[] }
-	| { type: "exclude"; events: TelemetryEventName[] }
+	{ type: "include"; events: TelemetryEventName[] } | { type: "exclude"; events: TelemetryEventName[] }
 
 /**
  * TelemetryPropertiesProvider

@@ -28,6 +28,7 @@ import { Package } from "../shared/package"
 import type { Mode } from "../shared/modes"
 import type { ClineProvider } from "../core/webview/ClineProvider"
 import type { ClineProviderFactory } from "../core/webview/ClineProviderFactory"
+import { readTaskMessages } from "../core/task-persistence/taskMessages"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
 import { getCommands } from "../services/command/commands"
@@ -303,6 +304,22 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 						JSON.stringify(block.input).includes(sequence.assistantToolInputText),
 				),
 		)
+	}
+
+	/** Checks persisted ui_messages.json contents without exposing messages to tests. */
+	public async hasTaskUiMessageText(taskId: string, text: string): Promise<boolean> {
+		let uiMessages: Awaited<ReturnType<typeof readTaskMessages>>
+		try {
+			// Reject unknown ids first: readTaskMessages creates the task directory.
+			await this.sidebarProvider.getTaskWithId(taskId)
+			uiMessages = await readTaskMessages({
+				taskId,
+				globalStoragePath: this.sidebarProvider.contextProxy.globalStorageUri.fsPath,
+			})
+		} catch {
+			return false
+		}
+		return uiMessages.some((message) => message.text?.includes(text))
 	}
 
 	public getCurrentTaskStack() {
