@@ -1,3 +1,4 @@
+// Retained for in-flight work: PR #436, issues #390, #724
 import * as path from "path"
 import * as fs from "fs/promises"
 

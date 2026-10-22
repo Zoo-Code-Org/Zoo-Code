@@ -80,6 +80,13 @@ import { searchCommits } from "../../utils/git"
 import { exportSettings, importSettingsWithFeedback } from "../config/importExport"
 import { getOpenAiModels } from "../../api/providers/openai"
 import { getVsCodeLmModels } from "../../api/providers/vscode-lm"
+import { getGitHubCopilotViewState } from "../../services/language-models/copilotViewState"
+import {
+	connectGitHubCopilot,
+	getGitHubCopilotAccount,
+	getGitHubCopilotModels,
+	openGitHubAccountManagement,
+} from "../../api/providers/github-copilot"
 import { openMention } from "../mentions"
 import { resolveImageMentions } from "../mentions/resolveImageMentions"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
@@ -1143,6 +1150,7 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.moonshot]: {},
 						[providerIdentifiers.opencodeGo]: {},
 						[providerIdentifiers.kenari]: {},
+						[providerIdentifiers.ioIntelligence]: {},
 						[providerIdentifiers.nanogpt]: {},
 						[providerIdentifiers.kimiCode]: {},
 					}
@@ -1323,6 +1331,22 @@ export const webviewMessageHandler = async (
 			candidates.push({
 				key: providerIdentifiers.kenari,
 				options: { provider: providerIdentifiers.kenari, apiKey: kenariApiKey },
+			})
+
+			// IO Intelligence's /models catalog is public; an optional key can scope
+			// the visible model set. Prefer an explicitly supplied unsaved key.
+			const ioIntelligenceApiKey = message?.values?.ioIntelligenceApiKey ?? apiConfiguration.ioIntelligenceApiKey
+			if (message?.values?.ioIntelligenceApiKey !== undefined) {
+				await flushModels(
+					{ provider: providerIdentifiers.ioIntelligence, apiKey: ioIntelligenceApiKey },
+					handlerFor(apiConfiguration, providerIdentifiers.ioIntelligence),
+					true,
+				)
+			}
+
+			candidates.push({
+				key: providerIdentifiers.ioIntelligence,
+				options: { provider: providerIdentifiers.ioIntelligence, apiKey: ioIntelligenceApiKey },
 			})
 
 			// NanoGPT's detailed catalog is public, while an optional key can expose a
@@ -1508,11 +1532,77 @@ export const webviewMessageHandler = async (
 			}
 
 			break
-		case VsCodeLmModelsMessageType.requestVsCodeLmModels:
-			const vsCodeLmModels = await getVsCodeLmModels()
-			// TODO: Cache like we do for OpenRouter, etc?
-			await provider.postMessageToWebview({ type: VsCodeLmModelsMessageType.vsCodeLmModels, vsCodeLmModels })
+		case VsCodeLmModelsMessageType.githubCopilotSignIn:
+		case VsCodeLmModelsMessageType.githubCopilotReconnect: {
+			// Plain sign-in and Reconnect run as separate attempts, so an older one can finish after a newer one.
+			// Only the latest request may publish, or its account and model list would overwrite newer state.
+			const viewState = getGitHubCopilotViewState(provider)
+			const requestId = ++viewState.signInId
+			viewState.changes++
+			const isLatest = () => viewState.signInId === requestId
+			try {
+				const { models, account } = await connectGitHubCopilot(async (githubCopilotAccount: string) => {
+					if (!isLatest()) return
+					await provider.postMessageToWebview({
+						type: VsCodeLmModelsMessageType.githubCopilotModels,
+						githubCopilotAccount,
+					})
+				}, message.type === VsCodeLmModelsMessageType.githubCopilotReconnect)
+				if (!isLatest()) break
+				await provider.postMessageToWebview({
+					type: VsCodeLmModelsMessageType.githubCopilotSignInResult,
+					vsCodeLmModels: models,
+					githubCopilotAccount: account,
+				})
+			} catch (error) {
+				if (!isLatest()) break
+				await provider.postMessageToWebview({
+					type: VsCodeLmModelsMessageType.githubCopilotSignInResult,
+					error: error instanceof Error ? error.message : String(error),
+				})
+			} finally {
+				if (isLatest()) viewState.changes++
+			}
 			break
+		}
+		case VsCodeLmModelsMessageType.githubCopilotManageAccount:
+			try {
+				await openGitHubAccountManagement()
+			} catch (error) {
+				provider.log(
+					`Could not open VS Code account management: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+			break
+		case VsCodeLmModelsMessageType.requestVsCodeLmModels: {
+			if (message.apiConfiguration?.apiProvider !== providerIdentifiers.githubCopilot) {
+				const vsCodeLmModels = await getVsCodeLmModels()
+				// TODO: Cache like we do for OpenRouter, etc?
+				await provider.postMessageToWebview({ type: VsCodeLmModelsMessageType.vsCodeLmModels, vsCodeLmModels })
+				break
+			}
+			const viewState = getGitHubCopilotViewState(provider)
+			const changesAtStart = viewState.changes
+			const refreshId = ++viewState.refreshId
+			const isOutOfDate = () => viewState.changes !== changesAtStart || viewState.refreshId !== refreshId
+			try {
+				const githubCopilotAccount = await getGitHubCopilotAccount()
+				const vsCodeLmModels = await getGitHubCopilotModels()
+				if (isOutOfDate()) break
+				await provider.postMessageToWebview({
+					type: VsCodeLmModelsMessageType.githubCopilotModels,
+					vsCodeLmModels,
+					githubCopilotAccount: githubCopilotAccount ?? null,
+				})
+			} catch (error) {
+				if (isOutOfDate()) break
+				await provider.postMessageToWebview({
+					type: VsCodeLmModelsMessageType.githubCopilotModels,
+					error: error instanceof Error ? error.message : String(error),
+				})
+			}
+			break
+		}
 		case "openImage":
 			await openImage(message.text!, { values: message.values })
 			break
@@ -2335,6 +2425,20 @@ export const webviewMessageHandler = async (
 				await provider.upsertProviderProfile(message.text, message.apiConfiguration)
 			}
 			break
+		case "updateProfileModel": {
+			const { expectedProvider, patch } = message.values ?? {}
+
+			if (
+				message.text &&
+				typeof expectedProvider === "string" &&
+				patch &&
+				typeof patch === "object" &&
+				!Array.isArray(patch)
+			) {
+				await provider.updateProfileModel(message.text, expectedProvider, patch)
+			}
+			break
+		}
 		case "renameApiConfiguration":
 			if (message.values && message.apiConfiguration) {
 				try {

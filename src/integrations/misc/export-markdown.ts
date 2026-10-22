@@ -92,7 +92,6 @@ export function formatContentBlockToMarkdown(block: ExtendedContentBlock): strin
 		}
 		case "tool_result": {
 			// For now we're not doing tool name lookup since we don't use tools anymore
-			// const toolName = findToolName(block.tool_use_id, messages)
 			const toolName = "Tool"
 			if (typeof block.content === "string") {
 				return `[${toolName}${block.is_error ? " (Error)" : ""}]\n${block.content}`
@@ -112,17 +111,4 @@ export function formatContentBlockToMarkdown(block: ExtendedContentBlock): strin
 		default:
 			return `[Unexpected content type: ${block.type}]`
 	}
-}
-
-export function findToolName(toolCallId: string, messages: Anthropic.MessageParam[]): string {
-	for (const message of messages) {
-		if (Array.isArray(message.content)) {
-			for (const block of message.content) {
-				if (block.type === "tool_use" && block.id === toolCallId) {
-					return block.name
-				}
-			}
-		}
-	}
-	return "Unknown Tool"
 }

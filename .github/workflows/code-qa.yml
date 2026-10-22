@@ -76,8 +76,12 @@ jobs:
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
             - name: Setup Node.js and pnpm
               uses: ./.github/actions/setup-node-pnpm
+            - name: Verify Knip guardrails
+              run: pnpm test:knip-policy
             - name: Run knip checks
               run: pnpm knip
+            - name: Run production Knip checks
+              run: pnpm knip:production
 
     compile:
         runs-on: ubuntu-latest
@@ -173,10 +177,11 @@ jobs:
             - name: Run extension test lanes
               if: ${{ !matrix.collect-coverage }}
               run: pnpm turbo run test:api test:core test:services test:misc test:tree-sitter --filter="zoo-code" --concurrency=2 --log-order grouped --output-logs new-only
-            # Runs outside Turbo so changes to .coderabbit.yaml and
-            # .github/workflows/label-pr-review-state.yml always bust the
-            # result — those files are outside the src/ package boundary and
-            # cannot be declared as Turbo inputs.
+            # Runs outside Turbo so changes to .coderabbit.yaml,
+            # .github/workflows/label-pr-review-state.yml, and
+            # .github/workflows/stale.yml always bust the result. Those files
+            # sit outside the src/ package boundary and cannot be declared as
+            # Turbo inputs.
             - name: Run workflow config tests
               run: pnpm --dir src run test:workflow
             - name: Verify extension coverage contract
