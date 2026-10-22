@@ -244,7 +244,6 @@ describe("API task controls", () => {
 			// No timer advance: the headless fast path must not wait for the readiness bound at
 			// all. Advancing here would let a regression back into the timeout fallback pass.
 
-
 			try {
 				await expect(started).resolves.toBe("sidebar-task")
 			} finally {

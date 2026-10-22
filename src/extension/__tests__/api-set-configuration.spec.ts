@@ -111,7 +111,10 @@ describe("API.setConfiguration", () => {
 			context: {},
 			on: vi.fn(),
 			getValue: vi.fn(() => undefined),
-			setValues: vi.fn().mockRejectedValueOnce(new Error("shared write failed")).mockRejectedValueOnce(new Error("shared restore failed")),
+			setValues: vi
+				.fn()
+				.mockRejectedValueOnce(new Error("shared write failed"))
+				.mockRejectedValueOnce(new Error("shared restore failed")),
 			contextProxy: { setValues: vi.fn().mockResolvedValue(undefined) },
 			providerSettingsManager: {
 				getProfile: vi.fn().mockRejectedValue(new Error("profile not found")),
@@ -120,7 +123,11 @@ describe("API.setConfiguration", () => {
 			},
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
 		})
-		const api = new API(Object.assign({} as OutputChannel, { appendLine: vi.fn() }), provider, makeClineProviderFactory())
+		const api = new API(
+			Object.assign({} as OutputChannel, { appendLine: vi.fn() }),
+			provider,
+			makeClineProviderFactory(),
+		)
 
 		const failure = await api
 			.setConfiguration({ currentApiConfigName: "default", apiProvider: providerIdentifiers.openai })
@@ -139,7 +146,10 @@ describe("API.setConfiguration", () => {
 			context: {},
 			on: vi.fn(),
 			getValue: vi.fn(() => undefined),
-			setValues: vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("shared restore failed")),
+			setValues: vi
+				.fn()
+				.mockResolvedValueOnce(undefined)
+				.mockRejectedValueOnce(new Error("shared restore failed")),
 			contextProxy: { setValues: vi.fn().mockResolvedValue(undefined) },
 			providerSettingsManager: {
 				getProfile: vi.fn().mockRejectedValue(new Error("profile not found")),
@@ -148,7 +158,11 @@ describe("API.setConfiguration", () => {
 			},
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
 		})
-		const api = new API(Object.assign({} as OutputChannel, { appendLine: vi.fn() }), provider, makeClineProviderFactory())
+		const api = new API(
+			Object.assign({} as OutputChannel, { appendLine: vi.fn() }),
+			provider,
+			makeClineProviderFactory(),
+		)
 
 		const failure = await api
 			.setConfiguration({ currentApiConfigName: "default", apiProvider: providerIdentifiers.openai })
