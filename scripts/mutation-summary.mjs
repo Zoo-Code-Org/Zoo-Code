@@ -30,6 +30,14 @@ export function escapeMarkdownCell(value) {
 		.join(BACKSLASH + "|")
 		.split(BACKTICK)
 		.join(BACKSLASH + BACKTICK)
+		.split("[")
+		.join(BACKSLASH + "[")
+		.split("]")
+		.join(BACKSLASH + "]")
+		.split("(")
+		.join(BACKSLASH + "(")
+		.split(")")
+		.join(BACKSLASH + ")")
 		.split("\r")
 		.join(BACKSLASH + "r")
 		.split("\n")
@@ -167,6 +175,31 @@ export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = 
 	return { lines, rows, unreadable }
 }
 
+/**
+ * Append through a crash-safe path: read the existing summary, write the combined content to a
+ * temporary file in the same directory, then rename it over the target. A partial append would
+ * leave the job summary truncated; the rename is atomic within one filesystem.
+ */
+function appendSummaryAtomically(outputFile, summary) {
+	const existing = fs.existsSync(outputFile) ? fs.readFileSync(outputFile, "utf8") : ""
+	const directory = path.dirname(outputFile)
+	const temporary = path.join(
+		directory,
+		"." + path.basename(outputFile) + "." + process.pid + "." + Date.now() + ".tmp",
+	)
+	fs.writeFileSync(temporary, existing + summary)
+	try {
+		fs.renameSync(temporary, outputFile)
+	} catch (error) {
+		try {
+			fs.unlinkSync(temporary)
+		} catch {
+			// Best effort: the caller is already failing the write.
+		}
+		throw error
+	}
+}
+
 /** Entry point used by the workflow: append the summary to GITHUB_STEP_SUMMARY (or stdout). */
 export function writeMutationSummary({
 	reportRoot = REPORT_DIRECTORY,
@@ -176,7 +209,7 @@ export function writeMutationSummary({
 	const { lines } = summarizeMutationReports({ reportRoot, cwd })
 	const summary = lines.join("\n") + "\n"
 	try {
-		if (outputFile) fs.appendFileSync(outputFile, summary)
+		if (outputFile) appendSummaryAtomically(outputFile, summary)
 		else process.stdout.write(summary)
 	} catch (error) {
 		console.log(
