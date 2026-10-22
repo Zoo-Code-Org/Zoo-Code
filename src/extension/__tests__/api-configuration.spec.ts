@@ -203,6 +203,7 @@ describe("API - configuration", () => {
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
+				hasConfig: vi.fn().mockResolvedValue(true),
 				getProfile: vi.fn().mockResolvedValue(previousRecord),
 				setModeConfig,
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
@@ -310,6 +311,7 @@ describe("API - configuration", () => {
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
+				hasConfig: vi.fn().mockResolvedValue(true),
 				getProfile: vi.fn().mockResolvedValue(previousRecord),
 				setModeConfig,
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
@@ -369,6 +371,7 @@ describe("API - configuration", () => {
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
+				hasConfig: vi.fn().mockResolvedValue(true),
 				getProfile: vi
 					.fn()
 					.mockImplementation(({ name }: { name: string }) =>
