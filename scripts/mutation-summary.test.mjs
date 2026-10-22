@@ -177,7 +177,8 @@ test("writeMutationSummary writes to stdout when no output file is configured", 
 		process.stdout.write = originalWrite
 	})
 
-	writeMutationSummary({ reportRoot, cwd: root, outputFile: undefined })
+	// An empty output file forces the stdout branch even when GITHUB_STEP_SUMMARY is set in CI.
+	writeMutationSummary({ reportRoot, cwd: root, outputFile: "" })
 
 	assert.match(written.join(""), /Per-file mutation results/)
 })
