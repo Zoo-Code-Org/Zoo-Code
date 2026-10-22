@@ -622,7 +622,7 @@
 			"baseUrl": "URL Base (opcional)",
 			"modelId": "ID do Modelo",
 			"apiKey": "Chave API Ollama",
-			"apiKeyHelp": "Chave API opcional para instâncias Ollama autenticadas ou serviços em nuvem. Deixe vazio para instalações locais.",
+			"apiKeyHelp": "Chave API opcional para instâncias Ollama que precisam de autenticação ou para serviços em nuvem. O Zoo Code envia a chave somente para endpoints HTTPS ou loopback. Um endpoint HTTP remoto não recebe a chave, porque a chave seguiria em texto simples. Use HTTPS para uma instância remota que precisa de uma chave. Deixe vazio para uma instalação local.",
 			"numCtx": "Tamanho da janela de contexto (num_ctx)",
 			"numCtxHelp": "Substitui o tamanho da janela de contexto padrão do modelo. Deixe em branco para usar a configuração do Modelfile do modelo. O valor mínimo é 128.",
 			"thinking": "Ativar raciocínio",
@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Recolher a saída dos comandos por padrão",
+			"description": "Mostra recolhida a saída dos comandos, incluindo a do terminal inline. Expanda manualmente quando necessário. Isso não altera a execução dos comandos."
+		},
 		"basic": {
 			"label": "Configurações do terminal: Básicas",
 			"description": "Configurações básicas do terminal"

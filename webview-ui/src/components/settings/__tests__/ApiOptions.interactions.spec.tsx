@@ -40,13 +40,11 @@ type UseSelectedModelReturn = { provider?: string; id?: string; info: Record<str
 const { modelPickerMock, useOpenRouterModelProvidersMock, useSelectedModelMock } = vi.hoisted(() => ({
 	modelPickerMock: vi.fn((_props: ComponentProps<typeof ModelPicker>) => null),
 	useOpenRouterModelProvidersMock: vi.fn<() => OpenRouterModelProvidersQueryResult>(() => ({ data: undefined })),
-	useSelectedModelMock: vi.fn(
-		(configuration: ProviderSettings): UseSelectedModelReturn => ({
-			provider: configuration.apiProvider,
-			id: configuration.apiModelId,
-			info: {},
-		}),
-	),
+	useSelectedModelMock: vi.fn((configuration: ProviderSettings): UseSelectedModelReturn => ({
+		provider: configuration.apiProvider,
+		id: configuration.apiModelId,
+		info: {},
+	})),
 }))
 
 vi.mock("@src/context/ExtensionStateContext", () => ({

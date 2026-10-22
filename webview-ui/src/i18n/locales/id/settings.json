@@ -622,7 +622,7 @@
 			"baseUrl": "Base URL (opsional)",
 			"modelId": "Model ID",
 			"apiKey": "Ollama API Key",
-			"apiKeyHelp": "API key opsional untuk instance Ollama yang terautentikasi atau layanan cloud. Biarkan kosong untuk instalasi lokal.",
+			"apiKeyHelp": "API key opsional untuk instance Ollama yang memerlukan autentikasi, atau untuk layanan cloud. Zoo Code mengirim key hanya ke endpoint HTTPS atau loopback. Endpoint HTTP jarak jauh tidak mendapat key, karena key akan dikirim sebagai teks biasa. Gunakan HTTPS untuk instance jarak jauh yang memerlukan key. Biarkan kosong untuk instalasi lokal.",
 			"numCtx": "Ukuran Jendela Konteks (num_ctx)",
 			"numCtxHelp": "Ganti ukuran jendela konteks default model. Biarkan kosong untuk menggunakan konfigurasi Modelfile model. Nilai minimum adalah 128.",
 			"thinking": "Aktifkan Thinking",
@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Ciutkan keluaran perintah secara default",
+			"description": "Tampilkan keluaran perintah dalam keadaan diciutkan, termasuk terminal inline. Perluas secara manual bila diperlukan. Cara perintah dijalankan tidak berubah."
+		},
 		"basic": {
 			"label": "Pengaturan Terminal: Dasar",
 			"description": "Pengaturan terminal dasar"

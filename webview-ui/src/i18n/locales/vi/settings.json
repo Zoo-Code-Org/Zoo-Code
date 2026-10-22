@@ -622,7 +622,7 @@
 			"baseUrl": "URL cơ sở (tùy chọn)",
 			"modelId": "ID mô hình",
 			"apiKey": "Khóa API Ollama",
-			"apiKeyHelp": "Khóa API tùy chọn cho các phiên bản Ollama đã xác thực hoặc dịch vụ đám mây. Để trống cho cài đặt cục bộ.",
+			"apiKeyHelp": "Khóa API tùy chọn cho các phiên bản Ollama cần xác thực, hoặc cho dịch vụ đám mây. Zoo Code chỉ gửi khóa đến endpoint HTTPS hoặc loopback. Endpoint HTTP từ xa không nhận khóa, vì khóa sẽ đi dưới dạng văn bản thuần. Hãy dùng HTTPS cho phiên bản từ xa cần khóa. Để trống cho cài đặt cục bộ.",
 			"numCtx": "Kích thước cửa sổ ngữ cảnh (num_ctx)",
 			"numCtxHelp": "Ghi đè kích thước cửa sổ ngữ cảnh mặc định của mô hình. Để trống để sử dụng cấu hình Modelfile của mô hình. Giá trị tối thiểu là 128.",
 			"thinking": "Bật suy luận",
@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Thu gọn đầu ra lệnh theo mặc định",
+			"description": "Hiển thị đầu ra lệnh ở trạng thái thu gọn, kể cả terminal nội tuyến. Mở rộng thủ công khi cần. Cách chạy lệnh không thay đổi."
+		},
 		"basic": {
 			"label": "Cài đặt Terminal: Cơ bản",
 			"description": "Cài đặt cơ bản cho terminal"

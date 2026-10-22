@@ -49,6 +49,9 @@ export const DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES = false
  */
 export const DEFAULT_DIFF_FUZZY_THRESHOLD = 1.0
 
+// Preserve the existing terminal-dependent output display until users opt in.
+export const DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT = false
+
 export const DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED = false
 
 /**
@@ -236,6 +239,7 @@ export const globalSettingsSchema = z.object({
 	terminalOutputPreviewSize: z.enum(["small", "medium", "large"]).optional(),
 	terminalShellIntegrationTimeout: z.number().optional(),
 	terminalShellIntegrationDisabled: z.boolean().optional(),
+	collapseCommandOutputByDefault: z.boolean().optional(),
 	terminalCommandDelay: z.number().optional(),
 	terminalPowershellCounter: z.boolean().optional(),
 	terminalZshClearEolMark: z.boolean().optional(),
