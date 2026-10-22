@@ -96,6 +96,21 @@ describe("API - startNewTask routing", () => {
 		expect(other.createTask).not.toHaveBeenCalled()
 	})
 
+	it("creates a task without a configuration without writing settings", async () => {
+		const taskId = await api.startNewTask({ text: "no configuration" })
+
+		// Omitted configuration means "use whatever the provider already has": no settings
+		// write, and the provider receives undefined so it cannot overwrite defaults.
+		expect(sidebar.createTask).toHaveBeenCalledExactlyOnceWith(
+			"no configuration",
+			undefined,
+			undefined,
+			{ consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER, toolRepetitionSoftLimit: 0 },
+			undefined,
+		)
+		expect(taskId).toBe("sidebar-task")
+	})
+
 	it("propagates tab-opening failures without starting a task in another chat", async () => {
 		const error = new Error("Cannot open editor chat")
 		vi.mocked(providerFactory.createInNewTab).mockRejectedValueOnce(error)

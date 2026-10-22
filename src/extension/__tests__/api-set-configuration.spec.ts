@@ -152,6 +152,60 @@ describe("API.setConfiguration", () => {
 		})
 	})
 
+	it("reports every failed compensation on the error instead of only logging it", async () => {
+		const provider = Object.assign({} as ClineProvider, {
+			context: {},
+			on: vi.fn(),
+			getValue: vi.fn((key: string) => (key === "currentApiConfigName" ? "old-name" : undefined)),
+			setValues: vi
+				.fn()
+				.mockResolvedValueOnce(undefined) // the forward write lands
+				.mockRejectedValueOnce(new Error("shared restore failed")), // the compensation does not
+			contextProxy: {
+				setValues: vi.fn().mockResolvedValue(undefined),
+			},
+			providerSettingsManager: {
+				getProfile: vi.fn().mockRejectedValue(new Error("profile not found")),
+				hasConfig: vi.fn().mockResolvedValue(false),
+				getModeConfigId: vi.fn().mockResolvedValue("old-mode-id"),
+				saveConfig: vi.fn().mockResolvedValue("default-id"),
+				// The forward mode write fails, and the mode restore fails too.
+				setModeConfig: vi
+					.fn()
+					.mockRejectedValueOnce(new Error("mode write failed"))
+					.mockRejectedValueOnce(new Error("mode restore failed")),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+			},
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		})
+		const api = new API(
+			Object.assign({} as OutputChannel, { appendLine: vi.fn() }),
+			provider,
+			makeClineProviderFactory(),
+		)
+
+		const failure = await api
+			.setConfiguration({
+				currentApiConfigName: "default",
+				apiProvider: providerIdentifiers.openai,
+				modeApiConfigs: { code: "new-id" },
+			})
+			.then(
+				() => undefined,
+				(error: unknown) => error as Error & { restoreFailures?: string[] },
+			)
+
+		// Both failed restores are reported on the thrown error, not just logged, so a
+		// caller can tell the compensation is incomplete.
+		expect(failure).toBeInstanceOf(Error)
+		expect(failure?.message).toContain("compensation step(s) also failed")
+		expect(failure?.message).toContain("restore the mode mapping for code")
+		expect(failure?.message).toContain("restore the shared settings")
+		expect(failure?.restoreFailures).toHaveLength(2)
+		// The original write failure is preserved as the cause.
+		expect((failure?.cause as Error).message).toBe("mode write failed")
+	})
+
 	it("leaves the stored profile alone when a transient read failure makes the lookup inconclusive", async () => {
 		const provider = Object.assign({} as ClineProvider, {
 			context: {},

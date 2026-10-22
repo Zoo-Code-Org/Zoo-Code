@@ -925,7 +925,15 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 				const error = (failedModeWrite as PromiseRejectedResult).reason
 				// Undo every write that landed, each restore independently so one failed
 				// restore cannot strand the others: mode mappings, then the profile
-				// save, then the shared values.
+				// save, then the shared values. A failed restore is durable state the
+				// caller must learn about, so every one is collected and reported on the
+				// error alongside the original write failure.
+				const restoreFailures: string[] = []
+				const recordRestoreFailure = (what: string, restoreError: unknown) => {
+					const message = restoreError instanceof Error ? restoreError.message : String(restoreError)
+					this.log(`[API#setConfiguration] failed to ${what}: ${message}`)
+					restoreFailures.push(`${what}: ${message}`)
+				}
 				for (const [mode, configId] of previousModeConfigs) {
 					try {
 						// A mode with no prior mapping is restored to an undefined id,
@@ -935,9 +943,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 							configId as string,
 						)
 					} catch (restoreError) {
-						this.log(
-							`[API#setConfiguration] failed to restore the mode mapping for ${mode}: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
-						)
+						recordRestoreFailure(`restore the mode mapping for ${mode}`, restoreError)
 					}
 				}
 				try {
@@ -953,11 +959,17 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 						)
 					}
 				} catch (restoreError) {
-					this.log(
-						`[API#setConfiguration] failed to restore the profile "${profileName}": ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
-					)
+					recordRestoreFailure(`restore the profile "${profileName}"`, restoreError)
 				}
-				await this.restoreConfigurationValues(previousValues)
+				await this.restoreConfigurationValues(previousValues, restoreFailures)
+				if (restoreFailures.length > 0) {
+					const compensationError = new Error(
+						`Configuration write failed and ${restoreFailures.length} compensation step(s) also failed: ${restoreFailures.join("; ")}`,
+						{ cause: error },
+					)
+					;(compensationError as Error & { restoreFailures?: string[] }).restoreFailures = restoreFailures
+					throw compensationError
+				}
 				throw error
 			}
 		}
@@ -965,13 +977,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		await this.sidebarProvider.postStateToWebview()
 	}
 
-	private async restoreConfigurationValues(previous: RooCodeSettings): Promise<void> {
+	private async restoreConfigurationValues(previous: RooCodeSettings, restoreFailures?: string[]): Promise<void> {
 		try {
 			await this.sidebarProvider.setValues(previous)
 		} catch (restoreError) {
-			this.log(
-				`[API#setConfiguration] failed to restore shared settings: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
-			)
+			const message = restoreError instanceof Error ? restoreError.message : String(restoreError)
+			this.log(`[API#setConfiguration] failed to restore shared settings: ${message}`)
+			restoreFailures?.push(`restore the shared settings: ${message}`)
 		}
 	}
 
