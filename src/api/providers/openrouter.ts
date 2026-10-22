@@ -306,15 +306,12 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 				// Step 2: Inject fake reasoning.encrypted block for tool calls that survived sanitization
 				openAiMessages = openAiMessages.map((msg) => {
-					// Stryker disable next-line ConditionalExpression: only assistant messages carry tool_calls after conversion, so the branch body is a no-op for every other role
 					if (msg.role === "assistant") {
 						const toolCalls = (msg as any).tool_calls as any[] | undefined
 						const existingDetails = (msg as any).reasoning_details as any[] | undefined
 
 						// Only inject if there are tool calls and no existing encrypted reasoning
-						// Stryker disable next-line ConditionalExpression,EqualityOperator: conversion only sets tool_calls for assistant messages with at least one tool_use, so the empty-array case the variants diverge on is unreachable
 						if (toolCalls && toolCalls.length > 0) {
-							// Stryker disable next-line LogicalOperator,OptionalChaining,BooleanLiteral: sanitizeGeminiMessages keeps only tool calls with matching details, so reasoning_details is a defined array here and the some()/?? fallback variants are unobservable
 							const hasEncrypted = existingDetails?.some((d) => d.type === "reasoning.encrypted") ?? false
 
 							if (!hasEncrypted) {
@@ -330,7 +327,6 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 								return {
 									...msg,
-									// Stryker disable next-line ArrayDeclaration: sanitizeGeminiMessages guarantees reasoning_details is a defined array inside this branch, so the ?? [] fallback never runs
 									reasoning_details: [...(existingDetails ?? []), fakeEncrypted],
 								}
 							}
@@ -353,7 +349,6 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			// https://openrouter.ai/docs/transforms
 			const completionParams: OpenRouterChatCompletionParams = {
 				model: modelId,
-				// Stryker disable next-line ConditionalExpression,LogicalOperator,EqualityOperator: every model-info source (model list or openRouterDefaultModelInfo) supplies a positive maxTokens, so the leading maxTokens guard makes the inner variants unreachable; whole-condition variants remain test-covered
 				...(maxTokens && maxTokens > 0 && { max_tokens: maxTokens }),
 				temperature,
 				top_p: topP,
@@ -397,10 +392,8 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 				if (parseResult.success && parseResult.data.error) {
 					const openRouterError = parseResult.data
-					// Stryker disable next-line OptionalChaining: the parseResult.data.error guard above guarantees .error is defined, so this optional chain is a no-op
 					const rawString = openRouterError.error?.metadata?.raw
 					const parsedError = extractErrorFromMetadataRaw(rawString)
-					// Stryker disable next-line OptionalChaining: the parseResult.data.error guard above guarantees .error is defined, so this optional chain is a no-op
 					const rawErrorMessage = parsedError || openRouterError.error?.message || "Unknown error"
 
 					const apiError = Object.assign(
@@ -409,11 +402,9 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 							providerIdentifiers.openrouter,
 							modelId,
 							"createMessage",
-							// Stryker disable next-line OptionalChaining: the parseResult.data.error guard above guarantees .error is defined, so this optional chain is a no-op
 							openRouterError.error?.code,
 						),
 						{
-							// Stryker disable next-line OptionalChaining: the parseResult.data.error guard above guarantees .error is defined, so this optional chain is a no-op
 							status: openRouterError.error?.code,
 							error: openRouterError.error,
 						},
@@ -598,13 +589,11 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 				// normally instead of throwing, so the catch below would never run: without this
 				// check, createMessage completes silently after yielding partial output.
 				if (controller.signal.aborted) {
-					// Stryker disable next-line StringLiteral: the catch below rethrows its own canonical createAbortError, masking the message of this throw
 					throw createAbortError("OpenRouter")
 				}
 
 				// After streaming completes, consolidate and store reasoning_details from the API.
 				// This filters out corrupted encrypted blocks (missing `data`) and consolidates by index.
-				// Stryker disable next-line ConditionalExpression,EqualityOperator: an empty accumulator consolidates to [] and getReasoningDetails() maps empty to undefined, so the block is unobservable
 				if (reasoningDetailsAccumulator.size > 0) {
 					const rawDetails = Array.from(reasoningDetailsAccumulator.values())
 					this.currentReasoningDetails = consolidateReasoningDetails(rawDetails)
