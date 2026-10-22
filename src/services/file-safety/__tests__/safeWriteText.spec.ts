@@ -437,10 +437,10 @@ describe("safeWriteText", () => {
 
 			await safeWriteText(targetPath, "data", { platform: "win32" })
 
-			// write succeeded despite restore failure (best-effort)
-			expect(fs.rename).toHaveBeenCalled()
-
-			// dump file was still unlinked in finally
+			// write succeeded despite restore failure (best-effort): the commit rename ran and
+			// the saved DACL dump was still unlinked in the finally block.
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+			expect(execFile).toHaveBeenCalledTimes(2)
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
 		})
 
