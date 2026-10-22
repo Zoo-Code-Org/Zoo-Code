@@ -2020,7 +2020,7 @@ describe("ClineProvider", () => {
 			)
 			await provider.contextProxy.setValue("viewStates", { "legacy-view": { updatedAt: 1 } })
 			// A concurrent registration binds this key while the re-bind write is queued.
-			ClineProvider.persistedViewStateWriteQueue = Promise.resolve().then(async () => {
+			ClineProvider["persistedViewStateWriteQueue"] = Promise.resolve().then(async () => {
 				await provider.contextProxy.setValue("viewStates", {
 					"legacy-view": { claimToken: "winner", updatedAt: 2 },
 				})
@@ -2033,7 +2033,7 @@ describe("ClineProvider", () => {
 			expect(claim).toBeUndefined()
 			const states = provider.contextProxy.getValue("viewStates") as Record<string, { claimToken?: string }>
 			expect(states["legacy-view"].claimToken).toBe("winner")
-			ClineProvider.persistedViewStateWriteQueue = Promise.resolve()
+			ClineProvider["persistedViewStateWriteQueue"] = Promise.resolve()
 			await provider.dispose()
 		})
 
