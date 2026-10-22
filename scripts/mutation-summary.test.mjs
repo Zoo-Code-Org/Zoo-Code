@@ -40,7 +40,8 @@ test("counts valid statuses including Timeout and skips unknown ones", () => {
 	)
 	const text = summaryLines.join("\n")
 	assert.match(text, /src\/a\.ts/)
-	assert.match(text, /25\.0%/)
+	// Stryker counts the Timeout mutant as detected: (1 killed + 1 timeout) / 4 mutants = 50%.
+	assert.match(text, /50\.0%/)
 })
 
 test("sorts by Survived + NoCoverage, worst first, then by path", () => {
@@ -111,6 +112,19 @@ test("escapes Markdown metacharacters in rendered cells", () => {
 	assert.equal(escapeMarkdownCell("a|b"), "a\\|b")
 	assert.equal(escapeMarkdownCell("a" + BACKTICK + "b"), "a\\" + BACKTICK + "b")
 	assert.equal(escapeMarkdownCell("a\r\nb"), "a\\r\\nb")
+})
+
+test("rejects a non-string projectRoot instead of resolving against it", () => {
+	const root = makeRoot()
+	writeReport(root, "pkg", { files: { "src/a.ts": { mutants: mutants("Killed") } } })
+	const report = JSON.parse(fs.readFileSync(path.join(root, "pkg", "mutation.json"), "utf8"))
+	report.projectRoot = 42
+	fs.writeFileSync(path.join(root, "pkg", "mutation.json"), JSON.stringify(report), "utf8")
+
+	const { rows, unreadable } = summarizeMutationReports({ reportRoot: root, cwd: root })
+
+	assert.equal(rows.length, 0)
+	assert.equal(unreadable.filter((entry) => /rejected unsafe report path/.test(entry)).length, 1)
 })
 
 test("normalizes a project-root-relative report path against the working directory", () => {

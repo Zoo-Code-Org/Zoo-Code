@@ -42,6 +42,7 @@ export function escapeMarkdownCell(value) {
  */
 export function normalizeReportPath(filePath, projectRoot, cwd) {
 	if (typeof filePath !== "string" || filePath.length === 0) return undefined
+	if (projectRoot !== undefined && typeof projectRoot !== "string") return undefined
 	if (filePath.includes("\u0000")) return undefined
 	const absolute = path.resolve(projectRoot ?? cwd, filePath)
 	const relative = path.relative(cwd, absolute).replaceAll("\\", "/")
@@ -89,7 +90,7 @@ export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = 
 		}
 		for (const [filePath, file] of Object.entries(report.files)) {
 			if (file === null || typeof file !== "object") continue
-			const counts = { mutants: 0, killed: 0, survived: 0, noCoverage: 0 }
+			const counts = { mutants: 0, killed: 0, survived: 0, noCoverage: 0, timeout: 0 }
 			const mutants = Array.isArray(file.mutants) ? file.mutants : []
 			for (const mutant of mutants) {
 				if (mutant === null || typeof mutant !== "object") continue
@@ -98,6 +99,7 @@ export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = 
 				if (mutant.status === "Killed") counts.killed += 1
 				if (mutant.status === "Survived") counts.survived += 1
 				if (mutant.status === "NoCoverage") counts.noCoverage += 1
+				if (mutant.status === "Timeout") counts.timeout += 1
 			}
 			if (counts.mutants === 0) continue
 			const relative = normalizeReportPath(filePath, report.projectRoot, cwd)
@@ -127,13 +129,15 @@ export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = 
 				BACKTICK +
 				"reports/mutation/<package>/mutation.json" +
 				BACKTICK +
-				"). Rows are sorted by Survived + NoCoverage, worst first; Score is Killed / Mutants, counting Timeout mutants as valid but not killed.",
+				"). Rows are sorted by Survived + NoCoverage, worst first; Score is Killed / Mutants, counting Timeout mutants as detected (matching Stryker's mutation score).",
 			"",
 			"| File | Mutants | Killed | Survived | NoCoverage | Score |",
 			"| --- | ---: | ---: | ---: | ---: | ---: |",
 		)
 		for (const row of rows) {
-			const score = ((row.killed / row.mutants) * 100).toFixed(1)
+			// Stryker counts a Timeout mutant as detected, so the mutation score numerator is
+			// Killed + Timeout (the table's Killed column stays Killed-only).
+			const score = (((row.killed + row.timeout) / row.mutants) * 100).toFixed(1)
 			lines.push(
 				"| " +
 					BACKTICK +
