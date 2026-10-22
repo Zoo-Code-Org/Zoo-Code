@@ -622,7 +622,7 @@
 			"baseUrl": "Temel URL (İsteğe bağlı)",
 			"modelId": "Model Kimliği",
 			"apiKey": "Ollama API Anahtarı",
-			"apiKeyHelp": "Kimlik doğrulamalı Ollama örnekleri veya bulut hizmetleri için isteğe bağlı API anahtarı. Yerel kurulumlar için boş bırakın.",
+			"apiKeyHelp": "Kimlik doğrulaması gereken Ollama örnekleri veya bulut hizmetleri için isteğe bağlı API anahtarı. Zoo Code anahtarı yalnızca HTTPS veya loopback uç noktalarına gönderir. Uzak bir HTTP uç noktası anahtar almaz, çünkü anahtar düz metin olarak gider. Anahtar gereken uzak bir örnek için HTTPS kullanın. Yerel kurulum için bu alanı boş bırakın.",
 			"numCtx": "Bağlam Penceresi Boyutu (num_ctx)",
 			"numCtxHelp": "Modelin varsayılan bağlam penceresi boyutunu geçersiz kılar. Modelin Modelfile yapılandırmasını kullanmak için boş bırakın. Minimum değer 128'dir.",
 			"thinking": "Akıl yürütmeyi etkinleştir",
@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Komut çıktısını varsayılan olarak daralt",
+			"description": "Satır içi terminal dahil komut çıktısını daraltılmış gösterir. Gerektiğinde elle genişletebilirsiniz. Komutların çalıştırılma biçimini değiştirmez."
+		},
 		"basic": {
 			"label": "Terminal Ayarları: Temel",
 			"description": "Temel terminal ayarları"

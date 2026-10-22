@@ -62,6 +62,30 @@ describe("Task run-state write helpers", () => {
 		expect(task.runRejections).toEqual([])
 	})
 
+	it("keeps the cancelTask order: reason, abort, then abandon, with no rejections", async () => {
+		task.setAbortReason("user_cancelled")
+		await task.abortTask()
+		task.requestAbandon()
+
+		expect(task.runRejections).toEqual([])
+		expect(task.runState.latches).toEqual({
+			abort: true,
+			abandoned: true,
+			disposed: true,
+			reason: "user_cancelled",
+		})
+	})
+
+	it("drives disposeRequested from dispose and keeps the reason", async () => {
+		task.setAbortReason("user_cancelled")
+		await task.dispose()
+
+		expect(task.abort).toBe(true)
+		expect(task.runState.latches.disposed).toBe(true)
+		expect(task.runState.latches.reason).toBe("user_cancelled")
+		expect(task.runRejections).toEqual([])
+	})
+
 	it("keeps a stale didFinishAbortingStream on the next stream so the kernel mismatch shows race R-1", () => {
 		task.markInitialized()
 		task.markStreamStarted()
@@ -163,20 +187,20 @@ describe("Task run-state divergence report", () => {
 	it("logs and counts a rejected event once when the check is enabled", () => {
 		const task = makeTask(vscode.ExtensionMode.Test)
 
-		task.requestAbandon()
+		task.markStreamEnded()
 
 		expect(divergenceWarnings()).toHaveLength(1)
 		expect(divergenceWarnings()[0][1]).toMatchObject({
 			taskId: task.taskId,
 			kind: "rejection",
-			event: { tag: "abandonRequested" },
+			event: { tag: "streamEnded" },
 			state: initialRunState,
 			mismatched: [],
 		})
 		expect(divergenceMetrics()).toEqual([
 			[
 				TelemetryEventName.RUN_STATE_DIVERGENCE,
-				expect.objectContaining({ taskId: task.taskId, kind: "rejection", eventTag: "abandonRequested" }),
+				expect.objectContaining({ taskId: task.taskId, kind: "rejection", eventTag: "streamEnded" }),
 			],
 		])
 	})
@@ -184,12 +208,23 @@ describe("Task run-state divergence report", () => {
 	it("reports a repeated rejection of the same event once per task", () => {
 		const task = makeTask(vscode.ExtensionMode.Test)
 
-		task.requestAbandon()
-		task.requestAbandon()
+		task.markStreamEnded()
+		task.markStreamEnded()
 
 		expect(task.runRejections).toHaveLength(2)
 		expect(divergenceWarnings()).toHaveLength(1)
 		expect(divergenceMetrics()).toHaveLength(1)
+	})
+
+	it("reports a rejection and an abandoned mismatch when abandon comes before abort", () => {
+		const task = makeTask(vscode.ExtensionMode.Test)
+
+		task.requestAbandon()
+
+		const reports = divergenceWarnings().map(([, report]: unknown[]) => report)
+		expect(reports).toHaveLength(2)
+		expect(reports).toContainEqual(expect.objectContaining({ kind: "rejection", mismatched: [] }))
+		expect(reports).toContainEqual(expect.objectContaining({ kind: "mismatch", mismatched: ["abandoned"] }))
 	})
 
 	it("stays silent for a production build on the stable channel", () => {

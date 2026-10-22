@@ -622,7 +622,7 @@
 			"baseUrl": "Basis-URL (optional)",
 			"modelId": "Modell-ID",
 			"apiKey": "Ollama API-Schlüssel",
-			"apiKeyHelp": "Optionaler API-Schlüssel für authentifizierte Ollama-Instanzen oder Cloud-Services. Leer lassen für lokale Installationen.",
+			"apiKeyHelp": "Optionaler API-Schlüssel für Ollama-Instanzen, die eine Authentifizierung brauchen, oder für Cloud-Dienste. Zoo Code sendet den Schlüssel nur an HTTPS- oder Loopback-Endpunkte. Ein entfernter HTTP-Endpunkt erhält keinen Schlüssel, weil der Schlüssel als Klartext übertragen würde. Verwende HTTPS für eine entfernte Instanz, die einen Schlüssel braucht. Lass dieses Feld für eine lokale Installation leer.",
 			"numCtx": "Kontextfenstergröße (num_ctx)",
 			"numCtxHelp": "Überschreibt die Standard-Kontextfenstergröße des Modells. Lassen Sie das Feld leer, um die Modelfile-Konfiguration des Modells zu verwenden. Der Mindestwert ist 128.",
 			"thinking": "Denken aktivieren",
@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Befehlsausgabe standardmäßig einklappen",
+			"description": "Befehlsausgaben werden zunächst eingeklappt, auch im Inline-Terminal. Bei Bedarf manuell aufklappen. Die Befehlsausführung bleibt unverändert."
+		},
 		"basic": {
 			"label": "Terminal-Einstellungen: Grundlegend",
 			"description": "Grundlegende Terminal-Einstellungen"
