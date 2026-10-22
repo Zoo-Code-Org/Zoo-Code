@@ -78,7 +78,12 @@ export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = 
 			unreadable.push(directory.name + ": " + error.message)
 			continue
 		}
-		if (report === null || typeof report !== "object" || report.files === null || typeof report.files !== "object") {
+		if (
+			report === null ||
+			typeof report !== "object" ||
+			report.files === null ||
+			typeof report.files !== "object"
+		) {
 			unreadable.push(directory.name + ": report has no files map")
 			continue
 		}
@@ -114,7 +119,15 @@ export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = 
 			return blocked === 0 ? left.file.localeCompare(right.file) : blocked
 		})
 		lines.push(
-			"Every file below comes from the " + BACKTICK + "changed-code-mutation-report" + BACKTICK + " artifact (" + BACKTICK + "reports/mutation/<package>/mutation.json" + BACKTICK + "). Rows are sorted by Survived + NoCoverage, worst first; Score is Killed / Mutants, counting Timeout mutants as valid but not killed.",
+			"Every file below comes from the " +
+				BACKTICK +
+				"changed-code-mutation-report" +
+				BACKTICK +
+				" artifact (" +
+				BACKTICK +
+				"reports/mutation/<package>/mutation.json" +
+				BACKTICK +
+				"). Rows are sorted by Survived + NoCoverage, worst first; Score is Killed / Mutants, counting Timeout mutants as valid but not killed.",
 			"",
 			"| File | Mutants | Killed | Survived | NoCoverage | Score |",
 			"| --- | ---: | ---: | ---: | ---: | ---: |",
@@ -122,7 +135,21 @@ export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = 
 		for (const row of rows) {
 			const score = ((row.killed / row.mutants) * 100).toFixed(1)
 			lines.push(
-				"| " + BACKTICK + escapeMarkdownCell(row.file) + BACKTICK + " | " + row.mutants + " | " + row.killed + " | " + row.survived + " | " + row.noCoverage + " | " + score + "% |",
+				"| " +
+					BACKTICK +
+					escapeMarkdownCell(row.file) +
+					BACKTICK +
+					" | " +
+					row.mutants +
+					" | " +
+					row.killed +
+					" | " +
+					row.survived +
+					" | " +
+					row.noCoverage +
+					" | " +
+					score +
+					"% |",
 			)
 		}
 		lines.push(
@@ -137,14 +164,20 @@ export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = 
 }
 
 /** Entry point used by the workflow: append the summary to GITHUB_STEP_SUMMARY (or stdout). */
-export function writeMutationSummary({ reportRoot = REPORT_DIRECTORY, cwd = process.cwd(), outputFile = process.env.GITHUB_STEP_SUMMARY } = {}) {
+export function writeMutationSummary({
+	reportRoot = REPORT_DIRECTORY,
+	cwd = process.cwd(),
+	outputFile = process.env.GITHUB_STEP_SUMMARY,
+} = {}) {
 	const { lines } = summarizeMutationReports({ reportRoot, cwd })
 	const summary = lines.join("\n") + "\n"
 	try {
 		if (outputFile) fs.appendFileSync(outputFile, summary)
 		else process.stdout.write(summary)
 	} catch (error) {
-		console.log("::warning title=Mutation test advisory::Could not write the per-file mutation summary: " + error.message)
+		console.log(
+			"::warning title=Mutation test advisory::Could not write the per-file mutation summary: " + error.message,
+		)
 	}
 	return summary
 }

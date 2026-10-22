@@ -24,11 +24,18 @@ function mutants(...statuses) {
 
 test("counts valid statuses including Timeout and skips unknown ones", () => {
 	const root = makeRoot()
-	writeReport(root, "pkg", { files: { "src/a.ts": { mutants: mutants("Killed", "Survived", "NoCoverage", "Timeout", "Exploded") } } })
+	writeReport(root, "pkg", {
+		files: { "src/a.ts": { mutants: mutants("Killed", "Survived", "NoCoverage", "Timeout", "Exploded") } },
+	})
 	const { lines: summaryLines, rows } = summarizeMutationReports({ reportRoot: root, cwd: root })
 	assert.equal(rows.length, 1)
 	assert.deepEqual(
-		{ mutants: rows[0].mutants, killed: rows[0].killed, survived: rows[0].survived, noCoverage: rows[0].noCoverage },
+		{
+			mutants: rows[0].mutants,
+			killed: rows[0].killed,
+			survived: rows[0].survived,
+			noCoverage: rows[0].noCoverage,
+		},
 		{ mutants: 4, killed: 1, survived: 1, noCoverage: 1 },
 	)
 	const text = summaryLines.join("\n")
@@ -47,12 +54,18 @@ test("sorts by Survived + NoCoverage, worst first, then by path", () => {
 		},
 	})
 	const { rows } = summarizeMutationReports({ reportRoot: root, cwd: root })
-	assert.deepEqual(rows.map((row) => row.file), ["src/a.ts", "src/b.ts", "src/d.ts", "src/c.ts"])
+	assert.deepEqual(
+		rows.map((row) => row.file),
+		["src/a.ts", "src/b.ts", "src/d.ts", "src/c.ts"],
+	)
 })
 
 test("reports an empty run when no reports exist", () => {
 	const root = makeRoot()
-	const { lines: summaryLines, rows } = summarizeMutationReports({ reportRoot: path.join(root, "missing"), cwd: root })
+	const { lines: summaryLines, rows } = summarizeMutationReports({
+		reportRoot: path.join(root, "missing"),
+		cwd: root,
+	})
 	assert.equal(rows.length, 0)
 	assert.match(summaryLines.join("\n"), /No Stryker JSON report was produced/)
 })
@@ -87,7 +100,10 @@ test("rejects unsafe report paths instead of rendering them", () => {
 		},
 	})
 	const { rows, unreadable } = summarizeMutationReports({ reportRoot: root, cwd: root })
-	assert.deepEqual(rows.map((row) => row.file), ["src/ok.ts"])
+	assert.deepEqual(
+		rows.map((row) => row.file),
+		["src/ok.ts"],
+	)
 	assert.equal(unreadable.filter((entry) => /rejected unsafe report path/.test(entry)).length, 2)
 })
 
