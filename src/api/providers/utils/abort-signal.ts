@@ -1,18 +1,24 @@
 /**
  * Merge an optional external abort signal with an optional timeout.
  *
- * Timeout values <= 0 are treated as disabled. The timeout is created via the
+ * Timeout values <= 0 and non-finite values are treated as disabled; finite
+ * delays above 2^31-1 ms are capped (Node clamps them to 1 ms otherwise). The timeout is created via the
  * native AbortSignal.timeout() API, which self-manages its timer — callers do
  * not need to (and cannot) clear it manually.
  */
 export function mergeAbortSignalAndTimeout(externalSignal?: AbortSignal, timeoutMs?: number): AbortSignal | undefined {
-	const hasTimeout = typeof timeoutMs === "number" && timeoutMs > 0
+	// Node's AbortSignal.timeout() throws ERR_OUT_OF_RANGE for non-integer
+	// delays (Infinity) and clamps delays above 2^31-1 ms to 1 ms, which would
+	// abort almost immediately; treat non-finite values as "no timeout",
+	// round fractional delays up to whole milliseconds (uint32 validation
+	// throws for 1500.5), and cap the rest.
+	const hasTimeout = typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
 
 	if (!hasTimeout) {
 		return externalSignal
 	}
 
-	const timeoutSignal = AbortSignal.timeout(timeoutMs)
+	const timeoutSignal = AbortSignal.timeout(Math.min(Math.max(1, Math.ceil(timeoutMs)), 2_147_483_647))
 
 	if (!externalSignal) {
 		return timeoutSignal
@@ -51,17 +57,6 @@ export function throwIfAborted(signal?: AbortSignal): void {
 	const abortError = new Error("This operation was aborted")
 	abortError.name = "AbortError"
 	throw abortError
-}
-
-/**
- * Request options this series passes to the OpenAI SDK call. The SDK's
- * `RequestOptions` declares `signal` as `AbortSignal | null | undefined`,
- * which does not satisfy the builder's base constraint, so the builder is
- * typed with only the options this series sets. The built config is still
- * assignable to the SDK's `RequestOptions`.
- */
-export type OpenAiRequestOptions = {
-	signal?: AbortSignal
 }
 
 /**
@@ -139,9 +134,11 @@ export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, provi
  * resolve. Abort failures from the lookup itself are normalized to the
  * provider AbortError; any other resolution failure propagates unchanged.
  *
- * Providers pass their own resolution step, so the entry guard, the race, and
- * the normalization logic exist once and are exercised through every
- * provider's spec.
+ * Accepts a provider-specific resolution step so the entry guard, race, and
+ * normalization can share one implementation. Direct contract tests cover
+ * this helper; providers do not currently call it.
+ *
+ * @internal Shared cancellation helper retained with direct contract tests for provider adoption.
  */
 export async function resolveModelWithAbort<T>(
 	fetchModel: () => Promise<T>,

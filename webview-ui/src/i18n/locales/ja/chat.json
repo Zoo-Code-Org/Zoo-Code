@@ -113,6 +113,15 @@
 	},
 	"selectMode": "対話モードを選択",
 	"selectApiConfig": "API構成を選択",
+	"selectModel": "モデルを選択",
+	"modelSelector": {
+		"title": "モデル",
+		"settings": "モデル設定",
+		"description": "この API 設定で使用するモデルを選択します。",
+		"searchPlaceholder": "モデルを検索...",
+		"unsupportedTooltip": "このプロバイダーのモデルは設定で構成します",
+		"loading": "モデルを読み込み中..."
+	},
 	"lockApiConfigAcrossModes": "このワークスペースのすべてのモードでAPI構成をロック",
 	"unlockApiConfigAcrossModes": "このワークスペースのすべてのモードでAPI構成がロックされています（クリックで解除）",
 	"enhancePrompt": "追加コンテキストでプロンプトを強化",
@@ -343,10 +352,10 @@
 		"title": "Zoo Code {{version}} リリース",
 		"support": "<githubLink>GitHub</githubLink>でスターを付けて Zoo Code を応援してください。",
 		"release": {
-			"heading": "Zoo Code v3.88.0 の新機能",
-			"highlight1": "✨ Provider とモデルへの対応: Grok Build を利用でき、カスタムモデルのサポートが向上しました。このリリースでは、Bedrock のモデル上限の修正と、Codex の verbosity 設定の送信も行われます。",
-			"highlight2": "🧭 タスクの信頼性: このリリースでは、キャンセル処理、tool turn の継続、タスクメッセージの保存を修正しました。",
-			"highlight3": "⚡ より速い編集とチャット: ファイルへの書き込みは、デフォルトでは人為的な遅延を行わなくなりました。チャットメッセージはファイルデータを減らして伝え、code action は最後にアクティブなチャットに届きます。"
+			"heading": "Zoo Code v3.90.0 の新機能",
+			"highlight1": "✨ Provider とモデル: GitHub Copilot が provider になりました。サインインすると、Zoo Code が Copilot モデルを読み込みます。IO Intelligence は専用の API キーを使う provider です。Gemini 4 Argon は Gemini と Vertex にあります。GPT-6 Luna は OpenCode Go にあります。Gemini 4 Argon と GPT-6 Luna は Zoo Gateway にもあります。",
+			"highlight2": "🧭 ツール実行: 同じツール呼び出しを繰り返すと警告が出て、その後 Zoo Code がそのループを止めます。attempt_completion を無効にしても、タスクが完了できない状態にはなりません。キュー内のメッセージは、直接送るコマンドと同じコマンド保護チェックを通ります。",
+			"highlight3": "⚡ 推論とストリーミング: Anthropic の adaptive thinking がチャットに表示され、thinking token がカウントされます。R1 トグルは llama.cpp、Ollama、LM Studio の推論を保持します。Codex は、表示される要約とともに暗号化された推論を保持します。VS Code の language model ストリームは、ストリームが失敗したときに guarded recovery を使います。"
 		},
 		"cloudAgents": {
 			"heading": "クラウドの新機能:",

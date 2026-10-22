@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Interaktionsmodus auswählen",
 	"selectApiConfig": "API-Konfiguration auswählen",
+	"selectModel": "Modell auswählen",
+	"modelSelector": {
+		"title": "Modelle",
+		"settings": "Modelleinstellungen",
+		"description": "Wähle das Modell für diese API-Konfiguration aus.",
+		"searchPlaceholder": "Modelle suchen...",
+		"unsupportedTooltip": "Das Modell dieses Anbieters wird in den Einstellungen konfiguriert",
+		"loading": "Modelle werden geladen..."
+	},
 	"lockApiConfigAcrossModes": "API-Konfiguration für alle Modi in diesem Arbeitsbereich sperren",
 	"unlockApiConfigAcrossModes": "API-Konfiguration ist für alle Modi in diesem Arbeitsbereich gesperrt (klicke zum Entsperren)",
 	"enhancePrompt": "Prompt mit zusätzlichem Kontext verbessern",
@@ -343,10 +352,10 @@
 		"title": "Zoo Code {{version}} veröffentlicht",
 		"support": "Bitte unterstütze Zoo Code, indem du uns auf <githubLink>GitHub</githubLink> einen Stern gibst.",
 		"release": {
-			"heading": "Was ist neu im Zoo Code v3.88.0",
-			"highlight1": "✨ Provider- und Modellunterstützung: Nutze Grok Build und eine verbesserte Unterstützung für eigene Modelle. Diese Version behebt außerdem Bedrock-Modellgrenzen und sendet die Codex-Verbosity-Einstellung.",
-			"highlight2": "🧭 Zuverlässigkeit von Aufgaben: Diese Version behebt die Behandlung von Abbrüchen, die Fortsetzung von Tool-Turns und das Speichern von Aufgabennachrichten.",
-			"highlight3": "⚡ Schnelleres Bearbeiten und Chatten: Datei-Schreibvorgänge verwenden standardmäßig keine künstlichen Verzögerungen mehr. Chat-Nachrichten enthalten weniger Dateidaten, und Code-Aktionen erreichen den zuletzt aktiven Chat."
+			"heading": "Was ist neu im Zoo Code v3.90.0",
+			"highlight1": "✨ Provider und Modelle: GitHub Copilot ist jetzt ein Provider: Melde dich an, und Zoo Code lädt deine Copilot-Modelle. IO Intelligence ist ein Provider mit eigenem API-Schlüssel. Gemini 4 Argon gibt es bei Gemini und Vertex. GPT-6 Luna gibt es bei OpenCode Go. Gemini 4 Argon und GPT-6 Luna gibt es auch im Zoo Gateway.",
+			"highlight2": "🧭 Tool-Ausführung: Wiederholst du denselben Tool-Aufruf, kommt eine Warnung, danach stoppt Zoo Code diese Schleife. attempt_completion auszuschalten lässt eine Aufgabe nicht mehr unfertig stecken. Nachrichten in der Warteschlange durchlaufen dieselben Befehlsschutzprüfungen wie Befehle, die du direkt sendest.",
+			"highlight3": "⚡ Reasoning und Streaming: Adaptives Anthropic-Thinking erscheint im Chat, und Thinking-Tokens werden gezählt. Der R1-Schalter behält das Reasoning von llama.cpp, Ollama und LM Studio. Codex behält verschlüsseltes Reasoning zusammen mit der Zusammenfassung, die du siehst. VS-Code-Language-Model-Streams nutzen guarded recovery, wenn ein Stream fehlschlägt."
 		},
 		"cloudAgents": {
 			"heading": "Neu in der Cloud:",
