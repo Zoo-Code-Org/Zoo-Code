@@ -216,6 +216,9 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		preserveOpenTabs?: boolean
 	}) {
 		let provider: ClineProvider
+		// A provider created for this call and never handed a task must not outlive the
+		// failed call in the active-instance list.
+		let createdInNewTab = false
 
 		if (newTab) {
 			if (!preserveOpenTabs) {
@@ -224,6 +227,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			}
 
 			provider = await this.providerFactory.createInNewTab()
+			createdInNewTab = true
 			this.registerListeners(provider)
 		} else {
 			await vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`)
@@ -231,73 +235,91 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			provider = this.sidebarProvider
 		}
 
-		// A new task must not consume shared default mode/profile state before the view's
-		// stable state id is registered and its persisted view state loaded: webviewDidLaunch
-		// may not have arrived yet. Bound the wait so a view that never launches cannot
-		// hang task creation.
-		//
-		// Skip the wait when there is nothing to wait for: a sidebar provider that never
-		// resolved a view cannot launch a webview (the headless API path), so waiting would
-		// only burn the full bound before the existing shared-state fallback runs. A new
-		// tab always creates a view.
-		// A launch message (`viewLaunched`) proves a webview exists even when the provider's
-		// view reference was cleared, so it keeps the barrier too.
-		if (newTab || provider.hasResolvedView || provider.viewLaunched) {
-			let readinessTimer: ReturnType<typeof setTimeout> | undefined
-			try {
-				await Promise.race([
-					provider.viewStateReadiness,
-					new Promise<never>((_, reject) => {
-						readinessTimer = setTimeout(
-							() => reject(new Error("Timed out waiting for the view state to become ready")),
-							3000,
-						)
-					}),
-				]).finally(() => {
-					clearTimeout(readinessTimer)
-				})
-			} catch (error) {
-				if (
-					provider.viewLaunched ||
-					!(error instanceof Error) ||
-					error.message !== "Timed out waiting for the view state to become ready"
-				) {
-					throw error
+		try {
+			// A new task must not consume shared default mode/profile state before the view's
+			// stable state id is registered and its persisted view state loaded: webviewDidLaunch
+			// may not have arrived yet. Bound the wait so a view that never launches cannot
+			// hang task creation.
+			//
+			// Skip the wait when there is nothing to wait for: a sidebar provider that never
+			// resolved a view cannot launch a webview (the headless API path), so waiting would
+			// only burn the full bound before the existing shared-state fallback runs. A new
+			// tab always creates a view.
+			// A launch message (`viewLaunched`) proves a webview exists even when the provider's
+			// view reference was cleared, so it keeps the barrier too.
+			if (newTab || provider.hasResolvedView || provider.viewLaunched) {
+				let readinessTimer: ReturnType<typeof setTimeout> | undefined
+				try {
+					await Promise.race([
+						provider.viewStateReadiness,
+						new Promise<never>((_, reject) => {
+							readinessTimer = setTimeout(
+								() => reject(new Error("Timed out waiting for the view state to become ready")),
+								3000,
+							)
+						}),
+					]).finally(() => {
+						clearTimeout(readinessTimer)
+					})
+				} catch (error) {
+					if (
+						provider.viewLaunched ||
+						!(error instanceof Error) ||
+						error.message !== "Timed out waiting for the view state to become ready"
+					) {
+						throw error
+					}
+					// Headless API callers create tasks without ever launching a webview: the
+					// readiness bound expiring keeps the pre-existing shared-state fallback.
+					// A launched view whose readiness failed is a real failure and rethrows.
+					this.log("[API#startNewTask] webview not launched; continuing in headless mode")
 				}
-				// Headless API callers create tasks without ever launching a webview: the
-				// readiness bound expiring keeps the pre-existing shared-state fallback.
-				// A launched view whose readiness failed is a real failure and rethrows.
-				this.log("[API#startNewTask] webview not launched; continuing in headless mode")
 			}
+
+			// Disposal resolves viewStateReadiness to release waiters: a provider torn down while
+			// the wait was pending must fail task creation rather than create a task against the
+			// disposed view (its posts and task registration would be orphaned).
+			if (provider.isDisposed) {
+				throw new Error("The provider was disposed while waiting for the view state to become ready")
+			}
+			await provider.evictCurrentTask()
+			await provider.postStateToWebview()
+			await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
+			await provider.postMessageToWebview({ type: "invoke", invoke: "newChat", text, images })
+
+			// API-driven tasks never stop to ask the user, so the hard stop is
+			// effectively unlimited. The soft repetition tier is disabled too:
+			// without a reachable hard stop it would reject every identical call
+			// with no escalation.
+			const options: CreateTaskOptions = {
+				consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
+				toolRepetitionSoftLimit: 0,
+			}
+
+			const task = await provider.createTask(text, images, undefined, options, configuration)
+
+			if (!task) {
+				throw new Error("Failed to create task due to policy restrictions")
+			}
+
+			return task.taskId
+		} catch (error) {
+			if (createdInNewTab && !provider.isDisposed) {
+				// Only the provider this call created is ours to tear down: the sidebar provider
+				// and any task attached to it are left untouched. Disposal also untracks the
+				// instance, so an aborted open-in-editor call cannot leave a ghost tab behind.
+				try {
+					await provider.dispose()
+				} catch (disposeError) {
+					this.log(
+						`[API#startNewTask] failed to dispose the aborted new-tab provider: ${
+							disposeError instanceof Error ? disposeError.message : String(disposeError)
+						}`,
+					)
+				}
+			}
+			throw error
 		}
-
-		// Disposal resolves viewStateReadiness to release waiters: a provider torn down while
-		// the wait was pending must fail task creation rather than create a task against the
-		// disposed view (its posts and task registration would be orphaned).
-		if (provider.isDisposed) {
-			throw new Error("The provider was disposed while waiting for the view state to become ready")
-		}
-		await provider.evictCurrentTask()
-		await provider.postStateToWebview()
-		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
-		await provider.postMessageToWebview({ type: "invoke", invoke: "newChat", text, images })
-
-		// API-driven tasks never stop to ask the user, so the hard stop is
-		// effectively unlimited. The soft repetition tier is disabled too:
-		// without a reachable hard stop it would reject every identical call
-		// with no escalation.
-		const options: CreateTaskOptions = {
-			consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
-			toolRepetitionSoftLimit: 0,
-		}
-
-		const task = await provider.createTask(text, images, undefined, options, configuration)
-
-		if (!task) {
-			throw new Error("Failed to create task due to policy restrictions")
-		}
-
-		return task.taskId
 	}
 
 	public async resumeTask(taskId: string): Promise<void> {

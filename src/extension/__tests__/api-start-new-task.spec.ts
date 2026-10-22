@@ -21,6 +21,7 @@ function createProvider(taskId: string) {
 		postStateToWebview: vi.fn<ClineProvider["postStateToWebview"]>().mockResolvedValue(undefined),
 		postMessageToWebview: vi.fn<ClineProvider["postMessageToWebview"]>().mockResolvedValue(undefined),
 		createTask: vi.fn<ClineProvider["createTask"]>().mockResolvedValue(task),
+		dispose: vi.fn<ClineProvider["dispose"]>().mockResolvedValue(undefined),
 	})
 }
 
@@ -109,6 +110,26 @@ describe("API - startNewTask routing", () => {
 			undefined,
 		)
 		expect(taskId).toBe("sidebar-task")
+	})
+
+	it("disposes only the provider it created when the new-tab task creation fails", async () => {
+		editor.createTask.mockRejectedValueOnce(new Error("task creation failed"))
+
+		await expect(api.startNewTask({ text: "new task", newTab: true })).rejects.toThrow("task creation failed")
+
+		// The provider this call created must not linger in the active-instance list; the
+		// pre-existing sidebar provider is not this call's to tear down.
+		expect(editor.dispose).toHaveBeenCalledOnce()
+		expect(sidebar.dispose).not.toHaveBeenCalled()
+	})
+
+	it("disposes the created new-tab provider when a post fails before the task starts", async () => {
+		editor.postMessageToWebview.mockRejectedValueOnce(new Error("webview post failed"))
+
+		await expect(api.startNewTask({ text: "new task", newTab: true })).rejects.toThrow("webview post failed")
+
+		expect(editor.dispose).toHaveBeenCalledOnce()
+		expect(sidebar.dispose).not.toHaveBeenCalled()
 	})
 
 	it("propagates tab-opening failures without starting a task in another chat", async () => {
