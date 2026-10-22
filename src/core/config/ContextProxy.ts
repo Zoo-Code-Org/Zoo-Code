@@ -501,7 +501,7 @@ export class ContextProxy {
 				`[ContextProxy] Sanitizing invalid provider "${sanitizedValues.apiProvider}" - resetting to undefined`,
 			)
 			// Return a new values object without the invalid apiProvider
-			const { apiProvider, ...restValues } = sanitizedValues
+			const { apiProvider: _apiProvider, ...restValues } = sanitizedValues
 			return restValues as RooCodeSettings
 		}
 		return sanitizedValues

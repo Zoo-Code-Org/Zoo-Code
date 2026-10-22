@@ -3,7 +3,6 @@ import * as vscode from "vscode"
 
 import { API } from "../api"
 import { ClineProvider } from "../../core/webview/ClineProvider"
-import { TaskCommandName } from "@roo-code/types"
 import { makeClineProviderFactory } from "../../test-utils/provider"
 
 vi.mock("vscode")

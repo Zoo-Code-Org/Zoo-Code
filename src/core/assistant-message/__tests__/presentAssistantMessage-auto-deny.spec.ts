@@ -77,6 +77,7 @@ interface MockTask {
 	didCompleteReadingStream: boolean
 	didRejectTool: boolean
 	didAlreadyUseTool: boolean
+	activeToolContexts: Map<string, unknown>
 	consecutiveMistakeCount: number
 	clineMessages: unknown[]
 	api: { getModel: () => { id: string; info: Record<string, unknown> } }
@@ -109,6 +110,7 @@ function buildMockTask(): MockTask {
 		didCompleteReadingStream: true,
 		didRejectTool: false,
 		didAlreadyUseTool: false,
+		activeToolContexts: new Map(),
 		consecutiveMistakeCount: 0,
 		clineMessages: [],
 		api: {
@@ -600,6 +602,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 		expect(payload.message).toBe("The user denied this operation.")
 		expect(payload.type).toBeUndefined()
 		expect(mockTask.didRejectTool).toBe(true)
+		expect(mockTask.activeToolContexts.get("call_mcp")).toEqual({ toolCallId: "call_mcp", didReject: true })
 		expect(mockTask.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
 	})
 
@@ -664,6 +667,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 		expect(payload.rule_id).toBe("R-1")
 		expect(mcpApproval).toBe(false)
 		expect(mockTask.didRejectTool).toBe(false)
+		expect(mockTask.activeToolContexts.get("call_mcp")).toEqual({ toolCallId: "call_mcp", didReject: false })
 	})
 
 	it("denies dangerous_substitution with the fixed shell-expansion reason without aborting the turn", async () => {
