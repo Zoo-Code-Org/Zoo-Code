@@ -2987,6 +2987,40 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("replaces the buffered provider settings when activating a stored profile with no provider fields", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// A previously activated profile left provider-specific keys in the view buffer.
+			provider["viewLocalState"] = {
+				currentApiConfigName: "stale-profile",
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "stale-key",
+				},
+			}
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				activateProfile: vi.fn().mockResolvedValue({ name: "target-profile", id: "target-id" }),
+				listConfig: vi.fn().mockResolvedValue([{ name: "target-profile", id: "target-id" }]),
+				setModeConfig: vi.fn(),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				getProfile: vi.fn().mockResolvedValue({ name: "target-profile", id: "target-id" }),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await provider.activateProviderProfile({ name: "target-profile" })
+
+			// Activation replaces the buffer: stale provider keys cannot survive next to the new name.
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({})
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("target-profile")
+			await provider.dispose()
+		})
+
 		it("should sync the view-local buffer when creating and activating a profile", async () => {
 			const provider = new ClineProvider(
 				mockContext,

@@ -2648,7 +2648,7 @@ export class ClineProvider
 				// view-local mutation path: also refresh this view's buffer so a stale
 				// loaded apiConfiguration cannot keep shadowing the new settings in
 				// getState().
-				this._saveViewLocalStateFromMutation(providerSettings),
+				this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings }),
 			])
 			const failedActivation = activationResults.find(
 				(result): result is PromiseRejectedResult => result.status === "rejected",
@@ -2866,7 +2866,7 @@ export class ClineProvider
 				// view-local mutation path: also refresh this view's buffer so a stale
 				// loaded apiConfiguration cannot keep shadowing the new settings in
 				// getState().
-				this._saveViewLocalStateFromMutation(providerSettings),
+				this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings }),
 			])
 
 			// Other live views may have buffered this profile's settings earlier;
