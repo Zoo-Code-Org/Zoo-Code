@@ -159,10 +159,7 @@ function _scopeErrorCode(error: unknown): string | undefined {
  * caller either way.
  * @internal Exported for the escape-undo regression tests.
  */
-export async function undoEscapedPublish(
-	publishedPath: string,
-	expectedBytes: Buffer | undefined,
-): Promise<void> {
+export async function undoEscapedPublish(publishedPath: string, expectedBytes: Buffer | undefined): Promise<void> {
 	if (expectedBytes === undefined) {
 		return
 	}
