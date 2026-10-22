@@ -61,3 +61,8 @@ plans/
 roo-cli-*.tar.gz*
 .merge-*
 .zdt-*
+.eslint-*.txt
+.fix-commit*.txt
+.prettier-check.txt
+.suites*.txt
+.tsc.txt

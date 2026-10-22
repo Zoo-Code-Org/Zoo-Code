@@ -1,1 +1,0 @@
-﻿core/tools/__tests__/switchModeTool.spec.ts(52,4): error TS1117: An object literal cannot have multiple properties with the same name.
