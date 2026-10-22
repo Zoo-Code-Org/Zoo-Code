@@ -622,7 +622,7 @@
 			"baseUrl": "URL bazowy (opcjonalnie)",
 			"modelId": "ID modelu",
 			"apiKey": "Klucz API Ollama",
-			"apiKeyHelp": "Opcjonalny klucz API dla uwierzytelnionych instancji Ollama lub usług chmurowych. Pozostaw puste dla instalacji lokalnych.",
+			"apiKeyHelp": "Opcjonalny klucz API dla instancji Ollama, które wymagają uwierzytelnienia, lub dla usług chmurowych. Zoo Code wysyła klucz tylko do punktów końcowych HTTPS lub loopback. Zdalny punkt końcowy HTTP nie dostaje klucza, ponieważ klucz byłby przesłany jawnym tekstem. Użyj HTTPS dla zdalnej instancji, która wymaga klucza. Dla instalacji lokalnej pozostaw to pole puste.",
 			"numCtx": "Rozmiar okna kontekstu (num_ctx)",
 			"numCtxHelp": "Zastępuje domyślny rozmiar okna kontekstu modelu. Pozostaw puste, aby użyć konfiguracji Modelfile modelu. Minimalna wartość to 128.",
 			"thinking": "Włącz wnioskowanie",
@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Domyślnie zwijaj wyniki poleceń",
+			"description": "Wyniki poleceń, także z terminala wbudowanego, są początkowo zwinięte. Można je ręcznie rozwinąć. Nie zmienia to sposobu wykonywania poleceń."
+		},
 		"basic": {
 			"label": "Ustawienia terminala: Podstawowe",
 			"description": "Podstawowe ustawienia terminala"

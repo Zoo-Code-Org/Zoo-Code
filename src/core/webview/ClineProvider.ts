@@ -48,6 +48,7 @@ import {
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
 	DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED,
 	DEFAULT_ALWAYS_DENY_UNAPPROVED_COMMANDS,
+	DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
@@ -154,10 +155,6 @@ type ViewLocalStateValues = Partial<RooCodeSettings> & Partial<ExtensionState>
  * https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default/weather-webview/src/providers/WeatherViewProvider.ts
  * https://github.com/KumarVariable/vscode-extension-sidebar-html/blob/master/src/customSidebarViewProvider.ts
  */
-
-export type ClineProviderEvents = {
-	clineCreated: [cline: Task]
-}
 
 type DelegatedChildContext = TaskExecutionContext
 
@@ -4524,6 +4521,7 @@ export class ClineProvider
 			diffFuzzyThreshold,
 			terminalShellIntegrationTimeout,
 			terminalShellIntegrationDisabled,
+			collapseCommandOutputByDefault,
 			terminalCommandDelay,
 			terminalPowershellCounter,
 			terminalZshClearEolMark,
@@ -4696,6 +4694,8 @@ export class ClineProvider
 			diffFuzzyThreshold: diffFuzzyThreshold ?? DEFAULT_DIFF_FUZZY_THRESHOLD,
 			terminalShellIntegrationTimeout: terminalShellIntegrationTimeout ?? Terminal.defaultShellIntegrationTimeout,
 			terminalShellIntegrationDisabled: terminalShellIntegrationDisabled ?? true,
+			collapseCommandOutputByDefault:
+				collapseCommandOutputByDefault ?? DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT,
 			terminalCommandDelay: terminalCommandDelay ?? 0,
 			terminalPowershellCounter: terminalPowershellCounter ?? false,
 			terminalZshClearEolMark: terminalZshClearEolMark ?? true,
@@ -4953,6 +4953,8 @@ export class ClineProvider
 			terminalShellIntegrationTimeout:
 				mergedStateValues.terminalShellIntegrationTimeout ?? Terminal.defaultShellIntegrationTimeout,
 			terminalShellIntegrationDisabled: mergedStateValues.terminalShellIntegrationDisabled ?? true,
+			collapseCommandOutputByDefault:
+				mergedStateValues.collapseCommandOutputByDefault ?? DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT,
 			terminalCommandDelay: mergedStateValues.terminalCommandDelay ?? 0,
 			terminalPowershellCounter: mergedStateValues.terminalPowershellCounter ?? false,
 			terminalZshClearEolMark: mergedStateValues.terminalZshClearEolMark ?? true,
@@ -4963,6 +4965,7 @@ export class ClineProvider
 			mode: (mergedStateValues.mode as Mode) ?? defaultModeSlug,
 			language: mergedStateValues.language ?? formatLanguage(vscode.env.language),
 			mcpEnabled: mergedStateValues.mcpEnabled ?? true,
+
 			mcpServers: this.mcpHub?.getAllServers() ?? [],
 			currentApiConfigName: mergedStateValues.currentApiConfigName ?? "default",
 			listApiConfigMeta: mergedStateValues.listApiConfigMeta ?? [],
@@ -5599,7 +5602,7 @@ export class ClineProvider
 		let parentTask = task.parentTask
 
 		// Mark this as a user-initiated cancellation so provider-only rehydration can occur
-		task.abortReason = "user_cancelled"
+		task.setAbortReason("user_cancelled")
 
 		// Capture the current instance to detect if rehydrate already occurred elsewhere
 		const originalInstanceId = task.instanceId
@@ -5615,7 +5618,7 @@ export class ClineProvider
 		const abortPromise = task.abortTask()
 
 		// Immediately mark the original instance as abandoned to prevent any residual activity
-		task.abandoned = true
+		task.requestAbandon()
 
 		await pWaitFor(
 			() =>

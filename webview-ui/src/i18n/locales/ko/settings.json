@@ -622,7 +622,7 @@
 			"baseUrl": "기본 URL (선택사항)",
 			"modelId": "모델 ID",
 			"apiKey": "Ollama API 키",
-			"apiKeyHelp": "인증된 Ollama 인스턴스나 클라우드 서비스용 선택적 API 키. 로컬 설치의 경우 비워두세요.",
+			"apiKeyHelp": "인증이 필요한 Ollama 인스턴스 또는 클라우드 서비스용 선택적 API 키. Zoo Code는 키를 HTTPS 또는 루프백 엔드포인트에만 보냅니다. 원격 HTTP 엔드포인트에는 키를 보내지 않습니다. 키가 평문으로 전달되기 때문입니다. 키가 필요한 원격 인스턴스에는 HTTPS를 사용하세요. 로컬 설치의 경우 비워두세요.",
 			"numCtx": "컨텍스트 창 크기(num_ctx)",
 			"numCtxHelp": "모델의 기본 컨텍스트 창 크기를 재정의합니다. 모델의 Modelfile 구성을 사용하려면 비워 둡니다. 최소값은 128입니다.",
 			"thinking": "추론 활성화",
@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "명령 출력을 기본적으로 접기",
+			"description": "인라인 터미널을 포함한 명령 출력을 접어서 표시합니다. 필요할 때 수동으로 펼칠 수 있습니다. 명령 실행 방식은 변경되지 않습니다."
+		},
 		"basic": {
 			"label": "터미널 설정: 기본",
 			"description": "기본 터미널 설정"
