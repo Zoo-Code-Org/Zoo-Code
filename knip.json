@@ -7,7 +7,7 @@
 	"playwright-ct": false,
 	"workspaces": {
 		"src": {
-			"entry": ["extension.ts", "extension/api.ts", "workers/countTokens.ts"],
+			"entry": ["extension.ts", "extension/api.ts", "workers/countTokens.ts", "core/tools/guardedWrite.ts"],
 			"project": ["**/*.ts", "!**/__tests__/**"],
 			"ignoreDependencies": [
 				"@roo-code/config-typescript",
