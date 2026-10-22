@@ -16,7 +16,12 @@ import { DIFF_VIEW_URI_SCHEME } from "../../integrations/editor/DiffViewProvider
 
 import { CheckpointServiceOptions, RepoPerTaskCheckpointService } from "../../services/checkpoints"
 
-import { appendChange, clearPendingJournal, reconcilePendingJournal, writePendingJournal } from "./changeJournal"
+import {
+	clearPendingJournal,
+	reconcilePendingJournal,
+	writeIncompleteJournal,
+	writePendingJournal,
+} from "./changeJournal"
 
 const WARNING_THRESHOLD_MS = 5000
 
@@ -325,20 +330,25 @@ export async function checkpointSave(
 							)
 						}
 					} else {
+						// The ready marker could not be written. Persist the complete entries in the
+						// dedicated incomplete marker (which the next read folds in) and surface the
+						// failure: a committed checkpoint must never be reported as successful while
+						// its journal state is missing.
+						let incompletePersisted = false
 						try {
-							for (const entry of entries) {
-								await appendChange(journalStorageDir, task.taskId, entry)
-							}
-							await clearPendingJournal(journalStorageDir, task.taskId)
-						} catch (appendError) {
-							// No durable record could be written for a committed checkpoint: stop
-							// producing checkpoints rather than continue with missing journal state.
+							await writeIncompleteJournal(journalStorageDir, task.taskId, entries)
+							incompletePersisted = true
+						} catch (incompleteError) {
 							console.error(
-								"[Task#checkpointSave] failed to persist change journal entries; disabling checkpoints",
-								appendError,
+								"[Task#checkpointSave] failed to persist the incomplete change journal marker",
+								incompleteError,
 							)
-							task.enableCheckpoints = false
 						}
+						throw new Error(
+							incompletePersisted
+								? "The checkpoint committed but its journal entries could only be recorded in the incomplete marker"
+								: "The checkpoint committed but its journal entries could not be persisted",
+						)
 					}
 				} else {
 					// No commit means no journal entry is claimable.

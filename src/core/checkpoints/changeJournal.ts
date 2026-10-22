@@ -97,6 +97,78 @@ export async function clearPendingJournal(globalStorageDir: string, taskId: stri
 	await fs.rm(pendingJournalPath(globalStorageDir, taskId), { force: true })
 }
 
+const INCOMPLETE_FILENAME = "changes.incomplete.json"
+
+/**
+ * Marker written when a committed checkpoint's journal entries could not be made
+ * durable through the pending marker or a direct append. It carries the complete
+ * entries so the next read can recover them; unlike the pending marker it is never
+ * interpreted as "nothing to do".
+ * @internal Exported for the recovery tests.
+ */
+export function incompleteJournalPath(globalStorageDir: string, taskId: string): string {
+	assertSafeTaskId(taskId)
+	return path.join(taskCheckpointDir(globalStorageDir, taskId), INCOMPLETE_FILENAME)
+}
+
+/** Write the incomplete-journal recovery marker atomically. */
+export async function writeIncompleteJournal(
+	globalStorageDir: string,
+	taskId: string,
+	entries: ChangeJournalEntry[],
+): Promise<void> {
+	const filePath = incompleteJournalPath(globalStorageDir, taskId)
+	await fs.mkdir(path.dirname(filePath), { recursive: true })
+	const stagingPath = `${filePath}.${process.pid}.${Date.now()}.staging`
+	try {
+		await fs.writeFile(stagingPath, JSON.stringify({ entries }), "utf8")
+		await fs.rename(stagingPath, filePath)
+	} catch (error) {
+		await fs.rm(stagingPath, { force: true }).catch(() => {})
+		throw error
+	}
+}
+
+/**
+ * Fold an incomplete-journal marker into the journal. Idempotent like the pending
+ * marker: entries already present are skipped, and the marker is removed only once
+ * every entry is durable.
+ */
+export async function reconcileIncompleteJournal(globalStorageDir: string, taskId: string): Promise<void> {
+	const filePath = incompleteJournalPath(globalStorageDir, taskId)
+	let raw: string
+	try {
+		raw = await fs.readFile(filePath, "utf8")
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+			return
+		}
+		throw error
+	}
+	let entries: ChangeJournalEntry[] = []
+	try {
+		const parsed = JSON.parse(raw) as { entries?: unknown }
+		if (Array.isArray(parsed.entries)) {
+			entries = parsed.entries as ChangeJournalEntry[]
+		}
+	} catch {
+		console.warn("[changeJournal] discarding an unreadable incomplete-journal marker")
+		await fs.rm(filePath, { force: true }).catch(() => {})
+		return
+	}
+	const existing = await readJournalEntries(globalStorageDir, taskId)
+	const seen = new Set(existing.map((entry) => `${entry.path}\u0000${entry.operation}\u0000${entry.checkpointId}`))
+	for (const entry of entries) {
+		const key = `${entry.path}\u0000${entry.operation}\u0000${entry.checkpointId}`
+		if (seen.has(key)) {
+			continue
+		}
+		await appendChange(globalStorageDir, taskId, entry)
+		seen.add(key)
+	}
+	await fs.rm(filePath, { force: true })
+}
+
 /**
  * Fold a durable pending marker into the journal.
  *
@@ -297,5 +369,6 @@ async function readJournalEntries(globalStorageDir: string, taskId: string): Pro
  */
 export async function loadChanges(globalStorageDir: string, taskId: string): Promise<ChangeJournalEntry[]> {
 	await reconcilePendingJournal(globalStorageDir, taskId)
+	await reconcileIncompleteJournal(globalStorageDir, taskId)
 	return readJournalEntries(globalStorageDir, taskId)
 }
