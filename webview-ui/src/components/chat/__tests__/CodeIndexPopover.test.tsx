@@ -218,4 +218,13 @@ describe("CodeIndexPopover OpenRouter provider lookup", () => {
 		expect(screen.getByPlaceholderText("settings:codeIndex.bedrockRegionPlaceholder")).toHaveValue(expectedRegion)
 		expect(screen.getByPlaceholderText("settings:codeIndex.bedrockProfilePlaceholder")).toHaveValue(expectedProfile)
 	})
+
+	it("shows a field error when saving a changed provider without its required key", () => {
+		renderPopover(providerIdentifiers.openai, "embedding-model")
+		fireEvent.click(screen.getByText("settings:codeIndex.setupConfigLabel"))
+		fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: providerIdentifiers.gemini } })
+		fireEvent.click(screen.getByText("settings:codeIndex.saveSettings"))
+
+		expect(screen.getByText("settings:codeIndex.validation.geminiApiKeyRequired")).toBeInTheDocument()
+	})
 })
