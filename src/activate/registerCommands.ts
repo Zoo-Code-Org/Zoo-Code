@@ -40,6 +40,7 @@ const liveTabPanels = new Set<vscode.WebviewPanel>()
 /**
  * Test-only: clears the module-level registry so tab panels created by one
  * spec cannot leak into another's tracked-panel re-pointing.
+ * @internal Exported for focused implementation tests.
  */
 export function __resetLiveTabPanelsForTests(): void {
 	liveTabPanels.clear()
@@ -54,6 +55,7 @@ let pendingTabPanelCreation: Promise<ClineProvider> | undefined
 /**
  * Get the currently active panel
  * @returns WebviewPanel或WebviewView
+ * @internal Exported for focused implementation tests.
  */
 export function getPanel(): vscode.WebviewPanel | vscode.WebviewView | undefined {
 	return tabPanel || sidebarPanel
