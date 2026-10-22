@@ -3,8 +3,8 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"lint": "eslint src --ext=ts,tsx --max-warnings=0",
-		"check-types": "tsc",
+		"lint": "eslint src --ext=ts,tsx --max-warnings=0 --cache --cache-strategy content --cache-location node_modules/.cache/eslint/.eslintcache",
+		"check-types": "tsc --noEmit",
 		"pretest": "turbo run bundle --cwd ..",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage",
@@ -15,7 +15,7 @@
 		"dev": "vite",
 		"build": "tsc -b && vite build",
 		"preview": "vite preview",
-		"clean": "rimraf ../src/webview-ui tsconfig.tsbuildinfo .turbo"
+		"clean": "rimraf ../src/webview-ui tsconfig.tsbuildinfo node_modules/.cache/tsc .turbo"
 	},
 	"dependencies": {
 		"@radix-ui/react-alert-dialog": "^1.1.6",
@@ -81,15 +81,15 @@
 		"use-sound": "^5.0.0",
 		"vscode-material-icons": "^0.1.1",
 		"vscrui": "^0.2.2",
-		"zod": "^3.25.61"
+		"zod": "^4.0.0"
 	},
 	"devDependencies": {
 		"@playwright/test": "1.62.1",
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
 		"@testing-library/jest-dom": "6.9.1",
-		"@testing-library/react": "16.3.2",
-		"@testing-library/user-event": "14.6.1",
+		"@testing-library/react": "16.3.3",
+		"@testing-library/user-event": "14.6.8",
 		"@types/diff": "5.2.3",
 		"@types/jest": "29.5.14",
 		"@types/katex": "0.16.7",
@@ -98,14 +98,14 @@
 		"@types/react-dom": "18.3.7",
 		"@types/stacktrace-js": "2.0.3",
 		"@types/vscode-webview": "1.57.5",
-		"@tailwindcss/vite": "^4.0.0",
+		"@tailwindcss/vite": "4.3.3",
 		"@vitejs/plugin-react": "5.2.0",
-		"@vitest/coverage-v8": "4.1.9",
-		"@vitest/ui": "4.1.9",
+		"@vitest/coverage-v8": "4.1.11",
+		"@vitest/ui": "4.1.11",
 		"babel-plugin-react-compiler": "1.0.0",
 		"jsdom": "26.1.0",
 		"monocart-reporter": "2.12.2",
-		"vite": "8.1.0",
+		"vite": "8.3.4",
 		"vitest": "4.1.11"
 	}
 }

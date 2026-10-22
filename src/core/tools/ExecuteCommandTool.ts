@@ -1,5 +1,6 @@
 import { markToolRejected } from "../task/toolExecutionContext"
 import fs from "fs/promises"
+import { constants as fsConstants } from "fs"
 import * as path from "path"
 import * as vscode from "vscode"
 
@@ -79,6 +80,30 @@ export function resolveAgentTimeoutMs(timeoutSeconds: number | null | undefined)
 	return process.env.ROO_CLI_RUNTIME === "1" ? 0 : requestedAgentTimeout
 }
 
+async function commandWorkingDirectoryError(workingDirectory: string): Promise<string | undefined> {
+	try {
+		const stats = await fs.stat(workingDirectory)
+		if (!stats.isDirectory()) {
+			return `Working directory '${workingDirectory}' is not a directory.`
+		}
+		// X_OK on a directory checks search permission, which spawning with it as cwd requires.
+		await fs.access(workingDirectory, fsConstants.X_OK)
+		return undefined
+	} catch (error) {
+		const code = error && typeof error === "object" && "code" in error ? error.code : undefined
+		if (code === "EACCES" || code === "EPERM") {
+			return `Working directory '${workingDirectory}' is not accessible (permission denied).`
+		}
+		if (code === "ENOENT") {
+			return `Working directory '${workingDirectory}' does not exist.`
+		}
+		if (code === "ENOTDIR") {
+			return `Working directory '${workingDirectory}' is not a directory.`
+		}
+		return `Unable to access working directory '${workingDirectory}': ${error instanceof Error ? error.message : String(error)}`
+	}
+}
+
 // Fire-and-forget: some call sites are synchronous terminal callbacks that cannot await,
 // and postMessageToWebview swallows its own errors, so void is enough.
 function postCommandExecutionStatus(provider: ClineProvider | undefined, status: CommandExecutionStatus): void {
@@ -130,10 +155,20 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				pushToolResult(formatResponse.toolError(parseError.message))
 				return
 			}
-
 			const provider = await task.providerRef.deref()
 			let dcgDecision: DcgDecision | undefined
 			if (provider?.contextProxy.getValue("destructiveCommandGuardEnabled") === true) {
+				const workingDirectory = customCwd
+					? path.isAbsolute(customCwd)
+						? customCwd
+						: path.resolve(task.cwd, customCwd)
+					: task.cwd
+				const workingDirectoryError = await commandWorkingDirectoryError(workingDirectory)
+				if (workingDirectoryError) {
+					task.didToolFailInCurrentTurn = true
+					pushToolResult(formatResponse.toolError(workingDirectoryError))
+					return
+				}
 				const { ensureDcgInstalled, runDcg } = await import("../../services/destructive-command-guard")
 				// Resolve through the managed installer on use so an extension update
 				// automatically installs the newly pinned and verified DCG version.
@@ -141,11 +176,8 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				if (!binaryPath) {
 					throw new Error(t("common:errors.destructiveCommandGuard.unavailable"))
 				}
-				const workingDirectory = customCwd
-					? path.isAbsolute(customCwd)
-						? customCwd
-						: path.resolve(task.cwd, customCwd)
-					: task.cwd
+				// Use the same validated directory as terminal execution. A missing cwd
+				// also surfaces as spawn ENOENT and can be mistaken for a missing binary.
 				// Infra failures (spawn/parse/timeout) reject here and surface as a
 				// retryable tool_error via the outer catch — never as a policy denial.
 				dcgDecision = await runDcg(binaryPath, canonicalCommand, workingDirectory)
@@ -383,7 +415,6 @@ export async function executeCommandInTerminal(
 	// Convert milliseconds back to seconds for display purposes.
 	const commandExecutionTimeoutSeconds = commandExecutionTimeout / 1000
 	let workingDir: string
-
 	if (!customCwd) {
 		workingDir = task.cwd
 	} else if (path.isAbsolute(customCwd)) {
@@ -392,10 +423,9 @@ export async function executeCommandInTerminal(
 		workingDir = path.resolve(task.cwd, customCwd)
 	}
 
-	try {
-		await fs.access(workingDir)
-	} catch {
-		return [false, `Working directory '${workingDir}' does not exist.`]
+	const workingDirectoryError = await commandWorkingDirectoryError(workingDir)
+	if (workingDirectoryError) {
+		return [false, workingDirectoryError]
 	}
 
 	let runInBackground = false
