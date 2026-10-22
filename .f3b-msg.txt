@@ -1,0 +1,17 @@
+fix(api): route setConfiguration through ClineProvider.setValues
+
+Route the CS API setConfiguration write through ClineProvider.setValues
+instead of the raw context proxy so the view-local subset stays in sync
+with the sidebar view's state. A direct context-proxy write leaves the
+view-local apiConfiguration stale; the mode-switch / profile-activation
+paths re-apply the current provider settings to the focused task on
+every user message, so a task started after an API setConfiguration runs
+with the stale configuration (wrong model / reasoning flags / endpoint).
+That is the deterministic 13-test e2e provider-suite failure (72/13) on
+this head: the provider suites configure the provider via setConfiguration
+and the mock serves fixtures by the model the request actually carries.
+
+Ported from the F5 head (vps2 F5) where the e2e provider suites pass;
+includes the unit spec asserting the routing.
+
+Upstream: Zoo-Code-Org/Zoo-Code#982 (vps2 F3)

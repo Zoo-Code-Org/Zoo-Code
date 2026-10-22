@@ -1,0 +1,24 @@
+﻿
+ RUN  v4.1.9 C:/work/Zoo-Code-fork/vps2-f3-wt/src
+
+node : 上午4:49:20 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${absolutepath}/
+At line:1 char:182
++ ... f3-wt\src'; node node_modules\vitest\vitest.mjs run core/config/__tes ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (上午4:49:20 [vite...{absolutepath}/:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  Plugin: builtin:vite-resolve
+上午4:49:20 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${cachedpath}/
+  Plugin: builtin:vite-resolve
+上午4:49:20 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${tempfile}/
+  Plugin: builtin:vite-resolve
+上午4:49:20 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${tempfile}/
+  Plugin: builtin:vite-resolve
+·····························································································································································
+
+ Test Files  4 passed (4)
+      Tests  157 passed (157)
+   Start at  04:49:18
+   Duration  5.90s (transform 4.50s, setup 325ms, import 9.34s, tests 2.02s, environment 0ms)
+

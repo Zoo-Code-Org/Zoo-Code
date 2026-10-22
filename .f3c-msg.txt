@@ -1,0 +1,12 @@
+test(extension): add setValues to the api-configuration spec provider mocks
+
+API.setConfiguration now routes through ClineProvider.setValues
+(8576b18cc "fix(api): route setConfiguration through
+ClineProvider.setValues"), but the pre-existing spec still shaped the
+provider mock around the old contextProxy.setValues call. Both tests in
+this file failed with "this.sidebarProvider.setValues is not a
+function" on the platform-unit-test runs (F3 #1560 windows unit,
+job 101863508169, run 34161293841). Add the provider-level setValues
+mock to both tests to match the new routing.
+
+Upstream: Zoo-Code-Org/Zoo-Code#1560 (vps2 F3)

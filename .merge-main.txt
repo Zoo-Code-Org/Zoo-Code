@@ -1,0 +1,23 @@
+﻿Auto-merging packages/types/src/global-settings.ts
+Auto-merging src/activate/__tests__/registerCommands.spec.ts
+Auto-merging src/activate/registerCommands.ts
+Auto-merging src/core/config/ProviderSettingsManager.ts
+Auto-merging src/core/config/__tests__/ProviderSettingsManager.spec.ts
+Auto-merging src/core/config/__tests__/importExport.spec.ts
+Auto-merging src/core/config/importExport.ts
+Auto-merging src/core/task/Task.ts
+Auto-merging src/core/task/__tests__/Task.spec.ts
+CONFLICT (content): Merge conflict in src/core/task/__tests__/Task.spec.ts
+Auto-merging src/core/tools/SwitchModeTool.ts
+CONFLICT (content): Merge conflict in src/core/tools/SwitchModeTool.ts
+Auto-merging src/core/tools/__tests__/switchModeTool.spec.ts
+CONFLICT (content): Merge conflict in src/core/tools/__tests__/switchModeTool.spec.ts
+Auto-merging src/core/webview/ClineProvider.ts
+CONFLICT (content): Merge conflict in src/core/webview/ClineProvider.ts
+Auto-merging src/core/webview/__tests__/ClineProvider.spec.ts
+Auto-merging src/core/webview/__tests__/ClineProvider.sticky-mode.spec.ts
+Auto-merging src/core/webview/webviewMessageHandler.ts
+Auto-merging src/eslint-suppressions.json
+CONFLICT (content): Merge conflict in src/eslint-suppressions.json
+Auto-merging src/package.json
+Automatic merge failed; fix conflicts and then commit the result.

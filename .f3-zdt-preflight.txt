@@ -1,0 +1,8 @@
+﻿HEAD: 3b1c6bf8a0f026e22879a6d9b7896f57223344b5
+BASE: 267bf35e56cd5da585a38f6685289cc0444f5a13
+PACKAGE extension: 80 changed executable lines (limit 500), 4 files
+  src/core/task/Task.ts: 8 lines
+  src/core/tools/SwitchModeTool.ts: 1 lines
+  src/core/webview/ClineProvider.ts: 70 lines
+  src/extension/api.ts: 1 lines
+PREFLIGHT OK

@@ -1,0 +1,56 @@
+﻿git : [WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.onlyBui
+ltDependencies", "pnpm.overrides". See https://pnpm.io/settings for the new home of each setting.
+At line:1 char:410
++ ... 'C:\work\Zoo-Code-fork\vps2-f3-wt'; git push origin HEAD 2>&1 | Out-F ...
++                                         ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([WARN] The "pnp...f each setting.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ WARN  Unsupported engine: wanted: {"node":"22.23.1"} (current: {"node":"v25.9.0","pnpm":"10.8.1"})
+
+> roo-code@ check-types C:\work\Zoo-Code-fork\vps2-f3-wt
+> turbo check-types --log-order grouped --output-logs new-only
+
+• turbo 2.10.0
+
+   • Packages in scope: @roo-code/build, @roo-code/cli, @roo-code/cloud, @roo-code/config-eslint, @roo-code/config-typescript, @roo-code/core, @roo-code/ipc, @roo-code/telemetry, @roo-code/types, @roo-code/vscode-e2e, @roo-code/vscode-shim, @roo-code/vscode-webview, zoo-code
+   • Running check-types in 13 packages
+   • Remote caching disabled, using shared worktree cache
+
+@roo-code/ipc:check-types: cache hit, suppressing logs bea95f994d073cec
+@roo-code/core:check-types: cache hit, suppressing logs 9f24614c0abd7f92
+@roo-code/vscode-shim:check-types: cache hit, suppressing logs 295a5bf9babcb0da
+@roo-code/telemetry:check-types: cache hit, suppressing logs 264d9a7f27e8d4ae
+@roo-code/vscode-e2e:check-types: cache hit, suppressing logs 91095502566af463
+@roo-code/build:check-types: cache hit, suppressing logs 5ba240f42108e7fd
+@roo-code/cloud:check-types: cache hit, suppressing logs 428d3f97f8ff22a8
+@roo-code/cli:check-types: cache hit, suppressing logs 54f778b80cbfce50
+@roo-code/types:check-types: cache miss, executing 4cbcfcf6ae349c12
+@roo-code/types:check-types: 
+@roo-code/types:check-types: > @roo-code/types@0.0.1 check-types C:\work\Zoo-Code-fork\vps2-f3-wt\packages\types
+@roo-code/types:check-types: > tsc --noEmit
+@roo-code/types:check-types: 
+@roo-code/vscode-webview:check-types: cache miss, executing e6872cb2b2c403a0
+@roo-code/vscode-webview:check-types: 
+@roo-code/vscode-webview:check-types: > @roo-code/vscode-webview@ check-types C:\work\Zoo-Code-fork\vps2-f3-wt\webview-ui
+@roo-code/vscode-webview:check-types: > tsc
+@roo-code/vscode-webview:check-types: 
+zoo-code:check-types: cache miss, executing 40f4dfa5778d65fc
+zoo-code:check-types:  WARN  Unsupported engine: wanted: {"node":"22.23.1"} (current: {"node":"v25.9.0","pnpm":"10.8.1"})
+zoo-code:check-types: 
+zoo-code:check-types: > zoo-code@3.84.0 check-types C:\work\Zoo-Code-fork\vps2-f3-wt\src
+zoo-code:check-types: > tsc --noEmit
+zoo-code:check-types: 
+
+ Tasks:    11 successful, 11 total
+Cached:    8 cached, 11 total
+  Time:    16.163s 
+
+Changeset files: 10
+remote: 
+remote: GitHub found 65 vulnerabilities on easonLiangWorldedtech/Zoo-Code's default branch (33 high, 28 moderate, 4 low
+). To find out more, visit:        
+remote:      https://github.com/easonLiangWorldedtech/Zoo-Code/security/dependabot        
+remote: 
+To https://github.com/easonLiangWorldedtech/Zoo-Code.git
+   065116c24..174dc68f2  HEAD -> vps2/f3-mode-profile-writes

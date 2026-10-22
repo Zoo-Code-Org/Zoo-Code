@@ -1,0 +1,172 @@
+﻿git : npm warn Unknown env config "manage-package-manager-versions". This will stop working in the next major version o
+f npm. See `npm help npmrc` for supported config options.
+At line:1 char:368
++ ... rovider.ts; git -c user.name="Eason Liang" -c user.email="easonliang2 ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[STARTED] Backing up original state...
+[COMPLETED] Backed up original state in git stash (4d7cce966)
+[STARTED] Running tasks for staged files...
+[STARTED] package.json — 52 files (chunk 1/6)...
+[STARTED] package.json — 52 files (chunk 2/6)...
+[STARTED] package.json — 52 files (chunk 3/6)...
+[STARTED] package.json — 52 files (chunk 4/6)...
+[STARTED] package.json — 52 files (chunk 5/6)...
+[STARTED] package.json — 52 files (chunk 6/6)...
+[STARTED] *.{js,jsx,ts,tsx,json,css,md} — 45 files
+[STARTED] *.{js,jsx,ts,tsx,json,css,md} — 48 files
+[STARTED] *.{js,jsx,ts,tsx,json,css,md} — 46 files
+[STARTED] *.{js,jsx,ts,tsx,json,css,md} — 51 files
+[STARTED] *.{js,jsx,ts,tsx,json,css,md} — 44 files
+[STARTED] *.{js,jsx,ts,tsx,json,css,md} — 51 files
+[STARTED] prettier --write
+[STARTED] prettier --write
+[STARTED] prettier --write
+[STARTED] prettier --write
+[STARTED] prettier --write
+[STARTED] prettier --write
+[COMPLETED] prettier --write
+[COMPLETED] *.{js,jsx,ts,tsx,json,css,md} — 46 files
+[COMPLETED] package.json — 52 files (chunk 3/6)...
+[COMPLETED] prettier --write
+[COMPLETED] *.{js,jsx,ts,tsx,json,css,md} — 51 files
+[COMPLETED] package.json — 52 files (chunk 6/6)...
+[COMPLETED] prettier --write
+[COMPLETED] *.{js,jsx,ts,tsx,json,css,md} — 45 files
+[COMPLETED] package.json — 52 files (chunk 1/6)...
+[COMPLETED] prettier --write
+[COMPLETED] *.{js,jsx,ts,tsx,json,css,md} — 44 files
+[COMPLETED] package.json — 52 files (chunk 5/6)...
+[COMPLETED] prettier --write
+[COMPLETED] *.{js,jsx,ts,tsx,json,css,md} — 48 files
+[COMPLETED] package.json — 52 files (chunk 2/6)...
+[FAILED] prettier --write [FAILED]
+[FAILED] prettier --write [FAILED]
+[COMPLETED] Running tasks for staged files...
+[STARTED] Applying modifications from tasks...
+[SKIPPED] Skipped because of errors from tasks.
+[STARTED] Reverting to original state because of errors...
+[COMPLETED] Reverting to original state because of errors...
+[STARTED] Cleaning up temporary files...
+[COMPLETED] Cleaning up temporary files...
+
+✖ prettier --write:
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/prompts/sections/objective.ts 46ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/prompts/sections/rules.ts 17ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/prompts/sections/skills.ts 8ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/prompts/sections/system-info.ts 4ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/prompts/sections/tool-use-guidelines.ts 1ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/prompts/system.ts 10ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/prompts/tools/__tests__/codebase-search-readiness.spec.ts 15ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/prompts/tools/__tests__/effective-tool-policy.spec.ts 51ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/prompts/tools/__tests__/filter-tools-for-mode.spec.ts 25ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/prompts/tools/effective-tool-policy.ts 14ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/prompts/tools/filter-tools-for-mode.ts 6ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/task/Task.ts 191ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/task/__tests__/Task.spec.ts 252ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/task/__tests__/build-tools-readiness.integration.spec.ts 9ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/task/__tests__/build-tools.spec.ts 12ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/task/__tests__/providerHandoff.spec.ts 3ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/task/__tests__/truncated-native-tool-args.spec.ts 2ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/task/build-tools.ts 3ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/task/providerHandoff.ts 2ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/tools/CodebaseSearchTool.ts 5ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/tools/RunSlashCommandTool.ts 4ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/tools/SkillTool.ts 3ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+[error] src/core/tools/SwitchModeTool.ts: SyntaxError: Merge conflict marker encountered. (41:1)
+[error]   39 | 			}
+[error]   40 |
+[error] > 41 | <<<<<<< HEAD
+[error]      | ^
+[error]   42 | 			// Check if already in requested mode
+[error]   43 | 			// the task's own mode (awaits taskModeReady and applies the default slug) instead of the provider
+[error]   44 | 			// state, which may be stale or focused on another task.
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/tools/__tests__/CodebaseSearchTool.spec.ts 19ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/tools/__tests__/CodebaseSearchTool.workspace.spec.ts 11ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/tools/__tests__/generateImageTool.test.ts 11ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/tools/__tests__/mcpServerRestriction.spec.ts 7ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/tools/__tests__/runSlashCommandTool.spec.ts 10ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/tools/__tests__/skillTool.spec.ts 8ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/tools/__tests__/switchModeTool.spec.ts 10ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/tools/__tests__/validateToolUse.spec.ts 8ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/tools/mcpServerRestriction.ts 3ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/webview/ClineProvider.ts 145ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/webview/__tests__/ClineProvider.flicker-free-cancel.spec.ts 28ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/webview/__tests__/ClineProvider.spec.ts 188ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/webview/__tests__/ClineProvider.sticky-mode.spec.ts 30ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/webview/__tests__/ClineProvider.taskHistory.spec.ts 27ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/webview/__tests__/generateSystemPrompt.spec.ts 16ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/webview/__tests__/webviewMessageHandler.openFile.spec.ts 15ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/webview/generateSystemPrompt.ts 3ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/core/webview/webviewMessageHandler.ts 91ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+[error] src/eslint-suppressions.json: SyntaxError: Unexpected token (1039:1)
+[error]   1037 | 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
+[error]   1038 | 		"@typescript-eslint/no-explicit-any": {
+[error] > 1039 | <<<<<<< HEAD
+[error]        | ^
+[error]   1040 | 			"count": 33
+[error]   1041 | =======
+[error]   1042 | 			"count": 27
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/extension.ts 8ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/i18n/__tests__/locale-bundles.spec.ts 2ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/i18n/locales/ca/common.json 4ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/i18n/locales/de/common.json 4ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/i18n/locales/en/common.json 2ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/i18n/locales/es/common.json 3ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/i18n/locales/fr/common.json 3ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/i18n/locales/hi/common.json 3ms
+[warn] Ignored unknown option { ignore: ["node_modules", "dist", "build", "out", ".next", ".venv", "pnpm-lock.yaml"] }.
+src/i18n/locales/id/common.json 2ms
+husky - pre-commit script failed (code 1)
