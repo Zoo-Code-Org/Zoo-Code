@@ -8337,7 +8337,7 @@ describe("saveClineMessages abandoned guard (#1021)", () => {
 
 			// abandonSubtask severs the link, then aborts the subtask with
 			// isAbandoned=true; an in-flight fire-and-forget save lands here.
-			task.abandoned = true
+			task.requestAbort(true)
 
 			const saved = await getTaskTestAccess(task).saveClineMessages()
 
@@ -8410,7 +8410,7 @@ describe("saveClineMessages abandoned guard (#1021)", () => {
 
 			// The save is in flight (awaiting saveTaskMessages) when the task is
 			// abandoned; only after it resumes does the save hit the guard.
-			task.abandoned = true
+			task.requestAbort(true)
 			resolveSave([])
 
 			const saved = await savePromise
