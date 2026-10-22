@@ -964,7 +964,6 @@ describe("safeWriteJson", () => {
 		const target = path.join(parent, "eacces-ancestor.json")
 		await fsPromisesActuals.writeFile!(target, JSON.stringify({ own: true }))
 		const asDir = { isSymbolicLink: () => false, dev: 1n, ino: 1n } as unknown as fsSyncActual.BigIntStats
-		const asFile = { isSymbolicLink: () => false } as unknown as fsSyncActual.Stats
 		const failure = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
 		let parentLooks = 0
 		vi.spyOn(fs, "lstat").mockImplementation(((p: unknown) => {
