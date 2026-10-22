@@ -5,7 +5,7 @@ import path from "path"
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest"
 
 import type { Task } from "../../task/Task"
-import { loadChanges } from "../changeJournal"
+import { appendChange, loadChanges, pendingJournalPath, writePendingJournal } from "../changeJournal"
 import { checkpointSave, type CheckpointWriteInfo } from "../index"
 
 // Mock the VS Code API surface (index.ts imports vscode at module level).
@@ -202,8 +202,14 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 		await expect(checkpointSave(mockTask as Task, false, true, write)).resolves.toMatchObject({ commit: COMMIT })
 
 		expect(mockTask.enableCheckpoints).toBe(true)
+		// The pending-marker write (before the commit) and the journal append both fail;
+		// neither failure propagates to the checkpoint error handler.
 		expect(consoleErrorSpy).toHaveBeenCalledWith(
-			expect.stringContaining("failed to append change journal entry"),
+			expect.stringContaining("failed to record the pending change journal"),
+			expect.anything(),
+		)
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			expect.stringContaining("failed to persist change journal entries"),
 			expect.anything(),
 		)
 	})
@@ -242,5 +248,54 @@ describe("loadChanges entry-shape validation (B2)", () => {
 
 		const entries = await loadChanges(tmpStorageDir, TASK_ID)
 		expect(entries).toEqual([{ path: "src/a.ts", operation: "create", checkpointId: "c1" }])
+	})
+})
+
+
+describe("checkpoint/journal transaction recovery (B2)", () => {
+	let tmpStorageDir: string
+
+	beforeEach(async () => {
+		tmpStorageDir = await fs.mkdtemp(path.join(os.tmpdir(), "b2-journal-recovery-"))
+	})
+
+	afterEach(async () => {
+		await fs.rm(tmpStorageDir, { recursive: true, force: true })
+	})
+
+	it("folds a durable ready marker into the journal on the next load", async () => {
+		await writePendingJournal(tmpStorageDir, TASK_ID, {
+			state: "ready",
+			createdAt: Date.now(),
+			entries: [{ path: "src/a.ts", operation: "create", checkpointId: "c1" }],
+		})
+
+		const entries = await loadChanges(tmpStorageDir, TASK_ID)
+		expect(entries).toHaveLength(1)
+		expect(entries[0]).toMatchObject({ path: "src/a.ts", operation: "create", checkpointId: "c1" })
+		// The marker is consumed once its entries are durable.
+		await expect(fs.stat(pendingJournalPath(tmpStorageDir, TASK_ID))).rejects.toThrow()
+	})
+
+	it("drops an awaiting-checkpoint marker without inventing entries", async () => {
+		await writePendingJournal(tmpStorageDir, TASK_ID, { state: "awaiting-checkpoint", createdAt: Date.now() })
+
+		expect(await loadChanges(tmpStorageDir, TASK_ID)).toEqual([])
+		await expect(fs.stat(pendingJournalPath(tmpStorageDir, TASK_ID))).rejects.toThrow()
+	})
+
+	it("does not duplicate entries already appended before a crash", async () => {
+		await appendChange(tmpStorageDir, TASK_ID, { path: "src/a.ts", operation: "create", checkpointId: "c1" })
+		await writePendingJournal(tmpStorageDir, TASK_ID, {
+			state: "ready",
+			createdAt: Date.now(),
+			entries: [
+				{ path: "src/a.ts", operation: "create", checkpointId: "c1" },
+				{ path: "src/b.ts", operation: "update", checkpointId: "c1" },
+			],
+		})
+
+		const entries = await loadChanges(tmpStorageDir, TASK_ID)
+		expect(entries.map((entry) => entry.path)).toEqual(["src/a.ts", "src/b.ts"])
 	})
 })

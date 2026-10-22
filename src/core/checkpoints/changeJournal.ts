@@ -48,6 +48,97 @@ export function journalPath(globalStorageDir: string, taskId: string): string {
 	return path.join(taskCheckpointDir(globalStorageDir, taskId), JOURNAL_FILENAME)
 }
 
+const PENDING_FILENAME = "changes.pending.json"
+
+/**
+ * On-disk state for the checkpoint/journal transaction.
+ *
+ * `awaiting-checkpoint` is written before the Git checkpoint is created: if the
+ * process dies before the checkpoint confirms, there is no durable commit to
+ * attribute entries to. `ready` carries the complete entries (with their commit
+ * id) and is written before any append: a crash or an append failure then leaves
+ * a durable marker that the next read reconciles into the journal.
+ */
+export interface PendingJournalState {
+	state: "awaiting-checkpoint" | "ready"
+	createdAt: number
+	entries?: ChangeJournalEntry[]
+}
+
+/** Pending-marker path for a given task. */
+export function pendingJournalPath(globalStorageDir: string, taskId: string): string {
+	assertSafeTaskId(taskId)
+	return path.join(taskCheckpointDir(globalStorageDir, taskId), PENDING_FILENAME)
+}
+
+/** Write the pending marker atomically (staging file + rename in the same dir). */
+export async function writePendingJournal(
+	globalStorageDir: string,
+	taskId: string,
+	state: PendingJournalState,
+): Promise<void> {
+	const filePath = pendingJournalPath(globalStorageDir, taskId)
+	await fs.mkdir(path.dirname(filePath), { recursive: true })
+	const stagingPath = `${filePath}.${process.pid}.${Date.now()}.staging`
+	try {
+		await fs.writeFile(stagingPath, JSON.stringify(state), "utf8")
+		await fs.rename(stagingPath, filePath)
+	} catch (error) {
+		await fs.rm(stagingPath, { force: true }).catch(() => {})
+		throw error
+	}
+}
+
+/** Remove the pending marker after the journal has durably recorded it. */
+export async function clearPendingJournal(globalStorageDir: string, taskId: string): Promise<void> {
+	await fs.rm(pendingJournalPath(globalStorageDir, taskId), { force: true })
+}
+
+/**
+ * Fold a durable pending marker into the journal.
+ *
+ * Idempotent: entries already present (same path, operation and checkpoint id)
+ * are skipped, so a crash between the append and the marker removal cannot
+ * duplicate them. A marker that is still `awaiting-checkpoint` is discarded —
+ * there is no committed checkpoint whose id could be attributed to the writes.
+ */
+export async function reconcilePendingJournal(globalStorageDir: string, taskId: string): Promise<void> {
+	const filePath = pendingJournalPath(globalStorageDir, taskId)
+	let raw: string
+	try {
+		raw = await fs.readFile(filePath, "utf8")
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+			return
+		}
+		throw error
+	}
+	let marker: PendingJournalState | undefined
+	try {
+		marker = JSON.parse(raw) as PendingJournalState
+	} catch {
+		marker = undefined
+	}
+	if (!marker || typeof marker !== "object" || (marker.state !== "ready" && marker.state !== "awaiting-checkpoint")) {
+		console.warn("[changeJournal] discarding an unreadable pending-journal marker")
+		await clearPendingJournal(globalStorageDir, taskId)
+		return
+	}
+	if (marker.state === "ready" && Array.isArray(marker.entries) && marker.entries.length > 0) {
+		const existing = await readJournalEntries(globalStorageDir, taskId)
+		const seen = new Set(existing.map((entry) => `${entry.path}\u0000${entry.operation}\u0000${entry.checkpointId}`))
+		for (const entry of marker.entries) {
+			const key = `${entry.path}\u0000${entry.operation}\u0000${entry.checkpointId}`
+			if (seen.has(key)) {
+				continue
+			}
+			await appendChange(globalStorageDir, taskId, entry)
+			seen.add(key)
+		}
+	}
+	await clearPendingJournal(globalStorageDir, taskId)
+}
+
 /**
  * Append one change-journal entry to the per-task changes.jsonl file.
  *
@@ -139,7 +230,7 @@ export async function appendChange(globalStorageDir: string, taskId: string, ent
  * not be indistinguishable from one that is legitimately empty.
  * @internal Wired by a later unit in the split chain; remove when the chain completes.
  */
-export async function loadChanges(globalStorageDir: string, taskId: string): Promise<ChangeJournalEntry[]> {
+async function readJournalEntries(globalStorageDir: string, taskId: string): Promise<ChangeJournalEntry[]> {
 	const filePath = journalPath(globalStorageDir, taskId)
 
 	let content: string
@@ -192,4 +283,13 @@ export async function loadChanges(globalStorageDir: string, taskId: string): Pro
 	}
 
 	return entries
+}
+
+/**
+ * Load all change-journal entries for a task, first folding in a durable
+ * pending marker left by a crash or a failed append (see reconcilePendingJournal).
+ */
+export async function loadChanges(globalStorageDir: string, taskId: string): Promise<ChangeJournalEntry[]> {
+	await reconcilePendingJournal(globalStorageDir, taskId)
+	return readJournalEntries(globalStorageDir, taskId)
 }
