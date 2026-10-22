@@ -3672,7 +3672,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// could still build tools and call `createMessage()`.
 		this.requestDispose()
 
-
 		// Cancel any in-progress HTTP request
 		try {
 			this.cancelCurrentRequest()
