@@ -846,6 +846,15 @@ export class ClineProvider
 	}
 
 	/**
+	 * True once a sidebar view or panel has been resolved for this provider. Headless API
+	 * callers can create tasks without any view: those must not wait on the webview
+	 * readiness barrier (nothing will ever launch), while a resolved view must.
+	 */
+	public get hasResolvedView(): boolean {
+		return this.view !== undefined
+	}
+
+	/**
 	 * Registers this provider's stable view identifier and loads any persisted selections it owns.
 	 * The identifier is sanitized so it remains a safe object key in the shared viewStates map.
 	 */

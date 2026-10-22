@@ -464,6 +464,23 @@ function stallProviderSettingsProfile(provider: ClineProvider) {
 }
 
 describe("ClineProvider", () => {
+	it("reports hasResolvedView once a view or panel is resolved", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		// Headless API callers must not wait on a readiness barrier nothing will release.
+		expect(provider.hasResolvedView).toBe(false)
+
+		await provider.resolveWebviewView(mockWebviewView)
+
+		expect(provider.hasResolvedView).toBe(true)
+		await provider.dispose()
+	})
+
 	beforeAll(() => {
 		vi.mocked(Task).mockImplementation(function (options: any) {
 			const task: any = {

@@ -234,33 +234,39 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		// A new task must not consume shared default mode/profile state before the view's
 		// stable state id is registered and its persisted view state loaded: webviewDidLaunch
 		// may not have arrived yet. Bound the wait so a view that never launches cannot
-		// hang task creation; if the bound expires, fail task creation rather than start
-		// the task against stale shared defaults.
-		let readinessTimer: ReturnType<typeof setTimeout> | undefined
-		try {
-			await Promise.race([
-				provider.viewStateReadiness,
-				new Promise<never>((_, reject) => {
-					readinessTimer = setTimeout(
-						() => reject(new Error("Timed out waiting for the view state to become ready")),
-						3000,
-					)
-				}),
-			]).finally(() => {
-				clearTimeout(readinessTimer)
-			})
-		} catch (error) {
-			if (
-				provider.viewLaunched ||
-				!(error instanceof Error) ||
-				error.message !== "Timed out waiting for the view state to become ready"
-			) {
-				throw error
+		// hang task creation.
+		//
+		// Skip the wait when there is nothing to wait for: a sidebar provider that never
+		// resolved a view cannot launch a webview (the headless API path), so waiting would
+		// only burn the full bound before the existing shared-state fallback runs. A new
+		// tab always creates a view.
+		if (newTab || provider.hasResolvedView) {
+			let readinessTimer: ReturnType<typeof setTimeout> | undefined
+			try {
+				await Promise.race([
+					provider.viewStateReadiness,
+					new Promise<never>((_, reject) => {
+						readinessTimer = setTimeout(
+							() => reject(new Error("Timed out waiting for the view state to become ready")),
+							3000,
+						)
+					}),
+				]).finally(() => {
+					clearTimeout(readinessTimer)
+				})
+			} catch (error) {
+				if (
+					provider.viewLaunched ||
+					!(error instanceof Error) ||
+					error.message !== "Timed out waiting for the view state to become ready"
+				) {
+					throw error
+				}
+				// Headless API callers create tasks without ever launching a webview: the
+				// readiness bound expiring keeps the pre-existing shared-state fallback.
+				// A launched view whose readiness failed is a real failure and rethrows.
+				this.log("[API#startNewTask] webview not launched; continuing in headless mode")
 			}
-			// Headless API callers create tasks without ever launching a webview: the
-			// readiness bound expiring keeps the pre-existing shared-state fallback.
-			// A launched view whose readiness failed is a real failure and rethrows.
-			this.log("[API#startNewTask] webview not launched; continuing in headless mode")
 		}
 
 		// Disposal resolves viewStateReadiness to release waiters: a provider torn down while
