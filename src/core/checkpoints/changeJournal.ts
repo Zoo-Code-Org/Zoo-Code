@@ -74,6 +74,22 @@ export function pendingJournalPath(globalStorageDir: string, taskId: string): st
 	return path.join(taskCheckpointDir(globalStorageDir, taskId), PENDING_FILENAME)
 }
 
+/**
+ * Runtime shape guard for entries read back from a marker or journal line:
+ * JSON.parse output is untrusted, so consumers validate instead of casting.
+ */
+function isChangeJournalEntry(value: unknown): value is ChangeJournalEntry {
+	if (value === null || typeof value !== "object") {
+		return false
+	}
+	const candidate = value as Partial<ChangeJournalEntry>
+	return (
+		typeof candidate.path === "string" &&
+		typeof candidate.checkpointId === "string" &&
+		(candidate.operation === "create" || candidate.operation === "update" || candidate.operation === "delete")
+	)
+}
+
 /** Write the pending marker atomically (staging file + rename in the same dir). */
 export async function writePendingJournal(
 	globalStorageDir: string,
@@ -149,7 +165,7 @@ export async function reconcileIncompleteJournal(globalStorageDir: string, taskI
 	try {
 		const parsed = JSON.parse(raw) as { entries?: unknown }
 		if (Array.isArray(parsed.entries)) {
-			entries = parsed.entries as ChangeJournalEntry[]
+			entries = parsed.entries.filter(isChangeJournalEntry)
 		}
 	} catch {
 		console.warn("[changeJournal] discarding an unreadable incomplete-journal marker")

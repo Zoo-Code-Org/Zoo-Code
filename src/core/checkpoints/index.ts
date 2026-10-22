@@ -269,6 +269,9 @@ export async function checkpointSave(
 	// marker cannot be written durably this save does not run at all.
 	if (journalStorageDir !== undefined) {
 		try {
+			// A marker left by a crash or a failed append is folded in before this save
+			// overwrites the marker, so its entries are not lost.
+			await reconcilePendingJournal(journalStorageDir, task.taskId)
 			await writePendingJournal(journalStorageDir, task.taskId, {
 				state: "awaiting-checkpoint",
 				createdAt: Date.now(),

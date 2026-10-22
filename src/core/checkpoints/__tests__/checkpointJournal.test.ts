@@ -268,14 +268,14 @@ describe("checkpoint/journal transaction recovery (B2)", () => {
 		expect(entries).toHaveLength(1)
 		expect(entries[0]).toMatchObject({ path: "src/a.ts", operation: "create", checkpointId: "c1" })
 		// The marker is consumed once its entries are durable.
-		await expect(fs.stat(pendingJournalPath(tmpStorageDir, TASK_ID))).rejects.toThrow()
+		await expect(fs.stat(pendingJournalPath(tmpStorageDir, TASK_ID))).rejects.toMatchObject({ code: "ENOENT" })
 	})
 
 	it("drops an awaiting-checkpoint marker without inventing entries", async () => {
 		await writePendingJournal(tmpStorageDir, TASK_ID, { state: "awaiting-checkpoint", createdAt: Date.now() })
 
 		expect(await loadChanges(tmpStorageDir, TASK_ID)).toEqual([])
-		await expect(fs.stat(pendingJournalPath(tmpStorageDir, TASK_ID))).rejects.toThrow()
+		await expect(fs.stat(pendingJournalPath(tmpStorageDir, TASK_ID))).rejects.toMatchObject({ code: "ENOENT" })
 	})
 
 	it("does not duplicate entries already appended before a crash", async () => {
@@ -292,4 +292,63 @@ describe("checkpoint/journal transaction recovery (B2)", () => {
 		const entries = await loadChanges(tmpStorageDir, TASK_ID)
 		expect(entries.map((entry) => entry.path)).toEqual(["src/a.ts", "src/b.ts"])
 	})
+
+	it.each(["not-json", JSON.stringify({ state: "unknown" }), JSON.stringify({ state: "ready" })] )(
+		"discards an unreadable or unrecognized pending marker (%s)",
+		async (rawMarker) => {
+			const markerPath = pendingJournalPath(tmpStorageDir, TASK_ID)
+			await fs.mkdir(path.dirname(markerPath), { recursive: true })
+			await fs.writeFile(markerPath, rawMarker)
+
+			expect(await loadChanges(tmpStorageDir, TASK_ID)).toEqual([])
+			// The unreadable marker is removed so it cannot shadow later writes.
+			await expect(fs.stat(markerPath)).rejects.toMatchObject({ code: "ENOENT" })
+		},
+	)
+
+	it("writes the pending marker with the exact state literals and no extra fields", async () => {
+		const readyEntry = { path: "src/a.ts", operation: "create" as const, checkpointId: "c1" }
+		await writePendingJournal(tmpStorageDir, TASK_ID, { state: "awaiting-checkpoint", createdAt: 1 })
+		const awaiting = JSON.parse(await fs.readFile(pendingJournalPath(tmpStorageDir, TASK_ID), "utf8"))
+		// Exact shape: a changed literal or an extra object property would leave the
+		// recovery read unable to classify the marker.
+		expect(awaiting).toEqual({ state: "awaiting-checkpoint", createdAt: 1 })
+
+		await writePendingJournal(tmpStorageDir, TASK_ID, { state: "ready", createdAt: 2, entries: [readyEntry] })
+		const ready = JSON.parse(await fs.readFile(pendingJournalPath(tmpStorageDir, TASK_ID), "utf8"))
+		expect(ready).toEqual({ state: "ready", createdAt: 2, entries: [readyEntry] })
+	})
+
+	it("folds a marker left by an earlier crash before writing the new awaiting marker", async () => {
+		// A earlier run committed a checkpoint but left its ready marker behind.
+		await writePendingJournal(tmpStorageDir, TASK_ID, {
+			state: "ready",
+			createdAt: 1,
+			entries: [{ path: "src/earlier.ts", operation: "update", checkpointId: "c0" }],
+		})
+
+		// The next save must fold that recovery record in, not overwrite it.
+		const saveCheckpointSpy = vi.fn().mockResolvedValue({ commit: COMMIT })
+		const provider = {
+			context: { globalStorageUri: { fsPath: tmpStorageDir } },
+			log: vi.fn(),
+			postMessageToWebview: vi.fn(),
+		}
+		const task = {
+			taskId: TASK_ID,
+			enableCheckpoints: true,
+			checkpointService: { isInitialized: true, saveCheckpoint: saveCheckpointSpy },
+			checkpointServiceInitializing: false,
+			providerRef: { deref: () => provider },
+		}
+		await checkpointSave(task as unknown as Task, false, true, {
+			path: "src/foo.ts",
+			operation: "create",
+		})
+
+		const entries = await loadChanges(tmpStorageDir, TASK_ID)
+		expect(entries.map((entry) => entry.checkpointId)).toEqual(["c0", COMMIT])
+		expect(entries.map((entry) => entry.path)).toEqual(["src/earlier.ts", "src/foo.ts"])
+	})
+
 })
