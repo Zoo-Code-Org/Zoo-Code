@@ -2860,6 +2860,31 @@ describe("OpenRouterHandler", () => {
 			)
 		})
 
+		it("normalizes the per-request timeout before handing it to the SDK", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			// Fractional delays fail the SDK's integer validation: round up.
+			await handler.completePrompt("test prompt", { timeoutMs: 1500.4 })
+			expect(mockCreate.mock.calls[0][1]).toMatchObject({ timeout: 1501 })
+
+			// Non-finite delays are not a timeout at all: omit the option.
+			mockCreate.mockClear()
+			await handler.completePrompt("test prompt", { timeoutMs: Number.POSITIVE_INFINITY })
+			expect(mockCreate.mock.calls[0][1]).not.toHaveProperty("timeout")
+
+			// Node clamps overflowing delays to 1 ms: cap them at the uint32 max.
+			mockCreate.mockClear()
+			await handler.completePrompt("test prompt", { timeoutMs: 9_000_000_000_000 })
+			expect(mockCreate.mock.calls[0][1]).toMatchObject({ timeout: 2_147_483_647 })
+		})
+
 		it("should work without options (backward compatible)", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })

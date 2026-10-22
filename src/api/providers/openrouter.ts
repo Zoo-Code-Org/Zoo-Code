@@ -727,12 +727,22 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		// or the timeout fires, so timeouts are normalized to AbortError in the catch below.
 		// The client-level timeout remains the default safety net; timeoutMs <= 0 disables the
 		// per-request timeout, and 0 is never passed to the SDK.
+		// The SDK validates a per-request timeout as a uint32: non-finite values
+		// must be dropped, fractional delays rounded up (they fail its integer
+		// validation) and delays above 2^31-1 ms capped (Node clamps them to 1 ms
+		// otherwise). Same policy as mergeAbortSignalAndTimeout, which owns the
+		// signal side of the same option.
+		const perRequestTimeoutMs =
+			typeof options?.timeoutMs === "number" && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+				? Math.min(Math.max(1, Math.ceil(options.timeoutMs)), 2_147_483_647)
+				: undefined
+
 		const requestOptions: OpenAI.RequestOptions = {
 			...(modelId.startsWith("anthropic/")
 				? { headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } }
 				: undefined),
 			...(requestAbortSignal && { signal: requestAbortSignal }),
-			...(typeof options?.timeoutMs === "number" && options.timeoutMs > 0 && { timeout: options.timeoutMs }),
+			...(perRequestTimeoutMs !== undefined && { timeout: perRequestTimeoutMs }),
 		}
 
 		let response
