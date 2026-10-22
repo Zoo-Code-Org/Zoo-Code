@@ -339,6 +339,7 @@ export type ExtensionState = Pick<
 	| "terminalOutputPreviewSize"
 	| "terminalShellIntegrationTimeout"
 	| "terminalShellIntegrationDisabled"
+	| "collapseCommandOutputByDefault"
 	| "terminalCommandDelay"
 	| "terminalPowershellCounter"
 	| "terminalZshClearEolMark"

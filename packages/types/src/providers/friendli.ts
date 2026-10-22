@@ -1,10 +1,7 @@
 import type { ModelInfo } from "../model.js"
 
 export type FriendliModelId =
-	| "zai-org/GLM-5.2"
-	| "zai-org/GLM-5.1"
-	| "deepseek-ai/DeepSeek-V3.2"
-	| "MiniMaxAI/MiniMax-M2.5"
+	"zai-org/GLM-5.2" | "zai-org/GLM-5.1" | "deepseek-ai/DeepSeek-V3.2" | "MiniMaxAI/MiniMax-M2.5"
 
 export const friendliDefaultModelId: FriendliModelId = "zai-org/GLM-5.2"
 
