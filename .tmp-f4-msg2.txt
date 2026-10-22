@@ -1,6 +1,0 @@
-test(activate): silence the equivalent StringLiteral mutant on the catch cleanup
-
-setPanel() only distinguishes the "sidebar" literal; the catch cleanup's
-tab-ref assignment is unchanged by any other literal, so the mutant is
-equivalent. Use the same directive wording as the other setPanel call
-sites in this file.
