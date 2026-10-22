@@ -3024,7 +3024,7 @@ describe("webviewMessageHandler - experiments", () => {
 		})
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
 	})
-	})
+})
 
 describe("webviewMessageHandler - collapseCommandOutputByDefault", () => {
 	beforeEach(() => {
@@ -3049,7 +3049,6 @@ describe("webviewMessageHandler - collapseCommandOutputByDefault", () => {
 			expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
 		},
 	)
-
 })
 
 describe("updateProfileModel", () => {
