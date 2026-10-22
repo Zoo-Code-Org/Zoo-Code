@@ -1,3 +1,0 @@
-Fixed in 91dd83f5e - `deleteProviderProfile` now repairs the shared slot through `ContextProxy` only: in the `!viewPinsDeletedProfile` branch, when the shared selection pointed at the deleted profile it runs `contextProxy.setValue("currentApiConfigName", profileToActivate)` before posting state. Since `getValues()`/`getState()` overlay `viewLocalState`, this view keeps its own pin while the shared slot points at the replacement.
-
-The assertion in `ClineProvider.spec.ts` now expects the replacement name ("replacement-profile") in the shared slot, while the view-local buffer still asserts "view-pin".

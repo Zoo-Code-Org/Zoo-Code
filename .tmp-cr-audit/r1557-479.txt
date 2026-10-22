@@ -1,3 +1,0 @@
-Fixed in 91dd83f5e - `broadcastResetToAllInstances` now clears the in-memory buffer only after `await write` (the queued durable clear). A save enqueued before the clear updates its buffer when its durable write completes, so an immediate buffer clear would leave the stale pin in the live state; ordering the buffer clear after the durable write closes that window.
-
-The ordering test now lets the stalled write reach storage (it delegates to the original mock implementation after the gate), so the `viewStates` storage assertion only passes if the clear actually ran after the in-flight save.
