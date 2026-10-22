@@ -66,7 +66,7 @@ export interface PendingJournalState {
 }
 
 /** Pending-marker path for a given task. */
-export function pendingJournalPath(globalStorageDir: string, taskId: string): string {
+function pendingJournalPath(globalStorageDir: string, taskId: string): string {
 	assertSafeTaskId(taskId)
 	return path.join(taskCheckpointDir(globalStorageDir, taskId), PENDING_FILENAME)
 }
