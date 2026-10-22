@@ -1,0 +1,553 @@
+﻿
+ RUN  v4.1.9 C:/work/Zoo-Code-fork/vps2-f4-wt/src
+
+node : 上午5:32:33 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${absolutepath}/
+At line:1 char:182
++ ... f4-wt\src'; node node_modules\vitest\vitest.mjs run core/webview/__te ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (上午5:32:33 [vite...{absolutepath}/:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  Plugin: builtin:vite-resolve
+上午5:32:33 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${cachedpath}/
+  Plugin: builtin:vite-resolve
+上午5:32:33 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${tempfile}/
+  Plugin: builtin:vite-resolve
+上午5:32:33 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${tempfile}/
+  Plugin: builtin:vite-resolve
+·································································································{"t":2379,"l":"info","m":"[ContextProxy] Sanitizing invalid provider \"bogus-provider\" - resetting to undefined"}
+{"t":86,"l":"info","m":"[ContextProxy] Sanitizing invalid provider \"bogus-provider\" - resetting to undefined"}
+········x····························x·····························································································································
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  core/webview/__tests__/ClineProvider.spec.ts > ClineProvider > getState merging > should update viewLocalState a
+piConfiguration when setValues receives flat provider settings
+AssertionError: expected 'openrouter' to be 'bedrock' // Object.is equality
+
+Expected: "bedrock"
+Received: "openrouter"
+
+ ❯ core/webview/__tests__/ClineProvider.spec.ts:3042:47
+    3040|    const state = await provider.getState()
+    3041|
+    3042|    expect(state.apiConfiguration.apiProvider).toBe("bedrock")
+       |                                               ^
+    3043|    expect(state.apiConfiguration.awsBedrockEndpoint).toBe("http://127.…
+    3044|    expect(provider["viewLocalState"].apiConfiguration?.apiProvider).to…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  core/webview/__tests__/ClineProvider.spec.ts > ClineProvider > should re-pin the view to a valid global selectio
+n when the first listed profile has no name
+AssertionError: expected "postMessageToWebview" to be called with arguments: [ ObjectContaining{…} ]
+
+Received:
+
+  1st postMessageToWebview call:
+
+  [
+-   ObjectContaining {
+-     "type": "listApiConfig",
++   {
++     "state": {
++       "allowedCommands": [],
++       "allowedMaxCost": undefined,
++       "allowedMaxRequests": undefined,
++       "allowedReadFiles": [],
++       "allowedWriteFiles": [],
++       "alwaysAllowExecute": false,
++       "alwaysAllowFollowupQuestions": false,
++       "alwaysAllowMcp": false,
++       "alwaysAllowModeSwitch": false,
++       "alwaysAllowReadOnly": false,
++       "alwaysAllowReadOnlyOutsideWorkspace": false,
++       "alwaysAllowSubtasks": false,
++       "alwaysAllowWrite": false,
++       "alwaysAllowWriteOutsideWorkspace": false,
++       "alwaysAllowWriteProtected": false,
++       "apiConfiguration": {
++         "anthropicBaseUrl": undefined,
++         "anthropicBeta1MContext": undefined,
++         "anthropicUseAuthToken": undefined,
++         "apiKey": undefined,
++         "apiModelId": undefined,
++         "apiProvider": "anthropic",
++         "awsAccessKey": undefined,
++         "awsApiKey": undefined,
++         "awsBedrock1MContext": undefined,
++         "awsBedrockEndpoint": undefined,
++         "awsBedrockEndpointEnabled": undefined,
++         "awsBedrockServiceTier": undefined,
++         "awsCustomArn": undefined,
++         "awsModelContextWindow": undefined,
++         "awsProfile": undefined,
++         "awsRegion": undefined,
++         "awsSecretKey": undefined,
++         "awsSessionToken": undefined,
++         "awsUseApiKey": undefined,
++         "awsUseCrossRegionInference": undefined,
++         "awsUseGlobalInference": undefined,
++         "awsUseProfile": undefined,
++         "awsUsePromptCache": undefined,
++         "azureApiVersion": undefined,
++         "basetenApiKey": undefined,
++         "codeIndexOpenAiKey": undefined,
++         "codeIndexQdrantApiKey": undefined,
++         "codebaseIndexGeminiApiKey": undefined,
++         "codebaseIndexMistralApiKey": undefined,
++         "codebaseIndexOpenAiCompatibleApiKey": undefined,
++         "codebaseIndexOpenAiCompatibleBaseUrl": undefined,
++         "codebaseIndexOpenAiCompatibleModelDimension": undefined,
++         "codebaseIndexOpenRouterApiKey": undefined,
++         "codebaseIndexVercelAiGatewayApiKey": undefined,
++         "consecutiveMistakeLimit": undefined,
++         "deepSeekApiKey": undefined,
++         "deepSeekBaseUrl": undefined,
++         "enableReasoningEffort": undefined,
++         "fakeAi": undefined,
++         "fireworksApiKey": undefined,
++         "friendliApiKey": undefined,
++         "geminiApiKey": undefined,
++         "geminiCliOAuthPath": undefined,
++         "geminiCliProjectId": undefined,
++         "googleGeminiBaseUrl": undefined,
++         "includeMaxTokens": undefined,
++         "kenariApiKey": undefined,
++         "kenariModelId": undefined,
++         "kimiCodeApiKey": undefined,
++         "kimiCodeAuthMethod": undefined,
++         "litellmApiKey": undefined,
++         "litellmBaseUrl": undefined,
++         "litellmModelId": undefined,
++         "litellmUsePromptCache": undefined,
++         "lmStudioBaseUrl": undefined,
++         "lmStudioDraftModelId": undefined,
++         "lmStudioModelId": undefined,
++         "lmStudioSpeculativeDecodingEnabled": undefined,
++         "mimoApiKey": undefined,
++         "mimoBaseUrl": undefined,
++         "minimaxApiKey": undefined,
++         "minimaxBaseUrl": undefined,
++         "mistralApiKey": undefined,
++         "mistralCodestralUrl": undefined,
++         "modelMaxThinkingTokens": undefined,
++         "modelMaxTokens": undefined,
++         "modelTemperature": undefined,
++         "moonshotApiKey": undefined,
++         "moonshotBaseUrl": undefined,
++         "nanoGptApiKey": undefined,
++         "nanoGptModelId": undefined,
++         "nanoGptRoutingPreference": undefined,
++         "ollamaApiKey": undefined,
++         "ollamaBaseUrl": undefined,
++         "ollamaModelId": undefined,
++         "ollamaNumCtx": undefined,
++         "openAiApiKey": undefined,
++         "openAiBaseUrl": undefined,
++         "openAiCodexServiceTier": undefined,
++         "openAiCustomModelInfo": undefined,
++         "openAiExtraBody": undefined,
++         "openAiHeaders": undefined,
++         "openAiHostHeader": undefined,
++         "openAiModelId": undefined,
++         "openAiNativeApiKey": undefined,
++         "openAiNativeBaseUrl": undefined,
++         "openAiNativeServiceTier": undefined,
++         "openAiR1FormatEnabled": undefined,
++         "openAiStreamingEnabled": undefined,
++         "openAiUseAzure": undefined,
++         "openRouterApiKey": undefined,
++         "openRouterBaseUrl": undefined,
++         "openRouterModelId": undefined,
++         "openRouterSpecificProvider": undefined,
++         "opencodeGoApiKey": undefined,
++         "opencodeGoModelId": undefined,
++         "poeApiKey": undefined,
++         "poeBaseUrl": undefined,
++         "qwenCodeOauthPath": undefined,
++         "rateLimitSeconds": undefined,
++         "reasoningEffort": undefined,
++         "requestyApiKey": undefined,
++         "requestyBaseUrl": undefined,
++         "requestyModelId": undefined,
++         "sambaNovaApiKey": undefined,
++         "todoListEnabled": undefined,
++         "unboundApiKey": undefined,
++         "unboundModelId": undefined,
++         "verbosity": undefined,
++         "vercelAiGatewayApiKey": undefined,
++         "vercelAiGatewayModelId": undefined,
++         "vertex1MContext": undefined,
++         "vertexJsonCredentials": undefined,
++         "vertexKeyFile": undefined,
++         "vertexProjectId": undefined,
++         "vertexRegion": undefined,
++         "vsCodeLmModelSelector": undefined,
++         "xaiApiKey": undefined,
++         "zaiApiKey": undefined,
++         "zaiApiLine": undefined,
++         "zooGatewayBaseUrl": undefined,
++         "zooGatewayModelId": undefined,
++         "zooSessionToken": undefined,
++       },
++       "arch": "x64",
++       "autoApprovalEnabled": false,
++       "autoCloseZooOpenedFiles": false,
++       "autoCloseZooOpenedFilesAfterUserEdited": false,
++       "autoCloseZooOpenedNewFiles": false,
++       "autoCondenseContext": true,
++       "autoCondenseContextPercent": 100,
++       "chatFontSize": undefined,
++       "checkpointTimeout": 15,
++       "clineMessages": [],
++       "clineMessagesSeq": 1,
++       "cloudApiUrl": "https://app.roocode.com",
++       "cloudAuthSkipModel": false,
++       "cloudIsAuthenticated": false,
++       "cloudOrganizations": [],
++       "cloudUserInfo": null,
++       "codebaseIndexConfig": {
++         "codebaseIndexBedrockProfile": undefined,
++         "codebaseIndexBedrockRegion": undefined,
++         "codebaseIndexEmbedderBaseUrl": "",
++         "codebaseIndexEmbedderModelDimension": 1536,
++         "codebaseIndexEmbedderModelId": "",
++         "codebaseIndexEmbedderProvider": "openai",
++         "codebaseIndexEnabled": false,
++         "codebaseIndexOpenAiCompatibleBaseUrl": undefined,
++         "codebaseIndexOpenRouterSpecificProvider": undefined,
++         "codebaseIndexQdrantUrl": "http://localhost:6333",
++         "codebaseIndexSearchMaxResults": undefined,
++         "codebaseIndexSearchMinScore": undefined,
++       },
++       "codebaseIndexModels": {
++         "bedrock": {
++           "amazon.nova-2-multimodal-embeddings-v1:0": {
++             "dimension": 1024,
++             "scoreThreshold": 0.4,
++           },
++           "amazon.titan-embed-image-v1": {
++             "dimension": 1024,
++             "scoreThreshold": 0.4,
++           },
++           "amazon.titan-embed-text-v1": {
++             "dimension": 1536,
++             "scoreThreshold": 0.4,
++           },
++           "amazon.titan-embed-text-v2:0": {
++             "dimension": 1024,
++             "scoreThreshold": 0.4,
++           },
++           "cohere.embed-english-v3": {
++             "dimension": 1024,
++             "scoreThreshold": 0.4,
++           },
++           "cohere.embed-multilingual-v3": {
++             "dimension": 1024,
++             "scoreThreshold": 0.4,
++           },
++           "cohere.embed-v4:0": {
++             "dimension": 1536,
++             "scoreThreshold": 0.4,
++           },
++         },
++         "gemini": {
++           "gemini-embedding-001": {
++             "dimension": 3072,
++             "scoreThreshold": 0.4,
++           },
++           "text-embedding-004": {
++             "dimension": 3072,
++             "scoreThreshold": 0.4,
++           },
++         },
++         "mistral": {
++           "codestral-embed-2505": {
++             "dimension": 1536,
++             "scoreThreshold": 0.4,
++           },
++         },
++         "ollama": {
++           "all-minilm": {
++             "dimension": 384,
++             "scoreThreshold": 0.4,
++           },
++           "mxbai-embed-large": {
++             "dimension": 1024,
++             "scoreThreshold": 0.4,
++           },
++           "nomic-embed-code": {
++             "dimension": 3584,
++             "queryPrefix": "Represent this query for searching relevant code: ",
++             "scoreThreshold": 0.15,
++           },
++           "nomic-embed-text": {
++             "dimension": 768,
++             "scoreThreshold": 0.4,
++           },
++         },
++         "openai": {
++           "text-embedding-3-large": {
++             "dimension": 3072,
++             "scoreThreshold": 0.4,
++           },
++           "text-embedding-3-small": {
++             "dimension": 1536,
++             "scoreThreshold": 0.4,
++           },
++           "text-embedding-ada-002": {
++             "dimension": 1536,
++             "scoreThreshold": 0.4,
++           },
++         },
++         "openai-compatible": {
++           "nomic-embed-code": {
++             "dimension": 3584,
++             "queryPrefix": "Represent this query for searching relevant code: ",
++             "scoreThreshold": 0.15,
++           },
++           "text-embedding-3-large": {
++             "dimension": 3072,
++             "scoreThreshold": 0.4,
++           },
++           "text-embedding-3-small": {
++             "dimension": 1536,
++             "scoreThreshold": 0.4,
++           },
++           "text-embedding-ada-002": {
++             "dimension": 1536,
++             "scoreThreshold": 0.4,
++           },
++         },
++         "openrouter": {
++           "google/gemini-embedding-001": {
++             "dimension": 3072,
++             "scoreThreshold": 0.4,
++           },
++           "mistralai/codestral-embed-2505": {
++             "dimension": 1536,
++             "scoreThreshold": 0.4,
++           },
++           "mistralai/mistral-embed-2312": {
++             "dimension": 1024,
++             "scoreThreshold": 0.4,
++           },
++           "openai/text-embedding-3-large": {
++             "dimension": 3072,
++             "scoreThreshold": 0.4,
++           },
++           "openai/text-embedding-3-small": {
++             "dimension": 1536,
++             "scoreThreshold": 0.4,
++           },
++           "openai/text-embedding-ada-002": {
++             "dimension": 1536,
++             "scoreThreshold": 0.4,
++           },
++           "qwen/qwen3-embedding-0.6b": {
++             "dimension": 1024,
++             "scoreThreshold": 0.4,
++           },
++           "qwen/qwen3-embedding-4b": {
++             "dimension": 2560,
++             "scoreThreshold": 0.4,
++           },
++           "qwen/qwen3-embedding-8b": {
++             "dimension": 4096,
++             "scoreThreshold": 0.4,
++           },
++         },
++         "semble": {
++           "potion-code-16M": {
++             "dimension": 256,
++             "scoreThreshold": 0.4,
++           },
++         },
++         "vercel-ai-gateway": {
++           "amazon/titan-embed-text-v2": {
++             "dimension": 1024,
++             "scoreThreshold": 0.4,
++           },
++           "cohere/embed-v4.0": {
++             "dimension": 1024,
++             "scoreThreshold": 0.4,
++           },
++           "google/gemini-embedding-001": {
++             "dimension": 3072,
++             "scoreThreshold": 0.4,
++           },
++           "google/text-embedding-005": {
++             "dimension": 768,
++             "scoreThreshold": 0.4,
++           },
++           "google/text-multilingual-embedding-002": {
++             "dimension": 768,
++             "scoreThreshold": 0.4,
++           },
++           "mistral/codestral-embed": {
++             "dimension": 1536,
++             "scoreThreshold": 0.4,
++           },
++           "mistral/mistral-embed": {
++             "dimension": 1024,
++             "scoreThreshold": 0.4,
++           },
++           "openai/text-embedding-3-large": {
++             "dimension": 3072,
++             "scoreThreshold": 0.4,
++           },
++           "openai/text-embedding-3-small": {
++             "dimension": 1536,
++             "scoreThreshold": 0.4,
++           },
++           "openai/text-embedding-ada-002": {
++             "dimension": 1536,
++             "scoreThreshold": 0.4,
++           },
++         },
++       },
++       "currentApiConfigName": "gone-pin",
++       "currentTaskId": undefined,
++       "currentTaskItem": undefined,
++       "currentTaskTodos": [],
++       "customCondensingPrompt": undefined,
++       "customInstructions": undefined,
++       "customModePrompts": {},
++       "customModes": [],
++       "customSupportPrompts": {},
++       "cwd": "",
++       "debug": [],
++       "deniedCommands": [],
++       "destructiveCommandGuardEnabled": false,
++       "deviceName": "DESKTOP-HRGFKMU",
++       "diffFuzzyThreshold": 1,
++       "disabledTools": undefined,
++       "enableCheckpoints": true,
++       "enableSubfolderRules": false,
++       "enhancementApiConfigId": undefined,
++       "enterBehavior": "send",
++       "experiments": {
++         "customTools": false,
++         "imageGeneration": false,
++         "parallelToolExecution": false,
++         "preventFocusDisruption": false,
++         "runSlashCommand": false,
++       },
++       "followupAutoApproveTimeoutMs": 60000,
++       "hasOpenedModeSelector": false,
++       "historyPreviewCollapsed": false,
++       "imageGenerationProvider": undefined,
++       "includeCurrentCost": true,
++       "includeCurrentTime": true,
++       "includeDiagnosticMessages": true,
++       "includeTaskHistoryInEnhance": true,
++       "kimiCodeIsAuthenticated": false,
++       "kimiCodeOAuthState": {
++         "status": "idle",
++       },
++       "language": "en",
++       "listApiConfigMeta": [],
++       "lockApiConfigAcrossModes": false,
++       "machineId": undefined,
++       "maxDiagnosticMessages": 50,
++       "maxGitStatusFiles": 0,
++       "maxImageFileSize": 5,
++       "maxOpenTabsContext": 20,
++       "maxTotalImageSize": 20,
++       "maxWorkspaceFiles": 200,
++       "mcpEnabled": true,
++       "mcpServers": [],
++       "mdmCompliant": undefined,
++       "messageQueue": undefined,
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 258 passed (260)
+   Start at  05:32:31
+   Duration  5.44s (transform 1.57s, setup 78ms, import 2.47s, tests 2.74s, environment 0ms)
+
++       "mode": "code",
++       "openAiCodexIsAuthenticated": false,
++       "openRouterImageApiKey": undefined,
++       "openRouterImageGenerationSelectedModel": undefined,
++       "organizationAllowList": {
++         "allowAll": true,
++         "providers": {},
++       },
++       "organizationSettingsVersion": -1,
++       "pinnedApiConfigs": {},
++       "platform": "win32",
++       "profileThresholds": {},
++       "publicSharingEnabled": false,
++       "reasoningBlockCollapsed": true,
++       "renderContext": "sidebar",
++       "settingsImportedAt": undefined,
++       "sharingEnabled": false,
++       "shouldShowAnnouncement": false,
++       "showRooIgnoredFiles": false,
++       "soundEnabled": false,
++       "soundVolume": 0.5,
++       "taskHistory": [],
++       "taskSyncEnabled": false,
++       "telemetryKey": undefined,
++       "telemetrySetting": "unset",
++       "terminalCommandDelay": 0,
++       "terminalPowershellCounter": false,
++       "terminalProfile": undefined,
++       "terminalShellIntegrationDisabled": true,
++       "terminalShellIntegrationTimeout": 5000,
++       "terminalZdotdir": false,
++       "terminalZshClearEolMark": true,
++       "terminalZshOhMy": false,
++       "terminalZshP10k": false,
++       "ttsEnabled": false,
++       "ttsSpeed": 1,
++       "uriScheme": "vscode",
++       "version": "1.0.0",
++       "vscodeTelemetryEnabled": undefined,
++       "writeDelayMs": 1000,
++       "zooCodeBaseUrl": "https://www.zoocode.dev",
++       "zooCodeIsAuthenticated": false,
++       "zooCodeUserEmail": undefined,
++       "zooCodeUserImage": undefined,
++       "zooCodeUserName": undefined,
++     },
++     "type": "state",
+    },
+  ]
+
+  2nd postMessageToWebview call:
+
+  [
+-   ObjectContaining {
+-     "type": "listApiConfig",
++   {
++     "text": undefined,
++     "type": "theme",
+    },
+  ]
+
+  3rd postMessageToWebview call:
+
+  [
+-   ObjectContaining {
+-     "type": "listApiConfig",
++   {
++     "mcpServers": [],
++     "type": "mcpServers",
+    },
+  ]
+
+
+Number of calls: 3
+
+ ❯ core/webview/__tests__/ClineProvider.spec.ts:3727:27
+    3725|   // The launch flow's profile-list sync is fire-and-forget; wait for …
+    3726|   await vi.waitFor(() =>
+    3727|    expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining…
+       |                           ^
+    3728|   )
+    3729|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+

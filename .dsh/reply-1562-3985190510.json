@@ -1,0 +1,3 @@
+{
+  "body": "Addressed in e6f730ad1: the test no longer sits inside the `handleModeSwitch integration` describe. It exercises `switchModeTool.handle` directly with a released provider reference and creates no ClineProvider, so it now lives in its own `describe(\"SwitchModeTool routing\")` block, immediately before the multi-instance describe.\r\n\r\nValidation: tsc --noEmit exit 0; 11 suites 611/611 on the merged tree (parallelMode, webviewMessageHandler, api-set-configuration, ClineProvider, sticky-profile, sticky-mode, importExport, switchModeTool, Task, ClineProvider.delegation, nested-delegation-resume); eslint --max-warnings=0 exit 0 on the touched files; no suppression count changes. Pushed with the main-first merge 9bf83e322."
+}

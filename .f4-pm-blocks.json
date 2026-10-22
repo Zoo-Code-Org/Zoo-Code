@@ -1,0 +1,42 @@
+[
+ {
+  "t": "should not activate for an unrelated deletion when the deleting view has no profile pin",
+  "s": 977,
+  "e": 1005
+ },
+ {
+  "t": "should activate the replacement when the shared selection references the deleted profile",
+  "s": 1007,
+  "e": 1038
+ },
+ {
+  "t": "should maintain independent state across three instances",
+  "s": 1402,
+  "e": 1433
+ },
+ {
+  "t": "should handle mode switch in one instance without affecting others",
+  "s": 1435,
+  "e": 1462
+ },
+ {
+  "t": "should keep resetting siblings when one sibling's state post fails",
+  "s": 1464,
+  "e": 1504
+ },
+ {
+  "t": "should clear all view-local state values",
+  "s": 1508,
+  "e": 1528
+ },
+ {
+  "t": "should cause getState to fall back to contextProxy values after clear",
+  "s": 1530,
+  "e": 1546
+ },
+ {
+  "t": "should be safe to call on empty viewLocalState",
+  "s": 1548,
+  "e": 1556
+ }
+]

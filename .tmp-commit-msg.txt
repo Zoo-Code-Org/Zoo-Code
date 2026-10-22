@@ -1,0 +1,11 @@
+fix(webview): narrow the deletion fallback and de-duplicate the state tests
+
+deleteProviderProfile's fallback branch only runs when this view does not
+pin the deleted profile (that case returns through the activation path), so
+the viewWasPinnedToDeleted branches were dead: reduce the fallback to the
+deleted-was-global case. The mock ContextProxy now serves the full state
+cache from getValues(), making a stale full-snapshot replay observable,
+with a regression test for the re-pointed viewStates entry. Remove the
+duplicated state describe blocks (~500 lines), porting the one unique test,
+and align the flat-settings overlay tests with the overlay-drop semantics
+introduced by the shared-settings write path.

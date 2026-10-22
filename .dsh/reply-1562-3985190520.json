@@ -1,0 +1,3 @@
+{
+  "body": "Addressed in e6f730ad1: the launch suite's beforeEach now resets `mockClineProvider.isViewLaunched = false` alongside `vi.clearAllMocks()`. `clearAllMocks` does not reset plain properties on the module-level double, so without this the \"marked the view as launched\" assertion could pass from a previous test's leaked state.\r\n\r\nValidation: tsc --noEmit exit 0; 11 suites 611/611 on the merged tree (parallelMode, webviewMessageHandler, api-set-configuration, ClineProvider, sticky-profile, sticky-mode, importExport, switchModeTool, Task, ClineProvider.delegation, nested-delegation-resume); eslint --max-warnings=0 exit 0 on the touched files; no suppression count changes. Pushed with the main-first merge 9bf83e322."
+}

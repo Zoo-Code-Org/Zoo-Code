@@ -1,0 +1,58 @@
+﻿zdt mutation preflight: 174dc68f2162 -> bbe4e8bf5eac
+  reports -> C:\work\Zoo-Code-fork\vps2-f4-wt\.zdt-mutation-reports
+  log     -> C:\work\Zoo-Code-fork\vps2-f4-wt\.zdt-mutation-preflight.log
+  (this runs the full Stryker gate locally; expect minutes)
+preflight exit code: 0
+digest -> C:\work\Zoo-Code-fork\vps2-f4-wt\.zdt-mutation-preflight.json
+
+mutation digest (174dc68f2162 -> bbe4e8bf5eac):
+  extension: 128 valid / 80 killed / 0 timeout / 38 survived / 10 noCoverage
+    BLOCKING NoCoverage StringLiteral core/webview/ClineProvider.ts:2519  ""
+    BLOCKING NoCoverage StringLiteral core/webview/ClineProvider.ts:2524  ""
+    BLOCKING NoCoverage ConditionalExpression core/webview/ClineProvider.ts:2533  true
+    BLOCKING NoCoverage ConditionalExpression core/webview/ClineProvider.ts:2533  false
+    BLOCKING NoCoverage ObjectLiteral core/webview/ClineProvider.ts:2538  {}
+    BLOCKING NoCoverage BlockStatement core/webview/ClineProvider.ts:2708  {}
+    BLOCKING NoCoverage ObjectLiteral core/webview/ClineProvider.ts:2709  {}
+    BLOCKING NoCoverage ConditionalExpression core/webview/ClineProvider.ts:2713  true
+    BLOCKING NoCoverage ConditionalExpression core/webview/ClineProvider.ts:2713  false
+    BLOCKING NoCoverage BlockStatement core/webview/ClineProvider.ts:2713  {}
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:832  false
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:840  false
+    BLOCKING Survived StringLiteral core/webview/ClineProvider.ts:1856  ``
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:2129  false
+    BLOCKING Survived OptionalChaining core/webview/ClineProvider.ts:2149  signal.aborted
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:2161  false
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:2183  false
+    BLOCKING Survived BlockStatement core/webview/ClineProvider.ts:2495  {}
+    BLOCKING Survived ObjectLiteral core/webview/ClineProvider.ts:2496  {}
+    BLOCKING Survived StringLiteral core/webview/ClineProvider.ts:2502  ``
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:2512  false
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:2513  false
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:2515  false
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:2520  true
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:2520  false
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:2527  false
+    BLOCKING Survived LogicalOperator core/webview/ClineProvider.ts:2527  deletedWasGlobal && viewWasPinnedToDeleted
+    BLOCKING Survived ArrowFunction core/webview/ClineProvider.ts:2671  () => undefined
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:2671  false
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:2671  true
+    BLOCKING Survived EqualityOperator core/webview/ClineProvider.ts:2671  instance.pinnedProfileName !== name
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:2674  true
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:2674  false
+    BLOCKING Survived BlockStatement core/webview/ClineProvider.ts:2679  {}
+    BLOCKING Survived EqualityOperator core/webview/ClineProvider.ts:2674  affected.length !== 0
+    BLOCKING Survived ObjectLiteral core/webview/ClineProvider.ts:2681  {}
+    BLOCKING Survived ArrowFunction core/webview/ClineProvider.ts:2700  () => undefined
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:2700  false
+    BLOCKING Survived LogicalOperator core/webview/ClineProvider.ts:2700  instance !== this || instance.pinnedProfileName === deletedProfileName
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:2700  true
+    BLOCKING Survived EqualityOperator core/webview/ClineProvider.ts:2700  instance === this
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:2700  true
+    BLOCKING Survived EqualityOperator core/webview/ClineProvider.ts:2700  instance.pinnedProfileName !== deletedProfileName
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:2703  true
+    BLOCKING Survived ConditionalExpression core/webview/ClineProvider.ts:2703  false
+    BLOCKING Survived EqualityOperator core/webview/ClineProvider.ts:2703  affected.length !== 0
+    BLOCKING Survived ConditionalExpression activate/registerCommands.ts:242  true
+    BLOCKING Survived StringLiteral core/config/ProviderSettingsManager.ts:64  ""
+  => FAIL (fix blocking mutants / split the unit)
