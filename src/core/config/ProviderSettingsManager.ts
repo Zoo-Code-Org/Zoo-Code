@@ -469,7 +469,7 @@ export class ProviderSettingsManager {
 					name = params.name
 
 					if (!providerProfiles.apiConfigs[name]) {
-						throw new Error(`Config with name '${name}' not found`)
+						throw new ProviderSettingsNotFoundError(`Config with name '${name}' not found`)
 					}
 
 					providerSettings = providerProfiles.apiConfigs[name]
@@ -481,7 +481,7 @@ export class ProviderSettingsManager {
 					)
 
 					if (!entry) {
-						throw new Error(`Config with ID '${id}' not found`)
+						throw new ProviderSettingsNotFoundError(`Config with ID '${id}' not found`)
 					}
 
 					name = entry[0]
@@ -491,6 +491,11 @@ export class ProviderSettingsManager {
 				return { name, ...providerSettings }
 			})
 		} catch (error) {
+			// Keep the typed not-found signal: callers branch on it to treat an already
+			// deleted profile as an idempotent no-op instead of matching message text.
+			if (error instanceof ProviderSettingsNotFoundError) {
+				throw error
+			}
 			throw new Error(`Failed to get profile: ${error instanceof Error ? error.message : error}`)
 		}
 	}

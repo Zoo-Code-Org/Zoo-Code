@@ -2853,12 +2853,7 @@ describe("ClineProvider", () => {
 			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
 
 			await expect(
-				provider["persistProviderProfile"](
-					"p",
-					{ apiProvider: providerIdentifiers.anthropic, apiKey: "raw-key" },
-					true,
-					new AbortController().signal,
-				),
+				provider["persistProviderProfile"]("p", { apiProvider: providerIdentifiers.anthropic, apiKey: "raw-key" }, true),
 			).rejects.toThrow("could not be read back")
 
 			// The landed save was compensated with the prior record, and no
@@ -2919,7 +2914,12 @@ describe("ClineProvider", () => {
 			await expect(provider.deleteProviderProfile(oldProfile)).rejects.toThrow("state write down")
 
 			// The secrets-backed record was restored with its pre-delete settings.
-			expect(saveSpy).toHaveBeenCalledWith("old-profile", expect.objectContaining({ apiKey: "old-key" }))
+			// The restore keeps the original id: mode mappings and enhancementApiConfigId
+			// reference the record by id, so a regenerated id would leave them dangling.
+			expect(saveSpy).toHaveBeenCalledWith(
+				"old-profile",
+				expect.objectContaining({ apiKey: "old-key", id: "old-id" }),
+			)
 
 			await provider.dispose()
 		})
@@ -3186,7 +3186,14 @@ describe("ClineProvider", () => {
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
-				getProfile: vi.fn().mockRejectedValue(new Error("profile unreadable")),
+				// The deleted profile's snapshot resolves; the survivor's settings do not,
+				// which is the condition this test covers.
+				getProfile: vi.fn().mockImplementation(async (params: { name: string }) => {
+					if (params.name === "old-profile") {
+						return { name: "old-profile", id: "old-id", apiProvider: providerIdentifiers.openrouter }
+					}
+					throw new Error("profile unreadable")
+				}),
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
 			}
 

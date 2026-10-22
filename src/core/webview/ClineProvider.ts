@@ -349,15 +349,12 @@ export class ClineProvider
 	}
 
 	/**
-	 * With `runToCompletion`, a timeout only rejects the caller: the mutation is not aborted and the
-	 * queue advances once it settles. Use it for multi-write mutations that must not stop halfway
-	 * (storage saved but not activated) or overlap with the next mutation.
+	 * Serialize provider-profile mutations. A timeout only rejects the caller: the mutation is not
+	 * aborted and keeps the queue until it settles, so multi-write mutations cannot stop halfway
+	 * (storage saved but not activated) or overlap with the next mutation. The cancellation checks
+	 * the callback used to receive are gone with the abort: none of these mutations is abortable.
 	 */
-	private enqueueProviderProfileMutation<T>(
-		fn: (signal: AbortSignal) => Promise<T>,
-		options: { runToCompletion?: boolean } = {},
-	): Promise<T> {
-		const controller = new AbortController()
+	private enqueueProviderProfileMutation<T>(fn: () => Promise<T>): Promise<T> {
 		// Set when the caller's timeout fires while this mutation is still queued behind a
 		// longer-running one: the callback must not start after its caller already saw a
 		// timeout, or the mutation would change state while reporting failure.
@@ -367,40 +364,17 @@ export class ClineProvider
 			if (callerTimedOut) {
 				return Promise.reject(new Error("Provider profile mutation timed out while queued"))
 			}
-			return fn(controller.signal)
+			return fn()
 		}
 		const run = this.providerProfileMutationQueue.then(start, start)
 		const callerResult = this.withProviderProfileMutationTimeout(run, () => {
-			if (options.runToCompletion) {
-				callerTimedOut = true
-				this.log("Provider profile mutation timed out; waiting for it to finish before the next mutation")
-				return
-			}
-
-			controller.abort()
-			this.log("Provider profile mutation timed out; aborting in-flight mutation")
+			callerTimedOut = true
+			this.log("Provider profile mutation timed out; waiting for it to finish before the next mutation")
 		})
 
-		void run.then(
-			() => {
-				if (controller.signal.aborted) {
-					this.log("Provider profile mutation completed after cancellation")
-				}
-			},
-			(error) => {
-				if (controller.signal.aborted) {
-					this.log(
-						`Provider profile mutation errored after cancellation: ${
-							error instanceof Error ? error.message : String(error)
-						}`,
-					)
-				}
-			},
-		)
-
-		// Advance from the timeout-bounded result. Each fn checks its AbortSignal before
-		// writing state, so advancing the queue on timeout cannot produce stale overwrites.
-		this.providerProfileMutationQueue = (options.runToCompletion ? run : callerResult).then(
+		// Advance from the unbounded run, not the timeout-bounded caller result: a mutation that
+		// outlives its caller's timeout still owns the queue until every write settles.
+		this.providerProfileMutationQueue = run.then(
 			() => undefined,
 			() => undefined,
 		)
@@ -2343,30 +2317,16 @@ export class ClineProvider
 	 * current task. Pass null to apply only global mode/profile effects for a pending child.
 	 */
 	public async handleModeSwitch(newMode: Mode, targetTask: Task | null | undefined = this.getCurrentTask()) {
-		return this.enqueueProviderProfileMutation(
-			(signal) => this.handleModeSwitchUnlocked(newMode, targetTask, signal),
-			// The switch and its nested activation must own the queue until every
-			// write - including compensation - settles: a timeout must not let the
-			// next queued mutation overlap writes that are still in flight.
-			{ runToCompletion: true },
-		)
+		// The switch and its nested activation own the queue until every write - including
+		// compensation - settles: a timeout only rejects the caller.
+		return this.enqueueProviderProfileMutation(() => this.handleModeSwitchUnlocked(newMode, targetTask))
 	}
 
 	private async handleModeSwitchUnlocked(
 		newMode: Mode,
 		targetTask: Task | null | undefined,
-		signal?: AbortSignal,
 	): Promise<void> {
 		const task = targetTask
-
-		// A cancelled or timed-out switch must not be partially applied: bail out
-		// before the task history / _taskMode writes as well as the durable mode
-		// write below. Aborts that land while the history write is in flight are
-		// handled in flight (the landed write is rolled back); the pre-write check
-		// further down still covers the remaining gap before the durable write.
-		if (signal?.aborted) {
-			return
-		}
 
 		if (task) {
 			TelemetryService.instance.captureModeSwitch(task.taskId, newMode)
@@ -2377,27 +2337,6 @@ export class ClineProvider
 
 				if (taskHistoryItem) {
 					await this.updateTaskHistory({ ...taskHistoryItem, mode: newMode })
-
-					// An abort that lands while the history write is in flight has
-					// already persisted the new mode: restore the pre-switch item and
-					// bail before the in-memory task write and the emit, so task
-					// history, task state, and provider mode cannot diverge. A failed
-					// rollback must not surface as the persistence error of the
-					// cancelled switch: log it and keep the cancellation result.
-					if (signal?.aborted) {
-						try {
-							// Restore only the field this switch changed: re-read the item so
-							// fields the running task persisted during the pending window
-							// (tokens, cost, status, apiConfigName) survive the rollback.
-							const latest = this.getTaskHistoryItem(task.taskId) ?? taskHistoryItem
-							await this.updateTaskHistory({ ...latest, mode: taskHistoryItem.mode })
-						} catch (rollbackError) {
-							this.log(`Failed to roll back mode switch ${task.taskId}: ${String(rollbackError)}`)
-						}
-						return
-					}
-				} else if (signal?.aborted) {
-					return
 				}
 
 				task.emit(RooCodeEventName.TaskModeSwitched, task.taskId, newMode)
@@ -2414,12 +2353,6 @@ export class ClineProvider
 				// This ensures the in-memory state remains consistent with persisted state.
 				throw error
 			}
-		}
-
-		// A cancelled or timed-out switch must not write the mode or emit
-		// ModeChanged: check the mutation signal right before the durable write.
-		if (signal?.aborted) {
-			return
 		}
 
 		// setValue (not the deprecated updateGlobalState) so the in-memory viewLocalState
@@ -2458,13 +2391,9 @@ export class ClineProvider
 			return
 		}
 
-		if (signal?.aborted) return
-
 		// Load the saved API config for the new mode if it exists.
 		const savedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
 		const listApiConfig = await this.providerSettingsManager.listConfig()
-
-		if (signal?.aborted) return
 
 		// Update listApiConfigMeta first to ensure UI has latest data.
 		await this.updateGlobalState("listApiConfigMeta", listApiConfig)
@@ -2487,7 +2416,6 @@ export class ClineProvider
 					await this.activateProviderProfileUnlocked(
 						{ name: profile.name },
 						targetTask === null ? { skipCurrentTaskRebuild: true } : undefined,
-						signal,
 					)
 				} else {
 					// The task will continue with the current/default configuration.
@@ -2773,9 +2701,8 @@ export class ClineProvider
 		activate: boolean = true,
 	): Promise<string | undefined> {
 		try {
-			return await this.enqueueProviderProfileMutation(
-				(signal) => this.persistProviderProfile(name, providerSettings, activate, signal),
-				{ runToCompletion: true },
+			return await this.enqueueProviderProfileMutation(() =>
+				this.persistProviderProfile(name, providerSettings, activate),
 			)
 		} catch (error) {
 			this.log(
@@ -2796,8 +2723,7 @@ export class ClineProvider
 		let partialState = false
 
 		try {
-			await this.enqueueProviderProfileMutation(
-				async (signal) => {
+			await this.enqueueProviderProfileMutation(async () => {
 					const { name: _name, ...stored } = await this.providerSettingsManager.getProfile({ name })
 
 					// Unset provider (e.g. the seeded default profile) resolves to anthropic, matching getState().
@@ -2853,15 +2779,13 @@ export class ClineProvider
 						)
 					}
 
-					if (signal.aborted) return
-
 					try {
-						await this.persistProviderProfile(name, merged as ProviderSettings, true, signal)
+						await this.persistProviderProfile(name, merged as ProviderSettings, true)
 					} catch (persistError) {
 						// Saving and activating are separate writes. Put the previous profile back so
 						// storage, context settings, and the task do not disagree about the model.
 						try {
-							await this.persistProviderProfile(name, stored as ProviderSettings, true, signal)
+							await this.persistProviderProfile(name, stored as ProviderSettings, true)
 						} catch (restoreError) {
 							partialState = true
 							this.log(
@@ -2871,9 +2795,7 @@ export class ClineProvider
 
 						throw persistError
 					}
-				},
-				{ runToCompletion: true },
-			)
+				})
 		} catch (error) {
 			this.log(`Error update profile model: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`)
 
@@ -2891,7 +2813,6 @@ export class ClineProvider
 		name: string,
 		providerSettings: ProviderSettings,
 		activate: boolean,
-		signal: AbortSignal,
 	): Promise<string | undefined> {
 		// TODO: Do we need to be calling `activateProfile`? It's not
 		// clear to me what the source of truth should be; in some cases
@@ -2915,18 +2836,6 @@ export class ClineProvider
 			// create claim) instead of escaping the group with the claim leaked.
 			await this._restoreProviderManagerRecord(name, managerSnapshot)
 			throw error
-		}
-
-		if (signal.aborted) {
-			// The record landed; the create is complete, so the claim is spent and
-			// the outcome recorded: a failed sibling create must spare the record.
-			if (managerSnapshot.claimedCreate) {
-				markProfileCreateSucceeded(name)
-				if (releaseProfileCreate(name)) {
-					profileCreatesSucceeded.delete(name)
-				}
-			}
-			return id
 		}
 
 		// saveConfig normalizes the record (schema parse, legacy downgrades):
@@ -3089,9 +2998,13 @@ export class ClineProvider
 		let previousRecord: Awaited<ReturnType<ProviderSettingsManager["getProfile"]>> | undefined
 		try {
 			previousRecord = await this.providerSettingsManager.getProfile({ name: profileToDelete.name })
-		} catch {
-			// Absent record: the idempotent not-found path below still prunes the
-			// stale list entry, and compensation skips the record restore.
+		} catch (error) {
+			// Only a typed not-found means the record was already gone. Any other failure
+			// means the snapshot is unavailable, and deleting without a restore point would
+			// leave the deletion uncompensatable, so it propagates instead.
+			if (!(error instanceof ProviderSettingsNotFoundError)) {
+				throw error
+			}
 		}
 		const previousEntries = this.getProviderProfileEntries()
 		const previousSelection = globalSettings.currentApiConfigName
@@ -3221,7 +3134,9 @@ export class ClineProvider
 			// failure is what the caller sees.
 			if (previousRecord) {
 				try {
-					const { name: _previousName, id: _previousId, ...previousSettings } = previousRecord
+					// Keep the original id: mode-to-profile mappings, the restored list entry and
+					// enhancementApiConfigId all reference the record by id.
+					const { name: _previousName, ...previousSettings } = previousRecord
 					await this.providerSettingsManager.saveConfig(profileToDelete.name, previousSettings)
 				} catch (restoreError) {
 					this.log(
@@ -3377,16 +3292,11 @@ export class ClineProvider
 			skipCurrentTaskRebuild?: boolean
 		},
 	) {
-		return this.enqueueProviderProfileMutation(
-			(signal) => this.activateProviderProfileUnlocked(args, options, signal),
-			{
-				// The queue stays owned until this run - including its compensation - settles:
-				// a group write that hangs past the mutation timeout must not let a later
-				// activation complete before this rollback, or the late restore would
-				// overwrite the later activation's selection and settings.
-				runToCompletion: true,
-			},
-		)
+		// The queue stays owned until this run - including its compensation - settles: a
+		// group write that hangs past the mutation timeout must not let a later activation
+		// complete before this rollback, or the late restore would overwrite the later
+		// activation's selection and settings.
+		return this.enqueueProviderProfileMutation(() => this.activateProviderProfileUnlocked(args, options))
 	}
 
 	private async activateProviderProfileUnlocked(
@@ -3396,15 +3306,12 @@ export class ClineProvider
 			persistTaskHistory?: boolean
 			skipCurrentTaskRebuild?: boolean
 		},
-		signal?: AbortSignal,
 	): Promise<void> {
 		// The manager selection written by activateProfile belongs to the same
 		// mutation group as the writes below: snapshot it first so a failed group
 		// compensates the manager store, not just its copies.
 		const managerSelectionSnapshot = await this._snapshotProviderManagerSelection()
 		const { name, id, ...providerSettings } = await this.providerSettingsManager.activateProfile(args)
-
-		if (signal?.aborted) return
 
 		const persistModeConfig = options?.persistModeConfig ?? true
 		const persistTaskHistory = options?.persistTaskHistory ?? true
