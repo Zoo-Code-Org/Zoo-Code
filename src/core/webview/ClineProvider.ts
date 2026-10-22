@@ -825,6 +825,9 @@ export class ClineProvider
 			return
 		}
 		for (const disposable of scoped) {
+			if (!disposable) {
+				continue
+			}
 			const index = this.webviewDisposables.indexOf(disposable)
 			if (index >= 0) {
 				this.webviewDisposables.splice(index, 1)
