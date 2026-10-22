@@ -114,7 +114,12 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 						? (error as { code?: string }).code
 						: undefined
 				if (code === "ENOENT") {
-					return checked
+					// Fail closed: a directory that vanishes mid-walk leaves no identity to re-check
+					// before publication, and a path that reappears as a symlink afterwards would be
+					// followed by the path-based commit rename. Refuse rather than publish blind.
+					throw new Error(
+						`safeWriteJson: refusing to write to ${absoluteFilePath}: ${current} does not exist, so the destination ancestry cannot be verified.`,
+					)
 				}
 				throw error
 			}

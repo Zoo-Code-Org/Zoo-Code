@@ -964,6 +964,7 @@ describe("safeWriteJson", () => {
 		const target = path.join(parent, "eacces-ancestor.json")
 		await fsPromisesActuals.writeFile!(target, JSON.stringify({ own: true }))
 		const asDir = { isSymbolicLink: () => false, dev: 1n, ino: 1n } as unknown as fsSyncActual.BigIntStats
+		const asFile = { isSymbolicLink: () => false } as unknown as fsSyncActual.Stats
 		const failure = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
 		let parentLooks = 0
 		vi.spyOn(fs, "lstat").mockImplementation(((p: unknown) => {
@@ -988,47 +989,52 @@ describe("safeWriteJson", () => {
 		await fs.mkdir(parent, { recursive: true })
 		const target = path.join(parent, "recheck-eacces.json")
 		const asDir = { isSymbolicLink: () => false, dev: 1n, ino: 1n } as unknown as fsSyncActual.BigIntStats
+		const asFile = { isSymbolicLink: () => false } as unknown as fsSyncActual.Stats
 		const failure = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
 		// Only ENOENT means "nothing there that could be a link"; any other lstat failure says
-		// nothing about the destination, so the re-check must stop the write.
+		// nothing about the destination. The initial check passes and the pre-commit re-check
+		// is the one that fails, so this covers the publication-time inspection specifically.
+		let targetLooks = 0
 		vi.spyOn(fs, "lstat").mockImplementation(((p: unknown) => {
-			if (String(p) === target) return Promise.reject(failure)
+			if (String(p) === target) {
+				targetLooks++
+				if (targetLooks >= 2) return Promise.reject(failure)
+				return Promise.resolve(asFile)
+			}
 			return Promise.resolve(asDir)
 		}) as unknown as typeof fs.lstat)
 
 		await expect(safeWriteJson(target, { written: true }, { refuseSymlinkTarget: true })).rejects.toThrow(/EACCES/)
 
 		vi.restoreAllMocks()
+		// The pre-commit inspection ran (second look at the destination) and stopped the write.
+		expect(targetLooks).toBe(2)
 		expect(await fileExists(target)).toBe(false)
 	})
 
-	test("returns early when an ancestor vanishes during the authorizing walk", async () => {
+	test("fails closed when an ancestor vanishes during the authorizing walk", async () => {
 		const parent = path.join(tempDir, "vanish-parent")
 		await fs.mkdir(parent, { recursive: true })
 		const target = path.join(parent, "vanish-during-walk.json")
 		await fsPromisesActuals.writeFile!(target, JSON.stringify({ own: true }))
-		const asDir = { isSymbolicLink: () => false, dev: 1n, ino: 1n } as unknown as fsSyncActual.BigIntStats
 		const asFile = { isSymbolicLink: () => false } as unknown as fsSyncActual.Stats
-		// The walk stops once a directory no longer exists: nothing above it needs identity
-		// recording, and the publication re-checks only the recorded ancestors.
-		let parentLooks = 0
+		// A directory that vanishes mid-walk has no recorded identity for the pre-commit
+		// re-check, so a path that reappears as a symlink before staging would be followed by
+		// the path-based rename. The walk must fail closed instead of recording a partial chain.
 		vi.spyOn(fs, "lstat").mockImplementation(((p: unknown) => {
 			if (String(p) === parent) {
-				parentLooks++
-				if (parentLooks === 1) {
-					return Promise.reject(
-						Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
-					)
-				}
-				return Promise.resolve(asDir)
+				return Promise.reject(Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }))
 			}
 			return Promise.resolve(asFile)
 		}) as unknown as typeof fs.lstat)
 
-		await safeWriteJson(target, { written: true }, { refuseSymlinkTarget: true })
+		await expect(safeWriteJson(target, { written: true }, { refuseSymlinkTarget: true })).rejects.toThrow(
+			/does not exist, so the destination ancestry cannot be verified/,
+		)
 
 		vi.restoreAllMocks()
-		expect(await readFileContent(target)).toEqual({ written: true })
+		// Nothing was published: the existing target keeps its content.
+		expect(await readFileContent(target)).toEqual({ own: true })
 	})
 
 	test("publishes when every recorded ancestor keeps its identity", async () => {
