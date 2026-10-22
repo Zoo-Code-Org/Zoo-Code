@@ -189,10 +189,7 @@ export const BLANKET_DENY_AUTO_DENY_KINDS: ReadonlySet<AutoDenyDetail["kind"]> =
  * decided against the auto-approval policy as it stands NOW.
  */
 type QueuedCommandPolicyAction =
-	| { action: "consume" }
-	| { action: "approve" }
-	| { action: "deny"; detail?: AutoDenyDetail }
-	| { action: "release" }
+	{ action: "consume" } | { action: "approve" } | { action: "deny"; detail?: AutoDenyDetail } | { action: "release" }
 
 /**
  * Whether blanket auto-deny currently engages. The three settings act as a
@@ -3172,7 +3169,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			} catch (error) {
 				console.error("[Task#startTask] ignored-disabled-tools notice failed:", error)
 			}
-			this.isInitialized = true
+			this.markInitialized()
 
 			const imageBlocks: Anthropic.ImageBlockParam[] = formatResponse.imageBlocks(images)
 
@@ -3298,7 +3295,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			if (this.pendingAction) {
-				this.isInitialized = true
+				this.markInitialized()
 				await this.resumePendingTaskAction(this.pendingAction)
 				return
 			}
@@ -3319,7 +3316,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				askType = "resume_task"
 			}
 
-			this.isInitialized = true
+			this.markInitialized()
 
 			const { response, text, images } = await this.ask(askType) // Calls `postStateToWebview`.
 
@@ -3646,11 +3643,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	public abortTask(isAbandoned = false): Promise<void> {
-		if (isAbandoned) {
-			this.abandoned = true
-		}
-
-		this.abort = true
+		this.requestAbort(isAbandoned)
 		this.cancelAssistantMessagePersistence()
 		this.abortPromise ??= this.abortTaskOnce()
 		return this.abortPromise
@@ -3742,13 +3735,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		// A task being disposed is no longer serving requests: set the same
-		// cancellation state `abortTask()` sets, synchronously before the aborts
+		// abort latch `abortTask()` sets (disposal never sets abandoned), synchronously before the aborts
 		// below, so the request-construction guard (`abort || abandoned` in
 		// attemptApiRequest) and the outer loop's `abort` checks observe disposal
 		// even when it lands before any explicit cancel. Without this, only the
 		// signals below are cancelled and a request already past those checks
 		// could still build tools and call `createMessage()`.
-		this.abort = true
+		this.requestDispose()
 
 		// Cancel any in-progress HTTP request
 		try {
@@ -3858,7 +3851,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 *
 	 * This method:
 	 * - Clears any pending ask states
-	 * - Resets abort and streaming flags
+	 * - Resets streaming flags
 	 * - Ensures next API call includes full context
 	 * - Immediately continues task loop without user interaction
 	 */
@@ -3868,10 +3861,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.resumableAsk = undefined
 		this.interactiveAsk = undefined
 
-		// Reset abort and streaming state to ensure clean continuation
-		this.abort = false
-		this.abandoned = false
-		this.abortReason = undefined
+		// Reset streaming state to ensure clean continuation
 		this.didFinishAbortingStream = false
 		this.isStreaming = false
 		this.isWaitingForFirstChunk = false
@@ -3880,7 +3870,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.skipPrevResponseIdOnce = true
 
 		// Mark as initialized and active
-		this.isInitialized = true
+		this.markInitialized()
 		this.emit(RooCodeEventName.TaskActive, this.taskId)
 
 		// Load conversation history if not already loaded
@@ -4369,6 +4359,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// under the canonical name slip past a name comparison. The first call wins.
 										const idAlreadyUsed = this.assistantMessageContent.some(
 											(entry) =>
+
 												(entry.type === "tool_use" || entry.type === "mcp_tool_use") &&
 												(entry as { id?: string }).id === event.id,
 										)
@@ -4421,6 +4412,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// keep the deprecated single-entry-per-ID lookup.
 										let streamingKey: string | undefined
 
+
 										if (event.name !== undefined) {
 											streamingKey = NativeToolCallParser.makeStreamingKey(event.id, event.name)
 										} else {
@@ -4437,6 +4429,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										}
 
 										const partialToolUse =
+
 											streamingKey === undefined
 												? null
 												: NativeToolCallParser.processStreamingChunk(
@@ -4444,6 +4437,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 														event.delta,
 														nativeToolCallParserScope,
 													)
+
 
 										if (partialToolUse && streamingKey !== undefined) {
 											// Reuse the compound key built above: it is exactly the key the start event
@@ -4757,8 +4751,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						await abortStream(cancelReason, streamingFailedMessage)
 
 						if (this.abort) {
-							// ??= keeps the first reason; a cancel can land during abortStream after cancelReason was already computed.
-							this.abortReason ??= "user_cancelled"
+							// A cancel can land during abortStream after cancelReason was computed; setAbortReason keeps the first reason.
+							this.setAbortReason("user_cancelled")
 							await this.abortTask()
 						} else if (error instanceof OutputTokenLimitError) {
 							// Truncation repeats on an identical request, so never auto-retry it
@@ -4793,7 +4787,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									console.log(
 										`[Task#${this.taskId}.${this.instanceId}] Task aborted during mid-stream retry backoff`,
 									)
-									this.abortReason ??= "user_cancelled"
+									this.setAbortReason("user_cancelled")
 									await this.abortTask()
 									break
 								}
@@ -4841,6 +4835,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					if (event.type === "tool_call_end") {
 						// Create compound key for deduplication (same pattern as streaming handler).
 						// End events carry the tool name; fall back to the id for events that don't.
+
 						let eventName = event.name ?? event.id
 						let dedupKey = NativeToolCallParser.makeStreamingKey(event.id, eventName)
 
@@ -4857,6 +4852,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// name (provider quirk), the compound-key lookup above misses and both the
 						// parser entry and the dedup tracking would stay stale. Resolve the tracked
 						// entry by id and target the real compound key for finalization and cleanup.
+
 						if (finalToolUse === null && toolUseIndex === undefined) {
 							const resolved = NativeToolCallParser.getStreamingToolCallById(
 								event.id,
