@@ -190,6 +190,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		terminalOutputPreviewSize,
 		terminalShellIntegrationTimeout,
 		terminalShellIntegrationDisabled, // Added from upstream
+		collapseCommandOutputByDefault,
 		terminalCommandDelay,
 		terminalPowershellCounter,
 		terminalZshClearEolMark,
@@ -419,6 +420,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					diffFuzzyThreshold,
 					terminalShellIntegrationTimeout: terminalShellIntegrationTimeout ?? 30_000,
 					terminalShellIntegrationDisabled,
+					collapseCommandOutputByDefault,
 					terminalCommandDelay,
 					terminalPowershellCounter,
 					terminalZshClearEolMark,
@@ -901,6 +903,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								terminalOutputPreviewSize={terminalOutputPreviewSize}
 								terminalShellIntegrationTimeout={terminalShellIntegrationTimeout}
 								terminalShellIntegrationDisabled={terminalShellIntegrationDisabled}
+								collapseCommandOutputByDefault={collapseCommandOutputByDefault}
 								terminalCommandDelay={terminalCommandDelay}
 								terminalPowershellCounter={terminalPowershellCounter}
 								terminalZshClearEolMark={terminalZshClearEolMark}

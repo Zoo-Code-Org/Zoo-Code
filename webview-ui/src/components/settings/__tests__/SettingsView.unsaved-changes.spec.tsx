@@ -637,13 +637,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 						setApiConfigurationField(
 							"nanoGptRoutingPreference",
 							event.target.value as
-								| "auto"
-								| "fast"
-								| "cheap"
-								| "latency"
-								| "throughput"
-								| "tools"
-								| "caching",
+								"auto" | "fast" | "cheap" | "latency" | "throughput" | "tools" | "caching",
 						)
 					}>
 					<option value="auto">Automatic</option>
