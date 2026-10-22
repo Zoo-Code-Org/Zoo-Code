@@ -699,19 +699,27 @@ export class ClineProvider
 	 * token re-expose them on a later launch, which is exactly the disclosure this binding
 	 * exists to prevent. Runs through the serialized write queue like every other mutation.
 	 */
-	private async rebindUnboundViewStateEntry(viewStateId: string): Promise<string> {
+	private async rebindUnboundViewStateEntry(viewStateId: string): Promise<string | undefined> {
 		const claimToken = crypto.randomUUID()
+		let rebound = false
 
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 			const states = this.getPersistedViewStates({ fresh: true })
+			const current = states[viewStateId]
+			// A concurrent registration may have bound this key while this write was queued:
+			// never overwrite an existing claim, and let the caller refuse the stale adoption.
+			if (current && typeof current.claimToken === "string" && current.claimToken) {
+				return
+			}
 			states[viewStateId] = { claimToken, updatedAt: Date.now() }
 			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			rebound = true
 		})
 
 		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
 		await write
 
-		return claimToken
+		return rebound ? claimToken : undefined
 	}
 
 	/**
@@ -855,6 +863,16 @@ export class ClineProvider
 				// that claim to this webview: the key becomes adoptable again (no upgrade brick)
 				// and the unbound selections are gone, so the new token cannot resurrect them.
 				const reboundClaim = await this.rebindUnboundViewStateEntry(normalizedViewStateId)
+
+				if (reboundClaim === undefined) {
+					// A concurrent registration bound the key while the re-bind was queued: this
+					// launch adopts a key another webview now owns, so refuse it instead of
+					// handing out a claim that is not ours.
+					this.log(
+						`[setViewStateId] Refusing viewStateId ${normalizedViewStateId} for view ${this.viewId}: bound concurrently by another registration.`,
+					)
+					return
+				}
 
 				this.postViewStateClaimToWebview(normalizedViewStateId, reboundClaim)
 				this.log(

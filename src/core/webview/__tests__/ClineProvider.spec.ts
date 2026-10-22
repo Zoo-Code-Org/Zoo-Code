@@ -2010,6 +2010,33 @@ describe("ClineProvider", () => {
 	})
 
 	describe("view state claim binding", () => {
+		it("does not overwrite a claim bound by a concurrent registration", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider.contextProxy.setValue("viewStates", { "legacy-view": { updatedAt: 1 } })
+			// A concurrent registration binds this key while the re-bind write is queued.
+			ClineProvider.persistedViewStateWriteQueue = Promise.resolve().then(async () => {
+				await provider.contextProxy.setValue("viewStates", {
+					"legacy-view": { claimToken: "winner", updatedAt: 2 },
+				})
+			})
+
+			const claim = await provider["rebindUnboundViewStateEntry"]("legacy-view")
+
+			// The queued re-bind must not replace the claim the other registration wrote; it
+			// reports that nothing was rebound so the caller can refuse the stale adoption.
+			expect(claim).toBeUndefined()
+			const states = provider.contextProxy.getValue("viewStates") as Record<string, { claimToken?: string }>
+			expect(states["legacy-view"].claimToken).toBe("winner")
+			ClineProvider.persistedViewStateWriteQueue = Promise.resolve()
+			await provider.dispose()
+		})
+
 		const createProvider = () =>
 			new ClineProvider(
 				mockContext,
