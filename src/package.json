@@ -288,6 +288,22 @@
 			],
 			"commandPalette": [
 				{
+					"command": "zoo-code.plusButtonClicked",
+					"when": "false"
+				},
+				{
+					"command": "zoo-code.settingsButtonClicked",
+					"when": "false"
+				},
+				{
+					"command": "zoo-code.marketplaceButtonClicked",
+					"when": "false"
+				},
+				{
+					"command": "zoo-code.historyButtonClicked",
+					"when": "false"
+				},
+				{
 					"command": "zoo-code.plusButtonClickedInTab",
 					"when": "false"
 				},

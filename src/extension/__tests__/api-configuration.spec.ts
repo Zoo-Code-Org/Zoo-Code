@@ -27,6 +27,7 @@ describe("API - configuration", () => {
 			providerSettingsManager: {
 				saveConfig,
 				setModeConfig,
+				hasConfig: vi.fn().mockResolvedValue(false),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			postStateToWebview,
@@ -70,6 +71,7 @@ describe("API - configuration", () => {
 			providerSettingsManager: {
 				saveConfig,
 				setModeConfig,
+				hasConfig: vi.fn().mockResolvedValue(false),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			postStateToWebview,
@@ -100,7 +102,7 @@ describe("API - configuration", () => {
 				getProviderSettings: vi.fn().mockReturnValue({}),
 				setProviderSettings,
 			},
-			providerSettingsManager: { saveConfig, deleteConfig, setModeConfig },
+			providerSettingsManager: { saveConfig, deleteConfig, setModeConfig, hasConfig: vi.fn().mockResolvedValue(false) },
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -143,9 +145,10 @@ describe("API - configuration", () => {
 				saveConfig,
 				deleteConfig,
 				setModeConfig,
-				// The profile did not exist before this call: compensation must
-				// delete the record the save created, not restore an old one.
-				getProfile: vi.fn().mockRejectedValue(new Error("profile absent")),
+				// Existence is read from the store: the profile did not exist before this
+				// call, so compensation must delete the record the save created.
+				hasConfig: vi.fn().mockResolvedValue(false),
+				getProfile: vi.fn(),
 			},
 			postStateToWebview,
 		} as unknown as ClineProvider
@@ -241,6 +244,8 @@ describe("API - configuration", () => {
 				saveConfig,
 				deleteConfig,
 				setModeConfig,
+				// The profile did not exist before the call.
+				hasConfig: vi.fn().mockResolvedValue(false),
 				// The code mode had no mapping before: rollback must clear the
 				// mapping this call created rather than leave it pointing at the
 				// config the failed fan-out chose.

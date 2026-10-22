@@ -589,13 +589,15 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		// agree on the empty-string fallback.
 		const savedProfileName = values.currentApiConfigName || "default"
 		const manager = this.sidebarProvider.providerSettingsManager
-		// Distinguish an existing profile synchronously: getProfile throws for a
-		// missing profile AND for transient load/lock failures, so its outcome
-		// must not decide whether rollback deletes - a read failure must never
-		// turn an existing profile into a deleted one.
-		const recordExisted = this.sidebarProvider
-			.getProviderProfileEntries()
-			.some(({ name }) => name === savedProfileName)
+		// Read existence from the store rather than the cached profile list: a stale
+		// list could hide an existing record and let rollback delete it. A failed
+		// existence read is treated as "may exist" so rollback never deletes blindly.
+		let recordExisted: boolean
+		try {
+			recordExisted = await manager.hasConfig(savedProfileName)
+		} catch {
+			recordExisted = true
+		}
 		const previousValues = this.getConfiguration()
 		const previousSharedSettings = this.sidebarProvider.contextProxy.getProviderSettings()
 		// Fail closed BEFORE any write: an existing record that cannot be read
