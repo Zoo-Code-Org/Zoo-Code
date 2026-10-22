@@ -9,6 +9,7 @@ import {
 	resolveLockKey,
 	resolvePublishTarget,
 	safeWriteText,
+	type AncestorIdentity,
 	type SafeWriteTextOptions,
 } from "../services/file-safety/safeWriteText"
 
@@ -43,21 +44,22 @@ export interface SafeWriteJsonOptions {
 	 * the resolved publish target inside the lock so a peer writer that moved the
 	 * referent in between is caught too.
 	 *
-	 * What it does NOT cover: an ancestor DIRECTORY of the target that is replaced
-	 * by a link in the window between the last check and the commit rename. Both
-	 * checks decide from the final component as it resolves at their own instant,
-	 * and publication is path based - the parent-directory creation and the commit
-	 * rename both take a path - so an ancestor swapped after the check redirects the
-	 * publish. What happens then depends on what sits at the swapped-in path: if it
-	 * already has a file at the target name the publish fails in the staging
-	 * identity guard (StagingPathError) and nothing is written; if it does not, the
-	 * write follows the swapped ancestor and lands OUTSIDE the declared scope. This
-	 * option claims neither outcome: it confines the target it resolved, not the
-	 * directory tree above it. Making the claim cover that window needs a publish
-	 * that walks from an already-open directory handle with no-follow semantics
-	 * (openat/renameat over a directory fd); this runtime exposes neither, so the
-	 * claim is narrowed here instead of being made true. A caller that needs
-	 * containment across that window cannot get it from this option.
+	 * An ancestor DIRECTORY replaced by a link after those checks is covered as well:
+	 * the check records the identity (dev, ino) of every directory it walked from the
+	 * scope root down to the target's parent, and safeWriteText re-reads both the
+	 * identity and the resolved name of each one immediately before the commit rename.
+	 * A parent swapped for a link therefore makes the publish abort (AncestorReplacedError
+	 * when the name still resolves where it claims, TargetMovedError when the target
+	 * itself resolves elsewhere) instead of redirecting it outside the scope. This is the
+	 * mitigation inherited from the guarded-write core (#1914).
+	 *
+	 * What it still does NOT cover is the window between that re-check and the commit
+	 * rename itself: publication is path based - the parent-directory creation, the
+	 * staged temp file and the rename all take a path - so a swap landing inside that
+	 * last window redirects the publish. Making the claim cover it needs a publish that
+	 * walks from an already-open directory handle with no-follow semantics
+	 * (openat/renameat over a directory fd), which this runtime does not expose; the
+	 * residual is registered in #2148, #1414, #1408 and #1991.
 	 */
 	confineTo?: string
 }
@@ -139,6 +141,38 @@ function _scopeErrorCode(error: unknown): string | undefined {
 }
 
 /**
+ * The directories between the canonical scope root and the target's parent, each with
+ * the identity it had when the write was authorized. `confineTo` decides from the
+ * resolved target; this is what lets the publish notice that a directory it walked was
+ * replaced afterwards, because safeWriteText re-reads every one of them right before the
+ * commit rename (see the confineTo option doc).
+ *
+ * A component that does not exist yet (a create into a directory the publish itself will
+ * make) has no identity to pin, so it is skipped: there is nothing to compare, and the
+ * pin exists to detect a directory that WAS walked being swapped, not to forbid creating
+ * one.
+ */
+async function _ancestorIdentities(root: string, targetParent: string): Promise<AncestorIdentity[]> {
+	const relative = path.relative(root, targetParent)
+	const chain: string[] = [root]
+	if (relative && relative !== "." && !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative)) {
+		let cursor = root
+		for (const segment of relative.split(path.sep)) {
+			cursor = path.join(cursor, segment)
+			chain.push(cursor)
+		}
+	}
+	const pinned: AncestorIdentity[] = []
+	for (const dir of chain) {
+		const stat = await fs.stat(dir, { bigint: true }).catch(() => undefined)
+		if (stat) {
+			pinned.push({ dir, dev: stat.dev, ino: stat.ino })
+		}
+	}
+	return pinned
+}
+
+/**
  * Safely writes JSON data to a file.
  * - Creates parent directories if they don't exist
  * - Uses 'proper-lockfile' for inter-process advisory locking to prevent concurrent writes to the same path.
@@ -214,15 +248,27 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// given. Re-checked here after the lock because a peer writer may have moved
 		// the referent between the pre-lock check and this one. This runs before the
 		// merge read and before anything is staged, so a rejected write leaves nothing
-		// behind. It is also the LAST confinement decision of this write: it decides
-		// the final component as it resolves here, and an ancestor directory replaced
-		// by a link between this point and the commit rename below is outside its
-		// reach, because the rename takes a path and re-resolves the tree at rename
-		// time. See the confineTo option doc for what the two outcomes of that window
-		// are and why neither is claimed by this option.
+		// behind.
+		//
+		// What this decision is made ABOUT is pinned for the publish: the resolved target
+		// (expectedResolvedPath) and the identity of every directory walked from the scope
+		// root down to the target's parent (expectedAncestorIdentities). safeWriteText
+		// re-reads both immediately before its commit rename, so an ancestor directory
+		// replaced by a link after this point aborts the publish instead of redirecting it
+		// outside the scope. Without the anchor the publish would re-resolve the tree at
+		// rename time and follow the swapped ancestor. See the confineTo option doc.
+		let publishPin: { expectedResolvedPath: string; expectedAncestorIdentities: AncestorIdentity[] } | undefined
 		if (options?.confineTo) {
 			const scopeRoot = await _resolveScopeRoot(options.confineTo)
-			_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(resolvedTargetPath), scopeRoot)
+			const canonicalTarget = await _resolveScopeRoot(resolvedTargetPath)
+			_assertWithinScope(absoluteFilePath, canonicalTarget, scopeRoot)
+			publishPin = {
+				// The exact value safeWriteText derives again for the path it is handed
+				// (both sides resolve through resolvePublishTarget), so an unchanged tree
+				// matches and a moved one does not.
+				expectedResolvedPath: resolvedTargetPath,
+				expectedAncestorIdentities: await _ancestorIdentities(scopeRoot, path.dirname(canonicalTarget)),
+			}
 		}
 
 		// If a merge callback was provided, read the current file under the lock
@@ -266,6 +312,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		const textOptions: SafeWriteTextOptions = {
 			tempPath: actualTempNewFilePath,
 			backup: true,
+			...publishPin,
 		}
 
 		await safeWriteText(resolvedTargetPath, "", textOptions)

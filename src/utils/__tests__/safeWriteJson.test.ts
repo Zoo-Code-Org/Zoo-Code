@@ -3,7 +3,11 @@ import { Writable } from "stream"
 import * as path from "path"
 import * as os from "os"
 
-import { PostCommitDurabilityError, StagingPathError } from "../../services/file-safety/safeWriteText"
+import {
+	AncestorReplacedError,
+	PostCommitDurabilityError,
+	TargetMovedError,
+} from "../../services/file-safety/safeWriteText"
 import { ConfinedPathEscapeError, safeWriteJson } from "../safeWriteJson"
 import * as fileLockModule from "../fileLock"
 
@@ -1005,14 +1009,15 @@ describe("safeWriteJson", () => {
 		},
 	)
 
-	// The confinement option decides from the resolved publish target and stops at its final
-	// component. What it does NOT cover is an ancestor DIRECTORY replaced by a link in the
-	// window between that decision and the commit rename, because publication takes a path
-	// and re-resolves the tree at rename time. These two tests are that limit as an
-	// executable contract - one per outcome of the window - so the documented narrowing
-	// cannot drift back into an unearned guarantee. The swap is driven from the merge
-	// callback, which safeWriteJson invokes after the in-lock confinement check and before
-	// anything is staged, so the ancestor moves inside the window rather than hopefully so.
+	// `confineTo` decides from the resolved publish target, and that decision is now pinned
+	// for the publish: safeWriteJson records the resolved target and the identity of every
+	// directory it walked from the scope root down to the target's parent, and safeWriteText
+	// re-reads them immediately before the commit rename (the mitigation inherited from the
+	// guarded-write core, #1914). The two tests below are that contract as an executable
+	// case, one per half of the window, so it cannot regress into a silent escape. The swap
+	// is driven from the merge callback, which safeWriteJson invokes after the in-lock
+	// confinement check and before anything is staged, so the ancestor moves inside the
+	// window rather than hopefully so.
 	// A directory link needs no privilege on win32 as a junction; "dir" is the POSIX
 	// spelling. Both make the ancestor itself the link, which is the shape under test.
 	const ancestorLinkKind = process.platform === "win32" ? ("junction" as const) : ("dir" as const)
@@ -1022,18 +1027,18 @@ describe("safeWriteJson", () => {
 		fsSyncActual.symlinkSync(pointsAt, ancestor, ancestorLinkKind)
 	}
 
-	test("publishes outside the declared scope when an ancestor is swapped after the final confinement check", async () => {
+	test("refuses the commit when an ancestor is swapped for a link after the final confinement check", async () => {
 		const projectDir = path.join(tempDir, "swap-project")
 		const ancestor = path.join(projectDir, "settings")
 		await fs.mkdir(ancestor, { recursive: true })
+		// The target does not exist yet, so the publish has to be stopped by the ancestor pin:
+		// nothing about the target NAME changes, and a create into the swapped-in directory
+		// would land outside the declared scope.
 		const target = path.join(ancestor, "mcp.json")
-		await fs.writeFile(target, JSON.stringify({ inside: true }))
-		// The swapped-in directory has no file at the target name yet: this is the half of the
-		// window in which nothing stops the publish.
 		const swappedIn = path.join(tempDir, "elsewhere", "settings")
 		await fs.mkdir(swappedIn, { recursive: true })
 
-		await safeWriteJson(
+		const error = await safeWriteJson(
 			target,
 			{ written: "payload" },
 			{
@@ -1043,27 +1048,35 @@ describe("safeWriteJson", () => {
 					return { written: "payload" }
 				},
 			},
+		).then(
+			() => undefined,
+			(reason: unknown) => reason,
 		)
 
-		// The bytes landed OUTSIDE the declared scope: the option confines the target it
-		// resolved, not the directory tree above it.
-		expect(JSON.parse(fsSyncActual.readFileSync(path.join(swappedIn, "mcp.json"), "utf8"))).toEqual({
-			written: "payload",
-		})
-		// The file that was inside the scope keeps its pre-write bytes - the publish did not
-		// reach it under the moved-aside name either.
-		expect(JSON.parse(fsSyncActual.readFileSync(path.join(ancestor + "-moved-aside", "mcp.json"), "utf8"))).toEqual(
-			{ inside: true },
-		)
+		// Fail closed on the swapped ancestor, not on the target path: the name still resolves
+		// to itself, only the directory it lives in was replaced.
+		expect(error).toBeInstanceOf(AncestorReplacedError)
+		expect(error).not.toBeInstanceOf(ConfinedPathEscapeError)
+		expect(path.basename((error as AncestorReplacedError).directory)).toBe("settings")
+		expect((error as AncestorReplacedError).message).toContain("nothing was published")
+		// Nothing landed outside the declared scope. The staged temp file is created through
+		// the swapped ancestor (staging is path based), and the failure cleanup removes it
+		// instead of leaving it beside the swapped-in directory.
+		expect(await fs.readdir(swappedIn)).toEqual([])
+		// Nothing landed through the moved-aside name either. (The advisory lock directory is
+		// created under the pre-swap name by proper-lockfile; when the ancestor moves aside
+		// the release targets the path, which now resolves through the link, so that empty
+		// lock directory can be left in the moved-aside copy. It holds no published content.)
+		expect((await fs.readdir(ancestor + "-moved-aside")).filter((entry) => entry === "mcp.json")).toEqual([])
 		// The scope was declared and active in this very fixture: with the ancestor left
 		// alone, the same option refuses an out-of-scope target. Without this contrast the
-		// escape above would also be the outcome of a confinement check that never ran.
+		// rejection above would also be the outcome of a confinement check that never ran.
 		await expect(
 			safeWriteJson(path.join(tempDir, "elsewhere", "other.json"), { other: true }, { confineTo: projectDir }),
 		).rejects.toThrow(ConfinedPathEscapeError)
 	})
 
-	test("fails the publish instead of following a swapped ancestor onto an existing target", async () => {
+	test("fails the publish when an existing target now resolves through a swapped ancestor", async () => {
 		const projectDir = path.join(tempDir, "swap-project-clash")
 		const ancestor = path.join(projectDir, "settings")
 		await fs.mkdir(ancestor, { recursive: true })
@@ -1088,10 +1101,9 @@ describe("safeWriteJson", () => {
 			(reason: unknown) => reason,
 		)
 
-		// The publish is stopped, but by the staging identity guard of the commit and not by
-		// confinement: the option does not claim this case, and the two must stay tellable
-		// apart from the error type alone.
-		expect(error).toBeInstanceOf(StagingPathError)
+		// An existing target makes the swap visible in the resolved name itself, so the
+		// publish stops at the target pin before anything is staged.
+		expect(error).toBeInstanceOf(TargetMovedError)
 		expect(error).not.toBeInstanceOf(ConfinedPathEscapeError)
 		// Nothing was written on either side of the swap.
 		expect(JSON.parse(fsSyncActual.readFileSync(path.join(swappedIn, "mcp.json"), "utf8"))).toEqual({
@@ -1100,6 +1112,21 @@ describe("safeWriteJson", () => {
 		expect(JSON.parse(fsSyncActual.readFileSync(path.join(ancestor + "-moved-aside", "mcp.json"), "utf8"))).toEqual(
 			{ inside: true },
 		)
+	})
+
+	test("publishes a confined write through a pinned ancestor chain and releases the lock", async () => {
+		const projectDir = path.join(tempDir, "pinned-project")
+		const nested = path.join(projectDir, "settings")
+		await fs.mkdir(nested, { recursive: true })
+		const target = path.join(nested, "mcp.json")
+
+		// The pins must not reject a directory chain that did not move: the write publishes
+		// and every artifact of it (lock, staged temp, staging directory) is gone afterwards.
+		await safeWriteJson(target, { mcpServers: {} }, { confineTo: projectDir })
+
+		expect(JSON.parse(fsSyncActual.readFileSync(target, "utf8"))).toEqual({ mcpServers: {} })
+		expect(await fs.readdir(nested)).toEqual(["mcp.json"])
+		expect(await fs.readdir(projectDir)).toEqual(["settings"])
 	})
 
 	// ── post-commit durability: the published target must survive (PI regression) ──

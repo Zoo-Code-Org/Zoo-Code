@@ -42,6 +42,41 @@ export interface SafeWriteTextOptions {
 	 * already written data to a temp file via a custom stream.
 	 */
 	tempPath?: string
+
+	/**
+	 * The publish target the caller already authorized.
+	 * A caller that checks workspace containment and then calls this primitive resolves
+	 * the path twice: once for its own decision and once here. If a link is swapped in
+	 * between the two, the decision was about a different file than the one published.
+	 * Passing the authorized value makes that drift fatal instead of silent.
+	 */
+	expectedResolvedPath?: string
+
+	/**
+	 * The directories the caller walked when it authorized this target, with the
+	 * (dev, ino) identity each had at that moment.
+	 *
+	 * expectedResolvedPath pins the NAME this write publishes; it cannot see a parent
+	 * directory being replaced by a link between the caller's containment check and the
+	 * commit. Re-checking the ancestor identities immediately before the commit makes a
+	 * swapped parent fatal too: the publish then aborts instead of writing through the new
+	 * link. Node has no descriptor-relative rename, so a swap that lands after this check
+	 * and before the rename is not eliminable here - it narrows the window to the commit
+	 * itself rather than the whole guard.
+	 * The identity check is paired with a realpath comparison: moving a directory
+	 * preserves (dev, ino), and replacing its old name with a symlink to the moved
+	 * location keeps stat() matching while sending the commit to the new location.
+	 * The name must still resolve to the authorized location, not merely to the
+	 * same inode.
+	 */
+	expectedAncestorIdentities?: AncestorIdentity[]
+}
+
+/** One directory's on-disk identity, read with bigint stats so NTFS 64-bit values survive. */
+export type AncestorIdentity = {
+	dir: string
+	dev: bigint
+	ino: bigint
 }
 
 /**
@@ -106,6 +141,40 @@ function _orphanedBackupMessage(targetPath: string, backupPath: string, cause: u
 		`still on disk and must be deleted.`
 	)
 }
+
+/**
+ * The path resolved to something other than the target the caller authorized.
+ * Nothing is staged or published: a link swapped in after the caller's containment
+ * check would otherwise send the write to a file that check never covered.
+ */
+export class TargetMovedError extends Error {
+	readonly authorizedPath: string
+	readonly resolvedPath: string
+	constructor(authorizedPath: string, resolvedPath: string) {
+		super(
+			`The write was authorized for ${authorizedPath}, but that path now resolves to ${resolvedPath} -- nothing was published.`,
+		)
+		this.name = "TargetMovedError"
+		this.authorizedPath = authorizedPath
+		this.resolvedPath = resolvedPath
+	}
+}
+
+/**
+ * A directory the caller walked on its way to the authorized target is no longer the
+ * directory it was: it was removed, replaced, or turned into a link to somewhere else.
+ * Publishing through it would act on a decision that was never made about the file now
+ * reachable there, so the commit is aborted.
+ */
+export class AncestorReplacedError extends Error {
+	readonly directory: string
+	constructor(directory: string, reason: string) {
+		super(`A directory on the authorized path (${directory}) ${reason} -- nothing was published.`)
+		this.name = "AncestorReplacedError"
+		this.directory = directory
+	}
+}
+
 // -- helpers ---------------------------------------------------------------
 
 /** Generate a unique temp file name in the given directory. */
@@ -329,6 +398,11 @@ export async function safeWriteText(
 
 	// Resolve the symlink referent (see resolvePublishTarget).
 	const targetPath = await resolvePublishTarget(absoluteFilePath)
+	// The caller authorized a specific resolved path; publishing at a different one
+	// would act on a decision that was never made about this file.
+	if (options?.expectedResolvedPath && path.resolve(options.expectedResolvedPath) !== targetPath) {
+		throw new TargetMovedError(options.expectedResolvedPath, targetPath)
+	}
 	const dirPath = path.dirname(targetPath)
 
 	// Ensure parent directory exists (mirrors safeWriteJson behaviour).
@@ -571,6 +645,46 @@ export async function safeWriteText(
 			}
 		}
 		try {
+			// -- Step 2b: re-validate the authorized ancestry before committing --
+			// The caller decided containment by walking this directory chain. A parent
+			// swapped for a link to outside that chain would send the commit somewhere the
+			// caller never authorized, even though expectedResolvedPath still matches (the
+			// name is unchanged). Compare each recorded identity now, before anything is
+			// moved into place.
+			if (options?.expectedAncestorIdentities) {
+				for (const expected of options.expectedAncestorIdentities) {
+					const current = await fs.stat(expected.dir, { bigint: true }).catch((error: unknown) => {
+						if (errorCode(error) === "ENOENT") {
+							throw new AncestorReplacedError(expected.dir, "no longer exists")
+						}
+						throw error
+					})
+					if (current.dev !== expected.dev || current.ino !== expected.ino) {
+						throw new AncestorReplacedError(expected.dir, "is no longer the directory that was authorized")
+					}
+					// A move preserves dev+ino, so the identity check above passes for a
+					// directory that was relocated and whose old name was replaced by a
+					// symlink to the moved location - stat follows that link. The commit
+					// below takes path strings and would follow it too, publishing at the
+					// moved location outside the chain the caller walked. Require that the
+					// authorized name still resolves to the very location it named.
+					// Only a vanished name is a containment violation. A transient EACCES
+					// or EIO would otherwise be reported as a replaced ancestor, pointing
+					// the user at a security problem that is not there - mirror the stat
+					// call above, which maps only ENOENT and rethrows the rest.
+					const resolvedDir = await fs.realpath(expected.dir).catch((error: unknown) => {
+						const code = errorCode(error)
+						if (code === "ENOENT" || code === "ENOTDIR") {
+							return undefined
+						}
+						throw error
+					})
+					if (resolvedDir === undefined || path.resolve(resolvedDir) !== path.resolve(expected.dir)) {
+						throw new AncestorReplacedError(expected.dir, "no longer resolves to the authorized location")
+					}
+				}
+			}
+
 			// -- Step 3 (backup:true): durable copy target -> backup ----
 			if (options?.backup) {
 				try {

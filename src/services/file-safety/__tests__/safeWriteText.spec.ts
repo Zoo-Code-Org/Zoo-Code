@@ -1,15 +1,18 @@
 import * as fs from "fs/promises"
+import type { BigIntStats } from "fs"
 import * as fsSync from "fs"
 import { execFile } from "child_process"
 import type { ChildProcess } from "child_process"
 import * as path from "path"
 
 import {
+	AncestorReplacedError,
 	OrphanedBackupError,
 	PostCommitDurabilityError,
 	resolveLockKey,
 	safeWriteText,
 	StagingPathError,
+	TargetMovedError,
 } from "../safeWriteText"
 
 // Full mock for fs/promises — all methods are vi.fn() stubs
@@ -22,6 +25,7 @@ vi.mock("fs/promises", () => ({
 	unlink: vi.fn(),
 	rmdir: vi.fn(),
 	realpath: vi.fn(),
+	stat: vi.fn(),
 	lstat: vi.fn(),
 	readlink: vi.fn(),
 }))
@@ -105,6 +109,16 @@ function mockDefaults(): void {
 	vi.mocked(fs.lstat).mockResolvedValue(_fileStats(false))
 	// Post-open default: the opened file is the same single-named regular file.
 	vi.mocked(fsSync.fstatSync).mockReturnValue(_fileStats(false))
+	// Ancestor-identity pin: default to one stable directory identity so the pin
+	// passes unless a test overrides it.
+	vi.mocked(fs.stat).mockResolvedValue(_dirIdentity(100n))
+}
+
+// BigIntStats stand-in for the ancestor pin: the SUT reads only dev/ino off it.
+// BigIntStats is class-backed with no public constructor, so this is a
+// last-resort double assertion (test-local, per AGENTS.md).
+function _dirIdentity(ino: bigint): BigIntStats {
+	return { dev: 1n, ino } as unknown as BigIntStats
 }
 function _stats(mode: number): fsSync.Stats {
 	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
@@ -1813,5 +1827,196 @@ describe("resolvePublishTarget", () => {
 
 		// The fallback is the resolved path, not the string that was handed in.
 		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), path.resolve(targetPath))
+	})
+})
+
+// ── Test 17: authorized-path pins (expectedResolvedPath + ancestor identities) ──
+
+describe("authorized-path pins", () => {
+	beforeEach(() => mockDefaults())
+
+	it("refuses to publish when the path no longer resolves to the authorized target", async () => {
+		// Platform-resolved spellings: the comparison is between the authorized path and
+		// what the target resolves to now, not between two ways of spelling one path.
+		const authorized = path.resolve("/tmp/test-dir/target.txt")
+		const elsewhere = path.resolve("/outside/the-victim.txt")
+		// The caller authorized this path while it was a real file in the workspace; by the
+		// time the publish resolves it, a local process has swapped in a link to somewhere
+		// else. The decision was never made about that other file, so nothing is published.
+		vi.mocked(fs.realpath).mockResolvedValue(elsewhere)
+
+		const error = await safeWriteText(authorized, "new data", {
+			expectedResolvedPath: authorized,
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(TargetMovedError)
+		const moved = error as TargetMovedError
+		expect(moved.authorizedPath).toBe(authorized)
+		expect(moved.resolvedPath).toBe(elsewhere)
+		expect(moved.message).toContain(elsewhere)
+		expect(fs.rename).not.toHaveBeenCalled()
+		// Nothing was staged either: the check runs before the staging directory is made.
+		expect(fsSync.mkdirSync).not.toHaveBeenCalled()
+	})
+
+	it("publishes when the resolved path still matches the authorized one", async () => {
+		const targetPath = path.resolve("/tmp/test-dir/target.txt")
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+
+		await safeWriteText(targetPath, "new data", { expectedResolvedPath: targetPath, platform: "linux" })
+
+		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText"), targetPath)
+	})
+
+	it("refuses to publish when an authorized parent directory was replaced after the check", async () => {
+		// expectedResolvedPath pins the NAME being published, so it cannot notice the
+		// directory the name lives in being swapped for another one (a link to outside the
+		// workspace looks exactly like this). The recorded ancestor identities are what
+		// catch it, and the commit is aborted before anything is moved into place.
+		const dir = path.resolve("/tmp/test-dir")
+		const targetPath = path.join(dir, "target.txt")
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.stat).mockResolvedValue(_dirIdentity(999n)) // was 100n when authorized
+
+		const error = await safeWriteText(targetPath, "new data", {
+			expectedResolvedPath: targetPath,
+			expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(AncestorReplacedError)
+		expect((error as AncestorReplacedError).directory).toBe(dir)
+		expect((error as AncestorReplacedError).message).toContain("no longer the directory that was authorized")
+		expect(fs.rename).not.toHaveBeenCalled()
+		// The staged copy is cleaned up rather than left beside the target.
+		expect(vi.mocked(fs.unlink).mock.calls.some((call) => String(call[0]).includes("safeWriteText"))).toBe(true)
+	})
+
+	it("refuses to publish when an authorized ancestor name was moved and replaced by a link", async () => {
+		// Moving a directory preserves (dev, ino), and replacing the old name with a
+		// symlink to the moved location keeps the identity check matching - stat
+		// follows the link. The commit takes path strings and would follow it too,
+		// publishing at the moved location outside the chain the caller walked, so
+		// the authorized name must still RESOLVE to the authorized location.
+		const dir = path.resolve("/tmp/test-dir")
+		const movedDir = path.resolve("/outside/workspace")
+		const targetPath = path.join(dir, "target.txt")
+		vi.mocked(fs.realpath).mockImplementation(async (p) =>
+			path.resolve(String(p)) === dir ? movedDir : targetPath,
+		)
+		vi.mocked(fs.stat).mockResolvedValue(_dirIdentity(100n)) // SAME identity as authorized
+
+		const error = await safeWriteText(targetPath, "new data", {
+			expectedResolvedPath: targetPath,
+			expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(AncestorReplacedError)
+		expect((error as AncestorReplacedError).message).toContain("no longer resolves to the authorized location")
+		// Nothing was published at either location.
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("propagates a transient realpath failure instead of reporting a replaced ancestor", async () => {
+		// EACCES/EIO while re-validating the authorized ancestry is not a containment
+		// violation: reporting AncestorReplacedError would point the user (and the
+		// model) at a security problem that is not there.
+		const dir = path.resolve("/tmp/test-dir")
+		const targetPath = path.join(dir, "target.txt")
+		const denied = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+		vi.mocked(fs.realpath).mockImplementation(async (p) => {
+			if (path.resolve(String(p)) === dir) throw denied
+			return targetPath
+		})
+
+		const error = await safeWriteText(targetPath, "new data", {
+			expectedResolvedPath: targetPath,
+			expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBe(denied)
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("publishes when the recorded ancestor identities are unchanged", async () => {
+		// The pin must not turn every guarded write into a false rejection: an unchanged
+		// directory chain publishes normally.
+		const dir = path.resolve("/tmp/test-dir")
+		const targetPath = path.join(dir, "target.txt")
+		// The unchanged chain resolves where it names: the ancestor realpath check
+		// sees the authorized directory itself, not a moved location.
+		vi.mocked(fs.realpath).mockImplementation(async (p) => (path.resolve(String(p)) === dir ? dir : targetPath))
+
+		await safeWriteText(targetPath, "new data", {
+			expectedResolvedPath: targetPath,
+			expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+			platform: "linux",
+		})
+
+		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText"), targetPath)
+	})
+
+	it("refuses the publish when an authorized ancestor disappears before the commit", async () => {
+		const dir = path.resolve("/tmp/test-dir")
+		const targetPath = path.join(dir, "target.txt")
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.stat).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+		const error = await safeWriteText(targetPath, "new data", {
+			expectedResolvedPath: targetPath,
+			expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(AncestorReplacedError)
+		expect((error as AncestorReplacedError).message).toContain("no longer exists")
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("reports a pinned directory whose name no longer resolves as replaced", async () => {
+		const dir = path.resolve("/tmp/test-dir")
+		const targetPath = path.join(dir, "target.txt")
+		// The identity still matches - the inode is the authorized directory - but its name
+		// cannot be resolved any more (a dangling link at the ancestor name looks like this),
+		// so the commit would re-create the path the caller never walked.
+		vi.mocked(fs.stat).mockResolvedValue(_dirIdentity(100n))
+		vi.mocked(fs.realpath).mockImplementation(async (p) => {
+			if (path.resolve(String(p)) === dir) {
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			}
+			return targetPath
+		})
+
+		const error = await safeWriteText(targetPath, "new data", {
+			expectedResolvedPath: targetPath,
+			expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(AncestorReplacedError)
+		expect((error as AncestorReplacedError).message).toContain("no longer resolves to the authorized location")
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("propagates a transient stat failure instead of reporting a replaced ancestor", async () => {
+		// Same reasoning as the realpath case: an EACCES/EIO while re-reading an identity says
+		// nothing about containment, so it must surface as itself.
+		const dir = path.resolve("/tmp/test-dir")
+		const targetPath = path.join(dir, "target.txt")
+		const denied = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.stat).mockRejectedValue(denied)
+
+		const error = await safeWriteText(targetPath, "new data", {
+			expectedResolvedPath: targetPath,
+			expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBe(denied)
+		expect(fs.rename).not.toHaveBeenCalled()
 	})
 })
