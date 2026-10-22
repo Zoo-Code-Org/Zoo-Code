@@ -37,6 +37,7 @@ export type OpenAiReasoningParams = { reasoning_effort: OpenAI.Chat.ChatCompleti
  * DTE series 2/5 — effort levels accepted by the Claude 4.7+ adaptive-thinking
  * `output_config.effort` envelope. Efforts outside this set (e.g. "none",
  * "minimal", "disable") omit the envelope so the API applies its own default.
+ * @internal Exported for focused implementation tests.
  */
 export const ADAPTIVE_OUTPUT_CONFIG_EFFORTS: readonly ReasoningEffortExtended[] = [
 	"low",
@@ -59,6 +60,7 @@ export const ADAPTIVE_OUTPUT_CONFIG_EFFORTS: readonly ReasoningEffortExtended[] 
  * providers that resolve the effective effort through it inherit the override
  * without duplicating precedence logic. The override is transient (next request
  * only) and never persisted to settings.
+ * @internal Exported for focused implementation tests.
  */
 export const resolveEffectiveReasoningEffort = ({
 	override,
