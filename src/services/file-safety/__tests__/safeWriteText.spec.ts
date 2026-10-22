@@ -78,6 +78,43 @@ describe("safeWriteText", () => {
 		)
 	})
 
+	describe("rollback failure", () => {
+		it("throws RollbackFailedError with the backup path when the rollback rename also fails", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.closeSync).mockReturnValue(undefined)
+			// backup rename succeeds, the commit rename fails, and the rollback rename fails.
+			vi.mocked(fs.rename)
+				.mockResolvedValueOnce(undefined)
+				.mockRejectedValueOnce(new Error("commit failed"))
+				.mockRejectedValueOnce(new Error("rollback failed"))
+
+			const failure = await safeWriteText(targetPath, "hello", { backup: true, platform: "linux" }).then(
+				() => undefined,
+				(error: unknown) =>
+					error as Error & {
+						name: string
+						filePath: string
+						backupPath: string
+						originalError?: Error
+						cause?: Error
+					},
+			)
+
+			// The caller must learn both the primary failure and where the previous content
+			// survived: the backup path is the only way to recover it.
+			expect(failure?.name).toBe("RollbackFailedError")
+			expect(failure?.filePath).toBe(targetPath)
+			expect(failure?.backupPath).toContain(".safeWriteText.bak_")
+			expect(failure?.originalError?.message).toBe("commit failed")
+			expect(failure?.cause?.message).toBe("rollback failed")
+			expect(failure?.message).toContain("commit failed")
+			expect(failure?.message).toContain("rollback failed")
+			expect(failure?.message).toContain(failure?.backupPath)
+		})
+	})
+
 	describe("staging and cleanup", () => {
 		it("creates a temp file in the staging dir, fsyncs it, renames to target, and cleans up on success", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
