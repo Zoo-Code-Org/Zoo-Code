@@ -549,6 +549,17 @@ describe("registerCommands handlers", () => {
 		expect(focusPanel).toHaveBeenCalledWith(undefined, undefined)
 	})
 
+	it("focusPanel command skips a tracked sidebar whose view is no longer live", async () => {
+		setPanel({} as vscode.WebviewView, "sidebar")
+		// The tracked sidebar's instance is gone: the handler must not reveal it.
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
+		vi.mocked(focusPanel).mockClear()
+
+		await handlers["zoo-code.focusPanel"]()
+
+		expect(focusPanel).toHaveBeenCalledWith(undefined, undefined)
+	})
+
 	it("focusPanel command targets the tracked live surfaces", async () => {
 		const sidebarPanel = {} as vscode.WebviewView
 		setPanel(sidebarPanel, "sidebar")
