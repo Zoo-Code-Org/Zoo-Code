@@ -25,6 +25,28 @@ export const DIFF_VIEW_URI_SCHEME = "cline-diff"
 export const DIFF_VIEW_LABEL_CHANGES = "Original ↔ Zoo's Changes"
 
 // TODO: https://github.com/cline/cline/pull/3354
+/**
+ * Write a file so readers only ever observe the previous bytes or the complete
+ * new bytes: the content goes to a sibling staging file first and is renamed
+ * into place (same directory, so the rename is atomic on one volume).
+ */
+async function writeFileAtomically(absolutePath: string, content: string): Promise<void> {
+	// Derive the sibling staging path with plain string operations: this helper runs
+	// under unit tests that mock the "path" module down to the few functions the
+	// provider itself uses.
+	const separatorIndex = Math.max(absolutePath.lastIndexOf("/"), absolutePath.lastIndexOf("\\"))
+	const directory = separatorIndex >= 0 ? absolutePath.slice(0, separatorIndex) : "."
+	const baseName = separatorIndex >= 0 ? absolutePath.slice(separatorIndex + 1) : absolutePath
+	const stagingPath = `${directory}/.${baseName}.${process.pid}.${Date.now()}.staging`
+	try {
+		await fs.writeFile(stagingPath, content, "utf-8")
+		await fs.rename(stagingPath, absolutePath)
+	} catch (error) {
+		await fs.rm(stagingPath, { force: true }).catch(() => {})
+		throw error
+	}
+}
+
 export class DiffViewProvider {
 	// Properties to store the results of saveChanges
 	newProblemsMessage?: string
@@ -1154,9 +1176,10 @@ export class DiffViewProvider {
 		// Get diagnostics before editing the file
 		this.preDiagnostics = vscode.languages.getDiagnostics()
 
-		// Write the content directly to the file
+		// Write the content directly to the file, atomically: a crash mid-write must
+		// not leave the destination truncated.
 		await createDirectoriesForFile(absolutePath)
-		await fs.writeFile(absolutePath, content, "utf-8")
+		await writeFileAtomically(absolutePath, content)
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory

@@ -14,6 +14,8 @@ vi.mock("delay", () => ({
 vi.mock("fs/promises", () => ({
 	readFile: vi.fn().mockResolvedValue("file content"),
 	writeFile: vi.fn().mockResolvedValue(undefined),
+	rename: vi.fn().mockResolvedValue(undefined),
+	rm: vi.fn().mockResolvedValue(undefined),
 	access: vi.fn().mockResolvedValue(undefined),
 }))
 
@@ -791,9 +793,14 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 2000)
 
-			// Verify file was written
+			// Verify the content was written through an atomic staging file + rename
 			const fs = await import("fs/promises")
-			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
+			expect(fs.writeFile).toHaveBeenCalledWith(expect.stringContaining(".staging"), "new content", "utf-8")
+			const stagingPath = (fs.writeFile as unknown as { mock: { calls: [string, string, string][] } }).mock.calls.find(
+				(call) => call[1] === "new content",
+			)?.[0]
+			expect(stagingPath).toContain(".test.ts.")
+			expect(fs.rename).toHaveBeenCalledWith(stagingPath, `${mockCwd}/test.ts`)
 
 			// Verify file was opened without focus
 			expect(vscode.window.showTextDocument).toHaveBeenCalledWith(
@@ -814,9 +821,14 @@ describe("DiffViewProvider", () => {
 		it("should not open file when openWithoutFocus is false", async () => {
 			await diffViewProvider.saveDirectly("test.ts", "new content", false, true, 1000)
 
-			// Verify file was written
+			// Verify the content was written through an atomic staging file + rename
 			const fs = await import("fs/promises")
-			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
+			expect(fs.writeFile).toHaveBeenCalledWith(expect.stringContaining(".staging"), "new content", "utf-8")
+			const stagingPath = (fs.writeFile as unknown as { mock: { calls: [string, string, string][] } }).mock.calls.find(
+				(call) => call[1] === "new content",
+			)?.[0]
+			expect(stagingPath).toContain(".test.ts.")
+			expect(fs.rename).toHaveBeenCalledWith(stagingPath, `${mockCwd}/test.ts`)
 
 			// Verify file was NOT opened
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
@@ -829,9 +841,14 @@ describe("DiffViewProvider", () => {
 
 			await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 1000)
 
-			// Verify file was written
+			// Verify the content was written through an atomic staging file + rename
 			const fs = await import("fs/promises")
-			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
+			expect(fs.writeFile).toHaveBeenCalledWith(expect.stringContaining(".staging"), "new content", "utf-8")
+			const stagingPath = (fs.writeFile as unknown as { mock: { calls: [string, string, string][] } }).mock.calls.find(
+				(call) => call[1] === "new content",
+			)?.[0]
+			expect(stagingPath).toContain(".test.ts.")
+			expect(fs.rename).toHaveBeenCalledWith(stagingPath, `${mockCwd}/test.ts`)
 
 			// Verify delay was NOT called
 			expect(mockDelay).not.toHaveBeenCalled()

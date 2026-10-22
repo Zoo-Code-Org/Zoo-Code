@@ -18,6 +18,7 @@ const mockedFsPromises = vi.mocked(
 			readFile: MockedFunction<typeof fsPromises.readFile>
 			unlink: MockedFunction<typeof fsPromises.unlink>
 			rm: MockedFunction<typeof fsPromises.rm>
+			rename: MockedFunction<typeof fsPromises.rename>
 			writeFile: MockedFunction<typeof fsPromises.writeFile>
 		}
 	},
@@ -28,6 +29,7 @@ vi.mock("fs/promises", () => ({
 		readFile: vi.fn().mockResolvedValue("original file content\n"),
 		unlink: vi.fn().mockResolvedValue(undefined),
 		rm: vi.fn().mockResolvedValue(undefined),
+		rename: vi.fn().mockResolvedValue(undefined),
 		mkdir: vi.fn().mockResolvedValue(undefined),
 		writeFile: vi.fn().mockResolvedValue(undefined),
 	},
@@ -191,6 +193,8 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				expect.stringContaining("could not be restored and may still contain the new content"),
 			)
 			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("EROFS"))
+			// The approved content survives the failed rollback as an explicit recovery artifact.
+			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("The approved new content was kept at"))
 			// ...and no whole-patch checkpoint is recorded for the failed move.
 			expect(mockedCheckpointSave).not.toHaveBeenCalled()
 			// Restore the default readFile behavior for later tests.
@@ -224,13 +228,17 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				toolCallId: "test-tool-call-id",
 			})
 
-			// The captured destination content is restored, not deleted: rm must not
-			// run for a destination that existed before the move.
-			expect(mockedFsPromises.default.writeFile).toHaveBeenCalledWith(
+			// The captured destination content is restored by renaming the on-disk backup
+			// over the clobbered destination (one atomic replacement), never by rewriting
+			// the captured bytes and never by deleting a destination that existed before.
+			expect(mockedFsPromises.default.writeFile).not.toHaveBeenCalledWith(
 				expect.stringContaining("new.ts"),
 				"existing destination content",
 			)
-			expect(mockedFsPromises.default.rm).not.toHaveBeenCalled()
+			expect(mockedFsPromises.default.rename).toHaveBeenCalledWith(
+				expect.stringContaining(".backup"),
+				expect.stringMatching(/[\\/]new\.ts$/),
+			)
 			expect(mockPushToolResult).toHaveBeenCalledWith(
 				expect.stringContaining("Failed to delete original file after move"),
 			)
