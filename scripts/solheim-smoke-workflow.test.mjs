@@ -147,7 +147,11 @@ function runRecorder(
 	return { result, ...paths, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) }
 }
 
-function runRecorderSignalled(args, { ffmpeg, ffprobeOk = true, delayMs, providerMarker, stopBudget } = {}) {
+// TERM waits until the stub proves its signal handler is armed: a bounded wait
+// for readyFile when one is given, or the fixed delayMs fallback otherwise. A
+// TERM that lands during Node boot would kill the stub before its handler
+// exists and turn the test into a boot-race coin flip.
+function runRecorderSignalled(args, { ffmpeg, ffprobeOk = true, delayMs, readyFile, providerMarker, stopBudget } = {}) {
 	return new Promise((resolve) => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "record-sh-"))
 		const bin = stubRecorderBin(dir, { ffmpeg, ffprobeOk })
@@ -163,10 +167,34 @@ function runRecorderSignalled(args, { ffmpeg, ffprobeOk = true, delayMs, provide
 			stdout += chunk
 		})
 		const watchdog = setTimeout(() => child.kill("SIGKILL"), 15_000)
-		const timer = setTimeout(() => child.kill("SIGTERM"), delayMs)
+		let timer
+		let poll
+		const sendTerm = () => {
+			timer = setTimeout(() => child.kill("SIGTERM"), delayMs)
+		}
+		if (readyFile === undefined) {
+			sendTerm()
+		} else {
+			const startedAt = Date.now()
+			poll = setInterval(() => {
+				if (fs.existsSync(readyFile)) {
+					clearInterval(poll)
+					poll = undefined
+					sendTerm()
+					return
+				}
+				// A stub that never becomes ready must not hang the test.
+				if (Date.now() - startedAt > 10_000) {
+					clearInterval(poll)
+					poll = undefined
+					child.kill("SIGKILL")
+				}
+			}, 25)
+		}
 		child.on("close", (code) => {
 			clearTimeout(watchdog)
-			clearTimeout(timer)
+			if (timer !== undefined) clearTimeout(timer)
+			if (poll !== undefined) clearInterval(poll)
 			resolve({ code, stdout, ...paths, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) })
 		})
 	})
@@ -360,6 +388,7 @@ describe("record.sh provider stop behavior", () => {
 		// The artifact lives beside the stub, not inside the recorder output
 		// directory, so the assertion only observes the driver-style write.
 		const artifact = path.join(dir, "verdict.json")
+		const readyFile = path.join(dir, "driver-ready")
 		const stub = path.join(dir, "driver-stub.mjs")
 		fs.writeFileSync(
 			stub,
@@ -374,10 +403,11 @@ describe("record.sh provider stop behavior", () => {
 				`		process.exit(143)`,
 				`	}, 1500)`,
 				`})`,
+				`fs.writeFileSync(process.argv[3], "ready")`,
 				`setInterval(() => {}, 1000)`,
 			].join("\n"),
 		)
-		const run = await runRecorderSignalled(["node", stub, artifact], { delayMs: 800, stopBudget: 10 })
+		const run = await runRecorderSignalled(["node", stub, artifact, readyFile], { readyFile, stopBudget: 10 })
 		try {
 			assert.equal(run.code, 143)
 			// The wrapper waited for the driver teardown instead of killing the
@@ -398,21 +428,24 @@ describe("record.sh provider stop behavior", () => {
 		// never interpolated into the driver source.
 		const hungPidFile = path.join(dir, "hung\\pid")
 		const termSeenFile = path.join(dir, 'term"seen')
+		const hungReadyFile = path.join(dir, "hung-ready")
 		const hungStub = path.join(dir, "hung-driver.mjs")
 		fs.writeFileSync(
 			hungStub,
 			[
 				`import fs from "node:fs"`,
 				`process.on("SIGTERM", () => fs.writeFileSync(process.argv[2], "seen"))`,
+				`fs.writeFileSync(process.argv[4], "ready")`,
 				`fs.writeFileSync(process.argv[3], String(process.pid))`,
 				`setInterval(() => {}, 1000)`,
 			].join("\n"),
 		)
 		const startedAt = Date.now()
-		// The TERM lands well after the child booted, so the ignored TERM is a
-		// handled signal, not a boot-time default kill.
-		const run = await runRecorderSignalled(["node", hungStub, termSeenFile, hungPidFile], {
-			delayMs: 900,
+		// TERM lands only after the ready file proves the TERM handler is
+		// armed, so the ignored TERM is a handled signal, never a boot-time
+		// default kill.
+		const run = await runRecorderSignalled(["node", hungStub, termSeenFile, hungPidFile, hungReadyFile], {
+			readyFile: hungReadyFile,
 			stopBudget: 2,
 		})
 		try {

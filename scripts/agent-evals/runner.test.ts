@@ -74,6 +74,8 @@ function harness(
 		timeout?: () => void
 		onPause?: (count: number) => void
 		disconnectOnPause?: number
+		onLaunch?: () => void
+		onReady?: () => void
 	} = {},
 ) {
 	let now = 0
@@ -87,6 +89,8 @@ function harness(
 	let disconnected = false
 	let unsubscribed = false
 	let launched = false
+	let connected = false
+	let readyAnnounced = false
 	let workspaceFiles: readonly { path: string; content: string }[] = []
 	const commands: TaskCommand[] = []
 	const signals: NodeJS.Signals[] = []
@@ -107,6 +111,7 @@ function harness(
 			launched = true
 			workspaceFiles = files
 			if (scenario === "setup") throw new Error("private setup detail")
+			options.onLaunch?.()
 			return {
 				get exited() {
 					return exited
@@ -121,8 +126,15 @@ function harness(
 			}
 		},
 		connect() {
+			connected = true
 			return {
-				isReady: scenario !== "activation",
+				get isReady() {
+					if (!readyAnnounced && scenario !== "activation") {
+						readyAnnounced = true
+						options.onReady?.()
+					}
+					return scenario !== "activation"
+				},
 				onTaskEvent(listener) {
 					onEvent = listener
 				},
@@ -253,6 +265,9 @@ function harness(
 		get launched() {
 			return launched
 		},
+		get connected() {
+			return connected
+		},
 		get workspaceFiles() {
 			return workspaceFiles
 		},
@@ -341,6 +356,86 @@ describe("agent fixture controller", () => {
 		assert.equal(result2.execution.code, "STOPPED")
 		assert.equal(writtenTrace(mixed).eventFlow.replayedAfterAck, 3)
 		assert.equal(accepted.length, 3)
+	})
+
+	it("reports a rejected task start without replay, and still tears down cleanly", async () => {
+		registerTestFixture("controller-start-failure")
+		const f = harness("start-failure")
+		f.emit({ eventName: RooCodeEventName.TaskStarted, payload: ["root"] })
+		const result = await runAgentFixture(f.runtime, {
+			fixtureName: "controller-start-failure",
+			credential: CREDENTIAL,
+		})
+		assert.equal(result.execution.code, "TASK_START_FAILED")
+		assert.equal(result.execution.stopReason, "startNotAccepted")
+		assert.equal(result.execution.activated, true)
+		assert.equal(result.execution.taskAccepted, false)
+		const trace = writtenTrace(f)
+		assert.equal(trace.eventFlow.bufferedBeforeAck, 1)
+		assert.equal(trace.eventFlow.replayedAfterAck, 0)
+		assert.ok(trace.accounting.completeness.reasons.includes("taskNotAccepted"))
+		assert.equal(result.teardown.status, "ok")
+		assert.equal(result.teardown.hostExited, true)
+		assert.equal(result.teardown.cleanup, "done")
+		assert.ok(f.cleaned && f.disconnected && f.unsubscribed)
+	})
+
+	it("never connects or starts a task when the interrupt lands during launch", async () => {
+		registerTestFixture("controller-launch-interrupt")
+		const f = harness("success", { onLaunch: () => f.interrupt() })
+		const result = await runAgentFixture(f.runtime, {
+			fixtureName: "controller-launch-interrupt",
+			credential: CREDENTIAL,
+		})
+		assert.equal(f.launched, true)
+		assert.equal(f.connected, false)
+		assert.equal(f.commands.length, 0)
+		assert.equal(result.execution.code, "SETUP_FAILED")
+		assert.equal(result.execution.activated, false)
+		assert.equal(result.execution.taskAccepted, false)
+		assert.deepEqual(f.signals, ["SIGTERM"])
+		assert.equal(result.teardown.status, "ok")
+		assert.equal(result.teardown.hostExited, true)
+		assert.equal(result.teardown.cleanup, "done")
+		assert.ok(f.cleaned && f.unsubscribed)
+	})
+
+	it("stops before the start command when the interrupt lands after activation", async () => {
+		registerTestFixture("controller-activation-interrupt")
+		const f = harness("success", { onReady: () => f.interrupt() })
+		const result = await runAgentFixture(f.runtime, {
+			fixtureName: "controller-activation-interrupt",
+			credential: CREDENTIAL,
+		})
+		assert.equal(result.execution.activated, true)
+		assert.equal(result.execution.taskAccepted, false)
+		assert.equal(result.execution.code, "SETUP_FAILED")
+		assert.ok(!f.commands.some((command) => command.commandName === TaskCommandName.StartNewTask))
+		assert.deepEqual(f.signals, ["SIGTERM"])
+		assert.equal(result.teardown.status, "ok")
+		assert.equal(result.teardown.hostExited, true)
+		assert.ok(f.cleaned && f.disconnected && f.unsubscribed)
+	})
+
+	it("drops exactly one event past the pre-ack buffer limit and records the overflow caveat", async () => {
+		registerTestFixture("controller-overflow")
+		const f = harness("no-events")
+		for (let index = 0; index < 257; index++) f.emit({ eventName: RooCodeEventName.TaskStarted, payload: ["root"] })
+		const result = await runAgentFixture(f.runtime, {
+			fixtureName: "controller-overflow",
+			credential: CREDENTIAL,
+			observers: { shouldStop: () => true },
+		})
+		assert.equal(result.execution.code, "STOPPED")
+		assert.equal(result.execution.taskAccepted, true)
+		const trace = writtenTrace(f)
+		assert.equal(trace.eventFlow.observed, 258)
+		assert.equal(trace.eventFlow.eventBufferLimit, 256)
+		assert.equal(trace.eventFlow.bufferedBeforeAck, 256)
+		assert.equal(trace.eventFlow.replayedAfterAck, 256)
+		assert.equal(trace.eventFlow.bufferOverflow, true)
+		assert.equal(trace.eventFlow.droppedByOverflow, 1)
+		assert.ok(trace.accounting.completeness.reasons.includes("eventBufferOverflow"))
 	})
 
 	it("bounds the run timeout, the activation wait, and the usage drain", async () => {
