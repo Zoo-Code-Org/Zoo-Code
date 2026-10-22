@@ -1,0 +1,6 @@
+test(activate): pin the never-sidebar claim in the focusInput priority test
+
+The test asserts the post targets the tracked tab's provider and claims it
+never reaches the sidebar registration; assert the sidebar provider double
+stays untouched so the claim is pinned by its own test instead of only by
+the sibling.
