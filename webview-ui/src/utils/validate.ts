@@ -13,9 +13,7 @@ import {
 
 type OpenAiExtraBodyParseResult = ReturnType<typeof parseOpenAiExtraBody>
 type OpenAiExtraBodyTranslationKey = `settings:validation.openAiExtraBody.${
-	| "invalidJson"
-	| "objectRequired"
-	| "reservedKeys"}`
+	"invalidJson" | "objectRequired" | "reservedKeys"}`
 type OpenAiExtraBodyTranslationFunction = (key: OpenAiExtraBodyTranslationKey, options?: { keys: string }) => string
 
 export function formatOpenAiExtraBodyValidationError(

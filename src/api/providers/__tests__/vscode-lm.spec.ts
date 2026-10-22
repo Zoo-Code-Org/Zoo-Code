@@ -1379,7 +1379,7 @@ describe("VsCodeLmHandler", () => {
 				// Greedy char deletion keeps the part count, so a printed repro still names its split points.
 				const shrink = async (parts: string[], frozen: ReadonlySet<number>, problem: string) => {
 					let current = parts
-					for (let progress = true; progress; ) {
+					for (let progress = true; progress;) {
 						progress = false
 						for (let partIndex = current.length - 1; partIndex >= 0; partIndex--) {
 							if (frozen.has(partIndex)) {
