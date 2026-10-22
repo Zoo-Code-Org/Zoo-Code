@@ -149,6 +149,30 @@ function _scopeErrorCode(error: unknown): string | undefined {
  * this single decision, so they can never disagree about whether a scope is
  * active.
  */
+/**
+ * Undo exactly the file this write published at the escaped location.
+ *
+ * The path alone cannot prove the file is ours: a concurrent writer can replace it
+ * between the commit and this re-check, and unlinking on the name would then delete a
+ * peer's file. The bytes this write staged are therefore compared with the bytes now on
+ * disk, and a mismatch leaves the peer's file untouched. The escape is reported to the
+ * caller either way.
+ * @internal Exported for the escape-undo regression tests.
+ */
+export async function undoEscapedPublish(
+	publishedPath: string,
+	expectedBytes: Buffer | undefined,
+): Promise<void> {
+	if (expectedBytes === undefined) {
+		return
+	}
+	const actualBytes = await fs.readFile(publishedPath).catch(() => undefined)
+	if (actualBytes === undefined || !actualBytes.equals(expectedBytes)) {
+		return
+	}
+	await fs.unlink(publishedPath).catch(() => {})
+}
+
 function _declaredScopeRoot(confineTo: string | undefined, requestedPath: string): string | undefined {
 	if (confineTo === undefined) {
 		return undefined
@@ -275,6 +299,10 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		)
 
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
+		// The bytes this write is about to publish. They are the identity a post-commit
+		// escape undo uses to avoid deleting a file a concurrent writer put at the escaped
+		// path; reading them here keeps the comparison independent of serialization details.
+		const stagedBytes = await fs.readFile(actualTempNewFilePath).catch(() => undefined)
 
 		// Step 2: Delegate backup + commit + rollback to safeWriteText with the
 		// pre-written temp path. backup:true keeps the old safeWriteJson
@@ -294,8 +322,9 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// at commit time, so an ancestor directory replaced by a link inside that
 		// window would publish outside the declared scope. Re-resolve after the
 		// commit: if the bytes landed outside, undo by removing exactly the file
-		// this write published at the escaped location and report the escape. The
-		// peer's swap itself is left as the peer made it. (A swapped-in directory
+		// this write published at the escaped location (never a same-named file a peer
+		// placed there after the commit) and report the escape. The peer's swap itself is
+		// left as the peer made it. (A swapped-in directory
 		// that already carried a target file is stopped earlier, by the staging
 		// identity guard inside safeWriteText, so this undo never races a backup.)
 		if (confinementRoot !== undefined) {
@@ -304,7 +333,9 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			try {
 				_assertWithinScope(absoluteFilePath, publishedPath, scopeRoot)
 			} catch (escapeError) {
-				await fs.unlink(publishedPath).catch(() => {})
+				// Undo only the file this write published, never a same-named file a peer
+				// placed there after the commit.
+				await undoEscapedPublish(publishedPath, stagedBytes)
 				throw escapeError
 			}
 		}

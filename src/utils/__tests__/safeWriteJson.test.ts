@@ -4,7 +4,7 @@ import * as path from "path"
 import * as os from "os"
 
 import { StagingPathError } from "../../services/file-safety/safeWriteText"
-import { ConfinedPathEscapeError, safeWriteJson } from "../safeWriteJson"
+import { ConfinedPathEscapeError, safeWriteJson, undoEscapedPublish } from "../safeWriteJson"
 
 // Capture actual implementations before the vi.mock factory runs,
 // so they are never wrapped by vi.fn() — avoids infinite recursion when
@@ -936,6 +936,29 @@ describe("safeWriteJson", () => {
 		await expect(
 			safeWriteJson(path.join(tempDir, "elsewhere", "other.json"), { other: true }, { confineTo: projectDir }),
 		).rejects.toThrow(ConfinedPathEscapeError)
+	})
+
+	test("undoes an escaped publish only when the bytes on disk are still this write's bytes", async () => {
+		const outside = path.join(tempDir, "undo-escaped")
+		await fs.mkdir(outside, { recursive: true })
+		const escaped = path.join(outside, "mcp.json")
+		// A peer wrote its own file at the escaped name after our commit published ours and
+		// before the post-commit re-check ran. Removing it on the name alone would delete the
+		// peer's file; the byte comparison must leave it in place.
+		fsSyncActual.writeFileSync(escaped, JSON.stringify({ peer: true }))
+
+		await undoEscapedPublish(escaped, Buffer.from(JSON.stringify({ ours: true })))
+
+		expect(fsSyncActual.existsSync(escaped)).toBe(true)
+		expect(JSON.parse(fsSyncActual.readFileSync(escaped, "utf8"))).toEqual({ peer: true })
+
+		// The bytes are still ours: the escaped publish is undone.
+		await undoEscapedPublish(escaped, Buffer.from(JSON.stringify({ peer: true })))
+		expect(fsSyncActual.existsSync(escaped)).toBe(false)
+
+		// A missing file and an unreadable byte record are both no-ops, never a throw.
+		await undoEscapedPublish(escaped, Buffer.from("{}"))
+		await undoEscapedPublish(path.join(outside, "absent.json"), undefined)
 	})
 
 	test("fails the publish instead of following a swapped ancestor onto an existing target", async () => {
