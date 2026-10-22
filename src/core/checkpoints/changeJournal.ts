@@ -65,8 +65,11 @@ export interface PendingJournalState {
 	entries?: ChangeJournalEntry[]
 }
 
-/** Pending-marker path for a given task. */
-function pendingJournalPath(globalStorageDir: string, taskId: string): string {
+/**
+ * Pending-marker path for a given task.
+ * @internal Exported for the focused transaction-recovery tests.
+ */
+export function pendingJournalPath(globalStorageDir: string, taskId: string): string {
 	assertSafeTaskId(taskId)
 	return path.join(taskCheckpointDir(globalStorageDir, taskId), PENDING_FILENAME)
 }
@@ -290,6 +293,7 @@ async function readJournalEntries(globalStorageDir: string, taskId: string): Pro
 /**
  * Load all change-journal entries for a task, first folding in a durable
  * pending marker left by a crash or a failed append (see reconcilePendingJournal).
+ * @internal Wired by a later unit in the split chain; remove when the chain completes.
  */
 export async function loadChanges(globalStorageDir: string, taskId: string): Promise<ChangeJournalEntry[]> {
 	await reconcilePendingJournal(globalStorageDir, taskId)
