@@ -65,6 +65,11 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		// queued turn start while the checkpoint is still staging or committing.
 
 		let handoffPending = false
+		// Committed-mutation tracker: a handler can commit a workspace write and then
+		// reject during later bookkeeping, so the outer catch must still persist the
+		// partial-state checkpoint. The flag is therefore owned here, outside the
+		// handler-return boundary.
+		const mutation = { committed: false }
 
 		try {
 			// Validate required parameters
@@ -144,12 +149,20 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						task,
 						callbacks,
 						isWriteProtected,
+						mutation,
 					)
 					handoffPending = handoffPending || result.mutated
 					patchSucceeded = result.ok && patchSucceeded
 				} else if (change.type === "delete") {
 					// Delete file
-					const result = await this.handleDeleteFile(absolutePath, relPath, task, callbacks, isWriteProtected)
+					const result = await this.handleDeleteFile(
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+						mutation,
+					)
 					handoffPending = handoffPending || result.mutated
 					patchSucceeded = result.ok && patchSucceeded
 				} else if (change.type === "update") {
@@ -161,6 +174,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						task,
 						callbacks,
 						isWriteProtected,
+						mutation,
 					)
 					handoffPending = handoffPending || result.mutated
 					patchSucceeded = result.ok && patchSucceeded
@@ -200,7 +214,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// checkpoint here (same default-on semantics as the branches
 			// above) instead of letting the queued turn start with the
 			// retained writes carried forward without rollback metadata.
-			if (handoffPending) {
+			if (handoffPending || mutation.committed) {
 				const perWriteCheckpoints = (await task.providerRef?.deref()?.getState())?.perWriteCheckpoints
 				if (perWriteCheckpoints !== false) {
 					await checkpointSave(task, false, true).catch(() => {})
@@ -214,7 +228,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// never start while the patch checkpoint is still staging or
 			// committing, and no path (disabled checkpoints, failed save, early
 			// return, error) strands the queued messages.
-			if (handoffPending) {
+			if (handoffPending || mutation.committed) {
 				task.processQueuedMessages()
 			}
 		}
@@ -227,6 +241,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
+		mutation: { committed: boolean },
 	): Promise<PatchFileResult> {
 		const { askApproval, pushToolResult } = callbacks
 		let mutated = false
@@ -306,6 +321,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		// Track file edit operation
 		await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
 		mutated = true
+		mutation.committed = true
 		task.didEditFile = true
 
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, true)
@@ -320,6 +336,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
+		mutation: { committed: boolean },
 	): Promise<PatchFileResult> {
 		const { askApproval, pushToolResult } = callbacks
 		let mutated = false
@@ -368,6 +385,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		}
 
 		mutated = true
+		mutation.committed = true
 		task.didEditFile = true
 		pushToolResult(`Successfully deleted ${relPath}`)
 		return { ok: true, mutated }
@@ -380,6 +398,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
+		mutation: { committed: boolean },
 	): Promise<PatchFileResult> {
 		const { askApproval, pushToolResult } = callbacks
 		let mutated = false
@@ -558,6 +577,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				// The destination content changed: even a later failed source unlink (which
 				// rolls the destination back) is a workspace mutation the checkpoint must see.
 				mutated = true
+				mutation.committed = true
 				if (isPreventFocusDisruptionEnabled) {
 					// Diagnostics/bookkeeping only: the bytes were committed above, and
 					// saveDirectly writes the same content through the same atomic write.
@@ -665,6 +685,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			}
 
 			mutated = true
+			mutation.committed = true
 			await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
 		}
 
