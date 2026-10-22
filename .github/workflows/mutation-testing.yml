@@ -56,7 +56,6 @@ jobs:
 
             - name: Summarize per-file mutation results
               if: always() && github.event_name == 'pull_request'
-              continue-on-error: true
               run: |
                   node --input-type=module - <<'NODE'
                   import fs from "node:fs"
@@ -66,7 +65,13 @@ jobs:
                   const VALID_STATUSES = new Set(["Killed", "Survived", "NoCoverage", "Timeout"])
                   const rows = []
                   const unreadable = []
-                  const directories = fs.existsSync(REPORT_ROOT) ? fs.readdirSync(REPORT_ROOT, { withFileTypes: true }) : []
+                  let directories = []
+
+                  try {
+                      directories = fs.existsSync(REPORT_ROOT) ? fs.readdirSync(REPORT_ROOT, { withFileTypes: true }) : []
+                  } catch (error) {
+                      unreadable.push("reports/mutation: " + error.message)
+                  }
 
                   for (const directory of directories) {
                       if (!directory.isDirectory()) continue
@@ -123,8 +128,13 @@ jobs:
                   if (unreadable.length > 0) lines.push("", "Unreadable report(s): " + unreadable.join("; "))
 
                   const summary = lines.join("\n") + "\n"
-                  if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary)
-                  else process.stdout.write(summary)
+
+                  try {
+                      if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary)
+                      else process.stdout.write(summary)
+                  } catch (error) {
+                      console.log("::warning title=Mutation test advisory::Could not write the per-file mutation summary: " + error.message)
+                  }
                   NODE
 
             - name: Upload mutation reports
