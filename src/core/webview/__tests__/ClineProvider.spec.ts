@@ -2853,7 +2853,11 @@ describe("ClineProvider", () => {
 			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
 
 			await expect(
-				provider["persistProviderProfile"]("p", { apiProvider: providerIdentifiers.anthropic, apiKey: "raw-key" }, true),
+				provider["persistProviderProfile"](
+					"p",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "raw-key" },
+					true,
+				),
 			).rejects.toThrow("could not be read back")
 
 			// The landed save was compensated with the prior record, and no

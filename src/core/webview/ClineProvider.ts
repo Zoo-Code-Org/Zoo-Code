@@ -2322,10 +2322,7 @@ export class ClineProvider
 		return this.enqueueProviderProfileMutation(() => this.handleModeSwitchUnlocked(newMode, targetTask))
 	}
 
-	private async handleModeSwitchUnlocked(
-		newMode: Mode,
-		targetTask: Task | null | undefined,
-	): Promise<void> {
+	private async handleModeSwitchUnlocked(newMode: Mode, targetTask: Task | null | undefined): Promise<void> {
 		const task = targetTask
 
 		if (task) {
@@ -2724,78 +2721,74 @@ export class ClineProvider
 
 		try {
 			await this.enqueueProviderProfileMutation(async () => {
-					const { name: _name, ...stored } = await this.providerSettingsManager.getProfile({ name })
+				const { name: _name, ...stored } = await this.providerSettingsManager.getProfile({ name })
 
-					// Unset provider (e.g. the seeded default profile) resolves to anthropic, matching getState().
-					const storedProvider = stored.apiProvider ?? providerIdentifiers.anthropic
+				// Unset provider (e.g. the seeded default profile) resolves to anthropic, matching getState().
+				const storedProvider = stored.apiProvider ?? providerIdentifiers.anthropic
 
-					if (storedProvider !== expectedProvider) {
-						throw new Error(
-							`Profile "${name}" provider changed from "${expectedProvider}" to "${storedProvider}"`,
-						)
+				if (storedProvider !== expectedProvider) {
+					throw new Error(
+						`Profile "${name}" provider changed from "${expectedProvider}" to "${storedProvider}"`,
+					)
+				}
+
+				const merged: Record<string, unknown> = { ...stored, apiProvider: storedProvider }
+
+				for (const [key, value] of Object.entries(patch)) {
+					if (PROFILE_MODEL_ID_PATCH_KEYS.has(key)) {
+						if (typeof value !== "string" || value.length === 0) {
+							throw new Error(`Key "${key}" must be a non-empty string in a model patch`)
+						}
+
+						merged[key] = value
+					} else if (PROFILE_MODEL_RESET_ONLY_KEYS.has(key)) {
+						if (value !== null && value !== undefined) {
+							throw new Error(`Key "${key}" can only be cleared in a model patch`)
+						}
+
+						delete merged[key]
+					} else {
+						throw new Error(`Key "${key}" is not allowed in a model patch`)
 					}
+				}
 
-					const merged: Record<string, unknown> = { ...stored, apiProvider: storedProvider }
-
-					for (const [key, value] of Object.entries(patch)) {
-						if (PROFILE_MODEL_ID_PATCH_KEYS.has(key)) {
-							if (typeof value !== "string" || value.length === 0) {
-								throw new Error(`Key "${key}" must be a non-empty string in a model patch`)
-							}
-
-							merged[key] = value
-						} else if (PROFILE_MODEL_RESET_ONLY_KEYS.has(key)) {
-							if (value !== null && value !== undefined) {
-								throw new Error(`Key "${key}" can only be cleared in a model patch`)
-							}
-
-							delete merged[key]
-						} else {
-							throw new Error(`Key "${key}" is not allowed in a model patch`)
+				if (storedProvider === providerIdentifiers.bedrock) {
+					if (merged.apiModelId === BEDROCK_CUSTOM_ARN_MODEL_ID) {
+						// The allow-list only sees apiModelId, so a patch must not select an ARN it cannot supply.
+						if (!merged.awsCustomArn) {
+							throw new Error(`Model "${BEDROCK_CUSTOM_ARN_MODEL_ID}" requires an existing custom ARN`)
+						}
+					} else {
+						// A retained ARN would override the allow-listed model, so drop it with its context fields.
+						for (const key of PROFILE_MODEL_RESET_ONLY_KEYS) {
+							if (key.startsWith("aws")) delete merged[key]
 						}
 					}
+				}
 
-					if (storedProvider === providerIdentifiers.bedrock) {
-						if (merged.apiModelId === BEDROCK_CUSTOM_ARN_MODEL_ID) {
-							// The allow-list only sees apiModelId, so a patch must not select an ARN it cannot supply.
-							if (!merged.awsCustomArn) {
-								throw new Error(
-									`Model "${BEDROCK_CUSTOM_ARN_MODEL_ID}" requires an existing custom ARN`,
-								)
-							}
-						} else {
-							// A retained ARN would override the allow-listed model, so drop it with its context fields.
-							for (const key of PROFILE_MODEL_RESET_ONLY_KEYS) {
-								if (key.startsWith("aws")) delete merged[key]
-							}
-						}
-					}
+				const { organizationAllowList } = await this.getState()
 
-					const { organizationAllowList } = await this.getState()
+				if (!ProfileValidator.isProfileAllowed(merged as ProviderSettings, organizationAllowList)) {
+					throw new OrganizationAllowListViolationError(t("common:errors.violated_organization_allowlist"))
+				}
 
-					if (!ProfileValidator.isProfileAllowed(merged as ProviderSettings, organizationAllowList)) {
-						throw new OrganizationAllowListViolationError(
-							t("common:errors.violated_organization_allowlist"),
-						)
-					}
-
+				try {
+					await this.persistProviderProfile(name, merged as ProviderSettings, true)
+				} catch (persistError) {
+					// Saving and activating are separate writes. Put the previous profile back so
+					// storage, context settings, and the task do not disagree about the model.
 					try {
-						await this.persistProviderProfile(name, merged as ProviderSettings, true)
-					} catch (persistError) {
-						// Saving and activating are separate writes. Put the previous profile back so
-						// storage, context settings, and the task do not disagree about the model.
-						try {
-							await this.persistProviderProfile(name, stored as ProviderSettings, true)
-						} catch (restoreError) {
-							partialState = true
-							this.log(
-								`Error restoring profile after failed model update: ${JSON.stringify(restoreError, Object.getOwnPropertyNames(restoreError), 2)}`,
-							)
-						}
-
-						throw persistError
+						await this.persistProviderProfile(name, stored as ProviderSettings, true)
+					} catch (restoreError) {
+						partialState = true
+						this.log(
+							`Error restoring profile after failed model update: ${JSON.stringify(restoreError, Object.getOwnPropertyNames(restoreError), 2)}`,
+						)
 					}
-				})
+
+					throw persistError
+				}
+			})
 		} catch (error) {
 			this.log(`Error update profile model: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`)
 
