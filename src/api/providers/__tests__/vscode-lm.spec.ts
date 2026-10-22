@@ -2556,6 +2556,7 @@ describe("VsCodeLmHandler", () => {
 			handler["client"] = null
 
 			const controller = new AbortController()
+			const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
 			const removeEventListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
 			const meta = makeCreateMessageMetadata({ abortSignal: controller.signal })
 			const stream = handler.createMessage(systemPrompt, messages, meta)
@@ -2584,6 +2585,13 @@ describe("VsCodeLmHandler", () => {
 			// initialization window.
 			expect(tokenSourceInstance().cancel).toHaveBeenCalled()
 			expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
+
+			// The cleanup must detach the exact callback the bridge registered: a
+			// wrong listener identity would leave the bridge attached to a dead
+			// request and leak it into later ones.
+			const abortRegistrations = addEventListenerSpy.mock.calls.filter(([event]) => event === "abort")
+			expect(abortRegistrations).toHaveLength(1)
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", abortRegistrations[0][1])
 		})
 
 		it("should bridge a mid-flight external abort to the request cancellation token", async () => {
