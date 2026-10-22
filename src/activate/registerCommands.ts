@@ -40,6 +40,7 @@ const liveTabPanels = new Set<vscode.WebviewPanel>()
 /**
  * Test-only: clears the module-level registry so tab panels created by one
  * spec cannot leak into another's tracked-panel re-pointing.
+ * @internal Exported for focused implementation tests.
  */
 export function __resetLiveTabPanelsForTests(): void {
 	liveTabPanels.clear()
@@ -49,6 +50,7 @@ export function __resetLiveTabPanelsForTests(): void {
  * Test-only: the number of tab panels currently in the live registry, so a
  * spec can assert the cleanup of a failed or closed panel without probing
  * through a close of a live panel.
+ * @internal Exported for focused implementation tests.
  */
 export function __getLiveTabPanelCountForTests(): number {
 	return liveTabPanels.size
