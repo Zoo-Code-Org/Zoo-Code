@@ -18,7 +18,7 @@ export async function writeFileAtomically(absolutePath: string, content: string,
 	try {
 		targetPath = await fs.realpath(absolutePath)
 		const stat = await fs.stat(targetPath)
-		targetMode = targetMode ?? (stat.mode & 0o7777)
+		targetMode = targetMode ?? stat.mode & 0o7777
 		targetOwnership = { uid: stat.uid, gid: stat.gid }
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
