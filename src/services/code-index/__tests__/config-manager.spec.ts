@@ -467,7 +467,7 @@ describe("CodeIndexConfigManager", () => {
 
 		it("should NOT require restart when models have same dimensions", async () => {
 			// Mock both models to have same dimension
-			mockedGetModelDimension.mockImplementation((provider, modelId) => {
+			mockedGetModelDimension.mockImplementation((_provider, modelId) => {
 				if (modelId === "text-embedding-3-small" || modelId === "text-embedding-ada-002") {
 					return 1536
 				}
@@ -1650,7 +1650,7 @@ describe("CodeIndexConfigManager", () => {
 			configManager = new CodeIndexConfigManager(mockContextProxy)
 
 			// Get the initial snapshot
-			const { configSnapshot: previousSnapshot } = await configManager.loadConfiguration()
+			await configManager.loadConfiguration()
 
 			// Update the internal state to enabled with proper configuration
 			mockContextProxy.getGlobalState.mockReturnValue({
@@ -1721,7 +1721,7 @@ describe("CodeIndexConfigManager", () => {
 			configManager = new CodeIndexConfigManager(mockContextProxy)
 
 			// Get initial configuration
-			const { configSnapshot: previousSnapshot } = await configManager.loadConfiguration()
+			await configManager.loadConfiguration()
 
 			// Load again with same config - should not require restart
 			const { requiresRestart } = await configManager.loadConfiguration()

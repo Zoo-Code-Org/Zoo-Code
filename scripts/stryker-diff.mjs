@@ -81,7 +81,7 @@ export function parseNameStatus(output) {
 	const tokens = output.split("\0")
 	const entries = []
 
-	for (let index = 0; index < tokens.length; ) {
+	for (let index = 0; index < tokens.length;) {
 		const statusToken = tokens[index++]
 		if (!statusToken) break
 

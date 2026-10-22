@@ -1,9 +1,11 @@
+import { v7 as uuidv7 } from "uuid"
 import { Anthropic } from "@anthropic-ai/sdk"
 import { CacheControlEphemeral } from "@anthropic-ai/sdk/resources"
 import OpenAI from "openai"
 
 import {
 	type ModelInfo,
+	type ModelRecord,
 	type ReasoningEffortExtended,
 	opencodeGoDefaultModelId,
 	opencodeGoDefaultModelInfo,
@@ -13,7 +15,7 @@ import {
 	providerIdentifiers,
 } from "@roo-code/types"
 
-import { ApiHandlerOptions } from "../../shared/api"
+import { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import { ApiStream, type ApiStreamUsageChunk } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
@@ -23,8 +25,14 @@ import { getModelParams } from "../transform/model-params"
 import { convertToResponsesApiInput } from "../transform/responses-api-input"
 import { processResponsesApiStream } from "../transform/responses-api-stream"
 
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import type {
+	SingleCompletionHandler,
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+} from "../index"
 import { RouterProvider } from "./router-provider"
+import { getOpencodeGoModels } from "./fetchers/opencode-go"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 import { DEFAULT_HEADERS } from "./constants"
 import { calculateApiCostAnthropic, calculateApiCostOpenAI } from "../../shared/cost"
@@ -98,6 +106,13 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	 */
 	private readonly anthropicClient: Anthropic
 
+	/**
+	 * Stable per-handler session ID sent as `x-opencode-session` when no
+	 * `metadata.taskId` is available, so every request carries operator-side
+	 * session affinity (mirrors the OpenAiNativeHandler fallback pattern).
+	 */
+	private readonly sessionId: string
+
 	/** Creates a new handler bound to the user's Go API key and selected model. */
 	constructor(options: ApiHandlerOptions) {
 		super({
@@ -110,14 +125,29 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			defaultModelInfo: opencodeGoDefaultModelInfo,
 		})
 
+		this.sessionId = uuidv7()
+
 		this.anthropicClient = new Anthropic({
 			baseURL: "https://opencode.ai/zen/go",
 			apiKey: options.opencodeGoApiKey,
 			defaultHeaders: {
 				...DEFAULT_HEADERS,
 				...(options.openAiHeaders || {}),
+				// completePrompt has no taskId metadata, so the per-handler
+				// session id provides operator-side session affinity here;
+				// streaming requests override it with taskId when available.
+				"x-opencode-session": this.sessionId,
 			},
 		})
+	}
+
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: false, keyScoped: false, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getOpencodeGoModels(options.apiKey, ...fetchOpts)
 	}
 
 	/**
@@ -247,11 +277,9 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			}),
 		}
 
-		const completion = metadata?.taskId
-			? await this.client.chat.completions.create(body, {
-					headers: { "x-opencode-session": metadata.taskId },
-				})
-			: await this.client.chat.completions.create(body)
+		const completion = await this.client.chat.completions.create(body, {
+			headers: { "x-opencode-session": metadata?.taskId ?? this.sessionId },
+		})
 
 		for await (const chunk of completion) {
 			const delta = chunk.choices[0]?.delta
@@ -310,7 +338,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	private async *streamResponsesMessage(
 		modelId: string,
 		info: ModelInfo,
-		temperature: number | undefined,
+		_temperature: number | undefined,
 		maxTokens: number | undefined,
 		reasoningEffort: ReasoningEffortExtended | undefined,
 		systemPrompt: string,
@@ -384,7 +412,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		try {
 			stream = await this.client.responses.create(requestBody, {
 				signal: metadata?.abortSignal,
-				headers: metadata?.taskId ? { "x-opencode-session": metadata.taskId } : undefined,
+				headers: { "x-opencode-session": metadata?.taskId ?? this.sessionId },
 			})
 		} catch (error) {
 			if (error instanceof Error) {
@@ -512,11 +540,9 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		// errors propagate unchanged, matching the OpenAI streaming path.
 		let stream
 		try {
-			stream = metadata?.taskId
-				? await this.anthropicClient.messages.create(requestParams, {
-						headers: { "x-opencode-session": metadata.taskId },
-					})
-				: await this.anthropicClient.messages.create(requestParams)
+			stream = await this.anthropicClient.messages.create(requestParams, {
+				headers: { "x-opencode-session": metadata?.taskId ?? this.sessionId },
+			})
 		} catch (error) {
 			if (error instanceof Error) {
 				throw new Error(`Opencode Go completion error: ${error.message}`)
@@ -756,7 +782,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 								}
 							: {}),
 					},
-					{ signal: options?.abortSignal },
+					{ signal: options?.abortSignal, headers: { "x-opencode-session": this.sessionId } },
 				)
 				return response.output_text || ""
 			} catch (error) {
@@ -786,7 +812,9 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 					reasoningEffort as OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"]
 			}
 
-			const response = await this.client.chat.completions.create(requestOptions)
+			const response = await this.client.chat.completions.create(requestOptions, {
+				headers: { "x-opencode-session": this.sessionId },
+			})
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
 			if (error instanceof Error) {

@@ -1,13 +1,21 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 import { Message, Ollama, Tool as OllamaTool, type Config as OllamaOptions } from "ollama"
-import { ModelInfo, openAiModelInfoSaneDefaults, DEEP_SEEK_DEFAULT_TEMPERATURE } from "@roo-code/types"
+import { ModelInfo, ModelRecord, openAiModelInfoSaneDefaults, DEEP_SEEK_DEFAULT_TEMPERATURE } from "@roo-code/types"
 import { ApiStream } from "../transform/stream"
 import { BaseProvider } from "./base-provider"
-import type { ApiHandlerOptions } from "../../shared/api"
-import { getOllamaModels } from "./fetchers/ollama"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
+import { getOllamaModels, isSecureOllamaEndpoint } from "./fetchers/ollama"
+import { createAbortError, mergeAbortSignalAndTimeout, rejectOnAbort } from "./utils/abort-signal"
+import { getLoggableOrigin } from "./utils/endpoint-origin"
 import { TagMatcher } from "../../utils/tag-matcher"
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import { isProxyEnabled } from "../../utils/networkProxy"
+import type {
+	SingleCompletionHandler,
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+} from "../index"
 
 interface OllamaChatOptions {
 	temperature: number
@@ -225,35 +233,78 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 
 export class NativeOllamaHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
-	private client: Ollama | undefined
 	protected models: Record<string, ModelInfo> = {}
+	private warnedKeyDropped = false
 
 	constructor(options: ApiHandlerOptions) {
 		super()
 		this.options = options
 	}
 
-	private ensureClient(): Ollama {
-		if (!this.client) {
-			try {
-				const clientOptions: OllamaOptions = {
-					host: this.options.ollamaBaseUrl || "http://localhost:11434",
-					// Note: The ollama npm package handles timeouts internally
-				}
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: true, keyScoped: false, authScoped: false }
+	}
 
-				// Add API key if provided (for Ollama cloud or authenticated instances)
-				if (this.options.ollamaApiKey) {
-					clientOptions.headers = {
-						Authorization: `Bearer ${this.options.ollamaApiKey}`,
-					}
-				}
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getOllamaModels(options.baseUrl, options.apiKey, ...fetchOpts)
+	}
 
-				this.client = new Ollama(clientOptions)
-			} catch (error: any) {
-				throw new Error(`Error creating Ollama client: ${error.message}`)
+	/**
+	 * Creates a new Ollama client instance with the configured options.
+	 * Uses constructor `headers` option for API key instead of mutating config.
+	 * The per-request transport makes both the in-flight POST and the response
+	 * body cancellable; see the inline rationale.
+	 */
+	private _createOllamaClient(requestSignal: AbortSignal): Ollama {
+		const clientOptions: OllamaOptions = {
+			host: this.options.ollamaBaseUrl || "http://localhost:11434",
+			// Note: The ollama npm package handles timeouts internally
+		}
+
+		// Add API key if provided (for Ollama cloud or authenticated instances).
+		// Use constructor `headers` option instead of mutating (request as any).config.
+		// The credential is only attached when the endpoint is HTTPS or loopback;
+		// sending it over plaintext HTTP to a remote host would leak it (CWE-319).
+		// The debug proxy patches globalThis.fetch, so a plaintext loopback request
+		// would reach the proxy in cleartext; treat that case as insecure too.
+		if (this.options.ollamaApiKey) {
+			const viaCleartextProxy = isProxyEnabled() && !/^https:/i.test(clientOptions.host ?? "")
+			if (isSecureOllamaEndpoint(clientOptions.host) && !viaCleartextProxy) {
+				clientOptions.headers = {
+					Authorization: `Bearer ${this.options.ollamaApiKey}`,
+				}
+			} else {
+				// The credential is dropped to avoid leaking it over plaintext
+				// HTTP (CWE-319); surface the drop so a bare 401 from an auth
+				// proxy is diagnosable. Neither the key nor the raw URL is
+				// logged: a base URL can embed credentials or sensitive query
+				// values, so only the WHATWG origin (protocol/host:port) is
+				// echoed, and an unparseable host falls back to a fixed phrase.
+				// Every request builds a client, so warn once per handler.
+				if (!this.warnedKeyDropped) {
+					this.warnedKeyDropped = true
+					const endpointOrigin = getLoggableOrigin(clientOptions.host)
+					console.warn(
+						`[NativeOllama] ollamaApiKey is set but the endpoint "${endpointOrigin}" is not https or loopback, or the debug proxy is active; the Authorization header is not sent (the credential would leak over plaintext). Use an https:// endpoint, or a loopback endpoint without the debug proxy, to authenticate.`,
+					)
+				}
 			}
 		}
-		return this.client
+
+		// The Ollama SDK (0.6.x) only tracks streaming iterators after the POST
+		// resolves and passes no signal for stream:false requests, so client
+		// .abort() alone cannot cancel an in-flight POST. The client always
+		// receives a per-request transport that merges the request signal into
+		// the SDK's fetch calls while preserving the SDK's own stream signal when
+		// present (AbortSignal.any honors either side).
+		const baseFetch = globalThis.fetch
+		clientOptions.fetch = (url, init) => {
+			const signal = init?.signal ? AbortSignal.any([init.signal, requestSignal]) : requestSignal
+			return baseFetch(url, { ...init, signal })
+		}
+
+		return new Ollama(clientOptions)
 	}
 
 	/**
@@ -398,25 +449,54 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const client = this.ensureClient()
-		const { id: modelId } = await this.fetchModel()
-		const useR1Format = modelId.toLowerCase().includes("deepseek-r1")
+		// The external abort signal drives both the per-request client and the
+		// per-request transport for this request, since the Ollama SDK exposes
+		// cancellation only through the client-level abort() and the fetch signal.
+		const externalAbortSignal = metadata?.abortSignal
+		if (externalAbortSignal?.aborted) {
+			// The request is already cancelled: reject before allocating the
+			// per-request client or transport so nothing is left to clean up.
+			throw createAbortError("Ollama")
+		}
 
-		const ollamaMessages: Message[] = [
-			{ role: "system", content: systemPrompt },
-			...convertToOllamaMessages(messages),
-		]
+		const requestController = new AbortController()
 
-		const matcher = new TagMatcher(
-			["think", "thought"],
-			(chunk) =>
-				({
-					type: chunk.matched ? "reasoning" : "text",
-					text: chunk.data,
-				}) as const,
-		)
-
+		let onExternalAbort: (() => void) | undefined
 		try {
+			// Inside the try so a constructor error gets the same handling as a
+			// request error.
+			const client = this._createOllamaClient(requestController.signal)
+			if (externalAbortSignal) {
+				onExternalAbort = () => {
+					requestController.abort()
+					client.abort()
+				}
+				externalAbortSignal.addEventListener("abort", onExternalAbort)
+			}
+
+			// Race model discovery against the external signal: the discovery
+			// fetch receives the signal so an aborted request is cancelled at
+			// the network level, and the race rejects a request aborted during
+			// discovery instead of proceeding to chat() with a stale model.
+			const { id: modelId } = externalAbortSignal
+				? await rejectOnAbort(this.fetchModel(externalAbortSignal), externalAbortSignal, "Ollama")
+				: await this.fetchModel(undefined)
+			const useR1Format = modelId.toLowerCase().includes("deepseek-r1")
+
+			const ollamaMessages: Message[] = [
+				{ role: "system", content: systemPrompt },
+				...convertToOllamaMessages(messages),
+			]
+
+			const matcher = new TagMatcher(
+				["think", "thought"],
+				(chunk) =>
+					({
+						type: chunk.matched ? "reasoning" : "text",
+						text: chunk.data,
+					}) as const,
+			)
+
 			// Build the shared chat options and conditional think parameter.
 			// Conditionally enabling Ollama's native think parameter lets
 			// reasoning models (qwen3, deepseek-r1, etc.) emit thinking via
@@ -436,6 +516,14 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 				tools: this.convertToolsToOllama(metadata?.tools),
 				...(thinkParam !== undefined ? { think: thinkParam } : {}),
 			})
+
+			// The POST can resolve in the same instant the abort lands (response
+			// headers arrived first). In that case the iterator must be disposed
+			// instead of being consumed after cancellation.
+			if (externalAbortSignal?.aborted) {
+				stream.abort()
+				throw createAbortError("Ollama")
+			}
 
 			let totalInputTokens = 0
 			let totalOutputTokens = 0
@@ -514,10 +602,22 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 					}
 				}
 			} catch (streamError: any) {
+				// A body read aborted by the per-request transport surfaces as an
+				// AbortError DOMException; keep its name unmodified (same contract
+				// as the outer catch) so callers can identify cancellations.
+				if (streamError instanceof Error && streamError.name === "AbortError") {
+					throw streamError
+				}
 				console.error("Error processing Ollama stream:", streamError)
 				throw new Error(`Ollama stream processing error: ${streamError.message || "Unknown error"}`)
 			}
 		} catch (error: any) {
+			// Let AbortError surface unmodified so callers can identify cancellations
+			// by `name === "AbortError"`; every other error keeps the historical wrap.
+			if (error instanceof Error && error.name === "AbortError") {
+				throw error
+			}
+
 			// Enhance error reporting
 			const statusCode = error.status || error.statusCode
 			const errorMessage = error.message || "Unknown error"
@@ -534,11 +634,29 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 
 			console.error(`Ollama API error (${statusCode || "unknown"}): ${errorMessage}`)
 			throw error
+		} finally {
+			// Detach the external-signal listener so it cannot outlive this request,
+			// including when model discovery rejects before the chat request starts.
+			if (onExternalAbort && externalAbortSignal) {
+				externalAbortSignal.removeEventListener("abort", onExternalAbort)
+			}
+			// A consumer that stops iterating early (break/return) would otherwise
+			// leave the in-flight response body open, and when metadata.abortSignal
+			// is undefined no abort bridge exists at all. The per-request controller
+			// drives the injected fetch transport, so aborting it here releases the
+			// body; after normal completion the abort is a no-op.
+			requestController.abort()
 		}
 	}
 
-	async fetchModel() {
-		this.models = await getOllamaModels(this.options.ollamaBaseUrl, this.options.ollamaApiKey)
+	/**
+	 * Fetches the model list. The optional signal is forwarded to the
+	 * discovery fetch (both /api/tags and /api/show) so an aborted or
+	 * timed-out request is cancelled at the network level instead of
+	 * settling in the background.
+	 */
+	async fetchModel(signal?: AbortSignal) {
+		this.models = await getOllamaModels(this.options.ollamaBaseUrl, this.options.ollamaApiKey, { signal })
 		return this.getModel()
 	}
 
@@ -551,9 +669,75 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Ollama native client cancellation calls client.abort(), so any request with
+		// cancellation behavior must use a dedicated client instance to avoid aborting
+		// unrelated requests sharing a provider-level client. The Ollama SDK has no
+		// per-call signal, so every request uses a per-request client. The
+		// per-request controller drives the abortable transport injected into the
+		// client, so the in-flight POST itself is cancellable.
+		const requestController = new AbortController()
+		let timeoutId: ReturnType<typeof setTimeout> | undefined
+		let onAbort: (() => void) | undefined
+		const abortSignal = options?.abortSignal
+
 		try {
-			const client = this.ensureClient()
-			const { id: modelId } = await this.fetchModel()
+			// Inside the try so a constructor error gets the same wrap as a
+			// request error.
+			const client = this._createOllamaClient(requestController.signal)
+
+			// Handle timeoutMs if provided (the client exists, so the timer can
+			// abort both the per-request transport and the client)
+			const timeoutMs = options?.timeoutMs
+			if (timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0) {
+				// Node clamps delays above 2^31-1 ms to 1 ms (and coerces
+				// Infinity the same way), which would abort almost immediately,
+				// and truncates fractional delays; round up and cap so the
+				// semantics match mergeAbortSignalAndTimeout, and treat
+				// non-finite values as "no timeout".
+				timeoutId = setTimeout(
+					() => {
+						requestController.abort()
+						client.abort()
+					},
+					Math.min(Math.ceil(timeoutMs), 2_147_483_647),
+				)
+			}
+
+			// Propagate abortSignal into the per-request client via client.abort()
+			// and the per-request transport. Set this up before fetchModel() so an
+			// already-aborted signal (or one that aborts during the model-list
+			// fetch) is honored before the request proceeds.
+			if (abortSignal) {
+				if (abortSignal.aborted) {
+					requestController.abort()
+					client.abort()
+					throw createAbortError("Ollama")
+				} else {
+					onAbort = () => {
+						requestController.abort()
+						client.abort()
+						// The per-request timeout is cleared by the finally block when this prompt
+						// settles; an external abort always settles it promptly (the discovery race
+						// or the injected transport rejects), so no timer clear is needed here.
+					}
+					abortSignal.addEventListener("abort", onAbort, { once: true })
+				}
+			}
+
+			// Model discovery goes through Axios (getOllamaModels) and never touches
+			// the Ollama client, so client.abort() alone cannot reject it. The
+			// discovery fetch receives the per-request signal (bridged from the
+			// external abort, merged with the per-request timeout) so an aborted
+			// or timed-out request is cancelled at the network level; the race
+			// remains the backstop that rejects a stalled discovery instead of
+			// hanging past the deadline.
+			const discoverySignal = mergeAbortSignalAndTimeout(requestController.signal, options?.timeoutMs)
+			// mergeAbortSignalAndTimeout yields undefined when neither an external
+			// signal nor a positive timeout applies; no race is needed then.
+			const { id: modelId } = discoverySignal
+				? await rejectOnAbort(this.fetchModel(discoverySignal), discoverySignal, "Ollama")
+				: await this.fetchModel(discoverySignal)
+
 			const useR1Format = modelId.toLowerCase().includes("deepseek-r1")
 
 			// Reuse the shared request-option builder so single-shot
@@ -571,10 +755,17 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 
 			return response.message?.content || ""
 		} catch (error) {
-			if (error instanceof Error) {
+			// Let AbortError surface unmodified so callers can identify cancellations
+			// by `name === "AbortError"`; every other error keeps the historical wrap.
+			if (error instanceof Error && error.name !== "AbortError") {
 				throw new Error(`Ollama completion error: ${error.message}`)
 			}
 			throw error
+		} finally {
+			clearTimeout(timeoutId)
+			if (onAbort && abortSignal) {
+				abortSignal.removeEventListener("abort", onAbort)
+			}
 		}
 	}
 }

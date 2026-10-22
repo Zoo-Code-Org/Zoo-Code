@@ -48,8 +48,7 @@ describe("Tooltip", () => {
 
 		await waitFor(
 			() => {
-				const tooltips = screen.getAllByText(/This is a very long tooltip text/)
-				const visibleTooltip = tooltips.find((el) => el.getAttribute("role") !== "tooltip")
+				const visibleTooltip = screen.getByRole("tooltip", { name: /This is a very long tooltip text/ })
 				expect(visibleTooltip).toHaveClass("max-w-[300px]", "break-words")
 			},
 			{ timeout: 1000 },
@@ -73,8 +72,7 @@ describe("Tooltip", () => {
 
 		await waitFor(
 			() => {
-				const tooltips = screen.getAllByText("Tooltip text")
-				const visibleTooltip = tooltips.find((el) => el.getAttribute("role") !== "tooltip")
+				const visibleTooltip = screen.getByRole("tooltip", { name: "Tooltip text" })
 				expect(visibleTooltip).not.toHaveClass("overflow-hidden")
 			},
 			{ timeout: 1000 },
@@ -145,8 +143,7 @@ describe("StandardTooltip", () => {
 
 		await waitFor(
 			() => {
-				const tooltips = screen.getAllByText("Long tooltip text")
-				const visibleTooltip = tooltips.find((el) => el.getAttribute("role") !== "tooltip")
+				const visibleTooltip = screen.getByRole("tooltip", { name: "Long tooltip text" })
 				expect(visibleTooltip).toHaveStyle({ maxWidth: "200px" })
 			},
 			{ timeout: 1000 },
@@ -169,8 +166,7 @@ describe("StandardTooltip", () => {
 
 		await waitFor(
 			() => {
-				const tooltips = screen.getAllByText("Long tooltip text")
-				const visibleTooltip = tooltips.find((el) => el.getAttribute("role") !== "tooltip")
+				const visibleTooltip = screen.getByRole("tooltip", { name: "Long tooltip text" })
 				expect(visibleTooltip).toHaveStyle({ maxWidth: "15rem" })
 			},
 			{ timeout: 1000 },
@@ -195,8 +191,7 @@ describe("StandardTooltip", () => {
 
 		await waitFor(
 			() => {
-				const tooltips = screen.getAllByText(longContent)
-				const visibleTooltip = tooltips.find((el) => el.getAttribute("role") !== "tooltip")
+				const visibleTooltip = screen.getByRole("tooltip", { name: longContent })
 				expect(visibleTooltip).toHaveClass("max-w-[300px]", "break-words")
 			},
 			{ timeout: 1000 },

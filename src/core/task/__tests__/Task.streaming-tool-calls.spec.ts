@@ -7,8 +7,7 @@ import { ClineProvider } from "../../webview/ClineProvider"
 import { WebviewFocusTracker } from "../../webview/WebviewFocusTracker"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import type { ProviderSettings } from "@roo-code/types"
-import type { ToolParamName } from "../../../shared/tools"
-import { ApiStreamChunk, type ApiStreamToolCallPartialChunk } from "../../../api/transform/stream"
+import { ApiStreamChunk } from "../../../api/transform/stream"
 import { ContextProxy } from "../../config/ContextProxy"
 import { TelemetryService } from "@roo-code/telemetry"
 import { asyncStreamFrom } from "../../../test-utils/stream"
@@ -18,8 +17,6 @@ vi.mock("delay", () => ({
 	__esModule: true,
 	default: vi.fn().mockResolvedValue(undefined),
 }))
-
-import delay from "delay"
 
 vi.mock("uuid", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("uuid")>()
@@ -108,7 +105,7 @@ vi.mock("vscode", () => {
 				stat: vi.fn().mockResolvedValue({ type: 1 }),
 			},
 			onDidSaveTextDocument: vi.fn(() => mockDisposable),
-			getConfiguration: vi.fn(() => ({ get: <T>(key: string, defaultValue: T) => defaultValue })),
+			getConfiguration: vi.fn(() => ({ get: <T>(_key: string, defaultValue: T) => defaultValue })),
 		},
 		env: {
 			uriScheme: "vscode",

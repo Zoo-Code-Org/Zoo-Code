@@ -28,10 +28,10 @@ import { Package } from "../shared/package"
 import type { Mode } from "../shared/modes"
 import type { ClineProvider } from "../core/webview/ClineProvider"
 import type { ClineProviderFactory } from "../core/webview/ClineProviderFactory"
+import { readTaskMessages } from "../core/task-persistence/taskMessages"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
 import { getCommands } from "../services/command/commands"
-import { getModels } from "../api/providers/fetchers/modelCache"
 
 export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly outputChannel: vscode.OutputChannel
@@ -124,7 +124,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 									argumentHint: cmd.argumentHint,
 								})),
 							])
-						} catch (error) {
+						} catch {
 							sendResponse(RooCodeEventName.CommandsResponse, [[]])
 						}
 
@@ -133,7 +133,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 						try {
 							const modes = await this.sidebarProvider.getModes()
 							sendResponse(RooCodeEventName.ModesResponse, [modes])
-						} catch (error) {
+						} catch {
 							sendResponse(RooCodeEventName.ModesResponse, [[]])
 						}
 
@@ -141,7 +141,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 					case TaskCommandName.GetModels:
 						try {
 							sendResponse(RooCodeEventName.ModelsResponse, [{}])
-						} catch (error) {
+						} catch {
 							sendResponse(RooCodeEventName.ModelsResponse, [{}])
 						}
 
@@ -304,6 +304,22 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 						JSON.stringify(block.input).includes(sequence.assistantToolInputText),
 				),
 		)
+	}
+
+	/** Checks persisted ui_messages.json contents without exposing messages to tests. */
+	public async hasTaskUiMessageText(taskId: string, text: string): Promise<boolean> {
+		let uiMessages: Awaited<ReturnType<typeof readTaskMessages>>
+		try {
+			// Reject unknown ids first: readTaskMessages creates the task directory.
+			await this.sidebarProvider.getTaskWithId(taskId)
+			uiMessages = await readTaskMessages({
+				taskId,
+				globalStoragePath: this.sidebarProvider.contextProxy.globalStorageUri.fsPath,
+			})
+		} catch {
+			return false
+		}
+		return uiMessages.some((message) => message.text?.includes(text))
 	}
 
 	public getCurrentTaskStack() {
@@ -532,7 +548,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 					this.outputChannel.appendLine(
 						JSON.stringify(
 							arg,
-							(key, value) => {
+							(_key, value) => {
 								if (typeof value === "bigint") return `BigInt(${value})`
 								if (typeof value === "function") return `Function: ${value.name || "anonymous"}`
 								if (typeof value === "symbol") return value.toString()
@@ -541,7 +557,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 							2,
 						),
 					)
-				} catch (error) {
+				} catch {
 					this.outputChannel.appendLine(`[Non-serializable object: ${Object.prototype.toString.call(arg)}]`)
 				}
 			}
