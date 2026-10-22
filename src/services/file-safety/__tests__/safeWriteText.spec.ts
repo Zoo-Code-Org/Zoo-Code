@@ -177,6 +177,29 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).not.toHaveBeenCalled()
 		})
 
+		it("propagates a parent-directory creation failure without publishing", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fs.mkdir).mockRejectedValueOnce(new Error("parent mkdir failed"))
+
+			await expect(safeWriteText(targetPath, "hello", { platform: "linux" })).rejects.toThrow("parent mkdir failed")
+
+			// Nothing was staged and nothing was published: the original directory error
+			// surfaces before the staging open.
+			expect(fs.rename).not.toHaveBeenCalled()
+			expect(fsSync.openSync).not.toHaveBeenCalled()
+		})
+
+		it("propagates a parent-directory access failure without publishing", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fs.access).mockRejectedValueOnce(new Error("parent access failed"))
+
+			await expect(safeWriteText(targetPath, "hello", { platform: "linux" })).rejects.toThrow("parent access failed")
+
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
+
 		it("removes the now-empty staging directory after a successful self-staged commit", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)

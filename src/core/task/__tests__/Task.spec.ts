@@ -1810,6 +1810,22 @@ describe("Cline", () => {
 			return dispose
 		}
 
+		it("clears the observation registry when the task is disposed", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "t",
+				startTask: false,
+			})
+			task.observationRegistry.observe("/tmp/observed.txt", "v1")
+			expect(task.observationRegistry.get("/tmp/observed.txt")).toBeDefined()
+
+			await task.dispose()
+
+			// The registry is task-owned: its per-path entries must not outlive disposal.
+			expect(task.observationRegistry.get("/tmp/observed.txt")).toBeUndefined()
+		})
+
 		it("disposes the replaced handler when the configuration changes while idle", async () => {
 			const task = new Task({
 				provider: mockProvider,
