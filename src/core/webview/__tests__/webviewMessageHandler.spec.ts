@@ -2891,8 +2891,7 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		// path is exercised, resolves (with its already-captured, now-stale value) only after
 		// the disable write above has fully landed.
 		const snapshotResolved = vi.mocked(providerForLaunch.getStateToPostToWebview).mock.results[0]?.value as
-			| Promise<unknown>
-			| undefined
+			Promise<unknown> | undefined
 		releaseSnapshot()
 
 		await Promise.all([launch, snapshotResolved])
@@ -2970,6 +2969,31 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 
 		expect(TelemetryService.instance.updateTelemetryState).not.toHaveBeenCalled()
 	})
+})
+
+describe("webviewMessageHandler - collapseCommandOutputByDefault", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it.each([true, false, undefined])(
+		"persists the output collapse preference (%s) without changing terminal mode",
+		async (value) => {
+			await webviewMessageHandler(mockClineProvider, {
+				type: "updateSettings",
+				updatedSettings: { collapseCommandOutputByDefault: value },
+			})
+			expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(
+				"collapseCommandOutputByDefault",
+				value,
+			)
+			expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith(
+				"terminalShellIntegrationDisabled",
+				expect.anything(),
+			)
+			expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+		},
+	)
 })
 
 describe("updateProfileModel", () => {

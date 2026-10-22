@@ -14,6 +14,7 @@
 		"src/services/tree-sitter/__tests__/helpers.ts"
 	],
 	"ignoreDependencies": ["lint-staged"],
+	"ignoreBinaries": ["dotenvx"],
 	"ignoreExportsUsedInFile": true,
 	"playwright": false,
 	"playwright-ct": false,
