@@ -177,6 +177,21 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).not.toHaveBeenCalled()
 		})
 
+		it("propagates a backup chmod failure without publishing", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// The private-mode step on the pre-write copy fails: the error must surface and
+			// nothing may be published over the target.
+			vi.mocked(fs.chmod).mockRejectedValueOnce(new Error("backup chmod failed"))
+
+			await expect(safeWriteText(targetPath, "hello", { backup: true, platform: "linux" })).rejects.toThrow(
+				"backup chmod failed",
+			)
+
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
+
 		it("propagates a parent-directory creation failure without publishing", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
