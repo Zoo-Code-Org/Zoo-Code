@@ -3614,7 +3614,7 @@ export class ClineProvider
 		let parentTask = task.parentTask
 
 		// Mark this as a user-initiated cancellation so provider-only rehydration can occur
-		task.abortReason = "user_cancelled"
+		task.setAbortReason("user_cancelled")
 
 		// Capture the current instance to detect if rehydrate already occurred elsewhere
 		const originalInstanceId = task.instanceId
@@ -3630,7 +3630,7 @@ export class ClineProvider
 		const abortPromise = task.abortTask()
 
 		// Immediately mark the original instance as abandoned to prevent any residual activity
-		task.abandoned = true
+		task.requestAbandon()
 
 		await pWaitFor(
 			() =>
