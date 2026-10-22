@@ -296,10 +296,13 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		)
 
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
-		// The bytes this write is about to publish. They are the identity a post-commit
-		// escape undo uses to avoid deleting a file a concurrent writer put at the escaped
-		// path; reading them here keeps the comparison independent of serialization details.
-		const stagedBytes = await fs.readFile(actualTempNewFilePath).catch(() => undefined)
+		// The bytes this write is about to publish identify the file a post-commit escape
+		// undo may remove. They are only needed when confinement can trigger that undo, and
+		// reading them here keeps the comparison independent of serialization details.
+		let stagedBytes: Buffer | undefined
+		if (confinementRoot !== undefined) {
+			stagedBytes = await fs.readFile(actualTempNewFilePath).catch(() => undefined)
+		}
 
 		// Step 2: Delegate backup + commit + rollback to safeWriteText with the
 		// pre-written temp path. backup:true keeps the old safeWriteJson
