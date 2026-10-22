@@ -5,6 +5,7 @@ import { JsonStreamStringify } from "json-stream-stringify"
 
 import { acquireFileLock } from "./fileLock"
 import {
+	OrphanedPublishedBackupError,
 	resolveLockKey,
 	resolvePublishTarget,
 	safeWriteText,
@@ -128,7 +129,20 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			backup: true,
 		}
 
-		await safeWriteText(resolvedTargetPath, "", textOptions)
+		try {
+			await safeWriteText(resolvedTargetPath, "", textOptions)
+		} catch (error) {
+			// Backup cleanup is best-effort for this caller: the content is already published
+			// at the target, and safeWriteJson's contract (and its existing callers) treats a
+			// leftover pre-write copy as a logged condition rather than a failed write. The
+			// strict signal stays available to callers that use safeWriteText directly.
+			if (!(error instanceof OrphanedPublishedBackupError)) {
+				throw error
+			}
+			console.warn(
+				`safeWriteJson: ${resolvedTargetPath} was published but its pre-write backup could not be removed: ${error.orphanedBackupPath}`,
+			)
+		}
 
 		// If we reach here, the new file is successfully in place and any
 		// backup has already been handled by safeWriteText.
