@@ -64,6 +64,19 @@ export function setPanel(
 }
 
 /**
+ * Clears the tracked sidebar view only when it is still the disposed one.
+ *
+ * A sidebar view can be resolved again while the previous view is being
+ * disposed; the late disposal of the replaced view must not clear the
+ * replacement, or focus/commands would lose the live sidebar.
+ */
+export function clearSidebarPanel(view: vscode.WebviewView | vscode.WebviewPanel): void {
+	if (sidebarPanel === view) {
+		sidebarPanel = undefined
+	}
+}
+
+/**
  * The instance that owns the tracked tab panel, if it is still alive.
  *
  * Title-bar commands on the editor-tab surface use this instead of the
@@ -232,14 +245,22 @@ const getCommandsMap = ({
 	},
 	focusInput: async () => {
 		try {
-			await focusPanel(tabPanel, sidebarPanel)
+			// Only a currently tracked, live sidebar is a focus candidate: a tracked ref
+			// whose view was disposed or replaced must not receive the input focus.
+			const liveSidebarPanel =
+				sidebarPanel && ClineProvider.getInstanceForView(sidebarPanel) ? sidebarPanel : undefined
+			await focusPanel(tabPanel, liveSidebarPanel)
 
 			// focusPanel selects the TAB whenever a tab panel is tracked, so the input
 			// focus has to go to whichever provider focusPanel actually focused: the tab's
 			// when one is tracked, otherwise the sidebar's, and nothing when neither is
 			// available. The previous guard skipped the post as soon as a tab existed, so
 			// in the both-tracked state the tab became visible without focusing its input.
-			const focusTarget = tabPanel ? getTabProvider() : sidebarPanel ? provider : undefined
+			const focusTarget = tabPanel
+				? getTabProvider()
+				: liveSidebarPanel
+					? ClineProvider.getInstanceForView(liveSidebarPanel)
+					: undefined
 			await focusTarget?.postMessageToWebview({ type: "action", action: "focusInput" })
 		} catch (error) {
 			outputChannel.appendLine(`Error focusing input: ${error}`)
@@ -247,7 +268,10 @@ const getCommandsMap = ({
 	},
 	focusPanel: async () => {
 		try {
-			await focusPanel(tabPanel, sidebarPanel)
+			// A stale sidebar ref would make focusPanel reveal a disposed view.
+			const liveSidebarPanel =
+				sidebarPanel && ClineProvider.getInstanceForView(sidebarPanel) ? sidebarPanel : undefined
+			await focusPanel(tabPanel, liveSidebarPanel)
 		} catch (error) {
 			outputChannel.appendLine(`Error focusing panel: ${error}`)
 		}

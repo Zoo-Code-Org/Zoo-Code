@@ -8,7 +8,14 @@ import { ContextProxy } from "../../core/config/ContextProxy"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { MdmService } from "../../services/mdm/MdmService"
 
-import { getPanel, getVisibleProviderOrLog, openClineInNewTab, registerCommands, setPanel } from "../registerCommands"
+import {
+	clearSidebarPanel,
+	getPanel,
+	getVisibleProviderOrLog,
+	openClineInNewTab,
+	registerCommands,
+	setPanel,
+} from "../registerCommands"
 
 vi.mock("execa", () => ({
 	execa: vi.fn(),
@@ -399,6 +406,8 @@ describe("registerCommands handlers", () => {
 	it("focusInput awaits postMessage on the registered provider when a sidebar panel is active", async () => {
 		const fakeSidebar = {} as vscode.WebviewView
 		setPanel(fakeSidebar, "sidebar")
+		// The sidebar target is resolved through the live-instance lookup.
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(mockProvider)
 
 		// Same deferred-promise pattern as above. focusInput first awaits
 		// focusPanel() (mocked to resolve sync) and then awaits
@@ -470,11 +479,14 @@ describe("registerCommands handlers", () => {
 	})
 
 	it("setPanel keeps independent refs: clearing only the tab ref re-enables the sidebar post", async () => {
-		setPanel({} as vscode.WebviewView, "sidebar")
+		const sidebarPanel = {} as vscode.WebviewView
+		setPanel(sidebarPanel, "sidebar")
 		const tabPanel = {} as vscode.WebviewPanel
 		setPanel(tabPanel, "tab")
 		const tabProvider = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
-		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(tabProvider)
+		;(ClineProvider.getInstanceForView as Mock).mockImplementation((view: unknown) =>
+			view === tabPanel ? tabProvider : mockProvider,
+		)
 
 		// The tab ref does not wipe the sidebar ref, and while it is set the tab is the
 		// focus target...
@@ -486,6 +498,51 @@ describe("registerCommands handlers", () => {
 		setPanel(undefined, "tab")
 		await handlers["zoo-code.focusInput"]()
 		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
+	})
+
+	// Bidirectional independence: resolving the sidebar AFTER the tab must keep the tab
+	// as the tracked surface (the reverse order is covered above).
+	it("setPanel keeps the tab target when the sidebar resolves after it", async () => {
+		const tabPanel = {} as vscode.WebviewPanel
+		setPanel(tabPanel, "tab")
+		const tabProvider = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(tabProvider)
+
+		const sidebarPanel = {} as vscode.WebviewView
+		setPanel(sidebarPanel, "sidebar")
+
+		await handlers["zoo-code.focusInput"]()
+		// getPanel still reports the tab and the tab keeps the focus target: the sidebar
+		// resolution must not displace it.
+		expect(getPanel()).toBe(tabPanel)
+		expect(tabProvider.postMessageToWebview).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
+		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	it("clearSidebarPanel ignores a late disposal of a replaced sidebar view", () => {
+		const first = {} as vscode.WebviewView
+		const second = {} as vscode.WebviewView
+		setPanel(first, "sidebar")
+		setPanel(second, "sidebar")
+
+		// The replaced view's late disposal must not clear the replacement.
+		clearSidebarPanel(first)
+		expect(getPanel()).toBe(second)
+
+		// The current view's disposal does clear the slot.
+		clearSidebarPanel(second)
+		expect(getPanel()).toBeUndefined()
+	})
+
+	it("focusInput skips a tracked sidebar whose view is no longer live", async () => {
+		setPanel({} as vscode.WebviewView, "sidebar")
+		// The tracked view's instance is gone: nothing may receive the input focus.
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
+
+		await handlers["zoo-code.focusInput"]()
+
+		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+		expect(mockVisibleProvider.postMessageToWebview).not.toHaveBeenCalled()
 	})
 
 	// Coverage for the .catch arm on the sidebar title-bar post sites

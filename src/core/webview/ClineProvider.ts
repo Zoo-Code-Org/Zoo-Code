@@ -102,7 +102,7 @@ import { getWorkspaceGitInfo } from "../../utils/git"
 import { getWorkspacePath } from "../../utils/path"
 import { OrganizationAllowListViolationError } from "../../utils/errors"
 
-import { setPanel } from "../../activate/registerCommands"
+import { clearSidebarPanel, setPanel } from "../../activate/registerCommands"
 
 import { t } from "../../i18n"
 
@@ -1119,6 +1119,8 @@ export class ClineProvider
 					await this.dispose()
 				} else {
 					this.log("Clearing webview resources for sidebar view")
+					// Identity-checked: a view resolved after this one must keep the slot.
+					clearSidebarPanel(webviewView)
 					this.clearWebviewResources()
 				}
 			},
