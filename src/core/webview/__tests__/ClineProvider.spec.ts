@@ -2010,6 +2010,38 @@ describe("ClineProvider", () => {
 	})
 
 	describe("view state claim binding", () => {
+		it("refuses a viewStateId bound by a concurrent registration through setViewStateId", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const beforeViewStateId = provider["viewStateId"]
+			const postSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			// A claim-less entry is adoptable at the first read, but a concurrent registration
+			// binds the key while this launch's queued re-bind is waiting its turn.
+			await provider.contextProxy.setValue("viewStates", { "legacy-view": { updatedAt: 1 } })
+			ClineProvider.persistedViewStateWriteQueue = Promise.resolve().then(async () => {
+				await provider.contextProxy.setValue("viewStates", {
+					"legacy-view": { claimToken: "winner", updatedAt: 2 },
+				})
+			})
+
+			await provider["setViewStateId"]("legacy-view")
+
+			// The launch must not adopt a key another webview now owns: no claim is delivered,
+			// the provider stays on its temporary id, and the winner's claim is untouched.
+			expect(postSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "viewStateClaim" }))
+			expect(provider["viewStateId"]).toBe(beforeViewStateId)
+			const states = provider.contextProxy.getValue("viewStates") as Record<string, { claimToken?: string }>
+			expect(states["legacy-view"].claimToken).toBe("winner")
+			ClineProvider.persistedViewStateWriteQueue = Promise.resolve()
+			postSpy.mockRestore()
+			await provider.dispose()
+		})
+
 		it("does not overwrite a claim bound by a concurrent registration", async () => {
 			const provider = new ClineProvider(
 				mockContext,
