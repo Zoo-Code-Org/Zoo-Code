@@ -68,7 +68,6 @@ describe("viewStates global setting", () => {
 	})
 })
 
-
 describe("collapseCommandOutputByDefault global setting", () => {
 	it.each([true, false, undefined])("round-trips %s through the export/import schema", (value) => {
 		const settings = globalSettingsSchema.parse({ collapseCommandOutputByDefault: value })
