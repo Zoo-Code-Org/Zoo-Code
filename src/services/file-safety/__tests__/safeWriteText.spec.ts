@@ -15,6 +15,7 @@ import {
 	TargetMovedError,
 	AncestorReplacedError,
 	OrphanedBackupError,
+	OrphanedPublishedBackupError,
 } from "../safeWriteText"
 
 // Full mock for fs/promises — all methods are vi.fn() stubs
@@ -412,6 +413,47 @@ describe("safeWriteText", () => {
 			// Both the backup copy and the staging temp are cleaned up on failure.
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		})
+
+		it("retries the post-commit backup removal and succeeds when the retry clears", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const backupUnlinks: string[] = []
+			vi.mocked(fs.unlink).mockImplementation(async (candidate: unknown) => {
+				const asString = String(candidate)
+				if (asString.includes("safeWriteText.bak_")) {
+					backupUnlinks.push(asString)
+					// The first attempt hits a transient Windows handle; the retry succeeds.
+					if (backupUnlinks.length === 1) {
+						throw Object.assign(new Error("EBUSY"), { code: "EBUSY" })
+					}
+				}
+			})
+
+			await safeWriteText(targetPath, "new data", { backup: true })
+
+			expect(backupUnlinks).toHaveLength(2)
+		})
+
+		it("surfaces an orphaned pre-write copy instead of returning success", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fs.unlink).mockImplementation(async (candidate: unknown) => {
+				if (String(candidate).includes("safeWriteText.bak_")) {
+					throw Object.assign(new Error("EPERM"), { code: "EPERM" })
+				}
+			})
+
+			const error = await safeWriteText(targetPath, "new data", { backup: true }).catch((caught: unknown) => caught)
+
+			expect(error).toBeInstanceOf(OrphanedPublishedBackupError)
+			const orphan = error as OrphanedPublishedBackupError
+			expect(orphan.orphanedBackupPath).toContain("safeWriteText.bak_")
+			expect(orphan.publishedPath).toBe(targetPath)
+			// Two attempts, then the failure is reported instead of swallowed.
+			expect(vi.mocked(fs.unlink).mock.calls.filter((call) => String(call[0]).includes("safeWriteText.bak_"))).toHaveLength(2)
 		})
 
 		it("creates the backup privately before its content exists, then fsyncs it", async () => {

@@ -98,6 +98,31 @@ export class OrphanedBackupError extends Error {
 	}
 }
 
+/**
+ * The write committed and the content is published, but the pre-write backup could not be
+ * removed after two attempts (a transient handle - antivirus scanner, indexer - usually
+ * causes this). Returning success would hide a stale copy of the previous content that
+ * only a recovery tool can find, so the path travels on this error instead.
+ */
+export class OrphanedPublishedBackupError extends Error {
+	readonly publishedPath: string
+	readonly orphanedBackupPath: string
+	readonly cleanupError: unknown
+
+	constructor(targetPath: string, backupPath: string, cleanupError: unknown) {
+		const reason = cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+		super(
+			`safeWriteText: the content was published at ${targetPath}, but the pre-write copy at ${backupPath} ` +
+				`could not be removed (${reason}). The copy is still on disk and should be removed by the caller or a recovery tool.`,
+			{ cause: cleanupError },
+		)
+		this.name = "OrphanedPublishedBackupError"
+		this.publishedPath = targetPath
+		this.orphanedBackupPath = backupPath
+		this.cleanupError = cleanupError
+	}
+}
+
 function _orphanedBackupMessage(targetPath: string, backupPath: string, cause: unknown, cleanupError: unknown): string {
 	const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 	return (
@@ -749,10 +774,28 @@ export async function safeWriteText(
 
 			// -- Step 6 (backup:true): delete backup on success -----------
 			if (releaseBackupOnSuccess && backupPath) {
-				try {
-					await fs.unlink(backupPath)
-				} catch {
-					// non-fatal — orphaned backup is acceptable
+				const orphanedBackupPath = backupPath
+				let backupCleanupError: unknown = null
+				// A transient handle (antivirus scanner, indexer) can block the first unlink
+				// on Windows; one retry usually clears it.
+				for (let attempt = 0; attempt < 2; attempt++) {
+					try {
+						await fs.unlink(orphanedBackupPath)
+						backupCleanupError = null
+						break
+					} catch (cleanupError: unknown) {
+						if (errorCode(cleanupError) === "ENOENT") {
+							backupCleanupError = null
+							break
+						}
+						backupCleanupError = cleanupError
+					}
+				}
+				backupPath = null
+				if (backupCleanupError !== null) {
+					// The content is published: reporting success here would abandon a stale
+					// copy of the previous content, so the failure travels as its own error.
+					throw new OrphanedPublishedBackupError(targetPath, orphanedBackupPath, backupCleanupError)
 				}
 			}
 		} finally {

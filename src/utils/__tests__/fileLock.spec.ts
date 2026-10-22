@@ -71,6 +71,32 @@ describe("fileLock - canonical lock keys", () => {
 		)
 	})
 
+	test("falls back to the lexical path when realpath fails with EACCES", async () => {
+		// A permission failure says nothing about the path's identity; failing closed to the
+		// lexical path keeps the lock key stable instead of inventing a canonical form.
+		vi.mocked(fsPromises.realpath).mockRejectedValueOnce(
+			Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }),
+		)
+		const callerPath = path.join(STORE, "aliasDir", "task.json")
+
+		await withFileLock(callerPath, async (absoluteFilePath) => {
+			expect(absoluteFilePath).toBe(callerPath)
+		})
+
+		expect(lockfile.lock).toHaveBeenCalledWith(callerPath, expect.objectContaining({ realpath: false }))
+	})
+
+	test("falls back to the lexical path when realpath fails without an error code", async () => {
+		vi.mocked(fsPromises.realpath).mockRejectedValueOnce(new Error("unknown failure"))
+		const callerPath = path.join(STORE, "aliasDir", "task.json")
+
+		await withFileLock(callerPath, async (absoluteFilePath) => {
+			expect(absoluteFilePath).toBe(callerPath)
+		})
+
+		expect(lockfile.lock).toHaveBeenCalledWith(callerPath, expect.objectContaining({ realpath: false }))
+	})
+
 	test("canonicalizes the nearest existing ancestor when the file does not exist yet", async () => {
 		// The file and its parent are absent, so realpath reports ENOENT for them; the deepest
 		// existing ancestor is resolved and the missing components are re-appended.
