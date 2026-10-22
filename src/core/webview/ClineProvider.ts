@@ -337,6 +337,18 @@ export class ClineProvider
 		return callerResult
 	}
 
+	/**
+	 * Resolves once the currently queued provider-profile mutation (and everything queued
+	 * before it) has settled. A caller that timed out on a run-to-completion mutation waits
+	 * on this before acting on state that mutation can still change.
+	 */
+	public awaitProfileMutationSettled(): Promise<void> {
+		return this.providerProfileMutationQueue.then(
+			() => undefined,
+			() => undefined,
+		)
+	}
+
 	private withProviderProfileMutationTimeout<T>(operation: Promise<T>, onTimeout: () => void): Promise<T> {
 		let timeoutId: ReturnType<typeof setTimeout> | undefined
 		const timeout = new Promise<never>((_, reject) => {
@@ -3341,7 +3353,17 @@ export class ClineProvider
 				if (instance.getCurrentTask()?.taskApiConfigName === name) {
 					instance.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
 				}
-				await instance.postStateToWebview()
+				// A sibling's UI refresh must not reject an already-applied profile mutation or
+				// trigger its rollback: log the failure and let the remaining siblings refresh.
+				try {
+					await instance.postStateToWebview()
+				} catch (error) {
+					this.log(
+						`[refreshViewLocalStateForUpdatedProfile] failed to post state to sibling view ${instance.viewId}: ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					)
+				}
 			}),
 		)
 	}
@@ -3394,7 +3416,15 @@ export class ClineProvider
 					}
 					await instance.persistStickyProviderProfileToCurrentTask(replacementName)
 				}
-				await instance.postStateToWebview()
+				try {
+					await instance.postStateToWebview()
+				} catch (error) {
+					this.log(
+						`[rePinViewLocalStateForDeletedProfile] failed to post state to sibling view ${instance.viewId}: ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					)
+				}
 			}),
 		)
 	}
@@ -3440,7 +3470,15 @@ export class ClineProvider
 					}
 					await instance.persistStickyProviderProfileToCurrentTask(newName)
 				}
-				await instance.postStateToWebview()
+				try {
+					await instance.postStateToWebview()
+				} catch (error) {
+					this.log(
+						`[repointViewLocalStateAfterProfileRename] failed to post state to sibling view ${instance.viewId}: ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					)
+				}
 			}),
 		)
 	}

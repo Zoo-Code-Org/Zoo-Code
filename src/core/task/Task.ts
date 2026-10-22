@@ -2589,6 +2589,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							`[Task#submitUserMessage] Mode switch to ${mode} failed (taskId=${this.taskId}):`,
 							error,
 						)
+						// A timed-out switch keeps its run-to-completion mutation queued and can still
+						// change this task's mode and profile. Wait for it to settle before delivering
+						// the message, or message processing runs against state the switch moves later.
+						await provider.awaitProfileMutationSettled?.()
 					}
 				}
 

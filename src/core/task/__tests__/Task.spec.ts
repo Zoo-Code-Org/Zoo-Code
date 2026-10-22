@@ -4088,6 +4088,16 @@ describe("Cline", () => {
 				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
 				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
+				const settleSpy = vi.fn().mockResolvedValue(undefined)
+				Object.assign(mockProvider, { awaitProfileMutationSettled: settleSpy })
+				const responseOrder: string[] = []
+				handleResponseSpy.mockImplementation(() => {
+					responseOrder.push("delivered")
+				})
+				settleSpy.mockImplementation(async () => {
+					responseOrder.push("settled")
+				})
+
 				await task.submitUserMessage("still delivered", undefined, "code")
 
 				// The mode-switch rejection is caught and logged locally...
@@ -4095,6 +4105,10 @@ describe("Cline", () => {
 					`[Task#submitUserMessage] Mode switch to code failed (taskId=${task.taskId}):`,
 					switchError,
 				)
+				// ...the queued run-to-completion mutation is awaited before the message is
+				// delivered, so a timed-out switch cannot move the task's mode mid-delivery.
+				expect(settleSpy).toHaveBeenCalledOnce()
+				expect(responseOrder).toEqual(["settled", "delivered"])
 				// ...and the pending ask is still answered, so the submitted text is not lost.
 				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "still delivered", [])
 				consoleErrorSpy.mockRestore()

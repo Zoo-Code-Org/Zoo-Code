@@ -3918,6 +3918,46 @@ describe("ClineProvider", () => {
 			expect(viewStates["stable-sidebar-view"].currentApiConfigName).toBe("profile-new")
 			await provider.dispose()
 		})
+		it("keeps the applied profile mutation when a sibling's state post fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const postError = new Error("sibling post failed")
+			const sibling = {
+				viewId: "sibling-view",
+				pinnedProfileName: "profile-new",
+				_saveViewLocalStateFromMutation: vi.fn().mockResolvedValue(undefined),
+				getCurrentTask: vi.fn().mockReturnValue(undefined),
+				postStateToWebview: vi.fn().mockRejectedValue(postError),
+			}
+			const logSpy = vi.spyOn(provider, "log")
+			const instancesSpy = vi
+				.spyOn(ClineProvider, "getAllInstances")
+				.mockReturnValue([provider, sibling] as unknown as ClineProvider[])
+			try {
+				// A sibling whose UI refresh fails must not reject the applied mutation; the
+				// failure is logged and the remaining siblings still refresh.
+				await expect(
+					provider["refreshViewLocalStateForUpdatedProfile"]("profile-new", {
+						apiProvider: providerIdentifiers.openrouter,
+					}),
+				).resolves.toBeUndefined()
+
+				expect(sibling._saveViewLocalStateFromMutation).toHaveBeenCalledOnce()
+				expect(logSpy).toHaveBeenCalledWith(
+					expect.stringContaining("failed to post state to sibling view sibling-view"),
+				)
+			} finally {
+				instancesSpy.mockRestore()
+				logSpy.mockRestore()
+			}
+			await provider.dispose()
+		})
+
 		it("re-points persisted pins of closed views onto the renamed profile", async () => {
 			const provider = new ClineProvider(
 				mockContext,
