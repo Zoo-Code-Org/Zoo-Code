@@ -22,7 +22,6 @@ import type { ModelInfo } from "@roo-code/types"
 
 import { applyOpenRouterMoonshotK3Profile } from "../fetchers/openrouter"
 
-
 import { OpenRouterHandler } from "../openrouter"
 import { Package } from "../../../shared/package"
 import { makeApiHandlerOptions, makeCreateMessageMetadata } from "../../../test-utils/api"
