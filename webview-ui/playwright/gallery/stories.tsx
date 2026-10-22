@@ -12,6 +12,33 @@ const mermaidGantt = `gantt
     Ship release :active, release, after scope, 3d`
 
 export const stories: Record<string, Story> = {
+	"terminal-settings": async () => {
+		const [{ AppProviders }, { TerminalSettings }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/TerminalSettings"),
+		])
+		function Settings() {
+			const [collapsed, setCollapsed] = useState(false)
+			return (
+				<div
+					className="w-[420px] p-4 bg-vscode-editor-background text-vscode-foreground"
+					data-testid="terminal-settings-story">
+					<TerminalSettings
+						terminalShellIntegrationDisabled={true}
+						collapseCommandOutputByDefault={collapsed}
+						setCachedStateField={(field, value) => {
+							if (field === "collapseCommandOutputByDefault") setCollapsed(Boolean(value))
+						}}
+					/>
+				</div>
+			)
+		}
+		return (
+			<AppProviders>
+				<Settings />
+			</AppProviders>
+		)
+	},
 	"bedrock-output-budget": async ({ model = "anthropic.claude-opus-5" }) => {
 		const [{ AppProviders }, { ThinkingBudget }, { bedrockModels, providerIdentifiers }] = await Promise.all([
 			import("../AppProviders"),
@@ -172,6 +199,39 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"io-intelligence-settings": async () => {
+		const [{ AppProviders }, { IOIntelligence }, { providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/providers/IOIntelligence"),
+			import("@roo-code/types"),
+		])
+		type ProviderSettings = React.ComponentProps<typeof IOIntelligence>["apiConfiguration"]
+
+		function IOIntelligenceSettingsStory() {
+			const [apiConfiguration, setApiConfiguration] = useState<ProviderSettings>({
+				apiProvider: providerIdentifiers.ioIntelligence,
+			})
+			return (
+				<div className="w-full p-4 bg-vscode-editor-background" data-testid="io-intelligence-settings-story">
+					<div className="flex flex-col gap-3">
+						<IOIntelligence
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={(field, value) =>
+								setApiConfiguration((current) => ({ ...current, [field]: value }))
+							}
+							organizationAllowList={{ allowAll: true, providers: {} }}
+						/>
+					</div>
+				</div>
+			)
+		}
+
+		return (
+			<AppProviders initialState={{ apiConfiguration: { apiProvider: providerIdentifiers.ioIntelligence } }}>
+				<IOIntelligenceSettingsStory />
+			</AppProviders>
+		)
+	},
 	"layout-clipped-text": () => (
 		<div className="w-40">
 			<span data-testid="clipped-direct-text" className="block w-8 overflow-hidden whitespace-nowrap">
@@ -194,6 +254,11 @@ export const stories: Record<string, Story> = {
 	"model-info": async () => {
 		const { ModelInfoViewFixture } = await import("@/components/settings/__tests__/ModelInfoView.visual.fixture")
 		return <ModelInfoViewFixture />
+	},
+	"ollama-api-key-help": async () => {
+		const { OllamaApiKeyHelpFixture } =
+			await import("@/components/settings/providers/__tests__/Ollama.visual.fixture")
+		return <OllamaApiKeyHelpFixture />
 	},
 	"openai-codex": async () => {
 		const { OpenAICodexFixture } =

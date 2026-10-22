@@ -1,0 +1,117 @@
+name: Label PR review state fork review follow-up
+
+on:
+    # Fork pull_request_review runs of "Label PR review state" get a read-only
+    # token and skip their label writes (issue #2046). When such a run
+    # completes, this privileged follow-up resolves the fork PRs and dispatches
+    # a workflow_dispatch run of "Label PR review state", which reconciles them
+    # and writes the computed labels. The follow-up lives in its own workflow
+    # because GitHub rejects a workflow that lists itself in
+    # workflow_run.workflows (issue #2086). It takes no artifact input and
+    # never checks out code, so no untrusted PR code or artifacts are touched.
+    workflow_run:
+        workflows: ["Label PR review state"]
+        types: [completed]
+
+permissions:
+    # This privileged workflow only reads PR metadata and dispatches the
+    # reconciliation workflow. All unspecified permissions, including contents,
+    # are none; no fork code or configuration is checked out or executed.
+    actions: write
+    pull-requests: read
+
+# Each completed run gets its own group: one run can resolve several PRs, and
+# a shared key would let an unrelated completion supersede queued dispatches.
+concurrency:
+    group: label-pr-review-state-fork-review-followup-${{ github.event.workflow_run.id }}
+    cancel-in-progress: false
+
+jobs:
+    dispatch:
+        name: Zoo Code / dispatch fork review reconciliation
+        # Loop guard (issue #2046): follow up only on runs triggered by
+        # pull_request_review. The runs this workflow dispatches have event
+        # 'workflow_dispatch', so their completion is filtered out here and
+        # the chain stops after one hop.
+        if: github.event.workflow_run.event == 'pull_request_review'
+        runs-on: ubuntu-latest
+        steps:
+            - name: Resolve fork PRs and dispatch reconciliation
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  retries: 3
+                  script: |
+                      const { owner, repo } = context.repo;
+                      const run = context.payload.workflow_run;
+
+                      // Mirrors the job-level `if`: only runs triggered by
+                      // pull_request_review need a follow-up, so the chain
+                      // stops after one hop.
+                      if (run?.event !== 'pull_request_review') {
+                        core.info(`Ignoring workflow_run with event '${run?.event}'`);
+                        return;
+                      }
+
+                      // GitHub reports the base repository as head_repository on
+                      // every pull_request_review run, fork PR or not (issue
+                      // #2133), so the payload cannot tell fork from same-repo
+                      // runs. Dispatching for a same-repo PR is idempotent: the
+                      // reconciliation writes the same labels, and its completion
+                      // carries event 'workflow_dispatch', which the guard above
+                      // filters out.
+                      //
+                      // Resolve which PRs the completed run targeted. Review runs
+                      // backfill pull_requests empty for fork PRs, and the head
+                      // owner is not recoverable from head_repository, so the
+                      // fallback lists open PRs and matches the exact head branch,
+                      // SHA, and base repository. The workflow_run branch of
+                      // label-pr-review-state.yml keeps an owner-and-branch query
+                      // instead: its runs are CI runs triggered by pull_request,
+                      // whose head_repository is the real fork.
+                      let prNumbers = [];
+                      if (run.pull_requests?.length > 0) {
+                        prNumbers = run.pull_requests.map(pr => pr.number);
+                      } else if (run.head_branch && run.head_sha) {
+                        const candidates = await github.paginate(github.rest.pulls.list, {
+                          owner,
+                          repo,
+                          state: 'open',
+                          per_page: 100,
+                        });
+                        const baseRepository = `${owner}/${repo}`.toLowerCase();
+                        prNumbers = candidates
+                          .filter(pr =>
+                            pr.head?.sha === run.head_sha &&
+                            pr.head?.ref === run.head_branch &&
+                            pr.base?.repo?.full_name?.toLowerCase() === baseRepository
+                          )
+                          .map(pr => pr.number);
+                        core.info(
+                          `Resolved workflow_run ${run.id ?? '(unknown)'} to ` +
+                          `${prNumbers.length} PR(s) by exact head branch, SHA, and base repository`
+                        );
+                      }
+
+                      // Each dispatch starts a privileged workflow_dispatch run of the
+                      // reconciliation workflow for one PR. Its completion re-triggers
+                      // this workflow, but the loop guard above filters it out.
+                      // A failed dispatch must not skip the PRs after it: collect the
+                      // failures and fail the step once, naming each PR.
+                      const failures = [];
+                      for (const prNumber of prNumbers) {
+                        try {
+                          await github.rest.actions.createWorkflowDispatch({
+                            owner,
+                            repo,
+                            workflow_id: 'label-pr-review-state.yml',
+                            ref: 'main',
+                            inputs: { pull_request_number: String(prNumber) },
+                          });
+                          core.info(`Dispatched label-pr-review-state.yml for PR #${prNumber}`);
+                        } catch (error) {
+                          failures.push(`#${prNumber}: ${error.message}`);
+                        }
+                      }
+                      if (failures.length > 0) {
+                        core.setFailed(`Failed to dispatch ${failures.length} PR(s): ${failures.join('; ')}`);
+                      }

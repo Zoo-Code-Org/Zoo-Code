@@ -245,7 +245,11 @@ function transitions(state: ModelState, policy: Policy): Step[] {
 	for (const pass of state.passes) {
 		if (pass.epoch < state.epoch && pass.step !== "done") {
 			const next = clone(state)
-			release(next, next.passes.find((candidate) => candidate.id === pass.id)!, policy)
+			release(
+				next,
+				next.passes.find((candidate) => candidate.id === pass.id)!,
+				policy,
+			)
 			result.push({ action: `stale-unwind(${pass.id})`, state: next })
 		}
 	}
