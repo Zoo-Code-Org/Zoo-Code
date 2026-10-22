@@ -9,11 +9,23 @@ import {
 	remoteMessageKey,
 	requeueRemoteEventsKeepingNewest,
 	resolveRemoteMessageAction,
+	blockingAskTimestamp,
 	resolveZooRemoteEventSeq,
 	workspaceNicknameFromFsPath,
 } from "../bridgeHelpers.js"
 
 describe("bridgeHelpers", () => {
+	it("finds a blocking ask when a later say was appended", () => {
+		const messages = [
+			{ ts: 42, type: "ask", partial: false },
+			{ ts: 50, type: "say", partial: false },
+		]
+		expect(blockingAskTimestamp(messages, 42, false)).toBe(42)
+		expect(blockingAskTimestamp(messages, 42, true)).toBeUndefined()
+		expect(blockingAskTimestamp([{ ts: 42, type: "ask", partial: true }], 42, false)).toBeUndefined()
+		expect(blockingAskTimestamp(messages, 50, false)).toBeUndefined()
+	})
+
 	it("derives a nickname from posix and windows paths", () => {
 		expect(workspaceNicknameFromFsPath("/Users/me/proj/")).toBe("proj")
 		expect(workspaceNicknameFromFsPath("C:\\Users\\me\\proj\\")).toBe("proj")

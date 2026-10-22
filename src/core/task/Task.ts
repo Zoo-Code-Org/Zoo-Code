@@ -14,6 +14,8 @@ import debounce from "lodash.debounce"
 import delay from "delay"
 import pWaitFor from "p-wait-for"
 import { serializeError } from "serialize-error"
+import { blockingAskTimestamp } from "@roo-code/core"
+
 import { Package } from "../../shared/package"
 
 import {
@@ -2472,11 +2474,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	/** True while `ask()` is blocked waiting for a webview/remote response. */
 	public hasPendingAsk(): boolean {
-		if (this.askResponse !== undefined || this.abort) {
-			return false
-		}
-		const last = this.clineMessages.at(-1)
-		return Boolean(last && last.type === "ask" && !last.partial && last.ts === this.lastMessageTs)
+		const settled = this.askResponse !== undefined || this.abort
+		return blockingAskTimestamp(this.clineMessages, this.lastMessageTs, settled) !== undefined
 	}
 
 	public supersedePendingAsk(): void {

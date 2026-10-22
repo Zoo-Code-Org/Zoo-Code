@@ -30,6 +30,51 @@ function makeHost(overrides: Partial<ZooRemoteCommandHost> = {}): ZooRemoteComma
 }
 
 describe("executeRemoteCommand", () => {
+	it("rejects a message that would answer a different pending ask", async () => {
+		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+		const sendMessage = vi.fn().mockResolvedValue(undefined)
+		const host = makeHost({
+			sendMessage,
+			getCurrentTask: () => liveTask({ hasPendingAsk: () => true, pendingAskTs: () => 42 }),
+		})
+
+		await executeRemoteCommand({
+			command: { commandId: "c1", type: "message", taskId: "t1", payload: { text: "late", askTs: 7 } },
+			epoch: 1,
+			client: { ackCommand },
+			host,
+		})
+
+		expect(sendMessage).not.toHaveBeenCalled()
+		expect(ackCommand).toHaveBeenCalledWith({
+			commandId: "c1",
+			status: "failed",
+			errorCode: "ask_mismatch",
+		})
+	})
+
+	it("rejects a follow-up that does not name the pending ask", async () => {
+		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+		const sendMessage = vi.fn().mockResolvedValue(undefined)
+
+		await executeRemoteCommand({
+			command: { commandId: "c1", type: "answer_followup", taskId: "t1", payload: { text: "later" } },
+			epoch: 1,
+			client: { ackCommand },
+			host: makeHost({
+				sendMessage,
+				getCurrentTask: () => liveTask({ hasPendingAsk: () => true, pendingAskTs: () => 42 }),
+			}),
+		})
+
+		expect(sendMessage).not.toHaveBeenCalled()
+		expect(ackCommand).toHaveBeenCalledWith({
+			commandId: "c1",
+			status: "failed",
+			errorCode: "missing_ask_id",
+		})
+	})
+
 	it("acks and sends a message when eligible and lifecycle is current", async () => {
 		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
 		const sendMessage = vi.fn().mockResolvedValue(undefined)

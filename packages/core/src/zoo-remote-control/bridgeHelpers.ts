@@ -74,6 +74,18 @@ export function resolveZooRemoteEventSeq(existing: number | undefined) {
 	return typeof existing === "number" && Number.isFinite(existing) && existing >= 0 ? existing : 0
 }
 
+/** Timestamp of the ask `lastMessageTs` still points at, even if a later say was appended. */
+export function blockingAskTimestamp(
+	messages: ReadonlyArray<{ ts?: number; type?: string; partial?: boolean }>,
+	lastMessageTs: number | undefined,
+	settled: boolean,
+): number | undefined {
+	if (settled || typeof lastMessageTs !== "number") return undefined
+	const blocking = messages.find((message) => message.ts === lastMessageTs)
+	if (!blocking || blocking.type !== "ask" || blocking.partial === true) return undefined
+	return lastMessageTs
+}
+
 export function generateZooRemoteInstanceId(now: number, sessionId: string | undefined) {
 	if (typeof sessionId === "string" && sessionId.length > 0) {
 		return sessionId

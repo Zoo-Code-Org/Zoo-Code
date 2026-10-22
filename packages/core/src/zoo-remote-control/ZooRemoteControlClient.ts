@@ -7,6 +7,8 @@ import {
 	type ZooRemoteSnapshot,
 } from "./types.js"
 
+const REQUEST_TIMEOUT_MS = 30_000
+
 export type ZooRemoteControlClientOptions = {
 	getBaseUrl: () => string
 	getSessionToken: () => string
@@ -88,6 +90,7 @@ export class ZooRemoteControlClient {
 					Accept: "application/json",
 					...(body !== undefined ? { "Content-Type": "application/json" } : {}),
 				},
+				signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
 				...(body !== undefined ? { body: JSON.stringify(body) } : {}),
 			})
 

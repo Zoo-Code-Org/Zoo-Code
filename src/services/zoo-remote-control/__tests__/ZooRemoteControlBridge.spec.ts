@@ -128,10 +128,14 @@ describe("ZooRemoteControlBridge", () => {
 	function useLiveTask(options?: { taskId?: string; pendingAskTs?: number }) {
 		const task = {
 			taskId: options?.taskId ?? "task-1",
+			lastMessageTs: options?.pendingAskTs,
 			clineMessages:
 				options?.pendingAskTs === undefined
 					? []
-					: [{ ts: options.pendingAskTs, type: "ask", ask: "command", partial: false }],
+					: [
+							{ ts: options.pendingAskTs, type: "ask", ask: "command", partial: false },
+							{ ts: options.pendingAskTs + 1, type: "say", say: "text", text: "status" },
+						],
 			hasPendingAsk: () => options?.pendingAskTs !== undefined,
 			approveAsk: vi.fn(),
 			denyAsk: vi.fn(),
@@ -334,6 +338,81 @@ describe("ZooRemoteControlBridge", () => {
 				}),
 			]),
 		)
+		bridge.dispose()
+	})
+
+	it("does not upload another task after the user opts in for one task", async () => {
+		sessionActive = true
+		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
+		provider.contextProxy.getProviderSettings.mockReturnValue({
+			apiProvider: providerIdentifiers.zooGateway,
+		})
+		useLiveTask({ taskId: "task-1" })
+
+		const bridge = createBridge()
+		await bridge.setSessionActive(true)
+		await vi.advanceTimersByTimeAsync(0)
+		client.postEvents.mockClear()
+		client.postSnapshot.mockClear()
+
+		api.emit(RooCodeEventName.Message, {
+			taskId: "task-2",
+			action: "created",
+			message: { ts: 2, type: "say", say: "text", text: "other", partial: false },
+		})
+		useLiveTask({ taskId: "task-2" })
+		await bridge["publishSnapshot"]()
+		await vi.advanceTimersByTimeAsync(100)
+
+		expect(client.postEvents).not.toHaveBeenCalled()
+		expect(client.postSnapshot).not.toHaveBeenCalled()
+
+		api.emit(RooCodeEventName.Message, {
+			taskId: "task-1",
+			action: "created",
+			message: { ts: 3, type: "say", say: "text", text: "kept", partial: false },
+		})
+		await vi.advanceTimersByTimeAsync(100)
+		expect(client.postEvents).toHaveBeenCalledWith(
+			"instance-1",
+			expect.arrayContaining([
+				expect.objectContaining({ taskId: "task-1", message: expect.objectContaining({ text: "kept" }) }),
+			]),
+		)
+		bridge.dispose()
+	})
+
+	it("does not start a second event post while one is still in flight", async () => {
+		sessionActive = true
+		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
+		provider.contextProxy.getProviderSettings.mockReturnValue({
+			apiProvider: providerIdentifiers.zooGateway,
+		})
+		let releasePost: () => void = () => {}
+		const postGate = new Promise<void>((resolve) => {
+			releasePost = resolve
+		})
+		client.postEvents.mockImplementation(() => postGate.then(() => ({ ok: true, status: 200 })))
+
+		const bridge = createBridge()
+		await vi.advanceTimersByTimeAsync(0)
+		api.emit(RooCodeEventName.Message, {
+			taskId: "task-1",
+			action: "created",
+			message: { ts: 1, type: "say", say: "text", text: "first", partial: false },
+		})
+		await vi.advanceTimersByTimeAsync(100)
+		api.emit(RooCodeEventName.Message, {
+			taskId: "task-1",
+			action: "created",
+			message: { ts: 2, type: "say", say: "text", text: "second", partial: false },
+		})
+		await vi.advanceTimersByTimeAsync(100)
+		expect(client.postEvents).toHaveBeenCalledTimes(1)
+
+		releasePost()
+		await vi.advanceTimersByTimeAsync(100)
+		expect(client.postEvents).toHaveBeenCalledTimes(2)
 		bridge.dispose()
 	})
 
@@ -618,7 +697,7 @@ describe("ZooRemoteControlBridge", () => {
 	})
 
 	it("answers follow-ups and can switch mode from the payload", async () => {
-		useLiveTask()
+		useLiveTask({ pendingAskTs: 42 })
 		provider.handleModeSwitch = vi.fn().mockResolvedValue(undefined)
 		client.getCommands.mockResolvedValueOnce({
 			ok: true,
@@ -629,7 +708,7 @@ describe("ZooRemoteControlBridge", () => {
 						commandId: "f1",
 						type: "answer_followup",
 						taskId: "task-1",
-						payload: { text: "option a", mode: "architect" },
+						payload: { text: "option a", mode: "architect", askTs: 42 },
 					},
 				],
 			},

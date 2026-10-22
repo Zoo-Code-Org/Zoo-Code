@@ -40,6 +40,7 @@ const INSTANCE_ID_STATE_KEY = "zooRemoteControl.instanceId"
 const EVENT_SEQ_STATE_KEY = "zooRemoteControl.eventSeq"
 /** Built-in remote session flag (not a VS Code Configuration setting). */
 const SESSION_ACTIVE_STATE_KEY = "zooRemoteControl.sessionActive"
+const CONSENTED_TASK_STATE_KEY = "zooRemoteControl.consentedTaskId"
 const LEGACY_SETTING_KEY = "remoteControl.enabled"
 
 export type ZooRemoteControlBridgeDeps = {
@@ -82,6 +83,9 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	/** Set before the identity await so a second activate cannot pass the first check. */
 	private activating = false
 	private commandPollInFlight = false
+	private flushInFlight = false
+	/** Task the user opted in for. Other tasks are not uploaded. Unset means a session from before this was stored. */
+	private consentedTaskId: string | undefined
 	/** At-most-once delivery for remote commands (esp. start_task) within an active session. */
 	private handledCommandIds = new Set<string>()
 
@@ -124,6 +128,8 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		this.instanceId = identity.id
 		this.identityReady = identity.needsPersist ? this.persistInstanceId(identity.id) : Promise.resolve(true)
 		this.eventSeq = this.resolveEventSeq()
+		const consented = this.context.globalState.get<string>(CONSENTED_TASK_STATE_KEY)
+		this.consentedTaskId = typeof consented === "string" && consented.length > 0 ? consented : undefined
 		this.client =
 			deps.client ??
 			new ZooRemoteControlClient({
@@ -156,7 +162,9 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 
 	/** Start or end remote session (does not cancel the task). */
 	public async setSessionActive(active: boolean): Promise<void> {
+		this.consentedTaskId = active ? this.provider.getCurrentTask()?.taskId : undefined
 		await this.context.globalState.update(SESSION_ACTIVE_STATE_KEY, active)
+		await this.context.globalState.update(CONSENTED_TASK_STATE_KEY, this.consentedTaskId)
 		await this.syncActiveState()
 		await this.provider.postStateToWebview()
 	}
@@ -257,9 +265,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	private persistEventSeq(): void {
 		this.eventSeqPersistChain = this.eventSeqPersistChain
 			.then(async () => {
-				if (this.disposed || this.eventSeqPersistFailed) {
-					return
-				}
+				if (this.disposed || this.eventSeqPersistFailed) return
 				await this.context.globalState.update(EVENT_SEQ_STATE_KEY, this.eventSeq)
 			})
 			.catch((error: unknown) => {
@@ -274,9 +280,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	private getApiProvider(): string | undefined {
 		try {
 			const getSettings = this.provider.contextProxy?.getProviderSettings
-			if (typeof getSettings !== "function") {
-				return undefined
-			}
+			if (typeof getSettings !== "function") return undefined
 			const settings: ProviderSettings = getSettings.call(this.provider.contextProxy)
 			return settings?.apiProvider
 		} catch {
@@ -395,12 +399,16 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		this.api[method](RooCodeEventName.TaskModeSwitched, this.onModeSwitched)
 	}
 
+	private acceptsTaskContent(taskId: string | undefined): boolean {
+		return this.consentedTaskId === undefined || taskId === this.consentedTaskId
+	}
+
 	private async handleMessageEvent(payload: {
 		taskId: string
 		action?: string
 		message: ClineMessage
 	}): Promise<void> {
-		if (!this.active) return
+		if (!this.active || !this.acceptsTaskContent(payload.taskId)) return
 
 		const shaped = {
 			taskId: payload.taskId,
@@ -418,9 +426,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				this.lastPartialFlushAt = this.now()
 				return
 			}
-			if (decision === "wait") {
-				return
-			}
+			if (decision === "wait") return
 			this.flushPendingPartials()
 			return
 		}
@@ -449,7 +455,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private enqueueEvent(event: Omit<ZooRemoteEvent, "seq">): void {
-		if (!this.active || this.eventSeqPersistFailed) return
+		if (!this.active || this.eventSeqPersistFailed || !this.acceptsTaskContent(event.taskId)) return
 
 		this.pendingEvents.push({ ...event, seq: this.eventSeq++ })
 		this.persistEventSeq()
@@ -487,7 +493,8 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 
 		// Nickname only — never send an absolute disk path (home dir / username fingerprint).
 		const workspacePath = workspaceNicknameFromFsPath(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath)
-		const taskId = this.provider.getCurrentTask()?.taskId
+		const currentTaskId = this.provider.getCurrentTask()?.taskId
+		const taskId = this.acceptsTaskContent(currentTaskId) ? currentTaskId : undefined
 		const epoch = this.lifecycleEpoch
 		const result = await this.client.postPresence({
 			instanceId: this.instanceId,
@@ -502,12 +509,8 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		// Online publishes must still belong to the active lifecycle. Offline notify is allowed
 		// after deactivate (active=false) as long as a newer activation has not started.
 		if (online) {
-			if (!this.isLifecycleCurrent(epoch)) {
-				return
-			}
-		} else if (this.active && epoch !== this.lifecycleEpoch) {
-			return
-		}
+			if (!this.isLifecycleCurrent(epoch)) return
+		} else if (this.active && epoch !== this.lifecycleEpoch) return
 
 		const kind = classifyRemoteControlHttpResult(result)
 		if (kind === "auth_blocked") {
@@ -530,7 +533,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		if (!this.active || !this.canCallServer()) return
 
 		const task = this.provider.getCurrentTask()
-		if (!task?.taskId || !Array.isArray(task.clineMessages)) return
+		if (!task?.taskId || !this.acceptsTaskContent(task.taskId) || !Array.isArray(task.clineMessages)) return
 
 		let mode: string | undefined
 		try {
@@ -546,9 +549,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			messages: projectClineMessagesForSnapshot(task.clineMessages),
 			mode,
 		})
-		if (!this.isLifecycleCurrent(epoch)) {
-			return
-		}
+		if (!this.isLifecycleCurrent(epoch)) return
 
 		const kind = classifyRemoteControlHttpResult(result)
 		if (kind === "auth_blocked") {
@@ -565,21 +566,24 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private async flushEvents(): Promise<void> {
-		if (!this.active || this.eventSeqPersistFailed || !this.canCallServer()) {
-			return
-		}
+		if (!this.active || this.eventSeqPersistFailed || !this.canCallServer() || this.flushInFlight) return
 
+		this.flushInFlight = true
+		try {
+			await this.flushEventsOnce()
+		} finally {
+			this.flushInFlight = false
+		}
+	}
+
+	private async flushEventsOnce(): Promise<void> {
 		const epoch = this.lifecycleEpoch
 		this.flushPendingPartials()
-		if (this.pendingEvents.length === 0) {
-			return
-		}
+		if (this.pendingEvents.length === 0) return
 
 		const batch = this.pendingEvents.splice(0, this.pendingEvents.length)
 		const result = await this.client.postEvents(this.instanceId, batch)
-		if (!this.isLifecycleCurrent(epoch)) {
-			return
-		}
+		if (!this.isLifecycleCurrent(epoch)) return
 
 		const kind = classifyRemoteControlHttpResult(result)
 		if (kind === "auth_blocked") {
@@ -602,9 +606,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private async pollCommands(): Promise<void> {
-		if (!this.active || this.disposed || this.commandPollInFlight || !this.canCallServer()) {
-			return
-		}
+		if (!this.active || this.disposed || this.commandPollInFlight || !this.canCallServer()) return
 
 		if (!this.evaluateEligible()) {
 			await this.deactivate({ notifyOffline: true })
@@ -615,9 +617,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		const epoch = this.lifecycleEpoch
 		try {
 			const result = await this.client.getCommands(this.instanceId)
-			if (!this.isLifecycleCurrent(epoch)) {
-				return
-			}
+			if (!this.isLifecycleCurrent(epoch)) return
 
 			const kind = classifyRemoteControlHttpResult(result)
 			if (kind === "auth_blocked") {
@@ -629,16 +629,12 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				this.markBackoff(UNAVAILABLE_BACKOFF_MS)
 				return
 			}
-			if (kind !== "success" || !result.body) {
-				return
-			}
+			if (kind !== "success" || !result.body) return
 
 			this.setServerAvailable(true)
 
 			for (const command of result.body.commands) {
-				if (!this.isLifecycleCurrent(epoch)) {
-					return
-				}
+				if (!this.isLifecycleCurrent(epoch)) return
 				await this.executeCommand(command, epoch)
 			}
 		} finally {
@@ -663,10 +659,10 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 					return {
 						taskId: task.taskId,
 						hasPendingAsk: () => task.hasPendingAsk(),
-						pendingAskTs: () => {
-							const ts = task.clineMessages.at(-1)?.ts
-							return task.hasPendingAsk() && typeof ts === "number" ? ts : undefined
-						},
+						pendingAskTs: () =>
+							task.hasPendingAsk() && typeof task.lastMessageTs === "number"
+								? task.lastMessageTs
+								: undefined,
 						approveAsk: (payload) => task.approveAsk(payload),
 						denyAsk: (payload) => task.denyAsk(payload),
 					}

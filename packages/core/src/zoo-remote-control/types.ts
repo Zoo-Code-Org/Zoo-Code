@@ -22,14 +22,14 @@ export const zooRemoteCommandTypeSchema = z.enum([
 export type ZooRemoteCommandType = z.infer<typeof zooRemoteCommandTypeSchema>
 
 export const zooRemoteCommandSchema = z.object({
-	commandId: z.string().min(1),
+	commandId: z.string().min(1).max(200),
 	type: zooRemoteCommandTypeSchema,
-	taskId: z.string().optional(),
+	taskId: z.string().max(200).optional(),
 	payload: z
 		.object({
-			text: z.string().optional(),
-			images: z.array(z.string()).optional(),
-			mode: z.string().optional(),
+			text: z.string().max(100_000).optional(),
+			images: z.array(z.string().max(1_500_000)).max(8).optional(),
+			mode: z.string().max(64).optional(),
 			/** Timestamp of the ask the user approved or denied. */
 			askTs: z.number().optional(),
 		})
@@ -40,7 +40,7 @@ export const zooRemoteCommandSchema = z.object({
 export type ZooRemoteCommand = z.infer<typeof zooRemoteCommandSchema>
 
 export const zooRemoteCommandsResponseSchema = z.object({
-	commands: z.array(zooRemoteCommandSchema).default([]),
+	commands: z.array(zooRemoteCommandSchema).max(25).default([]),
 })
 
 export type ZooRemoteCommandsResponse = z.infer<typeof zooRemoteCommandsResponseSchema>

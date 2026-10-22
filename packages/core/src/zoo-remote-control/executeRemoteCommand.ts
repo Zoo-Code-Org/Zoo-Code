@@ -62,6 +62,35 @@ async function ensureTaskTarget(options: {
 	return false
 }
 
+/** A message that can answer an ask must name that ask, so a late delivery cannot hit a newer one. */
+async function ensureAnswerTarget(options: {
+	command: ZooRemoteCommand
+	epoch: number
+	client: Pick<ZooRemoteControlClient, "ackCommand">
+	host: ZooRemoteCommandHost
+}): Promise<boolean> {
+	const { command, epoch, client, host } = options
+	const task = host.getCurrentTask()
+	const pending = task?.hasPendingAsk() === true
+	if (!pending) {
+		if (command.type === "answer_followup") {
+			await failCommand(client, host, epoch, command.commandId, "no_pending_ask")
+			return false
+		}
+		return true
+	}
+	const askTs = command.payload?.askTs
+	if (typeof askTs !== "number") {
+		await failCommand(client, host, epoch, command.commandId, "missing_ask_id")
+		return false
+	}
+	if (task?.pendingAskTs() !== askTs) {
+		await failCommand(client, host, epoch, command.commandId, "ask_mismatch")
+		return false
+	}
+	return true
+}
+
 /** Apply one remote command through host callbacks, respecting lifecycle epoch checks. */
 export async function executeRemoteCommand(options: {
 	command: ZooRemoteCommand
@@ -97,6 +126,9 @@ export async function executeRemoteCommand(options: {
 				case "message":
 				case "answer_followup":
 					if (!(await ensureTaskTarget({ command, epoch, client, host }))) {
+						return
+					}
+					if (!(await ensureAnswerTarget({ command, epoch, client, host }))) {
 						return
 					}
 					if (!host.isLifecycleCurrent(epoch)) {

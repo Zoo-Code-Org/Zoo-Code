@@ -35,6 +35,18 @@ describe("ZooRemoteControlClient", () => {
 		expect(fetchFn).not.toHaveBeenCalled()
 	})
 
+	it("aborts a remote request that does not finish", async () => {
+		fetchFn.mockResolvedValue({ ok: true, status: 200 })
+		await client.postPresence({
+			instanceId: "i1",
+			apiProvider: providerIdentifiers.zooGateway,
+			online: true,
+		})
+		const init = fetchFn.mock.calls[0]?.[1] as { signal?: AbortSignal }
+		expect(init.signal).toBeInstanceOf(AbortSignal)
+		expect(init.signal?.aborted).toBe(false)
+	})
+
 	it("posts presence with bearer auth", async () => {
 		fetchFn.mockResolvedValue({ ok: true, status: 200 })
 		const presence = {
@@ -103,6 +115,22 @@ describe("ZooRemoteControlClient", () => {
 			"https://www.zoocode.dev/api/extension/remote/commands?instanceId=inst-1",
 			expect.objectContaining({ method: "GET" }),
 		)
+	})
+
+	it("rejects a command batch that exceeds the size bound", async () => {
+		fetchFn.mockResolvedValue({
+			ok: true,
+			status: 200,
+			json: async () => ({
+				commands: Array.from({ length: 26 }, (_, index) => ({
+					commandId: `c${index}`,
+					type: "message",
+					payload: { text: "hi" },
+				})),
+			}),
+		})
+		const result = await client.getCommands("inst-1")
+		expect(result).toEqual({ ok: false, status: 0 })
 	})
 
 	it("returns status 0 when getCommands JSON body is malformed", async () => {
