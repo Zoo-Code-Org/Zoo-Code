@@ -12,6 +12,14 @@ export type Ask =
 	| { tag: "completion"; askTs: number }
 	| { tag: "other"; askTs: number }
 
+export type Turn = {
+	waitingForFirstChunk: boolean
+	toolRejected: boolean
+	toolUsed: boolean
+	toolFailed: boolean
+	streamReadComplete: boolean
+}
+
 export type Latches = {
 	abort: boolean
 	abandoned: boolean
@@ -24,12 +32,20 @@ export type RunState = {
 	generation: number
 	stream: Stream
 	ask: Ask
+	turn: Turn
 	latches: Latches
 	lastCompletionAskTs?: number
 }
 
 export type RunEvent =
 	| { tag: "initialized" }
+	| { tag: "turnStarted" }
+	| { tag: "firstChunkAwaitStarted" }
+	| { tag: "firstChunkAwaitEnded" }
+	| { tag: "toolRejected" }
+	| { tag: "toolUsed" }
+	| { tag: "toolFailed" }
+	| { tag: "streamReadCompleted" }
 	| { tag: "streamStarted" }
 	| { tag: "streamCleanupFinished" }
 	| { tag: "streamEnded" }
@@ -43,11 +59,20 @@ export type RunEvent =
 
 export type Transition = { ok: RunState } | { rejected: RunState }
 
+const initialTurn: Readonly<Turn> = Object.freeze({
+	waitingForFirstChunk: false,
+	toolRejected: false,
+	toolUsed: false,
+	toolFailed: false,
+	streamReadComplete: false,
+})
+
 export const initialRunState: Readonly<RunState> = Object.freeze({
 	phase: "uninitialized",
 	generation: 0,
 	stream: Object.freeze({ tag: "none" }),
 	ask: Object.freeze({ tag: "none" }),
+	turn: initialTurn,
 	latches: Object.freeze({ abort: false, abandoned: false, disposed: false }),
 })
 
@@ -58,6 +83,27 @@ export function nextRunState(state: RunState, event: RunEvent): Transition {
 				return { rejected: state }
 			}
 			return { ok: { ...state, phase: "running" } }
+
+		case "turnStarted":
+			return { ok: { ...state, turn: { ...initialTurn, waitingForFirstChunk: state.turn.waitingForFirstChunk } } }
+
+		case "firstChunkAwaitStarted":
+			return { ok: { ...state, turn: { ...state.turn, waitingForFirstChunk: true } } }
+
+		case "firstChunkAwaitEnded":
+			return { ok: { ...state, turn: { ...state.turn, waitingForFirstChunk: false } } }
+
+		case "toolRejected":
+			return { ok: { ...state, turn: { ...state.turn, toolRejected: true } } }
+
+		case "toolUsed":
+			return { ok: { ...state, turn: { ...state.turn, toolUsed: true } } }
+
+		case "toolFailed":
+			return { ok: { ...state, turn: { ...state.turn, toolFailed: true } } }
+
+		case "streamReadCompleted":
+			return { ok: { ...state, turn: { ...state.turn, streamReadComplete: true } } }
 
 		case "streamStarted": {
 			if (state.phase !== "running" || state.stream.tag !== "none") {
