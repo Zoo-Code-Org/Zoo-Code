@@ -4,6 +4,7 @@
  * Timeout values <= 0 and non-finite values are treated as disabled; finite
  * delays are rounded up and capped at 2^31-1 ms (Node clamps larger delays
  * to 1 ms and rejects non-integer ones). The timeout is created via the
+
  * native AbortSignal.timeout() API, which self-manages its timer — callers do
  * not need to (and cannot) clear it manually.
  */
@@ -13,6 +14,7 @@ export function mergeAbortSignalAndTimeout(externalSignal?: AbortSignal, timeout
 	// and clamps delays above 2^31-1 ms to 1 ms, which would abort almost
 	// immediately; treat non-finite values as "no timeout", round fractional
 	// delays up to whole milliseconds, and cap the rest.
+
 	const hasTimeout = typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
 
 	if (!hasTimeout) {
@@ -58,17 +60,6 @@ export function throwIfAborted(signal?: AbortSignal): void {
 	const abortError = new Error("This operation was aborted")
 	abortError.name = "AbortError"
 	throw abortError
-}
-
-/**
- * Request options this series passes to the OpenAI SDK call. The SDK's
- * `RequestOptions` declares `signal` as `AbortSignal | null | undefined`,
- * which does not satisfy the builder's base constraint, so the builder is
- * typed with only the options this series sets. The built config is still
- * assignable to the SDK's `RequestOptions`.
- */
-export type OpenAiRequestOptions = {
-	signal?: AbortSignal
 }
 
 /**
@@ -146,9 +137,11 @@ export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, provi
  * resolve. Abort failures from the lookup itself are normalized to the
  * provider AbortError; any other resolution failure propagates unchanged.
  *
- * Providers pass their own resolution step, so the entry guard, the race, and
- * the normalization logic exist once and are exercised through every
- * provider's spec.
+ * Accepts a provider-specific resolution step so the entry guard, race, and
+ * normalization can share one implementation. Direct contract tests cover
+ * this helper; providers do not currently call it.
+ *
+ * @internal Shared cancellation helper retained with direct contract tests for provider adoption.
  */
 export async function resolveModelWithAbort<T>(
 	fetchModel: () => Promise<T>,

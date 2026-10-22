@@ -172,6 +172,59 @@ function sanitizeSchemaForGemini(
 	return result
 }
 
+// googleGeminiBaseUrl is user-editable and can reach non-HTTPS values (settings,
+// imported profiles). The @google/genai client keeps API-key authentication for
+// custom endpoints, so reject cleartext base URLs before any request — with a
+// narrow loopback exception for local test proxies.
+// A decimal octet is a 1-3 digit string; a non-numeric part also fails the
+// range check, because Number() of a non-numeric string is NaN, which is not
+// <= 255.
+function isOctet(octet: string): boolean {
+	// Stryker disable next-line Regex,LogicalOperator,ConditionalExpression: equivalent mutants, new URL() rejects malformed or out-of-range octets before this check
+	return /^\d{1,3}$/.test(octet) && Number(octet) <= 255
+}
+
+// Only literal IPv4 loopback (127.0.0.0/8) qualifies: public hostnames may
+// start with a "127." label (e.g. 127.example.test), which a prefix test would
+// misclassify as loopback and allow cleartext. assertSecureGeminiBaseUrl has
+// already parsed the URL and only reaches this for the HTTP exception, so the
+// parsed hostname is passed directly; `new URL` keeps the brackets in IPv6
+// hostnames, so `[::1]` is the loopback host form to compare against.
+function isLoopbackHostname(hostname: string): boolean {
+	if (hostname === "localhost" || hostname === "[::1]") {
+		return true
+	}
+	const parts = hostname.split(".")
+	// Stryker disable next-line ConditionalExpression: equivalent mutants, new URL() rejects non-numeric or out-of-range middle octets before this check
+	return parts.length === 4 && parts[0] === "127" && isOctet(parts[1]) && isOctet(parts[2]) && isOctet(parts[3])
+}
+
+// Throws an ApiProviderError when baseUrl is not HTTPS (loopback HTTP is the
+// narrow exception, for local test proxies). The provider/model/operation
+// arguments keep the structured error context consistent with the request-path
+// ApiProviderError instances in this file.
+function assertSecureGeminiBaseUrl(baseUrl: string, modelId: string, operation: string): void {
+	let parsed: URL
+	try {
+		parsed = new URL(baseUrl)
+	} catch {
+		throw new ApiProviderError("Invalid Google Gemini base URL (not a valid URL)", "Gemini", modelId, operation)
+	}
+	if (parsed.protocol === "https:") {
+		return
+	}
+	if (parsed.protocol === "http:" && isLoopbackHostname(parsed.hostname)) {
+		// Loopback endpoints (localhost/127.x/::1) are allowed for local test proxies.
+		return
+	}
+	throw new ApiProviderError(
+		"Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+		"Gemini",
+		modelId,
+		operation,
+	)
+}
+
 export class GeminiHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 
@@ -295,6 +348,12 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 		const temperatureConfig: number | undefined = supportsTemperature
 			? (this.options.modelTemperature ?? info.defaultTemperature ?? 1)
 			: info.defaultTemperature
+
+		// Reject cleartext (non-loopback) base URLs before building the request so the
+		// API key is never sent over an insecure endpoint.
+		if (this.options.googleGeminiBaseUrl) {
+			assertSecureGeminiBaseUrl(this.options.googleGeminiBaseUrl, model, "createMessage")
+		}
 
 		const config: GenerateContentConfig = {
 			systemInstruction,
@@ -581,6 +640,13 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			const temperatureConfig: number | undefined = supportsTemperature
 				? (this.options.modelTemperature ?? info.defaultTemperature ?? 1)
 				: info.defaultTemperature
+
+			// Reject cleartext (non-loopback) base URLs before building the request so the
+			// API key is never sent over an insecure endpoint.
+			if (this.options.googleGeminiBaseUrl) {
+				// Stryker disable next-line StringLiteral: completePrompt's catch reads only .message from the thrown error before building its own telemetry error, so this operation argument is unobservable
+				assertSecureGeminiBaseUrl(this.options.googleGeminiBaseUrl, model, "completePrompt")
+			}
 
 			const promptConfig: GenerateContentConfig = {
 				httpOptions: this.options.googleGeminiBaseUrl
