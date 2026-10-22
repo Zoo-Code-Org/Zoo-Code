@@ -2896,6 +2896,63 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("preserves sibling view-state fields written while a failed deletion rolls back", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const oldProfile: ProviderSettingsEntry = {
+				name: "old-profile",
+				id: "old-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+			await provider.setValue("currentApiConfigName", "old-profile")
+			await provider.contextProxy.setValue("viewStates", {
+				"view-1": { currentApiConfigName: "old-profile", mode: "code", updatedAt: 1 },
+			})
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (params) => {
+				if ("name" in params && params.name === "old-profile") {
+					return { name: "old-profile", id: "old-id", apiProvider: providerIdentifiers.openrouter }
+				}
+				return { name: "keeper-profile", id: "keeper-id", apiProvider: providerIdentifiers.anthropic }
+			})
+			vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("x")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const originalSetValue = provider.contextProxy.setValue.bind(provider.contextProxy)
+			// A sibling view switches its mode after the deletion snapshotted viewStates but
+			// before the failing write; the rollback must keep that newer mode.
+			vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key, value) => {
+				if (key === "listApiConfigMeta") {
+					await originalSetValue("viewStates", {
+						"view-1": { currentApiConfigName: "old-profile", mode: "architect", updatedAt: 2 },
+					})
+					throw new Error("state write down")
+				}
+				return originalSetValue(key, value)
+			})
+
+			await expect(provider.deleteProviderProfile(oldProfile)).rejects.toThrow("state write down")
+
+			const viewStates = provider.contextProxy.getValue("viewStates") as Record<string, Record<string, unknown>>
+			// Only the deletion's own re-point would be undone; the sibling's newer mode
+			// survives because the fresh entry still names the pre-deletion profile.
+			expect(viewStates["view-1"].mode).toBe("architect")
+			expect(viewStates["view-1"].currentApiConfigName).toBe("old-profile")
+			expect(viewStates["view-1"].updatedAt).toBe(2)
+
+			await provider.dispose()
+		})
+
 		it("keeps the mutation queue owned by a mode switch past its timeout", async () => {
 			vi.useFakeTimers()
 			const provider = new ClineProvider(

@@ -3247,8 +3247,22 @@ export class ClineProvider
 						if (entry?.currentApiConfigName !== profileToDelete.name) {
 							continue
 						}
-						merged[viewId] = entry
-						changed = true
+						const fresh = merged[viewId]
+						if (!fresh) {
+							// The entry disappeared while the deletion ran: restore the snapshot.
+							merged[viewId] = entry
+							changed = true
+							continue
+						}
+						// Undo only this deletion's re-point: a sibling may have changed other
+						// fields (for example the mode) while the deletion ran, and the fresh
+						// entry must keep them. When the fresh entry no longer names the
+						// survivor (still the pre-deletion name, or another profile), there is
+						// nothing to undo.
+						if (fresh.currentApiConfigName === profileToActivate) {
+							merged[viewId] = { ...fresh, currentApiConfigName: profileToDelete.name }
+							changed = true
+						}
 					}
 					if (changed) {
 						await this.contextProxy.setValue("viewStates", merged)
