@@ -1,0 +1,11 @@
+fix(config): roll failed durable writes back to the durable record, not the call-time cache value
+
+A superseded in-flight write can leave the cache ahead of storage when the
+superseding write also fails: the token guard restored the cache value the
+write captured at call time, which the earlier write had already overwritten.
+Record the last value confirmed in durable storage (initialize loads,
+successful writes, refresh re-syncs) and roll back to that record.
+
+Also: pin the readiness-timeout cancellation with fake timers (assert the
+timer count is zero and no late rejection fires past the bound) instead of a
+clearTimeout spy, and type the image-settings migration read instead of any.

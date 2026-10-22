@@ -1,0 +1,72 @@
+﻿
+ RUN  v4.1.11 C:/work/Zoo-Code-fork/vps2-f5-wt/src
+
+node : 上午2:47:57 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${absolutepath}/
+At line:1 char:300
++ ... size=2048'; node node_modules\vitest\vitest.mjs run core/webview/__te ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (上午2:47:57 [vite...{absolutepath}/:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  Plugin: builtin:vite-resolve
+上午2:47:57 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${cachedpath}/
+  Plugin: builtin:vite-resolve
+上午2:47:57 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${tempfile}/
+  Plugin: builtin:vite-resolve
+上午2:47:57 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${tempfile}/
+  Plugin: builtin:vite-resolve
+
+<--- Last few GCs --->
+
+[21232:000001E62DCA5000]     7548 ms: Scavenge (during sweeping) 2040.6 (2049.9) -> 2038.9 (2050.4) MB, pooled: 0.0 MB,
+ 4.84 / 0.00 ms (average mu = 0.186, current mu = 0.139) allocation failure; 
+[21232:000001E62DCA5000]     8056 ms: Mark-Compact (reduce) 2041.5 (2052.7) -> 2039.0 (2047.4) MB, pooled: 0.0 MB, 449.
+12 / 0.00 ms (+ 6.9 ms in 36 steps since start of marking, biggest step 2.1 ms, walltime since start of marking 459 ms)
+ (average mu = 0.
+FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 00007FF777F59706 node::OnFatalError+1318
+ 2: 00007FF778AF94C7 v8::Function::NewInstance+423
+ 3: 00007FF778909407 v8::base::AddressSpaceReservation::AddressSpaceReservation+328087
+ 4: 00007FF77890D317 v8::base::AddressSpaceReservation::AddressSpaceReservation+344231
+ 5: 00007FF77891D518 v8::internal::StrongRootAllocatorBase::deallocate_impl+18360
+ 6: 00007FF77891CD4B v8::internal::StrongRootAllocatorBase::deallocate_impl+16363
+ 7: 00007FF77A09F56D v8::platform::DelayedTaskQueue::Terminate+10483453
+ 8: 00007FF778906D38 v8::base::AddressSpaceReservation::AddressSpaceReservation+318152
+ 9: 00007FF778922F70 X509_STORE_set_cleanup+5664
+10: 00007FF778921C9E X509_STORE_set_cleanup+846
+11: 00007FF77892F8CB X509_CRL_set_meth_data+21099
+12: 00007FF77853009E v8::String::Value::~Value+153662
+13: 000001E6663BB93A 
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Worker forks emitted error.
+ ❯ EventEmitter.onTaskError ../node_modules/.pnpm/vitest@4.1.11_@opentelemetr_4f3d07b48a48e0ce68f7f7f41e5a3c89/node_mod
+ules/vitest/dist/chunks/cli-api.CnMVyzaz.js:3526:21
+ ❯ EventEmitter.emit node:events:509:20
+ ❯ ChildProcess.emitUnexpectedExit ../node_modules/.pnpm/vitest@4.1.11_@opentelemetr_4f3d07b48a48e0ce68f7f7f41e5a3c89/n
+ode_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:3092:22
+ ❯ ChildProcess.emit node:events:509:20
+ ❯ Process.ChildProcess._handle.onexit node:internal/child_process:294:12
+
+Caused by: Error: Worker exited unexpectedly
+ ❯ ChildProcess.emitUnexpectedExit ../node_modules/.pnpm/vitest@4.1.11_@opentelemetr_4f3d07b48a48e0ce68f7f7f41e5a3c89/n
+ode_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:3090:33
+ ❯ ChildProcess.emit node:events:509:20
+ ❯ Process.ChildProcess._handle.onexit node:internal/child_process:294:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files   (1)
+      Tests  33 skipped (34)
+     Errors  1 error
+   Start at  02:47:55
+   Duration  8.22s (transform 1.55s, setup 86ms, import 2.58s, tests 0ms, environment 0ms)
+

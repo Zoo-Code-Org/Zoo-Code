@@ -1,0 +1,5 @@
+Fixed in 91dd83f5e - the spy now delegates to the original mock implementation: it gates only the non-clear write on the gate, then awaits the original implementation, so the stalled save does reach the storage record (making the `globalState["viewStates"]` assertion meaningful).
+
+One subtlety worth flagging: `contextProxy.setValue` is itself a `vi.fn` in this spec (the ContextProxy module is mocked), and `vi.spyOn` on an existing `vi.fn` returns the same function - a naive delegating spy therefore recurses into itself (I hit exactly that: ~3.8M self-calls until OOM). The fix captures the existing implementation via `vi.mocked(...).getMockImplementation()` and wraps it instead.
+
+The first-constructed-saving-provider variant ("clears the buffer of a first-constructed saving provider after a queued reset") is added: the saver is constructed and resolved before the caller, and the test asserts `viewLocalState` is `{}` and the durable map is cleared even though the save writes its captured pin back into the buffer when its durable write completes.

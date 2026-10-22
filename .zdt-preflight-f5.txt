@@ -1,0 +1,13 @@
+﻿zdt mutation preflight: e653b2a3dab9 -> 9e27c722ae18
+  reports -> C:\work\Zoo-Code-fork\vps2-f5-wt\.zdt-mutation-reports
+  log     -> C:\work\Zoo-Code-fork\vps2-f5-wt\.zdt-mutation-preflight.log
+  (this runs the full Stryker gate locally; expect minutes)
+preflight exit code: 0
+digest -> C:\work\Zoo-Code-fork\vps2-f5-wt\.zdt-mutation-preflight.json
+
+mutation digest (e653b2a3dab9 -> 9e27c722ae18):
+  extension: 20 valid / 17 killed / 0 timeout / 3 survived / 0 noCoverage
+    BLOCKING Survived CallExpression core/config/ContextProxy.ts:439  ;
+    BLOCKING Survived CallExpression core/config/ContextProxy.ts:633  ;
+    BLOCKING Survived CallExpression core/config/ContextProxy.ts:634  ;
+  => FAIL (fix blocking mutants / split the unit)

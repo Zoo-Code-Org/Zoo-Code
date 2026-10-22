@@ -1,0 +1,27 @@
+MEM A before save 185MB
+MEM B after waitFor await 186MB
+MEM C after broadcast start 186MB
+MEM D after resolveWrite 186MB
+MEM E after save await 186MB
+MEM A before save 185MB
+MEM B after waitFor await 185MB
+MEM C after broadcast start 185MB
+MEM D after resolveWrite 185MB
+MEM E after save await 185MB
+MEM F before broadcast await 185MB
+MEM G after broadcast await 186MB
+MEM A before save 184MB
+MEM B after waitFor await 184MB
+MEM C after broadcast start 184MB
+MEM D after resolveWrite 184MB
+MEM E after save await 184MB
+MEM A before save 185MB
+MEM B after waitFor await 186MB
+MEM C after broadcast start 186MB
+MEM D after resolveWrite 186MB
+MEM E after save await 186MB
+MEM A before save 189MB
+MEM B after waitFor await 197MB
+MEM C after broadcast start 197MB
+MEM D after resolveWrite 197MB
+MEM E after save await 197MB

@@ -1,0 +1,99 @@
+﻿
+ RUN  v4.1.11 C:/work/Zoo-Code-fork/vps2-f5-wt/src
+
+node : 上午2:33:28 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${absolutepath}/
+At line:1 char:182
++ ... f5-wt\src'; node node_modules\vitest\vitest.mjs run core/webview/__te ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (上午2:33:28 [vite...{absolutepath}/:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  Plugin: builtin:vite-resolve
+上午2:33:28 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${cachedpath}/
+  Plugin: builtin:vite-resolve
+上午2:33:28 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${tempfile}/
+  Plugin: builtin:vite-resolve
+上午2:33:28 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${tempfile}/
+  Plugin: builtin:vite-resolve
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > persisted view state pruning edge cases > should drop the entry without updatedAt first when the cap is exceeded 4ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > persisted view state pruning edge cases > should keep the earliest inserted entries when updatedAt values tie 1ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > persisted view state pruning edge cases > should drop corrupt viewStates entries on read so subsequent writes do not reject 2ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > durable editor view state retention (#1065) > should preserve persisted viewStates entry when an editor provider is disposed during teardown 1ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > profile mutations > should synchronize viewLocalState when activateProviderProfile mutates ContextProxy 21ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > profile mutations > should synchronize viewLocalState when upsertProviderProfile activates a saved profile 2ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > profile mutations > should synchronize viewLocalState when deleteProviderProfile selects a replacement profile 2ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > profile mutations > should re-point persisted view pins that referenced a deleted profile 1ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > profile mutations > should not write viewStates when re-pointing skips a corrupt stored entry 1ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > profile mutations > should re-point a mode-less legacy pin to a fresh two-field pin 1ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > profile mutations > should clear viewLocalState when resetState resets ContextProxy 2ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > profile mutations > should refresh the shared profile list when upsertProviderProfile saves without activating 1ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > profile mutations > should not activate for an unrelated deletion when the deleting view has no profile pin 1ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > profile mutations > should activate the replacement when the shared selection references the deleted profile and the view has no pin 1ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > profile mutations > should refresh the pinned view through activation when it pinned the deleted profile 1ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > provider profile activation > should sync view-local apiConfiguration when activating an upserted profile 2ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > handleModeSwitch integration > should update viewLocalState.mode when handleModeSwitch is called 2ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > handleModeSwitch integration > should post state and skip mode config lookup when API config locking is enabled 1ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > handleModeSwitch integration > should activate configured mode profile when switching modes 1ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > handleModeSwitch integration > should leave current configuration unchanged for empty mode profiles 1ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > handleModeSwitch integration > should emit ModeChanged event after handleModeSwitch 1ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > handleModeSwitch integration > should scope mode switches for non-focused tasks to the task only 1ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > handleModeSwitch integration > should log and no-op when handleModeSwitch receives an unknown mode slug 1ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > handleModeSwitch integration > should keep the view-level effects when a no-task switch is captured before a task gains focus 2ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > handleModeSwitch integration > should skip the mode profile load for a non-focused switch even when a saved config exists 1ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > SwitchModeTool routing > should report a successful switch when the provider reference is already released 1ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > multi-instance isolation > should maintain independent state across three instances 1ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > multi-instance isolation > should handle mode switch in one instance without affecting others 2ms
+ ✓ core/webview/__tests__/ClineProvider.parallelMode.spec.ts > ClineProvider - Parallel Mode Support > multi-instance isolation > should keep resetting siblings when one sibling's state post fails 3ms
+
+<--- Last few GCs --->
+
+[34040:000001893F9A5000]    38816 ms: Scavenge (during sweeping) 16235.9 (16317.6) -> 16220.6 (16347.6) MB, pooled: 0.0
+ MB, 72.42 / 0.00 ms (average mu = 0.229, current mu = 0.171) allocation failure; 
+[34040:000001893F9A5000]    42467 ms: Mark-Compact (reduce) 16263.2 (16347.6) -> 16244.0 (16263.8) MB, pooled: 0.0 MB, 
+74.57 / 0.00 ms (+ 3415.1 ms in 680 steps since start of marking, biggest step 8.4 ms, walltime since start of marking 
+3536 ms) (average
+FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 00007FF777F59706 node::OnFatalError+1318
+ 2: 00007FF778AF94C7 v8::Function::NewInstance+423
+ 3: 00007FF778909407 v8::base::AddressSpaceReservation::AddressSpaceReservation+328087
+ 4: 00007FF77890D317 v8::base::AddressSpaceReservation::AddressSpaceReservation+344231
+ 5: 00007FF77891D518 v8::internal::StrongRootAllocatorBase::deallocate_impl+18360
+ 6: 00007FF77891CD4B v8::internal::StrongRootAllocatorBase::deallocate_impl+16363
+ 7: 00007FF77A09F56D v8::platform::DelayedTaskQueue::Terminate+10483453
+ 8: 00007FF778906D38 v8::base::AddressSpaceReservation::AddressSpaceReservation+318152
+ 9: 00007FF778906A46 v8::base::AddressSpaceReservation::AddressSpaceReservation+317398
+10: 00007FF77898EB69 v8::Unlocker::~Unlocker+9081
+11: 00007FF77852F9E2 v8::String::Value::~Value+151938
+12: 0000018977FFB93A 
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Worker forks emitted error.
+ ❯ EventEmitter.onTaskError ../node_modules/.pnpm/vitest@4.1.11_@opentelemetr_4f3d07b48a48e0ce68f7f7f41e5a3c89/node_mod
+ules/vitest/dist/chunks/cli-api.CnMVyzaz.js:3526:21
+ ❯ EventEmitter.emit node:events:509:20
+ ❯ ChildProcess.emitUnexpectedExit ../node_modules/.pnpm/vitest@4.1.11_@opentelemetr_4f3d07b48a48e0ce68f7f7f41e5a3c89/n
+ode_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:3092:22
+ ❯ ChildProcess.emit node:events:509:20
+ ❯ Process.ChildProcess._handle.onexit node:internal/child_process:294:12
+
+Caused by: Error: Worker exited unexpectedly
+ ❯ ChildProcess.emitUnexpectedExit ../node_modules/.pnpm/vitest@4.1.11_@opentelemetr_4f3d07b48a48e0ce68f7f7f41e5a3c89/n
+ode_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:3090:33
+ ❯ ChildProcess.emit node:events:509:20
+ ❯ Process.ChildProcess._handle.onexit node:internal/child_process:294:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files   (1)
+      Tests  29 passed (34)
+     Errors  1 error
+   Start at  02:33:26
+   Duration  43.25s (transform 1.37s, setup 80ms, import 2.28s, tests 0ms, environment 0ms)
+

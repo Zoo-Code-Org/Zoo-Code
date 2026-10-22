@@ -1,0 +1,47 @@
+﻿diff --git a/scripts/stryker-diff.mjs b/scripts/stryker-diff.mjs
+index c1d6b46f4..69ad44c20 100644
+--- a/scripts/stryker-diff.mjs
++++ b/scripts/stryker-diff.mjs
+@@ -51,8 +51,12 @@ export const PACKAGE_CONFIGS = [
+ 		root: "src",
+ 		sourceRoot: "src/",
+ 		vitestConfig: "vitest.config.ts",
+-		vitestRelated: false,
+-		discoverRelatedTests: true,
++		// Local win32 shim (never committed): Stryker 10 + vitest-runner has a runtime-activation
++		// defect with the script's pre-selected related-test file set — extension mutants never
++		// activate and report NoCoverage. Let the runner use vitest's own related-test graph
++		// (vitestRelated) and skip the script's pre-selection (discoverRelatedTests: false).
++		vitestRelated: true,
++		discoverRelatedTests: false,
+ 		excludedPaths: ["src/esbuild.mjs", "src/eslint.config.mjs", "src/utils/vitest-verbosity.ts"],
+ 	},
+ ]
+@@ -348,9 +352,13 @@ export function discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory
+ 	const outputFile = path.join(reportDirectory, "vitest-related.json")
+ 	const configFile = path.relative(runRoot, path.join(packageRoot, packageEntry.vitestConfig)).replaceAll("\\", "/")
+ 	const sourceFiles = [...new Set(packageEntry.selectors.map(selectorFile))]
++	// Local win32 shim (never committed): the .bin/vitest entry in this worktree is a POSIX
++	// shell shim and cannot be spawned directly (ENOENT). Run the package's vitest CLI entry
++	// point under the current Node binary instead.
++	const vitestCli = path.join(packageRoot, "node_modules/vitest/vitest.mjs")
+ 	const result = spawnSync(
+-		resolveVitestBinary(repoRoot, packageEntry),
+-		["related", ...sourceFiles, "--run", "--config", configFile, "--reporter=json", `--outputFile=${outputFile}`],
++		process.execPath,
++		[vitestCli, "related", ...sourceFiles, "--run", "--config", configFile, "--reporter=json", `--outputFile=${outputFile}`],
+ 		{
+ 			cwd: runRoot,
+ 			encoding: "utf8",
+@@ -396,7 +404,10 @@ function runStryker(repoRoot, packageEntry, reportRoot, dryRunOnly) {
+ 	]
+ 	if (dryRunOnly) args.push("--dryRunOnly", "--reporters", "clear-text", "--logLevel", "info")
+ 
+-	const result = spawnSync(path.join(repoRoot, "node_modules/.bin/stryker"), args, {
++	// Local win32 shim (never committed): spawn the CLI entry point directly under the current
++	// Node binary instead of the .bin shell shim, and give the full mutation run more time.
++	const strykerCli = path.join(repoRoot, "node_modules/@stryker-mutator/core/bin/stryker.js")
++	const result = spawnSync(process.execPath, [strykerCli, ...args], {
+ 		cwd: runRoot,
+ 		encoding: "utf8",
+ 		timeout: 12 * 60 * 1_000,
