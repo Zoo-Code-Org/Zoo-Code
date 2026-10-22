@@ -801,10 +801,11 @@ describe("DiffViewProvider", () => {
 
 			// Verify the content was written through an atomic staging file + rename
 			const fs = await import("fs/promises")
-			expect(fs.writeFile).toHaveBeenCalledWith(expect.stringContaining(".staging"), "new content", "utf-8")
-			const stagingPath = (fs.writeFile as unknown as { mock: { calls: [string, string, string][] } }).mock.calls.find(
-				(call) => call[1] === "new content",
-			)?.[0]
+			expect(fs.writeFile).toHaveBeenCalledWith(expect.stringContaining(".staging"), "new content", {
+				encoding: "utf-8",
+				mode: 0o600,
+			})
+			const stagingPath = vi.mocked(fs.writeFile).mock.calls.find((call) => call[1] === "new content")?.[0]
 			expect(stagingPath).toContain(".test.ts.")
 			expect(fs.rename).toHaveBeenCalledWith(stagingPath, `${mockCwd}/test.ts`)
 
@@ -833,9 +834,7 @@ describe("DiffViewProvider", () => {
 				renameError,
 			)
 
-			const stagingPath = (fs.writeFile as unknown as { mock: { calls: [string, string, string][] } }).mock.calls.find(
-				(call) => call[1] === "new content",
-			)?.[0]
+			const stagingPath = vi.mocked(fs.writeFile).mock.calls.find((call) => call[1] === "new content")?.[0]
 			expect(renameError).toBeInstanceOf(Error)
 			expect(fs.rename).toHaveBeenCalledWith(stagingPath, `${mockCwd}/test.ts`)
 			expect(fs.rm).toHaveBeenCalledWith(stagingPath, { force: true })
@@ -846,10 +845,11 @@ describe("DiffViewProvider", () => {
 
 			// Verify the content was written through an atomic staging file + rename
 			const fs = await import("fs/promises")
-			expect(fs.writeFile).toHaveBeenCalledWith(expect.stringContaining(".staging"), "new content", "utf-8")
-			const stagingPath = (fs.writeFile as unknown as { mock: { calls: [string, string, string][] } }).mock.calls.find(
-				(call) => call[1] === "new content",
-			)?.[0]
+			expect(fs.writeFile).toHaveBeenCalledWith(expect.stringContaining(".staging"), "new content", {
+				encoding: "utf-8",
+				mode: 0o600,
+			})
+			const stagingPath = vi.mocked(fs.writeFile).mock.calls.find((call) => call[1] === "new content")?.[0]
 			expect(stagingPath).toContain(".test.ts.")
 			expect(fs.rename).toHaveBeenCalledWith(stagingPath, `${mockCwd}/test.ts`)
 
@@ -866,10 +866,11 @@ describe("DiffViewProvider", () => {
 
 			// Verify the content was written through an atomic staging file + rename
 			const fs = await import("fs/promises")
-			expect(fs.writeFile).toHaveBeenCalledWith(expect.stringContaining(".staging"), "new content", "utf-8")
-			const stagingPath = (fs.writeFile as unknown as { mock: { calls: [string, string, string][] } }).mock.calls.find(
-				(call) => call[1] === "new content",
-			)?.[0]
+			expect(fs.writeFile).toHaveBeenCalledWith(expect.stringContaining(".staging"), "new content", {
+				encoding: "utf-8",
+				mode: 0o600,
+			})
+			const stagingPath = vi.mocked(fs.writeFile).mock.calls.find((call) => call[1] === "new content")?.[0]
 			expect(stagingPath).toContain(".test.ts.")
 			expect(fs.rename).toHaveBeenCalledWith(stagingPath, `${mockCwd}/test.ts`)
 

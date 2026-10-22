@@ -200,7 +200,9 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			// The approved content survives the failed rollback as an explicit recovery artifact.
 			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("The approved new content was kept at"))
 			// ...and no whole-patch checkpoint is recorded for the failed move.
-			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+			// The destination was written (then rolled back): that is a workspace mutation, so
+			// the partial-state checkpoint is recorded even though the patch reports failure.
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
 			// Restore the default readFile behavior for later tests.
 			mockedFsPromises.default.readFile.mockResolvedValue("original file content\n")
 		})
@@ -249,7 +251,9 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			expect(mockPushToolResult).toHaveBeenCalledWith(
 				expect.stringContaining("Failed to delete original file after move"),
 			)
-			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+			// The destination was written (then rolled back): that is a workspace mutation, so
+			// the partial-state checkpoint is recorded even though the patch reports failure.
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
 			// Restore the default readFile behavior for later tests.
 			mockedFsPromises.default.readFile.mockResolvedValue("original file content\n")
 		})
@@ -756,11 +760,12 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 
 			// path is platform-dependent (Windows resolves cwd to a drive path);
 			// assert on the written content instead.
-			expect(mockedFsPromises.default.writeFile).toHaveBeenCalledWith(
-				expect.any(String),
-				"modified content\n",
-				"utf8",
-			)
+			// The staging file is created owner-only; the destination mode is re-applied
+			// separately before the atomic rename.
+			expect(mockedFsPromises.default.writeFile).toHaveBeenCalledWith(expect.any(String), "modified content\n", {
+				encoding: "utf8",
+				mode: 0o600,
+			})
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
 		})
 
