@@ -189,27 +189,22 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 		expect(await loadChanges(tmpStorageDir, TASK_ID)).toEqual([])
 	})
 
-	it("logs and continues when the journal cannot be written (checkpoints stay enabled)", async () => {
-		// Block the per-task checkpoint dir so the journal mkdir/append fails.
+	it("skips the checkpoint when the pending marker cannot be written durably", async () => {
+		// Block the per-task checkpoint dir so the pending-marker mkdir/write fails.
 		const taskDir = path.join(tmpStorageDir, "tasks", TASK_ID)
 		await fs.mkdir(taskDir, { recursive: true })
 		await fs.writeFile(path.join(taskDir, "checkpoints"), "blocker")
 
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
-		// The journal failure is swallowed (logged, not rethrown), so the
-		// checkpoint result still resolves exactly as without journaling.
-		await expect(checkpointSave(mockTask as Task, false, true, write)).resolves.toMatchObject({ commit: COMMIT })
-
+		// A committed checkpoint whose pending marker never landed could lose its journal
+		// state, so the marker is a hard prerequisite: the save is skipped and no commit is
+		// produced.
+		await expect(checkpointSave(mockTask as Task, false, true, write)).resolves.toBeUndefined()
+		expect(saveCheckpointSpy).not.toHaveBeenCalled()
 		expect(mockTask.enableCheckpoints).toBe(true)
-		// The pending-marker write (before the commit) and the journal append both fail;
-		// neither failure propagates to the checkpoint error handler.
 		expect(consoleErrorSpy).toHaveBeenCalledWith(
-			expect.stringContaining("failed to record the pending change journal"),
-			expect.anything(),
-		)
-		expect(consoleErrorSpy).toHaveBeenCalledWith(
-			expect.stringContaining("failed to persist change journal entries"),
+			expect.stringContaining("not running the checkpoint"),
 			expect.anything(),
 		)
 	})

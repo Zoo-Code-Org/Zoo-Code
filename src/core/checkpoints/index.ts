@@ -16,7 +16,7 @@ import { DIFF_VIEW_URI_SCHEME } from "../../integrations/editor/DiffViewProvider
 
 import { CheckpointServiceOptions, RepoPerTaskCheckpointService } from "../../services/checkpoints"
 
-import { clearPendingJournal, reconcilePendingJournal, writePendingJournal } from "./changeJournal"
+import { appendChange, clearPendingJournal, reconcilePendingJournal, writePendingJournal } from "./changeJournal"
 
 const WARNING_THRESHOLD_MS = 5000
 
@@ -256,19 +256,25 @@ export async function checkpointSave(
 
 	const writes = write ? (Array.isArray(write) ? write : [write]) : []
 	const globalStorageDir = task.providerRef.deref()?.context.globalStorageUri.fsPath
+	const journalStorageDir = writes.length > 0 ? globalStorageDir : undefined
 
-	// B2: the checkpoint and its change-journal entries are one transaction. The
-	// pending marker is recorded before the Git commit, promoted to the complete
-	// entries as soon as the commit id is known, and folded into the journal by
-	// reconcilePendingJournal. A crash or a failed append therefore leaves a
-	// durable marker instead of a committed checkpoint with no journal state.
-	if (writes.length > 0 && globalStorageDir) {
-		await writePendingJournal(globalStorageDir, task.taskId, {
-			state: "awaiting-checkpoint",
-			createdAt: Date.now(),
-		}).catch((err) => {
-			console.error("[Task#checkpointSave] failed to record the pending change journal", err)
-		})
+	// B2: the checkpoint and its change-journal entries are one transaction. The pending
+	// marker is recorded before the Git commit and is a hard prerequisite: a committed
+	// checkpoint whose marker never landed could lose its journal state, so when the
+	// marker cannot be written durably this save does not run at all.
+	if (journalStorageDir !== undefined) {
+		try {
+			await writePendingJournal(journalStorageDir, task.taskId, {
+				state: "awaiting-checkpoint",
+				createdAt: Date.now(),
+			})
+		} catch (err) {
+			console.error(
+				"[Task#checkpointSave] not running the checkpoint: the pending change journal could not be recorded",
+				err,
+			)
+			return
+		}
 	}
 
 	// Start the checkpoint process in the background.
@@ -278,7 +284,7 @@ export async function checkpointSave(
 			// Only a real commit produces entries (an empty or failed save resolves
 			// to undefined / rejects), and non-write checkpoint calls (e.g. the
 			// task-start baseline) pass no `write` value at all.
-			if (globalStorageDir && writes.length > 0) {
+			if (journalStorageDir !== undefined) {
 				if (result?.commit) {
 					const entries = writes.map((w) => ({
 						path: w.path,
@@ -286,21 +292,57 @@ export async function checkpointSave(
 						checkpointId: result.commit,
 						...(w.diffStats ? { diffStats: w.diffStats } : {}),
 					}))
-					try {
-						await writePendingJournal(globalStorageDir, task.taskId, {
-							state: "ready",
-							createdAt: Date.now(),
-							entries,
-						})
-						// Appends in order, then clears the marker; idempotent if a
-						// previous attempt already appended part of the entries.
-						await reconcilePendingJournal(globalStorageDir, task.taskId)
-					} catch (err) {
-						console.error("[Task#checkpointSave] failed to persist change journal entries", err)
+					// After the commit the entries must become recoverable. Retry the durable
+					// 'ready' promotion; when it still fails, append the entries directly (the
+					// earlier 'awaiting' marker stays as the recovery record for the next read).
+					// Returning success with neither a ready marker nor appended entries would
+					// recreate the committed-checkpoint-without-journal state.
+					let promoted = false
+					for (let attempt = 0; attempt < 2 && !promoted; attempt++) {
+						try {
+							await writePendingJournal(journalStorageDir, task.taskId, {
+								state: "ready",
+								createdAt: Date.now(),
+								entries,
+							})
+							promoted = true
+						} catch (promotionError) {
+							console.error(
+								"[Task#checkpointSave] failed to promote the pending change journal",
+								promotionError,
+							)
+						}
+					}
+					if (promoted) {
+						try {
+							// Appends in order, then clears the marker; idempotent if a previous
+							// attempt already appended part of the entries.
+							await reconcilePendingJournal(journalStorageDir, task.taskId)
+						} catch (reconcileError) {
+							console.error(
+								"[Task#checkpointSave] failed to reconcile the pending change journal",
+								reconcileError,
+							)
+						}
+					} else {
+						try {
+							for (const entry of entries) {
+								await appendChange(journalStorageDir, task.taskId, entry)
+							}
+							await clearPendingJournal(journalStorageDir, task.taskId)
+						} catch (appendError) {
+							// No durable record could be written for a committed checkpoint: stop
+							// producing checkpoints rather than continue with missing journal state.
+							console.error(
+								"[Task#checkpointSave] failed to persist change journal entries; disabling checkpoints",
+								appendError,
+							)
+							task.enableCheckpoints = false
+						}
 					}
 				} else {
 					// No commit means no journal entry is claimable.
-					await clearPendingJournal(globalStorageDir, task.taskId).catch(() => {})
+					await clearPendingJournal(journalStorageDir, task.taskId).catch(() => {})
 				}
 			}
 			return result
