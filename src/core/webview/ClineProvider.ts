@@ -3070,6 +3070,24 @@ export class ClineProvider
 		)
 	}
 
+	/**
+	 * Post state after a deletion has already committed. A posting failure must be
+	 * logged, never routed through the deletion's compensation path: the deletion is
+	 * durable by then, and the compensation would restore a record whose deletion
+	 * already landed.
+	 */
+	private async postStateToWebviewAfterCommittedDeletion(): Promise<void> {
+		try {
+			await this.postStateToWebview()
+		} catch (error) {
+			this.log(
+				`deleteProviderProfile: deletion committed, but posting state failed: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
+	}
+
 	private async deleteProviderProfileUnlocked(
 		profileToDelete: ProviderSettingsEntry,
 		signal: AbortSignal,
@@ -3182,6 +3200,13 @@ export class ClineProvider
 			// closed views' pins naming the deleted profile must follow the survivor,
 			// and a failed deletion must put the exact pre-deletion map back.
 			const previousPersistedViewStates = { ...this.getPersistedViewStates({ fresh: true }) }
+			// Task stickiness captured before the survivor is persisted into live tasks, so a
+			// failed deletion can put the pre-deletion values back.
+			let taskStickinessBeforeRepin: Array<{
+				task: Task
+				apiConfigName: string | undefined
+				historyItem: HistoryItem | undefined
+			}> = []
 			// Which writes have actually landed: only those need compensation.
 			let listWriteLanded = false
 			let selectionWriteLanded = false
@@ -3284,6 +3309,28 @@ export class ClineProvider
 				// Re-pin other live views still buffered on the deleted profile: their
 				// buffer and durable viewStates entry would otherwise keep serving the
 				// deleted profile's name and configuration.
+				// The re-pin persists the survivor into every live instance's current task
+				// (apiConfigName + task history). A deletion that fails after this point must put
+				// those back as well, or the rolled-back deletion leaves tasks pinned to the
+				// survivor.
+				taskStickinessBeforeRepin = ClineProvider.getAllInstances()
+					.map((instance: ClineProvider) => {
+						const task = instance.getCurrentTask()
+						if (!task) {
+							return undefined
+						}
+						return {
+							task,
+							apiConfigName: task.taskApiConfigName,
+							historyItem: this.getTaskHistoryItem(task.taskId),
+						}
+					})
+					.filter(
+						(
+							snapshot,
+						): snapshot is { task: Task; apiConfigName: string | undefined; historyItem: HistoryItem | undefined } =>
+							snapshot !== undefined,
+					)
 				await this.rePinViewLocalStateForDeletedProfile(
 					profileToDelete.name,
 					profileToActivate,
@@ -3308,8 +3355,23 @@ export class ClineProvider
 
 				if (persistedRepointLanded) {
 					try {
+						// Merge instead of replaying the snapshot: sibling views write their own
+						// viewStates entries through the serialized queue while this deletion waits,
+						// and restoring the whole snapshot would drop those newer entries. Re-read
+						// the durable map and rewrite only the entries this deletion re-pointed.
 						const restoreViewStates = ClineProvider.persistedViewStateWriteQueue.then(async () => {
-							await this.contextProxy.setValue("viewStates", { ...previousPersistedViewStates })
+							const current = this.getPersistedViewStates({ fresh: true })
+							let changed = false
+							for (const [viewId, entry] of Object.entries(previousPersistedViewStates)) {
+								if (entry?.currentApiConfigName !== profileToDelete.name) {
+									continue
+								}
+								current[viewId] = entry
+								changed = true
+							}
+							if (changed) {
+								await this.contextProxy.setValue("viewStates", current)
+							}
 						})
 						ClineProvider.persistedViewStateWriteQueue = restoreViewStates.catch(() => {})
 						await restoreViewStates
@@ -3363,6 +3425,19 @@ export class ClineProvider
 						await this.contextProxy.setValue("currentApiConfigName", previousGlobalSelection)
 					} catch (compensationError: unknown) {
 						compensationFailures.push(`shared selection: ${describeFailure(compensationError)}`)
+					}
+				}
+
+				if (taskStickinessBeforeRepin.length > 0) {
+					try {
+						for (const snapshot of taskStickinessBeforeRepin) {
+							snapshot.task.setTaskApiConfigName(snapshot.apiConfigName)
+							if (snapshot.historyItem) {
+								await this.updateTaskHistory(snapshot.historyItem)
+							}
+						}
+					} catch (compensationError: unknown) {
+						compensationFailures.push(`task stickiness: ${describeFailure(compensationError)}`)
 					}
 				}
 
@@ -3439,14 +3514,14 @@ export class ClineProvider
 					)
 				}
 
-				await this.postStateToWebview()
+				await this.postStateToWebviewAfterCommittedDeletion()
 				if (activationFailed) {
 					throw new ProfileDeletionActivationError(profileToActivate, activationError)
 				}
 				return
 			}
 
-			await this.postStateToWebview()
+			await this.postStateToWebviewAfterCommittedDeletion()
 		} catch (error) {
 			// Two failures must NOT be compensated here: a replacement activation
 			// failure after the deletion committed (documented contract: the

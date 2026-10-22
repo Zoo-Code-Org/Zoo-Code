@@ -1012,6 +1012,49 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 	})
 
 	describe("deleteProviderProfile", () => {
+		it("keeps a committed deletion when posting the committed state fails", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			const childId = await provider.providerSettingsManager.saveConfig("subtask-child-profile", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "subtask-child-profile", id: childId, apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "subtask-child-profile",
+			})
+
+			const logSpy = vi.spyOn(provider, "log")
+			// The deletion has committed at this point: a state-post failure must be logged,
+			// not routed through the compensation path that restores the deleted record.
+			vi.spyOn(provider, "postStateToWebview").mockRejectedValue(new Error("post failed"))
+
+			await expect(
+				provider.deleteProviderProfile({
+					name: "subtask-child-profile",
+					id: childId,
+					apiProvider: providerIdentifiers.openrouter,
+				}),
+			).resolves.not.toThrow()
+
+			const remaining = await provider.providerSettingsManager.listConfig()
+			expect(remaining.some((config) => config.name === "subtask-child-profile")).toBe(false)
+			const afterDeletion = provider.contextProxy.getValues()
+			expect(afterDeletion.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default"])
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining("deletion committed, but posting state failed"),
+			)
+		});
+
 		it("removes the stored profile so a dangling mode mapping can no longer re-activate it", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 
