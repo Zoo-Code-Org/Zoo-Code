@@ -196,6 +196,33 @@ describe("Vercel AI Gateway Fetchers", () => {
 			},
 		}
 
+		it("applies Google's authoritative limits and thinking levels to google/gemini-4-argon", () => {
+			// The gateway catalog reports context_window and max_tokens of 1,000,000;
+			// Google's documented limits are a shared 1,048,576-token window and a
+			// 65,536-token single-request output cap.
+			const result = parseVercelAiGatewayModel({
+				id: "google/gemini-4-argon",
+				model: {
+					...baseModel,
+					id: "google/gemini-4-argon",
+					name: "Gemini 4 Argon",
+					owned_by: "google",
+					context_window: 1_000_000,
+					max_tokens: 1_000_000,
+					tags: ["reasoning", "vision", "tool-use", "implicit-caching"],
+				},
+			})
+
+			expect(result).toMatchObject({
+				contextWindow: 1_048_576,
+				maxTokens: 65_536,
+				supportsImages: true,
+				supportsReasoningEffort: ["low", "medium", "high"],
+				reasoningEffort: "medium",
+				supportsTemperature: false,
+			})
+		})
+
 		it.each(["openai/gpt-6-astra", "openai/gpt-6-astra-fast"])(
 			"applies required Astra request constraints to %s",
 			(id) => {

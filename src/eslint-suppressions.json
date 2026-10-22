@@ -364,11 +364,6 @@
 			"count": 8
 		}
 	},
-	"api/providers/lm-studio.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
 	"api/providers/mimo.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 5
@@ -381,7 +376,7 @@
 	},
 	"api/providers/native-ollama.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 3
+			"count": 2
 		}
 	},
 	"api/providers/openai-codex.ts": {
@@ -744,11 +739,6 @@
 			"count": 14
 		}
 	},
-	"core/prompts/tools/filter-tools-for-mode.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"core/prompts/tools/native-tools/__tests__/converters.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
@@ -926,7 +916,7 @@
 	},
 	"core/tools/__tests__/executeCommand.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 12
+			"count": 10
 		}
 	},
 	"core/tools/__tests__/executeCommandTool.spec.ts": {
@@ -1162,11 +1152,6 @@
 	"integrations/misc/__tests__/export-markdown.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
-		}
-	},
-	"integrations/misc/__tests__/line-counter.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
 		}
 	},
 	"integrations/misc/__tests__/open-file.spec.ts": {

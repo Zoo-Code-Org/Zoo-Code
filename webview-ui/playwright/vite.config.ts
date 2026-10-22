@@ -15,6 +15,12 @@ const rooCodeTypesShimImporters = [
 	"/webview-ui/src/components/settings/UISettings.tsx",
 ]
 
+// Every story gets the Vitest toolkit mock, which draws a text field's label
+// below its input. These importers get the real toolkit so the story looks
+// like the extension. Add an importer here only with its own baseline.
+const realToolkitImporters = ["/settings/providers/Ollama.tsx"]
+const toolkitMock = path.resolve(webviewRoot, "src/__mocks__/@vscode/webview-ui-toolkit/react.tsx")
+
 export default defineConfig({
 	root: path.resolve(dirname, "gallery"),
 	plugins: [
@@ -29,6 +35,15 @@ export default defineConfig({
 				) {
 					return rooCodeTypesShim
 				}
+			},
+		},
+		{
+			name: "playwright-gallery-toolkit-mock",
+			enforce: "pre",
+			resolveId(source, importer) {
+				if (source !== "@vscode/webview-ui-toolkit/react") return
+				if (importer && realToolkitImporters.some((suffix) => importer.endsWith(suffix))) return
+				return toolkitMock
 			},
 		},
 		react({
@@ -55,10 +70,6 @@ export default defineConfig({
 			{ find: "@", replacement: path.resolve(webviewRoot, "src") },
 			{ find: "@src", replacement: path.resolve(webviewRoot, "src") },
 			{ find: "@roo", replacement: path.resolve(webviewRoot, "../src/shared") },
-			{
-				find: "@vscode/webview-ui-toolkit/react",
-				replacement: path.resolve(webviewRoot, "src/__mocks__/@vscode/webview-ui-toolkit/react.tsx"),
-			},
 			{ find: "vscode", replacement: path.resolve(webviewRoot, "../src/__mocks__/vscode.js") },
 		],
 	},
@@ -71,6 +82,9 @@ export default defineConfig({
 		"process.env.PKG_RELEASE_CHANNEL": JSON.stringify("stable"),
 	},
 	optimizeDeps: {
+		// Pre-bundle the real toolkit (see realToolkitImporters). If Vite finds it
+		// during the first page load, it re-optimizes and reloads mid-test.
+		include: ["@vscode/webview-ui-toolkit/react"],
 		exclude: ["@vscode/codicons"],
 	},
 	publicDir: path.resolve(webviewRoot, "../src/assets/images"),

@@ -72,12 +72,3 @@ export const CheckpointRestoreDialog: React.FC<CheckpointRestoreDialogProps> = (
 		</AlertDialog>
 	)
 }
-
-// Export convenience components for backward compatibility
-export const EditMessageWithCheckpointDialog: React.FC<Omit<CheckpointRestoreDialogProps, "type">> = (props) => (
-	<CheckpointRestoreDialog {...props} type="edit" />
-)
-
-export const DeleteMessageWithCheckpointDialog: React.FC<Omit<CheckpointRestoreDialogProps, "type">> = (props) => (
-	<CheckpointRestoreDialog {...props} type="delete" />
-)
