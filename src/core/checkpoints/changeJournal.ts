@@ -126,7 +126,9 @@ export async function reconcilePendingJournal(globalStorageDir: string, taskId: 
 	}
 	if (marker.state === "ready" && Array.isArray(marker.entries) && marker.entries.length > 0) {
 		const existing = await readJournalEntries(globalStorageDir, taskId)
-		const seen = new Set(existing.map((entry) => `${entry.path}\u0000${entry.operation}\u0000${entry.checkpointId}`))
+		const seen = new Set(
+			existing.map((entry) => `${entry.path}\u0000${entry.operation}\u0000${entry.checkpointId}`),
+		)
 		for (const entry of marker.entries) {
 			const key = `${entry.path}\u0000${entry.operation}\u0000${entry.checkpointId}`
 			if (seen.has(key)) {

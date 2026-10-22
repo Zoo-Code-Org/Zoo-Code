@@ -251,7 +251,6 @@ describe("loadChanges entry-shape validation (B2)", () => {
 	})
 })
 
-
 describe("checkpoint/journal transaction recovery (B2)", () => {
 	let tmpStorageDir: string
 
