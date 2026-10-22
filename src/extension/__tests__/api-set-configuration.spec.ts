@@ -43,6 +43,9 @@ describe("API.setConfiguration", () => {
 			},
 			providerSettingsManager: {
 				saveConfig: vi.fn().mockResolvedValue("default-id"),
+				// The accept path records whether the profile existed before saving; without it
+				// the call throws and the test only passes through the catch fallback.
+				hasConfig: vi.fn().mockResolvedValue(true),
 				getProfile: vi.fn().mockResolvedValue({
 					name: "default",
 					id: "default-id",
@@ -68,6 +71,7 @@ describe("API.setConfiguration", () => {
 		expect(provider.setValues).toHaveBeenCalledWith(configuration, { savedProfileName: "default" })
 		expect(provider.contextProxy.setValues).not.toHaveBeenCalled()
 		expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith("default", configuration)
+		expect(provider.providerSettingsManager.hasConfig).toHaveBeenCalledWith("default")
 		expect(provider.postStateToWebview).toHaveBeenCalled()
 	})
 })

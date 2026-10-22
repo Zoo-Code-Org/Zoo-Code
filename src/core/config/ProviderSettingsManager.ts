@@ -561,7 +561,7 @@ export class ProviderSettingsManager {
 	/**
 	 * Set the API config for a specific mode.
 	 */
-	public async setModeConfig(mode: Mode, configId: string) {
+	public async setModeConfig(mode: Mode, configId: string | undefined) {
 		try {
 			return await this.lock(async () => {
 				const providerProfiles = await this.load()
@@ -569,8 +569,13 @@ export class ProviderSettingsManager {
 				if (!providerProfiles.modeApiConfigs) {
 					providerProfiles.modeApiConfigs = {}
 				}
-				// Assign the chosen config ID to this mode
-				providerProfiles.modeApiConfigs[mode] = configId
+				// Assign the chosen config ID to this mode. Restoring a mode that had no config
+				// removes the entry instead of persisting an undefined value.
+				if (configId === undefined) {
+					delete providerProfiles.modeApiConfigs[mode]
+				} else {
+					providerProfiles.modeApiConfigs[mode] = configId
+				}
 				await this.store(providerProfiles)
 			})
 		} catch (error) {

@@ -897,6 +897,9 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		// The fixture is module-level and earlier tests in this describe run the launch path,
+		// so reset the flag or the launched assertion below cannot fail.
+		;(mockClineProvider as { isViewLaunched: boolean }).isViewLaunched = false
 		vi.mocked(mockClineProvider.getState).mockResolvedValue(
 			Object.assign({} as Awaited<ReturnType<typeof mockClineProvider.getState>>, {
 				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },

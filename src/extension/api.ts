@@ -712,9 +712,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				)
 			}
 			try {
-				await Promise.all(
-					previousModeConfigs.map(([mode, configId]) => manager.setModeConfig(mode, configId as string)),
-				)
+				await Promise.all(previousModeConfigs.map(([mode, configId]) => manager.setModeConfig(mode, configId)))
 			} catch (restoreError) {
 				this.log(
 					"[setConfiguration] failed to restore the mode API config mappings: " +

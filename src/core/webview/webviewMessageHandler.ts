@@ -679,6 +679,9 @@ export const webviewMessageHandler = async (
 								// keys with the repair skipped.
 								await provider.saveViewState("apiConfiguration", undefined)
 								await provider.saveViewState("currentApiConfigName", globalConfigName)
+								// The re-pin must reach this webview before the profile-list
+								// continuation below, otherwise it keeps rendering the stale name.
+								await provider.postStateToWebview()
 								// Fall through: refresh listApiConfigMeta and post listApiConfig
 								// to this webview below.
 							} else {
