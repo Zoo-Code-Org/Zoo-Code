@@ -345,6 +345,34 @@ describe("LmStudioHandler abort signal wiring", () => {
 			expect((caught as Error).message).toMatch(/aborted$/)
 		})
 
+		it("reports an elapsed timeout as TimeoutError, not as caller cancellation", async () => {
+			const handler = new LmStudioHandler(options)
+			const create = lastCreate()
+			create.mockImplementation((_params: unknown, opts?: { signal?: AbortSignal }) => {
+				return new Promise((_resolve, reject) => {
+					const signal = opts?.signal
+					if (!signal) {
+						reject(new Error("SDK create was called without a signal"))
+						return
+					}
+					signal.addEventListener("abort", () => reject(sdkAbortError()), { once: true })
+				})
+			})
+
+			let caught: unknown
+			try {
+				await handler.completePrompt("hi", { timeoutMs: 20 })
+			} catch (error) {
+				caught = error
+			}
+
+			// The merged signal fired its own timeout while the caller's signal
+			// stayed live: that is a deadline, not a user stop.
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("TimeoutError")
+			expect((caught as Error).message).toBe("The LM Studio completion request timed out")
+		})
+
 		it("should normalize SDK abort errors instead of wrapping them", async () => {
 			const handler = new LmStudioHandler(options)
 			const create = lastCreate()

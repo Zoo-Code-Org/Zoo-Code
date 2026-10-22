@@ -37,6 +37,25 @@ import {
 import { handleOpenAIError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
+/**
+ * A per-request timeout is not a caller cancellation: report it as the distinct
+ * TimeoutError so callers can tell a stalled request from a user stop (the
+ * Gemini and LiteLLM units in this series use the same contract).
+ */
+function createTimeoutError(providerName: string): Error {
+	const timeoutError = new Error(`The ${providerName} completion request timed out`)
+	timeoutError.name = "TimeoutError"
+	return timeoutError
+}
+
+/**
+ * Whether an abort-shaped failure came from the merged signal's own timeout
+ * rather than from the caller's stop signal.
+ */
+function isTimeoutAbort(requestSignal: AbortSignal | undefined, callerSignal: AbortSignal | undefined): boolean {
+	return Boolean(requestSignal?.aborted && !callerSignal?.aborted && requestSignal.reason?.name === "TimeoutError")
+}
+
 export class LmStudioHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 	private client: OpenAI
@@ -346,14 +365,18 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				response = await this.client.chat.completions.create(params, createOptions)
 			} catch (error) {
 				if (isRequestAborted(error, requestSignal)) {
-					throw createAbortError("LM Studio")
+					throw isTimeoutAbort(requestSignal, options?.abortSignal)
+						? createTimeoutError("LM Studio")
+						: createAbortError("LM Studio")
 				}
 				throw handleOpenAIError(error, this.providerName)
 			}
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
 			if (isRequestAborted(error, requestSignal)) {
-				throw createAbortError("LM Studio")
+				throw isTimeoutAbort(requestSignal, options?.abortSignal)
+					? createTimeoutError("LM Studio")
+					: createAbortError("LM Studio")
 			}
 			throw new Error(
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",

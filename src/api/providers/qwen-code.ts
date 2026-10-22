@@ -59,6 +59,25 @@ function objectToUrlEncoded(data: Record<string, string>): string {
 		.join("&")
 }
 
+/**
+ * A per-request timeout is not a caller cancellation: report it as the distinct
+ * TimeoutError so callers can tell a stalled request from a user stop (the
+ * Gemini and LiteLLM units in this series use the same contract).
+ */
+function createTimeoutError(providerName: string): Error {
+	const timeoutError = new Error(`The ${providerName} completion request timed out`)
+	timeoutError.name = "TimeoutError"
+	return timeoutError
+}
+
+/**
+ * Whether the merged request signal aborted because its own timeout elapsed
+ * (rather than because the caller stopped the request).
+ */
+function isTimeoutAbort(requestSignal: AbortSignal | undefined, callerSignal: AbortSignal | undefined): boolean {
+	return Boolean(requestSignal?.aborted && !callerSignal?.aborted && requestSignal.reason?.name === "TimeoutError")
+}
+
 export class QwenCodeHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: QwenCodeHandlerOptions
 	private credentials: QwenOAuthCredentials | null = null
@@ -451,29 +470,39 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 			.setOption("signal", requestSignal)
 			.build()
 
-		// A stop or timeout can land while the credential load or the token
-		// refresh below is still in flight; race the auth wait against the
-		// merged signal so the caller settles promptly instead of waiting for
-		// credential I/O. The shared refresh keeps running — only this wait
-		// is cut.
-		await settleOnAbort(this.ensureAuthenticated(), requestSignal, "Qwen Code")
-		const client = this.ensureClient()
-		const model = this.getModel()
+		try {
+			// A stop or timeout can land while the credential load or the token
+			// refresh below is still in flight; race the auth wait against the
+			// merged signal so the caller settles promptly instead of waiting for
+			// credential I/O. The shared refresh keeps running — only this wait
+			// is cut.
+			await settleOnAbort(this.ensureAuthenticated(), requestSignal, "Qwen Code")
+			const client = this.ensureClient()
+			const model = this.getModel()
 
-		const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
-			model: model.id,
-			messages: [{ role: "user", content: prompt }],
-			max_completion_tokens: model.info.maxTokens,
+			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+				model: model.id,
+				messages: [{ role: "user", content: prompt }],
+				max_completion_tokens: model.info.maxTokens,
+			}
+
+			// The retry reuses the captured request options, so it carries the same
+			// merged signal — and the guard in callApiWithRetry refuses to retry
+			// once this signal has aborted.
+			const response = await this.callApiWithRetry(
+				() => client.chat.completions.create(requestOptions, createOptions),
+				requestSignal,
+			)
+
+			return response.choices[0]?.message.content || ""
+		} catch (error) {
+			// A timeout is not a caller cancellation: surface the distinct
+			// TimeoutError when the merged signal ended because its own timer
+			// elapsed. The auth wait and the request both settle through here.
+			if (isRequestAborted(error, requestSignal) && isTimeoutAbort(requestSignal, options?.abortSignal)) {
+				throw createTimeoutError("Qwen Code")
+			}
+			throw error
 		}
-
-		// The retry reuses the captured request options, so it carries the same
-		// merged signal — and the guard in callApiWithRetry refuses to retry
-		// once this signal has aborted.
-		const response = await this.callApiWithRetry(
-			() => client.chat.completions.create(requestOptions, createOptions),
-			requestSignal,
-		)
-
-		return response.choices[0]?.message.content || ""
 	}
 }
