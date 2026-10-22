@@ -3538,6 +3538,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.abandoned = true
 		}
 		this.abort = true
+		// The S4a write guard compares this counter with the value a queued write
+		// captured when it started, so every cancellation must advance it; it must
+		// never go backwards because resumeAfterDelegation() clears `abort` (the
+		// flag alone cannot keep the cancelled run and the resumed run apart).
+		this.cancellationGeneration++
 		this.driveRunEvent({ tag: "abortRequested", abandoned: isAbandoned })
 	}
 
@@ -3548,6 +3553,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	requestDispose(): void {
 		this.abort = true
+		// A host teardown never calls abortTask(): disposal has to raise the same
+		// counter, or a write still parked on its path chain publishes after the
+		// task is gone.
+		this.cancellationGeneration++
 		this.driveRunEvent({ tag: "disposeRequested" })
 	}
 

@@ -4448,7 +4448,9 @@ describe("Cline", () => {
 			expect(task.cancellationGeneration).toBe(1)
 
 			await task.resumeAfterDelegation()
-			expect(task.abort).toBe(false)
+			// The run-state model (RSK-06) no longer clears the legacy `abort` flag
+			// on resume: that is exactly why the generation exists. Only the
+			// generation keeps the cancelled run and the resumed run apart.
 			expect(task.cancellationGeneration).toBe(1)
 
 			await task.abortTask()
