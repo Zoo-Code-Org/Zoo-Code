@@ -119,10 +119,14 @@ function recorderEnv(bin, outDir, providerMarker, extraEnv) {
 const stopBudgetEnv = (stopBudget) => (stopBudget ? { SOLHEIM_SMOKE_STOP_BUDGET_S: String(stopBudget) } : {})
 
 const recorderScript = fileURLToPath(new URL("./solheim-smoke/record.sh", import.meta.url))
+// Test-only mirror of record.sh that runs a supplied command. Production
+// record.sh always runs its fixed Node driver and rejects supplied arguments.
+const recorderHelper = fileURLToPath(new URL("./solheim-smoke/record.test-helper.sh", import.meta.url))
 
 function runRecorder(
 	args,
 	{
+		script = recorderScript,
 		ffmpeg,
 		ffmpegWrites = true,
 		ffprobeOk = true,
@@ -139,7 +143,7 @@ function runRecorder(
 	fs.mkdirSync(paths.outDir, { recursive: true })
 	if (seedFinal !== undefined) fs.writeFileSync(paths.finalRecording, seedFinal)
 	for (const name of seedMetadata ?? []) fs.writeFileSync(path.join(paths.outDir, name), "stale")
-	const result = spawnSync("bash", [recorderScript, ...args], {
+	const result = spawnSync("bash", [script, ...args], {
 		env: recorderEnv(bin, paths.outDir, providerMarker, { ...stopBudgetEnv(stopBudget), ...extraEnv }),
 		encoding: "utf8",
 		timeout: 20_000,
@@ -151,7 +155,10 @@ function runRecorder(
 // for readyFile when one is given, or the fixed delayMs fallback otherwise. A
 // TERM that lands during Node boot would kill the stub before its handler
 // exists and turn the test into a boot-race coin flip.
-function runRecorderSignalled(args, { ffmpeg, ffprobeOk = true, delayMs, readyFile, providerMarker, stopBudget } = {}) {
+function runRecorderSignalled(
+	args,
+	{ script = recorderScript, ffmpeg, ffprobeOk = true, delayMs, readyFile, providerMarker, stopBudget } = {},
+) {
 	return new Promise((resolve) => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "record-sh-"))
 		const bin = stubRecorderBin(dir, { ffmpeg, ffprobeOk })
@@ -159,7 +166,7 @@ function runRecorderSignalled(args, { ffmpeg, ffprobeOk = true, delayMs, readyFi
 		// The output directory is created here, before the recorder runs, so
 		// every process in the test observes the same directory object.
 		fs.mkdirSync(paths.outDir, { recursive: true })
-		const child = spawn("bash", [recorderScript, ...args], {
+		const child = spawn("bash", [script, ...args], {
 			env: recorderEnv(bin, paths.outDir, providerMarker, stopBudgetEnv(stopBudget)),
 		})
 		let stdout = ""
@@ -200,6 +207,12 @@ function runRecorderSignalled(args, { ffmpeg, ffprobeOk = true, delayMs, readyFi
 	})
 }
 
+// Command-execution recorder tests target the test-only helper: production
+// record.sh never runs a supplied command.
+const runCommandRecorder = (args, options = {}) => runRecorder(args, { ...options, script: recorderHelper })
+const runCommandRecorderSignalled = (args, options = {}) =>
+	runRecorderSignalled(args, { ...options, script: recorderHelper })
+
 const tempFilesLeft = (run) => fs.readdirSync(run.outDir).filter((name) => name.includes(".tmp"))
 
 const pidAlive = (pid) => {
@@ -211,9 +224,80 @@ const pidAlive = (pid) => {
 	}
 }
 
-describe("record.sh exit and validation behavior", () => {
+describe("record.sh production behavior", () => {
+	it("runs the real Node driver with no arguments and keeps metadata on failure", () => {
+		// The credential-free driver fails fast with a SETUP_FAILED verdict, so
+		// this exercises the exact CI spawn path end to end.
+		const run = runRecorder([])
+		try {
+			assert.equal(run.result.status, 1)
+			const verdict = JSON.parse(fs.readFileSync(path.join(run.outDir, "verdict.json"), "utf8"))
+			assert.equal(verdict.code, "SETUP_FAILED")
+			const trace = JSON.parse(fs.readFileSync(path.join(run.outDir, "trace.json"), "utf8"))
+			assert.equal(trace.execution.code, "SETUP_FAILED")
+			assert.equal(fs.readFileSync(run.finalRecording, "utf8"), "data\n")
+			assert.deepEqual(tempFilesLeft(run), [])
+		} finally {
+			run.cleanup()
+		}
+	})
+	it("refuses a supplied command while the provider credential is set", () => {
+		const run = runRecorder(["true"], { extraEnv: { SOLHEIM_API_KEY: "sk-test" } })
+		try {
+			assert.equal(run.result.status, 2)
+			assert.match(run.result.stderr, /Refusing/)
+		} finally {
+			run.cleanup()
+		}
+	})
+	it("rejects and never runs a supplied command when only unrelated secrets are inherited", () => {
+		const marker = path.join(os.tmpdir(), `record-sh-marker-${process.pid}-${Math.random()}`)
+		// Regression for the removed "$@" path: with SOLHEIM_API_KEY unset, the
+		// wrapper used to execute the supplied command with the full inherited
+		// environment, including unrelated credentials such as OPENAI_API_KEY.
+		const run = runRecorder(["bash", "-c", 'printf "%s" "$OPENAI_API_KEY" > "$PROVIDER_MARKER"'], {
+			extraEnv: { OPENAI_API_KEY: "sk-inherited-secret" },
+		})
+		try {
+			assert.equal(run.result.status, 2)
+			assert.match(run.result.stderr, /Refusing/)
+			assert.ok(!fs.existsSync(marker), "the supplied command must not run")
+			assert.ok(!run.result.stdout.includes("sk-inherited-secret"))
+			assert.ok(!run.result.stderr.includes("sk-inherited-secret"))
+			assert.ok(!fs.existsSync(run.finalRecording), "a rejected run must publish no recording")
+		} finally {
+			run.cleanup()
+			fs.rmSync(marker, { force: true })
+		}
+	})
+	it("keeps the test-only command helper identical to record.sh outside the driver selection", () => {
+		const structural = (source) =>
+			source
+				.split("\n")
+				.map((line) => line.trim())
+				.filter((line) => line !== "" && !line.startsWith("#"))
+		const production = structural(fs.readFileSync(recorderScript, "utf8"))
+		const helper = structural(fs.readFileSync(recorderHelper, "utf8"))
+		assert.deepEqual(
+			production.filter((line) => !helper.includes(line)),
+			[
+				'if [[ "$#" -gt 0 ]]; then',
+				'echo "Refusing supplied arguments: the recorder only runs its Node driver" >&2',
+				"exit 2",
+				'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+				'node --import tsx "$script_dir/driver.mts" &',
+			],
+		)
+		assert.deepEqual(
+			helper.filter((line) => !production.includes(line)),
+			['"$@" &'],
+		)
+	})
+})
+
+describe("record.test-helper.sh exit and validation behavior", () => {
 	it("passes when the command succeeds and the recording is valid", () => {
-		const run = runRecorder(["true"])
+		const run = runCommandRecorder(["true"])
 		try {
 			assert.equal(run.result.status, 0)
 			assert.equal(fs.readFileSync(run.finalRecording, "utf8"), "data\n")
@@ -223,7 +307,7 @@ describe("record.sh exit and validation behavior", () => {
 		}
 	})
 	it("keeps the exit code of a failing command and still publishes a valid recording", () => {
-		const run = runRecorder(["bash", "-c", "exit 7"])
+		const run = runCommandRecorder(["bash", "-c", "exit 7"])
 		try {
 			assert.equal(run.result.status, 7)
 			assert.equal(fs.readFileSync(run.finalRecording, "utf8"), "data\n")
@@ -232,7 +316,7 @@ describe("record.sh exit and validation behavior", () => {
 		}
 	})
 	it("removes stale verdict and trace metadata at start", () => {
-		const run = runRecorder(["true"], {
+		const run = runCommandRecorder(["true"], {
 			seedMetadata: ["verdict.json", "trace.json", "verdict.json.1.tmp"],
 		})
 		try {
@@ -243,18 +327,8 @@ describe("record.sh exit and validation behavior", () => {
 		}
 	})
 
-	it("refuses a supplied command while the provider credential is set", () => {
-		const run = runRecorder(["true"], { extraEnv: { SOLHEIM_API_KEY: "sk-test" } })
-		try {
-			assert.equal(run.result.status, 2)
-			assert.match(run.result.stderr, /Refusing/)
-		} finally {
-			run.cleanup()
-		}
-	})
-
 	it("fails when the recording is missing", () => {
-		const run = runRecorder(["true"], { ffmpegWrites: false })
+		const run = runCommandRecorder(["true"], { ffmpegWrites: false })
 		try {
 			assert.equal(run.result.status, 1)
 			assert.match(run.result.stdout, /recording failed/)
@@ -264,7 +338,7 @@ describe("record.sh exit and validation behavior", () => {
 		}
 	})
 	it("fails and cleans the temporary file when ffprobe rejects the recording", () => {
-		const run = runRecorder(["true"], { ffprobeOk: false })
+		const run = runCommandRecorder(["true"], { ffprobeOk: false })
 		try {
 			assert.equal(run.result.status, 1)
 			assert.ok(!fs.existsSync(run.finalRecording))
@@ -274,7 +348,7 @@ describe("record.sh exit and validation behavior", () => {
 		}
 	})
 	it("keeps a failing command code when the recording is also invalid", () => {
-		const run = runRecorder(["bash", "-c", "exit 7"], { ffprobeOk: false })
+		const run = runCommandRecorder(["bash", "-c", "exit 7"], { ffprobeOk: false })
 		try {
 			assert.equal(run.result.status, 7)
 			assert.ok(!fs.existsSync(run.finalRecording))
@@ -283,7 +357,7 @@ describe("record.sh exit and validation behavior", () => {
 		}
 	})
 	it("removes a stale final recording when the new recording fails", () => {
-		const run = runRecorder(["true"], { ffmpegWrites: false, seedFinal: "STALE" })
+		const run = runCommandRecorder(["true"], { ffmpegWrites: false, seedFinal: "STALE" })
 		try {
 			assert.equal(run.result.status, 1)
 			assert.ok(!fs.existsSync(run.finalRecording))
@@ -292,7 +366,7 @@ describe("record.sh exit and validation behavior", () => {
 		}
 	})
 	it("replaces a stale final recording with the validated new recording", () => {
-		const run = runRecorder(["true"], { seedFinal: "STALE" })
+		const run = runCommandRecorder(["true"], { seedFinal: "STALE" })
 		try {
 			assert.equal(run.result.status, 0)
 			assert.equal(fs.readFileSync(run.finalRecording, "utf8"), "data\n")
@@ -302,7 +376,7 @@ describe("record.sh exit and validation behavior", () => {
 	})
 	it("aborts before the command when the recorder dies at startup", () => {
 		const marker = path.join(os.tmpdir(), `record-sh-marker-${process.pid}-${Math.random()}`)
-		const run = runRecorder(["bash", "-c", 'echo ran > "$PROVIDER_MARKER"'], {
+		const run = runCommandRecorder(["bash", "-c", 'echo ran > "$PROVIDER_MARKER"'], {
 			ffmpeg: 'for a; do :; done; echo partial > "$a"\nexit 1',
 			providerMarker: marker,
 		})
@@ -317,7 +391,7 @@ describe("record.sh exit and validation behavior", () => {
 		}
 	})
 	it("rejects recorder output that stopped on its own with a failure status", () => {
-		const run = runRecorder(["bash", "-c", "sleep 2"], {
+		const run = runCommandRecorder(["bash", "-c", "sleep 2"], {
 			// The content is readable and would pass ffprobe, so the rejection
 			// must come from the recorder's own non-zero exit status.
 			ffmpeg: 'for a; do :; done\nsleep 0.7\necho data > "$a"\nexit 1',
@@ -332,7 +406,7 @@ describe("record.sh exit and validation behavior", () => {
 		}
 	})
 	it("publishes when the recorder stops on its own with success (size or time limit)", () => {
-		const run = runRecorder(["bash", "-c", "sleep 2"], {
+		const run = runCommandRecorder(["bash", "-c", "sleep 2"], {
 			ffmpeg: 'for a; do :; done\nsleep 0.7\necho data > "$a"\nexit 0',
 		})
 		try {
@@ -344,10 +418,10 @@ describe("record.sh exit and validation behavior", () => {
 	})
 })
 
-describe("record.sh signal teardown behavior", () => {
+describe("record.test-helper.sh signal teardown behavior", () => {
 	it("stops the recorder and the command on SIGTERM and keeps the signal exit code", async () => {
 		const marker = path.join(os.tmpdir(), `record-sh-marker-${process.pid}-${Math.random()}`)
-		const run = await runRecorderSignalled(
+		const run = await runCommandRecorderSignalled(
 			// The inner wait makes the stub command respond to TERM promptly, the
 			// way a signal-safe driver does. The trap exits so the "normal" write
 			// cannot run after a handled signal.
@@ -369,7 +443,7 @@ describe("record.sh signal teardown behavior", () => {
 		}
 	})
 	it("leaves no final recording when the interrupted output fails validation", async () => {
-		const run = await runRecorderSignalled(["bash", "-c", "sleep 5"], { delayMs: 800, ffprobeOk: false })
+		const run = await runCommandRecorderSignalled(["bash", "-c", "sleep 5"], { delayMs: 800, ffprobeOk: false })
 		try {
 			assert.equal(run.code, 143)
 			assert.ok(!fs.existsSync(run.finalRecording))
@@ -380,7 +454,7 @@ describe("record.sh signal teardown behavior", () => {
 	})
 })
 
-describe("record.sh provider stop behavior", () => {
+describe("record.test-helper.sh provider stop behavior", () => {
 	it("lets a driver-style stub finish teardown and atomic artifact writes on SIGTERM", async () => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "record-sh-"))
 		const bin = stubRecorderBin(dir)
@@ -407,7 +481,10 @@ describe("record.sh provider stop behavior", () => {
 				`setInterval(() => {}, 1000)`,
 			].join("\n"),
 		)
-		const run = await runRecorderSignalled(["node", stub, artifact, readyFile], { readyFile, stopBudget: 10 })
+		const run = await runCommandRecorderSignalled(["node", stub, artifact, readyFile], {
+			readyFile,
+			stopBudget: 10,
+		})
 		try {
 			assert.equal(run.code, 143)
 			// The wrapper waited for the driver teardown instead of killing the
@@ -444,7 +521,7 @@ describe("record.sh provider stop behavior", () => {
 		// TERM lands only after the ready file proves the TERM handler is
 		// armed, so the ignored TERM is a handled signal, never a boot-time
 		// default kill.
-		const run = await runRecorderSignalled(["node", hungStub, termSeenFile, hungPidFile, hungReadyFile], {
+		const run = await runCommandRecorderSignalled(["node", hungStub, termSeenFile, hungPidFile, hungReadyFile], {
 			readyFile: hungReadyFile,
 			stopBudget: 2,
 		})
@@ -466,22 +543,6 @@ describe("record.sh provider stop behavior", () => {
 		} finally {
 			run.cleanup()
 			fs.rmSync(dir, { recursive: true, force: true })
-		}
-	})
-	it("runs the real Node driver with no arguments and keeps metadata on failure", () => {
-		// The credential-free driver fails fast with a SETUP_FAILED verdict, so
-		// this exercises the exact CI spawn path end to end.
-		const run = runRecorder([])
-		try {
-			assert.equal(run.result.status, 1)
-			const verdict = JSON.parse(fs.readFileSync(path.join(run.outDir, "verdict.json"), "utf8"))
-			assert.equal(verdict.code, "SETUP_FAILED")
-			const trace = JSON.parse(fs.readFileSync(path.join(run.outDir, "trace.json"), "utf8"))
-			assert.equal(trace.execution.code, "SETUP_FAILED")
-			assert.equal(fs.readFileSync(run.finalRecording, "utf8"), "data\n")
-			assert.deepEqual(tempFilesLeft(run), [])
-		} finally {
-			run.cleanup()
 		}
 	})
 })

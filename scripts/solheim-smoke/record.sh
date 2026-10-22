@@ -3,6 +3,14 @@
 set -euo pipefail
 : "${DISPLAY:?Run this wrapper under xvfb-run}"
 : "${SOLHEIM_SMOKE_OUT_DIR:?Set a scratch output directory}"
+# Supplied arguments would run arbitrary caller commands with every inherited
+# credential. The recorder runs only its fixed Node driver, so reject any
+# arguments before the first side effect. Command-execution tests use a
+# separate test-only helper script.
+if [[ "$#" -gt 0 ]]; then
+    echo "Refusing supplied arguments: the recorder only runs its Node driver" >&2
+    exit 2
+fi
 mkdir -p "$SOLHEIM_SMOKE_OUT_DIR"
 final_recording="$SOLHEIM_SMOKE_OUT_DIR/smoke.mp4"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -103,21 +111,11 @@ trap 'exit 143' TERM
 sleep 0.5
 kill -0 "$recorder_pid" 2>/dev/null || exit 1
 
-# Arguments are used for credential-free recorder tests; CI supplies none.
-# An injected command would inherit the provider credential, so reject it.
+# Invoke the Node driver directly: a package-manager wrapper would sit
+# between this wrapper and the driver, and stop_provider must signal and
+# monitor the driver PID that performs teardown and artifact writes.
 # Backgrounding the provider keeps the signal traps responsive during the run.
-if [[ "$#" -gt 0 ]]; then
-    if [[ -n "${SOLHEIM_API_KEY:-}" ]]; then
-        echo "Refusing to run a supplied command while SOLHEIM_API_KEY is set" >&2
-        exit 2
-    fi
-    "$@" &
-else
-    # Invoke the Node driver directly: a package-manager wrapper would sit
-    # between this wrapper and the driver, and stop_provider must signal and
-    # monitor the driver PID that performs teardown and artifact writes.
-    node --import tsx "$script_dir/driver.mts" &
-fi
+node --import tsx "$script_dir/driver.mts" &
 provider_pid=$!
 provider_status=0
 wait "$provider_pid" || provider_status=$?
