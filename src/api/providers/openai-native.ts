@@ -769,16 +769,18 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				throw error
 			}
 
-			// A status-carrying API failure keeps its own identity: wrapping it
-			// would drop the numeric status that retry, backoff and the UI read.
-			if (hasNumericHttpStatus(error)) {
-				throw error
-			}
-
 			const model = this.getModel()
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")
 			TelemetryService.instance.captureException(apiError)
+
+			// A status-carrying API failure keeps its own identity: wrapping it
+			// would drop the numeric status that retry, backoff and the UI read.
+			// Report it first (above) so a 401/429/5xx raised while reading the
+			// SSE body is still captured once, then rethrow it unchanged.
+			if (hasNumericHttpStatus(error)) {
+				throw error
+			}
 
 			if (error instanceof Error) {
 				// Re-throw with the original error message if it's already formatted
@@ -1297,8 +1299,8 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				throw new DOMException(`The ${this.providerName} request was aborted`, "AbortError")
 			}
 
-			// No captureException here: the createMessage catch captures this
-			// failure once when the rethrown error propagates.
+			// No captureException here: the makeResponsesApiRequest catch captures
+			// this failure once when the rethrown error propagates.
 			if (error instanceof Error) {
 				throw new Error(`Error processing response stream: ${error.message}`)
 			}

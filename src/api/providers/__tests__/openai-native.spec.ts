@@ -3031,6 +3031,48 @@ describe("OpenAiNativeHandler", () => {
 			// Telemetry should have been captured before the error was thrown
 			expect(mockCaptureException).toHaveBeenCalled()
 		})
+
+		it("captures a status-carrying SSE body failure once and rethrows it unchanged", async () => {
+			// Regression: handleStreamResponse rethrows status-carrying errors
+			// unchanged, so the capture has to happen before that rethrow or a
+			// 401/429/5xx raised while reading the stream body is dropped from
+			// telemetry entirely.
+			const statusError = Object.assign(new Error("Rate limit exceeded"), { status: 429 })
+
+			const mockFetch = vitest.fn().mockResolvedValue({
+				ok: true,
+				body: new ReadableStream({
+					start(controller) {
+						controller.enqueue(
+							new TextEncoder().encode(
+								'data: {"type":"response.output_text.delta","delta":"partial"}\n\n',
+							),
+						)
+						controller.error(statusError)
+					},
+				}),
+			})
+			global.fetch = mockFetch as any
+
+			// Force the SSE fallback path (the SDK stream is unavailable).
+			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+
+			const stream = handler.createMessage(errorSystemPrompt, errorMessages)
+			const error = await collectStream(stream).catch((caught: unknown) => caught)
+
+			// The provider failure keeps its own identity (the numeric status must
+			// survive for retry/backoff) and is reported exactly once.
+			expect(error).toBe(statusError)
+			expect(mockCaptureException).toHaveBeenCalledTimes(1)
+			expect(mockCaptureException).toHaveBeenCalledWith(
+				expect.objectContaining({
+					message: "Rate limit exceeded",
+					provider: "OpenAI Native",
+					operation: "createMessage",
+				}),
+			)
+			expect(mockCaptureException.mock.calls[0][0]).toBeInstanceOf(ApiProviderError)
+		})
 	})
 })
 
