@@ -182,7 +182,9 @@ describe("safeWriteText", () => {
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fs.mkdir).mockRejectedValueOnce(new Error("parent mkdir failed"))
 
-			await expect(safeWriteText(targetPath, "hello", { platform: "linux" })).rejects.toThrow("parent mkdir failed")
+			await expect(safeWriteText(targetPath, "hello", { platform: "linux" })).rejects.toThrow(
+				"parent mkdir failed",
+			)
 
 			// Nothing was staged and nothing was published: the original directory error
 			// surfaces before the staging open.
@@ -195,7 +197,9 @@ describe("safeWriteText", () => {
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fs.access).mockRejectedValueOnce(new Error("parent access failed"))
 
-			await expect(safeWriteText(targetPath, "hello", { platform: "linux" })).rejects.toThrow("parent access failed")
+			await expect(safeWriteText(targetPath, "hello", { platform: "linux" })).rejects.toThrow(
+				"parent access failed",
+			)
 
 			expect(fs.rename).not.toHaveBeenCalled()
 		})
