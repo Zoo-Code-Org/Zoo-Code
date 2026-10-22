@@ -1,9 +1,0 @@
-﻿Auto-merging src/core/webview/ClineProvider.ts
-CONFLICT (content): Merge conflict in src/core/webview/ClineProvider.ts
-Auto-merging src/core/webview/__tests__/ClineProvider.parallelMode.spec.ts
-Auto-merging src/core/webview/__tests__/ClineProvider.spec.ts
-Auto-merging src/core/webview/__tests__/ClineProvider.sticky-mode.spec.ts
-Auto-merging src/core/webview/__tests__/webviewMessageHandler.spec.ts
-Auto-merging src/eslint-suppressions.json
-CONFLICT (content): Merge conflict in src/eslint-suppressions.json
-Automatic merge failed; fix conflicts and then commit the result.

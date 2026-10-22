@@ -1,6 +1,0 @@
-﻿Auto-merging src/core/webview/ClineProvider.ts
-Auto-merging src/core/webview/__tests__/ClineProvider.sticky-mode.spec.ts
-Merge made by the 'ort' strategy.
- src/core/webview/ClineProvider.ts                  | 10 +++-
- .../__tests__/ClineProvider.sticky-mode.spec.ts    | 60 ++++++++++++++++++++++
- 2 files changed, 68 insertions(+), 2 deletions(-)
