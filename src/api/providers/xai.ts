@@ -13,7 +13,13 @@ import { getModelParams } from "../transform/model-params"
 
 import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
-import { bridgeExternalAbortSignal, createAbortError, hasUsableTimeout, toSdkTimeoutMs, isRequestAborted } from "./utils/abort-signal"
+import {
+	bridgeExternalAbortSignal,
+	createAbortError,
+	hasUsableTimeout,
+	toSdkTimeoutMs,
+	isRequestAborted,
+} from "./utils/abort-signal"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
 import { isMcpTool } from "../../utils/mcp-name"
