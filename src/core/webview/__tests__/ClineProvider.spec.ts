@@ -597,7 +597,7 @@ describe("ClineProvider", () => {
 		const makeView = () => {
 			const disposables: Array<{ dispose: ReturnType<typeof vi.fn> }> = []
 			let disposeCallback: (() => void | Promise<void>) | undefined
-			const view: any = {
+			const view = {
 				webview: {
 					postMessage: vi.fn().mockResolvedValue(true),
 					html: "",
@@ -620,7 +620,7 @@ describe("ClineProvider", () => {
 					disposables.push(disposable)
 					return disposable
 				}),
-			}
+			} as unknown as vscode.WebviewView
 			return {
 				view,
 				disposables,
