@@ -153,6 +153,31 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 *** End Patch`
 		const mockedCheckpointSave = checkpointSave as MockedFunction<typeof checkpointSave>
 
+		it("records the partial-state checkpoint when post-write bookkeeping rejects after the write", async () => {
+			const patch = `*** Begin Patch
+*** Add File: src/new.ts
++file content
+*** End Patch`
+			mockedFileExistsAtPath.mockResolvedValueOnce(false)
+			// The write commits, then a later bookkeeping call rejects before the handler can
+			// return: the committed mutation is tracked outside the handler-return boundary, so
+			// the partial-state checkpoint and the queued-message handoff must still happen.
+			vi.mocked(mockTask.diffViewProvider.pushToolWriteResult).mockRejectedValueOnce(
+				new Error("diagnostics unavailable"),
+			)
+
+			await tool.execute({ patch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			expect(mockTask.processQueuedMessages).toHaveBeenCalledOnce()
+			expect(mockHandleError).toHaveBeenCalled()
+		})
+
 		it("restores the pre-move state and fails the operation when source deletion fails", async () => {
 			const patch = `*** Begin Patch
 *** Update File: src/old.ts
