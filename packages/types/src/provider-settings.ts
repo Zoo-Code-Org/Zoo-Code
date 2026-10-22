@@ -239,7 +239,7 @@ const indexProviderDefinitions = (
 const providerDefinitions = indexProviderDefinitions(providerDefinitionList)
 
 const defaultSchema = z.object({
-	[API_PROVIDER_FIELD]: z.undefined(),
+	[API_PROVIDER_FIELD]: z.undefined().optional(),
 })
 
 type ProviderDefinitionSchemas<D extends readonly ProviderDefinition[]> = {
@@ -266,7 +266,7 @@ export const providerSettingsSchemaDiscriminated = z.discriminatedUnion(API_PROV
 
 type ProviderSettingsShape = UnionToIntersection<(typeof providerDefinitionList)[number][typeof SETTINGS_SHAPE_FIELD]>
 
-const providerSettingsObjectSchema = providerDefinitionList.reduce<z.AnyZodObject>(
+const providerSettingsObjectSchema = providerDefinitionList.reduce<z.ZodObject>(
 	(schema, definition) => schema.merge(z.object(definition[SETTINGS_SHAPE_FIELD])),
 	z.object({}),
 )
