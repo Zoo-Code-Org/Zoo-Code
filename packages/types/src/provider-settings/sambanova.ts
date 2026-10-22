@@ -17,7 +17,3 @@ export const sambaNovaProviderDefinition = createProviderDefinition({
 		sambaNovaApiKey: z.string().optional(),
 	},
 })
-
-export const zaiApiLineSchema = z.enum(["international_coding", "china_coding", "international_api", "china_api"])
-
-export type ZaiApiLine = z.infer<typeof zaiApiLineSchema>

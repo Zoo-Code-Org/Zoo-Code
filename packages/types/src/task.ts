@@ -102,7 +102,6 @@ export enum TaskStatus {
 	Interactive = "interactive",
 	Resumable = "resumable",
 	Idle = "idle",
-	None = "none",
 }
 
 export const taskMetadataSchema = z.object({

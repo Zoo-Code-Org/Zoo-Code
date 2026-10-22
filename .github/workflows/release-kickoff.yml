@@ -1,0 +1,94 @@
+name: Weekly release kickoff
+
+# Kicks off the weekly Zoo Code release. The message pings one maintainer per
+# week as a reminder to review and approve the release PR, tag the release
+# branch, and approve the marketplace-production deployment, then @mentions
+# zoomote as the visible cue of who cuts the release. Webhook-posted mentions
+# do not trigger Roomote (confirmed by test), so the release prep (release PR
+# per .roo/commands/release.md, posted in the release channel) runs from the
+# separate Roomote automation at the same time.
+#
+# Requires two repo secrets:
+# - DISCORD_RELEASE_WEBHOOK_URL: Discord webhook for the channel that receives
+#   the kickoff message. The job fails (noisily) if it is unset.
+# - DISCORD_RELEASE_MAINTAINERS: space-separated Discord user mentions in the
+#   <@USER_ID> form, for example "<@123456789012345678> <@987654321098765432>".
+#   Use numeric user IDs, not @handles. Only the <@USER_ID> form pings the user.
+#   The rotation pings one maintainer per week, anchored to 2026-07-17 (same
+#   anchor as the previous rotation). If the secret is unset, the message uses
+#   a generic "Maintainers" greeting.
+#
+# The zoomote Discord user ID is not sensitive, so it is hardcoded below
+# instead of stored as a secret.
+
+on:
+    schedule:
+        # Friday at 7:00pm ET (23:00 UTC during daylight saving time).
+        # This fixed UTC cron fires at 6:00pm ET while the US is on EST.
+        - cron: "0 23 * * 5"
+    workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+    group: release-kickoff
+    # A re-run produces an identical message, so cancel a stale/duplicate run
+    # rather than risk posting twice.
+    cancel-in-progress: true
+
+jobs:
+    kickoff:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Post release kickoff to Discord
+              env:
+                  DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+                  DISCORD_RELEASE_MAINTAINERS: ${{ secrets.DISCORD_RELEASE_MAINTAINERS }}
+                  ZOOMOTE_MENTION: "<@1527781613927399614>"
+              run: |
+                  set -euo pipefail
+                  read -r -a maintainers <<< "${DISCORD_RELEASE_MAINTAINERS:-}"
+                  if [ ${#maintainers[@]} -eq 0 ]; then
+                      on_deck="Maintainers"
+                  else
+                      anchor_date="2026-07-17"
+                      seconds_since_anchor=$(($(date -u +%s) - $(date -u -d "$anchor_date" +%s)))
+                      weeks_since_anchor=$((seconds_since_anchor / 604800))
+                      on_deck="${maintainers[$((weeks_since_anchor % ${#maintainers[@]}))]}"
+                  fi
+
+                  message=$(cat <<EOF
+                  **Weekly release kickoff**
+
+                  ${on_deck} — reminder: you are on deck for this week's release. When the release PR is up:
+
+                  1. Review and approve the release PR.
+                  2. Tag the release branch tip (\`v[version]\`) to trigger the Marketplace publish workflow.
+                  3. Approve the deployment when the \`marketplace-production\` environment requests it.
+                  4. After publishing succeeds, add the release PR to the merge queue.
+
+                  ${ZOOMOTE_MENTION} prepare this week's Zoo Code release per \`.roo/commands/release.md\` and post the release PR in this channel.
+
+                  Avoid merging or rebasing the release branch before publishing, so the approved tag keeps the intended commit SHA.
+
+                  More detail: https://discord.com/channels/1497384592494297201/1498024845945081999/1512914847124291667
+                  EOF
+                  )
+
+                  payload=$(jq -n --arg content "$message" '{content: $content, allowed_mentions: {parse: ["users"]}}')
+                  curl --fail-with-body --silent --show-error \
+                    --header 'Content-Type: application/json' \
+                    --data "$payload" \
+                    "$DISCORD_RELEASE_WEBHOOK_URL"
+
+            - name: Notify on failure
+              if: failure()
+              env:
+                  DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+              run: |
+                  set -euo pipefail
+                  payload=$(jq -nc --arg content "⚠️ release-kickoff workflow failed — see the Actions runs." '{content: $content}')
+                  curl --fail-with-body --silent --show-error \
+                    --header 'Content-Type: application/json' \
+                    --data "$payload" \
+                    "$DISCORD_RELEASE_WEBHOOK_URL" || true

@@ -3,7 +3,12 @@ import { useEvent } from "react-use"
 import { t } from "i18next"
 import { ChevronDown, OctagonX } from "lucide-react"
 
-import { type ExtensionMessage, type CommandExecutionStatus, commandExecutionStatusSchema } from "@roo-code/types"
+import {
+	type ExtensionMessage,
+	type CommandExecutionStatus,
+	commandExecutionStatusSchema,
+	DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT,
+} from "@roo-code/types"
 
 import { safeJsonParse } from "@roo/core"
 import { COMMAND_OUTPUT_STRING } from "@roo/combineCommandSequences"
@@ -42,6 +47,7 @@ interface CommandExecutionProps {
 export const CommandExecution = ({ executionId, text, icon, title, isDenied = false }: CommandExecutionProps) => {
 	const {
 		terminalShellIntegrationDisabled = false,
+		collapseCommandOutputByDefault = DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT,
 		destructiveCommandGuardEnabled = false,
 		allowedCommands = [],
 		deniedCommands = [],
@@ -51,9 +57,8 @@ export const CommandExecution = ({ executionId, text, icon, title, isDenied = fa
 
 	const { command, output: parsedOutput } = useMemo(() => parseCommandAndOutput(text), [text])
 
-	// If we aren't opening the VSCode terminal for this command then we default
-	// to expanding the command execution output.
-	const [isExpanded, setIsExpanded] = useState(terminalShellIntegrationDisabled)
+	// Apply the preference on mount. Manual toggles remain in control afterwards.
+	const [isExpanded, setIsExpanded] = useState(!collapseCommandOutputByDefault && terminalShellIntegrationDisabled)
 	const [streamingOutput, setStreamingOutput] = useState("")
 	// Initialize from the module-level cache so that components mounting after
 	// the "started" event was delivered still show the running indicator.
@@ -159,7 +164,9 @@ export const CommandExecution = ({ executionId, text, icon, title, isDenied = fa
 							// Not a terminal state -- signals a mid-execution retry
 							// via execa after a shell integration failure. A new
 							// "started" event will follow, so leave the cache intact.
-							setIsExpanded(true)
+							if (!collapseCommandOutputByDefault) {
+								setIsExpanded(true)
+							}
 							break
 						case "output":
 							setStreamingOutput(data.output)
@@ -171,7 +178,7 @@ export const CommandExecution = ({ executionId, text, icon, title, isDenied = fa
 				}
 			}
 		},
-		[executionId],
+		[executionId, collapseCommandOutputByDefault],
 	)
 
 	useEvent("message", onMessage)
