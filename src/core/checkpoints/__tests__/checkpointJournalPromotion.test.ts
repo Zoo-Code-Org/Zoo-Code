@@ -124,7 +124,9 @@ describe("checkpointSave journal promotion failure (B2)", () => {
 	it("retries the ready promotion once and journals the entries when the retry succeeds", async () => {
 		controls.readyFailures = 1
 
-		await expect(checkpointSave(mockTask as unknown as Task, false, true, write)).resolves.toEqual({ commit: COMMIT })
+		await expect(checkpointSave(mockTask as unknown as Task, false, true, write)).resolves.toEqual({
+			commit: COMMIT,
+		})
 
 		const entries = await loadChanges(tmpStorageDir, TASK_ID)
 		expect(entries).toHaveLength(1)
@@ -178,7 +180,9 @@ describe("checkpointSave journal promotion failure (B2)", () => {
 		controls.reconcileFailAfter = 1
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
-		await expect(checkpointSave(mockTask as unknown as Task, false, true, write)).resolves.toEqual({ commit: COMMIT })
+		await expect(checkpointSave(mockTask as unknown as Task, false, true, write)).resolves.toEqual({
+			commit: COMMIT,
+		})
 
 		expect(mockTask.enableCheckpoints).toBe(true)
 		expect(consoleErrorSpy).toHaveBeenCalledWith(

@@ -293,7 +293,7 @@ describe("checkpoint/journal transaction recovery (B2)", () => {
 		expect(entries.map((entry) => entry.path)).toEqual(["src/a.ts", "src/b.ts"])
 	})
 
-	it.each(["not-json", JSON.stringify({ state: "unknown" }), JSON.stringify({ state: "ready" })] )(
+	it.each(["not-json", JSON.stringify({ state: "unknown" }), JSON.stringify({ state: "ready" })])(
 		"discards an unreadable or unrecognized pending marker (%s)",
 		async (rawMarker) => {
 			const markerPath = pendingJournalPath(tmpStorageDir, TASK_ID)
@@ -350,5 +350,4 @@ describe("checkpoint/journal transaction recovery (B2)", () => {
 		expect(entries.map((entry) => entry.checkpointId)).toEqual(["c0", COMMIT])
 		expect(entries.map((entry) => entry.path)).toEqual(["src/earlier.ts", "src/foo.ts"])
 	})
-
 })
