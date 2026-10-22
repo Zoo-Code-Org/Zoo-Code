@@ -102,7 +102,12 @@ describe("API - configuration", () => {
 				getProviderSettings: vi.fn().mockReturnValue({}),
 				setProviderSettings,
 			},
-			providerSettingsManager: { saveConfig, deleteConfig, setModeConfig, hasConfig: vi.fn().mockResolvedValue(false) },
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				setModeConfig,
+				hasConfig: vi.fn().mockResolvedValue(false),
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
