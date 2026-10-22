@@ -3,6 +3,13 @@ import type { WebviewApi } from "vscode-webview"
 import { WebviewMessage } from "@roo/WebviewMessage"
 
 /**
+ * Mirrors ClineProvider.MAX_VIEW_STATE_ID_LENGTH: the extension host refuses ids
+ * longer than this, so the webview regenerates instead of reusing a stored id the
+ * host would reject on every handoff.
+ */
+const MAX_VIEW_STATE_ID_LENGTH = 64
+
+/**
  * A utility wrapper around the acquireVsCodeApi() function, which enables
  * message passing and state management between the webview and extension
  * contexts.
@@ -11,8 +18,13 @@ import { WebviewMessage } from "@roo/WebviewMessage"
  * dev server by using native web browser features that mock the functionality
  * enabled by acquireVsCodeApi.
  */
-class VSCodeAPIWrapper {
+export class VSCodeAPIWrapper {
 	private readonly vsCodeApi: WebviewApi<unknown> | undefined
+	private fallbackState: unknown | undefined
+	// Once a persistent-storage write fails (setItem throws or is unavailable),
+	// the persisted JSON is stale: the in-memory fallbackState is authoritative
+	// for getState() until a write succeeds again.
+	private storageWriteFailed: boolean = false
 
 	constructor() {
 		// Check if the acquireVsCodeApi function exists in the current development
@@ -20,6 +32,56 @@ class VSCodeAPIWrapper {
 		if (typeof acquireVsCodeApi === "function") {
 			this.vsCodeApi = acquireVsCodeApi()
 		}
+	}
+
+	/**
+	 * Generates a unique identifier for this webview instance.
+	 *
+	 * @remarks Used only when no persisted identifier exists yet.
+	 */
+	private createViewStateId(): string {
+		if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+			return crypto.randomUUID()
+		}
+
+		return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+	}
+
+	/**
+	 * Returns the stable view state identifier for this webview, creating and persisting
+	 * one on first use so the extension can keep per-view state isolated across providers.
+	 */
+	public getViewStateId(): string {
+		const currentState = this.getState()
+		const stateObject =
+			currentState && typeof currentState === "object" && !Array.isArray(currentState)
+				? (currentState as Record<string, unknown>)
+				: {}
+		const existingViewStateId = stateObject.viewStateId
+
+		// Mirror the ClineProvider.setViewStateId validation so the webview never
+		// registers an id the extension would reject: trim, replace unsafe
+		// characters, and drop whitespace-only values plus every Object.prototype
+		// member name. "__proto__" alone is not enough: ids like "constructor" or
+		// "toString" survive the host's normalization and would be refused there
+		// forever, stranding this view's pre-launch entry under the temporary id.
+		// The host also caps the id length: a stored id beyond the cap must be
+		// regenerated, or every setViewStateId handoff is refused and the entry stays
+		// stranded under the temporary id.
+		const normalizedViewStateId =
+			typeof existingViewStateId === "string" ? existingViewStateId.trim().replace(/[^A-Za-z0-9_-]/g, "_") : ""
+
+		if (
+			normalizedViewStateId &&
+			normalizedViewStateId.length <= MAX_VIEW_STATE_ID_LENGTH &&
+			!Object.prototype.hasOwnProperty.call(Object.prototype, normalizedViewStateId)
+		) {
+			return normalizedViewStateId
+		}
+
+		const viewStateId = this.createViewStateId()
+		this.setState({ ...stateObject, viewStateId })
+		return viewStateId
 	}
 
 	/**
@@ -49,10 +111,24 @@ class VSCodeAPIWrapper {
 	public getState(): unknown | undefined {
 		if (this.vsCodeApi) {
 			return this.vsCodeApi.getState()
-		} else {
-			const state = localStorage.getItem("vscodeState")
-			return state ? JSON.parse(state) : undefined
 		}
+
+		if (this.storageWriteFailed) {
+			// A previous write could not be persisted: reading localStorage would
+			// return stale JSON, so the in-memory fallback is authoritative.
+			return this.fallbackState
+		}
+
+		try {
+			if (typeof localStorage?.getItem === "function") {
+				const state = localStorage.getItem("vscodeState")
+				return state ? JSON.parse(state) : this.fallbackState
+			}
+		} catch {
+			return this.fallbackState
+		}
+
+		return this.fallbackState
 	}
 
 	/**
@@ -69,10 +145,24 @@ class VSCodeAPIWrapper {
 	public setState<T extends unknown | undefined>(newState: T): T {
 		if (this.vsCodeApi) {
 			return this.vsCodeApi.setState(newState)
-		} else {
-			localStorage.setItem("vscodeState", JSON.stringify(newState))
-			return newState
 		}
+
+		this.fallbackState = newState
+
+		try {
+			if (typeof localStorage?.setItem === "function") {
+				localStorage.setItem("vscodeState", JSON.stringify(newState))
+				this.storageWriteFailed = false
+			} else {
+				this.storageWriteFailed = true
+			}
+		} catch {
+			// Storage can be unavailable in restricted webview/browser contexts.
+			// The in-memory fallback above keeps a stable viewStateId for this session.
+			this.storageWriteFailed = true
+		}
+
+		return newState
 	}
 }
 

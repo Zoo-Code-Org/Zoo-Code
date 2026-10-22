@@ -8,35 +8,60 @@ import pWaitFor from "p-wait-for"
 
 import {
 	type RooCodeAPI,
+	type RooCodeTestOnlyApi,
+	type GlobalState,
 	type RooCodeSettings,
 	type RooCodeEvents,
 	type ProviderSettings,
 	type ProviderSettingsEntry,
 	type TaskEvent,
+	type TaskLike,
 	type CreateTaskOptions,
 	type TaskApiConversationHistorySequence,
 	type WebviewThemeFixture,
 	RooCodeEventName,
 	TaskCommandName,
+	isGlobalStateKey,
 	isSecretStateKey,
+	isSensitiveProviderConfigKey,
+	globalSettingsSchema,
+	PROVIDER_SETTINGS_KEYS,
 	IpcOrigin,
 	IpcMessageType,
 } from "@roo-code/types"
 import { IpcServer } from "@roo-code/ipc"
 
 import { Package } from "../shared/package"
-import type { Mode } from "../shared/modes"
-import type { ClineProvider } from "../core/webview/ClineProvider"
+import { getAllModes, type Mode } from "../shared/modes"
+import { ClineProvider } from "../core/webview/ClineProvider"
 import type { ClineProviderFactory } from "../core/webview/ClineProviderFactory"
+import type { Task } from "../core/task/Task"
 import { readTaskMessages } from "../core/task-persistence/taskMessages"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
+import { createClineTabPanel } from "../activate/registerCommands"
 import { getCommands } from "../services/command/commands"
 
-export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
+type TaskAskController = {
+	approveAsk(): void
+	denyAsk(): void
+	handleWebviewAskResponse(response: "messageResponse", text?: string, images?: string[]): void
+}
+
+type RegisteredTask = {
+	task: TaskAskController
+	provider: ClineProvider
+}
+
+export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooCodeTestOnlyApi {
 	private readonly outputChannel: vscode.OutputChannel
 	private readonly sidebarProvider: ClineProvider
+	private readonly context: vscode.ExtensionContext
 	private readonly ipc?: IpcServer
+	private readonly tasksById = new Map<string, RegisteredTask>()
+
+	// Providers whose listeners are already wired (startNewTask is idempotent per provider).
+	private readonly registeredProviders = new WeakSet<ClineProvider>()
 	private readonly log: (...args: unknown[]) => void
 	private logfile?: string
 
@@ -51,6 +76,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 		this.outputChannel = outputChannel
 		this.sidebarProvider = provider
+		this.context = provider.context
 
 		if (enableLogging) {
 			this.log = (...args: unknown[]) => {
@@ -85,7 +111,15 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 						this.log(
 							`[API] StartNewTask -> ${command.data.text}, ${JSON.stringify(command.data.configuration)}`,
 						)
-						await this.startNewTask(command.data)
+						try {
+							await this.startNewTask(command.data)
+						} catch (error) {
+							// IpcServer does not await async listeners: an uncaught rejection here
+							// would surface as an unhandled rejection in the extension host.
+							this.log(
+								`[API] StartNewTask failed: ${error instanceof Error ? error.message : String(error)}`,
+							)
+						}
 						break
 					case TaskCommandName.CancelTask:
 						this.log(`[API] CancelTask`)
@@ -174,19 +208,28 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		text,
 		images,
 		newTab,
+		preserveOpenTabs,
 	}: {
-		configuration: RooCodeSettings
+		configuration?: RooCodeSettings
 		text?: string
 		images?: string[]
 		newTab?: boolean
+		preserveOpenTabs?: boolean
 	}) {
 		let provider: ClineProvider
 
 		if (newTab) {
-			await vscode.commands.executeCommand("workbench.action.files.revert")
-			await vscode.commands.executeCommand("workbench.action.closeAllEditors")
+			if (!preserveOpenTabs) {
+				await vscode.commands.executeCommand("workbench.action.files.revert")
+				await vscode.commands.executeCommand("workbench.action.closeAllEditors")
+			}
 
-			provider = await this.providerFactory.createInNewTab()
+			// A fresh tab: reusing the tracked tab would evict the task it is already serving.
+			provider = await createClineTabPanel({
+				context: this.context,
+				outputChannel: this.outputChannel,
+				webviewFocusTracker: this.sidebarProvider.webviewFocusTracker,
+			})
 			this.registerListeners(provider)
 		} else {
 			await vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`)
@@ -194,6 +237,43 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			provider = this.sidebarProvider
 		}
 
+		// A new task must not consume shared default mode/profile state before the view's
+		// stable state id is registered and its persisted view state loaded: webviewDidLaunch
+		// may not have arrived yet. Bound the wait so a view that never launches cannot
+		// hang task creation; if the bound expires, fail task creation rather than start
+		// the task against stale shared defaults.
+		let readinessTimer: ReturnType<typeof setTimeout> | undefined
+		try {
+			await Promise.race([
+				provider.viewStateReadiness,
+				new Promise<never>((_, reject) => {
+					readinessTimer = setTimeout(
+						() => reject(new Error("Timed out waiting for the view state to become ready")),
+						3000,
+					)
+				}),
+			]).finally(() => {
+				clearTimeout(readinessTimer)
+			})
+		} catch (error) {
+			if (
+				provider.viewLaunched ||
+				!(error instanceof Error) ||
+				error.message !== "Timed out waiting for the view state to become ready"
+			) {
+				throw error
+			}
+			// Headless API callers create tasks without ever launching a webview: the
+			// readiness bound expiring keeps the pre-existing shared-state fallback.
+			// A launched view whose readiness failed is a real failure and rethrows.
+			this.log("[API#startNewTask] webview not launched; continuing in headless mode")
+		}
+		// Disposal resolves viewStateReadiness to release waiters: a provider torn down while
+		// the wait was pending must fail task creation rather than create a task against the
+		// disposed view (its posts and task registration would be orphaned).
+		if (provider.isDisposed) {
+			throw new Error("The provider was disposed while waiting for the view state to become ready")
+		}
 		await provider.evictCurrentTask()
 		await provider.postStateToWebview()
 		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
@@ -382,6 +462,99 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		this.sidebarProvider.getCurrentTask()?.approveAsk()
 	}
 
+	/**
+	 * The test-only surface (task ask control by ID and raw global-state reads) must not
+	 * be reachable from production callers: VS Code only reports ExtensionMode.Production on the extension context for installed extensions, so test hosts and the e2e
+	 * harness keep access.
+	 */
+	private assertTestOnlyApi(method: string): void {
+		if (this.context.extensionMode === vscode.ExtensionMode.Production) {
+			throw new Error(`${method} is a test-only API and is unavailable in production mode`)
+		}
+	}
+
+	/**
+	 * Approves the pending ask for a specific task by its ID.
+	 *
+	 * @returns Whether a registered task with the given ID was found and approved.
+	 */
+	public async approveTaskAsk(taskId: string): Promise<boolean> {
+		this.assertTestOnlyApi("approveTaskAsk")
+		const entry = this.tasksById.get(taskId)
+
+		if (!entry) {
+			return false
+		}
+
+		entry.task.approveAsk()
+		return true
+	}
+
+	/**
+	 * Denies the pending ask for a specific task by its ID.
+	 *
+	 * @returns Whether a registered task with the given ID was found and denied.
+	 */
+	public async denyTaskAsk(taskId: string): Promise<boolean> {
+		this.assertTestOnlyApi("denyTaskAsk")
+		const entry = this.tasksById.get(taskId)
+
+		if (!entry) {
+			return false
+		}
+
+		entry.task.denyAsk()
+		return true
+	}
+
+	/**
+	 * Answers a task's pending ask with a follow-up suggestion, optionally switching that
+	 * task's provider to the suggestion's mode before responding.
+	 *
+	 * @returns Whether a registered task with the given ID was found and answered.
+	 */
+	public async selectTaskFollowupSuggestion({
+		taskId,
+		answer,
+		mode,
+	}: {
+		taskId: string
+		answer: string
+		mode?: string
+	}): Promise<boolean> {
+		this.assertTestOnlyApi("selectTaskFollowupSuggestion")
+		const entry = this.tasksById.get(taskId)
+
+		if (!entry) {
+			return false
+		}
+
+		if (mode) {
+			try {
+				const { customModes } = await entry.provider.getState()
+				const isValidMode = getAllModes(customModes).some((modeConfig) => modeConfig.slug === mode)
+
+				if (isValidMode) {
+					// entry.task is the registered Task instance (TaskAskController narrows it
+					// to the ask-response surface); pass it explicitly so the switch is scoped to
+					// this task rather than the provider's currently focused task.
+					await entry.provider.handleModeSwitch(mode, entry.task as Task)
+				} else {
+					this.log(`[API#selectTaskFollowupSuggestion] ignoring unknown mode "${mode}" for task ${taskId}`)
+				}
+			} catch (error) {
+				// A failed mode switch must not swallow the follow-up answer: the task's
+				// pending ask would otherwise stay unanswered.
+				this.log(
+					`[API#selectTaskFollowupSuggestion] mode switch failed for task ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+		}
+
+		entry.task.handleWebviewAskResponse("messageResponse", answer)
+		return true
+	}
+
 	public isReady() {
 		return this.sidebarProvider.viewLaunched
 	}
@@ -408,7 +581,29 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		}
 	}
 
+	/**
+	 * Removes a task's registration only if the registered entry still belongs to this
+	 * task instance: a replaced instance reusing the same taskId must not be dropped by
+	 * the previous instance's teardown events.
+	 */
+	private removeRegisteredTask(task: TaskLike): void {
+		const entry = this.tasksById.get(task.taskId)
+
+		// The stored controller is this exact instance (registered above with a cast to
+		// the ask-response surface), so reference equality is the right identity check.
+		if (entry?.task === (task as unknown as TaskAskController)) {
+			this.tasksById.delete(task.taskId)
+		}
+	}
+
 	private registerListeners(provider: ClineProvider) {
+		// Idempotent per provider: repeated or concurrent startNewTask calls against a
+		// reused tab provider must not stack duplicate listeners (duplicate API events,
+		// duplicate file logging, and duplicate per-task listener sets).
+		if (this.registeredProviders.has(provider)) {
+			return
+		}
+
 		provider.on(RooCodeEventName.TaskCompleted, async (taskId, tokenUsage, toolUsage) => {
 			const historyItem = provider.taskHistoryStore.get(taskId)
 			this.emit(RooCodeEventName.TaskCompleted, taskId, tokenUsage, toolUsage, {
@@ -421,6 +616,8 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		})
 
 		provider.on(RooCodeEventName.TaskCreated, (task) => {
+			this.tasksById.set(task.taskId, { task: task as unknown as TaskAskController, provider })
+
 			// Task Lifecycle
 
 			task.on(RooCodeEventName.TaskStarted, async () => {
@@ -428,8 +625,16 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				await this.fileLog(`[${new Date().toISOString()}] taskStarted -> ${task.taskId}\n`)
 			})
 
+			// #1452 moved the TaskCompleted emit and file-log to the provider-level
+			// listener above. This per-task listener remains only for the reference-safe
+			// registry removal: the provider-level handler receives the taskId but not the
+			// task instance, so it cannot verify the entry still belongs to this instance.
+			task.on(RooCodeEventName.TaskCompleted, () => {
+				this.removeRegisteredTask(task)
+			})
 			task.on(RooCodeEventName.TaskAborted, () => {
 				this.emit(RooCodeEventName.TaskAborted, task.taskId)
+				this.removeRegisteredTask(task)
 			})
 
 			task.on(RooCodeEventName.TaskFocused, () => {
@@ -438,6 +643,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 			task.on(RooCodeEventName.TaskUnfocused, () => {
 				this.emit(RooCodeEventName.TaskUnfocused, task.taskId)
+				this.removeRegisteredTask(task)
 			})
 
 			task.on(RooCodeEventName.TaskActive, () => {
@@ -529,6 +735,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		provider.on(RooCodeEventName.TaskDelegationResumed, (parentTaskId, childTaskId) => {
 			;(this.emit as any)(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
 		})
+		this.registeredProviders.add(provider)
 	}
 
 	// Logging
@@ -579,22 +786,133 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	// Global Settings Management
 
 	public getConfiguration(): RooCodeSettings {
-		return Object.fromEntries(
-			Object.entries(this.sidebarProvider.getValues()).filter(([key]) => !isSecretStateKey(key)),
+		// getValues() merges view-local state, whose apiConfiguration is a nested object that
+		// can carry provider secrets (e.g. apiKey). Flatten the provider settings onto the top
+		// level (the pre-existing flat shape) so the secret filter removes them before return.
+		const values = this.sidebarProvider.getValues()
+		// viewStates is per-view durable state owned by the extension host: exposing it on
+		// the flat configuration surface invites a caller to write a stale snapshot
+		// back and clobber newer per-view selections, so it never leaves here.
+		const { apiConfiguration, viewStates: _viewStates, ...rest } = values
+		// A view-local profile is a complete snapshot, not a patch over the shared
+		// store - getState() resolves it the same way. Drop the shared flat
+		// provider-settings keys before flattening, or a key the view's profile
+		// never defined (e.g. another profile's apiModelId or base URL) leaks in
+		// from whichever profile owns the shared store. The shared apiProvider is
+		// the one exception: getState() falls back to it when a pinned profile
+		// carries no provider of its own, so keep that single key as a base the
+		// profile's own apiProvider (when present) still overrides.
+		const shared = apiConfiguration
+			? Object.fromEntries(
+					Object.entries(rest).filter(
+						([key]) => key === "apiProvider" || !PROVIDER_SETTINGS_KEYS.some((k) => k === key),
+					),
+				)
+			: rest
+		// Secrets never leave the flattened surface: SECRET_STATE_KEYS covers the
+		// *ApiKey shapes, and SENSITIVE_PROVIDER_CONFIG_KEYS covers credential
+		// values that use other name shapes (header maps, session tokens,
+		// service-account JSON, credential-file paths).
+		// Retired providers keep their legacy fields through passthrough, and those
+		// names (e.g. groqApiKey, huggingFaceSecurityToken) predate the explicit
+		// secret lists and appear in neither. Treat credential-shaped key names as
+		// secret on this flattened surface so a retired profile cannot expose them.
+		const legacyCredentialKeyRe = /(?:ApiKey|ApiToken|SecurityToken|AccessToken|SessionToken|Credentials|Secret)$/
+		const configuration = Object.fromEntries(
+			Object.entries({ ...shared, ...apiConfiguration }).filter(
+				([key]) =>
+					!isSecretStateKey(key) && !isSensitiveProviderConfigKey(key) && !legacyCredentialKeyRe.test(key),
+			),
 		)
+		// An explicit apiProvider: undefined inside the nested profile clobbers the
+		// retained shared fallback through the spread above; restore it the same way
+		// getState() does with ?? so the provider never disappears from the result.
+		if (configuration.apiProvider === undefined && shared.apiProvider !== undefined) {
+			configuration.apiProvider = shared.apiProvider
+		}
+		return configuration
 	}
 
 	public async setConfiguration(values: RooCodeSettings) {
-		await this.sidebarProvider.contextProxy.setValues(values)
-		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
-		if (values.modeApiConfigs) {
+		// A caller's configuration snapshot can be stale for per-view state: viewStates
+		// is owned by the extension host and must not re-enter storage through the
+		// configuration round trip.
+		const { viewStates: _viewStates, ...configuration } = values
+		await this.sidebarProvider.setValues(configuration)
+		await this.sidebarProvider.providerSettingsManager.saveConfig(
+			configuration.currentApiConfigName || "default",
+			configuration,
+		)
+		if (configuration.modeApiConfigs) {
 			await Promise.all(
-				Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
+				Object.entries(configuration.modeApiConfigs).map(([mode, configId]) =>
 					this.sidebarProvider.providerSettingsManager.setModeConfig(mode as Mode, configId),
 				),
 			)
 		}
 		await this.sidebarProvider.postStateToWebview()
+	}
+
+	public getGlobalState<K extends keyof GlobalState>(key: K): GlobalState[K] {
+		this.assertTestOnlyApi("getGlobalState")
+		// The generic only constrains typed callers; a crafted runtime key can be
+		// any string. Refuse keys outside the settings schema before storage sees
+		// them, so the test-only API cannot read arbitrary global state.
+		if (!isGlobalStateKey(key)) {
+			throw new Error(`getGlobalState received a key outside the settings schema: ${String(key)}`)
+		}
+		// The global-state union still contains credential-bearing keys (API keys,
+		// headers, OAuth paths) that are not part of the secret-state union; refuse
+		// them before storage access so the test-only API cannot read credentials.
+		if (isSecretStateKey(String(key)) || isSensitiveProviderConfigKey(String(key))) {
+			throw new Error(`getGlobalState received a credential-bearing key: ${String(key)}`)
+		}
+		// Task history carries user PII (task texts): out of bounds for this surface
+		// even though it is a plain GlobalState key.
+		if (key === "taskHistory") {
+			throw new Error(`getGlobalState received a PII-bearing key: ${String(key)}`)
+		}
+		return this.context.globalState.get<GlobalState[K]>(key)
+	}
+
+	public async setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): Promise<void> {
+		this.assertTestOnlyApi("setGlobalState")
+		// Same runtime boundary as getGlobalState: an unvalidated key must not be
+		// persisted into global state.
+		if (!isGlobalStateKey(key)) {
+			throw new Error(`setGlobalState received a key outside the settings schema: ${String(key)}`)
+		}
+		// Same credential boundary as getGlobalState: a crafted runtime key must not
+		// be able to persist secrets through the test-only surface.
+		if (isSecretStateKey(String(key)) || isSensitiveProviderConfigKey(String(key))) {
+			throw new Error(`setGlobalState received a credential-bearing key: ${String(key)}`)
+		}
+		// Task history carries user PII (task texts): out of bounds for this surface
+		// even though it is a plain GlobalState key.
+		if (key === "taskHistory") {
+			throw new Error(`setGlobalState received a PII-bearing key: ${String(key)}`)
+		}
+		// The value is runtime data: parse it against the key's schema so malformed
+		// state never reaches durable storage. Keys without a global-settings schema
+		// entry (provider settings) are not seedable through this surface.
+		const valueSchema = (
+			globalSettingsSchema.shape as Record<
+				string,
+				{ safeParse: (value: unknown) => { success: boolean; data: unknown } } | undefined
+			>
+		)[String(key)]
+		if (!valueSchema) {
+			throw new Error(`setGlobalState received a key without a value schema: ${String(key)}`)
+		}
+		const parsedValue = valueSchema.safeParse(value)
+		if (!parsedValue.success) {
+			throw new Error(`setGlobalState received an invalid value for key: ${String(key)}`)
+		}
+		// Persist the parsed value: the object schemas in the settings map are
+		// non-strict, so the raw payload can carry extra credential- or PII-shaped
+		// fields that the schema strips; storing parsed data keeps unknown fields
+		// out of durable global state.
+		await this.context.globalState.update(key, parsedValue.data as GlobalState[K])
 	}
 
 	public setTerminalProfile(name: string | undefined): void {
