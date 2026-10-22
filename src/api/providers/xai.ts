@@ -13,7 +13,7 @@ import { getModelParams } from "../transform/model-params"
 
 import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
-import { bridgeExternalAbortSignal, createAbortError, hasUsableTimeout, isRequestAborted } from "./utils/abort-signal"
+import { bridgeExternalAbortSignal, createAbortError, hasUsableTimeout, toSdkTimeoutMs, isRequestAborted } from "./utils/abort-signal"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
 import { isMcpTool } from "../../utils/mcp-name"
@@ -193,7 +193,7 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 			// timeout: 0 as an immediate abort and throw on negative/non-finite values.
 			// Fractional delays are rounded up, matching mergeAbortSignalAndTimeout.
 			if (hasUsableTimeout(timeoutMs)) {
-				requestOptions.timeout = Math.ceil(timeoutMs)
+				requestOptions.timeout = toSdkTimeoutMs(timeoutMs)
 			}
 
 			const response = await this.client.responses.create(

@@ -8,6 +8,8 @@ import {
 	rejectOnAbort,
 	resolveModelWithAbort,
 	throwIfAborted,
+	MAX_TIMEOUT_MS,
+	toSdkTimeoutMs,
 } from "../abort-signal"
 import { withSettleGuard } from "../../../../test-utils/settle-guard"
 
@@ -528,5 +530,18 @@ describe("hasUsableTimeout", () => {
 		expect(hasUsableTimeout(-5)).toBe(false)
 		expect(hasUsableTimeout(Number.NaN)).toBe(false)
 		expect(hasUsableTimeout(Number.POSITIVE_INFINITY)).toBe(false)
+	})
+})
+
+describe("toSdkTimeoutMs", () => {
+	it("rounds fractional delays up", () => {
+		expect(toSdkTimeoutMs(1500.4)).toBe(1501)
+		expect(toSdkTimeoutMs(1)).toBe(1)
+	})
+
+	it("caps delays above the maximum Node timer delay", () => {
+		expect(toSdkTimeoutMs(MAX_TIMEOUT_MS)).toBe(MAX_TIMEOUT_MS)
+		expect(toSdkTimeoutMs(MAX_TIMEOUT_MS + 1)).toBe(MAX_TIMEOUT_MS)
+		expect(toSdkTimeoutMs(Number.MAX_SAFE_INTEGER)).toBe(MAX_TIMEOUT_MS)
 	})
 })

@@ -21,7 +21,7 @@ import { filterNonAnthropicBlocks } from "../transform/anthropic-filter"
 import { getAnthropicProviderReasoning } from "../transform/reasoning"
 
 import { BaseProvider } from "./base-provider"
-import { bridgeExternalAbortSignal, hasUsableTimeout } from "./utils/abort-signal"
+import { bridgeExternalAbortSignal, hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { calculateApiCostAnthropic } from "../../shared/cost"
 import {
@@ -472,7 +472,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			// timeout: 0 as an immediate abort and throw on negative/non-finite values.
 			// Fractional delays are rounded up, matching mergeAbortSignalAndTimeout.
 			if (hasUsableTimeout(timeoutMs)) {
-				requestOptions.timeout = Math.ceil(timeoutMs)
+				requestOptions.timeout = toSdkTimeoutMs(timeoutMs)
 			}
 
 			message = await this.client.messages.create(
