@@ -69,6 +69,7 @@ type ProviderDouble = EventEmitter & {
 	getState: Mock<() => Promise<{ customModes?: ModeConfig[] }>>
 	handleModeSwitch: Mock<(mode: string, targetTask?: unknown) => Promise<void>>
 	viewLaunched: boolean
+	hasResolvedView: boolean
 	isDisposed: boolean
 	viewStateReadiness: Promise<void>
 	taskHistoryStore: Map<string, unknown>
@@ -103,6 +104,7 @@ function createProvider(taskId = "task-1"): ProviderDouble {
 	provider.getState = vi.fn().mockResolvedValue({ customModes: [] })
 	provider.handleModeSwitch = vi.fn().mockResolvedValue(undefined)
 	provider.viewLaunched = true
+	provider.hasResolvedView = true
 	provider.isDisposed = false
 	provider.viewStateReadiness = Promise.resolve()
 	provider.taskHistoryStore = new Map()
@@ -235,6 +237,7 @@ describe("API task controls", () => {
 			// shared-state fallback still applies.
 			vi.useFakeTimers()
 			sidebarProvider.viewLaunched = false
+			sidebarProvider.hasResolvedView = false
 			sidebarProvider.viewStateReadiness = new Promise<void>(() => {})
 
 			const started = api.startNewTask({ configuration, text: "headless task" })

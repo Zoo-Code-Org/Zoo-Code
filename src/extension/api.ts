@@ -240,7 +240,9 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		// resolved a view cannot launch a webview (the headless API path), so waiting would
 		// only burn the full bound before the existing shared-state fallback runs. A new
 		// tab always creates a view.
-		if (newTab || provider.hasResolvedView) {
+		// A launch message (`viewLaunched`) proves a webview exists even when the provider's
+		// view reference was cleared, so it keeps the barrier too.
+		if (newTab || provider.hasResolvedView || provider.viewLaunched) {
 			let readinessTimer: ReturnType<typeof setTimeout> | undefined
 			try {
 				await Promise.race([
