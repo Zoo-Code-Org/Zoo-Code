@@ -113,6 +113,15 @@
 	},
 	"selectMode": "इंटरैक्शन मोड चुनें",
 	"selectApiConfig": "एपीआई कॉन्फ़िगरेशन का चयन करें",
+	"selectModel": "मॉडल चुनें",
+	"modelSelector": {
+		"title": "मॉडल",
+		"settings": "मॉडल सेटिंग्स",
+		"description": "इस API कॉन्फ़िगरेशन के लिए उपयोग किया जाने वाला मॉडल चुनें।",
+		"searchPlaceholder": "मॉडल खोजें...",
+		"unsupportedTooltip": "इस प्रदाता का मॉडल सेटिंग्स में कॉन्फ़िगर किया जाता है",
+		"loading": "मॉडल लोड हो रहे हैं..."
+	},
 	"lockApiConfigAcrossModes": "इस कार्यक्षेत्र में सभी मोड के लिए API कॉन्फ़िगरेशन लॉक करें",
 	"unlockApiConfigAcrossModes": "इस कार्यक्षेत्र में सभी मोड के लिए API कॉन्फ़िगरेशन लॉक है (अनलॉक करने के लिए क्लिक करें)",
 	"enhancePrompt": "अतिरिक्त संदर्भ के साथ प्रॉम्प्ट बढ़ाएँ",
@@ -343,10 +352,10 @@
 		"title": "Zoo Code {{version}} रिलीज़ हो गया",
 		"support": "कृपया <githubLink>GitHub</githubLink> पर हमें स्टार देकर Zoo Code का समर्थन करें।",
 		"release": {
-			"heading": "Zoo Code v3.88.0 में नया क्या है",
-			"highlight1": "✨ Provider और model समर्थन: Grok Build और बेहतर custom-model समर्थन का उपयोग करें। यह release Bedrock model limits भी ठीक करती है और Codex verbosity setting भेजती है।",
-			"highlight2": "🧭 Task भरोसेमंदपन: यह release cancellation handling, tool-turn continuation और task-message saving को ठीक करती है।",
-			"highlight3": "⚡ तेज़ editing और chat: File writes अब डिफ़ॉल्ट रूप से कृत्रिम देरी का उपयोग नहीं करतीं। Chat messages कम file data रखते हैं, और code actions अंतिम सक्रिय chat तक पहुँचते हैं।"
+			"heading": "Zoo Code v3.90.0 में नया क्या है",
+			"highlight1": "✨ Provider और model: GitHub Copilot अब एक provider है: sign in करें और Zoo Code आपके Copilot models लोड करता है। IO Intelligence अपना API key वाला provider है। Gemini 4 Argon, Gemini और Vertex पर है। GPT-6 Luna, OpenCode Go पर है। Gemini 4 Argon और GPT-6 Luna Zoo Gateway पर भी हैं।",
+			"highlight2": "🧭 Tool execution: वही tool call दोहराने पर warning मिलती है, फिर Zoo Code वह loop रोक देता है। attempt_completion बंद करने से task अब अधूरी नहीं रहती। Queued messages उन्हीं command-protection checks से गुज़रते हैं जो सीधे भेजे commands से गुज़रते हैं।",
+			"highlight3": "⚡ Reasoning और streaming: Anthropic adaptive thinking chat में दिखता है, और thinking tokens गिने जाते हैं। R1 toggle llama.cpp, Ollama और LM Studio का reasoning रखता है। Codex encrypted reasoning को उस summary के साथ रखता है जो आप देखते हैं। VS Code language-model streams stream fail होने पर guarded recovery इस्तेमाल करते हैं।"
 		},
 		"cloudAgents": {
 			"heading": "क्लाउड में नया:",

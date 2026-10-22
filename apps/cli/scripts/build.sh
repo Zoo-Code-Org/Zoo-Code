@@ -151,13 +151,11 @@ create_tarball() {
         type: 'module',
         dependencies: {
           '@inkjs/ui': pkg.dependencies['@inkjs/ui'],
-          '@trpc/client': pkg.dependencies['@trpc/client'],
           'commander': pkg.dependencies.commander,
           'fuzzysort': pkg.dependencies.fuzzysort,
           'ink': pkg.dependencies.ink,
           'p-wait-for': pkg.dependencies['p-wait-for'],
           'react': pkg.dependencies.react,
-          'superjson': pkg.dependencies.superjson,
           'zustand': pkg.dependencies.zustand
         }
       };
