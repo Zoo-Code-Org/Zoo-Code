@@ -137,7 +137,7 @@ export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = 
 				BACKTICK +
 				"reports/mutation/<package>/mutation.json" +
 				BACKTICK +
-				"). Rows are sorted by Survived + NoCoverage, worst first; Score is Killed / Mutants, counting Timeout mutants as detected (matching Stryker's mutation score).",
+				"). Rows are sorted by Survived + NoCoverage, worst first; Score is (Killed + Timeout) / Mutants, matching Stryker's mutation score.",
 			"",
 			"| File | Mutants | Killed | Survived | NoCoverage | Score |",
 			"| --- | ---: | ---: | ---: | ---: | ---: |",
