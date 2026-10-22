@@ -222,6 +222,29 @@ async function checkGitInstallation(
 	}
 }
 
+// Serialize checkpoint saves per task. saveCheckpoint() runs stageAll + commit, so two
+// concurrent saves for the same task (for example the task-start baseline racing the first
+// per-write save after the baseline timeout) can stage each other's writes or interleave
+// commits. A per-task promise queue makes every save wait for the previous one, including
+// a baseline that is still running.
+const checkpointSaveQueues = new Map<string, Promise<unknown>>()
+
+function enqueueCheckpointSave<T>(taskId: string, operation: () => Promise<T>): Promise<T> {
+	const previous = checkpointSaveQueues.get(taskId) ?? Promise.resolve()
+	const next = previous.then(operation, operation)
+	const tail = next.then(
+		() => undefined,
+		() => undefined,
+	)
+	checkpointSaveQueues.set(taskId, tail)
+	void tail.finally(() => {
+		if (checkpointSaveQueues.get(taskId) === tail) {
+			checkpointSaveQueues.delete(taskId)
+		}
+	})
+	return next
+}
+
 export async function checkpointSave(task: Task, force = false, suppressMessage = false) {
 	const service = await getCheckpointService(task)
 
@@ -231,13 +254,14 @@ export async function checkpointSave(task: Task, force = false, suppressMessage 
 
 	TelemetryService.instance.captureCheckpointCreated(task.taskId)
 
-	// Start the checkpoint process in the background.
-	return service
-		.saveCheckpoint(`Task: ${task.taskId}, Time: ${Date.now()}`, { allowEmpty: force, suppressMessage })
-		.catch((err) => {
-			console.error("[Task#checkpointSave] caught unexpected error, disabling checkpoints", err)
-			task.enableCheckpoints = false
-		})
+	// Start the checkpoint process in the background, queued behind any save already
+	// running for this task so stageAll + commit never overlap.
+	return enqueueCheckpointSave(task.taskId, () =>
+		service.saveCheckpoint(`Task: ${task.taskId}, Time: ${Date.now()}`, { allowEmpty: force, suppressMessage }),
+	).catch((err) => {
+		console.error("[Task#checkpointSave] caught unexpected error, disabling checkpoints", err)
+		task.enableCheckpoints = false
+	})
 }
 
 export type CheckpointRestoreOptions = {

@@ -113,6 +113,34 @@ describe("Checkpoint functionality", () => {
 	})
 
 	describe("checkpointSave", () => {
+		it("serializes concurrent saves for the same task so stageAll + commit never overlap", async () => {
+			const order: string[] = []
+			let resolveFirst: (value: { commit: string }) => void = () => {}
+			mockCheckpointService.saveCheckpoint
+				.mockImplementationOnce(() => {
+					order.push("first:start")
+					return new Promise((resolve) => {
+						resolveFirst = resolve
+					})
+				})
+				.mockImplementationOnce(async () => {
+					order.push("second:start")
+					return { commit: "second-commit" }
+				})
+
+			const first = checkpointSave(mockTask, false, true)
+			const second = checkpointSave(mockTask, false, true)
+
+			// The second save must not reach the service while the first is still running:
+			// a queued save owns the stageAll + commit pair until it settles.
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			expect(order).toEqual(["first:start"])
+
+			resolveFirst({ commit: "first-commit" })
+			await Promise.all([first, second])
+			expect(order).toEqual(["first:start", "second:start"])
+		})
+
 		it("should wait for checkpoint service initialization before saving", async () => {
 			// Set up task with uninitialized service
 			mockCheckpointService.isInitialized = false
