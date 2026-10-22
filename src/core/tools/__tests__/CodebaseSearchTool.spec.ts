@@ -67,6 +67,7 @@ describe("CodebaseSearchTool", () => {
 			askApproval: vi.fn<ToolCallbacks["askApproval"]>().mockResolvedValue(true),
 			handleError: vi.fn<ToolCallbacks["handleError"]>().mockResolvedValue(undefined),
 			pushToolResult: vi.fn<ToolCallbacks["pushToolResult"]>(),
+			toolCallId: "test-tool-call-id",
 		}
 		manager = {
 			isConfigurationLoaded: true,

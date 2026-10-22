@@ -63,6 +63,9 @@ type TaskTestAccess = {
 		messages: ApiMessage[],
 		requestModelInfo: ModelInfo,
 	) => Array<{ role: string; content: unknown } | { type: "reasoning"; encrypted_content: string }>
+	attemptApiRequestWithActiveApi: () => AsyncGenerator<ApiStreamChunk>
+	condenseContextWithActiveApi: () => Promise<void>
+	retiredApis: Set<unknown>
 }
 
 type TaskAskResult = Awaited<ReturnType<Task["ask"]>>
@@ -1774,6 +1777,323 @@ describe("Cline", () => {
 			// The default soft limit is 2; the task-level hard limit is preserved.
 			expect(cline.consecutiveMistakeLimit).toBe(7)
 			expect(cline.toolRepetitionSoftLimit).toBe(2)
+		})
+	})
+
+	describe("API handler disposal", () => {
+		const disposableApi = (task: Task) => {
+			const dispose = vi.fn()
+			task.api = Object.assign(Object.create(task.api), { dispose })
+			return dispose
+		}
+
+		it("disposes the replaced handler when the configuration changes while idle", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "t",
+				startTask: false,
+			})
+			const dispose = disposableApi(task)
+
+			task.updateApiConfiguration({ ...mockApiConfig })
+			expect(dispose).toHaveBeenCalledOnce()
+
+			await task.dispose()
+			expect(dispose).toHaveBeenCalledOnce()
+		})
+
+		/**
+		 * Replaces the request body behind `attemptApiRequest` with a stream the test
+		 * drives, so the lifecycle wrapper runs for real without prompt/tool setup.
+		 * `gate` holds the request in setup (before its first chunk) until opened.
+		 */
+		const controllableRequest = (task: Task) => {
+			let openGate!: () => void
+			const gate = new Promise<void>((resolve) => (openGate = resolve))
+			let finish!: () => void
+			const finished = new Promise<void>((resolve) => (finish = resolve))
+			vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(async function* () {
+				await gate
+				yield { type: "text", text: "a" }
+				await finished
+				yield { type: "text", text: "b" }
+			})
+			return { openGate, finish }
+		}
+
+		const newTask = () =>
+			new Task({ provider: mockProvider, apiConfiguration: mockApiConfig, task: "t", startTask: false })
+
+		it("keeps a handler replaced during request setup alive until that request settles", async () => {
+			const task = newTask()
+			const { openGate, finish } = controllableRequest(task)
+			const oldDispose = disposableApi(task)
+
+			const request = task.attemptApiRequest()
+			const first = request.next() // enters setup and blocks on the gate, isStreaming still false
+			await Promise.resolve()
+			expect(task.isStreaming).toBe(false)
+
+			task.updateApiConfiguration({ ...mockApiConfig })
+			expect(oldDispose).not.toHaveBeenCalled()
+
+			openGate()
+			await first
+			expect(oldDispose).not.toHaveBeenCalled()
+
+			finish()
+			for await (const _ of request) {
+				// drain
+			}
+			expect(oldDispose).toHaveBeenCalledOnce()
+
+			await task.dispose()
+			expect(oldDispose).toHaveBeenCalledOnce()
+		})
+
+		it("releases a handler replaced mid-stream when the stream is closed early, not at task disposal", async () => {
+			const task = newTask()
+			const { openGate } = controllableRequest(task)
+			const oldDispose = disposableApi(task)
+
+			openGate()
+			const request = task.attemptApiRequest()
+			await request.next()
+			task.updateApiConfiguration({ ...mockApiConfig })
+			expect(oldDispose).not.toHaveBeenCalled()
+
+			await request.return(undefined)
+			expect(oldDispose).toHaveBeenCalledOnce()
+		})
+
+		it("does not accumulate handlers across repeated mid-stream profile switches", async () => {
+			const task = newTask()
+			const disposals: Array<ReturnType<typeof vi.fn>> = []
+
+			for (let i = 0; i < 3; i++) {
+				const { openGate, finish } = controllableRequest(task)
+				disposals.push(disposableApi(task))
+				openGate()
+				const request = task.attemptApiRequest()
+				await request.next()
+				task.updateApiConfiguration({ ...mockApiConfig })
+				finish()
+				for await (const _ of request) {
+					// drain
+				}
+				expect(disposals[i]).toHaveBeenCalledOnce()
+			}
+
+			expect(getTaskTestAccess(task).retiredApis.size).toBe(0)
+		})
+
+		it("waits for every overlapping unit of work before disposing a replaced handler", async () => {
+			const task = newTask()
+			const first = controllableRequest(task)
+			const oldDispose = disposableApi(task)
+			first.openGate()
+			const requestA = task.attemptApiRequest()
+			await requestA.next()
+
+			const second = controllableRequest(task)
+			second.openGate()
+			const requestB = task.attemptApiRequest()
+			await requestB.next()
+
+			task.updateApiConfiguration({ ...mockApiConfig })
+			await requestA.return(undefined)
+			expect(oldDispose).not.toHaveBeenCalled()
+
+			await requestB.return(undefined)
+			expect(oldDispose).toHaveBeenCalledOnce()
+		})
+
+		it("disposes a handler retired by work that never settles when the task is disposed", async () => {
+			const task = newTask()
+			const { openGate } = controllableRequest(task)
+			const oldDispose = disposableApi(task)
+			openGate()
+			const request = task.attemptApiRequest()
+			await request.next()
+
+			task.updateApiConfiguration({ ...mockApiConfig })
+			const newDispose = disposableApi(task)
+			await task.dispose()
+			expect(oldDispose).toHaveBeenCalledOnce()
+			expect(newDispose).toHaveBeenCalledOnce()
+
+			// The request settling later must not dispose anything a second time.
+			await request.return(undefined)
+			expect(oldDispose).toHaveBeenCalledOnce()
+		})
+
+		it("keeps the handler alive for a manual condense started before the switch", async () => {
+			const task = newTask()
+			const oldDispose = disposableApi(task)
+			let release!: () => void
+			vi.spyOn(getTaskTestAccess(task), "condenseContextWithActiveApi").mockImplementation(
+				() => new Promise<void>((resolve) => (release = resolve)),
+			)
+
+			const condensing = task.condenseContext()
+			task.updateApiConfiguration({ ...mockApiConfig })
+			expect(oldDispose).not.toHaveBeenCalled()
+
+			release()
+			await condensing
+			expect(oldDispose).toHaveBeenCalledOnce()
+		})
+
+		it("logs and continues when a replaced handler's dispose throws", async () => {
+			const task = newTask()
+			const error = new Error("dispose failed")
+			task.api = Object.assign(Object.create(task.api), {
+				dispose: vi.fn(() => {
+					throw error
+				}),
+			})
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			expect(() => task.updateApiConfiguration({ ...mockApiConfig })).not.toThrow()
+			expect(consoleError).toHaveBeenCalledWith("Error disposing API handler:", error)
+			consoleError.mockRestore()
+		})
+
+		describe("through the real request lease", () => {
+			/** Lets the first `count` requests run the real lifecycle wrapper, then stops the loop. */
+			const realRequestsThenStop = (task: Task, count = 1) => {
+				const real = task.attemptApiRequest.bind(task)
+				let calls = 0
+				return vi.spyOn(task, "attemptApiRequest").mockImplementation((...args) => {
+					if (++calls <= count) return real(...args)
+					throw new Error("stop after the request under test")
+				})
+			}
+
+			it("closes a stream whose read failed, releasing the replaced handler (stream.return())", async () => {
+				const task = await createTaskWithManualRetries()
+				const oldDispose = disposableApi(task)
+				let releaseAfterAbort!: () => void
+				const afterAbort = new Promise<void>((resolve) => (releaseAfterAbort = resolve))
+				let firstChunkSent!: () => void
+				const firstChunk = new Promise<void>((resolve) => (firstChunkSent = resolve))
+				vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+					async function* () {
+						task.currentRequestAbortController = new AbortController()
+						yield { type: "text", text: "a" }
+						firstChunkSent()
+						// A host that ignores cancellation and keeps producing after the
+						// consumer gave up: only `return()` can end this generator.
+						await afterAbort
+						yield { type: "text", text: "late" }
+						yield { type: "text", text: "later" }
+					},
+				)
+				realRequestsThenStop(task)
+				vi.spyOn(console, "error").mockImplementation(() => {})
+
+				const loop = task.recursivelyMakeClineRequests([{ type: "text", text: "go" }])
+				await firstChunk
+				task.updateApiConfiguration({ ...mockApiConfig })
+				expect(oldDispose).not.toHaveBeenCalled()
+
+				// The read in flight is abandoned by the consumer (not failed by the stream).
+				task.currentRequestAbortController?.abort()
+				releaseAfterAbort()
+				await loop
+
+				await vi.waitFor(() => expect(oldDispose).toHaveBeenCalledOnce())
+				expect(getTaskTestAccess(task).retiredApis.size).toBe(0)
+			})
+
+			it("keeps a replaced handler alive through a retry until the retry's stream settles", async () => {
+				const task = newTask()
+				const oldDispose = disposableApi(task)
+				let startRetry!: () => void
+				const retryGate = new Promise<void>((resolve) => (startRetry = resolve))
+				let finishRetry!: () => void
+				const retryDone = new Promise<void>((resolve) => (finishRetry = resolve))
+				let attempt = 0
+				vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+					async function* () {
+						if (++attempt === 1) {
+							// The first attempt fails and retries through the public method,
+							// as the real first-chunk and context-window paths do.
+							await retryGate
+							yield* task.attemptApiRequest(1)
+							return
+						}
+						yield { type: "text", text: "retried" }
+						await retryDone
+					},
+				)
+
+				const request = task.attemptApiRequest()
+				const first = request.next()
+				await Promise.resolve()
+				task.updateApiConfiguration({ ...mockApiConfig })
+				expect(oldDispose).not.toHaveBeenCalled()
+
+				startRetry()
+				await first
+				expect(attempt).toBe(2)
+				expect(oldDispose).not.toHaveBeenCalled()
+
+				finishRetry()
+				for await (const _ of request) {
+					// drain
+				}
+				expect(oldDispose).toHaveBeenCalledOnce()
+			})
+
+			it("keeps a replaced handler alive until the background usage drain finishes", async () => {
+				const task = await createTaskWithManualRetries()
+				const oldDispose = disposableApi(task)
+				let finishDrain!: () => void
+				const drainGate = new Promise<void>((resolve) => (finishDrain = resolve))
+				let drainStarted!: () => void
+				const draining = new Promise<void>((resolve) => (drainStarted = resolve))
+				vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+					async function* () {
+						yield { type: "text", text: "a" }
+						// The main loop stops reading here and hands the rest of the stream to
+						// the background usage drain.
+						task.didRejectTool = true
+						yield { type: "text", text: "b" }
+						drainStarted()
+						await drainGate
+						yield { type: "usage", inputTokens: 1, outputTokens: 1 }
+					},
+				)
+				realRequestsThenStop(task)
+				vi.spyOn(console, "error").mockImplementation(() => {})
+
+				const loop = task.recursivelyMakeClineRequests([{ type: "text", text: "go" }])
+				// Reached only when the background drain reads past the main loop's last chunk.
+				await draining
+				task.updateApiConfiguration({ ...mockApiConfig })
+				// Give any premature release a chance to run before checking it did not.
+				await new Promise((resolve) => setTimeout(resolve, 0))
+				expect(oldDispose).not.toHaveBeenCalled()
+
+				finishDrain()
+				await loop
+				await vi.waitFor(() => expect(oldDispose).toHaveBeenCalledOnce())
+			})
+		})
+
+		it("disposes the current handler exactly once even when dispose is called twice", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "t",
+				startTask: false,
+			})
+			const dispose = disposableApi(task)
+
+			await Promise.all([task.dispose(), task.dispose()])
+			expect(dispose).toHaveBeenCalledOnce()
 		})
 	})
 

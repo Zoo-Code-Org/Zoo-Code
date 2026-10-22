@@ -7,6 +7,14 @@
 	"prConcurrentLimit": 5,
 	"prCreation": "immediate",
 	"ignoreDeps": ["@vscode/vsce"],
+	"lockFileMaintenance": {
+		"enabled": true,
+		"schedule": ["before 6am on monday"]
+	},
+	"vulnerabilityAlerts": {
+		"labels": ["security"],
+		"prConcurrentLimit": 0
+	},
 	"packageRules": [
 		{
 			"description": "Group GitHub Actions updates for one review pass.",
@@ -35,6 +43,11 @@
 			],
 			"matchUpdateTypes": ["minor", "patch"],
 			"groupName": "AI SDKs and providers"
+		},
+		{
+			"description": "Move ai and @ai-sdk/* together, including majors, so exact-pinned provider deps do not split.",
+			"matchPackageNames": ["ai", "/^@ai-sdk\\//"],
+			"groupName": "AI SDK core and providers"
 		},
 		{
 			"description": "Group frontend and UI patch/minor updates.",
