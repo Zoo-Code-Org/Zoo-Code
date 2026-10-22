@@ -499,8 +499,11 @@ jobs:
                             ? openPrHeads.get(String(parents[0].sha).toLowerCase())
                             : undefined;
                           // The open-PR map can predate a push to this PR: its own previous (or now
-                          // base) head is not a parent PR, so a self-match must not label it stacked.
-                          const parentPr = matchedPr === pr.number ? undefined : matchedPr;
+                          // base) head resolves back to this PR. That is not a parent PR, and it is
+                          // also not evidence that an existing stacked label is stale - leave every
+                          // stacked-label mutation untouched for this ambiguous self-match.
+                          if (matchedPr === pr.number) return;
+                          const parentPr = matchedPr;
                           const hasLabel = pr.labels.some(label => label.name === stackedLabel);
                           if (hasLabel && parentPr === undefined) {
                             await github.rest.issues.removeLabel({ owner, repo, issue_number: pr.number, name: stackedLabel });

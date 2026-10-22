@@ -750,6 +750,44 @@ describe("PR review-state workflow", () => {
 		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
 	})
 
+	it("leaves an existing stacked label untouched on a self-match", async () => {
+		// A valid label must survive a run whose open-PR map still contains this PR's own
+		// previous head: a self-match is not evidence that the relationship is stale.
+		const result = await runWorkflow({
+			labels: ["stacked"],
+			commitParents: [OLD_SHA],
+			openPrHeads: [{ number: 1437, sha: OLD_SHA }],
+		})
+
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["stacked"] }))
+		const labels = ((await result.getPullRequest()).data.labels || []).map((label: { name: string }) => label.name)
+		expect(labels).toContain("stacked")
+	})
+
+	it("keeps a valid stacked label through review-state reconciliation", async () => {
+		const result = await runWorkflow({
+			labels: ["stacked", "awaiting-maintainer"],
+			commitParents: [OLD_SHA],
+			openPrHeads: [{ number: 1436, sha: OLD_SHA }],
+			permissions: { maintainer: "write" },
+			reviews: [
+				{
+					login: "maintainer",
+					type: "User",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		// The reconcileLabels turn may replace review-state labels; the orthogonal stacked
+		// label must be neither removed nor re-added.
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
+		const labels = ((await result.getPullRequest()).data.labels || []).map((label: { name: string }) => label.name)
+		expect(labels).toContain("stacked")
+	})
+
 	it("removes a stale stacked label when the parent is not another open PR head", async () => {
 		const result = await runWorkflow({
 			labels: ["stacked"],
