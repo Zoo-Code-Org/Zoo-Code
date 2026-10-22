@@ -198,7 +198,9 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			)
 			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("EROFS"))
 			// The approved content survives the failed rollback as an explicit recovery artifact.
-			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("The approved new content was kept at"))
+			expect(mockPushToolResult).toHaveBeenCalledWith(
+				expect.stringContaining("The approved new content was kept at"),
+			)
 			// ...and no whole-patch checkpoint is recorded for the failed move.
 			// The destination was written (then rolled back): that is a workspace mutation, so
 			// the partial-state checkpoint is recorded even though the patch reports failure.
