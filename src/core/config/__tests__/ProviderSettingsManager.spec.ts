@@ -19,6 +19,12 @@ import { ProviderSettingsManager, ProviderProfiles } from "../ProviderSettingsMa
 // filtering is driven by real capability flags, and so this suite stays isolated from
 // sibling specs that also mock "../../../api" (avoids a cross-file mock leak under
 // Vitest's singleFork pool).
+// Every handler export() builds, so tests can check each temporary one is released. A test can
+// set `failGetModel` to make reading model info throw.
+const builtHandlers = vi.hoisted(() =>
+	Object.assign([] as Array<{ apiProvider?: string; dispose: ReturnType<typeof vi.fn> }>, { failGetModel: false }),
+)
+
 vi.mock("../../../api", async () => {
 	const types = await vi.importActual<typeof import("@roo-code/types")>("@roo-code/types")
 	const zaiModels = { ...types.internationalZAiModels, ...types.mainlandZAiModels } as Record<string, unknown>
@@ -35,9 +41,19 @@ vi.mock("../../../api", async () => {
 		}
 	}
 	return {
-		buildApiHandler: (config: { apiProvider?: string; apiModelId?: string }) => ({
-			getModel: () => ({ id: config?.apiModelId ?? "", info: modelInfoFor(config) }),
-		}),
+		buildApiHandler: (config: { apiProvider?: string; apiModelId?: string }) => {
+			const handler = {
+				apiProvider: config?.apiProvider,
+				getModel: () => {
+					if (builtHandlers.failGetModel) throw new Error("no model info")
+					return { id: config?.apiModelId ?? "", info: modelInfoFor(config) }
+				},
+				// Handlers such as GitHub Copilot hold a host listener export() must release.
+				dispose: vi.fn(),
+			}
+			builtHandlers.push(handler)
+			return handler
+		},
 	}
 })
 
@@ -1192,6 +1208,58 @@ describe("ProviderSettingsManager", () => {
 	})
 
 	describe("Export", () => {
+		it("releases every temporary API handler it builds to read model info", async () => {
+			builtHandlers.length = 0
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "copilot",
+					apiConfigs: {
+						copilot: { id: "copilot-id", apiProvider: providerIdentifiers.githubCopilot },
+						glm: { id: "glm-id", apiProvider: providerIdentifiers.zai, apiModelId: "glm-5.1" },
+					},
+				} satisfies ProviderProfiles),
+			)
+
+			await providerSettingsManager.export()
+
+			expect(builtHandlers.map((handler) => handler.apiProvider).sort()).toEqual(
+				[providerIdentifiers.githubCopilot, providerIdentifiers.zai].sort(),
+			)
+			for (const handler of builtHandlers) {
+				expect(handler.dispose).toHaveBeenCalledOnce()
+			}
+		})
+
+		it("still exports, and still releases the handler, when reading model info fails", async () => {
+			builtHandlers.length = 0
+			builtHandlers.failGetModel = true
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			try {
+				mockSecrets.get.mockResolvedValue(
+					JSON.stringify({
+						currentApiConfigName: "copilot",
+						apiConfigs: {
+							copilot: {
+								id: "copilot-id",
+								apiProvider: providerIdentifiers.githubCopilot,
+								modelMaxTokens: 1,
+							},
+						},
+					} satisfies ProviderProfiles),
+				)
+
+				const exported = await providerSettingsManager.export()
+
+				// Filtering is skipped rather than guessing, and the handler is still released.
+				expect(exported.apiConfigs.copilot.modelMaxTokens).toBe(1)
+				expect(builtHandlers).toHaveLength(1)
+				expect(builtHandlers[0].dispose).toHaveBeenCalledOnce()
+			} finally {
+				builtHandlers.failGetModel = false
+				warnSpy.mockRestore()
+			}
+		})
+
 		it("should preserve retired provider profiles with full fields", async () => {
 			const existingConfig: ProviderProfiles = {
 				currentApiConfigName: "retired",
