@@ -168,4 +168,4 @@ const McpServerRestriction: React.FC<McpServerRestrictionProps> = ({ customMode,
 }
 
 export default React.memo(McpServerRestriction)
-export { McpServerRestriction as McpServerRestrictionImpl, arraysEqualOrBothUndefined }
+export { arraysEqualOrBothUndefined }

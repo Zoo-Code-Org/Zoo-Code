@@ -513,7 +513,11 @@ export function middleOutTruncate(text: string, maxChars: number): string {
 	return `${head}${buildMarker(removed)}${tail}`
 }
 
-/** Estimated character cost of a whole conversation, using the same accounting as truncation. */
+/**
+ * Estimated character cost of a whole conversation, using the same accounting as truncation.
+ *
+ * @internal Exported for focused implementation tests.
+ */
 export function estimateMessagesChars(messages: Anthropic.Messages.MessageParam[]): number {
 	return messages.reduce((sum, message) => sum + estimateContentChars(message.content), 0)
 }
@@ -701,6 +705,8 @@ function parseLeakedInvokeParams(
  *
  * `validTools` may be a bare name set (no schemas, so every parameter stays a literal string) or a
  * map from tool name to its parameter schema, which enables typed conversion.
+ *
+ * @internal Exported for focused implementation tests.
  */
 export function extractLeakedToolCalls(
 	text: string,
