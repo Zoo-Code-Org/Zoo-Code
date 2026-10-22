@@ -1,0 +1,31 @@
+﻿
+ RUN  v4.1.11 C:/work/Zoo-Code-fork/vps2-f6-wt/src
+
+node : 上午6:34:02 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${absolutepath}/
+At line:1 char:182
++ ... f6-wt\src'; node node_modules\vitest\vitest.mjs run core/webview/__te ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (上午6:34:02 [vite...{absolutepath}/:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  Plugin: builtin:vite-resolve
+上午6:34:02 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${cachedpath}/
+  Plugin: builtin:vite-resolve
+上午6:34:02 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${tempfile}/
+  Plugin: builtin:vite-resolve
+上午6:34:02 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${tempfile}/
+  Plugin: builtin:vite-resolve
+{"t":55,"l":"info","m":"[ContextProxy] Migrating legacy Roo Code Router state to setup-needed fallback"}
+{"t":2,"l":"info","m":"[ContextProxy] Found invalid provider \"invalid-removed-provider\" in storage - clearing it"}
+{"t":2,"l":"info","m":"[ContextProxy] Found invalid provider \"invalid-removed-provider\" in storage - clearing it"}
+{"t":3,"l":"info","m":"Clearing old v1 default condensing prompt from customSupportPrompts.CONDENSE - user will now get the improved v2 default"}
+{"t":1,"l":"info","m":"Clearing old v1 default condensing prompt from customSupportPrompts.CONDENSE - user will now get the improved v2 default"}
+··································································································································································{"t":2232,"l":"info","m":"[ContextProxy] Sanitizing invalid provider \"bogus-provider\" - resetting to undefined"}
+··························{"t":83,"l":"info","m":"[ContextProxy] Sanitizing invalid provider \"bogus-provider\" - resetting to undefined"}
+···········································································································································································································································································
+
+ Test Files  5 passed (5)
+      Tests  455 passed (455)
+   Start at  06:34:01
+   Duration  4.41s (transform 5.18s, setup 410ms, import 10.12s, tests 5.29s, environment 0ms)
+
