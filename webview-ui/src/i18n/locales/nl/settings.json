@@ -622,7 +622,7 @@
 			"baseUrl": "Basis-URL (optioneel)",
 			"modelId": "Model-ID",
 			"apiKey": "Ollama API-sleutel",
-			"apiKeyHelp": "Optionele API-sleutel voor geauthenticeerde Ollama-instanties of cloudservices. Laat leeg voor lokale installaties.",
+			"apiKeyHelp": "Optionele API-sleutel voor Ollama-instanties die authenticatie nodig hebben, of voor cloudservices. Zoo Code stuurt de sleutel alleen naar HTTPS- of loopback-eindpunten. Een extern HTTP-eindpunt krijgt geen sleutel, omdat de sleutel als leesbare tekst zou reizen. Gebruik HTTPS voor een externe instantie die een sleutel nodig heeft. Laat dit leeg voor een lokale installatie.",
 			"numCtx": "Contextvenstergrootte (num_ctx)",
 			"numCtxHelp": "Overschrijft de standaard contextvenstergrootte van het model. Laat leeg om de Modelfile-configuratie van het model te gebruiken. De minimumwaarde is 128.",
 			"thinking": "Redeneren inschakelen",
@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Opdrachtuitvoer standaard inklappen",
+			"description": "Toon opdrachtuitvoer ingeklapt, ook van de inline-terminal. Klap deze indien nodig handmatig uit. Dit verandert de uitvoering van opdrachten niet."
+		},
 		"basic": {
 			"label": "Terminalinstellingen: Basis",
 			"description": "Basis terminalinstellingen"
