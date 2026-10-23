@@ -16,6 +16,7 @@ vi.mock("fs/promises", async (importOriginal) => ({
 }))
 vi.mock("../../../utils/safeWriteJson", () => ({
 	safeWriteJson: hoisted.safeWriteJsonMock,
+	recoverJsonFile: vi.fn().mockResolvedValue(undefined),
 }))
 
 // Import after mocks
@@ -221,7 +222,7 @@ describe("taskMessages.readTaskMessages", () => {
 			originalError: missing,
 			message: expect.stringContaining("(code: ENOENT)"),
 		})
-		expect(hoisted.readFileMock).toHaveBeenCalledTimes(2)
+		expect(hoisted.readFileMock).toHaveBeenCalledTimes(3)
 	})
 
 	it("does not retry non-ENOENT read failures and surfaces the underlying code", async () => {

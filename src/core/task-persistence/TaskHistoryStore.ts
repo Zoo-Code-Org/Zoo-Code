@@ -8,7 +8,7 @@ import { historyItemSchema, type HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, withFileLock } from "../../utils/fileLock"
-import { safeWriteJson } from "../../utils/safeWriteJson"
+import { safeWriteJson, removeJsonBackups } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
 import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
@@ -280,7 +280,10 @@ export class TaskHistoryStore {
 			// Remove per-task file (best-effort)
 			try {
 				const filePath = await this.getTaskFilePath(taskId)
-				await withFileLock(filePath, (absoluteFilePath) => fs.unlink(absoluteFilePath))
+				await withFileLock(filePath, async (absoluteFilePath) => {
+					await removeJsonBackups(absoluteFilePath)
+					await fs.unlink(absoluteFilePath)
+				})
 			} catch {
 				// File may already be deleted
 			}
@@ -308,7 +311,10 @@ export class TaskHistoryStore {
 				// Remove per-task file (best-effort)
 				try {
 					const filePath = await this.getTaskFilePath(taskId)
-					await withFileLock(filePath, (absoluteFilePath) => fs.unlink(absoluteFilePath))
+					await withFileLock(filePath, async (absoluteFilePath) => {
+						await removeJsonBackups(absoluteFilePath)
+						await fs.unlink(absoluteFilePath)
+					})
 				} catch {
 					// File may already be deleted
 				}

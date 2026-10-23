@@ -3,7 +3,8 @@ import * as fsSync from "fs"
 import * as path from "path"
 import { JsonStreamStringify } from "json-stream-stringify"
 
-import { acquireFileLock } from "./fileLock"
+import { acquireFileLock, withFileLock } from "./fileLock"
+import { tracePersistenceEvent } from "./persistenceTrace"
 
 /**
  * Stages reported through the optional `trace` callback. They mark the
@@ -76,7 +77,7 @@ function getTempFilePrefix(absoluteFilePath: string, kind: "new" | "bak"): strin
  * @returns Whether leftover files were found, and the backup path that was
  * restored, if any.
  */
-async function recoverInterruptedReplacement(
+async function recoverInterruptedReplacementUnchecked(
 	absoluteFilePath: string,
 ): Promise<{ foundLeftovers: boolean; restoredFrom: string | null }> {
 	const dirPath = path.dirname(absoluteFilePath)
@@ -86,9 +87,8 @@ async function recoverInterruptedReplacement(
 	let entries: string[]
 	try {
 		entries = await fs.readdir(dirPath)
-	} catch {
-		// The directory is unreadable or was removed; the write itself
-		// reports that error below.
+	} catch (error) {
+		if (getErrorCode(error) !== "ENOENT") throw error
 		return { foundLeftovers: false, restoredFrom: null }
 	}
 
@@ -104,27 +104,30 @@ async function recoverInterruptedReplacement(
 
 	try {
 		await fs.access(absoluteFilePath)
-	} catch {
-		// The canonical path is absent. An interrupted two-step replacement
-		// leaves the committed content in the newest backup, so restore it
-		// and keep readers on the last committed state.
+	} catch (error) {
+		if (getErrorCode(error) !== "ENOENT") throw error
+		// Ignore only backups removed since readdir. Other inspection failures
+		// must stop the write rather than discard uninspected committed data.
 		const backupStats = await Promise.all(
 			orphanedPaths
 				.filter((orphanPath) => path.basename(orphanPath).startsWith(backupPrefix))
-				.map(async (backupPath) => ({ backupPath, mtimeMs: (await fs.stat(backupPath)).mtimeMs })),
+				.map(async (backupPath) => {
+					try {
+						return { backupPath, mtimeMs: (await fs.stat(backupPath)).mtimeMs }
+					} catch (statError) {
+						if (getErrorCode(statError) !== "ENOENT") throw statError
+						return null
+					}
+				}),
 		)
-		if (backupStats.length > 0) {
-			backupStats.sort((a, b) => b.mtimeMs - a.mtimeMs)
-			const newestBackupPath = backupStats[0].backupPath
-			try {
-				await fs.rename(newestBackupPath, absoluteFilePath)
-				restoredFrom = newestBackupPath
-			} catch (restoreError) {
-				console.error(
-					`Failed to restore interrupted-write backup ${newestBackupPath} to ${absoluteFilePath}:`,
-					restoreError,
-				)
-			}
+		const backups = backupStats.filter((backup) => backup !== null)
+		backups.sort((a, b) => b.mtimeMs - a.mtimeMs || b.backupPath.localeCompare(a.backupPath))
+		if (backups.length > 0) {
+			const newestBackupPath = backups[0].backupPath
+			// A failed restore leaves every backup intact and aborts the write.
+			// In particular, a merge must never observe null in this state.
+			await fs.rename(newestBackupPath, absoluteFilePath)
+			restoredFrom = newestBackupPath
 		}
 	}
 
@@ -140,6 +143,59 @@ async function recoverInterruptedReplacement(
 	}
 
 	return { foundLeftovers: true, restoredFrom }
+}
+
+async function withRecoveryTrace<T>(absoluteFilePath: string, operation: () => Promise<T>): Promise<T> {
+	try {
+		return await operation()
+	} catch (error) {
+		tracePersistenceEvent("json-recovery-failed", {
+			filePath: absoluteFilePath,
+			detail: getErrorCode(error) ?? String(error),
+		})
+		throw error
+	}
+}
+
+function getErrorCode(error: unknown): string | undefined {
+	return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+		? error.code
+		: undefined
+}
+
+/** Recover a missing JSON file for a reader, serialized with writers and deletion. */
+export async function recoverJsonFile(filePath: string): Promise<void> {
+	const absoluteFilePath = path.resolve(filePath)
+	return withRecoveryTrace(absoluteFilePath, async () => {
+		let entries: string[]
+		try {
+			entries = await fs.readdir(path.dirname(absoluteFilePath))
+		} catch (error) {
+			if (getErrorCode(error) === "ENOENT") return
+			throw error
+		}
+		// A genuinely absent file has nothing to recover. Do not contend with a
+		// first writer (or create a lock directory) merely to report ENOENT.
+		const backupPrefix = getTempFilePrefix(absoluteFilePath, "bak")
+		if (!entries.some((entry) => entry.startsWith(backupPrefix) && entry.endsWith(".tmp"))) return
+		// This is only a hint: inspect the canonical file and backups again under
+		// the lock before restoring or cleaning anything.
+		await withFileLock(absoluteFilePath, recoverInterruptedReplacementUnchecked)
+	})
+}
+
+/** Called under the canonical file lock before deleting it, so backups cannot resurrect it. */
+export async function removeJsonBackups(absoluteFilePath: string): Promise<void> {
+	const prefix = getTempFilePrefix(absoluteFilePath, "bak")
+	for (const entry of await fs.readdir(path.dirname(absoluteFilePath))) {
+		if (entry.startsWith(prefix) && entry.endsWith(".tmp")) {
+			try {
+				await fs.unlink(path.join(path.dirname(absoluteFilePath), entry))
+			} catch (error) {
+				if (getErrorCode(error) !== "ENOENT") throw error
+			}
+		}
+	}
 }
 
 /**
@@ -194,7 +250,12 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// Heal any state an interrupted previous write left behind: an absent
 		// canonical path with an orphaned backup, or leftover replacement
 		// files. Runs first so a merge callback reads the restored content.
-		const recovery = await recoverInterruptedReplacement(absoluteFilePath)
+		const recovery = await withRecoveryTrace(absoluteFilePath, () =>
+			recoverInterruptedReplacementUnchecked(absoluteFilePath),
+		).catch((error: unknown) => {
+			options?.trace?.({ stage: "recover", detail: `failed: ${getErrorCode(error) ?? String(error)}` })
+			throw error
+		})
 		if (recovery.foundLeftovers) {
 			options?.trace?.({ stage: "recover", detail: recovery.restoredFrom ?? "cleaned-leftovers" })
 		}
@@ -216,13 +277,11 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			data = options.merge(existing, data)
 		}
 
-		// Step 1: Write data to a new temporary file and flush it to storage,
-		// so the replacement content is durable before it is committed.
+		// Step 1: Stream the replacement to a temporary file before commit.
 		options?.trace?.({ stage: "write-start" })
 		actualTempNewFilePath = createTempFilePath(absoluteFilePath, "new")
 
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
-		await _flushFileToDisk(actualTempNewFilePath)
 
 		// Step 2: Commit the replacement with a single atomic rename. The
 		// committed target stays in place until this rename lands, so a
@@ -243,8 +302,9 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			// second rename fails, and the recovery pass at the start of the
 			// next write repairs a crash between the two renames.
 			options?.trace?.({ stage: "backup-rename", detail: "eperm-fallback" })
-			actualTempBackupFilePath = createTempFilePath(absoluteFilePath, "bak")
-			await fs.rename(absoluteFilePath, actualTempBackupFilePath)
+			const backupPath = createTempFilePath(absoluteFilePath, "bak")
+			await fs.rename(absoluteFilePath, backupPath)
+			actualTempBackupFilePath = backupPath
 			options?.trace?.({ stage: "replacement-rename", detail: "eperm-fallback" })
 			await fs.rename(actualTempNewFilePath, absoluteFilePath)
 		}
@@ -303,17 +363,8 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			}
 		}
 
-		// Cleanup the .bak file if it still needs to be (i.e., wasn't successfully restored)
-		if (actualTempBackupFilePath) {
-			try {
-				await fs.unlink(actualTempBackupFilePath)
-			} catch (cleanupError) {
-				console.error(
-					`[Catch] Failed to clean up temporary backup file ${actualTempBackupFilePath}:`,
-					cleanupError,
-				)
-			}
-		}
+		// A failed rollback leaves the last committed copy in the backup.
+		// Preserve it so a subsequent read or write can recover it.
 		throw originalError // This MUST be the error that rejects the promise.
 	} finally {
 		// Release the lock in the main finally block.
@@ -354,25 +405,6 @@ async function _streamDataToFile(targetPath: string, data: any, prettyPrint = fa
 		fileWriteStream.on("finish", resolve)
 		stringifyStream.pipe(fileWriteStream)
 	})
-}
-
-/**
- * Flushes a fully written temp file to storage before it is committed.
- * Best effort: durability against power loss is a bonus here, process-crash
- * safety comes from the rename protocol itself, and a filesystem that
- * refuses fsync must not block the write.
- */
-async function _flushFileToDisk(targetPath: string): Promise<void> {
-	try {
-		const handle = await fs.open(targetPath, "r")
-		try {
-			await handle.sync()
-		} finally {
-			await handle.close()
-		}
-	} catch (flushError) {
-		console.error(`Failed to flush ${targetPath} to storage before commit:`, flushError)
-	}
 }
 
 export { safeWriteJson }

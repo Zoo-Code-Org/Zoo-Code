@@ -129,10 +129,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Mirror persistence trace lines (task ID + process ID) into the output
 	// channel and the console, so a restart-persistence investigation can
 	// order UI-message writer activity across extension-host restarts.
-	setPersistenceTraceSink((line) => {
-		outputChannel.appendLine(line)
-		console.log(line)
-	})
+	setPersistenceTraceSink(createDualLogger(createOutputChannelLogger(outputChannel)))
 	outputChannel.appendLine(`${Package.name} extension activated - ${JSON.stringify(Package)}`)
 
 	// Initialize network proxy configuration early, before any network requests.

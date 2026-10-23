@@ -1,10 +1,13 @@
 import * as fs from "fs/promises"
 
+import { recoverJsonFile } from "../../utils/safeWriteJson"
+
 // safeWriteJson commits a replacement with a single atomic rename. Only the
 // Windows EPERM fallback replaces a file in two renames (target to backup,
 // new file to target), because a single rename over an open file fails with
 // EPERM on Windows. A reader can see ENOENT between those two renames, so
-// retry once.
+// retry once. If the path is still absent, acquire the writer lock and
+// recover any committed backup before trying the read again.
 const READ_RETRY_MIN_MS = 1
 const READ_RETRY_MAX_MS = 10
 const READ_RETRY_RANGE_MS = READ_RETRY_MAX_MS - READ_RETRY_MIN_MS + 1
@@ -43,6 +46,12 @@ export async function readFileWithMissingRetry(filePath: string): Promise<string
 
 		const retryDelay = READ_RETRY_MIN_MS + Math.floor(Math.random() * READ_RETRY_RANGE_MS)
 		await new Promise((resolve) => setTimeout(resolve, retryDelay))
-		return fs.readFile(filePath, "utf8")
+		try {
+			return await fs.readFile(filePath, "utf8")
+		} catch (retryError) {
+			if (getErrorCode(retryError) !== "ENOENT") throw retryError
+			await recoverJsonFile(filePath)
+			return fs.readFile(filePath, "utf8")
+		}
 	}
 }
