@@ -33,6 +33,7 @@ import type { Mode } from "../shared/modes"
 import type { ClineProvider } from "../core/webview/ClineProvider"
 import type { ClineProviderFactory } from "../core/webview/ClineProviderFactory"
 import { readTaskMessages } from "../core/task-persistence/taskMessages"
+import { formatErrorDetail } from "../core/task-persistence/readFileWithMissingRetry"
 import { tracePersistenceEvent } from "../core/task-persistence/persistenceTrace"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
@@ -361,8 +362,12 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				taskId,
 				globalStoragePath: this.sidebarProvider.contextProxy.globalStorageUri.fsPath,
 			})
-		} catch {
-			tracePersistenceEvent("ui-messages-marker-check", { taskId, result: "read-error" })
+		} catch (error) {
+			tracePersistenceEvent("ui-messages-marker-check", {
+				taskId,
+				result: "read-error",
+				detail: formatErrorDetail(error),
+			})
 			return false
 		}
 		const hasText = uiMessages.some((message) => message.text?.includes(text))

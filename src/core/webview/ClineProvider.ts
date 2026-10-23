@@ -98,7 +98,7 @@ import type { CodeIndexWorkspaceScope } from "../../services/code-index/code-ind
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
 
-import { fileExistsAtPath } from "../../utils/fs"
+import { getErrorCode, readFileWithMissingRetry } from "../task-persistence/readFileWithMissingRetry"
 import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
 import { getWorkspaceGitInfo } from "../../utils/git"
 import { getWorkspacePath } from "../../utils/path"
@@ -2435,21 +2435,15 @@ export class ClineProvider
 		const taskDirPath = await getTaskDirectoryPath(globalStoragePath, id)
 		const apiConversationHistoryFilePath = path.join(taskDirPath, GlobalFileNames.apiConversationHistory)
 		const uiMessagesFilePath = path.join(taskDirPath, GlobalFileNames.uiMessages)
-		const fileExists = await fileExistsAtPath(apiConversationHistoryFilePath)
-
 		let apiConversationHistory: Anthropic.MessageParam[] = []
-
-		if (fileExists) {
-			try {
-				apiConversationHistory = JSON.parse(await fs.readFile(apiConversationHistoryFilePath, "utf8"))
-			} catch (error) {
-				console.warn(
-					`[getTaskWithId] api_conversation_history.json corrupted for task ${id}, returning empty history: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
-		} else {
+		try {
+			apiConversationHistory = JSON.parse(await readFileWithMissingRetry(apiConversationHistoryFilePath))
+		} catch (error) {
+			// Preserve the existing missing/corrupt-history behavior, but never
+			// turn an I/O or recovery failure into an empty conversation.
+			if (!(error instanceof SyntaxError) && getErrorCode(error) !== "ENOENT") throw error
 			console.warn(
-				`[getTaskWithId] api_conversation_history.json missing for task ${id}, returning empty history`,
+				`[getTaskWithId] API history unavailable for task ${id}, returning empty history: ${error instanceof Error ? error.message : String(error)}`,
 			)
 		}
 

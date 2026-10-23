@@ -64,7 +64,7 @@ const FAILURE_ARTIFACTS_DIR = "test-failures"
  * directory inside the checkout, then removes the temporary scenario root.
  * CI uploads that directory as a run artifact, so the failure that used to be
  * deleted in the cleanup path stays inspectable: phase results, VS Code logs,
- * and the extension's global storage with the task files.
+ * and the extension's task files. Global state databases are excluded.
  *
  * The directory is keyed by the unique scenario root name and cleared before
  * copying, so retried runs cannot mix artifacts from different failures.
@@ -92,8 +92,14 @@ export async function preserveScenarioWorkspace(scenarioWorkspace: ScenarioWorks
 		},
 		{
 			label: "task files",
-			source: path.join(scenarioWorkspace.userData, "User", "globalStorage"),
-			destination: path.join(destinationRoot, "global-storage"),
+			source: path.join(
+				scenarioWorkspace.userData,
+				"User",
+				"globalStorage",
+				"zoocodeorganization.zoo-code",
+				"tasks",
+			),
+			destination: path.join(destinationRoot, "tasks"),
 		},
 	]
 

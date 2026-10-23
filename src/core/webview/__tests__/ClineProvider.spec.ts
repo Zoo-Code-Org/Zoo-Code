@@ -30,7 +30,7 @@ import { setTtsEnabled } from "../../../utils/tts"
 import { ContextProxy } from "../../config/ContextProxy"
 import { WorkspaceIndexingEnablementManager } from "../../../services/code-index/workspace-indexing-enablement-manager"
 import { Task, TaskOptions } from "../../task/Task"
-import { safeWriteJson } from "../../../utils/safeWriteJson"
+import { recoverJsonFile, safeWriteJson } from "../../../utils/safeWriteJson"
 
 import { ClineProvider } from "../ClineProvider"
 import { webviewMessageHandler } from "../webviewMessageHandler"
@@ -5846,11 +5846,38 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 			const deleteTaskSpy = vi.spyOn(provider, "deleteTaskFromState")
 
-			const result = await (provider as any).getTaskWithId("missing-api-file-task")
+			const result = await provider.getTaskWithId("missing-api-file-task")
 
 			expect(result.historyItem).toEqual(historyItem)
 			expect(result.apiConversationHistory).toEqual([])
 			expect(deleteTaskSpy).not.toHaveBeenCalled()
+		})
+
+		it("recovers API history through the shared reader before returning a task", async () => {
+			const historyItem = { id: "recover-api-task", task: "test task", ts: Date.now() }
+			vi.mocked(mockContext.globalState.get).mockImplementation((key: string) =>
+				key === "taskHistory" ? [historyItem] : undefined,
+			)
+			const fsp = await import("fs/promises")
+			const missing = Object.assign(new Error("missing"), { code: "ENOENT" })
+			const messages = [{ role: "user", content: "committed" }]
+			vi.mocked(fsp.readFile)
+				.mockRejectedValueOnce(missing)
+				.mockRejectedValueOnce(missing)
+				.mockResolvedValueOnce(JSON.stringify(messages))
+			const result = await provider.getTaskWithId(historyItem.id)
+			expect(result.apiConversationHistory).toEqual(messages)
+			expect(recoverJsonFile).toHaveBeenCalledWith(result.apiConversationHistoryFilePath)
+		})
+
+		it.each(["EIO", "EACCES", "ELOCKED"])("does not return empty history after a %s read failure", async (code) => {
+			const historyItem = { id: "failed-api-task", task: "test task", ts: Date.now() }
+			vi.mocked(mockContext.globalState.get).mockImplementation((key: string) =>
+				key === "taskHistory" ? [historyItem] : undefined,
+			)
+			const fsp = await import("fs/promises")
+			vi.mocked(fsp.readFile).mockRejectedValueOnce(Object.assign(new Error(code), { code }))
+			await expect(provider.getTaskWithId(historyItem.id)).rejects.toMatchObject({ code })
 		})
 
 		it("returns empty apiConversationHistory when file contains invalid JSON", async () => {
@@ -5862,24 +5889,17 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				return undefined
 			})
 
-			// Make fileExistsAtPath return true so the read path is exercised
-			const fsUtils = await import("../../../utils/fs")
-			vi.spyOn(fsUtils, "fileExistsAtPath").mockResolvedValue(true)
-
 			// Make readFile return corrupted JSON
 			const fsp = await import("fs/promises")
 			vi.mocked(fsp.readFile).mockResolvedValueOnce("{not valid json!!!" as never)
 
 			const deleteTaskSpy = vi.spyOn(provider, "deleteTaskFromState")
 
-			const result = await (provider as any).getTaskWithId("corrupt-api-task")
+			const result = await provider.getTaskWithId("corrupt-api-task")
 
 			expect(result.historyItem).toEqual(historyItem)
 			expect(result.apiConversationHistory).toEqual([])
 			expect(deleteTaskSpy).not.toHaveBeenCalled()
-
-			// Restore the spy
-			vi.mocked(fsUtils.fileExistsAtPath).mockRestore()
 		})
 	})
 
