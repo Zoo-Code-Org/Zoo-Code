@@ -365,6 +365,19 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 
 				expect(await fs.readFile(lfsFile, "utf-8")).toBe("Modified binary content")
 			})
+
+			it("treats a negation rule as not-ignored in isPathIgnored", async () => {
+				// A negation rule re-includes a path matched by an earlier rule
+				// (".env*" then "!.env.example"). check-ignore -v prints the negation
+				// match and would misclassify the file as ignored; without -v only
+				// genuinely ignored paths print, so isPathIgnored must agree with
+				// what the shadow repo actually stages.
+				const excludesPath = path.join(service.checkpointsDir, ".git", "info", "exclude")
+				await fs.appendFile(excludesPath, "\n.env*\n!.env.example\n")
+
+				expect(await service.isPathIgnored(".env")).toBe(true)
+				expect(await service.isPathIgnored(".env.example")).toBe(false)
+			})
 		})
 
 		describe(`${klass.name}#create`, () => {
