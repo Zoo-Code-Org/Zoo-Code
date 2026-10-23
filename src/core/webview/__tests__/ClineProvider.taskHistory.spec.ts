@@ -618,10 +618,12 @@ describe("ClineProvider Task History Synchronization", () => {
 			["whitespace", "   "],
 			["undefined", undefined],
 		])("clears the title when given %s", async (_label, title) => {
-			await provider.updateTaskHistory(
-				createHistoryItem({ id: "task-clear", task: "Original prompt", title: "Old title" }),
-				{ broadcast: false },
-			)
+			// Set the starting title through the rename path: updateTaskHistory drops `title`.
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-clear", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			await provider.renameTaskWithId("task-clear", "Old title")
+			expect(getStored("task-clear")?.title).toBe("Old title")
 
 			await provider.renameTaskWithId("task-clear", title)
 
@@ -650,6 +652,33 @@ describe("ClineProvider Task History Synchronization", () => {
 			await Promise.all([save, rename])
 
 			expect(getStored("task-race")).toMatchObject({ title: "Renamed", tokensIn: 500 })
+		})
+
+		it("does not write a title through a full-item update", async () => {
+			await provider.updateTaskHistory(
+				createHistoryItem({ id: "task-title-owner", task: "Original prompt", title: "Stale title" }),
+				{ broadcast: false },
+			)
+
+			expect(getStored("task-title-owner")).toMatchObject({ id: "task-title-owner", task: "Original prompt" })
+			expect(getStored("task-title-owner")?.title).toBeUndefined()
+		})
+
+		it("does not revert a rename when a full-item update from an older snapshot lands", async () => {
+			const item = createHistoryItem({ id: "task-stale-write", task: "Original prompt", status: "active" })
+			await provider.updateTaskHistory(item, { broadcast: false })
+
+			// A prior rename leaves a title on the record; a caller reading the item now
+			// (e.g. onTaskCompleted, mode or profile switch) captures it in a pre-lock snapshot.
+			await provider.renameTaskWithId("task-stale-write", "Old title")
+			const staleSnapshot = { ...item, title: "Old title" }
+
+			// A queued rename completes after the snapshot was taken.
+			await provider.renameTaskWithId("task-stale-write", "Renamed")
+
+			await provider.updateTaskHistory({ ...staleSnapshot, status: "completed" }, { broadcast: false })
+
+			expect(getStored("task-stale-write")).toMatchObject({ title: "Renamed", status: "completed" })
 		})
 
 		it("does nothing for an unknown task", async () => {

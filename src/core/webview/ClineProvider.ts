@@ -3274,6 +3274,10 @@ export class ClineProvider
 	 * Updates a task in the task history and optionally broadcasts the updated history to the webview.
 	 * Now delegates to TaskHistoryStore for per-task file persistence.
 	 *
+	 * This writer never owns the `title` field: `title` is written only by the rename path
+	 * (`renameTaskWithId` via `taskHistoryStore.atomicReadAndUpdate`). Callers here build items
+	 * from snapshots read before taking the store lock, so any title they carry can be stale.
+	 *
 	 * @param item The history item to update or add
 	 * @param options.broadcast Whether to broadcast the updated history to the webview (default: true)
 	 * @returns The updated task history array
@@ -3281,13 +3285,17 @@ export class ClineProvider
 	async updateTaskHistory(item: HistoryItem, options: { broadcast?: boolean } = {}): Promise<HistoryItem[]> {
 		const { broadcast = true } = options
 
-		const history = await this.taskHistoryStore.upsert(item)
+		// Drop the snapshot's title so upsertCore preserves the value held under the store lock
+		// instead of treating a stale title as a changed field and reverting a concurrent rename.
+		const { title: _title, ...itemWithoutTitle } = item
+
+		const history = await this.taskHistoryStore.upsert(itemWithoutTitle)
 		this.recentTasksCache = undefined
 
 		// Broadcast the updated history to the webview if requested.
 		// Prefer per-item updates to avoid repeatedly cloning/sending the full history.
 		if (broadcast && this.isViewLaunched) {
-			const updatedItem = this.taskHistoryStore.get(item.id) ?? item
+			const updatedItem = this.taskHistoryStore.get(item.id) ?? itemWithoutTitle
 			await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
 		}
 
