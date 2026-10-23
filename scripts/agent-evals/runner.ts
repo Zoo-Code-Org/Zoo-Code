@@ -37,6 +37,11 @@ export interface AgentClient {
 // The adapter owns processes, sockets, files and credentials. The controller
 // only sees these operations, so tests can drive it with synthetic IPC and a
 // deterministic clock.
+export interface FinalWorkspaceSnapshot {
+	files: readonly AgentFixtureWorkspaceFile[]
+	truncated: boolean
+}
+
 export interface AgentRuntime {
 	launch(workspaceFiles: readonly AgentFixtureWorkspaceFile[]): Promise<AgentHost>
 	connect(): AgentClient
@@ -46,6 +51,10 @@ export interface AgentRuntime {
 	now(): number
 	pause(ms: number): Promise<void>
 	readIdentity?(): Promise<TraceRunIdentity>
+	// Reads the final workspace as bounded file data. Graders consume it from a
+	// fresh copy; the launcher's scratch paths never leak. Capture must happen
+	// before cleanup removes the directory.
+	readFinalWorkspace?(): Promise<FinalWorkspaceSnapshot>
 }
 
 export interface AgentRunObservers {
