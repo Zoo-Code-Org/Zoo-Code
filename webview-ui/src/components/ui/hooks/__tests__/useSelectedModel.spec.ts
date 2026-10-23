@@ -1739,7 +1739,7 @@ describe("useSelectedModel", () => {
 			const { result, rerender } = renderHook(
 				({ selector }: { selector: ProviderSettings["vsCodeLmModelSelector"] }) =>
 					useSelectedModel({ apiProvider: providerIdentifiers.vscodeLm, vsCodeLmModelSelector: selector }),
-				{ initialProps: { selector: undefined } },
+				{ initialProps: { selector: undefined as ProviderSettings["vsCodeLmModelSelector"] } },
 			)
 			expect(result.current.info?.supportsImages).toBeUndefined()
 			rerender({ selector: { vendor: "other", family: "shared-family" } })

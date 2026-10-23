@@ -16,7 +16,7 @@ const model = {
 	id: "vision",
 	vendor: "other",
 	family: "vision",
-	modelInfo: { contextWindow: 100, supportsImages: true },
+	modelInfo: { contextWindow: 100, supportsPromptCache: false, supportsImages: true },
 }
 
 const setup = (enabled = true) => {
