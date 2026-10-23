@@ -85,6 +85,24 @@ const EVENT_BUFFER_LIMIT = 256
 
 type BufferedEvent = { kind: "parsed"; event: TaskEvent }
 
+// True when the event carries the model's final, non-partial completion_result
+// say message for the accepted task. This is model output, not the
+// accepted-completion event. The headless stop policy in coding-run.ts uses
+// the same predicate as the trace's completionMessageSeen refinement.
+export const isFinalCompletionMessage = (event: TaskEvent): boolean => {
+	if (event.eventName !== RooCodeEventName.Message) return false
+	const message = event.payload[0]?.message
+	if (typeof message !== "object" || message === null) return false
+	const record = message as { type?: unknown; say?: unknown; partial?: unknown; text?: unknown }
+	return (
+		record.type === "say" &&
+		record.say === "completion_result" &&
+		record.partial !== true &&
+		typeof record.text === "string" &&
+		record.text.trim().length > 0
+	)
+}
+
 const traceSettings = (fixtureProjection: Record<string, unknown>, credential: string): AgentTrace["settings"] => {
 	try {
 		const projectionJson = JSON.stringify(fixtureProjection)
@@ -175,17 +193,7 @@ export async function runAgentFixture(runtime: AgentRuntime, options: AgentRunOp
 			return
 		}
 		accountant.observe(event)
-		if (event.eventName === RooCodeEventName.Message) {
-			const message = event.payload[0].message
-			if (
-				message.type === "say" &&
-				message.say === "completion_result" &&
-				message.partial !== true &&
-				typeof message.text === "string" &&
-				message.text.trim().length > 0
-			)
-				completionMessageSeen = true
-		}
+		if (isFinalCompletionMessage(event)) completionMessageSeen = true
 		if (event.eventName === RooCodeEventName.TaskCompleted) completedSeen = true
 		options.observers?.onAcceptedEvent?.(event, acceptedTaskId)
 	}

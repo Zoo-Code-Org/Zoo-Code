@@ -1,4 +1,10 @@
-import { runAgentFixture, type AgentRuntime, type FinalWorkspaceSnapshot } from "./runner.ts"
+import {
+	runAgentFixture,
+	isFinalCompletionMessage,
+	type AgentRuntime,
+	type AgentRunObservers,
+	type FinalWorkspaceSnapshot,
+} from "./runner.ts"
 import { getFixture } from "./registry.ts"
 import { ensureCodingSuiteRegistered, codingBundle } from "./coding-suite.ts"
 import { runGrader, type GraderVerdict, type GradingRuntime } from "./coding-grader.ts"
@@ -47,9 +53,28 @@ const modelIdentifierFromProjection = (projection: Record<string, unknown>): Mea
 		"modelIdMissingInProjection",
 	)
 
+// Headless stop policy. A headless extension host may never fire the accepted
+// TaskCompleted event, so the run must not wait for the whole task-run window.
+// The policy stops once the model's final non-partial completion_result
+// message arrives for the accepted task. The substrate records the stop as
+// adapterStopAfterCompletionMessage; it never claims an accepted completion.
+// Grading below stays independent of the completion event.
+export function stopOnFinalCompletionMessage(): AgentRunObservers {
+	let sawFinalCompletionMessage = false
+	return {
+		onAcceptedEvent: (event) => {
+			if (isFinalCompletionMessage(event)) sawFinalCompletionMessage = true
+		},
+		shouldStop: () => sawFinalCompletionMessage,
+	}
+}
+
 // Wraps a runtime so the final workspace is captured inside cleanup, before
 // the launcher removes its scratch directory. The captured file data feeds
-// only the fresh grading copy.
+// only the fresh grading copy. A rejected read leaves the snapshot undefined,
+// so a broken capture becomes an infrastructure failure, never an empty
+// workspace scored against the agent. A captured snapshot is never reread, so
+// repeated cleanup calls cannot overwrite it.
 export function withWorkspaceCapture(inner: AgentRuntime): {
 	runtime: AgentRuntime
 	getSnapshot: () => FinalWorkspaceSnapshot | undefined
@@ -61,10 +86,12 @@ export function withWorkspaceCapture(inner: AgentRuntime): {
 		launch: (files) => inner.launch(files),
 		connect: () => inner.connect(),
 		cleanup: async () => {
-			try {
-				snapshot = await inner.readFinalWorkspace?.()
-			} catch {
-				snapshot = { files: [], truncated: true }
+			if (snapshot === undefined) {
+				try {
+					snapshot = await inner.readFinalWorkspace?.()
+				} catch {
+					snapshot = undefined
+				}
 			}
 			await inner.cleanup()
 		},
@@ -98,6 +125,7 @@ export async function runCodingFixtureOnce(inputs: CodingRunInputs): Promise<Cod
 	const result = await runAgentFixture(runtime, {
 		fixtureName: inputs.fixtureName,
 		credential: inputs.credential,
+		observers: stopOnFinalCompletionMessage(),
 	})
 	const trace: AgentTrace = result.trace
 	const snapshot = getSnapshot()
