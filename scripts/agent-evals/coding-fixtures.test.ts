@@ -69,12 +69,28 @@ describe("coding fixture suite", () => {
 		}
 	})
 
+	it("keeps the settings projection equal to the built configuration", () => {
+		// The suite and settings digests hash the projection, so the built
+		// configuration must never drift from it. The credential is removed
+		// and the serialized extra body is parsed before the comparison.
+		for (const bundle of CODING_FIXTURE_BUNDLES) {
+			const built: Record<string, unknown> = {
+				...(bundle.fixture.buildConfiguration(CREDENTIAL) as Record<string, unknown>),
+			}
+			assert.equal(typeof built["openAiApiKey"], "string")
+			delete built["openAiApiKey"]
+			assert.equal(typeof built["openAiExtraBody"], "string")
+			built["openAiExtraBody"] = JSON.parse(built["openAiExtraBody"] as string)
+			assert.deepEqual(built, bundle.fixture.settingsProjection)
+		}
+	})
+
 	it("produces a stable suite digest that tracks the grader version", () => {
 		assert.equal(codingSuiteDigest(), codingSuiteDigest())
 		assert.equal(codingBundle("clamp-range").fixture.identity.name, "clamp-range")
 		assert.throws(() => codingBundle("unknown-fixture"))
 		assert.ok(codingSuiteDigest().length === 64)
 		assert.equal(CODING_SUITE_ID, "coding-basic-v1")
-		assert.equal(GRADER_VERSION, "coding-grader-v1")
+		assert.equal(GRADER_VERSION, "coding-grader-v2")
 	})
 })

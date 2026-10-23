@@ -28,6 +28,7 @@ const driverCompleted = (overrides: Partial<DriverCompleted> = {}): DriverComple
 	testFiles: [],
 	passedCount: 3,
 	failedCount: 0,
+	cancelledCount: 0,
 	failures: [],
 	durationMs: 1,
 	...overrides,
@@ -121,6 +122,39 @@ describe("runGrader", () => {
 				isolation: "container",
 				reason: "gradingCopyFailed",
 			})
+		} finally {
+			await fs.rm(scratch, { recursive: true, force: true })
+		}
+	})
+
+	it("separates a grader runtime crash from a grading copy failure", async () => {
+		const scratch = await tmpdir()
+		try {
+			const runtime: GradingRuntime = {
+				isolation: "container",
+				run: async () => {
+					throw new Error("runtime exploded")
+				},
+			}
+			const verdict = await runGrader({
+				finalFiles: [{ path: "marker.txt", content: "x" }],
+				hiddenTests: [],
+				resources: { timeoutMs: 1_000, memoryMb: 256, cpus: 1, pidsLimit: 64, image: "node:22-bookworm" },
+				runtime,
+				scratchDir: scratch,
+			})
+			// A runtime exception must not be reported as a copy failure, and
+			// a failed cleanup must not replace the verdict.
+			assert.deepEqual(verdict, {
+				kind: "grading-failure",
+				isolation: "container",
+				reason: "graderRuntimeFailed",
+			})
+			const gradingCopyGone = await fs
+				.access(path.join(scratch, "grading-copy"))
+				.then(() => false)
+				.catch(() => true)
+			assert.equal(gradingCopyGone, true)
 		} finally {
 			await fs.rm(scratch, { recursive: true, force: true })
 		}
