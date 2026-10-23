@@ -14,8 +14,14 @@ import { identityUnavailable, measured, type MeasuredString, type TraceRunIdenti
 const execFileAsync = promisify(execFile)
 
 export interface HostRuntimeOptions {
+	// Repository root of the evaluated extension. Reads of package metadata,
+	// commit identity, and the extension source all stay inside it.
 	root: string
 	artifactsDir: string
+	// Optional trusted cache for the downloaded VS Code build. Defaults to
+	// the evaluated root, so callers driving historical worktrees can keep
+	// one cache in the harness checkout.
+	vscodeCachePath?: string
 	now?: () => number
 	pause?: (ms: number) => Promise<void>
 }
@@ -123,7 +129,7 @@ export function createHostRuntime(options: HostRuntimeOptions): AgentRuntime {
 			}
 			const executable = await downloadAndUnzipVSCode({
 				version: pkg.devDependencies["@types/vscode"] ?? "1.100.0",
-				cachePath: path.join(root, "apps/vscode-e2e/.vscode-test"),
+				cachePath: options.vscodeCachePath ?? path.join(root, "apps/vscode-e2e/.vscode-test"),
 			})
 			const args = buildLaunchArgs(
 				workspace,

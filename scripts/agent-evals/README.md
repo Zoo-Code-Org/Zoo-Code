@@ -114,25 +114,42 @@ release process: a maintainer runs it locally or on demand.
 | `coding-stats.ts`      | Three repetitions, success rates with Wilson intervals, paired differences.                                                                              |
 | `coding-report.ts`     | The self-contained JSON report and the Markdown renderer.                                                                                                |
 | `coding-compare.ts`    | The comparison orchestration and the side result shape.                                                                                                  |
-| `coding-side.mts`      | One comparison side: all fixtures times N repetitions on this commit, graded, with pinned inputs.                                                        |
+| `coding-side.mts`      | One comparison side: all fixtures times N repetitions on the evaluated root, graded, with pinned inputs.                                                 |
 | `coding-compare.mts`   | Two-commit comparison driver. Writes `comparison-report.json` and `comparison-report.md`.                                                                |
+| `coding-trust.ts`      | The comparison trust policy: approved full commit SHAs, resolution, the approval gate, and the side environment allowlist.                               |
+| `fs-atomic.ts`         | Atomic file publication through same-directory temp files and renames.                                                                                   |
 
 ### Grading
 
 - The grader is model-free and credential-free. It judges the final workspace state only.
 - The final workspace is captured as bounded file data and rebuilt as a fresh copy. Hidden acceptance tests enter only that copy, so the agent can never read or change them, and one run can never inherit another run's files.
-- The default runtime executes the driver in a disposable container with no network, no capabilities, no privilege escalation, a read-only root filesystem, and fixed CPU, memory, and process limits. No environment variable passes through. Only trusted repo code runs with the provider credential. Fixtures and extension code from outside pull requests never do.
-- The grader has its own wall-clock limit. A grader that hangs, crashes, or loses its runner is a `grading failure`. It is never an `incorrect` solution.
+- The default runtime executes the driver in a uniquely named disposable container with no network, no capabilities, no privilege escalation, a read-only root filesystem, and fixed CPU, memory, and process limits. No environment variable passes through. Only trusted repo code runs with the provider credential. Fixtures and extension code from outside pull requests never do.
+- The grader has its own wall-clock limit. On expiry the runtime removes the container by name and verifies the removal before it deletes any output. A grader that hangs, crashes, or loses its runner is a `grading failure`. It is never an `incorrect` solution. The image pull happens before the timed run and never consumes grading time. The runtime resolves the immutable grader image digest from the local engine and the side records it in the comparison pins; it never fabricates one.
+- The driver's result file is untrusted data: it is written inside the container where agent-written test code executes. The host reads it with a size bound and validates shape, bounds, and internal consistency. An invalid or inconsistent result is a `grading failure`, never a verdict.
 - Each fixture ships two reference solutions. The known-correct solution must pass. The deliberately incorrect one passes the visible tests and must fail. Unit tests enforce both on every fixture.
 - `createLocalSubprocessGradingRuntime` runs the same driver directly on the host. It does not give container isolation. It exists for unit tests and explicit local checks only and must never back a recorded comparison.
 
 ### Comparisons
 
-A paired comparison pins both commit SHAs, the suite digest, the settings digest, the model identifier, the grader version, and the runner environment on both sides. Any difference in a pinned value marks the pair incompatible. The report records the values and flags the pair instead of dropping it.
+A paired comparison pins both commit SHAs, the suite digest, the settings digest, the model identifier, the grader version, the resolved grader image digest, and the runner environment on both sides. Any difference in a pinned value marks the pair incompatible. The report records the values and flags the pair instead of dropping it.
 
 The default is three repetitions per fixture per commit. Reports show success rates with Wilson 95% intervals and paired differences. They make no significance claim: three repetitions can show large regressions, not small improvements.
 
-Runs with incomplete token or cost accounting are flagged and excluded from aggregate cost comparisons. Missing token or cost values stay missing. The report states the price-table identifier and date and how cache reads and writes are priced. Cost per successful task divides the total attempt cost by the number of `correct` runs. It is unavailable when no run is correct or a correct run lacks complete cost data. Duplicate-call detection and HTTP retry counts are reported as unavailable.
+Runs with incomplete token or cost accounting are flagged and excluded from aggregate cost comparisons. Missing token or cost values stay missing. The report states the price-table identifier and date and how cache reads and writes are priced. Cost per successful task divides the total attempt cost by the number of `correct` runs. It is unavailable when no run is correct, when a correct run lacks complete cost data, or when any attempt, including a failed one, lacks complete cost data. Duplicate-call detection and HTTP retry counts are reported as unavailable.
+
+### Trust policy for comparisons
+
+A comparison runs the extension code of two commits with the provider credential. A commit runs only when its full 40-hex SHA is listed in an explicit trust policy file. Ref names are resolved first and checked against the policy before any worktree is created or any process starts. A policy entry is a full SHA; short SHAs and ref names are rejected.
+
+```json
+{ "version": 1, "approvedCommits": ["<full-40-hex-commit-sha>"] }
+```
+
+The comparison driver, fixtures, grader, and report builder all run from the trusted checkout that invokes `coding-evals:compare`. Only the extension host loads an evaluated worktree. The side process receives only the allowlisted environment plus the one named credential variable. Each side installs dependencies from its own worktree's frozen lockfile and builds its own exact commit, so each side runs its own compiled extension. Each side has its own wall clock (`--side-timeout-minutes`, default 120).
+
+### Output publication contract
+
+Artifacts are published atomically: content lands in a same-directory temp file and is renamed into place. A reader never sees a partial file. `side-results.json` appears only after every repetition of that side finished, so its existence means a complete side. A missing `side-results.json` means an interrupted side; consumers must treat it as a failed side and never pair partial output. The comparison reports are written atomically and only after both sides published complete results; a failed comparison leaves no report files.
 
 ### Commands
 
@@ -145,8 +162,8 @@ pnpm agent-evals:check-types
 # environment variable and the container runtime for grading.
 pnpm coding-evals:side --reps 3 --out /tmp/side-out
 
-# Full paired comparison of two commits.
-pnpm coding-evals:compare --baseline <sha> --candidate <sha> --reps 3 --out /tmp/compare-out
+# Full paired comparison of two approved commits.
+pnpm coding-evals:compare --baseline <sha> --candidate <sha> --trust-file trust-policy.json --reps 3 --out /tmp/compare-out
 ```
 
 ### Follow-up milestones
