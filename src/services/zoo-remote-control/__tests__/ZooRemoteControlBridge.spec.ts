@@ -65,6 +65,7 @@ describe("ZooRemoteControlBridge", () => {
 		storedState = {
 			"zooRemoteControl.instanceId": "other-window",
 			"zooRemoteControl.eventSeq": 0,
+			"zooRemoteControl.consentedTaskId": "task-1",
 		}
 		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
 			get: vi.fn((_key: string, defaultValue?: boolean) => defaultValue ?? false),
@@ -144,6 +145,7 @@ describe("ZooRemoteControlBridge", () => {
 			hasPendingAsk: () => options?.pendingAskTs !== undefined,
 			approveAsk: vi.fn(),
 			denyAsk: vi.fn(),
+			submitUserMessage: vi.fn((text: string, images?: string[]) => api.sendMessage(text, images)),
 		}
 		provider.getCurrentTask.mockReturnValue(task)
 		return task
@@ -435,6 +437,42 @@ describe("ZooRemoteControlBridge", () => {
 		expect(bridge.isActive()).toBe(false)
 		expect(client.postPresence).not.toHaveBeenCalled()
 		expect(provider.postStateToWebview).toHaveBeenCalled()
+		bridge.dispose()
+	})
+
+	it("does not start a session when there is no live task", async () => {
+		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
+		provider.contextProxy.getProviderSettings.mockReturnValue({
+			apiProvider: providerIdentifiers.zooGateway,
+		})
+
+		const bridge = createBridge()
+		await expect(bridge.setSessionActive(true)).rejects.toThrow("remote session requires a task")
+		expect(bridge.isSessionActive()).toBe(false)
+		expect(bridge.isActive()).toBe(false)
+		expect(context.globalState.update).not.toHaveBeenCalledWith("zooRemoteControl.sessionActive", true)
+		expect(client.postPresence).not.toHaveBeenCalled()
+		bridge.dispose()
+	})
+
+	it("does not upload task content when no task was consented", async () => {
+		delete storedState["zooRemoteControl.consentedTaskId"]
+		sessionActive = true
+		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
+		provider.contextProxy.getProviderSettings.mockReturnValue({
+			apiProvider: providerIdentifiers.zooGateway,
+		})
+
+		const bridge = createBridge()
+		await vi.advanceTimersByTimeAsync(0)
+		api.emit(RooCodeEventName.Message, {
+			taskId: "task-1",
+			action: "created",
+			message: { ts: 1, type: "say", say: "text", text: "hi", partial: false },
+		})
+		await vi.advanceTimersByTimeAsync(100)
+
+		expect(client.postEvents).not.toHaveBeenCalled()
 		bridge.dispose()
 	})
 
@@ -832,6 +870,7 @@ describe("ZooRemoteControlBridge", () => {
 	})
 
 	it("publishes a snapshot when the current task has messages", async () => {
+		storedState["zooRemoteControl.consentedTaskId"] = "task-snap"
 		provider.getCurrentTask.mockReturnValue({
 			taskId: "task-snap",
 			taskMode: "code",
@@ -967,6 +1006,7 @@ describe("ZooRemoteControlBridge", () => {
 		provider.contextProxy.getProviderSettings.mockReturnValue({
 			apiProvider: providerIdentifiers.zooGateway,
 		})
+		useLiveTask()
 		await bridge.setSessionActive(true)
 		await vi.advanceTimersByTimeAsync(0)
 		expect(bridge.isActive()).toBe(true)
@@ -1051,6 +1091,7 @@ describe("ZooRemoteControlBridge", () => {
 	})
 
 	it("publishes snapshot 404 as unavailable without crashing", async () => {
+		storedState["zooRemoteControl.consentedTaskId"] = "task-snap"
 		provider.getCurrentTask.mockReturnValue({
 			taskId: "task-snap",
 			clineMessages: [{ ts: 1, type: "say", say: "text", text: "hi" }],

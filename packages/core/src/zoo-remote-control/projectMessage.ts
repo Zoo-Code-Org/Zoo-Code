@@ -44,6 +44,33 @@ function boundJsonValue(value: unknown, stringCap: number): unknown {
 	return value
 }
 
+/** Drop trailing keys or items until the payload is valid JSON inside the budget. */
+function jsonWithinBudget(value: unknown, budget: number): string {
+	let current = value
+	for (;;) {
+		const serialized = JSON.stringify(current)
+		if (serialized.length <= budget) {
+			return serialized
+		}
+		if (Array.isArray(current) && current.length > 0) {
+			current = current.slice(0, -1)
+			continue
+		}
+		if (current && typeof current === "object" && !Array.isArray(current)) {
+			const entries = Object.entries(current as Record<string, unknown>)
+			if (entries.length > 0) {
+				const next: Record<string, unknown> = {}
+				for (const [key, item] of entries.slice(0, -1)) {
+					next[key] = item
+				}
+				current = next
+				continue
+			}
+		}
+		return '{"truncated":true}'
+	}
+}
+
 function shapeToolText(text: string): string {
 	try {
 		const parsed: unknown = JSON.parse(text)
@@ -64,7 +91,7 @@ function shapeToolText(text: string): string {
 		}
 
 		if (serialized.length > REMOTE_MESSAGE_JSON_MAX_CHARS) {
-			return truncateString(serialized, REMOTE_MESSAGE_JSON_MAX_CHARS)
+			return jsonWithinBudget(bounded, REMOTE_MESSAGE_JSON_MAX_CHARS)
 		}
 
 		return serialized

@@ -8,12 +8,13 @@ export type ZooRemoteCommandHostTask = {
 	pendingAskTs: () => number | undefined
 	approveAsk: (payload?: { text?: string; images?: string[] }) => void
 	denyAsk: (payload?: { text?: string; images?: string[] }) => void
+	/** Deliver text on this task. Call it on the object returned by the same getCurrentTask read. */
+	submitMessage: (text: string, images?: string[]) => Promise<void>
 }
 
 export type ZooRemoteCommandHost = {
 	isLifecycleCurrent: (epoch: number) => boolean
 	isEligible: () => boolean
-	sendMessage: (text?: string, images?: string[]) => Promise<void>
 	handleModeSwitch: (mode: string) => Promise<void>
 	getCurrentTask: () => ZooRemoteCommandHostTask | undefined
 	cancelCurrentTask: () => Promise<void>
@@ -42,53 +43,48 @@ async function failCommand(
 	})
 }
 
-/** Task-mutating commands must name the live task. A missing id is not "current task". */
-async function ensureTaskTarget(options: {
-	command: ZooRemoteCommand
-	epoch: number
-	client: Pick<ZooRemoteControlClient, "ackCommand">
-	host: ZooRemoteCommandHost
-}): Promise<boolean> {
-	const { command, epoch, client, host } = options
+type TaskBind = { task: ZooRemoteCommandHostTask } | { errorCode: string }
+
+/** One synchronous read. Callers mutate `task` before their next await. */
+function bindTask(host: ZooRemoteCommandHost, command: ZooRemoteCommand): TaskBind {
 	if (!command.taskId) {
-		await failCommand(client, host, epoch, command.commandId, "missing_task_id")
-		return false
+		return { errorCode: "missing_task_id" }
 	}
-	const currentId = host.getCurrentTask()?.taskId
-	if (currentId === command.taskId) {
-		return true
+	const task = host.getCurrentTask()
+	if (task?.taskId !== command.taskId) {
+		return { errorCode: "task_mismatch" }
 	}
-	await failCommand(client, host, epoch, command.commandId, "task_mismatch")
-	return false
+	return { task }
 }
 
 /** A message that can answer an ask must name that ask, so a late delivery cannot hit a newer one. */
-async function ensureAnswerTarget(options: {
-	command: ZooRemoteCommand
-	epoch: number
-	client: Pick<ZooRemoteControlClient, "ackCommand">
-	host: ZooRemoteCommandHost
-}): Promise<boolean> {
-	const { command, epoch, client, host } = options
-	const task = host.getCurrentTask()
-	const pending = task?.hasPendingAsk() === true
+function messageAskError(task: ZooRemoteCommandHostTask, command: ZooRemoteCommand): string | undefined {
+	const pending = task.hasPendingAsk()
 	if (!pending) {
-		if (command.type === "answer_followup") {
-			await failCommand(client, host, epoch, command.commandId, "no_pending_ask")
-			return false
-		}
-		return true
+		return command.type === "answer_followup" ? "no_pending_ask" : undefined
 	}
 	const askTs = command.payload?.askTs
 	if (typeof askTs !== "number") {
-		await failCommand(client, host, epoch, command.commandId, "missing_ask_id")
-		return false
+		return "missing_ask_id"
 	}
-	if (task?.pendingAskTs() !== askTs) {
-		await failCommand(client, host, epoch, command.commandId, "ask_mismatch")
-		return false
+	if (task.pendingAskTs() !== askTs) {
+		return "ask_mismatch"
 	}
-	return true
+	return undefined
+}
+
+function approvalAskError(task: ZooRemoteCommandHostTask, command: ZooRemoteCommand): string | undefined {
+	if (!task.hasPendingAsk()) {
+		return "no_pending_ask"
+	}
+	const askTs = command.payload?.askTs
+	if (askTs === undefined) {
+		return "missing_ask_id"
+	}
+	if (task.pendingAskTs() !== askTs) {
+		return "ask_mismatch"
+	}
+	return undefined
 }
 
 /** Apply one remote command through host callbacks, respecting lifecycle epoch checks. */
@@ -124,17 +120,21 @@ export async function executeRemoteCommand(options: {
 		try {
 			switch (command.type) {
 				case "message":
-				case "answer_followup":
-					if (!(await ensureTaskTarget({ command, epoch, client, host }))) {
+				case "answer_followup": {
+					const bound = bindTask(host, command)
+					if ("errorCode" in bound) {
+						await failCommand(client, host, epoch, command.commandId, bound.errorCode)
 						return
 					}
-					if (!(await ensureAnswerTarget({ command, epoch, client, host }))) {
+					const askError = messageAskError(bound.task, command)
+					if (askError) {
+						await failCommand(client, host, epoch, command.commandId, askError)
 						return
 					}
 					if (!host.isLifecycleCurrent(epoch)) {
 						return
 					}
-					await host.sendMessage(command.payload?.text, command.payload?.images)
+					await bound.task.submitMessage(command.payload?.text ?? "", command.payload?.images)
 					// The message has landed. Keep the claim if the follow-up mode switch fails.
 					applied = true
 					if (command.payload?.mode) {
@@ -156,42 +156,35 @@ export async function executeRemoteCommand(options: {
 						}
 					}
 					break
+				}
 				case "approve_ask":
 				case "deny_ask": {
-					if (!(await ensureTaskTarget({ command, epoch, client, host }))) {
+					const bound = bindTask(host, command)
+					if ("errorCode" in bound) {
+						await failCommand(client, host, epoch, command.commandId, bound.errorCode)
 						return
 					}
-					const task = host.getCurrentTask()
-					if (!task) {
-						await failCommand(client, host, epoch, command.commandId, "no_current_task")
-						return
-					}
-					if (!task.hasPendingAsk()) {
-						await failCommand(client, host, epoch, command.commandId, "no_pending_ask")
-						return
-					}
-					const askTs = command.payload?.askTs
-					if (askTs === undefined) {
-						await failCommand(client, host, epoch, command.commandId, "missing_ask_id")
-						return
-					}
-					if (task.pendingAskTs() !== askTs) {
-						await failCommand(client, host, epoch, command.commandId, "ask_mismatch")
+					const askError = approvalAskError(bound.task, command)
+					if (askError) {
+						await failCommand(client, host, epoch, command.commandId, askError)
 						return
 					}
 					if (!host.isLifecycleCurrent(epoch)) {
 						return
 					}
+					const answer = { text: command.payload?.text, images: command.payload?.images }
 					if (command.type === "approve_ask") {
-						task.approveAsk({ text: command.payload?.text, images: command.payload?.images })
+						bound.task.approveAsk(answer)
 					} else {
-						task.denyAsk({ text: command.payload?.text, images: command.payload?.images })
+						bound.task.denyAsk(answer)
 					}
 					applied = true
 					break
 				}
-				case "cancel_task":
-					if (!(await ensureTaskTarget({ command, epoch, client, host }))) {
+				case "cancel_task": {
+					const bound = bindTask(host, command)
+					if ("errorCode" in bound) {
+						await failCommand(client, host, epoch, command.commandId, bound.errorCode)
 						return
 					}
 					if (!host.isLifecycleCurrent(epoch)) {
@@ -200,6 +193,7 @@ export async function executeRemoteCommand(options: {
 					await host.cancelCurrentTask()
 					applied = true
 					break
+				}
 				case "resume_task":
 					if (!command.taskId) {
 						await failCommand(client, host, epoch, command.commandId, "missing_task_id")

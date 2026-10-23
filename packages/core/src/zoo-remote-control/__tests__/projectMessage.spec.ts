@@ -108,7 +108,23 @@ describe("projectClineMessageForRemote", () => {
 				f: chunk,
 			}),
 		})
-		expect(shaped.text!.length).toBeLessThanOrEqual(REMOTE_MESSAGE_JSON_MAX_CHARS + 80)
+		expect(shaped.text!.length).toBeLessThanOrEqual(REMOTE_MESSAGE_JSON_MAX_CHARS)
+		expect(JSON.parse(shaped.text!)).toEqual(expect.any(Object))
+	})
+
+	it("keeps valid JSON when a wide tool object is still over budget after string shrinking", () => {
+		const fields: Record<string, string> = {}
+		for (let i = 0; i < 200; i++) {
+			fields[`k${i}`] = "z".repeat(600)
+		}
+		const shaped = projectClineMessageForRemote({
+			ts: 1,
+			type: "ask",
+			ask: "tool",
+			text: JSON.stringify(fields),
+		})
+		expect(shaped.text!.length).toBeLessThanOrEqual(REMOTE_MESSAGE_JSON_MAX_CHARS)
+		expect(JSON.parse(shaped.text!)).toEqual(expect.any(Object))
 	})
 
 	it("recursively truncates nested tool JSON strings beyond top-level keys", () => {

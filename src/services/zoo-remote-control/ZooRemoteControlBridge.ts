@@ -157,9 +157,12 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	public async setSessionActive(active: boolean): Promise<void> {
 		try {
 			if (active) {
-				// Record the task before the flag. A failed consent write must not turn the session on,
-				// or an unset id is treated as opted-in for every task.
-				await this.context.globalState.update(CONSENTED_TASK_STATE_KEY, this.provider.getCurrentTask()?.taskId)
+				const taskId = this.provider.getCurrentTask()?.taskId
+				if (!taskId) {
+					throw new Error("remote session requires a task")
+				}
+				// Record the task before the flag. A failed consent write must not turn the session on.
+				await this.context.globalState.update(CONSENTED_TASK_STATE_KEY, taskId)
 				await this.context.globalState.update(SESSION_ACTIVE_STATE_KEY, true)
 			} else {
 				await this.context.globalState.update(SESSION_ACTIVE_STATE_KEY, false)
@@ -380,8 +383,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 
 	private acceptsTaskContent(taskId: string | undefined): boolean {
 		const consented = this.context.globalState.get<string>(CONSENTED_TASK_STATE_KEY)
-		const consentedTaskId = typeof consented === "string" && consented.length > 0 ? consented : undefined
-		return consentedTaskId === undefined || taskId === consentedTaskId
+		return typeof consented === "string" && consented.length > 0 && taskId === consented
 	}
 
 	private async handleMessageEvent(payload: {
@@ -637,7 +639,6 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			host: {
 				isLifecycleCurrent: (value) => this.isLifecycleCurrent(value),
 				isEligible: () => this.evaluateEligible(),
-				sendMessage: (text, images) => this.api.sendMessage(text, images),
 				handleModeSwitch: (mode) => this.provider.handleModeSwitch(mode),
 				getCurrentTask: () => {
 					const task = this.provider.getCurrentTask()
@@ -651,6 +652,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 								: undefined,
 						approveAsk: (payload) => task.approveAsk(payload),
 						denyAsk: (payload) => task.denyAsk(payload),
+						submitMessage: (text, images) => task.submitUserMessage(text, images),
 					}
 				},
 				cancelCurrentTask: () => this.api.cancelCurrentTask(),
