@@ -4,11 +4,12 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import type { AgentFixtureWorkspaceFile } from "./contract.ts"
 import { buildGradingCopy } from "./coding-workspace.ts"
-import { readDriverResult, verdictFromDriver } from "./container-runtime.ts"
+import { loadDriverResult, verdictFromDriver } from "./container-runtime.ts"
+import type { Measured } from "./trace.ts"
 
 // The grader version is a pinned comparison input. Any change to the driver,
 // the image, or the verdict rules must bump it.
-export const GRADER_VERSION = "coding-grader-v1"
+export const GRADER_VERSION = "coding-grader-v2"
 
 export interface GraderResources {
 	timeoutMs: number
@@ -25,6 +26,9 @@ export interface DriverCompleted {
 	testFiles: string[]
 	passedCount: number
 	failedCount: number
+	// Tests the runner cancelled. A cancelled test never ran, so a passing
+	// verdict requires zero cancellations.
+	cancelledCount: number
 	failures: { name: string; file: string }[]
 	durationMs: number
 }
@@ -53,6 +57,9 @@ export type GraderVerdict =
 export interface GradingRuntime {
 	readonly isolation: GradingIsolation
 	run(job: GraderJob): Promise<GraderVerdict>
+	// Resolves the immutable grader image identity for the comparison pins.
+	// Optional: runtimes without an image report unavailability.
+	imageDigest?(): Promise<Measured<string>>
 }
 
 export const driverFilePath = (): string => fileURLToPath(new URL("./grader-driver.mjs", import.meta.url))
@@ -71,18 +78,26 @@ export async function runGrader(inputs: {
 	scratchDir: string
 }): Promise<GraderVerdict> {
 	const gradingDir = path.join(inputs.scratchDir, "grading-copy")
+	// Cleanup is best effort. A failed removal must never replace the verdict.
+	const removeCopy = (): Promise<void> => fs.rm(gradingDir, { recursive: true, force: true }).catch(() => {})
+	let verdict: GraderVerdict
 	try {
 		await buildGradingCopy(inputs.finalFiles, inputs.hiddenTests, gradingDir)
-		return await inputs.runtime.run({
+	} catch {
+		await removeCopy()
+		return { kind: "grading-failure", isolation: inputs.runtime.isolation, reason: "gradingCopyFailed" }
+	}
+	try {
+		verdict = await inputs.runtime.run({
 			gradingDir,
 			driverPath: driverFilePath(),
 			resources: inputs.resources,
 		})
 	} catch {
-		return { kind: "grading-failure", isolation: inputs.runtime.isolation, reason: "gradingCopyFailed" }
-	} finally {
-		await fs.rm(gradingDir, { recursive: true, force: true })
+		verdict = { kind: "grading-failure", isolation: inputs.runtime.isolation, reason: "graderRuntimeFailed" }
 	}
+	await removeCopy()
+	return verdict
 }
 
 const INPROCESS_ENV_ALLOWLIST = ["PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT"] as const
@@ -120,10 +135,12 @@ export function createLocalSubprocessGradingRuntime(nodeExecutable = process.exe
 					return { kind: "grading-failure", isolation: "local-subprocess", reason: "graderTimeout" }
 				if (exit === "error" || exit !== 0)
 					return { kind: "grading-failure", isolation: "local-subprocess", reason: "graderCrashed" }
-				const result = await readDriverResult(resultPath)
-				if (!result)
+				const loaded = await loadDriverResult(resultPath)
+				if (loaded === "missing")
 					return { kind: "grading-failure", isolation: "local-subprocess", reason: "graderResultMissing" }
-				return verdictFromDriver(result, "local-subprocess")
+				if (loaded === "invalid")
+					return { kind: "grading-failure", isolation: "local-subprocess", reason: "graderResultInvalid" }
+				return verdictFromDriver(loaded, "local-subprocess")
 			} finally {
 				await fs.rm(outDir, { recursive: true, force: true })
 			}

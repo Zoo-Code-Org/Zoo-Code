@@ -77,16 +77,21 @@ export function buildRunMetrics(input: {
 	const trace = input.trace
 	const accounting = trace?.accounting
 	const last = accounting?.usage.lastSnapshot
-	const estimated: EstimatedCost = last
-		? estimateRunCost(
-				input.modelIdentifier.available ? input.modelIdentifier.value : "",
-				{ available: true, value: last.tokensIn },
-				{ available: true, value: last.tokensOut },
-				last.cacheReads,
-				last.cacheWrites,
-				input.priceTable,
-			)
-		: { available: false, reason: last ? "modelIdentifierMissing" : "noUsageEventsObserved" }
+	// Usage completeness stays separate from price availability. The reasons
+	// name the first missing input: no usage snapshot, then no model
+	// identifier, then the price table decision.
+	const estimated: EstimatedCost = !last
+		? { available: false, reason: "noUsageEventsObserved" }
+		: !input.modelIdentifier.available
+			? { available: false, reason: "modelIdentifierMissing" }
+			: estimateRunCost(
+					input.modelIdentifier.value,
+					{ available: true, value: last.tokensIn },
+					{ available: true, value: last.tokensOut },
+					last.cacheReads,
+					last.cacheWrites,
+					input.priceTable,
+				)
 	const snapshot = accounting?.toolSnapshot.snapshot
 	const byTool: Record<string, { attempts: number; failures: number }> = {}
 	let totalAttempts = 0
@@ -101,7 +106,10 @@ export function buildRunMetrics(input: {
 		providerReported: last
 			? { available: true, value: last.cost }
 			: { available: false, reason: "noUsageEventsObserved" },
-		accountingComplete: estimated.available,
+		// Complete requires both: the trace accounted for every request, and
+		// the price table could price the usage. Partial trace accounting with
+		// a configured price stays incomplete.
+		accountingComplete: estimated.available && accounting?.completeness.status === "complete",
 	}
 	return {
 		fixtureName: input.fixtureName,
@@ -167,10 +175,11 @@ export interface CostPerSuccessfulTask {
 	usd?: number
 }
 
-// Total estimated cost of all attempts with complete cost accounting, divided
-// by the number of correct runs. Runs with incomplete cost accounting are
-// flagged and excluded from aggregates. If no run is correct, or if any
-// correct run lacks complete cost accounting, the value is unavailable.
+// Total estimated cost of all attempts, divided by the number of correct
+// runs. The value is unavailable when any attempt lacks complete cost
+// accounting, including failed attempts: an unknown attempt cost makes the
+// total spend per success unknowable, not merely smaller. Usage completeness
+// and price availability both feed accountingComplete.
 export function costPerSuccessfulTask(runs: readonly CodingRunMetrics[]): CostPerSuccessfulTask {
 	const included = runs.filter((run) => run.cost.accountingComplete)
 	const excluded = runs.length - included.length
@@ -182,10 +191,10 @@ export function costPerSuccessfulTask(runs: readonly CodingRunMetrics[]): CostPe
 		correctRuns,
 	}
 	if (correctRuns === 0) return { ...base, available: false, reason: "noCorrectRuns" }
-	const correctIncomplete = runs.filter(
-		(run) => run.outcome.outcome === "correct" && !run.cost.accountingComplete,
-	).length
-	if (correctIncomplete > 0) return { ...base, available: false, reason: "correctRunCostIncomplete" }
+	const correctIncomplete = runs.some((run) => run.outcome.outcome === "correct" && !run.cost.accountingComplete)
+	if (correctIncomplete) return { ...base, available: false, reason: "correctRunCostIncomplete" }
+	const failedIncomplete = runs.some((run) => run.outcome.outcome !== "correct" && !run.cost.accountingComplete)
+	if (failedIncomplete) return { ...base, available: false, reason: "failedAttemptCostIncomplete" }
 	const total = included.reduce((sum, run) => {
 		if (run.cost.estimated.available) return sum + run.cost.estimated.usd
 		return sum

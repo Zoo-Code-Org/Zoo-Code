@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import { buildComparisonReport, renderMarkdownReport, type SideResult } from "./coding-report.ts"
-import { runComparison, type SideExecutor } from "./coding-compare.ts"
+import { runComparison, validateSideResultFile, type SideExecutor } from "./coding-compare.ts"
 import type { CodingRunMetrics } from "./coding-metrics.ts"
 import type { SidePins } from "./coding-pins.ts"
 
@@ -12,7 +12,8 @@ const pins = (side: "baseline" | "candidate", commit: string, overrides: Partial
 	suiteDigest: "d1".repeat(32),
 	settingsDigest: "d2".repeat(32),
 	modelIdentifier: "qwen3.8-27b",
-	graderVersion: "coding-grader-v1",
+	graderVersion: "coding-grader-v2",
+	graderImageDigest: `node:22-bookworm@sha256:${"e".repeat(64)}`,
 	runnerEnvironment: { os: "linux", nodeVersion: "v22.23.1", vscodeTarget: "1.104.0" },
 	...overrides,
 })
@@ -96,7 +97,7 @@ describe("comparison report", () => {
 		assert.deepEqual(report.compatibility.differences, ["modelIdentifier"])
 	})
 
-	it("keeps grading failures out of the incorrect count and excludes incomplete cost runs", () => {
+	it("keeps grading failures out of the incorrect count and is unavailable with unknown attempt costs", () => {
 		const baseline = sideResult("baseline", "a".repeat(40), [
 			metrics("clamp-range", 0, "correct", 0.2),
 			metrics("clamp-range", 1, "grading-failure", undefined),
@@ -106,8 +107,10 @@ describe("comparison report", () => {
 		const summary = report.costSummary.baseline
 		assert.equal(summary.correctRuns, 1)
 		assert.equal(summary.excludedRuns, 2)
-		assert.equal(summary.available, true)
-		assert.equal(summary.usd, 0.2)
+		// The failed attempts have unknown costs, so the total spend per
+		// success is unknowable instead of merely smaller.
+		assert.equal(summary.available, false)
+		assert.equal(summary.reason, "failedAttemptCostIncomplete")
 		assert.equal(report.partialDataPolicy, "excludeIncompleteFromAggregates-v1")
 	})
 
@@ -123,7 +126,16 @@ describe("comparison report", () => {
 		assert.match(markdown, /cannot show small improvements/)
 		assert.match(markdown, /## Results per fixture/)
 		assert.match(markdown, /## Cost per successful task/)
-		assert.match(markdown, /unavailable|over 1 correct run/)
+		// Each deterministic cost line is asserted on its own. An alternation
+		// would pass when only one line matched.
+		assert.ok(
+			markdown.includes("- Baseline: $0.2000 over 1 correct run(s), 0 excluded"),
+			`baseline cost line missing:\n${markdown}`,
+		)
+		assert.ok(
+			markdown.includes("- Candidate: unavailable (noCorrectRuns; 0 excluded)"),
+			`candidate cost line missing:\n${markdown}`,
+		)
 		assert.match(markdown, /## Per-run appendix/)
 		assert.match(markdown, /baseline \| clamp-range \| 0 \| correct /)
 	})
@@ -177,5 +189,22 @@ describe("comparison orchestration", () => {
 			executor,
 		})
 		assert.equal(report.repetitions, 3)
+	})
+})
+
+describe("side result validation", () => {
+	it("accepts a result that records exactly the approved commit", () => {
+		const file = { pins: pins("baseline", "a".repeat(40)), runs: [] }
+		const validated = validateSideResultFile(JSON.parse(JSON.stringify(file)), "a".repeat(40))
+		assert.equal(validated.pins.side, "baseline")
+	})
+
+	it("rejects a result that records a different commit, or has no shape", () => {
+		assert.throws(() =>
+			validateSideResultFile({ pins: pins("baseline", "b".repeat(40)), runs: [] }, "a".repeat(40)),
+		)
+		assert.throws(() => validateSideResultFile({ runs: [] }, "a".repeat(40)))
+		assert.throws(() => validateSideResultFile(null, "a".repeat(40)))
+		assert.throws(() => validateSideResultFile({ pins: pins("baseline", "a".repeat(40)) }, "a".repeat(40)))
 	})
 })

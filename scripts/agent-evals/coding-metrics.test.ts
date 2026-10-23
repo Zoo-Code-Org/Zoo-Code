@@ -168,6 +168,46 @@ describe("run metrics", () => {
 		assert.equal(metrics.cost.accountingComplete, false)
 	})
 
+	it("marks accounting incomplete when trace completeness is partial even with a configured price table", () => {
+		// Usage is fully reported and the table prices the model, but some
+		// requests lack usage, so the trace accounting is partial. The cost
+		// estimate exists; the accounting is still incomplete.
+		const metrics = buildRunMetrics({
+			fixtureName: "clamp-range",
+			repIndex: 0,
+			trace: trace({
+				accounting: accounting({
+					requestCount: 2,
+					requestsMissingUsage: 1,
+					usage: { available: true, snapshotsObserved: 1, lastSnapshot: fullUsage },
+					completeness: { status: "partial", reasons: ["usageMissingForSomeRequests"] },
+				}),
+			}),
+			outcome: correctOutcome,
+			modelIdentifier: { available: true, value: "qwen3.8-27b" },
+			priceTable: testTable,
+		})
+		assert.equal(metrics.cost.estimated.available, true)
+		assert.equal(metrics.accounting.status, "partial")
+		assert.equal(metrics.cost.accountingComplete, false)
+	})
+
+	it("reports a missing model identifier without an empty-string fallback", () => {
+		const metrics = buildRunMetrics({
+			fixtureName: "clamp-range",
+			repIndex: 0,
+			trace: trace({
+				accounting: accounting({ usage: { available: true, snapshotsObserved: 1, lastSnapshot: fullUsage } }),
+			}),
+			outcome: correctOutcome,
+			modelIdentifier: { available: false, reason: "modelIdMissingInProjection" },
+			priceTable: testTable,
+		})
+		assert.equal(metrics.cost.estimated.available, false)
+		if (!metrics.cost.estimated.available) assert.equal(metrics.cost.estimated.reason, "modelIdentifierMissing")
+		assert.equal(metrics.cost.accountingComplete, false)
+	})
+
 	it("summarizes tool calls and failures from the tool snapshot", () => {
 		const metrics = buildRunMetrics({
 			fixtureName: "clamp-range",
@@ -301,5 +341,23 @@ describe("cost per successful task", () => {
 		assert.equal(result.reason, "correctRunCostIncomplete")
 		assert.equal(result.excludedRuns, 1)
 		assert.equal(result.policy, "excludeIncompleteFromAggregates-v1")
+	})
+
+	it("is unavailable when a failed attempt lacks complete cost accounting", () => {
+		// One success, one known-cost failure, one unknown-cost failure. The
+		// unknown attempt cost makes the total spend per success unknowable.
+		const result = costPerSuccessfulTask([
+			metricsRun({ repIndex: 0, cost: completeCost(0.5) }),
+			metricsRun({
+				repIndex: 1,
+				outcome: { outcome: "incorrect", reason: "hiddenTestsFailed" },
+				cost: completeCost(0.3),
+			}),
+			metricsRun({ repIndex: 2, outcome: { outcome: "incorrect", reason: "hiddenTestsFailed" } }),
+		])
+		assert.equal(result.available, false)
+		assert.equal(result.reason, "failedAttemptCostIncomplete")
+		assert.equal(result.correctRuns, 1)
+		assert.equal(result.excludedRuns, 1)
 	})
 })

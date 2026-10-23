@@ -86,6 +86,7 @@ try {
 			testFiles: [],
 			passedCount: 0,
 			failedCount: 0,
+			cancelledCount: 0,
 			failures: [],
 			durationMs: 0,
 		})
@@ -94,6 +95,9 @@ try {
 	const started = Date.now()
 	let passedCount = 0
 	let failedCount = 0
+	// Cancelled tests never ran. A passing verdict requires zero of them, so a
+	// solution cannot pass while a hidden test stayed pending.
+	let cancelledCount = 0
 	let runnerBroke = false
 	const failures = []
 	for (const file of files) {
@@ -110,6 +114,7 @@ try {
 		}
 		passedCount += counts.passed
 		failedCount += counts.failed
+		cancelledCount += counts.cancelled ?? 0
 		if (counts.failed > 0 && failures.length < 50)
 			for (const name of readFailureNames(outcome.tap)) failures.push({ name, file })
 	}
@@ -119,11 +124,12 @@ try {
 	}
 	writeResult({
 		kind: "completed",
-		passed: failedCount === 0 && passedCount > 0,
+		passed: failedCount === 0 && cancelledCount === 0 && passedCount > 0,
 		noTestsDiscovered: false,
 		testFiles: files,
 		passedCount,
 		failedCount,
+		cancelledCount,
 		failures,
 		durationMs: Date.now() - started,
 	})
