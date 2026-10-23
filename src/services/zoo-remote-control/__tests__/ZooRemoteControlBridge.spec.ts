@@ -145,7 +145,7 @@ describe("ZooRemoteControlBridge", () => {
 			hasPendingAsk: () => options?.pendingAskTs !== undefined,
 			approveAsk: vi.fn(),
 			denyAsk: vi.fn(),
-			submitUserMessage: vi.fn((text: string, images?: string[]) => api.sendMessage(text, images)),
+			submitUserMessage: api.sendMessage,
 		}
 		provider.getCurrentTask.mockReturnValue(task)
 		return task
