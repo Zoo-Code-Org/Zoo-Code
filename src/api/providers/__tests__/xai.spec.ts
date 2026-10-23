@@ -28,6 +28,7 @@ import OpenAI, { APIUserAbortError } from "openai"
 import { xaiDefaultModelId, xaiModels } from "@roo-code/types"
 
 import { XAIHandler } from "../xai"
+import { MAX_TIMEOUT_MS } from "../utils/abort-signal"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { clearAllMocks } from "../../../test-utils/reset"
@@ -387,14 +388,23 @@ describe("XAIHandler", () => {
 		})
 	})
 
-	it("completePrompt should pass only timeoutMs when no signal provided", async () => {
-		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
+	it.each([
+		{ label: "a whole-number", input: 3000, forwarded: 3000 },
+		// Only a call through toSdkTimeoutMs rounds this up.
+		{ label: "a fractional", input: 12.5, forwarded: 13 },
+		// Only a call through toSdkTimeoutMs caps at the Node timer maximum.
+		{ label: "an over-cap", input: MAX_TIMEOUT_MS + 1, forwarded: MAX_TIMEOUT_MS },
+	])(
+		"completePrompt should forward $label timeoutMs as $forwarded when no signal provided",
+		async ({ input, forwarded }) => {
+			mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
 
-		await handler.completePrompt("test prompt", { timeoutMs: 3000 })
-		expect(mockResponsesCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
-			timeout: 3000,
-		})
-	})
+			await handler.completePrompt("test prompt", { timeoutMs: input })
+			expect(mockResponsesCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+				timeout: forwarded,
+			})
+		},
+	)
 
 	it("completePrompt should not forward an unusable timeoutMs", async () => {
 		// "No explicit timeout" must leave the option absent: timeout: 0 aborts

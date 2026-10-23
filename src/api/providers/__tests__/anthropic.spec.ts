@@ -1,6 +1,7 @@
 // npx vitest run src/api/providers/__tests__/anthropic.spec.ts
 
 import { AnthropicHandler } from "../anthropic"
+import { MAX_TIMEOUT_MS } from "../utils/abort-signal"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
@@ -1153,11 +1154,16 @@ describe("AnthropicHandler", () => {
 			}
 		})
 
-		it("should round a fractional timeoutMs up before forwarding it", async () => {
+		it.each([
+			// Only a call through toSdkTimeoutMs rounds this up.
+			{ label: "a fractional", input: 12.5, forwarded: 13 },
+			// Only a call through toSdkTimeoutMs caps at the Node timer maximum.
+			{ label: "an over-cap", input: MAX_TIMEOUT_MS + 1, forwarded: MAX_TIMEOUT_MS },
+		])("should forward $label timeoutMs as $forwarded", async ({ input, forwarded }) => {
 			mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
-			await handler.completePrompt("test prompt", { timeoutMs: 12.5 })
+			await handler.completePrompt("test prompt", { timeoutMs: input })
 			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: mockOptions.apiModelId }), {
-				timeout: 13,
+				timeout: forwarded,
 			})
 		})
 	})

@@ -11,14 +11,6 @@ export function hasUsableTimeout(timeoutMs?: number): timeoutMs is number {
 	return typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
 }
 
-/**
- * Merge an optional external abort signal with an optional timeout.
- *
- * Timeout values <= 0 and non-finite values are treated as disabled; finite
- * delays above 2^31-1 ms are capped (Node clamps them to 1 ms otherwise). The timeout is created via the
- * native AbortSignal.timeout() API, which self-manages its timer — callers do
- * not need to (and cannot) clear it manually.
- */
 /** Maximum delay a Node timer (and therefore an SDK timeout option) accepts. */
 export const MAX_TIMEOUT_MS = 2_147_483_647
 
@@ -31,6 +23,14 @@ export function toSdkTimeoutMs(timeoutMs: number): number {
 	return Math.min(Math.max(1, Math.ceil(timeoutMs)), MAX_TIMEOUT_MS)
 }
 
+/**
+ * Merge an optional external abort signal with an optional timeout.
+ *
+ * Timeout values <= 0 and non-finite values are treated as disabled; finite
+ * delays above 2^31-1 ms are capped (Node clamps them to 1 ms otherwise). The timeout is created via the
+ * native AbortSignal.timeout() API, which self-manages its timer — callers do
+ * not need to (and cannot) clear it manually.
+ */
 export function mergeAbortSignalAndTimeout(externalSignal?: AbortSignal, timeoutMs?: number): AbortSignal | undefined {
 	// Node's AbortSignal.timeout() throws ERR_OUT_OF_RANGE for non-integer
 	// delays (Infinity) and clamps delays above 2^31-1 ms to 1 ms, which would
