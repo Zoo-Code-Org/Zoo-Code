@@ -92,13 +92,65 @@ pnpm agent-evals:check-types
 
 Both run offline. No check spawns VS Code or touches a provider.
 
-## Follow-up milestones
+## Coding evaluation framework
 
-The substrate supports these planned steps. None of them exist in this
-change:
+The coding framework layers an evaluation on the substrate. It grades runs,
+repeats them, and compares two exact commits. It stays independent from any
+release process: a maintainer runs it locally or on demand.
 
-1. Five frozen, real coding task fixtures with known-good workspaces.
-2. Independent credential-free graders that judge workspace state only.
-3. Paired exact trusted commit comparisons on the same fixtures.
-4. Repeated runs with uncertainty reporting.
-5. Advisory release integration aligned to the actual release workflows.
+| File                   | Purpose                                                                                                                                                  |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `coding-fixtures.ts`   | Five frozen coding fixtures. Each ships a known-good workspace, one prompt, a tool policy, limits, hidden acceptance tests, and two reference solutions. |
+| `coding-suite.ts`      | Suite identity `coding-basic-v1`, registration, and the suite content digest.                                                                            |
+| `coding-workspace.ts`  | The immutable initial-state digest, fresh workspace builds, and fresh grading copies.                                                                    |
+| `coding-grader.ts`     | The grader contract, version, driver invocation, and the local subprocess runtime.                                                                       |
+| `grader-driver.mjs`    | The acceptance-test driver. Runs the workspace tests and writes one result JSON file.                                                                    |
+| `container-runtime.ts` | The default grading runtime. Builds and runs the locked-down container invocation.                                                                       |
+| `coding-outcomes.ts`   | Outcome rules: `correct`, `incorrect`, `timed out`, `grading failure`, `infrastructure failure`.                                                         |
+| `coding-pricing.ts`    | The operator-maintained price table and the run cost estimate.                                                                                           |
+| `coding-metrics.ts`    | Per-run metrics: requests, usage, tool calls, cost, unavailable telemetry, cost per successful task.                                                     |
+| `coding-run.ts`        | One repetition: substrate run, final-workspace capture, grading, outcome, metrics.                                                                       |
+| `coding-pins.ts`       | Pinned comparison inputs and the incompatibility check.                                                                                                  |
+| `coding-stats.ts`      | Three repetitions, success rates with Wilson intervals, paired differences.                                                                              |
+| `coding-report.ts`     | The self-contained JSON report and the Markdown renderer.                                                                                                |
+| `coding-compare.ts`    | The comparison orchestration and the side result shape.                                                                                                  |
+| `coding-side.mts`      | One comparison side: all fixtures times N repetitions on this commit, graded, with pinned inputs.                                                        |
+| `coding-compare.mts`   | Two-commit comparison driver. Writes `comparison-report.json` and `comparison-report.md`.                                                                |
+
+### Grading
+
+- The grader is model-free and credential-free. It judges the final workspace state only.
+- The final workspace is captured as bounded file data and rebuilt as a fresh copy. Hidden acceptance tests enter only that copy, so the agent can never read or change them, and one run can never inherit another run's files.
+- The default runtime executes the driver in a disposable container with no network, no capabilities, no privilege escalation, a read-only root filesystem, and fixed CPU, memory, and process limits. No environment variable passes through. Only trusted repo code runs with the provider credential. Fixtures and extension code from outside pull requests never do.
+- The grader has its own wall-clock limit. A grader that hangs, crashes, or loses its runner is a `grading failure`. It is never an `incorrect` solution.
+- Each fixture ships two reference solutions. The known-correct solution must pass. The deliberately incorrect one passes the visible tests and must fail. Unit tests enforce both on every fixture.
+- `createLocalSubprocessGradingRuntime` runs the same driver directly on the host. It does not give container isolation. It exists for unit tests and explicit local checks only and must never back a recorded comparison.
+
+### Comparisons
+
+A paired comparison pins both commit SHAs, the suite digest, the settings digest, the model identifier, the grader version, and the runner environment on both sides. Any difference in a pinned value marks the pair incompatible. The report records the values and flags the pair instead of dropping it.
+
+The default is three repetitions per fixture per commit. Reports show success rates with Wilson 95% intervals and paired differences. They make no significance claim: three repetitions can show large regressions, not small improvements.
+
+Runs with incomplete token or cost accounting are flagged and excluded from aggregate cost comparisons. Missing token or cost values stay missing. The report states the price-table identifier and date and how cache reads and writes are priced. Cost per successful task divides the total attempt cost by the number of `correct` runs. It is unavailable when no run is correct or a correct run lacks complete cost data. Duplicate-call detection and HTTP retry counts are reported as unavailable.
+
+### Commands
+
+```sh
+# Unit tests and type checks. Offline. No VS Code, no provider, no containers.
+pnpm test:agent-evals:unit
+pnpm agent-evals:check-types
+
+# One comparison side against the real provider. Requires the credential
+# environment variable and the container runtime for grading.
+pnpm coding-evals:side --reps 3 --out /tmp/side-out
+
+# Full paired comparison of two commits.
+pnpm coding-evals:compare --baseline <sha> --candidate <sha> --reps 3 --out /tmp/compare-out
+```
+
+### Follow-up milestones
+
+1. Release integration: trigger runs, store baselines, and promote them. See issue #2085.
+2. Later suites: repository navigation, debugging, and cost stress, toward the 21-task set.
+3. Optimization experiments: per-request context instrumentation, non-progress loop detection, tool-output filtering, compaction strategies, and dynamic tool-schema loading.

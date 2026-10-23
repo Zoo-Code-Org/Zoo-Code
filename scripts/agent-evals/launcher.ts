@@ -7,7 +7,8 @@ import { downloadAndUnzipVSCode } from "@vscode/test-electron"
 import { IpcClient } from "@roo-code/ipc"
 import { IpcMessageType } from "@roo-code/types"
 import { buildChildEnvironment, buildLaunchArgs } from "./isolation.ts"
-import type { AgentClient, AgentHost, AgentRuntime } from "./runner.ts"
+import type { AgentClient, AgentHost, AgentRuntime, FinalWorkspaceSnapshot } from "./runner.ts"
+import type { AgentFixtureWorkspaceFile } from "./contract.ts"
 import { identityUnavailable, measured, type MeasuredString, type TraceRunIdentity } from "./trace.ts"
 
 const execFileAsync = promisify(execFile)
@@ -44,6 +45,51 @@ const readJsonField = async (
 	} catch {
 		return { available: false, reason: "fileUnreadable" }
 	}
+}
+
+const FINAL_WORKSPACE_MAX_FILES = 4_096
+const FINAL_WORKSPACE_MAX_FILE_BYTES = 1_048_576
+const FINAL_WORKSPACE_MAX_TOTAL_BYTES = 8_388_608
+const FINAL_WORKSPACE_SKIPPED_DIRS = new Set(["node_modules", ".git"])
+
+// Bounded final-workspace capture. The walker skips dependency and VCS
+// directories, caps file count and size, and reports truncation instead of
+// reading unbounded agent-written trees. Paths stay relative and forward
+// slashed, matching the fixture workspace file shape.
+async function readWorkspaceFiles(workspaceRoot: string): Promise<FinalWorkspaceSnapshot> {
+	const files: AgentFixtureWorkspaceFile[] = []
+	let truncated = false
+	let totalBytes = 0
+	const visit = async (dir: string, prefix: string): Promise<void> => {
+		const entries = await fs.readdir(dir, { withFileTypes: true })
+		for (const entry of entries) {
+			if (files.length >= FINAL_WORKSPACE_MAX_FILES || totalBytes > FINAL_WORKSPACE_MAX_TOTAL_BYTES) {
+				truncated = true
+				return
+			}
+			const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name
+			const full = path.join(dir, entry.name)
+			if (entry.isDirectory()) {
+				if (FINAL_WORKSPACE_SKIPPED_DIRS.has(entry.name)) continue
+				await visit(full, relativePath)
+				continue
+			}
+			if (!entry.isFile()) continue
+			const stat = await fs.stat(full)
+			if (
+				stat.size > FINAL_WORKSPACE_MAX_FILE_BYTES ||
+				totalBytes + stat.size > FINAL_WORKSPACE_MAX_TOTAL_BYTES
+			) {
+				truncated = true
+				continue
+			}
+			const content = await fs.readFile(full, "utf8")
+			totalBytes += stat.size
+			files.push({ path: relativePath, content })
+		}
+	}
+	await visit(workspaceRoot, "")
+	return { files, truncated }
 }
 
 // The only place where VS Code is downloaded, spawned, isolated and torn
@@ -184,6 +230,10 @@ export function createHostRuntime(options: HostRuntimeOptions): AgentRuntime {
 				platform: fallback.platform,
 				arch: fallback.arch,
 			}
+		},
+		async readFinalWorkspace(): Promise<FinalWorkspaceSnapshot> {
+			if (!temp) throw new Error("workspace not created")
+			return readWorkspaceFiles(path.join(temp, "workspace"))
 		},
 	}
 }
