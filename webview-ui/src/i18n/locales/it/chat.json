@@ -132,6 +132,7 @@
 	"typeMessage": "Scrivi un messaggio...",
 	"typeTask": "Scrivi la tua attività qui...",
 	"addContext": "@ per aggiungere contesto, / per i comandi",
+	"historyHint": "! per la cronologia utente",
 	"dragFiles": "tieni premuto shift per trascinare file",
 	"dragFilesImages": "tieni premuto shift per trascinare file/immagini",
 	"enhancePromptDescription": "Il pulsante 'Migliora prompt' aiuta a migliorare la tua richiesta fornendo contesto aggiuntivo, chiarimenti o riformulazioni. Prova a digitare una richiesta qui e fai di nuovo clic sul pulsante per vedere come funziona.",

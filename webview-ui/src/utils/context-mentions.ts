@@ -108,6 +108,25 @@ export enum ContextMenuOptionType {
 	Mode = "mode", // Add mode type
 	Command = "command", // Add command type
 	SectionHeader = "sectionHeader", // Add section header type
+	History = "history", // Recall a previously sent user prompt
+}
+
+/**
+ * "!" (and its full-width form "！") at the very start of the input opens the
+ * prompt history picker. It must not contain whitespace, so the menu dismisses
+ * itself as soon as the user starts writing a real message.
+ *
+ * This is deliberately anchored to the start of the input: "!" is a common
+ * character in ordinary prose and code ("Great!", "if (!x)", "![alt](url)"),
+ * so triggering on any occurrence would hijack Enter for those messages.
+ */
+export function isHistoryTrigger(text: string): boolean {
+	// "![alt](url)" is a markdown image at the start of a message, not a picker.
+	if (text.startsWith("![")) {
+		return false
+	}
+
+	return /^[!！]\S*$/.test(text)
 }
 
 export interface ContextMenuQueryItem {
@@ -128,7 +147,27 @@ export function getContextMenuOptions(
 	dynamicSearchResults: SearchResult[] = [],
 	modes?: ModeConfig[],
 	commands?: Command[],
+	history: string[] = [],
 ): ContextMenuQueryItem[] {
+	// Prompt history recall. Newest-first, de-duplicated so that repeated
+	// prompts (e.g. "continue") don't fill the picker with identical rows.
+	if (isHistoryTrigger(query)) {
+		const historyQuery = query.slice(1)
+		const prompts = Array.from(new Set(history.filter((prompt) => prompt.trim().length > 0)))
+
+		if (prompts.length === 0) {
+			return [{ type: ContextMenuOptionType.NoResults }]
+		}
+
+		const searchable = prompts.map((prompt) => ({ prompt }))
+		const fzf = new Fzf(searchable, { selector: (item) => item.prompt })
+		const matching = historyQuery ? fzf.find(historyQuery).map((result) => result.item.prompt) : prompts
+
+		return matching.length > 0
+			? matching.map((prompt) => ({ type: ContextMenuOptionType.History, value: prompt }))
+			: [{ type: ContextMenuOptionType.NoResults }]
+	}
+
 	// Handle slash commands for modes and commands
 	// Only process as slash command if the query itself starts with "/" (meaning we're typing a slash command)
 	if (query.startsWith("/")) {
@@ -366,6 +405,11 @@ export function getContextMenuOptions(
 
 export function shouldShowContextMenu(text: string, position: number): boolean {
 	const beforeCursor = text.slice(0, position)
+
+	// Check for prompt history recall ("!" / "！" at the start of the input)
+	if (isHistoryTrigger(text)) {
+		return true
+	}
 
 	// Check if we're in a slash command context (at the beginning and no space yet)
 	if (text.startsWith("/") && !text.includes(" ") && position <= text.length) {

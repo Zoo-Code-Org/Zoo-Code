@@ -132,6 +132,7 @@
 	"typeMessage": "Bir mesaj yazın...",
 	"typeTask": "Görevinizi buraya yazın...",
 	"addContext": "Bağlam eklemek için @, komutlar için /",
+	"historyHint": "kullanıcı geçmişi için !",
 	"dragFiles": "dosyaları sürüklemek için shift tuşuna basılı tutun",
 	"dragFilesImages": "dosyaları/resimleri sürüklemek için shift tuşuna basılı tutun",
 	"enhancePromptDescription": "'İstemi geliştir' düğmesi, ek bağlam, açıklama veya yeniden ifade sağlayarak isteğinizi iyileştirmeye yardımcı olur. Buraya bir istek yazıp düğmeye tekrar tıklayarak nasıl çalıştığını görebilirsiniz.",

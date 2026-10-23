@@ -586,3 +586,69 @@ describe("shouldShowContextMenu", () => {
 		expect(shouldShowContextMenu("@/path/with space", 13)).toBe(false) // Cursor after unescaped space
 	})
 })
+
+describe("prompt history trigger", () => {
+	it("should open the menu for a leading !", () => {
+		expect(shouldShowContextMenu("!", 1)).toBe(true)
+		expect(shouldShowContextMenu("!fix", 4)).toBe(true)
+	})
+
+	it("should open the menu for a leading full-width ！", () => {
+		expect(shouldShowContextMenu("！", 1)).toBe(true)
+		expect(shouldShowContextMenu("！修复", 3)).toBe(true)
+	})
+
+	it("should not open the menu for ! outside the start of the input", () => {
+		expect(shouldShowContextMenu("Great!", 6)).toBe(false)
+		expect(shouldShowContextMenu("if (!x)", 7)).toBe(false)
+		expect(shouldShowContextMenu("![alt](url)", 11)).toBe(false)
+		expect(shouldShowContextMenu("多好！", 3)).toBe(false)
+	})
+
+	it("should close the menu once the message contains whitespace", () => {
+		expect(shouldShowContextMenu("!fix the bug", 12)).toBe(false)
+		expect(shouldShowContextMenu("! ", 2)).toBe(false)
+	})
+})
+
+describe("getContextMenuOptions for prompt history", () => {
+	const history = ["Third prompt", "Second prompt", "First prompt"]
+
+	it("should list prompts newest-first", () => {
+		const options = getContextMenuOptions("!", null, [], [], undefined, undefined, history)
+		expect(options.map((option) => option.type)).toEqual([
+			ContextMenuOptionType.History,
+			ContextMenuOptionType.History,
+			ContextMenuOptionType.History,
+		])
+		expect(options.map((option) => option.value)).toEqual(["Third prompt", "Second prompt", "First prompt"])
+	})
+
+	it("should filter prompts by the query", () => {
+		const options = getContextMenuOptions("!Third", null, [], [], undefined, undefined, history)
+		expect(options).toHaveLength(1)
+		expect(options[0]).toMatchObject({ type: ContextMenuOptionType.History, value: "Third prompt" })
+	})
+
+	it("should drop duplicate prompts so the picker has no identical rows", () => {
+		const options = getContextMenuOptions("!", null, [], [], undefined, undefined, ["继续", "explain this", "继续"])
+		expect(options.map((option) => option.value)).toEqual(["继续", "explain this"])
+	})
+
+	it("should return NoResults when the history is empty", () => {
+		expect(getContextMenuOptions("!", null, [], [], undefined, undefined, [])).toEqual([
+			{ type: ContextMenuOptionType.NoResults },
+		])
+	})
+
+	it("should return NoResults when nothing matches the query", () => {
+		expect(getContextMenuOptions("!zzzz", null, [], [], undefined, undefined, ["alpha", "beta"])).toEqual([
+			{ type: ContextMenuOptionType.NoResults },
+		])
+	})
+
+	it("should not treat a mid-text exclamation mark as history", () => {
+		const options = getContextMenuOptions("Great!", null, [], [], undefined, undefined, history)
+		expect(options.every((option) => option.type !== ContextMenuOptionType.History)).toBe(true)
+	})
+})

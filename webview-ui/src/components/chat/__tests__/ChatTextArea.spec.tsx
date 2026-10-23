@@ -634,6 +634,52 @@ describe("ChatTextArea", () => {
 				expect(setInputValue).toHaveBeenCalledWith("New input")
 			})
 
+			it("should open the prompt history picker when typing a leading !", () => {
+				const setInputValue = vi.fn()
+				const onSend = vi.fn()
+				const { container } = render(
+					<ChatTextArea {...defaultProps} onSend={onSend} setInputValue={setInputValue} inputValue="" />,
+				)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!", selectionStart: 1 } })
+
+				// Newest prompt first.
+				expect(container.textContent).toContain("Third prompt")
+
+				fireEvent.keyDown(textarea, { key: "Enter" })
+
+				// Selecting only fills the input; it must not send the message.
+				expect(setInputValue).toHaveBeenCalledWith("Third prompt")
+				expect(onSend).not.toHaveBeenCalled()
+			})
+
+			it("should close the prompt history picker on Escape without sending", () => {
+				const onSend = vi.fn()
+				const { container } = render(<ChatTextArea {...defaultProps} onSend={onSend} inputValue="" />)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!thi", selectionStart: 4 } })
+				expect(container.textContent).toContain("Third prompt")
+
+				fireEvent.keyDown(textarea, { key: "Escape" })
+
+				expect(container.textContent).not.toContain("Third prompt")
+				expect(onSend).not.toHaveBeenCalled()
+			})
+
+			it("should not open the prompt history picker for a mid-message exclamation mark", () => {
+				const { container } = render(<ChatTextArea {...defaultProps} inputValue="" />)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "Great!" } })
+
+				expect(container.textContent).not.toContain("Third prompt")
+			})
+
 			it("should reset history navigation when sending message", () => {
 				const onSend = vi.fn()
 				const setInputValue = vi.fn()

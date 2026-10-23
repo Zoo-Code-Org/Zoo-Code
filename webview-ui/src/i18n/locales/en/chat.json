@@ -168,6 +168,7 @@
 	"typeMessage": "Type a message...",
 	"typeTask": "Type your task here...",
 	"addContext": "@ to add context, / for commands",
+	"historyHint": "! for user history",
 	"dragFiles": "hold shift to drag in files",
 	"dragFilesImages": "hold shift to drag in files/images",
 	"errorReadingFile": "Error reading file",
