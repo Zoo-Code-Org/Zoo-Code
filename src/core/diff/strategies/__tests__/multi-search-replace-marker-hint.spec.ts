@@ -67,10 +67,16 @@ describe("MultiSearchReplaceDiffStrategy malformed start-line marker hint", () =
 		expect(performance.now() - startedAt).toBeLessThan(2_000)
 	})
 
-	it("still hints for a padded marker within the length guard", async () => {
-		const diffContent = buildDiff(`start_line:${" ".repeat(40)}3\nnot-in-the-file`, "replacement")
+	it.each([
+		{ length: 64, hinted: true },
+		{ length: 65, hinted: false },
+	])("hints only while the first line fits the length guard ($length chars)", async ({ length, hinted }) => {
+		const firstLine = `startline${" ".repeat(length - 10)}3`
+		expect(firstLine).toHaveLength(length)
+		const diffContent = buildDiff(`${firstLine}\nnot-in-the-file`, "replacement")
+		const errorText = firstFailureError(await strategy.applyDiff(nonMatchingFile, diffContent))
 
-		expect(firstFailureError(await strategy.applyDiff(nonMatchingFile, diffContent))).toContain("LIKELY CAUSE")
+		expect(errorText.includes("LIKELY CAUSE")).toBe(hinted)
 	})
 
 	it.each(["value:3", ":3 trailing", "x start_line:3"])(
