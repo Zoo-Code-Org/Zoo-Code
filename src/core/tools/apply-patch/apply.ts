@@ -29,6 +29,21 @@ export interface ApplyPatchFileChange {
 	originalContent?: string
 	/** New content (for add/update) */
 	newContent?: string
+	/**
+	 * B3a: the unified approval diff for this file (computed by the tool
+	 * handler), reused by the per-step change card.
+	 */
+	diff?: string
+	/** B3a: { added, removed } stats of the approval diff, when computable. */
+	diffStats?: { added: number; removed: number }
+	/** B3a: whether this file's approval was auto-approved. */
+	autoApproved?: boolean
+	/**
+	 * Set by the tool handler when a move's source unlink succeeded: the
+	 * change journal then records the source deletion alongside the
+	 * destination write so a step rollback can restore the removed file.
+	 */
+	moveSourceDeleted?: boolean
 }
 
 /**

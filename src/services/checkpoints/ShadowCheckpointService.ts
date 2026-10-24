@@ -407,6 +407,230 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 		}
 	}
 
+	/**
+	 * Restore a single file to its state at `commitHash` without moving the
+	 * branch or truncating the checkpoint list (unlike
+	 * {@link restoreCheckpoint}).
+	 *
+	 * If the file did not exist at `commitHash`, it is removed from the
+	 * working tree instead — rolling a file back to before it was created.
+	 */
+	// Real-path containment for restoreFile targets. The lexical prefix check
+	// cannot see through a symlinked ancestor: a link inside the workspace
+	// pointing outside it passes the prefix check while the real target
+	// resolves elsewhere. Validate containment on real paths for every
+	// target, not only existing ones: the checkout branch writes through a
+	// symlinked ancestor even when the target itself does not exist. Walk up
+	// to the deepest ancestor that has a directory entry (lstat, so a
+	// dangling symlink counts as present and is then rejected by realpath
+	// instead of being skipped by an exists()-style check, which would
+	// validate the root and let the checkout report a false success).
+	// Resolving both sides keeps a legitimate symlinked workspace root
+	// working. Called before the Git lookups AND again immediately before
+	// each filesystem mutation: a concurrent process can replace an existing
+	// ancestor with a symlink while the Git calls are awaited (TOCTOU),
+	// redirecting the delete or the checkout outside the workspace.
+	private async assertRestoreContainment(resolvedTarget: string, filePath: string): Promise<void> {
+		const realWorkspaceRoot = await fs.realpath(this.workspaceDir)
+		const realRoot = realWorkspaceRoot.endsWith(path.sep) ? realWorkspaceRoot : realWorkspaceRoot + path.sep
+		let realCandidate = resolvedTarget
+		while (true) {
+			try {
+				await fs.lstat(realCandidate)
+				break
+			} catch (err) {
+				const code = (err as NodeJS.ErrnoException).code
+				if (code !== "ENOENT" && code !== "ENOTDIR") throw err
+			}
+			const parent = path.dirname(realCandidate)
+			if (parent === realCandidate) {
+				throw new Error(`restoreFile target resolves outside the workspace: ${filePath}`)
+			}
+			realCandidate = parent
+		}
+		let realChecked: string
+		try {
+			realChecked = await fs.realpath(realCandidate)
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+				throw new Error(`restoreFile target resolves through a dangling link: ${filePath}`)
+			}
+			throw err
+		}
+		if (realChecked !== realWorkspaceRoot && !realChecked.startsWith(realRoot)) {
+			throw new Error(`restoreFile target resolves outside the workspace: ${filePath}`)
+		}
+	}
+
+	public async restoreFile(commitHash: string, filePath: string): Promise<void> {
+		try {
+			this.log(`[${this.constructor.name}#restoreFile] restoring ${filePath} from ${commitHash}`)
+
+			if (!this.git) {
+				throw new Error("Shadow git repo not initialized")
+			}
+
+			// Constrain the path to the workspace before either branch: `..`
+			// segments would otherwise normalize (path.join / git pathspec) to a
+			// location outside `this.workspaceDir`, and the delete branch could
+			// remove an unrelated file. `path.resolve` normalizes the segments;
+			// the trailing-separator prefix check is the containment guard.
+			const resolvedTarget = path.resolve(this.workspaceDir, filePath)
+			const workspaceRoot = this.workspaceDir.endsWith(path.sep)
+				? this.workspaceDir
+				: this.workspaceDir + path.sep
+			if (resolvedTarget !== this.workspaceDir && !resolvedTarget.startsWith(workspaceRoot)) {
+				throw new Error(`restoreFile target is outside the workspace: ${filePath}`)
+			}
+
+			// Real-path containment (symlinked ancestors, dangling links); see
+			// assertRestoreContainment. Re-checked below, immediately before
+			// each filesystem mutation.
+			await this.assertRestoreContainment(resolvedTarget, filePath)
+
+			// Git pathspecs are always POSIX, but the path handed to git must be
+			// the same path containment just validated. Deriving it from the raw
+			// request with a blanket backslash conversion would reinterpret
+			// POSIX filename backslashes as separators: `link\secret.txt` (a
+			// legal POSIX filename) would reach git as `link/secret.txt` and
+			// could write through a symlinked directory the validated path never
+			// traversed. Derive the pathspec from the validated native path and
+			// convert only its real separators; on Windows this is exactly the
+			// native-to-POSIX normalization the journal and webview hand back.
+			const gitPath = path.relative(this.workspaceDir, resolvedTarget).split(path.sep).join("/")
+
+			// restoreFile restores exactly one regular file: a directory pathspec
+			// would recursively check out the whole subtree from the checkpoint,
+			// so reject directory targets - including "." and "" resolving to the
+			// workspace root - before either branch runs.
+			try {
+				const targetStat = await fs.lstat(resolvedTarget)
+				if (targetStat.isDirectory()) {
+					throw new Error(`restoreFile target is a directory: ${filePath}`)
+				}
+			} catch (err) {
+				if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err
+			}
+
+			const start = Date.now()
+			const existed = await this.fileExistsInCommit(commitHash, gitPath)
+
+			if (existed) {
+				// The checkpoint entry can be a tree or a symlink (whose object
+				// is also a blob); only regular-file modes may be restored through
+				// this single-file path. ls-tree reports the mode, unlike cat-file.
+				const entry = await this.git!.raw(["ls-tree", commitHash, "--", `:(literal)${gitPath}`])
+				const mode = entry.trim() ? entry.split("\t")[0].split(" ")[0] : ""
+				if (mode !== "100644" && mode !== "100755") {
+					throw new Error(`restoreFile target is not a regular file in the checkpoint: ${filePath}`)
+				}
+				// TOCTOU guard: a concurrent process can replace an ancestor with
+				// a symlink while the Git lookups above are awaited, and the
+				// checkout would then write through the swapped link. Re-check
+				// containment immediately before the mutation.
+				await this.assertRestoreContainment(resolvedTarget, filePath)
+				// The checkout pathspec must be literal too: a filename containing
+				// glob characters ([a].ts, foo?bar.ts) would otherwise match - or
+				// miss - other files, restoring more (or the wrong file) than the
+				// single requested path.
+				await this.git.checkout([commitHash, "--", `:(literal)${gitPath}`])
+			} else {
+				// Belt-and-suspenders: a path the shadow repository excludes was
+				// never tracked, so its absence from the commit is not evidence of
+				// a deletion - removing it here could rm a live user file (e.g. a
+				// log under an excluded directory) that no checkpoint ever
+				// contained. Journaling now skips excluded paths, but journals
+				// written before that fix can still route an excluded path here;
+				// fail loudly instead of deleting.
+				if (await this.isPathIgnored(filePath)) {
+					throw new Error(`restoreFile target is excluded from the shadow repository: ${filePath}`)
+				}
+				// TOCTOU guard: same race as above - without this re-check the
+				// delete could remove a file the swapped link now points at
+				// outside the workspace.
+				await this.assertRestoreContainment(resolvedTarget, filePath)
+				// Use the validated path, not a re-join of the raw request: the
+				// delete branch must remove exactly what containment approved.
+				await fs.rm(resolvedTarget, { force: true })
+			}
+
+			const duration = Date.now() - start
+			this.emit("restore", { type: "restore", commitHash, duration })
+			this.log(`[${this.constructor.name}#restoreFile] restored ${filePath} in ${duration}ms`)
+		} catch (e) {
+			const error = e instanceof Error ? e : new Error(String(e))
+			this.log(`[${this.constructor.name}#restoreFile] failed to restore file: ${error.message}`)
+			this.emit("error", { type: "error", error })
+			throw error
+		}
+	}
+
+	/**
+	 * Whether `filePath` (workspace-relative or absolute) is excluded from the
+	 * shadow repository by its local exclude rules (.git/info/exclude, which
+	 * mirrors the workspace ignore configuration). Excluded paths are never
+	 * tracked by the shadow repo, so they must not enter the change journal
+	 * and must not be deleted by restoreFile's delete branch.
+	 */
+	public async isPathIgnored(filePath: string): Promise<boolean> {
+		if (!this.git) {
+			return false
+		}
+		const resolved = path.resolve(this.workspaceDir, filePath)
+		const gitPath = path.relative(this.workspaceDir, resolved).split(path.sep).join("/")
+		if (!gitPath || gitPath.startsWith("..")) {
+			return false
+		}
+		try {
+			// --no-index evaluates the exclude rules alone: index or commit
+			// membership is irrelevant to "the shadow repo never tracks this".
+			// No -v: verbose mode prints a line for ANY matching rule, and a
+			// negation rule (e.g. "!.env.example" after ".env*") means the path
+			// is NOT ignored - under -v it would be misclassified as ignored.
+			// Without -v only genuinely ignored paths print a line. The verdict
+			// still comes from the output, not from the promise settling:
+			// simple-git's raw() resolves (rather than rejects) on a silent
+			// non-zero exit, so "not ignored" (exit 1, no output) arrives as an
+			// empty success here - the same defect documented in
+			// fileExistsInCommit.
+			const match = await this.git.raw(["check-ignore", "--no-index", "--", gitPath])
+			return match.trim().length > 0
+		} catch {
+			// A git fatal (corrupt repo) leaves the path unproven-ignored;
+			// callers keep their historical behavior for that case.
+			return false
+		}
+	}
+
+	/** Whether `filePath` exists in the tree of `commitHash`. */
+	private async fileExistsInCommit(commitHash: string, filePath: string): Promise<boolean> {
+		// A failed lookup is not evidence the file is absent. If the commit object
+		// itself cannot be read (invalid hash, corrupt or missing shadow repo),
+		// falling through to the restoreFile delete branch would remove a live
+		// file. Verify the object first and fail the restore loudly instead.
+		//
+		// Verification must be evidence-based: simple-git's raw() only rejects
+		// when git writes a fatal to stderr, and `git cat-file -e <bad-sha>`
+		// fails *silently* (exit 1, no output) — a silent resolution would be
+		// read as "valid commit". `rev-parse --verify` emits the resolved id on
+		// success and a stderr fatal on every failure mode, so the reject is
+		// reliable.
+		try {
+			await this.git!.raw(["rev-parse", "--verify", `${commitHash}^{commit}`])
+		} catch {
+			throw new Error(`Checkpoint unavailable: ${commitHash}`)
+		}
+		// Existence must distinguish "absent" from "unreadable": ls-tree exits 0
+		// with empty output only when the path is genuinely absent from the
+		// tree, while a corrupt or missing tree object makes it fail - and that
+		// failure must propagate rather than be misread as absence, which would
+		// route restoreFile into the delete branch and rm a live file the
+		// checkpoint does contain. The :(literal) magic keeps paths containing
+		// glob characters exact.
+		const entry = await this.git!.raw(["ls-tree", commitHash, "--", `:(literal)${filePath}`])
+		return entry.trim().length > 0
+	}
+
 	public async getDiff({ from, to }: { from?: string; to?: string }): Promise<CheckpointDiff[]> {
 		if (!this.git) {
 			throw new Error("Shadow git repo not initialized")
