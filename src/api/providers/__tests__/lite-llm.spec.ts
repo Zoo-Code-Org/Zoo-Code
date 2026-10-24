@@ -1,6 +1,8 @@
 import { Anthropic } from "@anthropic-ai/sdk"
+import type OpenAI from "openai"
 
 import { LiteLLMHandler } from "../lite-llm"
+import type { ApiHandlerCreateMessageMetadata } from "../../index"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { litellmDefaultModelId, litellmDefaultModelInfo } from "@roo-code/types"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
@@ -752,6 +754,47 @@ describe("LiteLLMHandler", () => {
 				// First tool call should have the thought signature
 				expect(assistantMessage.tool_calls[0].provider_specific_fields).toBeDefined()
 				expect(assistantMessage.tool_calls[0].provider_specific_fields.thought_signature).toBe(dummySignature)
+			})
+
+			it("should send tool call ids that carry a thought signature unchanged", async () => {
+				// LiteLLM encodes the Gemini signature into the id; truncating it breaks the signature.
+				const signature = "AY89a18ErUKBAfkTYnDbzq6mGnRG5QS8VFogncpDzYVXzC0i_aDwY5o-0123456789abcdef"
+				const toolCallId = `call_864944__thought__${signature}`
+				expect(toolCallId.length).toBeGreaterThan(64)
+
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{ role: "user", content: "Hello" },
+					{
+						role: "assistant",
+						content: [{ type: "tool_use", id: toolCallId, name: "read_file", input: { path: "test.txt" } }],
+					},
+					{
+						role: "user",
+						content: [{ type: "tool_result", tool_use_id: toolCallId, content: "file contents" }],
+					},
+				]
+				mockCreate.mockReturnValue({
+					withResponse: vi.fn().mockResolvedValue({
+						data: asyncStreamFrom([{ choices: [{ delta: { content: "ok" } }] }]),
+					}),
+				})
+				const metadata: ApiHandlerCreateMessageMetadata = {
+					taskId: "task-1",
+					tools: [
+						{
+							type: "function",
+							function: { name: "read_file", description: "Read a file", parameters: {} },
+						},
+					],
+				}
+
+				await collectStream(handler.createMessage("You are a helpful assistant", messages, metadata))
+
+				const sent: OpenAI.Chat.ChatCompletionMessageParam[] = mockCreate.mock.calls[0][0].messages
+				const assistantMessage = sent.find((msg) => msg.role === "assistant" && msg.tool_calls?.length)
+				const toolMessage = sent.find((msg) => msg.role === "tool")
+				expect(assistantMessage?.role === "assistant" && assistantMessage.tool_calls?.[0].id).toBe(toolCallId)
+				expect(toolMessage?.role === "tool" && toolMessage.tool_call_id).toBe(toolCallId)
 			})
 
 			it("should not inject thought signatures for non-Gemini models", async () => {
