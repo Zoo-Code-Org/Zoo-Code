@@ -1010,6 +1010,10 @@
 			"refreshSuccess": "Narzędzia odświeżone pomyślnie",
 			"refreshError": "Nie udało się odświeżyć narzędzi",
 			"toolParameters": "Parametry"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Dynamiczny wysiłek myślowy",
+			"description": "Przygotowuje narzędzie set_thinking_effort do późniejszego wsparcia: to ustawienie zapisuje tylko preferencję, zachowanie na żądanie pojawi się w kolejnych pracach. Ręczna regulacja w czacie jest zawsze dostępna. (eksperymentalne)"
 		}
 	},
 	"promptCaching": {

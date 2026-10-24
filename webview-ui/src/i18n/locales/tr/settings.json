@@ -1010,6 +1010,10 @@
 			"refreshSuccess": "Araçlar başarıyla yenilendi",
 			"refreshError": "Araçlar yenilenemedi",
 			"toolParameters": "Parametreler"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Dinamik düşünme çabası",
+			"description": "set_thinking_effort aracını sonraki destek için hazırlar: bu ayar yalnızca tercihi saklar, istek başına davranış sonraki çalışmada gelir. Sohbetteki manuel kontrol her zaman kullanılabilir. (deneysel)"
 		}
 	},
 	"promptCaching": {

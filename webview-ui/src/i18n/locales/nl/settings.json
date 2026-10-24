@@ -1010,6 +1010,10 @@
 			"refreshSuccess": "Tools succesvol vernieuwd",
 			"refreshError": "Fout bij vernieuwen van tools",
 			"toolParameters": "Parameters"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Dynamisch denkwerk",
+			"description": "Bereidt het set_thinking_effort-gereedschap voor op latere ondersteuning: deze instelling slaat alleen de voorkeur op, het gedrag per verzoek volgt in later werk. De handmatige aanpassing in het gesprek blijft altijd beschikbaar. (experimenteel)"
 		}
 	},
 	"promptCaching": {

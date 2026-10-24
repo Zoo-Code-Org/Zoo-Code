@@ -1010,6 +1010,10 @@
 			"refreshSuccess": "도구가 성공적으로 새로고침되었습니다",
 			"refreshError": "도구 새로고침에 실패했습니다",
 			"toolParameters": "매개변수"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "동적 사고 노력",
+			"description": "set_thinking_effort 도구를 이후 지원을 위해 준비합니다. 이 설정은 선호도만 저장하며, 요청별 동작은 후속 작업에서 제공됩니다. 채팅에서 수동 조정은 항상 사용 가능합니다. (실험적 기능)"
 		}
 	},
 	"promptCaching": {

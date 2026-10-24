@@ -1010,6 +1010,10 @@
 			"refreshSuccess": "工具刷新成功",
 			"refreshError": "工具刷新失败",
 			"toolParameters": "参数"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "动态思考强度",
+			"description": "为后续支持准备 set_thinking_effort 工具：此设置仅保存偏好，按请求的工具行为将在后续工作中提供。对话中的手动调整随时可用。（实验性功能）"
 		}
 	},
 	"promptCaching": {
