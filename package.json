@@ -112,7 +112,7 @@
 			"esbuild": "0.28.2",
 			"rollup": "4.60.4",
 			"vite": "catalog:",
-			"undici": "6.28.1",
+			"undici": "6.29.1",
 			"@ai-sdk/provider@3": "3.0.19",
 			"@ai-sdk/provider-utils@4": "4.0.61",
 			"@ai-sdk/openai-compatible@2": "2.0.56",
