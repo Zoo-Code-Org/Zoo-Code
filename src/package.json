@@ -557,7 +557,7 @@
 		"@vitest/coverage-v8": "catalog:",
 		"@vscode/vsce": "3.9.2",
 		"ai": "7.0.148",
-		"esbuild-wasm": "0.28.1",
+		"esbuild-wasm": "0.28.2",
 		"execa": "9.6.1",
 		"mkdirp": "3.0.1",
 		"nock": "14.0.17",
