@@ -55,6 +55,19 @@ export const providerProfilesSchema = z.object({
 
 export type ProviderProfiles = z.infer<typeof providerProfilesSchema>
 
+/**
+ * Signals that a profile's configuration no longer exists. Callers that treat an
+ * already-deleted profile as an idempotent no-op branch on this type instead of
+ * matching error message text, which a profile name containing the phrase could
+ * otherwise spoof.
+ */
+export class ProviderSettingsNotFoundError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "ProviderSettingsNotFoundError"
+	}
+}
+
 export class ProviderSettingsManager {
 	private static readonly SCOPE_PREFIX = "roo_cline_config_"
 	private readonly defaultConfigId = this.generateId()
@@ -511,7 +524,7 @@ export class ProviderSettingsManager {
 				const providerProfiles = await this.load()
 
 				if (!providerProfiles.apiConfigs[name]) {
-					throw new Error(`Config '${name}' not found`)
+					throw new ProviderSettingsNotFoundError(`Config '${name}' not found`)
 				}
 
 				if (Object.keys(providerProfiles.apiConfigs).length === 1) {
@@ -522,6 +535,11 @@ export class ProviderSettingsManager {
 				await this.store(providerProfiles)
 			})
 		} catch (error) {
+			// A missing config is a caller-meaningful signal, not a failure: rethrow it
+			// unwrapped so callers can branch on the type instead of message text.
+			if (error instanceof ProviderSettingsNotFoundError) {
+				throw error
+			}
 			throw new Error(`Failed to delete config: ${error}`)
 		}
 	}
@@ -543,7 +561,7 @@ export class ProviderSettingsManager {
 	/**
 	 * Set the API config for a specific mode.
 	 */
-	public async setModeConfig(mode: Mode, configId: string) {
+	public async setModeConfig(mode: Mode, configId: string | undefined) {
 		try {
 			return await this.lock(async () => {
 				const providerProfiles = await this.load()
@@ -551,8 +569,13 @@ export class ProviderSettingsManager {
 				if (!providerProfiles.modeApiConfigs) {
 					providerProfiles.modeApiConfigs = {}
 				}
-				// Assign the chosen config ID to this mode
-				providerProfiles.modeApiConfigs[mode] = configId
+				// Assign the chosen config ID to this mode. Restoring a mode that had no config
+				// removes the entry instead of persisting an undefined value.
+				if (configId === undefined) {
+					delete providerProfiles.modeApiConfigs[mode]
+				} else {
+					providerProfiles.modeApiConfigs[mode] = configId
+				}
 				await this.store(providerProfiles)
 			})
 		} catch (error) {
