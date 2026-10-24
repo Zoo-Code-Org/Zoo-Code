@@ -166,7 +166,10 @@ describe("interrupted JSON recovery", () => {
 		}
 	})
 
-	it.each([readFileWithMissingRetry, recoverJsonFile])("propagates recovery failures to readers", async (read) => {
+	it.each([
+		{ name: "retrying reader", read: readFileWithMissingRetry },
+		{ name: "recovery helper", read: recoverJsonFile },
+	])("propagates recovery failures through the $name", async ({ read }) => {
 		vi.mocked(fs.rename).mockRejectedValueOnce(ioError("EIO"))
 		await expect(read(canonical)).rejects.toMatchObject({ code: "EIO" })
 		await expect(fs.access(backup)).resolves.toBeUndefined()

@@ -8,10 +8,11 @@ import { historyItemSchema, type HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, withFileLock } from "../../utils/fileLock"
-import { safeWriteJson, removeJsonBackups } from "../../utils/safeWriteJson"
+import { safeWriteJson, removeJsonBackups, recoverJsonFile } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
 import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
+import { getErrorCode, readFileWithMissingRetry } from "./readFileWithMissingRetry"
 
 export { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
 export { DeltaRejectedError } from "./taskStoreConcurrency"
@@ -87,13 +88,25 @@ export class TaskHistoryStore {
 	private fsWatcher: fsSync.FSWatcher | null = null
 	private reconcileTimer: ReturnType<typeof setTimeout> | null = null
 	private disposed = false
+	private initializationPromise: Promise<void> | undefined
+	private initializationRetryTimer: ReturnType<typeof setTimeout> | null = null
+	private resolveInitializationRetry: (() => void) | undefined
+	private initializationHealthy = false
 
 	/**
-	 * Promise that resolves when initialization is complete.
-	 * Callers can await this to ensure the store is ready before reading.
+	 * Resolves after initialization succeeds or ends in terminal failure.
+	 * Check isHealthy to distinguish readiness from an unsuccessful attempt.
 	 */
 	public readonly initialized: Promise<void>
 	private resolveInitialized!: () => void
+
+	/** Whether startup completed successfully with a full snapshot. */
+	get isHealthy(): boolean {
+		return this.initializationHealthy
+	}
+
+	// Six retries cover a stale crash lock without polling aggressively.
+	private static readonly INITIALIZATION_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 8_000, 8_000]
 
 	/** Periodic reconciliation interval in milliseconds. */
 	private static readonly RECONCILE_INTERVAL_MS = 5 * 60 * 1000
@@ -111,37 +124,72 @@ export class TaskHistoryStore {
 	/**
 	 * Scan task files, reconcile delegation state, start watchers.
 	 */
-	async initialize(): Promise<void> {
+	initialize(): Promise<void> {
+		if (this.initializationHealthy) return Promise.resolve()
+		if (!this.initializationPromise) {
+			this.initializationPromise = this.initializeWithRetry().finally(() => {
+				this.initializationPromise = undefined
+			})
+		}
+		return this.initializationPromise
+	}
+
+	private async initializeWithRetry(): Promise<void> {
 		try {
-			const tasksDir = await this.getTasksDir()
-			await fs.mkdir(tasksDir, { recursive: true })
-
-			// 1. Scan task directories to populate the cache
-			await this.reconcile({ forceRefresh: true })
-			// Capture which active tasks were present in persisted state before replay can
-			// change any statuses. Reconciliation must not treat a replay-repaired parent
-			// as an orphaned active child in the same startup pass.
-			const persistedActiveIds = this.getPersistedActiveIds()
-
-			// 2. Complete any two-record repair interrupted after its intent was durable.
-			try {
-				await this.replayDelegationRepairIntent()
-			} catch (error) {
-				console.error("[TaskHistoryStore] Failed to replay delegation repair intent:", error)
+			for (let attempt = 0; ; attempt++) {
+				try {
+					if (this.disposed) throw new Error("TaskHistoryStore was disposed during initialization")
+					await this.initializeAttempt()
+					if (this.disposed) throw new Error("TaskHistoryStore was disposed during initialization")
+					this.initializationHealthy = true
+					return
+				} catch (error) {
+					const code = getErrorCode(error)
+					const delay = TaskHistoryStore.INITIALIZATION_RETRY_DELAYS_MS[attempt]
+					if (this.disposed || (code !== "ELOCKED" && code !== "EBUSY") || delay === undefined) throw error
+					console.warn(`[TaskHistoryStore] Initialization failed with ${code}; retrying in ${delay}ms`)
+					await new Promise<void>((resolve) => {
+						this.resolveInitializationRetry = resolve
+						this.initializationRetryTimer = setTimeout(resolve, delay)
+					})
+					this.initializationRetryTimer = null
+					this.resolveInitializationRetry = undefined
+					if (this.disposed) throw error
+				}
 			}
-
-			// 3. Repair delegation inconsistencies left by a previous crash
-			await this.reconcileDelegationState(persistedActiveIds)
-
-			// 4. Start fs.watch for cross-instance reactivity
-			this.startWatcher()
-
-			// 5. Start periodic reconciliation as a defensive fallback
-			this.startPeriodicReconciliation()
 		} finally {
-			// Mark initialization as complete so callers awaiting `initialized` can proceed
+			// Completion after exhaustion is distinct from a healthy snapshot.
+			// Activation can continue; callers inspect isHealthy for readiness.
 			this.resolveInitialized()
 		}
+	}
+
+	private async initializeAttempt(): Promise<void> {
+		const tasksDir = await this.getTasksDir()
+		await fs.mkdir(tasksDir, { recursive: true })
+
+		// 1. Scan task directories to populate the cache
+		await this.reconcile({ forceRefresh: true })
+		// Capture which active tasks were present in persisted state before replay can
+		// change any statuses. Reconciliation must not treat a replay-repaired parent
+		// as an orphaned active child in the same startup pass.
+		const persistedActiveIds = this.getPersistedActiveIds()
+
+		// 2. Complete any two-record repair interrupted after its intent was durable.
+		try {
+			await this.replayDelegationRepairIntent()
+		} catch (error) {
+			console.error("[TaskHistoryStore] Failed to replay delegation repair intent:", error)
+		}
+
+		// 3. Repair delegation inconsistencies left by a previous crash
+		await this.reconcileDelegationState(persistedActiveIds)
+
+		// 4. Start fs.watch for cross-instance reactivity
+		this.startWatcher()
+
+		// 5. Start periodic reconciliation as a defensive fallback
+		this.startPeriodicReconciliation()
 	}
 
 	/**
@@ -149,6 +197,13 @@ export class TaskHistoryStore {
 	 */
 	dispose(): void {
 		this.disposed = true
+		this.initializationHealthy = false
+		if (this.initializationRetryTimer) {
+			clearTimeout(this.initializationRetryTimer)
+			this.initializationRetryTimer = null
+		}
+		this.resolveInitializationRetry?.()
+		this.resolveInitializationRetry = undefined
 
 		if (this.reconcileTimer) {
 			clearTimeout(this.reconcileTimer)
@@ -343,7 +398,8 @@ export class TaskHistoryStore {
 			let dirEntries: string[]
 			try {
 				dirEntries = await fs.readdir(tasksDir)
-			} catch {
+			} catch (error) {
+				if (getErrorCode(error) !== "ENOENT") throw error
 				return // tasks dir doesn't exist yet
 			}
 
@@ -357,7 +413,11 @@ export class TaskHistoryStore {
 			for (const taskId of onDiskIds) {
 				try {
 					const taskFilePath = await this.getTaskFilePath(taskId)
-					const { mtimeMs } = await fs.stat(taskFilePath)
+					const { mtimeMs } = await fs.stat(taskFilePath).catch(async (error: unknown) => {
+						if (getErrorCode(error) !== "ENOENT") throw error
+						await recoverJsonFile(taskFilePath)
+						return fs.stat(taskFilePath)
+					})
 					liveIds.add(taskId)
 					if (
 						!options.forceRefresh &&
@@ -375,7 +435,10 @@ export class TaskHistoryStore {
 							this.cache.set(taskId, item)
 						}
 					}
-				} catch {
+				} catch (error) {
+					// An unavailable snapshot is not evidence of deletion. In
+					// particular, startup must not repair delegation from it.
+					if (getErrorCode(error) !== "ENOENT") throw error
 					// File may be temporarily absent during a peer's atomic
 					// rename window in safeWriteJson. The advisory lock is
 					// held for the entire write, so its presence means a
@@ -775,17 +838,14 @@ export class TaskHistoryStore {
 	 */
 	async invalidate(taskId: string): Promise<void> {
 		return this.withLock(async () => {
-			try {
-				const item = await this.readTaskFile(taskId)
-				if (item) {
-					this.cache.set(taskId, item)
-				} else {
-					this.cache.delete(taskId)
-				}
-				this.taskFileMtimes.delete(taskId)
-			} catch {
+			// A failed read must retain the last known record, not evict it.
+			const item = await this.readTaskFile(taskId)
+			if (item) {
+				this.cache.set(taskId, item)
+			} else {
 				this.cache.delete(taskId)
 			}
+			this.taskFileMtimes.delete(taskId)
 		})
 	}
 
@@ -894,10 +954,11 @@ export class TaskHistoryStore {
 		const filePath = await this.getTaskFilePath(taskId)
 
 		try {
-			const raw = await fs.readFile(filePath, "utf8")
+			const raw = await readFileWithMissingRetry(filePath)
 			const item: HistoryItem = JSON.parse(raw)
 			return item.id ? item : null
-		} catch {
+		} catch (error) {
+			if (!(error instanceof SyntaxError) && getErrorCode(error) !== "ENOENT") throw error
 			return null
 		}
 	}
