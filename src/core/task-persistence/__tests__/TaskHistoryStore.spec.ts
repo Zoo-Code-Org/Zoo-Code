@@ -53,6 +53,15 @@ describe("TaskHistoryStore", () => {
 	})
 
 	describe("initialize()", () => {
+		it("reports isInitialized only after the scan completes", async () => {
+			expect(store.isInitialized).toBe(false)
+
+			await store.initialize()
+
+			expect(store.isInitialized).toBe(true)
+			await expect(store.initialized).resolves.toBeUndefined()
+		})
+
 		it("initializes from empty state (no index, no task dirs)", async () => {
 			await store.initialize()
 			expect(store.getAll()).toEqual([])

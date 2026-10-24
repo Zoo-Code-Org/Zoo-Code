@@ -2447,6 +2447,16 @@ describe("ClineProvider", () => {
 		expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
 	})
 
+	it("builds state without task history while the task history store is still loading", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		// A scan that never finishes must not block a state that omits task history.
+		Object.defineProperty(provider.taskHistoryStore, "initialized", { value: new Promise<void>(() => {}) })
+
+		const state = await provider.getStateToPostToWebview({ includeTaskHistory: false })
+
+		expect(state.taskHistory).toEqual([])
+	})
+
 	it("saves current config when switching to mode without config", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]

@@ -128,6 +128,8 @@ const mockClineProvider = {
 	},
 	log: vi.fn(),
 	postStateToWebview: vi.fn(),
+	postStateToWebviewWithoutTaskHistory: vi.fn(),
+	taskHistoryStore: { isInitialized: true, initialized: Promise.resolve() },
 	resolveWebviewThemeFixtureProbe: vi.fn(),
 	getCurrentTask: vi.fn(),
 	getTaskWithId: vi.fn(),
@@ -3034,5 +3036,44 @@ describe("updateProfileModel", () => {
 		} as unknown as Parameters<typeof webviewMessageHandler>[1])
 
 		expect(updateProfileModel).not.toHaveBeenCalled()
+	})
+})
+
+describe("webviewMessageHandler - webviewDidLaunch task history", () => {
+	function setupLaunch(taskHistoryStore: { isInitialized: boolean; initialized: Promise<void> }) {
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([])
+		const launchProvider = mockClineProvider as unknown as {
+			getMcpHub: ReturnType<typeof vi.fn>
+			providerSettingsManager: { listConfig: ReturnType<typeof vi.fn> }
+			taskHistoryStore: typeof taskHistoryStore
+		}
+		launchProvider.getMcpHub = vi.fn().mockReturnValue(undefined)
+		launchProvider.providerSettingsManager = { listConfig: vi.fn().mockResolvedValue(undefined) }
+		launchProvider.taskHistoryStore = taskHistoryStore
+		vi.mocked(mockClineProvider.postStateToWebview).mockClear()
+		vi.mocked(mockClineProvider.postStateToWebviewWithoutTaskHistory).mockClear()
+	}
+
+	it("posts the full state right away once task history is loaded", async () => {
+		setupLaunch({ isInitialized: true, initialized: Promise.resolve() })
+
+		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch" })
+
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+		expect(mockClineProvider.postStateToWebviewWithoutTaskHistory).not.toHaveBeenCalled()
+	})
+
+	it("renders without waiting for a slow task history load, then posts the full state", async () => {
+		let finishLoading!: () => void
+		const initialized = new Promise<void>((resolve) => (finishLoading = resolve))
+		setupLaunch({ isInitialized: false, initialized })
+
+		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch" })
+
+		expect(mockClineProvider.postStateToWebviewWithoutTaskHistory).toHaveBeenCalledTimes(1)
+		expect(mockClineProvider.postStateToWebview).not.toHaveBeenCalled()
+
+		finishLoading()
+		await vi.waitFor(() => expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1))
 	})
 })
