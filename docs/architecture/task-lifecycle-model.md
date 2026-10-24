@@ -90,9 +90,42 @@ The known-unsafe witnesses currently compare exact shortest action sequences. Th
 
 ## History-file availability boundary
 
-Before startup delegation repair runs, `TaskHistoryStore.reconcile()` recovers an absent canonical history file from its interrupted-write backup under the file lock. Recovery failures prevent reducers from treating an unreadable child as missing; refresh failures retain the last cached record. Startup retries ELOCKED/EBUSY through one capped timeout chain and repeats the full scan before repair. The `initialized` promise settles only after success or terminal failure; `isHealthy` distinguishes these outcomes. `TaskHistoryStore.recovery.spec.ts` checks startup, reconciliation, invalidation, failed restore, fresh locks, and stale-lock takeover with real temporary files. `TaskHistoryStore.initialization.spec.ts` checks retry timing and exhaustion, persistent failures, shared concurrent initialization, health publication, and disposal cancellation.
+`TaskHistoryStore.reconcile()` recovers a missing canonical history file from its backup under the file lock.
+A failed scan blocks delegation repair.
+A failed refresh keeps the last cached record.
 
-This boundary changes which persisted records can be supplied to the reducers, not their lifecycle transitions. The pure shared-store model has no file-name, backup, or filesystem-error states, so it cannot prove this recovery protocol. Its missing-record transitions must not be read as permission to infer deletion from an I/O failure. Existing genuine-deletion reducer semantics remain unchanged.
+### Initialization and availability
+
+Initialization retries only `ELOCKED` and `EBUSY`.
+It uses one timeout chain with delays of 1, 2, 4, 8, 8, and 8 seconds.
+Each retry repeats the full scan before delegation repair.
+Lock acquisition has separate retries, which add time to this sequence.
+
+Concurrent `initialize()` calls share one promise.
+A healthy store does not repeat initialization.
+Disposal cancels a pending retry.
+
+`initialize()` rejects after a persistent error or exhausted retries.
+The provider therefore skips legacy migration after initialization failure.
+`initialized` resolves after success or terminal failure.
+`isHealthy` is true only after a successful attempt.
+
+Activation can continue after terminal failure.
+The cache can remain incomplete, and observers do not start.
+The provider logs the error.
+A persistent warning and manual retry action are tracked in [#2179](https://github.com/Zoo-Code-Org/Zoo-Code/issues/2179).
+
+### Tests and model limits
+
+`TaskHistoryStore.recovery.spec.ts` checks startup, reconciliation, invalidation, failed restores, fresh locks, and stale-lock recovery.
+`TaskHistoryStore.initialization.spec.ts` checks retries, persistent failures, shared initialization, health state, and disposal.
+These tests use temporary files or controlled timers.
+
+This boundary controls which records reach the lifecycle reducers.
+It does not change their transitions.
+The pure shared-store model does not represent filenames, backups, or filesystem errors.
+A failed read is not evidence of deletion.
+The filesystem tests cover this distinction.
 
 ## Task cleanup protocol model
 
