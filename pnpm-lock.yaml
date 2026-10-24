@@ -6,6 +6,9 @@ settings:
 
 catalogs:
   default:
+    '@types/node':
+      specifier: 22.20.5
+      version: 22.20.5
     '@vitest/coverage-v8':
       specifier: 4.1.12
       version: 4.1.12
@@ -66,7 +69,7 @@ importers:
         specifier: 10.0.0
         version: 10.0.0(@stryker-mutator/core@10.0.0(@types/node@22.20.5))(vitest@4.1.12)
       '@types/node':
-        specifier: 22.20.5
+        specifier: 'catalog:'
         version: 22.20.5
       '@vscode/test-electron':
         specifier: 2.5.2
@@ -154,7 +157,7 @@ importers:
         specifier: workspace:^
         version: link:../../packages/config-typescript
       '@types/node':
-        specifier: 22.20.5
+        specifier: 'catalog:'
         version: 22.20.5
       '@types/react':
         specifier: 18.3.31
@@ -202,7 +205,7 @@ importers:
         specifier: 10.0.10
         version: 10.0.10
       '@types/node':
-        specifier: 22.20.5
+        specifier: 'catalog:'
         version: 22.20.5
       '@types/vscode':
         specifier: 1.100.0
@@ -232,7 +235,7 @@ importers:
         specifier: workspace:^
         version: link:../config-typescript
       '@types/node':
-        specifier: 22.20.5
+        specifier: 'catalog:'
         version: 22.20.5
       vitest:
         specifier: 'catalog:'
@@ -257,7 +260,7 @@ importers:
         specifier: workspace:^
         version: link:../config-typescript
       '@types/node':
-        specifier: 22.20.5
+        specifier: 'catalog:'
         version: 22.20.5
       '@types/vscode':
         specifier: 1.100.0
@@ -332,7 +335,7 @@ importers:
         specifier: workspace:^
         version: link:../config-typescript
       '@types/node':
-        specifier: 22.20.5
+        specifier: 'catalog:'
         version: 22.20.5
       '@vitest/coverage-v8':
         specifier: 'catalog:'
@@ -357,7 +360,7 @@ importers:
         specifier: workspace:^
         version: link:../config-typescript
       '@types/node':
-        specifier: 22.20.5
+        specifier: 'catalog:'
         version: 22.20.5
       '@types/node-ipc':
         specifier: 9.2.3
@@ -382,7 +385,7 @@ importers:
         specifier: workspace:^
         version: link:../config-typescript
       '@types/node':
-        specifier: 22.20.5
+        specifier: 'catalog:'
         version: 22.20.5
       '@types/vscode':
         specifier: 1.100.0
@@ -410,7 +413,7 @@ importers:
         specifier: workspace:^
         version: link:../config-typescript
       '@types/node':
-        specifier: 22.20.5
+        specifier: 'catalog:'
         version: 22.20.5
       ajv:
         specifier: 8.20.0
@@ -434,7 +437,7 @@ importers:
         specifier: workspace:^
         version: link:../config-typescript
       '@types/node':
-        specifier: 22.20.5
+        specifier: 'catalog:'
         version: 22.20.5
       vitest:
         specifier: 'catalog:'
@@ -666,7 +669,7 @@ importers:
         specifier: 4.0.9
         version: 4.0.9
       '@types/node':
-        specifier: 22.20.5
+        specifier: 'catalog:'
         version: 22.20.5
       '@types/node-cache':
         specifier: 4.2.5
@@ -937,7 +940,7 @@ importers:
         specifier: 0.16.7
         version: 0.16.7
       '@types/node':
-        specifier: 22.20.5
+        specifier: 'catalog:'
         version: 22.20.5
       '@types/react':
         specifier: 18.3.31

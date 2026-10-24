@@ -49,7 +49,7 @@
 		"@vscode/test-electron": "2.5.2",
 		"@stryker-mutator/core": "10.0.0",
 		"@stryker-mutator/vitest-runner": "10.0.0",
-		"@types/node": "22.20.5",
+		"@types/node": "catalog:",
 		"@vscode/vsce": "3.9.2",
 		"esbuild": "0.28.2",
 		"eslint": "9.39.5",

@@ -549,7 +549,7 @@
 		"@types/clone-deep": "4.0.4",
 		"@types/diff": "5.2.3",
 		"@types/lodash.debounce": "4.0.9",
-		"@types/node": "22.20.5",
+		"@types/node": "catalog:",
 		"@types/node-cache": "4.2.5",
 		"@types/proper-lockfile": "4.1.4",
 		"@types/ps-tree": "1.1.6",
