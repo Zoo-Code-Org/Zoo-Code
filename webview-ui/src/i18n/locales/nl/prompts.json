@@ -104,6 +104,10 @@
 				"label": "Prompt verbeteren",
 				"description": "Gebruik promptverbetering om op maat gemaakte suggesties of verbeteringen voor je invoer te krijgen. Zo begrijpt Zoo je intentie en krijg je de best mogelijke antwoorden. Beschikbaar via het ✨-icoon in de chat."
 			},
+			"COMMIT_MESSAGE": {
+				"label": "Commitbericht",
+				"description": "Vat je wijzigingen samen in een commitbericht. Beschikbaar via het Zoo Code-pictogram in het paneel Broncodebeheer, dat het resultaat rechtstreeks in het commitveld schrijft."
+			},
 			"CONDENSE": {
 				"label": "Contextcondensatie",
 				"description": "Configureer hoe de gesprekscontext wordt gecondenseerd om tokenlimieten te beheren.Deze prompt wordt gebruikt voor zowel handmatige als automatische contextcondensatiebewerkingen."

@@ -103,6 +103,10 @@
 				"label": "Enhance Prompt",
 				"description": "Use prompt enhancement to get tailored suggestions or improvements for your inputs. This ensures Zoo understands your intent and provides the best possible responses. Available via the ✨ icon in chat."
 			},
+			"COMMIT_MESSAGE": {
+				"label": "Commit Message",
+				"description": "Summarizes your changes into a commit message. Available via the Zoo Code icon in the Source Control panel, which writes the result straight into the commit input box."
+			},
 			"CONDENSE": {
 				"label": "Context Condensing",
 				"description": "Configure how conversation context is condensed to manage token limits. This prompt is used for both manual and automatic context condensing operations."
