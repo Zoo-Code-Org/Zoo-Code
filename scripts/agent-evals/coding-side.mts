@@ -10,19 +10,16 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { createHostRuntime } from "./launcher.ts"
 import { createContainerGradingRuntime } from "./container-runtime.ts"
-import { createLocalSubprocessGradingRuntime } from "./coding-grader.ts"
-import { runCodingFixtureOnce, type CodingRunRecord } from "./coding-run.ts"
+import { runCodingFixtureOnce } from "./coding-run.ts"
 import { CODING_FIXTURE_BUNDLES } from "./coding-fixtures.ts"
 import { CODING_SUITE_ID, codingSuiteDigest, ensureCodingSuiteRegistered } from "./coding-suite.ts"
 import { GRADER_VERSION } from "./coding-grader.ts"
 import { digestValue } from "./coding-digest.ts"
 import type { SidePins } from "./coding-pins.ts"
 import { invalidateSideArtifacts } from "./coding-compare.ts"
-import type { SideResultFile } from "./coding-compare.ts"
 import { assertCommitsApproved, assertCredentialEnvAllowed, loadTrustPolicy, resolveCommit } from "./coding-trust.ts"
-import { classifyRunOutcome } from "./coding-outcomes.ts"
-import { buildRunMetrics } from "./coding-metrics.ts"
-import { writeJsonAtomic } from "./fs-atomic.ts"
+import { executeSideFlow, type SideRepetition } from "./coding-side-flow.ts"
+import { createInterruptFlag } from "./side-process-guard.ts"
 
 const thisRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 
@@ -30,11 +27,16 @@ const readArgs = (): {
 	reps: number
 	out: string
 	credentialEnv: string
-	allowUnisolatedGrading: boolean
 	evaluatedRoot: string
 	trustFile: string
 } => {
 	const args = process.argv.slice(2)
+	// The local subprocess runtime has no container isolation: agent-written
+	// grading code would execute on the host filesystem. A live side always
+	// grades in the container runtime, so the dangerous option is rejected
+	// loudly instead of ignored.
+	if (args.includes("--allow-unisolated-grading"))
+		throw new Error("--allow-unisolated-grading is not accepted here: a live side grades in the container runtime")
 	const read = (name: string): string | undefined => {
 		const index = args.indexOf(`--${name}`)
 		return index >= 0 ? args[index + 1] : undefined
@@ -51,7 +53,6 @@ const readArgs = (): {
 		reps: Number(read("reps") ?? "3"),
 		out: path.resolve(out),
 		credentialEnv,
-		allowUnisolatedGrading: args.includes("--allow-unisolated-grading"),
 		// Repository root of the extension under test. The trusted harness
 		// code drives the run; only the extension host loads this tree.
 		evaluatedRoot: path.resolve(read("evaluated-root") ?? thisRoot),
@@ -82,7 +83,7 @@ const readVscodeTarget = async (root: string): Promise<string> => {
 	}
 }
 
-const { reps, out, credentialEnv, allowUnisolatedGrading, evaluatedRoot, trustFile } = readArgs()
+const { reps, out, credentialEnv, evaluatedRoot, trustFile } = readArgs()
 if (!Number.isInteger(reps) || reps < 1) throw new Error("--reps must be a positive integer")
 const sideLabel = readSideLabel()
 // Trust gate. The evaluated root is loaded by the extension host and receives
@@ -102,7 +103,19 @@ if (credential === undefined || credential.length === 0) {
 }
 ensureCodingSuiteRegistered()
 
-const gradingRuntime = allowUnisolatedGrading ? createLocalSubprocessGradingRuntime() : createContainerGradingRuntime()
+// Side-level interrupt. A SIGINT or SIGTERM that reaches this process arms
+// one flag at most once. The flow checks it before each repetition and
+// before publication, so an interrupted side starts no new repetition and
+// never publishes the completion marker. The substrate registers its own
+// host teardown listener per run; the two listeners stay independent and
+// the flag never consumes their signals.
+const interrupt = createInterruptFlag()
+process.on("SIGINT", () => interrupt.signal("SIGINT"))
+process.on("SIGTERM", () => interrupt.signal("SIGTERM"))
+
+// Live sides always grade in the container runtime. The local subprocess
+// runtime stays available to unit tests only.
+const gradingRuntime = createContainerGradingRuntime()
 
 // Invalidate the previous generation before execution. After this point a
 // crash can never leave stale side results or run records behind: consumers
@@ -112,79 +125,69 @@ await invalidateSideArtifacts(out)
 
 const projection = CODING_FIXTURE_BUNDLES[0]?.fixture.settingsProjection ?? {}
 
-const runs: CodingRunRecord[] = []
-for (const bundle of CODING_FIXTURE_BUNDLES) {
-	const fixtureName = bundle.fixture.identity.name
-	for (let repIndex = 0; repIndex < reps; repIndex++) {
-		const artifactsDir = path.join(out, "artifacts", `${fixtureName}-rep${repIndex}`)
-		await fs.mkdir(artifactsDir, { recursive: true })
-		try {
-			const record = await runCodingFixtureOnce({
-				fixtureName,
-				repIndex,
-				credential,
-				runtime: createHostRuntime({
-					root: evaluatedRoot,
-					artifactsDir,
-					vscodeCachePath: path.join(thisRoot, "apps/vscode-e2e/.vscode-test"),
-				}),
-				gradingRuntime,
-				scratchDir: artifactsDir,
-			})
-			runs.push(record)
-		} catch {
-			// The substrate never throws for task failures. This guards wiring
-			// errors only, and records them as infrastructure failures.
-			const outcome = classifyRunOutcome({ hasTrace: false, finalWorkspaceAvailable: false })
-			runs.push({
-				fixtureName,
-				fixtureVersion: bundle.fixture.identity.version,
-				repIndex,
-				outcome,
-				metrics: buildRunMetrics({
-					fixtureName,
-					repIndex,
-					outcome,
-					modelIdentifier: { available: false, reason: "runFailed" },
-				}),
-			})
-		}
+const repetitions: SideRepetition[] = CODING_FIXTURE_BUNDLES.flatMap((bundle) =>
+	Array.from({ length: reps }, (_, repIndex) => ({
+		fixtureName: bundle.fixture.identity.name,
+		fixtureVersion: bundle.fixture.identity.version,
+		repIndex,
+	})),
+)
+
+// Pins are recorded when the side publishes, so they describe what actually
+// executed: the approved evaluated commit and, when the container runtime
+// resolved one, the immutable grader image identity.
+const buildPins = async (): Promise<SidePins> => {
+	const digest = gradingRuntime.imageDigest ? await gradingRuntime.imageDigest() : undefined
+	return {
+		side: sideLabel,
+		commit: evaluatedCommit,
+		suiteId: CODING_SUITE_ID,
+		suiteDigest: codingSuiteDigest(),
+		settingsDigest: digestValue(projection),
+		modelIdentifier: typeof projection["openAiModelId"] === "string" ? projection["openAiModelId"] : "unavailable",
+		graderVersion: GRADER_VERSION,
+		graderImageDigest: digest?.available === true ? digest.value : "unavailable",
+		runnerEnvironment: {
+			os: process.platform,
+			nodeVersion: process.version,
+			vscodeTarget: await readVscodeTarget(evaluatedRoot),
+		},
 	}
 }
 
-// Pins are recorded after the runs so they describe what actually executed:
-// the approved evaluated commit and, when the container runtime resolved one,
-// the immutable grader image identity.
-const digest = gradingRuntime.imageDigest ? await gradingRuntime.imageDigest() : undefined
-const pins: SidePins = {
-	side: sideLabel,
-	commit: evaluatedCommit,
-	suiteId: CODING_SUITE_ID,
-	suiteDigest: codingSuiteDigest(),
-	settingsDigest: digestValue(projection),
-	modelIdentifier: typeof projection["openAiModelId"] === "string" ? projection["openAiModelId"] : "unavailable",
-	graderVersion: GRADER_VERSION,
-	graderImageDigest: digest?.available === true ? digest.value : "unavailable",
-	runnerEnvironment: {
-		os: process.platform,
-		nodeVersion: process.version,
-		vscodeTarget: await readVscodeTarget(evaluatedRoot),
+const { runs, completed } = await executeSideFlow({
+	repetitions,
+	out,
+	isInterrupted: interrupt.isInterrupted,
+	runRepetition: async ({ fixtureName, repIndex }) => {
+		const artifactsDir = path.join(out, "artifacts", `${fixtureName}-rep${repIndex}`)
+		await fs.mkdir(artifactsDir, { recursive: true })
+		return runCodingFixtureOnce({
+			fixtureName,
+			repIndex,
+			credential,
+			runtime: createHostRuntime({
+				root: evaluatedRoot,
+				artifactsDir,
+				vscodeCachePath: path.join(thisRoot, "apps/vscode-e2e/.vscode-test"),
+			}),
+			gradingRuntime,
+			scratchDir: artifactsDir,
+		})
 	},
-}
-const result: SideResultFile = { pins, runs }
+	// Publication point and completion marker. side-results.json appears
+	// atomically only after every repetition of this invocation finished, so
+	// a reader that sees the file sees a complete side of the current run. A
+	// missing file means an interrupted side; consumers must treat it as a
+	// failed side and never pair partial output.
+	buildResult: async (runs) => ({ pins: await buildPins(), runs }),
+})
 
-// Per-run artifacts are published atomically as each record exists.
-for (const record of runs) {
-	if (!record.trace) continue
-	const artifactDir = path.join(out, "artifacts", `${record.fixtureName}-rep${record.repIndex}`)
-	await writeJsonAtomic(path.join(artifactDir, "run-record.json"), record)
+if (!completed) {
+	// An interrupted side exits with the conventional signal code and without
+	// side-results.json, so consumers treat it as a failed side.
+	console.error(`coding-evals side interrupted by ${interrupt.name() ?? "signal"}; side-results.json not published`)
+	process.exit(interrupt.exitCode())
 }
-
-// Publication point and completion marker. side-results.json appears
-// atomically only after every repetition of this invocation finished, so a
-// reader that sees the file sees a complete side of the current run. A
-// missing file means an interrupted side; consumers must treat it as a failed
-// side and never pair partial output.
-await writeJsonAtomic(path.join(out, "side-results.json"), result)
 const correct = runs.filter((record) => record.outcome.outcome === "correct").length
-console.log(`coding-evals side complete: ${correct}/${runs.length} correct, suite ${pins.suiteDigest.slice(0, 12)}`)
+console.log(`coding-evals side complete: ${correct}/${runs.length} correct, suite ${codingSuiteDigest().slice(0, 12)}`)

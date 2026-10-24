@@ -4,6 +4,7 @@
 // or a missing result file means the grader itself failed, not the solution.
 // The driver receives no credential and needs no network.
 import { spawn } from "node:child_process"
+import { randomUUID } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
 
@@ -14,9 +15,28 @@ if (!outPath) {
 }
 const testDir = process.argv[3] ?? "test"
 
+// The result file is the host's only view of the grading outcome, so its
+// publication is atomic: the content lands in a unique same-directory temp
+// file and is renamed into place. A reader never observes a partial write,
+// and a failed write or rename removes the temp file before the error
+// propagates.
 const writeResult = (result) => {
 	fs.mkdirSync(path.dirname(outPath), { recursive: true })
-	fs.writeFileSync(outPath, JSON.stringify(result))
+	const temp = path.join(
+		path.dirname(outPath),
+		`.${path.basename(outPath)}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`,
+	)
+	try {
+		fs.writeFileSync(temp, JSON.stringify(result))
+		fs.renameSync(temp, outPath)
+	} catch (error) {
+		try {
+			fs.rmSync(temp, { force: true })
+		} catch {
+			/* The temp file is already gone. */
+		}
+		throw error
+	}
 }
 
 const TEST_EXTENSIONS = new Set([".js", ".mjs", ".cjs"])

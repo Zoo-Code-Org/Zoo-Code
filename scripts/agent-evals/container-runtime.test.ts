@@ -131,16 +131,14 @@ describe("container grading runtime", () => {
 		assert.equal(runtime.isolation, "container")
 	})
 
-	it("pulls the image outside the grading timeout and runs with a unique name", async () => {
+	it("skips the pull when the image digest already resolves locally", async () => {
 		const cli = recordingCli()
 		const runtime = createContainerGradingRuntime({ cli })
 		const verdict = await runtime.run(makeJob())
 		assert.equal(verdict.kind, "passed")
-		// The pull happens first, the image identity is resolved from the
-		// local engine, and the timed run comes after both.
-		assert.equal(cli.calls[0], `pull ${GRADER_IMAGE}`)
-		assert.equal(cli.calls.indexOf("run 30000"), 2)
-		assert.equal(cli.calls[1], "inspect")
+		// The digest lookup decides, so a cached image never pulls again: the
+		// inspect comes first and the timed run follows it directly.
+		assert.deepEqual(cli.calls, ["inspect", "run 30000"])
 		// The run argv names a unique container.
 		const nameIndex = cli.runArgs[0]!.indexOf("--name")
 		assert.ok(nameIndex > 0)
@@ -149,6 +147,45 @@ describe("container grading runtime", () => {
 		const digest = await runtime.imageDigest!()
 		assert.equal(digest.available, true)
 		assert.match(digest.available ? digest.value : "", /^node:22-bookworm@sha256:[0-9a-f]{64}$/)
+	})
+
+	it("pulls when the local digest is absent, then resolves the identity again", async () => {
+		let lookups = 0
+		const cli = recordingCli({
+			imageDigest: async () => {
+				lookups += 1
+				cli.calls.push("inspect")
+				return lookups === 1 ? undefined : "node:22-bookworm@sha256:" + "a".repeat(64)
+			},
+		})
+		const runtime = createContainerGradingRuntime({ cli })
+		const verdict = await runtime.run(makeJob())
+		assert.equal(verdict.kind, "passed")
+		// Inspect, pull, inspect again, and only then the timed run.
+		assert.deepEqual(cli.calls, ["inspect", `pull ${GRADER_IMAGE}`, "inspect", "run 30000"])
+		const digest = await runtime.imageDigest!()
+		assert.equal(digest.available, true)
+		assert.equal(digest.available ? digest.value : "", "node:22-bookworm@sha256:" + "a".repeat(64))
+	})
+
+	it("preserves the resolved digest when a later lookup stays unavailable", async () => {
+		let lookups = 0
+		const cli = recordingCli({
+			imageDigest: async () => {
+				lookups += 1
+				cli.calls.push("inspect")
+				return lookups <= 2 ? "node:22-bookworm@sha256:" + "b".repeat(64) : undefined
+			},
+		})
+		const runtime = createContainerGradingRuntime({ cli })
+		await runtime.run(makeJob())
+		// The second run finds no digest, pulls, and still finds none; the
+		// runtime keeps the identity the first run resolved and never
+		// fabricates a new one.
+		await runtime.run(makeJob())
+		const digest = await runtime.imageDigest!()
+		assert.equal(digest.available, true)
+		assert.equal(digest.available ? digest.value : "", "node:22-bookworm@sha256:" + "b".repeat(64))
 	})
 
 	it("removes the container by name on timeout and verifies the removal before deleting output", async () => {
@@ -215,7 +252,17 @@ describe("container grading runtime", () => {
 	})
 
 	it("reports a failed image pull before any container runs", async () => {
-		const cli = recordingCli({ pull: async () => "failed" })
+		const cli = recordingCli({
+			// The image is absent locally, so the runtime attempts the pull.
+			imageDigest: async () => {
+				cli.calls.push("inspect")
+				return undefined
+			},
+			pull: async (image) => {
+				cli.calls.push(`pull ${image}`)
+				return "failed"
+			},
+		})
 		const runtime = createContainerGradingRuntime({ cli })
 		const verdict = await runtime.run(makeJob())
 		assert.deepEqual(verdict, {
@@ -223,6 +270,8 @@ describe("container grading runtime", () => {
 			isolation: "container",
 			reason: "graderImagePullFailed",
 		})
+		// The pull failure aborts before any timed run.
+		assert.deepEqual(cli.calls, ["inspect", `pull ${GRADER_IMAGE}`])
 		assert.deepEqual(
 			cli.calls.filter((call) => call.startsWith("run")),
 			[],

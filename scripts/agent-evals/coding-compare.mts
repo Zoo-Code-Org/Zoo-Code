@@ -73,11 +73,16 @@ const readArgs = (): {
 	reps: number
 	out: string
 	credentialEnv: string
-	allowUnisolatedGrading: boolean
 	trustFile: string
 	sideTimeoutMs: number
 } => {
 	const args = process.argv.slice(2)
+	// The local subprocess runtime has no container isolation: agent-written
+	// grading code would execute on the host filesystem. A comparison always
+	// grades in the container runtime, so the dangerous option is rejected
+	// loudly here and never forwarded to a side.
+	if (args.includes("--allow-unisolated-grading"))
+		throw new Error("--allow-unisolated-grading is not accepted here: a comparison grades in the container runtime")
 	const read = (name: string): string | undefined => {
 		const index = args.indexOf(`--${name}`)
 		return index >= 0 ? args[index + 1] : undefined
@@ -105,7 +110,6 @@ const readArgs = (): {
 		reps,
 		out: path.resolve(out),
 		credentialEnv,
-		allowUnisolatedGrading: args.includes("--allow-unisolated-grading"),
 		trustFile: path.resolve(trustFile),
 		sideTimeoutMs: sideTimeoutMinutes * 60_000,
 	}
@@ -167,7 +171,6 @@ const runSide = async (
 				inputs.credentialEnv,
 				"--evaluated-root",
 				worktree,
-				...(inputs.allowUnisolatedGrading ? ["--allow-unisolated-grading"] : []),
 			],
 			{
 				cwd: root,
