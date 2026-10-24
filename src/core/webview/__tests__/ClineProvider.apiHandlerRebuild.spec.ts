@@ -243,6 +243,8 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 		// Mock providerSettingsManager
 		;(provider as any).providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
 			saveConfig: vi.fn().mockResolvedValue("test-id"),
 			listConfig: vi.fn().mockResolvedValue([
 				{
@@ -336,6 +338,96 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect((mockTask as any).apiConfiguration.openRouterModelId).toBe("openai/gpt-4")
 			expect((mockTask as any).apiConfiguration.rateLimitSeconds).toBe(5)
 			expect((mockTask as any).apiConfiguration.modelTemperature).toBe(0.7)
+		})
+
+		test("rejects a profile the organization allow-list forbids without touching any state", async () => {
+			const realGetState = provider.getState.bind(provider)
+			vi.spyOn(provider, "getState").mockImplementation(async () => ({
+				...(await realGetState()),
+				organizationAllowList: {
+					allowAll: false,
+					providers: {
+						[providerIdentifiers.openrouter]: { allowAll: false, models: ["openai/gpt-4"] },
+					},
+				},
+			}))
+			const setProviderSettings = vi.spyOn(provider.contextProxy, "setProviderSettings")
+
+			const result = await provider.upsertProviderProfile("test-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "anthropic/claude",
+			})
+
+			expect(result).toBeUndefined()
+			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
+			expect(provider["providerSettingsManager"].setModeConfig).not.toHaveBeenCalled()
+			expect(setProviderSettings).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.violated_organization_allowlist")
+		})
+
+		test("accepts a profile the organization allow-list permits", async () => {
+			const realGetState = provider.getState.bind(provider)
+			vi.spyOn(provider, "getState").mockImplementation(async () => ({
+				...(await realGetState()),
+				organizationAllowList: {
+					allowAll: false,
+					providers: {
+						[providerIdentifiers.openrouter]: { allowAll: false, models: ["openai/gpt-4"] },
+					},
+				},
+			}))
+
+			const result = await provider.upsertProviderProfile("test-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			})
+
+			expect(result).toBe("test-id")
+		})
+
+		test("restores the previous profile, mode binding and settings when activation fails", async () => {
+			const manager = provider["providerSettingsManager"]
+			const previousProfile = {
+				id: "test-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			}
+			vi.mocked(manager.hasConfig).mockResolvedValue(true)
+			vi.mocked(manager.getProfile).mockResolvedValue({ name: "test-config", ...previousProfile })
+			vi.mocked(manager.getModeConfigId).mockResolvedValue("previous-mode-id")
+			const previousSettings = provider.contextProxy.getProviderSettings()
+			const setProviderSettings = vi
+				.spyOn(provider.contextProxy, "setProviderSettings")
+				.mockRejectedValueOnce(new Error("context write failed"))
+
+			const result = await provider.upsertProviderProfile("test-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "anthropic/claude",
+			})
+
+			expect(result).toBeUndefined()
+			// First the new profile is saved, then the snapshot is written back.
+			expect(manager.saveConfig).toHaveBeenNthCalledWith(1, "test-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "anthropic/claude",
+			})
+			expect(manager.saveConfig).toHaveBeenLastCalledWith("test-config", previousProfile)
+			expect(manager.setModeConfig).toHaveBeenLastCalledWith(expect.any(String), "previous-mode-id")
+			expect(setProviderSettings).toHaveBeenLastCalledWith(previousSettings)
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.create_api_config")
+		})
+
+		test("deletes a profile that did not exist before when activation fails", async () => {
+			const manager = provider["providerSettingsManager"]
+			vi.mocked(manager.hasConfig).mockResolvedValueOnce(false).mockResolvedValue(true)
+			vi.spyOn(provider.contextProxy, "setProviderSettings").mockRejectedValueOnce(new Error("write failed"))
+
+			await provider.upsertProviderProfile("new-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			})
+
+			expect(manager.deleteConfig).toHaveBeenCalledWith("new-config")
 		})
 
 		test("calls updateApiConfiguration when provider changes", async () => {
