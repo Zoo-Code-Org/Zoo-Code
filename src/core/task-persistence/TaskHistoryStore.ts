@@ -339,8 +339,9 @@ export class TaskHistoryStore {
 					await removeJsonBackups(absoluteFilePath)
 					await fs.unlink(absoluteFilePath)
 				})
-			} catch {
-				// File may already be deleted
+			} catch (error) {
+				if (getErrorCode(error) !== "ENOENT")
+					console.warn(`[TaskHistoryStore] Failed to delete task ${taskId}:`, error)
 			}
 
 			// Call onWrite callback inside the lock for serialized write-through
@@ -370,8 +371,9 @@ export class TaskHistoryStore {
 						await removeJsonBackups(absoluteFilePath)
 						await fs.unlink(absoluteFilePath)
 					})
-				} catch {
-					// File may already be deleted
+				} catch (error) {
+					if (getErrorCode(error) !== "ENOENT")
+						console.warn(`[TaskHistoryStore] Failed to delete task ${taskId}:`, error)
 				}
 			}
 
