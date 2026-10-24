@@ -15,9 +15,11 @@ import {
 
 import { createDirectoriesForFile } from "../../utils/fs"
 import { arePathsEqual, getReadablePath } from "../../utils/path"
+import { computeVersionToken } from "../../utils/versionToken"
 import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
 import { Task } from "../../core/task/Task"
+import { assertWithinCanonicalRoot, guardedWrite, type GuardedWriteKind } from "../../core/tools/guardedWrite"
 
 import { DecorationController } from "./DecorationController"
 
@@ -119,6 +121,12 @@ export class DiffViewProvider {
 		// after editing to see if cline needs to fix anything.
 		this.preDiagnostics = vscode.languages.getDiagnostics()
 
+		// Capture the on-disk version token for the content the user is about to
+		// review BEFORE reading it: computing it afterwards would fold a concurrent
+		// change into both the snapshot and the token, so the guarded publish would
+		// accept a state the user never reviewed.
+		const observedVersionToken = fileExists ? await computeVersionToken(absolutePath) : undefined
+
 		if (fileExists) {
 			this.originalContent = await fs.readFile(absolutePath, "utf-8")
 		} else {
@@ -132,6 +140,20 @@ export class DiffViewProvider {
 		// Make sure the file exists before we open it.
 		if (!fileExists) {
 			await fs.writeFile(absolutePath, "")
+		}
+		// The diff view is the read for the guarded-write contract (epic #1375,
+		// #1400): record the on-disk version token for exactly what the user is
+		// about to review, so saveChanges' guarded publish CAS-checks against it.
+		// A change between opening the diff and accepting it fails the guard as
+		// stale instead of silently overwriting the newer content.
+		const openTask = this.taskRef.deref()
+		if (openTask) {
+			// A file created by this diff flow has no pre-read token: compute it now,
+			// after the empty file exists, so the publish CAS-checks what it created.
+			openTask.observationRegistry.observe(
+				absolutePath,
+				observedVersionToken ?? (await computeVersionToken(absolutePath)),
+			)
 		}
 
 		// If the file was already open, close it (must happen after showing the
@@ -340,7 +362,60 @@ export class DiffViewProvider {
 		const editedContent = updatedDocument.getText()
 
 		if (updatedDocument.isDirty) {
-			await updatedDocument.save()
+			// Publish through the S4b guarded-write API (epic #1375, #1400): the
+			// legacy diff-editor save path must pass the same CAS guard as the
+			// plain-diff path; saving the editor buffer directly would overwrite
+			// changes the model never re-read.
+			const guardTask = this.taskRef.deref()
+			if (!guardTask) {
+				// Fail closed: without the owning task the observation registry is
+				// unreachable and the write cannot be guarded.
+				throw new Error("Cannot guard the write: the owning task is no longer available")
+			}
+			try {
+				await guardedWrite(guardTask, this.relPath, editedContent, "update")
+			} catch (error: unknown) {
+				// The guard rejected the publish: roll the editor buffer back to the
+				// content the diff started from - the file on disk is untouched - so no
+				// unsaved buffer survives a rejected publish (a retry's open() would
+				// otherwise save a dirty buffer through an unguarded save). The user's
+				// buffer edits are exposed in the rejection remediation BEFORE the
+				// rollback clears them, so the retry can merge them back in.
+				const newContentEOL = this.newContent.includes("\r\n") ? "\r\n" : "\n"
+				const normalizedEditedContent = editedContent.replace(/\r\n|\n/g, newContentEOL)
+				const normalizedNewContent = this.newContent.replace(/\r\n|\n/g, newContentEOL)
+				const lostUserEdits =
+					normalizedEditedContent === normalizedNewContent
+						? undefined
+						: formatResponse.createPrettyPatch(
+								this.relPath.toPosix(),
+								normalizedNewContent,
+								normalizedEditedContent,
+							)
+				const editor = this.activeDiffEditor
+				const rollback = this.originalContent ?? ""
+				const fullRange = updatedDocument.validateRange(
+					// Whole-document range: lineCount is one past the last line, so this
+					// covers every byte the buffer holds.
+					new vscode.Range(0, 0, updatedDocument.lineCount, 0),
+				)
+				await editor.edit((builder) => {
+					builder.replace(fullRange, rollback)
+				})
+				const guardMessage = error instanceof Error ? error.message : String(error)
+				throw new Error(
+					lostUserEdits
+						? `${guardMessage}\n\nThe rolled-back buffer carried user edits; merge them into the retry:` +
+								`\n${lostUserEdits}`
+						: guardMessage,
+				)
+			}
+			// Deliberately no updatedDocument.save() here: the guarded publish
+			// replaced the file through an atomic rename, so the file changed
+			// externally and a save would raise VS Code's save-conflict
+			// confirmation (which hangs unattended flows). The buffer and the file
+			// hold the same bytes, so the editor's external-change reconciliation
+			// clears the dirty flag on its own.
 		}
 
 		// Stop tracking touches and cancel any pending scroll-to-diff before any
@@ -1136,6 +1211,10 @@ export class DiffViewProvider {
 	 * @param relPath - Relative path to the file
 	 * @param content - Content to write to the file
 	 * @param openFile - Whether to show the file in editor (false = open in memory only for diagnostics)
+	 * @param writeKind - Guarded-write kind that selects the S4a guard for this publish.
+	 *   Defaults to "create" because this method always publishes a complete file
+	 *   content: an unobserved target may only be created when absent, and an
+	 *   observed target must still carry the version token recorded at read time.
 	 * @returns Result of the save operation including any new problems detected
 	 */
 	async saveDirectly(
@@ -1144,6 +1223,7 @@ export class DiffViewProvider {
 		openFile: boolean = true,
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
+		writeKind: GuardedWriteKind = "create",
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -1154,9 +1234,23 @@ export class DiffViewProvider {
 		// Get diagnostics before editing the file
 		this.preDiagnostics = vscode.languages.getDiagnostics()
 
-		// Write the content directly to the file
+		// Publish through the S4 guarded-write API (epic #1375): an unobserved
+		// write to an existing file and a stale observed version are rejected
+		// with a re-read-then-retry remediation instead of overwriting the file.
+		// Concurrent in-process writes to the same path are already ordered by
+		// the guard's per-path FIFO chain, so no additional locking is added here.
+		const task = this.taskRef.deref()
+		if (!task) {
+			// Fail closed: without the owning task the observation registry is
+			// unreachable and the write cannot be guarded.
+			throw new Error("Cannot guard the write: the owning task is no longer available")
+		}
+		// Fail closed on an escaped target before creating directories for it:
+		// mkdir -p through a symlinked ancestor would materialize directories
+		// outside the working directory before the guard's own check could run.
+		await assertWithinCanonicalRoot(task.cwd, absolutePath)
 		await createDirectoriesForFile(absolutePath)
-		await fs.writeFile(absolutePath, content, "utf-8")
+		await guardedWrite(task, relPath, content, writeKind)
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
