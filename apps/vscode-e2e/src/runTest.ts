@@ -231,13 +231,12 @@ async function main() {
 			await fs.rm(testWorkspace, { recursive: true, force: true })
 		}
 		if (scenarioWorkspace) {
-			// A failed restart scenario must stay inspectable: the phase
-			// results, VS Code logs, and task files are copied to a stable
-			// directory for CI artifact upload before the temp root goes away.
+			// Keep metadata from a failed restart scenario for CI inspection.
+			// Raw histories, phase errors, and logs must never enter the artifact.
 			if (runFailed) {
 				try {
 					const preservedAt = await preserveScenarioWorkspace(scenarioWorkspace)
-					console.error(`Restart scenario workspace preserved for failure inspection: ${preservedAt}`)
+					console.error(`Restart scenario diagnostics saved for failure inspection: ${preservedAt}`)
 				} catch (preserveError) {
 					console.error("Failed to preserve the restart scenario workspace:", preserveError)
 				}

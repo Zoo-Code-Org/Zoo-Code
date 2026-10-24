@@ -440,7 +440,7 @@ export class TaskHistoryStore {
 				} catch (error) {
 					// An unavailable snapshot is not evidence of deletion. In
 					// particular, startup must not repair delegation from it.
-					if (getErrorCode(error) !== "ENOENT") throw error
+					if (!["ENOENT", "ENOTDIR"].includes(getErrorCode(error) ?? "")) throw error
 					// File may be temporarily absent during a peer's atomic
 					// rename window in safeWriteJson. The advisory lock is
 					// held for the entire write, so its presence means a

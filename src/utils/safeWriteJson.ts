@@ -47,6 +47,18 @@ export interface SafeWriteJsonOptions {
 	trace?: SafeWriteJsonTrace
 }
 
+function notifyTrace(trace: SafeWriteJsonTrace | undefined, event: Parameters<SafeWriteJsonTrace>[0]): void {
+	try {
+		trace?.(event)
+	} catch {
+		try {
+			console.error("JSON write trace callback failed")
+		} catch {
+			// Diagnostics must not affect persistence, even if logging fails.
+		}
+	}
+}
+
 function createTempFilePath(absoluteFilePath: string, kind: "new" | "bak"): string {
 	return path.join(
 		path.dirname(absoluteFilePath),
@@ -158,7 +170,7 @@ async function withRecoveryTrace<T>(absoluteFilePath: string, operation: () => P
 	}
 }
 
-function getErrorCode(error: unknown): string | undefined {
+export function getErrorCode(error: unknown): string | undefined {
 	return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
 		? error.code
 		: undefined
@@ -246,6 +258,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// Variables to hold the actual paths of temp files if they are created.
 	let actualTempNewFilePath: string | null = null
 	let actualTempBackupFilePath: string | null = null
+	let committed = false
 
 	try {
 		// Heal any state an interrupted previous write left behind: an absent
@@ -254,11 +267,11 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		const recovery = await withRecoveryTrace(absoluteFilePath, () =>
 			recoverInterruptedReplacementUnchecked(absoluteFilePath),
 		).catch((error: unknown) => {
-			options?.trace?.({ stage: "recover", detail: `failed: ${getErrorCode(error) ?? String(error)}` })
+			notifyTrace(options?.trace, { stage: "recover", detail: `failed: ${getErrorCode(error) ?? String(error)}` })
 			throw error
 		})
 		if (recovery.foundLeftovers) {
-			options?.trace?.({ stage: "recover", detail: recovery.restoredFrom ?? "cleaned-leftovers" })
+			notifyTrace(options?.trace, { stage: "recover", detail: recovery.restoredFrom ?? "cleaned-leftovers" })
 		}
 
 		// If a merge callback was provided, read the current file under the lock
@@ -279,7 +292,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		}
 
 		// Step 1: Stream the replacement to a temporary file before commit.
-		options?.trace?.({ stage: "write-start" })
+		notifyTrace(options?.trace, { stage: "write-start" })
 		actualTempNewFilePath = createTempFilePath(absoluteFilePath, "new")
 
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
@@ -289,10 +302,10 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// process exit before or during the commit can no longer leave the
 		// canonical path absent.
 		try {
-			options?.trace?.({ stage: "replacement-rename" })
+			notifyTrace(options?.trace, { stage: "replacement-rename" })
 			await fs.rename(actualTempNewFilePath, absoluteFilePath)
-		} catch (renameError: any) {
-			if (renameError?.code !== "EPERM") {
+		} catch (renameError: unknown) {
+			if (getErrorCode(renameError) !== "EPERM") {
 				throw renameError
 			}
 
@@ -302,19 +315,20 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			// The rollback in the catch below restores the backup when the
 			// second rename fails, and the recovery pass at the start of the
 			// next write repairs a crash between the two renames.
-			options?.trace?.({ stage: "backup-rename", detail: "eperm-fallback" })
+			notifyTrace(options?.trace, { stage: "backup-rename", detail: "eperm-fallback" })
 			const backupPath = createTempFilePath(absoluteFilePath, "bak")
 			await fs.rename(absoluteFilePath, backupPath)
 			actualTempBackupFilePath = backupPath
-			options?.trace?.({ stage: "replacement-rename", detail: "eperm-fallback" })
+			notifyTrace(options?.trace, { stage: "replacement-rename", detail: "eperm-fallback" })
 			await fs.rename(actualTempNewFilePath, absoluteFilePath)
 		}
+
+		committed = true
 
 		// If we reach here, the new file is successfully in place.
 		// The original actualTempNewFilePath is now the main file, so we shouldn't try to clean it up as "temp".
 		// Mark as "used" or "committed"
 		actualTempNewFilePath = null
-		options?.trace?.({ stage: "write-complete" })
 
 		// Step 3: If a backup was created, attempt to delete it.
 		if (actualTempBackupFilePath) {
@@ -338,7 +352,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		const backupFileToRollbackOrCleanupWithinCatch = actualTempBackupFilePath
 
 		// Attempt rollback if a backup was made
-		if (backupFileToRollbackOrCleanupWithinCatch) {
+		if (!committed && backupFileToRollbackOrCleanupWithinCatch) {
 			try {
 				await fs.rename(backupFileToRollbackOrCleanupWithinCatch, absoluteFilePath)
 				// Mark as handled, prevent later unlink of this path
@@ -368,6 +382,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// Preserve it so a subsequent read or write can recover it.
 		throw originalError // This MUST be the error that rejects the promise.
 	} finally {
+		if (committed) notifyTrace(options?.trace, { stage: "write-complete" })
 		// Release the lock in the main finally block.
 		try {
 			// releaseLock will be the actual unlock function if lock was acquired,

@@ -514,6 +514,7 @@ export class ClineProvider
 			}
 
 			this.taskHistoryStoreInitialized = true
+			if (this.isViewLaunched) await this.postStateToWebview()
 		} catch (error) {
 			this.log(`[initializeTaskHistoryStore] Error: ${error instanceof Error ? error.message : String(error)}`)
 		}
@@ -2979,8 +2980,12 @@ export class ClineProvider
 			clineMessages: currentTask?.clineMessages || [],
 			currentTaskTodos: currentTask?.todoList || [],
 			messageQueue: currentTask?.messageQueueService?.messages,
+			// Legacy history can include deleted tasks. Prefer it to hiding all history while the store is unhealthy.
 			taskHistory: includeTaskHistory
-				? this.taskHistoryStore.getAll().filter((item: HistoryItem) => item.ts && item.task)
+				? (this.taskHistoryStore.isHealthy
+						? this.taskHistoryStore.getAll()
+						: (this.contextProxy.getValue("taskHistory") ?? [])
+					).filter((item: HistoryItem) => item.ts && item.task)
 				: [],
 			soundEnabled: soundEnabled ?? false,
 			ttsEnabled: ttsEnabled ?? false,

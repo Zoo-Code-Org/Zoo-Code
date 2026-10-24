@@ -124,4 +124,12 @@ describe("TaskHistoryStore interrupted history recovery", () => {
 		expect(store.get(child.id)).toEqual(child)
 		expect(store.get(parent.id)).toEqual(parent)
 	})
+	it("treats a task path that is no longer a directory as an absent record", async () => {
+		await store.initialize()
+		await fs.rm(path.dirname(canonical), { recursive: true })
+		await fs.writeFile(path.dirname(canonical), "not a task directory")
+		await expect(store.reconcile()).resolves.toBeUndefined()
+		expect(store.get(child.id)).toBeUndefined()
+		expect(store.get(parent.id)).toEqual(parent)
+	})
 })

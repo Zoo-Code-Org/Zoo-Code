@@ -23,7 +23,8 @@ vi.mock("../../../utils/fs", () => ({
 	fileExistsAtPath: vi.fn().mockResolvedValue(false),
 }))
 
-vi.mock("../../../utils/safeWriteJson", () => ({
+vi.mock("../../../utils/safeWriteJson", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../../utils/safeWriteJson")>()),
 	safeWriteJson: vi.fn().mockResolvedValue(undefined),
 }))
 
