@@ -35,6 +35,38 @@ describe("task lifecycle transitions", () => {
 		})
 	})
 
+	it.each(["owned", "released", "replaced", "missing"] as const)(
+		"resumes interrupted delegation with %s parent ownership",
+		(ownership) => {
+			const parent = item("parent", {
+				status: "interrupted",
+				parentTaskId: "root",
+				rootTaskId: "root",
+				childIds: ["older"],
+			})
+			const owner =
+				ownership === "missing"
+					? undefined
+					: item("root", {
+							status: ownership === "released" ? "active" : "delegated",
+							awaitingChildId:
+								ownership === "owned" ? "parent" : ownership === "replaced" ? "sibling" : undefined,
+						})
+			const resumed = delegateTaskToChild(parent, "grandchild", undefined, owner)
+
+			expect(resumed).toMatchObject({
+				status: "delegated",
+				awaitingChildId: "grandchild",
+				delegatedToId: "grandchild",
+				childIds: ["older", "grandchild"],
+				parentTaskId: ownership === "owned" ? "root" : undefined,
+				rootTaskId: ownership === "owned" ? "root" : undefined,
+			})
+			expect(parent.status).toBe("interrupted")
+			expect(parent.childIds).toEqual(["older"])
+		},
+	)
+
 	it("treats a legacy unset status as active when delegating", () => {
 		expect(delegateTaskToChild(item("parent", { status: undefined }), "child")).toMatchObject({
 			status: "delegated",
@@ -176,12 +208,12 @@ describe("settleRejectedCreateSubtaskAction", () => {
 		expect(settleRejectedCreateSubtaskAction(parent, "create-action")).toBe(parent)
 	})
 
-	it("rejects an interrupted parent's delegation with a typed transition error", () => {
-		const parent = item("parent", { status: "interrupted", pendingAction: createSubtaskAction })
+	it("rejects a completed parent's delegation with a typed transition error", () => {
+		const parent = item("parent", { status: "completed", pendingAction: createSubtaskAction })
 
 		expect(() => delegateTaskToChild(parent, "child")).toThrow(LifecycleTransitionError)
 		expect(() => delegateTaskToChild(parent, "child")).toThrow(
-			"Invalid task status transition: interrupted → delegated",
+			"Invalid task status transition: completed → delegated",
 		)
 	})
 })
