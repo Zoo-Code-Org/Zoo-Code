@@ -5805,6 +5805,18 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 	})
 
 	describe("getTaskWithId", () => {
+		const apiHistoryPath = path.join("/test/task/path", "api_conversation_history.json")
+
+		beforeEach(async () => {
+			const fsp = await import("fs/promises")
+			vi.mocked(fsp.readFile).mockReset().mockResolvedValue("")
+		})
+
+		afterEach(async () => {
+			const fsp = await import("fs/promises")
+			vi.mocked(fsp.readFile).mockReset().mockResolvedValue("")
+		})
+
 		it("does not restore a deleted file-backed task from legacy history", async () => {
 			const historyItem = {
 				id: "deleted-task",
@@ -5861,12 +5873,15 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			const fsp = await import("fs/promises")
 			const missing = Object.assign(new Error("missing"), { code: "ENOENT" })
 			const messages = [{ role: "user", content: "committed" }]
-			vi.mocked(fsp.readFile)
-				.mockRejectedValueOnce(missing)
-				.mockRejectedValueOnce(missing)
-				.mockResolvedValueOnce(JSON.stringify(messages))
+			let historyReads = 0
+			vi.mocked(fsp.readFile).mockImplementation(async (filePath) => {
+				if (filePath !== apiHistoryPath) return ""
+				if (++historyReads <= 2) throw missing
+				return JSON.stringify(messages)
+			})
 			const result = await provider.getTaskWithId(historyItem.id)
 			expect(result.apiConversationHistory).toEqual(messages)
+			expect(historyReads).toBe(3)
 			expect(recoverJsonFile).toHaveBeenCalledWith(result.apiConversationHistoryFilePath)
 		})
 
@@ -5876,7 +5891,10 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				key === "taskHistory" ? [historyItem] : undefined,
 			)
 			const fsp = await import("fs/promises")
-			vi.mocked(fsp.readFile).mockRejectedValueOnce(Object.assign(new Error(code), { code }))
+			vi.mocked(fsp.readFile).mockImplementation(async (filePath) => {
+				if (filePath === apiHistoryPath) throw Object.assign(new Error(code), { code })
+				return ""
+			})
 			await expect(provider.getTaskWithId(historyItem.id)).rejects.toMatchObject({ code })
 		})
 
@@ -5891,7 +5909,9 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 			// Make readFile return corrupted JSON
 			const fsp = await import("fs/promises")
-			vi.mocked(fsp.readFile).mockResolvedValueOnce("{not valid json!!!" as never)
+			vi.mocked(fsp.readFile).mockImplementation(async (filePath) =>
+				filePath === apiHistoryPath ? "{not valid json!!!" : "",
+			)
 
 			const deleteTaskSpy = vi.spyOn(provider, "deleteTaskFromState")
 
