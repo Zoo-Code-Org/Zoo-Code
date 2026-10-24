@@ -295,6 +295,8 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			isViewLaunched: false,
 			taskHistoryStore: makeStoreStub(),
 			providerSettingsManager,
+			// No window-local choice is recorded, so the lookup reaches the shared manager.
+			getModeConfigId: (mode: string) => providerSettingsManager.getModeConfigId(mode),
 			context: { workspaceState: { get: workspaceGet } },
 		} as unknown as ClineProvider
 
@@ -347,6 +349,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				? vi.fn().mockRejectedValue(savedProfile)
 				: vi.fn().mockResolvedValue(savedProfile)
 		const log = vi.fn()
+		const getModeConfigId = vi.fn().mockResolvedValue(savedConfigId)
 		const provider = {
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
@@ -356,10 +359,9 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			log,
 			isViewLaunched: false,
 			taskHistoryStore: makeStoreStub(),
-			providerSettingsManager: {
-				getModeConfigId: vi.fn().mockResolvedValue(savedConfigId),
-				getProfile,
-			},
+			providerSettingsManager: { getModeConfigId, getProfile },
+			// No window-local choice is recorded, so the lookup reaches the shared manager.
+			getModeConfigId,
 			context: { workspaceState: { get: vi.fn().mockReturnValue(false) } },
 		} as unknown as ClineProvider
 

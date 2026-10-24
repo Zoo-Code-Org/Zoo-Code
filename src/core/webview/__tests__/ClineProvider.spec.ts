@@ -2447,6 +2447,21 @@ describe("ClineProvider", () => {
 		expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
 	})
 
+	it("prefers this window's mode profile over one another window saved in shared storage", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const manager = provider.providerSettingsManager
+		vi.spyOn(manager, "getModeConfigId").mockResolvedValue("other-window-id")
+		vi.spyOn(manager, "setModeConfig").mockResolvedValue(undefined)
+
+		await provider["setModeConfig"]("code", "this-window-id")
+
+		expect(manager.setModeConfig).toHaveBeenCalledWith("code", "this-window-id")
+		await expect(provider["getModeConfigId"]("code")).resolves.toBe("this-window-id")
+		// A mode this window never chose still falls back to the shared value.
+		await expect(provider["getModeConfigId"]("architect")).resolves.toBe("other-window-id")
+	})
+
 	it("saves current config when switching to mode without config", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
