@@ -346,6 +346,12 @@ Successful cold initialization must report a healthy store.
 
 A successful rename can publish a new value before the write promise resolves.
 The checker treats that value as committed.
+A native rename can also finish after the last JavaScript snapshot but before SIGKILL.
+The checker reads committed files after child exit to set exact follow-up expectations.
+That final state must preserve the newest value already observed.
+An observer also retries a complete snapshot if a rename races its directory listing and file reads.
+Three failed attempts exhaust the snapshot budget and fail the check.
+Deterministic regressions cover both orderings without waiting for scheduling races.
 Deletion follow-ups run without injected faults.
 The best-effort delete API can resolve after an I/O failure; this check does not strengthen that contract.
 
