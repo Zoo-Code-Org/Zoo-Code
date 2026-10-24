@@ -1096,25 +1096,25 @@ describe("VertexHandler", () => {
 			)
 		})
 
-		it("completePrompt should not forward an unusable timeoutMs", async () => {
-			handler = new AnthropicVertexHandler({
-				apiModelId: "claude-3-5-sonnet-v2@20241022",
-				vertexProjectId: "test-project",
-				vertexRegion: "us-central1",
-			})
+		// The SDK turns timeout: 0 into an immediate abort and rejects
+		// negative/non-finite delays, so "no explicit timeout" means no option.
+		it.each([0, -5, Number.NaN, Number.POSITIVE_INFINITY])(
+			"completePrompt should not forward an unusable timeoutMs (%s)",
+			async (timeoutMs) => {
+				handler = new AnthropicVertexHandler({
+					apiModelId: "claude-3-5-sonnet-v2@20241022",
+					vertexProjectId: "test-project",
+					vertexRegion: "us-central1",
+				})
 
-			const mockCreate = vitest
-				.spyOn(handler["client"].messages, "create")
-				.mockResolvedValue({ content: [{ type: "text", text: "response" }] } as never)
+				const mockCreate = vitest
+					.spyOn(handler["client"].messages, "create")
+					.mockResolvedValue({ content: [{ type: "text", text: "response" }] } as never)
 
-			// The SDK turns timeout: 0 into an immediate abort and rejects
-			// negative/non-finite delays, so "no explicit timeout" means no option.
-			for (const timeoutMs of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
-				mockCreate.mockClear()
 				await handler.completePrompt("test prompt", { timeoutMs })
 				expect(mockCreate).toHaveBeenCalledWith(expect.any(Object), undefined)
-			}
-		})
+			},
+		)
 
 		it("should handle empty content array for Claude", async () => {
 			handler = new AnthropicVertexHandler({

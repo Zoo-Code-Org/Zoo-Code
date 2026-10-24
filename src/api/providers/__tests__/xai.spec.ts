@@ -406,10 +406,11 @@ describe("XAIHandler", () => {
 		},
 	)
 
-	it("completePrompt should not forward an unusable timeoutMs", async () => {
-		// "No explicit timeout" must leave the option absent: timeout: 0 aborts
-		// immediately and negative/non-finite delays throw inside the SDK.
-		for (const timeoutMs of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+	// "No explicit timeout" must leave the option absent: timeout: 0 aborts
+	// immediately and negative/non-finite delays throw inside the SDK.
+	it.each([0, -5, Number.NaN, Number.POSITIVE_INFINITY])(
+		"completePrompt should not forward an unusable timeoutMs (%s)",
+		async (timeoutMs) => {
 			mockResponsesCreate.mockClear()
 			mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
 			await handler.completePrompt("test prompt", { timeoutMs })
@@ -417,8 +418,8 @@ describe("XAIHandler", () => {
 				expect.objectContaining({ model: expect.any(String) }),
 				undefined,
 			)
-		}
-	})
+		},
+	)
 
 	it("should include reasoning effort for mini models in Responses API format", async () => {
 		const miniModelHandler = new XAIHandler({

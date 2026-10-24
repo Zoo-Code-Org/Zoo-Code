@@ -1139,11 +1139,12 @@ describe("AnthropicHandler", () => {
 			expect(mockCreate).toHaveBeenCalledWith(expect.any(Object), undefined)
 		})
 
-		it("should not forward an unusable timeoutMs (0, negative, non-finite)", async () => {
-			// The Anthropic SDK turns timeout: 0 into an immediate abort and throws
-			// on negative/non-finite delays, so "no explicit timeout" must mean the
-			// option is absent rather than 0.
-			for (const timeoutMs of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+		// The Anthropic SDK turns timeout: 0 into an immediate abort and throws
+		// on negative/non-finite delays, so "no explicit timeout" must mean the
+		// option is absent rather than 0.
+		it.each([0, -5, Number.NaN, Number.POSITIVE_INFINITY])(
+			"should not forward an unusable timeoutMs (%s)",
+			async (timeoutMs) => {
 				mockCreate.mockClear()
 				mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
 				await handler.completePrompt("test prompt", { timeoutMs })
@@ -1151,8 +1152,8 @@ describe("AnthropicHandler", () => {
 					expect.objectContaining({ model: mockOptions.apiModelId }),
 					undefined,
 				)
-			}
-		})
+			},
+		)
 
 		it.each([
 			// Only a call through toSdkTimeoutMs rounds this up.

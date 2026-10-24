@@ -484,65 +484,66 @@ describe("VsCodeLmHandler", () => {
 			})
 
 			describe("offered tool name recovery", () => {
-				it.each([
-					{
-						label: "encoded surrogate",
-						rawName: "read\uD800file",
-						declaredName: "read_uD800file",
-						leakedName: "read_uD800file",
-						expectedName: "read\uD800file",
-					},
-					{
-						label: "encoded marker",
-						rawName: "get_uuid",
-						declaredName: "get_uuuid",
-						leakedName: "get_uuuid",
-						expectedName: "get_uuid",
-					},
-					{
-						label: "raw marker",
-						rawName: "get_uuid",
-						declaredName: "get_uuuid",
-						leakedName: "get_uuid",
-						expectedName: "get_uuid",
-					},
-				])("recovers $label with its original schema and split invariance", async (fixture) => {
+				it.each(
+					[
+						{
+							label: "encoded surrogate",
+							rawName: "read\uD800file",
+							declaredName: "read_uD800file",
+							leakedName: "read_uD800file",
+							expectedName: "read\uD800file",
+						},
+						{
+							label: "encoded marker",
+							rawName: "get_uuid",
+							declaredName: "get_uuuid",
+							leakedName: "get_uuuid",
+							expectedName: "get_uuid",
+						},
+						{
+							label: "raw marker",
+							rawName: "get_uuid",
+							declaredName: "get_uuuid",
+							leakedName: "get_uuid",
+							expectedName: "get_uuid",
+						},
+					].flatMap((fixture) => [false, true].map((split) => ({ ...fixture, split }))),
+				)("recovers $label with its original schema (split stream: $split)", async (fixture) => {
 					const text =
 						`<function_calls><invoke name="${fixture.leakedName}">` +
 						'<parameter name="count">7</parameter></invoke></function_calls>'
-					const split = text.indexOf(fixture.leakedName) + 5
-					for (const parts of [[text], [text.slice(0, split), text.slice(split)]]) {
-						streamTextParts(parts)
-						const chunks = await collectStream(
-							handler.createMessage("system", [{ role: "user", content: "hi" }], {
-								taskId: "test-task",
-								tools: [
-									{
-										type: "function",
-										function: {
-											name: fixture.rawName,
-											parameters: { type: "object", properties: { count: { type: "number" } } },
-										},
+					const splitAt = text.indexOf(fixture.leakedName) + 5
+					const parts = fixture.split ? [text.slice(0, splitAt), text.slice(splitAt)] : [text]
+					streamTextParts(parts)
+					const chunks = await collectStream(
+						handler.createMessage("system", [{ role: "user", content: "hi" }], {
+							taskId: "test-task",
+							tools: [
+								{
+									type: "function",
+									function: {
+										name: fixture.rawName,
+										parameters: { type: "object", properties: { count: { type: "number" } } },
 									},
-								],
-							}),
-						)
-						expect(mockLanguageModelChat.sendRequest).toHaveBeenLastCalledWith(
-							expect.any(Array),
-							expect.objectContaining({
-								tools: [expect.objectContaining({ name: fixture.declaredName })],
-							}),
-							expect.anything(),
-						)
-						expect(chunks.filter((chunk) => chunk.type !== "usage")).toEqual([
-							{
-								type: "tool_call",
-								id: expect.stringMatching(/^vscodelm-salvaged-\d+-0$/),
-								name: fixture.expectedName,
-								arguments: '{"count":7}',
-							},
-						])
-					}
+								},
+							],
+						}),
+					)
+					expect(mockLanguageModelChat.sendRequest).toHaveBeenLastCalledWith(
+						expect.any(Array),
+						expect.objectContaining({
+							tools: [expect.objectContaining({ name: fixture.declaredName })],
+						}),
+						expect.anything(),
+					)
+					expect(chunks.filter((chunk) => chunk.type !== "usage")).toEqual([
+						{
+							type: "tool_call",
+							id: expect.stringMatching(/^vscodelm-salvaged-\d+-0$/),
+							name: fixture.expectedName,
+							arguments: '{"count":7}',
+						},
+					])
 				})
 
 				it.each([false, true])(
@@ -4172,12 +4173,8 @@ describe("context-window tool_result truncation", () => {
 			expect(middleOutTruncate(text, 200)).toBe(text)
 		})
 
-		it("stays within a limit too small to hold the truncation marker", () => {
-			const text = "A".repeat(500)
-			for (const limit of [1, 5, 50]) {
-				const result = middleOutTruncate(text, limit)
-				expect(result).toBe("A".repeat(limit))
-			}
+		it.each([1, 5, 50])("stays within a limit too small to hold the truncation marker (%s)", (limit) => {
+			expect(middleOutTruncate("A".repeat(500), limit)).toBe("A".repeat(limit))
 		})
 
 		it("does not end a marker-less truncation on a lone high surrogate", () => {
