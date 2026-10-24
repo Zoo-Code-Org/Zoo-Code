@@ -7,7 +7,7 @@
 		"format": "prettier --write src",
 		"test:ci": "pnpm -w bundle && pnpm --filter @roo-code/vscode-webview build && pnpm test:run",
 		"test:ci:mock": "pnpm -w bundle && pnpm --filter @roo-code/vscode-webview build && USE_MOCK=true pnpm test:run",
-		"test:restart-artifacts": "tsc -p tsconfig.json && node ./out/restart/scenarioWorkspace.test.js",
+		"test:restart-artifacts": "tsc -p tsconfig.restart-artifacts.json && node ./out/restart/scenarioWorkspace.test.js",
 		"test:record": "AIMOCK_RECORD=true pnpm test:ci",
 		"test:run": "rimraf out && tsc -p tsconfig.json && dotenv -e .env.local -- node ./out/runTest.js",
 		"themes:build": "pnpm -w bundle && pnpm --filter @roo-code/vscode-webview build && rimraf out && tsc -p tsconfig.json",
