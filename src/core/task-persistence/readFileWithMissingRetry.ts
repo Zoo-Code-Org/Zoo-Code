@@ -1,6 +1,6 @@
 import * as fs from "fs/promises"
 
-import { recoverJsonFile } from "../../utils/safeWriteJson"
+import { getErrorCode, recoverJsonFile } from "../../utils/safeWriteJson"
 
 // safeWriteJson commits a replacement with a single atomic rename. Only the
 // Windows EPERM fallback replaces a file in two renames (target to backup,
@@ -12,11 +12,7 @@ const READ_RETRY_MIN_MS = 1
 const READ_RETRY_MAX_MS = 10
 const READ_RETRY_RANGE_MS = READ_RETRY_MAX_MS - READ_RETRY_MIN_MS + 1
 
-export function getErrorCode(error: unknown): string | undefined {
-	return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
-		? error.code
-		: undefined
-}
+export { getErrorCode } from "../../utils/safeWriteJson"
 
 /**
  * Formats the actionable detail of an underlying error for inclusion in

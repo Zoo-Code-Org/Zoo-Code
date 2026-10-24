@@ -157,16 +157,13 @@ jobs:
               run: TEST_FILE=restart-persistence.test USE_MOCK=true xvfb-run -a pnpm --filter @roo-code/vscode-e2e exec node ./out/runTest.js
 
             - name: Upload restart-persistence failure artifacts
-              # runTest.js preserves a failed scenario workspace (phase results,
-              # VS Code logs, task files) under apps/vscode-e2e/test-failures/
-              # instead of deleting it, so the interrupted-write state from
-              # issue #2130-style failures stays inspectable.
+              # Publish only generated metadata. Raw histories and logs are excluded.
               if: failure()
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
               with:
                   name: restart-persistence-failure
                   retention-days: 7
-                  path: apps/vscode-e2e/test-failures/
+                  path: apps/vscode-e2e/test-failures/**/diagnostics.json
                   if-no-files-found: ignore
 
             - name: Explain skipped mocked E2E pass marker

@@ -1486,7 +1486,67 @@ describe("ClineProvider", () => {
 		expect(postMessageSpy.mock.calls[0]?.[0].state).not.toHaveProperty("taskHistory")
 	})
 
+	test.each([
+		{ launched: true, fails: false },
+		{ launched: false, fails: false },
+		{ launched: true, fails: true },
+	])("refreshes history after initialization: launched=$launched, fails=$fails", async ({ launched, fails }) => {
+		await provider["initializeTaskHistoryStore"]()
+		let release!: () => void
+		const waiting = new Promise<void>((resolve, reject) => {
+			release = () => (fails ? reject(new Error("initialization failed")) : resolve())
+		})
+		const initialize = vi.spyOn(provider.taskHistoryStore, "initialize").mockReturnValue(waiting)
+		const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+		provider.isViewLaunched = launched
+		provider["taskHistoryStoreInitialized"] = false
+		try {
+			const pending = provider["initializeTaskHistoryStore"]()
+			expect(post).not.toHaveBeenCalled()
+			release()
+			await pending
+			expect(post).toHaveBeenCalledTimes(launched && !fails ? 1 : 0)
+			expect(provider["taskHistoryStoreInitialized"]).toBe(!fails)
+		} finally {
+			provider.isViewLaunched = false
+			initialize.mockRestore()
+			post.mockRestore()
+		}
+	})
+
+	test.each([
+		{ healthy: true, includeTaskHistory: true },
+		{ healthy: false, includeTaskHistory: true },
+		{ healthy: false, includeTaskHistory: false },
+	])(
+		"publishes history with store health $healthy and inclusion $includeTaskHistory",
+		async ({ healthy, includeTaskHistory }) => {
+			const item = {
+				id: "legacy",
+				number: 1,
+				ts: 1,
+				task: "legacy task",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			const cached = { ...item, id: "cached", task: "cached task" }
+			const health = vi.spyOn(provider.taskHistoryStore, "isHealthy", "get").mockReturnValue(healthy)
+			const getAll = vi.spyOn(provider.taskHistoryStore, "getAll").mockReturnValue([cached])
+			await provider["contextProxy"].setValue("taskHistory", [item, { ...item, id: "invalid", ts: 0 }])
+			try {
+				const state = await provider.getStateToPostToWebview({ includeTaskHistory })
+				expect(state.taskHistory).toEqual(includeTaskHistory ? [healthy ? cached : item] : [])
+				expect(getAll).toHaveBeenCalledTimes(healthy && includeTaskHistory ? 1 : 0)
+			} finally {
+				health.mockRestore()
+				getAll.mockRestore()
+			}
+		},
+	)
+
 	test("getStateToPostToWebview computes task history once after its base state resolves", async () => {
+		const health = vi.spyOn(provider.taskHistoryStore, "isHealthy", "get").mockReturnValue(true)
 		const historyItem = {
 			id: "history-task",
 			number: 1,
@@ -1516,6 +1576,7 @@ describe("ClineProvider", () => {
 		expect(getAllSpy).toHaveBeenCalledOnce()
 		expect(historyReadPhases).toEqual([true])
 		expect(state.taskHistory).toEqual([historyItem])
+		health.mockRestore()
 	})
 
 	describe("postStateToWebviewThrottled", () => {

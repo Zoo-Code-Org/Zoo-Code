@@ -57,7 +57,8 @@ vi.mock("../../../utils/storage", () => ({
 	}),
 }))
 
-vi.mock("../../../utils/safeWriteJson", () => ({
+vi.mock("../../../utils/safeWriteJson", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../../utils/safeWriteJson")>()),
 	safeWriteJson: vi.fn().mockResolvedValue(undefined),
 }))
 

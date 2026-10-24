@@ -660,4 +660,19 @@ describe("safeWriteJson", () => {
 		const content = await readFileContent(currentTestFilePath)
 		expect(content).toEqual(newData)
 	})
+	test.each(["recover", "write-start", "replacement-rename", "backup-rename", "write-complete"] as const)(
+		"keeps the EPERM replacement when the %s trace throws",
+		async (stage) => {
+			await fs.writeFile(path.join(tempDir, ".test-file.json.new_orphan.tmp"), "partial")
+			const incoming = { message: "committed despite trace failure" }
+			vi.spyOn(fs, "rename").mockRejectedValueOnce(Object.assign(new Error("open file"), { code: "EPERM" }))
+			const trace = vi.fn((event: { stage: string }) => {
+				if (event.stage === stage) throw new Error("diagnostic sink failed")
+			})
+			await expect(safeWriteJson(currentTestFilePath, incoming, { trace })).resolves.toBeUndefined()
+			expect(trace).toHaveBeenCalledWith(expect.objectContaining({ stage }))
+			expect(await readFileContent(currentTestFilePath)).toEqual(incoming)
+			expect(await fs.readdir(tempDir)).toEqual(["test-file.json"])
+		},
+	)
 })

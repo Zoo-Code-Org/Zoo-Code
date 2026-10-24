@@ -14,7 +14,8 @@ vi.mock("fs/promises", async (importOriginal) => ({
 	...(await importOriginal<typeof import("fs/promises")>()),
 	readFile: hoisted.readFileMock,
 }))
-vi.mock("../../../utils/safeWriteJson", () => ({
+vi.mock("../../../utils/safeWriteJson", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../../utils/safeWriteJson")>()),
 	safeWriteJson: hoisted.safeWriteJsonMock,
 	recoverJsonFile: vi.fn().mockResolvedValue(undefined),
 }))
