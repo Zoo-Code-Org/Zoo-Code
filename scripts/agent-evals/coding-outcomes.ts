@@ -7,6 +7,9 @@ export interface OutcomeInput {
 	hasTrace: boolean
 	executionCode?: AgentExecutionCode
 	finalWorkspaceAvailable: boolean
+	// True when the captured workspace was incomplete. A truncated capture is
+	// a harness fault, never agent work, so it can never grade as incorrect.
+	finalWorkspaceTruncated?: boolean
 	grading?: Pick<GraderVerdict, "kind"> & { reason?: string }
 }
 
@@ -30,6 +33,8 @@ const INFRASTRUCTURE_CODES: readonly AgentExecutionCode[] = [
 // - COMPLETED and STOPPED runs are graded. The hidden tests decide:
 //   passed is correct, failed is incorrect, including when the agent
 //   reported completion.
+// - A truncated final workspace is infrastructure failure. The capture is
+//   incomplete, so grading it could turn missing files into a wrong answer.
 // - A grader that hung, crashed, or hit its limits is grading failure and is
 //   never counted as incorrect.
 export function classifyRunOutcome(input: OutcomeInput): ClassifiedOutcome {
@@ -42,6 +47,8 @@ export function classifyRunOutcome(input: OutcomeInput): ClassifiedOutcome {
 		return { outcome: "infrastructure-failure", reason: `execution-${code ?? "unknown"}` }
 	if (!input.finalWorkspaceAvailable)
 		return { outcome: "infrastructure-failure", reason: "finalWorkspaceUnavailable" }
+	if (input.finalWorkspaceTruncated === true)
+		return { outcome: "infrastructure-failure", reason: "finalWorkspaceTruncated" }
 	if (!input.grading) return { outcome: "infrastructure-failure", reason: "graderNotRun" }
 	switch (input.grading.kind) {
 		case "passed":

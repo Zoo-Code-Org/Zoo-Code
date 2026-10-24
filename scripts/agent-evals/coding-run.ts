@@ -132,7 +132,10 @@ export async function runCodingFixtureOnce(inputs: CodingRunInputs): Promise<Cod
 	const finalWorkspaceAvailable = snapshot !== undefined
 	let grading: GraderVerdict | undefined
 	const code = result.execution.code
-	if ((code === "COMPLETED" || code === "STOPPED") && snapshot) {
+	// A truncated capture is incomplete harness data. The grader never sees
+	// it, so missing files can never become an incorrect verdict. Complete
+	// snapshots keep grading.
+	if ((code === "COMPLETED" || code === "STOPPED") && snapshot && !snapshot.truncated) {
 		grading = await runGrader({
 			finalFiles: snapshot.files,
 			hiddenTests: bundle.grading.hiddenTests,
@@ -145,6 +148,7 @@ export async function runCodingFixtureOnce(inputs: CodingRunInputs): Promise<Cod
 		hasTrace: true,
 		executionCode: code,
 		finalWorkspaceAvailable,
+		finalWorkspaceTruncated: snapshot?.truncated,
 		grading,
 	})
 	const metrics = buildRunMetrics({

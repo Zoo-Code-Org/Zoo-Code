@@ -5,7 +5,9 @@ import path from "node:path"
 import { describe, it } from "node:test"
 import {
 	assertCommitsApproved,
+	assertCredentialEnvAllowed,
 	buildSideEnvironment,
+	buildWorktreeEnvironment,
 	loadTrustPolicy,
 	UntrustedCommitError,
 	type TrustPolicy,
@@ -58,12 +60,18 @@ describe("trust policy", () => {
 		// The gate is case insensitive on the approved side.
 		assertCommitsApproved(policy, [sha("A").toUpperCase()])
 		assert.throws(() => assertCommitsApproved(policy, [sha("b"), sha("c")]), UntrustedCommitError)
-		try {
-			assertCommitsApproved(policy, [sha("b")])
-		} catch (error) {
-			assert.ok(error instanceof UntrustedCommitError)
-			assert.match(error.message, /not approved by the trust policy/)
-		}
+		// The single-commit rejection carries the exact rejected SHA. A silent
+		// pass here would approve an untrusted commit, so the assertion names
+		// the intended error instead of catching anything.
+		assert.throws(
+			() => assertCommitsApproved(policy, [sha("b")]),
+			(error: unknown) => {
+				assert.ok(error instanceof UntrustedCommitError)
+				assert.match(error.message, /not approved by the trust policy/)
+				assert.deepEqual(error.commits, [sha("b")])
+				return true
+			},
+		)
 	})
 })
 
@@ -94,5 +102,45 @@ describe("side environment allowlist", () => {
 		const child = buildSideEnvironment({ PATH: "/usr/bin" }, "SOLHEIM_API_KEY", "baseline")
 		assert.equal(child["SOLHEIM_API_KEY"], undefined)
 		assert.equal(child["CODING_EVALS_SIDE"], "baseline")
+	})
+})
+
+describe("credential environment allowlist", () => {
+	it("accepts the supported provider variable", () => {
+		assert.doesNotThrow(() => assertCredentialEnvAllowed("SOLHEIM_API_KEY"))
+	})
+
+	it("rejects unrelated secret variables before any process starts", () => {
+		for (const name of ["AWS_SECRET_ACCESS_KEY", "OPENAI_API_KEY", "GITHUB_TOKEN", "PATH"]) {
+			assert.throws(() => assertCredentialEnvAllowed(name), /credential environment variable must be one of/)
+		}
+	})
+})
+
+describe("worktree process environment", () => {
+	it("passes the install and build allowlist and drops secrets", () => {
+		const child = buildWorktreeEnvironment({
+			PATH: "/usr/bin",
+			HOME: "/home/dev",
+			PNPM_HOME: "/home/dev/.local/share/pnpm",
+			XDG_DATA_HOME: "/home/dev/.local/share",
+			npm_config_registry: "https://registry.example",
+			SOLHEIM_API_KEY: "sk-test",
+			AWS_SECRET_ACCESS_KEY: "leak-me",
+			OTHER_SECRET: "leak-me-too",
+			NODE_OPTIONS: "--require /tmp/never",
+		})
+		assert.deepEqual(child, {
+			PATH: "/usr/bin",
+			HOME: "/home/dev",
+			PNPM_HOME: "/home/dev/.local/share/pnpm",
+			XDG_DATA_HOME: "/home/dev/.local/share",
+			npm_config_registry: "https://registry.example",
+		})
+	})
+
+	it("never carries the provider credential into install or build", () => {
+		const child = buildWorktreeEnvironment({ PATH: "/usr/bin", SOLHEIM_API_KEY: "sk-test" })
+		assert.equal(child["SOLHEIM_API_KEY"], undefined)
 	})
 })
