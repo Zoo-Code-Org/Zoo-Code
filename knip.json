@@ -1,6 +1,7 @@
 {
 	"$schema": "https://unpkg.com/knip@5/schema.json",
 	"ignore": [
+		"src/core/checkpoints/rollback.ts",
 		"apps/vscode-e2e/**",
 		"scripts/**",
 		"apps/cli/scripts/**",
