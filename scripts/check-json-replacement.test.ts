@@ -31,3 +31,16 @@ for (const workers of ["0", "9", "1.5", "invalid"]) {
 		assert.match(result.stderr, /JSON_REPLACEMENT_WORKERS must be an integer from 1 to 8/)
 	})
 }
+
+for (const regression of ["rename-in-flight", "snapshot-race"]) {
+	test(`accepts the deterministic ${regression} schedule`, () => {
+		const result = spawnSync(
+			process.execPath,
+			["--import", "tsx", "scripts/check-json-replacement.ts", `--regression=${regression}`],
+			{ encoding: "utf8", timeout: 30_000 },
+		)
+		assert.ifError(result.error)
+		assert.equal(result.status, 0, result.stderr)
+		assert.match(result.stdout, new RegExp(`${regression} regression passed`))
+	})
+}

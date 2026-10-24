@@ -19,17 +19,30 @@ type Result = { op: string; ok: boolean; code?: string; value?: string; repairRu
 const CHILD = String.raw`
 const fs = require("fs"), fsp = require("fs/promises"), path = require("path")
 const native = { ...fsp }, emit = (data) => fs.writeSync(1, JSON.stringify(data) + "\n")
-let root = process.env.CHECK_ROOT, fault = JSON.parse(process.env.CHECK_FAULT || "null"), count = 0, forced = false, rolledBack = false, observing = true, pending = 0
+let root = process.env.CHECK_ROOT, fault = JSON.parse(process.env.CHECK_FAULT || "null"), count = 0, forced = false, rolledBack = false, observing = true, pending = 0, pendingClose, pendingCommit, pendingSnapshotMove
 const canonical = () => path.join(root, "tasks", "child", "history_item.json")
 const normalize = (p) => typeof p === "string" ? path.relative(root, p).replace(/\\/g, "/").replace(/\.(new|bak)_[^.]+\.tmp/g, ".$1.tmp") : ""
 function copies() {
  const dir = path.dirname(canonical())
- return fs.readdirSync(dir).filter((name) => name === "history_item.json" || (name.startsWith(".history_item.json.bak_") && name.endsWith(".tmp"))).map((name) => fs.readFileSync(path.join(dir, name), "utf8"))
+ // Native namespace changes can race this synchronous list/read observer.
+ // Retry the whole snapshot; never drop a missing entry from a stale list.
+ for (let attempt = 0; attempt < 3; attempt++) {
+  try {
+ const names = fs.readdirSync(dir).filter((name) => name === "history_item.json" || (name.startsWith(".history_item.json.bak_") && name.endsWith(".tmp")))
+ if (pendingSnapshotMove) { const move = pendingSnapshotMove; pendingSnapshotMove = undefined; move() }
+ return names.map((name) => fs.readFileSync(path.join(dir, name), "utf8"))
+  } catch (error) { if (error.code !== "ENOENT") throw error }
+ }
+ throw new Error("Committed-copy snapshot retry budget exhausted")
 }
 console.error = console.warn = console.log = () => {}
 Math.random = () => 0.5
 function cut(n, phase) {
  if (fault && fault.step === n && fault.kind === phase) {
+  if (process.env.CHECK_SCHEDULE === "late-rename") {
+   if (!pendingCommit) throw new Error("Regression schedule did not reach the in-flight rename")
+   pendingCommit()
+  }
   emit({ crash: true }); process.kill(process.pid, "SIGKILL")
  }
 }
@@ -54,7 +67,22 @@ function after(n, call, error) {
 for (const name of ["mkdir", "access", "readdir", "stat", "readFile", "rename", "unlink"]) {
  fsp[name] = async (...args) => {
   const { n, error } = before(name, args)
-  try { if (error) throw error; const value = await native[name](...args); after(n, name); return value }
+  try {
+   if (error) throw error
+   if (name === "rename" && process.env.CHECK_SCHEDULE === "move-during-snapshot" && args[0] === canonical()) {
+    pendingSnapshotMove = () => fs.renameSync(...args)
+    if (pendingClose) pendingClose()
+    return await new Promise(() => {})
+   }
+   if (name === "rename" && process.env.CHECK_SCHEDULE === "late-rename") {
+    // Hold the real rename until the close snapshot has been emitted. Its
+    // filesystem effect then lands before SIGKILL, without a JS completion event.
+    pendingCommit = () => fs.renameSync(...args)
+    if (pendingClose) pendingClose()
+    return await new Promise(() => {})
+   }
+   const value = await native[name](...args); after(n, name); return value
+  }
   catch (error) { after(n, name, error); throw error }
  }
 }
@@ -64,7 +92,13 @@ function callbacks(names, prefix) {
   const callback = args.pop(), { n, error } = before(prefix + name, args)
   if (error) { after(n, prefix + name, error); return callback(error) }
   pending++
-  return fs[name](...args, (error, ...values) => { pending--; after(n, prefix + name, error); callback(error, ...values) })
+  return fs[name](...args, (error, ...values) => {
+   const finish = () => { pending--; after(n, prefix + name, error); callback(error, ...values) }
+   if (prefix === "stream." && name === "close" && process.env.CHECK_SCHEDULE) {
+    pendingClose = finish
+    if (pendingCommit || pendingSnapshotMove) finish()
+   } else finish()
+  })
  }
  return result
 }
@@ -173,7 +207,13 @@ function committed(root: string): string[] {
 		)
 		.map((name) => fs.readFileSync(path.join(dir, name), "utf8"))
 }
-async function runtime(bundle: string, root: string, mode: string, fault?: Fault) {
+async function runtime(
+	bundle: string,
+	root: string,
+	mode: string,
+	fault?: Fault,
+	schedule?: "late-rename" | "move-during-snapshot",
+) {
 	const child = await new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve, reject) => {
 		execFile(
 			process.execPath,
@@ -190,6 +230,7 @@ async function runtime(bundle: string, root: string, mode: string, fault?: Fault
 					CHECK_MODE: mode,
 					CHECK_INCOMING: encoded[2],
 					CHECK_FAULT: JSON.stringify(fault ?? null),
+					CHECK_SCHEDULE: schedule,
 				},
 				encoding: "utf8",
 				timeout: 20_000,
@@ -296,13 +337,19 @@ function violation(invariant: number, context: string, events: Event[]): never {
 				.join("\n"),
 	)
 }
-async function runCase(bundle: string, dir: string, mode: Mode, fault?: Fault) {
+async function runCase(
+	bundle: string,
+	dir: string,
+	mode: Mode,
+	fault?: Fault,
+	schedule?: "late-rename" | "move-during-snapshot",
+) {
 	const root = path.join(dir, "storage")
 	seed(root, mode)
 	const beforeCanonical = fs.existsSync(path.join(root, relativeCanonical))
 		? fs.readFileSync(path.join(root, relativeCanonical), "utf8")
 		: undefined
-	const run = await runtime(bundle, root, mode, fault)
+	const run = await runtime(bundle, root, mode, fault, schedule)
 	const context = `${mode} ${JSON.stringify(fault ?? "no fault")}`
 	let latest = mode === "newer" ? 1 : 0
 	for (const [index, event] of run.events.entries()) {
@@ -316,8 +363,12 @@ async function runCase(bundle: string, dir: string, mode: Mode, fault?: Fault) {
 			run.events.some((event) => event.n === fault.step),
 			"Fault cutpoint was not reached",
 		)
-	if (!committed(root).some((data) => encoded.some((entry) => entry === data)))
-		violation(2, context + " lost the only committed copy", run.events)
+	// Native renames can finish after the last JS snapshot but before SIGKILL.
+	// Once the child exits, its actual disk state owns follow-up expectations.
+	const diskVersion = Math.max(-1, ...committed(root).map((data) => encoded.findIndex((entry) => entry === data)))
+	if (diskVersion < latest)
+		violation(2, context + " lost the latest committed copy after the last snapshot", run.events)
+	latest = diskVersion
 	const result = run.results[0]
 	if (
 		result?.ok &&
@@ -342,7 +393,12 @@ async function runCase(bundle: string, dir: string, mode: Mode, fault?: Fault) {
 		if (followup.op === "delete" && followup.value !== undefined)
 			violation(4, context + " deleted file returned after recovery", run.events)
 		if (followup.op !== "delete" && followup.value !== encoded[followup.op === "write" ? 2 : latest])
-			violation(3, context + " invalid follow-up value", run.events)
+			violation(
+				3,
+				context +
+					` follow-up ${followup.op} returned an invalid value (expected version ${followup.op === "write" ? 2 : latest})`,
+				run.events,
+			)
 		if (followup.op === "cold" && !followup.healthy)
 			violation(5, context + " cold-start snapshot unavailable", run.events)
 	}
@@ -354,6 +410,18 @@ async function main() {
 		const mutation = process.argv.find((arg) => arg.startsWith("--mutation="))?.split("=")[1]
 		const bundle = path.join(work, "production.cjs")
 		await bundleAt(bundle, mutation)
+		const regression = process.argv.find((arg) => arg.startsWith("--regression="))?.split("=")[1]
+		if (regression === "rename-in-flight" || regression === "snapshot-race") {
+			const mode = regression === "rename-in-flight" ? "write" : "fallback"
+			const schedule = regression === "rename-in-flight" ? "late-rename" : "move-during-snapshot"
+			const trace = await runCase(bundle, path.join(work, "baseline"), mode)
+			const close = trace.find((event) => event.phase === "before" && event.call === "stream.close")
+			assert(close, "Regression requires the real stream-close boundary")
+			await runCase(bundle, path.join(work, schedule), mode, { step: close.n, kind: "after" }, schedule)
+			console.log(`${regression} regression passed`)
+			return
+		}
+		assert(!regression, "Unknown regression")
 		if (mutation === "restore-backup-loss") {
 			const baseline = path.join(work, "baseline")
 			const events = await runCase(bundle, baseline, "restore")
