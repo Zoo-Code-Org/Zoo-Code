@@ -8,6 +8,7 @@ import type { HistoryItem } from "@roo-code/types"
 
 import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
 import { GlobalFileNames } from "../../../shared/globalFileNames"
+import { acquireFileLock } from "../../../utils/fileLock"
 import { ClineProvider } from "../../webview/ClineProvider"
 
 vi.mock("../../../utils/storage", () => ({
@@ -525,6 +526,141 @@ describe("TaskHistoryStore", () => {
 			await invalidation
 
 			expect(store.get(item.id)?.tokensIn).toBe(999)
+		})
+	})
+
+	describe("refreshStrict()", () => {
+		it.each([
+			"",
+			".",
+			"..",
+			"../outside",
+			"..\\outside",
+			"child/../owner",
+			"/outside",
+			"C:outside",
+			".. ",
+			"task.",
+			"task ",
+			"child\u0000",
+		])("rejects unsafe task ID %j", async (taskId) => {
+			await store.initialize()
+			store.dispose()
+			await expect(store.refreshStrict(taskId)).rejects.toThrow("Invalid task ID")
+		})
+
+		it("does not load an escaped record even when its ID matches the traversal", async () => {
+			await store.initialize()
+			store.dispose()
+			const taskId = "../outside"
+			const outsideDir = path.join(tmpDir, "outside")
+			await fs.mkdir(outsideDir)
+			await fs.writeFile(
+				path.join(outsideDir, GlobalFileNames.historyItem),
+				JSON.stringify(makeHistoryItem({ id: taskId, status: "completed" })),
+			)
+
+			await expect(store.refreshStrict(taskId)).rejects.toThrow("Invalid task ID")
+			expect(store.get(taskId)).toBeUndefined()
+		})
+
+		it.each([
+			["missing", undefined],
+			["read-error", { code: "EISDIR" }],
+			["malformed", { name: "SyntaxError" }],
+			["other-task-id", { message: expect.stringContaining("Invalid task history record") }],
+		] as const)("keeps the cached record unless the file is missing (%s)", async (scenario, error) => {
+			await store.initialize()
+			store.dispose() // Keep filesystem watcher reconciliation out of this explicit refresh test.
+			const owner = makeHistoryItem({ id: "owner", status: "delegated", awaitingChildId: "child" })
+			await store.upsert(owner)
+			const filePath = path.join(tmpDir, "tasks", "owner", GlobalFileNames.historyItem)
+			if (scenario === "malformed") {
+				await fs.writeFile(filePath, "{")
+			} else if (scenario === "other-task-id") {
+				await fs.writeFile(filePath, JSON.stringify({ ...owner, id: "other-task" }))
+			} else {
+				await fs.unlink(filePath)
+				if (scenario === "read-error") await fs.mkdir(filePath)
+			}
+
+			if (error) {
+				await expect(store.refreshStrict("owner")).rejects.toMatchObject(error)
+				expect(store.get("owner")).toEqual(owner)
+			} else {
+				await expect(store.refreshStrict("owner")).resolves.toBeUndefined()
+				expect(store.get("owner")).toBeUndefined()
+			}
+		})
+
+		it.each([
+			["missing required fields", { id: "owner" }],
+			["invalid status", { ...makeHistoryItem({ id: "owner" }), status: "invalid" }],
+			["invalid token count", { ...makeHistoryItem({ id: "owner" }), tokensIn: "100" }],
+		] as const)("rejects a matching-ID record with %s without changing the cache", async (_scenario, record) => {
+			await store.initialize()
+			store.dispose() // Only the explicit strict refresh should observe the invalid file.
+			const owner = makeHistoryItem({ id: "owner", status: "delegated", awaitingChildId: "child" })
+			await store.upsert(owner)
+			const filePath = path.join(tmpDir, "tasks", "owner", GlobalFileNames.historyItem)
+			await fs.writeFile(filePath, JSON.stringify(record))
+
+			await expect(store.refreshStrict("owner")).rejects.toThrow("Invalid task history record")
+			expect(store.get("owner")).toEqual(owner)
+		})
+
+		it("names only the task ID, not the storage path, when rejecting a record", async () => {
+			await store.initialize()
+			store.dispose()
+			await store.upsert(makeHistoryItem({ id: "owner" }))
+			await fs.writeFile(path.join(tmpDir, "tasks", "owner", GlobalFileNames.historyItem), "{}")
+
+			const error = await store.refreshStrict("owner").catch((caught: unknown) => caught)
+
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).message).toBe('Invalid task history record: "owner"')
+			expect((error as Error).message).not.toContain(tmpDir)
+		})
+
+		it("treats a missing task directory as a missing record", async () => {
+			await store.initialize()
+			store.dispose()
+			await store.upsert(makeHistoryItem({ id: "owner" }))
+			await fs.rm(path.join(tmpDir, "tasks", "owner"), { recursive: true })
+
+			await expect(store.refreshStrict("owner")).resolves.toBeUndefined()
+			expect(store.get("owner")).toBeUndefined()
+		})
+
+		it("waits out a peer write's rename window instead of evicting the record", async () => {
+			await store.initialize()
+			store.dispose()
+			const owner = makeHistoryItem({ id: "owner", status: "delegated", awaitingChildId: "child" })
+			await store.upsert(owner)
+			const filePath = path.join(tmpDir, "tasks", "owner", GlobalFileNames.historyItem)
+			// Simulate safeWriteJson mid-write in another process: lock held, target renamed away.
+			const releaseLock = await acquireFileLock(filePath)
+			await fs.unlink(filePath)
+
+			const refresh = store.refreshStrict("owner")
+			await new Promise((resolve) => setTimeout(resolve, 50))
+			await fs.writeFile(filePath, JSON.stringify({ ...owner, tokensIn: 999 }))
+			await releaseLock()
+			await refresh
+
+			expect(store.get("owner")).toEqual({ ...owner, tokensIn: 999 })
+		})
+
+		it("re-reads a valid record from disk", async () => {
+			await store.initialize()
+			const item = makeHistoryItem({ id: "strict-task", tokensIn: 100 })
+			await store.upsert(item)
+			const filePath = path.join(tmpDir, "tasks", "strict-task", GlobalFileNames.historyItem)
+			await fs.writeFile(filePath, JSON.stringify({ ...item, tokensIn: 999 }))
+
+			await store.refreshStrict("strict-task")
+
+			expect(store.get("strict-task")?.tokensIn).toBe(999)
 		})
 	})
 
