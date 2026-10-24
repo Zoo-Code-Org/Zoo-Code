@@ -140,6 +140,7 @@ import { type AutoDenyDetail, AutoApprovalHandler, checkAutoApproval } from "../
 import { MessageManager } from "../message-manager"
 import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
+import { normalizeToolResultPairing } from "./normalizeToolResultPairing"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
@@ -574,7 +575,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
-	 * Push a tool_result block to userMessageContent, preventing duplicates.
+	 * Push a tool_result block to userMessageContent after any existing tool_results
+	 * (ahead of images and text), preventing duplicates.
 	 * Duplicate tool_use_ids cause API errors.
 	 *
 	 * @param toolResult - The tool_result block to add
@@ -591,7 +593,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			)
 			return false
 		}
-		this.userMessageContent.push(toolResult)
+		// Keep results contiguous at the front: with parallel tool calls, an earlier tool's
+		// images or text are already queued, and Anthropic needs every tool_result first.
+		const lastResultIndex = findLastIndex(this.userMessageContent, (block) => block.type === "tool_result")
+		this.userMessageContent.splice(lastResultIndex + 1, 0, toolResult)
 		return true
 	}
 
@@ -5831,7 +5836,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// For API only: merge consecutive user messages (excludes summary messages per
 		// mergeConsecutiveApiMessages implementation) without mutating stored history.
 		const mergedForApi = mergeConsecutiveApiMessages(messagesSinceLastSummary, { roles: ["user"] })
-		const messagesWithoutImages = maybeRemoveImageBlocks(mergedForApi, this.api)
+		const messagesWithoutImages = maybeRemoveImageBlocks(normalizeToolResultPairing(mergedForApi), this.api)
 		const cleanConversationHistory = this.buildCleanConversationHistory(
 			messagesWithoutImages as ApiMessage[],
 			requestModelInfo,
