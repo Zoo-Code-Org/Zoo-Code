@@ -9,7 +9,7 @@ import type { Measured } from "./trace.ts"
 
 // The grader version is a pinned comparison input. Any change to the driver,
 // the image, or the verdict rules must bump it.
-export const GRADER_VERSION = "coding-grader-v2"
+export const GRADER_VERSION = "coding-grader-v3"
 
 export interface GraderResources {
 	timeoutMs: number

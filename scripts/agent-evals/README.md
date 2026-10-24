@@ -130,6 +130,8 @@ release process: a maintainer runs it locally or on demand.
 - The driver's result file is untrusted data: it is written inside the container where agent-written test code executes. The host reads it with a size bound and validates shape, bounds, and internal consistency. An invalid or inconsistent result is a `grading failure`, never a verdict.
 - Each fixture ships two reference solutions. The known-correct solution must pass. The deliberately incorrect one passes the visible tests and must fail. Unit tests enforce both on every fixture.
 - `createLocalSubprocessGradingRuntime` runs the same driver directly on the host. It does not give container isolation. It exists for unit tests and explicit local checks only and must never back a recorded comparison.
+- The live `coding-evals:side` and `coding-evals:compare` entry points reject `--allow-unisolated-grading` instead of ignoring it. A recorded comparison always grades in the container runtime.
+- The driver publishes its result file atomically: the content lands in a unique same-directory temp file and is renamed into place. A failed write or rename removes the temp file, and the host treats a missing or invalid result as a grading failure.
 
 ### Comparisons
 
@@ -158,6 +160,8 @@ Every driver child, preparation steps and the side alike, runs detached in its o
 Artifacts are published atomically: content lands in a same-directory temp file and is renamed into place. A reader never sees a partial file.
 
 A side run invalidates its output directory first. Before the first repetition executes, the side removes any previous `side-results.json` and the whole `artifacts` tree, so stale results from an earlier rerun can never survive. `side-results.json` is the completion marker: it appears only after every repetition of the current invocation finished, and consumers must require it and treat its absence as a failed side. A side rerun that cannot remove a stale artifact fails before any repetition runs.
+
+The side process arms one flag when it receives SIGINT or SIGTERM. The flag starts no further repetition and blocks the completion marker, so an interrupted side exits with the conventional signal code and publishes nothing.
 
 The comparison reports are published as one generation. `comparison-report.json` and `comparison-report.md` carry the report's `generatedAt` stamp, and `comparison-report.complete` holds that stamp; it is written last. Consumers must require the marker and match its stamp against the report files. `readPublishedComparisonReport` enforces this: it returns the report only when the marker exists and its stamp matches both files. The marker is removed before publication starts, so a crash between the two file publications leaves a detectable incomplete generation instead of a mixed one. A thrown failure rolls both files back; a failed comparison leaves no report files.
 
