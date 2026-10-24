@@ -325,10 +325,10 @@
 		"title": "Zoo Code {{version}} uitgebracht",
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Wat is nieuw in Zoo Code v3.90.0",
-			"highlight1": "✨ Providers en modellen: GitHub Copilot is nu een provider: meld je aan en Zoo Code laadt je Copilot-modellen. IO Intelligence is een provider met een eigen API-sleutel. Gemini 4 Argon staat op Gemini en Vertex. GPT-6 Luna staat op OpenCode Go. Gemini 4 Argon en GPT-6 Luna staan ook op Zoo Gateway.",
-			"highlight2": "🧭 Tool-uitvoering: Dezelfde tool-aanroep herhalen geeft een waarschuwing, daarna stopt Zoo Code die lus. attempt_completion uitschakelen laat een taak niet langer onafgemaakt. Berichten in de wachtrij doorlopen dezelfde command-protection-controles als opdrachten die je direct verstuurt.",
-			"highlight3": "⚡ Redeneren en streaming: Adaptief denken van Anthropic verschijnt in de chat en thinking tokens worden geteld. De R1-schakelaar bewaart redenering van llama.cpp, Ollama en LM Studio. Codex bewaart versleutelde redenering bij de samenvatting die je ziet. VS Code language-model-streams gebruiken guarded recovery als een stream mislukt."
+			"heading": "Wat is nieuw in Zoo Code v3.92.0",
+			"highlight1": "✨ Snellere modelkeuze en betere modelondersteuning: Wissel van model via het invoerveld van de chat. Gebruik Claude Haiku 5.5 op Amazon Bedrock, krijg nauwkeurigere Kimi K3-mogelijkheden op OpenRouter en gebruik de gecorrigeerde limieten voor Gemini 4 Argon op Vercel AI Gateway.",
+			"highlight2": "🧭 Betrouwbaardere workflows voor terminal, bewerking, chat en externe omgevingen: Laat opdrachtuitvoer desgewenst standaard inklappen, krijg duidelijkere bewerkingsfouten, houd redeneer- en API-rijen zichtbaar en voorkom opstart- en proxyproblemen in externe workspaces.",
+			"highlight3": "🔌 Uitgebreide MCP-marketplace: Verbind Zoo Code via de MCP-marketplace met AnySearch, Mailtea en Tradehand."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",
