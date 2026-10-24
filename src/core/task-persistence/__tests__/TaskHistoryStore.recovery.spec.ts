@@ -9,10 +9,10 @@ import { acquireFileLock, LOCK_STALE_MS } from "../../../utils/fileLock"
 
 vi.mock("fs/promises", async () => {
 	const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
-	return { ...actual, rename: vi.fn(actual.rename) }
+	return { ...actual, rename: vi.fn(actual.rename), readFile: vi.fn(actual.readFile) }
 })
 const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
-const entryPoints = ["initialize", "reconcile", "invalidate"] as const
+const entryPoints = ["initialize", "forced reconcile", "invalidate"] as const
 
 describe("TaskHistoryStore interrupted history recovery", () => {
 	let root: string
@@ -25,6 +25,7 @@ describe("TaskHistoryStore interrupted history recovery", () => {
 
 	beforeEach(async () => {
 		vi.mocked(fs.rename).mockReset().mockImplementation(actual.rename)
+		vi.mocked(fs.readFile).mockReset().mockImplementation(actual.readFile)
 		root = await fs.mkdtemp(path.join(os.tmpdir(), "history-recovery-"))
 		parent = {
 			id: "parent",
@@ -75,7 +76,8 @@ describe("TaskHistoryStore interrupted history recovery", () => {
 
 	async function run(entry: (typeof entryPoints)[number]) {
 		if (entry === "invalidate") await store.invalidate(child.id)
-		else await store[entry]()
+		else if (entry === "forced reconcile") await store.reconcile({ forceRefresh: true })
+		else await store.initialize()
 	}
 
 	it.each(entryPoints)("restores an orphaned child before %s can treat it as missing", async (entry) => {
@@ -131,5 +133,49 @@ describe("TaskHistoryStore interrupted history recovery", () => {
 		await expect(store.reconcile()).resolves.toBeUndefined()
 		expect(store.get(child.id)).toBeUndefined()
 		expect(store.get(parent.id)).toEqual(parent)
+	})
+	it.each(
+		(["background", "forced", "initialize"] as const).flatMap((entry) =>
+			(["EACCES", "EIO", "EISDIR", "null"] as const).map((code) => ({ entry, code })),
+		),
+	)("keeps unreadable records and completes the $entry scan with $code", async ({ entry, code }) => {
+		const gonePath = path.join(root, "tasks", "gone", "history_item.json")
+		await fs.mkdir(path.dirname(gonePath), { recursive: true })
+		await fs.writeFile(gonePath, JSON.stringify({ ...child, id: "gone" }))
+		await store.reconcile()
+		await fs.rm(path.dirname(gonePath), { recursive: true })
+		const updated = { ...parent, totalCost: parent.totalCost + 1 }
+		await fs.writeFile(parentPath, JSON.stringify(updated))
+		await fs.utimes(parentPath, new Date(1), new Date(1))
+		await fs.utimes(canonical, new Date(2), new Date(2))
+		const error = Object.assign(new Error("unreadable task"), { code })
+		vi.mocked(fs.readFile).mockImplementation(async (...args) => {
+			if (String(args[0]) === canonical) {
+				if (code === "null") return "null"
+				throw error
+			}
+			return actual.readFile(...args)
+		})
+		const repair = vi.fn(store["reconcileDelegationState"].bind(store))
+		store["reconcileDelegationState"] = repair
+		const result =
+			entry === "initialize" ? store.initialize() : store.reconcile({ forceRefresh: entry === "forced" })
+		if (entry === "background") await expect(result).resolves.toBeUndefined()
+		else if (code === "null") await expect(result).rejects.toBeInstanceOf(TypeError)
+		else await expect(result).rejects.toBe(error)
+		expect(store.get(child.id)).toEqual(child)
+		expect(store.get(parent.id)).toEqual(updated)
+		expect(store.get("gone")).toBeUndefined()
+		expect(JSON.parse(await actual.readFile(parentPath, "utf8"))).toEqual(updated)
+		expect(repair).not.toHaveBeenCalled()
+		if (entry === "initialize") expect(store.isHealthy).toBe(false)
+	})
+
+	it("preserves a failed restore during background reconciliation", async () => {
+		await prepare("forced reconcile")
+		vi.mocked(fs.rename).mockRejectedValueOnce(Object.assign(new Error("restore failed"), { code: "EIO" }))
+		await expect(store.reconcile()).resolves.toBeUndefined()
+		expect(store.get(child.id)).toEqual(child)
+		expect(JSON.parse(await fs.readFile(backup, "utf8"))).toEqual(child)
 	})
 })

@@ -136,3 +136,16 @@ describe("Knip quality gate", () => {
 		assert.doesNotMatch(job, /continue-on-error|if:/)
 	})
 })
+
+describe("restart artifact privacy gate", () => {
+	it("runs the package-local artifact tests in the compile job on pull requests", () => {
+		const compile = workflow.match(/\n    compile:\n(?<body>[\s\S]*?)\n    [a-z-]+:/)?.groups?.body
+		assert.ok(compile, "missing compile job")
+		assert.match(compile, /name: Test restart artifact sanitization/)
+		assert.match(
+			workflowStep("Test restart artifact sanitization"),
+			/run: pnpm --filter @roo-code\/vscode-e2e test:restart-artifacts\s*$/,
+		)
+		assert.doesNotMatch(workflowStep("Test restart artifact sanitization"), /continue-on-error|if:/)
+	})
+})

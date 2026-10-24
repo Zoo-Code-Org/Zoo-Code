@@ -411,6 +411,7 @@ export class TaskHistoryStore {
 			const onDiskIds = new Set(taskDirNames)
 			const cacheIds = new Set(this.cache.keys())
 			const liveIds = new Set<string>()
+			let scanFailure: { error: unknown } | undefined
 
 			for (const taskId of onDiskIds) {
 				try {
@@ -438,9 +439,13 @@ export class TaskHistoryStore {
 						}
 					}
 				} catch (error) {
-					// An unavailable snapshot is not evidence of deletion. In
-					// particular, startup must not repair delegation from it.
-					if (!["ENOENT", "ENOTDIR"].includes(getErrorCode(error) ?? "")) throw error
+					// An unreadable record is not evidence of deletion. Keep its
+					// cached value and scan the other tasks before reporting failure.
+					if (!["ENOENT", "ENOTDIR"].includes(getErrorCode(error) ?? "")) {
+						liveIds.add(taskId)
+						scanFailure ??= { error }
+						continue
+					}
 					// File may be temporarily absent during a peer's atomic
 					// rename window in safeWriteJson. The advisory lock is
 					// held for the entire write, so its presence means a
@@ -463,6 +468,12 @@ export class TaskHistoryStore {
 					this.cache.delete(taskId)
 					this.taskFileMtimes.delete(taskId)
 				}
+			}
+
+			if (scanFailure) {
+				// Startup and replay require a complete snapshot before repair.
+				if (options.forceRefresh) throw scanFailure.error
+				console.warn("[TaskHistoryStore] Reconciliation retained unreadable task records:", scanFailure.error)
 			}
 		})
 	}

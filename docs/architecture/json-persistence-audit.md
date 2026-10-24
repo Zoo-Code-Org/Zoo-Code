@@ -114,7 +114,8 @@ Its read path can have different behavior.
 
 - Writes task history, repair intents, merged changes, and conditional action settlement.
 - Recovers missing history files during reconciliation and individual reads.
-- Blocks delegation repair when the history scan fails.
+- Forced scans report read errors before delegation repair or replay.
+- Background scans retain unreadable cached records and update readable tasks.
 - Keeps cached records when a refresh fails.
 - Removes backups under the file lock before it deletes canonical history.
 - Logs deletion errors other than `ENOENT`.

@@ -92,7 +92,9 @@ The known-unsafe witnesses currently compare exact shortest action sequences. Th
 ## History-file availability boundary
 
 `TaskHistoryStore.reconcile()` recovers a missing canonical history file from its backup under the file lock.
-A failed scan blocks delegation repair.
+Forced scans, including startup and replay refreshes, report read failures after scanning all tasks.
+A failed forced scan blocks delegation repair or replay.
+Background scans keep unreadable cached records, log the first error, and continue updating other tasks.
 A failed refresh keeps the last cached record.
 
 ### Initialization and availability
@@ -365,7 +367,9 @@ Three source mutations must fail with their named invariants:
 - Omitting backup removal from deletion must violate no resurrection, invariant 4.
 - Ignoring an existing canonical file during reader recovery must violate reader preservation, invariant 6.
 
-Coverage excludes concurrent actors, stale takeover of a paused owner, and crashes inside fault-induced rollback paths.
+The rollback baseline includes its EPERM and EIO failures, plus crashes at the recorded rollback boundaries.
+Coverage excludes concurrent actors and stale takeover of a paused owner.
+It also excludes crash combinations with additional replay-injected faults beyond the fixed scenario failures.
 It also excludes native Windows open-handle semantics and power-loss durability.
 The existing subprocess SIGKILL tests and extension-host restart tests remain separate checks.
 See the [JSON persistence contract](./json-persistence-audit.md) for caller coverage and remaining gaps.

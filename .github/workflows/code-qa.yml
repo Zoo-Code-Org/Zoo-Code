@@ -96,6 +96,8 @@ jobs:
               run: pnpm lint
             - name: Check types
               run: pnpm check-types
+            - name: Test restart artifact sanitization
+              run: pnpm --filter @roo-code/vscode-e2e test:restart-artifacts
             - name: Validate Code QA workflow
               run: pnpm test:code-qa-ci
             - name: Validate Solheim provider smoke workflow
