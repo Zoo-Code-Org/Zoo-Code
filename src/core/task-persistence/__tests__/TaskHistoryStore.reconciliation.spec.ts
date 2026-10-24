@@ -20,7 +20,10 @@ const writeJson = async (filePath: string, data: unknown): Promise<void> => {
 
 const safeWriteJsonMock = vi.hoisted(() => vi.fn())
 
-vi.mock("../../../utils/safeWriteJson", () => ({ safeWriteJson: safeWriteJsonMock }))
+vi.mock("../../../utils/safeWriteJson", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../../utils/safeWriteJson")>()),
+	safeWriteJson: safeWriteJsonMock,
+}))
 
 safeWriteJsonMock.mockImplementation(writeJson)
 

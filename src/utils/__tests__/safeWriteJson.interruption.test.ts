@@ -67,7 +67,7 @@ require(process.env.INTERRUPTION_BUNDLE_PATH)
 
 async function waitForChildExit(
 	child: ChildProcess,
-): Promise<{ signal: NodeJS.Signals | null; stdout: string; stderr: string }> {
+): Promise<{ code: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string }> {
 	const stdoutChunks: Buffer[] = []
 	const stderrChunks: Buffer[] = []
 	child.stdout?.on("data", (chunk: Buffer) => stdoutChunks.push(chunk))
@@ -78,9 +78,10 @@ async function waitForChildExit(
 			reject(new Error("Interruption child did not exit within 20 seconds"))
 		}, 20_000)
 		child.once("error", reject)
-		child.once("close", (_code, signal) => {
+		child.once("close", (code, signal) => {
 			clearTimeout(timeout)
 			resolve({
+				code,
 				signal,
 				stdout: Buffer.concat(stdoutChunks).toString("utf8"),
 				stderr: Buffer.concat(stderrChunks).toString("utf8"),
@@ -148,7 +149,11 @@ describe("safeWriteJson subprocess interruption fault injection", () => {
 			expect(exit.stdout).toContain("EXIT_BEFORE_REPLACEMENT_RENAME")
 			expect(exit.stdout).not.toContain("WRITE_COMPLETED")
 			expect(exit.stderr).not.toContain("WRITE_FAILED")
-			expect(exit.signal).toBe("SIGKILL")
+			// A self-kill uses TerminateProcess(..., 1) on Windows, so the
+			// parent receives exit code 1 without a POSIX signal name.
+			expect({ code: exit.code, signal: exit.signal }).toEqual(
+				process.platform === "win32" ? { code: 1, signal: null } : { code: null, signal: "SIGKILL" },
+			)
 
 			// SIGKILL bypasses proper-lockfile's exit cleanup. A fresh writer
 			// must reject the live-looking lock rather than steal it early.
