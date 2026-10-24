@@ -1,3 +1,5 @@
+import { createHash } from "crypto"
+
 /**
  * Utilities for sanitizing MCP server and tool names to conform to
  * API function name requirements across all providers.
@@ -115,28 +117,68 @@ export function sanitizeMcpName(name: string): string {
 }
 
 /**
+ * Maximum length providers accept for a function name (Gemini, Bedrock, Azure OpenAI).
+ */
+export const MAX_TOOL_NAME_LENGTH = 64
+
+const HASH_SUFFIX_LENGTH = 8
+
+function buildUncutMcpToolName(serverName: string, toolName: string): string {
+	const sanitizedServer = sanitizeMcpName(serverName)
+	const sanitizedTool = sanitizeMcpName(toolName)
+
+	return `${MCP_TOOL_PREFIX}${MCP_TOOL_SEPARATOR}${sanitizedServer}${MCP_TOOL_SEPARATOR}${sanitizedTool}`
+}
+
+/**
  * Build a full MCP tool function name from server and tool names.
  * The format is: mcp--{sanitized_server_name}--{sanitized_tool_name}
  *
- * The total length is capped at 64 characters to conform to API limits.
+ * The total length is capped at 64 characters to conform to API limits. A name that
+ * is too long is cut and given a short hash of the full name, so distinct tools stay
+ * distinct and the result does not look like a word cut in half that a model would
+ * want to complete. Use `resolveMcpToolByName` to map such a name back to its tool.
  *
  * @param serverName - The MCP server name
  * @param toolName - The tool name
  * @returns A sanitized function name in the format mcp--serverName--toolName
  */
 export function buildMcpToolName(serverName: string, toolName: string): string {
-	const sanitizedServer = sanitizeMcpName(serverName)
-	const sanitizedTool = sanitizeMcpName(toolName)
+	const fullName = buildUncutMcpToolName(serverName, toolName)
 
-	// Build the full name: mcp--{server}--{tool}
-	const fullName = `${MCP_TOOL_PREFIX}${MCP_TOOL_SEPARATOR}${sanitizedServer}${MCP_TOOL_SEPARATOR}${sanitizedTool}`
-
-	// Truncate if necessary (max 64 chars for Gemini)
-	if (fullName.length > 64) {
-		return fullName.slice(0, 64)
+	if (fullName.length <= MAX_TOOL_NAME_LENGTH) {
+		return fullName
 	}
 
-	return fullName
+	const hash = createHash("sha256").update(fullName).digest("hex").slice(0, HASH_SUFFIX_LENGTH)
+	return `${fullName.slice(0, MAX_TOOL_NAME_LENGTH - HASH_SUFFIX_LENGTH - 1)}_${hash}`
+}
+
+/**
+ * Find the server and tool a model-supplied MCP function name refers to, whether it is the
+ * name declared to the model (possibly shortened with a hash) or the full uncut name.
+ * Hyphens and underscores are treated as equivalent, as elsewhere.
+ *
+ * @returns The original server and tool names, or null when nothing matches
+ */
+export function resolveMcpToolByName(
+	servers: ReadonlyArray<{ name: string; tools?: ReadonlyArray<{ name: string }> }>,
+	calledName: string,
+): { serverName: string; toolName: string } | null {
+	const wanted = normalizeForComparison(normalizeMcpToolName(calledName))
+
+	for (const server of servers) {
+		for (const tool of server.tools ?? []) {
+			const declared = buildMcpToolName(server.name, tool.name)
+			const uncut = buildUncutMcpToolName(server.name, tool.name)
+
+			if (normalizeForComparison(declared) === wanted || normalizeForComparison(uncut) === wanted) {
+				return { serverName: server.name, toolName: tool.name }
+			}
+		}
+	}
+
+	return null
 }
 
 /**

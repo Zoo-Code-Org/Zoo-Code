@@ -9,6 +9,7 @@ import { getModeBySlug } from "../../../shared/modes"
 import type { Task } from "../../task/Task"
 import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
 import { useMcpToolTool } from "../../tools/UseMcpToolTool"
+import { buildMcpToolName, parseMcpToolName } from "../../../utils/mcp-name"
 
 vi.mock("../../task/Task")
 vi.mock("../../../shared/modes", async (importOriginal) => {
@@ -80,7 +81,10 @@ interface MockTask {
 		deref: () =>
 			| {
 					getState: ReturnType<typeof vi.fn>
-					getMcpHub?: () => { findServerNameBySanitizedName: (name: string) => string | undefined }
+					getMcpHub?: () => {
+						findServerNameBySanitizedName: (name: string) => string | undefined
+						getAllServers: () => Array<{ name: string; tools?: Array<{ name: string }> }>
+					}
 			  }
 			| undefined
 	}
@@ -379,6 +383,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 					}),
 					getMcpHub: () => ({
 						findServerNameBySanitizedName: () => "my_server",
+						getAllServers: () => [],
 					}),
 				}),
 			}
@@ -548,6 +553,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 					}),
 					getMcpHub: () => ({
 						findServerNameBySanitizedName: () => "my_server",
+						getAllServers: () => [],
 					}),
 				}),
 			}
@@ -638,6 +644,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 					}),
 					getMcpHub: () => ({
 						findServerNameBySanitizedName: () => "my_server",
+						getAllServers: () => [],
 					}),
 				}),
 			}
@@ -680,6 +687,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 					}),
 					getMcpHub: () => ({
 						findServerNameBySanitizedName: () => "my_server",
+						getAllServers: () => [],
 					}),
 				}),
 			}
@@ -787,6 +795,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 					}),
 					getMcpHub: () => ({
 						findServerNameBySanitizedName: () => "my_server",
+						getAllServers: () => [],
 					}),
 				}),
 			}
@@ -932,6 +941,43 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			expect(handleSpy).toHaveBeenCalledTimes(1)
 		})
 
+		it("resolves a hash-shortened MCP tool name to its server and tool before executing", async () => {
+			const serverName = "company-gateway-tools"
+			const realToolName = "confluence-confluence_get_space_page_tree"
+			const declaredName = buildMcpToolName(serverName, realToolName)
+			const mockHub = {
+				findServerNameBySanitizedName: () => serverName,
+				getAllServers: () => [{ name: serverName, tools: [{ name: realToolName, enabledForPrompt: true }] }],
+			}
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({ mode: "code", customModes: [], disabledTools: [] }),
+					getMcpHub: () => mockHub,
+				}),
+			}
+			const handleSpy = vi.spyOn(useMcpToolTool, "handle").mockResolvedValue(undefined)
+			// The parser can only recover a cut tool name from the shortened one.
+			const parsed = parseMcpToolName(declaredName)!
+			mockTask.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "call_hashed_name",
+					name: declaredName,
+					serverName: parsed.serverName,
+					toolName: parsed.toolName,
+					arguments: {},
+					partial: false,
+				},
+			]
+
+			await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
+
+			expect(handleSpy).toHaveBeenCalledTimes(1)
+			expect(handleSpy.mock.calls[0][1]).toMatchObject({
+				nativeArgs: { server_name: serverName, tool_name: realToolName },
+			})
+		})
+
 		it("performs no provider-state read on the native validation path", async () => {
 			// Handler mocked so the only reachable pre-handler code is the
 			// validation arm itself; any getState call inside the presenter's
@@ -947,6 +993,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 					getState,
 					getMcpHub: () => ({
 						findServerNameBySanitizedName: () => "my_server",
+						getAllServers: () => [],
 					}),
 				}),
 			}

@@ -491,6 +491,7 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 					}),
 					getMcpHub: () => ({
 						findServerNameBySanitizedName: () => "test-server",
+						getAllServers: () => [],
 						executeToolCall: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "result" }] }),
 					}),
 				}),
