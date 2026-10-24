@@ -680,6 +680,44 @@ describe("ChatTextArea", () => {
 				expect(container.textContent).not.toContain("Third prompt")
 			})
 
+			it("should close the picker before cancelling an edit on Escape", () => {
+				const onCancel = vi.fn()
+				const { container } = render(
+					<ChatTextArea {...defaultProps} isEditMode onCancel={onCancel} inputValue="" />,
+				)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!", selectionStart: 1 } })
+				expect(container.textContent).toContain("Third prompt")
+
+				// First press closes the picker and keeps the edit (and its draft).
+				fireEvent.keyDown(textarea, { key: "Escape" })
+				expect(onCancel).not.toHaveBeenCalled()
+				expect(container.textContent).not.toContain("Third prompt")
+
+				// Second press, with no picker open, cancels the edit.
+				fireEvent.keyDown(textarea, { key: "Escape" })
+				expect(onCancel).toHaveBeenCalledTimes(1)
+			})
+
+			it("should still send on Enter when the history query matches nothing", () => {
+				const onSend = vi.fn()
+				const setInputValue = vi.fn()
+				const { container } = render(
+					<ChatTextArea {...defaultProps} onSend={onSend} setInputValue={setInputValue} inputValue="" />,
+				)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!zzz", selectionStart: 4 } })
+				fireEvent.keyDown(textarea, { key: "Enter" })
+
+				// "No results" is not selectable, so Enter must not be swallowed.
+				expect(onSend).toHaveBeenCalledTimes(1)
+				expect(setInputValue).not.toHaveBeenCalledWith("Third prompt")
+			})
+
 			it("should reset history navigation when sending message", () => {
 				const onSend = vi.fn()
 				const setInputValue = vi.fn()

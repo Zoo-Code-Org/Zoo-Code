@@ -630,6 +630,17 @@ describe("getContextMenuOptions for prompt history", () => {
 		expect(options[0]).toMatchObject({ type: ContextMenuOptionType.History, value: "Third prompt" })
 	})
 
+	it("should keep newest-first order when fuzzy scores rank matches differently", () => {
+		// fzf scores the exact "fix" (older, index 1) above the scattered
+		// "finally, invest in x-rays" (newer, index 0). The picker must still
+		// list the newer prompt first.
+		const options = getContextMenuOptions("!fix", null, [], [], undefined, undefined, [
+			"finally, invest in x-rays",
+			"fix",
+		])
+		expect(options.map((option) => option.value)).toEqual(["finally, invest in x-rays", "fix"])
+	})
+
 	it("should drop duplicate prompts so the picker has no identical rows", () => {
 		const options = getContextMenuOptions("!", null, [], [], undefined, undefined, ["继续", "explain this", "继续"])
 		expect(options.map((option) => option.value)).toEqual(["继续", "explain this"])

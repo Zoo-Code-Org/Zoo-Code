@@ -503,7 +503,6 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						return
 					}
 					if ((event.key === "Enter" || event.key === "Tab") && selectedMenuIndex !== -1) {
-						event.preventDefault()
 						const selectedOption = getContextMenuOptions(
 							searchQuery,
 							selectedType,
@@ -519,9 +518,14 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							selectedOption.type !== ContextMenuOptionType.NoResults &&
 							selectedOption.type !== ContextMenuOptionType.SectionHeader
 						) {
+							event.preventDefault()
 							handleMentionSelect(selectedOption.type, selectedOption.value)
+							return
 						}
-						return
+
+						// Nothing selectable (e.g. "No results"). Do not swallow the
+						// key: fall through so Enter still sends the message instead
+						// of leaving the composer unresponsive.
 					}
 				}
 
@@ -1144,8 +1148,16 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 								}}
 								onFocus={() => setIsFocused(true)}
 								onKeyDown={(e) => {
-									// Handle ESC to cancel in edit mode
-									if (isEditMode && e.key === "Escape" && !e.nativeEvent?.isComposing) {
+									// Handle ESC to cancel in edit mode. The context menu
+									// takes precedence: while the history picker is open,
+									// ESC only closes it, so cancelling the edit (which
+									// discards the draft) needs a second press.
+									if (
+										isEditMode &&
+										e.key === "Escape" &&
+										!showContextMenu &&
+										!e.nativeEvent?.isComposing
+									) {
 										e.preventDefault()
 										onCancel?.()
 										return

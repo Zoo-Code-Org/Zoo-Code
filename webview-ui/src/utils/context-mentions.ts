@@ -159,9 +159,18 @@ export function getContextMenuOptions(
 			return [{ type: ContextMenuOptionType.NoResults }]
 		}
 
-		const searchable = prompts.map((prompt) => ({ prompt }))
+		// fzf ranks matches by score, which would put an older prompt above a
+		// newer one. The picker promises newest-first history, so keep the
+		// original (input) order of the prompts that matched.
+		const searchable = prompts.map((prompt, index) => ({ prompt, index }))
 		const fzf = new Fzf(searchable, { selector: (item) => item.prompt })
-		const matching = historyQuery ? fzf.find(historyQuery).map((result) => result.item.prompt) : prompts
+		const matching = historyQuery
+			? fzf
+					.find(historyQuery)
+					.map((result) => result.item)
+					.sort((a, b) => a.index - b.index)
+					.map((item) => item.prompt)
+			: prompts
 
 		return matching.length > 0
 			? matching.map((prompt) => ({ type: ContextMenuOptionType.History, value: prompt }))
