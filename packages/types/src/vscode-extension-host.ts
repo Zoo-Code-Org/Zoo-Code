@@ -111,6 +111,7 @@ export interface ExtensionMessage {
 		| "originalContent"
 		| "rooHistoryImportProgress"
 		| "themeFixtureProbeRequest"
+		| "viewStateClaim"
 	text?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
@@ -169,6 +170,13 @@ export interface ExtensionMessage {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	values?: Record<string, any>
 	requestId?: string
+	/**
+	 * For `viewStateClaim`: the durable `viewStates` key the delivered claim governs. The
+	 * message is only ever sent to the webview that key belongs to.
+	 */
+	viewStateId?: string
+	/** For `viewStateClaim`: the host-minted token the webview stores and echoes on launch. */
+	viewStateClaim?: string
 	themeFixture?: WebviewThemeFixture
 	promptText?: string
 	results?:
@@ -670,6 +678,13 @@ export interface WebviewMessage {
 		| "openRulesDirectory"
 		| "themeFixtureProbeResponse"
 	text?: string
+	viewStateId?: string
+	/**
+	 * For `webviewDidLaunch`: the host-minted claim previously delivered for `viewStateId`.
+	 * The webview only echoes what it was given; the host rejects an id whose stored claim
+	 * does not match, so a view cannot adopt another view's persisted selections.
+	 */
+	viewStateClaim?: string
 	taskId?: string
 	editedMessageContent?: string
 	tab?: "settings" | "history" | "mcp" | "modes" | "chat" | "marketplace" | "cloud"
