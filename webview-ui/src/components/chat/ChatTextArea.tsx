@@ -16,6 +16,7 @@ import {
 	ContextMenuOptionType,
 	getContextMenuOptions,
 	insertMention,
+	isHistoryTrigger,
 	removeMention,
 	shouldShowContextMenu,
 	SearchResult,
@@ -231,14 +232,21 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const [isEnhancingPrompt, setIsEnhancingPrompt] = useState(false)
 		const [isFocused, setIsFocused] = useState(false)
 
+		// Text for which the user explicitly dismissed the prompt history picker.
+		// Without this, recalling (or typing) a message that starts with "!" would
+		// pop the picker back open on the very next keystroke.
+		const suppressedHistoryRef = useRef<string | null>(null)
+
 		// Use custom hook for prompt history navigation
-		const { handleHistoryNavigation, resetHistoryNavigation, resetOnInputChange } = usePromptHistory({
-			clineMessages,
-			taskHistory,
-			cwd,
-			inputValue: normalizedInputValue,
-			setInputValue,
-		})
+		const { handleHistoryNavigation, resetHistoryNavigation, resetOnInputChange, promptHistory } = usePromptHistory(
+			{
+				clineMessages,
+				taskHistory,
+				cwd,
+				inputValue: normalizedInputValue,
+				setInputValue,
+			},
+		)
 
 		// Fetch git commits when Git is selected or when typing a hash.
 		useEffect(() => {
@@ -323,6 +331,27 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const handleMentionSelect = useCallback(
 			(type: ContextMenuOptionType, value?: string) => {
 				if (type === ContextMenuOptionType.NoResults) {
+					return
+				}
+
+				if (type === ContextMenuOptionType.History && value) {
+					// Replace the whole input with the recalled prompt instead of
+					// inserting it as a mention: the "!" prefix is only a trigger
+					// and must not survive into the message. Deliberately does not
+					// send, so the user can edit the prompt before re-sending.
+					suppressedHistoryRef.current = value
+					setShowContextMenu(false)
+					setSelectedType(null)
+					setSelectedMenuIndex(-1)
+					setSearchQuery("")
+					setInputValue(value)
+					setCursorPosition(value.length)
+					setIntendedCursorPosition(value.length)
+					resetHistoryNavigation()
+
+					setTimeout(() => {
+						textAreaRef.current?.focus()
+					}, 0)
 					return
 				}
 
@@ -421,8 +450,14 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			(event: React.KeyboardEvent<HTMLTextAreaElement>) => {
 				if (showContextMenu) {
 					if (event.key === "Escape") {
+						// Dismiss the menu outright. `!` is easy to type by
+						// accident, so Escape must actually close the picker
+						// rather than leave the arrow keys captured by it.
+						suppressedHistoryRef.current = normalizedInputValue
+						setShowContextMenu(false)
+						setSearchQuery("")
 						setSelectedType(null)
-						setSelectedMenuIndex(3) // File by default
+						setSelectedMenuIndex(-1)
 						return
 					}
 
@@ -437,6 +472,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 								fileSearchResults,
 								allModes,
 								commands,
+								promptHistory,
 							)
 							const optionsLength = options.length
 
@@ -467,7 +503,6 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						return
 					}
 					if ((event.key === "Enter" || event.key === "Tab") && selectedMenuIndex !== -1) {
-						event.preventDefault()
 						const selectedOption = getContextMenuOptions(
 							searchQuery,
 							selectedType,
@@ -475,6 +510,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							fileSearchResults,
 							allModes,
 							commands,
+							promptHistory,
 						)[selectedMenuIndex]
 						if (
 							selectedOption &&
@@ -482,9 +518,14 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							selectedOption.type !== ContextMenuOptionType.NoResults &&
 							selectedOption.type !== ContextMenuOptionType.SectionHeader
 						) {
+							event.preventDefault()
 							handleMentionSelect(selectedOption.type, selectedOption.value)
+							return
 						}
-						return
+
+						// Nothing selectable (e.g. "No results"). Do not swallow the
+						// key: fall through so Enter still sends the message instead
+						// of leaving the composer unresponsive.
 					}
 				}
 
@@ -576,6 +617,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				handleHistoryNavigation,
 				resetHistoryNavigation,
 				commands,
+				promptHistory,
 				enterBehavior,
 			],
 		)
@@ -602,10 +644,31 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				setCursorPosition(newCursorPosition)
 
 				const showMenu = shouldShowContextMenu(newValue, newCursorPosition)
+
+				if (isHistoryTrigger(newValue)) {
+					const suppressed = suppressedHistoryRef.current
+
+					// Keep the picker closed when the user dismissed it for this text,
+					// or when there is nothing to recall. Without the second guard an
+					// empty picker would swallow Enter for a message starting with "!".
+					if ((suppressed !== null && newValue.startsWith(suppressed)) || promptHistory.length === 0) {
+						setShowContextMenu(false)
+						setSearchQuery("")
+						setSelectedMenuIndex(-1)
+						return
+					}
+				} else {
+					suppressedHistoryRef.current = null
+				}
+
 				setShowContextMenu(showMenu)
 
 				if (showMenu) {
-					if (newValue.startsWith("/") && !newValue.includes(" ")) {
+					if (isHistoryTrigger(newValue)) {
+						// getContextMenuOptions dispatches on the leading "!" itself.
+						setSearchQuery(newValue)
+						setSelectedMenuIndex(0)
+					} else if (newValue.startsWith("/") && !newValue.includes(" ")) {
 						// Handle slash command - request fresh commands
 						const query = newValue
 						setSearchQuery(query)
@@ -655,7 +718,14 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					setFileSearchResults([]) // Clear file search results.
 				}
 			},
-			[setInputValue, setSearchRequestId, setFileSearchResults, setSearchLoading, resetOnInputChange],
+			[
+				setInputValue,
+				setSearchRequestId,
+				setFileSearchResults,
+				setSearchLoading,
+				resetOnInputChange,
+				promptHistory,
+			],
 		)
 
 		useEffect(() => {
@@ -935,7 +1005,8 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			}
 		})
 
-		const placeholderBottomText = `\n(${t("chat:addContext")}${shouldDisableImages ? `, ${t("chat:dragFiles")}` : `, ${t("chat:dragFilesImages")}`})`
+		const dragHint = shouldDisableImages ? t("chat:dragFiles") : t("chat:dragFilesImages")
+		const placeholderBottomText = `\n(${t("chat:addContext")}, ${t("chat:historyHint")}, ${dragHint})`
 
 		// Common mode selector handler
 		const handleModeChange = useCallback(
@@ -1016,6 +1087,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 									loading={searchLoading}
 									dynamicSearchResults={fileSearchResults}
 									commands={commands}
+									history={promptHistory}
 								/>
 							</div>
 						)}
@@ -1076,8 +1148,16 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 								}}
 								onFocus={() => setIsFocused(true)}
 								onKeyDown={(e) => {
-									// Handle ESC to cancel in edit mode
-									if (isEditMode && e.key === "Escape" && !e.nativeEvent?.isComposing) {
+									// Handle ESC to cancel in edit mode. The context menu
+									// takes precedence: while the history picker is open,
+									// ESC only closes it, so cancelling the edit (which
+									// discards the draft) needs a second press.
+									if (
+										isEditMode &&
+										e.key === "Escape" &&
+										!showContextMenu &&
+										!e.nativeEvent?.isComposing
+									) {
 										e.preventDefault()
 										onCancel?.()
 										return

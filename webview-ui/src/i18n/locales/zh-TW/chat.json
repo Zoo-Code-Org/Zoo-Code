@@ -168,6 +168,7 @@
 	"typeMessage": "輸入訊息...",
 	"typeTask": "在這裡輸入工作...",
 	"addContext": "輸入 @ 新增內容，/ 執行命令",
+	"historyHint": "! 查看歷史",
 	"dragFiles": "按住 Shift 鍵拖曳檔案",
 	"dragFilesImages": "按住 Shift 鍵拖曳檔案／圖片",
 	"errorReadingFile": "讀取檔案時發生錯誤",
