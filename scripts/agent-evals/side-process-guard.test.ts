@@ -5,7 +5,7 @@ import os from "node:os"
 import path from "node:path"
 import { describe, it } from "node:test"
 import { runBoundedPreparation } from "./coding-compare.ts"
-import { createSideProcessGuard, type SideKillOutcome } from "./side-process-guard.ts"
+import { createInterruptFlag, createSideProcessGuard, groupAlive, type SideKillOutcome } from "./side-process-guard.ts"
 
 // Credential-free process fixtures. Each child is a bare node process in its
 // own detached group, the same topology the comparison driver creates.
@@ -277,5 +277,64 @@ describe("bounded preparation children", () => {
 		} finally {
 			await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
 		}
+	})
+})
+
+describe("group liveness probe", () => {
+	it("reports a live process group as alive", { timeout: 30_000 }, async () => {
+		const { child, spawned } = spawnDetachedChild("setInterval(() => {}, 1000000)")
+		try {
+			await spawned
+			assert.ok(child.pid !== undefined)
+			assert.equal(groupAlive(child.pid), true)
+		} finally {
+			child.kill("SIGKILL")
+		}
+	})
+
+	it("reports a gone process group as gone", { timeout: 30_000 }, async () => {
+		const { child, spawned, exited } = spawnDetachedChild("process.exit(0)")
+		await spawned
+		await exited
+		assert.ok(child.pid !== undefined)
+		assert.equal(groupAlive(child.pid), false)
+	})
+
+	it("treats a refused probe as an alive group so the escalation continues", () => {
+		const throwCode = (code: string) => () => {
+			throw Object.assign(new Error(`probe refused: ${code}`), { code })
+		}
+		// EPERM means the group exists but the probe was not allowed.
+		assert.equal(groupAlive(123_456, throwCode("EPERM")), true)
+		// Any other error is not proof of absence either.
+		assert.equal(
+			groupAlive(123_456, () => {
+				throw new Error("probe failed")
+			}),
+			true,
+		)
+		// Only ESRCH proves the group is gone.
+		assert.equal(groupAlive(123_456, throwCode("ESRCH")), false)
+	})
+})
+
+describe("side interrupt flag", () => {
+	it("arms at most once and keeps the first signal", () => {
+		const flag = createInterruptFlag()
+		assert.equal(flag.isInterrupted(), false)
+		assert.equal(flag.exitCode(), 1)
+		flag.signal("SIGINT")
+		// A later signal must not un-arm or replace the first one.
+		flag.signal("SIGTERM")
+		assert.equal(flag.isInterrupted(), true)
+		assert.equal(flag.name(), "SIGINT")
+		assert.equal(flag.exitCode(), 130)
+	})
+
+	it("maps SIGTERM to its conventional exit code", () => {
+		const flag = createInterruptFlag()
+		flag.signal("SIGTERM")
+		assert.equal(flag.name(), "SIGTERM")
+		assert.equal(flag.exitCode(), 143)
 	})
 })

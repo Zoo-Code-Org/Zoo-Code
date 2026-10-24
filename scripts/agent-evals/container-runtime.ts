@@ -223,9 +223,17 @@ export function createContainerGradingRuntime(options: ContainerRuntimeOptions =
 			})
 			const selected = await resolveCli()
 			if (!selected) return failure("noContainerRuntime")
-			// The pull stays outside the grading timeout on purpose.
-			if ((await selected.pull(job.resources.image)) === "failed") return failure("graderImagePullFailed")
-			resolvedDigest = (await selected.imageDigest(job.resources.image)) ?? resolvedDigest
+			// The digest lookup decides whether a pull is needed, so a cached
+			// image never pulls again, and the pull stays outside the grading
+			// timeout on purpose. The identity is resolved again after a pull.
+			let digest = await selected.imageDigest(job.resources.image)
+			if (digest === undefined) {
+				if ((await selected.pull(job.resources.image)) === "failed") return failure("graderImagePullFailed")
+				digest = await selected.imageDigest(job.resources.image)
+			}
+			// A lookup that still finds nothing preserves a digest resolved by
+			// an earlier run of this runtime; it never fabricates one.
+			resolvedDigest = digest ?? resolvedDigest
 			const outDir = path.join(path.dirname(job.gradingDir), "grading-out")
 			await fs.mkdir(outDir, { recursive: true })
 			// The container runs as root with all capabilities dropped, so it
