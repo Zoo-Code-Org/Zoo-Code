@@ -614,6 +614,26 @@ describe("ThinkingBudget", () => {
 			expect(screen.getByTestId("select-item-high")).toBeInTheDocument()
 		})
 
+		it("should enable reasoning and persist 'none' when none is selected", () => {
+			const setApiConfigurationField = vi.fn()
+
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: ["none", "low", "medium", "high"],
+					}}
+				/>,
+			)
+
+			fireEvent.click(screen.getByTestId("select-item-none"))
+
+			expect(setApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", true)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "none")
+		})
+
 		it("should show 'xhigh' option when supportsReasoningEffort array includes xhigh (e.g. gpt-5.5)", () => {
 			render(
 				<ThinkingBudget
