@@ -100,12 +100,12 @@
 		"@types/vscode-webview": "1.57.5",
 		"@tailwindcss/vite": "4.3.3",
 		"@vitejs/plugin-react": "5.2.0",
-		"@vitest/coverage-v8": "4.1.11",
-		"@vitest/ui": "4.1.11",
+		"@vitest/coverage-v8": "4.1.12",
+		"@vitest/ui": "4.1.12",
 		"babel-plugin-react-compiler": "1.0.0",
 		"jsdom": "26.1.0",
 		"monocart-reporter": "2.12.2",
-		"vite": "8.3.4",
-		"vitest": "4.1.11"
+		"vite": "8.3.5",
+		"vitest": "4.1.12"
 	}
 }
