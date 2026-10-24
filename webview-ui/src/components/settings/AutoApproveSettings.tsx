@@ -306,7 +306,7 @@ export const AutoApproveSettings = ({
 							label={t("settings:autoApprove.followupQuestions.timeoutLabel")}>
 							<div className="flex items-center gap-2">
 								<Slider
-									min={1000}
+									min={0}
 									max={300000}
 									step={1000}
 									value={[followupAutoApproveTimeoutMs]}
@@ -317,8 +317,12 @@ export const AutoApproveSettings = ({
 								/>
 								<span className="w-20">{followupAutoApproveTimeoutMs / 1000}s</span>
 							</div>
-							<div className="text-vscode-descriptionForeground text-sm mt-1">
-								{t("settings:autoApprove.followupQuestions.timeoutLabel")}
+							<div
+								className="text-vscode-descriptionForeground text-sm mt-1"
+								data-testid="auto-approve-followup-timeout-description">
+								{followupAutoApproveTimeoutMs === 0
+									? t("settings:autoApprove.followupQuestions.timeoutZeroDescription")
+									: t("settings:autoApprove.followupQuestions.timeoutLabel")}
 							</div>
 						</SearchableSetting>
 					</div>
