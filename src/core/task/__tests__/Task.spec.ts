@@ -4366,6 +4366,120 @@ describe("Cline", () => {
 		})
 	})
 
+	describe("partial message update throttling", () => {
+		function createStreamingTask() {
+			// Task mutates one ClineMessage across deltas and finalization, so snapshot the
+			// fields of each messageUpdated post when it happens instead of keeping the reference.
+			const messageUpdates: Array<Pick<ClineMessage, "ts" | "text" | "partial">> = []
+			vi.mocked(mockProvider.postMessageToWebview).mockImplementation(async (message) => {
+				if (message.type === "messageUpdated" && message.clineMessage) {
+					const { ts, text, partial } = message.clineMessage
+					messageUpdates.push({ ts, text, partial })
+				}
+			})
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+			return { task, messageUpdates }
+		}
+
+		beforeEach(() => {
+			vi.useFakeTimers()
+		})
+
+		afterEach(() => {
+			vi.useRealTimers()
+		})
+
+		it("coalesces a burst of partial updates and delivers the latest text last", async () => {
+			const { task, messageUpdates } = createStreamingTask()
+
+			await task.say("text", "chunk 0", undefined, true)
+			for (let i = 1; i <= 50; i++) {
+				await task.say("text", `chunk ${i}`, undefined, true)
+				vi.advanceTimersByTime(5)
+			}
+			await vi.advanceTimersByTimeAsync(500)
+
+			// 50 deltas over ~250ms: far fewer than one post per delta.
+			expect(messageUpdates.length).toBeGreaterThan(0)
+			expect(messageUpdates.length).toBeLessThan(10)
+			expect(messageUpdates.at(-1)).toMatchObject({ text: "chunk 50", partial: true })
+		})
+
+		it("lets the finalized message through and drops the queued partial post", async () => {
+			const { task, messageUpdates } = createStreamingTask()
+
+			await task.say("text", "first", undefined, true)
+			await task.say("text", "second", undefined, true)
+			await task.say("text", "third", undefined, true)
+			// "third" is queued behind the throttle; finalizing must cancel that queued post.
+			expect(vi.getTimerCount()).toBe(1)
+			await task.say("text", "final text", undefined, false)
+			expect(vi.getTimerCount()).toBe(0)
+			await vi.advanceTimersByTimeAsync(500)
+
+			expect(messageUpdates.map(({ text, partial }) => ({ text, partial }))).toEqual([
+				{ text: "second", partial: true },
+				{ text: "final text", partial: false },
+			])
+		})
+
+		it("drops a queued partial ask update when the ask is finalized", async () => {
+			const { task, messageUpdates } = createStreamingTask()
+
+			// Partial asks always reject with AskIgnoredError.
+			await task.ask("tool", "first", true).catch(() => {})
+			await task.ask("tool", "second", true).catch(() => {})
+			await task.ask("tool", "third", true).catch(() => {})
+			expect(task["pendingPartialMessageTimer"]).toBeDefined()
+
+			// A complete ask resolves only after a response, so leave it pending. Step 1ms per check
+			// so the final post lands well before the queued timer would fire on its own.
+			void task.ask("tool", "final", false).catch(() => {})
+			await vi.waitFor(() => expect(messageUpdates.at(-1)?.partial).toBe(false), { interval: 1 })
+			expect(task["pendingPartialMessageTimer"]).toBeUndefined()
+			await vi.advanceTimersByTimeAsync(500)
+
+			expect(messageUpdates.map(({ text, partial }) => ({ text, partial }))).toEqual([
+				{ text: "second", partial: true },
+				{ text: "final", partial: false },
+			])
+		})
+
+		it("drops a queued partial update when the task is disposed", async () => {
+			const { task, messageUpdates } = createStreamingTask()
+
+			await task.say("text", "first", undefined, true)
+			await task.say("text", "second", undefined, true)
+			await task.say("text", "third", undefined, true)
+			expect(task["pendingPartialMessageTimer"]).toBeDefined()
+
+			await task.dispose()
+			expect(task["pendingPartialMessageTimer"]).toBeUndefined()
+			await vi.advanceTimersByTimeAsync(500)
+
+			expect(messageUpdates.map(({ text }) => text)).toEqual(["second"])
+		})
+
+		it("posts updates that are far enough apart immediately", async () => {
+			const { task, messageUpdates } = createStreamingTask()
+
+			await task.say("text", "one", undefined, true)
+			await task.say("text", "two", undefined, true)
+			await vi.advanceTimersByTimeAsync(1000)
+			await task.say("text", "three", undefined, true)
+
+			// "one" creates the message; "two" and "three" are each the first update in their window.
+			expect(messageUpdates.map(({ text }) => text)).toEqual(["two", "three"])
+		})
+	})
+
 	describe("abortTask", () => {
 		it("should set abort flag and emit TaskAborted event", async () => {
 			const task = new Task({
