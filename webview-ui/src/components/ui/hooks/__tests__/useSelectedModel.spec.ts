@@ -1699,6 +1699,11 @@ describe("useSelectedModel", () => {
 			},
 		)
 
+		it("does not request generic VS Code LM models for other providers", () => {
+			renderHook(() => useSelectedModel({ apiProvider: providerIdentifiers.openaiNative }))
+			expect(useVsCodeLmModels).toHaveBeenLastCalledWith(false)
+		})
+
 		it.each([
 			{ vendor: "other", family: "unknown" },
 			{ vendor: "wanted", family: "unknown", id: "missing" },

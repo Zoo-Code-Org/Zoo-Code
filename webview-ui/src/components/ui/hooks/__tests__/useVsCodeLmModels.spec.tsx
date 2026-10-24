@@ -24,8 +24,12 @@ const setup = (enabled = true) => {
 	const wrapper = ({ children }: { children: React.ReactNode }) => (
 		<QueryClientProvider client={client}>{children}</QueryClientProvider>
 	)
-	return renderHook(({ enabled }) => useVsCodeLmModels(enabled), { wrapper, initialProps: { enabled } })
+	return {
+		client,
+		...renderHook(({ enabled }) => useVsCodeLmModels(enabled), { wrapper, initialProps: { enabled } }),
+	}
 }
+const cachedModels = (client: ReturnType<typeof createTestQueryClient>) => client.getQueryData(["vsCodeLmModels"])
 
 describe("useVsCodeLmModels", () => {
 	beforeEach(() => vi.clearAllMocks())
@@ -58,9 +62,9 @@ describe("useVsCodeLmModels", () => {
 		{ type: VsCodeLmModelsMessageType.githubCopilotSignInResult, vsCodeLmModels: [model] },
 		{ type: VsCodeLmModelsMessageType.vsCodeLmModels },
 	])("ignores non-generic or unsuccessful replies: %j", (message) => {
-		const { result } = setup()
+		const { client } = setup()
 		send(message)
-		expect(result.current.data).toBeUndefined()
+		expect(cachedModels(client)).toBeUndefined()
 	})
 
 	it.each([{ models: undefined }, { models: [model] }])(
@@ -79,19 +83,27 @@ describe("useVsCodeLmModels", () => {
 	)
 
 	it("does not request or listen when disabled, and removes its listener on unmount", () => {
+		const add = vi.spyOn(window, "addEventListener")
 		const remove = vi.spyOn(window, "removeEventListener")
-		const { result, rerender, unmount } = setup(false)
+		const lastMessageHandler = () => add.mock.calls.filter(([type]) => type === "message").at(-1)?.[1]
+		const { client, rerender, unmount } = setup(false)
 		expect(vscode.postMessage).not.toHaveBeenCalled()
+		expect(lastMessageHandler()).toBeUndefined()
 		send({ type: VsCodeLmModelsMessageType.vsCodeLmModels, vsCodeLmModels: [model] })
-		expect(result.current.data).toBeUndefined()
+		expect(cachedModels(client)).toBeUndefined()
 		rerender({ enabled: true })
 		expect(vscode.postMessage).toHaveBeenCalledTimes(1)
+		const firstHandler = lastMessageHandler()
+		expect(firstHandler).toBeDefined()
 		rerender({ enabled: false })
-		expect(remove).toHaveBeenCalledWith("message", expect.any(Function))
+		expect(remove).toHaveBeenCalledWith("message", firstHandler)
 		rerender({ enabled: true })
+		const secondHandler = lastMessageHandler()
+		expect(secondHandler).toBeDefined()
 		remove.mockClear()
 		unmount()
-		expect(remove).toHaveBeenCalledWith("message", expect.any(Function))
+		expect(remove).toHaveBeenCalledWith("message", secondHandler)
+		add.mockRestore()
 		remove.mockRestore()
 	})
 })
