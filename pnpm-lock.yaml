@@ -4,6 +4,24 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    '@vitest/coverage-v8':
+      specifier: 4.1.12
+      version: 4.1.12
+    '@vitest/ui':
+      specifier: 4.1.12
+      version: 4.1.12
+    eslint-plugin-turbo:
+      specifier: 2.11.10
+      version: 2.11.10
+    turbo:
+      specifier: 2.11.10
+      version: 2.11.10
+    vitest:
+      specifier: 4.1.12
+      version: 4.1.12
+
 overrides:
   tar-fs: '>=3.1.1'
   mocha>diff: 8.0.4
@@ -84,7 +102,7 @@ importers:
         specifier: 4.23.15
         version: 4.23.15
       turbo:
-        specifier: 2.11.10
+        specifier: 'catalog:'
         version: 2.11.10
       typescript:
         specifier: 5.9.3
@@ -142,7 +160,7 @@ importers:
         specifier: 18.3.31
         version: 18.3.31
       '@vitest/coverage-v8':
-        specifier: 4.1.12
+        specifier: 'catalog:'
         version: 4.1.12(vitest@4.1.12)
       execa:
         specifier: 9.6.1
@@ -160,7 +178,7 @@ importers:
         specifier: 4.23.15
         version: 4.23.15
       vitest:
-        specifier: 4.1.12
+        specifier: 'catalog:'
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.12)(jsdom@26.1.0)(vite@8.3.5(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   apps/vscode-e2e:
@@ -217,7 +235,7 @@ importers:
         specifier: 22.20.1
         version: 22.20.1
       vitest:
-        specifier: 4.1.12
+        specifier: 'catalog:'
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.12)(jsdom@26.1.0)(vite@8.3.5(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/cloud:
@@ -245,13 +263,13 @@ importers:
         specifier: 1.100.0
         version: 1.100.0
       '@vitest/coverage-v8':
-        specifier: 4.1.12
+        specifier: 'catalog:'
         version: 4.1.12(vitest@4.1.12)
       globals:
         specifier: 16.5.0
         version: 16.5.0
       vitest:
-        specifier: 4.1.12
+        specifier: 'catalog:'
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.12)(jsdom@26.1.0)(vite@8.3.5(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/config-eslint:
@@ -275,7 +293,7 @@ importers:
         specifier: 5.2.0
         version: 5.2.0(eslint@9.39.5(jiti@2.7.0))
       eslint-plugin-turbo:
-        specifier: 2.11.10
+        specifier: 'catalog:'
         version: 2.11.10(eslint@9.39.5(jiti@2.7.0))(turbo@2.11.10)
       globals:
         specifier: 16.5.0
@@ -317,10 +335,10 @@ importers:
         specifier: 22.20.1
         version: 22.20.1
       '@vitest/coverage-v8':
-        specifier: 4.1.12
+        specifier: 'catalog:'
         version: 4.1.12(vitest@4.1.12)
       vitest:
-        specifier: 4.1.12
+        specifier: 'catalog:'
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.12)(jsdom@26.1.0)(vite@8.3.5(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/ipc:
@@ -370,10 +388,10 @@ importers:
         specifier: 1.100.0
         version: 1.100.0
       '@vitest/coverage-v8':
-        specifier: 4.1.12
+        specifier: 'catalog:'
         version: 4.1.12(vitest@4.1.12)
       vitest:
-        specifier: 4.1.12
+        specifier: 'catalog:'
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.12)(jsdom@26.1.0)(vite@8.3.5(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/types:
@@ -404,7 +422,7 @@ importers:
         specifier: 8.5.1
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.31)(tsx@4.23.15)(typescript@5.9.3)(yaml@2.9.1)
       vitest:
-        specifier: 4.1.12
+        specifier: 'catalog:'
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.12)(jsdom@26.1.0)(vite@8.3.5(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/vscode-shim:
@@ -419,7 +437,7 @@ importers:
         specifier: 22.20.1
         version: 22.20.1
       vitest:
-        specifier: 4.1.12
+        specifier: 'catalog:'
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.12)(jsdom@26.1.0)(vite@8.3.5(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   src:
@@ -663,7 +681,7 @@ importers:
         specifier: 1.100.0
         version: 1.100.0
       '@vitest/coverage-v8':
-        specifier: 4.1.12
+        specifier: 'catalog:'
         version: 4.1.12(vitest@4.1.12)
       '@vscode/vsce':
         specifier: 3.9.2
@@ -690,7 +708,7 @@ importers:
         specifier: 6.0.1
         version: 6.0.1
       vitest:
-        specifier: 4.1.12
+        specifier: 'catalog:'
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.12)(jsdom@26.1.0)(vite@8.3.5(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   webview-ui:
@@ -937,10 +955,10 @@ importers:
         specifier: 5.2.0
         version: 5.2.0(vite@8.3.5(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
       '@vitest/coverage-v8':
-        specifier: 4.1.12
+        specifier: 'catalog:'
         version: 4.1.12(vitest@4.1.12)
       '@vitest/ui':
-        specifier: 4.1.12
+        specifier: 'catalog:'
         version: 4.1.12(vitest@4.1.12)
       babel-plugin-react-compiler:
         specifier: 1.0.0
@@ -955,7 +973,7 @@ importers:
         specifier: 8.3.5
         version: 8.3.5(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)
       vitest:
-        specifier: 4.1.12
+        specifier: 'catalog:'
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.12)(jsdom@26.1.0)(vite@8.3.5(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
 packages:
