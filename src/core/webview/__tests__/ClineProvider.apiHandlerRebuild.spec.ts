@@ -241,9 +241,15 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			new WebviewFocusTracker(),
 		)
 
-		// Mock providerSettingsManager
+		// Mock providerSettingsManager. saveConfig repoints the CURRENT getProfile mock at
+		// the record it wrote: the real manager reads back the stored record, and
+		// persistProviderProfile builds its activation writes from that read-back.
+		const currentGetProfile = () => provider["providerSettingsManager"].getProfile as ReturnType<typeof vi.fn>
 		;(provider as any).providerSettingsManager = {
-			saveConfig: vi.fn().mockResolvedValue("test-id"),
+			saveConfig: vi.fn().mockImplementation(async (name: string, config: Record<string, unknown>) => {
+				currentGetProfile().mockResolvedValue({ name, id: "test-id", ...config })
+				return "test-id"
+			}),
 			listConfig: vi.fn().mockResolvedValue([
 				{
 					name: "test-config",
