@@ -64,7 +64,16 @@ const probeExecutable = (candidate: ContainerExecutable): Promise<boolean> =>
 		}
 	})
 
-const exec = (
+// Shared bound for one CLI call's captured stdout and stderr. Digest, pull,
+// and removal diagnostics are far smaller than this cap; the cap only bounds
+// a pathological output stream, so captured output can never grow unbounded.
+export const EXEC_OUTPUT_MAX_BYTES = 262_144
+
+const appendBounded = (current: string, chunk: string): string =>
+	current.length >= EXEC_OUTPUT_MAX_BYTES ? current : current + chunk.slice(0, EXEC_OUTPUT_MAX_BYTES - current.length)
+
+// Exported as a test seam. Production callers go through ContainerCli.
+export const exec = (
 	file: string,
 	args: readonly string[],
 	timeoutMs: number,
@@ -79,10 +88,10 @@ const exec = (
 			let stdout = ""
 			let stderr = ""
 			child.stdout?.on("data", (chunk) => {
-				stdout += String(chunk)
+				stdout = appendBounded(stdout, String(chunk))
 			})
 			child.stderr?.on("data", (chunk) => {
-				stderr += String(chunk)
+				stderr = appendBounded(stderr, String(chunk))
 			})
 			child.once("error", () => resolve({ code: "error", stdout, stderr }))
 			child.once("close", (code, signal) =>

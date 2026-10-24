@@ -63,11 +63,23 @@ export function assertCommitsApproved(policy: TrustPolicy, commits: readonly str
 	if (unapproved.length > 0) throw new UntrustedCommitError(unapproved)
 }
 
-// Environment allowlist for the side process. The comparison driver may hold
-// unrelated secrets in its own environment; the side gets only what it needs
-// to spawn git, node, and the extension host, plus the one named credential
-// variable.
-const SIDE_ENV_ALLOWLIST = [
+// Provider credential variables this framework supports. The side script and
+// the comparison driver accept only these names, so the tooling can never be
+// pointed at an unrelated parent secret by naming an arbitrary variable.
+export const CREDENTIAL_ENV_ALLOWLIST = ["SOLHEIM_API_KEY"] as const
+
+export function assertCredentialEnvAllowed(name: string): void {
+	if (!(CREDENTIAL_ENV_ALLOWLIST as readonly string[]).includes(name)) {
+		throw new Error(`credential environment variable must be one of: ${CREDENTIAL_ENV_ALLOWLIST.join(", ")}`)
+	}
+}
+
+// Environment allowlist shared by every child this framework spawns. The
+// comparison driver may hold unrelated secrets in its own environment; the
+// children get only what they need to spawn git, node, and the extension
+// host. Credentials never travel through this list; the side adds the one
+// named credential variable separately.
+const PROCESS_ENV_ALLOWLIST = [
 	"PATH",
 	"HOME",
 	"LANG",
@@ -83,18 +95,44 @@ const SIDE_ENV_ALLOWLIST = [
 	"PATHEXT",
 ] as const
 
+// Environment for the side process: the shared allowlist plus the one named
+// credential variable and the side label.
 export function buildSideEnvironment(
 	env: NodeJS.ProcessEnv,
 	credentialEnv: string,
 	side: "baseline" | "candidate",
 ): NodeJS.ProcessEnv {
 	const child: NodeJS.ProcessEnv = {}
-	for (const name of SIDE_ENV_ALLOWLIST) {
+	for (const name of PROCESS_ENV_ALLOWLIST) {
 		const value = env[name]
 		if (value !== undefined) child[name] = value
 	}
 	const credential = env[credentialEnv]
 	if (credential !== undefined) child[credentialEnv] = credential
 	child["CODING_EVALS_SIDE"] = side
+	return child
+}
+
+// Environment for the worktree install and build processes. These children
+// inherit neither the driver's secrets nor the provider credential. They get
+// the shared process locations plus the explicitly approved pnpm variables a
+// frozen-lockfile install and a build need to locate their store, cache, and
+// registry.
+const WORKTREE_ENV_ALLOWLIST = [
+	...PROCESS_ENV_ALLOWLIST,
+	"PNPM_HOME",
+	"XDG_DATA_HOME",
+	"XDG_CACHE_HOME",
+	"XDG_CONFIG_HOME",
+	"XDG_STATE_HOME",
+	"npm_config_registry",
+] as const
+
+export function buildWorktreeEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	const child: NodeJS.ProcessEnv = {}
+	for (const name of WORKTREE_ENV_ALLOWLIST) {
+		const value = env[name]
+		if (value !== undefined) child[name] = value
+	}
 	return child
 }

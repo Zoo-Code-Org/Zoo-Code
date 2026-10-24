@@ -4,7 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import { after, describe, it } from "node:test"
 import { RooCodeEventName, TaskCommandName, type TaskCommand, type TaskEvent } from "@roo-code/types"
-import { runCodingFixtureOnce, withWorkspaceCapture } from "./coding-run.ts"
+import { runCodingFixtureOnce, stopOnFinalCompletionMessage, withWorkspaceCapture } from "./coding-run.ts"
 import { createLocalSubprocessGradingRuntime } from "./coding-grader.ts"
 import type { AgentClient, AgentHost, AgentRuntime, FinalWorkspaceSnapshot } from "./runner.ts"
 import type { AgentFixtureWorkspaceFile } from "./contract.ts"
@@ -19,8 +19,14 @@ interface SyntheticOptions {
 	// Emits the model's final non-partial completion_result message instead
 	// of the accepted TaskCompleted event.
 	completeByMessageOnly?: boolean
+	// Emits only a partial completion_result message. The headless stop
+	// policy must never treat it as final.
+	completeByPartialMessageOnly?: boolean
 	// Rejects the final-workspace read, as a broken capture does.
 	failWorkspaceRead?: boolean
+	// Reports the final-workspace capture as truncated, as a bounded walker
+	// over an oversized tree does.
+	truncateWorkspaceRead?: boolean
 }
 
 const syntheticRuntime = (options: SyntheticOptions): { runtime: AgentRuntime; traces: AgentTrace[] } => {
@@ -48,11 +54,13 @@ const syntheticRuntime = (options: SyntheticOptions): { runtime: AgentRuntime; t
 				eventName: RooCodeEventName.TaskStartResponse,
 				payload: [{ requestId, success: true, taskId: "task-1" }],
 			})
-			if (options.completeByMessageOnly) {
+			if (options.completeByMessageOnly || options.completeByPartialMessageOnly) {
 				// The model reports completion, but the accepted TaskCompleted
-				// event never fires. This is the headless completion path.
-				// The synthetic message satisfies the Message payload shape;
-				// the cast names the variant the schema accepts.
+				// event never fires. This is the headless completion path. The
+				// partial variant streams the message with partial: true, which
+				// the stop policy must reject. The synthetic message satisfies
+				// the Message payload shape; the cast names the variant the
+				// schema accepts.
 				emit({
 					eventName: RooCodeEventName.Message,
 					payload: [
@@ -64,6 +72,7 @@ const syntheticRuntime = (options: SyntheticOptions): { runtime: AgentRuntime; t
 								say: "completion_result",
 								ts: 1,
 								text: "Task finished.",
+								...(options.completeByPartialMessageOnly ? { partial: true } : {}),
 							},
 						},
 					],
@@ -97,7 +106,7 @@ const syntheticRuntime = (options: SyntheticOptions): { runtime: AgentRuntime; t
 		},
 		readFinalWorkspace: async (): Promise<FinalWorkspaceSnapshot> => {
 			if (options.failWorkspaceRead) throw new Error("unreadable workspace")
-			return { files: options.finalFiles, truncated: false }
+			return { files: options.finalFiles, truncated: options.truncateWorkspaceRead === true }
 		},
 	}
 	return { runtime, traces }
@@ -254,5 +263,100 @@ describe("coding run orchestration", () => {
 		// Repeated cleanup must not overwrite the captured snapshot.
 		await captured.runtime.cleanup()
 		assert.equal(captured.getSnapshot(), first)
+	})
+
+	const completionSayEvent = (message: Record<string, unknown>): TaskEvent =>
+		({
+			eventName: RooCodeEventName.Message,
+			payload: [{ taskId: "task-1", action: "created", message: { ts: 1, ...message } }],
+		}) as unknown as TaskEvent
+
+	it("stops on the final non-partial completion_result say message", () => {
+		const observer = stopOnFinalCompletionMessage()
+		observer.onAcceptedEvent!(completionSayEvent({ type: "say", say: "completion_result", text: "done" }), "task-1")
+		assert.equal(observer.shouldStop!(), true)
+	})
+
+	it("never stops on partial, blank, or wrong-say completion messages", () => {
+		const rejected = [
+			{ name: "partial", message: { type: "say", say: "completion_result", text: "working", partial: true } },
+			{ name: "blank", message: { type: "say", say: "completion_result", text: "  \n\t " } },
+			{ name: "wrongSay", message: { type: "say", say: "text", text: "progress note" } },
+		]
+		for (const { name, message } of rejected) {
+			const observer = stopOnFinalCompletionMessage()
+			observer.onAcceptedEvent!(completionSayEvent(message), "task-1")
+			assert.equal(observer.shouldStop!(), false, `observer must not stop on a ${name} completion message`)
+		}
+	})
+
+	it(
+		"skips grading and reports infrastructure failure when the snapshot is truncated",
+		{ timeout: 30_000 },
+		async () => {
+			const bundle = codingBundle("clamp-range")
+			const { runtime } = syntheticRuntime({
+				finalFiles: finalFilesWith(bundle.grading.correctSolution[0]!),
+				complete: true,
+				truncateWorkspaceRead: true,
+			})
+			const record = await runCodingFixtureOnce({
+				fixtureName: "clamp-range",
+				repIndex: 5,
+				credential: "sk-test",
+				runtime,
+				gradingRuntime: createLocalSubprocessGradingRuntime(),
+				scratchDir: await scratch(),
+			})
+			// A truncated capture is incomplete harness data. Grading it could
+			// score missing files as a wrong answer, so it never grades.
+			assert.equal(record.outcome.outcome, "infrastructure-failure")
+			assert.equal(record.outcome.reason, "finalWorkspaceTruncated")
+			assert.equal(record.grading, undefined)
+			assert.equal(record.finalWorkspaceTruncated, true)
+		},
+	)
+
+	it("keeps grading a complete snapshot", { timeout: 30_000 }, async () => {
+		const bundle = codingBundle("clamp-range")
+		const { runtime } = syntheticRuntime({
+			finalFiles: finalFilesWith(bundle.grading.correctSolution[0]!),
+			complete: true,
+			truncateWorkspaceRead: false,
+		})
+		const record = await runCodingFixtureOnce({
+			fixtureName: "clamp-range",
+			repIndex: 6,
+			credential: "sk-test",
+			runtime,
+			gradingRuntime: createLocalSubprocessGradingRuntime(),
+			scratchDir: await scratch(),
+		})
+		assert.equal(record.outcome.outcome, "correct")
+		assert.equal(record.grading?.kind, "passed")
+		assert.equal(record.finalWorkspaceTruncated, false)
+	})
+
+	it("times out a run that only ever streams a partial completion message", { timeout: 30_000 }, async () => {
+		const { runtime } = syntheticRuntime({
+			finalFiles: [],
+			complete: false,
+			completeByPartialMessageOnly: true,
+		})
+		const record = await runCodingFixtureOnce({
+			fixtureName: "clamp-range",
+			repIndex: 7,
+			credential: "sk-test",
+			runtime,
+			gradingRuntime: createLocalSubprocessGradingRuntime(),
+			scratchDir: await scratch(),
+		})
+		// The partial message never satisfies the stop policy, so the run
+		// window expires instead of stopping early. A timeout is never graded.
+		assert.equal(record.executionCode, "TASK_RUN_TIMEOUT")
+		assert.equal(record.outcome.outcome, "timed-out")
+		assert.equal(record.grading, undefined)
+		assert.equal(record.trace?.execution.stopReason, "runTimeout")
+		assert.equal(record.trace?.execution.completionMessageSeen, false)
 	})
 })

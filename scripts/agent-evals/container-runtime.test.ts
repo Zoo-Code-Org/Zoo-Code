@@ -6,6 +6,8 @@ import { describe, it } from "node:test"
 import {
 	buildContainerArgs,
 	createContainerGradingRuntime,
+	EXEC_OUTPUT_MAX_BYTES,
+	exec,
 	GRADER_IMAGE,
 	parseDriverResult,
 	type ContainerCli,
@@ -316,5 +318,31 @@ describe("untrusted driver result validation", () => {
 
 	it("rejects oversized payloads", () => {
 		assert.equal(parseDriverResult(`{"kind":"completed","pad":"${"x".repeat(70_000)}"}`), undefined)
+	})
+})
+
+describe("bounded cli output capture", () => {
+	it("caps oversized stdout and stderr at the shared bound and keeps the head", { timeout: 30_000 }, async () => {
+		const outcome = await exec(
+			process.execPath,
+			["-e", "process.stdout.write('a'.repeat(1000000)); process.stderr.write('b'.repeat(1000000))"],
+			30_000,
+		)
+		assert.equal(outcome.code, 0)
+		assert.equal(outcome.stdout.length, EXEC_OUTPUT_MAX_BYTES)
+		assert.equal(outcome.stderr.length, EXEC_OUTPUT_MAX_BYTES)
+		assert.ok(outcome.stdout.startsWith("a"))
+		assert.ok(outcome.stderr.startsWith("b"))
+	})
+
+	it("keeps short diagnostic output intact", { timeout: 30_000 }, async () => {
+		const outcome = await exec(
+			process.execPath,
+			["-e", "process.stdout.write('sha256:digest'); process.stderr.write('no such container: gone')"],
+			30_000,
+		)
+		assert.equal(outcome.code, 0)
+		assert.equal(outcome.stdout, "sha256:digest")
+		assert.equal(outcome.stderr, "no such container: gone")
 	})
 })

@@ -57,4 +57,22 @@ describe("run outcome classification", () => {
 		)
 		assert.equal(classifyRunOutcome({ ...base, grading: undefined }).outcome, "infrastructure-failure")
 	})
+
+	it("reports a truncated final workspace as infrastructure failure without grading", () => {
+		// A truncated capture is incomplete. Even a passing verdict must not
+		// turn missing files into a correct answer.
+		assert.deepEqual(classifyRunOutcome({ ...base, finalWorkspaceTruncated: true, grading: { kind: "passed" } }), {
+			outcome: "infrastructure-failure",
+			reason: "finalWorkspaceTruncated",
+		})
+		assert.deepEqual(classifyRunOutcome({ ...base, finalWorkspaceTruncated: true }), {
+			outcome: "infrastructure-failure",
+			reason: "finalWorkspaceTruncated",
+		})
+		// A complete capture keeps grading.
+		assert.deepEqual(classifyRunOutcome({ ...base, finalWorkspaceTruncated: false, grading: { kind: "passed" } }), {
+			outcome: "correct",
+			reason: "hiddenTestsPassed",
+		})
+	})
 })
