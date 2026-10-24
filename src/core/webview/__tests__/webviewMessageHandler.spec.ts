@@ -1128,6 +1128,18 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 	})
 
 	it("successfully fetches models from all providers", async () => {
+		// Unbound's catalog is only fetched when Unbound is the active provider,
+		// so make it active to include it in this aggregate coverage.
+		mockClineProvider.getState = vi.fn().mockResolvedValue({
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.unbound,
+				openRouterApiKey: "openrouter-key",
+				requestyApiKey: "requesty-key",
+				litellmApiKey: "litellm-key",
+				litellmBaseUrl: "http://localhost:4000",
+			},
+		})
+
 		const mockModels: ModelRecord = {
 			"model-1": {
 				maxTokens: 4096,
@@ -1436,6 +1448,8 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 	it("skips LiteLLM when both config and message values are missing", async () => {
 		mockClineProvider.getState = vi.fn().mockResolvedValue({
 			apiConfiguration: {
+				// Unbound's catalog is only fetched when Unbound is the active provider.
+				apiProvider: providerIdentifiers.unbound,
 				openRouterApiKey: "openrouter-key",
 				requestyApiKey: "requesty-key",
 				// Missing litellm config
@@ -1492,6 +1506,18 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 	})
 
 	it("handles individual provider failures gracefully", async () => {
+		// Unbound's catalog is only fetched when Unbound is the active provider,
+		// so make it active to include it in this aggregate coverage.
+		mockClineProvider.getState = vi.fn().mockResolvedValue({
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.unbound,
+				openRouterApiKey: "openrouter-key",
+				requestyApiKey: "requesty-key",
+				litellmApiKey: "litellm-key",
+				litellmBaseUrl: "http://localhost:4000",
+			},
+		})
+
 		const mockModels: ModelRecord = {
 			"model-1": {
 				maxTokens: 4096,
@@ -1559,6 +1585,18 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 	})
 
 	it("handles Error objects and string errors correctly", async () => {
+		// Unbound's catalog is only fetched when Unbound is the active provider,
+		// so make it active to include it in this aggregate coverage.
+		mockClineProvider.getState = vi.fn().mockResolvedValue({
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.unbound,
+				openRouterApiKey: "openrouter-key",
+				requestyApiKey: "requesty-key",
+				litellmApiKey: "litellm-key",
+				litellmBaseUrl: "http://localhost:4000",
+			},
+		})
+
 		// Mock providers to fail with different error types
 		mockGetModels
 			.mockRejectedValueOnce(new Error("Structured error message")) // openrouter
