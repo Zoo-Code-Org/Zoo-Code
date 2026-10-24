@@ -122,8 +122,9 @@ async function recoverInterruptedReplacementUnchecked(
 		)
 		const backups = backupStats.filter((backup) => backup !== null)
 		backups.sort((a, b) => b.mtimeMs - a.mtimeMs || b.backupPath.localeCompare(a.backupPath))
-		if (backups.length > 0) {
-			const newestBackupPath = backups[0].backupPath
+		const [newest] = backups
+		if (newest) {
+			const newestBackupPath = newest.backupPath
 			// A failed restore leaves every backup intact and aborts the write.
 			// In particular, a merge must never observe null in this state.
 			await fs.rename(newestBackupPath, absoluteFilePath)
