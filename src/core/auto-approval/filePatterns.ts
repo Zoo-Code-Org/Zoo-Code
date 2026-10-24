@@ -3,6 +3,9 @@ import path from "path"
 
 import ignore from "ignore"
 
+import { WorkspaceRootCanonicalizer } from "./WorkspaceRootCanonicalizer"
+import { WorkspaceRootStrategy } from "./strategies/WorkspaceRootStrategy"
+
 /**
  * Matching of file paths against user-configured file patterns.
  *
@@ -72,7 +75,7 @@ import ignore from "ignore"
  * Both the configured patterns and the path being checked are therefore
  * rewritten into a single form the library accepts: a path relative to the
  * filesystem root (`/`), with any Windows drive as its first segment, in the
- * spelling `toPosixAbsolutePath` gives it.
+ * spelling supplied by the selected path strategy.
  *
  * An alternative implementation would be to remember for each pattern whether
  * it's a workspace-scoped pattern or an absolute-filesystem pattern, and then
@@ -155,56 +158,37 @@ function pathsepsToPosix(value: string, isWindows: boolean): string {
 }
 
 /**
- * A Windows drive at the root of a path: the `C:` in `C:/tmp/x`, or `C:` alone.
+ * A Windows drive at the root of an absolute path: the `C:` in `C:/tmp/x`.
  *
- * The lookahead is what limits this to a drive *root*. Windows also reads `C:tmp`
- * as naming a drive, but relative to the current directory on it, which is not a
- * place this module can resolve.
+ * Require a separator after the colon. Both `C:` and `C:tmp` are relative to
+ * the current directory on that drive, which this module cannot safely infer.
  */
-const DRIVE_PREFIX = /^([a-zA-Z]):(?=\/|$)/
+const DRIVE_PREFIX = /^([a-zA-Z]):(?=\/)/
 
 /**
- * Rewrite an absolute path into the plain POSIX form the rest of this module
- * works in, where a Windows drive is an ordinary first path segment.
- *
- * - `"C:/tmp/x"` -> `"/C/tmp/x"`
- * - `"/tmp/x"` with `workspaceDrive = "/D"` -> `"/D/tmp/x"`, since Windows reads a
- *   path written without a drive as being on the current one
- * - `"/tmp/x"` off Windows -> `"/tmp/x"`, where there are no drives to place it on
- *
- * The colon has to go, working around `ignore` behaviour:
- * On Windows, `ignore` rejects any path that looks drive-rooted
- * (it tests `/^[a-z]:\//i` and throws `RangeError`,
- * "path should be a `path.relative()`d string").
- *
- * The bare letter cannot be mistaken for a directory of the same name, because it
- * only ever goes where Windows puts the drive, at the very root of the path: a
- * directory called `C` always sits in a later segment.
- *
- * Its case is left as typed, since a drive only occurs on Windows, where the
- * matcher ignores case anyway (see the case-sensitivity note at the top), so
- * `C:/x` and `c:/x` already agree.
- *
- * A drive is only read as one when reading paths as Windows does. Elsewhere `C:`
- * is an ordinary directory name (`mkdir 'C:'` succeeds on Linux), so `C:/notes.md`
- * is a *relative* path naming a file in it, and taking it for a drive would anchor
- * it to the filesystem root instead of the workspace.
+ * The Windows volume in matcher notation: /C for a drive, /UNC/server/share
+ * for a network share. Empty when no volume is known, and always off Windows.
  */
-function toPosixAbsolutePath(absolutePath: string, workspaceDrive: string, isWindows: boolean): string {
-	const drive = isWindows ? DRIVE_PREFIX.exec(absolutePath) : null
-
-	return drive ? `/${drive[1]}${absolutePath.slice(drive[0].length)}` : `${workspaceDrive}${absolutePath}`
-}
-
-/**
- * The drive a path is on, spelled as the path segment that `toPosixAbsolutePath`
- * gives it: `"/C"` for `"C:/tmp/x"`. Empty when the path names no drive, as is
- * always the case off Windows.
- */
-function driveSegmentOf(absolutePath: string, isWindows: boolean): string {
+function volumeSegmentOf(absolutePath: string, isWindows: boolean): string {
+	if (isWindows) {
+		const unc = /^\/\/([^/]+)\/([^/]+)/.exec(absolutePath)
+		if (unc) return `/UNC/${unc[1]}/${unc[2]}`
+	}
 	const drive = isWindows ? DRIVE_PREFIX.exec(absolutePath) : null
 
 	return drive ? `/${drive[1]}` : ""
+}
+
+/** Filesystem-provided prefixes are literal names, not user-authored globs. */
+function escapePatternLiteral(value: string): string {
+	// `ignore` expands ? even when escaped or inside a character class. A hex
+	// character class preserves a literal ? in filesystem-provided names.
+	return value.replace(/[\\*?[\]]/g, (character) => (character === "?" ? "[\\x3f]" : `\\${character}`))
+}
+
+/** A Windows drive/share is a filesystem root; .. cannot climb above it. */
+function resolveMatcherPath(root: string, relativePath: string, volume: string): string {
+	return `${volume}${path.posix.resolve(root.slice(volume.length) || "/", relativePath)}`.replace(/\/$/, "") || "/"
 }
 
 /**
@@ -213,6 +197,11 @@ function driveSegmentOf(absolutePath: string, isWindows: boolean): string {
  */
 function isAbsolutePath(value: string, isWindows: boolean): boolean {
 	return value.startsWith("/") || (isWindows && DRIVE_PREFIX.test(value))
+}
+
+/** Windows drive-relative paths depend on per-drive process state, not the task workspace. */
+function isDriveRelativePath(value: string, isWindows: boolean): boolean {
+	return isWindows && /^[a-zA-Z]:(?!\/)/.test(value)
 }
 
 function escapesWorkspace(posixPath: string): boolean {
@@ -270,7 +259,7 @@ function toRootRelativePath(posixAbsolutePath: string): string {
  *   - `"../shared/notes.md"` -> `"/path/to/shared/notes.md"`
  *     resolved against the workspace root, so it lands outside the workspace
  *   - `"~/notes.md"` -> `"/home/me/notes.md"`
- *   - `"C:/tmp/notes.md"` on Windows -> `"/C/tmp/notes.md"`, see `toPosixAbsolutePath()`
+ *   - `"C:/tmp/notes.md"` on Windows -> `"/C/tmp/notes.md"`, using the path strategy
  *   - `"!docs/secret.md"` -> `"!/path/to/repo/docs/secret.md"`
  *   - `"mydir/"` -> `undefined` (because it names a dir)
  *   - `"~"` -> `undefined` (because it names a dir)
@@ -298,6 +287,16 @@ export function toMatcherPattern(
 	isWindows = runningOnWindows(),
 	homeDir = os.homedir(),
 ): string | undefined {
+	return toMatcherPatternWithStrategy(pattern, cwd, isWindows, homeDir, WorkspaceRootStrategy.forPlatform(isWindows))
+}
+
+function toMatcherPatternWithStrategy(
+	pattern: string,
+	cwd: string | undefined,
+	isWindows: boolean,
+	homeDir: string,
+	strategy: WorkspaceRootStrategy,
+): string | undefined {
 	// Set gitignore's negation aside so the path is rewritten on its own merits,
 	// then restore it, so that a negation is anchored exactly like the pattern it
 	// is written to cancel.
@@ -307,14 +306,20 @@ export function toMatcherPattern(
 	// as gitignore's escape character and a legal filename character.
 	let normalized = pathsepsToPosix(pattern.slice(negation.length), isWindows)
 
-	if (!normalized.trim() || normalized === "." || normalized === "~" || normalized.endsWith("/")) {
+	if (
+		!normalized.trim() ||
+		isDriveRelativePath(normalized, isWindows) ||
+		normalized === "." ||
+		normalized === "~" ||
+		normalized.endsWith("/")
+	) {
 		return undefined
 	}
 
 	const workspacePosix = pathsepsToPosix(cwd ?? "", isWindows)
-	// A path written without a drive is read as being on the workspace's, which is
-	// the drive the tool call it came from would resolve it against.
-	const workspaceDrive = driveSegmentOf(workspacePosix, isWindows)
+	// A rooted Windows path belongs to the workspace's drive or network share.
+	const workspaceVolume = volumeSegmentOf(workspacePosix, isWindows)
+	const matcherVolume = strategy.toMatcherAbsolutePath("/", workspaceVolume).replace(/\/$/, "")
 
 	if (normalized.startsWith("~/")) {
 		// Left in the user's own spelling, drive and all, for the absolute branch
@@ -323,21 +328,23 @@ export function toMatcherPattern(
 	}
 
 	if (isAbsolutePath(normalized, isWindows)) {
-		return `${negation}${toPosixAbsolutePath(normalized, workspaceDrive, isWindows)}`
+		return `${negation}${strategy.toMatcherAbsolutePath(normalized, workspaceVolume)}`
 	}
 
-	if (!cwd) {
-		// No workspace for a relative pattern to be relative to; see the note above
+	if (!cwd || isDriveRelativePath(workspacePosix, isWindows)) {
+		// An unknown or drive-relative workspace cannot anchor a relative pattern; see the note above
 		// on why this is not matched loosely instead.
 		return undefined
 	}
 
 	// `resolve` also normalises, so that a `cwd` with a trailing slash or a `..`
 	// segment does not reach the patterns below.
-	const workspaceRoot = path.posix.resolve(toPosixAbsolutePath(workspacePosix, workspaceDrive, isWindows))
+	const workspaceRoot = escapePatternLiteral(
+		resolveMatcherPath(strategy.toMatcherAbsolutePath(workspacePosix, workspaceVolume), ".", matcherVolume),
+	)
 
 	if (escapesWorkspace(normalized)) {
-		return `${negation}${path.posix.resolve(workspaceRoot, normalized)}`
+		return `${negation}${resolveMatcherPath(workspaceRoot, normalized, escapePatternLiteral(matcherVolume))}`
 	}
 
 	// "./notes.md" names the workspace root explicitly.
@@ -355,7 +362,7 @@ export function toMatcherPattern(
 	// number of directories including none, restores its reach.
 	const matchesInAnyDirectory = !isWorkspaceRootAnchored && !normalized.includes("/")
 
-	return `${negation}${workspaceRoot}/${matchesInAnyDirectory ? "**/" : ""}${normalized}`
+	return `${negation}${workspaceRoot.replace(/\/$/, "")}/${matchesInAnyDirectory ? "**/" : ""}${normalized}`
 }
 
 /**
@@ -365,31 +372,37 @@ export function toMatcherPattern(
  * @returns The rewritten path, or `undefined` when it names no file, or when it
  * is relative and there is no workspace root to resolve it against.
  */
-function toMatcherPath(filePath: string, cwd: string | undefined, isWindows: boolean): string | undefined {
+function toMatcherPath(
+	filePath: string,
+	cwd: string | undefined,
+	isWindows: boolean,
+	strategy: WorkspaceRootStrategy,
+): string | undefined {
 	// Not trimmed: whitespace can be part of a filename.
 	const normalized = pathsepsToPosix(filePath, isWindows)
 
-	if (!normalized.trim() || normalized === ".") {
+	if (!normalized.trim() || isDriveRelativePath(normalized, isWindows) || normalized === ".") {
 		return undefined
 	}
 
 	const workspacePosix = pathsepsToPosix(cwd ?? "", isWindows)
-	const workspaceDrive = driveSegmentOf(workspacePosix, isWindows)
+	const workspaceVolume = volumeSegmentOf(workspacePosix, isWindows)
+	const matcherVolume = strategy.toMatcherAbsolutePath("/", workspaceVolume).replace(/\/$/, "")
 
 	if (isAbsolutePath(normalized, isWindows)) {
-		return toRootRelativePath(toPosixAbsolutePath(normalized, workspaceDrive, isWindows))
+		return toRootRelativePath(strategy.toMatcherAbsolutePath(normalized, workspaceVolume))
 	}
 
-	if (!cwd) {
-		// A relative path cannot be placed on the filesystem without a root, and
+	if (!cwd || isDriveRelativePath(workspacePosix, isWindows)) {
+		// A relative path cannot be placed without a known, non-drive-relative root, and
 		// the only patterns that survive without one are absolute, which such a
 		// path could never match anyway.
 		return undefined
 	}
 
-	const workspaceRoot = toPosixAbsolutePath(workspacePosix, workspaceDrive, isWindows)
+	const workspaceRoot = strategy.toMatcherAbsolutePath(workspacePosix, workspaceVolume)
 
-	return toRootRelativePath(path.posix.resolve(workspaceRoot, normalized))
+	return toRootRelativePath(resolveMatcherPath(workspaceRoot, normalized, matcherVolume))
 }
 
 /**
@@ -411,12 +424,15 @@ function toMatcherPath(filePath: string, cwd: string | undefined, isWindows: boo
 export function isFileMatchedByPatterns({
 	filePath,
 	cwd,
+	canonicalCwd,
 	patterns,
 	isWindows = runningOnWindows(),
 	homeDir = os.homedir(),
 }: {
 	filePath?: string
 	cwd?: string
+	/** Verified realpath of cwd, used only by read approval. */
+	canonicalCwd?: string
 	patterns?: string[]
 	isWindows?: boolean
 	homeDir?: string
@@ -425,14 +441,17 @@ export function isFileMatchedByPatterns({
 		return false
 	}
 
-	const candidate = toMatcherPath(filePath, cwd, isWindows)
+	const strategy = WorkspaceRootStrategy.forPlatform(isWindows)
+	const candidate = toMatcherPath(filePath, cwd, isWindows, strategy)
 
 	if (!candidate) {
 		return false
 	}
 
+	const workspaceRoot = WorkspaceRootCanonicalizer.forStrategy(cwd, canonicalCwd, strategy)
+	const candidates = workspaceRoot.equivalentPaths(`/${candidate}`).map(toRootRelativePath)
 	const matcherPatterns = patterns
-		.map((pattern) => toMatcherPattern(pattern, cwd, isWindows, homeDir))
+		.map((pattern) => toMatcherPatternWithStrategy(pattern, cwd, isWindows, homeDir, strategy))
 		.filter((pattern): pattern is string => !!pattern)
 
 	if (!matcherPatterns.length) {
@@ -440,9 +459,18 @@ export function isFileMatchedByPatterns({
 	}
 
 	try {
-		return ignore({ ignoreCase: isWindows })
-			.add([...matcherPatterns, MATCH_DIRECTORIES_ONLY_PATTERN])
-			.ignores(candidate)
+		let matched = false
+		for (const pattern of matcherPatterns) {
+			const negated = pattern.startsWith("!")
+			const matcher = ignore({ ignoreCase: isWindows }).add([
+				negated ? pattern.slice(1) : pattern,
+				MATCH_DIRECTORIES_ONLY_PATTERN,
+			])
+			// Apply each rule to both spellings BEFORE advancing to the next rule.
+			// OR-ing two complete matchers would let one spelling bypass an exclusion.
+			if (candidates.some((value) => matcher.ignores(value))) matched = !negated
+		}
+		return matched
 	} catch (error) {
 		// A path the matcher rejects cannot be confirmed as matching, so treat it
 		// as unmatched.
