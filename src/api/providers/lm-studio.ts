@@ -17,6 +17,7 @@ import { convertToOpenAiMessages } from "../transform/openai-format"
 import { ApiStream } from "../transform/stream"
 
 import { BaseProvider } from "./base-provider"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 import type {
 	SingleCompletionHandler,
 	ApiHandlerCreateMessageMetadata,
@@ -25,8 +26,35 @@ import type {
 } from "../index"
 import { getModelsFromCache } from "./fetchers/modelCache"
 import { getLMStudioModels } from "./fetchers/lmstudio"
+import {
+	mergeAbortSignalAndTimeout,
+	throwIfAborted,
+	createAbortError,
+	isRequestAborted,
+	settleOnAbort,
+	type OpenAiRequestOptions,
+} from "./utils/abort-signal"
 import { handleOpenAIError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+
+/**
+ * A per-request timeout is not a caller cancellation: report it as the distinct
+ * TimeoutError so callers can tell a stalled request from a user stop (the
+ * Gemini and LiteLLM units in this series use the same contract).
+ */
+function createTimeoutError(providerName: string): Error {
+	const timeoutError = new Error(`The ${providerName} completion request timed out`)
+	timeoutError.name = "TimeoutError"
+	return timeoutError
+}
+
+/**
+ * Whether an abort-shaped failure came from the merged signal's own timeout
+ * rather than from the caller's stop signal.
+ */
+function isTimeoutAbort(requestSignal: AbortSignal | undefined, callerSignal: AbortSignal | undefined): boolean {
+	return Boolean(requestSignal?.aborted && !callerSignal?.aborted && requestSignal.reason?.name === "TimeoutError")
+}
 
 export class LmStudioHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
@@ -61,6 +89,9 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
+		// Fast-fail if the caller’s stop signal already fired before we started.
+		throwIfAborted(metadata?.abortSignal)
+
 		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
 			{ role: "system", content: systemPrompt },
 			...convertToOpenAiMessages(messages),
@@ -91,18 +122,49 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 			return result
 		}
 
-		let inputTokens = 0
-		try {
-			inputTokens = await this.countTokens([{ type: "text", text: systemPrompt }, ...toContentBlocks(messages)])
-		} catch (err) {
-			console.error("[LmStudio] Failed to count input tokens:", err)
-			inputTokens = 0
+		// Request-local abort controller — a class field would outlive this
+		// request and let concurrent requests abort each other. It is created
+		// before the token counts so an abort landing while either count is
+		// pending settles this generator promptly instead of waiting for the
+		// count to finish.
+		const requestController = new AbortController()
+		const onExternalAbort = () => {
+			requestController.abort()
+		}
+		const externalSignal = metadata?.abortSignal
+		if (externalSignal) {
+			externalSignal.addEventListener("abort", onExternalAbort)
+			// A listener registered after the signal already aborted never
+			// fires, so bridge the aborted state into the request-local
+			// controller (this also covers an abort landing while a token
+			// count below is still pending).
+			if (externalSignal.aborted) {
+				requestController.abort()
+			}
 		}
 
-		let assistantText = ""
-		let reasoningOutput = ""
-
 		try {
+			let inputTokens = 0
+			try {
+				inputTokens = await settleOnAbort(
+					this.countTokens([{ type: "text", text: systemPrompt }, ...toContentBlocks(messages)]),
+					requestController.signal,
+					this.providerName,
+				)
+			} catch (err) {
+				if (isRequestAborted(err, requestController.signal)) {
+					// An abort is not a count failure: let it propagate to the
+					// outer catch for normalization instead of falling back to
+					// zero tokens.
+					throw err
+				}
+				console.error("[LmStudio] Failed to count input tokens:", err)
+				inputTokens = 0
+			}
+
+			let assistantText = ""
+			let reasoningOutput = ""
+
 			const params: OpenAI.Chat.ChatCompletionCreateParamsStreaming & { draft_model?: string } = {
 				model: this.getModel().id,
 				messages: openAiMessages,
@@ -117,10 +179,24 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				params.draft_model = this.options.lmStudioDraftModelId
 			}
 
+			// Bridge the request-local signal into the SDK request options so the
+			// in-flight request can be cancelled.
+			const createOptions = new RequestConfigBuilder<OpenAiRequestOptions>()
+				.setOption("signal", requestController.signal)
+				.build()
+
+			// Fast-fail if the caller aborted while countTokens() above was
+			// pending — the request must not be issued once the request-local
+			// signal has aborted.
+			throwIfAborted(requestController.signal)
+
 			let results
 			try {
-				results = await this.client.chat.completions.create(params, { signal: metadata?.abortSignal })
+				results = await this.client.chat.completions.create(params, createOptions)
 			} catch (error) {
+				if (isRequestAborted(error, externalSignal)) {
+					throw createAbortError("LM Studio")
+				}
 				throw handleOpenAIError(error, this.providerName)
 			}
 
@@ -157,9 +233,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
 				if (delta?.tool_calls) {
 					for (const toolCall of delta.tool_calls) {
-						// Stryker disable next-line ConditionalExpression: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
 						if (toolCall.id) {
-							// Stryker disable next-line CallExpression: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
 							activeToolCallIds.add(toolCall.id)
 						}
 						yield {
@@ -173,13 +247,10 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				}
 
 				// Process finish_reason to emit tool_call_end events
-				// Stryker disable next-line ConditionalExpression,EqualityOperator,StringLiteral: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
 				if (finishReason === "tool_calls") {
 					for (const id of activeToolCallIds) {
-						// Stryker disable next-line ObjectLiteral,StringLiteral: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
 						yield { type: "tool_call_end", id }
 					}
-					// Stryker disable next-line CallExpression: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
 					activeToolCallIds.clear()
 				}
 			}
@@ -192,10 +263,27 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 			try {
 				// Reasoning tokens are billed as output, so count them alongside the
 				// visible text — otherwise thinking models under-report usage entirely.
-				outputTokens = await this.countTokens([{ type: "text", text: reasoningOutput + assistantText }])
+				outputTokens = await settleOnAbort(
+					this.countTokens([{ type: "text", text: reasoningOutput + assistantText }]),
+					requestController.signal,
+					this.providerName,
+				)
 			} catch (err) {
+				if (isRequestAborted(err, requestController.signal)) {
+					// Same as the input count above: an abort is not a count
+					// failure — propagate it instead of reporting zero output
+					// tokens.
+					throw err
+				}
 				console.error("[LmStudio] Failed to count output tokens:", err)
 				outputTokens = 0
+			}
+
+			// A stop can land in the microtask gap between the output count
+			// settling and this generator resuming; do not report usage for an
+			// aborted response.
+			if (requestController.signal.aborted) {
+				throw createAbortError(this.providerName)
 			}
 
 			yield {
@@ -203,10 +291,21 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				inputTokens,
 				outputTokens,
 			} as const
-		} catch {
+		} catch (error) {
+			if (isRequestAborted(error, externalSignal)) {
+				throw createAbortError("LM Studio")
+			}
 			throw new Error(
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
 			)
+		} finally {
+			// Cancel the in-flight SDK request if the consumer stopped iterating
+			// early (break or return): the external signal may never fire in that
+			// case, and only the request-local signal reaches the SDK.
+			requestController.abort()
+			if (externalSignal) {
+				externalSignal.removeEventListener("abort", onExternalAbort)
+			}
 		}
 	}
 
@@ -231,7 +330,15 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Fast-fail if the caller’s stop signal already fired before we started.
+		throwIfAborted(options?.abortSignal)
+
+		// Merge the external stop signal with an optional per-call timeout. A
+		// timeoutMs <= 0 means "no explicit timeout" inside the util, so zero
+		// never reaches the SDK as an explicit timeout.
+		const requestSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+
 		try {
 			// Create params object with optional draft model
 			const params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming & { draft_model?: string } = {
@@ -246,14 +353,31 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				params.draft_model = this.options.lmStudioDraftModelId
 			}
 
+			// CompletePromptOptions is not createMessage metadata (no taskId), so
+			// the generic builder takes the merged signal via setOption instead of
+			// setAbortSignal(metadata).
+			const createOptions = new RequestConfigBuilder<OpenAiRequestOptions>()
+				.setOption("signal", requestSignal)
+				.build()
+
 			let response
 			try {
-				response = await this.client.chat.completions.create(params)
+				response = await this.client.chat.completions.create(params, createOptions)
 			} catch (error) {
+				if (isRequestAborted(error, requestSignal)) {
+					throw isTimeoutAbort(requestSignal, options?.abortSignal)
+						? createTimeoutError("LM Studio")
+						: createAbortError("LM Studio")
+				}
 				throw handleOpenAIError(error, this.providerName)
 			}
 			return response.choices[0]?.message.content || ""
-		} catch {
+		} catch (error) {
+			if (isRequestAborted(error, requestSignal)) {
+				throw isTimeoutAbort(requestSignal, options?.abortSignal)
+					? createTimeoutError("LM Studio")
+					: createAbortError("LM Studio")
+			}
 			throw new Error(
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
 			)
