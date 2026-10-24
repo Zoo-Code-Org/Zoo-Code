@@ -33,6 +33,53 @@ export type AnthropicProviderReasoningParams =
 
 export type OpenAiReasoningParams = { reasoning_effort: OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"] }
 
+/**
+ * DTE series 2/5 — effort levels accepted by the Claude 4.7+ adaptive-thinking
+ * `output_config.effort` envelope. Efforts outside this set (e.g. "none",
+ * "minimal", "disable") omit the envelope so the API applies its own default.
+ * @internal Exported for focused implementation tests.
+ */
+export const ADAPTIVE_OUTPUT_CONFIG_EFFORTS: readonly ReasoningEffortExtended[] = [
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+]
+
+/**
+ * DTE series 2/5 — resolves the effective thinking effort for a single request.
+ *
+ * Resolution order (strongest first):
+ * 1. `override` — the per-request task-local effort
+ *    (`ApiHandlerCreateMessageMetadata.reasoningEffort`),
+ * 2. `settingsReasoningEffort` — the settings-derived value,
+ * 3. `modelDefaultEffort` — the model's default effort.
+ *
+ * This is the single shared resolution point for the per-request override:
+ * providers that resolve the effective effort through it inherit the override
+ * without duplicating precedence logic. The override is transient (next request
+ * only) and never persisted to settings.
+ * @internal Exported for focused implementation tests.
+ */
+export const resolveEffectiveReasoningEffort = ({
+	override,
+	settingsReasoningEffort,
+	modelDefaultEffort,
+}: {
+	override?: ReasoningEffortExtended
+	settingsReasoningEffort?: ReasoningEffortExtended | "disable"
+	modelDefaultEffort?: ReasoningEffortExtended
+}): ReasoningEffortExtended | "disable" | undefined => {
+	if (override !== undefined) {
+		return override
+	}
+	if (settingsReasoningEffort !== undefined) {
+		return settingsReasoningEffort
+	}
+	return modelDefaultEffort
+}
+
 // Valid Gemini thinking levels for effort-based reasoning
 const GEMINI_THINKING_LEVELS = ["minimal", "low", "medium", "high"] as const
 

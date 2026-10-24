@@ -21,6 +21,7 @@ import {
 	type TaskMetadata,
 	type TaskEvents,
 	type ProviderSettings,
+	type ReasoningEffortExtended,
 	type TokenUsage,
 	type ToolUsage,
 	type ToolName,
@@ -417,6 +418,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// API
 	apiConfiguration: ProviderSettings
 	api: ApiHandler
+	// DTE series 2/5: task-local thinking effort override. Transient per-task state —
+	// never persisted to settings; cleared on dispose (see dispose()).
+	private runtimeThinkingEffort?: ReasoningEffortExtended
+	private runtimeThinkingEffortSource?: string
 	/**
 	 * Units of in-flight API work: a request from setup through its retries and
 	 * background usage drain, or a manual condense. Work can hold any handler it
@@ -2471,6 +2476,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Updates the API configuration and rebuilds the API handler.
 	 * There is no tool-protocol switching or tool parser swapping.
 	 *
+	 * DTE series 2/5: when a task-local thinking effort override is active
+	 * (`setRuntimeThinkingEffort`), the incoming configuration's `reasoningEffort`
+	 * becomes the new restore value and the override is re-applied on top of the
+	 * fresh in-memory copy — clearing the override later restores the NEW profile's
+	 * value, not a stale one.
+	 *
 	 * @param newApiConfiguration - The new API configuration to use
 	 */
 	public updateApiConfiguration(newApiConfiguration: ProviderSettings): void {
@@ -2478,9 +2489,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// VS Code LM / GitHub Copilot own host listeners, so the old one is
 		// released — immediately when idle, or when the last request, retry,
 		// background drain, or condense that leased it settles.
+		// DTE series 2/5: apiConfiguration stays the profile-derived projection;
+		// an active task-local override is applied to the rebuilt handler only, so
+		// a profile switch keeps the override live and clearing it later restores
+		// the NEW profile's value (it is the configuration itself now).
 		const previousApi = this.api
 		this.apiConfiguration = newApiConfiguration
-		this.api = buildApiHandler(this.apiConfiguration)
+		this.api = buildApiHandler(
+			this.runtimeThinkingEffort !== undefined
+				? { ...newApiConfiguration, reasoningEffort: this.runtimeThinkingEffort }
+				: newApiConfiguration,
+		)
 		this.retireApi(previousApi)
 
 		// Refresh only the soft tool-repetition limit from the new profile so an
@@ -2495,6 +2514,64 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.consecutiveMistakeLimit,
 		)
 		this.toolRepetitionDetector.updateLimits(this.toolRepetitionSoftLimit, this.consecutiveMistakeLimit)
+	}
+
+	/**
+	 * DTE series 2/5: sets — or clears with `undefined` — the task-local thinking
+	 * effort override.
+	 *
+	 * Resolution order for the affected requests (strongest first): this
+	 * task-local override → settings `reasoningEffort` → model default. The
+	 * override applies to the NEXT API request only (no mid-stream effect): it
+	 * is passed per request as `metadata.reasoningEffort` and applied to the
+	 * rebuilt API handler. `apiConfiguration` itself stays the profile-derived
+	 * projection — the override never enters it — so the webview state (which
+	 * posts the active task's `apiConfiguration`) and any profile save built
+	 * from it can never carry the task-local effort. `undefined` clears the
+	 * override and rebuilds the handler from the projection.
+	 *
+	 * @param effort - The task-local effort, or `undefined` to clear.
+	 * @param source - Optional provenance label (UI wiring lands in a later PR).
+	 */
+	public setRuntimeThinkingEffort(effort: ReasoningEffortExtended | undefined, source?: string): void {
+		const wasActive = this.runtimeThinkingEffort !== undefined
+		this.runtimeThinkingEffort = effort
+		this.runtimeThinkingEffortSource = effort === undefined ? undefined : source
+
+		if (effort === undefined && !wasActive) {
+			// Already inactive: nothing to clear.
+			return
+		}
+
+		// Rebuild the handler with the effective effort applied. The projection
+		// (this.apiConfiguration) is untouched, so clearing needs no restore: the
+		// handler is simply rebuilt from the profile-derived configuration. The
+		// replaced handler is retired like any other swap: handlers with host
+		// listeners must not leak when the effort changes.
+		const previousApi = this.api
+		this.api = buildApiHandler(
+			effort !== undefined ? { ...this.apiConfiguration, reasoningEffort: effort } : this.apiConfiguration,
+		)
+		this.retireApi(previousApi)
+	}
+
+	/**
+	 * DTE series 2/5: reads the current task-local thinking effort override.
+	 */
+	public getRuntimeThinkingEffort(): { effort?: ReasoningEffortExtended; source?: string } {
+		return {
+			effort: this.runtimeThinkingEffort,
+			source: this.runtimeThinkingEffortSource,
+		}
+	}
+
+	/**
+	 * DTE series 2/5: metadata fragment carrying the active task-local effort
+	 * override on a single request. Empty when no override is active, so the
+	 * existing settings resolution applies unchanged.
+	 */
+	private getRuntimeThinkingEffortMetadata(): Pick<ApiHandlerCreateMessageMetadata, "reasoningEffort"> {
+		return this.runtimeThinkingEffort !== undefined ? { reasoningEffort: this.runtimeThinkingEffort } : {}
 	}
 
 	/**
@@ -2676,6 +2753,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						parallelToolCalls: true,
 					}
 				: {}),
+			// DTE series 2/5: carry the active task-local effort override.
+			...this.getRuntimeThinkingEffortMetadata(),
 		}
 		// Generate environment details to include in the condensed summary
 		const environmentDetails = await getEnvironmentDetails(this, true)
@@ -3611,6 +3690,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
+	/**
+	 * Centralized task teardown: releases task resources and resets transient
+	 * task-local state.
+	 */
 	public dispose(): Promise<void> {
 		if (this.disposalPromise) {
 			return this.disposalPromise
@@ -3721,6 +3804,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		} catch (error) {
 			console.error("Error reverting diff changes:", error)
 		}
+
+		// Clear the DTE runtime-effort override so a retained disposed task never
+		// reports a stale override. The fields are cleared directly instead of via
+		// setRuntimeThinkingEffort: that setter rebuilds the handler, and during
+		// disposal the rebuild would (a) create a replacement handler this pass has
+		// already collected and disposed, and (b) retire the just-disposed handler a
+		// second time. `apiConfiguration` never carries the override (it stays the
+		// profile-derived projection), so there is nothing to restore.
+		this.runtimeThinkingEffort = undefined
+		this.runtimeThinkingEffortSource = undefined
 
 		await pendingCleanup
 		await this.diffReversionPromise
@@ -4259,7 +4352,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// under the canonical name slip past a name comparison. The first call wins.
 										const idAlreadyUsed = this.assistantMessageContent.some(
 											(entry) =>
-												// Stryker disable next-line ConditionalExpression: equivalent mutant, only tool_use and mcp_tool_use entries carry an id, so the type check cannot change entry.id === event.id
 												(entry.type === "tool_use" || entry.type === "mcp_tool_use") &&
 												(entry as { id?: string }).id === event.id,
 										)
@@ -4312,7 +4404,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// keep the deprecated single-entry-per-ID lookup.
 										let streamingKey: string | undefined
 
-										// Stryker disable next-line ConditionalExpression: equivalent mutant, event.name is always a string here, so the legacy nameless branch is unreachable
 										if (event.name !== undefined) {
 											streamingKey = NativeToolCallParser.makeStreamingKey(event.id, event.name)
 										} else {
@@ -4329,7 +4420,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										}
 
 										const partialToolUse =
-											// Stryker disable next-line ConditionalExpression: equivalent mutant, streamingKey is always a string here (makeStreamingKey), so the null side is unreachable
 											streamingKey === undefined
 												? null
 												: NativeToolCallParser.processStreamingChunk(
@@ -4338,7 +4428,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 														nativeToolCallParserScope,
 													)
 
-										// Stryker disable next-line ConditionalExpression, EqualityOperator: equivalent mutants, streamingKey is always defined here, so both conditions reduce to the partialToolUse check
 										if (partialToolUse && streamingKey !== undefined) {
 											// Reuse the compound key built above: it is exactly the key the start event
 											// registered under, so the delta lookup needs no second encoding.
@@ -4735,7 +4824,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					if (event.type === "tool_call_end") {
 						// Create compound key for deduplication (same pattern as streaming handler).
 						// End events carry the tool name; fall back to the id for events that don't.
-						// Stryker disable next-line LogicalOperator: equivalent mutant, finalizeRawChunks emits end events with a string name, so the ?? event.id fallback is unreachable
+
 						let eventName = event.name ?? event.id
 						let dedupKey = NativeToolCallParser.makeStreamingKey(event.id, eventName)
 
@@ -4752,13 +4841,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// name (provider quirk), the compound-key lookup above misses and both the
 						// parser entry and the dedup tracking would stay stale. Resolve the tracked
 						// entry by id and target the real compound key for finalization and cleanup.
-						// Stryker disable next-line ConditionalExpression, LogicalOperator, EqualityOperator: equivalent mutants, the both-miss case is unreachable via the raw-chunk pipeline
+
 						if (finalToolUse === null && toolUseIndex === undefined) {
 							const resolved = NativeToolCallParser.getStreamingToolCallById(
 								event.id,
 								nativeToolCallParserScope,
 							)
-							// Stryker disable next-line ConditionalExpression: unreachable defensive region — getStreamingToolCallById can only resolve when the both-miss case above is reachable, which the raw-chunk pipeline cannot produce (see the directive there).
 							if (resolved) {
 								eventName = resolved.name
 								dedupKey = NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name)
@@ -5452,6 +5540,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						parallelToolCalls: true,
 					}
 				: {}),
+			// DTE series 2/5: carry the active task-local effort override.
+			...this.getRuntimeThinkingEffortMetadata(),
 		}
 
 		try {
@@ -5730,6 +5820,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							parallelToolCalls: true,
 						}
 					: {}),
+				// DTE series 2/5: carry the active task-local effort override.
+				...this.getRuntimeThinkingEffortMetadata(),
 			}
 
 			// Only generate environment details when context management will actually run.
@@ -5899,6 +5991,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			taskId: this.taskId,
 			suppressPreviousResponseId: this.skipPrevResponseIdOnce,
 			abortSignal,
+			// DTE series 2/5: carry the active task-local effort override for this request.
+			...this.getRuntimeThinkingEffortMetadata(),
 			// Include tools whenever they are present.
 			...(shouldIncludeTools
 				? {
