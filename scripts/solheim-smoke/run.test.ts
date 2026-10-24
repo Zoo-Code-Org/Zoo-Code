@@ -210,7 +210,9 @@ describe("provider smoke orchestration", () => {
 		const f = fixture("success", { stuck: true })
 		const verdict = await runSmoke(f.runtime, "private-test-key")
 		assert.equal(verdict.code, "TEARDOWN_FAILED")
-		assert.equal(verdict.durationMs, 15_000)
+		// The success scenario stops after the final completion message, so
+		// the bounded usage drain runs: 5_000 drain + 3 x 5_000 teardown.
+		assert.equal(verdict.durationMs, 20_000)
 		assert.deepEqual(f.signals, ["SIGTERM", "SIGKILL"])
 		assert.equal(verdict.gates.childExited, false)
 		assert.equal(f.cleaned, false)

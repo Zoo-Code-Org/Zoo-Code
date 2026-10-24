@@ -845,9 +845,10 @@ describe("agent fixture controller", () => {
 		})
 		assert.equal(trace.accounting.completeness.status, "complete")
 		assert.deepEqual(trace.accounting.completeness.reasons, [])
-		// The drain is bound to the accepted-completion event. Without it, no
-		// drain window runs.
-		assert.equal(trace.execution.timings.usageDrainMs, undefined)
+		// The stop after the final completion message gets the same bounded
+		// usage drain a confirmed completion gets. The fixture drain window
+		// is 5_000 ms.
+		assert.equal(trace.execution.timings.usageDrainMs, 5_000)
 		const serialized = JSON.stringify(trace)
 		assert.ok(serialized.includes("pr1909-smoke-topology-synthetic"))
 		assert.ok(!serialized.includes(CREDENTIAL))
@@ -1049,5 +1050,92 @@ describe("agent fixture controller", () => {
 		assert.equal(result.execution.completionMessageSeen, true)
 		assert.equal(result.execution.sessionLost, false)
 		assert.equal(result.teardown.status, "ok")
+	})
+
+	it("drains bounded usage after an observer stop on the final completion message", async () => {
+		registerTestFixture("controller-stop-drain", {
+			limits: {
+				activationTimeoutMs: 120_000,
+				taskStartTimeoutMs: 35_000,
+				taskRunTimeoutMs: 120_000,
+				usageDrainMs: 500,
+				teardownStepMs: 5_000,
+			},
+		})
+		let lateSent = false
+		const f = harness("no-events", {
+			onPause: (count) => {
+				if (count === 1)
+					f.emit({
+						eventName: RooCodeEventName.Message,
+						payload: [
+							{
+								taskId: "root",
+								action: "created",
+								message: {
+									ts: 1,
+									type: "say",
+									say: "completion_result",
+									text: "synthetic final answer",
+								},
+							},
+						],
+					})
+				// A usage snapshot lands inside the drain window that follows
+				// the stop. The bounded drain must capture it.
+				if (count === 2 && !lateSent) {
+					lateSent = true
+					f.emit({
+						eventName: RooCodeEventName.TaskTokenUsageUpdated,
+						payload: [
+							"root",
+							{ totalTokensIn: 40, totalTokensOut: 20, totalCost: 0, contextTokens: 30 },
+							{},
+						],
+					})
+				}
+			},
+		})
+		let completionOutput = false
+		const result = await runAgentFixture(f.runtime, {
+			fixtureName: "controller-stop-drain",
+			credential: CREDENTIAL,
+			observers: {
+				onAcceptedEvent: (event) => {
+					if (
+						event.eventName === RooCodeEventName.Message &&
+						event.payload[0].message.say === "completion_result"
+					)
+						completionOutput = true
+				},
+				shouldStop: () => completionOutput,
+			},
+		})
+		assert.equal(result.execution.code, "STOPPED")
+		assert.equal(result.execution.stopReason, "adapterStopAfterCompletionMessage")
+		const trace = writtenTrace(f)
+		// The stop path drains for the fixture's bounded window and captures
+		// the late usage snapshot.
+		assert.equal(trace.execution.timings.usageDrainMs, 500)
+		assert.equal(trace.accounting.usage.snapshotsObserved, 1)
+		assert.equal(trace.accounting.usage.lastSnapshot?.source, "taskTokenUsageUpdated")
+		assert.equal(trace.accounting.usage.lastSnapshot?.tokensIn, 40)
+		assert.equal(trace.accounting.completeness.status, "complete")
+		assert.deepEqual(trace.accounting.completeness.reasons, [])
+	})
+
+	it("skips the usage drain for a plain observer stop without the completion message", async () => {
+		registerTestFixture("controller-plain-stop")
+		const f = harness("success")
+		const result = await runAgentFixture(f.runtime, {
+			fixtureName: "controller-plain-stop",
+			credential: CREDENTIAL,
+			observers: { shouldStop: () => true },
+		})
+		assert.equal(result.execution.code, "STOPPED")
+		assert.equal(result.execution.stopReason, "adapterStop")
+		assert.equal(result.execution.completionMessageSeen, false)
+		// Without the final completion message, no drain window runs.
+		assert.equal(writtenTrace(f).execution.timings.usageDrainMs, undefined)
 	})
 })

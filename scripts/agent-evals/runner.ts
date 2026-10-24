@@ -302,7 +302,12 @@ export async function runAgentFixture(runtime: AgentRuntime, options: AgentRunOp
 						)
 						runSessionLost = sessionLost
 						timings.taskRunMs = runtime.now() - runStart
-						if (completedSeen && !runSessionLost) {
+						const stopped = !runSessionLost && !completedSeen && options.observers?.shouldStop?.() === true
+						// The model's final completion message already produced
+						// reportable usage, so a stop issued after it gets the
+						// same bounded drain a confirmed completion gets. A
+						// plain stop, a timeout, and a session loss get none.
+						if ((completedSeen || (stopped && completionMessageSeen)) && !runSessionLost) {
 							// Fixed bound; ends early only on session loss.
 							const drainStart = runtime.now()
 							await until(() => false, fixture.limits.usageDrainMs)
@@ -312,7 +317,6 @@ export async function runAgentFixture(runtime: AgentRuntime, options: AgentRunOp
 							// accounting must carry the caveat.
 							lostDuringDrain = sessionLost
 						}
-						const stopped = !runSessionLost && !completedSeen && options.observers?.shouldStop?.() === true
 						if (completedSeen) {
 							// A confirmed accepted completion outranks a stop
 							// request or a loss observed in the same window.
