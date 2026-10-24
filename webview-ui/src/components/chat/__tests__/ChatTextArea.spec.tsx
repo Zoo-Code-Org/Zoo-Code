@@ -521,6 +521,64 @@ describe("ChatTextArea", () => {
 			expect(setInputValue).not.toHaveBeenCalled()
 		})
 
+		describe("dragover acceptance", () => {
+			// jsdom has no DragEvent constructor, so build a plain cancelable
+			// Event and attach the drag payload the React handler expects.
+			const fireDragOver = (element: Element, types: string[], shiftKey = false) => {
+				const event = new Event("dragover", { bubbles: true, cancelable: true })
+				Object.defineProperty(event, "dataTransfer", {
+					value: { types, files: [], dropEffect: "none" },
+				})
+				Object.defineProperty(event, "shiftKey", { value: shiftKey })
+				fireEvent(element, event)
+				return event
+			}
+
+			it("accepts VS Code Explorer file drags without holding Shift", () => {
+				const { container } = render(<ChatTextArea {...defaultProps} />)
+
+				const event = fireDragOver(
+					container.querySelector(".chat-text-area")!,
+					["text/plain", "ResourceURIs", "application/vnd.code.uri-list", "text/uri-list"],
+					false,
+				)
+
+				expect(event.defaultPrevented).toBe(true)
+			})
+
+			it("accepts OS file manager drags without holding Shift", () => {
+				const { container } = render(<ChatTextArea {...defaultProps} />)
+
+				const event = fireDragOver(container.querySelector(".chat-text-area")!, ["Files"], false)
+
+				expect(event.defaultPrevented).toBe(true)
+			})
+
+			it.each(["text/uri-list", "application/vnd.code.files"])("accepts %s drags without Shift", (type) => {
+				const { container } = render(<ChatTextArea {...defaultProps} />)
+
+				const event = fireDragOver(container.querySelector(".chat-text-area")!, [type], false)
+
+				expect(event.defaultPrevented).toBe(true)
+			})
+
+			it("keeps the browser's native behavior for plain text drags without Shift", () => {
+				const { container } = render(<ChatTextArea {...defaultProps} />)
+
+				const event = fireDragOver(container.querySelector(".chat-text-area")!, ["text/plain"], false)
+
+				expect(event.defaultPrevented).toBe(false)
+			})
+
+			it("still accepts plain text drags when Shift is held", () => {
+				const { container } = render(<ChatTextArea {...defaultProps} />)
+
+				const event = fireDragOver(container.querySelector(".chat-text-area")!, ["text/plain"], true)
+
+				expect(event.defaultPrevented).toBe(true)
+			})
+		})
+
 		describe("prompt history navigation", () => {
 			const mockClineMessages = [
 				{ type: "say", say: "user_feedback", text: "First prompt", ts: 1000 },
