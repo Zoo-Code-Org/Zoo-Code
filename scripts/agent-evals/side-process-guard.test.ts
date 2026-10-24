@@ -9,8 +9,11 @@ import { createSideProcessGuard, type SideKillOutcome } from "./side-process-gua
 
 // Credential-free process fixtures. Each child is a bare node process in its
 // own detached group, the same topology the comparison driver creates.
-const spawnDetachedChild = (script: string) => {
-	const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "ignore"], detached: true })
+const spawnDetachedChild = (script: string, args: readonly string[] = []) => {
+	const child = spawn(process.execPath, ["-e", script, ...args], {
+		stdio: ["ignore", "pipe", "ignore"],
+		detached: true,
+	})
 	const spawned = new Promise<void>((resolve, reject) => {
 		child.once("spawn", resolve)
 		child.once("error", reject)
@@ -98,14 +101,19 @@ describe("side process guard", () => {
 		const grandchildHeartbeat = path.join(dir, "grandchild-heartbeat")
 		const grandchildPidPath = path.join(dir, "grandchild-pid")
 		const grandchildReadyPath = path.join(dir, "grandchild-ready")
-		const grandchildScript = `const fs = require('node:fs'); process.on('SIGTERM', () => {}); fs.writeFileSync(${JSON.stringify(grandchildReadyPath)}, 'ready'); setInterval(() => fs.appendFileSync(${JSON.stringify(grandchildHeartbeat)}, 'x'), 50)`
+		// Fixture sources stay static. Host paths and the grandchild source
+		// travel as argv, so no host value is embedded in generated code.
+		const grandchildScript =
+			"const fs = require('node:fs'); process.on('SIGTERM', () => {}); const [heartbeatPath, readyPath] = process.argv.slice(1); fs.writeFileSync(readyPath, 'ready'); setInterval(() => fs.appendFileSync(heartbeatPath, 'x'), 50)"
 		const fixture = spawnDetachedChild(
 			`const fs = require('node:fs');
 			const { spawn } = require('node:child_process');
-			const grandchild = spawn(process.execPath, ['-e', ${JSON.stringify(grandchildScript)}], { stdio: 'ignore' });
-			fs.writeFileSync(${JSON.stringify(grandchildPidPath)}, String(grandchild.pid));
+			const [grandchildPidPath, grandchildReadyPath, grandchildHeartbeatPath, grandchildScript] = process.argv.slice(1);
+			const grandchild = spawn(process.execPath, ['-e', grandchildScript, grandchildHeartbeatPath, grandchildReadyPath], { stdio: 'ignore' });
+			fs.writeFileSync(grandchildPidPath, String(grandchild.pid));
 			process.stdout.write('ready');
 			setTimeout(() => process.exit(0), 100);`,
+			[grandchildPidPath, grandchildReadyPath, grandchildHeartbeat, grandchildScript],
 		)
 		try {
 			// The signal must not land before the grandchild installed its
@@ -195,20 +203,27 @@ describe("bounded preparation children", () => {
 		const childPidPath = path.join(dir, "child-pid")
 		const childHeartbeat = path.join(dir, "child-heartbeat")
 		const grandchildHeartbeat = path.join(dir, "grandchild-heartbeat")
-		const grandchildScript = `const fs = require('node:fs'); setInterval(() => fs.appendFileSync(${JSON.stringify(grandchildHeartbeat)}, 'x'), 50)`
+		// Fixture sources stay static. Host paths and the grandchild source
+		// travel as argv, so no host value is embedded in generated code.
+		const grandchildScript =
+			"const fs = require('node:fs'); const [heartbeatPath] = process.argv.slice(1); setInterval(() => fs.appendFileSync(heartbeatPath, 'x'), 50)"
 		const childScript = [
 			"const fs = require('node:fs')",
 			"const { spawn } = require('node:child_process')",
-			`fs.writeFileSync(${JSON.stringify(childPidPath)}, String(process.pid))`,
-			`const grandchild = spawn(process.execPath, ['-e', ${JSON.stringify(grandchildScript)}], { stdio: 'ignore' })`,
-			`fs.writeFileSync(${JSON.stringify(readyPath)}, 'ready')`,
-			`setInterval(() => fs.appendFileSync(${JSON.stringify(childHeartbeat)}, 'x'), 50)`,
+			"const [childPidPath, readyPath, childHeartbeatPath, grandchildHeartbeatPath, grandchildScript] = process.argv.slice(1)",
+			"fs.writeFileSync(childPidPath, String(process.pid))",
+			"const grandchild = spawn(process.execPath, ['-e', grandchildScript, grandchildHeartbeatPath], { stdio: 'ignore' })",
+			"fs.writeFileSync(readyPath, 'ready')",
+			"setInterval(() => fs.appendFileSync(childHeartbeatPath, 'x'), 50)",
 		].join("; ")
+		// Security regression guard: generated fixture code must not embed
+		// any host path. Every host value travels as argv instead.
+		assert.ok(!childScript.includes(dir))
 		const bounded = runBoundedPreparation(
 			guard,
 			() => interruptSignal !== undefined,
 			process.execPath,
-			["-e", childScript],
+			["-e", childScript, childPidPath, readyPath, childHeartbeat, grandchildHeartbeat, grandchildScript],
 			dir,
 			60_000,
 		)
