@@ -80,8 +80,10 @@ them:
   message still appears in `completionMessageSeen`.
 - `SESSION_LOST` covers disconnects and interrupts. A manual stop after
   completion output stays `SESSION_LOST`.
-- The usage drain runs only after a `taskCompleted` event. It stays inside the
-  bounded drain window.
+- The usage drain runs after a `taskCompleted` event and after an observer stop
+  that followed the final `completion_result` message. It stays inside the
+  bounded drain window. A plain stop, a run timeout, and a session loss get no
+  drain.
 
 ## Checks
 
@@ -147,9 +149,17 @@ A comparison runs the extension code of two commits with the provider credential
 
 The comparison driver, fixtures, grader, and report builder all run from the trusted checkout that invokes `coding-evals:compare`. Only the extension host loads an evaluated worktree. The side process receives only the allowlisted environment plus the one named credential variable. Each side installs dependencies from its own worktree's frozen lockfile and builds its own exact commit, so each side runs its own compiled extension. Each side has its own wall clock (`--side-timeout-minutes`, default 120).
 
+The side script runs the same gate on its own inputs. It requires `--trust-file`, resolves the full commit of its `--evaluated-root`, and rejects an unapproved or unreadable commit before it creates a host or reads the credential. The `--credential-env` name must come from the supported provider variable allowlist; an arbitrary name can never forward an unrelated parent secret. Worktree install and build children also receive only an allowlisted environment, so the driver's secrets never reach them.
+
+Every driver child, preparation steps and the side alike, runs detached in its own process group and is tracked by one guard. A SIGINT or SIGTERM that reaches only the driver terminates the tracked group through a bounded SIGTERM-then-SIGKILL escalation, and the worktree cleanup waits for that escalation before it removes any tree.
+
 ### Output publication contract
 
-Artifacts are published atomically: content lands in a same-directory temp file and is renamed into place. A reader never sees a partial file. `side-results.json` appears only after every repetition of that side finished, so its existence means a complete side. A missing `side-results.json` means an interrupted side; consumers must treat it as a failed side and never pair partial output. The comparison reports are written atomically and only after both sides published complete results; a failed comparison leaves no report files.
+Artifacts are published atomically: content lands in a same-directory temp file and is renamed into place. A reader never sees a partial file.
+
+A side run invalidates its output directory first. Before the first repetition executes, the side removes any previous `side-results.json` and the whole `artifacts` tree, so stale results from an earlier rerun can never survive. `side-results.json` is the completion marker: it appears only after every repetition of the current invocation finished, and consumers must require it and treat its absence as a failed side. A side rerun that cannot remove a stale artifact fails before any repetition runs.
+
+The comparison reports are published as one generation. `comparison-report.json` and `comparison-report.md` carry the report's `generatedAt` stamp, and `comparison-report.complete` holds that stamp; it is written last. Consumers must require the marker and match its stamp against the report files. `readPublishedComparisonReport` enforces this: it returns the report only when the marker exists and its stamp matches both files. The marker is removed before publication starts, so a crash between the two file publications leaves a detectable incomplete generation instead of a mixed one. A thrown failure rolls both files back; a failed comparison leaves no report files.
 
 ### Commands
 
@@ -158,9 +168,9 @@ Artifacts are published atomically: content lands in a same-directory temp file 
 pnpm test:agent-evals:unit
 pnpm agent-evals:check-types
 
-# One comparison side against the real provider. Requires the credential
-# environment variable and the container runtime for grading.
-pnpm coding-evals:side --reps 3 --out /tmp/side-out
+# One comparison side against the real provider. Requires the trust policy,
+# the credential environment variable, and the container runtime for grading.
+pnpm coding-evals:side --reps 3 --out /tmp/side-out --trust-file trust-policy.json
 
 # Full paired comparison of two approved commits.
 pnpm coding-evals:compare --baseline <sha> --candidate <sha> --trust-file trust-policy.json --reps 3 --out /tmp/compare-out

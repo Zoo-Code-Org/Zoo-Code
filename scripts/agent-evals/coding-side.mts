@@ -3,7 +3,8 @@
 // side-results file with the pinned inputs. Trusted repo code only: the
 // provider credential stays with this process and the extension host; the
 // grader never receives it. The extension under test comes from the evaluated
-// root, which defaults to this repository.
+// root, which must be a commit the operator's trust policy approves before
+// any host is created or any credential is read.
 import fs from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -16,7 +17,9 @@ import { CODING_SUITE_ID, codingSuiteDigest, ensureCodingSuiteRegistered } from 
 import { GRADER_VERSION } from "./coding-grader.ts"
 import { digestValue } from "./coding-digest.ts"
 import type { SidePins } from "./coding-pins.ts"
+import { invalidateSideArtifacts } from "./coding-compare.ts"
 import type { SideResultFile } from "./coding-compare.ts"
+import { assertCommitsApproved, assertCredentialEnvAllowed, loadTrustPolicy, resolveCommit } from "./coding-trust.ts"
 import { classifyRunOutcome } from "./coding-outcomes.ts"
 import { buildRunMetrics } from "./coding-metrics.ts"
 import { writeJsonAtomic } from "./fs-atomic.ts"
@@ -29,6 +32,7 @@ const readArgs = (): {
 	credentialEnv: string
 	allowUnisolatedGrading: boolean
 	evaluatedRoot: string
+	trustFile: string
 } => {
 	const args = process.argv.slice(2)
 	const read = (name: string): string | undefined => {
@@ -37,14 +41,21 @@ const readArgs = (): {
 	}
 	const out = read("out")
 	if (!out) throw new Error("Set --out to a scratch directory")
+	const trustFile = read("trust-file")
+	if (!trustFile) throw new Error("Set --trust-file to the policy file listing the approved commit for this side")
+	const credentialEnv = read("credential-env") ?? "SOLHEIM_API_KEY"
+	// The variable name must be one the framework supports. An arbitrary name
+	// could forward an unrelated parent secret to the evaluated extension.
+	assertCredentialEnvAllowed(credentialEnv)
 	return {
 		reps: Number(read("reps") ?? "3"),
 		out: path.resolve(out),
-		credentialEnv: read("credential-env") ?? "SOLHEIM_API_KEY",
+		credentialEnv,
 		allowUnisolatedGrading: args.includes("--allow-unisolated-grading"),
 		// Repository root of the extension under test. The trusted harness
 		// code drives the run; only the extension host loads this tree.
 		evaluatedRoot: path.resolve(read("evaluated-root") ?? thisRoot),
+		trustFile: path.resolve(trustFile),
 	}
 }
 
@@ -71,20 +82,18 @@ const readVscodeTarget = async (root: string): Promise<string> => {
 	}
 }
 
-const readCommit = async (root: string): Promise<string> => {
-	const { execFile } = await import("node:child_process")
-	const { promisify } = await import("node:util")
-	try {
-		const { stdout } = await promisify(execFile)("git", ["rev-parse", "HEAD"], { cwd: root, timeout: 5_000 })
-		return stdout.trim()
-	} catch {
-		return "commit-unavailable"
-	}
-}
-
-const { reps, out, credentialEnv, allowUnisolatedGrading, evaluatedRoot } = readArgs()
+const { reps, out, credentialEnv, allowUnisolatedGrading, evaluatedRoot, trustFile } = readArgs()
 if (!Number.isInteger(reps) || reps < 1) throw new Error("--reps must be a positive integer")
 const sideLabel = readSideLabel()
+// Trust gate. The evaluated root is loaded by the extension host and receives
+// the credential, so its resolved full commit must be approved before any
+// directory is prepared, any host is created, or the credential is read. The
+// comparison driver checks its resolved commits first; this second check binds
+// the root that was actually passed in. The commit of an unapproved root is
+// unreadable or foreign, and both fail closed here.
+const policy = await loadTrustPolicy(trustFile)
+const evaluatedCommit = await resolveCommit("HEAD", evaluatedRoot)
+assertCommitsApproved(policy, [evaluatedCommit])
 // Fail before any directory, run, or result file exists. An empty credential
 // would otherwise produce a plausible file of infrastructure failures.
 const credential = process.env[credentialEnv]
@@ -94,6 +103,12 @@ if (credential === undefined || credential.length === 0) {
 ensureCodingSuiteRegistered()
 
 const gradingRuntime = allowUnisolatedGrading ? createLocalSubprocessGradingRuntime() : createContainerGradingRuntime()
+
+// Invalidate the previous generation before execution. After this point a
+// crash can never leave stale side results or run records behind: consumers
+// require side-results.json, and it exists only after this invocation
+// completes.
+await invalidateSideArtifacts(out)
 
 const projection = CODING_FIXTURE_BUNDLES[0]?.fixture.settingsProjection ?? {}
 
@@ -138,12 +153,12 @@ for (const bundle of CODING_FIXTURE_BUNDLES) {
 }
 
 // Pins are recorded after the runs so they describe what actually executed:
-// the evaluated commit and, when the container runtime resolved one, the
-// immutable grader image identity.
+// the approved evaluated commit and, when the container runtime resolved one,
+// the immutable grader image identity.
 const digest = gradingRuntime.imageDigest ? await gradingRuntime.imageDigest() : undefined
 const pins: SidePins = {
 	side: sideLabel,
-	commit: await readCommit(evaluatedRoot),
+	commit: evaluatedCommit,
 	suiteId: CODING_SUITE_ID,
 	suiteDigest: codingSuiteDigest(),
 	settingsDigest: digestValue(projection),
@@ -165,10 +180,11 @@ for (const record of runs) {
 	await writeJsonAtomic(path.join(artifactDir, "run-record.json"), record)
 }
 
-// Publication point. side-results.json appears atomically only after every
-// repetition finished, so a reader that sees the file sees a complete side.
-// A missing file means an interrupted side; consumers must treat it as a
-// failed side and never pair partial output.
+// Publication point and completion marker. side-results.json appears
+// atomically only after every repetition of this invocation finished, so a
+// reader that sees the file sees a complete side of the current run. A
+// missing file means an interrupted side; consumers must treat it as a failed
+// side and never pair partial output.
 await writeJsonAtomic(path.join(out, "side-results.json"), result)
 const correct = runs.filter((record) => record.outcome.outcome === "correct").length
 console.log(`coding-evals side complete: ${correct}/${runs.length} correct, suite ${pins.suiteDigest.slice(0, 12)}`)
