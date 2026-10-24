@@ -176,3 +176,34 @@ describe("coding side trust gate", () => {
 		},
 	)
 })
+
+describe("coding side isolation gate", () => {
+	it("rejects --allow-unisolated-grading before any run or artifact exists", { timeout: 180_000 }, async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "coding-side-test-"))
+		try {
+			// The argument gate runs before the trust policy loads, so no
+			// fixture commit is needed and no credential is read.
+			const trustFile = await writePolicy(dir, [])
+			const outcome = await runSideScript(
+				[
+					"--reps",
+					"1",
+					"--out",
+					path.join(dir, "out"),
+					"--trust-file",
+					trustFile,
+					"--allow-unisolated-grading",
+				],
+				minimalEnv({ SOLHEIM_API_KEY: "sk-test" }),
+			)
+			assert.notEqual(outcome.code, 0)
+			assert.match(outcome.stderr, /--allow-unisolated-grading is not accepted here/)
+			assert.ok(!outcome.stdout.includes("coding-evals side complete"))
+			// The rejection happens before any directory or result file
+			// exists, so the side can never publish host-graded artifacts.
+			await assert.rejects(fs.access(path.join(dir, "out", "side-results.json")))
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+})

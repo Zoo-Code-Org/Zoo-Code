@@ -214,6 +214,17 @@ describe("side result validation", () => {
 		assert.equal(validated.pins.commit, "a".repeat(40))
 	})
 
+	it("accepts a well-formed run with object metrics and keeps it", () => {
+		const run = { fixtureName: "clamp-range", repIndex: 0, metrics: metrics("clamp-range", 0, "correct", 0.1) }
+		const validated = validateSideResultFile(
+			validatedFile("baseline", "a".repeat(40), { runs: [run] }),
+			"baseline",
+			"a".repeat(40),
+		)
+		assert.equal(validated.runs.length, 1)
+		assert.deepEqual(validated.runs[0], run)
+	})
+
 	it("rejects a result that records the wrong side or a different commit", () => {
 		assert.throws(
 			() => validateSideResultFile(validatedFile("candidate", "a".repeat(40)), "baseline", "a".repeat(40)),
