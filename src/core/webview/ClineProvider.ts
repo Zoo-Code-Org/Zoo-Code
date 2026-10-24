@@ -69,6 +69,10 @@ import {
 	type TaskExecutionContext,
 } from "../task/providerHandoff"
 import { aggregateTaskCostsRecursive, type AggregatedCosts } from "./aggregateTaskCosts"
+import { ProfileDeletionActivationError } from "./profileDeletionError"
+
+// Re-exported so callers catching profile-deletion outcomes can import the provider and the error from one place.
+export { ProfileDeletionActivationError } from "./profileDeletionError"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService, getRooCodeApiUrl } from "@roo-code/cloud"
 
@@ -112,13 +116,13 @@ import { buildApiHandler } from "../../api"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/providers/fetchers/lmstudio"
 
 import { ContextProxy } from "../config/ContextProxy"
-import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
+import { ProviderSettingsManager, ProviderSettingsNotFoundError } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
 import { PendingActionSettlementError, Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
 import type { WebviewFocusTracker } from "./WebviewFocusTracker"
-import type { ClineMessage, TodoItem } from "@roo-code/types"
+import type { ClineMessage, ProviderSettingsWithId, TodoItem } from "@roo-code/types"
 import {
 	type ApiMessage,
 	readApiMessages,
@@ -138,6 +142,14 @@ import { omitOriginalContentFromExtensionMessage } from "./stripOriginalContent"
 import { REQUESTY_BASE_URL } from "../../shared/utils/requesty"
 import { validateAndFixToolResultIds } from "../task/validateToolResultIds"
 import { PendingEditOperationStore, type PendingEditOperationInput } from "./PendingEditOperationStore"
+
+type PersistedViewState = NonNullable<GlobalState["viewStates"]>[string]
+
+/**
+ * Values that can be held in a view-local state buffer (in-memory) and, for the
+ * non-secret subset, persisted durably per stable view id.
+ */
+type ViewLocalStateValues = Partial<RooCodeSettings> & Partial<ExtensionState>
 
 /**
  * https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default/weather-webview/src/providers/WeatherViewProvider.ts
@@ -209,6 +221,60 @@ type GetStateOptions = {
 	includeTaskHistory?: boolean
 }
 
+/**
+ * Raised when a profile mutation failed after durable writes landed and at least one
+ * compensation write failed too. Callers must not read it as the ordinary "the save
+ * failed and nothing changed" result: the persisted profile stores may now disagree.
+ */
+class ProfileActivationInconsistentError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "ProfileActivationInconsistentError"
+	}
+}
+
+/**
+ * Raised when a cancelled mode switch had already persisted the new mode and the
+ * compensating write failed too. The shared mode and the acting view's pin may now
+ * disagree, which is not the ordinary "cancelled before anything happened" outcome the
+ * caller's early return would suggest.
+ */
+class ModeSwitchInconsistentError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "ModeSwitchInconsistentError"
+	}
+}
+
+/**
+ * The durable stores a profile activation or upsert rewrites, captured before the first
+ * write so a rejected mutation can put every landed write back. `mode` is undefined when
+ * the caller never touches the per-mode mapping, and `previousProfileSettings` is
+ * undefined when the profile did not exist yet - the creation case the compensation must
+ * delete rather than restore.
+ */
+interface ProfileActivationSnapshot {
+	profileName: string
+	mode: Mode | undefined
+	previousProfileSettings: ProviderSettingsWithId | undefined
+	entries: ProviderSettingsEntry[]
+	modeConfigId: string | undefined
+	selection: string | undefined
+	viewSelection: string | undefined
+	sharedProviderSettings: ProviderSettings
+	viewOverlay: ProviderSettings | undefined
+}
+
+/** Which of the snapshotted stores this mutation actually committed. */
+interface ProfileActivationLanded {
+	profileRecord: boolean
+	profileList: boolean
+	modeMapping: boolean
+	selection: boolean
+	sharedProviderSettings: boolean
+	viewOverlay: boolean
+}
+
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
 	implements vscode.WebviewViewProvider, TelemetryPropertiesProvider, TaskProviderLike
@@ -219,6 +285,10 @@ export class ClineProvider
 	public static readonly sideBarId = `${Package.name}.SidebarProvider`
 	public static readonly tabPanelId = `${Package.name}.TabPanelProvider`
 	private static activeInstances: Set<ClineProvider> = new Set()
+	private static nextViewId = 0
+	private static readonly MAX_PERSISTED_VIEW_STATES = 50
+	private static readonly MAX_VIEW_STATE_ID_LENGTH = 64
+	private static persistedViewStateWriteQueue: Promise<void> = Promise.resolve()
 	private disposables: vscode.Disposable[] = []
 	private webviewDisposables: vscode.Disposable[] = []
 	private pendingThemeFixtureProbes = new Map<
@@ -265,8 +335,16 @@ export class ClineProvider
 	public readonly taskHistoryStore: TaskHistoryStore
 	private taskHistoryStoreInitialized = false
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
-	private providerProfileMutationQueue = Promise.resolve()
+	// Shared across instances: profile mutations rewrite the shared ContextProxy stores, so a
+	// per-instance queue lets another view commit between this view's shared write and its
+	// snapshot compensation, and the compensation would restore a stale copy over the newer
+	// write. One queue serializes every view's profile mutations against each other.
+	private static providerProfileMutationQueue = Promise.resolve()
 	private historyTaskCreationQueue = Promise.resolve()
+	// Ownership token for the shared mode. A timed-out mutation keeps running after the queue
+	// advances, so a newer switch can commit while the cancelled one is still in flight; only the
+	// operation that still owns the latest mode mutation may write the mode again.
+	private modeMutationGeneration = 0
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
 		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
@@ -283,7 +361,7 @@ export class ClineProvider
 	): Promise<T> {
 		const controller = new AbortController()
 		// Run fn after either outcome so a rejected mutation never poisons the queue.
-		const run = this.providerProfileMutationQueue.then(
+		const run = ClineProvider.providerProfileMutationQueue.then(
 			() => fn(controller.signal),
 			() => fn(controller.signal),
 		)
@@ -314,9 +392,12 @@ export class ClineProvider
 			},
 		)
 
-		// Advance from the timeout-bounded result. Each fn checks its AbortSignal before
-		// writing state, so advancing the queue on timeout cannot produce stale overwrites.
-		this.providerProfileMutationQueue = (options.runToCompletion ? run : callerResult).then(
+		// Chain the queue to the underlying run, not to the timeout-bounded result: the timeout
+		// exists to release the caller, not to release the queue. A mutation that is still
+		// writing durable state must keep later mutations out, otherwise the next profile
+		// mutation interleaves its own writes with the one still in flight - the abort signal is
+		// advisory, so a fn that ignores it would run concurrently with its successor.
+		ClineProvider.providerProfileMutationQueue = run.then(
 			() => undefined,
 			() => undefined,
 		)
@@ -351,6 +432,44 @@ export class ClineProvider
 	 */
 	private clineMessagesSeq = 0
 
+	/**
+	 * Unique identifier for this provider instance's view.
+	 * Based on renderContext and a monotonically increasing counter to ensure uniqueness across multiple instances.
+	 */
+	public readonly viewId: string
+
+	/**
+	 * Stable identifier for persisted per-view state keys.
+	 * Defaults to a session-unique temporary key until the webview reports its
+	 * VS Code-persisted id.
+	 */
+	private viewStateId: string
+
+	/**
+	 * Session-unique key this view writes under until the webview reports its
+	 * VS Code-persisted id. viewId is a counter that restarts at 0 in every window and
+	 * every extension host while globalState is shared, so a counter-derived temporary
+	 * key lets one window read - and re-key away - another window's pre-launch
+	 * selection.
+	 */
+	private readonly temporaryViewStateId: string
+
+	/**
+	 * Local state buffer for this specific view instance.
+	 * Used to isolate mode, apiConfiguration, and other fields from the shared ContextProxy singleton
+	 * when running in parallel (multi-tab) mode.
+	 */
+	private viewLocalState: Partial<ExtensionState> = {}
+
+	/**
+	 * This view's pinned profile name from the view-local buffer. Exposed for
+	 * sibling-instance inspection (getAllInstances() filtering): `viewLocalState`
+	 * is private and must not be reached through bracket access.
+	 */
+	get pinnedProfileName(): string | undefined {
+		return this.viewLocalState.currentApiConfigName
+	}
+
 	public isViewLaunched = false
 	public settingsImportedAt?: number
 	public readonly latestAnnouncementId = "oct-2026-v3.92.0-models-reliability-mcp" // v3.92.0 models, workflow reliability, and MCP marketplace
@@ -366,13 +485,19 @@ export class ClineProvider
 		mdmService?: MdmService,
 	) {
 		super()
+		// Initialize viewId based on renderContext and monotonically increasing instance identifier for uniqueness.
+		// activeInstances is used for visibility/iteration checks, so we keep tracking instances separately.
+		this.viewId = `${renderContext}-${ClineProvider.nextViewId++}`
+		// Unique per provider instance: the counter in viewId collides across windows and
+		// reloads that share globalState.
+		this.temporaryViewStateId = `${this.viewId}-${crypto.randomUUID()}`
+		this.viewStateId = this.temporaryViewStateId
+		ClineProvider.activeInstances.add(this)
 		this.currentWorkspacePath = getWorkspacePath()
 		this.pendingEditOperations = new PendingEditOperationStore(
 			ClineProvider.PENDING_OPERATION_TIMEOUT_MS,
 			(message) => this.log(message),
 		)
-
-		ClineProvider.activeInstances.add(this)
 
 		this.mdmService = mdmService
 		void this.updateGlobalState("codebaseIndexModels", EMBEDDING_MODEL_PROFILES)
@@ -398,9 +523,23 @@ export class ClineProvider
 			await this.postStateToWebviewWithoutClineMessages()
 		})
 
-		// Initialize MCP Hub through the singleton manager
+		// Load initial state from global state into viewLocalState buffer after dependencies used by getState are ready.
+		void this.loadViewState()
+
+		// Initialize MCP Hub through the singleton manager. The hub can resolve after this
+		// provider is already disposed (tab-creation rollback disposes immediately), and by
+		// then disposal has removed the provider from McpServerManager.providers, so a late
+		// hub must not be attached or registered: nothing would ever unregister it.
+		// registerClient only happens in this continuation, so skipping it leaves nothing to
+		// compensate. Disposal deliberately does not await this promise - getInstance waits
+		// on hub.waitUntilReady(), so a hung readiness wait would block teardown; making the
+		// late resolution inert is what finalizes it safely.
 		McpServerManager.getInstance(this.context, this)
 			.then((hub) => {
+				if (this._disposed) {
+					return
+				}
+
 				this.mcpHub = hub
 				this.mcpHub.registerClient()
 			})
@@ -518,6 +657,406 @@ export class ClineProvider
 		} catch (error) {
 			this.log(`[initializeTaskHistoryStore] Error: ${error instanceof Error ? error.message : String(error)}`)
 		}
+	}
+
+	/**
+	 * Reads the registered viewStates map, returning a defensive copy.
+	 * When fresh is set, the map is read directly from globalState (bypassing the
+	 * ContextProxy cache) so serialized writes never observe a stale in-memory value.
+	 */
+	/**
+	 * Writes the shared viewStates map and restores the pre-write map if the storage write
+	 * rejects. ContextProxy#updateGlobalState puts the value in the in-memory cache BEFORE
+	 * awaiting globalState.update, so a rejected write would otherwise leave every other
+	 * view reading a map that was never committed to disk - and the next successful write
+	 * would merge into that phantom state. The map put back is the one storage actually
+	 * holds, read fresh: callers build `states` from a fresh read too, so a cached snapshot
+	 * can be older than storage, and writing it back would delete entries another writer
+	 * persisted in the meantime.
+	 */
+	private async writePersistedViewStates(states: Record<string, PersistedViewState>): Promise<void> {
+		// What storage actually holds right now - the only safe rollback target. The in-memory
+		// cache may be older than storage when another writer persisted in between.
+		// Read raw, not through getPersistedViewStates: when nothing is persisted the map is
+		// absent, and a rollback must not manufacture an empty one.
+		const previousPersisted = this.context.globalState.get<GlobalState["viewStates"]>("viewStates")
+		try {
+			await this.contextProxy.setValue("viewStates", states)
+		} catch (error) {
+			try {
+				// setValue restores storage AND the cache together, so the cache cannot keep the
+				// phantom map the rejected write put there.
+				await this.contextProxy.setValue("viewStates", previousPersisted)
+			} catch (rollbackError) {
+				this.log(
+					`[ClineProvider] Failed to restore the persisted viewStates after a rejected write: ${
+						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+					}`,
+				)
+			}
+			throw error
+		}
+	}
+
+	private getPersistedViewStates(options: { fresh?: boolean } = {}): Record<string, PersistedViewState> {
+		const viewStates = options.fresh
+			? this.context.globalState.get<GlobalState["viewStates"]>("viewStates")
+			: this.contextProxy.getValue("viewStates")
+
+		if (!viewStates || typeof viewStates !== "object" || Array.isArray(viewStates)) {
+			return {}
+		}
+
+		return { ...viewStates }
+	}
+
+	/**
+	 * Persists this view's non-secret selections through the serialized write queue.
+	 * The write re-reads the map fresh and merges into the existing entry, removing the
+	 * entry entirely when nothing persistable remains, so concurrent views cannot clobber it.
+	 * The entry is keyed by the view id active when the change was made. Writes captured
+	 * while the provider still holds its temporary (pre-launch) id persist under that id
+	 * and are re-keyed to the stable view id when the webview registers one, so a change
+	 * that lands before the launch message stays durable instead of being lost.
+	 */
+	private async savePersistedViewState(values: Partial<PersistedViewState>): Promise<void> {
+		// Capture the id at change time: a write belongs to the view that was active
+		// when the change was made, even if a newer id is registered while it is queued.
+		const viewStateId = this.viewStateId
+		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			const states = this.getPersistedViewStates({ fresh: true })
+			const current = states[viewStateId] ?? {}
+			const next: PersistedViewState = { ...current }
+
+			if ("mode" in values) {
+				if (values.mode === undefined || values.mode === null) {
+					delete next.mode
+				} else {
+					next.mode = values.mode
+				}
+			}
+
+			if ("currentApiConfigName" in values) {
+				if (values.currentApiConfigName === undefined || values.currentApiConfigName === null) {
+					delete next.currentApiConfigName
+				} else {
+					next.currentApiConfigName = values.currentApiConfigName
+				}
+			}
+
+			if (!next.mode && !next.currentApiConfigName) {
+				delete states[viewStateId]
+			} else {
+				next.updatedAt = values.updatedAt ?? Date.now()
+				states[viewStateId] = next
+			}
+
+			await this.writePersistedViewStates(this.prunePersistedViewStates(states))
+		})
+
+		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
+		await write
+	}
+
+	/**
+	 * Removes the given view's entry from the registered viewStates map.
+	 * Runs through the serialized write queue to avoid racing concurrent view-state writes.
+	 */
+	private async clearPersistedViewState(viewStateId = this.viewStateId): Promise<void> {
+		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			const states = this.getPersistedViewStates({ fresh: true })
+			delete states[viewStateId]
+			await this.writePersistedViewStates(states)
+		})
+
+		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
+		await write
+	}
+
+	/**
+	 * Re-points persisted view pins that reference a removed profile so views do not
+	 * rehydrate a missing profile name after a reload. Runs through the serialized
+	 * write queue like every other viewStates mutation.
+	 */
+	private async repointPersistedViewStates(
+		removedProfileName: string,
+		replacementProfileName: string,
+	): Promise<void> {
+		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			const states = this.getPersistedViewStates({ fresh: true })
+			let changed = false
+
+			for (const [viewId, entry] of Object.entries(states)) {
+				if (entry?.currentApiConfigName !== removedProfileName) {
+					continue
+				}
+
+				changed = true
+				const { currentApiConfigName: _removed, ...rest } = entry
+
+				if (rest.mode) {
+					states[viewId] = { ...rest, currentApiConfigName: replacementProfileName, updatedAt: Date.now() }
+				} else {
+					states[viewId] = { currentApiConfigName: replacementProfileName, updatedAt: Date.now() }
+				}
+			}
+
+			if (changed) {
+				try {
+					await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+				} catch (error) {
+					// updateGlobalState applies the new map to the in-memory cache
+					// before the durable write: restore the cache to the value durable
+					// storage actually holds so closed-view pins cannot serve re-pointed
+					// names that never reached disk, then let the caller compensate.
+					try {
+						await this.contextProxy.setValue("viewStates", this.context.globalState.get("viewStates"))
+					} catch {
+						// The cache is updated before the durable attempt: it matches the
+						// durable value regardless of whether this restore write landed.
+					}
+					throw error
+				}
+			}
+		})
+
+		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
+		await write
+	}
+	/**
+	 * Keeps only the most recently updated entries of the persisted view states map,
+	 * bounded by MAX_PERSISTED_VIEW_STATES so the global key cannot grow unboundedly.
+	 */
+	private prunePersistedViewStates(states: Record<string, PersistedViewState>): Record<string, PersistedViewState> {
+		return Object.fromEntries(
+			Object.entries(states)
+				.sort(([, a], [, b]) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+				.slice(0, ClineProvider.MAX_PERSISTED_VIEW_STATES),
+		)
+	}
+
+	/**
+	 * Re-keys this provider's temporary pre-launch viewStates entry to the newly
+	 * registered stable id so pre-launch writes become durable under the stable key
+	 * instead of orphaning under a session-local temporary id. Only the provider's own
+	 * temporary id is eligible: an entry under a previously registered stable id belongs
+	 * to that webview's storage and is left alone. When the stable entry already exists
+	 * it wins and the temporary entry is dropped, because a temporary entry written
+	 * by an earlier session can still be sitting in the shared map.
+	 * queue like every other viewStates mutation.
+	 */
+	private async rekeyPersistedViewStateEntry(nextViewStateId: string): Promise<void> {
+		const previousViewStateId = this.temporaryViewStateId
+
+		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			const states = this.getPersistedViewStates({ fresh: true })
+			// Own-property checks only: the map is a plain object, and an inherited
+			// Object.prototype member must never look like a persisted entry (a map
+			// written by an older build can still carry a "constructor"-style key).
+			const previous = Object.prototype.hasOwnProperty.call(states, previousViewStateId)
+				? states[previousViewStateId]
+				: undefined
+
+			if (!previous) {
+				return
+			}
+
+			delete states[previousViewStateId]
+
+			if (!Object.prototype.hasOwnProperty.call(states, nextViewStateId)) {
+				states[nextViewStateId] = previous
+			}
+
+			await this.writePersistedViewStates(this.prunePersistedViewStates(states))
+		})
+
+		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
+		await write
+	}
+
+	/**
+	 * Registers this provider's stable view identifier and loads any persisted selections
+	 * it owns. The identifier arrives over the webview channel, so it is treated as untrusted
+	 * input: it is type-checked, normalized to a safe object key, length-bounded, and refused
+	 * when another live view already owns it.
+	 */
+	public async setViewStateId(viewStateId: string | undefined): Promise<void> {
+		// The webview generates this id on purpose - it has to survive a webview reload,
+		// which recreates the view on both sides - so the host cannot mint it instead.
+		// What the host owns is which view may hold a given persisted key, so everything
+		// below validates the supplied value before it becomes one.
+		if (typeof viewStateId !== "string") {
+			// A crafted postMessage can carry any JSON value here even though the message
+			// type declares a string; the persisted key must stay a string.
+			this.log(`[setViewStateId] Ignoring a non-string viewStateId for view ${this.viewId}.`)
+			return
+		}
+
+		const normalizedViewStateId = viewStateId.trim().replace(/[^A-Za-z0-9_-]/g, "_")
+
+		if (
+			!normalizedViewStateId ||
+			normalizedViewStateId === this.viewStateId ||
+			// Reject every id that collides with an Object.prototype member: the
+			// persisted map is a plain object, so "__proto__" would go through the
+			// prototype setter (and be silently dropped by the later spread), while
+			// names like "constructor" or "toString" survive normalization and would
+			// make an inherited member look like an existing entry during re-keying,
+			// losing the view's pre-launch state.
+			Object.prototype.hasOwnProperty.call(Object.prototype, normalizedViewStateId)
+		) {
+			return
+		}
+
+		// Bound the key: the webview generates a UUID, so a much longer value is not a
+		// view id, and an unbounded key is unbounded growth in the shared viewStates map.
+		if (normalizedViewStateId.length > ClineProvider.MAX_VIEW_STATE_ID_LENGTH) {
+			this.log(
+				`[setViewStateId] Ignoring an oversized viewStateId (${normalizedViewStateId.length} chars) for view ${this.viewId}.`,
+			)
+			return
+		}
+
+		const claimant = ClineProvider.getAllInstances().find(
+			(instance) => instance !== this && instance.viewStateId === normalizedViewStateId,
+		)
+		if (claimant) {
+			// Ownership check: a key another live view holds must not be adopted. Doing so
+			// would load that view's pinned profile, nested overlay, and mode into this
+			// provider, and this webview could then overwrite that view's persisted entry.
+			// Staying on the temporary id keeps this view working against the shared state.
+			this.log(
+				`[setViewStateId] Refusing viewStateId ${normalizedViewStateId} for view ${this.viewId}: already claimed by live view ${claimant.viewId}.`,
+			)
+			return
+		}
+
+		const previousViewStateId = this.viewStateId
+
+		this.viewStateId = normalizedViewStateId
+
+		try {
+			// Re-key any durable entry written under the temporary pre-launch id before
+			// loading, so the load sees the view's own pre-registration selections.
+			await this.rekeyPersistedViewStateEntry(this.viewStateId)
+
+			await this.loadViewState()
+		} catch (error) {
+			// A persistence failure must not leave the provider holding an id that was
+			// never registered: restore the previous id so a later launch retries the
+			// registration and the load instead of the guard above early-returning for
+			// the failed id.
+			this.viewStateId = previousViewStateId
+			throw error
+		}
+	}
+
+	/**
+	 * Loads non-secret persisted selections from the registered viewStates map.
+	 * Missing entries are intentionally left unset so getState() falls back to shared ContextProxy values.
+	 * Fields mutated while the async profile lookup is in flight are reapplied on top of the
+	 * loaded state, field by field, so in-flight user selections are not clobbered by the load.
+	 */
+	private async loadViewState(): Promise<void> {
+		// Capture the id this load is for: a newer id registered while an async
+		// profile lookup is in flight must not be overwritten by this stale load.
+		const loadedForViewId = this.viewStateId
+		try {
+			const persisted = this.getPersistedViewStates()[loadedForViewId]
+			const loadedState: Partial<ExtensionState> = {}
+
+			// Snapshot the in-memory buffer before the async profile lookup. The
+			// mutation paths update viewLocalState in place, so a shallow copy is
+			// what makes fields mutated during the load window observable below.
+			const preLoadBuffer = { ...this.viewLocalState }
+
+			if (persisted?.mode) {
+				// A persisted mode may reference a custom mode that was deleted after it was
+				// pinned: restore it only when the slug still resolves, so a stale slug cannot
+				// shadow the shared mode from getState().
+				const customModes = await this.customModesManager.getCustomModes()
+				if (getModeBySlug(persisted.mode, customModes)) {
+					loadedState.mode = persisted.mode as Mode
+				} else {
+					this.log(`[loadViewState] Ignoring unknown persisted mode "${persisted.mode}"`)
+				}
+			}
+
+			if (persisted?.currentApiConfigName) {
+				loadedState.currentApiConfigName = persisted.currentApiConfigName
+
+				try {
+					const { name: _name, ...apiConfiguration } = await this.providerSettingsManager.getProfile({
+						name: persisted.currentApiConfigName,
+					})
+					loadedState.apiConfiguration = apiConfiguration as ProviderSettings
+				} catch (error) {
+					this.log(
+						`[loadViewState] Unable to resolve API profile '${persisted.currentApiConfigName}' for viewId ${this.viewId}: ${error instanceof Error ? error.message : String(error)}`,
+					)
+				}
+			}
+
+			if (this.viewStateId !== loadedForViewId) {
+				this.log(`[loadViewState] Discarding stale state for superseded view id ${loadedForViewId}`)
+				return
+			}
+
+			// Reapply the buffer fields that changed while the load was in flight,
+			// tracking the change instead of testing against undefined: a field cleared
+			// during the load window must stay cleared (the loaded value must not
+			// resurrect it), and a field written to a new value must win over it.
+			// Untouched fields keep the persisted values authoritative, and the
+			// pre-load buffer is never merged wholesale so stale temporary-id state
+			// cannot override the stable persisted state.
+			const postLoadBuffer = this.viewLocalState
+			const mergedState: Partial<ExtensionState> = { ...loadedState }
+
+			if (!Object.is(preLoadBuffer.mode, postLoadBuffer.mode)) {
+				if (postLoadBuffer.mode === undefined) {
+					delete mergedState.mode
+				} else {
+					mergedState.mode = postLoadBuffer.mode
+				}
+			}
+
+			if (!Object.is(preLoadBuffer.currentApiConfigName, postLoadBuffer.currentApiConfigName)) {
+				if (postLoadBuffer.currentApiConfigName === undefined) {
+					delete mergedState.currentApiConfigName
+				} else {
+					mergedState.currentApiConfigName = postLoadBuffer.currentApiConfigName
+				}
+			}
+
+			if (!Object.is(preLoadBuffer.apiConfiguration, postLoadBuffer.apiConfiguration)) {
+				if (postLoadBuffer.apiConfiguration === undefined) {
+					delete mergedState.apiConfiguration
+				} else {
+					mergedState.apiConfiguration = postLoadBuffer.apiConfiguration
+				}
+			}
+
+			this.viewLocalState = mergedState
+			this.log(`[loadViewState] Loaded state for viewId ${this.viewId}`)
+		} catch (error) {
+			this.log(
+				`[loadViewState] Error loading state for viewId ${this.viewId}: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+	}
+
+	/**
+	 * Saves a single view-local state value. The in-memory buffer is always updated; the
+	 * non-secret subset (mode, currentApiConfigName) is persisted durably under the view
+	 * id active when the change was made, re-keyed to the stable id on registration.
+	 */
+	public async saveViewState<K extends keyof ViewLocalStateValues>(
+		key: K,
+		value: ViewLocalStateValues[K] | undefined,
+	): Promise<void> {
+		await this._saveViewLocalStateFromMutation({ [key]: value } as ViewLocalStateValues)
+
+		this.log(`[saveViewState] Saved ${String(key)} for viewId ${this.viewId}`)
 	}
 
 	/**
@@ -901,16 +1440,36 @@ export class ClineProvider
 			}
 		}
 
-		this._workspaceTracker?.dispose()
-		this._workspaceTracker = undefined
-		await this.mcpHub?.unregisterClient()
+		// Each teardown step gets its own guard: a rejecting step must not strand the steps after
+		// it, and the unregistration below must run no matter what - _disposed is already set, so
+		// a half-disposed provider would never get another chance to finish here.
+		const cleanupFailures: string[] = []
+		const attemptCleanup = async (label: string, step: () => unknown) => {
+			try {
+				await step()
+			} catch (error: unknown) {
+				cleanupFailures.push(`${label}: ${error instanceof Error ? error.message : String(error)}`)
+			}
+		}
+
+		await attemptCleanup("workspace tracker", () => {
+			this._workspaceTracker?.dispose()
+			this._workspaceTracker = undefined
+		})
+		await attemptCleanup("mcpHub", () => this.mcpHub?.unregisterClient())
 		this.mcpHub = undefined
-		await this.skillsManager?.dispose()
+		await attemptCleanup("skills manager", () => this.skillsManager?.dispose())
 		this.skillsManager = undefined
-		await this.marketplaceManager?.cleanup()
-		this.customModesManager?.dispose()
-		this.taskHistoryStore.dispose()
-		this.log("Disposed all disposables")
+		await attemptCleanup("marketplace manager", () => this.marketplaceManager?.cleanup())
+		await attemptCleanup("custom modes manager", () => this.customModesManager?.dispose())
+		await attemptCleanup("task history store", () => this.taskHistoryStore.dispose())
+
+		if (cleanupFailures.length > 0) {
+			this.log(`Disposal was incomplete (${cleanupFailures.join("; ")}); the provider was unregistered anyway.`)
+		} else {
+			this.log("Disposed all disposables")
+		}
+
 		ClineProvider.activeInstances.delete(this)
 
 		// Clean up any event listeners attached to this provider
@@ -929,6 +1488,16 @@ export class ClineProvider
 
 	public static getAllInstances(): ClineProvider[] {
 		return Array.from(this.activeInstances)
+	}
+
+	/**
+	 * Returns the live instance whose current view is the given view or panel,
+	 * if any. Title-bar commands on a specific surface use this to target the
+	 * instance that owns that surface rather than the visible-instance
+	 * heuristic (which picks whichever surface the user last focused).
+	 */
+	public static getInstanceForView(view: vscode.WebviewView | vscode.WebviewPanel): ClineProvider | undefined {
+		return Array.from(this.activeInstances).find((instance) => instance.view === view)
 	}
 
 	public static async getInstance(): Promise<ClineProvider | undefined> {
@@ -1265,7 +1834,10 @@ export class ClineProvider
 				historyItem.mode = defaultModeSlug
 			}
 
-			await this.updateGlobalState("mode", historyItem.mode)
+			// Persist the restored mode through this view's per-view pin rather than the
+			// shared global: a global write would leak the restored mode into other views
+			// in parallel mode, and a buffer-only write would be lost after a reload.
+			await this.saveViewState("mode", historyItem.mode)
 
 			// Load the saved API config for the restored mode if it exists.
 			// Skip mode-based profile activation if historyItem.apiConfigName exists,
@@ -1475,8 +2047,28 @@ export class ClineProvider
 			return
 		}
 
+		const webview = this.view?.webview
+		if (!webview) {
+			return
+		}
+
+		// Dispatch without awaiting the renderer ack: VS Code settles postMessage only when the
+		// webview page acknowledges the message, and a page reload or view dispose in flight
+		// orphans that promise forever. Awaiting it could wedge every caller on the task critical
+		// path (e.g. the trailing postStateToWebview in handleModeSwitchUnlocked gates the next
+		// turn after a mode switch). Message ordering is enforced by the message seq, not the ack.
+		// Promise.resolve() normalizes non-promise returns (e.g. test doubles) before the catch.
 		try {
-			await this.view?.webview.postMessage(omitOriginalContentFromExtensionMessage(message))
+			void Promise.resolve(webview.postMessage(omitOriginalContentFromExtensionMessage(message))).catch(
+				(error) => {
+					// Swallow: postMessage rejects when the webview is disposed in flight.
+					// Log the dropped message type so a wedged webview channel is diagnosable
+					// instead of silently losing state updates.
+					this.log(
+						`[postMessageToWebview] dropped message type=${message.type}: ${error instanceof Error ? error.message : String(error)}`,
+					)
+				},
+			)
 		} catch {
 			// View disposed, drop message silently
 		}
@@ -1721,8 +2313,12 @@ export class ClineProvider
 	 * current task. Pass null to apply only global mode/profile effects for a pending child.
 	 */
 	public async handleModeSwitch(newMode: Mode, targetTask: Task | null | undefined = this.getCurrentTask()) {
-		return this.enqueueProviderProfileMutation((signal) =>
-			this.handleModeSwitchUnlocked(newMode, targetTask, signal),
+		return this.enqueueProviderProfileMutation(
+			(signal) => this.handleModeSwitchUnlocked(newMode, targetTask, signal),
+			// The switch and its nested activation must own the queue until every
+			// write - including compensation - settles: a timeout must not let the
+			// next queued mutation overlap writes that are still in flight.
+			{ runToCompletion: true },
 		)
 	}
 
@@ -1733,9 +2329,17 @@ export class ClineProvider
 	): Promise<void> {
 		const task = targetTask
 
+		// A cancelled or timed-out switch must not be partially applied: bail out
+		// before the task history / _taskMode writes as well as the durable mode
+		// write below. Aborts that land while the history write is in flight are
+		// handled in flight (the landed write is rolled back); the pre-write check
+		// further down still covers the remaining gap before the durable write.
+		if (signal?.aborted) {
+			return
+		}
+
 		if (task) {
 			TelemetryService.instance.captureModeSwitch(task.taskId, newMode)
-			task.emit(RooCodeEventName.TaskModeSwitched, task.taskId, newMode)
 
 			try {
 				// Update the task history with the new mode first.
@@ -1743,7 +2347,30 @@ export class ClineProvider
 
 				if (taskHistoryItem) {
 					await this.updateTaskHistory({ ...taskHistoryItem, mode: newMode })
+
+					// An abort that lands while the history write is in flight has
+					// already persisted the new mode: restore the pre-switch item and
+					// bail before the in-memory task write and the emit, so task
+					// history, task state, and provider mode cannot diverge. A failed
+					// rollback must not surface as the persistence error of the
+					// cancelled switch: log it and keep the cancellation result.
+					if (signal?.aborted) {
+						try {
+							// Restore only the field this switch changed: re-read the item so
+							// fields the running task persisted during the pending window
+							// (tokens, cost, status, apiConfigName) survive the rollback.
+							const latest = this.getTaskHistoryItem(task.taskId) ?? taskHistoryItem
+							await this.updateTaskHistory({ ...latest, mode: taskHistoryItem.mode })
+						} catch (rollbackError) {
+							this.log(`Failed to roll back mode switch ${task.taskId}: ${String(rollbackError)}`)
+						}
+						return
+					}
+				} else if (signal?.aborted) {
+					return
 				}
+
+				task.emit(RooCodeEventName.TaskModeSwitched, task.taskId, newMode)
 
 				// Only update the task's mode after successful persistence.
 				;(task as any)._taskMode = newMode
@@ -1759,7 +2386,52 @@ export class ClineProvider
 			}
 		}
 
-		await this.updateGlobalState("mode", newMode)
+		// A cancelled or timed-out switch must not write the mode or emit
+		// ModeChanged: check the mutation signal right before the durable write.
+		if (signal?.aborted) {
+			return
+		}
+
+		// setValue (not the deprecated updateGlobalState) so the in-memory viewLocalState
+		// buffer stays in sync with the durable global write: getValues() merges
+		// viewLocalState on top of the ContextProxy values, so an unsynced stale
+		// restored mode would otherwise shadow the fresh switch for consumers.
+		// If the durable write fails, roll the shared write back so getValues()
+		// cannot mix a fresh shared mode with the stale pre-switch buffer.
+		const previousMode = this.getValue("mode")
+		// getValue reads the shared ContextProxy value only. The undo must also be able to put
+		// this view's own pin back: a sibling view may have moved the shared mode since this
+		// view last pinned, so the two stores can start from different values.
+		const previousViewMode = this.viewLocalState.mode
+		const generation = ++this.modeMutationGeneration
+		try {
+			// setValue writes the shared key and the acting view's pin, so once it resolves the switch
+			// is durable in both stores: every abort checkpoint below has to undo it again, not just
+			// the one right after this write.
+			await this.setValue("mode", newMode)
+		} catch (error) {
+			try {
+				await this.contextProxy.setValue("mode", previousMode)
+			} catch (rollbackError) {
+				this.log(
+					`[handleModeSwitch] Failed to roll back shared mode after persistence failure: ${
+						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+					}`,
+				)
+			}
+			this.log(
+				`[handleModeSwitch] Failed to persist mode "${newMode}": ${error instanceof Error ? error.message : String(error)}`,
+			)
+			throw error
+		}
+
+		// An abort that lands after the durable write still has to be undone: the mutation queue has
+		// already advanced, so emitting or writing profile/list state now would land behind the next
+		// mutation. Compensate through the shared mode-switch rollback.
+		if (signal?.aborted) {
+			await this.compensateCancelledModeSwitch(newMode, previousMode, previousViewMode, generation)
+			return
+		}
 
 		this.emit(RooCodeEventName.ModeChanged, newMode)
 
@@ -1772,13 +2444,25 @@ export class ClineProvider
 			return
 		}
 
-		if (signal?.aborted) return
+		// An abort that landed after the durable write but before the profile lookups must undo the
+		// mode and the acting view's pin too: the activation below is the only thing that completes
+		// the switch, and it never starts on a cancelled operation.
+		if (signal?.aborted) {
+			await this.compensateCancelledModeSwitch(newMode, previousMode, previousViewMode, generation)
+			return
+		}
 
 		// Load the saved API config for the new mode if it exists.
 		const savedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
 		const listApiConfig = await this.providerSettingsManager.listConfig()
 
-		if (signal?.aborted) return
+		// Same contract after the lookups: returning bare here used to leave the new mode and the
+		// per-view pin persisted with no mode-specific activation behind them, so a reload restored
+		// the incomplete new selection.
+		if (signal?.aborted) {
+			await this.compensateCancelledModeSwitch(newMode, previousMode, previousViewMode, generation)
+			return
+		}
 
 		// Update listApiConfigMeta first to ensure UI has latest data.
 		await this.updateGlobalState("listApiConfigMeta", listApiConfig)
@@ -1798,6 +2482,13 @@ export class ClineProvider
 				const hasActualSettings = !!fullProfile.apiProvider
 
 				if (hasActualSettings) {
+					// The activation is the last persistence step of the switch. An abort that landed
+					// while its profile was being read has to undo the durable mode write as well, or
+					// storage keeps the new mode with no activation behind it.
+					if (signal?.aborted) {
+						await this.compensateCancelledModeSwitch(newMode, previousMode, previousViewMode, generation)
+						return
+					}
 					await this.activateProviderProfileUnlocked(
 						{ name: profile.name },
 						targetTask === null ? { skipCurrentTaskRebuild: true } : undefined,
@@ -1824,6 +2515,47 @@ export class ClineProvider
 
 		if (targetTask !== null) {
 			await this.postStateToWebview()
+		}
+	}
+
+	/**
+	 * Undoes a cancelled mode switch whose durable write already landed. Compensates through the
+	 * same awaited setValue so the shared key and the acting view's pin move back together.
+	 *
+	 * Only the operation that still owns the latest mode mutation may compensate: a cancelled
+	 * switch whose write stalled past the mutation timeout resumes after the queue advanced, and a
+	 * newer switch may have committed in the meantime, so restoring the mode then would overwrite
+	 * that newer selection with this switch's stale previous mode and pin. A compensation that
+	 * cannot finish surfaces as an explicit inconsistent-state error instead of a clean
+	 * cancellation.
+	 */
+	private async compensateCancelledModeSwitch(
+		newMode: Mode,
+		previousMode: Mode | undefined,
+		previousViewMode: Mode | undefined,
+		generation: number,
+	): Promise<void> {
+		if (generation !== this.modeMutationGeneration) {
+			this.log(
+				`[handleModeSwitch] Skipped the compensation for the cancelled switch to mode "${newMode}": a newer mode mutation owns the value.`,
+			)
+			return
+		}
+		try {
+			// Restore the two stores separately, the way compensateProfileActivation restores the
+			// shared selection and the acting view's profile pin. Going through setValue would write
+			// the shared previous mode into this view's pin too, repinning a view that was pinned
+			// elsewhere (or pinning one that had no pin at all).
+			await this.contextProxy.setValue("mode", previousMode)
+			await this._saveViewLocalStateFromMutation({ mode: previousViewMode })
+		} catch (compensationError) {
+			throw new ModeSwitchInconsistentError(
+				`[ClineProvider] A cancelled switch to mode "${newMode}" could not restore the previous mode "${String(
+					previousMode,
+				)}"; the shared mode and the per-view pin may disagree: ${
+					compensationError instanceof Error ? compensationError.message : String(compensationError)
+				}`,
+			)
 		}
 	}
 
@@ -1880,15 +2612,166 @@ export class ClineProvider
 		return !!this.getProviderProfileEntry(name)
 	}
 
+	/**
+	 * Snapshot every durable store that profile activation and upsert are about to rewrite.
+	 * The stores are independent - the profile-manager record, the profile list, the per-mode
+	 * mapping, the shared current name, the shared provider settings blob, and this view's own
+	 * buffer - so a partial commit is user visible: `getState()` merges the shared blob with
+	 * the per-view buffer, which can pair the previous profile's name with the new profile's
+	 * settings.
+	 */
+	private async snapshotProfileActivationStores(
+		profileName: string,
+		mode: Mode | undefined,
+	): Promise<ProfileActivationSnapshot> {
+		let previousProfileSettings: ProviderSettingsWithId | undefined
+
+		try {
+			const { name: _name, ...profile } = await this.providerSettingsManager.getProfile({ name: profileName })
+			previousProfileSettings = profile as ProviderSettingsWithId
+		} catch (error: unknown) {
+			if (!(error instanceof ProviderSettingsNotFoundError)) {
+				// Without the prior record there is no way to put an updated profile back, so fail
+				// before the first write instead of discovering it in the compensation path.
+				throw error
+			}
+			// Not-found is the creation case: compensation deletes the new record again.
+		}
+
+		const { currentApiConfigName } = this.contextProxy.getValues()
+
+		return {
+			profileName,
+			mode,
+			previousProfileSettings,
+			entries: this.getProviderProfileEntries(),
+			modeConfigId: mode === undefined ? undefined : await this.providerSettingsManager.getModeConfigId(mode),
+			selection: currentApiConfigName,
+			viewSelection: this.viewLocalState.currentApiConfigName,
+			sharedProviderSettings: this.contextProxy.getProviderSettings(),
+			viewOverlay: this.viewLocalState.apiConfiguration,
+		}
+	}
+
+	/**
+	 * Roll a failed profile activation or upsert back store by store, newest write first. Only
+	 * the stores whose write landed are touched: replaying one this call never wrote would
+	 * clobber a value another mutation committed in the meantime. Restore failures are collected
+	 * rather than thrown immediately so one broken store cannot strand the rest, and a partial
+	 * rollback surfaces as an explicit inconsistent-state error - the silent `undefined` callers
+	 * used to receive is exactly what hid a half-applied activation.
+	 */
+	private async compensateProfileActivation(
+		snapshot: ProfileActivationSnapshot,
+		landed: ProfileActivationLanded,
+		operation: string,
+		cause: unknown,
+		managerCurrentNameRewritten: boolean,
+	): Promise<void> {
+		const describeFailure = (e: unknown) => (e instanceof Error ? e.message : String(e))
+		const failures: string[] = []
+
+		if (landed.viewOverlay) {
+			try {
+				await this._saveViewLocalStateFromMutation({ apiConfiguration: snapshot.viewOverlay })
+			} catch (error: unknown) {
+				failures.push(`view-local buffer: ${describeFailure(error)}`)
+			}
+		}
+
+		if (landed.sharedProviderSettings) {
+			try {
+				await this.contextProxy.setProviderSettings(snapshot.sharedProviderSettings)
+			} catch (error: unknown) {
+				failures.push(`shared provider settings: ${describeFailure(error)}`)
+			}
+		}
+
+		if (landed.selection) {
+			// The shared selection and this view's pin are two stores. setValue moves both, so a rollback
+			// that only means to restore the shared name would also overwrite a pin that legitimately
+			// differed from it: a sibling activation leaves the shared selection on another profile while
+			// this view stays pinned to its own. Restore them separately, and clear the pin when this
+			// view had none before the call.
+			try {
+				await this.contextProxy.setValue("currentApiConfigName", snapshot.selection)
+			} catch (error: unknown) {
+				failures.push(`shared selection: ${describeFailure(error)}`)
+			}
+			try {
+				await this._saveViewLocalStateFromMutation({ currentApiConfigName: snapshot.viewSelection })
+			} catch (error: unknown) {
+				failures.push(`view profile pin: ${describeFailure(error)}`)
+			}
+		}
+
+		if (landed.modeMapping && snapshot.mode !== undefined) {
+			try {
+				// The manager serializes modeApiConfigs through JSON, which drops undefined
+				// values, so writing the previous undefined id back clears the mapping instead of
+				// storing a bogus id.
+				await this.providerSettingsManager.setModeConfig(snapshot.mode, snapshot.modeConfigId as string)
+			} catch (error: unknown) {
+				failures.push(`mode mapping: ${describeFailure(error)}`)
+			}
+		}
+
+		if (landed.profileList) {
+			try {
+				// Only the list is replayed: writing back the whole settings snapshot would also
+				// rewrite unrelated keys (viewStates included) with this view's cached copy.
+				await this.contextProxy.setValue("listApiConfigMeta", snapshot.entries)
+			} catch (error: unknown) {
+				failures.push(`profile list: ${describeFailure(error)}`)
+			}
+		}
+
+		if (landed.profileRecord) {
+			try {
+				if (snapshot.previousProfileSettings === undefined) {
+					await this.providerSettingsManager.deleteConfig(snapshot.profileName)
+				} else {
+					await this.providerSettingsManager.saveConfig(
+						snapshot.profileName,
+						snapshot.previousProfileSettings,
+					)
+				}
+			} catch (error: unknown) {
+				failures.push(`profile-manager record: ${describeFailure(error)}`)
+			}
+		}
+
+		if (managerCurrentNameRewritten && snapshot.selection && snapshot.selection !== snapshot.profileName) {
+			try {
+				// `activateProfile` rewrote the profile manager's own current-profile record; put
+				// the previous name back so a later load cannot resolve the aborted activation.
+				await this.providerSettingsManager.activateProfile({ name: snapshot.selection })
+			} catch (error: unknown) {
+				failures.push(`profile-manager current profile: ${describeFailure(error)}`)
+			}
+		}
+
+		if (failures.length > 0) {
+			throw new ProfileActivationInconsistentError(
+				`${operation}: the profile change failed after durable writes landed and the rollback was incomplete (${failures.join("; ")}); the persisted profile stores may now disagree. Original failure: ${describeFailure(cause)}`,
+			)
+		}
+
+		this.log(`${operation}: rolled back the profile writes that had landed after ${describeFailure(cause)}`)
+	}
+
 	async upsertProviderProfile(
 		name: string,
 		providerSettings: ProviderSettings,
 		activate: boolean = true,
 	): Promise<string | undefined> {
 		try {
-			return await this.enqueueProviderProfileMutation(
-				(signal) => this.persistProviderProfile(name, providerSettings, activate, signal),
-				{ runToCompletion: true },
+			// This unit's upsert is transactional: the mutation timeout must abort the run so
+			// the landed-write compensation rolls the record and the stores back, so it
+			// deliberately does not opt into runToCompletion (unlike the model patch below,
+			// which has no compensation of its own).
+			return await this.enqueueProviderProfileMutation((signal) =>
+				this.persistProviderProfile(name, providerSettings, activate, signal),
 			)
 		} catch (error) {
 			this.log(
@@ -1896,6 +2779,14 @@ export class ClineProvider
 			)
 
 			vscode.window.showErrorMessage(t("common:errors.create_api_config"))
+
+			if (error instanceof ProfileActivationInconsistentError) {
+				// The rollback itself was incomplete. Returning `undefined` here would read as "the
+				// save failed and nothing changed" while the persisted profile stores disagree, so the
+				// caller gets the inconsistency instead.
+				throw error
+			}
+
 			return undefined
 		}
 	}
@@ -2011,57 +2902,132 @@ export class ClineProvider
 		// we rely on the `ContextProxy`'s data store and in other cases
 		// we rely on the `ProviderSettingsManager`'s data store. It might
 		// be simpler to unify these two.
-		const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
-
-		if (signal.aborted) return id
-
-		if (activate) {
-			const { mode } = await this.getState()
-
-			if (signal.aborted) return id
-
-			// These promises do the following:
-			// 1. Adds or updates the list of provider profiles.
-			// 2. Sets the current provider profile.
-			// 3. Sets the current mode's provider profile.
-			// 4. Copies the provider settings to the context.
-			//
-			// Note: 1, 2, and 4 can be done in one `ContextProxy` call:
-			// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
-			// We should probably switch to that and verify that it works.
-			// I left the original implementation in just to be safe.
-			// `allSettled` so a caller that rolls back after a failure never races a write still in flight.
-			const activationResults = await Promise.allSettled([
-				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
-				this.updateGlobalState("currentApiConfigName", name),
-				this.providerSettingsManager.setModeConfig(mode, id),
-				this.contextProxy.setProviderSettings(providerSettings),
-			])
-			const failedActivation = activationResults.find(
-				(result): result is PromiseRejectedResult => result.status === "rejected",
-			)
-
-			if (failedActivation) throw failedActivation.reason
-
-			if (signal.aborted) return id
-
-			// Change the provider for the current task.
-			// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
-			this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
-
-			// Keep the current task's sticky provider profile in sync with the newly-activated profile.
-			await this.persistStickyProviderProfileToCurrentTask(name)
-		} else {
-			await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+		const mode = activate ? (await this.getState()).mode : undefined
+		const snapshot = await this.snapshotProfileActivationStores(name, mode)
+		const landed: ProfileActivationLanded = {
+			profileRecord: false,
+			profileList: false,
+			modeMapping: false,
+			selection: false,
+			sharedProviderSettings: false,
+			viewOverlay: false,
 		}
+		let id: string
 
-		if (signal.aborted) return id
+		try {
+			id = await this.providerSettingsManager.saveConfig(name, providerSettings)
+			landed.profileRecord = true
+
+			if (signal.aborted) {
+				// The mutation timeout already released the caller with a timeout rejection, and this
+				// write has landed since. Returning here would exit the try without an exception, so
+				// the compensation below would never run and the record would stay saved under a
+				// caller that was told the save failed. Throwing routes this checkpoint through the
+				// same store-by-store rollback a rejected write gets. The landed flags keep it to the
+				// stores this call actually wrote - the queue stays owned until this run settles,
+				// so no later mutation can have written them in the meantime - and an
+				// incomplete rollback still surfaces as the inconsistent-state error.
+				throw new Error("Profile upsert was cancelled after the profile-record write")
+			}
+
+			// saveConfig normalizes the record (schema parse, legacy downgrades):
+			// read the stored copy back and use it for every activation write,
+			// sibling refresh, overlay, and task-handler update below, so raw
+			// webview fields the profile schema strips cannot enter the shared
+			// store, sibling view state, or task configuration. Fail closed when
+			// the read-back fails: the raw caller payload must never stand in for
+			// the validated record, so the landed save is compensated and the
+			// mutation group fails instead of propagating unvalidated settings.
+			let normalizedSettings: ProviderSettings
+			// The overlay refresh stores the record in the same shape the reload path
+			// stores it (id and name included), so a refreshed overlay cannot be
+			// distinguished from a reloaded one in a pinned view's getState().
+			let refreshedRecord: ProviderSettings & { id?: string; name?: string } = providerSettings
+			try {
+				const storedRecord = await this.providerSettingsManager.getProfile({ name })
+				const { name: _savedName, id: _savedId, ...storedFields } = storedRecord
+				normalizedSettings = storedFields as ProviderSettings
+				refreshedRecord = storedRecord
+			} catch (error) {
+				// Fail closed: the raw caller payload must never stand in for the
+				// validated record. Throwing routes the landed write through the
+				// group's store-by-store compensation before the mutation fails.
+				throw new Error(
+					`Provider profile '${name}' could not be read back after save: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+
+			// The durable writes are serialized instead of raced in one Promise.all so every
+			// step can record that it landed: a later rejection then puts back exactly the stores
+			// this call changed. Previously a rejected per-view write rolled back only the shared
+			// name inside setValue, while the profile record, the profile list, the mode mapping,
+			// and the shared provider settings stayed committed - leaving getState() reporting the
+			// previous profile's name next to the new profile's settings.
+			await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+			landed.profileList = true
+
+			if (mode !== undefined) {
+				await this.providerSettingsManager.setModeConfig(mode, id)
+				landed.modeMapping = true
+
+				// Route through setValue so the in-memory viewLocalState buffer tracks the
+				// activated profile: a plain global write would leave a stale loaded
+				// currentApiConfigName shadowing the new value in getValues().
+				await this.setValue("currentApiConfigName", name)
+				landed.selection = true
+
+				// Marked before the await: setProviderSettings fans out to several globalState keys,
+				// so a rejection partway through the fan-out still has to be rolled back.
+				landed.sharedProviderSettings = true
+				await this.contextProxy.setProviderSettings(normalizedSettings)
+
+				// setProviderSettings writes the shared store directly, bypassing the
+				// view-local mutation path: clear this view's buffered apiConfiguration
+				// overlay (if any) so a stale loaded profile cannot keep shadowing the
+				// new settings in getState().
+				await this._saveViewLocalStateFromMutation({ apiConfiguration: undefined })
+				landed.viewOverlay = true
+
+				// Other live views may have buffered this profile's settings earlier;
+				// refresh them so their getState() cannot report the updated profile's
+				// name with stale settings.
+				await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings)
+
+				// Change the provider for the current task.
+				// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
+				this.updateTaskApiHandlerIfNeeded(normalizedSettings, { forceRebuild: true })
+
+				// Keep the current task's sticky provider profile in sync with the newly-activated profile.
+				await this.persistStickyProviderProfileToCurrentTask(name)
+			} else {
+				// The stored profile changed without an activation. Neither this view nor a sibling
+				// had its overlay cleared, so every view pinned to the saved profile - including
+				// the acting one - has to be refreshed.
+				await this.refreshViewLocalStateForUpdatedProfile(name, refreshedRecord, true)
+			}
+		} catch (error: unknown) {
+			await this.compensateProfileActivation(snapshot, landed, "upsertProviderProfile", error, false)
+			throw error
+		}
 
 		await this.postStateToWebview()
 		return id
 	}
 
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
+		// Deletion snapshots and compensates the same durable stores that upsert,
+		// activation, and mode switch mutate, so it has to run serialized against them:
+		// an overlapping mutation could otherwise land between the snapshot and the
+		// rollback, and the compensation would restore a stale copy over the newer write.
+		return this.enqueueProviderProfileMutation((signal) =>
+			this.deleteProviderProfileUnlocked(profileToDelete, signal),
+		)
+	}
+
+	private async deleteProviderProfileUnlocked(
+		profileToDelete: ProviderSettingsEntry,
+		signal: AbortSignal,
+	): Promise<void> {
 		const globalSettings = this.contextProxy.getValues()
 		let profileToActivate: string | undefined = globalSettings.currentApiConfigName
 
@@ -2073,15 +3039,433 @@ export class ClineProvider
 			throw new Error("You cannot delete the last profile")
 		}
 
-		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
+		// Snapshot the manager record and every persistence surface this
+		// deletion rewrites BEFORE the manager delete commits, so a failure
+		// inside the write group below can be compensated instead of leaving
+		// the secrets-backed record gone while metadata and view pins still
+		// reference it.
+		let previousRecord: Awaited<ReturnType<ProviderSettingsManager["getProfile"]>> | undefined
+		try {
+			previousRecord = await this.providerSettingsManager.getProfile({ name: profileToDelete.name })
+		} catch {
+			// Absent record: the idempotent not-found path below still prunes the
+			// stale list entry, and compensation skips the record restore.
+		}
+		const previousEntries = this.getProviderProfileEntries()
+		const previousSelection = globalSettings.currentApiConfigName
+		const previousSharedSettings = this.contextProxy.getProviderSettings()
+		const previousViewStates = this.getPersistedViewStates({ fresh: true })
+		// Tracks whether the scoped activation compensation inside the try
+		// already ran, so the outer write-group restore does not run a second,
+		// conflicting compensation.
+		let innerCompensationRan = false
 
-		await this.contextProxy.setValues({
-			...globalSettings,
-			currentApiConfigName: profileToActivate,
-			listApiConfigMeta: entries,
-		})
+		// Remove the profile from the settings store (context.secrets) so it cannot be
+		// resurrected by a later listApiConfigMeta sync. A not-found rejection means
+		// the secret was already gone (e.g. pruned by an earlier run): branch on the
+		// typed ProviderSettingsNotFoundError so the stale list entry below is still
+		// pruned as an idempotent success, while any other failure (e.g. refusing to
+		// delete the last remaining configuration) propagates. Matching message text
+		// instead would let a profile whose name contains "not found" swallow an
+		// unrelated failure.
+		// The settings-store commit and the profile-list write below are two separate
+		// durable writes. Capture the settings first so a failure after the commit can be
+		// compensated: without them the stored profile list would name a profile whose
+		// settings no longer exist, and a later selection or load could not recover them.
+		let deletedProfile: ProviderSettingsWithId | undefined
+		try {
+			const { name: _deletedName, ...profile } = await this.providerSettingsManager.getProfile({
+				name: profileToDelete.name,
+			})
+			deletedProfile = profile as ProviderSettingsWithId
+		} catch (error: unknown) {
+			if (!(error instanceof ProviderSettingsNotFoundError)) {
+				// Abort BEFORE the destructive delete. Without the captured settings there is no
+				// way to put them back if a later durable write fails, so continuing here would
+				// turn a transient read error into permanent profile loss while the persisted list
+				// still named the profile.
+				this.log(
+					`deleteProviderProfile: could not read the settings for '${profileToDelete.name}'; aborting before the deletion because a later failure could not be compensated. ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+				throw error
+			}
+			// A typed not-found is the idempotent case: the secret is already gone, so there is
+			// nothing to compensate and the stale list entry is still pruned below.
+		}
 
-		await this.postStateToWebview()
+		if (signal.aborted) {
+			// Queue contract: check the signal before the first destructive write, so a
+			// deletion that timed out while queued behind another mutation does not destroy
+			// settings that no caller is waiting for any more.
+			throw new Error("Profile deletion was cancelled before the settings commit")
+		}
+
+		try {
+			await this.providerSettingsManager.deleteConfig(profileToDelete.name)
+		} catch (error) {
+			if (!(error instanceof ProviderSettingsNotFoundError)) {
+				throw error
+			}
+			this.log(
+				`deleteProviderProfile: settings for '${profileToDelete.name}' were not found; pruning the stale list entry only`,
+			)
+		}
+
+		try {
+			// Snapshot every durable store this method is about to change, so a failure after the
+			// settings commit can be rolled back store by store instead of only re-saving the
+			// settings: a later failed write would otherwise leave the persisted list, the shared
+			// selection, or this view's own pin pointing at a profile that no longer exists.
+			// Hoisted so the post-commit activation-side effects below can see whether this
+			// deletion displaced the profile this view or the shared selection was using.
+			let viewWasPinnedToDeleted = false
+			let deletedWasGlobal = false
+			let survivingSettings: ProviderSettings | undefined
+			const previousEntries = this.getProviderProfileEntries()
+			const previousGlobalSelection = globalSettings.currentApiConfigName
+			const previousViewPin = this.viewLocalState.currentApiConfigName
+			const previousViewOverlay = this.viewLocalState.apiConfiguration
+			// The shared provider keys are a fifth durable store this method rewrites: without the
+			// same snapshot the compensation would restore the profile list and the selection while
+			// leaving the survivor's provider keys in place, i.e. the restored profile's name paired
+			// with another profile's configuration.
+			const previousSharedProviderSettings = this.contextProxy.getProviderSettings()
+			// The durable viewStates map is another store the re-point below rewrites:
+			// closed views' pins naming the deleted profile must follow the survivor,
+			// and a failed deletion must put the exact pre-deletion map back.
+			const previousPersistedViewStates = { ...this.getPersistedViewStates({ fresh: true }) }
+			// Which writes have actually landed: only those need compensation.
+			let listWriteLanded = false
+			let selectionWriteLanded = false
+			let viewPinWriteLanded = false
+			let providerSettingsWriteLanded = false
+			let persistedRepointLanded = false
+			const entries = previousEntries.filter(({ name }) => name !== profileToDelete.name)
+
+			// Write only the profile list back: replaying the full settings snapshot
+			// captured above would also rewrite unrelated keys (including viewStates,
+			// which ClineProvider mutates directly in storage for concurrent views)
+			// with this view's stale cached copy.
+			try {
+				if (signal.aborted) {
+					// Same contract after the settings commit: throwing here routes through the
+					// compensation below, so the settings are put back instead of leaving a
+					// half-applied deletion behind for the next mutation to read.
+					throw new Error("Profile deletion was cancelled before the profile-list write")
+				}
+
+				await this.contextProxy.setValue("listApiConfigMeta", entries)
+				listWriteLanded = true
+
+				// Resolve the surviving profile's settings so this view and any other
+				// live view still pinned to the deleted profile can be re-pinned with
+				// a matching configuration.
+				try {
+					const { name: _survivingName, ...settings } = await this.providerSettingsManager.getProfile({
+						name: profileToActivate,
+					})
+					survivingSettings = settings as ProviderSettings
+				} catch (error) {
+					this.log(
+						`[deleteProviderProfile] Unable to resolve API profile '${profileToActivate}': ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					)
+				}
+
+				// The mutation timeout already released the caller with a timeout rejection, so the
+				// forward half of the deletion stops here: everything below rewrites the shared
+				// selection, the shared provider settings, and other views' pins, completing a
+				// deletion no caller is waiting for any more. Throwing routes through the
+				// compensation below, which restores the landed writes while the queue is still held.
+				if (signal.aborted) {
+					this.log(
+						`deleteProviderProfile: cancelled before the selection/settings rewrite; the deletion stopped with the profile list already updated.`,
+					)
+					throw new Error("Profile deletion was cancelled before the selection and settings rewrite")
+				}
+
+				// Capture this view's pin before any rewrite: a view pinned to the
+				// deleted profile while the global selection points elsewhere must still be
+				// reconfigured, or getState() would keep the deleted profile's settings under
+				// the surviving profile's name.
+				viewWasPinnedToDeleted = this.viewLocalState.currentApiConfigName === profileToDelete.name
+				deletedWasGlobal = profileToDelete.name === globalSettings.currentApiConfigName
+
+				if (viewWasPinnedToDeleted) {
+					// This view's pin now dangles: re-point it. setValue also persists the
+					// survivor to the shared store, which covers the deleted-was-global case
+					// for every other view as well as this one.
+					await this.setValue("currentApiConfigName", profileToActivate)
+					selectionWriteLanded = true
+					viewPinWriteLanded = true
+				} else if (deletedWasGlobal) {
+					// The shared selection changed, but this view's own pin still names a
+					// surviving profile: update the shared store only, leaving the
+					// view-local pin untouched.
+					await this.contextProxy.setValue("currentApiConfigName", profileToActivate)
+					selectionWriteLanded = true
+				}
+
+				if ((deletedWasGlobal || viewWasPinnedToDeleted) && survivingSettings) {
+					// The deleted profile was the active one (globally, or for this view), so
+					// the shared provider keys still carry its settings; replace them so
+					// getState() reports the surviving profile's configuration.
+					await this.contextProxy.setProviderSettings(survivingSettings)
+					providerSettingsWriteLanded = true
+
+					if (viewWasPinnedToDeleted) {
+						// This view's nested overlay (viewLocalState.apiConfiguration, seeded
+						// by loadViewState) still serves the deleted profile's configuration:
+						// replace it with the survivor's so the re-pointed pin serves matching
+						// settings. A view pinned to another profile keeps its own overlay.
+						await this._saveViewLocalStateFromMutation({ apiConfiguration: survivingSettings })
+						viewPinWriteLanded = true
+					}
+				}
+
+				// Closed views keep their durable viewStates entry after disposal: a pin
+				// naming the deleted profile would rehydrate a missing profile name on
+				// the next load. Re-point those persisted pins to the survivor too.
+				// Order matters: the durable re-point runs before the live re-pin, so a
+				// rejected re-point leaves every live sibling untouched - the
+				// compensation below restores the shared stores only, and an already
+				// re-pointed sibling buffer would keep serving the survivor until its
+				// next mutation.
+				await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
+				persistedRepointLanded = true
+				// Re-pin other live views still buffered on the deleted profile: their
+				// buffer and durable viewStates entry would otherwise keep serving the
+				// deleted profile's name and configuration.
+				await this.rePinViewLocalStateForDeletedProfile(
+					profileToDelete.name,
+					profileToActivate,
+					survivingSettings,
+				)
+			} catch (error: unknown) {
+				// This scoped compensation is authoritative for the stores it
+				// covers; the outer write-group restore must not run again below.
+				innerCompensationRan = true
+				// The queue stays owned until this run settles (see enqueueProviderProfileMutation),
+				// so a cancelled deletion compensates the same way a rejected write does: no later
+				// mutation can have rewritten these stores while this run still holds the queue.
+
+				// Compensate every store that already landed, each awaited on its own so one
+				// failing restore cannot skip the next one. The deletion simply did not happen:
+				// the settings, the profile list, the shared selection, and this view's pin must
+				// all agree again before the original failure is surfaced.
+				const compensationFailures: string[] = []
+				const describeFailure = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+				if (persistedRepointLanded) {
+					try {
+						const restoreViewStates = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+							await this.contextProxy.setValue("viewStates", { ...previousPersistedViewStates })
+						})
+						ClineProvider.persistedViewStateWriteQueue = restoreViewStates.catch(() => {})
+						await restoreViewStates
+					} catch (compensationError: unknown) {
+						compensationFailures.push(`durable viewStates pins: ${describeFailure(compensationError)}`)
+					}
+				}
+
+				if (deletedProfile) {
+					try {
+						await this.providerSettingsManager.saveConfig(profileToDelete.name, deletedProfile)
+					} catch (compensationError: unknown) {
+						compensationFailures.push(
+							`settings for the deleted profile: ${describeFailure(compensationError)}`,
+						)
+					}
+				}
+
+				if (listWriteLanded) {
+					try {
+						await this.contextProxy.setValue("listApiConfigMeta", previousEntries)
+					} catch (compensationError: unknown) {
+						compensationFailures.push(`profile list: ${describeFailure(compensationError)}`)
+					}
+				}
+
+				if (providerSettingsWriteLanded) {
+					try {
+						await this.contextProxy.setProviderSettings(previousSharedProviderSettings)
+					} catch (compensationError: unknown) {
+						compensationFailures.push(`shared provider settings: ${describeFailure(compensationError)}`)
+					}
+				}
+
+				if (selectionWriteLanded) {
+					try {
+						await this.contextProxy.setValue("currentApiConfigName", previousGlobalSelection)
+					} catch (compensationError: unknown) {
+						compensationFailures.push(`shared selection: ${describeFailure(compensationError)}`)
+					}
+				}
+
+				if (viewPinWriteLanded) {
+					try {
+						// Restoring the pin and its nested overlay together returns this view to its
+						// exact pre-deletion state; a view with no pre-deletion pin gets the pin the
+						// deletion created cleared again instead of left holding the survivor.
+						await this._saveViewLocalStateFromMutation({
+							currentApiConfigName: previousViewPin,
+							apiConfiguration: previousViewOverlay,
+						})
+					} catch (compensationError: unknown) {
+						compensationFailures.push(`view pin: ${describeFailure(compensationError)}`)
+					}
+				}
+
+				if (compensationFailures.length > 0) {
+					// A partially repaired deletion is worse than a reported one: surface it as its
+					// own inconsistent-state error so the caller cannot read it as a clean rollback.
+					this.log(
+						`deleteProviderProfile: the deletion failed AND the rollback was incomplete (${compensationFailures.join("; ")}); the persisted profile state may be inconsistent.`,
+					)
+					throw new Error(
+						`Profile deletion left persisted state inconsistent: ${compensationFailures.join("; ")}. Original failure: ${describeFailure(error)}`,
+					)
+				}
+
+				this.log(
+					`deleteProviderProfile: the deletion failed after durable writes landed; the settings, profile list, shared selection, and view pin were all restored, so the profile was not deleted.`,
+				)
+				throw error
+			}
+
+			// The old deleteApiConfiguration path ended with activateProviderProfile, which
+			// updated the manager's own current-profile record and the current mode's profile
+			// mapping, rebuilt the current task's API handler, refreshed the current task's
+			// sticky profile, and emitted ProviderProfileChanged. The storage rewrites above
+			// cover the durable stores; when the deleted profile was the active one (globally
+			// or for this view), complete the activation-side effects here so the deletion
+			// leaves the same live state as activating the survivor. They run after the
+			// try/catch because the deletion has already landed: a failure here must not roll
+			// it back, the same placement activateProviderProfileUnlocked gives its rebuild.
+			if (deletedWasGlobal || viewWasPinnedToDeleted) {
+				let activationFailed = false
+				let activationError: unknown
+				try {
+					const {
+						id: survivingId,
+						name: _activatedName,
+						...activatedSettings
+					} = await this.providerSettingsManager.activateProfile({ name: profileToActivate })
+					if (survivingId) {
+						const { mode } = await this.getState()
+						await this.providerSettingsManager.setModeConfig(mode, survivingId)
+					}
+					this.updateTaskApiHandlerIfNeeded(activatedSettings, { forceRebuild: true })
+					await this.persistStickyProviderProfileToCurrentTask(profileToActivate)
+					if (activatedSettings.apiProvider) {
+						this.emit(RooCodeEventName.ProviderProfileChanged, {
+							name: profileToActivate,
+							provider: activatedSettings.apiProvider,
+						})
+					}
+				} catch (error: unknown) {
+					// The deletion is already committed: post the committed state first, then surface a
+					// distinct error so the caller cannot report a successful deletion as a failed one.
+					activationFailed = true
+					activationError = error
+					this.log(
+						`deleteProviderProfile: deletion committed but activation of '${profileToActivate}' failed: ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					)
+				}
+
+				await this.postStateToWebview()
+				if (activationFailed) {
+					throw new ProfileDeletionActivationError(profileToActivate, activationError)
+				}
+				return
+			}
+
+			await this.postStateToWebview()
+		} catch (error) {
+			// Two failures must NOT be compensated here: a replacement activation
+			// failure after the deletion committed (documented contract: the
+			// deletion stands), and any failure whose scoped compensation
+			// already ran inside the try.
+			if (error instanceof ProfileDeletionActivationError || innerCompensationRan) {
+				throw error
+			}
+			// The manager delete committed but a later write failed: restore the
+			// deleted record first, then the shared metadata, selection, and shared
+			// settings the deletion had rewritten, and finally merge the affected
+			// persisted pins back. The merge re-reads the durable map and rewrites
+			// only entries that named the deleted profile in the pre-delete
+			// snapshot, so concurrent viewStates updates from sibling views
+			// survive. Each restore is independent and logged; the original
+			// failure is what the caller sees.
+			if (previousRecord) {
+				try {
+					const { name: _previousName, id: _previousId, ...previousSettings } = previousRecord
+					await this.providerSettingsManager.saveConfig(profileToDelete.name, previousSettings)
+				} catch (restoreError) {
+					this.log(
+						`[deleteProviderProfile] failed to restore the manager record '${profileToDelete.name}': ${
+							restoreError instanceof Error ? restoreError.message : String(restoreError)
+						}`,
+					)
+				}
+			}
+			try {
+				// Merge rather than clobber: another instance may have added
+				// profiles between the snapshot and the compensation.
+				const currentEntries = this.getProviderProfileEntries()
+				const deletedEntry = previousEntries.find((entry) => entry.name === profileToDelete.name)
+				if (deletedEntry && !currentEntries.some((entry) => entry.name === profileToDelete.name)) {
+					await this.contextProxy.setValue("listApiConfigMeta", [...currentEntries, deletedEntry])
+				}
+			} catch (restoreError) {
+				this.log(
+					`[deleteProviderProfile] failed to restore the profile list: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+				)
+			}
+			try {
+				await this.contextProxy.setValue("currentApiConfigName", previousSelection)
+			} catch (restoreError) {
+				this.log(
+					`[deleteProviderProfile] failed to restore the shared selection: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+				)
+			}
+			try {
+				await this.contextProxy.setProviderSettings(previousSharedSettings)
+			} catch (restoreError) {
+				this.log(
+					`[deleteProviderProfile] failed to restore the shared provider settings: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+				)
+			}
+			try {
+				const restore = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+					const current = this.getPersistedViewStates({ fresh: true })
+					const merged = { ...current }
+					let changed = false
+					for (const [viewId, entry] of Object.entries(previousViewStates)) {
+						if (entry?.currentApiConfigName !== profileToDelete.name) {
+							continue
+						}
+						merged[viewId] = entry
+						changed = true
+					}
+					if (changed) {
+						await this.contextProxy.setValue("viewStates", merged)
+					}
+				})
+				ClineProvider.persistedViewStateWriteQueue = restore.catch(() => {})
+				await restore
+			} catch (restoreError) {
+				this.log(
+					`[deleteProviderProfile] failed to restore the persisted view pins: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+				)
+			}
+			throw error
+		}
 	}
 
 	private async persistStickyProviderProfileToCurrentTask(
@@ -2144,19 +3528,62 @@ export class ClineProvider
 		const persistTaskHistory = options?.persistTaskHistory ?? true
 		const skipCurrentTaskRebuild = options?.skipCurrentTaskRebuild ?? false
 
-		if (!skipCurrentTaskRebuild) {
-			// See `upsertProviderProfile` for a description of what this is doing.
-			await Promise.all([
-				this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
-				this.contextProxy.setValue("currentApiConfigName", name),
-				this.contextProxy.setProviderSettings(providerSettings),
-			])
+		// The mode is read before the first write because the per-mode mapping is one of the
+		// durable stores the snapshot below captures.
+		const { mode } = await this.getState()
+		const snapshot = await this.snapshotProfileActivationStores(name, mode)
+		const landed: ProfileActivationLanded = {
+			profileRecord: false,
+			profileList: false,
+			modeMapping: false,
+			selection: false,
+			sharedProviderSettings: false,
+			viewOverlay: false,
 		}
 
-		const { mode } = await this.getState()
+		try {
+			if (!skipCurrentTaskRebuild) {
+				// See `upsertProviderProfile` for a description of what this is doing. The writes
+				// are serialized so each step can record that it landed: a rejection later in the
+				// activation then rolls back the profile list, the shared name, the shared settings,
+				// and this view's buffer instead of leaving them committed under the name the
+				// previous profile still carries.
+				await this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+				landed.profileList = true
 
-		if (id && persistModeConfig) {
-			await this.providerSettingsManager.setModeConfig(mode, id)
+				// Route through setValue so the in-memory viewLocalState buffer tracks the
+				// activated profile: a plain ContextProxy write would leave a stale loaded
+				// currentApiConfigName shadowing the new value in getValues().
+				await this.setValue("currentApiConfigName", name)
+				landed.selection = true
+
+				// Marked before the await: setProviderSettings fans out to several globalState keys,
+				// so a rejection partway through the fan-out still has to be rolled back.
+				landed.sharedProviderSettings = true
+				await this.contextProxy.setProviderSettings(providerSettings)
+
+				// setProviderSettings writes the shared store directly, bypassing the
+				// view-local mutation path: clear this view's buffered apiConfiguration
+				// overlay (if any) so a stale loaded profile cannot keep shadowing the
+				// new settings in getState().
+				await this._saveViewLocalStateFromMutation({ apiConfiguration: undefined })
+				landed.viewOverlay = true
+
+				// Other live views may have buffered this profile's settings earlier;
+				// refresh them so their getState() cannot report the activated profile's
+				// name with stale settings.
+				await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
+			}
+
+			if (id && persistModeConfig) {
+				await this.providerSettingsManager.setModeConfig(mode, id)
+				landed.modeMapping = true
+			}
+		} catch (error: unknown) {
+			// `activateProfile` above already rewrote the profile manager's own current-profile
+			// record, so the compensation has to put the previous name back there too.
+			await this.compensateProfileActivation(snapshot, landed, "activateProviderProfile", error, true)
+			throw error
 		}
 
 		// Change the provider for the current task.
@@ -2175,6 +3602,231 @@ export class ClineProvider
 		if (providerSettings.apiProvider && !skipCurrentTaskRebuild) {
 			this.emit(RooCodeEventName.ProviderProfileChanged, { name, provider: providerSettings.apiProvider })
 		}
+	}
+
+	/**
+	 * Refresh the view-local apiConfiguration buffer of the other live views after a
+	 * profile upsert/activation. Both cases come from the same shape: the shared store
+	 * holds exactly one "current profile" settings blob, while each view pins its own
+	 * profile name.
+	 *
+	 * - Pinned to THIS profile: the upsert rewrote the profile's settings in the
+	 *   store-backed manager, so a buffer that loaded them earlier keeps shadowing the
+	 *   stale settings in getState(). Push the new settings into it.
+	 * - Pinned to ANOTHER profile: activation wrote the activated profile's settings into
+	 *   the shared blob, and this refresh does not touch that other profile. Without a
+	 *   reload, that view's getState() reports its pinned profile's NAME next to the
+	 *   activated profile's SETTINGS. Reload the pinned profile from the manager so the
+	 *   name and the settings stay consistent.
+	 *
+	 * A view with no pin follows the shared store and needs nothing. The originating view
+	 * refreshes its own buffer at the mutation site - but only when it ACTIVATED the
+	 * profile, because activation clears its overlay. A save that does not activate leaves
+	 * the acting view's own overlay untouched, so those callers pass includeSelf and this
+	 * view refreshes too when its pin names the profile that was just saved.
+	 */
+	private async refreshViewLocalStateForUpdatedProfile(
+		name: string,
+		providerSettings: ProviderSettings,
+		includeSelf = false,
+	): Promise<void> {
+		const affected = ClineProvider.getAllInstances().filter((instance) => instance !== this || includeSelf)
+
+		if (affected.length === 0) {
+			return
+		}
+
+		await Promise.all(
+			affected.map(async (instance) => {
+				const pinned = instance.pinnedProfileName
+
+				if (pinned === undefined) {
+					return
+				}
+
+				// The acting view is affected only by the profile it just saved. The reload
+				// below exists for SIBLING views, whose shared blob can change underneath
+				// them; refreshing an unrelated pin here would overwrite settings that did
+				// not change with whatever this call happens to carry.
+				if (instance === this && pinned !== name) {
+					return
+				}
+
+				let settings: ProviderSettings = providerSettings
+
+				if (pinned !== name) {
+					try {
+						settings = await this.providerSettingsManager.getProfile({ name: pinned })
+					} catch (error) {
+						// The pin can name a profile the manager no longer holds (deleted out of band).
+						// Leaving that view's buffer alone is no worse than before this fix; the
+						// deletion re-pin path owns recovery for a removed profile.
+						console.error(`Failed to reload pinned profile "${pinned}" for a sibling view:`, error)
+						return
+					}
+				}
+
+				// Direct private access: compile-time safe across sibling instances.
+				await instance._saveViewLocalStateFromMutation({ apiConfiguration: settings })
+
+				// The active task of a view pinned to the saved profile holds its own
+				// API handler built from that profile's settings: rebuild it with the
+				// saved settings or the running conversation keeps sending the old
+				// token even though the view's buffer has caught up. Views pinned to
+				// other profiles just reloaded their own unchanged settings.
+				// Only rebuild when the task actually runs under the saved profile: a
+				// view pinned to this profile can hold a task that follows a different
+				// sticky profile, and the forced rebuild would silently switch that
+				// conversation to the saved profile's settings.
+				if (pinned === name && instance.getCurrentTask()?.taskApiConfigName === name) {
+					// The handler takes provider settings, not the stored record: the
+					// overlay above keeps the record's identity fields, the rebuilt
+					// handler must not see them.
+					const {
+						name: _recordName,
+						id: _recordId,
+						...taskSettings
+					} = settings as ProviderSettings & { name?: string; id?: string }
+					instance.updateTaskApiHandlerIfNeeded(taskSettings, { forceRebuild: true })
+				}
+				await instance.postStateToWebview()
+			}),
+		)
+	}
+
+	/**
+	 * Re-pin the other live views whose buffer still names a deleted profile:
+	 * without this their in-memory buffer and durable viewStates entry keep
+	 * serving the deleted profile's name and configuration on top of the
+	 * surviving shared state. Each affected view's durable entry is re-pinned
+	 * through the serialized write queue, so the rename survives reloads.
+	 */
+	private async rePinViewLocalStateForDeletedProfile(
+		deletedProfileName: string,
+		replacementName: string,
+		replacementSettings: ProviderSettings | undefined,
+	): Promise<void> {
+		const affected = ClineProvider.getAllInstances().filter(
+			(instance) => instance !== this && instance.pinnedProfileName === deletedProfileName,
+		)
+
+		if (affected.length === 0) {
+			return
+		}
+
+		const snapshots = affected.map((instance) => ({
+			instance,
+			previousPin: instance.viewLocalState.currentApiConfigName,
+			previousOverlay: instance.viewLocalState.apiConfiguration,
+		}))
+
+		const results = await Promise.allSettled(
+			snapshots.map(async (snapshot) => {
+				const values: Partial<RooCodeSettings> & Partial<ExtensionState> = {
+					currentApiConfigName: replacementName,
+				}
+
+				if (replacementSettings) {
+					values.apiConfiguration = replacementSettings
+				}
+
+				// Direct private access: compile-time safe across sibling instances.
+				await snapshot.instance._saveViewLocalStateFromMutation(values)
+				await snapshot.instance.postStateToWebview()
+			}),
+		)
+
+		const rejected = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+		if (rejected.length > 0) {
+			// Undo every affected view, not just the failing one: _saveViewLocalStateFromMutation
+			// fills the in-memory buffer before the durable write settles, so even a rejected write
+			// leaves the view re-pointed. Each restore is awaited on its own so one failing restore
+			// cannot skip the next one.
+			for (const snapshot of snapshots) {
+				try {
+					await snapshot.instance._saveViewLocalStateFromMutation({
+						currentApiConfigName: snapshot.previousPin,
+						apiConfiguration: snapshot.previousOverlay,
+					})
+				} catch (rollbackError: unknown) {
+					snapshot.instance.log(
+						`[rePinViewLocalStateForDeletedProfile] Could not restore the pin for view ${snapshot.instance.viewId} after a failed re-pin: ${
+							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+						}`,
+					)
+				}
+			}
+			throw rejected[0].reason
+		}
+
+		// Only after every sibling's re-pin landed: switching a task is not part of the durable
+		// rollback above, so doing it inside the loop would leave a successful sibling's task on
+		// the replacement's handler and sticky name while its pin was compensated back to the
+		// deleted profile. The active task of a view pinned to the deleted profile holds its own
+		// API handler and sticky profile name built from the deleted profile: rebuild the handler
+		// with the replacement's settings and re-point the sticky name, or the running
+		// conversation keeps sending the deleted profile's configuration even though the view's
+		// buffer was re-pointed (the posted state prefers the task's own apiConfiguration).
+		for (const snapshot of snapshots) {
+			// Only re-point when the task actually runs under the deleted profile:
+			// a view pinned to it can hold a task that follows a different sticky
+			// profile, and forcing the replacement would silently switch that
+			// conversation and rewrite its persisted profile name without the user
+			// asking.
+			if (snapshot.instance.getCurrentTask()?.taskApiConfigName === deletedProfileName) {
+				if (replacementSettings) {
+					snapshot.instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
+				}
+				await snapshot.instance.persistStickyProviderProfileToCurrentTask(replacementName)
+			}
+			await snapshot.instance.postStateToWebview()
+		}
+	}
+
+	/**
+	 * Re-point live views still pinned to a profile that is being renamed onto
+	 * the new name. A rename keeps the profile id, so a view pinned to the old
+	 * name should follow the record instead of falling back to the shared
+	 * selection: without this, the pin dangles at a name that no longer
+	 * resolves and the buffered overlay keeps serving the pre-rename copy.
+	 * Must run before the old name is deleted.
+	 */
+	public async repointViewLocalStateAfterProfileRename(
+		oldName: string,
+		newName: string,
+		renamedSettings: ProviderSettingsWithId | undefined,
+	): Promise<void> {
+		// Closed views keep their pin only in the persisted map: re-point those entries
+		// first so a view that launches after an intervening activation still follows the
+		// renamed profile instead of dangling at the deleted name.
+		await this.repointPersistedViewStates(oldName, newName)
+		const affected = ClineProvider.getAllInstances().filter((instance) => instance.pinnedProfileName === oldName)
+
+		if (affected.length === 0) {
+			return
+		}
+
+		await Promise.all(
+			affected.map(async (instance) => {
+				// Assigning the settings (even undefined) is what replaces or clears the
+				// overlay: the renamed record's current settings are the only correct
+				// overlay for a pin that now names the new profile.
+				await instance._saveViewLocalStateFromMutation({
+					currentApiConfigName: newName,
+					apiConfiguration: renamedSettings,
+				})
+				// A task running under the old name holds its own API handler and sticky
+				// profile name: re-point both, or the conversation keeps sending the
+				// pre-rename configuration under a name that no longer resolves.
+				if (instance.getCurrentTask()?.taskApiConfigName === oldName) {
+					if (renamedSettings) {
+						instance.updateTaskApiHandlerIfNeeded(renamedSettings, { forceRebuild: true })
+					}
+					await instance.persistStickyProviderProfileToCurrentTask(newName)
+				}
+				await instance.postStateToWebview()
+			}),
+		)
 	}
 
 	async updateCustomInstructions(instructions?: string) {
@@ -2312,8 +3964,11 @@ export class ClineProvider
 						// picks up the new token immediately for the current task.
 						await this.upsertProviderProfile(entry.name, updated, true)
 					} else {
-						// Non-active profiles just need the token saved to disk.
+						// Non-active profiles just need the token saved to disk, plus the same overlay
+						// refresh a view pinned to that profile needs to pick the new token up without
+						// a window reload - including this view, whose own pin may name it.
 						await this.providerSettingsManager.saveConfig(entry.name, updated)
+						await this.refreshViewLocalStateForUpdatedProfile(entry.name, updated, true)
 					}
 				}
 			}
@@ -3083,12 +4738,18 @@ export class ClineProvider
 		>
 	> {
 		const stateValues = this.contextProxy.getValues()
+
+		// Merge viewLocalState on top of global state so a provider can serve
+		// state values scoped to its own view while preserving ContextProxy defaults.
+		const mergedStateValues = { ...stateValues, ...this.viewLocalState }
+
 		const customModes = await this.customModesManager.getCustomModes()
 
 		// Determine apiProvider with the same logic as before, while filtering retired providers.
+		// Use mergedStateValues to prioritize viewLocalState for parallel mode support
 		const apiProvider: ProviderName =
-			stateValues.apiProvider && !isRetiredProvider(stateValues.apiProvider)
-				? stateValues.apiProvider
+			mergedStateValues.apiProvider && !isRetiredProvider(mergedStateValues.apiProvider)
+				? mergedStateValues.apiProvider
 				: providerIdentifiers.anthropic
 
 		// Build the apiConfiguration object combining state values and secrets.
@@ -3098,6 +4759,23 @@ export class ClineProvider
 		if (!providerSettings.apiProvider) {
 			providerSettings.apiProvider = apiProvider
 		}
+
+		// A view-local apiConfiguration overlay always holds a COMPLETE profile: it is seeded from
+		// providerSettingsManager.getProfile (loadViewState), from the profile refresh / re-pin
+		// paths, or from a full settings object written by this view's own mutation. Spreading the
+		// shared provider settings underneath it would fill every key the pinned profile leaves
+		// unset with the settings of whichever profile the shared store activated last - a task in
+		// this view could then send its own credential to another profile's endpoint, and the
+		// settings UI would persist that mix back into the profile. With an overlay the view's own
+		// profile wins outright; without one the previous merge is preserved.
+		// The computed apiProvider goes first so it only applies when the overlay does not set one:
+		// a profile saved without a provider yields an overlay without apiProvider, and that undefined
+		// would otherwise reach createTask, ProfileValidator.isProfileAllowed and the webview's
+		// checkExistKey instead of the previous anthropic fallback.
+		const viewApiConfiguration = this.viewLocalState.apiConfiguration
+		const effectiveApiConfiguration: ProviderSettings = viewApiConfiguration
+			? { apiProvider, ...viewApiConfiguration }
+			: { ...providerSettings, ...mergedStateValues.apiConfiguration }
 
 		let organizationAllowList = ORGANIZATION_ALLOW_ALL
 
@@ -3150,123 +4828,124 @@ export class ClineProvider
 
 		// Return the same structure as before.
 		return {
-			apiConfiguration: providerSettings,
-			lastShownAnnouncementId: stateValues.lastShownAnnouncementId,
-			customInstructions: stateValues.customInstructions,
-			apiModelId: stateValues.apiModelId,
-			alwaysAllowReadOnly: stateValues.alwaysAllowReadOnly ?? false,
-			alwaysAllowReadOnlyOutsideWorkspace: stateValues.alwaysAllowReadOnlyOutsideWorkspace ?? false,
-			allowedReadFiles: stateValues.allowedReadFiles ?? [],
-			alwaysAllowWrite: stateValues.alwaysAllowWrite ?? false,
-			alwaysAllowWriteOutsideWorkspace: stateValues.alwaysAllowWriteOutsideWorkspace ?? false,
-			alwaysAllowWriteProtected: stateValues.alwaysAllowWriteProtected ?? false,
-			allowedWriteFiles: stateValues.allowedWriteFiles ?? [],
-			alwaysAllowExecute: stateValues.alwaysAllowExecute ?? false,
+			apiConfiguration: effectiveApiConfiguration,
+			lastShownAnnouncementId: mergedStateValues.lastShownAnnouncementId,
+			customInstructions: mergedStateValues.customInstructions,
+			apiModelId: mergedStateValues.apiModelId,
+			alwaysAllowReadOnly: mergedStateValues.alwaysAllowReadOnly ?? false,
+			alwaysAllowReadOnlyOutsideWorkspace: mergedStateValues.alwaysAllowReadOnlyOutsideWorkspace ?? false,
+			allowedReadFiles: mergedStateValues.allowedReadFiles ?? [],
+			alwaysAllowWrite: mergedStateValues.alwaysAllowWrite ?? false,
+			alwaysAllowWriteOutsideWorkspace: mergedStateValues.alwaysAllowWriteOutsideWorkspace ?? false,
+			alwaysAllowWriteProtected: mergedStateValues.alwaysAllowWriteProtected ?? false,
+			allowedWriteFiles: mergedStateValues.allowedWriteFiles ?? [],
+			alwaysAllowExecute: mergedStateValues.alwaysAllowExecute ?? false,
 			destructiveCommandGuardEnabled:
-				stateValues.destructiveCommandGuardEnabled ?? DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED,
+				mergedStateValues.destructiveCommandGuardEnabled ?? DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED,
 			alwaysDenyUnapprovedCommands:
-				stateValues.alwaysDenyUnapprovedCommands ?? DEFAULT_ALWAYS_DENY_UNAPPROVED_COMMANDS,
-			alwaysAllowMcp: stateValues.alwaysAllowMcp ?? false,
-			alwaysAllowModeSwitch: stateValues.alwaysAllowModeSwitch ?? false,
-			alwaysAllowSubtasks: stateValues.alwaysAllowSubtasks ?? false,
-			alwaysAllowFollowupQuestions: stateValues.alwaysAllowFollowupQuestions ?? false,
-			followupAutoApproveTimeoutMs: stateValues.followupAutoApproveTimeoutMs ?? 60000,
-			diagnosticsEnabled: stateValues.diagnosticsEnabled ?? true,
-			allowedMaxRequests: stateValues.allowedMaxRequests,
-			allowedMaxCost: stateValues.allowedMaxCost,
-			autoCondenseContext: stateValues.autoCondenseContext ?? true,
-			autoCondenseContextPercent: stateValues.autoCondenseContextPercent ?? 100,
+				mergedStateValues.alwaysDenyUnapprovedCommands ?? DEFAULT_ALWAYS_DENY_UNAPPROVED_COMMANDS,
+			alwaysAllowMcp: mergedStateValues.alwaysAllowMcp ?? false,
+			alwaysAllowModeSwitch: mergedStateValues.alwaysAllowModeSwitch ?? false,
+			alwaysAllowSubtasks: mergedStateValues.alwaysAllowSubtasks ?? false,
+			alwaysAllowFollowupQuestions: mergedStateValues.alwaysAllowFollowupQuestions ?? false,
+			followupAutoApproveTimeoutMs: mergedStateValues.followupAutoApproveTimeoutMs ?? 60000,
+			diagnosticsEnabled: mergedStateValues.diagnosticsEnabled ?? true,
+			allowedMaxRequests: mergedStateValues.allowedMaxRequests,
+			allowedMaxCost: mergedStateValues.allowedMaxCost,
+			autoCondenseContext: mergedStateValues.autoCondenseContext ?? true,
+			autoCondenseContextPercent: mergedStateValues.autoCondenseContextPercent ?? 100,
 			taskHistory: includeTaskHistory ? this.taskHistoryStore.getAll() : [],
-			allowedCommands: stateValues.allowedCommands,
-			deniedCommands: stateValues.deniedCommands,
-			soundEnabled: stateValues.soundEnabled ?? false,
-			ttsEnabled: stateValues.ttsEnabled ?? false,
-			ttsSpeed: stateValues.ttsSpeed ?? 1.0,
-			enableCheckpoints: stateValues.enableCheckpoints ?? true,
-			checkpointTimeout: stateValues.checkpointTimeout ?? DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
-			soundVolume: stateValues.soundVolume,
-			writeDelayMs: stateValues.writeDelayMs ?? DEFAULT_WRITE_DELAY_MS,
-			diffFuzzyThreshold: stateValues.diffFuzzyThreshold ?? DEFAULT_DIFF_FUZZY_THRESHOLD,
+			allowedCommands: mergedStateValues.allowedCommands,
+			deniedCommands: mergedStateValues.deniedCommands,
+			soundEnabled: mergedStateValues.soundEnabled ?? false,
+			ttsEnabled: mergedStateValues.ttsEnabled ?? false,
+			ttsSpeed: mergedStateValues.ttsSpeed ?? 1.0,
+			enableCheckpoints: mergedStateValues.enableCheckpoints ?? true,
+			checkpointTimeout: mergedStateValues.checkpointTimeout ?? DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
+			soundVolume: mergedStateValues.soundVolume,
+			writeDelayMs: mergedStateValues.writeDelayMs ?? DEFAULT_WRITE_DELAY_MS,
+			diffFuzzyThreshold: mergedStateValues.diffFuzzyThreshold ?? DEFAULT_DIFF_FUZZY_THRESHOLD,
 			terminalShellIntegrationTimeout:
-				stateValues.terminalShellIntegrationTimeout ?? Terminal.defaultShellIntegrationTimeout,
-			terminalShellIntegrationDisabled: stateValues.terminalShellIntegrationDisabled ?? true,
+				mergedStateValues.terminalShellIntegrationTimeout ?? Terminal.defaultShellIntegrationTimeout,
+			terminalShellIntegrationDisabled: mergedStateValues.terminalShellIntegrationDisabled ?? true,
 			collapseCommandOutputByDefault:
-				stateValues.collapseCommandOutputByDefault ?? DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT,
-			terminalCommandDelay: stateValues.terminalCommandDelay ?? 0,
-			terminalPowershellCounter: stateValues.terminalPowershellCounter ?? false,
-			terminalZshClearEolMark: stateValues.terminalZshClearEolMark ?? true,
-			terminalZshOhMy: stateValues.terminalZshOhMy ?? false,
-			terminalZshP10k: stateValues.terminalZshP10k ?? false,
-			terminalZdotdir: stateValues.terminalZdotdir ?? false,
-			terminalProfile: stateValues.terminalProfile,
-			mode: stateValues.mode ?? defaultModeSlug,
-			language: stateValues.language ?? formatLanguage(vscode.env.language),
-			mcpEnabled: stateValues.mcpEnabled ?? true,
+				mergedStateValues.collapseCommandOutputByDefault ?? DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT,
+			terminalCommandDelay: mergedStateValues.terminalCommandDelay ?? 0,
+			terminalPowershellCounter: mergedStateValues.terminalPowershellCounter ?? false,
+			terminalZshClearEolMark: mergedStateValues.terminalZshClearEolMark ?? true,
+			terminalZshOhMy: mergedStateValues.terminalZshOhMy ?? false,
+			terminalZshP10k: mergedStateValues.terminalZshP10k ?? false,
+			terminalZdotdir: mergedStateValues.terminalZdotdir ?? false,
+			terminalProfile: mergedStateValues.terminalProfile,
+			mode: (mergedStateValues.mode as Mode) ?? defaultModeSlug,
+			language: mergedStateValues.language ?? formatLanguage(vscode.env.language),
+			mcpEnabled: mergedStateValues.mcpEnabled ?? true,
+
 			mcpServers: this.mcpHub?.getAllServers() ?? [],
-			currentApiConfigName: stateValues.currentApiConfigName ?? "default",
-			listApiConfigMeta: stateValues.listApiConfigMeta ?? [],
-			pinnedApiConfigs: stateValues.pinnedApiConfigs ?? {},
-			modeApiConfigs: stateValues.modeApiConfigs ?? ({} as Record<Mode, string>),
-			customModePrompts: stateValues.customModePrompts ?? {},
-			customSupportPrompts: stateValues.customSupportPrompts ?? {},
-			enhancementApiConfigId: stateValues.enhancementApiConfigId,
-			experiments: stateValues.experiments ?? experimentDefault,
-			autoApprovalEnabled: stateValues.autoApprovalEnabled ?? false,
+			currentApiConfigName: mergedStateValues.currentApiConfigName ?? "default",
+			listApiConfigMeta: mergedStateValues.listApiConfigMeta ?? [],
+			pinnedApiConfigs: mergedStateValues.pinnedApiConfigs ?? {},
+			modeApiConfigs: (mergedStateValues.modeApiConfigs as Record<Mode, string>) ?? ({} as Record<Mode, string>),
+			customModePrompts: mergedStateValues.customModePrompts ?? {},
+			customSupportPrompts: mergedStateValues.customSupportPrompts ?? {},
+			enhancementApiConfigId: mergedStateValues.enhancementApiConfigId,
+			experiments: mergedStateValues.experiments ?? experimentDefault,
+			autoApprovalEnabled: mergedStateValues.autoApprovalEnabled ?? false,
 			customModes,
-			maxOpenTabsContext: stateValues.maxOpenTabsContext ?? 20,
-			maxWorkspaceFiles: stateValues.maxWorkspaceFiles ?? 200,
-			disabledTools: stateValues.disabledTools,
-			telemetrySetting: stateValues.telemetrySetting || "unset",
-			showRooIgnoredFiles: stateValues.showRooIgnoredFiles ?? false,
-			enableSubfolderRules: stateValues.enableSubfolderRules ?? false,
-			maxImageFileSize: stateValues.maxImageFileSize ?? 5,
-			maxTotalImageSize: stateValues.maxTotalImageSize ?? 20,
-			historyPreviewCollapsed: stateValues.historyPreviewCollapsed ?? false,
-			reasoningBlockCollapsed: stateValues.reasoningBlockCollapsed ?? true,
-			chatFontSize: stateValues.chatFontSize,
-			enterBehavior: stateValues.enterBehavior ?? "send",
+			maxOpenTabsContext: mergedStateValues.maxOpenTabsContext ?? 20,
+			maxWorkspaceFiles: mergedStateValues.maxWorkspaceFiles ?? 200,
+			disabledTools: mergedStateValues.disabledTools,
+			telemetrySetting: mergedStateValues.telemetrySetting || "unset",
+			showRooIgnoredFiles: mergedStateValues.showRooIgnoredFiles ?? false,
+			enableSubfolderRules: mergedStateValues.enableSubfolderRules ?? false,
+			maxImageFileSize: mergedStateValues.maxImageFileSize ?? 5,
+			maxTotalImageSize: mergedStateValues.maxTotalImageSize ?? 20,
+			historyPreviewCollapsed: mergedStateValues.historyPreviewCollapsed ?? false,
+			reasoningBlockCollapsed: mergedStateValues.reasoningBlockCollapsed ?? true,
+			chatFontSize: mergedStateValues.chatFontSize,
+			enterBehavior: mergedStateValues.enterBehavior ?? "send",
 			cloudUserInfo,
 			cloudIsAuthenticated,
 			sharingEnabled,
 			publicSharingEnabled,
 			organizationAllowList,
 			organizationSettingsVersion,
-			customCondensingPrompt: stateValues.customCondensingPrompt,
-			codebaseIndexModels: stateValues.codebaseIndexModels ?? EMBEDDING_MODEL_PROFILES,
+			customCondensingPrompt: mergedStateValues.customCondensingPrompt,
+			codebaseIndexModels: mergedStateValues.codebaseIndexModels ?? EMBEDDING_MODEL_PROFILES,
 			codebaseIndexConfig: {
-				codebaseIndexEnabled: stateValues.codebaseIndexConfig?.codebaseIndexEnabled ?? false,
+				codebaseIndexEnabled: mergedStateValues.codebaseIndexConfig?.codebaseIndexEnabled ?? false,
 				codebaseIndexQdrantUrl:
-					stateValues.codebaseIndexConfig?.codebaseIndexQdrantUrl ?? "http://localhost:6333",
+					mergedStateValues.codebaseIndexConfig?.codebaseIndexQdrantUrl ?? "http://localhost:6333",
 				codebaseIndexEmbedderProvider:
-					stateValues.codebaseIndexConfig?.codebaseIndexEmbedderProvider ?? providerIdentifiers.openai,
-				codebaseIndexEmbedderBaseUrl: stateValues.codebaseIndexConfig?.codebaseIndexEmbedderBaseUrl ?? "",
-				codebaseIndexEmbedderModelId: stateValues.codebaseIndexConfig?.codebaseIndexEmbedderModelId ?? "",
+					mergedStateValues.codebaseIndexConfig?.codebaseIndexEmbedderProvider ?? providerIdentifiers.openai,
+				codebaseIndexEmbedderBaseUrl: mergedStateValues.codebaseIndexConfig?.codebaseIndexEmbedderBaseUrl ?? "",
+				codebaseIndexEmbedderModelId: mergedStateValues.codebaseIndexConfig?.codebaseIndexEmbedderModelId ?? "",
 				codebaseIndexEmbedderModelDimension:
-					stateValues.codebaseIndexConfig?.codebaseIndexEmbedderModelDimension,
+					mergedStateValues.codebaseIndexConfig?.codebaseIndexEmbedderModelDimension,
 				codebaseIndexOpenAiCompatibleBaseUrl:
-					stateValues.codebaseIndexConfig?.codebaseIndexOpenAiCompatibleBaseUrl,
-				codebaseIndexSearchMaxResults: stateValues.codebaseIndexConfig?.codebaseIndexSearchMaxResults,
-				codebaseIndexSearchMinScore: stateValues.codebaseIndexConfig?.codebaseIndexSearchMinScore,
-				codebaseIndexBedrockRegion: stateValues.codebaseIndexConfig?.codebaseIndexBedrockRegion,
-				codebaseIndexBedrockProfile: stateValues.codebaseIndexConfig?.codebaseIndexBedrockProfile,
+					mergedStateValues.codebaseIndexConfig?.codebaseIndexOpenAiCompatibleBaseUrl,
+				codebaseIndexSearchMaxResults: mergedStateValues.codebaseIndexConfig?.codebaseIndexSearchMaxResults,
+				codebaseIndexSearchMinScore: mergedStateValues.codebaseIndexConfig?.codebaseIndexSearchMinScore,
+				codebaseIndexBedrockRegion: mergedStateValues.codebaseIndexConfig?.codebaseIndexBedrockRegion,
+				codebaseIndexBedrockProfile: mergedStateValues.codebaseIndexConfig?.codebaseIndexBedrockProfile,
 				codebaseIndexOpenRouterSpecificProvider:
-					stateValues.codebaseIndexConfig?.codebaseIndexOpenRouterSpecificProvider,
+					mergedStateValues.codebaseIndexConfig?.codebaseIndexOpenRouterSpecificProvider,
 			},
-			profileThresholds: stateValues.profileThresholds ?? {},
+			profileThresholds: mergedStateValues.profileThresholds ?? {},
 			lockApiConfigAcrossModes: this.context.workspaceState.get("lockApiConfigAcrossModes", false),
-			includeDiagnosticMessages: stateValues.includeDiagnosticMessages ?? true,
-			maxDiagnosticMessages: stateValues.maxDiagnosticMessages ?? 50,
-			includeTaskHistoryInEnhance: stateValues.includeTaskHistoryInEnhance ?? true,
-			includeCurrentTime: stateValues.includeCurrentTime ?? true,
-			includeCurrentCost: stateValues.includeCurrentCost ?? true,
-			maxGitStatusFiles: stateValues.maxGitStatusFiles ?? 0,
+			includeDiagnosticMessages: mergedStateValues.includeDiagnosticMessages ?? true,
+			maxDiagnosticMessages: mergedStateValues.maxDiagnosticMessages ?? 50,
+			includeTaskHistoryInEnhance: mergedStateValues.includeTaskHistoryInEnhance ?? true,
+			includeCurrentTime: mergedStateValues.includeCurrentTime ?? true,
+			includeCurrentCost: mergedStateValues.includeCurrentCost ?? true,
+			maxGitStatusFiles: mergedStateValues.maxGitStatusFiles ?? 0,
 			taskSyncEnabled,
-			imageGenerationProvider: stateValues.imageGenerationProvider,
-			openRouterImageApiKey: stateValues.openRouterImageApiKey,
-			openRouterImageGenerationSelectedModel: stateValues.openRouterImageGenerationSelectedModel,
-			autoCloseZooOpenedFiles: stateValues.autoCloseZooOpenedFiles,
-			autoCloseZooOpenedFilesAfterUserEdited: stateValues.autoCloseZooOpenedFilesAfterUserEdited,
-			autoCloseZooOpenedNewFiles: stateValues.autoCloseZooOpenedNewFiles,
+			imageGenerationProvider: mergedStateValues.imageGenerationProvider,
+			openRouterImageApiKey: mergedStateValues.openRouterImageApiKey,
+			openRouterImageGenerationSelectedModel: mergedStateValues.openRouterImageGenerationSelectedModel,
+			autoCloseZooOpenedFiles: mergedStateValues.autoCloseZooOpenedFiles,
+			autoCloseZooOpenedFilesAfterUserEdited: mergedStateValues.autoCloseZooOpenedFilesAfterUserEdited,
+			autoCloseZooOpenedNewFiles: mergedStateValues.autoCloseZooOpenedNewFiles,
 		}
 	}
 
@@ -3338,7 +5017,25 @@ export class ClineProvider
 	}
 
 	public async setValue<K extends keyof RooCodeSettings>(key: K, value: RooCodeSettings[K]) {
+		const previousValue = this.contextProxy.getValue(key)
 		await this.contextProxy.setValue(key, value)
+		try {
+			await this._saveViewLocalStateFromMutation({ [key]: value })
+		} catch (error) {
+			// The per-view pin could not be persisted. Roll the shared value back so the two
+			// stores cannot disagree: a fresh shared setting on top of a stale pin (or vice
+			// versa) is exactly what getValues() would hand to the next consumer.
+			try {
+				await this.contextProxy.setValue(key, previousValue)
+			} catch (rollbackError) {
+				this.log(
+					`[ClineProvider#setValue] Failed to restore the shared value for "${key}" after a per-view write failed: ${
+						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+					}`,
+				)
+			}
+			throw error
+		}
 	}
 
 	public getValue<K extends keyof RooCodeSettings>(key: K) {
@@ -3346,11 +5043,169 @@ export class ClineProvider
 	}
 
 	public getValues() {
-		return this.contextProxy.getValues()
+		return { ...this.contextProxy.getValues(), ...this.viewLocalState }
 	}
 
 	public async setValues(values: RooCodeSettings) {
-		await this.contextProxy.setValues(values)
+		const sanitizedValues = { ...values }
+
+		if (sanitizedValues.mode !== undefined) {
+			// An unknown or non-string mode (e.g. from an API payload) must not be persisted:
+			// a new Task would read it from getState() and persist it into task history.
+			if (
+				typeof sanitizedValues.mode !== "string" ||
+				!getModeBySlug(sanitizedValues.mode, await this.customModesManager.getCustomModes())
+			) {
+				this.log(`[ClineProvider#setValues] Ignoring invalid mode "${String(sanitizedValues.mode)}"`)
+				delete sanitizedValues.mode
+			}
+		}
+
+		// Snapshot the shared values this call is about to change so a failed per-view
+		// persist can put them back (see setValue).
+		const previousValues: Partial<RooCodeSettings> = {}
+		for (const key of Object.keys(sanitizedValues) as Array<keyof RooCodeSettings>) {
+			Object.assign(previousValues, { [key]: this.contextProxy.getValue(key) })
+		}
+
+		await this.contextProxy.setValues(sanitizedValues)
+
+		try {
+			await this._saveViewLocalStateFromMutation(sanitizedValues)
+		} catch (error) {
+			try {
+				await this.contextProxy.setValues(previousValues)
+			} catch (rollbackError) {
+				this.log(
+					`[ClineProvider#setValues] Failed to restore the shared settings after a per-view write failed: ${
+						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+					}`,
+				)
+			}
+			throw error
+		}
+	}
+
+	/**
+	 * Persists the view-local subset of a ContextProxy mutation, then updates the in-memory
+	 * viewLocalState buffer. Persistence is awaited first so a failed durable write cannot
+	 * leave the local cache ahead of the persisted state.
+	 */
+	private async _saveViewLocalStateFromMutation(
+		values: Partial<RooCodeSettings> & Partial<ExtensionState>,
+	): Promise<void> {
+		await this._persistViewLocalStateFromMutation(values)
+		this._updateViewLocalStateFromMutation(values)
+	}
+
+	/**
+	 * Update or invalidate viewLocalState when ContextProxy is mutated via setValues, setValue,
+	 * profile upsert/activation/deletion, or resetState. This ensures the local cache stays in
+	 * sync with global state changes that would otherwise be invisible behind mergedStateValues.
+	 */
+	private _updateViewLocalStateFromMutation(values: Partial<RooCodeSettings> & Partial<ExtensionState>): void {
+		if ("mode" in values) {
+			const val = values.mode
+			if (val === undefined || val === null) {
+				delete this.viewLocalState.mode
+			} else {
+				this.viewLocalState.mode = val
+			}
+		}
+
+		if ("currentApiConfigName" in values) {
+			const val = values.currentApiConfigName
+			if (val === undefined || val === null) {
+				delete this.viewLocalState.currentApiConfigName
+			} else {
+				this.viewLocalState.currentApiConfigName = val
+			}
+		}
+
+		if ("apiConfiguration" in values) {
+			const val = values.apiConfiguration
+			if (val === undefined || val === null) {
+				delete this.viewLocalState.apiConfiguration
+			} else {
+				this.viewLocalState.apiConfiguration = val
+			}
+		}
+
+		// Flat provider-settings keys (PROVIDER_SETTINGS_KEYS) are shared settings:
+		// they are written through the ContextProxy above and must NOT be merged
+		// into viewLocalState.apiConfiguration, which would turn them into a
+		// per-view override masking later shared updates from other views.
+	}
+
+	/**
+	 * Writes the durably persisted subset of a mutation (mode and currentApiConfigName)
+	 * into the registered viewStates map for this view.
+	 */
+	private async _persistViewLocalStateFromMutation(
+		values: Partial<RooCodeSettings> & Partial<ExtensionState>,
+	): Promise<void> {
+		const persistedValues: Partial<PersistedViewState> = {}
+
+		if ("mode" in values) {
+			persistedValues.mode = values.mode as PersistedViewState["mode"]
+		}
+
+		if ("currentApiConfigName" in values) {
+			persistedValues.currentApiConfigName = values.currentApiConfigName
+		}
+
+		if ("mode" in persistedValues || "currentApiConfigName" in persistedValues) {
+			await this.savePersistedViewState(persistedValues)
+		}
+	}
+
+	/**
+	 * Clear view-local state cache so that getState() falls back to ContextProxy defaults.
+	 */
+	private _clearViewLocalState(): void {
+		this.viewLocalState = {}
+	}
+
+	/**
+	 * Broadcast a reset/import invalidation to all live ClineProvider instances, clearing
+	 * both in-memory view-local caches and durable per-view selections so stale view state
+	 * cannot mask imported/reset shared state after reload.
+	 */
+	async broadcastResetToAllInstances(): Promise<void> {
+		const allInstances = ClineProvider.getAllInstances()
+
+		// The durable per-view selections live in one shared global-state slot, so
+		// the reset needs exactly one durable clear. Route it through the persisted
+		// write queue (and run it before the in-memory clears): a per-instance clear
+		// outside the queue could interleave with a queued view-state write and
+		// either clobber that write or leave a re-created entry behind.
+		const clearWrite = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			await this.contextProxy.setValue("viewStates", undefined)
+		})
+		ClineProvider.persistedViewStateWriteQueue = clearWrite.catch(() => {})
+		await clearWrite
+
+		for (const instance of allInstances) {
+			instance._clearViewLocalState()
+
+			if (instance !== this) {
+				// A sibling's post can throw mid-reset (state generation reaches the
+				// settings file through customModesManager.getCustomModes): the failure
+				// must not stop the reset from reaching the remaining instances, whose
+				// buffers are already cleared above. The originator is deliberately not
+				// posted here: resetState posts its own state immediately after the
+				// broadcast, and a second post would refresh its webview twice.
+				try {
+					await instance.postStateToWebview()
+				} catch (error) {
+					this.log(
+						`[broadcastResetToAllInstances] failed to post reset state to a sibling view: ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					)
+				}
+			}
+		}
 	}
 
 	// dev
@@ -3379,9 +5234,21 @@ export class ClineProvider
 		}
 
 		await this.contextProxy.resetAllState()
+
+		// Clear view-local state cache so getState() falls back to ContextProxy defaults.
+		this._clearViewLocalState()
+
+		// Clear this view's persisted entry too, so the reset selections are not
+		// re-applied from the durable viewStates pin after a reload.
+		await this.clearPersistedViewState()
+
 		await this.providerSettingsManager.resetAllConfigs()
 		await this.customModesManager.resetCustomModes()
 		await this.removeClineFromStack()
+
+		// Clear durable and in-memory per-view state across live instances so parallel tabs don't keep stale state.
+		await this.broadcastResetToAllInstances()
+
 		await this.postStateToWebview()
 		await this.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
 	}
