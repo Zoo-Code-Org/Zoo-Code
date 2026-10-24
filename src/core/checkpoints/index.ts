@@ -113,6 +113,15 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 		const service = RepoPerTaskCheckpointService.create(options)
 		task.checkpointServiceInitializing = true
 		await checkGitInstallation(task, service, log, provider)
+		if (!service.isInitialized) {
+			// checkGitInstallation disables checkpoints when Git is unavailable and
+			// logs initShadowGit failures without throwing: storing such a service
+			// would hand later saves (and the fast path above) an uninitialized
+			// handle whose isInitialized can never flip, so a failed
+			// initialization must resolve to no service at all.
+			task.checkpointServiceInitializing = false
+			return undefined
+		}
 		task.checkpointService = service
 		if (task.enableCheckpoints) {
 			sendCheckpointInitWarn(task)
@@ -200,6 +209,10 @@ async function checkGitInstallation(
 		} catch (err) {
 			log(`[Task#getCheckpointService] initShadowGit -> ${err.message}`)
 			task.enableCheckpoints = false
+			// The "initialize" event never fires for a failed initShadowGit, so
+			// clear the flag here or later lookups wait on an initialization
+			// that already died.
+			task.checkpointServiceInitializing = false
 		}
 	} catch (err) {
 		log(`[Task#getCheckpointService] Unexpected error during Git check: ${err.message}`)
@@ -207,6 +220,29 @@ async function checkGitInstallation(
 		task.enableCheckpoints = false
 		task.checkpointServiceInitializing = false
 	}
+}
+
+// Serialize checkpoint saves per task. saveCheckpoint() runs stageAll + commit, so two
+// concurrent saves for the same task (for example the task-start baseline racing the first
+// per-write save after the baseline timeout) can stage each other's writes or interleave
+// commits. A per-task promise queue makes every save wait for the previous one, including
+// a baseline that is still running.
+const checkpointSaveQueues = new Map<string, Promise<unknown>>()
+
+function enqueueCheckpointSave<T>(taskId: string, operation: () => Promise<T>): Promise<T> {
+	const previous = checkpointSaveQueues.get(taskId) ?? Promise.resolve()
+	const next = previous.then(operation, operation)
+	const tail = next.then(
+		() => undefined,
+		() => undefined,
+	)
+	checkpointSaveQueues.set(taskId, tail)
+	void tail.finally(() => {
+		if (checkpointSaveQueues.get(taskId) === tail) {
+			checkpointSaveQueues.delete(taskId)
+		}
+	})
+	return next
 }
 
 export async function checkpointSave(task: Task, force = false, suppressMessage = false) {
@@ -218,13 +254,14 @@ export async function checkpointSave(task: Task, force = false, suppressMessage 
 
 	TelemetryService.instance.captureCheckpointCreated(task.taskId)
 
-	// Start the checkpoint process in the background.
-	return service
-		.saveCheckpoint(`Task: ${task.taskId}, Time: ${Date.now()}`, { allowEmpty: force, suppressMessage })
-		.catch((err) => {
-			console.error("[Task#checkpointSave] caught unexpected error, disabling checkpoints", err)
-			task.enableCheckpoints = false
-		})
+	// Start the checkpoint process in the background, queued behind any save already
+	// running for this task so stageAll + commit never overlap.
+	return enqueueCheckpointSave(task.taskId, () =>
+		service.saveCheckpoint(`Task: ${task.taskId}, Time: ${Date.now()}`, { allowEmpty: force, suppressMessage }),
+	).catch((err) => {
+		console.error("[Task#checkpointSave] caught unexpected error, disabling checkpoints", err)
+		task.enableCheckpoints = false
+	})
 }
 
 export type CheckpointRestoreOptions = {

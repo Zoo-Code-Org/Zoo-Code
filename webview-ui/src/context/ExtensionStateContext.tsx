@@ -213,6 +213,7 @@ export const createInitialExtensionState = (): ExtensionState => ({
 	ttsEnabled: false,
 	ttsSpeed: 1.0,
 	enableCheckpoints: true,
+	perWriteCheckpoints: true,
 	checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, // Default to 15 seconds
 	language: "en", // Default language code
 	// Placeholder before the extension state hydrates: use the shared default

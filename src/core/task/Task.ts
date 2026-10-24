@@ -468,6 +468,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	public lastMessageTs?: number
 	private autoApprovalTimeoutRef?: NodeJS.Timeout
 
+	// B1: task-start baseline, recorded at most once (initiateTaskLoop also runs on resume).
+	private taskStartBaselineDone = false
+
 	// Tool Use
 	consecutiveMistakeCount: number = 0
 	consecutiveMistakeLimit: number
@@ -3826,6 +3829,72 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// arm needed.
 		void getCheckpointService(this)
 
+		// B1 task-start baseline: a suppressed pre-task root commit (default-on).
+		// History resumes skip it: the baseline belongs to the original task start
+		// (exactly once per task), and the resumed task's shadow repo already carries
+		// a baseline for the first post-resume write checkpoint to diff against.
+		// An already-aborted task skips it too: the loop will never run, so the
+		// save would only add latency to a task that is being disposed.
+		if (!this.taskStartBaselineDone && !this._isHistoryTask && !this.abort) {
+			let baselineEnabled: boolean | undefined
+			try {
+				baselineEnabled = (await this.providerRef.deref()?.getState())?.perWriteCheckpoints
+			} catch (error) {
+				// A rejected state lookup must not abort task startup: fall back
+				// to the default-on semantics used when the setting is absent.
+				console.error("[Task] task-start baseline settings read failed:", error)
+			}
+			// Cancellation can arrive while the state lookup is pending; recheck
+			// before the save so a canceled task performs no checkpoint work.
+			if (baselineEnabled === false || this.abort) {
+				this.taskStartBaselineDone = true
+			} else {
+				try {
+					// allowEmpty=true so a clean workspace still produces the baseline
+					// commit; awaited so the first per-write checkpoint cannot interleave.
+					// The await is bounded: a stalled git add/commit must not hold task
+					// startup before TaskStarted. A baseline that finishes late is
+					// harmless - checkpointSave serializes per task, so a still-running
+					// baseline cannot interleave with the first per-write save.
+					const savePromise = this.checkpointSave(true, true)
+					// A timeout that wins must not leave an unhandled rejection behind.
+					savePromise.catch(() => undefined)
+					const BASELINE_TIMED_OUT = Symbol("baseline-timed-out")
+					let baselineTimer: ReturnType<typeof setTimeout> | undefined
+					const baseline = await Promise.race([
+						savePromise,
+						new Promise<typeof BASELINE_TIMED_OUT>((resolve) => {
+							baselineTimer = setTimeout(
+								() => resolve(BASELINE_TIMED_OUT),
+								Math.max(1, this.checkpointTimeout * 1000),
+							)
+						}),
+					]).finally(() => {
+						if (baselineTimer !== undefined) {
+							clearTimeout(baselineTimer)
+						}
+					})
+					if (baseline === BASELINE_TIMED_OUT) {
+						console.warn(
+							`[Task] task-start checkpoint baseline still running after ${this.checkpointTimeout}s; entering the request loop and leaving the baseline to the per-task checkpoint lock.`,
+						)
+					} else if (baseline?.commit) {
+						// The flag is set only once the baseline actually committed: a save
+						// that no-ops behind a failed or timed-out service initialization is
+						// retried on a later loop entry instead of being marked done without
+						// a rollback point.
+						this.taskStartBaselineDone = true
+					}
+				} catch (error) {
+					// The baseline is best-effort and runs before TaskStarted: a
+					// checkpoint error must not abort task startup (startTask rethrows
+					// non-abort errors from initiateTaskLoop). Log and continue; the
+					// next loop entry retries the baseline.
+					console.error("[Task] task-start checkpoint baseline failed:", error)
+				}
+			}
+		}
+
 		let nextUserContent = userContent
 		let includeFileDetails = true
 
@@ -4260,6 +4329,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										const idAlreadyUsed = this.assistantMessageContent.some(
 											(entry) =>
 												// Stryker disable next-line ConditionalExpression: equivalent mutant, only tool_use and mcp_tool_use entries carry an id, so the type check cannot change entry.id === event.id
+
 												(entry.type === "tool_use" || entry.type === "mcp_tool_use") &&
 												(entry as { id?: string }).id === event.id,
 										)
@@ -4313,6 +4383,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										let streamingKey: string | undefined
 
 										// Stryker disable next-line ConditionalExpression: equivalent mutant, event.name is always a string here, so the legacy nameless branch is unreachable
+
 										if (event.name !== undefined) {
 											streamingKey = NativeToolCallParser.makeStreamingKey(event.id, event.name)
 										} else {
@@ -4330,6 +4401,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 										const partialToolUse =
 											// Stryker disable next-line ConditionalExpression: equivalent mutant, streamingKey is always a string here (makeStreamingKey), so the null side is unreachable
+
 											streamingKey === undefined
 												? null
 												: NativeToolCallParser.processStreamingChunk(
@@ -4339,6 +4411,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 													)
 
 										// Stryker disable next-line ConditionalExpression, EqualityOperator: equivalent mutants, streamingKey is always defined here, so both conditions reduce to the partialToolUse check
+
 										if (partialToolUse && streamingKey !== undefined) {
 											// Reuse the compound key built above: it is exactly the key the start event
 											// registered under, so the delta lookup needs no second encoding.
@@ -4736,6 +4809,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// Create compound key for deduplication (same pattern as streaming handler).
 						// End events carry the tool name; fall back to the id for events that don't.
 						// Stryker disable next-line LogicalOperator: equivalent mutant, finalizeRawChunks emits end events with a string name, so the ?? event.id fallback is unreachable
+
 						let eventName = event.name ?? event.id
 						let dedupKey = NativeToolCallParser.makeStreamingKey(event.id, eventName)
 
@@ -4753,12 +4827,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// parser entry and the dedup tracking would stay stale. Resolve the tracked
 						// entry by id and target the real compound key for finalization and cleanup.
 						// Stryker disable next-line ConditionalExpression, LogicalOperator, EqualityOperator: equivalent mutants, the both-miss case is unreachable via the raw-chunk pipeline
+
 						if (finalToolUse === null && toolUseIndex === undefined) {
 							const resolved = NativeToolCallParser.getStreamingToolCallById(
 								event.id,
 								nativeToolCallParserScope,
 							)
-							// Stryker disable next-line ConditionalExpression: unreachable defensive region — getStreamingToolCallById can only resolve when the both-miss case above is reachable, which the raw-chunk pipeline cannot produce (see the directive there).
 							if (resolved) {
 								eventName = resolved.name
 								dedupKey = NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name)
@@ -6438,6 +6512,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * @param context - Context string for logging (e.g., the calling tool name)
 	 */
 	public processQueuedMessages(): void {
+		// An aborted task must not dequeue queued messages: submitUserMessage
+		// rejects once abort is set, so consuming the queue here would drop the
+		// message instead of leaving it for the resume/abort flow. Tools await
+		// checkpoint saves before handing off, so a cancellation can land between
+		// the write and this call.
+		if (this.abort) {
+			return
+		}
 		try {
 			if (!this.messageQueueService.isEmpty()) {
 				const queued = this.messageQueueService.dequeueMessage()
