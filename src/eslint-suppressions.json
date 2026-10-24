@@ -234,11 +234,6 @@
 			"count": 3
 		}
 	},
-	"api/providers/__tests__/openrouter.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 34
-		}
-	},
 	"api/providers/__tests__/poe.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
