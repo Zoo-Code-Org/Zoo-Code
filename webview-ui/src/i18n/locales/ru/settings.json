@@ -550,6 +550,7 @@
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Имя развёртывания Azure",
 		"azureOpenAiDeploymentNameDescription": "Введите имя развёртывания из Azure AI Studio, а не имя базовой модели.",
+		"azureOpenAiRequestUrl": "Запросы отправляются на:",
 		"getOpenAiApiKey": "Получить OpenAI API-ключ",
 		"mistralApiKey": "Mistral API-ключ",
 		"getMistralApiKey": "Получить Mistral / Codestral API-ключ",

@@ -978,3 +978,20 @@ export function isAzureOpenAiBaseUrl(baseUrl?: string, useAzure?: boolean): bool
 		return false
 	}
 }
+
+/**
+ * Normalizes an Azure OpenAI resource URL to the `/openai` root the AzureOpenAI
+ * client expects. A trailing `/openai` the user already typed is not repeated.
+ */
+export function getAzureOpenAiBaseUrl(baseUrl: string): string {
+	return `${baseUrl.replace(/\/openai\/?$/i, "").replace(/\/$/, "")}/openai`
+}
+
+/**
+ * Returns the chat completions URL the AzureOpenAI client requests: it inserts
+ * `/deployments/<deployment>` using the configured model ID as the deployment name.
+ */
+export function getAzureOpenAiChatCompletionsUrl(baseUrl: string, deployment: string, apiVersion?: string): string {
+	const version = apiVersion || azureOpenAiDefaultApiVersion
+	return `${getAzureOpenAiBaseUrl(baseUrl)}/deployments/${deployment}/chat/completions?api-version=${version}`
+}

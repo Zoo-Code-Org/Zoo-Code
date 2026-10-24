@@ -123,7 +123,8 @@
 		},
 		"api": {
 			"invalidKeyInvalidChars": "API कुंजी में अमान्य वर्ण हैं।",
-			"apiRequestFailed": "API अनुरोध विफल ({{status}})"
+			"apiRequestFailed": "API अनुरोध विफल ({{status}})",
+			"azureDeploymentNotFound": "Azure OpenAI को परिनियोजन \"{{deployment}}\" नहीं मिला। \"Azure परिनियोजन नाम\" को Azure AI Foundry के सटीक परिनियोजन नाम पर सेट करें, मॉडल नाम पर नहीं (उदाहरण के लिए gpt-4o)। विवरण: {{message}}"
 		},
 		"manual_url_empty": "कृपया एक वैध callback URL दर्ज करें",
 		"manual_url_no_query": "अवैध callback URL: क्वेरी पैरामीटर गुम हैं",

@@ -123,7 +123,8 @@
 		},
 		"api": {
 			"invalidKeyInvalidChars": "API anahtarı geçersiz karakterler içeriyor.",
-			"apiRequestFailed": "API isteği başarısız oldu ({{status}})"
+			"apiRequestFailed": "API isteği başarısız oldu ({{status}})",
+			"azureDeploymentNotFound": "Azure OpenAI \"{{deployment}}\" dağıtımını bulamadı. \"Azure dağıtım adı\" alanını model adına (örneğin gpt-4o) değil, Azure AI Foundry'deki tam dağıtım adına ayarlayın. Ayrıntılar: {{message}}"
 		},
 		"manual_url_empty": "Lütfen geçerli bir callback URL'si girin",
 		"manual_url_no_query": "Geçersiz callback URL'si: sorgu parametreleri eksik",

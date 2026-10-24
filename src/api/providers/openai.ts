@@ -5,6 +5,7 @@ import axios from "axios"
 import {
 	type ModelInfo,
 	azureOpenAiDefaultApiVersion,
+	getAzureOpenAiBaseUrl,
 	isAzureAiInferenceBaseUrl,
 	isAzureOpenAiBaseUrl,
 	openAiModelInfoSaneDefaults,
@@ -15,6 +16,7 @@ import {
 } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
+import { t } from "../../i18n"
 
 import { TagMatcher } from "../../utils/tag-matcher"
 
@@ -27,7 +29,7 @@ import { getModelParams } from "../transform/model-params"
 import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
-import { handleOpenAIError } from "./utils/error-handler"
+import { handleOpenAIError, handleProviderError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
 // TODO: Rename this to OpenAICompatibleHandler. Also, I think the
@@ -38,6 +40,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	protected client: OpenAI
 	private readonly providerName = "OpenAI"
 	private readonly extraBody: Record<string, unknown>
+	private readonly isAzureOpenAi: boolean
 
 	constructor(options: ApiHandlerOptions) {
 		super()
@@ -48,6 +51,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		const apiKey = this.options.openAiApiKey ?? NOT_PROVIDED
 		const isAzureAiInference = this._isAzureAiInference(this.options.openAiBaseUrl)
 		const isAzureOpenAi = isAzureOpenAiBaseUrl(this.options.openAiBaseUrl, options.openAiUseAzure)
+		this.isAzureOpenAi = isAzureOpenAi
 
 		const headers = {
 			...DEFAULT_HEADERS,
@@ -66,9 +70,8 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		} else if (isAzureOpenAi) {
 			// Azure API shape slightly differs from the core API shape:
 			// https://github.com/openai/openai-node?tab=readme-ov-file#microsoft-azure-openai
-			const azureBaseURL = `${baseURL.replace(/\/openai\/?$/i, "").replace(/\/$/, "")}/openai`
 			this.client = new AzureOpenAI({
-				baseURL: azureBaseURL,
+				baseURL: getAzureOpenAiBaseUrl(baseURL),
 				apiKey,
 				apiVersion: this.options.azureApiVersion || azureOpenAiDefaultApiVersion,
 				defaultHeaders: headers,
@@ -193,7 +196,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 					...(isAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {}),
 				})
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw this.handleRequestError(error, modelId)
 			}
 
 			const matcher = new TagMatcher(
@@ -261,7 +264,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 					...(this._isAzureAiInference(modelUrl) ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {}),
 				})
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw this.handleRequestError(error, modelId)
 			}
 
 			const message = response.choices?.[0]?.message
@@ -353,7 +356,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 					isAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
 				)
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw this.handleRequestError(error, model.id)
 			}
 
 			return response.choices?.[0]?.message.content || ""
@@ -420,7 +423,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 					...(methodIsAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {}),
 				})
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw this.handleRequestError(error, modelId)
 			}
 
 			yield* this.handleStreamResponse(stream)
@@ -455,7 +458,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 					...(methodIsAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {}),
 				})
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw this.handleRequestError(error, modelId)
 			}
 
 			const message = response.choices?.[0]?.message
@@ -561,6 +564,25 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		return urlHost === "api.x.ai" || urlHost.endsWith(".x.ai")
 	}
 
+	/**
+	 * Azure OpenAI routes each request to `/openai/deployments/<model>`, so a 404 there
+	 * almost always means the configured deployment name does not exist. Name the
+	 * deployment in the error instead of surfacing a bare "Resource not found".
+	 */
+	private handleRequestError(error: unknown, deploymentName: string): Error {
+		if (this.isAzureOpenAi && isNotFoundError(error)) {
+			return handleProviderError(error, this.providerName, {
+				messageTransformer: (message) =>
+					`${this.providerName} completion error: ${t("common:errors.api.azureDeploymentNotFound", {
+						deployment: deploymentName,
+						message,
+					})}`,
+			})
+		}
+
+		return handleOpenAIError(error, this.providerName)
+	}
+
 	protected _isAzureAiInference(baseUrl?: string): boolean {
 		return isAzureAiInferenceBaseUrl(baseUrl)
 	}
@@ -587,6 +609,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	private withExtraBody<T extends object>(requestOptions: T): T {
 		return { ...this.extraBody, ...requestOptions }
 	}
+}
+
+function isNotFoundError(error: unknown): boolean {
+	return typeof error === "object" && error !== null && "status" in error && error.status === 404
 }
 
 export async function getOpenAiModels(baseUrl?: string, apiKey?: string, openAiHeaders?: Record<string, string>) {

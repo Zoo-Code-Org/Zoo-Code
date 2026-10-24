@@ -123,7 +123,8 @@
 		},
 		"api": {
 			"invalidKeyInvalidChars": "La chiave API contiene caratteri non validi.",
-			"apiRequestFailed": "Richiesta API fallita ({{status}})"
+			"apiRequestFailed": "Richiesta API fallita ({{status}})",
+			"azureDeploymentNotFound": "Azure OpenAI non ha trovato la distribuzione \"{{deployment}}\". Imposta \"Nome della distribuzione Azure\" sul nome esatto della distribuzione in Azure AI Foundry, non sul nome del modello (ad esempio gpt-4o). Dettagli: {{message}}"
 		},
 		"manual_url_empty": "Inserisci un URL di callback valido",
 		"manual_url_no_query": "URL di callback non valido: parametri di query mancanti",

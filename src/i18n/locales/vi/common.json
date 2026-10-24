@@ -123,7 +123,8 @@
 		},
 		"api": {
 			"invalidKeyInvalidChars": "Khóa API chứa ký tự không hợp lệ.",
-			"apiRequestFailed": "Yêu cầu API thất bại ({{status}})"
+			"apiRequestFailed": "Yêu cầu API thất bại ({{status}})",
+			"azureDeploymentNotFound": "Azure OpenAI không tìm thấy triển khai \"{{deployment}}\". Hãy đặt \"Tên triển khai Azure\" thành tên triển khai chính xác trong Azure AI Foundry, không phải tên mô hình (ví dụ gpt-4o). Chi tiết: {{message}}"
 		},
 		"manual_url_empty": "Vui lòng nhập URL callback hợp lệ",
 		"manual_url_no_query": "URL callback không hợp lệ: thiếu tham số truy vấn",

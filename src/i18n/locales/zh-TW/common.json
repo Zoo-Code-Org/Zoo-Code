@@ -122,7 +122,8 @@
 		},
 		"api": {
 			"invalidKeyInvalidChars": "API 金鑰包含無效字元。",
-			"apiRequestFailed": "API 請求失敗 ({{status}})"
+			"apiRequestFailed": "API 請求失敗 ({{status}})",
+			"azureDeploymentNotFound": "Azure OpenAI 找不到部署 \"{{deployment}}\"。請將「Azure 部署名稱」設定為 Azure AI Foundry 中的確切部署名稱，而非模型名稱（例如 gpt-4o）。詳細資訊：{{message}}"
 		},
 		"manual_url_empty": "請輸入有效的回呼 URL",
 		"manual_url_no_query": "無效的回呼 URL：缺少查詢參數",

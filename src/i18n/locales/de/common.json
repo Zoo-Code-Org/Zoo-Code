@@ -141,7 +141,8 @@
 		},
 		"api": {
 			"invalidKeyInvalidChars": "API-Schlüssel enthält ungültige Zeichen.",
-			"apiRequestFailed": "API-Anfrage fehlgeschlagen ({{status}})"
+			"apiRequestFailed": "API-Anfrage fehlgeschlagen ({{status}})",
+			"azureDeploymentNotFound": "Azure OpenAI konnte die Bereitstellung \"{{deployment}}\" nicht finden. Setze \"Azure-Bereitstellungsname\" auf den exakten Bereitstellungsnamen aus Azure AI Foundry, nicht auf den Modellnamen (zum Beispiel gpt-4o). Details: {{message}}"
 		},
 		"manual_url_empty": "Bitte gib eine gültige Callback-URL ein",
 		"manual_url_no_query": "Ungültige Callback-URL: Query-Parameter fehlen",

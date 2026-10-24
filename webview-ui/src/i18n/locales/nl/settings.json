@@ -550,6 +550,7 @@
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Naam van Azure-implementatie",
 		"azureOpenAiDeploymentNameDescription": "Voer de implementatienaam uit Azure AI Studio in, niet de naam van het onderliggende model.",
+		"azureOpenAiRequestUrl": "Verzoeken worden verzonden naar:",
 		"getOpenAiApiKey": "OpenAI API-sleutel ophalen",
 		"mistralApiKey": "Mistral API-sleutel",
 		"getMistralApiKey": "Mistral / Codestral API-sleutel ophalen",

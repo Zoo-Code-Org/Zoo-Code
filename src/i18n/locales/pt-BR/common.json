@@ -127,7 +127,8 @@
 		},
 		"api": {
 			"invalidKeyInvalidChars": "A chave API contém caracteres inválidos.",
-			"apiRequestFailed": "Solicitação API falhou ({{status}})"
+			"apiRequestFailed": "Solicitação API falhou ({{status}})",
+			"azureDeploymentNotFound": "O Azure OpenAI não encontrou a implantação \"{{deployment}}\". Defina \"Nome da implantação do Azure\" com o nome exato da implantação no Azure AI Foundry, não o nome do modelo (por exemplo gpt-4o). Detalhes: {{message}}"
 		},
 		"manual_url_empty": "Por favor, insira uma URL de callback válida",
 		"manual_url_no_query": "URL de callback inválida: parâmetros de consulta ausentes",

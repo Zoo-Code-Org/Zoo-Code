@@ -550,6 +550,7 @@
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Tên triển khai Azure",
 		"azureOpenAiDeploymentNameDescription": "Nhập tên triển khai trong Azure AI Studio, không phải tên mô hình cơ sở.",
+		"azureOpenAiRequestUrl": "Yêu cầu được gửi đến:",
 		"getOpenAiApiKey": "Lấy khóa API OpenAI",
 		"mistralApiKey": "Khóa API Mistral",
 		"getMistralApiKey": "Lấy khóa API Mistral / Codestral",

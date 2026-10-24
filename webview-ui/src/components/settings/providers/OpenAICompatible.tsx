@@ -10,6 +10,7 @@ import {
 	type OrganizationAllowList,
 	type ExtensionMessage,
 	azureOpenAiDefaultApiVersion,
+	getAzureOpenAiChatCompletionsUrl,
 	isAzureOpenAiBaseUrl,
 	openAiModelInfoSaneDefaults,
 	DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS,
@@ -169,6 +170,18 @@ export const OpenAICompatible = ({
 			{isAzureOpenAi && (
 				<div className="text-sm text-vscode-descriptionForeground">
 					{t("settings:providers.azureOpenAiDeploymentNameDescription")}
+					{apiConfiguration?.openAiBaseUrl && (
+						<div className="mt-1 break-all" data-testid="azure-request-url">
+							{t("settings:providers.azureOpenAiRequestUrl")}{" "}
+							<code>
+								{getAzureOpenAiChatCompletionsUrl(
+									apiConfiguration.openAiBaseUrl,
+									apiConfiguration.openAiModelId || "<deployment>",
+									apiConfiguration.azureApiVersion,
+								)}
+							</code>
+						</div>
+					)}
 				</div>
 			)}
 			<R1FormatSetting
