@@ -1,54 +1,162 @@
-# JSON persistence audit for PR #2136
+# JSON persistence contract and caller inventory
 
-This is a source audit of the working tree, not a claim of power-loss durability or exhaustive filesystem fault testing. There are 19 executable `safeWriteJson` calls in 10 consumer files; the earlier review's count of 11 sibling callers did not identify its counting unit. Tests, the writer declaration, and the built-in command's textual example are excluded.
+Update this file when you add a `safeWriteJson` caller.
+
+The canonical file is the committed JSON file.
+A backup file contains the previous committed data.
+This contract covers the shared JSON writer and its consumers.
+It does not guarantee recovery after power loss.
+
+## Find callers
+
+Run this command from the repository root:
+
+```sh
+rg -n 'safeWriteJson\(' src --glob '!**/__tests__/**'
+```
+
+The results also include the function declaration and text examples.
 
 ## Shared contract
 
-Every call acquires the canonical file's advisory lock before recovery, merge, streaming, or replacement. Recovery only interprets ENOENT as absence. A failed restore or rollback retains committed backups. No fsync or durability option remains; replacement protects against process interruption, not arbitrary power loss. Read recovery checks for a matching backup before acquiring the same lock and rechecks the filesystem under it.
+- The writer takes the canonical file's advisory lock before recovery, merge, write, or replacement.
+- Recovery treats only `ENOENT` as a missing file.
+- A failed backup restore stops the write.
+- A failed restore or rollback keeps the committed backup.
+- The normal commit uses one rename operation.
+- The Windows `EPERM` fallback uses two rename operations.
+- The writer does not call `fsync`.
+- Read recovery searches for a matching backup before it takes the file lock.
+- Read recovery checks the canonical file and backups again under that lock.
 
-All rejected recovery attempts, including read-side lock acquisition and directory inspection failures, emit `json-recovery-failed` with the canonical path, process ID, timestamp, and error code through the shared persistence trace sink. UI-message writes additionally retain their task-specific stage callbacks. Sink exceptions cannot replace the filesystem error. This trace does not log file contents. Best-effort leftover-unlink failures still use the existing console error logging and do not reject an otherwise successful recovery.
+A fresh lock can belong to a paused writer.
+The protocol does not remove that lock before the stale interval expires.
+The stale interval is 31 seconds.
+Lock acquisition also has its own retries.
+See [fileLock.ts](../../src/utils/fileLock.ts) for the lock configuration.
 
-A fresh-looking lock left by SIGKILL still rejects a writer or a reader attempting backup recovery with ELOCKED after the configured retries. This is intentional: lock freshness cannot distinguish a dead process from a paused owner. The subprocess test verifies rejection, backup preservation, and recovery after aging the lock past `LOCK_STALE_MS` (31 seconds). It does not wait 31 real seconds or establish Windows filesystem semantics.
+See [History-file availability](task-lifecycle-model.md#history-file-availability-boundary) for initialization retries and health state.
 
-## Initialization availability
+## Failure reports
 
-Initialization retries transient `ELOCKED` and `EBUSY` failures with one timeout chain: delays of 1, 2, 4, 8, 8, and 8 seconds, after which the final error is returned. Concurrent calls share the same initialization promise, and disposal cancels a pending retry. Each attempt reruns the scan and startup sequence; delegation repair cannot run after a failed scan. Permanent errors such as EACCES or EIO are not retried.
+A rejected recovery attempt emits `json-recovery-failed` through the shared trace sink.
+The event includes the canonical path, process ID, timestamp, and error code.
+The event does not include file contents.
+UI-message writes also emit task-specific events.
+A trace sink failure does not replace the filesystem error.
 
-`initialized` resolves after success or terminal failure, not between transient attempts. `isHealthy` is true only after the startup sequence succeeds; it stays false after exhaustion or persistent failure. The provider's existing awaited initialization resumes migration on eventual success. The existing activation catch still logs terminal errors and allows extension activation to continue.
+Leftover-file cleanup errors go to the console.
+These errors do not reject a write that otherwise succeeded.
 
-Follow-up work, outside this PR: show a persistent-error warning and offer an explicit user retry action. There is no new UI action here. After a persistent error or exhaustion, history can remain partial and observers have not been started. The separate health flag makes that outcome distinguishable from successful initialization; it does not itself provide a user-facing warning.
+## Consumers
 
-## Consumer inventory
+The paths below start at `src/`.
+Each consumer uses the shared writer's recovery and lock protocol.
+Its read path can have different behavior.
 
-Paths in this table are relative to `src/`.
+### `api/providers/fetchers/modelEndpointCache.ts`
 
-| Consumer                                       | Calls | Data and semantics                                                                                                     | Error/read behavior                                                                                                                                                                                                                                                                                                                                           |
-| ---------------------------------------------- | ----: | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api/providers/fetchers/modelEndpointCache.ts` |     1 | Replace fetched endpoint cache                                                                                         | Disk reader checks existence; cache can be refetched. Writer rejection propagates to cache refresh handling.                                                                                                                                                                                                                                                  |
-| `api/providers/fetchers/modelCache.ts`         |     1 | Replace fetched model cache                                                                                            | Includes a synchronous disk reader; missing cache can be refetched. Refresh paths catch/log write failures.                                                                                                                                                                                                                                                   |
-| `services/mcp/McpHub.ts`                       |     4 | Create global settings with a preserving merge; replace settings for updates, removal, and tool configuration          | Creation preserves recovered settings. Other operations read before entering the writer's lock; their entire read-modify-write is not made atomic by this PR.                                                                                                                                                                                                 |
-| `services/code-index/cache-manager.ts`         |     2 | Save or clear file hashes                                                                                              | Initialization uses VS Code filesystem reads and resets a missing cache; writes catch/log and emit telemetry. Hashes are rebuildable.                                                                                                                                                                                                                         |
-| `core/config/importExport.ts`                  |     1 | Replace a user-selected settings export                                                                                | Export catches/logs failures. Import reads the selected canonical file directly.                                                                                                                                                                                                                                                                              |
-| `core/webview/webviewMessageHandler.ts`        |     1 | Initialize project MCP settings when the canonical file appears absent                                                 | Uses an existence check and blind default write. An orphaned backup can be restored and then replaced by defaults. This is a remaining initialization gap, not covered by task-message recovery tests.                                                                                                                                                        |
-| `core/task-persistence/taskMessages.ts`        |     1 | Save UI messages; optional snapshot merge                                                                              | Reads use missing-file retry and backup recovery. Save failures propagate to Task, whose existing save helper catches them. Adds task-specific write traces.                                                                                                                                                                                                  |
-| `core/task-persistence/apiMessages.ts`         |     2 | Migrate legacy history with merge; save API messages with optional merge                                               | Current and legacy readers use recovery. Genuine absence maps to no history; other I/O failures throw. Migration removes the legacy source only after the write succeeds.                                                                                                                                                                                     |
-| `core/task-persistence/TaskHistoryStore.ts`    |     5 | Repair intent; legacy migration; history delta merge; authoritative replacement; conditional pending-action settlement | Deletion removes backups under the same file lock. Settlement rejects missing disk state. History reconcile and individual reads recover absent canonical files; failed recovery blocks delegation repair; transient initialization failures are retried and preserves cached records on refresh. Repair-intent reads still read the canonical path directly. |
-| `core/context-tracking/FileContextTracker.ts`  |     1 | Replace task file-context metadata                                                                                     | Reads check canonical existence and otherwise return an empty context. Saves catch/log failures. Read-side backup healing is not provided here.                                                                                                                                                                                                               |
+- Replaces the endpoint cache with fetched data.
+- Reads the canonical file directly.
+- Fetches data again when the cache is missing.
+- Returns write errors to the cache refresh handler.
 
-`ClineProvider.getTaskWithId` is an additional API-history reader, not a writer. It now uses the recovery reader. SyntaxError and ENOENT retain their previous empty-history behavior; other filesystem/recovery failures propagate. Task loading and parent reopening also use the message readers. The advisory-file-lock owners are the JSON writer/recovery and history deletion; the inspected call paths do not invoke message recovery while already holding the same file lock. Provider delegation locks and store host mutexes are distinct from that file lock.
+### `api/providers/fetchers/modelCache.ts`
 
-## Writes outside the shared protocol
+- Replaces the model cache with fetched data.
+- Includes a synchronous reader for the canonical file.
+- Fetches data again when the cache is missing.
+- Logs refresh write errors.
 
-The production source scan covered `src/`, `packages/`, and `apps/cli`, excluding tests, generated output, dependencies, and fixtures. These paths do not acquire protection merely because other writes use `safeWriteJson`:
+### `services/mcp/McpHub.ts`
 
-- Task-history import copies files into a unique staging directory, validates `history_item.json`, and promotes the directory by rename. It does not rewrite existing canonical message files through the JSON writer. Its directory-level publication protocol is separate.
-- TaskHistoryStore also renames repair intents into quarantine and unlinks completed intents. These are removal/quarantine operations, not JSON replacements.
-- `services/marketplace/SimpleInstaller.ts` writes and removes MCP entries with direct JSON file writes to project/global MCP settings. It can share files with McpHub and is outside its advisory-lock protocol. Concurrent marketplace/McpHub updates and interruption safety need separate work.
-- Qwen credential refresh writes its credentials JSON directly. The CLI's VS Code shim writes Memento and SecretStorage JSON synchronously. None of these writes gains crash recovery from this PR.
-- Other direct writes found are workspace edits, generated images, YAML modes and settings migration, rule/skill installation, exported markdown, logs, shell scripts, terminal artifacts, managed-binary staging, build output, and test/coverage tooling. The scan found no additional direct production replacement of `ui_messages.json`, `api_conversation_history.json`, or `history_item.json` outside task-history import's staging protocol.
+- Creates global settings with a merge that preserves existing settings.
+- Preserves settings restored from a backup during creation.
+- Reads settings before it takes the write lock for other changes.
+- Can lose a concurrent change during these read-modify-write operations.
+- This transaction gap is tracked in [#2173](https://github.com/Zoo-Code-Org/Zoo-Code/issues/2173).
 
-## Validation and limits
+### `services/code-index/cache-manager.ts`
 
-Focused tests cover failed recovery/rollback, filesystem errors, backup ordering, neighboring files, missing-file reads, fresh-lock rejection, stale-lock takeover, trace delivery, and history deletion. The existing real-window restart E2E additionally moves UI/API histories to orphaned backups in a fresh extension host before resume and requires public reads to restore their exact bytes.
+- Saves or clears the file-hash cache.
+- Reads through the VS Code filesystem API.
+- Rebuilds the cache when the file is missing.
+- Logs write errors and emits telemetry.
 
-The E2E runner and CI workflow inspected run VS Code on Linux. That is real extension-host/window coverage, not evidence for Windows open-handle rename behavior. The Windows EPERM branch is fault-injected in unit/subprocess tests. The remaining repair-intent/metadata reader and MCP-writer gaps above are explicitly outside the verified UI/API history contract.
+### `core/config/importExport.ts`
+
+- Writes a settings snapshot to the file that the user selects.
+- Reads the selected import file directly.
+- Logs export errors.
+
+### `core/webview/webviewMessageHandler.ts`
+
+- Creates project MCP settings when the canonical file appears absent.
+- Can replace restored settings with defaults during creation.
+- This creation gap is tracked in [#2175](https://github.com/Zoo-Code-Org/Zoo-Code/issues/2175).
+
+### `core/task-persistence/taskMessages.ts`
+
+- Saves UI messages, with an optional snapshot merge.
+- Uses read retries and backup recovery.
+- Emits task-specific write events.
+- Returns save errors to the Task save helper, which logs them.
+
+### `core/task-persistence/apiMessages.ts`
+
+- Saves API messages, with an optional snapshot merge.
+- Uses backup recovery for current and legacy history reads.
+- Returns an empty history only when both history files are missing.
+- Throws other read errors.
+- Deletes legacy history only after it saves the new file.
+
+### `core/task-persistence/TaskHistoryStore.ts`
+
+- Writes task history, repair intents, merged changes, and conditional action settlement.
+- Recovers missing history files during reconciliation and individual reads.
+- Blocks delegation repair when the history scan fails.
+- Keeps cached records when a refresh fails.
+- Removes backups under the file lock before it deletes canonical history.
+- Logs deletion errors other than `ENOENT`.
+- Reads repair intents directly from the canonical path.
+- The repair-intent recovery gap is tracked in [#2176](https://github.com/Zoo-Code-Org/Zoo-Code/issues/2176).
+
+### `core/context-tracking/FileContextTracker.ts`
+
+- Saves file-context metadata.
+- Returns an empty context when the canonical file appears absent.
+- Does not recover metadata backups during reads.
+- Logs save errors.
+- The metadata recovery gap is tracked in [#2177](https://github.com/Zoo-Code-Org/Zoo-Code/issues/2177).
+
+## Other readers and write paths
+
+`ClineProvider.getTaskWithId` reads API history through the recovery reader.
+It returns an empty history for `SyntaxError` or `ENOENT`.
+It throws other read errors.
+Task loading and parent reopening also use the message readers.
+These read paths do not already hold the same file lock.
+Provider delegation locks and store mutexes are separate locks.
+
+Task-history import copies files into a private staging directory.
+It validates `history_item.json` before it renames the directory into place.
+This directory publication uses a separate protocol.
+
+Repair-intent quarantine and removal use rename or unlink operations.
+These operations do not replace JSON content.
+
+`services/marketplace/SimpleInstaller.ts` changes MCP settings with direct file writes.
+It does not share the JSON writer's lock.
+This writer gap is tracked in [#2174](https://github.com/Zoo-Code-Org/Zoo-Code/issues/2174).
+
+Workspace edits, credential files, and CLI state use other write paths.
+This contract does not cover those paths.
+
+## Validation limits
+
+The [writer tests](../../src/utils/__tests__/safeWriteJson.recovery.test.ts) cover restore failures, backup selection, read recovery, and error reports.
+The [subprocess tests](../../src/utils/__tests__/safeWriteJson.interruption.test.ts) cover forced termination, fresh locks, and stale-lock recovery.
+The [restart E2E test](../../apps/vscode-e2e/src/suite/restart-persistence.test.ts) checks recovery through a fresh extension host.
+
+Injected `EPERM` failures do not prove native Windows behavior.
+Native Windows open-handle checks are tracked in [#2178](https://github.com/Zoo-Code-Org/Zoo-Code/issues/2178).
