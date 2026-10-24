@@ -252,12 +252,21 @@ describe("VsCodeLmHandler", () => {
 			expect(imagePart).toMatchObject({ mimeType: "image/png", data: Buffer.from("iVBORw==", "base64") })
 		})
 
+		const imageCapable = { imageInput: true }
 		it.each([
-			{ liveWindow: 100, curatedWindow: 200, inputTokens: 100, accepted: true },
-			{ liveWindow: 100, curatedWindow: 200, inputTokens: 101, accepted: false },
-			{ liveWindow: 200, curatedWindow: 100, inputTokens: 100, accepted: true },
-			{ liveWindow: 200, curatedWindow: 100, inputTokens: 101, accepted: false },
-		])("checks measured image input against both windows: %j", async (fixture) => {
+			{ capabilities: imageCapable, liveWindow: 100, curatedWindow: 200, inputTokens: 100, accepted: true },
+			{ capabilities: imageCapable, liveWindow: 100, curatedWindow: 200, inputTokens: 101, accepted: false },
+			{ capabilities: imageCapable, liveWindow: 200, curatedWindow: 100, inputTokens: 100, accepted: true },
+			{ capabilities: imageCapable, liveWindow: 200, curatedWindow: 100, inputTokens: 101, accepted: false },
+			{ capabilities: {}, liveWindow: 100, curatedWindow: 200, inputTokens: 101, accepted: true },
+			{
+				capabilities: { supportsImageToText: false },
+				liveWindow: 200,
+				curatedWindow: 100,
+				inputTokens: 101,
+				accepted: true,
+			},
+		])("checks measured input against both windows only for image models: %j", async (fixture) => {
 			await handler.initializeClient()
 			const userRole = vscode.LanguageModelChatMessage.User("").role
 			const sendRequest = vi.fn<vscode.LanguageModelChat["sendRequest"]>().mockResolvedValue({
@@ -266,19 +275,23 @@ describe("VsCodeLmHandler", () => {
 			})
 			handler["client"] = {
 				...mockLanguageModelChat,
-				...{ capabilities: { imageInput: true } },
+				...{ capabilities: fixture.capabilities },
 				maxInputTokens: fixture.liveWindow,
 				sendRequest,
+				// Text-only models count extracted strings; every one exceeds the window on its own.
 				countTokens: vi
 					.fn<vscode.LanguageModelChat["countTokens"]>()
 					.mockImplementation(async (content) =>
-						typeof content !== "string" && content.role === userRole ? fixture.inputTokens : 0,
+						typeof content === "string" || content.role === userRole ? fixture.inputTokens : 0,
 					),
 			}
 			const windowSpy = vi.spyOn(handler, "getCondenseContextWindow").mockReturnValue(fixture.curatedWindow)
 			try {
 				const request = collectStream(handler.createMessage("system", [{ role: "user", content: [image] }]))
-				if (fixture.accepted) {
+				if (fixture.capabilities !== imageCapable) {
+					await expect(request).resolves.toBeDefined()
+					expect(sendRequest).toHaveBeenCalledTimes(1)
+				} else if (fixture.accepted) {
 					await expect(request).resolves.toContainEqual({
 						type: "usage",
 						inputTokens: fixture.inputTokens,
