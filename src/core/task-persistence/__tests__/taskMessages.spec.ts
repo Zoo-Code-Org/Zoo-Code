@@ -14,13 +14,16 @@ vi.mock("fs/promises", async (importOriginal) => ({
 	...(await importOriginal<typeof import("fs/promises")>()),
 	readFile: hoisted.readFileMock,
 }))
-vi.mock("../../../utils/safeWriteJson", () => ({
+vi.mock("../../../utils/safeWriteJson", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../../utils/safeWriteJson")>()),
 	safeWriteJson: hoisted.safeWriteJsonMock,
+	recoverJsonFile: vi.fn().mockResolvedValue(undefined),
 }))
 
 // Import after mocks
 import { saveTaskMessages, readTaskMessages } from "../taskMessages"
 import { formatErrorDetail } from "../readFileWithMissingRetry"
+import { setPersistenceTraceSink } from "../persistenceTrace"
 
 let tmpBaseDir: string
 
@@ -35,6 +38,7 @@ beforeEach(async () => {
 afterEach(() => {
 	vi.useRealTimers()
 	vi.restoreAllMocks()
+	setPersistenceTraceSink(undefined)
 })
 
 describe("taskMessages.saveTaskMessages", () => {
@@ -63,7 +67,11 @@ describe("taskMessages.saveTaskMessages", () => {
 		expect(hoisted.safeWriteJsonMock).toHaveBeenCalledTimes(1)
 		const [, persisted] = hoisted.safeWriteJsonMock.mock.calls[0]
 		expect(persisted).toEqual(messages)
-		expect(hoisted.safeWriteJsonMock.mock.calls[0][2]).toBeUndefined()
+		const options = hoisted.safeWriteJsonMock.mock.calls[0][2] as { merge?: unknown; trace?: unknown } | undefined
+		expect(options?.merge).toBeUndefined()
+		// The trace callback is always installed so restart logs can follow
+		// the write stages.
+		expect(options?.trace).toBeTypeOf("function")
 	})
 
 	it("persists messages without modification when no metadata", async () => {
@@ -99,6 +107,39 @@ describe("taskMessages.saveTaskMessages", () => {
 			expect.objectContaining({ ts: 1, text: "disk" }),
 			expect.objectContaining({ ts: 2, text: "incoming" }),
 		])
+	})
+
+	it("emits persistence trace events with the task ID for the write stages", async () => {
+		const traceLines: string[] = []
+		hoisted.safeWriteJsonMock.mockImplementationOnce(async (_path, _data, options) => {
+			for (const stage of ["recover", "write-start", "backup-rename", "replacement-rename", "write-complete"]) {
+				options.trace({ stage, detail: stage === "backup-rename" ? "eperm-fallback" : undefined })
+			}
+		})
+		setPersistenceTraceSink((line) => traceLines.push(line))
+
+		await saveTaskMessages({
+			messages: [{ ts: 1, type: "say", say: "text", text: "traced" }],
+			taskId: "task-trace",
+			globalStoragePath: tmpBaseDir,
+		})
+
+		const events = traceLines.map(
+			(line) => JSON.parse(line.replace("[persistence-trace] ", "")) as Record<string, unknown>,
+		)
+		expect(events.map((event) => event.stage)).toEqual([
+			"ui-messages-recovery",
+			"ui-messages-write-start",
+			"ui-messages-backup-rename",
+			"ui-messages-replacement-rename",
+			"ui-messages-write-complete",
+		])
+		for (const event of events) {
+			expect(event.taskId).toBe("task-trace")
+			expect(event.pid).toBe(process.pid)
+		}
+		const backupRename = events.find((event) => event.stage === "ui-messages-backup-rename")
+		expect(backupRename?.detail).toBe("eperm-fallback")
 	})
 
 	it("propagates a forced write failure without swallowing or replacing it", async () => {
@@ -182,7 +223,7 @@ describe("taskMessages.readTaskMessages", () => {
 			originalError: missing,
 			message: expect.stringContaining("(code: ENOENT)"),
 		})
-		expect(hoisted.readFileMock).toHaveBeenCalledTimes(2)
+		expect(hoisted.readFileMock).toHaveBeenCalledTimes(3)
 	})
 
 	it("does not retry non-ENOENT read failures and surfaces the underlying code", async () => {

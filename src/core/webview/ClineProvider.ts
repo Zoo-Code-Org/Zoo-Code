@@ -98,7 +98,7 @@ import type { CodeIndexWorkspaceScope } from "../../services/code-index/code-ind
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
 
-import { fileExistsAtPath } from "../../utils/fs"
+import { getErrorCode, readFileWithMissingRetry } from "../task-persistence/readFileWithMissingRetry"
 import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
 import { getWorkspaceGitInfo } from "../../utils/git"
 import { getWorkspacePath } from "../../utils/path"
@@ -515,6 +515,7 @@ export class ClineProvider
 			}
 
 			this.taskHistoryStoreInitialized = true
+			if (this.isViewLaunched) await this.postStateToWebview()
 		} catch (error) {
 			this.log(`[initializeTaskHistoryStore] Error: ${error instanceof Error ? error.message : String(error)}`)
 		}
@@ -2385,21 +2386,15 @@ export class ClineProvider
 		const taskDirPath = await getTaskDirectoryPath(globalStoragePath, id)
 		const apiConversationHistoryFilePath = path.join(taskDirPath, GlobalFileNames.apiConversationHistory)
 		const uiMessagesFilePath = path.join(taskDirPath, GlobalFileNames.uiMessages)
-		const fileExists = await fileExistsAtPath(apiConversationHistoryFilePath)
-
 		let apiConversationHistory: Anthropic.MessageParam[] = []
-
-		if (fileExists) {
-			try {
-				apiConversationHistory = JSON.parse(await fs.readFile(apiConversationHistoryFilePath, "utf8"))
-			} catch (error) {
-				console.warn(
-					`[getTaskWithId] api_conversation_history.json corrupted for task ${id}, returning empty history: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
-		} else {
+		try {
+			apiConversationHistory = JSON.parse(await readFileWithMissingRetry(apiConversationHistoryFilePath))
+		} catch (error) {
+			// Preserve the existing missing/corrupt-history behavior, but never
+			// turn an I/O or recovery failure into an empty conversation.
+			if (!(error instanceof SyntaxError) && getErrorCode(error) !== "ENOENT") throw error
 			console.warn(
-				`[getTaskWithId] api_conversation_history.json missing for task ${id}, returning empty history`,
+				`[getTaskWithId] API history unavailable for task ${id}, returning empty history: ${error instanceof Error ? error.message : String(error)}`,
 			)
 		}
 
@@ -2935,8 +2930,12 @@ export class ClineProvider
 			clineMessages: currentTask?.clineMessages || [],
 			currentTaskTodos: currentTask?.todoList || [],
 			messageQueue: currentTask?.messageQueueService?.messages,
+			// Legacy history can include deleted tasks. Prefer it to hiding all history while the store is unhealthy.
 			taskHistory: includeTaskHistory
-				? this.taskHistoryStore.getAll().filter((item: HistoryItem) => item.ts && item.task)
+				? (this.taskHistoryStore.isHealthy
+						? this.taskHistoryStore.getAll()
+						: (this.contextProxy.getValue("taskHistory") ?? [])
+					).filter((item: HistoryItem) => item.ts && item.task)
 				: [],
 			soundEnabled: soundEnabled ?? false,
 			ttsEnabled: ttsEnabled ?? false,

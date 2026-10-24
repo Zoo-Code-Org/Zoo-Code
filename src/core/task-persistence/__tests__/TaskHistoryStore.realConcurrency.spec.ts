@@ -292,32 +292,40 @@ describe("TaskHistoryStore real cross-host locking", () => {
 		}
 	})
 
-	it("does not recreate a task deleted by another host before settlement", async () => {
-		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-deleted-settlement-"))
-		const storeA = new TaskHistoryStore(storagePath)
-		const storeB = new TaskHistoryStore(storagePath)
-		const actionA = createAction("action-a", "action A")
+	it.each(["delete", "deleteMany"] as const)(
+		"does not resurrect a backup after %s before settlement",
+		async (method) => {
+			const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-deleted-settlement-"))
+			const storeA = new TaskHistoryStore(storagePath)
+			const storeB = new TaskHistoryStore(storagePath)
+			const actionA = createAction("action-a", "action A")
 
-		try {
-			await storeA.initialize()
-			await storeA.upsert({ ...item("shared-task"), pendingAction: actionA })
-			await storeB.initialize()
+			try {
+				await storeA.initialize()
+				await storeA.upsert({ ...item("shared-task"), pendingAction: actionA })
+				await storeB.initialize()
 
-			await storeB.delete("shared-task")
-			expect(storeA.get("shared-task")?.pendingAction).toEqual(actionA)
+				const canonical = path.join(storagePath, "tasks", "shared-task", "history_item.json")
+				const backup = path.join(path.dirname(canonical), ".history_item.json.bak_1_test.tmp")
+				await fs.copyFile(canonical, backup)
+				if (method === "delete") await storeB.delete("shared-task")
+				else await storeB.deleteMany(["shared-task"])
+				await expect(fs.access(backup)).rejects.toMatchObject({ code: "ENOENT" })
+				expect(storeA.get("shared-task")?.pendingAction).toEqual(actionA)
 
-			await expect(storeA.clearPendingActionIfMatching("shared-task", actionA.actionId)).rejects.toThrow(
-				"task shared-task not found",
-			)
-			expect(storeA.get("shared-task")).toBeUndefined()
-			await storeB.invalidate("shared-task")
-			expect(storeB.get("shared-task")).toBeUndefined()
-		} finally {
-			storeA.dispose()
-			storeB.dispose()
-			await fs.rm(storagePath, { recursive: true, force: true })
-		}
-	})
+				await expect(storeA.clearPendingActionIfMatching("shared-task", actionA.actionId)).rejects.toThrow(
+					"task shared-task not found",
+				)
+				expect(storeA.get("shared-task")).toBeUndefined()
+				await storeB.invalidate("shared-task")
+				expect(storeB.get("shared-task")).toBeUndefined()
+			} finally {
+				storeA.dispose()
+				storeB.dispose()
+				await fs.rm(storagePath, { recursive: true, force: true })
+			}
+		},
+	)
 
 	it("serializes deletion after settlement reads disk without recreating the record", async () => {
 		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-delete-during-settlement-"))

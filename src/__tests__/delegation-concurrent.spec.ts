@@ -19,7 +19,8 @@ vi.mock("fs", () => ({
 	existsSync: vi.fn().mockReturnValue(false),
 }))
 
-vi.mock("../utils/safeWriteJson", () => ({
+vi.mock("../utils/safeWriteJson", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../utils/safeWriteJson")>()),
 	safeWriteJson: vi.fn().mockResolvedValue(undefined),
 }))
 

@@ -27,6 +27,7 @@ import { initializeNetworkProxy } from "./utils/networkProxy"
 import { Package } from "./shared/package"
 import { formatLanguage } from "./shared/language"
 import { ContextProxy } from "./core/config/ContextProxy"
+import { setPersistenceTraceSink, tracePersistenceEvent } from "./core/task-persistence/persistenceTrace"
 import { ClineProvider } from "./core/webview/ClineProvider"
 import { registerCopilotModelBroadcast } from "./services/language-models/copilotModelBroadcast"
 import { ClineProviderFactory } from "./core/webview/ClineProviderFactory"
@@ -125,6 +126,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	extensionContext = context
 	outputChannel = vscode.window.createOutputChannel(Package.outputChannel)
 	context.subscriptions.push(outputChannel)
+	// Mirror persistence trace lines (task ID + process ID) into the output
+	// channel and the console, so a restart-persistence investigation can
+	// order UI-message writer activity across extension-host restarts.
+	setPersistenceTraceSink(createDualLogger(createOutputChannelLogger(outputChannel)))
 	outputChannel.appendLine(`${Package.name} extension activated - ${JSON.stringify(Package)}`)
 
 	// Initialize network proxy configuration early, before any network requests.
@@ -402,6 +407,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 // This method is called when your extension is deactivated.
 export async function deactivate() {
+	tracePersistenceEvent("shutdown")
 	outputChannel.appendLine(`${Package.name} extension deactivated`)
 
 	if (cloudService && CloudService.hasInstance()) {

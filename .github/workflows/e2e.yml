@@ -156,6 +156,16 @@ jobs:
               if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
               run: TEST_FILE=restart-persistence.test USE_MOCK=true xvfb-run -a pnpm --filter @roo-code/vscode-e2e exec node ./out/runTest.js
 
+            - name: Upload restart-persistence failure artifacts
+              # Publish only generated metadata. Raw histories and logs are excluded.
+              if: failure()
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              with:
+                  name: restart-persistence-failure
+                  retention-days: 7
+                  path: apps/vscode-e2e/test-failures/**/diagnostics.json
+                  if-no-files-found: ignore
+
             - name: Explain skipped mocked E2E pass marker
               if: steps.e2e-marker.outputs.cache-hit != 'true' && steps.run-e2e.outcome == 'success' && steps.vscode-fallback.outputs.used == 'true'
               run: echo "Skipping mocked E2E pass marker because tests ran against a stale cached VS Code binary (VS Code download endpoints unreachable)."
