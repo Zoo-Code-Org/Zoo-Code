@@ -1,0 +1,102 @@
+import { z } from "zod"
+
+import { clineMessageSchema } from "@roo-code/types"
+
+/**
+ * Public wire types for Zoo account remote task control.
+ * Paths live under /api/extension/remote/* and use the extension session token.
+ */
+
+export const zooRemoteCommandTypeSchema = z.enum([
+	"message",
+	"approve_ask",
+	"deny_ask",
+	"cancel_task",
+	"resume_task",
+	"start_task",
+	"switch_mode",
+	"answer_followup",
+	"end_remote_session",
+])
+
+export type ZooRemoteCommandType = z.infer<typeof zooRemoteCommandTypeSchema>
+
+export const zooRemoteCommandSchema = z.object({
+	commandId: z.string().min(1).max(200),
+	type: zooRemoteCommandTypeSchema,
+	taskId: z.string().max(200).optional(),
+	payload: z
+		.object({
+			text: z.string().max(100_000).optional(),
+			images: z.array(z.string().max(1_500_000)).max(8).optional(),
+			mode: z.string().max(64).optional(),
+			/** Timestamp of the ask the user approved or denied. */
+			askTs: z.number().optional(),
+		})
+		.optional(),
+	timestamp: z.number().optional(),
+})
+
+export type ZooRemoteCommand = z.infer<typeof zooRemoteCommandSchema>
+
+/** Commands kept from one poll. Invalid entries are returned separately so they can be acked. */
+export type ZooRemoteCommandsResponse = {
+	commands: ZooRemoteCommand[]
+	invalidCommandIds: string[]
+}
+
+export const zooRemoteEventTypeSchema = z.enum([
+	"message",
+	"task_interactive",
+	"task_idle",
+	"task_resumable",
+	"task_completed",
+	"task_aborted",
+	"mode_switched",
+])
+
+export type ZooRemoteEventType = z.infer<typeof zooRemoteEventTypeSchema>
+
+export const zooRemoteMessageActionSchema = z.enum(["created", "updated"])
+
+export const zooRemoteEventSchema = z.object({
+	type: zooRemoteEventTypeSchema,
+	taskId: z.string().min(1),
+	message: clineMessageSchema.optional(),
+	action: zooRemoteMessageActionSchema.optional(),
+	mode: z.string().optional(),
+	seq: z.number().int().nonnegative().optional(),
+	timestamp: z.number(),
+})
+
+export type ZooRemoteEvent = z.infer<typeof zooRemoteEventSchema>
+
+export const zooRemotePresenceSchema = z.object({
+	instanceId: z.string().min(1),
+	apiProvider: z.string().min(1),
+	workspacePath: z.string().optional(),
+	taskId: z.string().optional(),
+	online: z.boolean(),
+	editorName: z.string().optional(),
+	extensionVersion: z.string().optional(),
+})
+
+export type ZooRemotePresence = z.infer<typeof zooRemotePresenceSchema>
+
+export const zooRemoteCommandAckSchema = z.object({
+	commandId: z.string().min(1),
+	status: z.enum(["acked", "failed"]),
+	errorCode: z.string().optional(),
+	message: z.string().optional(),
+})
+
+export type ZooRemoteCommandAck = z.infer<typeof zooRemoteCommandAckSchema>
+
+export const zooRemoteSnapshotSchema = z.object({
+	instanceId: z.string().min(1),
+	taskId: z.string().min(1),
+	messages: z.array(clineMessageSchema).max(500),
+	mode: z.string().optional(),
+})
+
+export type ZooRemoteSnapshot = z.infer<typeof zooRemoteSnapshotSchema>

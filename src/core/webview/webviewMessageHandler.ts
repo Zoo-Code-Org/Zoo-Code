@@ -2070,12 +2070,33 @@ export const webviewMessageHandler = async (
 			stopTts()
 			break
 
+		case "startRemoteControlSession":
+		case "endRemoteControlSession": {
+			try {
+				const { getZooRemoteControlBridge } = await import("../../extension")
+				await getZooRemoteControlBridge()?.setSessionActive(message.type === "startRemoteControlSession")
+			} catch (error) {
+				provider.log(
+					`[ZooRemoteControl] session toggle failed: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+			break
+		}
 		case "updateVSCodeSetting": {
-			const { setting, value } = message
+			const { setting } = message
+			const value = message.bool ?? message.value
 
 			if (setting !== undefined && value !== undefined) {
 				if (ALLOWED_VSCODE_SETTINGS.has(setting)) {
-					await vscode.workspace.getConfiguration().update(setting, value, true)
+					const config = vscode.workspace.getConfiguration()
+					const inspected = config.inspect(setting)
+					const target =
+						inspected?.workspaceFolderValue !== undefined
+							? vscode.ConfigurationTarget.WorkspaceFolder
+							: inspected?.workspaceValue !== undefined
+								? vscode.ConfigurationTarget.Workspace
+								: vscode.ConfigurationTarget.Global
+					await config.update(setting, value, target)
 				} else {
 					vscode.window.showErrorMessage(`Cannot update restricted VSCode setting: ${setting}`)
 				}
