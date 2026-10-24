@@ -2089,6 +2089,75 @@ describe("ClineProvider", () => {
 		expect(state.alwaysDenyUnapprovedCommands).toBe(false)
 	})
 
+	describe("command list scope merging", () => {
+		// getConfiguration overrides must not leak past these tests:
+		// clearAllMocks does not remove mockReturnValue defaults.
+		afterEach(() => {
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+				get: vi.fn().mockReturnValue([]),
+				update: vi.fn(),
+			} as unknown as vscode.WorkspaceConfiguration)
+		})
+
+		test("getState enforces workspace-scope denied commands even when global state is empty", async () => {
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+				get: vi.fn().mockReturnValue([]),
+				inspect: vi
+					.fn()
+					.mockImplementation((key: string) =>
+						key === "deniedCommands" ? { key, workspaceValue: ["docker"] } : undefined,
+					),
+				update: vi.fn(),
+			} as unknown as vscode.WorkspaceConfiguration)
+
+			const state = await provider.getState()
+
+			expect(state.deniedCommands).toEqual(["docker"])
+		})
+
+		test("getStateToPostToWebview shows the same merged command lists as getState", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("deniedCommands", ["git"])
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+				get: vi.fn().mockReturnValue(["git", "docker"]),
+				inspect: vi
+					.fn()
+					.mockImplementation((key: string) =>
+						key === "deniedCommands" ? { key, workspaceValue: ["docker"] } : undefined,
+					),
+				update: vi.fn(),
+			} as unknown as vscode.WorkspaceConfiguration)
+
+			const state = await provider.getStateToPostToWebview()
+
+			// Display is the set union of global state and workspace scope, matching
+			// what getState() enforces.
+			expect(state.deniedCommands).toEqual(["git", "docker"])
+			expect(state.allowedCommands).toEqual([])
+		})
+
+		test("getState prefers the workspace-folder value for multi-root workspaces", async () => {
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+				get: vi.fn().mockReturnValue(["docker", "pnpm docker"]),
+				inspect: vi
+					.fn()
+					.mockImplementation((key: string) =>
+						key === "deniedCommands"
+							? { key, workspaceValue: ["docker"], workspaceFolderValue: ["pnpm docker"] }
+							: undefined,
+					),
+				update: vi.fn(),
+			} as unknown as vscode.WorkspaceConfiguration)
+
+			const state = await provider.getState()
+
+			// The folder value replaces (not unions with) the workspace value, and
+			// the effective get() value is ignored so global-scoped entries do not
+			// leak into the workspace layer.
+			expect(state.deniedCommands).toEqual(["pnpm docker"])
+		})
+	})
+
 	test("getState returns the saved allowed read files", async () => {
 		await provider.contextProxy.setValue("allowedReadFiles", ["notes.md"])
 
