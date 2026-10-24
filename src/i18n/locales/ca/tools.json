@@ -19,7 +19,8 @@
 			"blocked": "Destructive Command Guard ha bloquejat aquesta ordre.",
 			"blockedWithReason": "Destructive Command Guard ha bloquejat aquesta ordre. Missatge de DCG: {{reason}}",
 			"blockedWithRule": "Destructive Command Guard ha bloquejat aquesta ordre. (Regla: {{ruleId}})",
-			"blockedWithReasonAndRule": "Destructive Command Guard ha bloquejat aquesta ordre. Missatge de DCG: {{reason}} (Regla: {{ruleId}})"
+			"blockedWithReasonAndRule": "Destructive Command Guard ha bloquejat aquesta ordre. Missatge de DCG: {{reason}} (Regla: {{ruleId}})",
+			"assumedPosixNote": "Nota: DCG analitza les ordres com a sintaxi d'intèrpret POSIX, però aquesta ordre s'executa a {{shell}}, de manera que un bloqueig pot voler dir que DCG no ha pogut llegir l'ordre i no que sigui destructiva."
 		}
 	},
 	"newTask": {

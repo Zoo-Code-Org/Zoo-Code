@@ -19,7 +19,8 @@
 			"blocked": "Destructive Command Guard memblokir perintah ini.",
 			"blockedWithReason": "Destructive Command Guard memblokir perintah ini. Pesan dari DCG: {{reason}}",
 			"blockedWithRule": "Destructive Command Guard memblokir perintah ini. (Aturan: {{ruleId}})",
-			"blockedWithReasonAndRule": "Destructive Command Guard memblokir perintah ini. Pesan dari DCG: {{reason}} (Aturan: {{ruleId}})"
+			"blockedWithReasonAndRule": "Destructive Command Guard memblokir perintah ini. Pesan dari DCG: {{reason}} (Aturan: {{ruleId}})",
+			"assumedPosixNote": "Catatan: DCG menganalisis perintah sebagai sintaks shell POSIX, tetapi perintah ini berjalan di {{shell}}, sehingga pemblokiran bisa berarti DCG tidak dapat membaca perintah, bukan bahwa perintah tersebut destruktif."
 		}
 	},
 	"searchFiles": {

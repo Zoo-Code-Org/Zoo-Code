@@ -71,6 +71,9 @@ vitest.mock("../../../services/destructive-command-guard", () => ({
 
 // Import the module
 import * as executeCommandModule from "../ExecuteCommandTool"
+
+// The DCG block message names the executing shell; pin it so tests do not depend on the host.
+vi.mock("../../../utils/shell", () => ({ getShell: vi.fn(() => "/bin/bash") }))
 const { executeCommandTool } = executeCommandModule
 
 // Spies installed on the auto-approval module are not restored between tests,
@@ -314,6 +317,17 @@ describe("executeCommandTool", () => {
 			],
 		])("selects the localized DCG block message for reason %s and rule %s", (reason, ruleId, expected) => {
 			expect(executeCommandModule.formatDcgBlockedMessage(reason, ruleId)).toBe(expected)
+		})
+
+		it.each([
+			["C:\\Windows\\System32\\cmd.exe", true],
+			["C:\\Program Files\\PowerShell\\7\\pwsh.exe", true],
+			["/bin/bash", false],
+			[undefined, false],
+		])("appends the POSIX-assumption note only for non-POSIX shell %s", (shellPath, expectNote) => {
+			const message = executeCommandModule.formatDcgBlockedMessage(undefined, undefined, shellPath)
+
+			expect(message.includes("executeCommand.destructiveCommandGuard.assumedPosixNote")).toBe(expectNote)
 		})
 
 		it("shows a DCG block message as an error before requesting explicit approval", async () => {

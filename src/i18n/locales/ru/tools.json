@@ -19,7 +19,8 @@
 			"blocked": "Destructive Command Guard заблокировал эту команду.",
 			"blockedWithReason": "Destructive Command Guard заблокировал эту команду. Сообщение от DCG: {{reason}}",
 			"blockedWithRule": "Destructive Command Guard заблокировал эту команду. (Правило: {{ruleId}})",
-			"blockedWithReasonAndRule": "Destructive Command Guard заблокировал эту команду. Сообщение от DCG: {{reason}} (Правило: {{ruleId}})"
+			"blockedWithReasonAndRule": "Destructive Command Guard заблокировал эту команду. Сообщение от DCG: {{reason}} (Правило: {{ruleId}})",
+			"assumedPosixNote": "Примечание: DCG анализирует команды как синтаксис оболочки POSIX, но эта команда выполняется в {{shell}}, поэтому блокировка может означать, что DCG не смог прочитать команду, а не то, что она разрушительна."
 		}
 	},
 	"newTask": {

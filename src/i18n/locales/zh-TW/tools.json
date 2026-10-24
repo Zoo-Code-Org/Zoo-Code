@@ -19,7 +19,8 @@
 			"blocked": "Destructive Command Guard 已阻擋此命令。",
 			"blockedWithReason": "Destructive Command Guard 已阻擋此命令。來自 DCG 的訊息：{{reason}}",
 			"blockedWithRule": "Destructive Command Guard 已阻擋此命令。（規則：{{ruleId}}）",
-			"blockedWithReasonAndRule": "Destructive Command Guard 已阻擋此命令。來自 DCG 的訊息：{{reason}}（規則：{{ruleId}}）"
+			"blockedWithReasonAndRule": "Destructive Command Guard 已阻擋此命令。來自 DCG 的訊息：{{reason}}（規則：{{ruleId}}）",
+			"assumedPosixNote": "注意:DCG 以 POSIX shell 語法分析指令,但此指令在 {{shell}} 中執行,因此封鎖可能代表 DCG 無法解析該指令,而不是該指令具有破壞性。"
 		}
 	},
 	"newTask": {
