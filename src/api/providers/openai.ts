@@ -92,9 +92,6 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		const { info: modelInfo, reasoning } = this.getModel()
 		const modelUrl = this.options.openAiBaseUrl ?? ""
 		const modelId = this.options.openAiModelId ?? ""
-		// Stryker disable next-line LogicalOperator: equivalent. An unset option makes `&&`
-		// yield undefined, which the parameter default in convertToolsForOpenAI turns back into
-		// the same strict value as `??`.
 		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
 		const isAzureAiInference = this._isAzureAiInference(modelUrl)
 		const deepseekReasoner = this.usesR1Format(modelId)
@@ -380,9 +377,6 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	): ApiStream {
 		const { info: modelInfo, reasoning } = this.getModel()
 		const methodIsAzureAiInference = this._isAzureAiInference(this.options.openAiBaseUrl)
-		// Stryker disable next-line LogicalOperator: equivalent. An unset option makes `&&`
-		// yield undefined, which the parameter default in convertToolsForOpenAI turns back into
-		// the same strict value as `??`.
 		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
 
 		if (this.options.openAiStreamingEnabled ?? true) {

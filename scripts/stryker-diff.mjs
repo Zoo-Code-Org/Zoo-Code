@@ -465,6 +465,50 @@ export function mutantCounts(report) {
 	return counts
 }
 
+export function loadEquivalences(repoRoot) {
+	const file = path.join(repoRoot, "scripts/stryker-equivalences.json")
+	if (!fs.existsSync(file)) return []
+	const parsed = JSON.parse(fs.readFileSync(file, "utf8"))
+	return parsed.equivalences ?? []
+}
+
+export function applyEquivalences(counts, equivalences, packageEntry, reportedFiles = new Set()) {
+	// The key includes the replacement: one condition yields both `=> true` and `=> false`
+	// ConditionalExpression mutants, and only the reviewed replacement may be accepted.
+	// Matching is count-limited: a compound condition emits several mutants that share the key
+	// (same line, mutator and replacement, different column), so one registry entry accepts
+	// exactly one mutant and any further mutant with that key stays blocking.
+	const entryKey = (entry) => `${entry.file}:${entry.line}:${entry.mutator}:${entry.replacement}`
+	const remaining = new Map()
+	for (const entry of equivalences) {
+		const key = entryKey(entry)
+		remaining.set(key, (remaining.get(key) ?? 0) + 1)
+	}
+	const accepted = new Map()
+	const blocking = []
+	let equivalent = 0
+	for (const mutant of counts.blocking) {
+		const key = `${packageEntry.root}/${mutant.filePath}:${mutant.location?.start?.line}:${mutant.mutatorName}:${mutant.replacement}`
+		const left = remaining.get(key) ?? 0
+		if (left > 0) {
+			remaining.set(key, left - 1)
+			accepted.set(key, (accepted.get(key) ?? 0) + 1)
+			equivalent++
+		} else {
+			blocking.push(mutant)
+		}
+	}
+	const seen = new Map()
+	const unusedEquivalences = equivalences.filter((entry) => {
+		if (!entry.file.startsWith(packageEntry.sourceRoot) || !reportedFiles.has(entry.file)) return false
+		const key = entryKey(entry)
+		const ordinal = (seen.get(key) ?? 0) + 1
+		seen.set(key, ordinal)
+		return (accepted.get(key) ?? 0) < ordinal
+	})
+	return { ...counts, blocking, equivalent, unusedEquivalences }
+}
+
 function escapeWorkflowData(value) {
 	return String(value).replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A")
 }
@@ -569,15 +613,15 @@ export function formatSummary(rows, advisories, manifest = {}) {
 	const lines = [
 		"## Changed-code mutation testing",
 		"",
-		"| Package | Changed executable lines | Valid | Killed | Timeout | Survived | No coverage | Result |",
-		"| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+		"| Package | Changed executable lines | Valid | Killed | Timeout | Survived | No coverage | Equivalent | Result |",
+		"| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
 	]
 	for (const row of rows) {
 		lines.push(
-			`| ${row.id} | ${row.changedLines} | ${row.valid} | ${row.killed} | ${row.timeout} | ${row.survived} | ${row.noCoverage} | ${row.result} |`,
+			`| ${row.id} | ${row.changedLines} | ${row.valid} | ${row.killed} | ${row.timeout} | ${row.survived} | ${row.noCoverage} | ${row.equivalent ?? 0} | ${row.result} |`,
 		)
 	}
-	if (rows.length === 0) lines.push("| — | 0 | 0 | 0 | 0 | 0 | 0 | Not applicable |")
+	if (rows.length === 0) lines.push("| — | 0 | 0 | 0 | 0 | 0 | 0 | 0 | Not applicable |")
 
 	if (rows.length > 0) {
 		lines.push("", "### Focused tests")
@@ -670,9 +714,17 @@ export function appendSummary(rows, advisories, manifest) {
 	}
 }
 
-export function evaluateReport(report, packageEntry) {
-	const counts = mutantCounts(report)
+export function evaluateReport(report, packageEntry, equivalences = []) {
+	const reportedFiles = new Set(Object.keys(report.files ?? {}).map((filePath) => `${packageEntry.root}/${filePath}`))
+	const counts = applyEquivalences(mutantCounts(report), equivalences, packageEntry, reportedFiles)
 	const advisories = []
+	if (counts.unusedEquivalences.length > 0) {
+		advisories.push(
+			`${packageEntry.id} matched none of its accepted equivalence entries for files under test ` +
+				`(${counts.unusedEquivalences.map((entry) => `${entry.file}:${entry.line}:${entry.mutator}:${entry.replacement}`).join(", ")}). ` +
+				"The code shifted or the mutant is now killed; update or remove the stale entries.",
+		)
+	}
 	if (counts.valid > MAX_MUTANTS) {
 		advisories.push(
 			`${packageEntry.id} generated ${counts.valid} valid mutants (limit ${MAX_MUTANTS}). ` +
@@ -695,8 +747,10 @@ export function runManifest(
 	{
 		runMutation = runStryker,
 		readMutationReport = (reportPath) => JSON.parse(fs.readFileSync(reportPath, "utf8")),
+		readEquivalences = loadEquivalences,
 	} = {},
 ) {
+	const equivalences = readEquivalences(repoRoot)
 	const rows = []
 	const advisories = [...(manifest.advisories ?? [])]
 	const annotationState = { total: 0, perFile: new Map() }
@@ -737,6 +791,7 @@ export function runManifest(
 					timeout: 0,
 					survived: 0,
 					noCoverage: 0,
+					equivalent: 0,
 					result: "No mutants generated",
 				})
 				continue
@@ -746,7 +801,7 @@ export function runManifest(
 			const jsonReportPath = path.join(reportRoot, packageEntry.id, "mutation.json")
 			const report = readMutationReport(jsonReportPath)
 			packageEntry.testFiles = testsFromMutationReport(report, packageEntry.testFiles)
-			counts = evaluateReport(report, packageEntry)
+			counts = evaluateReport(report, packageEntry, equivalences)
 			for (const annotation of formatAnnotations(
 				counts.blocking,
 				packageEntry.runRoot ?? packageEntry.root,
@@ -781,6 +836,7 @@ export function runManifest(
 				timeout: counts?.timeout ?? 0,
 				survived: counts?.survived ?? 0,
 				noCoverage: counts?.noCoverage ?? 0,
+				equivalent: counts?.equivalent ?? 0,
 				blocking: counts?.blocking ?? [],
 				result: "Advisory incomplete",
 			})

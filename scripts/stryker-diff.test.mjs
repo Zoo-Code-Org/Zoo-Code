@@ -20,6 +20,7 @@ import {
 	formatAnnotationCommand,
 	formatBlockingMutants,
 	formatSummary,
+	loadEquivalences,
 	mutantCounts,
 	parseChangedLines,
 	parseNameStatus,
@@ -986,5 +987,270 @@ describe("report evaluation", () => {
 			evaluateReport({ files: { "src/value.ts": { mutants } } }, packageEntry).advisories.join("\n"),
 			/result is inconclusive/,
 		)
+	})
+})
+
+describe("accepted equivalent mutants", () => {
+	const packageEntry = { id: "extension", root: "src", sourceRoot: "src/" }
+	const report = {
+		files: {
+			"utils/pathUtils.ts": {
+				mutants: [
+					{
+						status: "Survived",
+						mutatorName: "EqualityOperator",
+						replacement: "<=",
+						location: { start: { line: 45 } },
+					},
+					{
+						status: "Survived",
+						mutatorName: "ConditionalExpression",
+						replacement: "true",
+						location: { start: { line: 50 } },
+					},
+				],
+			},
+		},
+	}
+	const equivalences = [
+		{
+			file: "src/utils/pathUtils.ts",
+			line: 45,
+			mutator: "EqualityOperator",
+			replacement: "<=",
+			reason: "defensive bound never hit",
+		},
+		{
+			file: "src/utils/pathUtils.ts",
+			line: 99,
+			mutator: "BlockStatement",
+			replacement: "{}",
+			reason: "entry whose mutant is gone",
+		},
+		{
+			file: "src/other.ts",
+			line: 7,
+			mutator: "Foo",
+			replacement: "bar",
+			reason: "file not part of this run",
+		},
+	]
+
+	it("removes accepted equivalent mutants from the blocking set", () => {
+		const counts = evaluateReport(report, packageEntry, equivalences)
+		assert.equal(counts.equivalent, 1)
+		assert.equal(counts.survived, 2)
+		assert.equal(counts.blocking.length, 1)
+		assert.equal(counts.blocking[0].mutatorName, "ConditionalExpression")
+	})
+
+	it("accepts only the reviewed replacement when two mutants share a key", () => {
+		const twoMutants = {
+			files: {
+				"utils/pathUtils.ts": {
+					mutants: [
+						{
+							status: "Survived",
+							mutatorName: "ConditionalExpression",
+							replacement: "true",
+							location: { start: { line: 50 } },
+						},
+						{
+							status: "Survived",
+							mutatorName: "ConditionalExpression",
+							replacement: "false",
+							location: { start: { line: 50 } },
+						},
+					],
+				},
+			},
+		}
+		const reviewed = [
+			{
+				file: "src/utils/pathUtils.ts",
+				line: 50,
+				mutator: "ConditionalExpression",
+				replacement: "true",
+				reason: "only the true replacement is equivalent here",
+			},
+		]
+		const counts = evaluateReport(twoMutants, packageEntry, reviewed)
+		assert.equal(counts.equivalent, 1)
+		assert.equal(counts.blocking.length, 1)
+		assert.equal(counts.blocking[0].replacement, "false")
+	})
+
+	it("limits each registry entry to a single accepted mutant", () => {
+		// A compound condition emits several ConditionalExpression/true mutants on one line that
+		// differ only by column. One reviewed entry must not accept all of them.
+		const threeSameKey = {
+			files: {
+				"utils/pathUtils.ts": {
+					mutants: [1, 2, 3].map((column) => ({
+						status: "Survived",
+						mutatorName: "ConditionalExpression",
+						replacement: "true",
+						location: { start: { line: 50, column } },
+					})),
+				},
+			},
+		}
+		const oneEntry = [
+			{
+				file: "src/utils/pathUtils.ts",
+				line: 50,
+				mutator: "ConditionalExpression",
+				replacement: "true",
+				reason: "the first sub-expression is equivalent here",
+			},
+		]
+		const limited = evaluateReport(threeSameKey, packageEntry, oneEntry)
+		assert.equal(limited.equivalent, 1)
+		assert.equal(limited.blocking.length, 2)
+		assert.deepEqual(
+			limited.blocking.map((mutant) => mutant.location.start.column),
+			[2, 3],
+		)
+		assert.deepEqual(limited.advisories, [])
+
+		const twoEntries = [...oneEntry, { ...oneEntry[0], reason: "the second sub-expression is also equivalent" }]
+		const both = evaluateReport(threeSameKey, packageEntry, twoEntries)
+		assert.equal(both.equivalent, 2)
+		assert.equal(both.blocking.length, 1)
+		assert.deepEqual(both.advisories, [])
+	})
+
+	it("flags registry duplicates that no extra mutant consumed", () => {
+		const singleMutant = {
+			files: {
+				"utils/pathUtils.ts": {
+					mutants: [
+						{
+							status: "Survived",
+							mutatorName: "ConditionalExpression",
+							replacement: "true",
+							location: { start: { line: 50, column: 1 } },
+						},
+					],
+				},
+			},
+		}
+		const oneEntry = {
+			file: "src/utils/pathUtils.ts",
+			line: 50,
+			mutator: "ConditionalExpression",
+			replacement: "true",
+			reason: "only one mutant carries this key",
+		}
+		const counts = evaluateReport(singleMutant, packageEntry, [
+			oneEntry,
+			{ ...oneEntry, reason: "duplicate entry with no second mutant to accept" },
+		])
+		assert.equal(counts.equivalent, 1)
+		assert.equal(counts.unusedEquivalences.length, 1)
+		assert.equal(counts.unusedEquivalences[0].reason, "duplicate entry with no second mutant to accept")
+	})
+
+	it("advises about stale entries only for files present in the report", () => {
+		const advisories = evaluateReport(report, packageEntry, equivalences).advisories.join("\n")
+		assert.match(advisories, /src\/utils\/pathUtils\.ts:99:BlockStatement/)
+		assert.doesNotMatch(advisories, /src\/other\.ts/)
+	})
+
+	it("keeps prior behavior when no equivalences are configured", () => {
+		const counts = evaluateReport(report, packageEntry)
+		assert.equal(counts.blocking.length, 2)
+		assert.equal(counts.equivalent, 0)
+	})
+
+	it("applies registry equivalences through the runManifest pipeline", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-equiv-manifest-"))
+		const packageEntry = {
+			id: "core",
+			root: "packages/core",
+			sourceRoot: "packages/core/",
+			vitestConfig: "vitest.unit.config.ts",
+			selectors: ["src/value.ts:1-1"],
+			changedExecutableLines: 1,
+		}
+		try {
+			const row = runManifest(repo, { packages: [{ ...packageEntry }] }, path.join(repo, "reports"), {
+				runMutation: (_repoRoot, _entry, _reportRoot, dryRunOnly) =>
+					dryRunOnly ? "Instrumented 1 source file(s) with 1 mutant(s)" : "",
+				readMutationReport: () => ({
+					files: {
+						"src/value.ts": {
+							mutants: [
+								{
+									status: "Survived",
+									mutatorName: "BooleanLiteral",
+									replacement: "false",
+									location: { start: { line: 1 } },
+								},
+							],
+						},
+					},
+				}),
+				readEquivalences: () => [
+					{
+						file: "packages/core/src/value.ts",
+						line: 1,
+						mutator: "BooleanLiteral",
+						replacement: "false",
+						reason: "the mutated branch is unreachable in every caller",
+					},
+				],
+			})[0]
+			assert.equal(row.equivalent, 1)
+			assert.equal(row.result, "Passed")
+			assert.deepEqual(row.advisories, [])
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("loads no equivalences when the registry file is absent", () => {
+		assert.deepEqual(loadEquivalences(fs.mkdtempSync(path.join(os.tmpdir(), "stryker-eq-"))), [])
+	})
+
+	it("ships registry entries with file, line, mutator, and reason", () => {
+		const registry = JSON.parse(
+			fs.readFileSync(path.join(repositoryRoot, "scripts/stryker-equivalences.json"), "utf8"),
+		).equivalences
+		assert.ok(registry.length > 0)
+		for (const entry of registry) {
+			assert.match(entry.file, /^(src|packages)\//)
+			assert.ok(Number.isInteger(entry.line))
+			assert.ok(entry.mutator)
+			assert.equal(typeof entry.replacement, "string")
+			assert.ok(entry.reason.length > 20)
+		}
+	})
+
+	it("reports the equivalent column in the summary", () => {
+		const summary = formatSummary(
+			[
+				{
+					id: "extension",
+					root: "src",
+					changedLines: 1,
+					valid: 2,
+					killed: 1,
+					timeout: 0,
+					survived: 1,
+					noCoverage: 0,
+					equivalent: 1,
+					result: "Passed",
+					testFiles: [],
+				},
+			],
+			[],
+			{},
+		)
+		const header = summary.split("\n").find((line) => line.includes("| Equivalent |")) ?? ""
+		const delimiter = summary.split("\n")[summary.split("\n").indexOf(header) + 1] ?? ""
+		assert.equal(header.split("|").length, delimiter.split("|").length)
+		assert.ok(summary.includes("| Equivalent |"))
+		assert.ok(summary.includes("| 1 | Passed |"))
 	})
 })
