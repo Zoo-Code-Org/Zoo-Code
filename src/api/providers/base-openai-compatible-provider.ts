@@ -112,11 +112,10 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 			;(params as any).thinking = { type: "enabled" }
 		}
 
-		try {
-			return await this.client.chat.completions.create(params, requestOptions)
-		} catch (error) {
-			throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
-		}
+		// Creation errors are normalized once in createMessage: subclasses can override this
+		// method and return the SDK promise without awaiting it, so a catch here would not
+		// cover every provider.
+		return await this.client.chat.completions.create(params, requestOptions)
 	}
 
 	override async *createMessage(
@@ -130,7 +129,16 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		// Per-request abort wiring (RequestConfigBuilder adoption): subclasses inherit
 		// it by receiving the built config as createStream's requestOptions.
 		const requestConfig = new RequestConfigBuilder<OpenAiRequestConfig>().setAbortSignal(metadata).build()
-		const stream = await this.createStream(systemPrompt, messages, metadata, requestConfig)
+		// Request creation can reject before the stream exists. Some subclasses return the
+		// SDK promise without awaiting it (e.g. FriendliHandler.createStream), so their own
+		// catch cannot fire; normalize creation-time failures here so an abort during request
+		// creation reaches Task.ts as an AbortError instead of a raw APIUserAbortError.
+		let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
+		try {
+			stream = await this.createStream(systemPrompt, messages, metadata, requestConfig)
+		} catch (error) {
+			throw handleOpenAIRequestError(error, this.providerName, signal)
+		}
 
 		const matcher = new TagMatcher(
 			["think", "thought"],

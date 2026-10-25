@@ -443,6 +443,29 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			expect(result.message).toBe("TestProvider request aborted")
 		})
 
+		it("should normalize a rejected-Promise abort from an overriding createStream that does not await", async () => {
+			// Subclasses such as FriendliHandler return the SDK promise without awaiting it,
+			// so their own catch cannot fire. The base createMessage must normalize the
+			// creation-time rejection for every subclass.
+			class UnawaitedCreateStreamProvider extends TestOpenAiCompatibleProvider {
+				protected override createStream() {
+					return Promise.reject(new APIUserAbortError())
+				}
+			}
+
+			const provider = new UnawaitedCreateStreamProvider("test-api-key")
+			const result = await captureError(
+				(async () => {
+					for await (const _ of provider.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("TestProvider request aborted")
+		})
+
 		it("should normalize an abort error raised during stream iteration into the abort contract", async () => {
 			mockCreate.mockImplementationOnce(() =>
 				(async function* () {
