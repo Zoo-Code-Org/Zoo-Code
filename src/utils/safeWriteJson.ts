@@ -70,6 +70,55 @@ function getTempFilePrefix(absoluteFilePath: string, kind: "new" | "bak"): strin
 	return `.${path.basename(absoluteFilePath)}.${kind}_`
 }
 
+/** Copy validated backup bytes; never publish the backup pathname itself. */
+async function restoreBackup(backupPath: string, absoluteFilePath: string): Promise<void> {
+	const temporaryPath = createTempFilePath(absoluteFilePath, "new")
+	try {
+		const before = await fs.lstat(backupPath, { bigint: true })
+		if (!before.isFile())
+			throw Object.assign(new Error("Recovery backup must be a regular file"), { code: "EINVAL" })
+		const flags =
+			fsSync.constants.O_RDONLY | (fsSync.constants.O_NOFOLLOW ?? 0) | (fsSync.constants.O_NONBLOCK ?? 0)
+		const source = await fs.open(backupPath, flags)
+		try {
+			const opened = await source.stat({ bigint: true })
+			const after = await fs.lstat(backupPath, { bigint: true })
+			// Identity checks also protect platforms without O_NOFOLLOW. No bytes
+			// are read until the descriptor matches the regular entry inspected.
+			if (
+				!opened.isFile() ||
+				!after.isFile() ||
+				before.dev !== opened.dev ||
+				before.ino !== opened.ino ||
+				after.dev !== opened.dev ||
+				after.ino !== opened.ino
+			) {
+				throw Object.assign(new Error("Recovery backup changed during validation"), { code: "EINVAL" })
+			}
+			const destination = await fs.open(temporaryPath, "wx", 0o600)
+			try {
+				const buffer = Buffer.alloc(64 * 1024)
+				for (;;) {
+					const { bytesRead } = await source.read(buffer, 0, buffer.length, null)
+					if (bytesRead === 0) break
+					await destination.writeFile(buffer.subarray(0, bytesRead))
+				}
+			} finally {
+				await destination.close()
+			}
+		} finally {
+			await source.close()
+		}
+		await fs.rename(temporaryPath, absoluteFilePath)
+	} finally {
+		try {
+			await fs.unlink(temporaryPath)
+		} catch (error) {
+			if (getErrorCode(error) !== "ENOENT") console.error("Failed to clean recovery temporary file:", error)
+		}
+	}
+}
+
 /**
  * Heals the canonical path after an interrupted previous write. Must run
  * under the advisory lock and before any data is read or written: temp and
@@ -125,7 +174,10 @@ async function recoverInterruptedReplacementUnchecked(
 				.filter((orphanPath) => path.basename(orphanPath).startsWith(backupPrefix))
 				.map(async (backupPath) => {
 					try {
-						return { backupPath, mtimeMs: (await fs.stat(backupPath)).mtimeMs }
+						const stats = await fs.lstat(backupPath)
+						if (!stats.isFile())
+							throw Object.assign(new Error("Recovery backup must be a regular file"), { code: "EINVAL" })
+						return { backupPath, mtimeMs: stats.mtimeMs }
 					} catch (statError) {
 						if (getErrorCode(statError) !== "ENOENT") throw statError
 						return null
@@ -139,15 +191,12 @@ async function recoverInterruptedReplacementUnchecked(
 			const newestBackupPath = newest.backupPath
 			// A failed restore leaves every backup intact and aborts the write.
 			// In particular, a merge must never observe null in this state.
-			await fs.rename(newestBackupPath, absoluteFilePath)
+			await restoreBackup(newestBackupPath, absoluteFilePath)
 			restoredFrom = newestBackupPath
 		}
 	}
 
 	for (const orphanPath of orphanedPaths) {
-		if (orphanPath === restoredFrom) {
-			continue
-		}
 		try {
 			await fs.unlink(orphanPath)
 		} catch (cleanupError) {

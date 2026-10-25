@@ -28,6 +28,12 @@ The results also include the function declaration and text examples.
 - The writer does not call `fsync`.
 - Read recovery searches for a matching backup before it takes the file lock.
 - Read recovery checks the canonical file and backups again under that lock.
+- Recovery rejects backup symlinks and non-regular files.
+- It validates the open backup descriptor before copying bytes into an exclusive temporary file.
+- It publishes that regular file by rename and retains the backup until commit.
+
+Recovery uses `O_NOFOLLOW` where Node provides it.
+Descriptor and pathname identity checks also apply on platforms without that flag.
 
 A fresh lock can belong to a paused writer.
 The protocol does not remove that lock before the stale interval expires.

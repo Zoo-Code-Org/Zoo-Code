@@ -331,6 +331,9 @@ It does not add a production injection interface or copy the replacement protoco
 Each scenario starts with a committed child record and its parent.
 Some scenarios also contain an orphaned backup and an incomplete replacement.
 The baseline records stream, filesystem, and advisory-lock calls.
+Recovery also records descriptor opens, stat, reads, writes, and closes.
+Recovery copies a validated regular backup into a new temporary file before commit.
+The original backup remains available across failed copies and interrupted commits.
 Each recorded call gets a SIGKILL before and after it.
 Each call also gets one injected EPERM, EBUSY, EACCES, or EIO error.
 Each resulting state gets four isolated follow-ups: read, write, delete, and cold initialization.

@@ -127,11 +127,45 @@ void test("records collection failures without copying raw files and still clean
 	await assert.rejects(fs.access(workspace.root), { code: "ENOENT" })
 })
 
-void test("cleans the workspace even when writing the diagnostic artifact fails", async (t) => {
-	const { workspace } = await scenario(t)
-	t.mock.method(fs, "writeFile", async () => {
-		throw Object.assign(new Error("disk failed"), { code: "EIO" })
+for (const failure of ["partial write", "rename"] as const) {
+	for (const existing of [false, true]) {
+		void test(`keeps the source after a failed ${failure}, previous artifact: ${existing}`, async (t) => {
+			const { workspace, destination } = await scenario(t)
+			await fs.mkdir(destination, { recursive: true })
+			const artifact = path.join(destination, "diagnostics.json")
+			const previous = JSON.stringify({ previous: true })
+			if (existing) await fs.writeFile(artifact, previous)
+			const write = fs.writeFile
+			if (failure === "partial write") {
+				t.mock.method(fs, "writeFile", async (file: Parameters<typeof fs.writeFile>[0]) => {
+					await write(file, '{"partial":')
+					throw Object.assign(new Error("disk failed"), { code: "EIO" })
+				})
+			} else {
+				t.mock.method(fs, "rename", async () => {
+					throw Object.assign(new Error("rename failed"), { code: "EIO" })
+				})
+			}
+			await assert.rejects(preserveScenarioWorkspace(workspace), { code: "EIO" })
+			await fs.access(workspace.root)
+			if (existing) assert.equal(await fs.readFile(artifact, "utf8"), previous)
+			else await assert.rejects(fs.access(artifact), { code: "ENOENT" })
+			assert.deepEqual(await fs.readdir(destination), existing ? ["diagnostics.json"] : [])
+		})
+	}
+}
+
+void test("publishes complete diagnostics before removing the source workspace", async (t) => {
+	const { workspace, destination } = await scenario(t)
+	const rename = fs.rename
+	t.mock.method(fs, "rename", async (source: string, target: string) => {
+		assert.equal(target, path.join(destination, "diagnostics.json"))
+		await fs.access(workspace.root)
+		await assert.rejects(fs.access(target), { code: "ENOENT" })
+		assert(JSON.parse(await fs.readFile(source, "utf8")).sources)
+		await rename(source, target)
 	})
-	await assert.rejects(preserveScenarioWorkspace(workspace), { code: "EIO" })
+	await preserveScenarioWorkspace(workspace)
+	assert.deepEqual(await fs.readdir(destination), ["diagnostics.json"])
 	await assert.rejects(fs.access(workspace.root), { code: "ENOENT" })
 })

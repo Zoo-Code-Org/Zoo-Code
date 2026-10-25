@@ -15,7 +15,8 @@ vi.mock("fs/promises", async () => {
 		...actual,
 		access: vi.fn(actual.access),
 		rename: vi.fn(actual.rename),
-		stat: vi.fn(actual.stat),
+		lstat: vi.fn(actual.lstat),
+		open: vi.fn(actual.open),
 		readdir: vi.fn(actual.readdir),
 	}
 })
@@ -31,7 +32,8 @@ describe("interrupted JSON recovery", () => {
 	beforeEach(async () => {
 		vi.mocked(fs.access).mockReset().mockImplementation(actual.access)
 		vi.mocked(fs.rename).mockReset().mockImplementation(actual.rename)
-		vi.mocked(fs.stat).mockReset().mockImplementation(actual.stat)
+		vi.mocked(fs.lstat).mockReset().mockImplementation(actual.lstat)
+		vi.mocked(fs.open).mockReset().mockImplementation(actual.open)
 		vi.mocked(fs.readdir).mockReset().mockImplementation(actual.readdir)
 		dir = await fs.mkdtemp(path.join(os.tmpdir(), "json-recovery-"))
 		canonical = path.join(dir, "history.json")
@@ -43,6 +45,83 @@ describe("interrupted JSON recovery", () => {
 		vi.restoreAllMocks()
 		setPersistenceTraceSink(undefined)
 		await fs.rm(dir, { recursive: true, force: true })
+	})
+
+	// Creating file symlinks requires privileges not guaranteed on Windows CI.
+	it.skipIf(process.platform === "win32").each(["recover", "read", "write"] as const)(
+		"rejects a symlinked backup through %s without reading its target",
+		async (entry) => {
+			const secret = path.join(dir, "secrets.json")
+			await fs.writeFile(secret, JSON.stringify({ secret: "must not be restored" }))
+			await fs.unlink(backup)
+			await fs.symlink(secret, backup)
+			const merge = vi.fn()
+			const pending =
+				entry === "recover"
+					? recoverJsonFile(canonical)
+					: entry === "read"
+						? readFileWithMissingRetry(canonical)
+						: safeWriteJson(canonical, {}, { merge })
+			await expect(pending).rejects.toMatchObject({ code: "EINVAL" })
+			expect(merge).not.toHaveBeenCalled()
+			await expect(fs.lstat(canonical)).rejects.toMatchObject({ code: "ENOENT" })
+			expect((await fs.lstat(backup)).isSymbolicLink()).toBe(true)
+			expect(JSON.parse(await fs.readFile(secret, "utf8"))).toEqual({ secret: "must not be restored" })
+		},
+	)
+
+	it("rejects a directory backup without publishing it", async () => {
+		await fs.unlink(backup)
+		await fs.mkdir(backup)
+		await expect(recoverJsonFile(canonical)).rejects.toMatchObject({ code: "EINVAL" })
+		await expect(fs.lstat(canonical)).rejects.toMatchObject({ code: "ENOENT" })
+	})
+
+	it.skipIf(process.platform === "win32")("rejects a swapped backup even without O_NOFOLLOW", async () => {
+		const secret = path.join(dir, "secrets.json")
+		await fs.writeFile(secret, JSON.stringify({ secret: true }))
+		vi.mocked(fs.open).mockImplementation(async (file, flags, mode) => {
+			if (file === backup) {
+				await fs.rename(backup, backup + ".saved")
+				await fs.symlink(secret, backup)
+				// Exercise identity validation on platforms without O_NOFOLLOW.
+				return actual.open(file, "r", mode)
+			}
+			return actual.open(file, flags, mode)
+		})
+		await expect(recoverJsonFile(canonical)).rejects.toMatchObject({ code: "EINVAL" })
+		await expect(fs.lstat(canonical)).rejects.toMatchObject({ code: "ENOENT" })
+		expect(JSON.parse(await fs.readFile(secret, "utf8"))).toEqual({ secret: true })
+	})
+
+	it.skipIf(process.platform === "win32")(
+		"copies descriptor bytes when the backup path changes after validation",
+		async () => {
+			const secret = path.join(dir, "secrets.json")
+			await fs.writeFile(secret, JSON.stringify({ secret: true }))
+			let inspections = 0
+			vi.mocked(fs.lstat).mockImplementation(async (...args) => {
+				const stats = await actual.lstat(...args)
+				if (args[0] === backup && ++inspections === 3) {
+					await fs.rename(backup, backup + ".saved")
+					await fs.symlink(secret, backup)
+				}
+				return stats
+			})
+			await recoverJsonFile(canonical)
+			expect((await fs.lstat(canonical)).isFile()).toBe(true)
+			expect(JSON.parse(await fs.readFile(canonical, "utf8"))).toEqual({ committed: true })
+			expect(JSON.parse(await fs.readFile(secret, "utf8"))).toEqual({ secret: true })
+		},
+	)
+
+	it("copies a regular backup across multiple buffers before publishing it", async () => {
+		const committed = JSON.stringify({ text: "x".repeat(150 * 1024) })
+		await fs.writeFile(backup, committed)
+		await recoverJsonFile(canonical)
+		expect((await fs.lstat(canonical)).isFile()).toBe(true)
+		expect(await fs.readFile(canonical, "utf8")).toBe(committed)
+		expect(await fs.readdir(dir)).toEqual(["history.json"])
 	})
 
 	it("preserves committed backups and aborts before merge when restoration fails", async () => {
@@ -70,7 +149,7 @@ describe("interrupted JSON recovery", () => {
 		expect(fs.rename).not.toHaveBeenCalled()
 	})
 
-	it.each(["readdir", "stat"] as const)("preserves backups and stops a write after %s fails", async (operation) => {
+	it.each(["readdir", "lstat"] as const)("preserves backups and stops a write after %s fails", async (operation) => {
 		vi.mocked(fs[operation]).mockRejectedValueOnce(ioError("EIO"))
 		await expect(safeWriteJson(canonical, {})).rejects.toMatchObject({ code: "EIO" })
 		await expect(fs.access(backup)).resolves.toBeUndefined()
@@ -85,11 +164,11 @@ describe("interrupted JSON recovery", () => {
 		await fs.utimes(backup, new Date(1_000), new Date(1_000))
 		await fs.utimes(newer, new Date(2_000), new Date(2_000))
 		// Make the vanished stat deterministic, regardless of directory order.
-		vi.mocked(fs.stat)
+		vi.mocked(fs.lstat)
 			.mockReset()
 			.mockImplementation((...args) => {
 				if (args[0] === vanished) return Promise.reject(ioError("ENOENT"))
-				return actual.stat(...args)
+				return actual.lstat(...args)
 			})
 		const merge = vi.fn((existing: unknown) => existing)
 		const trace = vi.fn<SafeWriteJsonTrace>()

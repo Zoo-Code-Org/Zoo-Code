@@ -1,7 +1,7 @@
 import * as os from "os"
 import * as path from "path"
 import * as fs from "fs/promises"
-import { createHash } from "crypto"
+import { createHash, randomUUID } from "crypto"
 
 import { readPhaseResult } from "./phaseProtocol"
 
@@ -181,8 +181,8 @@ export async function preserveScenarioWorkspace(scenarioWorkspace: ScenarioWorks
 		FAILURE_ARTIFACTS_DIR,
 		path.basename(scenarioWorkspace.root),
 	)
+	const temporaryPath = path.join(destinationRoot, `.diagnostics-${randomUUID()}.tmp`)
 	try {
-		await fs.rm(destinationRoot, { recursive: true, force: true })
 		await fs.mkdir(destinationRoot, { recursive: true })
 		const selections = [
 			{ label: "phase-results", source: scenarioWorkspace.results },
@@ -226,7 +226,7 @@ export async function preserveScenarioWorkspace(scenarioWorkspace: ScenarioWorks
 			}
 		}
 		await fs.writeFile(
-			path.join(destinationRoot, "diagnostics.json"),
+			temporaryPath,
 			JSON.stringify(
 				{
 					sources,
@@ -238,10 +238,13 @@ export async function preserveScenarioWorkspace(scenarioWorkspace: ScenarioWorks
 				null,
 				2,
 			),
+			{ flag: "wx", mode: 0o600 },
 		)
-		return destinationRoot
+		await fs.rename(temporaryPath, path.join(destinationRoot, "diagnostics.json"))
 	} finally {
-		// Collection or output errors must not leave the temporary workspace behind.
-		await removeScenarioWorkspace(scenarioWorkspace)
+		await fs.rm(temporaryPath, { force: true })
 	}
+	// Keep the source available for retry if collection or publication fails.
+	await removeScenarioWorkspace(scenarioWorkspace)
+	return destinationRoot
 }

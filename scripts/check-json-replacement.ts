@@ -64,7 +64,7 @@ function after(n, call, error) {
  emit({ n, phase: "after", call, copies: copies(), paths: [], code: error && error.code })
  cut(n, "after")
 }
-for (const name of ["mkdir", "access", "readdir", "stat", "readFile", "rename", "unlink"]) {
+for (const name of ["mkdir", "access", "readdir", "stat", "lstat", "open", "readFile", "rename", "unlink"]) {
  fsp[name] = async (...args) => {
   const { n, error } = before(name, args)
   try {
@@ -81,7 +81,18 @@ for (const name of ["mkdir", "access", "readdir", "stat", "readFile", "rename", 
     if (pendingClose) pendingClose()
     return await new Promise(() => {})
    }
-   const value = await native[name](...args); after(n, name); return value
+   const value = await native[name](...args)
+   if (name === "open") {
+    for (const method of ["stat", "read", "writeFile", "close"]) {
+     const original = value[method].bind(value)
+     value[method] = async (...parameters) => {
+      const step = before("handle." + method, args)
+      try { if (step.error) throw step.error; const result = await original(...parameters); after(step.n, "handle." + method); return result }
+      catch (error) { after(step.n, "handle." + method, error); throw error }
+     }
+    }
+   }
+   after(n, name); return value
   }
   catch (error) { after(n, name, error); throw error }
  }
@@ -292,7 +303,7 @@ async function bundleAt(destination: string, mutation?: string) {
 							let source = fs.readFileSync(args.path, "utf8")
 							if (mutation === "restore-backup-loss" && args.path.endsWith("safeWriteJson.ts")) {
 								const original =
-									"await fs.rename(newestBackupPath, absoluteFilePath)\n\t\t\trestoredFrom = newestBackupPath"
+									"await restoreBackup(newestBackupPath, absoluteFilePath)\n\t\t\trestoredFrom = newestBackupPath"
 								assert(source.includes(original), "Restore mutation anchor changed")
 								source = source.replace(original, "try { " + original + " } catch {}")
 								applied = true
@@ -444,7 +455,7 @@ async function main() {
 			const baseline = path.join(work, "baseline")
 			const events = await runCase(bundle, baseline, "restore")
 			const restore = events.find(
-				(event) => event.phase === "before" && event.call === "rename" && event.paths[0]?.includes(".bak"),
+				(event) => event.phase === "before" && event.call === "rename" && event.paths[0]?.includes(".new"),
 			)
 			assert(restore)
 			await runCase(bundle, path.join(work, "mutant"), "restore", { step: restore.n, kind: "EIO" })
