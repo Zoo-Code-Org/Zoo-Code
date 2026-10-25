@@ -168,66 +168,67 @@ describe("VsCodeLmHandler", () => {
 			},
 		)
 
-		it.each(["message", "tool_result"] as const)(
-			"forwards image bytes in the %s path only when supported",
-			async (path) => {
+		it.each(
+			(["message", "tool_result"] as const).flatMap((path) =>
+				[true, false, undefined].map((supportsImages) => ({ path, supportsImages })),
+			),
+		)(
+			"forwards image bytes in the $path path only when supported ($supportsImages)",
+			async ({ path, supportsImages }) => {
 				await handler.initializeClient()
-				for (const supportsImages of [true, false, undefined]) {
-					const sendRequest = vi.fn<vscode.LanguageModelChat["sendRequest"]>().mockResolvedValue({
-						stream: asyncStreamFrom([new vscode.LanguageModelTextPart("done")]),
-						text: asyncStreamFrom(["done"]),
+				const sendRequest = vi.fn<vscode.LanguageModelChat["sendRequest"]>().mockResolvedValue({
+					stream: asyncStreamFrom([new vscode.LanguageModelTextPart("done")]),
+					text: asyncStreamFrom(["done"]),
+				})
+				const countTokens = vi.fn<vscode.LanguageModelChat["countTokens"]>().mockResolvedValue(37)
+				handler["client"] = {
+					...mockLanguageModelChat,
+					...{ capabilities: { supportsImageToText: supportsImages } },
+					sendRequest,
+					countTokens,
+				}
+				const messages: Anthropic.Messages.MessageParam[] =
+					path === "message"
+						? [{ role: "user", content: [{ type: "text", text: "look" }, image] }]
+						: [
+								{
+									role: "assistant",
+									content: [{ type: "tool_use", id: "image-tool", name: "read_file", input: {} }],
+								},
+								{
+									role: "user",
+									content: [
+										{
+											type: "tool_result",
+											tool_use_id: "image-tool",
+											content: [{ type: "text", text: "look" }, image],
+										},
+									],
+								},
+							]
+				const chunks = await collectStream(handler.createMessage("system", messages))
+				const sent = sendRequest.mock.calls[0][0]
+				expect(chunks).toContainEqual({ type: "usage", inputTokens: sent.length * 37, outputTokens: 37 })
+				const counted = countTokens.mock.calls.map(([content]) => content)
+				if (supportsImages) {
+					expect(counted).toEqual(expect.arrayContaining(sent))
+				} else {
+					expect(counted.every((content) => typeof content === "string")).toBe(true)
+				}
+				const content = sent[sent.length - 1].content
+				const parts =
+					path === "tool_result" && content[0] instanceof vscode.LanguageModelToolResultPart
+						? content[0].content
+						: content
+				expect(parts[0]).toMatchObject({ value: "look" })
+				if (supportsImages) {
+					expect(parts[1]).toMatchObject({
+						mimeType: "image/png",
+						data: Buffer.from("iVBORw==", "base64"),
 					})
-					const countTokens = vi.fn<vscode.LanguageModelChat["countTokens"]>().mockResolvedValue(37)
-					handler["client"] = {
-						...mockLanguageModelChat,
-						...{ capabilities: { supportsImageToText: supportsImages } },
-						sendRequest,
-						countTokens,
-					}
-					const messages: Anthropic.Messages.MessageParam[] =
-						path === "message"
-							? [{ role: "user", content: [{ type: "text", text: "look" }, image] }]
-							: [
-									{
-										role: "assistant",
-										content: [{ type: "tool_use", id: "image-tool", name: "read_file", input: {} }],
-									},
-									{
-										role: "user",
-										content: [
-											{
-												type: "tool_result",
-												tool_use_id: "image-tool",
-												content: [{ type: "text", text: "look" }, image],
-											},
-										],
-									},
-								]
-					const chunks = await collectStream(handler.createMessage("system", messages))
-					const sent = sendRequest.mock.calls[0][0]
-					expect(chunks).toContainEqual({ type: "usage", inputTokens: sent.length * 37, outputTokens: 37 })
-					if (supportsImages) {
-						for (const message of sent) {
-							expect(countTokens).toHaveBeenCalledWith(message, expect.anything())
-						}
-					} else {
-						expect(countTokens.mock.calls.every(([content]) => typeof content === "string")).toBe(true)
-					}
-					const content = sent[sent.length - 1].content
-					const parts =
-						path === "tool_result" && content[0] instanceof vscode.LanguageModelToolResultPart
-							? content[0].content
-							: content
-					expect(parts[0]).toMatchObject({ value: "look" })
-					if (supportsImages) {
-						expect(parts[1]).toMatchObject({
-							mimeType: "image/png",
-							data: Buffer.from("iVBORw==", "base64"),
-						})
-					} else {
-						expect(parts[1]).toBeInstanceOf(vscode.LanguageModelTextPart)
-						expect(parts[1]).toMatchObject({ value: expect.stringContaining("not supported") })
-					}
+				} else {
+					expect(parts[1]).toBeInstanceOf(vscode.LanguageModelTextPart)
+					expect(parts[1]).toMatchObject({ value: expect.stringContaining("not supported") })
 				}
 			},
 		)
@@ -278,12 +279,13 @@ describe("VsCodeLmHandler", () => {
 				...{ capabilities: fixture.capabilities },
 				maxInputTokens: fixture.liveWindow,
 				sendRequest,
-				// Text-only models count extracted strings; every one exceeds the window on its own.
-				countTokens: vi
-					.fn<vscode.LanguageModelChat["countTokens"]>()
-					.mockImplementation(async (content) =>
-						typeof content === "string" || content.role === userRole ? fixture.inputTokens : 0,
-					),
+				// Image models count whole messages; text-only models count extracted strings.
+				countTokens: vi.fn<vscode.LanguageModelChat["countTokens"]>().mockImplementation(async (content) => {
+					if (typeof content === "string") {
+						return fixture.capabilities === imageCapable ? 0 : fixture.inputTokens
+					}
+					return content.role === userRole ? fixture.inputTokens : 0
+				}),
 			}
 			const windowSpy = vi.spyOn(handler, "getCondenseContextWindow").mockReturnValue(fixture.curatedWindow)
 			try {
