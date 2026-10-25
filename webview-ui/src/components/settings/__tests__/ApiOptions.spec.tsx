@@ -4,7 +4,9 @@ import { retiredProviderIdentifiers, providerIdentifiers } from "@roo-code/types
 import { renderWithExtensionState, screen, fireEvent, within } from "@/utils/test-utils"
 
 import { type ModelInfo, type ProviderSettings, openAiModelInfoSaneDefaults } from "@roo-code/types"
-import { openAiCodexDefaultModelId, zooGatewayDefaultModelId } from "@roo-code/types"
+import { openAiCodexDefaultModelId, opencodeGoModels, zooGatewayDefaultModelId } from "@roo-code/types"
+
+import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 
 import ApiOptions, { ApiOptionsProps } from "../ApiOptions"
 
@@ -194,9 +196,14 @@ vi.mock("../ThinkingBudget", () => ({
 						value={apiConfiguration?.reasoningEffort || ""}
 						onChange={(e) => setApiConfigurationField("reasoningEffort", e.target.value)}>
 						<option value="">Select...</option>
-						<option value="low">Low</option>
-						<option value="medium">Medium</option>
-						<option value="high">High</option>
+						{(Array.isArray(modelInfo.supportsReasoningEffort)
+							? modelInfo.supportsReasoningEffort
+							: ["low", "medium", "high"]
+						).map((effort: string) => (
+							<option key={effort} value={effort}>
+								{effort}
+							</option>
+						))}
 					</select>
 				</div>
 			)
@@ -364,6 +371,71 @@ describe("ApiOptions", () => {
 		expect(screen.queryByTestId("rate-limit-seconds-control")).not.toBeInTheDocument()
 	})
 
+	describe("OpenCode Go Responses temperature (Zoo-Code-Org/Zoo-Code#2055)", () => {
+		const selectOpencodeGoModel = (modelId: string) => {
+			vi.mocked(useSelectedModel).mockImplementation(() => ({
+				provider: providerIdentifiers.opencodeGo,
+				id: modelId,
+				info: opencodeGoModels[modelId],
+				isLoading: false,
+				isError: false,
+			}))
+		}
+
+		const opencodeGoConfig = (modelId: string, settings: ProviderSettings = {}): ProviderSettings => ({
+			apiProvider: providerIdentifiers.opencodeGo,
+			opencodeGoModelId: modelId,
+			modelTemperature: 0.42,
+			...settings,
+		})
+
+		afterEach(() => {
+			vi.mocked(useSelectedModel).mockReset()
+		})
+
+		it("shows the control for a model that always supports temperature", () => {
+			selectOpencodeGoModel("grok-4.6")
+			renderApiOptions({ apiConfiguration: opencodeGoConfig("grok-4.6") })
+
+			expect(screen.getByTestId("temperature-control")).toBeInTheDocument()
+		})
+
+		it("hides the control for a GPT Luna model on its default reasoning effort", () => {
+			selectOpencodeGoModel("gpt-6-luna")
+			renderApiOptions({ apiConfiguration: opencodeGoConfig("gpt-6-luna") })
+
+			expect(screen.queryByTestId("temperature-control")).not.toBeInTheDocument()
+		})
+
+		it("updates visibility when the reasoning effort changes without clearing the saved value", () => {
+			const setApiConfigurationField = vi.fn()
+			selectOpencodeGoModel("gpt-5.6-luna")
+			const renderWithEffort = (reasoningEffort: ProviderSettings["reasoningEffort"]) => (
+				<ApiOptions
+					errorMessage={undefined}
+					setErrorMessage={() => {}}
+					uriScheme={undefined}
+					apiConfiguration={opencodeGoConfig("gpt-5.6-luna", { reasoningEffort })}
+					setApiConfigurationField={setApiConfigurationField}
+				/>
+			)
+			const view = renderWithExtensionState(renderWithEffort("none"))
+			expect(screen.getByTestId("temperature-control")).toBeInTheDocument()
+
+			view.rerender(renderWithEffort("high"))
+			expect(screen.queryByTestId("temperature-control")).not.toBeInTheDocument()
+
+			// Returning to "none" shows the control again with the saved value.
+			view.rerender(renderWithEffort("none"))
+			expect(within(screen.getByTestId("temperature-control")).getByRole("slider")).toHaveValue("0.42")
+
+			const temperatureWrites = setApiConfigurationField.mock.calls.filter(
+				([field]) => field === "modelTemperature",
+			)
+			expect(temperatureWrites).toEqual([])
+		})
+	})
+
 	describe("thinking functionality", () => {
 		it("should show ThinkingBudget for Anthropic models that support thinking", () => {
 			renderApiOptions({
@@ -425,6 +497,7 @@ describe("ApiOptions", () => {
 		expect(optionTexts).toContain("OpenAI")
 		expect(optionTexts).toContain("Anthropic")
 		expect(optionTexts).toContain("NanoGPT")
+		expect(optionTexts).toContain("IO Intelligence")
 
 		// Note: The mock doesn't implement search functionality, so we're just verifying
 		// that the select element is rendered with the expected options
@@ -521,11 +594,12 @@ describe("ApiOptions", () => {
 			// However, we've tested the state update call.
 		})
 
-		it("updates reasoningEffort in openAiCustomModelInfo when select value changes", () => {
+		it("selects max in custom model info even when a top-level low effort remains", () => {
 			const mockSetApiConfigurationField = vi.fn()
 			const initialConfig = {
 				apiProvider: providerIdentifiers.openai,
 				enableReasoningEffort: true, // Initially enabled
+				reasoningEffort: "low" as const,
 				openAiCustomModelInfo: {
 					...openAiModelInfoSaneDefaults,
 					reasoningEffort: "low" as const,
@@ -537,25 +611,18 @@ describe("ApiOptions", () => {
 				setApiConfigurationField: mockSetApiConfigurationField,
 			})
 
-			// Find the reasoning effort select among all comboboxes by its current value
-			// const allSelects = screen.getAllByRole("combobox") as HTMLSelectElement[]
-			// const reasoningSelect = allSelects.find(
-			// 	(el) => el.value === initialConfig.openAiCustomModelInfo.reasoningEffort,
-			// )
-			// expect(reasoningSelect).toBeDefined()
 			const selectContainer = screen.getByTestId("reasoning-effort")
 			expect(selectContainer).toBeInTheDocument()
 
 			const reasoningSelect = within(selectContainer).getByRole("combobox")
 			expect(reasoningSelect).toHaveValue("low")
 
-			// Simulate changing the reasoning effort to 'high'
-			fireEvent.change(reasoningSelect, { target: { value: "high" } })
+			fireEvent.change(reasoningSelect, { target: { value: "max" } })
 
 			// Check if setApiConfigurationField was called correctly for openAiCustomModelInfo
 			expect(mockSetApiConfigurationField).toHaveBeenCalledWith(
 				"openAiCustomModelInfo",
-				expect.objectContaining({ reasoningEffort: "high" }),
+				expect.objectContaining({ reasoningEffort: "max" }),
 			)
 
 			// Check that other properties were preserved

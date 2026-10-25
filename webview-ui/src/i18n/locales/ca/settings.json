@@ -346,6 +346,10 @@
 				"label": "Activa la protecció contra ordres destructives",
 				"description": "Baixa i utilitza Destructive Command Guard (DCG) per a aquesta plataforma. Les ordres permeses per DCG s'executen automàticament. Les ordres bloquejades per DCG requereixen la teva aprovació. Les llistes d'ordres de Zoo es desactiven mentre aquesta opció està activa. L'executable baixat es conserva si la desactives."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "Comandes d'auto-execució permeses",
 			"allowedCommandsDescription": "Prefixos de comandes que poden ser executats automàticament quan \"Aprovar sempre operacions d'execució\" està habilitat. Afegeix * per permetre totes les comandes (usar amb precaució).",
 			"deniedCommands": "Comandes denegades",
@@ -394,6 +398,11 @@
 		"vscodeLmDescription": "L'API del model de llenguatge de VS Code us permet executar models proporcionats per altres extensions de VS Code (incloent-hi, però no limitat a, GitHub Copilot). La manera més senzilla de començar és instal·lar les extensions Copilot i Copilot Chat des del VS Code Marketplace.",
 		"awsCustomArnUse": "Introduïu un ARN vàlid d'Amazon Bedrock per al model que voleu utilitzar. Exemples de format:",
 		"awsCustomArnDesc": "Assegureu-vos que la regió a l'ARN coincideix amb la regió d'AWS seleccionada anteriorment.",
+		"awsCustomArnBaseModel": "Model subjacent",
+		"awsCustomArnBaseModelOther": "Altre (no és a la llista)",
+		"awsCustomArnBaseModelDesc": "El model al qual apunta aquest ARN. Zoo Code l'utilitza per al raonament, la temperatura, la finestra de context, la sortida màxima i els preus. Es detecta automàticament quan l'ARN indica el model.",
+		"awsCustomArnContextWindow": "Finestra de context (tokens)",
+		"awsCustomArnMaxTokens": "Tokens de sortida màxims",
 		"openRouterApiKey": "Clau API d'OpenRouter",
 		"getOpenRouterApiKey": "Obtenir clau API d'OpenRouter",
 		"vercelAiGatewayApiKey": "Clau API de Vercel AI Gateway",
@@ -402,6 +411,12 @@
 		"getOpencodeGoApiKey": "Obtenir clau API de Opencode Go",
 		"kenariApiKey": "Clau API de Kenari",
 		"getKenariApiKey": "Obtenir clau API de Kenari",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "Clau API de IO Intelligence",
+			"getApiKey": "Obtenir clau API de IO Intelligence",
+			"model": "Model"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Clau API de NanoGPT",
@@ -530,6 +545,8 @@
 		"openAiApiKey": "Clau API d'OpenAI",
 		"apiKey": "Clau API",
 		"openAiBaseUrl": "URL base",
+		"openAiStrictToolSchemas": "Esquemes d'eines estrictes (strict: true)",
+		"openAiStrictToolSchemasDescription": "Envia strict: true amb els esquemes d'eines per activar l'adherència estricta a l'esquema. Desactiva només per usar la crida d'eines no estricta.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nom de desplegament d'Azure",
 		"azureOpenAiDeploymentNameDescription": "Introduïu el nom del desplegament d'Azure AI Studio, no el nom del model subjacent.",
@@ -568,6 +585,16 @@
 		"enablePromptCaching": "Habilitar emmagatzematge en caché de prompts",
 		"enablePromptCachingTitle": "Habilitar l'emmagatzematge en caché de prompts per millorar el rendiment i reduir els costos per als models compatibles.",
 		"cacheUsageNote": "Nota: Si no veieu l'ús de la caché, proveu de seleccionar un model diferent i després tornar a seleccionar el model desitjat.",
+		"githubCopilot": {
+			"accountActions": "Accions del compte de GitHub Copilot",
+			"signIn": "Inicia la sessió a GitHub",
+			"reconnect": "Torna a connectar GitHub",
+			"signedIn": "Sessió iniciada com a {{account}}",
+			"connecting": "Connectant...",
+			"noModels": "No hi ha models de Copilot disponibles. Instal·la o activa GitHub Copilot Chat, inicia la sessió amb un compte de GitHub elegible i actualitza. Iniciar la sessió no confirma una subscripció a Copilot. S'apliquen els límits del teu pla de GitHub, de sol·licituds premium i de taxa.",
+			"manageAccount": "Gestiona el compte de GitHub",
+			"manageAccountDescription": "Obre el menú de comptes de VS Code, on pots tancar la sessió de GitHub. Tancar la sessió afecta Copilot i altres extensions que utilitzen aquest compte."
+		},
 		"vscodeLmModel": "Model de llenguatge",
 		"vscodeLmWarning": "Nota: Els models accessibles a través de l’API VS Code Language Model poden estar encapsulats o ajustats pel proveïdor; per tant, el comportament pot diferir de l’ús directe del mateix model des d’un proveïdor o enrutador típic. Per utilitzar un model del desplegable «Language Model», primer canvia a aquest model i després fes clic a «Acceptar» a l’avís de Copilot Chat; en cas contrari pots veure un error com 400 «The requested model is not supported».",
 		"googleCloudSetup": {
@@ -595,7 +622,7 @@
 			"baseUrl": "URL base (opcional)",
 			"modelId": "ID del model",
 			"apiKey": "Clau API d'Ollama",
-			"apiKeyHelp": "Clau API opcional per a instàncies d'Ollama autenticades o serveis al núvol. Deixa-ho buit per a instal·lacions locals.",
+			"apiKeyHelp": "Clau API opcional per a instàncies d'Ollama que necessiten autenticació o per a serveis al núvol. Zoo Code envia la clau només a punts finals HTTPS o de loopback. Un punt final HTTP remot no rep la clau, perquè la clau viatjaria en text pla. Utilitza HTTPS per a una instància remota que necessita una clau. Deixa això buit per a una instal·lació local.",
 			"numCtx": "Mida de la finestra de context (num_ctx)",
 			"numCtxHelp": "Sobreescriu la mida de la finestra de context per defecte del model. Deixeu-ho en blanc per utilitzar la configuració del Modelfile del model. El valor mínim és 128.",
 			"thinking": "Activa el raonament",
@@ -661,6 +688,10 @@
 			"description": "Nombre d'errors consecutius o accions repetides abans de mostrar el diàleg 'En Zoo està tenint problemes'. Estableix a 0 per desactivar aquest mecanisme de seguretat (no s'activarà mai).",
 			"unlimitedDescription": "Reintents il·limitats habilitats (procediment automàtic). El diàleg no apareixerà mai.",
 			"warning": "⚠️ Establir a 0 permet reintents il·limitats que poden consumir un ús significatiu de l'API"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "Llindar d'avís suau de repetició",
+			"description": "Després d'aquest nombre de crides idèntiques consecutives a l'eina, l'eina es bloqueja i es demana a la IA que justifiqui el reintent, sense implicar-te. Estableix-ho a 0 per desactivar els avisos suaus."
 		},
 		"reasoningEffort": {
 			"label": "Esforç de raonament del model",
@@ -820,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Replega la sortida de les ordres per defecte",
+			"description": "Mostra replegada la sortida de les ordres, inclosa la del terminal en línia. Podeu desplegar-la manualment. Això no canvia com s’executen les ordres."
+		},
 		"basic": {
 			"label": "Configuració del terminal: Bàsica",
 			"description": "Configuració bàsica del terminal"
@@ -987,8 +1022,14 @@
 		"rangeDescription": "Valors més alts fan que la sortida sigui més aleatòria, valors més baixos la fan més determinista."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Compatibilitat amb imatges no informada",
+		"toolSupportUnknown": "Compatibilitat amb eines no informada",
+		"promptCacheManagedByCopilot": "La memòria cau de prompts la gestiona GitHub Copilot",
+		"promptCacheCopilotDetails": "La memòria cau depèn del model i del backend de GitHub Copilot. Zoo Code no pot configurar la retenció de la memòria cau ni observar-ne els encerts a través de l'API de VS Code.",
 		"supportsImages": "Suporta imatges",
 		"noImages": "No suporta imatges",
+		"supportsTools": "Suporta eines",
+		"noTools": "No suporta eines",
 		"supportsPromptCache": "Suporta emmagatzematge en caché de prompts",
 		"noPromptCache": "No suporta emmagatzematge en caché de prompts",
 		"contextWindow": "Finestra de context:",

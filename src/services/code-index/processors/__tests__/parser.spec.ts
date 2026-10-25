@@ -770,8 +770,6 @@ ${longParagraph}
 Final thoughts that need to be long enough to meet the minimum character requirement.
 This conclusion section contains multiple lines to ensure it exceeds 100 characters.`
 
-			const lines = markdownContent.split("\n")
-
 			vi.mocked(parseMarkdown).mockReturnValue([
 				{
 					node: {

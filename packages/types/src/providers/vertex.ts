@@ -6,6 +6,28 @@ export type VertexModelId = keyof typeof vertexModels
 export const vertexDefaultModelId: VertexModelId = "claude-sonnet-4-5@20250929"
 
 export const vertexModels = {
+	// https://cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-4-argon
+	// Available in the global, us, and eu locations.
+	"gemini-4-argon": {
+		maxTokens: 65_536, // Single-request streaming cap; long decodes up to 1M via continuation tokens.
+		contextWindow: 1_048_576, // Shared across input, thinking, and output tokens.
+		supportsImages: true,
+		// Implicit caching only (automatic for prompt prefixes >= 6,144 tokens);
+		// explicit context caching is not supported on this model.
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["low", "medium", "high"],
+		reasoningEffort: "medium",
+		// thinking_budget returns an HTTP 400 error on this model.
+		supportsReasoningBudget: false,
+		// The backend ignores temperature/top_p/top_k.
+		supportsTemperature: false,
+		// Standard tier promo pricing (Global) through Nov 30, 2026; from
+		// Dec 1, 2026: input $4.00, output $20.00, cached input $0.20 per 1M
+		// tokens. Non-global locations are +10%.
+		inputPrice: 2.0,
+		outputPrice: 10.0, // Includes thinking tokens.
+		cacheReadsPrice: 0.1,
+	},
 	"gemini-3.7-flash": {
 		maxTokens: 65_536,
 		contextWindow: 1_048_576,
@@ -488,6 +510,21 @@ export const vertexModels = {
 		supportsReasoningBinary: true,
 		supportsTemperature: false,
 		description: "Claude Opus 5 is Anthropic's most capable model for complex agentic coding and enterprise work.",
+	},
+	"claude-opus-5-5": {
+		maxTokens: 128_000, // 128K max output tokens per the Anthropic model card (same across all platforms).
+		contextWindow: 1_000_000, // 1M context window native (no beta header required)
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 4.0, // $4 per million input tokens
+		outputPrice: 20.0, // $20 per million output tokens
+		cacheWritesPrice: 5.0, // $5 per million tokens
+		cacheReadsPrice: 0.2, // $0.20 per million tokens
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		description:
+			"Claude Opus 5.5 is Anthropic's most capable model for complex agentic coding and enterprise work.",
 	},
 	"claude-fable-5-1": {
 		maxTokens: 128_000,

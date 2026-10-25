@@ -1,8 +1,12 @@
 // npx vitest run __tests__/extension.spec.ts
 
 import type * as vscode from "vscode"
+import type { WebviewMessage } from "@roo-code/types"
+
+import { makeCompositeDisposable, makeEventEmitter, makeExtensionContext } from "../test-utils/vscode"
 
 vi.mock("vscode", () => ({
+	Disposable: { from: (...subscriptions: vscode.Disposable[]) => makeCompositeDisposable(...subscriptions) },
 	window: {
 		createOutputChannel: vi.fn().mockReturnValue({
 			appendLine: vi.fn(),
@@ -12,7 +16,7 @@ vi.mock("vscode", () => ({
 		tabGroups: {
 			onDidChangeTabs: vi.fn(),
 		},
-		onDidChangeActiveTextEditor: vi.fn(),
+		onDidChangeActiveTextEditor: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 	},
 	workspace: {
 		registerTextDocumentContentProvider: vi.fn(),
@@ -139,9 +143,10 @@ vi.mock("../services/mcp/McpServerManager", () => ({
 	},
 }))
 
-vi.mock("../services/code-index/manager", () => ({
-	CodeIndexManager: {
-		getInstance: vi.fn().mockReturnValue(null),
+vi.mock("../services/code-index/code-index-manager-registry", () => ({
+	CodeIndexManagerRegistry: {
+		getOrCreate: vi.fn().mockReturnValue(null),
+		disposeAll: vi.fn(),
 	},
 }))
 
@@ -164,6 +169,8 @@ vi.mock("../extension/api", () => ({
 		return {}
 	}),
 }))
+
+vi.mock("../activate/registerCommands", () => ({ openClineInNewTab: vi.fn() }))
 
 vi.mock("../activate", () => ({
 	handleUri: vi.fn(),
@@ -204,6 +211,7 @@ vi.mock("../core/webview/ClineProvider", async () => {
 			{
 				// Static method used by extension.ts
 				getVisibleInstance: vi.fn().mockReturnValue(mockInstance),
+				getAllInstances: vi.fn().mockReturnValue([]),
 				sideBarId: "zoo-code.SidebarProvider",
 			},
 		),
@@ -235,6 +243,267 @@ describe("extension.ts", () => {
 		} as unknown as vscode.ExtensionContext
 
 		settingsUpdatedHandler = undefined
+	})
+
+	test("shares the extension-owned focus tracker with the sidebar and code actions and disposes its listeners", async () => {
+		vi.resetModules()
+		const { WebviewFocusTracker } = await import("../core/webview/WebviewFocusTracker")
+		const { ClineProvider } = await import("../core/webview/ClineProvider")
+		const { ContextProxy } = await import("../core/config/ContextProxy")
+		const { registerCodeActions } = await import("../activate")
+		const vscode = await import("vscode")
+		const { activate } = await import("../extension")
+
+		await activate(mockContext)
+
+		const trackers = mockContext.subscriptions.filter((entry) => entry instanceof WebviewFocusTracker)
+		expect(trackers).toHaveLength(1)
+		const tracker = trackers[0]
+		const outputChannel = vi.mocked(vscode.window.createOutputChannel).mock.results[0].value
+		expect(ClineProvider).toHaveBeenCalledExactlyOnceWith(
+			mockContext,
+			outputChannel,
+			"sidebar",
+			await ContextProxy.getInstance(mockContext),
+			tracker,
+			null,
+		)
+		expect(registerCodeActions).toHaveBeenCalledExactlyOnceWith(mockContext, tracker)
+
+		const messages = makeEventEmitter<WebviewMessage>()
+		const disposed = makeEventEmitter<void>()
+		const provider = ClineProvider.getVisibleInstance()!
+		tracker.init(provider, { webview: { onDidReceiveMessage: messages.event }, onDidDispose: disposed.event })
+		messages.fire({ type: "webviewDidFocus" })
+		expect(tracker.getLastActiveProvider()).toBe(provider)
+
+		// Dispose the exact instance owned by the extension, rather than a separate test tracker.
+		tracker.dispose()
+		messages.fire({ type: "webviewDidFocus" })
+		expect(tracker.getLastActiveProvider()).toBeUndefined()
+	})
+
+	test("keeps focus trackers independent across extension activations", async () => {
+		vi.resetModules()
+		const { WebviewFocusTracker } = await import("../core/webview/WebviewFocusTracker")
+		const { registerCodeActions } = await import("../activate")
+		const { activate } = await import("../extension")
+		const secretChanges = makeEventEmitter<vscode.SecretStorageChangeEvent>()
+		const secondContext = makeExtensionContext({
+			secrets: {
+				get: vi.fn().mockResolvedValue(undefined),
+				store: vi.fn().mockResolvedValue(undefined),
+				delete: vi.fn().mockResolvedValue(undefined),
+				onDidChange: secretChanges.event,
+			},
+		})
+
+		await activate(mockContext)
+		await activate(secondContext)
+
+		const firstTracker = mockContext.subscriptions.find((entry) => entry instanceof WebviewFocusTracker)
+		const secondTracker = secondContext.subscriptions.find((entry) => entry instanceof WebviewFocusTracker)
+		expect(firstTracker).toBeInstanceOf(WebviewFocusTracker)
+		expect(secondTracker).toBeInstanceOf(WebviewFocusTracker)
+		expect(secondTracker).not.toBe(firstTracker)
+		expect(registerCodeActions).toHaveBeenNthCalledWith(1, mockContext, firstTracker)
+		expect(registerCodeActions).toHaveBeenNthCalledWith(2, secondContext, secondTracker)
+		firstTracker?.dispose()
+		secondTracker?.dispose()
+		secretChanges.dispose()
+	})
+
+	test("injects a factory instance with this activation's dependencies without reading the sidebar tracker", async () => {
+		vi.resetModules()
+		const { API } = await import("../extension/api")
+		const { openClineInNewTab } = await import("../activate/registerCommands")
+		const { ClineProviderFactory } = await import("../core/webview/ClineProviderFactory")
+		const { WebviewFocusTracker } = await import("../core/webview/WebviewFocusTracker")
+		const { ClineProvider } = await import("../core/webview/ClineProvider")
+		const { activate } = await import("../extension")
+		const vscode = await import("vscode")
+		await activate(mockContext)
+
+		const tracker = mockContext.subscriptions.find((entry) => entry instanceof WebviewFocusTracker)
+		const outputChannel = vi.mocked(vscode.window.createOutputChannel).mock.results[0].value
+		const sidebar = vi.mocked(ClineProvider).mock.results[0].value
+		const providerFactory = vi.mocked(API).mock.calls[0][2]
+		expect(providerFactory).toBeInstanceOf(ClineProviderFactory)
+		expect(sidebar.webviewFocusTracker).toBeUndefined()
+		expect(openClineInNewTab).not.toHaveBeenCalled()
+		vi.mocked(openClineInNewTab).mockResolvedValueOnce(sidebar)
+
+		await expect(providerFactory.createInNewTab()).resolves.toBe(sidebar)
+		expect(openClineInNewTab).toHaveBeenCalledExactlyOnceWith({
+			context: mockContext,
+			outputChannel,
+			webviewFocusTracker: tracker,
+		})
+		tracker?.dispose()
+	})
+
+	test("initializes the code index scope and registers it for extension cleanup", async () => {
+		vi.resetModules()
+		const { CodeIndexScope } = await import("../services/code-index/code-index-scope")
+		const init = vi.spyOn(CodeIndexScope.prototype, "init")
+		const dispose = vi.spyOn(CodeIndexScope.prototype, "dispose")
+		try {
+			const { activate } = await import("../extension")
+			await activate(mockContext)
+
+			const scopes = mockContext.subscriptions.filter((entry) => entry instanceof CodeIndexScope)
+			expect(scopes).toHaveLength(1)
+			expect(init).toHaveBeenCalledExactlyOnceWith()
+			expect(init.mock.contexts[0]).toBe(scopes[0])
+			expect(dispose).not.toHaveBeenCalled()
+			scopes[0].dispose()
+			expect(dispose).toHaveBeenCalledExactlyOnceWith()
+		} finally {
+			init.mockRestore()
+			dispose.mockRestore()
+		}
+	})
+
+	test("publishes indexing status to matching providers and logs delivery failures", async () => {
+		vi.resetModules()
+		const { CodeIndexScope } = await import("../services/code-index/code-index-scope")
+		const { ClineProvider } = await import("../core/webview/ClineProvider")
+		const log = vi.spyOn(console, "error").mockImplementation(() => {})
+		const provider = ClineProvider.getVisibleInstance()!
+		Object.defineProperty(provider, "workspacePath", { configurable: true, value: "/workspace" })
+		const getAll = vi.mocked(ClineProvider.getAllInstances)
+		const post = vi.mocked(provider.postMessageToWebview)
+		getAll.mockReturnValue([provider, provider])
+		post.mockRejectedValueOnce(new Error("delivery failed")).mockResolvedValue(undefined)
+		try {
+			const { activate } = await import("../extension")
+			await activate(mockContext)
+			const scope = mockContext.subscriptions.find((entry) => entry instanceof CodeIndexScope)!
+			const status = {
+				systemStatus: "Standby" as const,
+				message: "Ready",
+				processedItems: 0,
+				totalItems: 0,
+				currentItemUnit: "blocks",
+				workspacePath: "/workspace",
+				workspaceEnabled: true,
+				autoEnableDefault: true,
+			}
+			scope["statusManager"]!["publishStatus"](status)
+			await Promise.resolve()
+			expect(post).toHaveBeenCalledTimes(2)
+			expect(post).toHaveBeenCalledWith({ type: "indexingStatusUpdate", values: status })
+			expect(log).toHaveBeenCalledWith(
+				"[CodeIndexStatusManager] Failed to publish indexing status:",
+				expect.objectContaining({ message: "delivery failed" }),
+			)
+			scope.dispose()
+		} finally {
+			log.mockRestore()
+			getAll.mockReturnValue([])
+			post.mockReset()
+			Reflect.deleteProperty(provider, "workspacePath")
+		}
+	})
+
+	test.each([
+		{ workspacePath: "/other-workspace", receivesStatus: false },
+		{ workspacePath: "/workspace", receivesStatus: true },
+		{ workspacePath: undefined, receivesStatus: true },
+		{ workspacePath: "", receivesStatus: true },
+	])(
+		"routes status for provider workspace=$workspacePath with receivesStatus=$receivesStatus",
+		async ({ workspacePath, receivesStatus }) => {
+			vi.resetModules()
+			const { CodeIndexScope } = await import("../services/code-index/code-index-scope")
+			const { ClineProvider } = await import("../core/webview/ClineProvider")
+			const provider = ClineProvider.getVisibleInstance()!
+			Object.defineProperty(provider, "workspacePath", { configurable: true, value: workspacePath })
+			const getAll = vi.mocked(ClineProvider.getAllInstances)
+			getAll.mockReturnValue([provider])
+			try {
+				const { activate } = await import("../extension")
+				await activate(mockContext)
+				const scope = mockContext.subscriptions.find((entry) => entry instanceof CodeIndexScope)!
+				const status = {
+					systemStatus: "Indexing" as const,
+					message: "Processing confidential.ts",
+					processedItems: 1,
+					totalItems: 2,
+					currentItemUnit: "files",
+					workspacePath: "/workspace",
+					workspaceEnabled: true,
+					autoEnableDefault: true,
+				}
+				scope["statusManager"]!["publishStatus"](status)
+				await Promise.resolve()
+				if (receivesStatus) {
+					expect(provider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+						type: "indexingStatusUpdate",
+						values: status,
+					})
+				} else {
+					expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+				}
+				scope.dispose()
+			} finally {
+				getAll.mockReturnValue([])
+				Reflect.deleteProperty(provider, "workspacePath")
+			}
+		},
+	)
+
+	test.each([new Error("scope initialization failed"), "scope initialization failed"])(
+		"continues activation and logs code index scope initialization failure: %s",
+		async (error) => {
+			vi.resetModules()
+			const { CodeIndexScope } = await import("../services/code-index/code-index-scope")
+			const init = vi.spyOn(CodeIndexScope.prototype, "init").mockImplementationOnce(() => {
+				throw error
+			})
+			try {
+				const { activate } = await import("../extension")
+				await expect(activate(mockContext)).resolves.toBeDefined()
+
+				const vscode = await import("vscode")
+				const channel = vi.mocked(vscode.window.createOutputChannel).mock.results.at(-1)?.value
+				expect(channel?.appendLine).toHaveBeenCalledWith(
+					"[CodeIndexScope] Failed to initialize: scope initialization failed",
+				)
+				expect(mockContext.subscriptions.filter((entry) => entry instanceof CodeIndexScope)).toHaveLength(1)
+			} finally {
+				init.mockRestore()
+			}
+		},
+	)
+
+	test("registers the Copilot model broadcast against every provider instance and the output channel", async () => {
+		vi.resetModules()
+		const disposable = { dispose: vi.fn() }
+		const registerCopilotModelBroadcast = vi.fn().mockReturnValue(disposable)
+		vi.doMock("../services/language-models/copilotModelBroadcast", () => ({ registerCopilotModelBroadcast }))
+		try {
+			const { ClineProvider } = await import("../core/webview/ClineProvider")
+			const vscode = await import("vscode")
+			const { activate } = await import("../extension")
+
+			await activate(mockContext)
+
+			expect(registerCopilotModelBroadcast).toHaveBeenCalledTimes(1)
+			const { getTargets, log } = registerCopilotModelBroadcast.mock.calls[0][0]
+
+			const instances = [{ id: "first" }, { id: "second" }]
+			vi.mocked(ClineProvider.getAllInstances).mockReturnValue(instances as never)
+			expect(getTargets()).toBe(instances)
+
+			const outputChannel = vi.mocked(vscode.window.createOutputChannel).mock.results[0].value
+			log("copilot broadcast message")
+			expect(outputChannel.appendLine).toHaveBeenCalledWith("copilot broadcast message")
+
+			expect(mockContext.subscriptions).toContain(disposable)
+		} finally {
+			vi.doUnmock("../services/language-models/copilotModelBroadcast")
+		}
 	})
 
 	test("does not call dotenv.config when optional .env does not exist", async () => {
@@ -463,6 +732,7 @@ describe("extension.ts", () => {
 			const { TelemetryService } = await import("@roo-code/telemetry")
 			const { Terminal } = await import("../integrations/terminal/Terminal")
 			const { TerminalRegistry } = await import("../integrations/terminal/TerminalRegistry")
+			const { CodeIndexManagerRegistry } = await import("../services/code-index/code-index-manager-registry")
 
 			vi.mocked(TelemetryService.instance.shutdown).mockRejectedValue(new Error("shutdown failed"))
 			const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile")
@@ -474,6 +744,7 @@ describe("extension.ts", () => {
 
 			expect(setTerminalProfileSpy).toHaveBeenCalledWith(undefined)
 			expect(TerminalRegistry.cleanup).toHaveBeenCalledTimes(1)
+			expect(CodeIndexManagerRegistry.disposeAll).toHaveBeenCalledTimes(1)
 
 			setTerminalProfileSpy.mockRestore()
 		})
@@ -486,6 +757,7 @@ describe("extension.ts", () => {
 			const { TelemetryService } = await import("@roo-code/telemetry")
 			const { Terminal } = await import("../integrations/terminal/Terminal")
 			const { TerminalRegistry } = await import("../integrations/terminal/TerminalRegistry")
+			const { CodeIndexManagerRegistry } = await import("../services/code-index/code-index-manager-registry")
 
 			const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile")
 
@@ -509,9 +781,9 @@ describe("extension.ts", () => {
 			expect(mockTelemetryServiceInstance.shutdown).not.toHaveBeenCalled()
 			expect(setTerminalProfileSpy).toHaveBeenCalledWith(undefined)
 			expect(TerminalRegistry.cleanup).toHaveBeenCalledTimes(1)
+			expect(CodeIndexManagerRegistry.disposeAll).toHaveBeenCalledTimes(1)
 
 			instanceGetterSpy.mockRestore()
-
 			setTerminalProfileSpy.mockRestore()
 		})
 	})

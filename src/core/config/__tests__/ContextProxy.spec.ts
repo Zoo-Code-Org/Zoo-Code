@@ -309,6 +309,25 @@ describe("ContextProxy", () => {
 	})
 
 	describe("setProviderSettings", () => {
+		it("stores and returns the complete IO Intelligence configuration across secret and global state", async () => {
+			await proxy.setProviderSettings({
+				apiProvider: providerIdentifiers.ioIntelligence,
+				ioIntelligenceApiKey: "ionet-secret",
+				ioIntelligenceModelId: "meta-llama/Llama-3.3-70B-Instruct",
+			})
+
+			expect(mockSecrets.store).toHaveBeenCalledWith("ioIntelligenceApiKey", "ionet-secret")
+			expect(mockGlobalState.update).toHaveBeenCalledWith(
+				"ioIntelligenceModelId",
+				"meta-llama/Llama-3.3-70B-Instruct",
+			)
+			expect(proxy.getProviderSettings()).toMatchObject({
+				apiProvider: providerIdentifiers.ioIntelligence,
+				ioIntelligenceApiKey: "ionet-secret",
+				ioIntelligenceModelId: "meta-llama/Llama-3.3-70B-Instruct",
+			})
+		})
+
 		it("stores and returns the complete NanoGPT configuration across secret and global state", async () => {
 			await proxy.setProviderSettings({
 				apiProvider: providerIdentifiers.nanogpt,

@@ -4,6 +4,8 @@ import * as path from "path"
 import tsxQuery from "../queries/tsx"
 import { Parser, Language } from "web-tree-sitter"
 
+import { loadTestGrammar } from "./wasm"
+
 vi.mock("fs/promises")
 export const mockedFs = vi.mocked(fs)
 
@@ -34,16 +36,6 @@ export async function initializeTreeSitter() {
 		// Initialize directly using the default export or the module itself
 		await Parser.init()
 
-		// Override the Parser.Language.load to use dist directory
-		const originalLoad = Language.load
-
-		Language.load = async (wasmPath: string) => {
-			const filename = path.basename(wasmPath)
-			const correctPath = path.join(process.cwd(), "dist", filename)
-			// console.log(`Redirecting WASM load from ${wasmPath} to ${correctPath}`)
-			return originalLoad(correctPath)
-		}
-
 		initializedTreeSitter = { Parser, Language }
 	}
 
@@ -72,7 +64,6 @@ export async function testParseSourceCodeDefinitions(
 	// Clear any previous mocks and set up fs mock
 	vi.clearAllMocks()
 	vi.mock("fs/promises")
-	const mockedFs = (await vi.importActual("fs/promises")) as typeof import("fs/promises")
 	;(fs.readFile as any).mockResolvedValue(content)
 
 	// Get the mock function
@@ -80,12 +71,11 @@ export async function testParseSourceCodeDefinitions(
 	const mockedLoadRequiredLanguageParsers = loadRequiredLanguageParsers as any
 
 	// Initialize TreeSitter and create a real parser
-	const { Parser, Language } = await initializeTreeSitter()
+	const { Parser } = await initializeTreeSitter()
 	const parser = new Parser()
 
 	// Load language and configure parser
-	const wasmPath = path.join(process.cwd(), `dist/${wasmFile}`)
-	const lang = await Language.load(wasmPath)
+	const lang = await loadTestGrammar(path.basename(wasmFile))
 	parser.setLanguage(lang)
 
 	// Create a real query
@@ -111,10 +101,9 @@ export async function testParseSourceCodeDefinitions(
 
 // Helper function to inspect tree structure
 export async function inspectTreeStructure(content: string, language: string = "typescript"): Promise<string> {
-	const { Parser, Language } = await initializeTreeSitter()
+	const { Parser } = await initializeTreeSitter()
 	const parser = new Parser()
-	const wasmPath = path.join(process.cwd(), `dist/tree-sitter-${language}.wasm`)
-	const lang = await Language.load(wasmPath)
+	const lang = await loadTestGrammar(`tree-sitter-${language}.wasm`)
 	parser.setLanguage(lang)
 
 	// Parse the content

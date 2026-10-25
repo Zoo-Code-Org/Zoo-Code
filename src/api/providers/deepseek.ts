@@ -6,11 +6,11 @@ import {
 	deepSeekDefaultModelId,
 	DEEP_SEEK_DEFAULT_TEMPERATURE,
 	OPENAI_AZURE_AI_INFERENCE_PATH,
-	type ModelInfo,
+	type ModelRecord,
 	DeepSeekModelId,
 } from "@roo-code/types"
 
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
@@ -19,8 +19,9 @@ import { convertToR1Format } from "../transform/r1-format"
 import { OpenAiHandler } from "./openai"
 import { NOT_PROVIDED } from "./constants"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
-import type { ApiHandlerCreateMessageMetadata } from "../index"
+import type { ApiHandlerCreateMessageMetadata, ModelCacheScope } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
+import { getDeepSeekModels } from "./fetchers/deepseek"
 
 // Custom interface for DeepSeek params to support thinking mode
 type DeepSeekChatCompletionParams = Omit<OpenAI.Chat.ChatCompletionCreateParamsStreaming, "reasoning_effort"> & {
@@ -28,7 +29,12 @@ type DeepSeekChatCompletionParams = Omit<OpenAI.Chat.ChatCompletionCreateParamsS
 	reasoning_effort?: "low" | "high" | "max"
 }
 
-const deepSeekV4ThinkingModels = new Set(["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"])
+const deepSeekV4ThinkingModels = new Set([
+	"deepseek-flash",
+	"deepseek-v4-flash",
+	"deepseek-v4-pro",
+	"deepseek-v4-flash-vision-exp",
+])
 const supportsDeepSeekThinkingToggle = (modelId: string) => deepSeekV4ThinkingModels.has(modelId)
 
 // Only known V4 models and the legacy reasoner alias support DeepSeek's
@@ -49,6 +55,7 @@ export const normalizeDeepSeekReasoningEffort = (
 ): "low" | "high" | "max" | undefined => {
 	// still check the modelId so non-supported models won't produce reasoning efforts
 	switch (modelId) {
+		case "deepseek-flash":
 		case "deepseek-v4-flash":
 		case "deepseek-v4-pro":
 		case "deepseek-v4-flash-vision-exp":
@@ -94,6 +101,15 @@ export class DeepSeekHandler extends OpenAiHandler {
 		})
 	}
 
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: true, keyScoped: false, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getDeepSeekModels(options.baseUrl, options.apiKey, ...fetchOpts)
+	}
+
 	override getModel() {
 		const id = this.options.apiModelId ?? deepSeekDefaultModelId
 		const info = deepSeekModels[id as keyof typeof deepSeekModels] || deepSeekModels[deepSeekDefaultModelId]
@@ -104,7 +120,13 @@ export class DeepSeekHandler extends OpenAiHandler {
 			settings: this.options,
 			defaultTemperature: DEEP_SEEK_DEFAULT_TEMPERATURE,
 		})
-		return { id, info, ...params }
+		return {
+			id,
+			info,
+			...params,
+			// Unknown IDs use fallback metadata, but must not inherit its V4 request fields.
+			reasoning: supportsDeepSeekThinkingToggle(id) ? params.reasoning : undefined,
+		}
 	}
 
 	override async *createMessage(

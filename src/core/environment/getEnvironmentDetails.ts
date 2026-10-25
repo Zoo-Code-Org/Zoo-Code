@@ -5,10 +5,8 @@ import * as vscode from "vscode"
 import pWaitFor from "p-wait-for"
 import delay from "delay"
 
-import type { ExperimentId } from "@roo-code/types"
-
 import { formatLanguage } from "../../shared/language"
-import { defaultModeSlug, getFullModeDetails } from "../../shared/modes"
+import { getFullModeDetails } from "../../shared/modes"
 import { getApiMetrics } from "../../shared/getApiMetrics"
 import { listFiles } from "../../services/glob/list-files"
 import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
@@ -204,16 +202,11 @@ export async function getEnvironmentDetails(cline: Task, includeFileDetails: boo
 	const { id: modelId } = cline.api.getModel()
 
 	// Add current mode and any mode-specific warnings.
-	const {
-		mode,
-		customModes,
-		customModePrompts,
-		experiments = {} as Record<ExperimentId, boolean>,
-		customInstructions: globalCustomInstructions,
-		language,
-	} = state ?? {}
+	const { customModes, customModePrompts, customInstructions: globalCustomInstructions, language } = state ?? {}
 
-	const currentMode = mode ?? defaultModeSlug
+	// Read the task-local mode, not the shared provider mode.
+	// A delegated child task may run in a different mode than its parent.
+	const currentMode = await cline.getTaskMode()
 
 	const modeDetails = await getFullModeDetails(currentMode, customModes, customModePrompts, {
 		cwd: cline.cwd,

@@ -346,6 +346,10 @@
 				"label": "Beveiliging tegen destructieve opdrachten inschakelen",
 				"description": "Download en gebruik Destructive Command Guard (DCG) voor dit platform. Opdrachten die DCG toestaat, worden automatisch uitgevoerd. Voor opdrachten die DCG blokkeert, is jouw goedkeuring nodig. De opdrachtenlijsten van Zoo zijn uitgeschakeld zolang deze optie actief is. Het gedownloade uitvoerbare bestand blijft bewaard als je de optie uitschakelt."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "Toegestane automatisch uit te voeren commando's",
 			"allowedCommandsDescription": "Commando-prefixen die automatisch kunnen worden uitgevoerd als 'Altijd goedkeuren voor uitvoeren' is ingeschakeld. Voeg * toe om alle commando's toe te staan (gebruik met voorzichtigheid).",
 			"deniedCommands": "Geweigerde commando's",
@@ -394,6 +398,11 @@
 		"vscodeLmDescription": "De VS Code Language Model API stelt je in staat modellen te draaien die door andere VS Code-extensies worden geleverd (waaronder GitHub Copilot). De eenvoudigste manier om te beginnen is door de Copilot- en Copilot Chat-extensies te installeren vanuit de VS Code Marketplace.",
 		"awsCustomArnUse": "Voer een geldige Amazon Bedrock ARN in voor het model dat je wilt gebruiken. Voorbeeldformaten:",
 		"awsCustomArnDesc": "Zorg ervoor dat de regio in de ARN overeenkomt met je geselecteerde AWS-regio hierboven.",
+		"awsCustomArnBaseModel": "Onderliggend model",
+		"awsCustomArnBaseModelOther": "Anders (niet vermeld)",
+		"awsCustomArnBaseModelDesc": "Het model waarnaar deze ARN verwijst. Zoo Code gebruikt het voor denken, temperatuur, contextvenster, maximale uitvoer en prijzen. Wordt automatisch gedetecteerd als de ARN het model noemt.",
+		"awsCustomArnContextWindow": "Contextvenster (tokens)",
+		"awsCustomArnMaxTokens": "Maximale uitvoertokens",
 		"openRouterApiKey": "OpenRouter API-sleutel",
 		"getOpenRouterApiKey": "OpenRouter API-sleutel ophalen",
 		"vercelAiGatewayApiKey": "Vercel AI Gateway API-sleutel",
@@ -402,6 +411,12 @@
 		"getOpencodeGoApiKey": "Opencode Go API-sleutel ophalen",
 		"kenariApiKey": "Kenari API-sleutel",
 		"getKenariApiKey": "Kenari API-sleutel ophalen",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "IO Intelligence API-sleutel",
+			"getApiKey": "IO Intelligence API-sleutel ophalen",
+			"model": "Model"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API-sleutel",
@@ -530,6 +545,8 @@
 		"apiKey": "API-sleutel",
 		"openAiApiKey": "OpenAI API-sleutel",
 		"openAiBaseUrl": "Basis-URL",
+		"openAiStrictToolSchemas": "Strikte toolschemas (strict: true)",
+		"openAiStrictToolSchemasDescription": "Verstuurt strict: true met de toolschemas om strikte schema-naleving in te schakelen. Schakel uit voor niet-strikte tool calls.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Naam van Azure-implementatie",
 		"azureOpenAiDeploymentNameDescription": "Voer de implementatienaam uit Azure AI Studio in, niet de naam van het onderliggende model.",
@@ -568,6 +585,16 @@
 		"enablePromptCaching": "Prompt caching inschakelen",
 		"enablePromptCachingTitle": "Schakel prompt caching in om de prestaties te verbeteren en de kosten te verlagen voor ondersteunde modellen.",
 		"cacheUsageNote": "Let op: als je geen cachegebruik ziet, probeer dan een ander model te selecteren en vervolgens weer je gewenste model.",
+		"githubCopilot": {
+			"accountActions": "Acties voor het GitHub Copilot-account",
+			"signIn": "Aanmelden bij GitHub",
+			"reconnect": "GitHub opnieuw verbinden",
+			"signedIn": "Aangemeld als {{account}}",
+			"connecting": "Verbinden...",
+			"noModels": "Geen Copilot-modellen beschikbaar. Installeer of activeer GitHub Copilot Chat, meld je aan met een geschikt GitHub-account en ververs daarna. Aanmelden bevestigt geen Copilot-abonnement. De limieten van je GitHub-abonnement, premiumverzoeken en aanvraagfrequentie zijn van toepassing.",
+			"manageAccount": "GitHub-account beheren",
+			"manageAccountDescription": "Opent het accountmenu van VS Code, waar je je kunt afmelden bij GitHub. Afmelden heeft gevolgen voor Copilot en andere extensies die dit account gebruiken."
+		},
 		"vscodeLmModel": "Taalmodel",
 		"vscodeLmWarning": "Let op: Modellen die via de VS Code Language Model API worden benaderd kunnen door de provider worden verpakt of fijn‑afgesteld, waardoor het gedrag kan afwijken van het rechtstreeks gebruiken van hetzelfde model bij een typische provider of router. Om een model uit de keuzelijst ‘Language Model’ te gebruiken, schakel eerst naar dat model en klik vervolgens op ‘Accepteren’ in de Copilot Chat‑prompt; anders kun je een fout zien zoals 400 ‘The requested model is not supported’.",
 		"googleCloudSetup": {
@@ -595,7 +622,7 @@
 			"baseUrl": "Basis-URL (optioneel)",
 			"modelId": "Model-ID",
 			"apiKey": "Ollama API-sleutel",
-			"apiKeyHelp": "Optionele API-sleutel voor geauthenticeerde Ollama-instanties of cloudservices. Laat leeg voor lokale installaties.",
+			"apiKeyHelp": "Optionele API-sleutel voor Ollama-instanties die authenticatie nodig hebben, of voor cloudservices. Zoo Code stuurt de sleutel alleen naar HTTPS- of loopback-eindpunten. Een extern HTTP-eindpunt krijgt geen sleutel, omdat de sleutel als leesbare tekst zou reizen. Gebruik HTTPS voor een externe instantie die een sleutel nodig heeft. Laat dit leeg voor een lokale installatie.",
 			"numCtx": "Contextvenstergrootte (num_ctx)",
 			"numCtxHelp": "Overschrijft de standaard contextvenstergrootte van het model. Laat leeg om de Modelfile-configuratie van het model te gebruiken. De minimumwaarde is 128.",
 			"thinking": "Redeneren inschakelen",
@@ -661,6 +688,10 @@
 			"description": "Aantal opeenvolgende fouten of herhaalde acties voordat het dialoogvenster 'Zoo ondervindt problemen' wordt weergegeven. Zet op 0 om dit veiligheidsmechanisme uit te schakelen (wordt nooit geactiveerd).",
 			"unlimitedDescription": "Onbeperkt aantal nieuwe pogingen ingeschakeld (automatisch doorgaan). Het dialoogvenster zal nooit verschijnen.",
 			"warning": "⚠️ Instellen op 0 staat onbeperkte nieuwe pogingen toe, wat aanzienlijk API-gebruik kan verbruiken"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "Drempel zachte herhalingswaarschuwing",
+			"description": "Na dit aantal identieke opeenvolgende toolaanroepen wordt de tool geblokkeerd en wordt de AI gevraagd het opnieuw proberen te rechtvaardigen, zonder jou erbij te betrekken. Stel in op 0 om zachte waarschuwingen uit te schakelen."
 		},
 		"reasoningEffort": {
 			"label": "Model redeneervermogen",
@@ -820,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Opdrachtuitvoer standaard inklappen",
+			"description": "Toon opdrachtuitvoer ingeklapt, ook van de inline-terminal. Klap deze indien nodig handmatig uit. Dit verandert de uitvoering van opdrachten niet."
+		},
 		"basic": {
 			"label": "Terminalinstellingen: Basis",
 			"description": "Basis terminalinstellingen"
@@ -987,8 +1022,14 @@
 		"rangeDescription": "Hogere waarden maken de output willekeuriger, lagere waarden maken deze deterministischer."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Ondersteuning voor afbeeldingen niet gemeld",
+		"toolSupportUnknown": "Ondersteuning voor tools niet gemeld",
+		"promptCacheManagedByCopilot": "Prompt-caching wordt beheerd door GitHub Copilot",
+		"promptCacheCopilotDetails": "Caching hangt af van het model en de GitHub Copilot-backend. Zoo Code kan de cachebewaartermijn niet instellen en cachetreffers niet waarnemen via de VS Code API.",
 		"supportsImages": "Ondersteunt afbeeldingen",
 		"noImages": "Ondersteunt geen afbeeldingen",
+		"supportsTools": "Ondersteunt tools",
+		"noTools": "Ondersteunt geen tools",
 		"supportsPromptCache": "Ondersteunt prompt caching",
 		"noPromptCache": "Ondersteunt geen prompt caching",
 		"contextWindow": "Contextvenster:",

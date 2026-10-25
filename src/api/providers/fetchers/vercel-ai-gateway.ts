@@ -7,6 +7,8 @@ import { VERCEL_AI_GATEWAY_VISION_ONLY_MODELS, VERCEL_AI_GATEWAY_VISION_AND_TOOL
 import type { ApiHandlerOptions } from "../../../shared/api"
 import { parseApiPrice } from "../../../shared/cost"
 
+import { throwIfAborted } from "../utils/abort-signal"
+
 /**
  * VercelAiGatewayPricing
  */
@@ -55,12 +57,15 @@ type VercelAiGatewayModelsResponse = z.infer<typeof vercelAiGatewayModelsRespons
  * getVercelAiGatewayModels
  */
 
-export async function getVercelAiGatewayModels(options?: ApiHandlerOptions): Promise<Record<string, ModelInfo>> {
+export async function getVercelAiGatewayModels(
+	_options?: ApiHandlerOptions,
+	opts?: { signal?: AbortSignal },
+): Promise<Record<string, ModelInfo>> {
 	const models: Record<string, ModelInfo> = {}
 	const baseURL = "https://ai-gateway.vercel.sh/v1"
 
 	try {
-		const response = await axios.get<VercelAiGatewayModelsResponse>(`${baseURL}/models`)
+		const response = await axios.get<VercelAiGatewayModelsResponse>(`${baseURL}/models`, { signal: opts?.signal })
 		const result = vercelAiGatewayModelsResponseSchema.safeParse(response.data)
 		const data = result.success ? result.data.data : response.data.data
 
@@ -80,6 +85,10 @@ export async function getVercelAiGatewayModels(options?: ApiHandlerOptions): Pro
 			models[id] = parseVercelAiGatewayModel({ id, model })
 		}
 	} catch (error) {
+		// Surface cancellation as a rejection: logging and returning here would
+		// present an aborted fetch to callers as a successful (partial) catalog.
+		throwIfAborted(opts?.signal)
+
 		console.error(
 			`Error fetching Vercel AI Gateway models: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 		)
@@ -116,6 +125,19 @@ export const parseVercelAiGatewayModel = ({ id, model }: { id: string; model: Ve
 		description: model.description ?? model.name,
 	}
 
+	if (id === "google/gemini-4-argon") {
+		// The gateway catalog reports context_window and max_tokens of 1,000,000,
+		// but Google's authoritative limits are a shared 1,048,576-token window
+		// (input + thinking + output) and a 65,536-token single-request output cap
+		// (longer decodes use continuation tokens).
+		modelInfo.contextWindow = 1_048_576
+		modelInfo.maxTokens = 65_536
+		modelInfo.supportsReasoningEffort = ["low", "medium", "high"]
+		modelInfo.reasoningEffort = "medium"
+		// The Google backend ignores temperature/top_p/top_k on this model.
+		modelInfo.supportsTemperature = false
+	}
+
 	if (id === "openai/gpt-6-astra" || id === "openai/gpt-6-astra-fast") {
 		modelInfo.supportsReasoningEffort = ["low", "medium", "high", "xhigh", "max"]
 		modelInfo.requiredReasoningEffort = true
@@ -132,6 +154,10 @@ export const parseVercelAiGatewayModel = ({ id, model }: { id: string; model: Ve
 	}
 
 	if (id === "anthropic/claude-opus-5") {
+		modelInfo.supportsTemperature = false
+	}
+
+	if (id === "anthropic/claude-opus-5-5") {
 		modelInfo.supportsTemperature = false
 	}
 

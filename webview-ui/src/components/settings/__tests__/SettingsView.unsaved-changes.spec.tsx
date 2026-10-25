@@ -1,4 +1,4 @@
-import { providerIdentifiers } from "@roo-code/types"
+import { providerIdentifiers, openAiModelInfoSaneDefaults, type ProviderSettings } from "@roo-code/types"
 import { screen, fireEvent, waitFor } from "@testing-library/react"
 
 import { renderWithExtensionState } from "@/utils/test-utils"
@@ -268,8 +268,10 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		deniedCommands: [],
 		allowedMaxRequests: undefined,
 		allowedMaxCost: undefined,
-		language: "en",
+		language: "en" as const,
 		alwaysAllowExecute: false,
+		alwaysDenyUnapprovedCommands: false,
+		destructiveCommandGuardEnabled: false,
 		alwaysAllowMcp: false,
 		alwaysAllowModeSwitch: false,
 		alwaysAllowSubtasks: false,
@@ -287,7 +289,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		ttsEnabled: false,
 		ttsSpeed: 1.0,
 		soundVolume: 0.5,
-		telemetrySetting: "unset",
+		telemetrySetting: "unset" as const,
 		terminalOutputLineLimit: 500,
 		terminalOutputCharacterLimit: 50000,
 		terminalShellIntegrationTimeout: 3000,
@@ -635,13 +637,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 						setApiConfigurationField(
 							"nanoGptRoutingPreference",
 							event.target.value as
-								| "auto"
-								| "fast"
-								| "cheap"
-								| "latency"
-								| "throughput"
-								| "tools"
-								| "caching",
+								"auto" | "fast" | "cheap" | "latency" | "throughput" | "tools" | "caching",
 						)
 					}>
 					<option value="auto">Automatic</option>
@@ -682,6 +678,57 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		})
 	})
 
+	it("keeps OpenAI-compatible reasoning edits cached until Save despite a live state refresh", async () => {
+		const configuration: ProviderSettings = {
+			apiProvider: providerIdentifiers.openai,
+			openAiModelId: "custom-model",
+			enableReasoningEffort: false,
+			reasoningEffort: "low",
+			openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, reasoningEffort: "low" },
+		}
+		vi.mocked(useExtensionState, { partial: true }).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: configuration,
+		})
+		vi.mocked(ApiOptions).mockImplementation(({ apiConfiguration, setApiConfigurationField }) => (
+			<button
+				data-testid="select-compatible-max"
+				onClick={() => {
+					setApiConfigurationField("enableReasoningEffort", true)
+					setApiConfigurationField("openAiCustomModelInfo", {
+						...(apiConfiguration.openAiCustomModelInfo ?? openAiModelInfoSaneDefaults),
+						reasoningEffort: "max",
+					})
+				}}>
+				{apiConfiguration.openAiCustomModelInfo?.reasoningEffort}
+			</button>
+		))
+		const view = renderWithExtensionState(<SettingsView onDone={vi.fn()} />, { queryClient })
+		fireEvent.click(await screen.findByTestId("select-compatible-max"))
+
+		vi.mocked(useExtensionState, { partial: true }).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: { ...configuration },
+		})
+		view.rerender(<SettingsView onDone={vi.fn()} />)
+
+		expect(screen.getByTestId("select-compatible-max")).toHaveTextContent("max")
+		expect(configuration.enableReasoningEffort).toBe(false)
+		expect(configuration.openAiCustomModelInfo?.reasoningEffort).toBe("low")
+		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(postMessage).toHaveBeenCalledWith({
+			type: "upsertApiConfiguration",
+			text: "default",
+			apiConfiguration: {
+				...configuration,
+				enableReasoningEffort: true,
+				openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, reasoningEffort: "max" },
+			},
+		})
+	})
+
 	it("discards NanoGPT cached edits and restores the extension values", async () => {
 		const onDone = vi.fn()
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -707,6 +754,87 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		fireEvent.click(await screen.findByText("settings:unsavedChangesDialog.discardButton"))
 
 		await waitFor(() => expect(screen.getByTestId("cached-nanogpt-key")).toHaveValue("saved-key"))
+		expect(onDone).toHaveBeenCalledOnce()
+		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+	})
+
+	it("buffers and saves the complete IO Intelligence provider configuration from cached state", async () => {
+		const liveApiConfiguration = {
+			apiProvider: providerIdentifiers.ioIntelligence,
+			ioIntelligenceApiKey: "original-key",
+			ioIntelligenceModelId: "meta-llama/original",
+		}
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: liveApiConfiguration,
+		})
+		vi.mocked(ApiOptions).mockImplementation(({ apiConfiguration, setApiConfigurationField }) => (
+			<div>
+				<input
+					data-testid="cached-ionet-key"
+					value={apiConfiguration.ioIntelligenceApiKey ?? ""}
+					onChange={(event) => setApiConfigurationField("ioIntelligenceApiKey", event.target.value)}
+				/>
+				<input
+					data-testid="cached-ionet-model"
+					value={apiConfiguration.ioIntelligenceModelId ?? ""}
+					onChange={(event) => setApiConfigurationField("ioIntelligenceModelId", event.target.value)}
+				/>
+			</div>
+		))
+
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} />, { queryClient })
+
+		expect(await screen.findByTestId("cached-ionet-key")).toHaveValue("original-key")
+		expect(screen.getByTestId("cached-ionet-model")).toHaveValue("meta-llama/original")
+
+		fireEvent.change(screen.getByTestId("cached-ionet-key"), { target: { value: "unsaved-key" } })
+		fireEvent.change(screen.getByTestId("cached-ionet-model"), { target: { value: "zai-org/next" } })
+
+		expect(liveApiConfiguration).toEqual({
+			apiProvider: providerIdentifiers.ioIntelligence,
+			ioIntelligenceApiKey: "original-key",
+			ioIntelligenceModelId: "meta-llama/original",
+		})
+		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(postMessage).toHaveBeenCalledWith({
+			type: "upsertApiConfiguration",
+			text: "default",
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.ioIntelligence,
+				ioIntelligenceApiKey: "unsaved-key",
+				ioIntelligenceModelId: "zai-org/next",
+			},
+		})
+	})
+
+	it("discards IO Intelligence cached edits and restores the extension values", async () => {
+		const onDone = vi.fn()
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.ioIntelligence,
+				ioIntelligenceApiKey: "saved-key",
+				ioIntelligenceModelId: "meta-llama/saved",
+			},
+		})
+		vi.mocked(ApiOptions).mockImplementation(({ apiConfiguration, setApiConfigurationField }) => (
+			<input
+				data-testid="cached-ionet-key"
+				value={apiConfiguration.ioIntelligenceApiKey ?? ""}
+				onChange={(event) => setApiConfigurationField("ioIntelligenceApiKey", event.target.value)}
+			/>
+		))
+
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
+		fireEvent.change(await screen.findByTestId("cached-ionet-key"), { target: { value: "discard-me" } })
+		fireEvent.click(screen.getByText("settings:common.done"))
+		fireEvent.click(await screen.findByText("settings:unsavedChangesDialog.discardButton"))
+
+		await waitFor(() => expect(screen.getByTestId("cached-ionet-key")).toHaveValue("saved-key"))
 		expect(onDone).toHaveBeenCalledOnce()
 		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
 	})

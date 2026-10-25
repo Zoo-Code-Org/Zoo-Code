@@ -13,6 +13,7 @@
 	"deleteTaskTitle": "タスクを削除（Shift + クリックで確認をスキップ）",
 	"copyPrompt": "プロンプトをコピー",
 	"exportTask": "タスクをエクスポート",
+	"renameTask": "タスク名を変更",
 	"deleteTask": "タスクを削除",
 	"deleteTaskMessage": "このタスクを削除してもよろしいですか？この操作は元に戻せません。",
 	"cancel": "キャンセル",

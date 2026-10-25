@@ -7,7 +7,9 @@ import { GoogleAuth } from "google-auth-library"
 import { VERTEX_1M_CONTEXT_MODEL_IDS } from "@roo-code/types"
 
 import { AnthropicVertexHandler } from "../anthropic-vertex"
+import { MAX_TIMEOUT_MS } from "../utils/abort-signal"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 
 vitest.mock("../utils/timeout-config", () => ({
 	getApiRequestTimeout: vitest.fn().mockReturnValue(300_000),
@@ -626,7 +628,7 @@ describe("VertexHandler", () => {
 				vertexRegion: "us-central1",
 			})
 
-			const mockCreate = vitest.fn().mockImplementation(async (options) =>
+			const mockCreate = vitest.fn().mockImplementation(async (_options) =>
 				asyncStreamFrom([
 					{
 						type: "message_start",
@@ -675,7 +677,7 @@ describe("VertexHandler", () => {
 			]
 
 			const stream = handler.createMessage(systemPrompt, messagesWithReasoning)
-			const chunks = await collectStream(stream)
+			await collectStream(stream)
 
 			// Verify the API was called with filtered messages (no reasoning blocks)
 			const calledMessages = mockCreate.mock.calls[0][0].messages
@@ -702,7 +704,7 @@ describe("VertexHandler", () => {
 				vertexRegion: "us-central1",
 			})
 
-			const mockCreate = vitest.fn().mockImplementation(async (options) =>
+			const mockCreate = vitest.fn().mockImplementation(async (_options) =>
 				asyncStreamFrom([
 					{
 						type: "message_start",
@@ -739,12 +741,204 @@ describe("VertexHandler", () => {
 			]
 
 			const stream = handler.createMessage(systemPrompt, messagesWithOnlyReasoning)
-			const chunks = await collectStream(stream)
+			await collectStream(stream)
 
 			// Verify empty message was filtered out
 			const calledMessages = mockCreate.mock.calls[0][0].messages
 			expect(calledMessages).toHaveLength(2) // Only the two user messages
 			expect(calledMessages.every((m: any) => m.role === "user")).toBe(true)
+		})
+
+		it("should reject with AbortError when createMessage is called with an already-aborted signal", async () => {
+			const abortedController = new AbortController()
+			abortedController.abort()
+
+			vitest
+				.spyOn(handler["client"].messages, "create")
+				.mockImplementation((_params: unknown, options?: { signal?: AbortSignal | null }) => {
+					if (options?.signal?.aborted) {
+						const error = new Error("The operation was aborted")
+						error.name = "AbortError"
+						throw error
+					}
+					return asyncStreamFrom([]) as never
+				})
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: abortedController.signal }),
+			)
+
+			await expect(stream.next()).rejects.toMatchObject({ name: "AbortError" })
+		})
+
+		it("should abort the request when the external signal aborts mid-flight", async () => {
+			const controller = new AbortController()
+
+			vitest.spyOn(handler["client"].messages, "create").mockImplementation(
+				(_params: unknown, options?: { signal?: AbortSignal | null }) =>
+					new Promise<void>((_resolve, reject) => {
+						const signal = options?.signal
+						if (!signal) {
+							return
+						}
+						if (signal.aborted) {
+							const error = new Error("The operation was aborted")
+							error.name = "AbortError"
+							reject(error)
+							return
+						}
+						signal.addEventListener(
+							"abort",
+							() => {
+								const error = new Error("The operation was aborted")
+								error.name = "AbortError"
+								reject(error)
+							},
+							{ once: true },
+						)
+					}) as never,
+			)
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const promise = stream.next()
+			controller.abort()
+			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+		})
+
+		it("should remove the external abort listener when the stream completes", async () => {
+			const handlerWithSignal = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const controller = new AbortController()
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+			const stream = handlerWithSignal.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await collectStream(stream)
+
+			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+			const [event, listener] = addEventListenerSpy.mock.calls[0]
+			expect(event).toBe("abort")
+			// The same retained callback must be detached once the stream is done.
+			expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)
+		})
+
+		it("should remove the external abort listener when message creation fails", async () => {
+			const handlerWithSignal = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const controller = new AbortController()
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+			handlerWithSignal["client"].messages.create = vitest
+				.fn()
+				.mockRejectedValue(new Error("vertex create error"))
+
+			const stream = handlerWithSignal.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await expect(collectStream(stream)).rejects.toThrow("vertex create error")
+
+			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+			const [event, listener] = addEventListenerSpy.mock.calls[0]
+			expect(event).toBe("abort")
+			// The inline finally must detach the listener on the failure path too,
+			// not only on normal completion.
+			expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)
+		})
+
+		it("should remove the external abort listener when the consumer returns early", async () => {
+			const handlerWithSignal = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const controller = new AbortController()
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+			handlerWithSignal["client"].messages.create = vitest.fn().mockImplementation(async () =>
+				asyncStreamFrom([
+					{ type: "message_start", message: { usage: { input_tokens: 1, output_tokens: 0 } } },
+					{ type: "content_block_delta", delta: { type: "text_delta", text: "first" } },
+					{ type: "content_block_delta", delta: { type: "text_delta", text: "second" } },
+				]),
+			)
+
+			const stream = handlerWithSignal.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+			const iterator = stream[Symbol.asyncIterator]()
+
+			await iterator.next()
+			await iterator.return(undefined)
+
+			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+			const [event, listener] = addEventListenerSpy.mock.calls[0]
+			expect(event).toBe("abort")
+			// Abandoning the generator mid-stream runs the finally block too.
+			expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)
+		})
+
+		it("should default message_start outputTokens to zero when output_tokens is omitted", async () => {
+			handler = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const mockCreate = vitest.fn().mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 10,
+							},
+						},
+					},
+				]),
+			)
+			handler["client"].messages.create = mockCreate
+
+			const stream = handler.createMessage(systemPrompt, [{ role: "user", content: "Hello" }])
+			const chunks = await collectStream(stream)
+
+			expect(chunks[0]).toEqual({
+				type: "usage",
+				inputTokens: 10,
+				outputTokens: 0,
+				cacheWriteTokens: undefined,
+				cacheReadTokens: undefined,
+			})
 		})
 	})
 
@@ -758,18 +952,22 @@ describe("VertexHandler", () => {
 
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("Test response")
-			expect(handler["client"].messages.create).toHaveBeenCalledWith({
-				model: "claude-3-5-sonnet-v2@20241022",
-				max_tokens: 8192,
-				temperature: 0,
-				messages: [
-					{
-						role: "user",
-						content: [{ type: "text", text: "Test prompt", cache_control: { type: "ephemeral" } }],
-					},
-				],
-				stream: false,
-			})
+			expect(handler["client"].messages.create).toHaveBeenCalledWith(
+				{
+					model: "claude-3-5-sonnet-v2@20241022",
+					max_tokens: 8192,
+					temperature: 0,
+					messages: [
+						{
+							role: "user",
+							content: [{ type: "text", text: "Test prompt", cache_control: { type: "ephemeral" } }],
+						},
+					],
+					stream: false,
+					thinking: undefined,
+				},
+				undefined,
+			)
 		})
 
 		it("should handle API errors for Claude", async () => {
@@ -819,6 +1017,104 @@ describe("VertexHandler", () => {
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
 		})
+
+		it("should pass abort signal through to client", async () => {
+			handler = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const controller = new AbortController()
+			const mockCreate = vitest
+				.spyOn(handler["client"].messages, "create")
+				.mockResolvedValue({ content: [{ type: "text", text: "response" }] } as never)
+
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+
+			const [, requestOptions] = mockCreate.mock.calls[0]
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.any(Object),
+			)
+			expect(requestOptions?.signal).toBe(controller.signal)
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			handler = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const mockCreate = vitest
+				.spyOn(handler["client"].messages, "create")
+				.mockResolvedValue({ content: [{ type: "text", text: "response" }] } as never)
+
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), undefined)
+		})
+
+		it("completePrompt should pass signal through to client", async () => {
+			handler = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const controller = new AbortController()
+			const mockCreate = vitest
+				.spyOn(handler["client"].messages, "create")
+				.mockResolvedValue({ content: [{ type: "text", text: "response" }] } as never)
+
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
+
+			const [, requestOptions] = mockCreate.mock.calls[0]
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ timeout: 5000 }),
+			)
+			expect(requestOptions?.signal).toBe(controller.signal)
+		})
+
+		it.each([
+			{ label: "a whole-number", input: 3000, forwarded: 3000 },
+			// Only a call through toSdkTimeoutMs rounds this up.
+			{ label: "a fractional", input: 12.5, forwarded: 13 },
+			// Only a call through toSdkTimeoutMs caps at the Node timer maximum.
+			{ label: "an over-cap", input: MAX_TIMEOUT_MS + 1, forwarded: MAX_TIMEOUT_MS },
+		])("completePrompt should forward $label timeoutMs as $forwarded", async ({ input, forwarded }) => {
+			const mockCreate = vitest
+				.spyOn(handler["client"].messages, "create")
+				.mockResolvedValue({ content: [{ type: "text", text: "response" }] } as never)
+
+			await handler.completePrompt("test prompt", { timeoutMs: input })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ timeout: forwarded }),
+			)
+		})
+
+		// The SDK turns timeout: 0 into an immediate abort and rejects
+		// negative/non-finite delays, so "no explicit timeout" means no option.
+		it.each([0, -5, Number.NaN, Number.POSITIVE_INFINITY])(
+			"completePrompt should not forward an unusable timeoutMs (%s)",
+			async (timeoutMs) => {
+				handler = new AnthropicVertexHandler({
+					apiModelId: "claude-3-5-sonnet-v2@20241022",
+					vertexProjectId: "test-project",
+					vertexRegion: "us-central1",
+				})
+
+				const mockCreate = vitest
+					.spyOn(handler["client"].messages, "create")
+					.mockResolvedValue({ content: [{ type: "text", text: "response" }] } as never)
+
+				await handler.completePrompt("test prompt", { timeoutMs })
+				expect(mockCreate).toHaveBeenCalledWith(expect.any(Object), undefined)
+			},
+		)
 
 		it("should handle empty content array for Claude", async () => {
 			handler = new AnthropicVertexHandler({
@@ -1038,6 +1334,25 @@ describe("VertexHandler", () => {
 			expect(model.id).toBe("claude-opus-5")
 			expect(model.info.maxTokens).toBe(8192)
 			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+		})
+
+		it("should return Claude Opus 5.5 model info", () => {
+			const handler = new AnthropicVertexHandler({
+				apiModelId: "claude-opus-5-5",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("claude-opus-5-5")
+			expect(model.info.maxTokens).toBe(128_000)
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.inputPrice).toBe(4.0)
+			expect(model.info.outputPrice).toBe(20.0)
 			expect(model.info.supportsReasoningBinary).toBe(true)
 			expect(model.info.supportsReasoningBudget).toBe(true)
 			expect(model.info.supportsPromptCache).toBe(true)
@@ -1266,7 +1581,7 @@ describe("VertexHandler", () => {
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 				}),
 				undefined,
 			)
@@ -1297,7 +1612,7 @@ describe("VertexHandler", () => {
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 				}),
 				undefined,
 			)
@@ -1328,7 +1643,7 @@ describe("VertexHandler", () => {
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 				}),
 				undefined,
 			)
@@ -1361,7 +1676,7 @@ describe("VertexHandler", () => {
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 				}),
 				undefined,
 			)
@@ -1392,7 +1707,7 @@ describe("VertexHandler", () => {
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 				}),
 				undefined,
 			)
@@ -1400,6 +1715,210 @@ describe("VertexHandler", () => {
 			const request = mockCreate.mock.calls[0][0]
 			expect(request.thinking).not.toHaveProperty("budget_tokens")
 			expect(request.temperature).toBeUndefined()
+		})
+
+		it("should use adaptive thinking for Claude Opus 5.5", async () => {
+			const opusHandler = new AnthropicVertexHandler({
+				apiModelId: "claude-opus-5-5",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+				enableReasoningEffort: true,
+			})
+
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async () =>
+					asyncStreamFrom([
+						{ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } },
+					]),
+				)
+			// The SDK client's overloaded `create` signature can't be assigned a
+			// vitest mock directly, so a structural double assertion is required.
+			;(opusHandler["client"].messages as unknown as { create: typeof mockCreate }).create = mockCreate
+
+			await opusHandler.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }]).next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					thinking: { type: "adaptive", display: "summarized" },
+				}),
+				undefined,
+			)
+
+			const request = mockCreate.mock.calls[0][0]
+			expect(request.thinking).not.toHaveProperty("budget_tokens")
+			expect(request.temperature).toBeUndefined()
+		})
+
+		it("should surface thinking_tokens from output_tokens_details in usage chunks", async () => {
+			const thinkingTokensHandler = new AnthropicVertexHandler({
+				apiModelId: "claude-opus-4-8",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+				enableReasoningEffort: true,
+			})
+
+			const mockCreate = vitest.fn().mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 100,
+								output_tokens: 10,
+								output_tokens_details: {
+									thinking_tokens: 5,
+								},
+							},
+						},
+					},
+					{
+						type: "message_delta",
+						usage: {
+							output_tokens: 200,
+							output_tokens_details: {
+								thinking_tokens: 150,
+							},
+						},
+					},
+				]),
+			)
+			// Object.assign avoids the SDK's streaming-overload cast that a direct property assignment would require
+			Object.assign(thinkingTokensHandler["client"].messages, { create: mockCreate })
+
+			const stream = thinkingTokensHandler.createMessage("You are a helpful assistant", [
+				{ role: "user", content: "Hello" },
+			])
+			const chunks = await collectStream(stream)
+
+			expect(chunks).toEqual([
+				{
+					type: "usage",
+					inputTokens: 100,
+					outputTokens: 10,
+					reasoningTokens: 5,
+				},
+				{
+					type: "usage",
+					inputTokens: 0,
+					outputTokens: 200,
+					reasoningTokens: 150,
+				},
+			])
+		})
+
+		it("should omit reasoningTokens when output_tokens_details.thinking_tokens is unset", async () => {
+			const noThinkingDetailsHandler = new AnthropicVertexHandler({
+				apiModelId: "claude-opus-4-8",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+				enableReasoningEffort: true,
+			})
+
+			const mockCreate = vitest.fn().mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 100,
+								output_tokens: 10,
+							},
+						},
+					},
+					{
+						type: "message_delta",
+						usage: {
+							output_tokens: 200,
+						},
+					},
+				]),
+			)
+			// Object.assign avoids the SDK's streaming-overload cast that a direct property assignment would require
+			Object.assign(noThinkingDetailsHandler["client"].messages, { create: mockCreate })
+
+			const stream = noThinkingDetailsHandler.createMessage("You are a helpful assistant", [
+				{ role: "user", content: "Hello" },
+			])
+			const chunks = await collectStream(stream)
+
+			expect(chunks).toEqual([
+				{
+					type: "usage",
+					inputTokens: 100,
+					outputTokens: 10,
+				},
+				{
+					type: "usage",
+					inputTokens: 0,
+					outputTokens: 200,
+				},
+			])
+			// Property absence, not just undefined: toEqual ignores own properties whose
+			// value is undefined, so a regression that adds `reasoningTokens: undefined`
+			// to either chunk must fail these assertions.
+			expect(chunks[0]).not.toHaveProperty("reasoningTokens")
+			expect(chunks[1]).not.toHaveProperty("reasoningTokens")
+		})
+
+		it("should preserve a zero-valued thinking_tokens in message_start and message_delta usage chunks", async () => {
+			const zeroThinkingHandler = new AnthropicVertexHandler({
+				apiModelId: "claude-opus-4-8",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+				enableReasoningEffort: true,
+			})
+
+			const mockCreate = vitest.fn().mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 100,
+								output_tokens: 10,
+								output_tokens_details: {
+									thinking_tokens: 0,
+								},
+							},
+						},
+					},
+					{
+						type: "message_delta",
+						usage: {
+							output_tokens: 200,
+							output_tokens_details: {
+								thinking_tokens: 0,
+							},
+						},
+					},
+				]),
+			)
+			// Object.assign avoids the SDK's streaming-overload cast that a direct property assignment would require
+			Object.assign(zeroThinkingHandler["client"].messages, { create: mockCreate })
+
+			const stream = zeroThinkingHandler.createMessage("You are a helpful assistant", [
+				{ role: "user", content: "Hello" },
+			])
+			const chunks = await collectStream(stream)
+
+			// A zero-valued `thinking_tokens` is valid numeric telemetry (the
+			// model skipped thinking this turn); both usage chunks must preserve
+			// it as 0 rather than dropping it via a truthiness check.
+			expect(chunks).toEqual([
+				{
+					type: "usage",
+					inputTokens: 100,
+					outputTokens: 10,
+					reasoningTokens: 0,
+				},
+				{
+					type: "usage",
+					inputTokens: 0,
+					outputTokens: 200,
+					reasoningTokens: 0,
+				},
+			])
 		})
 	})
 
