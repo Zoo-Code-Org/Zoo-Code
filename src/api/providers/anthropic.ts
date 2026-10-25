@@ -1,6 +1,7 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import { Stream as AnthropicStream } from "@anthropic-ai/sdk/streaming"
 import { CacheControlEphemeral } from "@anthropic-ai/sdk/resources"
+import { withFinallyCleanup } from "./stream-cleanup"
 
 import {
 	type ModelInfo,
@@ -20,6 +21,7 @@ import { filterNonAnthropicBlocks } from "../transform/anthropic-filter"
 import { getAnthropicProviderReasoning } from "../transform/reasoning"
 
 import { BaseProvider } from "./base-provider"
+import { bridgeExternalAbortSignal, hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { calculateApiCostAnthropic } from "../../shared/cost"
 import {
@@ -111,6 +113,15 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			tool_choice: toolChoice,
 		}
 
+		// Bridge the external abort signal from request metadata into a per-request
+		// controller so the SDK call is cancelled when the owning request is aborted
+		// (or when the signal is already aborted). Without an external signal the
+		// client-level timeout configured in the constructor remains the only
+		// cancellation mechanism, preserving the existing behavior.
+		const externalAbortSignal = metadata?.abortSignal
+		const { signal: abortSignal, dispose: removeExternalAbortListener } =
+			bridgeExternalAbortSignal(externalAbortSignal)
+
 		switch (modelId) {
 			case "claude-sonnet-5":
 			case "claude-sonnet-4-6":
@@ -177,41 +188,19 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 						stream: true,
 						...nativeToolParams,
 					}
+					// prompt caching: https://x.com/alexalbert__/status/1823751995901272068
+					// https://github.com/anthropics/anthropic-sdk-typescript?tab=readme-ov-file#default-headers
+					// https://github.com/anthropics/anthropic-sdk-typescript/commit/c920b77fc67bd839bfeb6716ceab9d7c9bbe7393
+					// Every model that reaches this branch supports prompt caching, so the
+					// beta applies to all of them.
+					betas.push("prompt-caching-2024-07-31")
+					const requestOptions: Anthropic.RequestOptions = {
+						headers: { "anthropic-beta": betas.join(",") },
+						...(abortSignal && { signal: abortSignal }),
+					}
 					stream = await this.client.messages.create(
 						requestParams as Anthropic.Messages.MessageCreateParamsStreaming,
-						(() => {
-							// prompt caching: https://x.com/alexalbert__/status/1823751995901272068
-							// https://github.com/anthropics/anthropic-sdk-typescript?tab=readme-ov-file#default-headers
-							// https://github.com/anthropics/anthropic-sdk-typescript/commit/c920b77fc67bd839bfeb6716ceab9d7c9bbe7393
-
-							// Then check for models that support prompt caching
-							switch (modelId) {
-								case "claude-sonnet-5":
-								case "claude-sonnet-4-6":
-								case "claude-sonnet-4-5":
-								case "claude-sonnet-4-20250514":
-								case "claude-opus-4-6":
-								case "claude-opus-4-7":
-								case "claude-opus-4-8":
-								case "claude-opus-5":
-								case "claude-opus-5-5":
-								case "claude-fable-5-1":
-								case "claude-fable-5":
-								case "claude-opus-4-5-20251101":
-								case "claude-opus-4-1-20250805":
-								case "claude-opus-4-20250514":
-								case "claude-3-7-sonnet-20250219":
-								case "claude-3-5-sonnet-20241022":
-								case "claude-3-5-haiku-20241022":
-								case "claude-3-opus-20240229":
-								case "claude-haiku-4-5-20251001":
-								case "claude-3-haiku-20240307":
-									betas.push("prompt-caching-2024-07-31")
-									return { headers: { "anthropic-beta": betas.join(",") } }
-								default:
-									return undefined
-							}
-						})(),
+						requestOptions,
 					)
 				} catch (error) {
 					TelemetryService.instance.captureException(
@@ -222,6 +211,9 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 							"createMessage",
 						),
 					)
+					// The request failed before streaming: detach the bridged listener so
+					// it cannot outlive this request.
+					removeExternalAbortListener?.()
 					throw error
 				}
 				break
@@ -240,6 +232,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 					}
 					stream = (await this.client.messages.create(
 						requestParams as Anthropic.Messages.MessageCreateParamsStreaming,
+						abortSignal ? { signal: abortSignal } : undefined,
 					)) as any
 				} catch (error) {
 					TelemetryService.instance.captureException(
@@ -250,6 +243,9 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 							"createMessage",
 						),
 					)
+					// The request failed before streaming: detach the bridged listener so
+					// it cannot outlive this request.
+					removeExternalAbortListener?.()
 					throw error
 				}
 				break
@@ -261,7 +257,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		let cacheWriteTokens = 0
 		let cacheReadTokens = 0
 
-		for await (const chunk of stream) {
+		for await (const chunk of withFinallyCleanup(stream, removeExternalAbortListener)) {
 			switch (chunk.type) {
 				case "message_start": {
 					// Tells us cache reads/writes/input/output.
@@ -461,19 +457,35 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions) {
+	async completePrompt(prompt: string, options?: CompletePromptOptions) {
 		const { id: model, temperature } = this.getModel()
 
 		let message
 		try {
-			message = await this.client.messages.create({
-				model,
-				max_tokens: ANTHROPIC_DEFAULT_MAX_TOKENS,
-				thinking: undefined,
-				temperature,
-				messages: [{ role: "user", content: prompt }],
-				stream: false,
-			})
+			// Build request options with both abortSignal and timeout handling
+			const requestOptions: Anthropic.RequestOptions = {}
+			if (options?.abortSignal) {
+				requestOptions.signal = options.abortSignal
+			}
+			const timeoutMs = options?.timeoutMs
+			// Only a usable finite positive timeout may be forwarded: the SDKs treat
+			// timeout: 0 as an immediate abort and throw on negative/non-finite values.
+			// Fractional delays are rounded up, matching mergeAbortSignalAndTimeout.
+			if (hasUsableTimeout(timeoutMs)) {
+				requestOptions.timeout = toSdkTimeoutMs(timeoutMs)
+			}
+
+			message = await this.client.messages.create(
+				{
+					model,
+					max_tokens: ANTHROPIC_DEFAULT_MAX_TOKENS,
+					thinking: undefined,
+					temperature,
+					messages: [{ role: "user", content: prompt }],
+					stream: false,
+				},
+				Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
+			)
 		} catch (error) {
 			TelemetryService.instance.captureException(
 				new ApiProviderError(

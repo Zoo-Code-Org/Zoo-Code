@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Interaktionsmodus auswählen",
 	"selectApiConfig": "API-Konfiguration auswählen",
+	"selectModel": "Modell auswählen",
+	"modelSelector": {
+		"title": "Modelle",
+		"settings": "Modelleinstellungen",
+		"description": "Wähle das Modell für diese API-Konfiguration aus.",
+		"searchPlaceholder": "Modelle suchen...",
+		"unsupportedTooltip": "Das Modell dieses Anbieters wird in den Einstellungen konfiguriert",
+		"loading": "Modelle werden geladen..."
+	},
 	"lockApiConfigAcrossModes": "API-Konfiguration für alle Modi in diesem Arbeitsbereich sperren",
 	"unlockApiConfigAcrossModes": "API-Konfiguration ist für alle Modi in diesem Arbeitsbereich gesperrt (klicke zum Entsperren)",
 	"enhancePrompt": "Prompt mit zusätzlichem Kontext verbessern",
@@ -343,10 +352,10 @@
 		"title": "Zoo Code {{version}} veröffentlicht",
 		"support": "Bitte unterstütze Zoo Code, indem du uns auf <githubLink>GitHub</githubLink> einen Stern gibst.",
 		"release": {
-			"heading": "Was ist neu im Zoo Code v3.88.0",
-			"highlight1": "✨ Provider- und Modellunterstützung: Nutze Grok Build und eine verbesserte Unterstützung für eigene Modelle. Diese Version behebt außerdem Bedrock-Modellgrenzen und sendet die Codex-Verbosity-Einstellung.",
-			"highlight2": "🧭 Zuverlässigkeit von Aufgaben: Diese Version behebt die Behandlung von Abbrüchen, die Fortsetzung von Tool-Turns und das Speichern von Aufgabennachrichten.",
-			"highlight3": "⚡ Schnelleres Bearbeiten und Chatten: Datei-Schreibvorgänge verwenden standardmäßig keine künstlichen Verzögerungen mehr. Chat-Nachrichten enthalten weniger Dateidaten, und Code-Aktionen erreichen den zuletzt aktiven Chat."
+			"heading": "Was ist neu in Zoo Code v3.92.0",
+			"highlight1": "✨ Schnellere Modellauswahl und bessere Modellunterstützung: Wechsle das Modell direkt im Chat-Eingabefeld. Nutze Claude Haiku 5.5 auf Amazon Bedrock, profitiere von präziseren Kimi K3-Funktionen auf OpenRouter und verwende die korrigierten Limits für Gemini 4 Argon auf Vercel AI Gateway.",
+			"highlight2": "🧭 Zuverlässigere Workflows für Terminal, Bearbeitung, Chat und Remote-Umgebungen: Lass Befehlsausgaben auf Wunsch standardmäßig einklappen, erhalte klarere Fehlermeldungen bei der Bearbeitung, halte Reasoning- und API-Zeilen sichtbar und vermeide Start- und Proxy-Probleme in Remote-Workspaces.",
+			"highlight3": "🔌 Erweiterter MCP Marketplace: Verbinde Zoo Code über den MCP Marketplace mit AnySearch, Mailtea und Tradehand."
 		},
 		"cloudAgents": {
 			"heading": "Neu in der Cloud:",
