@@ -1,5 +1,5 @@
 import React from "react"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { Package } from "@roo/package"
 
 interface VersionIndicatorProps {
@@ -8,7 +8,7 @@ interface VersionIndicatorProps {
 }
 
 const VersionIndicator: React.FC<VersionIndicatorProps> = ({ onClick, className = "" }) => {
-	const { t } = useTranslation()
+	const { t } = useAppTranslation()
 
 	return (
 		<button

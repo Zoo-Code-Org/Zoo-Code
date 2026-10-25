@@ -1,6 +1,6 @@
 import { useCallback, useState, memo, useMemo } from "react"
 import { useEvent } from "react-use"
-import { t } from "i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { ChevronDown, OctagonX } from "lucide-react"
 
 import {
@@ -45,6 +45,7 @@ interface CommandExecutionProps {
 }
 
 export const CommandExecution = ({ executionId, text, icon, title, isDenied = false }: CommandExecutionProps) => {
+	const { t } = useAppTranslation()
 	const {
 		terminalShellIntegrationDisabled = false,
 		collapseCommandOutputByDefault = DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT,
