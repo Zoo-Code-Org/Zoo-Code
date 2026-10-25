@@ -3,7 +3,7 @@ import { VSCodeTextField, VSCodeDropdown, VSCodeOption } from "@vscode/webview-u
 
 import type { ProviderSettings } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
 
 import { inputEventTransform } from "../transforms"
@@ -15,7 +15,7 @@ type MiniMaxProps = {
 }
 
 export const MiniMax = ({ apiConfiguration, setApiConfigurationField }: MiniMaxProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react"
 import type { OpenAiCodexRateLimitInfo } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { vscode } from "@src/utils/vscode"
 
 interface OpenAICodexRateLimitDashboardProps {
@@ -85,7 +85,7 @@ const UsageProgressBar: React.FC<{ usedPercent: number; label?: string }> = ({ u
 }
 
 export const OpenAICodexRateLimitDashboard: React.FC<OpenAICodexRateLimitDashboardProps> = ({ isAuthenticated }) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const [rateLimits, setRateLimits] = useState<OpenAiCodexRateLimitInfo | null>(null)
 	const [isLoading, setIsLoading] = useState(false)
 	const [error, setError] = useState<string | null>(null)

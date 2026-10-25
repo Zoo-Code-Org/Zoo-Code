@@ -1,4 +1,4 @@
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 import { StandardTooltip } from "../ui"
 
@@ -13,7 +13,7 @@ interface TaskStatusBadgeProps {
  * can be resumed rather than silently detached. See #559.
  */
 export const TaskStatusBadge = ({ status, className }: TaskStatusBadgeProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const isInterrupted = status === "interrupted"
 	const icon = isInterrupted ? "codicon-warning" : "codicon-sync"

@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from "react"
 
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import {
 	Button,
 	Dialog,
@@ -45,7 +45,7 @@ export const CreateSlashCommandDialog: React.FC<CreateSlashCommandDialogProps> =
 	onCommandCreated,
 	hasWorkspace,
 }) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const [name, setName] = useState("")
 	const [source, setSource] = useState<"global" | "project">(hasWorkspace ? "project" : "global")

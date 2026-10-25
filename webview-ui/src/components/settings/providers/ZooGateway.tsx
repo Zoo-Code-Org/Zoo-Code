@@ -9,7 +9,7 @@ import {
 
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { getZooCodeAuthUrl } from "@src/oauth/urls"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
 
 import { ModelPicker } from "../ModelPicker"
@@ -57,7 +57,7 @@ export const ZooGateway = ({
 	modelValidationError,
 	simplifySettings,
 }: ZooGatewayProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const { zooCodeIsAuthenticated, zooCodeUserEmail, zooCodeUserName, zooCodeBaseUrl, uriScheme, deviceName } =
 		useExtensionState()
 

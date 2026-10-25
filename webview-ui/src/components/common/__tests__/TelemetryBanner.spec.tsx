@@ -10,8 +10,9 @@ vi.mock("@src/utils/vscode", () => ({
 	},
 }))
 
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", async (importOriginal) => ({
+	...(await importOriginal<typeof import("react-i18next")>()),
+	useTranslation: () => ({
 		t: (key: string) => {
 			const translations: Record<string, string> = {
 				"welcome:telemetry.helpImprove": "Help Improve Zoo Code",

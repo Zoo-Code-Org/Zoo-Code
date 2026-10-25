@@ -11,7 +11,7 @@ import {
 	providerIdentifiers,
 } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
 import { Button } from "@src/components/ui"
 import { vscode } from "@src/utils/vscode"
@@ -33,7 +33,7 @@ enum RefreshStatus {
 }
 
 export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const [ollamaModels, setOllamaModels] = useState<ModelRecord>({})
 	const [refreshStatus, setRefreshStatus] = useState(RefreshStatus.Idle)

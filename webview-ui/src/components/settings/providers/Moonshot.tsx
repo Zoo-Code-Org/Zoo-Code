@@ -13,7 +13,7 @@ import {
 
 import { RouterName } from "@roo/api"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
 import { vscode } from "@src/utils/vscode"
@@ -37,7 +37,7 @@ enum RefreshStatus {
 }
 
 export const Moonshot = ({ apiConfiguration, setApiConfigurationField, simplifySettings }: MoonshotProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const { routerModels } = useExtensionState()
 	const queryClient = useQueryClient()
 	const [refreshStatus, setRefreshStatus] = useState(RefreshStatus.Idle)

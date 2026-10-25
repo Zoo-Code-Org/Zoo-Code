@@ -29,7 +29,7 @@ Object.entries(localeFiles).forEach(([path, module]) => {
 console.log("Dynamically loaded translations:", Object.keys(translations))
 
 // Initialize i18next for React
-// This will be initialized with the VSCode language in TranslationProvider
+// The language is switched by the "state" message handler in ExtensionStateContext (see applyLanguage)
 i18next.use(initReactI18next).init({
 	lng: "en", // Default language (will be overridden)
 	fallbackLng: "en",
@@ -50,5 +50,9 @@ export function loadTranslations() {
 		}
 	})
 }
+
+// The locale files are bundled eagerly, so register them before the first render instead of
+// in a mount effect, which ran after children had already rendered raw keys.
+loadTranslations()
 
 export default i18next

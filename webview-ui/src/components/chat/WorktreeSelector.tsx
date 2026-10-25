@@ -6,7 +6,7 @@ import type { Worktree, WorktreeListResponse } from "@roo-code/types"
 import { cn } from "@/lib/utils"
 import { useRooPortal } from "@/components/ui/hooks/useRooPortal"
 import { Popover, PopoverContent, PopoverTrigger, StandardTooltip, Button } from "@/components/ui"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { vscode } from "@/utils/vscode"
 
 import { CreateWorktreeModal } from "../worktrees/CreateWorktreeModal"
@@ -18,7 +18,7 @@ interface WorktreeSelectorProps {
 }
 
 export const WorktreeSelector = ({ disabled = false }: WorktreeSelectorProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const [open, setOpen] = useState(false)
 	const [worktrees, setWorktrees] = useState<Worktree[]>([])
 	const [isGitRepo, setIsGitRepo] = useState(true)

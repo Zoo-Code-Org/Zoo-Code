@@ -1,7 +1,7 @@
 import { useCallback } from "react"
 
 import { Button, StandardTooltip } from "@/components/ui"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { vscode } from "@/utils/vscode"
 
 type DeleteButtonProps = {
@@ -10,7 +10,7 @@ type DeleteButtonProps = {
 }
 
 export const DeleteButton = ({ itemId, onDelete }: DeleteButtonProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const handleDeleteClick = useCallback(
 		(e: React.MouseEvent) => {

@@ -23,16 +23,8 @@ vi.mock("vscrui", () => ({
 	),
 }))
 
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({ t: (key: string) => key }),
-}))
-
-// The component uses <Trans> for the path-shape warning so it can interpolate
-// <strong>/<code> elements. Resolve the i18n key against the real English
-// resource so the test fails if the warning copy drops the "Google Cloud Key
-// File Path" field name or the "GOOGLE_APPLICATION_CREDENTIALS" env var
-// mention — those are the actual remediation hints users need.
 vi.mock("react-i18next", () => ({
+	useTranslation: () => ({ t: (key: string) => key }),
 	Trans: ({ i18nKey }: { i18nKey: string }) => {
 		// Keys are "<namespace>:<dotted.path>"; the spec only renders the
 		// settings namespace so resolve against the imported English bundle.
@@ -47,6 +39,12 @@ vi.mock("react-i18next", () => ({
 		return <>{typeof resolved === "string" ? resolved : i18nKey}</>
 	},
 }))
+
+// The component uses <Trans> for the path-shape warning so it can interpolate
+// <strong>/<code> elements. Resolve the i18n key against the real English
+// resource so the test fails if the warning copy drops the "Google Cloud Key
+// File Path" field name or the "GOOGLE_APPLICATION_CREDENTIALS" env var
+// mention — those are the actual remediation hints users need.
 
 vi.mock("@src/components/ui", () => ({
 	Select: ({ children, value, onValueChange }: any) => (

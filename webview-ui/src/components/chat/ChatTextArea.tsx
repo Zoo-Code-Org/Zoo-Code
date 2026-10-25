@@ -11,7 +11,7 @@ import { Mode, getAllModes } from "@roo/modes"
 
 import { vscode } from "@src/utils/vscode"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import {
 	ContextMenuOptionType,
 	getContextMenuOptions,
@@ -109,7 +109,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		// indexing, paste, drop, and the textarea value) is safe.
 		const normalizedInputValue = typeof inputValue === "string" ? inputValue : ""
 
-		const { t } = useAppTranslation()
+		const { t } = useTranslation()
 		const {
 			filePaths,
 			openedTabs,

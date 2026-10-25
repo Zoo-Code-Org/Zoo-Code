@@ -13,7 +13,7 @@ import {
 	resolveBedrockCustomArnBaseModelId,
 } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, StandardTooltip } from "@src/components/ui"
 
 import { inputEventTransform, noTransform } from "../transforms"
@@ -26,7 +26,7 @@ type BedrockProps = {
 }
 
 export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedModelInfo }: BedrockProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const [awsEndpointSelected, setAwsEndpointSelected] = useState(!!apiConfiguration.awsBedrockEndpointEnabled)
 
 	// For a custom ARN, model capabilities come from the model the ARN points to.

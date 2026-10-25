@@ -6,8 +6,8 @@ import { fireEvent, render, screen } from "@/utils/test-utils"
 
 import { OpenAI } from "../OpenAI"
 
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({ t: (key: string) => key }),
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({ t: (key: string) => key }),
 }))
 
 vi.mock("vscrui", () => ({

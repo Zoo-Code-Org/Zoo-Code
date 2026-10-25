@@ -3,7 +3,9 @@ import React from "react"
 
 import { OpenAiCodexServiceTier } from "@roo-code/types/model"
 
-import { TranslationContext } from "@src/i18n/TranslationContext"
+import { I18nextProvider } from "react-i18next"
+
+import { createFixtureI18n } from "@src/i18n/__tests__/createFixtureI18n.visual.i18n"
 import { TooltipProvider } from "@src/components/ui/tooltip"
 import { OpenAICodexSpeedSelector } from "../OpenAICodexSpeedSelector"
 
@@ -16,17 +18,15 @@ const translations: Record<string, string> = {
 	"settings:openAiCodexSpeed.fast": "Fast (1.5x speed, increased usage)",
 }
 
+const i18n = createFixtureI18n(translations)
+
 export const OpenAICodexFixture = () => (
-	<TranslationContext.Provider
-		value={{
-			t: (key) => translations[key] ?? key,
-			i18n: null as unknown as typeof import("../../../../i18n/setup").default,
-		}}>
+	<I18nextProvider i18n={i18n}>
 		<TooltipProvider>
 			<div className="flex w-[480px] flex-col gap-4 bg-vscode-editor-background p-4 text-vscode-foreground">
 				<OpenAICodexSpeedSelector value={OpenAiCodexServiceTier.Default} onValueChange={() => {}} />
 				<OpenAICodexSpeedSelector value={OpenAiCodexServiceTier.Priority} onValueChange={() => {}} />
 			</div>
 		</TooltipProvider>
-	</TranslationContext.Provider>
+	</I18nextProvider>
 )

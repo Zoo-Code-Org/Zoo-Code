@@ -1,4 +1,4 @@
-import { t } from "i18next"
+import { useTranslation } from "react-i18next"
 import { ArrowRight, Check, ListChecks, SquareDashed } from "lucide-react"
 
 type TodoStatus = "completed" | "in_progress" | "pending"
@@ -26,6 +26,7 @@ function getTodoIcon(status: TodoStatus | null) {
 }
 
 export function TodoChangeDisplay({ previousTodos, newTodos }: TodoChangeDisplayProps) {
+	const { t } = useTranslation()
 	const isInitialState = previousTodos.length === 0
 
 	// Determine which todos to display

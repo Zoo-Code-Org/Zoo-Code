@@ -5,7 +5,7 @@ import {
 	type OpenAiCodexServiceTier as OpenAiCodexServiceTierValue,
 } from "@roo-code/types/model"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, StandardTooltip } from "@src/components/ui"
 
 interface OpenAICodexSpeedSelectorProps {
@@ -14,7 +14,7 @@ interface OpenAICodexSpeedSelectorProps {
 }
 
 export const OpenAICodexSpeedSelector: React.FC<OpenAICodexSpeedSelectorProps> = ({ value, onValueChange }) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const selectId = React.useId()
 
 	return (

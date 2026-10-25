@@ -1,5 +1,5 @@
 import { HTMLAttributes } from "react"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 
 import { SetCachedStateField } from "./types"
@@ -24,7 +24,7 @@ export const NotificationSettings = ({
 	setCachedStateField,
 	...props
 }: NotificationSettingsProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	return (
 		<div {...props}>
 			<SectionHeader>{t("settings:sections.notifications")}</SectionHeader>

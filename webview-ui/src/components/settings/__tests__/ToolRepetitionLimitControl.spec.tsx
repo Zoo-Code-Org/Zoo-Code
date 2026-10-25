@@ -5,8 +5,8 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import { ToolRepetitionLimitControl } from "../ToolRepetitionLimitControl"
 
 // Mock the translation hook
-vi.mock("@/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string) => {
 			const translations: Record<string, string> = {
 				"settings:providers.toolRepetitionSoftLimit.label": "Tool repetition soft limit",

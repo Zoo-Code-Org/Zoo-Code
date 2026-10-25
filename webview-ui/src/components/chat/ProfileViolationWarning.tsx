@@ -1,8 +1,8 @@
 import React from "react"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 
 const ProfileViolationWarning: React.FC = () => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	return (
 		<div className="flex items-center px-4 py-2 mb-2 text-sm rounded bg-vscode-editorWarning-foreground text-vscode-editor-background">

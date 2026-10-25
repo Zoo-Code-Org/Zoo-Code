@@ -1,5 +1,5 @@
 import { useCallback } from "react"
-import { useTranslation, Trans } from "react-i18next"
+import { Trans, useTranslation } from "react-i18next"
 import { VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 import { buildDocLink } from "../../utils/docLinks"
 
@@ -22,6 +22,7 @@ export const CommandExecutionError = () => {
 				</div>
 				<div>
 					<Trans
+						t={t}
 						i18nKey="chat:shellIntegration.description"
 						components={{
 							settingsLink: <VSCodeLink href="#" onClick={onClick} className="inline" />,

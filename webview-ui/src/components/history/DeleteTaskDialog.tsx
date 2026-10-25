@@ -13,7 +13,7 @@ import {
 	AlertDialogTitle,
 	Button,
 } from "@/components/ui"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 
 import { vscode } from "@/utils/vscode"
 
@@ -24,7 +24,7 @@ interface DeleteTaskDialogProps extends AlertDialogProps {
 }
 
 export const DeleteTaskDialog = ({ taskId, subtaskCount = 0, ...props }: DeleteTaskDialogProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const [isEnterPressed] = useKeyPress("Enter")
 
 	const { onOpenChange } = props

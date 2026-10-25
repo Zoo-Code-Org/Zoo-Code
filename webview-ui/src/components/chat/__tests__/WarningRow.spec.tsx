@@ -10,9 +10,9 @@ vi.mock("@/utils/vscode", () => ({
 	},
 }))
 
-// Mock i18n TranslationContext
-vi.mock("@/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+// Mock the translation hook
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string) => {
 			const map: Record<string, string> = {
 				"chat:apiRequest.errorMessage.docs": "Docs",

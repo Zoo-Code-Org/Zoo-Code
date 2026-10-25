@@ -11,7 +11,7 @@ import {
 } from "@roo-code/types"
 
 import { vscode } from "@src/utils/vscode"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { Button } from "@src/components/ui"
 
 import { inputEventTransform } from "../transforms"
@@ -40,7 +40,7 @@ export const Requesty = ({
 	uriScheme,
 	simplifySettings,
 }: RequestyProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const [requestyEndpointSelected, setRequestyEndpointSelected] = useState(!!apiConfiguration.requestyBaseUrl)
 

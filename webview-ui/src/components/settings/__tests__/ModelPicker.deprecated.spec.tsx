@@ -12,8 +12,9 @@ import { ModelPicker } from "../ModelPicker"
 import type { ModelInfo } from "@roo-code/types"
 
 // Mock the i18n module
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", async (importOriginal) => ({
+	...(await importOriginal<typeof import("react-i18next")>()),
+	useTranslation: () => ({
 		t: (key: string, options?: any) => {
 			// Handle specific translation keys
 			if (key === "settings:validation.modelDeprecated") {

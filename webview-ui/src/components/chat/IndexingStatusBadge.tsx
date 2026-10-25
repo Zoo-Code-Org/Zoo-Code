@@ -5,7 +5,7 @@ import type { IndexingStatus, IndexingStatusUpdateMessage } from "@roo-code/type
 
 import { cn } from "@src/lib/utils"
 import { vscode } from "@src/utils/vscode"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { PopoverTrigger, StandardTooltip, Button } from "@src/components/ui"
@@ -18,7 +18,7 @@ interface IndexingStatusBadgeProps {
 }
 
 export const IndexingStatusBadge: React.FC<IndexingStatusBadgeProps> = ({ className }) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const { cwd } = useExtensionState()
 
 	const [indexingStatus, setIndexingStatus] = useState<IndexingStatus>({

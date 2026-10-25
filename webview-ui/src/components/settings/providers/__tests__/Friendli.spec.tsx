@@ -5,8 +5,8 @@ import type { ProviderSettings } from "@roo-code/types"
 
 import { Friendli } from "../Friendli"
 
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string) => key,
 	}),
 }))

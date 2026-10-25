@@ -2,8 +2,8 @@ import { render, screen } from "@/utils/test-utils"
 
 import TaskItemFooter from "../TaskItemFooter"
 
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string) => key,
 	}),
 }))

@@ -4,7 +4,7 @@ import { ArrowLeft } from "lucide-react"
 import { Tab, TabContent, TabHeader } from "../common/Tab"
 import { MarketplaceViewStateManager } from "./MarketplaceViewStateManager"
 import { useStateManager } from "./useStateManager"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { vscode } from "@/utils/vscode"
 import { MarketplaceListView } from "./MarketplaceListView"
 import { cn } from "@/lib/utils"
@@ -17,7 +17,7 @@ interface MarketplaceViewProps {
 	targetTab?: "mcp" | "mode"
 }
 export function MarketplaceView({ stateManager, onDone, targetTab }: MarketplaceViewProps) {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const [state, manager] = useStateManager(stateManager)
 	const [hasReceivedInitialState, setHasReceivedInitialState] = useState(false)
 	const extensionState = useContext(ExtensionStateContext)

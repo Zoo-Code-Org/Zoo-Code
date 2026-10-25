@@ -1,4 +1,4 @@
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 
 import { Slider } from "@/components/ui"
 
@@ -8,7 +8,7 @@ interface RateLimitSecondsControlProps {
 }
 
 export const RateLimitSecondsControl = ({ value, onChange }: RateLimitSecondsControlProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	return (
 		<div className="flex flex-col gap-1">

@@ -9,10 +9,9 @@ export const visualTestTranslations: Record<string, string> = {
 	"welcome:telemetry.decline": "Decline",
 }
 
-// Trans reads from its own react-i18next instance rather than the useAppTranslation
-// context, so it needs a real (if minimal) i18next init to resolve helpImproveMessage
-// and the settingsLink interpolation instead of rendering nothing. init() returns a
-// promise even for inline resources, so callers must await it before mounting.
+// The fixture passes this instance to I18nextProvider; TelemetryBanner's useTranslation and Trans
+// translate with it. init() returns a promise even for inline resources, so callers must await it
+// before mounting.
 export const visualTestI18n = i18next.createInstance()
 
 export const visualTestI18nReady = visualTestI18n.use(initReactI18next).init({

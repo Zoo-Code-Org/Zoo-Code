@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from "react"
 import type { Worktree } from "@roo-code/types"
 
 import { vscode } from "@/utils/vscode"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Button, Checkbox } from "@/components/ui"
 import { Folder, GitBranch, TriangleAlert } from "lucide-react"
 
@@ -15,7 +15,7 @@ interface DeleteWorktreeModalProps {
 }
 
 export const DeleteWorktreeModal = ({ open, onClose, worktree, onSuccess }: DeleteWorktreeModalProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const [isDeleting, setIsDeleting] = useState(false)
 	const [forceDeleteLocked, setForceDeleteLocked] = useState(false)

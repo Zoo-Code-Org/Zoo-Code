@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from "react"
 
 import { getAllModes } from "@roo/modes"
 
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import {
 	Button,
@@ -41,7 +41,7 @@ export const CreateRuleDialog: React.FC<CreateRuleDialogProps> = ({
 	onRuleCreated,
 	hasWorkspace,
 }) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const { customModes } = useExtensionState()
 
 	const [name, setName] = useState("")

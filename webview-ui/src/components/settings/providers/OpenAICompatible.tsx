@@ -17,7 +17,7 @@ import {
 	parseOpenAiExtraBody,
 } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { Button, StandardTooltip } from "@src/components/ui"
 import { formatOpenAiExtraBodyValidationError } from "@src/utils/validate"
 
@@ -46,7 +46,7 @@ export const OpenAICompatible = ({
 	modelValidationError,
 	simplifySettings,
 }: OpenAICompatibleProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const isAzureOpenAi = isAzureOpenAiBaseUrl(apiConfiguration.openAiBaseUrl, apiConfiguration.openAiUseAzure)
 
 	const [azureApiVersionSelected, setAzureApiVersionSelected] = useState(!!apiConfiguration.azureApiVersion)

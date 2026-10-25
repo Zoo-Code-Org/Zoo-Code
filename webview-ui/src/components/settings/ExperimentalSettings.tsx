@@ -4,7 +4,7 @@ import type { Experiments, ImageGenerationProvider, ProviderSettings } from "@ro
 
 import { EXPERIMENT_IDS, experimentConfigsMap } from "@roo/experiments"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { cn } from "@src/lib/utils"
 
 import { SetExperimentEnabled } from "./types"
@@ -42,7 +42,7 @@ export const ExperimentalSettings = ({
 	className,
 	...props
 }: ExperimentalSettingsProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	return (
 		<div className={cn("flex flex-col gap-2", className)} {...props}>

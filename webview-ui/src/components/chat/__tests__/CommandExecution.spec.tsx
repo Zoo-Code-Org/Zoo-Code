@@ -5,6 +5,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react"
 
 import { CommandExecution } from "../CommandExecution"
 import { ExtensionStateContext } from "../../../context/ExtensionStateContext"
+import { TooltipProvider } from "../../ui/tooltip"
 
 // Mock dependencies
 vi.mock("react-use", () => ({
@@ -51,8 +52,11 @@ const mockExtensionState = {
 	setDeniedCommands: vi.fn(),
 }
 
+// The status tooltips need a TooltipProvider now that their labels resolve through useTranslation.
 const ExtensionStateWrapper = ({ children }: { children: React.ReactNode }) => (
-	<ExtensionStateContext.Provider value={mockExtensionState as any}>{children}</ExtensionStateContext.Provider>
+	<ExtensionStateContext.Provider value={mockExtensionState as any}>
+		<TooltipProvider>{children}</TooltipProvider>
+	</ExtensionStateContext.Provider>
 )
 
 describe("CommandExecution", () => {

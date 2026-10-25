@@ -4,7 +4,7 @@ import prettyBytes from "pretty-bytes"
 import type { WorktreeDefaultsResponse, BranchInfo, WorktreeIncludeStatus } from "@roo-code/types"
 
 import { vscode } from "@/utils/vscode"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Button, Input } from "@/components/ui"
 import { SearchableSelect, type SearchableSelectOption } from "@/components/ui/searchable-select"
 import { CornerDownRight, Folder, FolderSearch, Info } from "lucide-react"
@@ -22,7 +22,7 @@ export const CreateWorktreeModal = ({
 	openAfterCreate = false,
 	onSuccess,
 }: CreateWorktreeModalProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	// Form state
 	const [branchName, setBranchName] = useState("")

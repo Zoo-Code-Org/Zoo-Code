@@ -16,7 +16,7 @@ import { RouterName } from "@roo/api"
 
 import { vscode } from "@src/utils/vscode"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { Button } from "@src/components/ui"
 
 import { inputEventTransform } from "../transforms"
@@ -44,7 +44,7 @@ export const LiteLLM = ({
 	modelValidationError,
 	simplifySettings,
 }: LiteLLMProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const queryClient = useQueryClient()
 	const { routerModels } = useExtensionState()
 	const [refreshStatus, setRefreshStatus] = useState(RefreshStatus.Idle)

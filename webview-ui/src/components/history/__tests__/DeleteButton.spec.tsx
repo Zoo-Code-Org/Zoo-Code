@@ -2,8 +2,8 @@ import { render, screen, fireEvent } from "@/utils/test-utils"
 
 import { DeleteButton } from "../DeleteButton"
 
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string) => key,
 	}),
 }))

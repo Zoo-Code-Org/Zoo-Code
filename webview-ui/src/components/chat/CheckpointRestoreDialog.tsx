@@ -1,5 +1,5 @@
 import React from "react"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -26,7 +26,7 @@ export const CheckpointRestoreDialog: React.FC<CheckpointRestoreDialogProps> = (
 	type,
 	hasCheckpoint,
 }) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const isEdit = type === "edit"
 	const title = isEdit ? t("common:confirmation.editMessage") : t("common:confirmation.deleteMessage")

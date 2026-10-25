@@ -15,8 +15,8 @@ import { allRouterModelsProvider, providerIdentifiers, type ProviderSettings } f
 import { Moonshot } from "../Moonshot"
 
 // Mock the translation hook
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string) => key,
 	}),
 }))

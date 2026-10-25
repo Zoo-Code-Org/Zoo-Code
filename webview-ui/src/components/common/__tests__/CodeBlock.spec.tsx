@@ -5,9 +5,9 @@ import { render, screen, fireEvent, act, waitFor } from "@/utils/test-utils"
 import CodeBlock, { getCodeBlockTheme } from "../CodeBlock"
 import { getHighlighter } from "../../../utils/highlighter"
 
-// Mock the translation context
-vi.mock("../../../i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+// Mock the translation hook
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string) => {
 			// Return fixed English strings for tests
 			const translations: { [key: string]: string } = {

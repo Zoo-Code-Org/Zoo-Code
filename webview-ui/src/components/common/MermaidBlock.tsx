@@ -3,7 +3,7 @@ import mermaid from "mermaid"
 import styled from "styled-components"
 import { useDebounceEffect } from "@src/utils/useDebounceEffect"
 import { vscode } from "@src/utils/vscode"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { useCopyToClipboard } from "@src/utils/clipboard"
 import CodeBlock from "./CodeBlock"
 import { MermaidButton } from "@/components/common/MermaidButton"
@@ -21,7 +21,7 @@ export default function MermaidBlock({ code }: MermaidBlockProps) {
 	const renderVersionRef = useRef(0)
 	const theme = useMermaidTheme()
 	const { showCopyFeedback, copyWithFeedback } = useCopyToClipboard()
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	// Whenever the source or host theme changes, invalidate in-flight rendering.
 	useEffect(() => {

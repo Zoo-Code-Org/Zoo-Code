@@ -1,6 +1,6 @@
 import { DEFAULT_CONSECUTIVE_MISTAKE_LIMIT } from "@roo-code/types"
 
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 
 import { Slider } from "@/components/ui"
 
@@ -10,7 +10,7 @@ interface ConsecutiveMistakeLimitControlProps {
 }
 
 export const ConsecutiveMistakeLimitControl = ({ value, onChange }: ConsecutiveMistakeLimitControlProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	return (
 		<div className="flex flex-col gap-1">

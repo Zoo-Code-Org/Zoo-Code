@@ -1,18 +1,12 @@
 import { render, screen, fireEvent } from "@/utils/test-utils"
 
-import { TranslationProvider } from "@/i18n/__mocks__/TranslationContext"
-
 import { AutoApproveToggle, autoApproveSettingsConfig } from "../AutoApproveToggle"
 
-vi.mock("@/i18n/TranslationContext", () => {
-	const actual = vi.importActual("@/i18n/TranslationContext")
-	return {
-		...actual,
-		useAppTranslation: () => ({
-			t: (key: string) => key,
-		}),
-	}
-})
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
+		t: (key: string) => key,
+	}),
+}))
 
 describe("AutoApproveToggle", () => {
 	const mockOnToggle = vi.fn()
@@ -32,11 +26,7 @@ describe("AutoApproveToggle", () => {
 	})
 
 	test("renders all toggle buttons with correct initial ARIA attributes", () => {
-		render(
-			<TranslationProvider>
-				<AutoApproveToggle {...initialProps} />
-			</TranslationProvider>,
-		)
+		render(<AutoApproveToggle {...initialProps} />)
 
 		Object.values(autoApproveSettingsConfig).forEach((config) => {
 			const button = screen.getByTestId(config.testId)
@@ -47,11 +37,7 @@ describe("AutoApproveToggle", () => {
 	})
 
 	test("calls onToggle with the correct key and value when a button is clicked", () => {
-		render(
-			<TranslationProvider>
-				<AutoApproveToggle {...initialProps} />
-			</TranslationProvider>,
-		)
+		render(<AutoApproveToggle {...initialProps} />)
 
 		const writeToggleButton = screen.getByTestId(autoApproveSettingsConfig.alwaysAllowWrite.testId)
 		fireEvent.click(writeToggleButton)
@@ -66,21 +52,13 @@ describe("AutoApproveToggle", () => {
 	})
 
 	test("updates aria-pressed attribute after toggle", () => {
-		const { rerender } = render(
-			<TranslationProvider>
-				<AutoApproveToggle {...initialProps} />
-			</TranslationProvider>,
-		)
+		const { rerender } = render(<AutoApproveToggle {...initialProps} />)
 
 		const writeToggleButton = screen.getByTestId(autoApproveSettingsConfig.alwaysAllowWrite.testId)
 		expect(writeToggleButton).toHaveAttribute("aria-pressed", "false")
 
 		const updatedProps = { ...initialProps, alwaysAllowWrite: true }
-		rerender(
-			<TranslationProvider>
-				<AutoApproveToggle {...updatedProps} />
-			</TranslationProvider>,
-		)
+		rerender(<AutoApproveToggle {...updatedProps} />)
 
 		expect(screen.getByTestId(autoApproveSettingsConfig.alwaysAllowWrite.testId)).toHaveAttribute(
 			"aria-pressed",

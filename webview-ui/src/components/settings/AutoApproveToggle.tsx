@@ -1,6 +1,6 @@
 import type { GlobalSettings } from "@roo-code/types"
 
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 import { Button, StandardTooltip } from "@/components/ui"
 
@@ -82,7 +82,7 @@ type AutoApproveToggleProps = AutoApproveToggles & {
 }
 
 export const AutoApproveToggle = ({ onToggle, ...props }: AutoApproveToggleProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	return (
 		<div className={cn("flex flex-row flex-wrap gap-2 py-2")}>

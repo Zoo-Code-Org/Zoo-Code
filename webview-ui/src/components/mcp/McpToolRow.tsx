@@ -2,7 +2,7 @@ import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 
 import type { McpTool } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { vscode } from "@src/utils/vscode"
 import { StandardTooltip, ToggleSwitch } from "@/components/ui"
 
@@ -15,7 +15,7 @@ type McpToolRowProps = {
 }
 
 const McpToolRow = ({ tool, serverName, serverSource, alwaysAllowMcp, isInChatContext = false }: McpToolRowProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const isToolEnabled = tool.enabledForPrompt ?? true
 
 	const handleAlwaysAllowChange = () => {

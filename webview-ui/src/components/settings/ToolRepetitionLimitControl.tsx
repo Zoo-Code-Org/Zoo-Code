@@ -1,6 +1,6 @@
 import { DEFAULT_TOOL_REPETITION_SOFT_LIMIT } from "@roo-code/types"
 
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 
 import { Slider } from "@/components/ui"
 
@@ -10,7 +10,7 @@ interface ToolRepetitionLimitControlProps {
 }
 
 export const ToolRepetitionLimitControl = ({ softValue, onSoftChange }: ToolRepetitionLimitControlProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const resolvedSoft = softValue ?? DEFAULT_TOOL_REPETITION_SOFT_LIMIT
 

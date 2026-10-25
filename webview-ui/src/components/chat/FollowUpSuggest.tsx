@@ -3,7 +3,7 @@ import { ClipboardCopy, Timer } from "lucide-react"
 
 import { Button, StandardTooltip } from "@/components/ui"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { getSuggestionMode, hasUsableAnswer, type SuggestionItem } from "@roo-code/types"
 import { cn } from "@/lib/utils"
@@ -31,7 +31,7 @@ export const FollowUpSuggest = ({
 	const { autoApprovalEnabled, alwaysAllowFollowupQuestions, followupAutoApproveTimeoutMs } = useExtensionState()
 	const [countdown, setCountdown] = useState<number | null>(null)
 	const [suggestionSelected, setSuggestionSelected] = useState(false)
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	// The model may emit suggestions with missing or blank answers. Those render
 	// as empty buttons, and clicking "Copy to input" on one pushes an undefined

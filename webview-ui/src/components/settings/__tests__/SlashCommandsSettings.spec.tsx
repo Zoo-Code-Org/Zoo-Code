@@ -14,8 +14,9 @@ vi.mock("@/utils/vscode", () => ({
 }))
 
 // Mock the translation hook
-vi.mock("@/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", async (importOriginal) => ({
+	...(await importOriginal<typeof import("react-i18next")>()),
+	useTranslation: () => ({
 		t: (key: string, params?: any) => {
 			if (params?.name) {
 				return `${key} ${params.name}`

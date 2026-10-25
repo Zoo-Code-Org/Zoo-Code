@@ -61,8 +61,9 @@ vi.mock("@vscode/webview-ui-toolkit/react", async () => {
 	return { ...toolkitMock, VSCodeCheckbox: VSCodeCheckboxHost }
 })
 
-vi.mock("@/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({ t: (key: string) => key }),
+vi.mock("react-i18next", async (importOriginal) => ({
+	...(await importOriginal<typeof import("react-i18next")>()),
+	useTranslation: () => ({ t: (key: string) => key }),
 }))
 
 // AutoApproveSettings reads a couple of live-state values that are genuinely

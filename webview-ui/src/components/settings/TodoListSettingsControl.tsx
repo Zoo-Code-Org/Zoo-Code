@@ -1,5 +1,5 @@
 import React, { useCallback } from "react"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 
 interface TodoListSettingsControlProps {
@@ -11,7 +11,7 @@ export const TodoListSettingsControl: React.FC<TodoListSettingsControlProps> = (
 	todoListEnabled = true,
 	onChange,
 }) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const handleTodoListEnabledChange = useCallback(
 		(e: any) => {

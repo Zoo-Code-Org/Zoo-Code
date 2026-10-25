@@ -2,7 +2,6 @@ import React from "react"
 import { act } from "@testing-library/react"
 import { fireEvent, render, screen } from "@/utils/test-utils"
 import type { ClineMessage } from "@roo-code/types"
-import { TranslationProvider } from "@/i18n/__mocks__/TranslationContext"
 import FileChangesPanel from "../components/chat/FileChangesPanel"
 
 const mockPostMessage = vi.fn()
@@ -69,11 +68,7 @@ function createFileEditMessage(
 }
 
 function renderPanel(messages: ClineMessage[] | undefined, taskId?: string) {
-	return render(
-		<TranslationProvider>
-			<FileChangesPanel clineMessages={messages} taskId={taskId} />
-		</TranslationProvider>,
-	)
+	return render(<FileChangesPanel clineMessages={messages} taskId={taskId} />)
 }
 
 describe("FileChangesPanel", () => {
@@ -333,11 +328,7 @@ describe("FileChangesPanel", () => {
 			expandRow()
 			expect(requestsOfType("readOriginalContent")).toHaveLength(1)
 
-			rerender(
-				<TranslationProvider>
-					<FileChangesPanel clineMessages={messages} taskId="task-1" />
-				</TranslationProvider>,
-			)
+			rerender(<FileChangesPanel clineMessages={messages} taskId="task-1" />)
 			fireEvent.click(screen.getByTestId("accordian-toggle"))
 
 			const requests = requestsOfType("readOriginalContent")
@@ -347,11 +338,7 @@ describe("FileChangesPanel", () => {
 
 		it("does not send a duplicate request when switching A -> B -> A before the first response arrives", () => {
 			const messages = [createEditWithOriginal({ originalContentLength: 5000 })]
-			const panel = (taskId: string) => (
-				<TranslationProvider>
-					<FileChangesPanel clineMessages={messages} taskId={taskId} />
-				</TranslationProvider>
-			)
+			const panel = (taskId: string) => <FileChangesPanel clineMessages={messages} taskId={taskId} />
 			const { rerender } = renderPanel(messages, "task-A")
 			expandRow()
 			expect(requestsOfType("readOriginalContent")).toHaveLength(1)
@@ -372,11 +359,7 @@ describe("FileChangesPanel", () => {
 
 		it("requests again after a response that arrived for a task that is no longer current", () => {
 			const messages = [createEditWithOriginal({ originalContentLength: 5000 })]
-			const panel = (taskId: string) => (
-				<TranslationProvider>
-					<FileChangesPanel clineMessages={messages} taskId={taskId} />
-				</TranslationProvider>
-			)
+			const panel = (taskId: string) => <FileChangesPanel clineMessages={messages} taskId={taskId} />
 			const { rerender } = renderPanel(messages, "task-A")
 			expandRow()
 
@@ -397,11 +380,7 @@ describe("FileChangesPanel", () => {
 			expandRow()
 			mockPostMessage.mockClear()
 
-			rerender(
-				<TranslationProvider>
-					<FileChangesPanel clineMessages={messages} taskId="task-B" />
-				</TranslationProvider>,
-			)
+			rerender(<FileChangesPanel clineMessages={messages} taskId="task-B" />)
 
 			expect(mockPostMessage).not.toHaveBeenCalled()
 		})
@@ -417,11 +396,7 @@ describe("FileChangesPanel", () => {
 			})
 			expect(requestsOfType("readOriginalContent")).toHaveLength(1)
 
-			rerender(
-				<TranslationProvider>
-					<FileChangesPanel clineMessages={[...first]} taskId="task-A" />
-				</TranslationProvider>,
-			)
+			rerender(<FileChangesPanel clineMessages={[...first]} taskId="task-A" />)
 			fireEvent.click(screen.getByTestId("accordian-toggle"))
 			respond({ type: "fileContent", fileContent: { path: "src/foo.ts", content: "new line\n" } })
 

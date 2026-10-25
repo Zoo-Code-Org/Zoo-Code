@@ -15,8 +15,8 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	),
 }))
 
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({ t: (key: string) => key }),
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({ t: (key: string) => key }),
 }))
 
 vi.mock("@src/components/common/VSCodeButtonLink", () => ({

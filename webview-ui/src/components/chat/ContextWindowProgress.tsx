@@ -32,21 +32,21 @@ export const ContextWindowProgress = ({ contextWindow, contextTokens, maxTokens 
 		<div className="space-y-1">
 			<div>
 				{t("chat:tokenProgress.tokensUsed", {
-					used: formatLargeNumber(safeContextTokens),
-					total: formatLargeNumber(safeContextWindow),
+					used: formatLargeNumber(safeContextTokens, t),
+					total: formatLargeNumber(safeContextWindow, t),
 				})}
 			</div>
 			{reservedForOutput > 0 && (
 				<div>
 					{t("chat:tokenProgress.reservedForResponse", {
-						amount: formatLargeNumber(reservedForOutput),
+						amount: formatLargeNumber(reservedForOutput, t),
 					})}
 				</div>
 			)}
 			{availableSize > 0 && (
 				<div>
 					{t("chat:tokenProgress.availableSpace", {
-						amount: formatLargeNumber(availableSize),
+						amount: formatLargeNumber(availableSize, t),
 					})}
 				</div>
 			)}
@@ -56,7 +56,7 @@ export const ContextWindowProgress = ({ contextWindow, contextTokens, maxTokens 
 	return (
 		<>
 			<div className="flex items-center gap-2 flex-1 whitespace-nowrap">
-				<div data-testid="context-tokens-count">{formatLargeNumber(safeContextTokens)}</div>
+				<div data-testid="context-tokens-count">{formatLargeNumber(safeContextTokens, t)}</div>
 				<StandardTooltip content={tooltipContent} side="top" sideOffset={8}>
 					<div className="flex-1 relative">
 						{/* Main progress bar container */}
@@ -91,7 +91,7 @@ export const ContextWindowProgress = ({ contextWindow, contextTokens, maxTokens 
 						</div>
 					</div>
 				</StandardTooltip>
-				<div data-testid="context-window-size">{formatLargeNumber(safeContextWindow)}</div>
+				<div data-testid="context-window-size">{formatLargeNumber(safeContextWindow, t)}</div>
 			</div>
 		</>
 	)

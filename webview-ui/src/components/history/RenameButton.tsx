@@ -1,12 +1,12 @@
 import { Button, StandardTooltip } from "@/components/ui"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 
 type RenameButtonProps = {
 	onRename: () => void
 }
 
 export const RenameButton = ({ onRename }: RenameButtonProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const label = t("history:renameTask")
 
 	return (

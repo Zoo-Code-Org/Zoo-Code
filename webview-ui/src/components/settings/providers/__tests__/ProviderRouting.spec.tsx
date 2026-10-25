@@ -20,8 +20,8 @@ const { modelPickerMock } = vi.hoisted(() => ({
 	modelPickerMock: vi.fn((_props: React.ComponentProps<typeof import("../../ModelPicker").ModelPicker>) => null),
 }))
 
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string, options?: { account?: string }) =>
 			key === "settings:providers.githubCopilot.signedIn" ? `Signed in as ${options?.account}` : key,
 	}),

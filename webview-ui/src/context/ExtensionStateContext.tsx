@@ -37,6 +37,8 @@ import { experimentDefault } from "@roo/experiments"
 import { vscode } from "@src/utils/vscode"
 import { convertTextMateToHljs } from "@src/utils/textMateToHljs"
 import { StringCache } from "@src/utils/stringCache"
+import i18next from "i18next"
+import { applyLanguage } from "@src/i18n/language"
 
 export interface ExtensionStateContextType extends ExtensionState {
 	historyPreviewCollapsed?: boolean // Add the new state property
@@ -422,6 +424,7 @@ export const ExtensionStateContextProvider: React.FC<{
 					if (newState.currentTaskItem) {
 						historyCache.intern(newState.currentTaskItem)
 					}
+					applyLanguage(i18next, newState.language)
 					setState((prevState) => mergeExtensionState(prevState, newState))
 					setShowWelcome(!checkExistKey(newState.apiConfiguration, newState.zooCodeIsAuthenticated))
 					setDidHydrateState(true)

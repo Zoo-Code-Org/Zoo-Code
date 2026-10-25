@@ -4,7 +4,7 @@ import { VSCodeTextArea, VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react
 import { supportPrompt, SupportPromptType } from "@roo/support-prompt"
 
 import { vscode } from "@src/utils/vscode"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import {
 	Button,
@@ -33,7 +33,7 @@ const PromptsSettings = ({
 	includeTaskHistoryInEnhance: propsIncludeTaskHistoryInEnhance,
 	setIncludeTaskHistoryInEnhance: propsSetIncludeTaskHistoryInEnhance,
 }: PromptsSettingsProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const {
 		listApiConfigMeta,
 		enhancementApiConfigId,

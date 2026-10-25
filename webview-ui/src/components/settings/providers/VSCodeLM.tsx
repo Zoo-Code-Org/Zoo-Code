@@ -11,7 +11,7 @@ import {
 	providerIdentifiers,
 } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { Button, StandardTooltip } from "@src/components/ui"
 import { vscode } from "@src/utils/vscode"
 import { useGitHubCopilotModels } from "@src/components/ui/hooks/useGitHubCopilotModels"
@@ -31,7 +31,7 @@ type VSCodeLMProps = {
 const NO_MODELS: NonNullable<ExtensionMessage["vsCodeLmModels"]> = []
 
 export const VSCodeLM = ({ apiConfiguration, setApiConfigurationField }: VSCodeLMProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const isCopilot = apiConfiguration.apiProvider === providerIdentifiers.githubCopilot
 
 	// The legacy provider is fed by messages into local state; Copilot's list is the shared, extension-pushed one.

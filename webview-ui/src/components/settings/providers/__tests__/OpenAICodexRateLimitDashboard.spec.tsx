@@ -2,8 +2,8 @@ import { render, screen, waitFor } from "@/utils/test-utils"
 
 import { OpenAICodexRateLimitDashboard } from "../OpenAICodexRateLimitDashboard"
 
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string, options?: Record<string, any>) => {
 			switch (key) {
 				case "settings:providers.openAiCodexRateLimits.title":

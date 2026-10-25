@@ -1,6 +1,5 @@
 import { HTMLAttributes, useEffect, useState } from "react"
-import { useAppTranslation } from "@/i18n/TranslationContext"
-import { Trans } from "react-i18next"
+import { Trans, useTranslation } from "react-i18next"
 import { ArrowRightLeft, Download, Upload, TriangleAlert, Bug, Lightbulb, Shield, MessagesSquare } from "lucide-react"
 import { VSCodeButton, VSCodeCheckbox, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 
@@ -27,7 +26,7 @@ type AboutProps = HTMLAttributes<HTMLDivElement> & {
 }
 
 export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, className, ...props }: AboutProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const [rooHistoryImportProgress, setRooHistoryImportProgress] = useState<RooHistoryImportProgress | null>(null)
 
 	useEffect(() => {
@@ -117,6 +116,7 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 					</VSCodeCheckbox>
 					<p className="text-vscode-descriptionForeground text-sm mt-0">
 						<Trans
+							t={t}
 							i18nKey="settings:footer.telemetry.description"
 							components={{
 								privacyLink: <VSCodeLink href="https://www.zoocode.dev/privacy" />,
@@ -160,6 +160,7 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 						<MessagesSquare className="size-4 text-vscode-descriptionForeground shrink-0" />
 						<span>
 							<Trans
+								t={t}
 								i18nKey="settings:about.community"
 								components={{
 									redditLink: <VSCodeLink href={EXTERNAL_LINKS.REDDIT} />,

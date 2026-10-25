@@ -6,9 +6,9 @@ import { vi } from "vitest"
 
 import { CheckpointRestoreDialog } from "../CheckpointRestoreDialog"
 
-// Mock the translation context
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+// Mock the translation hook
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string) => {
 			const translations: Record<string, string> = {
 				"common:confirmation.deleteMessage": "Delete Message",

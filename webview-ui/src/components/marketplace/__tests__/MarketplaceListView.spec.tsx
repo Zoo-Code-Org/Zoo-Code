@@ -9,8 +9,9 @@ import { ExtensionStateContextProvider } from "@/context/ExtensionStateContext"
 import { MarketplaceListView } from "../MarketplaceListView"
 import { ViewState } from "../MarketplaceViewStateManager"
 
-vi.mock("@/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", async (importOriginal) => ({
+	...(await importOriginal<typeof import("react-i18next")>()),
+	useTranslation: () => ({
 		t: (key: string) => key,
 	}),
 }))

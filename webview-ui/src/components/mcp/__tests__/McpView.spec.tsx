@@ -12,8 +12,9 @@ vi.mock("@src/context/ExtensionStateContext", () => ({
 	}),
 }))
 
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({ t: (key: string) => key }),
+vi.mock("react-i18next", async (importOriginal) => ({
+	...(await importOriginal<typeof import("react-i18next")>()),
+	useTranslation: () => ({ t: (key: string) => key }),
 }))
 
 vi.mock("@src/hooks/useTooManyTools", () => ({

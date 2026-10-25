@@ -4,8 +4,8 @@ import { render, screen, within } from "@/utils/test-utils"
 
 import { ModelInfoView } from "../ModelInfoView"
 
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string) =>
 			({
 				"settings:modelInfo.imageSupportUnknown": "Image support not reported",

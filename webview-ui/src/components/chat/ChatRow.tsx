@@ -1,6 +1,6 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSize } from "react-use"
-import { useTranslation, Trans } from "react-i18next"
+import { Trans, useTranslation } from "react-i18next"
 import deepEqual from "fast-deep-equal"
 import { VSCodeBadge } from "@vscode/webview-ui-toolkit/react"
 
@@ -596,12 +596,14 @@ export const ChatRowContent = ({
 						<span style={{ fontWeight: "bold" }}>
 							{tool.path ? (
 								<Trans
+									t={t}
 									i18nKey="chat:codebaseSearch.wantsToSearchWithPath"
 									components={{ code: <code></code> }}
 									values={{ query: tool.query, path: tool.path }}
 								/>
 							) : (
 								<Trans
+									t={t}
 									i18nKey="chat:codebaseSearch.wantsToSearch"
 									components={{ code: <code></code> }}
 									values={{ query: tool.query }}
@@ -815,6 +817,7 @@ export const ChatRowContent = ({
 							<span style={{ fontWeight: "bold" }}>
 								{message.type === "ask" ? (
 									<Trans
+										t={t}
 										i18nKey={
 											tool.isOutsideWorkspace
 												? "chat:directoryOperations.wantsToSearchOutsideWorkspace"
@@ -825,6 +828,7 @@ export const ChatRowContent = ({
 									/>
 								) : (
 									<Trans
+										t={t}
 										i18nKey={
 											tool.isOutsideWorkspace
 												? "chat:directoryOperations.didSearchOutsideWorkspace"
@@ -857,12 +861,14 @@ export const ChatRowContent = ({
 									<>
 										{tool.reason ? (
 											<Trans
+												t={t}
 												i18nKey="chat:modes.wantsToSwitchWithReason"
 												components={{ code: <code className="font-medium">{tool.mode}</code> }}
 												values={{ mode: tool.mode, reason: tool.reason }}
 											/>
 										) : (
 											<Trans
+												t={t}
 												i18nKey="chat:modes.wantsToSwitch"
 												components={{ code: <code className="font-medium">{tool.mode}</code> }}
 												values={{ mode: tool.mode }}
@@ -873,12 +879,14 @@ export const ChatRowContent = ({
 									<>
 										{tool.reason ? (
 											<Trans
+												t={t}
 												i18nKey="chat:modes.didSwitchWithReason"
 												components={{ code: <code className="font-medium">{tool.mode}</code> }}
 												values={{ mode: tool.mode, reason: tool.reason }}
 											/>
 										) : (
 											<Trans
+												t={t}
 												i18nKey="chat:modes.didSwitch"
 												components={{ code: <code className="font-medium">{tool.mode}</code> }}
 												values={{ mode: tool.mode }}
@@ -905,6 +913,7 @@ export const ChatRowContent = ({
 							<Split className="size-4" />
 							<span style={{ fontWeight: "bold" }}>
 								<Trans
+									t={t}
 									i18nKey="chat:subtasks.wantsToCreate"
 									components={{ code: <code>{tool.mode}</code> }}
 									values={{ mode: tool.mode }}

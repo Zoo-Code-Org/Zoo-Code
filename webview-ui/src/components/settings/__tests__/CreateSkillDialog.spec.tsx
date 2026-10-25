@@ -12,8 +12,8 @@ vi.mock("@/utils/vscode", () => ({
 }))
 
 // Mock the translation hook
-vi.mock("@/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string) => key,
 	}),
 }))

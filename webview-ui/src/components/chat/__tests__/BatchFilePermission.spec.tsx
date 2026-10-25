@@ -1,7 +1,5 @@
 import { render, screen, fireEvent } from "@/utils/test-utils"
 
-import { TranslationProvider } from "@/i18n/__mocks__/TranslationContext"
-
 import { BatchFilePermission } from "../BatchFilePermission"
 
 const mockVscodePostMessage = vi.fn()
@@ -45,13 +43,7 @@ describe("BatchFilePermission", () => {
 
 	it("renders file list correctly", () => {
 		render(
-			<TranslationProvider>
-				<BatchFilePermission
-					files={mockFiles}
-					onPermissionResponse={mockOnPermissionResponse}
-					ts={Date.now()}
-				/>
-			</TranslationProvider>,
+			<BatchFilePermission files={mockFiles} onPermissionResponse={mockOnPermissionResponse} ts={Date.now()} />,
 		)
 
 		// Check that all files are rendered
@@ -67,9 +59,7 @@ describe("BatchFilePermission", () => {
 
 	it("renders nothing when files array is empty", () => {
 		const { container } = render(
-			<TranslationProvider>
-				<BatchFilePermission files={[]} onPermissionResponse={mockOnPermissionResponse} ts={Date.now()} />
-			</TranslationProvider>,
+			<BatchFilePermission files={[]} onPermissionResponse={mockOnPermissionResponse} ts={Date.now()} />,
 		)
 
 		expect(container.firstChild).toBeNull()
@@ -77,9 +67,7 @@ describe("BatchFilePermission", () => {
 
 	it("renders nothing when onPermissionResponse is not provided", () => {
 		const { container } = render(
-			<TranslationProvider>
-				<BatchFilePermission files={mockFiles} onPermissionResponse={undefined} ts={Date.now()} />
-			</TranslationProvider>,
+			<BatchFilePermission files={mockFiles} onPermissionResponse={undefined} ts={Date.now()} />,
 		)
 
 		expect(container.firstChild).toBeNull()
@@ -87,13 +75,7 @@ describe("BatchFilePermission", () => {
 
 	it("opens file when clicking on file item", () => {
 		render(
-			<TranslationProvider>
-				<BatchFilePermission
-					files={mockFiles}
-					onPermissionResponse={mockOnPermissionResponse}
-					ts={Date.now()}
-				/>
-			</TranslationProvider>,
+			<BatchFilePermission files={mockFiles} onPermissionResponse={mockOnPermissionResponse} ts={Date.now()} />,
 		)
 
 		// The onClick is on the ToolUseBlockHeader which contains the file path text
@@ -123,13 +105,11 @@ describe("BatchFilePermission", () => {
 		]
 
 		render(
-			<TranslationProvider>
-				<BatchFilePermission
-					files={filesWithDotPath}
-					onPermissionResponse={mockOnPermissionResponse}
-					ts={Date.now()}
-				/>
-			</TranslationProvider>,
+			<BatchFilePermission
+				files={filesWithDotPath}
+				onPermissionResponse={mockOnPermissionResponse}
+				ts={Date.now()}
+			/>,
 		)
 
 		// Should render dot before the path
@@ -139,20 +119,14 @@ describe("BatchFilePermission", () => {
 
 	it("re-renders when timestamp changes", () => {
 		const { rerender } = render(
-			<TranslationProvider>
-				<BatchFilePermission files={mockFiles} onPermissionResponse={mockOnPermissionResponse} ts={1000} />
-			</TranslationProvider>,
+			<BatchFilePermission files={mockFiles} onPermissionResponse={mockOnPermissionResponse} ts={1000} />,
 		)
 
 		// Initial render
 		expect(screen.getByText(/Button\.tsx/)).toBeInTheDocument()
 
 		// Re-render with new timestamp
-		rerender(
-			<TranslationProvider>
-				<BatchFilePermission files={mockFiles} onPermissionResponse={mockOnPermissionResponse} ts={2000} />
-			</TranslationProvider>,
-		)
+		rerender(<BatchFilePermission files={mockFiles} onPermissionResponse={mockOnPermissionResponse} ts={2000} />)
 
 		// Should still show files
 		expect(screen.getByText(/Button\.tsx/)).toBeInTheDocument()
@@ -160,13 +134,7 @@ describe("BatchFilePermission", () => {
 
 	it("displays external link icon for all files", () => {
 		render(
-			<TranslationProvider>
-				<BatchFilePermission
-					files={mockFiles}
-					onPermissionResponse={mockOnPermissionResponse}
-					ts={Date.now()}
-				/>
-			</TranslationProvider>,
+			<BatchFilePermission files={mockFiles} onPermissionResponse={mockOnPermissionResponse} ts={Date.now()} />,
 		)
 
 		// All files should have external link icons

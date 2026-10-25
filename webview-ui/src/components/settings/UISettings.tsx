@@ -1,5 +1,5 @@
 import { HTMLAttributes, useMemo } from "react"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 import { telemetryClient } from "@/utils/TelemetryClient"
 import {
@@ -39,7 +39,7 @@ export const UISettings = ({
 	setCachedStateField,
 	...props
 }: UISettingsProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	// Detect platform for dynamic modifier key display
 	const primaryMod = useMemo(() => {

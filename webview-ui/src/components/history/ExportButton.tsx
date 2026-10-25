@@ -1,10 +1,10 @@
 import { vscode } from "@/utils/vscode"
 import { Button, StandardTooltip } from "@/components/ui"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { useCallback } from "react"
 
 export const ExportButton = ({ itemId }: { itemId: string }) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const handleExportClick = useCallback(
 		(e: React.MouseEvent) => {

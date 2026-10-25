@@ -1,9 +1,8 @@
 import { FormEvent, HTMLAttributes, useState } from "react"
 import { X } from "lucide-react"
-import { Trans } from "react-i18next"
 import { Package } from "@roo/package"
 
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { Trans, useTranslation } from "react-i18next"
 import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 import { vscode } from "@/utils/vscode"
 import { Button, Input, Slider } from "@/components/ui"
@@ -92,7 +91,7 @@ export const AutoApproveSettings = ({
 	setCachedStateField,
 	...props
 }: AutoApproveSettingsProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const [commandInput, setCommandInput] = useState("")
 	const [deniedCommandInput, setDeniedCommandInput] = useState("")
 	const { autoApprovalEnabled, setAutoApprovalEnabled } = useExtensionState()
@@ -145,6 +144,7 @@ export const AutoApproveSettings = ({
 							<p>{t("settings:autoApprove.description")}</p>
 							<p>
 								<Trans
+									t={t}
 									i18nKey="settings:autoApprove.toggleShortcut"
 									components={{
 										SettingsLink: (

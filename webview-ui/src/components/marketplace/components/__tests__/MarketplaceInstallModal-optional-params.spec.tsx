@@ -13,8 +13,8 @@ vi.mock("@/utils/vscode", () => ({
 import { vscode } from "@/utils/vscode"
 const mockPostMessage = vscode.postMessage as any
 
-vi.mock("@/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string, params?: any) => {
 			// Simple mock translation
 			if (key === "marketplace:install.configuration") return "Configuration"

@@ -117,36 +117,18 @@ vi.mock("react-i18next", () => {
 			MockedComponent.displayName = `withTranslation(${Component.displayName || Component.name || "Component"})`
 			return MockedComponent
 		},
-		Trans: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-		useTranslation: () => {
-			return {
-				t: tFunction,
-				i18n: {
-					t: tFunction,
-					changeLanguage: vi.fn(() => Promise.resolve()),
-				},
-			}
-		},
-		initReactI18next: {
-			type: "3rdParty",
-			init: vi.fn(),
-		},
-	}
-})
-
-// Mock TranslationProvider to pass through children
-vi.mock("@src/i18n/TranslationContext", () => {
-	const tFunction = (key: string) => key
-	return {
-		__esModule: true,
-		default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-		useAppTranslation: () => ({
+		useTranslation: () => ({
 			t: tFunction,
 			i18n: {
 				t: tFunction,
 				changeLanguage: vi.fn(() => Promise.resolve()),
 			},
 		}),
+		Trans: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+		initReactI18next: {
+			type: "3rdParty",
+			init: vi.fn(),
+		},
 	}
 })
 

@@ -3,7 +3,7 @@ import { validateSkillName as validateSkillNameShared, SkillNameValidationError 
 
 import { getAllModes } from "@roo/modes"
 
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import {
 	Button,
@@ -74,7 +74,7 @@ export const CreateSkillDialog: React.FC<CreateSkillDialogProps> = ({
 	onSkillCreated,
 	hasWorkspace,
 }) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const { customModes } = useExtensionState()
 
 	const [name, setName] = useState("")

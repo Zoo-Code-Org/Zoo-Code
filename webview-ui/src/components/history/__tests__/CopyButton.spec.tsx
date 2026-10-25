@@ -5,8 +5,8 @@ import { useClipboard } from "@/components/ui/hooks"
 import { CopyButton } from "../CopyButton"
 
 vi.mock("@/components/ui/hooks")
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string) => key,
 	}),
 }))

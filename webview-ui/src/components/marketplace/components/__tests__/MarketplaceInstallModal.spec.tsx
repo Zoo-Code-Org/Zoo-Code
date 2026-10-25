@@ -15,8 +15,8 @@ import { vscode } from "@/utils/vscode"
 const mockedVscode = vscode as any
 
 // Mock the translation hook
-vi.mock("@/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string, params?: any) => {
 			// Simple mock translation that returns the key with params
 			if (key === "marketplace:install.validationRequired") {
