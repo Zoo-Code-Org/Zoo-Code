@@ -123,7 +123,8 @@
 		},
 		"api": {
 			"invalidKeyInvalidChars": "APIキーに無効な文字が含まれています。",
-			"apiRequestFailed": "APIリクエストが失敗しました ({{status}})"
+			"apiRequestFailed": "APIリクエストが失敗しました ({{status}})",
+			"azureDeploymentNotFound": "Azure OpenAI でデプロイ \"{{deployment}}\" が見つかりませんでした。「Azure デプロイ名」には、モデル名 (例: gpt-4o) ではなく、Azure AI Foundry の正確なデプロイ名を設定してください。詳細: {{message}}"
 		},
 		"manual_url_empty": "有効なコールバック URL を入力してください",
 		"manual_url_no_query": "無効なコールバック URL：クエリパラメータがありません",

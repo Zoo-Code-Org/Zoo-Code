@@ -142,7 +142,8 @@
 		},
 		"api": {
 			"invalidKeyInvalidChars": "API key contains invalid characters.",
-			"apiRequestFailed": "API request failed ({{status}})"
+			"apiRequestFailed": "API request failed ({{status}})",
+			"azureDeploymentNotFound": "Azure OpenAI could not find the deployment \"{{deployment}}\". Set \"Azure deployment name\" to the exact deployment name from Azure AI Foundry, not the model name (for example gpt-4o). Details: {{message}}"
 		},
 		"manual_url_empty": "Please enter a valid callback URL",
 		"manual_url_no_query": "Invalid callback URL: missing query parameters",

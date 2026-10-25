@@ -550,6 +550,7 @@
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure 部署名称",
 		"azureOpenAiDeploymentNameDescription": "请输入 Azure AI Studio 中的部署名称，而不是底层模型名称。",
+		"azureOpenAiRequestUrl": "请求发送至：",
 		"getOpenAiApiKey": "获取 OpenAI API 密钥",
 		"mistralApiKey": "Mistral API 密钥",
 		"getMistralApiKey": "获取 Mistral / Codestral API 密钥",

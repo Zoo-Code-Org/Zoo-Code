@@ -144,7 +144,8 @@
 		},
 		"api": {
 			"invalidKeyInvalidChars": "La clau API conté caràcters no vàlids.",
-			"apiRequestFailed": "La sol·licitud API ha fallat ({{status}})"
+			"apiRequestFailed": "La sol·licitud API ha fallat ({{status}})",
+			"azureDeploymentNotFound": "Azure OpenAI no ha trobat el desplegament \"{{deployment}}\". Establiu \"Nom de desplegament d'Azure\" al nom exacte del desplegament d'Azure AI Foundry, no al nom del model (per exemple gpt-4o). Detalls: {{message}}"
 		},
 		"manual_url_empty": "Si us plau, introdueix una URL de callback vàlida",
 		"manual_url_no_query": "URL de callback no vàlida: falten paràmetres de consulta",

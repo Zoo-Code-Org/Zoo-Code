@@ -550,6 +550,7 @@
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure dağıtım adı",
 		"azureOpenAiDeploymentNameDescription": "Temel model adı yerine Azure AI Studio'daki dağıtım adını girin.",
+		"azureOpenAiRequestUrl": "İstekler şuraya gönderilir:",
 		"getOpenAiApiKey": "OpenAI API Anahtarı Al",
 		"mistralApiKey": "Mistral API Anahtarı",
 		"getMistralApiKey": "Mistral / Codestral API Anahtarı Al",

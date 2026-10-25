@@ -550,6 +550,7 @@
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure デプロイ名",
 		"azureOpenAiDeploymentNameDescription": "基盤モデル名ではなく、Azure AI Studio のデプロイ名を入力してください。",
+		"azureOpenAiRequestUrl": "リクエストの送信先:",
 		"getOpenAiApiKey": "OpenAI APIキーを取得",
 		"mistralApiKey": "Mistral APIキー",
 		"getMistralApiKey": "Mistral / Codestral APIキーを取得",
