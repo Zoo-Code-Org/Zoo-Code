@@ -19,12 +19,21 @@ export function buildChildEnvironment(
 	}
 }
 
-export function buildLaunchArgs(workspace: string, userData: string, extensions: string, extension: string): string[] {
+export function buildLaunchArgs(
+	workspace: string,
+	userData: string,
+	extensions: string,
+	extension: string,
+	testsPath?: string,
+): string[] {
 	return [
 		workspace,
 		`--user-data-dir=${userData}`,
 		`--extensions-dir=${extensions}`,
 		`--extensionDevelopmentPath=${extension}`,
+		// Off by default: an --extensionTestsPath module settles into a VS Code
+		// exit, so only a caller that owns a never-settling module may set it.
+		...(testsPath ? [`--extensionTestsPath=${testsPath}`] : []),
 		"--no-sandbox",
 		"--disable-gpu-sandbox",
 		"--password-store=basic",

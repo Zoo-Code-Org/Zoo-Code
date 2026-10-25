@@ -1,6 +1,6 @@
 import { runAgentFixture, type AgentRuntime } from "../agent-evals/runner.ts"
 import { getFixture } from "../agent-evals/registry.ts"
-import { SOLHEIM_BASE_URL, SOLHEIM_MODEL } from "./config.ts"
+import { SOLHEIM_BASE_URL, SOLHEIM_MODEL, SMOKE_TEARDOWN_HOLD_MS } from "./config.ts"
 import { collectEvidence, smokeCode, type SmokeCode, type SmokeEvidence } from "./evidence.ts"
 import { SMOKE_FIXTURE_NAME, ensureSmokeFixtureRegistered } from "./fixture.ts"
 
@@ -45,6 +45,7 @@ export async function runSmoke(runtime: SmokeRuntime, apiKey: string): Promise<S
 				evidence.aborted ||
 				(evidence.providerResponseSeen && evidence.completionSeen),
 		},
+		holdBeforeTeardownMs: SMOKE_TEARDOWN_HOLD_MS,
 	})
 	let code: SmokeCode
 	switch (result.execution.code) {

@@ -57,6 +57,10 @@ export interface AgentRunOptions {
 	fixtureName: string
 	credential: string
 	observers?: AgentRunObservers
+	// Optional hold before teardown after the completion message, so a
+	// recording can capture the finished task. Off by default; skipped when
+	// no completion message was seen or the host is already gone.
+	holdBeforeTeardownMs?: number
 }
 
 export interface AgentRunResult {
@@ -325,6 +329,11 @@ export async function runAgentFixture(runtime: AgentRuntime, options: AgentRunOp
 		// Never expose thrown provider, filesystem or host messages.
 	} finally {
 		waiter?.onExit()
+		// A recording needs the finished task on screen before teardown
+		// clears it. The hold is opt-in and only applies after the
+		// completion message, while a live host can still show it.
+		if (completionMessageSeen && options.holdBeforeTeardownMs && host && !host.exited)
+			await runtime.pause(options.holdBeforeTeardownMs)
 		const teardownStart = runtime.now()
 		const attempt = async (step: string, operation: () => unknown) => {
 			try {

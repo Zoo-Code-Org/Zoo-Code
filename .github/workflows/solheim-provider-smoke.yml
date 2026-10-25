@@ -41,6 +41,7 @@ jobs:
                   pnpm --filter @roo-code/vscode-webview build
 
             - name: Install display dependencies
+              timeout-minutes: 5
               run: sudo apt-get update && sudo apt-get install -y xvfb ffmpeg libasound2t64
 
             - name: Run Solheim provider smoke

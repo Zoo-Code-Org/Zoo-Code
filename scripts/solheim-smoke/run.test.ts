@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import { RooCodeEventName, TaskCommandName, type TaskCommand } from "@roo-code/types"
+import { SMOKE_TEARDOWN_HOLD_MS } from "./config.ts"
 import { runSmoke, smokeExitCode, type SmokeRuntime, type SmokeVerdict } from "./run.ts"
 
 type Scenario =
@@ -164,6 +165,9 @@ describe("provider smoke orchestration", () => {
 		const verdict = await runSmoke(f.runtime, "private-test-key")
 		assert.equal(verdict.code, "OK")
 		assert.equal(smokeExitCode(verdict), 0)
+		// The teardown hold runs once after the completion message; no other
+		// pause fires in this scenario, so the duration is exactly the hold.
+		assert.equal(verdict.durationMs, SMOKE_TEARDOWN_HOLD_MS)
 		assert.deepEqual(verdict.gates, {
 			extensionActivated: true,
 			ipcConnected: true,
@@ -210,7 +214,8 @@ describe("provider smoke orchestration", () => {
 		const f = fixture("success", { stuck: true })
 		const verdict = await runSmoke(f.runtime, "private-test-key")
 		assert.equal(verdict.code, "TEARDOWN_FAILED")
-		assert.equal(verdict.durationMs, 15_000)
+		// The 3 second completion hold plus three 5 second termination windows.
+		assert.equal(verdict.durationMs, 15_000 + SMOKE_TEARDOWN_HOLD_MS)
 		assert.deepEqual(f.signals, ["SIGTERM", "SIGKILL"])
 		assert.equal(verdict.gates.childExited, false)
 		assert.equal(f.cleaned, false)
