@@ -2758,7 +2758,7 @@ describe("Cline", () => {
 				vi.spyOn(await import("delay"), "default").mockImplementation(mockDelay)
 
 				// Mock say to track messages
-				const saySpy = vi.spyOn(cline, "say")
+				const saySpy = vi.spyOn(cline, "say").mockResolvedValue(undefined)
 
 				// Create a stream that fails on first chunk
 				const mockError = new Error("API Error")
@@ -2921,6 +2921,47 @@ describe("Cline", () => {
 					Array.from({ length: 10 }, (_, index) => `API Error\n<retry_timer>${10 - index}</retry_timer>`),
 				)
 				expect(clock.getLastRequestTime()).toBeDefined()
+			})
+
+			it("honors a provider Retry-After hint for 429 retries", async () => {
+				// This partial Task double supplies only the backoff method's providerRef,
+				// apiConfiguration, rateLimitClock, abort, taskId, and instanceId dependencies.
+				const cline = Object.create(Task.prototype) as unknown as Task
+				Object.defineProperties(cline, {
+					providerRef: { value: new WeakRef(mockProvider) },
+					apiConfiguration: { value: mockApiConfig },
+					rateLimitClock: { value: createRateLimitClock() },
+					abort: { value: false, writable: true },
+					taskId: { value: "retry-after-test" },
+					instanceId: { value: "retry-after-test" },
+				})
+				const providerState = await mockProvider.getState()
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					...providerState,
+					autoApprovalEnabled: true,
+					requestDelaySeconds: 3,
+				})
+				const mockDelay = vi.fn().mockResolvedValue(undefined)
+				vi.spyOn(await import("delay"), "default").mockImplementation(mockDelay)
+				const saySpy = vi.spyOn(cline, "say").mockResolvedValue(undefined)
+
+				const rateLimitError = Object.assign(new Error("Token rate limit exceeded"), {
+					status: 429,
+					retryAfterSeconds: 12,
+				})
+				await getTaskTestAccess(cline).backoffAndAnnounce(0, rateLimitError)
+
+				expect(mockDelay).toHaveBeenCalledTimes(12)
+				const countdownMessages = saySpy.mock.calls.filter(
+					([type, text, , partial]) =>
+						type === "api_req_retry_delayed" && partial && typeof text === "string",
+				)
+				expect(countdownMessages.map(([, text]) => text)).toEqual(
+					Array.from(
+						{ length: 12 },
+						(_, index) => `429\nToken rate limit exceeded\n<retry_timer>${12 - index}</retry_timer>`,
+					),
+				)
 			})
 
 			it("should not apply retry delay twice", async () => {
