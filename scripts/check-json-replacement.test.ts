@@ -33,7 +33,7 @@ for (const workers of ["0", "9", "1.5", "invalid"]) {
 	})
 }
 
-for (const regression of ["rename-in-flight", "snapshot-race"]) {
+for (const regression of ["rename-in-flight", "snapshot-race", "stdout-backpressure"]) {
 	test(`accepts the deterministic ${regression} schedule`, () => {
 		const result = spawnSync(
 			process.execPath,

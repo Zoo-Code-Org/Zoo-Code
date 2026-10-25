@@ -4,6 +4,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { execFile } from "node:child_process"
 import { build } from "esbuild"
+import { randomUUID } from "node:crypto"
 
 // Real filesystem fallback: no production injection seam. Each cut kills a fresh
 // process, so exception cleanup cannot masquerade as process-crash recovery.
@@ -18,7 +19,17 @@ type Result = { op: string; ok: boolean; code?: string; value?: string; repairRu
 
 const CHILD = String.raw`
 const fs = require("fs"), fsp = require("fs/promises"), path = require("path")
-const native = { ...fsp }, emit = (data) => fs.writeSync(1, JSON.stringify(data) + "\n")
+if (process.env.CHECK_SCHEDULE === "stdout-backpressure") {
+ const nativeWriteSync = fs.writeSync
+ fs.writeSync = (fd, ...args) => {
+  if (fd === 1) throw Object.assign(new Error("injected stdout backpressure"), { code: "EAGAIN" })
+  return nativeWriteSync(fd, ...args)
+ }
+}
+// A regular file avoids nonblocking stdout EAGAIN and keeps every event
+// complete before a synchronous SIGKILL cutpoint.
+const events = fs.openSync(process.env.CHECK_EVENTS, "wx")
+const native = { ...fsp }, emit = (data) => fs.writeFileSync(events, JSON.stringify(data) + "\n")
 let root = process.env.CHECK_ROOT, fault = JSON.parse(process.env.CHECK_FAULT || "null"), count = 0, forced = false, rolledBack = false, observing = true, pending = 0, pendingClose, pendingCommit, pendingSnapshotMove
 const canonical = () => path.join(root, "tasks", "child", "history_item.json")
 const normalize = (p) => typeof p === "string" ? path.relative(root, p).replace(/\\/g, "/").replace(/\.(new|bak)_[^.]+\.tmp/g, ".$1.tmp") : ""
@@ -105,7 +116,7 @@ function callbacks(names, prefix) {
   pending++
   return fs[name](...args, (error, ...values) => {
    const finish = () => { pending--; after(n, prefix + name, error); callback(error, ...values) }
-   if (prefix === "stream." && name === "close" && process.env.CHECK_SCHEDULE) {
+   if (prefix === "stream." && name === "close" && ["late-rename", "move-during-snapshot"].includes(process.env.CHECK_SCHEDULE)) {
     pendingClose = finish
     if (pendingCommit || pendingSnapshotMove) finish()
    } else finish()
@@ -223,8 +234,9 @@ async function runtime(
 	root: string,
 	mode: string,
 	fault?: Fault,
-	schedule?: "late-rename" | "move-during-snapshot",
+	schedule?: "late-rename" | "move-during-snapshot" | "stdout-backpressure",
 ) {
+	const eventPath = path.join(path.dirname(root), `events-${randomUUID()}.jsonl`)
 	const child = await new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve, reject) => {
 		execFile(
 			process.execPath,
@@ -236,6 +248,7 @@ async function runtime(
 						path.delimiter,
 					),
 					CHECK_BUNDLE: bundle,
+					CHECK_EVENTS: eventPath,
 					CHECK_MAX_STEPS: String(MAX_STEPS),
 					CHECK_ROOT: root,
 					CHECK_MODE: mode,
@@ -258,12 +271,15 @@ async function runtime(
 			},
 		)
 	})
-	const output = child.stdout
+	assert(fs.existsSync(eventPath), child.stderr || "Checker child did not create its trace file")
+	const trace = fs.readFileSync(eventPath, "utf8")
+	fs.unlinkSync(eventPath)
+	const output = trace
 		.trim()
 		.split("\n")
 		.filter(Boolean)
 		.map((line) => JSON.parse(line) as { n?: number; result?: Result; harnessError?: string; crash?: boolean })
-	assert(!output.some((event) => event.harnessError), child.stdout + child.stderr)
+	assert(!output.some((event) => event.harnessError), trace + child.stderr)
 	assert(child.status === 0 || output.some((event) => event.crash), child.stderr)
 	if (fault && ["before", "after"].includes(fault.kind))
 		assert(
@@ -359,7 +375,7 @@ async function runCase(
 	dir: string,
 	mode: Mode,
 	fault?: Fault,
-	schedule?: "late-rename" | "move-during-snapshot",
+	schedule?: "late-rename" | "move-during-snapshot" | "stdout-backpressure",
 ) {
 	const root = path.join(dir, "storage")
 	seed(root, mode)
@@ -448,6 +464,11 @@ async function main() {
 			assert(close, "Regression requires the real stream-close boundary")
 			await runCase(bundle, path.join(work, schedule), mode, { step: close.n, kind: "after" }, schedule)
 			console.log(`${regression} regression passed`)
+			return
+		}
+		if (regression === "stdout-backpressure") {
+			await runCase(bundle, path.join(work, "stdout-backpressure"), "cold", undefined, "stdout-backpressure")
+			console.log("stdout-backpressure regression passed")
 			return
 		}
 		assert(!regression, "Unknown regression")

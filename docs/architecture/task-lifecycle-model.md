@@ -362,6 +362,10 @@ That final state must preserve the newest value already observed.
 An observer also retries a complete snapshot if a rename races its directory listing and file reads.
 Three failed attempts exhaust the snapshot budget and fail the check.
 Deterministic regressions cover both orderings without waiting for scheduling races.
+Each child writes trace events synchronously to its own regular file.
+The parent reads the file after child exit and removes it afterwards.
+This avoids stdout pipe backpressure without buffering events across SIGKILL.
+A deterministic regression makes stdout writes fail with `EAGAIN`.
 Deletion follow-ups run without injected faults.
 The best-effort delete API can resolve after an I/O failure; this check does not strengthen that contract.
 
