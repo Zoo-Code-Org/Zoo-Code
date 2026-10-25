@@ -40,17 +40,21 @@ import { disabledChatControlClassName, enabledChatControlClassName } from "./cha
 // text selection drag. "Files" covers drags from the OS file manager; the
 // remaining types are set by VS Code when dragging resources from the Explorer
 // or editor tabs, in local and remote workspaces alike (see fillEditorsDragData
-// in VS Code's workbench drag-and-drop code).
+// in VS Code's workbench drag-and-drop code). Bare text/uri-list also
+// identifies browser link drags, so it must retain native drop behavior.
 const FILE_DRAG_DATA_TRANSFER_TYPES = [
 	"Files",
-	"text/uri-list",
-	"ResourceURIs",
-	"application/vnd.code.files",
+	"ResourceURLs",
+	"CodeEditors",
+	"CodeFiles",
 	"application/vnd.code.uri-list",
 ]
 
+// Chromium lowercases custom drag types; compare without relying on casing.
 const isFileDrag = (dataTransfer: DataTransfer): boolean =>
-	FILE_DRAG_DATA_TRANSFER_TYPES.some((type) => dataTransfer.types.includes(type))
+	dataTransfer.types.some((type) =>
+		FILE_DRAG_DATA_TRANSFER_TYPES.some((fileType) => fileType.toLowerCase() === type.toLowerCase()),
+	)
 
 interface ChatTextAreaProps {
 	inputValue: string
