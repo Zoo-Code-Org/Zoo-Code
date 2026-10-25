@@ -102,6 +102,8 @@ A failed refresh keeps the last cached record.
 Initialization retries only `ELOCKED` and `EBUSY`.
 It uses one timeout chain with delays of 1, 2, 4, 8, 8, and 8 seconds.
 Each retry repeats the full scan before delegation repair.
+Replay and repair failures propagate through the same retry policy.
+An intent read error is not treated as malformed JSON.
 Lock acquisition has separate retries, which add time to this sequence.
 
 Concurrent `initialize()` calls share one promise.
@@ -112,6 +114,9 @@ Disposal cancels a pending retry.
 The provider therefore skips legacy migration after initialization failure.
 `initialized` resolves after success or terminal failure.
 `isHealthy` is true only after a successful attempt.
+Webview state publication does not wait for this attempt.
+It uses legacy history while the store is unhealthy, or omits history when requested.
+The provider posts fresh state after successful initialization.
 
 Activation can continue after terminal failure.
 The cache can remain incomplete, and observers do not start.
@@ -308,7 +313,7 @@ Add E2E coverage only when a lifecycle change crosses one of those runtime bound
 ## JSON replacement crash points
 
 Run `pnpm json-replacement:model-check` for the production-backed filesystem check.
-The umbrella command also runs this check and its three negative controls.
+The umbrella command also runs this check and its four negative controls.
 This check enumerates call boundaries, rather than actor interleavings.
 
 The harness bundles production code and runs it in child processes against real temporary directories.
@@ -361,11 +366,17 @@ The bounds are seven baseline scenarios, 128 filesystem calls per execution, and
 Budget exhaustion fails the command.
 A violation prints the observed trace through the first failing boundary.
 This prefix is replayable, but it is not a shortest interleaving counterexample.
-Three source mutations must fail with their named invariants:
+Four source mutations must fail with their named invariants:
 
 - Swallowing a failed backup restore must violate backup preservation, invariant 2.
 - Omitting backup removal from deletion must violate no resurrection, invariant 4.
 - Ignoring an existing canonical file during reader recovery must violate reader preservation, invariant 6.
+- Swallowing a replay I/O failure must violate initialization integrity, invariant 5.
+
+The cold-start oracle requires injected non-retryable intent read errors to reject initialization.
+Checking only rejected attempts would miss a swallowed error followed by false health.
+Focused production tests cover busy replay reads, failed repair writes, and pending webview initialization.
+These are boundary tests, not an exhaustive liveness proof.
 
 The rollback baseline includes its EPERM and EIO failures, plus crashes at the recorded rollback boundaries.
 Coverage excludes concurrent actors and stale takeover of a paused owner.

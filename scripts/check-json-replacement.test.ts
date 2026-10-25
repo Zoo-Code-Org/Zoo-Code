@@ -6,6 +6,7 @@ for (const [mutation, invariant] of [
 	["restore-backup-loss", 2],
 	["delete-keeps-backup", 4],
 	["reader-overwrites-newer", 6],
+	["swallowed-replay-error", 5],
 ] as const) {
 	test(`checker rejects ${mutation} with invariant ${invariant}`, () => {
 		const result = spawnSync(

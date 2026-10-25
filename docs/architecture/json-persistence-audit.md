@@ -132,6 +132,11 @@ Its read path can have different behavior.
 
 ## Other readers and write paths
 
+Legacy history can be displayed while initialization is pending or has failed.
+After migration, per-task reads and metadata updates use the file-backed store.
+The persisted migration marker keeps this rule active during later startup retries.
+A stale legacy row cannot supply a missing task record.
+
 `ClineProvider.getTaskWithId` reads API history through the recovery reader.
 It returns an empty history for `SyntaxError` or `ENOENT`.
 It throws other read errors.

@@ -596,6 +596,9 @@ export const webviewMessageHandler = async (
 			const customModes = await provider.customModesManager.getCustomModes()
 			await updateGlobalState("customModes", customModes)
 
+			// Register launch before the first state post so initialization cannot
+			// finish during launch without publishing its healthy snapshot.
+			provider.isViewLaunched = true
 			await provider.postStateToWebview()
 			void provider.workspaceTracker
 				?.initializeFilePaths()
@@ -698,7 +701,6 @@ export const webviewMessageHandler = async (
 				),
 			)
 
-			provider.isViewLaunched = true
 			break
 		case "newTask":
 			// Initializing new instance of Cline will make sure that any

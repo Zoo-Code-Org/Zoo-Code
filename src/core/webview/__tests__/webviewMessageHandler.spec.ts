@@ -2803,6 +2803,19 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		expect(calls.at(-1)).toEqual([true])
 	})
 
+	it("registers launch before posting state so initialization can refresh history", async () => {
+		Object.assign(mockClineProvider, {
+			isViewLaunched: false,
+			getMcpHub: vi.fn().mockReturnValue(undefined),
+			providerSettingsManager: { listConfig: vi.fn().mockResolvedValue(undefined) },
+		})
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([])
+		vi.mocked(mockClineProvider.postStateToWebview).mockImplementationOnce(async () => {
+			expect(Reflect.get(mockClineProvider, "isViewLaunched")).toBe(true)
+		})
+		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch" })
+	})
+
 	// CodeRabbit follow-up on the finding #12 fix: webviewDidLaunch's telemetry init read state
 	// via an async provider.getStateToPostToWebview().then(...) continuation, outside
 	// telemetrySettingQueue -- so it could resolve after a concurrent "telemetrySetting" message

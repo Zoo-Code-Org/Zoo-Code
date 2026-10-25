@@ -2409,9 +2409,10 @@ export class ClineProvider
 	private getTaskHistoryItem(id: string): HistoryItem | undefined {
 		const historyItem = this.taskHistoryStore.get(id)
 
-		// Once initialization and migration succeed, the file-backed store is authoritative.
-		// Legacy global state is only a fallback while startup is incomplete or has failed.
-		if (historyItem || this.taskHistoryStoreInitialized) {
+		// A completed migration keeps files authoritative across later startup failures.
+		// Legacy history can still be displayed, but must not recreate a deleted task.
+		const alreadyMigrated = this.context.globalState.get<boolean>("taskHistoryMigratedToFiles")
+		if (historyItem || this.taskHistoryStoreInitialized || alreadyMigrated) {
 			return historyItem
 		}
 
@@ -2788,8 +2789,8 @@ export class ClineProvider
 	}
 
 	async getStateToPostToWebview({ includeTaskHistory = true }: GetStateOptions = {}): Promise<ExtensionState> {
-		// Ensure the store is initialized before reading task history
-		await this.taskHistoryStore.initialized
+		// Publish the legacy fallback while initialization retries. The successful
+		// initialization path posts fresh state after the store becomes healthy.
 
 		const {
 			apiConfiguration,

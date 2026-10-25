@@ -1517,6 +1517,7 @@ describe("ClineProvider", () => {
 		{ healthy: true, includeTaskHistory: true },
 		{ healthy: false, includeTaskHistory: true },
 		{ healthy: false, includeTaskHistory: false },
+		{ healthy: true, includeTaskHistory: false },
 	])(
 		"publishes history with store health $healthy and inclusion $includeTaskHistory",
 		async ({ healthy, includeTaskHistory }) => {
@@ -1532,12 +1533,15 @@ describe("ClineProvider", () => {
 			const cached = { ...item, id: "cached", task: "cached task" }
 			const health = vi.spyOn(provider.taskHistoryStore, "isHealthy", "get").mockReturnValue(healthy)
 			const getAll = vi.spyOn(provider.taskHistoryStore, "getAll").mockReturnValue([cached])
+			const initialized = Object.getOwnPropertyDescriptor(provider.taskHistoryStore, "initialized")!
+			Object.defineProperty(provider.taskHistoryStore, "initialized", { value: new Promise<void>(() => {}) })
 			await provider["contextProxy"].setValue("taskHistory", [item, { ...item, id: "invalid", ts: 0 }])
 			try {
 				const state = await provider.getStateToPostToWebview({ includeTaskHistory })
 				expect(state.taskHistory).toEqual(includeTaskHistory ? [healthy ? cached : item] : [])
 				expect(getAll).toHaveBeenCalledTimes(healthy && includeTaskHistory ? 1 : 0)
 			} finally {
+				Object.defineProperty(provider.taskHistoryStore, "initialized", initialized)
 				health.mockRestore()
 				getAll.mockRestore()
 			}
@@ -3078,6 +3082,55 @@ describe("ClineProvider", () => {
 				}),
 			)
 		})
+	})
+
+	describe("early launch history authority", () => {
+		it.each(
+			(["resume", "mode", "profile"] as const).flatMap((action) =>
+				[false, true].map((cached) => ({ action, cached })),
+			),
+		)(
+			"uses file-backed authority for launch-time $action with cached record $cached",
+			async ({ action, cached }) => {
+				await provider["initializeTaskHistoryStore"]()
+				const item = {
+					id: "stale-launch-task",
+					number: 1,
+					ts: 1,
+					task: "stale task",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+				}
+				await provider["contextProxy"].setValue("taskHistory", [item])
+				await mockContext.globalState.update("taskHistoryMigratedToFiles", true)
+				const authoritative = { ...item, task: "current task", tokensIn: 42 }
+				if (cached) provider.taskHistoryStore["cache"].set(item.id, authoritative)
+				provider["taskHistoryStoreInitialized"] = false
+				const health = vi.spyOn(provider.taskHistoryStore, "isHealthy", "get").mockReturnValue(false)
+				const update = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+				const task = new Task({ ...defaultTaskOptions, historyItem: item })
+				task.setTaskApiConfigName = vi.fn()
+				const current = vi.spyOn(provider, "getCurrentTask").mockReturnValue(task)
+				try {
+					expect((await provider.getStateToPostToWebview()).taskHistory).toEqual([item])
+					if (action === "resume") {
+						if (cached) expect((await provider.getTaskWithId(item.id)).historyItem).toEqual(authoritative)
+						else await expect(provider.getTaskWithId(item.id)).rejects.toThrow("Task not found")
+					}
+					if (action === "mode") await provider.handleModeSwitch("architect", task)
+					if (action === "profile") await provider["persistStickyProviderProfileToCurrentTask"]("new-profile")
+					if (cached && action !== "resume")
+						expect(update).toHaveBeenCalledWith(expect.objectContaining(authoritative))
+					else expect(update).not.toHaveBeenCalled()
+					expect(provider.taskHistoryStore.get(item.id)).toEqual(cached ? authoritative : undefined)
+				} finally {
+					current.mockRestore()
+					update.mockRestore()
+					health.mockRestore()
+				}
+			},
+		)
 	})
 
 	describe("handleModeSwitch", () => {

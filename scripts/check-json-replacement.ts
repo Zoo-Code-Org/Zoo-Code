@@ -317,6 +317,12 @@ async function bundleAt(destination: string, mutation?: string) {
 									"/* mutation: omit backup removal */",
 								)
 							}
+							if (mutation === "swallowed-replay-error" && args.path.endsWith("TaskHistoryStore.ts")) {
+								const original = "await this.replayDelegationRepairIntent()"
+								assert(source.includes(original), "Replay mutation anchor changed")
+								source = source.replace(original, "try { " + original + " } catch {}")
+								applied = true
+							}
 							return { contents: source, loader: "ts" }
 						})
 				},
@@ -385,6 +391,18 @@ async function runCase(
 	if (result?.ok && ["read", "newer"].includes(mode) && !encoded.some((entry) => entry === result.value))
 		violation(3, context, run.events)
 	if (mode === "cold" && result && !result.ok && result.repairRuns !== 0) violation(5, context, run.events)
+	// A read fault must not be reclassified as a missing or malformed intent.
+	// Check the injected outcome, not only the implication "failure => no repair".
+	if (mode === "cold" && fault && ["EPERM", "EACCES", "EIO"].includes(fault.kind)) {
+		const injected = run.events.find((event) => event.n === fault.step && event.phase === "before")
+		if (
+			injected?.call === "readFile" &&
+			injected.paths.some((entry) => entry.endsWith("_delegation_repair_intent.json"))
+		) {
+			if (!result || result.ok || result.code !== fault.kind || result.repairRuns !== 0)
+				violation(5, context + " replay read failure published health or entered repair", run.events)
+		}
+	}
 	const followups = (await runtime(bundle, root, "followups")).results
 	assert.equal(followups.length, 4)
 	for (const followup of followups) {
@@ -447,6 +465,18 @@ async function main() {
 			if (fs.readFileSync(path.join(root, relativeCanonical), "utf8") !== encoded[1])
 				violation(6, "reader replaced a newer canonical value", run.events)
 			throw new Error("Reader mutant survived")
+		}
+		if (mutation === "swallowed-replay-error") {
+			const events = await runCase(bundle, path.join(work, "replay-baseline"), "cold")
+			const read = events.find(
+				(event) =>
+					event.phase === "before" &&
+					event.call === "readFile" &&
+					event.paths.some((entry) => entry.endsWith("_delegation_repair_intent.json")),
+			)
+			assert(read, "Replay read was not reached")
+			await runCase(bundle, path.join(work, "replay-mutant"), "cold", { step: read.n, kind: "EIO" })
+			throw new Error("Replay mutant survived")
 		}
 		assert(!mutation, "Unknown mutation")
 		const workers = Number(process.env.JSON_REPLACEMENT_WORKERS ?? 4)

@@ -176,11 +176,9 @@ export class TaskHistoryStore {
 		const persistedActiveIds = this.getPersistedActiveIds()
 
 		// 2. Complete any two-record repair interrupted after its intent was durable.
-		try {
-			await this.replayDelegationRepairIntent()
-		} catch (error) {
-			console.error("[TaskHistoryStore] Failed to replay delegation repair intent:", error)
-		}
+		// Replay must succeed before repair or health publication. Lock failures
+		// use the same bounded retry policy as the initial scan.
+		await this.replayDelegationRepairIntent()
 
 		// 3. Repair delegation inconsistencies left by a previous crash
 		await this.reconcileDelegationState(persistedActiveIds)
@@ -590,6 +588,7 @@ export class TaskHistoryStore {
 					}
 				} catch (error) {
 					console.error(`[TaskHistoryStore] Failed to reconcile delegation for task ${item.id}:`, error)
+					throw error
 				}
 				// child.status === "interrupted" or "delegated" → leave as-is this pass
 			}
@@ -747,6 +746,7 @@ export class TaskHistoryStore {
 			if (this.isFileNotFoundError(error)) {
 				return null
 			}
+			if (!(error instanceof SyntaxError)) throw error
 			await this.quarantineDelegationRepairIntent(null, "malformed JSON")
 			return null
 		}
