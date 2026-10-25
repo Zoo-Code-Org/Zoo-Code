@@ -291,7 +291,7 @@ describe("VsCodeLmHandler", () => {
 			try {
 				const request = collectStream(handler.createMessage("system", [{ role: "user", content: [image] }]))
 				if (fixture.capabilities !== imageCapable) {
-					await expect(request).resolves.toBeDefined()
+					await expect(request).resolves.toContainEqual({ type: "text", text: "done" })
 					expect(sendRequest).toHaveBeenCalledTimes(1)
 				} else if (fixture.accepted) {
 					await expect(request).resolves.toContainEqual({
