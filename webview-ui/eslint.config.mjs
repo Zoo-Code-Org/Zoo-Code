@@ -1,4 +1,5 @@
 import { reactConfig } from "@roo-code/config-eslint/react"
+import { i18nLanguageSwitchSelectors } from "@roo-code/config-eslint/i18n-language-switch"
 import { createProviderIdentifierConfig } from "@roo-code/config-eslint/provider-identifiers"
 import { createI18nDotKeyConfig } from "@roo-code/config-eslint/i18n-keys"
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
@@ -75,6 +76,36 @@ export default [
 							message:
 								"axios was removed from the webview bundle in favour of global fetch. Use fetch() for network calls. The dependency is no longer declared in webview-ui/package.json, so an import here only resolves through the hoisted store and would fail at build time.",
 						},
+						{
+							name: "i18next",
+							importNames: ["t"],
+							message: "Use t from useAppTranslation so memoized output follows language changes.",
+						},
+						{
+							name: "react-i18next",
+							importNames: ["useTranslation"],
+							message:
+								"Use useAppTranslation from @src/i18n/TranslationContext: it loads the selected language and exposes the active one for date formatting.",
+						},
+					],
+				},
+			],
+			"no-restricted-syntax": ["error", ...i18nLanguageSwitchSelectors],
+		},
+	},
+	{
+		// The provider is the one place that reads react-i18next's useTranslation.
+		files: ["src/i18n/TranslationContext.tsx"],
+		rules: {
+			"no-restricted-imports": [
+				"error",
+				{
+					paths: [
+						{
+							name: "i18next",
+							importNames: ["t"],
+							message: "Use t from useAppTranslation so memoized output follows language changes.",
+						},
 					],
 				},
 			],
@@ -107,6 +138,17 @@ export default [
 							name: "axios",
 							message:
 								"axios was removed from the webview bundle in favour of global fetch. Use fetch() for network calls. The dependency is no longer declared in webview-ui/package.json, so an import here only resolves through the hoisted store and would fail at build time.",
+						},
+						{
+							name: "i18next",
+							importNames: ["t"],
+							message: "Use t from useAppTranslation so memoized output follows language changes.",
+						},
+						{
+							name: "react-i18next",
+							importNames: ["useTranslation"],
+							message:
+								"Use useAppTranslation from @src/i18n/TranslationContext: it loads the selected language and exposes the active one for date formatting.",
 						},
 						{
 							name: "@tanstack/react-query",

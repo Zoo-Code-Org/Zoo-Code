@@ -13,6 +13,10 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	),
 }))
 
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({ t: (key: string) => key }),
+}))
+
 vi.mock("react-i18next", () => ({
 	Trans: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))

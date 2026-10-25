@@ -7,6 +7,7 @@ import TaskItemFooter from "../TaskItemFooter"
 vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({
 		t: (key: string) => key,
+		language: "en",
 	}),
 }))
 
@@ -204,7 +205,7 @@ describe("TaskItemFooter", () => {
 
 		it("passes the chosen time and date formats to the formatter", () => {
 			renderWith({ showRelativeTimes: false, timeFormat: "24h", dateFormat: "dmy" })
-			expect(formatDateTime).toHaveBeenCalledWith(mockItem.ts, "24h", "dmy")
+			expect(formatDateTime).toHaveBeenCalledWith(mockItem.ts, "en", "24h", "dmy")
 			expect(screen.getByText("15/01/2024, 14:30")).toBeInTheDocument()
 		})
 	})

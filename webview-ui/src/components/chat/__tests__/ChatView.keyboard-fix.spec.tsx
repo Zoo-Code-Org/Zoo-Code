@@ -55,14 +55,13 @@ vi.mock("../common/TelemetryBanner", () => ({
 }))
 
 // Mock i18n
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string) => key,
 	}),
-	initReactI18next: {
-		type: "3rdParty",
-		init: () => {},
-	},
+}))
+
+vi.mock("react-i18next", () => ({
 	Trans: ({ i18nKey }: { i18nKey: string }) => <>{i18nKey}</>,
 }))
 

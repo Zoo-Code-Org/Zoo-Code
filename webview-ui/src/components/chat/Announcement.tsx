@@ -72,7 +72,7 @@ const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 					</div>
 
 					<div className="mt-3 text-sm text-center text-vscode-descriptionForeground">
-						<Trans i18nKey="chat:announcement.support" components={{ githubLink: <GitHubLink /> }} />
+						<Trans t={t} i18nKey="chat:announcement.support" components={{ githubLink: <GitHubLink /> }} />
 					</div>
 				</div>
 			</DialogContent>

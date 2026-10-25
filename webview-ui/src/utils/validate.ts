@@ -1,5 +1,4 @@
-import i18next from "i18next"
-
+import type { TFunction } from "i18next"
 import {
 	type ProviderSettings,
 	type OrganizationAllowList,
@@ -33,27 +32,28 @@ export function formatOpenAiExtraBodyValidationError(
 	return t(`settings:validation.openAiExtraBody.${result.reason}`)
 }
 
-function validateOpenAiExtraBody(apiConfiguration: ProviderSettings): string | undefined {
+function validateOpenAiExtraBody(apiConfiguration: ProviderSettings, t: TFunction): string | undefined {
 	if (apiConfiguration.apiProvider !== providerIdentifiers.openai) {
 		return undefined
 	}
 
-	return formatOpenAiExtraBodyValidationError(parseOpenAiExtraBody(apiConfiguration.openAiExtraBody), i18next.t)
+	return formatOpenAiExtraBodyValidationError(parseOpenAiExtraBody(apiConfiguration.openAiExtraBody), t)
 }
 
 export function validateApiConfiguration(
 	apiConfiguration: ProviderSettings,
+	t: TFunction,
 	routerModels?: RouterModels,
 	organizationAllowList?: OrganizationAllowList,
 	zooCodeIsAuthenticated?: boolean,
 ): string | undefined {
-	const keysAndIdsPresentErrorMessage = validateModelsAndKeysProvided(apiConfiguration, zooCodeIsAuthenticated)
+	const keysAndIdsPresentErrorMessage = validateModelsAndKeysProvided(apiConfiguration, t, zooCodeIsAuthenticated)
 
 	if (keysAndIdsPresentErrorMessage) {
 		return keysAndIdsPresentErrorMessage
 	}
 
-	const extraBodyError = validateOpenAiExtraBody(apiConfiguration)
+	const extraBodyError = validateOpenAiExtraBody(apiConfiguration, t)
 
 	if (extraBodyError) {
 		return extraBodyError
@@ -61,6 +61,7 @@ export function validateApiConfiguration(
 
 	const organizationAllowListError = validateProviderAgainstOrganizationSettings(
 		apiConfiguration,
+		t,
 		organizationAllowList,
 	)
 
@@ -68,82 +69,83 @@ export function validateApiConfiguration(
 		return organizationAllowListError.message
 	}
 
-	return validateDynamicProviderModelId(apiConfiguration, routerModels)
+	return validateDynamicProviderModelId(apiConfiguration, t, routerModels)
 }
 
 function validateModelsAndKeysProvided(
 	apiConfiguration: ProviderSettings,
+	t: TFunction,
 	zooCodeIsAuthenticated?: boolean,
 ): string | undefined {
 	switch (apiConfiguration.apiProvider) {
 		case providerIdentifiers.openrouter:
 			if (!apiConfiguration.openRouterApiKey) {
-				return i18next.t("settings:validation.apiKey")
+				return t("settings:validation.apiKey")
 			}
 			break
 		case providerIdentifiers.requesty:
 			if (!apiConfiguration.requestyApiKey) {
-				return i18next.t("settings:validation.apiKey")
+				return t("settings:validation.apiKey")
 			}
 			break
 		case providerIdentifiers.unbound:
 			if (!apiConfiguration.unboundApiKey) {
-				return i18next.t("settings:validation.apiKey")
+				return t("settings:validation.apiKey")
 			}
 			break
 		case providerIdentifiers.litellm:
 			if (!apiConfiguration.litellmApiKey) {
-				return i18next.t("settings:validation.apiKey")
+				return t("settings:validation.apiKey")
 			}
 			break
 		case providerIdentifiers.anthropic:
 			if (!apiConfiguration.apiKey) {
-				return i18next.t("settings:validation.apiKey")
+				return t("settings:validation.apiKey")
 			}
 			break
 		case providerIdentifiers.bedrock:
 			if (!apiConfiguration.awsRegion) {
-				return i18next.t("settings:validation.awsRegion")
+				return t("settings:validation.awsRegion")
 			}
 			break
 		case providerIdentifiers.vertex:
 			if (!apiConfiguration.vertexProjectId || !apiConfiguration.vertexRegion) {
-				return i18next.t("settings:validation.googleCloud")
+				return t("settings:validation.googleCloud")
 			}
 			break
 		case providerIdentifiers.gemini:
 			if (!apiConfiguration.geminiApiKey) {
-				return i18next.t("settings:validation.apiKey")
+				return t("settings:validation.apiKey")
 			}
 			break
 		case providerIdentifiers.openaiNative:
 			if (!apiConfiguration.openAiNativeApiKey) {
-				return i18next.t("settings:validation.apiKey")
+				return t("settings:validation.apiKey")
 			}
 			break
 		case providerIdentifiers.mistral:
 			if (!apiConfiguration.mistralApiKey) {
-				return i18next.t("settings:validation.apiKey")
+				return t("settings:validation.apiKey")
 			}
 			break
 		case providerIdentifiers.openai:
 			if (!apiConfiguration.openAiBaseUrl || !apiConfiguration.openAiApiKey || !apiConfiguration.openAiModelId) {
-				return i18next.t("settings:validation.openAi")
+				return t("settings:validation.openAi")
 			}
 			break
 		case providerIdentifiers.ollama:
 			if (!apiConfiguration.ollamaModelId) {
-				return i18next.t("settings:validation.modelId")
+				return t("settings:validation.modelId")
 			}
 			break
 		case providerIdentifiers.lmstudio:
 			if (!apiConfiguration.lmStudioModelId) {
-				return i18next.t("settings:validation.modelId")
+				return t("settings:validation.modelId")
 			}
 			break
 		case providerIdentifiers.vscodeLm:
 			if (!apiConfiguration.vsCodeLmModelSelector) {
-				return i18next.t("settings:validation.modelSelector")
+				return t("settings:validation.modelSelector")
 			}
 			break
 		case providerIdentifiers.githubCopilot:
@@ -151,62 +153,62 @@ function validateModelsAndKeysProvided(
 				apiConfiguration.vsCodeLmModelSelector?.vendor !== githubCopilotLanguageModel.vendor ||
 				(!apiConfiguration.vsCodeLmModelSelector.id && !apiConfiguration.vsCodeLmModelSelector.family)
 			) {
-				return i18next.t("settings:validation.modelSelector")
+				return t("settings:validation.modelSelector")
 			}
 			break
 		case providerIdentifiers.fireworks:
 			if (!apiConfiguration.fireworksApiKey) {
-				return i18next.t("settings:validation.apiKey")
+				return t("settings:validation.apiKey")
 			}
 			break
 		case providerIdentifiers.friendli:
 			if (!apiConfiguration.friendliApiKey) {
-				return i18next.t("settings:validation.apiKey")
+				return t("settings:validation.apiKey")
 			}
 			break
 		case providerIdentifiers.qwenCode:
 			if (!apiConfiguration.qwenCodeOauthPath) {
-				return i18next.t("settings:validation.qwenCodeOauthPath")
+				return t("settings:validation.qwenCodeOauthPath")
 			}
 			break
 		case providerIdentifiers.kimiCode:
 			if ((apiConfiguration.kimiCodeAuthMethod ?? "oauth") === "api-key" && !apiConfiguration.kimiCodeApiKey) {
-				return i18next.t("settings:validation.apiKey")
+				return t("settings:validation.apiKey")
 			}
 			break
 		case providerIdentifiers.vercelAiGateway:
 			if (!apiConfiguration.vercelAiGatewayApiKey) {
-				return i18next.t("settings:validation.apiKey")
+				return t("settings:validation.apiKey")
 			}
 			break
 		case providerIdentifiers.opencodeGo:
 			if (!apiConfiguration.opencodeGoApiKey) {
-				return i18next.t("settings:validation.apiKey")
+				return t("settings:validation.apiKey")
 			}
 			break
 		case providerIdentifiers.kenari:
 			if (!apiConfiguration.kenariApiKey) {
-				return i18next.t("settings:validation.apiKey")
+				return t("settings:validation.apiKey")
 			}
 			break
 		case providerIdentifiers.ioIntelligence:
 			if (!apiConfiguration.ioIntelligenceApiKey) {
-				return i18next.t("settings:validation.apiKey")
+				return t("settings:validation.apiKey")
 			}
 			break
 		case providerIdentifiers.nanogpt:
 			if (!apiConfiguration.nanoGptApiKey) {
-				return i18next.t("settings:validation.apiKey")
+				return t("settings:validation.apiKey")
 			}
 			break
 		case providerIdentifiers.zooGateway:
 			if (!apiConfiguration.zooSessionToken && !zooCodeIsAuthenticated) {
-				return i18next.t("settings:validation.zooGatewaySignIn")
+				return t("settings:validation.zooGatewaySignIn")
 			}
 			break
 		case providerIdentifiers.baseten:
 			if (!apiConfiguration.basetenApiKey) {
-				return i18next.t("settings:validation.apiKey")
+				return t("settings:validation.apiKey")
 			}
 			break
 	}
@@ -221,6 +223,7 @@ type ValidationError = {
 
 function validateProviderAgainstOrganizationSettings(
 	apiConfiguration: ProviderSettings,
+	t: TFunction,
 	organizationAllowList?: OrganizationAllowList,
 ): ValidationError | undefined {
 	if (organizationAllowList && !organizationAllowList.allowAll) {
@@ -234,7 +237,7 @@ function validateProviderAgainstOrganizationSettings(
 
 		if (!providerConfig) {
 			return {
-				message: i18next.t("settings:validation.providerNotAllowed", { provider }),
+				message: t("settings:validation.providerNotAllowed", { provider }),
 				code: "PROVIDER_NOT_ALLOWED",
 			}
 		}
@@ -245,7 +248,7 @@ function validateProviderAgainstOrganizationSettings(
 
 			if (modelId && !allowedModels.includes(modelId)) {
 				return {
-					message: i18next.t("settings:validation.modelNotAllowed", {
+					message: t("settings:validation.modelNotAllowed", {
 						model: modelId,
 						provider,
 					}),
@@ -265,10 +268,11 @@ function validateProviderAgainstOrganizationSettings(
  * provide valid ARNs without restriction. See issue #10108.
  *
  * @param arn The ARN string to validate
+ * @param t Translates the region mismatch message
  * @param region Optional region to check against the ARN's region
  * @returns An object with validation results: { isValid, arnRegion, errorMessage }
  */
-export function validateBedrockArn(arn: string, region?: string) {
+export function validateBedrockArn(arn: string, t: TFunction, region?: string) {
 	// Try to extract region from ARN for region mismatch warning.
 	// This is a permissive regex that attempts to find the region component
 	// without enforcing strict ARN format validation.
@@ -280,7 +284,7 @@ export function validateBedrockArn(arn: string, region?: string) {
 		return {
 			isValid: true,
 			arnRegion,
-			errorMessage: i18next.t("settings:validation.arn.regionMismatch", { arnRegion, region }),
+			errorMessage: t("settings:validation.arn.regionMismatch", { arnRegion, region }),
 		}
 	}
 
@@ -290,6 +294,7 @@ export function validateBedrockArn(arn: string, region?: string) {
 
 function validateDynamicProviderModelId(
 	apiConfiguration: ProviderSettings,
+	t: TFunction,
 	routerModels?: RouterModels,
 ): string | undefined {
 	const provider = apiConfiguration.apiProvider ?? ""
@@ -302,13 +307,13 @@ function validateDynamicProviderModelId(
 	const modelId = getModelId(apiConfiguration)
 
 	if (!modelId) {
-		return i18next.t("settings:validation.modelId")
+		return t("settings:validation.modelId")
 	}
 
 	const models = routerModels?.[provider]
 
 	if (models && Object.keys(models).length > 1 && !Object.keys(models).includes(modelId)) {
-		return i18next.t("settings:validation.modelAvailability", { modelId })
+		return t("settings:validation.modelAvailability", { modelId })
 	}
 
 	return undefined
@@ -320,6 +325,7 @@ function validateDynamicProviderModelId(
  */
 export function getModelValidationError(
 	apiConfiguration: ProviderSettings,
+	t: TFunction,
 	routerModels?: RouterModels,
 	organizationAllowList?: OrganizationAllowList,
 ): string | undefined {
@@ -330,13 +336,13 @@ export function getModelValidationError(
 		apiModelId: modelId || "",
 	}
 
-	const orgError = validateProviderAgainstOrganizationSettings(configWithModelId, organizationAllowList)
+	const orgError = validateProviderAgainstOrganizationSettings(configWithModelId, t, organizationAllowList)
 
 	if (orgError && orgError.code === "MODEL_NOT_ALLOWED") {
 		return orgError.message
 	}
 
-	return validateDynamicProviderModelId(configWithModelId, routerModels)
+	return validateDynamicProviderModelId(configWithModelId, t, routerModels)
 }
 
 /**
@@ -351,18 +357,19 @@ export function getModelValidationError(
  */
 export function validateApiConfigurationExcludingModelErrors(
 	apiConfiguration: ProviderSettings,
+	t: TFunction,
 	_routerModels?: RouterModels, // Keeping this for compatibility with the old function.
 	organizationAllowList?: OrganizationAllowList,
 ): string | undefined {
 	if (apiConfiguration.apiProvider !== providerIdentifiers.zooGateway) {
-		const keysAndIdsPresentErrorMessage = validateModelsAndKeysProvided(apiConfiguration)
+		const keysAndIdsPresentErrorMessage = validateModelsAndKeysProvided(apiConfiguration, t)
 
 		if (keysAndIdsPresentErrorMessage) {
 			return keysAndIdsPresentErrorMessage
 		}
 	}
 
-	const extraBodyError = validateOpenAiExtraBody(apiConfiguration)
+	const extraBodyError = validateOpenAiExtraBody(apiConfiguration, t)
 
 	if (extraBodyError) {
 		return extraBodyError
@@ -370,6 +377,7 @@ export function validateApiConfigurationExcludingModelErrors(
 
 	const organizationAllowListError = validateProviderAgainstOrganizationSettings(
 		apiConfiguration,
+		t,
 		organizationAllowList,
 	)
 

@@ -28,7 +28,7 @@ const TaskItemFooter: React.FC<TaskItemFooterProps> = ({
 	onDelete,
 	onRename,
 }) => {
-	const { t } = useAppTranslation()
+	const { t, language } = useAppTranslation()
 	// Optional read: this leaf renders standalone (tests, previews) without a provider.
 	const ext = useContext(ExtensionStateContext)
 	const timeFormat = ext?.timeFormat
@@ -56,11 +56,13 @@ const TaskItemFooter: React.FC<TaskItemFooterProps> = ({
 				{/* Datetime. A relative time carries the full date and time in a tooltip; the absolute time already
 				    shows it, so it gets no tooltip that would only repeat it. */}
 				{showRelativeTimes ? (
-					<StandardTooltip content={formatDateTime(item.ts, timeFormat, dateFormat)}>
-						<span className="first-letter:uppercase">{formatTimeAgo(item.ts)}</span>
+					<StandardTooltip content={formatDateTime(item.ts, language, timeFormat, dateFormat)}>
+						<span className="first-letter:uppercase">{formatTimeAgo(item.ts, t)}</span>
 					</StandardTooltip>
 				) : (
-					<span className="first-letter:uppercase">{formatDateTime(item.ts, timeFormat, dateFormat)}</span>
+					<span className="first-letter:uppercase">
+						{formatDateTime(item.ts, language, timeFormat, dateFormat)}
+					</span>
 				)}
 
 				{/* Cost */}
