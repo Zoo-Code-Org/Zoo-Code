@@ -127,7 +127,11 @@ export class LanguageModelDataPart {
 	}
 
 	static json(value: unknown, mimeType: string = "application/json"): LanguageModelDataPart {
-		return new LanguageModelDataPart(new TextEncoder().encode(JSON.stringify(value)), mimeType)
+		const serialized = JSON.stringify(value)
+		if (serialized === undefined) {
+			throw new TypeError("LanguageModelDataPart.json: value is not JSON-serializable")
+		}
+		return new LanguageModelDataPart(new TextEncoder().encode(serialized), mimeType)
 	}
 }
 

@@ -308,6 +308,15 @@ describe("LanguageModelDataPart text and JSON", () => {
 		expect(JSON.parse(new TextDecoder().decode(part.data))).toEqual(value)
 		expect(part.mimeType).toBe(mimeType ?? "application/json")
 	})
+
+	it.each([undefined, () => 1, Symbol("x")])("rejects non-serializable JSON value %s", (value) => {
+		expect(() => LanguageModelDataPart.json(value)).toThrow(TypeError)
+	})
+
+	it.each([null, 0, false, ""])("accepts serializable falsy JSON value %s", (value) => {
+		const part = LanguageModelDataPart.json(value)
+		expect(JSON.parse(new TextDecoder().decode(part.data))).toBe(value)
+	})
 })
 
 describe("LanguageModelToolCallPart", () => {
