@@ -221,6 +221,10 @@ export function createContainerGradingRuntime(options: ContainerRuntimeOptions =
 				isolation: "container",
 				reason,
 			})
+			// Each run records only its own lookup result. A digest an earlier
+			// run resolved must never stand in for the identity of the image
+			// this run grades with.
+			resolvedDigest = undefined
 			const selected = await resolveCli()
 			if (!selected) return failure("noContainerRuntime")
 			// The digest lookup decides whether a pull is needed, so a cached
@@ -231,9 +235,10 @@ export function createContainerGradingRuntime(options: ContainerRuntimeOptions =
 				if ((await selected.pull(job.resources.image)) === "failed") return failure("graderImagePullFailed")
 				digest = await selected.imageDigest(job.resources.image)
 			}
-			// A lookup that still finds nothing preserves a digest resolved by
-			// an earlier run of this runtime; it never fabricates one.
-			resolvedDigest = digest ?? resolvedDigest
+			// A lookup that still finds nothing leaves the digest unset, and
+			// the pins record the identity as unavailable instead of reusing
+			// one from an earlier run. The runtime never fabricates a value.
+			resolvedDigest = digest
 			const outDir = path.join(path.dirname(job.gradingDir), "grading-out")
 			await fs.mkdir(outDir, { recursive: true })
 			// The container runs as root with all capabilities dropped, so it

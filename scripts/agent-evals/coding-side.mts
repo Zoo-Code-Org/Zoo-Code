@@ -3,8 +3,8 @@
 // side-results file with the pinned inputs. Trusted repo code only: the
 // provider credential stays with this process and the extension host; the
 // grader never receives it. The extension under test comes from the evaluated
-// root, which must be a commit the operator's trust policy approves before
-// any host is created or any credential is read.
+// root, which must be an approved commit and a tree that matches that commit
+// exactly before any host is created or any credential is read.
 import fs from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -17,7 +17,13 @@ import { GRADER_VERSION } from "./coding-grader.ts"
 import { digestValue } from "./coding-digest.ts"
 import type { SidePins } from "./coding-pins.ts"
 import { invalidateSideArtifacts } from "./coding-compare.ts"
-import { assertCommitsApproved, assertCredentialEnvAllowed, loadTrustPolicy, resolveCommit } from "./coding-trust.ts"
+import {
+	assertCommitsApproved,
+	assertCredentialEnvAllowed,
+	assertEvaluatedTreeClean,
+	loadTrustPolicy,
+	resolveCommit,
+} from "./coding-trust.ts"
 import { executeSideFlow, type SideRepetition } from "./coding-side-flow.ts"
 import { createInterruptFlag } from "./side-process-guard.ts"
 
@@ -95,6 +101,10 @@ const sideLabel = readSideLabel()
 const policy = await loadTrustPolicy(trustFile)
 const evaluatedCommit = await resolveCommit("HEAD", evaluatedRoot)
 assertCommitsApproved(policy, [evaluatedCommit])
+// The approval covers the commit only, so the tree the host loads must also
+// match that commit. A tracked or untracked change makes the executed files
+// differ from the approved content, and the side stops here.
+await assertEvaluatedTreeClean(evaluatedRoot)
 // Fail before any directory, run, or result file exists. An empty credential
 // would otherwise produce a plausible file of infrastructure failures.
 const credential = process.env[credentialEnv]
