@@ -1380,22 +1380,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.blanketDeniedCommandThisTurn = true
 	}
 
+	/** When provided, historyItem overrides task and images in the startup metadata. */
 	static create(options: TaskOptions): [Task, Promise<void>] {
-		const instance = new Task({ ...options, startTask: false })
-		const { images, task, historyItem } = options
-		let promise
-
-		instance.startIdleTelemetryCheck()
-
-		if (images || task) {
-			promise = instance.startTask(task, images)
-		} else if (historyItem) {
-			promise = instance.resumeTaskFromHistory()
-		} else {
+		if (!options.task && !options.images && !options.historyItem) {
 			throw new Error("Either historyItem or task/images must be provided")
 		}
 
-		return [instance, promise]
+		const instance = new Task({ ...options, startTask: false })
+
+		return [instance, instance.run()]
 	}
 
 	// API Messages

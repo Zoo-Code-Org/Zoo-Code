@@ -27,6 +27,7 @@ import {
 import { CONTEXT_WINDOW_EXCEEDED_STATUS } from "../../core/context/context-management/context-error-handling"
 
 import { BaseProvider } from "./base-provider"
+import { getVsCodeLmModelInfo } from "./vscode-lm-capabilities"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
 /**
@@ -409,18 +410,8 @@ function declaredParamType(schema: Record<string, unknown> | undefined, paramNam
  * details), and only when the request would otherwise exceed the budget.
  */
 
-/**
- * Conservative characters-per-token ratio used to turn a token window into a character budget.
- *
- * `client.countTokens` is the model's real tokenizer, but it counts only a string: it cannot price
- * the tool schemas, image placeholders, or per-message framing the backend adds, so it cannot give
- * the true total for the request we are about to send. It is also an async, per-call RPC, and the
- * budget is needed for every message on every turn. We therefore keep a character estimate here
- * and stay deliberately conservative — 3 chars/token rather than the ~4 typical of English —
- * because the token-dense JSON, logs, and code that dominate oversized tool results tokenize to
- * fewer characters per token than prose. Under-counting biases toward trimming too early, which is
- * recoverable; over-counting sends an over-window request, which is not.
- */
+// Text trimming uses 3 chars/token rather than ~4 for token-dense code and logs.
+// Native image input is counted separately by the host before sending; this budget is text-only.
 const VSCODE_LM_BUDGET_CHARS_PER_TOKEN = 3
 
 /**
@@ -433,11 +424,7 @@ const VSCODE_LM_INPUT_BUDGET_FRACTION = 0.8
 /** A tool_result is never shrunk below this many characters, so a truncated result stays useful. */
 const MIN_TOOL_RESULT_CHARS = 2000
 
-/**
- * Length charged for an image block. VS Code LM cannot carry image data, so
- * `convertToVsCodeLmMessages` replaces each image with a sentence-long textual placeholder; this
- * is that placeholder's approximate length.
- */
+/** Approximate placeholder length; the text-only budget does not measure native image tokens. */
 const IMAGE_PLACEHOLDER_CHARS = 64
 
 function readToolResultText(block: Anthropic.Messages.ContentBlockParam): string | undefined {
@@ -539,8 +526,6 @@ function estimateContentChars(content: Anthropic.Messages.MessageParam["content"
 		} else if (type === "tool_use") {
 			total += JSON.stringify((block as Anthropic.Messages.ToolUseBlockParam).input ?? {}).length
 		} else if (type === "image") {
-			// VS Code LM cannot send image data; convertToVsCodeLmMessages substitutes a textual
-			// placeholder, so charge that placeholder's real length rather than a token-sized guess.
 			total += IMAGE_PLACEHOLDER_CHARS
 		}
 	}
@@ -902,7 +887,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				typeof client.maxInputTokens === "number"
 					? Math.max(0, client.maxInputTokens)
 					: openAiModelInfoSaneDefaults.contextWindow,
-			supportsImages: false, // VSCode Language Model API historically had no image input
+			supportsImages: getVsCodeLmModelInfo(client).supportsImages,
 			supportsPromptCache: true,
 			inputPrice: 0,
 			outputPrice: 0,
@@ -912,25 +897,38 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 
 	/** Model info reported before any client exists. */
 	protected getFallbackModelInfo(): ModelInfo {
-		return openAiModelInfoSaneDefaults
+		return { ...openAiModelInfoSaneDefaults, supportsImages: undefined }
 	}
 
 	/** Whether image parts are sent to the model. */
-	protected supportsImageInput(_info: ModelInfo): boolean {
-		return false
+	protected supportsImageInput(info: ModelInfo): boolean {
+		return info.supportsImages === true
 	}
 
 	/** Rejects a request the selected model cannot serve before anything is sent. */
 	protected assertRequestSupported(_messages: Anthropic.Messages.MessageParam[], _info: ModelInfo): void {}
 
 	/** Rejects a request whose measured input exceeds what the model accepts. */
-	protected assertWithinContextWindow(_inputTokens: number, _info: ModelInfo): void {}
+	protected assertWithinContextWindow(inputTokens: number, info: ModelInfo): void {
+		// Native images are absent from the character budget; use the host's measured input too.
+		if (
+			this.supportsImageInput(info) &&
+			inputTokens > Math.min(this.getCondenseContextWindow(), info.contextWindow)
+		) {
+			throw Object.assign(
+				new Error(
+					"The request exceeds the selected VS Code model's input context window. Condense the conversation or start a new task.",
+				),
+				{ status: CONTEXT_WINDOW_EXCEEDED_STATUS },
+			)
+		}
+	}
 
 	/** The form in which a chat message is handed to the host's token counter. */
 	protected prepareMessageForCounting(
 		message: vscode.LanguageModelChatMessage,
 	): string | vscode.LanguageModelChatMessage {
-		return extractTextCountFromMessage(message)
+		return this.supportsImageInput(this.getModel().info) ? message : extractTextCountFromMessage(message)
 	}
 
 	/**
@@ -969,14 +967,17 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 	 * @returns A promise resolving to the token count
 	 */
 	override async countTokens(content: Array<Anthropic.Messages.ContentBlockParam>): Promise<number> {
-		// Convert Anthropic content blocks to a string for VSCode LM token counting
+		if (this.supportsImageInput(this.getModel().info) && containsImageBlock(content)) {
+			return this.calculateTotalInputTokens(convertToVsCodeLmMessages([{ role: "user", content }], true))
+		}
+
+		// Preserve text-only counting for models that cannot send native images.
 		let textContent = ""
 
 		for (const block of content) {
 			if (block.type === "text") {
 				textContent += block.text || ""
 			} else if (block.type === "image") {
-				// VSCode LM doesn't support images directly, so we'll just use a placeholder
 				textContent += "[IMAGE]"
 			}
 		}
@@ -1597,7 +1598,17 @@ export const VSCODE_LM_STATIC_BLACKLIST: string[] = ["claude-3.7-sonnet", "claud
 export async function getVsCodeLmModels() {
 	try {
 		const models = (await vscode.lm.selectChatModels({})) || []
-		return models.filter((model) => !VSCODE_LM_STATIC_BLACKLIST.includes(model.id))
+		return models
+			.filter((model) => !VSCODE_LM_STATIC_BLACKLIST.includes(model.id))
+			.map((model) => ({
+				id: model.id,
+				vendor: model.vendor,
+				family: model.family,
+				version: model.version,
+				name: model.name,
+				maxInputTokens: model.maxInputTokens,
+				modelInfo: getVsCodeLmModelInfo(model),
+			}))
 	} catch (error) {
 		console.error(
 			`Error fetching VS Code LM models: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
