@@ -171,7 +171,7 @@ describe("getModels with new GetModelsOptions", () => {
 		expect(result).toEqual(mockModels)
 	})
 
-	it("forwards the caller's cancellation signal to Requesty model discovery", async () => {
+	it("rejects the caller when its cancellation signal aborts during Requesty model discovery", async () => {
 		setupCancellationMocks()
 		// Keep the fetch pending so the caller's abort lands mid-flight: under the
 		// single-flight contract the caller's signal detaches this waiter (and rejects
