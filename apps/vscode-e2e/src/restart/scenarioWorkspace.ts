@@ -248,3 +248,13 @@ export async function preserveScenarioWorkspace(scenarioWorkspace: ScenarioWorks
 	await removeScenarioWorkspace(scenarioWorkspace)
 	return destinationRoot
 }
+
+/** The runner has no retry step, so it must also clean up failed publications. */
+export async function preserveScenarioWorkspaceForRunner(scenarioWorkspace: ScenarioWorkspace): Promise<string> {
+	try {
+		return await preserveScenarioWorkspace(scenarioWorkspace)
+	} catch (error) {
+		await removeScenarioWorkspace(scenarioWorkspace)
+		throw error
+	}
+}

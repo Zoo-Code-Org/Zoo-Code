@@ -23,7 +23,7 @@ import { addUseMcpToolResultFixtures } from "./fixtures/use-mcp-tool"
 import { addWriteToFileResultFixtures } from "./fixtures/write-to-file"
 import {
 	createScenarioWorkspace,
-	preserveScenarioWorkspace,
+	preserveScenarioWorkspaceForRunner,
 	removeScenarioWorkspace,
 } from "./restart/scenarioWorkspace"
 import { runRestartScenario } from "./restart/vscodeCoordinator"
@@ -235,7 +235,7 @@ async function main() {
 			// Raw histories, phase errors, and logs must never enter the artifact.
 			if (runFailed) {
 				try {
-					const preservedAt = await preserveScenarioWorkspace(scenarioWorkspace)
+					const preservedAt = await preserveScenarioWorkspaceForRunner(scenarioWorkspace)
 					console.error(`Restart scenario diagnostics saved for failure inspection: ${preservedAt}`)
 				} catch (preserveError) {
 					console.error("Failed to preserve the restart scenario workspace:", preserveError)
