@@ -663,6 +663,29 @@ export class SkillsManager {
 	 * @param modeSlugs - Optional mode restrictions (undefined/empty = any mode)
 	 * @returns Path to created SKILL.md file
 	 */
+	/**
+	 * Write one SKILL.md atomically: stage the content in a same-directory temp file,
+	 * await the complete write, then rename it over the target. A crash or failed write
+	 * must not leave a truncated SKILL.md that the loader would silently misparse.
+	 * The temp file is removed when the write or rename fails.
+	 */
+	private async writeSkillFileAtomically(filePath: string, content: string): Promise<void> {
+		const directory = path.dirname(filePath)
+		const temporaryPath = path.join(
+			directory,
+			`.${path.basename(filePath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+		)
+		try {
+			await fs.writeFile(temporaryPath, content, "utf-8")
+			await fs.rename(temporaryPath, filePath)
+		} catch (error) {
+			// Best effort: a partial temp file must not be left behind. The original
+			// failure is the one the caller needs to see.
+			await fs.unlink(temporaryPath).catch(() => {})
+			throw error
+		}
+	}
+
 	async createSkill(
 		name: string,
 		source: "global" | "project",
@@ -703,8 +726,9 @@ export class SkillsManager {
 			throw new Error(t("skills:errors.already_exists", { name, path: skillMdPath }))
 		}
 
-		// Create the skill directory
-		await fs.mkdir(skillDir, { recursive: true })
+		// Create the skill directory. mkdir reports the path it created (when any), so a
+		// failed persistence can remove exactly the directory this call introduced.
+		const createdDir = await fs.mkdir(skillDir, { recursive: true })
 
 		// Generate SKILL.md content with frontmatter
 		const titleName = name
@@ -731,8 +755,16 @@ export class SkillsManager {
 Add your skill instructions here.
 `
 		const skillContent = matter.stringify(body, frontmatter, SKILL_YAML_DUMP_OPTIONS)
-		// Write the SKILL.md file
-		await fs.writeFile(skillMdPath, skillContent, "utf-8")
+		// Publish the SKILL.md atomically, and leave no half-created skill directory behind
+		// when persistence fails.
+		try {
+			await this.writeSkillFileAtomically(skillMdPath, skillContent)
+		} catch (error) {
+			if (createdDir) {
+				await fs.rm(createdDir, { recursive: true, force: true }).catch(() => {})
+			}
+			throw error
+		}
 
 		// Refresh skills list
 		await this.discoverSkills()
@@ -1063,7 +1095,7 @@ Add your skill instructions here.
 		// values from being reflowed into folded block scalars, keeping the
 		// file stable (see issue #859).
 		const newContent = matter.stringify(body, frontmatter, SKILL_YAML_DUMP_OPTIONS)
-		await fs.writeFile(skill.path, newContent, "utf-8")
+		await this.writeSkillFileAtomically(skill.path, newContent)
 
 		// Refresh skills list
 		await this.discoverSkills()

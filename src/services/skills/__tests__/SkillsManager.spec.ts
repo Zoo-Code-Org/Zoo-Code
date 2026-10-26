@@ -2249,7 +2249,8 @@ Instructions`)
 
 			// Verify the content written
 			const writeCall = mockWriteFile.mock.calls[0]
-			expect(writeCall[0]).toBe(p(GLOBAL_ROO_DIR, "skills", "new-skill", "SKILL.md"))
+			expect(String(writeCall[0])).toMatch(/[/\\]new-skill[/\\]\.SKILL\.md\.[^/\\]+\.tmp$/)
+			expect(mockRename).toHaveBeenCalledWith(writeCall[0], p(GLOBAL_ROO_DIR, "skills", "new-skill", "SKILL.md"))
 			const written = String(writeCall[1])
 			expect(written).toContain("name: new-skill")
 			const descriptionLine = written.split("\n").find((line) => line.startsWith("description:"))
@@ -2316,6 +2317,42 @@ Instructions`)
 
 			const generatedContent = mockWriteFile.mock.calls[0][1] as string
 			expect(matter(generatedContent).data.description).toBe(description)
+		})
+
+		it("cleans the temp file and the newly created skill directory when persistence fails", async () => {
+			mockDirectoryExists.mockResolvedValue(false)
+			mockRealpath.mockImplementation(async (p: string) => p)
+			mockReaddir.mockResolvedValue([])
+			mockFileExists.mockResolvedValue(false)
+			const createdDir = p(GLOBAL_ROO_DIR, "skills", "failing-skill")
+			mockMkdir.mockResolvedValue(createdDir)
+			mockWriteFile.mockRejectedValueOnce(Object.assign(new Error("ENOSPC"), { code: "ENOSPC" }))
+			mockUnlink.mockResolvedValue(undefined)
+			mockRm.mockResolvedValue(undefined)
+
+			await expect(skillsManager.createSkill("failing-skill", "global", "Description")).rejects.toThrow("ENOSPC")
+
+			// The partially written temp file and the directory this call created are removed;
+			// the original persistence error is what the caller sees.
+			expect(mockUnlink).toHaveBeenCalledWith(expect.stringMatching(/\.SKILL\.md\.[^/\\]+\.tmp$/))
+			expect(mockRm).toHaveBeenCalledWith(createdDir, { recursive: true, force: true })
+		})
+
+		it("does not remove a pre-existing skill directory when persistence fails", async () => {
+			mockDirectoryExists.mockResolvedValue(false)
+			mockRealpath.mockImplementation(async (p: string) => p)
+			mockReaddir.mockResolvedValue([])
+			mockFileExists.mockResolvedValue(false)
+			// mkdir resolves undefined when the directory already existed: it is not ours to remove.
+			mockMkdir.mockResolvedValue(undefined)
+			mockWriteFile.mockRejectedValueOnce(new Error("EACCES"))
+			mockUnlink.mockResolvedValue(undefined)
+			mockRm.mockResolvedValue(undefined)
+
+			await expect(skillsManager.createSkill("owned-skill", "global", "Description")).rejects.toThrow("EACCES")
+
+			expect(mockRm).not.toHaveBeenCalled()
+			expect(mockUnlink).toHaveBeenCalledWith(expect.stringMatching(/\.SKILL\.md\.[^/\\]+\.tmp$/))
 		})
 
 		it("should create a project skill", async () => {
@@ -2429,6 +2466,9 @@ Body here.`
 
 			expect(mockWriteFile).toHaveBeenCalledTimes(1)
 			const rewritten = String(mockWriteFile.mock.calls[0][1])
+			// The rewrite lands through the same atomic temp+rename path as createSkill.
+			expect(String(mockWriteFile.mock.calls[0][0])).toMatch(/\.SKILL\.md\.[^/\\]+\.tmp$/)
+			expect(mockRename).toHaveBeenCalledWith(mockWriteFile.mock.calls[0][0], skillMd)
 			const parsed = matter(rewritten)
 			// The description survives the round-trip exactly and stays quoted.
 			expect(parsed.data.description).toBe(description)
@@ -2531,7 +2571,9 @@ Instructions`)
 			const created = await skillsManager.createSkill("my-skill", "global", "Description")
 
 			expect(created).toBe(rooSkillMd)
-			expect(mockWriteFile).toHaveBeenCalledWith(rooSkillMd, expect.any(String), "utf-8")
+			const staged = mockWriteFile.mock.calls[0][0]
+			expect(String(staged)).toMatch(/\.SKILL\.md\.[^/\\]+\.tmp$/)
+			expect(mockRename).toHaveBeenCalledWith(staged, rooSkillMd)
 		})
 	})
 
