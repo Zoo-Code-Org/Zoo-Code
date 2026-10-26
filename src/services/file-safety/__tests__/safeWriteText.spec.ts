@@ -55,7 +55,7 @@ vi.mock("fs", () => ({
 	writeSync: vi.fn(),
 	closeSync: vi.fn(),
 	mkdirSync: vi.fn(),
-	fsyncSync: vi.fn(),
+	fsync: vi.fn((_fd: number, callback: (error: Error | null) => void) => callback(null)),
 	chmodSync: vi.fn(),
 	fchmodSync: vi.fn(),
 	fchownSync: vi.fn(),
@@ -208,8 +208,8 @@ describe("safeWriteText", () => {
 			// content was written as a buffer (partial-write loop, full write)
 			expect(fsSync.writeSync).toHaveBeenCalledWith(1, Buffer.from("hello world", "utf8"), 0, 11)
 
-			// fsync (sync form) was called on the fd
-			expect(fsSync.fsyncSync).toHaveBeenCalledWith(1)
+			// fsync (async form) was called on the fd
+			expect(fsSync.fsync).toHaveBeenCalledWith(1, expect.any(Function))
 
 			// file was closed
 			expect(fsSync.closeSync).toHaveBeenCalledWith(1)
@@ -323,13 +323,13 @@ describe("safeWriteText", () => {
 
 			await safeWriteText(targetPath, "data", { platform: "linux" })
 
-			// Verify call order: openSync(temp) → writeSync → fsyncSync(temp)
+			// Verify call order: openSync(temp) → writeSync → fsync(temp)
 			// → closeSync(temp) → rename. On POSIX the parent directory is then
-			// opened and fsynced after the commit rename, so openSync/fsyncSync/
+			// opened and fsynced after the commit rename, so openSync/fsync/
 			// closeSync each have a second (directory) call.
 			expect(vi.mocked(fsSync.openSync).mock.calls.length).toBe(2)
 			expect(vi.mocked(fsSync.writeSync).mock.calls.length).toBe(1)
-			expect(vi.mocked(fsSync.fsyncSync).mock.calls.length).toBe(2)
+			expect(vi.mocked(fsSync.fsync).mock.calls.length).toBe(2)
 			expect(vi.mocked(fsSync.closeSync).mock.calls.length).toBe(2)
 
 			// the temp file was fully closed before the commit rename
@@ -343,14 +343,14 @@ describe("safeWriteText", () => {
 			const renameOrder = firstCallOf(vi.mocked(fs.rename))
 			expect(firstCallOf(vi.mocked(fsSync.openSync))).toBeLessThan(renameOrder)
 			expect(firstCallOf(vi.mocked(fsSync.writeSync))).toBeLessThan(renameOrder)
-			expect(firstCallOf(vi.mocked(fsSync.fsyncSync))).toBeLessThan(renameOrder)
+			expect(firstCallOf(vi.mocked(fsSync.fsync))).toBeLessThan(renameOrder)
 			expect(firstCallOf(vi.mocked(fsSync.closeSync))).toBeLessThan(renameOrder)
 			// the staged file is fsynced before it is closed
-			expect(vi.mocked(fsSync.fsyncSync).mock.invocationCallOrder[0]).toBeLessThan(
+			expect(vi.mocked(fsSync.fsync).mock.invocationCallOrder[0]).toBeLessThan(
 				vi.mocked(fsSync.closeSync).mock.invocationCallOrder[0],
 			)
 			// the parent-directory fsync is the second fsync and lands AFTER the rename
-			expect(vi.mocked(fsSync.fsyncSync).mock.invocationCallOrder[1]).toBeGreaterThan(renameOrder)
+			expect(vi.mocked(fsSync.fsync).mock.invocationCallOrder[1]).toBeGreaterThan(renameOrder)
 		})
 	})
 
@@ -1189,7 +1189,7 @@ describe("safeWriteText", () => {
 			expect(fsSync.openSync).toHaveBeenCalledWith(customTempPath, "r+")
 
 			// fsync was called
-			expect(fsSync.fsyncSync).toHaveBeenCalledWith(1)
+			expect(fsSync.fsync).toHaveBeenCalledWith(1, expect.any(Function))
 
 			// rename happened — realpath mock returns targetPath
 			expect(fs.rename).toHaveBeenCalledWith(customTempPath, targetPath)
@@ -1657,7 +1657,7 @@ describe("safeWriteText", () => {
 			expect(fsSync.writeSync).toHaveBeenCalledTimes(2)
 			expect(fsSync.writeSync).toHaveBeenNthCalledWith(1, 1, buffer, 0, 10)
 			expect(fsSync.writeSync).toHaveBeenNthCalledWith(2, 1, buffer, 4, 6)
-			expect(fsSync.fsyncSync).toHaveBeenCalledWith(1)
+			expect(fsSync.fsync).toHaveBeenCalledWith(1, expect.any(Function))
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 		})
 
@@ -1673,8 +1673,8 @@ describe("safeWriteText", () => {
 			// the dir path assertion is path-agnostic (stringContaining) because
 			// path.dirname renders the same input differently on Windows
 			expect(fsSync.openSync).toHaveBeenCalledWith(expect.stringContaining("test-dir"), "r")
-			expect(fsSync.fsyncSync).toHaveBeenNthCalledWith(1, 1)
-			expect(fsSync.fsyncSync).toHaveBeenNthCalledWith(2, 2)
+			expect(fsSync.fsync).toHaveBeenNthCalledWith(1, 1, expect.any(Function))
+			expect(fsSync.fsync).toHaveBeenNthCalledWith(2, 2, expect.any(Function))
 			expect(fsSync.closeSync).toHaveBeenCalledWith(2)
 		})
 
@@ -1988,7 +1988,7 @@ describe("safeWriteText", () => {
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 			const fsyncError = new Error("EBADF: fsync failed")
-			vi.mocked(fsSync.fsyncSync).mockImplementationOnce(() => {
+			vi.mocked(fsSync.fsync).mockImplementationOnce(() => {
 				throw fsyncError
 			})
 
