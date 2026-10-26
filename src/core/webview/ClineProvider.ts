@@ -3216,6 +3216,12 @@ export class ClineProvider
 		const previousSelection = globalSettings.currentApiConfigName
 		const previousSharedSettings = this.contextProxy.getProviderSettings()
 		const previousViewStates = this.getPersistedViewStates({ fresh: true })
+		// The activation path below can write this view's local pin and its durable viewStates
+		// entry (when the shared selection named the deleted profile): snapshot both so a later
+		// failure can restore them, including the absence of a pin.
+		const hadPreviousLocalPin = "currentApiConfigName" in this.viewLocalState
+		const previousLocalPin = this.viewLocalState.currentApiConfigName
+		const previousOwnViewState = previousViewStates[this.viewStateId]
 
 		// Commit the secret deletion before the compensating writes. If the deletion
 		// fails, nothing else runs: the durable pins still reference the profile that
@@ -3395,10 +3401,33 @@ export class ClineProvider
 				)
 			}
 			try {
+				// The activation path may have moved this view's local pin to the replacement: restore
+				// the pre-activation buffer (or its absence).
+				this._updateViewLocalStateFromMutation({
+					currentApiConfigName: hadPreviousLocalPin ? previousLocalPin : undefined,
+				})
+			} catch (restoreError) {
+				this.log(
+					`[deleteProviderProfile] failed to restore the local view pin: ${
+						restoreError instanceof Error ? restoreError.message : String(restoreError)
+					}`,
+				)
+			}
+			try {
 				const restore = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 					const current = this.getPersistedViewStates({ fresh: true })
 					const merged = { ...current }
 					let changed = false
+					// Restore this view's own durable entry first, even when it did not name the
+					// deleted profile: the activation above may have written a replacement pin.
+					if (JSON.stringify(merged[this.viewStateId]) !== JSON.stringify(previousOwnViewState)) {
+						if (previousOwnViewState === undefined) {
+							delete merged[this.viewStateId]
+						} else {
+							merged[this.viewStateId] = previousOwnViewState
+						}
+						changed = true
+					}
 					for (const [viewId, entry] of Object.entries(previousViewStates)) {
 						if (entry?.currentApiConfigName !== profileToDelete.name) {
 							continue
