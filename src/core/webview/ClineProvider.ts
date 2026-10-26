@@ -2985,6 +2985,8 @@ export class ClineProvider
 		// failure can restore them, including the absence of a pin.
 		const hadPreviousLocalPin = "currentApiConfigName" in this.viewLocalState
 		const previousLocalPin = this.viewLocalState.currentApiConfigName
+		const hadPreviousOverlay = "apiConfiguration" in this.viewLocalState
+		const previousOverlay = this.viewLocalState.apiConfiguration
 		const previousOwnViewState = previousViewStates[this.viewStateId]
 
 		// Commit the secret deletion before the compensating writes. If the deletion
@@ -3172,6 +3174,7 @@ export class ClineProvider
 				// the pre-activation buffer (or its absence).
 				this._updateViewLocalStateFromMutation({
 					currentApiConfigName: hadPreviousLocalPin ? previousLocalPin : undefined,
+					apiConfiguration: hadPreviousOverlay ? previousOverlay : undefined,
 				})
 			} catch (restoreError) {
 				this.log(
