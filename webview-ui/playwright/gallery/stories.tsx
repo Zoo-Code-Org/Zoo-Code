@@ -469,14 +469,8 @@ export const stories: Record<string, Story> = {
 				message: "Missing required 'description' field",
 			},
 		]
-		// The gallery's ExtensionStateContext shim merges arbitrary keys, while the real
-		// provider's state type does not expose the skills diagnostics fields the settings
-		// panel reads; the cast keeps the story typed without changing production state.
-		const initialState = { cwd: "/workspace", skills, skillDiagnostics } as unknown as NonNullable<
-			React.ComponentProps<typeof AppProviders>["initialState"]
-		>
 		return (
-			<AppProviders initialState={initialState}>
+			<AppProviders initialState={{ cwd: "/workspace", skills, skillDiagnostics }}>
 				<div
 					className="flex h-full w-full flex-col bg-vscode-editor-background p-4 text-vscode-foreground"
 					data-testid="skills-settings-story">

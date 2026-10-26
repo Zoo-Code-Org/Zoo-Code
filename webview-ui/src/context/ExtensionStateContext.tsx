@@ -284,6 +284,10 @@ export const createInitialExtensionState = (): ExtensionState => ({
 
 type ExtensionStateProviderInitialState = Partial<ExtensionState> & {
 	routerModels?: RouterModels
+	// The skill state lives outside ExtensionState; the fixture and tests seed it here so the
+	// initial-state contract covers every value the provider exposes.
+	skills?: SkillMetadata[]
+	skillDiagnostics?: SkillDiagnostic[]
 }
 
 export const ExtensionStateContextProvider: React.FC<{
@@ -319,8 +323,10 @@ export const ExtensionStateContextProvider: React.FC<{
 				global: {},
 			},
 	)
-	const [skills, setSkills] = useState<SkillMetadata[]>([])
-	const [skillDiagnostics, setSkillDiagnostics] = useState<SkillDiagnostic[]>([])
+	const [skills, setSkills] = useState<SkillMetadata[]>(() => initialState?.skills ?? [])
+	const [skillDiagnostics, setSkillDiagnostics] = useState<SkillDiagnostic[]>(
+		() => initialState?.skillDiagnostics ?? [],
+	)
 	const [rules, setRules] = useState<RuleMetadata[]>([])
 	const [includeTaskHistoryInEnhance, setIncludeTaskHistoryInEnhance] = useState(
 		() => initialState?.includeTaskHistoryInEnhance ?? true,
