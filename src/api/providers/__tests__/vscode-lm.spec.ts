@@ -1009,10 +1009,10 @@ describe("VsCodeLmHandler", () => {
 					tools: salvageTools,
 				})
 
-				// The series normalizes host cancellation to a canonical AbortError
-				// (name "AbortError", same branded message), so assert the message
-				// only - an Error-instance comparison would also pin the name.
-				await expect(stream.next()).rejects.toThrow("Zoo Code <Language Model API>: Request cancelled by user")
+				// The series normalizes host cancellation to the shared canonical AbortError
+				// (name "AbortError"), so assert the message only - an Error-instance
+				// comparison would also pin the name.
+				await expect(stream.next()).rejects.toThrow("The VS Code LM request was aborted")
 				await expect(stream.next()).resolves.toEqual({ done: true, value: undefined })
 			})
 
@@ -2706,7 +2706,7 @@ describe("VsCodeLmHandler", () => {
 			)
 		})
 
-		it("should throw a Zoo Code branded error when request is cancelled", async () => {
+		it("should throw the shared canonical abort when request is cancelled", async () => {
 			const systemPrompt = "You are a helpful assistant"
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{
@@ -2717,8 +2717,11 @@ describe("VsCodeLmHandler", () => {
 
 			mockLanguageModelChat.sendRequest.mockRejectedValueOnce(new vscode.CancellationError())
 
-			await expect(handler.createMessage(systemPrompt, messages).next()).rejects.toThrow(
-				"Zoo Code <Language Model API>: Request cancelled by user",
+			await expect(handler.createMessage(systemPrompt, messages).next()).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "The VS Code LM request was aborted",
 			)
 		})
 
@@ -3081,7 +3084,7 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "Zoo Code <Language Model API>: Request cancelled by user",
+					error.message === "The VS Code LM request was aborted",
 			)
 		})
 

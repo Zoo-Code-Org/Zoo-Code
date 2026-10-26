@@ -1533,10 +1533,9 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			if (error instanceof vscode.CancellationError) {
 				// The host rejected because the request was cancelled: either the
 				// bridged external signal aborted or the user cancelled the request
-				// in VS Code. Both are aborts, so surface a standard abort error.
-				const abortError = new Error("Zoo Code <Language Model API>: Request cancelled by user")
-				abortError.name = "AbortError"
-				throw abortError
+				// in VS Code. Both are aborts, so surface the shared canonical error
+				// instead of a hand-built copy.
+				throw createAbortError(this.providerName)
 			}
 
 			if (error instanceof Error) {
