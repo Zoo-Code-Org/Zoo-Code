@@ -205,11 +205,17 @@ function _stagingDir(dir: string): string {
 
 /**
  * fsync a file descriptor so its data is durable before the atomic rename.
- * Uses the sync form because this repo's @types/node does not declare
- * fs.promises.fsync; the staging file is small, so the blocking window is bounded.
+ *
+ * The async fsync form runs the same syscall on libuv's thread pool instead of blocking the
+ * extension host event loop (this is also what FileHandle.sync() uses internally). The staging
+ * write and fchmod stay synchronous because they are bounded and need the descriptor the sync
+ * open produced; only the durability barrier - the part the review measured at ~7 ms - is moved
+ * off the event loop. Any fsync error still rejects the publish before the rename.
  */
-function _fsyncFile(fd: number): void {
-	fsSync.fsyncSync(fd)
+function _fsyncFile(fd: number): Promise<void> {
+	return new Promise((resolve, reject) => {
+		fsSync.fsync(fd, (error) => (error ? reject(error) : resolve()))
+	})
 }
 
 /**
@@ -575,7 +581,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				while (offset < buffer.length) {
 					offset += fsSync.writeSync(fd, buffer, offset, buffer.length - offset)
 				}
-				_fsyncFile(fd)
+				await _fsyncFile(fd)
 			} finally {
 				fsSync.closeSync(fd)
 			}
@@ -603,7 +609,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 					_applyTargetOwnership(fd, targetGid, platform)
 					fsSync.fchmodSync(fd, targetMode)
 				}
-				_fsyncFile(fd)
+				await _fsyncFile(fd)
 			} finally {
 				fsSync.closeSync(fd)
 			}
@@ -723,7 +729,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				try {
 					const dirFd = fsSync.openSync(dirPath, "r")
 					try {
-						_fsyncFile(dirFd)
+						await _fsyncFile(dirFd)
 					} finally {
 						fsSync.closeSync(dirFd)
 					}
