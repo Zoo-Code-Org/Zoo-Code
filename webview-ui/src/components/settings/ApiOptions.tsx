@@ -29,6 +29,7 @@ import {
 	handleModelChangeSideEffects,
 	toBedrockModelId,
 } from "./utils/providerModelConfig"
+import { isTemperatureControlSupported } from "./utils/temperatureSupport"
 
 import { vscode } from "@src/utils/vscode"
 import { validateApiConfigurationExcludingModelErrors, getModelValidationError } from "@src/utils/validate"
@@ -85,6 +86,7 @@ import {
 	VercelAiGateway,
 	OpenCodeGo,
 	Kenari,
+	IOIntelligence,
 	NanoGPT,
 	ZooGateway,
 	MiniMax,
@@ -707,6 +709,17 @@ const ApiOptions = ({
 						/>
 					)}
 
+					{selectedProvider === providerIdentifiers.ioIntelligence && (
+						<IOIntelligence
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							routerModels={routerModels}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
+							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
 					{selectedProvider === providerIdentifiers.nanogpt && (
 						<NanoGPT
 							apiConfiguration={apiConfiguration}
@@ -824,7 +837,12 @@ const ApiOptions = ({
 									todoListEnabled={apiConfiguration.todoListEnabled}
 									onChange={(field, value) => setApiConfigurationField(field, value)}
 								/>
-								{selectedModelInfo?.supportsTemperature !== false && (
+								{isTemperatureControlSupported({
+									provider: activeSelectedProvider,
+									modelId: selectedModelId,
+									modelInfo: selectedModelInfo,
+									apiConfiguration,
+								}) && (
 									<TemperatureControl
 										value={apiConfiguration.modelTemperature}
 										onChange={handleInputChange("modelTemperature", noTransform)}

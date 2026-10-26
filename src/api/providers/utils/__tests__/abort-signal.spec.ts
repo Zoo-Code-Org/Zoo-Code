@@ -1,11 +1,15 @@
 import {
+	bridgeExternalAbortSignal,
 	createAbortError,
 	isRequestAborted,
 	mergeAbortSignalAndTimeout,
+	hasUsableTimeout,
 	mergeAbortSignals,
 	rejectOnAbort,
 	resolveModelWithAbort,
 	throwIfAborted,
+	MAX_TIMEOUT_MS,
+	toSdkTimeoutMs,
 } from "../abort-signal"
 import { withSettleGuard } from "../../../../test-utils/settle-guard"
 
@@ -275,6 +279,56 @@ describe("abort-signal utilities", () => {
 
 			await vi.waitFor(() => expect(result?.aborted).toBe(true))
 		})
+
+		it("treats a non-finite timeoutMs as no timeout", () => {
+			const controller = new AbortController()
+
+			// Infinity must not reach AbortSignal.timeout(), which throws
+			// ERR_OUT_OF_RANGE for non-integer delays.
+			expect(() => mergeAbortSignalAndTimeout(undefined, Infinity)).not.toThrow()
+			expect(mergeAbortSignalAndTimeout(undefined, Infinity)).toBeUndefined()
+			expect(mergeAbortSignalAndTimeout(controller.signal, Infinity)).toBe(controller.signal)
+		})
+
+		it("rounds a fractional timeoutMs up before scheduling", async () => {
+			// Node validates AbortSignal.timeout delays as uint32: 1.5 or 0.5
+			// would throw ERR_OUT_OF_RANGE. Pin the rounded delay that actually
+			// reaches AbortSignal.timeout (1.5 -> 2, 0.5 -> 1, never 0) so a
+			// round-down mutation reddens this test instead of still aborting
+			// eventually.
+			const timeoutSpy = vi.spyOn(AbortSignal, "timeout")
+			let result: AbortSignal | undefined
+			let tiny: AbortSignal | undefined
+			try {
+				expect(() => {
+					result = mergeAbortSignalAndTimeout(undefined, 1.5)
+				}).not.toThrow()
+				expect(timeoutSpy).toHaveBeenCalledWith(2)
+				expect(() => {
+					tiny = mergeAbortSignalAndTimeout(undefined, 0.5)
+				}).not.toThrow()
+				expect(timeoutSpy).toHaveBeenCalledWith(1)
+			} finally {
+				timeoutSpy.mockRestore()
+			}
+			expect(result).toBeInstanceOf(AbortSignal)
+			expect(result?.aborted).toBe(false)
+			expect(tiny).toBeInstanceOf(AbortSignal)
+			await vi.waitFor(() => expect(result?.aborted).toBe(true))
+		})
+
+		it("caps an overflowing timeoutMs instead of aborting immediately", async () => {
+			// Node clamps AbortSignal.timeout delays above 2^31-1 ms to 1 ms;
+			// the helper caps the delay so an overflowing timeout does not abort
+			// the request within the first millisecond.
+			const result = mergeAbortSignalAndTimeout(undefined, 2_147_483_648)
+
+			expect(result).toBeInstanceOf(AbortSignal)
+			expect(result?.aborted).toBe(false)
+
+			await new Promise((resolve) => setTimeout(resolve, 20))
+			expect(result?.aborted).toBe(false)
+		})
 	})
 
 	describe("mergeAbortSignals", () => {
@@ -414,5 +468,80 @@ describe("abort-signal utilities", () => {
 		it("returns a fresh error on each call", () => {
 			expect(createAbortError("X")).not.toBe(createAbortError("X"))
 		})
+	})
+})
+
+describe("bridgeExternalAbortSignal", () => {
+	it("returns an undefined signal and a noop dispose without an external signal", () => {
+		const { signal, dispose } = bridgeExternalAbortSignal()
+		expect(signal).toBeUndefined()
+		expect(() => dispose()).not.toThrow()
+	})
+
+	it("returns an already-aborted signal when the external signal is aborted", () => {
+		const controller = new AbortController()
+		controller.abort()
+		const { signal, dispose } = bridgeExternalAbortSignal(controller.signal)
+		expect(signal?.aborted).toBe(true)
+		expect(() => dispose()).not.toThrow()
+	})
+
+	it("aborts the per-request signal when the external signal aborts", () => {
+		const controller = new AbortController()
+		const { signal } = bridgeExternalAbortSignal(controller.signal)
+		expect(signal?.aborted).toBe(false)
+		controller.abort()
+		expect(signal?.aborted).toBe(true)
+	})
+
+	it("detaches the retained listener on dispose", () => {
+		const controller = new AbortController()
+		const addSpy = vitest.spyOn(controller.signal, "addEventListener")
+		const removeSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+		const { signal, dispose } = bridgeExternalAbortSignal(controller.signal)
+
+		expect(addSpy).toHaveBeenCalledTimes(1)
+		const [event, listener, opts] = addSpy.mock.calls[0]
+		expect(event).toBe("abort")
+		expect(opts).toEqual({ once: true })
+
+		dispose()
+		expect(removeSpy).toHaveBeenCalledTimes(1)
+		expect(removeSpy).toHaveBeenCalledWith("abort", listener)
+
+		// After dispose the bridge no longer forwards aborts: the per-request
+		// signal stays live, proving the exact retained callback was detached.
+		controller.abort()
+		expect(signal?.aborted).toBe(false)
+	})
+})
+
+describe("hasUsableTimeout", () => {
+	it("accepts only finite positive values", () => {
+		expect(hasUsableTimeout(1)).toBe(true)
+		expect(hasUsableTimeout(50)).toBe(true)
+		expect(hasUsableTimeout(12.5)).toBe(true)
+	})
+
+	it("rejects values the SDK timeout option cannot take", () => {
+		expect(hasUsableTimeout(undefined)).toBe(false)
+		expect(hasUsableTimeout(0)).toBe(false)
+		expect(hasUsableTimeout(-5)).toBe(false)
+		expect(hasUsableTimeout(Number.NaN)).toBe(false)
+		expect(hasUsableTimeout(Number.POSITIVE_INFINITY)).toBe(false)
+	})
+})
+
+describe("toSdkTimeoutMs", () => {
+	it("rounds fractional delays up", () => {
+		expect(toSdkTimeoutMs(1500.4)).toBe(1501)
+		expect(toSdkTimeoutMs(1)).toBe(1)
+	})
+
+	it("caps delays above the maximum Node timer delay", () => {
+		expect(toSdkTimeoutMs(MAX_TIMEOUT_MS)).toBe(MAX_TIMEOUT_MS)
+		expect(toSdkTimeoutMs(MAX_TIMEOUT_MS + 1)).toBe(MAX_TIMEOUT_MS)
+		expect(toSdkTimeoutMs(Number.MAX_SAFE_INTEGER)).toBe(MAX_TIMEOUT_MS)
 	})
 })

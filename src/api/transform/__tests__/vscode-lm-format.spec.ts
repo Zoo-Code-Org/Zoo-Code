@@ -936,20 +936,22 @@ describe("convertToVsCodeLmMessages surrogate-safe identifiers", () => {
 		expect(codeUnits(sanitizeToolNameSurrogates(`read-${VALID_PAIR}`))).toEqual(codeUnits(`read-${VALID_PAIR}`))
 	})
 
-	it("leaves a valid tool name untouched so it still matches its registry entry", () => {
-		for (const name of ["get_user", "read_file", "apply_diff", "update_todo_list"]) {
+	it.each(["get_user", "read_file", "apply_diff", "update_todo_list"])(
+		"leaves the valid tool name %s untouched so it still matches its registry entry",
+		(name) => {
 			expect(sanitizeToolNameSurrogates(name)).toBe(name)
 			expect(decodeToolNameSurrogates(sanitizeToolNameSurrogates(name))).toBe(name)
-		}
-	})
+		},
+	)
 
-	it("round-trips encoded tool names back to the original registry name", () => {
-		for (const name of [`read${LONE_HIGH}file`, `read${LONE_LOW}file`, "a_uu_b", "x_uD800y", "get_user"]) {
+	it.each([`read${LONE_HIGH}file`, `read${LONE_LOW}file`, "a_uu_b", "x_uD800y", "get_user"])(
+		"round-trips the encoded tool name %j back to the original registry name",
+		(name) => {
 			const declared = sanitizeToolNameSurrogates(name)
 			expect(declared).toMatch(/^[\w-]+$/)
 			expect(codeUnits(decodeToolNameSurrogates(declared))).toEqual(codeUnits(name))
-		}
-	})
+		},
+	)
 
 	it("does not decode a non-marker u+hex sequence", () => {
 		// "queue1234" has "u" followed by hex but no preceding "_", so it must survive untouched.

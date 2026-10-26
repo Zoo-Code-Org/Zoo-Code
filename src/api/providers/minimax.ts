@@ -1,5 +1,7 @@
 import { Anthropic } from "@anthropic-ai/sdk"
+import { Stream as AnthropicStream } from "@anthropic-ai/sdk/streaming"
 import { CacheControlEphemeral } from "@anthropic-ai/sdk/resources"
+import { withFinallyCleanup } from "./stream-cleanup"
 import OpenAI from "openai"
 
 import { type MinimaxModelId, minimaxDefaultModelId, minimaxModels } from "@roo-code/types"
@@ -11,6 +13,7 @@ import { getModelParams } from "../transform/model-params"
 import { mergeEnvironmentDetailsForMiniMax } from "../transform/minimax-format"
 
 import { BaseProvider } from "./base-provider"
+import { bridgeExternalAbortSignal, hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { calculateApiCostAnthropic } from "../../shared/cost"
 import { convertOpenAIToolsToAnthropic } from "../../core/prompts/tools/native-tools/converters"
@@ -84,6 +87,15 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 		const cacheControl: CacheControlEphemeral = { type: "ephemeral" }
 		const { id: modelId, info, maxTokens, temperature } = this.getModel()
 
+		// Bridge the external abort signal from request metadata into a per-request
+		// controller so the SDK call is cancelled when the owning request is aborted
+		// (or when the signal is already aborted). Without an external signal the
+		// client-level timeout configured in the constructor remains the only
+		// cancellation mechanism, preserving the existing behavior.
+		const externalAbortSignal = metadata?.abortSignal
+		const { signal: abortSignal, dispose: removeExternalAbortListener } =
+			bridgeExternalAbortSignal(externalAbortSignal)
+
 		// MiniMax M2 models support prompt caching
 		const supportsPromptCache = info.supportsPromptCache ?? false
 
@@ -112,14 +124,22 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 			tool_choice: convertOpenAIToolChoice(metadata?.tool_choice),
 		}
 
-		const stream = await this.client.messages.create(requestParams)
+		let stream: AnthropicStream<Anthropic.Messages.RawMessageStreamEvent>
+		try {
+			stream = await this.client.messages.create(requestParams, abortSignal ? { signal: abortSignal } : undefined)
+		} catch (error) {
+			// Creation failed before streaming: detach the bridged listener so it
+			// cannot outlive this request.
+			removeExternalAbortListener?.()
+			throw error
+		}
 
 		let inputTokens = 0
 		let outputTokens = 0
 		let cacheWriteTokens = 0
 		let cacheReadTokens = 0
 
-		for await (const chunk of stream) {
+		for await (const chunk of withFinallyCleanup(stream, removeExternalAbortListener)) {
 			switch (chunk.type) {
 				case "message_start": {
 					// Tells us cache reads/writes/input/output.
@@ -288,16 +308,32 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions) {
+	async completePrompt(prompt: string, options?: CompletePromptOptions) {
 		const { id: model, temperature } = this.getModel()
 
-		const message = await this.client.messages.create({
-			model,
-			max_tokens: 16_384,
-			temperature: temperature ?? 1.0,
-			messages: [{ role: "user", content: prompt }],
-			stream: false,
-		})
+		// Build request options with abortSignal and/or timeout handling
+		const requestOptions: Anthropic.RequestOptions = {}
+		if (options?.abortSignal) {
+			requestOptions.signal = options.abortSignal
+		}
+		const timeoutMs = options?.timeoutMs
+		// Only a usable finite positive timeout may be forwarded: the SDKs treat
+		// timeout: 0 as an immediate abort and throw on negative/non-finite values.
+		// Fractional delays are rounded up, matching mergeAbortSignalAndTimeout.
+		if (hasUsableTimeout(timeoutMs)) {
+			requestOptions.timeout = toSdkTimeoutMs(timeoutMs)
+		}
+
+		const message = await this.client.messages.create(
+			{
+				model,
+				max_tokens: 16_384,
+				temperature: temperature ?? 1.0,
+				messages: [{ role: "user", content: prompt }],
+				stream: false,
+			},
+			Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
+		)
 
 		const content = message.content.find(({ type }) => type === "text")
 		return content?.type === "text" ? content.text : ""

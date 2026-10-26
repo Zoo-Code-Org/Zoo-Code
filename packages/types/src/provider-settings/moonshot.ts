@@ -20,6 +20,3 @@ export const moonshotProviderDefinition = createProviderDefinition({
 		moonshotApiKey: z.string().optional(),
 	},
 })
-
-export const kimiCodeAuthMethodSchema = z.enum(["oauth", "api-key"])
-export type KimiCodeAuthMethod = z.infer<typeof kimiCodeAuthMethodSchema>
