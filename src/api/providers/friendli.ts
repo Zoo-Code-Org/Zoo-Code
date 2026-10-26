@@ -11,6 +11,7 @@ import { getModelParams } from "../transform/model-params"
 
 import { BaseOpenAiCompatibleProvider } from "./base-openai-compatible-provider"
 import { handleOpenAIError } from "./utils/error-handler"
+import { hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
 import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
 /**
@@ -193,13 +194,19 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 		}
 
 		try {
-			const requestOptions: OpenAI.RequestOptions | undefined =
-				options && (options.abortSignal !== undefined || options.timeoutMs !== undefined)
-					? { signal: options.abortSignal, timeout: options.timeoutMs }
-					: undefined
+			// The OpenAI SDK rejects a present-but-undefined or unusable `timeout`, so
+			// only forward a real value, rounded and capped like mergeAbortSignalAndTimeout.
+			const requestOptions: OpenAI.RequestOptions = {}
+			if (options?.abortSignal !== undefined) {
+				requestOptions.signal = options.abortSignal
+			}
+			const timeoutMs = options?.timeoutMs
+			if (hasUsableTimeout(timeoutMs)) {
+				requestOptions.timeout = toSdkTimeoutMs(timeoutMs)
+			}
 			const response = (await this.client.chat.completions.create(
 				params as OpenAI.Chat.Completions.ChatCompletionCreateParams,
-				requestOptions,
+				Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
 			)) as OpenAI.Chat.Completions.ChatCompletion
 			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
