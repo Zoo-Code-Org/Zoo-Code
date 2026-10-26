@@ -743,7 +743,11 @@ export class SkillsManager {
 		// back to the resolved path when the directory cannot be resolved (e.g. not created yet).
 		const key = await fs.realpath(directory).catch(() => path.resolve(directory))
 		const previous = SkillsManager.directoryQueues.get(key) ?? Promise.resolve()
-		const run = previous.then(operation)
+		const run = previous.then(async () => {
+			// A manager disposed while this operation waited must not run at all.
+			if (this.isDisposed) throw new Error("SkillsManager is disposed")
+			return operation()
+		})
 		const tracked = run.then(
 			() => undefined,
 			() => undefined,
@@ -774,12 +778,15 @@ export class SkillsManager {
 			// it: when wx fails because the path already exists, that file belongs to someone else.
 			let ownsTemporaryPath = false
 			try {
+				if (this.isDisposed) throw new Error("SkillsManager is disposed")
 				// Exclusive creation: a pre-created symlink at the generated name cannot be followed.
 				await fs.writeFile(temporaryPath, content, { encoding: "utf-8", flag: "wx" })
 				ownsTemporaryPath = true
+				if (this.isDisposed) throw new Error("SkillsManager is disposed")
 				// Re-validate the final target immediately before the rename: the target (or an
 				// ancestor) can change between the caller's resolution and this publish.
 				await validateTarget?.(filePath)
+				if (this.isDisposed) throw new Error("SkillsManager is disposed")
 				await fs.rename(temporaryPath, filePath)
 			} catch (error) {
 				// Best effort: a partial temp file must not be left behind, but an EEXIST failure
@@ -1235,7 +1242,9 @@ Add your skill instructions here.
 		const targetPath = await fs.realpath(skill.path)
 		await this.assertTargetWithinSkillsRoots(targetPath, source)
 		await this.writeSkillFileAtomically(targetPath, newContent, async (target) => {
-			const freshTarget = await fs.realpath(target).catch(() => target)
+			// Fail closed: a resolution failure must propagate so the staged temp write is removed
+			// and the rename is skipped, rather than publishing through a stale path.
+			const freshTarget = await fs.realpath(target)
 			await this.assertTargetWithinSkillsRoots(freshTarget, source)
 		})
 

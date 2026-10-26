@@ -2632,7 +2632,51 @@ Body here.`
 			// the failed rename never committed.
 			expect(mockWriteFile).toHaveBeenCalledTimes(1)
 			expect(mockRename).toHaveBeenCalledWith(temporaryPath, skillMd)
+			// The existing SKILL.md and its directory remain untouched.
+			expect(mockReadFile).toHaveBeenCalledWith(skillMd, "utf-8")
+			expect(mockWriteFile).not.toHaveBeenCalledWith(skillMd, expect.anything(), expect.anything())
+			expect(mockRmdir).not.toHaveBeenCalled()
+			expect(mockRm).not.toHaveBeenCalled()
 			expect(skillsManager["activeTempFiles"].size).toBe(0)
+		})
+
+		it("fails closed when the pre-rename target resolution fails", async () => {
+			const skillDir = p(globalSkillsDir, "resolution-fails")
+			const skillMd = p(skillDir, "SKILL.md")
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["resolution-fails"] : []))
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === skillDir) {
+					return { isDirectory: () => true }
+				}
+				throw enoent()
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === skillMd)
+			mockReadFile.mockResolvedValue("---\nname: resolution-fails\ndescription: A skill\n---\nInstructions")
+			// The first resolution succeeds; the immediate pre-rename resolution fails and must
+			// propagate instead of publishing through the stale path.
+			let resolutions = 0
+			mockRealpath.mockImplementation(async (pathArg: string) => {
+				if (pathArg === skillMd) {
+					resolutions += 1
+					if (resolutions === 1) {
+						return skillMd
+					}
+					throw Object.assign(new Error("EIO: resolution failed"), { code: "EIO" })
+				}
+				return pathArg
+			})
+			mockWriteFile.mockResolvedValue(undefined)
+			mockUnlink.mockResolvedValue(undefined)
+
+			await skillsManager.discoverSkills()
+
+			await expect(skillsManager.updateSkillModes("resolution-fails", "global", ["code"])).rejects.toThrow(
+				"EIO: resolution failed",
+			)
+			const temporaryPath = String(mockWriteFile.mock.calls[0][0])
+			expect(mockUnlink).toHaveBeenCalledWith(temporaryPath)
+			expect(mockRename).not.toHaveBeenCalled()
 		})
 
 		it("refuses to update a SKILL.md that resolves outside the skills roots", async () => {
@@ -4156,6 +4200,18 @@ Instructions`)
 		await skillsManager.initialize()
 
 		expect(createWatcher).not.toHaveBeenCalled()
+	})
+
+	it("rejects a queued write once the manager is disposed", async () => {
+		await skillsManager.dispose()
+		mockWriteFile.mockResolvedValue(undefined)
+		mockUnlink.mockResolvedValue(undefined)
+
+		await expect(
+			skillsManager["writeSkillFileAtomically"](p(globalSkillsDir, "SKILL.md"), "content"),
+		).rejects.toThrow("SkillsManager is disposed")
+		expect(mockWriteFile).not.toHaveBeenCalled()
+		expect(mockRename).not.toHaveBeenCalled()
 	})
 
 	it("removes tracked temp sidecars on dispose", async () => {
