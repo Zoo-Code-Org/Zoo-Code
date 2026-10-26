@@ -1482,8 +1482,9 @@ describe("OpenAiNativeHandler", () => {
 					() => undefined,
 					(e: unknown) => e,
 				)
-				expect(error).toMatchObject({ status: 429 })
-				expect((error as Error).message).toContain("Rate limit exceeded")
+				// The exact SDK error object must reach the caller unchanged (same reference):
+				// retry/backoff read its status, so a wrapper or clone would break them.
+				expect(error).toBe(rateLimited)
 				expect(mockFetch).not.toHaveBeenCalled()
 			})
 
