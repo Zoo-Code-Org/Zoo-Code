@@ -64,13 +64,15 @@ export class ContextProxy {
 	// storage when the superseding write also fails.
 	private durableState = new Map<GlobalStateKey, unknown>()
 	private durableSecrets = new Map<SecretStateKey, unknown>()
-	// Write-completion generation. A write issued before resetAllState (or
-	// refreshSecrets) may still be in flight when that reset/refresh re-seeds the
-	// durable records from storage: its value is then obsolete, and re-recording it
-	// would leave a later failed write rolling the cache back to a value storage no
-	// longer holds. Only completions from the current generation update the durable
-	// maps; resetAllState and refreshSecrets both advance the generation.
-	private resetGeneration = 0
+	// Write-completion generations, one per persistence store. A write issued before
+	// resetAllState (or refreshSecrets) may still be in flight when that reset/refresh
+	// re-seeds the durable records from storage: its value is then obsolete, and
+	// re-recording it would leave a later failed write rolling the cache back to a value
+	// storage no longer holds. Each store compares only its own generation, so a secret
+	// refresh cannot invalidate an in-flight global-state completion (or vice versa).
+	// resetAllState advances both; refreshSecrets advances only the secret generation.
+	private stateGeneration = 0
+	private secretGeneration = 0
 	private _isInitialized = false
 
 	constructor(context: vscode.ExtensionContext) {
@@ -441,7 +443,7 @@ export class ContextProxy {
 		// hold undefined in its cache (no successful write or initialize has landed
 		// for it), so reading the record is exact in every reachable state.
 		const token = Symbol()
-		const writeGeneration = this.resetGeneration
+		const writeGeneration = this.stateGeneration
 		this.stateWriteTokens.set(key, token)
 		this.stateCache[key] = value
 		return Promise.resolve(this.originalContext.globalState.update(key, value))
@@ -450,7 +452,7 @@ export class ContextProxy {
 				// Skip the record if a reset/refresh re-seeded the durable maps in the
 				// meantime: this write completed from before that re-seed, so its value
 				// is obsolete relative to the re-seeded storage.
-				if (this.resetGeneration !== writeGeneration) {
+				if (this.stateGeneration !== writeGeneration) {
 					return
 				}
 				this.durableState.set(key, value)
@@ -485,7 +487,7 @@ export class ContextProxy {
 		// from storage (the durable record is exact in every reachable state: see
 		// updateGlobalState).
 		const token = Symbol()
-		const writeGeneration = this.resetGeneration
+		const writeGeneration = this.secretGeneration
 		this.secretWriteTokens.set(key, token)
 		this.secretCache[key] = value
 
@@ -499,7 +501,7 @@ export class ContextProxy {
 				// The durable write (or delete) landed: the cache value is now the
 				// durable value. Skip the record if a reset/refresh re-seeded the
 				// durable maps in the meantime (see updateGlobalState).
-				if (this.resetGeneration !== writeGeneration) {
+				if (this.secretGeneration !== writeGeneration) {
 					return
 				}
 				this.durableSecrets.set(key, value)
@@ -520,10 +522,10 @@ export class ContextProxy {
 	 * This is useful when you need to ensure the cache has the latest values
 	 */
 	async refreshSecrets(): Promise<void> {
-		// Invalidate writes issued before this refresh: once the re-seed below lands,
-		// their completions hold obsolete values that must not re-record over the
-		// freshly loaded durable records.
-		this.resetGeneration += 1
+		// Invalidate secret writes issued before this refresh: once the re-seed below lands,
+		// their completions hold obsolete values that must not re-record over the freshly
+		// loaded durable records. Global-state writes are untouched by a secrets refresh.
+		this.secretGeneration += 1
 		// The refresh re-syncs the whole secret cache from storage and re-seeds the
 		// durable records with the loaded values, so a later rollback of a pending
 		// pre-refresh write restores the freshly loaded value (the in-write token
@@ -734,7 +736,8 @@ export class ContextProxy {
 		// Invalidate writes issued before this reset: once the durable maps below
 		// are cleared and re-seeded by the re-initialization, their completions hold
 		// obsolete values that must not re-record over the re-seeded records.
-		this.resetGeneration += 1
+		this.stateGeneration += 1
+		this.secretGeneration += 1
 		// Clear in-memory caches. The write tokens are left in place: the durable
 		// records below carry the rollback protection (see the in-write token guard,
 		// which still covers the interleaving where a newer write has moved the cache
