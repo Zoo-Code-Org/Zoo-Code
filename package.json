@@ -124,7 +124,7 @@
 			"@types/react-dom": "18.3.7",
 			"csstype": "3.2.3",
 			"zod": "4.6.7",
-			"@lmstudio/sdk>zod": "3.25.76",
+			"@lmstudio/sdk>zod": "4.6.6",
 			"katex": "0.18.2"
 		}
 	}
