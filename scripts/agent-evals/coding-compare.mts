@@ -18,31 +18,14 @@
 // SIGTERM aimed at the driver alone terminate the tracked group with a bounded
 // SIGTERM-then-SIGKILL escalation before the scratch cleanup runs, and an
 // interrupt leaves no orphan host behind.
-import { execFile, spawn } from "node:child_process"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { promisify } from "node:util"
-import {
-	publishComparisonReport,
-	runBoundedPreparation,
-	sideResultFileName,
-	toSideResult,
-	validateSideResultFile,
-	type SideResultFile,
-} from "./coding-compare.ts"
-import { buildComparisonReport, renderMarkdownReport } from "./coding-report.ts"
-import {
-	assertCommitsApproved,
-	assertCredentialEnvAllowed,
-	buildSideEnvironment,
-	loadTrustPolicy,
-	resolveCommit,
-} from "./coding-trust.ts"
-import { createSideProcessGuard, type SideKillOutcome } from "./side-process-guard.ts"
+import { executeComparisonFlow, runBoundedPreparation, runCompareSide } from "./coding-compare.ts"
+import { assertCommitsApproved, assertCredentialEnvAllowed, loadTrustPolicy, resolveCommit } from "./coding-trust.ts"
+import { createInterruptFlag, createSideProcessGuard, type SideKillOutcome } from "./side-process-guard.ts"
 
-const execFileAsync = promisify(execFile)
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 
 const INSTALL_TIMEOUT_MS = 10 * 60_000
@@ -52,16 +35,16 @@ const SIDE_KILL_GRACE_MS = 30_000
 const DEFAULT_SIDE_TIMEOUT_MINUTES = 120
 
 // Interrupt state. The handlers are registered before any child is spawned.
-// A signal terminates the tracked child group at once; the main flow observes
-// the child exit, the cleanup awaits the escalation before it removes the
-// worktrees, and the driver exits with the conventional signal exit code.
+// A signal arms the flag and starts the guard escalation at once; the flow
+// observes the flag at its async boundaries, the cleanup awaits the
+// escalation before it removes the worktrees, and the driver exits with the
+// conventional signal exit code after that cleanup.
 const sideGuard = createSideProcessGuard(SIDE_KILL_GRACE_MS)
-let interruptSignal: NodeJS.Signals | undefined
+const interruptFlag = createInterruptFlag()
 let interruptKill: Promise<SideKillOutcome> | undefined
-const isInterrupted = (): boolean => interruptSignal !== undefined
 const onInterruptSignal = (signal: NodeJS.Signals): void => {
-	if (interruptSignal !== undefined) return
-	interruptSignal = signal
+	if (interruptFlag.isInterrupted()) return
+	interruptFlag.signal(signal)
 	interruptKill = sideGuard.interrupt()
 }
 process.on("SIGINT", () => onInterruptSignal("SIGINT"))
@@ -121,97 +104,27 @@ const readArgs = (): {
 const prepareWorktree = async (worktree: string): Promise<void> => {
 	await runBoundedPreparation(
 		sideGuard,
-		isInterrupted,
+		interruptFlag.isInterrupted,
 		"pnpm",
 		["install", "--frozen-lockfile"],
 		worktree,
 		INSTALL_TIMEOUT_MS,
 	)
-	await runBoundedPreparation(sideGuard, isInterrupted, "pnpm", ["build"], worktree, BUILD_TIMEOUT_MS)
+	await runBoundedPreparation(sideGuard, interruptFlag.isInterrupted, "pnpm", ["build"], worktree, BUILD_TIMEOUT_MS)
 }
 
-// Runs one trusted side against the evaluated worktree. The side script comes
-// from this checkout, receives only the allowlisted environment plus the
-// named credential variable, re-checks the worktree commit against the trust
-// policy, and must finish inside its own wall clock.
-const runSide = async (
-	side: "baseline" | "candidate",
-	commit: string,
-	inputs: ReturnType<typeof readArgs>,
-	scratchDir: string,
-): Promise<SideResultFile> => {
-	if (isInterrupted()) throw new Error(`interrupted before the ${side} side started`)
-	const worktree = path.join(scratchDir, side)
+// One side's full preparation: the detached worktree add of that exact
+// commit, then the install and build inside it.
+const prepareSideWorktree = async (commit: string, worktree: string): Promise<void> => {
 	await runBoundedPreparation(
 		sideGuard,
-		isInterrupted,
+		interruptFlag.isInterrupted,
 		"git",
 		["worktree", "add", "--detach", worktree, commit],
 		root,
 		WORKTREE_TIMEOUT_MS,
 	)
 	await prepareWorktree(worktree)
-	if (isInterrupted()) throw new Error(`interrupted before the ${side} side started`)
-	const sideOut = path.join(scratchDir, `${side}-out`)
-	await fs.mkdir(sideOut, { recursive: true })
-	const exit = await new Promise<number>((resolve) => {
-		const child = spawn(
-			process.execPath,
-			[
-				"--import",
-				"tsx",
-				path.join(root, "scripts/agent-evals/coding-side.mts"),
-				"--reps",
-				String(inputs.reps),
-				"--out",
-				sideOut,
-				"--trust-file",
-				inputs.trustFile,
-				"--credential-env",
-				inputs.credentialEnv,
-				"--evaluated-root",
-				worktree,
-			],
-			{
-				cwd: root,
-				env: buildSideEnvironment(process.env, inputs.credentialEnv, side),
-				stdio: "inherit",
-				detached: true,
-			},
-		)
-		sideGuard.track(child.pid)
-		let timedOut = false
-		const timer = setTimeout(() => {
-			timedOut = true
-			try {
-				if (child.pid) process.kill(-child.pid, "SIGTERM")
-			} catch {
-				child.kill("SIGTERM")
-			}
-			setTimeout(() => {
-				try {
-					if (child.pid) process.kill(-child.pid, "SIGKILL")
-				} catch {
-					child.kill("SIGKILL")
-				}
-			}, SIDE_KILL_GRACE_MS).unref()
-		}, inputs.sideTimeoutMs)
-		child.once("error", () => {
-			clearTimeout(timer)
-			sideGuard.track(undefined)
-			resolve(1)
-		})
-		child.once("exit", (code) => {
-			clearTimeout(timer)
-			sideGuard.track(undefined)
-			resolve(timedOut ? 1 : (code ?? 1))
-		})
-	})
-	if (exit !== 0) throw new Error(`${side} side failed with exit code ${exit}`)
-	const parsed: unknown = JSON.parse(await fs.readFile(path.join(sideOut, sideResultFileName()), "utf8"))
-	// The side output must describe exactly this side and its approved commit,
-	// or the pair is invalid.
-	return validateSideResultFile(parsed, side, commit)
 }
 
 const inputs = readArgs()
@@ -227,36 +140,39 @@ assertCommitsApproved(policy, [baselineCommit, candidateCommit])
 
 const scratchDir = await fs.mkdtemp(path.join(os.tmpdir(), "coding-evals-compare-"))
 await fs.mkdir(inputs.out, { recursive: true })
-try {
-	const report = buildComparisonReport({
-		baseline: toSideResult(await runSide("baseline", baselineCommit, inputs, scratchDir)),
-		candidate: toSideResult(await runSide("candidate", candidateCommit, inputs, scratchDir)),
-		repetitions: inputs.reps,
-	})
-	// The reports are the comparison's publication point. The pair is
-	// published as one generation with a completion marker; any failure above
-	// or during publication leaves no complete report generation behind.
-	await publishComparisonReport(inputs.out, report)
-	console.log(
-		report.compatibility.compatible
-			? `comparison complete: compatible pair, report in ${inputs.out}`
-			: `comparison complete: INCOMPATIBLE pair (${report.compatibility.differences.join(", ")}), report in ${inputs.out}`,
-	)
-} finally {
-	// An interrupt escalation must finish before the worktrees go away, so
-	// no child is still writing while its tree is deleted.
-	await interruptKill
-	await execFileAsync("git", ["worktree", "remove", "--force", path.join(scratchDir, "baseline")], {
-		cwd: root,
-		timeout: 30_000,
-	}).catch(() => {})
-	await execFileAsync("git", ["worktree", "remove", "--force", path.join(scratchDir, "candidate")], {
-		cwd: root,
-		timeout: 30_000,
-	}).catch(() => {})
-	await fs.rm(scratchDir, { recursive: true, force: true }).catch(() => {})
-}
-// An interrupt terminated the side group above, and the cleanup in the
-// finally block has completed. Exit with the conventional signal code.
-if (interruptSignal === "SIGINT") process.exit(130)
-if (interruptSignal === "SIGTERM") process.exit(143)
+// Both sides run inside the flow. The flow cleanup finishes the interrupt
+// escalation, removes the worktrees, and removes the scratch directory
+// before any exit, so no child is still writing while its tree is deleted.
+const outcome = await executeComparisonFlow({
+	out: inputs.out,
+	scratchDir,
+	root,
+	reps: inputs.reps,
+	runSide: (side) =>
+		runCompareSide(side, side === "baseline" ? baselineCommit : candidateCommit, scratchDir, {
+			guard: sideGuard,
+			isInterrupted: interruptFlag.isInterrupted,
+			root,
+			sideScript: path.join(root, "scripts/agent-evals/coding-side.mts"),
+			reps: inputs.reps,
+			trustFile: inputs.trustFile,
+			credentialEnv: inputs.credentialEnv,
+			sideTimeoutMs: inputs.sideTimeoutMs,
+			killGraceMs: SIDE_KILL_GRACE_MS,
+			prepareWorktree: prepareSideWorktree,
+			createSideOutDir: async (dir) => {
+				await fs.mkdir(dir, { recursive: true })
+			},
+		}),
+	interruptedSignal: interruptFlag.name,
+	interruptKill: () => interruptKill ?? Promise.resolve(),
+})
+// An interrupt stopped the comparison and the flow cleanup has completed.
+// Exit with the conventional signal code on the normal and the throwing
+// path alike.
+if (outcome.status === "interrupted") process.exit(interruptFlag.exitCode())
+console.log(
+	outcome.report.compatibility.compatible
+		? `comparison complete: compatible pair, report in ${inputs.out}`
+		: `comparison complete: INCOMPATIBLE pair (${outcome.report.compatibility.differences.join(", ")}), report in ${inputs.out}`,
+)

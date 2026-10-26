@@ -1,11 +1,12 @@
-import { spawn } from "node:child_process"
+import { execFile, spawn } from "node:child_process"
 import fs from "node:fs/promises"
 import path from "node:path"
+import { promisify } from "node:util"
 import type { SidePins } from "./coding-pins.ts"
 import { buildComparisonReport, renderMarkdownReport, type ComparisonReport, type SideResult } from "./coding-report.ts"
 import { DEFAULT_REPETITIONS } from "./coding-stats.ts"
 import type { CodingRunRecord } from "./coding-run.ts"
-import { buildWorktreeEnvironment } from "./coding-trust.ts"
+import { buildSideEnvironment, buildWorktreeEnvironment } from "./coding-trust.ts"
 import type { SideProcessGuard } from "./side-process-guard.ts"
 import { writeFileAtomic, writeJsonAtomic } from "./fs-atomic.ts"
 
@@ -107,6 +108,184 @@ export const runBoundedPreparation = async (
 		})
 	})
 }
+
+// The worktree removals in the flow cleanup are best effort and bounded.
+const WORKTREE_REMOVE_TIMEOUT_MS = 30_000
+
+// Everything one side execution needs from the driver process. The guard and
+// the interrupt view are shared with the driver's signal handler; the two
+// async steps are seams, so tests can place a signal inside the last boundary
+// before the spawn without a repository, a toolchain, or a credential.
+export interface CompareSideWiring {
+	guard: SideProcessGuard
+	isInterrupted: () => boolean
+	// Trusted checkout root: the spawn cwd of the side process.
+	root: string
+	// The side entry script of this checkout. Production points at
+	// scripts/agent-evals/coding-side.mts; tests substitute a fixture.
+	sideScript: string
+	reps: number
+	trustFile: string
+	credentialEnv: string
+	sideTimeoutMs: number
+	killGraceMs: number
+	// Prepares the side's worktree: the detached worktree add of this exact
+	// commit, the frozen dependency install, and the build of that commit.
+	prepareWorktree: (commit: string, worktree: string) => Promise<void>
+	// Creates the side output directory. This is the last async boundary
+	// before the spawn; tests arm the interrupt inside it.
+	createSideOutDir: (dir: string) => Promise<void>
+}
+
+// Runs one trusted side against the evaluated worktree. The side script comes
+// from this checkout, receives only the allowlisted environment plus the named
+// credential variable, re-checks the worktree commit against the trust
+// policy, and must finish inside its own wall clock.
+export const runCompareSide = async (
+	side: "baseline" | "candidate",
+	commit: string,
+	scratchDir: string,
+	wiring: CompareSideWiring,
+): Promise<SideResultFile> => {
+	if (wiring.isInterrupted()) throw new Error(`interrupted before the ${side} side started`)
+	const worktree = path.join(scratchDir, side)
+	await wiring.prepareWorktree(commit, worktree)
+	if (wiring.isInterrupted()) throw new Error(`interrupted before the ${side} side started`)
+	const sideOut = path.join(scratchDir, `${side}-out`)
+	// The directory creation is the last await before the spawn. A signal
+	// during it arms the guard while nothing is tracked, and the guard never
+	// revisits a finished escalation, so the side must be refused here rather
+	// than started into an already-interrupted driver.
+	await wiring.createSideOutDir(sideOut)
+	if (wiring.isInterrupted()) throw new Error(`interrupted before the ${side} side started`)
+	// From this refusal check to the guard track there is no await, so a
+	// signal cannot slip between them and miss the new child.
+	const exit = await new Promise<number>((resolve) => {
+		const child = spawn(
+			process.execPath,
+			[
+				"--import",
+				"tsx",
+				wiring.sideScript,
+				"--reps",
+				String(wiring.reps),
+				"--out",
+				sideOut,
+				"--trust-file",
+				wiring.trustFile,
+				"--credential-env",
+				wiring.credentialEnv,
+				"--evaluated-root",
+				worktree,
+			],
+			{
+				cwd: wiring.root,
+				env: buildSideEnvironment(process.env, wiring.credentialEnv, side),
+				stdio: "inherit",
+				detached: true,
+			},
+		)
+		wiring.guard.track(child.pid)
+		let timedOut = false
+		const timer = setTimeout(() => {
+			timedOut = true
+			try {
+				if (child.pid) process.kill(-child.pid, "SIGTERM")
+			} catch {
+				child.kill("SIGTERM")
+			}
+			setTimeout(() => {
+				try {
+					if (child.pid) process.kill(-child.pid, "SIGKILL")
+				} catch {
+					child.kill("SIGKILL")
+				}
+			}, wiring.killGraceMs).unref()
+		}, wiring.sideTimeoutMs)
+		child.once("error", () => {
+			clearTimeout(timer)
+			wiring.guard.track(undefined)
+			resolve(1)
+		})
+		child.once("exit", (code) => {
+			clearTimeout(timer)
+			wiring.guard.track(undefined)
+			resolve(timedOut ? 1 : (code ?? 1))
+		})
+	})
+	if (exit !== 0) throw new Error(`${side} side failed with exit code ${exit}`)
+	const parsed: unknown = JSON.parse(await fs.readFile(path.join(sideOut, sideResultFileName()), "utf8"))
+	// The side output must describe exactly this side and its approved commit,
+	// or the pair is invalid.
+	return validateSideResultFile(parsed, side, commit)
+}
+
+// The comparison body after the trust gates: both sides, one report
+// publication, and the cleanup that must finish before the driver exits.
+export interface ComparisonFlowWiring {
+	out: string
+	scratchDir: string
+	root: string
+	reps: number
+	// Runs one side to its validated result. The driver wires its own side
+	// runner; tests substitute synthetic sides.
+	runSide: (side: "baseline" | "candidate") => Promise<SideResultFile>
+	// The observed terminal signal, or undefined. The interrupt outcome and
+	// the final exit code read this one view.
+	interruptedSignal: () => NodeJS.Signals | undefined
+	// The guard's kill escalation, created when the signal arrived. Cleanup
+	// awaits it so no tracked child outlives the removed worktrees.
+	interruptKill: () => Promise<unknown>
+}
+
+export type ComparisonFlowOutcome =
+	{ status: "completed"; report: ComparisonReport } | { status: "interrupted"; signal: "SIGINT" | "SIGTERM" }
+
+// Runs the comparison and resolves to its outcome after the cleanup. An
+// interrupt resolves to its signal no matter how the body ended, so the
+// caller exits with the conventional code on the normal and the throwing
+// path alike; any other failure stays a thrown failure.
+export const executeComparisonFlow = async (wiring: ComparisonFlowWiring): Promise<ComparisonFlowOutcome> => {
+	let completed: ComparisonReport | undefined
+	let failure: unknown
+	try {
+		const report = buildComparisonReport({
+			baseline: toSideResult(await wiring.runSide("baseline")),
+			candidate: toSideResult(await wiring.runSide("candidate")),
+			repetitions: wiring.reps,
+		})
+		// The reports are the comparison's publication point. The pair is
+		// published as one generation with a completion marker; any failure
+		// above or during publication leaves no complete report generation
+		// behind.
+		await publishComparisonReport(wiring.out, report)
+		completed = report
+	} catch (error) {
+		// Deferred, not swallowed: the cleanup below runs first, then the
+		// failure rethrows unless the run was interrupted.
+		failure = error
+	} finally {
+		// An interrupt escalation must finish before the worktrees go away,
+		// so no child is still writing while its tree is deleted.
+		await wiring.interruptKill()
+		await execFileAsync("git", ["worktree", "remove", "--force", path.join(wiring.scratchDir, "baseline")], {
+			cwd: wiring.root,
+			timeout: WORKTREE_REMOVE_TIMEOUT_MS,
+		}).catch(() => {})
+		await execFileAsync("git", ["worktree", "remove", "--force", path.join(wiring.scratchDir, "candidate")], {
+			cwd: wiring.root,
+			timeout: WORKTREE_REMOVE_TIMEOUT_MS,
+		}).catch(() => {})
+		await fs.rm(wiring.scratchDir, { recursive: true, force: true }).catch(() => {})
+	}
+	const signal = wiring.interruptedSignal()
+	if (signal === "SIGINT" || signal === "SIGTERM") return { status: "interrupted", signal }
+	if (failure !== undefined) throw failure
+	if (completed === undefined) throw new Error("comparison ended without a report or a failure")
+	return { status: "completed", report: completed }
+}
+
+const execFileAsync = promisify(execFile)
 
 // Serializes a side result for artifact storage. Full run records travel so
 // each side's traces and grading verdicts stay inspectable.
