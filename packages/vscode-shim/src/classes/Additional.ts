@@ -112,6 +112,25 @@ export class LanguageModelTextPart {
 	constructor(public value: string) {}
 }
 
+export class LanguageModelDataPart {
+	constructor(
+		public data: Uint8Array,
+		public mimeType: string,
+	) {}
+
+	static image(data: Uint8Array, mimeType: string): LanguageModelDataPart {
+		return new LanguageModelDataPart(data, mimeType)
+	}
+
+	static text(value: string, mimeType: string = "text/plain"): LanguageModelDataPart {
+		return new LanguageModelDataPart(new TextEncoder().encode(value), mimeType)
+	}
+
+	static json(value: unknown, mimeType: string = "application/json"): LanguageModelDataPart {
+		return new LanguageModelDataPart(new TextEncoder().encode(JSON.stringify(value)), mimeType)
+	}
+}
+
 export class LanguageModelToolCallPart {
 	constructor(
 		public callId: string,
