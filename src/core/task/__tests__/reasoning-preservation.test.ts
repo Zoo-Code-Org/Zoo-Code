@@ -155,6 +155,7 @@ vi.mock("../../../utils/fs", () => ({
 
 // Import Task AFTER all vi.mock() calls - Vitest hoists mocks so this works
 import { Task } from "../Task"
+import { LiteLLMHandler } from "../../../api/providers/lite-llm"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 describe("Task reasoning preservation", () => {
@@ -511,6 +512,44 @@ describe("Task reasoning preservation", () => {
 			type: "text",
 			text: assistantText,
 		})
+	})
+
+	it.each([
+		{ setting: "on", detected: false, preserve: true },
+		{ setting: "off", detected: true, preserve: false },
+		{ setting: "auto", detected: true, preserve: true },
+		{ setting: "auto", detected: false, preserve: false },
+	] as const)("filters history with the LiteLLM $setting request snapshot ($detected)", async (testCase) => {
+		const { setting, detected, preserve } = testCase
+		const task = new Task({
+			provider: mockProvider as ClineProvider,
+			apiConfiguration: mockApiConfiguration,
+			task: "Test task",
+			startTask: false,
+		})
+		const handler = new LiteLLMHandler({ litellmModelId: "alias", litellmPreserveReasoning: setting })
+		handler["models"] = {
+			alias: { contextWindow: 123456, supportsPromptCache: false, preserveReasoning: detected },
+		}
+		const snapshot = handler.getModel().info
+		await task["addToApiConversationHistory"](
+			{ role: "assistant", content: [{ type: "text", text: "Answer" }] },
+			"Earlier reasoning",
+		)
+		const history = task["buildCleanConversationHistory"](task.apiConversationHistory, snapshot)
+		expect(history[0]).toMatchObject({
+			role: "assistant",
+			content: preserve
+				? [
+						{ type: "reasoning", text: "Earlier reasoning", summary: [] },
+						{ type: "text", text: "Answer" },
+					]
+				: "Answer",
+		})
+		// Filtering outbound history does not remove stored/UI reasoning.
+		expect(task.apiConversationHistory[0].content).toEqual(
+			expect.arrayContaining([expect.objectContaining({ type: "reasoning", text: "Earlier reasoning" })]),
+		)
 	})
 
 	it("should keep plain text reasoning in buildCleanConversationHistory when preserveReasoning is true", async () => {

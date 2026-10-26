@@ -609,6 +609,13 @@
 		"codestralBaseUrlDesc": "Set an alternative URL for the Codestral model.",
 		"xaiApiKey": "xAI API Key",
 		"getXaiApiKey": "Get xAI API Key",
+		"litellmPreserveReasoning": {
+			"label": "Send reasoning back to the model",
+			"auto": "Auto",
+			"on": "On",
+			"off": "Off",
+			"description": "Send earlier plain-text reasoning back to the model. Auto follows model detection; On always sends; Off never sends. Does not enable reasoning generation or hide reasoning in chat."
+		},
 		"litellmApiKey": "LiteLLM API Key",
 		"litellmBaseUrl": "LiteLLM Base URL",
 		"awsCredentials": "AWS Credentials",

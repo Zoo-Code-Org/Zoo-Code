@@ -4,7 +4,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import { LiteLLMHandler } from "../lite-llm"
 import { getModels } from "../fetchers/modelCache"
 import { ApiHandlerOptions } from "../../../shared/api"
-import { type ModelRecord, litellmDefaultModelId, litellmDefaultModelInfo } from "@roo-code/types"
+import { type ModelInfo, type ModelRecord, litellmDefaultModelId, litellmDefaultModelInfo } from "@roo-code/types"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
@@ -91,6 +91,23 @@ describe("LiteLLMHandler", () => {
 			litellmModelId: litellmDefaultModelId,
 		}
 		handler = new LiteLLMHandler(mockOptions)
+	})
+
+	it("overrides fetched metadata without changing the catalog shared by other profiles", async () => {
+		const info: ModelInfo = Object.freeze({ ...litellmDefaultModelInfo, preserveReasoning: false })
+		const catalog = { alias: info }
+		const provider = new LiteLLMHandler({
+			...mockOptions,
+			litellmModelId: "alias",
+			litellmPreserveReasoning: "on",
+		})
+
+		vi.mocked(getModels).mockResolvedValueOnce(catalog)
+		expect(await provider.fetchModel()).toEqual({ id: "alias", info: { ...info, preserveReasoning: true } })
+
+		const otherProfile = new LiteLLMHandler({ ...mockOptions, litellmModelId: "alias" })
+		vi.mocked(getModels).mockResolvedValueOnce(catalog)
+		expect(await otherProfile.fetchModel()).toEqual({ id: "alias", info: { ...info, preserveReasoning: false } })
 	})
 
 	describe("prompt caching", () => {
