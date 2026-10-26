@@ -1009,6 +1009,14 @@ describe("SettingsView - Experiments", () => {
 		fireEvent.click(checkbox as HTMLInputElement)
 		await waitFor(() => expect(saveButton).toBeEnabled())
 
+		// Buffered only: nothing is persisted before Save.
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ experiments: expect.anything() }),
+			}),
+		)
+
 		fireEvent.click(saveButton)
 
 		// Only the toggled key is sent: the host merges the received map over the stored
@@ -1020,6 +1028,34 @@ describe("SettingsView - Experiments", () => {
 					// The control starts enabled by default; toggling it off is the change.
 					experiments: { preventFocusDisruption: false },
 				}),
+			}),
+		)
+	})
+
+	it("submits the toggled-on value when a stored false is rendered", async () => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection={"experimental"} />, {
+			state: { experiments: { preventFocusDisruption: false } },
+		})
+
+		const saveButton = screen.getByTestId("save-button")
+		await waitFor(() => expect(saveButton).toBeDisabled())
+
+		const label = await waitFor(() => {
+			const content = screen.getByTestId("settings-content")
+			return within(content).getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name").closest("label")
+		})
+		const checkbox = label!.querySelector('input[type="checkbox"]') as HTMLInputElement
+		// The stored false is hydrated, so the control starts unchecked.
+		expect(checkbox).not.toBeChecked()
+
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(saveButton)
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ experiments: { preventFocusDisruption: true } }),
 			}),
 		)
 	})
