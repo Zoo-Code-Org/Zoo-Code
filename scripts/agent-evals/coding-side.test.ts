@@ -86,6 +86,48 @@ const makeFixtureCommit = async (dir: string): Promise<{ repo: string; commit: s
 }
 
 describe("coding side trust gate", () => {
+	it(
+		"rejects a dirty approved evaluated root before any host launch or publication",
+		{ timeout: 180_000 },
+		async () => {
+			const dir = await fs.mkdtemp(path.join(os.tmpdir(), "coding-side-test-"))
+			try {
+				const { repo, commit } = await makeFixtureCommit(dir)
+				const trustFile = await writePolicy(dir, [commit])
+				// The approved checkout is modified after approval: one staged
+				// tracked change and one untracked file. The commit identity is
+				// still approved, but it no longer describes the tree.
+				await fs.writeFile(path.join(repo, "tracked.txt"), "changed")
+				await execFileAsync("git", ["add", "tracked.txt"], { cwd: repo })
+				await fs.writeFile(path.join(repo, "untracked.txt"), "untracked")
+				// The fake credential only proves the failure is not the
+				// credential check: the cleanliness gate must stop the side first.
+				const outcome = await runSideScript(
+					[
+						"--reps",
+						"1",
+						"--out",
+						path.join(dir, "out"),
+						"--trust-file",
+						trustFile,
+						"--evaluated-root",
+						repo,
+					],
+					minimalEnv({ SOLHEIM_API_KEY: "sk-test" }),
+				)
+				assert.notEqual(outcome.code, 0)
+				assert.match(outcome.stderr, /tracked or untracked changes/)
+				assert.ok(!outcome.stdout.includes("coding-evals side complete"))
+				// The rejection happens before the publication point: no side
+				// results and no artifacts exist.
+				await assert.rejects(fs.access(path.join(dir, "out", "side-results.json")))
+				await assert.rejects(fs.access(path.join(dir, "out", "artifacts")))
+			} finally {
+				await fs.rm(dir, { recursive: true, force: true })
+			}
+		},
+	)
+
 	it("rejects an unapproved evaluated root before any host launch", { timeout: 180_000 }, async () => {
 		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "coding-side-test-"))
 		try {

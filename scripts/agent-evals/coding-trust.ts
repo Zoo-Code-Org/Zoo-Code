@@ -63,6 +63,40 @@ export function assertCommitsApproved(policy: TrustPolicy, commits: readonly str
 	if (unapproved.length > 0) throw new UntrustedCommitError(unapproved)
 }
 
+// A tree whose tracked or untracked files differ from its commit executes
+// content the approved commit does not contain, so the approval would not
+// describe the code the extension host loads.
+export class DirtyEvaluatedTreeError extends Error {
+	constructor(readonly entries: string[]) {
+		const shown = entries.slice(0, 10)
+		const more = entries.length > shown.length ? `, and ${entries.length - shown.length} more` : ""
+		super(
+			`evaluated root has tracked or untracked changes; the approved commit does not describe the files the host would load: ${shown.join(", ")}${more}`,
+		)
+		this.name = "DirtyEvaluatedTreeError"
+	}
+}
+
+// Gate before any host launch. The evaluated root must match its approved
+// commit exactly, so a modified checkout can never run under that commit's
+// approval. Ignored files, such as dependency installs and build outputs,
+// stay outside commit identity and outside this check: the approval does not
+// attest them. The comparison driver closes that gap by loading only a fresh
+// detached worktree built from the approved commit.
+export async function assertEvaluatedTreeClean(root: string): Promise<void> {
+	const { execFile } = await import("node:child_process")
+	const { promisify } = await import("node:util")
+	const { stdout } = await promisify(execFile)("git", ["status", "--porcelain"], {
+		cwd: root,
+		timeout: 30_000,
+	})
+	const entries = stdout
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line.length > 0)
+	if (entries.length > 0) throw new DirtyEvaluatedTreeError(entries)
+}
+
 // Provider credential variables this framework supports. The side script and
 // the comparison driver accept only these names, so the tooling can never be
 // pointed at an unrelated parent secret by naming an arbitrary variable.

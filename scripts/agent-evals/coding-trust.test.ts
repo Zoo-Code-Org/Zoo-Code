@@ -1,19 +1,52 @@
 import assert from "node:assert/strict"
+import { execFile } from "node:child_process"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { promisify } from "node:util"
 import { describe, it } from "node:test"
 import {
 	assertCommitsApproved,
 	assertCredentialEnvAllowed,
+	assertEvaluatedTreeClean,
 	buildSideEnvironment,
 	buildWorktreeEnvironment,
+	DirtyEvaluatedTreeError,
 	loadTrustPolicy,
 	UntrustedCommitError,
 	type TrustPolicy,
 } from "./coding-trust.ts"
 
+const execFileAsync = promisify(execFile)
 const sha = (c: string): string => c.repeat(40)
+
+// One throwaway repository with one empty commit. It stands in for an
+// evaluated root; no code from it ever runs in these checks.
+const makeRepo = async (dir: string): Promise<string> => {
+	const repo = path.join(dir, "repo")
+	await fs.mkdir(repo)
+	await execFileAsync("git", ["init", "-q"], { cwd: repo })
+	await execFileAsync(
+		"git",
+		[
+			"-c",
+			"user.email=fixture@example.test",
+			"-c",
+			"user.name=fixture",
+			// The operator's git config may force signed commits, and the
+			// throwaway fixture has no key or tty.
+			"-c",
+			"commit.gpgsign=false",
+			"commit",
+			"--allow-empty",
+			"-q",
+			"-m",
+			"fixture",
+		],
+		{ cwd: repo },
+	)
+	return repo
+}
 
 const writePolicy = async (dir: string, content: unknown): Promise<string> => {
 	const file = path.join(dir, "trust-policy.json")
@@ -113,6 +146,97 @@ describe("credential environment allowlist", () => {
 	it("rejects unrelated secret variables before any process starts", () => {
 		for (const name of ["AWS_SECRET_ACCESS_KEY", "OPENAI_API_KEY", "GITHUB_TOKEN", "PATH"]) {
 			assert.throws(() => assertCredentialEnvAllowed(name), /credential environment variable must be one of/)
+		}
+	})
+})
+
+describe("evaluated tree cleanliness gate", () => {
+	it("accepts a clean tree", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "coding-trust-test-"))
+		try {
+			const repo = await makeRepo(dir)
+			await assert.doesNotReject(assertEvaluatedTreeClean(repo))
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("accepts a tree with only ignored build artifacts", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "coding-trust-test-"))
+		try {
+			const repo = await makeRepo(dir)
+			await fs.writeFile(path.join(repo, ".gitignore"), "dist\n")
+			await execFileAsync("git", ["add", ".gitignore"], { cwd: repo })
+			await execFileAsync(
+				"git",
+				[
+					"-c",
+					"user.email=fixture@example.test",
+					"-c",
+					"user.name=fixture",
+					"-c",
+					"commit.gpgsign=false",
+					"commit",
+					"-q",
+					"-m",
+					"ignore",
+				],
+				{ cwd: repo },
+			)
+			// Ignored files sit outside commit identity: dependency installs
+			// and build outputs never make the tree dirty, and the approval
+			// never attests them either.
+			await fs.mkdir(path.join(repo, "dist"))
+			await fs.writeFile(path.join(repo, "dist", "run.sh"), "#!/bin/sh\n")
+			await fs.chmod(path.join(repo, "dist", "run.sh"), 0o755)
+			await assert.doesNotReject(assertEvaluatedTreeClean(repo))
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("rejects a tracked modification after the commit was approved", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "coding-trust-test-"))
+		try {
+			const repo = await makeRepo(dir)
+			await fs.writeFile(path.join(repo, "tracked.txt"), "approved\n")
+			await execFileAsync("git", ["add", "tracked.txt"], { cwd: repo })
+			await execFileAsync(
+				"git",
+				[
+					"-c",
+					"user.email=fixture@example.test",
+					"-c",
+					"user.name=fixture",
+					"-c",
+					"commit.gpgsign=false",
+					"commit",
+					"-q",
+					"-m",
+					"tracked",
+				],
+				{ cwd: repo },
+			)
+			await fs.writeFile(path.join(repo, "tracked.txt"), "changed\n")
+			await assert.rejects(assertEvaluatedTreeClean(repo), (error: unknown) => {
+				assert.ok(error instanceof DirtyEvaluatedTreeError)
+				assert.match(error.message, /tracked or untracked changes/)
+				assert.ok(error.entries.some((entry) => entry.includes("tracked.txt")))
+				return true
+			})
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("rejects an untracked file", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "coding-trust-test-"))
+		try {
+			const repo = await makeRepo(dir)
+			await fs.writeFile(path.join(repo, "untracked.txt"), "x")
+			await assert.rejects(assertEvaluatedTreeClean(repo), DirtyEvaluatedTreeError)
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
 		}
 	})
 })

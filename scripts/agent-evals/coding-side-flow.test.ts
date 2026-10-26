@@ -143,6 +143,62 @@ describe("side execution flow", () => {
 		}
 	})
 
+	it("prints one bounded diagnostic with the fixture name and repetition index when a repetition throws", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "side-flow-test-"))
+		const lines: string[] = []
+		const originalError = console.error
+		console.error = (line: string) => lines.push(String(line))
+		try {
+			const outcome = await flow({
+				repetitions: plan(1),
+				out: dir,
+				isInterrupted: () => false,
+				runRepetition: async () => {
+					throw new Error("wiring broke")
+				},
+			})
+			assert.equal(outcome.completed, true)
+			const failed = outcome.runs[0]
+			assert.ok(failed)
+			assert.deepEqual(failed.outcome, { outcome: "infrastructure-failure", reason: "runTraceMissing" })
+			assert.equal(lines.length, 1)
+			assert.match(
+				lines[0] ?? "",
+				/^coding-evals repetition failed: fixture clamp-range rep 0: Error: wiring broke$/,
+			)
+		} finally {
+			console.error = originalError
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("prints a safe fallback for a non-Error throw and never prints the thrown value", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "side-flow-test-"))
+		const lines: string[] = []
+		const originalError = console.error
+		console.error = (line: string) => lines.push(String(line))
+		try {
+			const outcome = await flow({
+				repetitions: plan(1),
+				out: dir,
+				isInterrupted: () => false,
+				runRepetition: async () => {
+					throw { credential: "not-a-real-credential" }
+				},
+			})
+			const failed = outcome.runs[0]
+			assert.ok(failed)
+			assert.deepEqual(failed.outcome, { outcome: "infrastructure-failure", reason: "runTraceMissing" })
+			assert.equal(lines.length, 1)
+			assert.match(lines[0] ?? "", /non-Error value thrown$/)
+			// The thrown value itself never reaches the diagnostic.
+			assert.ok(!lines[0]?.includes("not-a-real-credential"))
+		} finally {
+			console.error = originalError
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
 	it("keeps running after a wiring error and records it as an infrastructure failure", async () => {
 		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "side-flow-test-"))
 		try {
