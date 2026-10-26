@@ -45,11 +45,11 @@ Zoo Code는 Roo Code가 만든 기반 위에서 다음 기능을 더하며 계�
 - **더 안정적인 터미널 및 편집 워크플로우** — 터미널 조기 완료, 작업 상태 경합, 컨텍스트 관리, diff 편집, 프로바이더별 도구 사용 문제를 수정.
 - **워크스페이스를 더 세밀하게 제어** — 규칙 관리, 모드별 MCP 제한, 멀티 루트 경로 제어, 모델 reasoning 옵션, 완료 시 변경 사항 검토 작업을 제공.
 
-## v3.90.0의 새로운 기능
+## v3.92.0의 새로운 기능
 
-- ✨ **Provider와 모델:** GitHub Copilot이 이제 provider입니다. 로그인하면 Zoo Code가 Copilot 모델을 불러옵니다. IO Intelligence는 자체 API 키를 쓰는 provider입니다. Gemini 4 Argon은 Gemini와 Vertex에 있습니다. GPT-6 Luna는 OpenCode Go에 있습니다. Gemini 4 Argon과 GPT-6 Luna는 Zoo Gateway에도 있습니다.
-- 🧭 **도구 실행:** 같은 도구 호출을 반복하면 경고가 나오고, 그다음 Zoo Code가 그 루프를 멈춥니다. `attempt_completion`을 꺼도 작업이 끝나지 못하는 상태가 되지 않습니다. 대기 중인 메시지는 직접 보내는 명령과 같은 명령 보호 검사를 거칩니다.
-- ⚡ **추론과 스트리밍:** Anthropic adaptive thinking이 채팅에 표시되고 thinking token이 집계됩니다. R1 토글은 llama.cpp, Ollama, LM Studio의 추론을 유지합니다. Codex는 보이는 요약과 함께 암호화된 추론을 유지합니다. VS Code language model 스트림은 스트림이 실패하면 guarded recovery를 사용합니다.
+- ✨ **더 빠른 모델 선택과 강화된 모델 지원:** 채팅 작성창에서 모델을 전환하세요. Amazon Bedrock에서 Claude Haiku 5.5를 사용하고, OpenRouter에서 더 정확한 Kimi K3 기능을 이용하며, Vercel AI Gateway에서 수정된 Gemini 4 Argon 한도를 적용하세요.
+- 🧭 **더 안정적인 터미널, 편집, 채팅 및 원격 워크플로:** 원할 때 명령 출력을 기본적으로 접고, 편집 실패 원인을 더 명확히 확인하며, 추론 및 API 행을 계속 표시하고, 원격 워크스페이스의 시작 및 프록시 문제를 방지하세요.
+- 🔌 **확장된 MCP 마켓플레이스:** MCP 마켓플레이스를 통해 Zoo Code를 AnySearch, Mailtea, Tradehand에 연결하세요.
 
 ## Zoo Code가 당신을 위해 무엇을 할 수 있을까요?
 

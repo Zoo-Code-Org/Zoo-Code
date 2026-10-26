@@ -16,6 +16,7 @@ import {
 	type ProviderSettingsEntry,
 	type TaskEvent,
 	type TaskLike,
+	type TaskStartResponse,
 	type CreateTaskOptions,
 	type TaskApiConversationHistorySequence,
 	type WebviewThemeFixture,
@@ -28,7 +29,10 @@ import {
 	PROVIDER_SETTINGS_KEYS,
 	IpcOrigin,
 	IpcMessageType,
+	TASK_START_FAILURE_ERROR_CODE,
+	TASK_START_FAILURE_ERROR_MESSAGE,
 } from "@roo-code/types"
+
 import { IpcServer } from "@roo-code/ipc"
 
 import { Package } from "../shared/package"
@@ -106,20 +110,53 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 				}
 
 				switch (command.commandName) {
-					case TaskCommandName.StartNewTask:
-						this.log(
-							`[API] StartNewTask -> ${command.data.text}, ${JSON.stringify(command.data.configuration)}`,
-						)
-						try {
-							await this.startNewTask(command.data)
-						} catch (error) {
-							// IpcServer does not await async listeners: an uncaught rejection here
-							// would surface as an unhandled rejection in the extension host.
-							this.log(
-								`[API] StartNewTask failed: ${error instanceof Error ? error.message : String(error)}`,
-							)
+					case TaskCommandName.StartNewTask: {
+						// Neither prompt nor settings values enter the log.
+						this.log("[API] StartNewTask", {
+							promptLength: command.data.text.length,
+							imageCount: command.data.images?.length ?? 0,
+							newTab: command.data.newTab === true,
+							requestId: command.data.requestId,
+						})
+
+						const { requestId } = command.data
+
+						if (requestId === undefined) {
+							// IpcServer does not await async listeners: an uncaught rejection
+							// here would surface as an unhandled rejection in the extension host.
+							try {
+								await this.startNewTask(command.data, { focusSidebar: false })
+							} catch (error) {
+								this.log(
+									`[API] StartNewTask failed: ${error instanceof Error ? error.message : String(error)}`,
+								)
+							}
+							break
 						}
+
+						// Exactly one sanitized, client-scoped response per
+						// correlated start. The reply never echoes the failure.
+						// Await actual startup, including configuration writes.
+						// The smoke controller owns its timeout and terminates
+						// its isolated host; shared-profile writes are not raced.
+						let response: TaskStartResponse
+						try {
+							const taskId = await this.startNewTask(command.data, {
+								focusSidebar: false,
+							})
+							response = { requestId, success: true, taskId }
+						} catch {
+							this.log("[API] StartNewTask failed", { requestId })
+							response = {
+								requestId,
+								success: false,
+								errorCode: TASK_START_FAILURE_ERROR_CODE,
+								errorMessage: TASK_START_FAILURE_ERROR_MESSAGE,
+							}
+						}
+						sendResponse(RooCodeEventName.TaskStartResponse, [response])
 						break
+					}
 					case TaskCommandName.CancelTask:
 						this.log(`[API] CancelTask`)
 						await this.cancelCurrentTask()
@@ -202,19 +239,22 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		return super.emit(eventName, ...args)
 	}
 
-	public async startNewTask({
-		configuration,
-		text,
-		images,
-		newTab,
-		preserveOpenTabs,
-	}: {
-		configuration?: RooCodeSettings
-		text?: string
-		images?: string[]
-		newTab?: boolean
-		preserveOpenTabs?: boolean
-	}) {
+	public async startNewTask(
+		{
+			configuration,
+			text,
+			images,
+			newTab,
+			preserveOpenTabs,
+		}: {
+			configuration?: RooCodeSettings
+			text?: string
+			images?: string[]
+			newTab?: boolean
+			preserveOpenTabs?: boolean
+		},
+		startOptions?: { focusSidebar?: boolean },
+	) {
 		let provider: ClineProvider
 		// A provider created for this call and never handed a task must not outlive the
 		// failed call in the active-instance list.
@@ -230,7 +270,11 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			createdInNewTab = true
 			this.registerListeners(provider)
 		} else {
-			await vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`)
+			// IPC callers omit focus: executeCommand cannot be cancelled and a
+			// stalled webview launch would block the whole start.
+			if (startOptions?.focusSidebar ?? true) {
+				await vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`)
+			}
 
 			provider = this.sidebarProvider
 		}
