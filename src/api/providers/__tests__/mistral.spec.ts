@@ -453,6 +453,39 @@ describe("MistralHandler", () => {
 		})
 	})
 
+	it("wraps an Error raised by the stream iterator during for await", async () => {
+		mockCreate.mockImplementationOnce(async () =>
+			(async function* () {
+				yield { data: { choices: [{ delta: { content: "partial" }, index: 0 }] } }
+				throw new Error("stream exploded")
+			})(),
+		)
+
+		await expect(
+			collectStream(handler.createMessage("system", [{ role: "user", content: "hello" }])),
+		).rejects.toThrow("Mistral completion error: stream exploded")
+
+		// The provider reports the failure once through telemetry, with the original message.
+		expect(mockCaptureException).toHaveBeenCalledTimes(1)
+		expect(mockCaptureException.mock.calls[0][0].message).toContain("stream exploded")
+	})
+
+	it("wraps a non-Error value raised by the stream iterator during for await", async () => {
+		mockCreate.mockImplementationOnce(async () =>
+			(async function* () {
+				yield { data: { choices: [{ delta: { content: "partial" }, index: 0 }] } }
+				throw 42
+			})(),
+		)
+
+		await expect(
+			collectStream(handler.createMessage("system", [{ role: "user", content: "hello" }])),
+		).rejects.toThrow("Mistral completion error: 42")
+
+		expect(mockCaptureException).toHaveBeenCalledTimes(1)
+		expect(mockCaptureException.mock.calls[0][0].message).toContain("42")
+	})
+
 	describe("native tool calling", () => {
 		const systemPrompt = "You are a helpful assistant."
 		const messages: Anthropic.Messages.MessageParam[] = [
