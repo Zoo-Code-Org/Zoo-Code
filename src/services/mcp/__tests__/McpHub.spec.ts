@@ -1254,7 +1254,7 @@ describe("McpHub", () => {
 			// Neither the provider cwd nor the VS Code workspace supplies a root: an empty
 			// confinement root would let the write proceed unbounded, so it must be refused.
 			Object.defineProperty(mockProvider, "cwd", { value: undefined, configurable: true })
-			const workspaceSpy = vi.spyOn(pathUtils, "getWorkspacePath").mockReturnValue(undefined)
+			const workspaceSpy = vi.spyOn(pathUtils, "getWorkspacePath").mockReturnValue("")
 			// The project config path still resolves, so the write reaches the confinement guard
 			// rather than failing earlier while resolving the path.
 			const projectPathSpy = vi
