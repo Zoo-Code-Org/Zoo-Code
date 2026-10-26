@@ -2608,7 +2608,12 @@ Body here.`
 
 			const temporaryPath = String(mockWriteFile.mock.calls[0][0])
 			expect(temporaryPath).toMatch(/\.SKILL\.md\.[^/\\]+\.tmp$/)
+			expect(mockWriteFile.mock.calls[0][2]).toEqual(expect.objectContaining({ flag: "wx" }))
 			expect(mockUnlink).toHaveBeenCalledWith(temporaryPath)
+			// The existing SKILL.md was never replaced: the only write went to the temp sidecar and
+			// the failed rename never committed.
+			expect(mockWriteFile).toHaveBeenCalledTimes(1)
+			expect(mockRename).toHaveBeenCalledWith(temporaryPath, skillMd)
 			expect(skillsManager["activeTempFiles"].size).toBe(0)
 		})
 
@@ -4045,6 +4050,16 @@ Instructions`)
 			})
 		})
 	})
+	it("does not start watchers when initialization runs after disposal", async () => {
+		const createWatcher = vi.mocked(vscode.workspace.createFileSystemWatcher)
+		await skillsManager.dispose()
+		createWatcher.mockClear()
+
+		await skillsManager.initialize()
+
+		expect(createWatcher).not.toHaveBeenCalled()
+	})
+
 	it("removes tracked temp sidecars on dispose", async () => {
 		mockUnlink.mockResolvedValue(undefined)
 		skillsManager["activeTempFiles"].add("/mock/skills/foo/.SKILL.md.123.abc.tmp")

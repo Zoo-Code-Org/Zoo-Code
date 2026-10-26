@@ -118,16 +118,25 @@ export class SkillsManager {
 		this.providerRef = new WeakRef(provider)
 	}
 
-	async initialize(): Promise<void> {
-		// A previous extension-host stop can leave a staged SKILL.md temp sidecar behind; the
-		// in-memory tracking cannot survive that, so sweep the known skills directories once.
-		try {
-			await this.sweepStaleSkillTempFiles()
-		} catch {
-			// Stale-cleanup is best effort; discovery and watcher setup still run.
-		}
-		await this.discoverSkills()
-		await this.setupFileWatchers()
+	private initialization: Promise<void> | null = null
+
+	initialize(): Promise<void> {
+		if (this.initialization) return this.initialization
+		this.initialization = (async () => {
+			// A previous extension-host stop can leave a staged SKILL.md temp sidecar behind; the
+			// in-memory tracking cannot survive that, so sweep the known skills directories once.
+			try {
+				await this.sweepStaleSkillTempFiles()
+			} catch {
+				// Stale-cleanup is best effort; discovery and watcher setup still run.
+			}
+			// Disposal can land during the sweep: stop before touching discovery or watchers.
+			if (this.isDisposed) return
+			await this.discoverSkills()
+			if (this.isDisposed) return
+			await this.setupFileWatchers()
+		})()
+		return this.initialization
 	}
 
 	/**
@@ -715,7 +724,11 @@ export class SkillsManager {
 	 * must not leave a truncated SKILL.md that the loader would silently misparse.
 	 * The temp file is removed when the write or rename fails.
 	 */
-	private async writeSkillFileAtomically(filePath: string, content: string): Promise<void> {
+	private async writeSkillFileAtomically(
+		filePath: string,
+		content: string,
+		validateTarget?: (targetPath: string) => Promise<void>,
+	): Promise<void> {
 		const directory = path.dirname(filePath)
 		const temporaryPath = path.join(
 			directory,
@@ -723,7 +736,11 @@ export class SkillsManager {
 		)
 		this.activeTempFiles.add(temporaryPath)
 		try {
-			await fs.writeFile(temporaryPath, content, "utf-8")
+			// Exclusive creation: a pre-created symlink at the generated name cannot be followed.
+			await fs.writeFile(temporaryPath, content, { encoding: "utf-8", flag: "wx" })
+			// Re-validate the final target immediately before the rename: the target (or an
+			// ancestor) can change between the caller's resolution and this publish.
+			await validateTarget?.(filePath)
 			await fs.rename(temporaryPath, filePath)
 		} catch (error) {
 			// Best effort: a partial temp file must not be left behind. The original
@@ -1173,7 +1190,10 @@ Add your skill instructions here.
 		// symlink with a regular file (or write somewhere other than the target the caller saw).
 		const targetPath = await fs.realpath(skill.path)
 		await this.assertTargetWithinSkillsRoots(targetPath, source)
-		await this.writeSkillFileAtomically(targetPath, newContent)
+		await this.writeSkillFileAtomically(targetPath, newContent, async (target) => {
+			const freshTarget = await fs.realpath(target).catch(() => target)
+			await this.assertTargetWithinSkillsRoots(freshTarget, source)
+		})
 
 		// Refresh skills list
 		await this.discoverSkills()
@@ -1264,6 +1284,7 @@ Add your skill instructions here.
 	}
 
 	private async setupFileWatchers(): Promise<void> {
+		if (this.isDisposed) return
 		// Skip if test environment is detected or VSCode APIs are not available
 		if (process.env.NODE_ENV === "test" || !vscode.workspace.createFileSystemWatcher) {
 			return
@@ -1303,6 +1324,7 @@ Add your skill instructions here.
 	}
 
 	private watchDirectory(dirPath: string): void {
+		if (this.isDisposed) return
 		const watcher = this.createSkillsWatcher(dirPath)
 		if (watcher) {
 			this.disposables.push(watcher)
