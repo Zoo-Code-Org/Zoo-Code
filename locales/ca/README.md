@@ -47,11 +47,11 @@ Zoo Code parteix de la base creada per Roo Code i continua ampliant-la amb:
 - **Fluxos de terminal i edició més fiables** — correccions per a la finalització prematura del terminal, les condicions de cursa en l'estat de les tasques, la gestió del context, l'edició de diff i l'ús d'eines específiques de cada proveïdor.
 - **Més control sobre el teu espai de treball** — gestió de regles, restriccions MCP per mode, controls de rutes multiarrel, opcions de raonament dels models i accions per revisar els canvis en completar una tasca.
 
-## Novetats a la v3.90.0
+## Novetats a la v3.92.0
 
-- ✨ **Proveïdors i models:** GitHub Copilot ara és un proveïdor: inicia la sessió i Zoo Code carrega els teus models de Copilot. IO Intelligence és un proveïdor amb la seva pròpia clau d'API. Gemini 4 Argon és a Gemini i Vertex. GPT-6 Luna és a OpenCode Go. Gemini 4 Argon i GPT-6 Luna també són a Zoo Gateway.
-- 🧭 **Execució d'eines:** Repetir la mateixa crida d'eina mostra un avís i després Zoo Code atura aquest bucle. Desactivar `attempt_completion` ja no deixa una tasca sense poder acabar. Els missatges en cua passen les mateixes comprovacions de protecció d'ordres que les ordres que envies directament.
-- ⚡ **Raonament i streaming:** El pensament adaptatiu d'Anthropic es mostra al xat i es compten els thinking tokens. L'interruptor R1 conserva el raonament de llama.cpp, Ollama i LM Studio. Codex conserva el raonament xifrat amb el resum que veus. Els streams del model de llenguatge de VS Code fan servir recuperació protegida quan un stream falla.
+- ✨ **Tria de models més ràpida i compatibilitat millorada:** Canvia de model des de l'editor de missatges del xat. Utilitza Claude Haiku 5.5 a Amazon Bedrock, obtén unes capacitats de Kimi K3 més precises a OpenRouter i utilitza els límits corregits de Gemini 4 Argon a Vercel AI Gateway.
+- 🧭 **Fluxos de treball de terminal, edició, xat i remots més fiables:** Configura la sortida de les ordres perquè es replegui per defecte quan vulguis, obtén errors d'edició més clars, mantén visibles les files de raonament i d'API i evita problemes d'inici i de proxy als espais de treball remots.
+- 🔌 **Marketplace d'MCP ampliat:** Connecta Zoo Code a AnySearch, Mailtea i Tradehand mitjançant el marketplace d'MCP.
 
 ## Què pot fer Zoo Code per TU?
 

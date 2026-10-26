@@ -13,6 +13,13 @@ import { getModelParams } from "../transform/model-params"
 
 import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
+import {
+	bridgeExternalAbortSignal,
+	createAbortError,
+	hasUsableTimeout,
+	toSdkTimeoutMs,
+	isRequestAborted,
+} from "./utils/abort-signal"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
 import { isMcpTool } from "../../utils/mcp-name"
@@ -95,6 +102,15 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 		const input = convertToResponsesApiInput(messages)
 		const responseTools = this.mapResponseTools(metadata?.tools)
 
+		// Bridge the external abort signal from request metadata into a per-request
+		// controller so the SDK call is cancelled when the owning request is aborted
+		// (or when the signal is already aborted). Without an external signal the
+		// client-level timeout configured in the constructor remains the only
+		// cancellation mechanism, preserving the existing behavior.
+		const externalAbortSignal = metadata?.abortSignal
+		const { signal: abortSignal, dispose: removeExternalAbortListener } =
+			bridgeExternalAbortSignal(externalAbortSignal)
+
 		// Build request options
 		const requestBody: Record<string, any> = {
 			model: model.id,
@@ -127,36 +143,84 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 			requestBody.reasoning = { effort: model.reasoning.reasoning_effort }
 		}
 
-		let stream: AsyncIterable<any>
 		try {
-			stream = (await this.client.responses.create({
-				...requestBody,
-				stream: true,
-			} as any)) as unknown as AsyncIterable<any>
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error)
-			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")
-			TelemetryService.instance.captureException(apiError)
-			throw handleOpenAIError(error, this.providerName)
-		}
+			let stream: AsyncIterable<any>
+			try {
+				stream = (await this.client.responses.create(
+					{ ...requestBody, stream: true } as any,
+					abortSignal ? { signal: abortSignal } : undefined,
+				)) as unknown as AsyncIterable<any>
+			} catch (error) {
+				// Normalize cancellations to the contract error: the OpenAI SDK's
+				// APIUserAbortError carries name "Error" and message "Request was
+				// aborted.", so rethrowing it raw would leak a non-conforming shape to
+				// the caller's AbortError guard.
+				if (isRequestAborted(error, abortSignal)) {
+					throw createAbortError(this.providerName)
+				}
+				const errorMessage = error instanceof Error ? error.message : String(error)
+				const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")
+				TelemetryService.instance.captureException(apiError)
+				throw handleOpenAIError(error, this.providerName)
+			}
 
-		const normalizeUsage = createUsageNormalizer()
-		yield* processResponsesApiStream(stream, normalizeUsage)
+			const normalizeUsage = createUsageNormalizer()
+			try {
+				yield* processResponsesApiStream(stream, normalizeUsage)
+			} catch (error) {
+				// An abort landing after responses.create resolved surfaces here as
+				// the SDK's APIUserAbortError thrown from stream iteration (name
+				// "Error", message "Request was aborted."), outside the create
+				// catch above. Normalize it to the contract AbortError too, so
+				// callers never classify a cancellation as a provider failure.
+				if (isRequestAborted(error, abortSignal)) {
+					throw createAbortError(this.providerName)
+				}
+				throw error
+			}
+		} finally {
+			// Release the listener once the stream is consumed, whether the
+			// request completed, failed, or the generator was closed early.
+			removeExternalAbortListener?.()
+		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		const model = this.getModel()
 
 		try {
-			const response = await this.client.responses.create({
-				model: model.id,
-				input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
-				store: false,
-			})
+			// Build request options with abortSignal and/or timeout handling
+			const requestOptions: OpenAI.RequestOptions = {}
+			if (options?.abortSignal) {
+				requestOptions.signal = options.abortSignal
+			}
+			const timeoutMs = options?.timeoutMs
+			// Only a usable finite positive timeout may be forwarded: the SDKs treat
+			// timeout: 0 as an immediate abort and throw on negative/non-finite values.
+			// Fractional delays are rounded up, matching mergeAbortSignalAndTimeout.
+			if (hasUsableTimeout(timeoutMs)) {
+				requestOptions.timeout = toSdkTimeoutMs(timeoutMs)
+			}
+
+			const response = await this.client.responses.create(
+				{
+					model: model.id,
+					input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
+					store: false,
+				},
+				Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
+			)
 
 			// output_text is a convenience field on the Responses API response
 			return response.output_text || ""
 		} catch (error) {
+			// Normalize cancellations to the contract error: the OpenAI SDK's
+			// APIUserAbortError carries name "Error" and message "Request was
+			// aborted.", so rethrowing it raw would leak a non-conforming shape to
+			// the caller's AbortError guard.
+			if (isRequestAborted(error, options?.abortSignal)) {
+				throw createAbortError(this.providerName)
+			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "completePrompt")
 			TelemetryService.instance.captureException(apiError)
