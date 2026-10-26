@@ -82,4 +82,47 @@ describe("coding compare isolation gate", () => {
 			await fs.rm(dir, { recursive: true, force: true })
 		}
 	})
+
+	it(
+		"runs past the isolation gate without the flag and fails at the approved-commit check",
+		{ timeout: 180_000 },
+		async () => {
+			const dir = await fs.mkdtemp(path.join(os.tmpdir(), "coding-compare-test-"))
+			try {
+				const trustFile = path.join(dir, "trust-policy.json")
+				// The empty policy approves nothing, so the trust gate must reject
+				// the run. The placeholder credential only proves the failure is
+				// not the credential check; no real credential enters this test.
+				await fs.writeFile(trustFile, JSON.stringify({ version: 1, approvedCommits: [] }))
+				const out = path.join(dir, "out")
+				const env = { ...minimalEnv(), SOLHEIM_API_KEY: "not-a-real-credential" }
+				const outcome = await runCompareScript(
+					[
+						"--baseline",
+						"a".repeat(40),
+						"--candidate",
+						"b".repeat(40),
+						"--reps",
+						"1",
+						"--out",
+						out,
+						"--trust-file",
+						trustFile,
+					],
+					env,
+				)
+				assert.notEqual(outcome.code, 0)
+				// The failure is the approved-commit gate, not the argument gate.
+				assert.doesNotMatch(outcome.stderr, /--allow-unisolated-grading is not accepted here/)
+				assert.match(outcome.stderr, /trust policy must list at least one approved commit SHA/)
+				// The rejection happens before any report generation exists, so
+				// the comparison never publishes anything.
+				for (const name of ["comparison-report.json", "comparison-report.md", "comparison-report.complete"]) {
+					await assert.rejects(fs.access(path.join(out, name)))
+				}
+			} finally {
+				await fs.rm(dir, { recursive: true, force: true })
+			}
+		},
+	)
 })

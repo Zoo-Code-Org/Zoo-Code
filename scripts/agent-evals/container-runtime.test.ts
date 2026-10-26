@@ -168,24 +168,31 @@ describe("container grading runtime", () => {
 		assert.equal(digest.available ? digest.value : "", "node:22-bookworm@sha256:" + "a".repeat(64))
 	})
 
-	it("preserves the resolved digest when a later lookup stays unavailable", async () => {
+	it("never reuses a previous digest when the current lookup stays unavailable", async () => {
 		let lookups = 0
 		const cli = recordingCli({
 			imageDigest: async () => {
 				lookups += 1
 				cli.calls.push("inspect")
-				return lookups <= 2 ? "node:22-bookworm@sha256:" + "b".repeat(64) : undefined
+				// Only the first run's lookup finds the image; every later
+				// lookup, before and after a pull, stays unavailable.
+				return lookups === 1 ? "node:22-bookworm@sha256:" + "b".repeat(64) : undefined
 			},
 		})
 		const runtime = createContainerGradingRuntime({ cli })
+		// The first run resolves the identity and records it for the pins.
 		await runtime.run(makeJob())
-		// The second run finds no digest, pulls, and still finds none; the
-		// runtime keeps the identity the first run resolved and never
-		// fabricates a new one.
+		const first = await runtime.imageDigest!()
+		assert.equal(first.available, true)
+		assert.equal(first.available ? first.value : "", "node:22-bookworm@sha256:" + "b".repeat(64))
+		// The second run finds no digest before or after the pull. The
+		// runtime must report the identity as unavailable instead of reusing
+		// the digest of the image the first run graded with.
 		await runtime.run(makeJob())
-		const digest = await runtime.imageDigest!()
-		assert.equal(digest.available, true)
-		assert.equal(digest.available ? digest.value : "", "node:22-bookworm@sha256:" + "b".repeat(64))
+		// The missed lookups sent the second run to the pull path.
+		assert.equal(cli.calls.filter((call) => call.startsWith("pull")).length, 1)
+		const second = await runtime.imageDigest!()
+		assert.equal(second.available, false)
 	})
 
 	it("removes the container by name on timeout and verifies the removal before deleting output", async () => {

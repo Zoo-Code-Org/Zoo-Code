@@ -40,6 +40,12 @@ export interface SideFlowOutcome {
 	completed: boolean
 }
 
+// One bounded diagnostic line per failed repetition. Only the error name and
+// message travel to stderr; a thrown non-Error value can hold anything, so it
+// is never printed.
+const describeRepetitionError = (error: unknown): string =>
+	error instanceof Error ? `${error.name}: ${error.message.slice(0, 500)}` : "non-Error value thrown"
+
 export async function executeSideFlow(inputs: SideFlowInputs): Promise<SideFlowOutcome> {
 	const runs: CodingRunRecord[] = []
 	for (const repetition of inputs.repetitions) {
@@ -48,9 +54,14 @@ export async function executeSideFlow(inputs: SideFlowInputs): Promise<SideFlowO
 		if (inputs.isInterrupted()) return { runs, completed: false }
 		try {
 			runs.push(await inputs.runRepetition(repetition))
-		} catch {
+		} catch (error) {
 			// The substrate never throws for task failures. This guards wiring
-			// errors only, and records them as infrastructure failures.
+			// errors only, and records them as infrastructure failures. The
+			// diagnostic names the repetition so a silent failure row has an
+			// operator-visible cause.
+			console.error(
+				`coding-evals repetition failed: fixture ${repetition.fixtureName} rep ${repetition.repIndex}: ${describeRepetitionError(error)}`,
+			)
 			const outcome = classifyRunOutcome({ hasTrace: false, finalWorkspaceAvailable: false })
 			runs.push({
 				fixtureName: repetition.fixtureName,
