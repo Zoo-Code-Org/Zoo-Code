@@ -51,6 +51,7 @@ import { useOpenRouterModelProviders } from "./useOpenRouterModelProviders"
 import { useLmStudioModels } from "./useLmStudioModels"
 import { useOllamaModels } from "./useOllamaModels"
 import { useGitHubCopilotModels, type GitHubCopilotModels } from "./useGitHubCopilotModels"
+import { useVsCodeLmModels, type VsCodeLmModels } from "./useVsCodeLmModels"
 
 /**
  * Helper to get a validated model ID for dynamic providers.
@@ -118,6 +119,7 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 	const ollamaModels = useOllamaModels(ollamaModelId)
 	// Not part of readiness: until the host reports, the curated catalog describes the model.
 	const copilotModels = useGitHubCopilotModels(activeProvider === providerIdentifiers.githubCopilot)
+	const vsCodeLmModels = useVsCodeLmModels(activeProvider === providerIdentifiers.vscodeLm)
 
 	// Compute readiness only for the data actually needed for the selected provider
 	const needRouterModels = shouldFetchRouterModels
@@ -156,6 +158,7 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 					lmStudioModels: (lmStudioModels.data || undefined) as ModelRecord | undefined,
 					ollamaModels: (ollamaModels.data || undefined) as ModelRecord | undefined,
 					copilotModels: copilotModels.data,
+					vsCodeLmModels: vsCodeLmModels.data,
 				})
 			: activeProvider === providerIdentifiers.kimiCode && apiConfiguration
 				? {
@@ -189,6 +192,7 @@ function getSelectedModel({
 	lmStudioModels,
 	ollamaModels,
 	copilotModels,
+	vsCodeLmModels,
 }: {
 	provider: ProviderName
 	apiConfiguration: ProviderSettings
@@ -197,6 +201,7 @@ function getSelectedModel({
 	lmStudioModels: ModelRecord | undefined
 	ollamaModels: ModelRecord | undefined
 	copilotModels?: GitHubCopilotModels
+	vsCodeLmModels?: VsCodeLmModels
 }): { id: string; info: ModelInfo | undefined } {
 	// the `undefined` case are used to show the invalid selection to prevent
 	// users from seeing the default model if their selection is invalid
@@ -469,6 +474,14 @@ function getSelectedModel({
 			}
 		}
 		case providerIdentifiers.vscodeLm: {
+			const selector = apiConfiguration.vsCodeLmModelSelector
+			const matches = vsCodeLmModels?.filter((model) =>
+				(["id", "vendor", "family", "version"] as const).every(
+					(key) => selector?.[key] === undefined || model[key] === selector[key],
+				),
+			)
+			// The host selects its first match; a separate listing cannot establish that order.
+			const reported = matches?.length === 1 ? matches[0] : undefined
 			const id = apiConfiguration?.vsCodeLmModelSelector
 				? `${apiConfiguration.vsCodeLmModelSelector.vendor}/${apiConfiguration.vsCodeLmModelSelector.family}`
 				: vscodeLlmDefaultModelId
@@ -484,7 +497,7 @@ function getSelectedModel({
 				...openAiModelInfoSaneDefaults,
 				...listedModel,
 				contextWindow: listedModel.maxInputTokens,
-				supportsImages: false, // VSCode LM API currently doesn't support images.
+				supportsImages: reported?.modelInfo?.supportsImages,
 			}
 			return { id, info }
 		}

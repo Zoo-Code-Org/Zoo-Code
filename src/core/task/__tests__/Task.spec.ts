@@ -1440,6 +1440,35 @@ describe("Cline", () => {
 		})
 	})
 
+	describe("create", () => {
+		it("rejects missing task inputs before constructing the task", () => {
+			const onCreated = vi.fn()
+
+			expect(() => Task.create({ provider: mockProvider, apiConfiguration: mockApiConfig, onCreated })).toThrow(
+				"Either historyItem or task/images must be provided",
+			)
+			expect(onCreated).not.toHaveBeenCalled()
+		})
+
+		it("returns the cached run promise", async () => {
+			const startTaskSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "startTask").mockResolvedValue(undefined)
+
+			try {
+				const [task, promise] = Task.create({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "x",
+				})
+
+				expect(task.run()).toBe(promise)
+				expect(startTaskSpy).toHaveBeenCalledExactlyOnceWith("x", undefined)
+				await promise
+			} finally {
+				startTaskSpy.mockRestore()
+			}
+		})
+	})
+
 	describe("constructor", () => {
 		it.each([{ apiConfigName: "parent-local-profile" }, { apiConfigName: undefined }])(
 			"uses an explicit delegated-child context without shared state or startup persistence",
