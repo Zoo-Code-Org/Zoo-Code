@@ -385,8 +385,8 @@ describe("QwenCodeHandler abort wiring", () => {
 			expect(removeSpy).toHaveBeenCalledWith("abort", listener)
 		})
 
-		it("reports an elapsed timeout as TimeoutError, not as caller cancellation", async () => {
-			mockCreate.mockImplementation((_params?: unknown, opts?: { signal?: AbortSignal }) => {
+		it("reports an elapsed timeout as TimeoutError while the caller signal stays live", async () => {
+			mockCreate.mockImplementationOnce((_params?: unknown, opts?: { signal?: AbortSignal }) => {
 				return new Promise((_resolve, reject) => {
 					const signal = opts?.signal
 					if (!signal) {
@@ -401,15 +401,17 @@ describe("QwenCodeHandler abort wiring", () => {
 				})
 			})
 
+			const caller = new AbortController()
 			let caught: unknown
 			try {
-				await handler.completePrompt("hi", { timeoutMs: 20 })
+				await handler.completePrompt("hi", { abortSignal: caller.signal, timeoutMs: 20 })
 			} catch (error) {
 				caught = error
 			}
 
 			// The merged signal fired its own timeout while the caller's signal
 			// stayed live: that is a deadline, not a user stop.
+			expect(caller.signal.aborted).toBe(false)
 			expect(caught).toBeInstanceOf(Error)
 			expect((caught as Error).name).toBe("TimeoutError")
 			expect((caught as Error).message).toBe("The Qwen Code completion request timed out")

@@ -291,3 +291,22 @@ export function settleOnAbort<T>(
 		)
 	})
 }
+
+/**
+ * A per-request timeout is not a caller cancellation: report it as the distinct TimeoutError so
+ * callers can tell a stalled request from a user stop (the Gemini and LiteLLM units in this
+ * series use the same contract).
+ */
+export function createTimeoutError(providerName: string): Error {
+	const timeoutError = new Error(`The ${providerName} completion request timed out`)
+	timeoutError.name = "TimeoutError"
+	return timeoutError
+}
+
+/**
+ * Whether an abort-shaped failure came from the merged signal's own timeout rather than from the
+ * caller's stop signal.
+ */
+export function isTimeoutAbort(requestSignal: AbortSignal | undefined, callerSignal: AbortSignal | undefined): boolean {
+	return Boolean(requestSignal?.aborted && !callerSignal?.aborted && requestSignal.reason?.name === "TimeoutError")
+}

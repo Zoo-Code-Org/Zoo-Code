@@ -21,6 +21,8 @@ import {
 	isRequestAborted,
 	settleOnAbort,
 	type OpenAiRequestOptions,
+	createTimeoutError,
+	isTimeoutAbort,
 } from "./utils/abort-signal"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
@@ -57,25 +59,6 @@ function objectToUrlEncoded(data: Record<string, string>): string {
 	return Object.keys(data)
 		.map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(data[key])}`)
 		.join("&")
-}
-
-/**
- * A per-request timeout is not a caller cancellation: report it as the distinct
- * TimeoutError so callers can tell a stalled request from a user stop (the
- * Gemini and LiteLLM units in this series use the same contract).
- */
-function createTimeoutError(providerName: string): Error {
-	const timeoutError = new Error(`The ${providerName} completion request timed out`)
-	timeoutError.name = "TimeoutError"
-	return timeoutError
-}
-
-/**
- * Whether the merged request signal aborted because its own timeout elapsed
- * (rather than because the caller stopped the request).
- */
-function isTimeoutAbort(requestSignal: AbortSignal | undefined, callerSignal: AbortSignal | undefined): boolean {
-	return Boolean(requestSignal?.aborted && !callerSignal?.aborted && requestSignal.reason?.name === "TimeoutError")
 }
 
 export class QwenCodeHandler extends BaseProvider implements SingleCompletionHandler {

@@ -30,31 +30,14 @@ import {
 	mergeAbortSignalAndTimeout,
 	throwIfAborted,
 	createAbortError,
+	createTimeoutError,
 	isRequestAborted,
+	isTimeoutAbort,
 	settleOnAbort,
 	type OpenAiRequestOptions,
 } from "./utils/abort-signal"
 import { handleOpenAIError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
-
-/**
- * A per-request timeout is not a caller cancellation: report it as the distinct
- * TimeoutError so callers can tell a stalled request from a user stop (the
- * Gemini and LiteLLM units in this series use the same contract).
- */
-function createTimeoutError(providerName: string): Error {
-	const timeoutError = new Error(`The ${providerName} completion request timed out`)
-	timeoutError.name = "TimeoutError"
-	return timeoutError
-}
-
-/**
- * Whether an abort-shaped failure came from the merged signal's own timeout
- * rather than from the caller's stop signal.
- */
-function isTimeoutAbort(requestSignal: AbortSignal | undefined, callerSignal: AbortSignal | undefined): boolean {
-	return Boolean(requestSignal?.aborted && !callerSignal?.aborted && requestSignal.reason?.name === "TimeoutError")
-}
 
 export class LmStudioHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
@@ -330,6 +313,20 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		}
 	}
 
+	/**
+	 * A timeout elapsing on the merged request signal is reported as the distinct TimeoutError; a
+	 * caller stop as the contract AbortError. The same selection runs from the inner create catch
+	 * and the outer completion catch, so it lives in one helper.
+	 */
+	private toCompletionAbortError(
+		requestSignal: AbortSignal | undefined,
+		callerSignal: AbortSignal | undefined,
+	): Error {
+		return isTimeoutAbort(requestSignal, callerSignal)
+			? createTimeoutError("LM Studio")
+			: createAbortError("LM Studio")
+	}
+
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		// Fast-fail if the caller’s stop signal already fired before we started.
 		throwIfAborted(options?.abortSignal)
@@ -365,18 +362,14 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				response = await this.client.chat.completions.create(params, createOptions)
 			} catch (error) {
 				if (isRequestAborted(error, requestSignal)) {
-					throw isTimeoutAbort(requestSignal, options?.abortSignal)
-						? createTimeoutError("LM Studio")
-						: createAbortError("LM Studio")
+					throw this.toCompletionAbortError(requestSignal, options?.abortSignal)
 				}
 				throw handleOpenAIError(error, this.providerName)
 			}
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
 			if (isRequestAborted(error, requestSignal)) {
-				throw isTimeoutAbort(requestSignal, options?.abortSignal)
-					? createTimeoutError("LM Studio")
-					: createAbortError("LM Studio")
+				throw this.toCompletionAbortError(requestSignal, options?.abortSignal)
 			}
 			throw new Error(
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",

@@ -11,6 +11,8 @@ import {
 	throwIfAborted,
 	MAX_TIMEOUT_MS,
 	toSdkTimeoutMs,
+	createTimeoutError,
+	isTimeoutAbort,
 } from "../abort-signal"
 import { withSettleGuard } from "../../../../test-utils/settle-guard"
 
@@ -722,5 +724,47 @@ describe("toSdkTimeoutMs", () => {
 	it("caps delays above the maximum Node timer delay", () => {
 		expect(toSdkTimeoutMs(MAX_TIMEOUT_MS)).toBe(MAX_TIMEOUT_MS)
 		expect(toSdkTimeoutMs(MAX_TIMEOUT_MS + 1)).toBe(MAX_TIMEOUT_MS)
+	})
+})
+
+describe("createTimeoutError", () => {
+	it("builds a TimeoutError naming the provider", () => {
+		const error = createTimeoutError("LM Studio")
+
+		expect(error).toBeInstanceOf(Error)
+		expect(error.name).toBe("TimeoutError")
+		expect(error.message).toBe("The LM Studio completion request timed out")
+	})
+})
+
+describe("isTimeoutAbort", () => {
+	it("is true only when the merged signal timed out while the caller stayed live", () => {
+		const request = new AbortController()
+		const caller = new AbortController()
+		request.abort(createTimeoutError("Qwen Code"))
+
+		expect(isTimeoutAbort(request.signal, caller.signal)).toBe(true)
+	})
+
+	it("is false for a caller cancellation", () => {
+		const request = new AbortController()
+		const caller = new AbortController()
+		request.abort(createTimeoutError("Qwen Code"))
+		caller.abort()
+
+		expect(isTimeoutAbort(request.signal, caller.signal)).toBe(false)
+	})
+
+	it("is false when the request was aborted for a non-timeout reason", () => {
+		const request = new AbortController()
+		const caller = new AbortController()
+		request.abort(new Error("shutdown"))
+
+		expect(isTimeoutAbort(request.signal, caller.signal)).toBe(false)
+	})
+
+	it("is false without an aborted request signal", () => {
+		expect(isTimeoutAbort(undefined, undefined)).toBe(false)
+		expect(isTimeoutAbort(new AbortController().signal, undefined)).toBe(false)
 	})
 })
