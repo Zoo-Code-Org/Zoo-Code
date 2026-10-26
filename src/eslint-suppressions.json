@@ -609,11 +609,6 @@
 			"count": 24
 		}
 	},
-	"core/config/ContextProxy.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"core/config/CustomModesManager.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 5
