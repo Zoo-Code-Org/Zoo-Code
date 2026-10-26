@@ -1393,6 +1393,15 @@ describe("OpencodeGoHandler", () => {
 			// without a timeout key.
 			expect(Object.keys(requestOptions ?? {})).not.toContain("timeout")
 		})
+		it("completePrompt omits the timeout option when timeoutMs is negative (Anthropic path)", async () => {
+			// The disabled-timeout contract covers every non-positive value, not just 0.
+			mockAnthropicCreate.mockResolvedValue({ content: [{ type: "text", text: "response" }] })
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			await handler.completePrompt("ping", { timeoutMs: -1 })
+			const call = mockAnthropicCreate.mock.calls[mockAnthropicCreate.mock.calls.length - 1]
+			const requestOptions = call[1] as { timeout?: number } | undefined
+			expect(Object.keys(requestOptions ?? {})).not.toContain("timeout")
+		})
 
 		it("completePrompt preserves abort identity when the caller aborts (Anthropic path)", async () => {
 			// Emulate the Anthropic SDK: an aborted request signal rejects with
@@ -1577,6 +1586,17 @@ describe("OpencodeGoHandler", () => {
 				})
 				const handler = new OpencodeGoHandler(openaiOptions)
 				await handler.completePrompt("ping", { timeoutMs: 0 })
+				const call = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]
+				const requestOptions = call[1] as { timeout?: number } | undefined
+				expect(requestOptions).not.toHaveProperty("timeout")
+			})
+			it("completePrompt omits the timeout option when timeoutMs is negative (OpenAI path)", async () => {
+				// The disabled-timeout contract covers every non-positive value, not just 0.
+				mockCreate.mockResolvedValueOnce({
+					choices: [{ message: { content: "response" } }],
+				})
+				const handler = new OpencodeGoHandler(openaiOptions)
+				await handler.completePrompt("ping", { timeoutMs: -1 })
 				const call = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]
 				const requestOptions = call[1] as { timeout?: number } | undefined
 				expect(requestOptions).not.toHaveProperty("timeout")
@@ -2666,6 +2686,18 @@ describe("OpencodeGoHandler", () => {
 			const handler = new OpencodeGoHandler(lunaOptions)
 
 			await handler.completePrompt("ping", { timeoutMs: 0 })
+
+			const callOptions = mockResponsesCreate.mock.calls[0][1] as Record<string, unknown>
+			expect(callOptions).not.toHaveProperty("timeout")
+			expect(callOptions).not.toHaveProperty("signal")
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+		it("omits the timeout option from the Responses request when timeoutMs is negative", async () => {
+			// The disabled-timeout contract covers every non-positive value, not just 0.
+			mockResponsesCreate.mockResolvedValue({ output_text: "Hello!" })
+			const handler = new OpencodeGoHandler(lunaOptions)
+
+			await handler.completePrompt("ping", { timeoutMs: -1 })
 
 			const callOptions = mockResponsesCreate.mock.calls[0][1] as Record<string, unknown>
 			expect(callOptions).not.toHaveProperty("timeout")
