@@ -2379,6 +2379,26 @@ Instructions`)
 			expect(mockRm).not.toHaveBeenCalled()
 		})
 
+		it("removes the temp file and rethrows the original error when the create rename fails", async () => {
+			mockDirectoryExists.mockResolvedValue(false)
+			mockRealpath.mockImplementation(async (p: string) => p)
+			mockReaddir.mockResolvedValue([])
+			mockFileExists.mockResolvedValue(false)
+			mockMkdir.mockResolvedValue(p(GLOBAL_ROO_DIR, "skills", "rename-fails"))
+			mockWriteFile.mockResolvedValue(undefined)
+			const renameError = Object.assign(new Error("EEXIST: rename failed"), { code: "EEXIST" })
+			mockRename.mockRejectedValueOnce(renameError)
+			mockUnlink.mockResolvedValue(undefined)
+			mockRmdir.mockResolvedValue(undefined)
+
+			await expect(skillsManager.createSkill("rename-fails", "global", "Description")).rejects.toBe(renameError)
+
+			const temporaryPath = String(mockWriteFile.mock.calls[0][0])
+			expect(temporaryPath).toMatch(/\.SKILL\.md\.[^/\\]+\.tmp$/)
+			expect(mockUnlink).toHaveBeenCalledWith(temporaryPath)
+			expect(skillsManager["activeTempFiles"].size).toBe(0)
+		})
+
 		it("does not remove a pre-existing skill directory when persistence fails", async () => {
 			mockDirectoryExists.mockResolvedValue(false)
 			mockRealpath.mockImplementation(async (p: string) => p)
@@ -2558,6 +2578,64 @@ Body here.`
 
 			await expect(skillsManager.updateSkillModes("unresolvable-skill", "global", ["code"])).rejects.toBe(
 				resolutionError,
+			)
+			expect(mockWriteFile).not.toHaveBeenCalled()
+			expect(mockRename).not.toHaveBeenCalled()
+		})
+
+		it("removes the temp file and rethrows the original error when the update rename fails", async () => {
+			const skillDir = p(globalSkillsDir, "rename-update")
+			const skillMd = p(skillDir, "SKILL.md")
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["rename-update"] : []))
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === skillDir) {
+					return { isDirectory: () => true }
+				}
+				throw enoent()
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === skillMd)
+			mockReadFile.mockResolvedValue("---\nname: rename-update\ndescription: A skill\n---\nInstructions")
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockWriteFile.mockResolvedValue(undefined)
+			const renameError = Object.assign(new Error("EIO: rename failed"), { code: "EIO" })
+			mockRename.mockRejectedValueOnce(renameError)
+			mockUnlink.mockResolvedValue(undefined)
+
+			await skillsManager.discoverSkills()
+
+			await expect(skillsManager.updateSkillModes("rename-update", "global", ["code"])).rejects.toBe(renameError)
+
+			const temporaryPath = String(mockWriteFile.mock.calls[0][0])
+			expect(temporaryPath).toMatch(/\.SKILL\.md\.[^/\\]+\.tmp$/)
+			expect(mockUnlink).toHaveBeenCalledWith(temporaryPath)
+			expect(skillsManager["activeTempFiles"].size).toBe(0)
+		})
+
+		it("refuses to update a SKILL.md that resolves outside the skills roots", async () => {
+			const skillDir = p(globalSkillsDir, "escaping")
+			const skillMd = p(skillDir, "SKILL.md")
+			const outsidePath = p("/outside/root", "SKILL.md")
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["escaping"] : []))
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === skillDir) {
+					return { isDirectory: () => true }
+				}
+				throw enoent()
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === skillMd)
+			mockReadFile.mockResolvedValue("---\nname: escaping\ndescription: A skill\n---\nInstructions")
+			// Discovery saw the root path, but the publish-time resolution points outside every
+			// configured skills root: a direct skill-dir symlink must not let the write escape.
+			mockRealpath.mockImplementation(async (pathArg: string) => (pathArg === skillMd ? outsidePath : pathArg))
+			mockWriteFile.mockResolvedValue(undefined)
+			mockRename.mockResolvedValue(undefined)
+
+			await skillsManager.discoverSkills()
+
+			await expect(skillsManager.updateSkillModes("escaping", "global", ["code"])).rejects.toThrow(
+				/Refusing to update SKILL\.md outside the global skills directories/,
 			)
 			expect(mockWriteFile).not.toHaveBeenCalled()
 			expect(mockRename).not.toHaveBeenCalled()
@@ -3966,5 +4044,14 @@ Instructions`)
 				expect(mockRmdir).not.toHaveBeenCalled()
 			})
 		})
+	})
+	it("removes tracked temp sidecars on dispose", async () => {
+		mockUnlink.mockResolvedValue(undefined)
+		skillsManager["activeTempFiles"].add("/mock/skills/foo/.SKILL.md.123.abc.tmp")
+
+		await skillsManager.dispose()
+
+		expect(mockUnlink).toHaveBeenCalledWith("/mock/skills/foo/.SKILL.md.123.abc.tmp")
+		expect(skillsManager["activeTempFiles"].size).toBe(0)
 	})
 })

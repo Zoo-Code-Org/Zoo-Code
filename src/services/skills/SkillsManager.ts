@@ -110,14 +110,60 @@ export class SkillsManager {
 	// Runs discovery passes one at a time, so an older pass can't finish after a newer one
 	private discoveryQueue: Promise<void> = Promise.resolve()
 	private isDisposed = false
+	// Atomic SKILL.md writes in flight, tracked so dispose() can remove temp sidecars if the
+	// extension host stops between the staged write and the rename.
+	private activeTempFiles: Set<string> = new Set()
 
 	constructor(provider: ClineProvider) {
 		this.providerRef = new WeakRef(provider)
 	}
 
 	async initialize(): Promise<void> {
+		// A previous extension-host stop can leave a staged SKILL.md temp sidecar behind; the
+		// in-memory tracking cannot survive that, so sweep the known skills directories once.
+		try {
+			await this.sweepStaleSkillTempFiles()
+		} catch {
+			// Stale-cleanup is best effort; discovery and watcher setup still run.
+		}
 		await this.discoverSkills()
 		await this.setupFileWatchers()
+	}
+
+	/**
+	 * Remove SKILL.md temp sidecars left by a previous host: the name pattern is the one
+	 * writeSkillFileAtomically generates, and only the skill directories under the known skills
+	 * roots are scanned.
+	 */
+	private async sweepStaleSkillTempFiles(): Promise<void> {
+		const tempPattern = /^\..*\.SKILL\.md\..*\.tmp$/
+		const roots = (await this.getSkillsDirectories()).map((entry) => entry.dir)
+		for (const root of roots) {
+			let entries: unknown[]
+			try {
+				entries = await fs.readdir(root, { withFileTypes: true })
+			} catch {
+				continue
+			}
+			const directories = [root]
+			for (const entry of entries) {
+				const dirent = entry as { name?: string; isDirectory?: () => boolean }
+				if (!dirent?.isDirectory?.()) continue
+				directories.push(path.join(root, String(dirent.name)))
+			}
+			for (const directory of directories) {
+				let files: string[]
+				try {
+					files = await fs.readdir(directory)
+				} catch {
+					continue
+				}
+				for (const file of files) {
+					if (!tempPattern.test(file)) continue
+					await fs.unlink(path.join(directory, file)).catch(() => {})
+				}
+			}
+		}
 	}
 
 	/**
@@ -675,6 +721,7 @@ export class SkillsManager {
 			directory,
 			`.${path.basename(filePath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
 		)
+		this.activeTempFiles.add(temporaryPath)
 		try {
 			await fs.writeFile(temporaryPath, content, "utf-8")
 			await fs.rename(temporaryPath, filePath)
@@ -683,6 +730,8 @@ export class SkillsManager {
 			// failure is the one the caller needs to see.
 			await fs.unlink(temporaryPath).catch(() => {})
 			throw error
+		} finally {
+			this.activeTempFiles.delete(temporaryPath)
 		}
 	}
 
@@ -1063,6 +1112,26 @@ Add your skill instructions here.
 	 * @param source - Where the skill is located ("global" or "project")
 	 * @param newModeSlugs - New mode slugs (undefined/empty = any mode)
 	 */
+	/**
+	 * The resolved SKILL.md target must stay inside one of the configured skills roots for the
+	 * source: a direct skill-directory symlink can point anywhere, and publishing through it
+	 * would write outside the user selected skills folder.
+	 */
+	private async assertTargetWithinSkillsRoots(targetPath: string, source: "global" | "project"): Promise<void> {
+		const roots = (await this.getSkillsDirectories())
+			.filter((entry) => entry.source === source)
+			.map((entry) => entry.dir)
+		const inside = async (root: string): Promise<boolean> => {
+			const resolvedRoot = await fs.realpath(root).catch(() => root)
+			const relative = path.relative(resolvedRoot, targetPath)
+			return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative)
+		}
+		for (const root of roots) {
+			if (await inside(root)) return
+		}
+		throw new Error(`Refusing to update SKILL.md outside the ${source} skills directories: ${targetPath}`)
+	}
+
 	async updateSkillModes(name: string, source: "global" | "project", newModeSlugs?: string[]): Promise<void> {
 		// Find any skill with this name and source (regardless of current mode)
 		let skill: SkillMetadata | undefined
@@ -1103,6 +1172,7 @@ Add your skill instructions here.
 		// A resolution failure propagates: publishing through the unresolved path could replace a
 		// symlink with a regular file (or write somewhere other than the target the caller saw).
 		const targetPath = await fs.realpath(skill.path)
+		await this.assertTargetWithinSkillsRoots(targetPath, source)
 		await this.writeSkillFileAtomically(targetPath, newContent)
 
 		// Refresh skills list
@@ -1284,6 +1354,11 @@ Add your skill instructions here.
 
 	async dispose(): Promise<void> {
 		this.isDisposed = true
+		// Any sidecar still tracked is a write that never reached its rename.
+		for (const temporaryPath of this.activeTempFiles) {
+			await fs.unlink(temporaryPath).catch(() => {})
+		}
+		this.activeTempFiles.clear()
 		this.disposables.forEach((d) => d.dispose())
 		this.disposables = []
 		this.containerWatchers.forEach((w) => w.dispose())
