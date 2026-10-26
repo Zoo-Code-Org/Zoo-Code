@@ -397,8 +397,13 @@ describe("XAIHandler", () => {
 			{ type: "function", function: { name: 123 } },
 		]
 		for (const entry of malformedEntries) {
+			// The mapping throws during request construction; the abort bridge must not have
+			// registered a listener yet, or a malformed tool choice would leak it.
+			const abortController = new AbortController()
+			const addListenerSpy = vi.spyOn(abortController.signal, "addEventListener")
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
+				abortSignal: abortController.signal,
 				tools: testTools,
 				tool_choice: {
 					type: "allowed_tools",
@@ -411,6 +416,8 @@ describe("XAIHandler", () => {
 			await expect(stream.next()).rejects.toThrow(
 				'allowed_tools entry of type "function" is missing a valid function name',
 			)
+			expect(addListenerSpy).not.toHaveBeenCalled()
+			addListenerSpy.mockRestore()
 		}
 		expect(mockResponsesCreate.mock.calls.length).toBe(callsBefore)
 	})

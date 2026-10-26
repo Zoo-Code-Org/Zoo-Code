@@ -159,15 +159,6 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 		const toolChoice = metadata?.tool_choice
 		const parallelToolCalls = metadata?.parallelToolCalls
 
-		// Bridge the external abort signal from request metadata into a per-request
-		// controller so the SDK call is cancelled when the owning request is aborted
-		// (or when the signal is already aborted). Without an external signal the
-		// client-level timeout configured in the constructor remains the only
-		// cancellation mechanism, preserving the existing behavior.
-		const externalAbortSignal = metadata?.abortSignal
-		const { signal: abortSignal, dispose: removeExternalAbortListener } =
-			bridgeExternalAbortSignal(externalAbortSignal)
-
 		// Build request options
 		const requestBody: OpenAI.Responses.ResponseCreateParamsStreaming = {
 			model: model.id,
@@ -196,6 +187,14 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 		if (model.reasoning) {
 			requestBody.reasoning = { effort: model.reasoning.reasoning_effort }
 		}
+
+		// Bridge the external abort signal only after every throw-prone part of the request
+		// construction (notably mapToolChoice, which rejects malformed allowed_tools entries)
+		// has run: the bridge's cleanup covers the request below, not construction failures,
+		// so registering earlier would leak a listener on metadata.abortSignal.
+		const externalAbortSignal = metadata?.abortSignal
+		const { signal: abortSignal, dispose: removeExternalAbortListener } =
+			bridgeExternalAbortSignal(externalAbortSignal)
 
 		try {
 			let stream: AsyncIterable<any>
