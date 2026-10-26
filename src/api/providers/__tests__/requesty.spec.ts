@@ -1554,6 +1554,35 @@ describe("RequestyHandler", () => {
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
+		it("rejects with AbortError when the timeout elapses during model lookup", async () => {
+			const handler = new RequestyHandler(mockOptions)
+
+			// Model discovery is deferred and never settles. The merged timeout covers the
+			// lookup, so the request settles on the timeout instead of waiting for it.
+			let notifyLookupStarted!: () => void
+			const lookupStarted = new Promise<void>((resolve) => {
+				notifyLookupStarted = resolve
+			})
+			const deferredModelLookup = new Promise<ModelRecord>(() => {})
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockImplementationOnce(() => {
+				notifyLookupStarted()
+				return deferredModelLookup
+			})
+
+			const promise = handler.completePrompt("test prompt", { timeoutMs: 20 })
+			// Defensive: the fast-fail path may reject before the barrier below settles,
+			// which would otherwise surface as an unhandled rejection.
+			void promise.catch(() => {})
+			await withSettleGuard(lookupStarted)
+
+			await expect(withSettleGuard(promise)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
 		it("rethrows non-abort model lookup failures from completePrompt", async () => {
 			const handler = new RequestyHandler(mockOptions)
 			const { getModels } = await import("../fetchers/modelCache")
