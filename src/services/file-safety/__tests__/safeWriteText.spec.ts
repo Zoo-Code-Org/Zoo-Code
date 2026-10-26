@@ -4,7 +4,14 @@ import { execFile } from "child_process"
 import type { ChildProcess } from "child_process"
 import * as path from "path"
 
-import { DaclRestoreError, resolvePublishTarget, safeWriteText } from "../safeWriteText"
+import {
+	DaclCaptureError,
+	DaclRestoreError,
+	isPublishCommittedError,
+	PublishNotDurableError,
+	resolvePublishTarget,
+	safeWriteText,
+} from "../safeWriteText"
 
 // The two failure classes are module-private (knip ignores __tests__, so a
 // test-only export would be reported as unused), so tests match them by name.
@@ -1975,5 +1982,44 @@ describe("post-create staging probe failure", () => {
 
 		expect(stagingProbes).toBe(2)
 		expect(fsSync.rmdirSync).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
+	})
+})
+
+describe("isPublishCommittedError", () => {
+	it("marks the two post-commit failures as committed writes", () => {
+		expect(isPublishCommittedError(new PublishNotDurableError("/tmp/target.txt", "EIO"))).toBe(true)
+		expect(isPublishCommittedError(new DaclRestoreError("/tmp/target.txt", null))).toBe(true)
+	})
+
+	it("does not mark pre-commit failures or plain errors as committed", () => {
+		expect(isPublishCommittedError(new Error("EACCES: permission denied"))).toBe(false)
+		expect(isPublishCommittedError(new DaclCaptureError("/tmp/target.txt", "/tmp/dump"))).toBe(false)
+		expect(isPublishCommittedError(undefined)).toBe(false)
+	})
+})
+
+describe("staging directory creation failure", () => {
+	beforeEach(() => {
+		_restoreFsDefaults()
+	})
+
+	it.each([
+		["EACCES", Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })],
+		["ENOSPC", Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" })],
+	])("reports a %s mkdir failure without opening or renaming anything", async (_code, mkdirError) => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		const mkdirMock = vi.mocked(fsSync.mkdirSync)
+		mkdirMock.mockClear()
+		mkdirMock.mockImplementationOnce(() => {
+			throw mkdirError
+		})
+		vi.mocked(fsSync.openSync).mockClear()
+		vi.mocked(fs.rename).mockClear()
+
+		await expect(safeWriteText("/tmp/test-dir/target.txt", "data", { platform: "linux" })).rejects.toBe(mkdirError)
+
+		// The exact failure reaches the caller and no publish work starts after it.
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
 	})
 })
