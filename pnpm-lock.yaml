@@ -320,7 +320,7 @@ importers:
         version: 9.6.1
       ignore:
         specifier: ^7.0.3
-        version: 7.0.12
+        version: 7.0.14
       openai:
         specifier: ^5.12.2
         version: 5.23.2(ws@8.22.0)(zod@4.6.7)
@@ -549,7 +549,7 @@ importers:
         version: 25.10.10(typescript@5.9.3)
       ignore:
         specifier: ^7.0.3
-        version: 7.0.12
+        version: 7.0.14
       isbinaryfile:
         specifier: ^5.0.7
         version: 5.0.7
@@ -5674,8 +5674,8 @@ packages:
     resolution: {integrity: sha512-hsBTNUqQTDwkWtcdYI2i06Y/nUBEsNEDJKjWdigLvegy8kDuJAS8uRlpkkcQpyEXL0Z/pjDy5HBmMjRCJ2gq+g==}
     engines: {node: '>= 4'}
 
-  ignore@7.0.12:
-    resolution: {integrity: sha512-/8UvqAPU9DGTI9k4mxtf49U37Isfwr8Uts96+SBHIkFxPJnHS0Ew4f00sM4Scd8V8EjM0jUNtVDdv1kPdt35lg==}
+  ignore@7.0.14:
+    resolution: {integrity: sha512-wCBiZ77u1tuWde6G/nfOtLaCTYcFDU5yCzARzK10y+rLhzYoL7a7yEemcopcc2Mzow7gZOIjnV2ym1NYmdiJOQ==}
     engines: {node: '>= 4'}
 
   immediate@3.0.6:
@@ -11965,7 +11965,7 @@ snapshots:
       '@typescript-eslint/visitor-keys': 8.32.1
       eslint: 9.39.5(jiti@2.7.0)
       graphemer: 1.4.0
-      ignore: 7.0.12
+      ignore: 7.0.14
       natural-compare: 1.4.0
       ts-api-utils: 2.5.0(typescript@5.9.3)
       typescript: 5.9.3
@@ -14134,7 +14134,7 @@ snapshots:
     dependencies:
       '@sindresorhus/merge-streams': 2.3.0
       fast-glob: 3.3.3
-      ignore: 7.0.12
+      ignore: 7.0.14
       path-type: 6.0.0
       slash: 5.1.0
       unicorn-magic: 0.3.0
@@ -14398,7 +14398,7 @@ snapshots:
 
   ignore@5.3.2: {}
 
-  ignore@7.0.12: {}
+  ignore@7.0.14: {}
 
   immediate@3.0.6: {}
 
