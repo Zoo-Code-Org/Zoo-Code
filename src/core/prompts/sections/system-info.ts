@@ -20,7 +20,7 @@ export function getSystemInfoSection(cwd: string, policy: EffectiveToolPolicy): 
 	let osInfo: string
 	try {
 		osInfo = osName()
-	} catch (error) {
+	} catch {
 		// Fallback when os-name fails (e.g., PowerShell not available on Windows)
 		const platform = os.platform()
 		const release = os.release()

@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Selecteer modus voor interactie",
 	"selectApiConfig": "Selecteer API-configuratie",
+	"selectModel": "Model selecteren",
+	"modelSelector": {
+		"title": "Modellen",
+		"settings": "Modelinstellingen",
+		"description": "Kies het model dat voor deze API-configuratie wordt gebruikt.",
+		"searchPlaceholder": "Modellen zoeken...",
+		"unsupportedTooltip": "Het model van deze provider wordt in de Instellingen geconfigureerd",
+		"loading": "Modellen laden..."
+	},
 	"lockApiConfigAcrossModes": "API-configuratie vergrendelen voor alle modi in deze werkruimte",
 	"unlockApiConfigAcrossModes": "API-configuratie is vergrendeld voor alle modi in deze werkruimte (klik om te ontgrendelen)",
 	"enhancePrompt": "Prompt verbeteren met extra context",
@@ -316,10 +325,10 @@
 		"title": "Zoo Code {{version}} uitgebracht",
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Wat is nieuw in Zoo Code v3.88.0",
-			"highlight1": "✨ Provider- en modelondersteuning: Gebruik Grok Build en verbeterde ondersteuning voor aangepaste modellen. Deze release herstelt ook Bedrock-modellimieten en verstuurt de Codex-verbosity-instelling.",
-			"highlight2": "🧭 Betrouwbaarheid van taken: Deze release herstelt de afhandeling van annuleringen, het voortzetten van tool-turns en het opslaan van taakberichten.",
-			"highlight3": "⚡ Sneller bewerken en chatten: Bestandsschrijfbewerkingen gebruiken standaard geen kunstmatige vertragingen meer. Chatberichten bevatten minder bestandsgegevens, en codeacties bereiken de laatst actieve chat."
+			"heading": "Wat is nieuw in Zoo Code v3.92.0",
+			"highlight1": "✨ Snellere modelkeuze en betere modelondersteuning: Wissel van model via het invoerveld van de chat. Gebruik Claude Haiku 5.5 op Amazon Bedrock, krijg nauwkeurigere Kimi K3-mogelijkheden op OpenRouter en gebruik de gecorrigeerde limieten voor Gemini 4 Argon op Vercel AI Gateway.",
+			"highlight2": "🧭 Betrouwbaardere workflows voor terminal, bewerking, chat en externe omgevingen: Laat opdrachtuitvoer desgewenst standaard inklappen, krijg duidelijkere bewerkingsfouten, houd redeneer- en API-rijen zichtbaar en voorkom opstart- en proxyproblemen in externe workspaces.",
+			"highlight3": "🔌 Uitgebreide MCP-marketplace: Verbind Zoo Code via de MCP-marketplace met AnySearch, Mailtea en Tradehand."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",
@@ -487,6 +496,10 @@
 		"serversPart_other": "{{count}} MCP servers",
 		"messageTemplate": "Je hebt {{tools}} ingeschakeld via {{servers}}. Zoveel tools kunnen het model verwarren en tot fouten leiden. Probeer dit onder {{threshold}} te houden.",
 		"openMcpSettings": "MCP-instellingen openen"
+	},
+	"ignoredDisabledTools": {
+		"title": "Uitgeschakelde tool genegeerd",
+		"messageTemplate": "De volgende tools kunnen niet worden uitgeschakeld, zodat de bijbehorende disabledTools-vermeldingen zijn genegeerd: {{tools}}."
 	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"
