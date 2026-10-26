@@ -1,5 +1,5 @@
 {
-	"$comment": "Maintainer-reviewed equivalent mutants for the changed-code mutation gate. Each entry accepts exactly one mutant (file, start line, mutator name, replacement) as equivalent, with the review rationale. Entries are advisory-checked: if a listed file is under test and the mutant is gone or killed, the gate warns so stale entries are updated. Add entries only with maintainer approval; never add in-source Stryker directives. Lines are Stryker report lines (0-based): the editor shows the code at line + 1.",
+	"$comment": "Maintainer-reviewed equivalent mutants for the changed-code mutation gate. Each entry accepts exactly one mutant (file, start line, mutator name, replacement) as equivalent, with the review rationale. Entries are validated against the checked-in source before mutation testing; a missing file, unknown mutator, or line that no longer contains the named mutator fails the gate. Entries that do not match a reported mutant produce advisories for the tested files. Add entries only with maintainer approval; never add in-source Stryker directives. Lines are Stryker report lines (0-based): the editor shows the code at line + 1.",
 	"equivalences": [
 		{
 			"file": "src/api/providers/openai-codex.ts",
