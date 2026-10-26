@@ -6,7 +6,13 @@ import { ApiStream } from "../transform/stream"
 import { BaseProvider } from "./base-provider"
 import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { getOllamaModels, isSecureOllamaEndpoint } from "./fetchers/ollama"
-import { createAbortError, mergeAbortSignalAndTimeout, rejectOnAbort } from "./utils/abort-signal"
+import {
+	createAbortError,
+	hasUsableTimeout,
+	mergeAbortSignalAndTimeout,
+	rejectOnAbort,
+	toSdkTimeoutMs,
+} from "./utils/abort-signal"
 import { getLoggableOrigin } from "./utils/endpoint-origin"
 import { TagMatcher } from "../../utils/tag-matcher"
 import { isProxyEnabled } from "../../utils/networkProxy"
@@ -688,19 +694,13 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			// Handle timeoutMs if provided (the client exists, so the timer can
 			// abort both the per-request transport and the client)
 			const timeoutMs = options?.timeoutMs
-			if (timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0) {
-				// Node clamps delays above 2^31-1 ms to 1 ms (and coerces
-				// Infinity the same way), which would abort almost immediately,
-				// and truncates fractional delays; round up and cap so the
-				// semantics match mergeAbortSignalAndTimeout, and treat
-				// non-finite values as "no timeout".
-				timeoutId = setTimeout(
-					() => {
-						requestController.abort()
-						client.abort()
-					},
-					Math.min(Math.ceil(timeoutMs), 2_147_483_647),
-				)
+			if (hasUsableTimeout(timeoutMs)) {
+				// toSdkTimeoutMs rounds up and caps the delay (Node clamps larger
+				// values to 1 ms), matching mergeAbortSignalAndTimeout.
+				timeoutId = setTimeout(() => {
+					requestController.abort()
+					client.abort()
+				}, toSdkTimeoutMs(timeoutMs))
 			}
 
 			// Propagate abortSignal into the per-request client via client.abort()

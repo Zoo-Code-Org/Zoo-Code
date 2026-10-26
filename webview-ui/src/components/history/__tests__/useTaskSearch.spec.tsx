@@ -13,8 +13,10 @@ vi.mock("@/utils/highlight", () => ({
 }))
 
 import { useExtensionState } from "@/context/ExtensionStateContext"
+import { highlightFzfMatch } from "@/utils/highlight"
 
 const mockUseExtensionState = useExtensionState as ReturnType<typeof vi.fn>
+const mockHighlightFzfMatch = highlightFzfMatch as ReturnType<typeof vi.fn>
 
 const mockTaskHistory: HistoryItem[] = [
 	{
@@ -152,6 +154,45 @@ describe("useTaskSearch", () => {
 		expect(result.current.tasks).toHaveLength(1)
 		expect(result.current.tasks[0].id).toBe("task-1")
 		expect((result.current.tasks[0] as any).highlight).toBe("<mark>Create a React component</mark>")
+	})
+
+	it("searches and highlights the custom title of a renamed task", () => {
+		mockUseExtensionState.mockReturnValue({
+			taskHistory: [{ ...mockTaskHistory[1], title: "Coverage sprint" }],
+			cwd: "/workspace/project1",
+		})
+		const { result } = renderHook(() => useTaskSearch())
+
+		act(() => {
+			result.current.setSearchQuery("Coverage")
+		})
+
+		expect(result.current.tasks).toEqual([
+			expect.objectContaining({ id: "task-2", highlight: "<mark>Coverage sprint</mark>" }),
+		])
+	})
+
+	it("keeps match positions from a custom title that is longer than the task", () => {
+		// "Write unit tests" (16 chars) vs "Coverage sprint with deep tests" (31 chars):
+		// with the old task.length bound, every position of "deep" (21-24) would be filtered out.
+		mockUseExtensionState.mockReturnValue({
+			taskHistory: [{ ...mockTaskHistory[1], title: "Coverage sprint with deep tests" }],
+			cwd: "/workspace/project1",
+		})
+		const { result } = renderHook(() => useTaskSearch())
+
+		act(() => {
+			result.current.setSearchQuery("deep")
+		})
+
+		expect(result.current.tasks).toEqual([
+			expect.objectContaining({ id: "task-2", highlight: "<mark>Coverage sprint with deep tests</mark>" }),
+		])
+		// fzf reports positions in match order; normalize before comparing so this pins the
+		// position set (21-24), not fzf's internal ordering.
+		const lastCall = mockHighlightFzfMatch.mock.calls.at(-1)
+		expect(lastCall?.[0]).toBe("Coverage sprint with deep tests")
+		expect([...(lastCall?.[1] ?? [])].sort((a, b) => a - b)).toEqual([21, 22, 23, 24])
 	})
 
 	it("automatically switches to mostRelevant when searching", () => {
