@@ -898,17 +898,16 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 
 	public getGlobalState<K extends keyof GlobalState>(key: K): GlobalState[K] {
 		this.assertTestOnlyApi("getGlobalState")
-		// The generic only constrains typed callers; a crafted runtime key can be
-		// any string. Refuse keys outside the settings schema before storage sees
-		// them, so the test-only API cannot read arbitrary global state.
-		if (!isGlobalStateKey(key)) {
-			throw new Error(`getGlobalState received a key outside the settings schema: ${String(key)}`)
-		}
-		// The global-state union still contains credential-bearing keys (API keys,
-		// headers, OAuth paths) that are not part of the secret-state union; refuse
-		// them before storage access so the test-only API cannot read credentials.
+		// The generic only constrains typed callers; a crafted runtime key can be any
+		// string. Credential-bearing keys are refused first: they may not even be part
+		// of the current settings schema, and the test-only API must never read them.
 		if (isSecretStateKey(String(key)) || isSensitiveProviderConfigKey(String(key))) {
 			throw new Error(`getGlobalState received a credential-bearing key: ${String(key)}`)
+		}
+		// Refuse keys outside the settings schema before storage sees them, so the
+		// test-only API cannot read arbitrary global state.
+		if (!isGlobalStateKey(key)) {
+			throw new Error(`getGlobalState received a key outside the settings schema: ${String(key)}`)
 		}
 		// Task history carries user PII (task texts): out of bounds for this surface
 		// even though it is a plain GlobalState key.
@@ -922,13 +921,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		this.assertTestOnlyApi("setGlobalState")
 		// Same runtime boundary as getGlobalState: an unvalidated key must not be
 		// persisted into global state.
-		if (!isGlobalStateKey(key)) {
-			throw new Error(`setGlobalState received a key outside the settings schema: ${String(key)}`)
+		if (isSecretStateKey(String(key)) || isSensitiveProviderConfigKey(String(key))) {
+			throw new Error(`setGlobalState received a credential-bearing key: ${String(key)}`)
 		}
 		// Same credential boundary as getGlobalState: a crafted runtime key must not
 		// be able to persist secrets through the test-only surface.
-		if (isSecretStateKey(String(key)) || isSensitiveProviderConfigKey(String(key))) {
-			throw new Error(`setGlobalState received a credential-bearing key: ${String(key)}`)
+		if (!isGlobalStateKey(key)) {
+			throw new Error(`setGlobalState received a key outside the settings schema: ${String(key)}`)
 		}
 		// Task history carries user PII (task texts): out of bounds for this surface
 		// even though it is a plain GlobalState key.

@@ -378,6 +378,8 @@ export const SECRET_STATE_KEYS = [
 	"ioIntelligenceApiKey",
 	"nanoGptApiKey",
 	"basetenApiKey",
+	"mimoApiKey",
+	"poeApiKey",
 ] as const
 
 // Global secrets that are part of GlobalSettings (not ProviderSettings)
