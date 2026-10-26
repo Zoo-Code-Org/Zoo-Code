@@ -75,6 +75,26 @@ describe("Opencode Go Fetchers", () => {
 			})
 		})
 
+		it("keeps curated Responses temperature support after merging live metadata", async () => {
+			mockedAxios.get.mockResolvedValue({
+				data: {
+					data: [
+						{ id: "grok-4.6", context_window: 400_000 },
+						{ id: "muse-spark-1.2-contributor", max_tokens: 65_536 },
+						{ id: "gpt-5.6-luna", context_window: 900_000 },
+					],
+				},
+			})
+
+			const models = await getOpencodeGoModels("k")
+
+			// Live limits never override the curated temperature capability
+			// (Zoo-Code-Org/Zoo-Code#2055).
+			expect(models["grok-4.6"]).toMatchObject({ contextWindow: 400_000, supportsTemperature: true })
+			expect(models["muse-spark-1.2-contributor"]).toMatchObject({ maxTokens: 65_536, supportsTemperature: true })
+			expect(models["gpt-5.6-luna"]).toMatchObject({ contextWindow: 900_000, supportsTemperature: false })
+		})
+
 		it("uses curated gpt-6-luna metadata when the live model omits metadata", async () => {
 			mockedAxios.get.mockResolvedValue({ data: { data: [{ id: "gpt-6-luna" }] } })
 
@@ -86,9 +106,9 @@ describe("Opencode Go Fetchers", () => {
 				supportsImages: true,
 				supportsPromptCache: true,
 				supportsMaxTokens: true,
-				// The Opencode Go Responses gateway rejects `temperature` for
-				// `gpt-6-luna`, so the curated registry must opt out so the UI
-				// hides the dead control rather than rendering it.
+				// The Go gateway accepts `temperature` for `gpt-6-luna` only with
+				// reasoning effort "none", so the static baseline opts out and the
+				// effort-aware rule opts back in (Zoo-Code-Org/Zoo-Code#2055).
 				supportsTemperature: false,
 				supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
 				reasoningEffort: "medium",

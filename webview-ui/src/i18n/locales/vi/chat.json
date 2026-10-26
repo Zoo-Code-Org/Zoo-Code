@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Chọn chế độ tương tác",
 	"selectApiConfig": "Chọn cấu hình API",
+	"selectModel": "Chọn mô hình",
+	"modelSelector": {
+		"title": "Mô hình",
+		"settings": "Cài đặt mô hình",
+		"description": "Chọn mô hình được dùng cho cấu hình API này.",
+		"searchPlaceholder": "Tìm kiếm mô hình...",
+		"unsupportedTooltip": "Mô hình của nhà cung cấp này được cấu hình trong Cài đặt",
+		"loading": "Đang tải mô hình..."
+	},
 	"lockApiConfigAcrossModes": "Khóa cấu hình API cho tất cả chế độ trong workspace này",
 	"unlockApiConfigAcrossModes": "Cấu hình API đã bị khóa cho tất cả chế độ trong workspace này (nhấn để mở khóa)",
 	"enhancePrompt": "Nâng cao yêu cầu với ngữ cảnh bổ sung",
@@ -344,10 +353,10 @@
 		"title": "Zoo Code {{version}} đã phát hành",
 		"support": "Hãy ủng hộ Zoo Code bằng cách tặng sao cho chúng tôi trên <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Có gì mới trong Zoo Code v3.88.0",
-			"highlight1": "✨ Hỗ trợ provider và model: Dùng Grok Build và hỗ trợ model tùy chỉnh đã được cải thiện. Bản phát hành này cũng sửa các giới hạn model Bedrock và gửi cài đặt verbosity của Codex.",
-			"highlight2": "🧭 Độ tin cậy của task: Bản phát hành này sửa cách xử lý hủy, việc tiếp tục lượt tool và việc lưu message task.",
-			"highlight3": "⚡ Chỉnh sửa và chat nhanh hơn: Ghi file mặc định không còn dùng độ trễ nhân tạo. Message chat mang ít dữ liệu file hơn, và code action đến được chat hoạt động gần nhất."
+			"heading": "Có gì mới trong Zoo Code v3.92.0",
+			"highlight1": "✨ Lựa chọn model nhanh hơn và hỗ trợ model mạnh mẽ hơn: Chuyển model ngay trong ô soạn chat. Dùng Claude Haiku 5.5 trên Amazon Bedrock, tận dụng các khả năng Kimi K3 chính xác hơn trên OpenRouter và dùng giới hạn Gemini 4 Argon đã được chỉnh sửa trên Vercel AI Gateway.",
+			"highlight2": "🧭 Quy trình terminal, chỉnh sửa, chat và làm việc từ xa đáng tin cậy hơn: Tùy chọn thu gọn output lệnh theo mặc định, nhận thông báo lỗi chỉnh sửa rõ ràng hơn, giữ các hàng reasoning và API luôn hiển thị, đồng thời tránh sự cố khởi động và proxy trong workspace từ xa.",
+			"highlight3": "🔌 Mở rộng MCP marketplace: Kết nối Zoo Code với AnySearch, Mailtea và Tradehand thông qua MCP marketplace."
 		},
 		"cloudAgents": {
 			"heading": "Mới trên Cloud:",

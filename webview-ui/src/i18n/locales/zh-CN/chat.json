@@ -113,6 +113,15 @@
 	},
 	"selectMode": "选择交互模式",
 	"selectApiConfig": "选择 API 配置",
+	"selectModel": "选择模型",
+	"modelSelector": {
+		"title": "模型",
+		"settings": "模型设置",
+		"description": "选择此 API 配置使用的模型。",
+		"searchPlaceholder": "搜索模型...",
+		"unsupportedTooltip": "此提供商的模型需在设置中配置",
+		"loading": "正在加载模型..."
+	},
 	"lockApiConfigAcrossModes": "锁定此工作区所有模式的 API 配置",
 	"unlockApiConfigAcrossModes": "此工作区所有模式的 API 配置已锁定（点击解锁）",
 	"enhancePrompt": "增强提示词",
@@ -344,10 +353,10 @@
 		"title": "Zoo Code {{version}} 已发布",
 		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
 		"release": {
-			"heading": "Zoo Code v3.88.0 新增内容",
-			"highlight1": "✨ Provider 与模型支持：使用 Grok Build 和改进后的自定义模型支持。本版本还修复了 Bedrock 模型上限，并发送 Codex verbosity 设置。",
-			"highlight2": "🧭 任务可靠性：本版本修复了取消处理、tool turn 续行和任务消息保存。",
-			"highlight3": "⚡ 更快的编辑与聊天：文件写入默认不再使用人为延迟。聊天消息携带更少的文件数据，代码操作会到达最近活动的聊天。"
+			"heading": "Zoo Code v3.92.0 新增内容",
+			"highlight1": "✨ 更快选择模型，更强模型支持：直接从聊天输入框切换模型。在 Amazon Bedrock 上使用 Claude Haiku 5.5；在 OpenRouter 上获得更准确的 Kimi K3 功能支持；在 Vercel AI Gateway 上使用修正后的 Gemini 4 Argon 限制。",
+			"highlight2": "🧭 更可靠的终端、编辑、聊天和远程工作流：可按需默认收起命令输出，更清晰地了解编辑失败原因，保持推理和 API 行可见，并避免远程工作区中的启动和代理问题。",
+			"highlight3": "🔌 扩展 MCP 市场：通过 MCP 市场将 Zoo Code 连接到 AnySearch、Mailtea 和 Tradehand。"
 		},
 		"cloudAgents": {
 			"heading": "云端新功能：",
