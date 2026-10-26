@@ -99,15 +99,15 @@ async function postForm(endpoint: string, values: Record<string, string>, signal
 			signal: controller.signal,
 		})
 	} catch (error) {
-		// Normalize only a rejection that WAS the abort (the forwarded reason itself, or an
-		// abort-shaped error): the caller's reason can be an ordinary Error, and fetch forwards it.
-		// An independent OAuth or network failure that merely races the abort is thrown unchanged.
-		const reason: unknown = controller.signal.reason
-		const isAbortRejection =
-			controller.signal.aborted &&
-			(error === reason ||
-				(error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")))
-		if (isAbortRejection) {
+		// Classify from the CALLER signal: only a rejection that came from the caller's own abort
+		// is normalized. The caller's reason can be an ordinary Error and fetch forwards it
+		// verbatim, and an independent OAuth/network failure that merely races the abort must be
+		// thrown unchanged. The internal timeout is never normalized here: timeout errors are
+		// rethrown as they are so callers can distinguish a stalled POST from a cancellation.
+		const callerAborted = signal?.aborted === true
+		const isCallerAbortRejection =
+			callerAborted && (error === signal?.reason || (error instanceof Error && error.name === "AbortError"))
+		if (isCallerAbortRejection) {
 			throw createOAuthAbortError()
 		}
 		throw error
@@ -279,7 +279,9 @@ export class KimiCodeOAuthManager {
 		if (!forceRefresh && Date.now() < credentials.expiresAt - TOKEN_EXPIRY_BUFFER_MS) {
 			return credentials.accessToken
 		}
-		if (!this.refreshPromise) {
+		// A pending refresh whose controller was already aborted can never settle successfully:
+		// start a replacement even if the old promise has not run its finally yet.
+		if (!this.refreshPromise || this.refreshController?.signal.aborted) {
 			this.startRefresh(credentials)
 		}
 		return this.awaitRefresh(signal)
@@ -309,6 +311,11 @@ export class KimiCodeOAuthManager {
 				return null
 			})
 			.finally(() => {
+				// A replacement refresh may have started while this one was settling: only the
+				// still-current refresh may clear the shared state.
+				if (this.refreshController !== controller) {
+					return
+				}
 				this.refreshPromise = null
 				this.refreshController = null
 				this.refreshWaiters = null
@@ -326,10 +333,17 @@ export class KimiCodeOAuthManager {
 		const promise = this.refreshPromise
 		const waiters = this.refreshWaiters
 		if (!promise) return Promise.resolve(null)
-		if (!signal || !waiters) return promise
+		if (!waiters) return promise
 
-		const waiter = { signal }
+		const waiter: { signal?: AbortSignal } = { signal }
 		waiters.add(waiter)
+		if (!signal) {
+			// A caller without an AbortSignal cannot detach: keep it registered until the shared
+			// POST settles so an aborting signaled caller cannot cancel a refresh this caller needs.
+			return promise.finally(() => {
+				waiters.delete(waiter)
+			})
+		}
 		if (signal.aborted) {
 			waiters.delete(waiter)
 			if (waiters.size === 0) this.refreshController?.abort(signal.reason)

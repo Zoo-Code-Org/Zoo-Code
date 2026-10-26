@@ -583,6 +583,101 @@ describe("KimiCodeOAuthManager", () => {
 		expect(context.secrets.delete).not.toHaveBeenCalled()
 	})
 
+	it("joins a signal-less waiter when a signaled caller aborts", async () => {
+		const { context, values } = createContext()
+		values.set(
+			"kimi-code-oauth-credentials",
+			JSON.stringify({ type: "kimi-code", accessToken: "old", refreshToken: "refresh", expiresAt: 0 }),
+		)
+		const manager = new KimiCodeOAuthManager()
+		manager.initialize(context)
+		let fetchedSignal: AbortSignal | undefined
+		let resolveFetch!: (response: Response) => void
+		vi.spyOn(globalThis, "fetch").mockImplementation(((_url, init) => {
+			fetchedSignal = (init as RequestInit)?.signal as AbortSignal
+			return new Promise<Response>((resolve) => {
+				resolveFetch = resolve
+			})
+		}) as typeof fetch)
+
+		// The signal-less caller is the one that must keep the shared POST alive; the signaled
+		// caller joins and then detaches without cancelling it.
+		const signalLessResult = manager.getAccessToken(false)
+		const controller = new AbortController()
+		const signaledResult = manager.getAccessToken(false, controller.signal).catch((error: Error) => error.name)
+		await vi.waitFor(() => expect(fetchedSignal).toBeDefined())
+
+		controller.abort()
+
+		await expect(signaledResult).resolves.toBe("AbortError")
+		expect(fetchedSignal?.aborted).toBe(false)
+
+		resolveFetch(
+			new Response(JSON.stringify({ access_token: "new", refresh_token: "rotated", expires_in: 3600 }), {
+				status: 200,
+			}),
+		)
+		await expect(signalLessResult).resolves.toBe("new")
+	})
+
+	it("normalizes a caller abort that lands after the token POST started", async () => {
+		let startedResolve!: () => void
+		const started = new Promise<void>((resolve) => {
+			startedResolve = resolve
+		})
+		let fetchedSignal: AbortSignal | undefined
+		vi.spyOn(globalThis, "fetch").mockImplementation(((_url, init) => {
+			const signal = (init as RequestInit)?.signal as AbortSignal
+			fetchedSignal = signal
+			startedResolve()
+			return new Promise<Response>((_resolve, reject) => {
+				signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+			})
+		}) as typeof fetch)
+
+		const controller = new AbortController()
+		const result = refreshKimiCodeAccessToken(
+			{ type: "kimi-code", accessToken: "old", refreshToken: "refresh", expiresAt: 0 },
+			controller.signal,
+		).catch((error: Error) => error)
+		await started
+
+		controller.abort(new Error("cancelled by the caller"))
+
+		const error = await result
+		expect(error).toBeInstanceOf(Error)
+		expect((error as Error).name).toBe("AbortError")
+		expect(fetchedSignal?.aborted).toBe(true)
+	})
+
+	it("preserves an independent fetch failure that races an aborted caller signal", async () => {
+		let rejectFetch!: (error: Error) => void
+		let startedResolve!: () => void
+		const started = new Promise<void>((resolve) => {
+			startedResolve = resolve
+		})
+		vi.spyOn(globalThis, "fetch").mockImplementation((() => {
+			startedResolve()
+			return new Promise<Response>((_resolve, reject) => {
+				rejectFetch = reject
+			})
+		}) as typeof fetch)
+
+		const controller = new AbortController()
+		const result = refreshKimiCodeAccessToken(
+			{ type: "kimi-code", accessToken: "old", refreshToken: "refresh", expiresAt: 0 },
+			controller.signal,
+		).catch((error: Error) => error)
+		await started
+
+		controller.abort(new Error("cancelled by the caller"))
+		const independent = new Error("network exploded")
+		rejectFetch(independent)
+
+		// The independent failure is not the caller's abort: it must be preserved unchanged.
+		await expect(result).resolves.toBe(independent)
+	})
+
 	it("normalizes a caller abort with an ordinary-Error reason to AbortError", async () => {
 		const { context, values } = createContext()
 		values.set(
