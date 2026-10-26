@@ -194,7 +194,12 @@ describe("safeWriteText", () => {
 			// staging directory are released before the original error propagates.
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".safeWriteText.bak_"))
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".safeWriteText_"))
-			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging_"))
+			const stagingDir = vi
+				.mocked(fsSync.mkdirSync)
+				.mock.calls.map((call) => call[0])
+				.find((dir) => String(dir).includes(".file-safety-staging_"))
+			expect(stagingDir).toBeDefined()
+			expect(fs.rmdir).toHaveBeenCalledWith(stagingDir)
 			expect(fs.rename).not.toHaveBeenCalled()
 		})
 

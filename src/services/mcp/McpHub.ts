@@ -670,7 +670,13 @@ export class McpHub {
 		if (source !== "project") {
 			return undefined
 		}
-		return this.providerRef.deref()?.cwd ?? getWorkspacePath()
+		const workspaceRoot = this.providerRef.deref()?.cwd || getWorkspacePath()
+		if (!workspaceRoot) {
+			// Fail closed: an empty confinement root would let a project write proceed without a
+			// boundary, so a project edit with no resolvable workspace must not be written at all.
+			throw new Error("Cannot write project MCP settings without a workspace root")
+		}
+		return workspaceRoot
 	}
 
 	// Initialize project-level MCP servers

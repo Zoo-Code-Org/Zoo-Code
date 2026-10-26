@@ -833,6 +833,9 @@ describe("McpHub", () => {
 			// Verify watcher was created
 			expect(chokidar.watch).toHaveBeenCalledWith(["/path/to/watch"], expect.any(Object))
 
+			// The project config write needs a resolvable workspace root to stay confined.
+			Object.defineProperty(mockProvider, "cwd", { value: "/mock/workspace", configurable: true })
+
 			// Now disable the server
 			await mcpHub.toggleServerDisabled("watcher-test-server", true)
 
@@ -1245,6 +1248,30 @@ describe("McpHub", () => {
 			const write = vi.mocked(safeWriteJson).mock.calls.find((call) => String(call[0]).includes("mcp.json"))
 			expect(write).toBeDefined()
 			expect(write![2]).toEqual(expect.objectContaining({ confineTo: "/mock/workspace" }))
+		})
+
+		it("fails closed for a project write when no workspace root is available", async () => {
+			// Neither the provider cwd nor the VS Code workspace supplies a root: an empty
+			// confinement root would let the write proceed unbounded, so it must be refused.
+			Object.defineProperty(mockProvider, "cwd", { value: undefined, configurable: true })
+			const workspaceSpy = vi.spyOn(pathUtils, "getWorkspacePath").mockReturnValue(undefined)
+			// The project config path still resolves, so the write reaches the confinement guard
+			// rather than failing earlier while resolving the path.
+			const projectPathSpy = vi
+				.spyOn(
+					mcpHub as unknown as { getProjectMcpPath: () => Promise<string | undefined> },
+					"getProjectMcpPath",
+				)
+				.mockResolvedValue("/mock/workspace/.roo/mcp.json")
+			mcpHub.connections = [projectConnection()]
+
+			await expect(mcpHub.toggleToolAlwaysAllow("test-server", "project", "new-tool", true)).rejects.toThrow(
+				"Cannot write project MCP settings without a workspace root",
+			)
+			const write = vi.mocked(safeWriteJson).mock.calls.find((call) => String(call[0]).includes("mcp.json"))
+			expect(write).toBeUndefined()
+			projectPathSpy.mockRestore()
+			workspaceSpy.mockRestore()
 		})
 
 		it("leaves a global-scoped allowlist write unconstrained", async () => {
