@@ -93,6 +93,10 @@ function isHiddenEntry(name: string): boolean {
 	return name.startsWith(".")
 }
 
+// Stale-sidecar sweep: a matching temp file younger than this may belong to a live write in
+// another process, so only older sidecars are treated as abandoned by a previous host.
+const SKILL_TEMP_SIDECAR_STALE_MS = 10 * 60 * 1000
+
 export class SkillsManager {
 	private skills: Map<string, SkillMetadata> = new Map()
 	private diagnostics: SkillDiagnostic[] = []
@@ -174,7 +178,11 @@ export class SkillsManager {
 					}
 					for (const file of files) {
 						if (!tempPattern.test(file)) continue
-						await fs.unlink(path.join(directory, file)).catch(() => {})
+						const stalePath = path.join(directory, file)
+						const stats = await fs.stat(stalePath).catch(() => undefined)
+						// Leave fresh sidecars alone: they may belong to a write in another process.
+						if (!stats || Date.now() - stats.mtimeMs < SKILL_TEMP_SIDECAR_STALE_MS) continue
+						await fs.unlink(stalePath).catch(() => {})
 					}
 				})
 			}
@@ -731,7 +739,9 @@ export class SkillsManager {
 	 * The temp file is removed when the write or rename fails.
 	 */
 	private async withDirectoryLock<T>(directory: string, operation: () => Promise<T>): Promise<T> {
-		const key = path.resolve(directory)
+		// Normalize through realpath first so a symlinked alias shares the same queue key; fall
+		// back to the resolved path when the directory cannot be resolved (e.g. not created yet).
+		const key = await fs.realpath(directory).catch(() => path.resolve(directory))
 		const previous = SkillsManager.directoryQueues.get(key) ?? Promise.resolve()
 		const run = previous.then(operation)
 		const tracked = run.then(

@@ -4086,19 +4086,66 @@ Instructions`)
 		}
 	})
 
-	it("sweeps a staged sidecar left by a previous host", async () => {
+	it("sweeps only a staged sidecar left by a previous host", async () => {
 		const staleName = ".SKILL.md.123.abc.tmp"
+		const freshName = ".SKILL.md.456.def.tmp"
 		mockReaddir.mockImplementation(async (_dir: string, options?: { withFileTypes?: boolean }) => {
 			if (options?.withFileTypes) {
 				return []
 			}
-			return [staleName]
+			return [staleName, freshName]
+		})
+		mockStat.mockImplementation(async (pathArg: string) => {
+			if (pathArg.endsWith(staleName)) {
+				// Older than the stale threshold: abandoned by a previous host.
+				return { mtimeMs: Date.now() - 60 * 60 * 1000 }
+			}
+			if (pathArg.endsWith(freshName)) {
+				return { mtimeMs: Date.now() }
+			}
+			throw enoent()
 		})
 		mockUnlink.mockResolvedValue(undefined)
 
 		await skillsManager["sweepStaleSkillTempFiles"]()
 
 		expect(mockUnlink).toHaveBeenCalledWith(p(globalSkillsDir, staleName))
+		// A fresh matching sidecar may belong to a live write and must survive.
+		expect(mockUnlink).not.toHaveBeenCalledWith(p(globalSkillsDir, freshName))
+	})
+
+	it("shares one directory queue across symlink aliases", async () => {
+		const order: string[] = []
+		let releaseFirst!: () => void
+		const firstGate = new Promise<void>((resolve) => {
+			releaseFirst = resolve
+		})
+		const alias = p("/alias", "skills")
+		mockRealpath.mockImplementation(async (pathArg: string) => (pathArg === alias ? globalSkillsDir : pathArg))
+
+		const first = skillsManager["withDirectoryLock"](alias, async () => {
+			order.push("first:start")
+			await firstGate
+			order.push("first:end")
+		})
+		try {
+			// The lock key is resolved through realpath asynchronously before the operation runs.
+			await vi.waitFor(() => expect(order).toEqual(["first:start"]))
+			const second = skillsManager["withDirectoryLock"](globalSkillsDir, async () => {
+				order.push("second")
+			})
+			await Promise.resolve()
+			// The alias resolves to the same real directory, so the second operation waits.
+			expect(order).toEqual(["first:start"])
+
+			releaseFirst()
+			await Promise.all([first, second])
+			expect(order).toEqual(["first:start", "first:end", "second"])
+		} finally {
+			// Never leave the shared queue holding a gate if an assertion above fails.
+			releaseFirst()
+			await first.catch(() => undefined)
+		}
 	})
 
 	it("does not start watchers when initialization runs after disposal", async () => {
