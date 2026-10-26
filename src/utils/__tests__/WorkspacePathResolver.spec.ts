@@ -132,3 +132,20 @@ describe("resolveRealPath", () => {
 		}
 	})
 })
+
+describe("resolveRealPath case folding option", () => {
+	it("preserves the on-disk case when case folding is disabled", async () => {
+		const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "zoo-wpr-case-")))
+		const mixed = path.join(root, "MixedCase")
+		await fs.mkdir(mixed)
+		try {
+			const preserved = await resolveRealPath(mixed, { caseFold: false })
+			expect(preserved).toBe(path.join(root, "MixedCase"))
+			if (process.platform === "darwin" || process.platform === "win32") {
+				expect(await resolveRealPath(mixed)).toBe(preserved.toLowerCase())
+			}
+		} finally {
+			await fs.rm(root, { recursive: true, force: true })
+		}
+	})
+})
