@@ -42,9 +42,9 @@ describe("hydrated language", () => {
 
 		await postState({ language: "es" })
 
-		expect(screen.getByTestId("tips")).toHaveTextContent(
-			i18next.t("chat:rooTips.customizableModes.title", { lng: "es" }),
-		)
+		const tips = screen.getByTestId("tips")
+		expect(tips).toHaveTextContent("Modos personalizables")
+		expect(tips).not.toHaveTextContent("rooTips.customizableModes.title")
 	})
 })
 

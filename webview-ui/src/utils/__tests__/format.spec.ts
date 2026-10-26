@@ -1,3 +1,5 @@
+import type { TFunction } from "i18next"
+
 import { formatLargeNumber, formatDate, formatTimeAgo } from "../format"
 
 // Mock i18next
@@ -5,8 +7,8 @@ vi.mock("i18next", () => ({
 	default: { language: "en" },
 }))
 
-// Stands in for the `t` a component gets from `useTranslation`.
-const t = (key: string, options?: Record<string, any>) => {
+// Returns translation keys with interpolated values appended.
+const t = ((key: string, options?: { count?: number }) => {
 	const translations: Record<string, string> = {
 		"common:number_format.billion_suffix": "b",
 		"common:number_format.million_suffix": "m",
@@ -32,7 +34,7 @@ const t = (key: string, options?: Record<string, any>) => {
 		result = result.replace("{{count}}", options.count.toString())
 	}
 	return result
-}
+}) as unknown as TFunction
 
 describe("formatLargeNumber", () => {
 	it("should format billions", () => {
@@ -58,7 +60,8 @@ describe("formatLargeNumber", () => {
 	it("takes suffixes from the given t", () => {
 		const givenT = vi.fn((key: string) => (key === "common:number_format.thousand_suffix" ? " mil" : key))
 
-		expect(formatLargeNumber(1500, givenT)).toBe("1.5 mil")
+		// `TFunction` is branded; the mock only needs to answer a key lookup.
+		expect(formatLargeNumber(1500, givenT as unknown as TFunction)).toBe("1.5 mil")
 		expect(givenT).toHaveBeenCalledWith("common:number_format.thousand_suffix")
 	})
 })
@@ -161,7 +164,8 @@ describe("formatTimeAgo", () => {
 		const givenT = vi.fn((key: string, options?: Record<string, unknown>) => `es:${key}:${options?.count}`)
 		const timestamp = new Date("2024-01-15T09:00:00").getTime() // 3 hours ago
 
-		expect(formatTimeAgo(timestamp, givenT)).toBe("es:common:time_ago.hours_ago:3")
+		// `TFunction` is branded; the mock only needs to answer a key lookup with `count`.
+		expect(formatTimeAgo(timestamp, givenT as unknown as TFunction)).toBe("es:common:time_ago.hours_ago:3")
 		expect(givenT).toHaveBeenCalledWith("common:time_ago.hours_ago", { count: 3 })
 	})
 })

@@ -4,6 +4,7 @@ import {
 	type OrganizationAllowList,
 	type RouterModels,
 } from "@roo-code/types"
+import type { TFunction } from "i18next"
 
 import {
 	formatOpenAiExtraBodyValidationError,
@@ -14,7 +15,7 @@ import {
 } from "../validate"
 
 // Returns translation keys with interpolated values appended.
-const t = (key: string, options?: Record<string, string>) => {
+const t = ((key: string, options?: Record<string, string>) => {
 	if (options) {
 		let result = key
 		Object.entries(options).forEach(([k, v]) => {
@@ -23,7 +24,7 @@ const t = (key: string, options?: Record<string, string>) => {
 		return result
 	}
 	return key
-}
+}) as unknown as TFunction
 
 describe("Model Validation Functions", () => {
 	const mockRouterModels: RouterModels = {

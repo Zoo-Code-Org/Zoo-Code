@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next"
 import {
 	type ProviderSettings,
 	type OrganizationAllowList,
@@ -8,9 +9,6 @@ import {
 	providerIdentifiers,
 	githubCopilotLanguageModel,
 } from "@roo-code/types"
-
-// Structural rather than i18next's branded `TFunction`, so test doubles can stand in for `t`.
-type Translate = (key: string, options?: Record<string, any>) => string
 
 type OpenAiExtraBodyParseResult = ReturnType<typeof parseOpenAiExtraBody>
 type OpenAiExtraBodyTranslationKey = `settings:validation.openAiExtraBody.${
@@ -34,7 +32,7 @@ export function formatOpenAiExtraBodyValidationError(
 	return t(`settings:validation.openAiExtraBody.${result.reason}`)
 }
 
-function validateOpenAiExtraBody(apiConfiguration: ProviderSettings, t: Translate): string | undefined {
+function validateOpenAiExtraBody(apiConfiguration: ProviderSettings, t: TFunction): string | undefined {
 	if (apiConfiguration.apiProvider !== providerIdentifiers.openai) {
 		return undefined
 	}
@@ -44,7 +42,7 @@ function validateOpenAiExtraBody(apiConfiguration: ProviderSettings, t: Translat
 
 export function validateApiConfiguration(
 	apiConfiguration: ProviderSettings,
-	t: Translate,
+	t: TFunction,
 	routerModels?: RouterModels,
 	organizationAllowList?: OrganizationAllowList,
 	zooCodeIsAuthenticated?: boolean,
@@ -76,7 +74,7 @@ export function validateApiConfiguration(
 
 function validateModelsAndKeysProvided(
 	apiConfiguration: ProviderSettings,
-	t: Translate,
+	t: TFunction,
 	zooCodeIsAuthenticated?: boolean,
 ): string | undefined {
 	switch (apiConfiguration.apiProvider) {
@@ -225,7 +223,7 @@ type ValidationError = {
 
 function validateProviderAgainstOrganizationSettings(
 	apiConfiguration: ProviderSettings,
-	t: Translate,
+	t: TFunction,
 	organizationAllowList?: OrganizationAllowList,
 ): ValidationError | undefined {
 	if (organizationAllowList && !organizationAllowList.allowAll) {
@@ -274,7 +272,7 @@ function validateProviderAgainstOrganizationSettings(
  * @param region Optional region to check against the ARN's region
  * @returns An object with validation results: { isValid, arnRegion, errorMessage }
  */
-export function validateBedrockArn(arn: string, t: Translate, region?: string) {
+export function validateBedrockArn(arn: string, t: TFunction, region?: string) {
 	// Try to extract region from ARN for region mismatch warning.
 	// This is a permissive regex that attempts to find the region component
 	// without enforcing strict ARN format validation.
@@ -296,7 +294,7 @@ export function validateBedrockArn(arn: string, t: Translate, region?: string) {
 
 function validateDynamicProviderModelId(
 	apiConfiguration: ProviderSettings,
-	t: Translate,
+	t: TFunction,
 	routerModels?: RouterModels,
 ): string | undefined {
 	const provider = apiConfiguration.apiProvider ?? ""
@@ -327,7 +325,7 @@ function validateDynamicProviderModelId(
  */
 export function getModelValidationError(
 	apiConfiguration: ProviderSettings,
-	t: Translate,
+	t: TFunction,
 	routerModels?: RouterModels,
 	organizationAllowList?: OrganizationAllowList,
 ): string | undefined {
@@ -359,7 +357,7 @@ export function getModelValidationError(
  */
 export function validateApiConfigurationExcludingModelErrors(
 	apiConfiguration: ProviderSettings,
-	t: Translate,
+	t: TFunction,
 	_routerModels?: RouterModels, // Keeping this for compatibility with the old function.
 	organizationAllowList?: OrganizationAllowList,
 ): string | undefined {

@@ -1,9 +1,6 @@
-import i18next from "i18next"
+import i18next, { type TFunction } from "i18next"
 
-// Structural rather than i18next's branded `TFunction`, so test doubles can stand in for `t`.
-type Translate = (key: string, options?: Record<string, any>) => string
-
-export function formatLargeNumber(num: number, t: Translate): string {
+export function formatLargeNumber(num: number, t: TFunction): string {
 	if (num >= 1e9) {
 		return (num / 1e9).toFixed(1) + t("common:number_format.billion_suffix")
 	}
@@ -32,7 +29,7 @@ export const formatDate = (timestamp: number) => {
 	})
 }
 
-export const formatTimeAgo = (timestamp: number, t: Translate) => {
+export const formatTimeAgo = (timestamp: number, t: TFunction) => {
 	const now = Date.now()
 	const diff = now - timestamp
 	const seconds = Math.floor(diff / 1000)
