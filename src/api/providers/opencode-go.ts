@@ -41,7 +41,13 @@ import {
 	convertOpenAIToolsToAnthropic,
 	convertOpenAIToolChoiceToAnthropic,
 } from "../../core/prompts/tools/native-tools/converters"
-import { createAbortError, isRequestAborted, resolveModelWithAbort } from "./utils/abort-signal"
+import {
+	createAbortError,
+	hasUsableTimeout,
+	isRequestAborted,
+	resolveModelWithAbort,
+	toSdkTimeoutMs,
+} from "./utils/abort-signal"
 
 /**
  * The wire formats exposed by the Opencode Go gateway:
@@ -250,9 +256,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		const controller = new AbortController()
 		const abortListener = () => controller.abort()
 		if (externalAbortSignal) {
-			// Stryker disable next-line ConditionalExpression: externalAbortSignal.aborted can never be true here - the entry guard rejects a pre-aborted signal and the rejectOnAbort race rejects an abort during model resolution, and no await sits between the race settling and this bridge, so the branch is unreachable
 			if (externalAbortSignal.aborted) {
-				// Stryker disable next-line CallExpression: unreachable branch body - a pre-aborted external signal is rejected by the entry guard (and a mid-resolution abort by the race) before this bridge registers
 				controller.abort()
 			} else {
 				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
@@ -530,9 +534,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			// isRequestAborted covers the signal-aborted case plus the OpenAI
 			// SDK's APIUserAbortError (name "APIUserAbortError" / "Request was
 			// aborted.").
-			// Stryker disable next-line ConditionalExpression: abort normalization is subsumed by createMessage's outer catch, which applies the identical isRequestAborted check to the same controller signal and re-throws the standardized AbortError - this condition's mutation is unobservable (the inner layer's unique behavior is the non-abort wrap below)
 			if (isRequestAborted(error, abortSignal)) {
-				// Stryker disable next-line StringLiteral: the thrown error is re-caught by createMessage's outer catch, which re-standardizes with the correct provider name (the standardized error's name AbortError matches the outer isRequestAborted) - this literal is unobservable
 				throw createAbortError("Opencode Go")
 			}
 			if (error instanceof Error) {
@@ -671,7 +673,6 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			// completion error. isRequestAborted also covers the Anthropic
 			// SDK's APIUserAbortError (name "APIUserAbortError").
 			if (isRequestAborted(error, abortSignal)) {
-				// Stryker disable next-line StringLiteral: the thrown error is re-caught by createMessage's outer catch, which re-standardizes with the correct provider name (the standardized error's name AbortError matches the outer isRequestAborted) - this literal is unobservable
 				throw createAbortError("Opencode Go")
 			}
 			if (error instanceof Error) {
@@ -864,16 +865,19 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			reasoningEffort,
 			maxTokens,
 		} = await resolveModelWithAbort(() => this.resolveModel(), options?.abortSignal, "Opencode Go")
+		const timeoutMs = options?.timeoutMs
 
 		if (format === "anthropic") {
 			try {
 				// Build request options with abortSignal and/or timeout handling.
-				// timeoutMs <= 0 means "no explicit timeout": omit the SDK timeout
-				// option entirely — the SDKs treat timeout: 0 as an immediate
-				// abort, which would cancel the request right away.
+				// hasUsableTimeout/toSdkTimeoutMs own the non-positive and non-finite
+				// semantics: a usable budget is rounded up and capped before it reaches
+				// the SDK.
 				const requestOptions: Anthropic.RequestOptions = {
 					...(options?.abortSignal && { signal: options.abortSignal }),
-					...(options?.timeoutMs !== undefined && options.timeoutMs > 0 && { timeout: options.timeoutMs }),
+				}
+				if (hasUsableTimeout(timeoutMs)) {
+					requestOptions.timeout = toSdkTimeoutMs(timeoutMs)
 				}
 
 				const message = await this.anthropicClient.messages.create(
@@ -916,12 +920,14 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		if (format === "responses") {
 			try {
 				// Build request options with abortSignal and/or timeout (series
-				// standard): timeoutMs <= 0 means "no explicit timeout" — the
-				// OpenAI SDK treats timeout: 0 as an immediate abort, so the SDK
-				// timeout option is omitted unless the value is positive.
+				// standard): hasUsableTimeout/toSdkTimeoutMs own the disabled and
+				// non-finite semantics, so the SDK option is only set for a usable
+				// budget.
 				const createOptions: OpenAI.RequestOptions = {
 					...(options?.abortSignal && { signal: options.abortSignal }),
-					...(options?.timeoutMs !== undefined && options.timeoutMs > 0 && { timeout: options.timeoutMs }),
+				}
+				if (hasUsableTimeout(timeoutMs)) {
+					createOptions.timeout = toSdkTimeoutMs(timeoutMs)
 				}
 
 				const response = await this.client.responses.create(
@@ -992,13 +998,14 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 					reasoningEffort as OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"]
 			}
 
-			// Build request options with abortSignal and/or timeout for OpenAI path.
-			// timeoutMs <= 0 means "no explicit timeout": omit the SDK timeout
-			// option entirely — the OpenAI SDK treats timeout: 0 as an immediate
-			// abort, which would cancel the request right away.
+			// Build request options with abortSignal and/or timeout for the OpenAI
+			// path: hasUsableTimeout/toSdkTimeoutMs own the disabled and non-finite
+			// semantics.
 			const createOptions: OpenAI.RequestOptions = {
 				...(options?.abortSignal && { signal: options.abortSignal }),
-				...(options?.timeoutMs !== undefined && options.timeoutMs > 0 && { timeout: options.timeoutMs }),
+			}
+			if (hasUsableTimeout(timeoutMs)) {
+				createOptions.timeout = toSdkTimeoutMs(timeoutMs)
 			}
 
 			const response = await this.client.chat.completions.create(requestOptions, {

@@ -29,7 +29,13 @@ import type {
 } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
-import { createAbortError, isRequestAborted, resolveModelWithAbort } from "./utils/abort-signal"
+import {
+	createAbortError,
+	hasUsableTimeout,
+	isRequestAborted,
+	resolveModelWithAbort,
+	toSdkTimeoutMs,
+} from "./utils/abort-signal"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
 // Unbound usage includes extra fields for Anthropic cache tokens.
@@ -195,9 +201,7 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 		const controller = new AbortController()
 		const abortListener = () => controller.abort()
 		if (externalAbortSignal) {
-			// Stryker disable next-line ConditionalExpression: externalAbortSignal.aborted can never be true here - the entry guard rejects a pre-aborted signal and the rejectOnAbort race rejects an abort during model resolution, and no await sits between the race settling and this bridge, so the branch is unreachable
 			if (externalAbortSignal.aborted) {
-				// Stryker disable next-line CallExpression: unreachable branch body - a pre-aborted external signal is rejected by the entry guard (and a mid-resolution abort by the race) before this bridge registers
 				controller.abort()
 			} else {
 				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
@@ -293,8 +297,9 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 		if (options?.abortSignal) {
 			createOptions.signal = options.abortSignal
 		}
-		if (options?.timeoutMs !== undefined && options.timeoutMs > 0) {
-			createOptions.timeout = options.timeoutMs
+		const timeoutMs = options?.timeoutMs
+		if (hasUsableTimeout(timeoutMs)) {
+			createOptions.timeout = toSdkTimeoutMs(timeoutMs)
 		}
 
 		let response: OpenAI.Chat.ChatCompletion
