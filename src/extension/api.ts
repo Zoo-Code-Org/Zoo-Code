@@ -834,7 +834,10 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		// can carry provider secrets (e.g. apiKey). Flatten the provider settings onto the top
 		// level (the pre-existing flat shape) so the secret filter removes them before return.
 		const values = this.sidebarProvider.getValues()
-		const { apiConfiguration, ...rest } = values
+		// viewStates is per-view durable state owned by the extension host: exposing it on
+		// the flat configuration surface invites a caller to write a stale snapshot
+		// back and clobber newer per-view selections, so it never leaves here.
+		const { apiConfiguration, viewStates: _viewStates, ...rest } = values
 		// A view-local profile is a complete snapshot, not a patch over the shared
 		// store - getState() resolves it the same way. Drop the shared flat
 		// provider-settings keys before flattening, or a key the view's profile
@@ -875,11 +878,18 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 	}
 
 	public async setConfiguration(values: RooCodeSettings) {
-		await this.sidebarProvider.setValues(values)
-		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
-		if (values.modeApiConfigs) {
+		// A caller's configuration snapshot can be stale for per-view state: viewStates
+		// is owned by the extension host and must not re-enter storage through the
+		// configuration round trip.
+		const { viewStates: _viewStates, ...configuration } = values
+		await this.sidebarProvider.setValues(configuration)
+		await this.sidebarProvider.providerSettingsManager.saveConfig(
+			configuration.currentApiConfigName || "default",
+			configuration,
+		)
+		if (configuration.modeApiConfigs) {
 			await Promise.all(
-				Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
+				Object.entries(configuration.modeApiConfigs).map(([mode, configId]) =>
 					this.sidebarProvider.providerSettingsManager.setModeConfig(mode as Mode, configId),
 				),
 			)
