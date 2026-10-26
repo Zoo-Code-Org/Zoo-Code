@@ -42,6 +42,8 @@ import {
 	ImageGenerationProvider,
 } from "@roo-code/types"
 
+import { experimentDefault } from "@roo/experiments"
+
 import { vscode } from "@src/utils/vscode"
 import { cn } from "@src/lib/utils"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
@@ -150,6 +152,10 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const prevMode = useRef(mode)
 	const handledSettingsImportedAt = useRef<number | undefined>(undefined)
 	const confirmDialogHandler = useRef<() => void>()
+	// Experiment ids toggled during this edit session. Only these are sent on Save: the
+	// extension merges the received map over the stored experiments, so writing the whole
+	// live map would freeze every other experiment at today's default.
+	const changedExperiments = useRef(new Set<ExperimentId>())
 
 	const [cachedState, setCachedState] = useState(() => extensionState)
 
@@ -234,6 +240,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
 		prevApiConfigName.current = currentApiConfigName
 		prevMode.current = mode
+		changedExperiments.current.clear()
 		setChangeDetected(false)
 	}, [currentApiConfigName, mode, extensionState])
 
@@ -244,6 +251,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		}
 
 		handledSettingsImportedAt.current = settingsImportedAt
+		changedExperiments.current.clear()
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
 		setChangeDetected(false)
 	}, [settingsImportedAt, extensionState])
@@ -307,6 +315,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			}
 
 			setChangeDetected(true)
+			changedExperiments.current.add(id)
 			return { ...prevState, experiments: { ...prevState.experiments, [id]: enabled } }
 		})
 	}, [])
@@ -381,6 +390,18 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 	const handleSubmit = () => {
 		if (isSettingValid) {
+			// Only experiments that actually differ from the live state are persisted, so a
+			// future default flip still reaches users who have saved other settings before.
+			const experimentChanges: Record<string, boolean> = {}
+			for (const id of changedExperiments.current) {
+				const value = experiments?.[id] ?? experimentDefault[id]
+				// Compare against the live/default baseline, not a bare false: a user toggling
+				// a default-on experiment off is a real change that must be persisted.
+				if (value !== (extensionState.experiments?.[id] ?? experimentDefault[id])) {
+					experimentChanges[id] = value
+				}
+			}
+
 			vscode.postMessage({
 				type: "updateSettings",
 				updatedSettings: {
@@ -452,7 +473,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					imageGenerationProvider,
 					openRouterImageApiKey,
 					openRouterImageGenerationSelectedModel,
-					experiments,
+					experiments: Object.keys(experimentChanges).length > 0 ? experimentChanges : undefined,
 					customSupportPrompts,
 				},
 			})
@@ -463,6 +484,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			vscode.postMessage({ type: "telemetrySetting", text: telemetrySetting })
 			vscode.postMessage({ type: "debugSetting", bool: cachedState.debug })
 
+			changedExperiments.current.clear()
 			setChangeDetected(false)
 		}
 	}
@@ -486,6 +508,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			if (confirm) {
 				// Discard changes: Reset state and flag
 				setCachedState(extensionState) // Revert to original state
+				changedExperiments.current.clear()
 				setChangeDetected(false) // Reset change flag
 				confirmDialogHandler.current?.() // Execute the pending action (e.g., tab switch)
 			}

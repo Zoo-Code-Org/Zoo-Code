@@ -912,3 +912,52 @@ describe("SettingsView - Blanket Auto-Deny", () => {
 		)
 	})
 })
+
+describe("SettingsView - Experiments", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("persists only the experiment the user toggled, not the whole map", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { imageGeneration: false } })
+
+		activateTab("experimental")
+		const content = getSettingsContent()
+
+		// Toggle the chat-diff experiment through the settings control.
+		const label = within(content).getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name").closest("label")
+		expect(label).not.toBeNull()
+		const checkbox = label!.querySelector('input[type="checkbox"]')
+		expect(checkbox).not.toBeNull()
+		fireEvent.click(checkbox as HTMLInputElement)
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		// Only the toggled key is sent: the host merges the received map over the stored
+		// experiments, so sending the whole live map would freeze other defaults.
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({
+					// The control starts enabled by default; toggling it off is the change.
+					experiments: { preventFocusDisruption: false },
+				}),
+			}),
+		)
+	})
+
+	it("does not persist the experiments map when no experiment changed", () => {
+		const { activateTab } = renderSettingsView({ experiments: { imageGeneration: false } })
+
+		activateTab("experimental")
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		const updateSettingsCalls = vi
+			.mocked(vscode.postMessage)
+			.mock.calls.filter(([message]) => (message as { type?: string }).type === "updateSettings")
+		expect(updateSettingsCalls.length).toBe(1)
+		expect(
+			(updateSettingsCalls[0][0] as { updatedSettings: Record<string, unknown> }).updatedSettings.experiments,
+		).toBeUndefined()
+	})
+})
