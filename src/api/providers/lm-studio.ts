@@ -318,10 +318,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 	 * caller stop as the contract AbortError. The same selection runs from the inner create catch
 	 * and the outer completion catch, so it lives in one helper.
 	 */
-	private toCompletionAbortError(
-		requestSignal: AbortSignal | undefined,
-		callerSignal: AbortSignal | undefined,
-	): Error {
+	private toCompletionAbortError(requestSignal: AbortSignal | undefined): Error {
 		return isTimeoutAbort(requestSignal) ? createTimeoutError("LM Studio") : createAbortError("LM Studio")
 	}
 
@@ -360,14 +357,14 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				response = await this.client.chat.completions.create(params, createOptions)
 			} catch (error) {
 				if (isRequestAborted(error, requestSignal)) {
-					throw this.toCompletionAbortError(requestSignal, options?.abortSignal)
+					throw this.toCompletionAbortError(requestSignal)
 				}
 				throw handleOpenAIError(error, this.providerName)
 			}
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
 			if (isRequestAborted(error, requestSignal)) {
-				throw this.toCompletionAbortError(requestSignal, options?.abortSignal)
+				throw this.toCompletionAbortError(requestSignal)
 			}
 			throw new Error(
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
