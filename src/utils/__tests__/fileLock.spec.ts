@@ -31,15 +31,20 @@ describe("resolveFileLockPath", () => {
 
 		const aliasPath = path.join(aliasDirectory, "settings.json")
 		const referentPath = path.join(realDirectory, "settings.json")
+		// Compare against the realpath of the ancestor: Windows short (8.3) paths in os.tmpdir()
+		// resolve to their long form, so path.resolve(tmp) is not the canonical spelling.
+		const expected = path.join(await fs.realpath(realDirectory), "settings.json")
 
-		await expect(resolveFileLockPath(aliasPath)).resolves.toBe(path.resolve(referentPath))
-		await expect(resolveFileLockPath(referentPath)).resolves.toBe(path.resolve(referentPath))
+		await expect(resolveFileLockPath(aliasPath)).resolves.toBe(expected)
+		await expect(resolveFileLockPath(referentPath)).resolves.toBe(expected)
 	})
 
 	it("keeps an ordinary path unchanged", async () => {
 		const root = await makeTemporaryDirectory()
 		const target = path.join(root, "ordinary.json")
-		await expect(resolveFileLockPath(target)).resolves.toBe(path.resolve(target))
+		// The lock path resolves the nearest existing ancestor (the temp root), so short (8.3)
+		// Windows temp paths come back in their canonical long form.
+		await expect(resolveFileLockPath(target)).resolves.toBe(path.join(await fs.realpath(root), "ordinary.json"))
 	})
 })
 
