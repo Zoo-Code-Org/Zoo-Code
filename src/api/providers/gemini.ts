@@ -27,9 +27,15 @@ import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, Complete
 import { BaseProvider } from "./base-provider"
 import { NOT_PROVIDED } from "./constants"
 import { parseVertexJsonCredentials } from "./utils/vertex-credentials"
-import { createAbortError, isRequestAborted, throwIfAborted } from "./utils/abort-signal"
+import {
+	createAbortError,
+	hasUsableTimeout,
+	isRequestAborted,
+	throwIfAborted,
+	toSdkTimeoutMs,
+} from "./utils/abort-signal"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
-import { createTimeoutError, getRequestTimeoutMs } from "./utils/request-timeout"
+import { createTimeoutError } from "./utils/request-timeout"
 
 type GeminiHandlerOptions = ApiHandlerOptions & {
 	isVertex?: boolean
@@ -681,10 +687,11 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 
 		const { id: model, info } = this.getModel()
 
-		// Per the abort-signal series contract, timeoutMs <= 0 means 'no per-request
-		// timeout': the option is omitted entirely (some SDKs treat 0 as an
-		// immediate timeout).
-		const timeoutMs = getRequestTimeoutMs(options?.timeoutMs)
+		// Per the abort-signal series contract, timeoutMs <= 0/non-finite means 'no
+		// per-request timeout': the option is omitted entirely (some SDKs treat 0 as an
+		// immediate timeout). The shared helper rounds fractions up and caps the delay at
+		// the Node timer maximum.
+		const requestTimeoutMs = hasUsableTimeout(options?.timeoutMs) ? toSdkTimeoutMs(options.timeoutMs) : undefined
 
 		try {
 			const supportsTemperature = info.supportsTemperature !== false
@@ -692,8 +699,8 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 				? (this.options.modelTemperature ?? info.defaultTemperature ?? 1)
 				: info.defaultTemperature
 			const httpOpts: { timeout?: number; baseUrl?: string } = {}
-			if (timeoutMs !== undefined) {
-				httpOpts.timeout = timeoutMs
+			if (requestTimeoutMs !== undefined) {
+				httpOpts.timeout = requestTimeoutMs
 			}
 			if (this.options.googleGeminiBaseUrl) {
 				httpOpts.baseUrl = this.options.googleGeminiBaseUrl
@@ -744,7 +751,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 				// cancellation: it is the configured per-request HTTP timeout
 				// elapsing. Report it distinctly (same contract as the LiteLLM
 				// unit) so a stalled request is not mistaken for a user stop.
-				if (timeoutMs !== undefined && !options?.abortSignal?.aborted) {
+				if (requestTimeoutMs !== undefined && !options?.abortSignal?.aborted) {
 					throw createTimeoutError("Gemini", "completion request")
 				}
 				throw createAbortError("Gemini")
