@@ -6,7 +6,7 @@ import { safeWriteJson } from "../../utils/safeWriteJson"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { getTaskDirectoryPath } from "../../utils/storage"
 import { ensureMessageIdentifiers, mergeClineMessageSnapshots } from "./mergeMessageSnapshots"
-import { getErrorCode, readFileWithMissingRetry } from "./readFileWithMissingRetry"
+import { formatErrorDetail, getErrorCode, readFileWithMissingRetry } from "./readFileWithMissingRetry"
 
 export type TaskMessagesReadErrorKind = "not_found" | "invalid" | "io_error"
 
@@ -38,14 +38,22 @@ export async function readTaskMessages({
 		fileContent = await readFileWithMissingRetry(filePath)
 	} catch (error) {
 		const kind = getErrorCode(error) === "ENOENT" ? "not_found" : "io_error"
-		throw new TaskMessagesReadError(kind, `Failed to read task messages for ${taskId} at ${filePath}`, error)
+		throw new TaskMessagesReadError(
+			kind,
+			`Failed to read task messages for ${taskId} at ${filePath}${formatErrorDetail(error)}`,
+			error,
+		)
 	}
 
 	let parsedData: unknown
 	try {
 		parsedData = JSON.parse(fileContent)
 	} catch (error) {
-		throw new TaskMessagesReadError("invalid", `Failed to parse task messages for ${taskId} at ${filePath}`, error)
+		throw new TaskMessagesReadError(
+			"invalid",
+			`Failed to parse task messages for ${taskId} at ${filePath}${formatErrorDetail(error)}`,
+			error,
+		)
 	}
 
 	if (!Array.isArray(parsedData)) {

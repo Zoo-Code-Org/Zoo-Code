@@ -13,6 +13,7 @@
 	"deleteTaskTitle": "Elimina attività (Shift + Clic per saltare conferma)",
 	"copyPrompt": "Copia prompt",
 	"exportTask": "Esporta attività",
+	"renameTask": "Rinomina attività",
 	"deleteTask": "Elimina attività",
 	"deleteTaskMessage": "Sei sicuro di voler eliminare questa attività? Questa azione non può essere annullata.",
 	"cancel": "Annulla",

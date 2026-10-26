@@ -2226,6 +2226,16 @@ describe("ClineProvider", () => {
 		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
 	})
 
+	test.each([true, false, undefined])(
+		"returns the saved output collapse preference (%s) to the webview",
+		async (value) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("collapseCommandOutputByDefault", value)
+			expect((await provider.getState()).collapseCommandOutputByDefault).toBe(value ?? false)
+			expect((await provider.getStateToPostToWebview()).collapseCommandOutputByDefault).toBe(value ?? false)
+		},
+	)
+
 	test("getState applies fallback defaults for write, diff, and terminal settings", async () => {
 		// Mock globalState.get to return undefined for the fallback settings
 		// (typed reassignment — Memento.get has no mock type, same pattern as the
@@ -4620,6 +4630,7 @@ describe("ClineProvider - Router Models", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -4655,6 +4666,7 @@ describe("ClineProvider - Router Models", () => {
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm fail
 			.mockResolvedValueOnce(mockModels) // opencode-go (public endpoint)
 			.mockResolvedValueOnce(mockModels) // kenari (public endpoint)
+			.mockResolvedValueOnce(mockModels) // io-intelligence (public endpoint)
 			.mockResolvedValueOnce(mockModels) // nanogpt (public endpoint)
 
 		await messageHandler({ type: "requestRouterModels" })
@@ -4676,6 +4688,7 @@ describe("ClineProvider - Router Models", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -4781,6 +4794,7 @@ describe("ClineProvider - Router Models", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
