@@ -35,6 +35,8 @@ import {
 	mergeAbortSignalAndTimeout,
 	rejectOnAbort,
 	throwIfAborted,
+	hasUsableTimeout,
+	toSdkTimeoutMs,
 } from "./utils/abort-signal"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
@@ -342,9 +344,12 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 		// SDK so both abort and timeout reject with a DOM-standard AbortError in the catch
 		// below. The client-level timeout remains the default safety net; 0 is never passed
 		// to the SDK timeout.
+		const timeoutMs = options?.timeoutMs
 		const createOptions: OpenAI.RequestOptions = {
 			...(requestAbortSignal && { signal: requestAbortSignal }),
-			...(typeof options?.timeoutMs === "number" && options.timeoutMs > 0 && { timeout: options.timeoutMs }),
+			// hasUsableTimeout/toSdkTimeoutMs own the disabled and non-finite semantics:
+			// a usable budget is rounded up and capped before it reaches the SDK.
+			...(hasUsableTimeout(timeoutMs) && { timeout: toSdkTimeoutMs(timeoutMs) }),
 		}
 
 		let response: OpenAI.Chat.ChatCompletion
