@@ -1,236 +1,269 @@
 {
-	"$comment": "Maintainer-reviewed equivalent mutants for the changed-code mutation gate. Each entry accepts exactly one mutant (file, start line, mutator name, replacement) as equivalent, with the review rationale. Entries are validated against the checked-in source before mutation testing; a missing file, unknown mutator, or line that no longer contains the named mutator fails the gate. Entries that do not match a reported mutant produce advisories for the tested files. Add entries only with maintainer approval; never add in-source Stryker directives. Lines are Stryker report lines (0-based): the editor shows the code at line + 1.",
+	"$comment": "Maintainer-reviewed equivalent mutants for the changed-code mutation gate. Each entry accepts exactly one mutant (file, start line, mutator name, replacement) as equivalent, with the review rationale. Entries are validated against the checked-in source before mutation testing; a missing file, unknown mutator, or line that no longer contains the named mutator fails the gate. Entries that do not match a reported mutant produce advisories for the tested files. Add entries only with maintainer approval; never add in-source Stryker directives. Lines are Stryker report lines (0-based): the editor shows the code at line + 1. Entries include the Stryker start column so a same-line change cannot silently re-bind an entry to a different mutant.",
 	"equivalences": [
 		{
 			"file": "src/api/providers/openai-codex.ts",
 			"line": 274,
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
-			"reason": "the false mutant differs only if an abort lands between the OAuth race settle and this catch, a microtask window"
+			"reason": "the false mutant differs only if an abort lands between the OAuth race settle and this catch, a microtask window",
+			"column": 7
 		},
 		{
 			"file": "src/api/providers/openai-codex.ts",
 			"line": 1457,
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
-			"reason": "the false mutant differs only if an abort lands between the transport last pre-yield check and this consumer resumption"
+			"reason": "the false mutant differs only if an abort lands between the transport last pre-yield check and this consumer resumption",
+			"column": 8
 		},
 		{
 			"file": "src/api/providers/openai.ts",
 			"line": 94,
 			"mutator": "LogicalOperator",
 			"replacement": "this.options.openAiStrictToolSchemas && DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS",
-			"reason": "an unset option makes && yield undefined so the parameter default supplies the same strict value as ??"
+			"reason": "an unset option makes && yield undefined so the parameter default supplies the same strict value as ??",
+			"column": 28
 		},
 		{
 			"file": "src/api/providers/openai.ts",
 			"line": 379,
 			"mutator": "LogicalOperator",
 			"replacement": "this.options.openAiStrictToolSchemas && DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS",
-			"reason": "an unset option makes && yield undefined so the parameter default supplies the same strict value as ??"
+			"reason": "an unset option makes && yield undefined so the parameter default supplies the same strict value as ??",
+			"column": 28
 		},
 		{
 			"file": "src/api/providers/utils/abort-signal.ts",
 			"line": 112,
 			"mutator": "BooleanLiteral",
 			"replacement": "false",
-			"reason": "a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable"
+			"reason": "a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable",
+			"column": 52
 		},
 		{
 			"file": "src/api/providers/utils/abort-signal.ts",
 			"line": 112,
 			"mutator": "ObjectLiteral",
 			"replacement": "{}",
-			"reason": "a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable"
+			"reason": "a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable",
+			"column": 44
 		},
 		{
 			"file": "src/core/assistant-message/NativeToolCallParser.ts",
 			"line": 379,
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
-			"reason": "the guard and delete are both GC-only; observable behavior is identical"
+			"reason": "the guard and delete are both GC-only; observable behavior is identical",
+			"column": 6
 		},
 		{
 			"file": "src/core/assistant-message/NativeToolCallParser.ts",
 			"line": 380,
 			"mutator": "CallExpression",
 			"replacement": ";",
-			"reason": "deleting an empty WeakMap entry is only observable as GC eligibility"
+			"reason": "deleting an empty WeakMap entry is only observable as GC eligibility",
+			"column": 3
 		},
 		{
 			"file": "src/core/task/Task.ts",
 			"line": 4268,
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
-			"reason": "only tool_use and mcp_tool_use entries ever carry an id, so the guard is always true on this path"
+			"reason": "only tool_use and mcp_tool_use entries ever carry an id, so the guard is always true on this path",
+			"column": 12
 		},
 		{
 			"file": "src/core/task/Task.ts",
 			"line": 4320,
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
-			"reason": "event.name is always a string on this path; delta events carry the tracked start name"
+			"reason": "event.name is always a string on this path; delta events carry the tracked start name",
+			"column": 14
 		},
 		{
 			"file": "src/core/task/Task.ts",
 			"line": 4336,
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
-			"reason": "makeStreamingKey always returns a string and the legacy lookup branch is unreachable"
+			"reason": "makeStreamingKey always returns a string and the legacy lookup branch is unreachable",
+			"column": 11
 		},
 		{
 			"file": "src/core/task/Task.ts",
 			"line": 4344,
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
-			"reason": "streamingKey is always a defined string on this path (same invariant as the guard above)"
+			"reason": "streamingKey is always a defined string on this path (same invariant as the guard above)",
+			"column": 14
 		},
 		{
 			"file": "src/core/task/Task.ts",
 			"line": 4344,
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
-			"reason": "streamingKey is always a defined string on this path (same invariant as the guard above)"
+			"reason": "streamingKey is always a defined string on this path (same invariant as the guard above)",
+			"column": 14
 		},
 		{
 			"file": "src/core/task/Task.ts",
 			"line": 4344,
 			"mutator": "EqualityOperator",
 			"replacement": "streamingKey === undefined",
-			"reason": "streamingKey is always a defined string on this path (same invariant as the guard above)"
+			"reason": "streamingKey is always a defined string on this path (same invariant as the guard above)",
+			"column": 32
 		},
 		{
 			"file": "src/core/task/Task.ts",
 			"line": 4740,
 			"mutator": "LogicalOperator",
 			"replacement": "event.name && event.id",
-			"reason": "finalizeRawChunks emits end events with the tracked start name, so the ?? fallback is unreachable"
+			"reason": "finalizeRawChunks emits end events with the tracked start name, so the ?? fallback is unreachable",
+			"column": 22
 		},
 		{
 			"file": "src/core/task/Task.ts",
 			"line": 4756,
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
-			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves"
+			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
+			"column": 10
 		},
 		{
 			"file": "src/core/task/Task.ts",
 			"line": 4756,
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
-			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves"
+			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
+			"column": 10
 		},
 		{
 			"file": "src/core/task/Task.ts",
 			"line": 4756,
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
-			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves"
+			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
+			"column": 10
 		},
 		{
 			"file": "src/core/task/Task.ts",
 			"line": 4756,
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
-			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves"
+			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
+			"column": 35
 		},
 		{
 			"file": "src/core/task/Task.ts",
 			"line": 4756,
 			"mutator": "EqualityOperator",
 			"replacement": "finalToolUse !== null",
-			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves"
+			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
+			"column": 10
 		},
 		{
 			"file": "src/core/task/Task.ts",
 			"line": 4756,
 			"mutator": "EqualityOperator",
 			"replacement": "toolUseIndex !== undefined",
-			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves"
+			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
+			"column": 35
 		},
 		{
 			"file": "src/core/task/Task.ts",
 			"line": 4756,
 			"mutator": "LogicalOperator",
 			"replacement": "finalToolUse === null || toolUseIndex === undefined",
-			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves"
+			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
+			"column": 10
 		},
 		{
 			"file": "src/core/task/Task.ts",
 			"line": 4761,
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
-			"reason": "unreachable defensive region: getStreamingToolCallById can only resolve when the both-miss case is reachable"
+			"reason": "unreachable defensive region: getStreamingToolCallById can only resolve when the both-miss case is reachable",
+			"column": 11
 		},
 		{
 			"file": "src/core/task/Task.ts",
 			"line": 4761,
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
-			"reason": "unreachable defensive region: getStreamingToolCallById can only resolve when the both-miss case is reachable"
+			"reason": "unreachable defensive region: getStreamingToolCallById can only resolve when the both-miss case is reachable",
+			"column": 11
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
 			"line": 44,
 			"mutator": "EqualityOperator",
 			"replacement": "i <= maxIterations",
-			"reason": "defensive iteration bound: valid percent-encoding strictly reduces escape depth per decode, so the bound is never hit"
+			"reason": "defensive iteration bound: valid percent-encoding strictly reduces escape depth per decode, so the bound is never hit",
+			"column": 17
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
 			"line": 73,
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
-			"reason": "ENOENT is the only expected code on a walk toward an existing ancestor; anything else must fail closed"
+			"reason": "ENOENT is the only expected code on a walk toward an existing ancestor; anything else must fail closed",
+			"column": 7
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
 			"line": 84,
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
-			"reason": "lstat succeeding after realpath ENOENT means a dangling symlink, so the true branch is unreachable"
+			"reason": "lstat succeeding after realpath ENOENT means a dangling symlink, so the true branch is unreachable",
+			"column": 8
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
 			"line": 113,
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
-			"reason": "with no folders the realFolders set stays empty and the empty-set fail-closed returns the same result"
+			"reason": "with no folders the realFolders set stays empty and the empty-set fail-closed returns the same result",
+			"column": 5
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
 			"line": 113,
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
-			"reason": "with no folders the realFolders set stays empty and the empty-set fail-closed returns the same result"
+			"reason": "with no folders the realFolders set stays empty and the empty-set fail-closed returns the same result",
+			"column": 17
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
 			"line": 113,
 			"mutator": "LogicalOperator",
 			"replacement": "!folders && folders.length === 0",
-			"reason": "with no folders the realFolders set stays empty and the empty-set fail-closed returns the same result"
+			"reason": "with no folders the realFolders set stays empty and the empty-set fail-closed returns the same result",
+			"column": 5
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
 			"line": 120,
 			"mutator": "ArrayDeclaration",
 			"replacement": "[\"Stryker was here\"]",
-			"reason": "the array is always populated (or fails closed at the empty check) before the containment test, so the initial literal is unobservable"
+			"reason": "the array is always populated (or fails closed at the empty check) before the containment test, so the initial literal is unobservable",
+			"column": 31
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
 			"line": 123,
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
-			"reason": "a null real can never match a resolved target, and the empty-set fail-closed is unaffected by an extra null entry"
+			"reason": "a null real can never match a resolved target, and the empty-set fail-closed is unaffected by an extra null entry",
+			"column": 6
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
 			"line": 127,
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
-			"reason": "if no folder could be realized the containment set is empty, so fail-closed is equivalent"
+			"reason": "if no folder could be realized the containment set is empty, so fail-closed is equivalent",
+			"column": 5
 		}
 	]
 }

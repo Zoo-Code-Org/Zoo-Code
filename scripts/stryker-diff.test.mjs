@@ -1001,13 +1001,13 @@ describe("accepted equivalent mutants", () => {
 						status: "Survived",
 						mutatorName: "EqualityOperator",
 						replacement: "<=",
-						location: { start: { line: 45 } },
+						location: { start: { line: 45, column: 0 } },
 					},
 					{
 						status: "Survived",
 						mutatorName: "ConditionalExpression",
 						replacement: "true",
-						location: { start: { line: 50 } },
+						location: { start: { line: 50, column: 2 } },
 					},
 				],
 			},
@@ -1017,6 +1017,7 @@ describe("accepted equivalent mutants", () => {
 		{
 			file: "src/utils/pathUtils.ts",
 			line: 45,
+			column: 0,
 			mutator: "EqualityOperator",
 			replacement: "<=",
 			reason: "defensive bound never hit",
@@ -1024,6 +1025,7 @@ describe("accepted equivalent mutants", () => {
 		{
 			file: "src/utils/pathUtils.ts",
 			line: 99,
+			column: 0,
 			mutator: "BlockStatement",
 			replacement: "{}",
 			reason: "entry whose mutant is gone",
@@ -1031,6 +1033,7 @@ describe("accepted equivalent mutants", () => {
 		{
 			file: "src/other.ts",
 			line: 7,
+			column: 0,
 			mutator: "Foo",
 			replacement: "bar",
 			reason: "file not part of this run",
@@ -1054,13 +1057,13 @@ describe("accepted equivalent mutants", () => {
 							status: "Survived",
 							mutatorName: "ConditionalExpression",
 							replacement: "true",
-							location: { start: { line: 50 } },
+							location: { start: { line: 50, column: 2 } },
 						},
 						{
 							status: "Survived",
 							mutatorName: "ConditionalExpression",
 							replacement: "false",
-							location: { start: { line: 50 } },
+							location: { start: { line: 50, column: 2 } },
 						},
 					],
 				},
@@ -1070,6 +1073,7 @@ describe("accepted equivalent mutants", () => {
 			{
 				file: "src/utils/pathUtils.ts",
 				line: 50,
+				column: 2,
 				mutator: "ConditionalExpression",
 				replacement: "true",
 				reason: "only the true replacement is equivalent here",
@@ -1100,6 +1104,7 @@ describe("accepted equivalent mutants", () => {
 			{
 				file: "src/utils/pathUtils.ts",
 				line: 50,
+				column: 1,
 				mutator: "ConditionalExpression",
 				replacement: "true",
 				reason: "the first sub-expression is equivalent here",
@@ -1114,7 +1119,10 @@ describe("accepted equivalent mutants", () => {
 		)
 		assert.deepEqual(limited.advisories, [])
 
-		const twoEntries = [...oneEntry, { ...oneEntry[0], reason: "the second sub-expression is also equivalent" }]
+		const twoEntries = [
+			...oneEntry,
+			{ ...oneEntry[0], column: 2, reason: "the second sub-expression is also equivalent" },
+		]
 		const both = evaluateReport(threeSameKey, packageEntry, twoEntries)
 		assert.equal(both.equivalent, 2)
 		assert.equal(both.blocking.length, 1)
@@ -1139,6 +1147,7 @@ describe("accepted equivalent mutants", () => {
 		const oneEntry = {
 			file: "src/utils/pathUtils.ts",
 			line: 50,
+			column: 1,
 			mutator: "ConditionalExpression",
 			replacement: "true",
 			reason: "only one mutant carries this key",
@@ -1210,8 +1219,31 @@ describe("accepted equivalent mutants", () => {
 		}
 	})
 
-	it("loads no equivalences when the registry file is absent", () => {
-		assert.deepEqual(loadEquivalences(fs.mkdtempSync(path.join(os.tmpdir(), "stryker-eq-"))), [])
+	it("loads no equivalences when the registry file is absent", (t) => {
+		const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-eq-"))
+		t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+		assert.deepEqual(loadEquivalences(directory), [])
+	})
+
+	it("loads entries from a repository registry file", (t) => {
+		const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-eq-present-"))
+		t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+		fs.mkdirSync(path.join(directory, "scripts"), { recursive: true })
+		const entry = {
+			file: "src/example.ts",
+			line: 3,
+			column: 2,
+			mutator: "ConditionalExpression",
+			replacement: "true",
+			reason: "example reason that is long enough to be reviewable",
+		}
+		fs.writeFileSync(
+			path.join(directory, "scripts/stryker-equivalences.json"),
+			JSON.stringify({ equivalences: [entry] }),
+			"utf8",
+		)
+
+		assert.deepEqual(loadEquivalences(directory), [entry])
 	})
 
 	it("ships registry entries with file, line, mutator, and reason", () => {
@@ -1222,6 +1254,7 @@ describe("accepted equivalent mutants", () => {
 		for (const entry of registry) {
 			assert.match(entry.file, /^(src|packages)\//)
 			assert.ok(Number.isInteger(entry.line))
+			assert.ok(Number.isInteger(entry.column) && entry.column >= 0)
 			assert.ok(entry.mutator)
 			assert.equal(typeof entry.replacement, "string")
 			assert.ok(entry.reason.length > 20)
@@ -1234,6 +1267,7 @@ describe("accepted equivalent mutants", () => {
 		const conditional = {
 			file: "src/example.ts",
 			line: 1,
+			column: 10,
 			mutator: "ConditionalExpression",
 			replacement: "true",
 			reason: "example",
@@ -1246,7 +1280,7 @@ describe("accepted equivalent mutants", () => {
 		const driftedObject = { ...conditional, mutator: "ObjectLiteral", line: 1 }
 		assert.match(
 			validateEquivalenceEntries([driftedObject], readSource).join("\n"),
-			/src\/example\.ts:1: expected ObjectLiteral code at line 2/,
+			/src\/example\.ts:1:10: expected ObjectLiteral code at line 2/,
 		)
 
 		// ConditionalExpression is a different node kind than the object literal.
@@ -1254,6 +1288,14 @@ describe("accepted equivalent mutants", () => {
 		assert.match(
 			validateEquivalenceEntries([driftedConditional], readSource).join("\n"),
 			/expected ConditionalExpression code at line 3/,
+		)
+
+		// A same-line edit that moves the mutated node must invalidate the entry rather than
+		// silently accepting whatever mutant now sits on the recorded line.
+		const driftedColumn = { ...conditional, column: 11 }
+		assert.match(
+			validateEquivalenceEntries([driftedColumn], readSource).join("\n"),
+			/src\/example\.ts:1:11: expected ConditionalExpression code at line 2/,
 		)
 	})
 

@@ -533,7 +533,7 @@ const MUTATOR_NODE_PREDICATES = new Map([
 	],
 ])
 
-function lineHasMutatorNode(source, filePath, line, mutator) {
+function lineHasMutatorNode(source, filePath, line, column, mutator) {
 	const predicate = MUTATOR_NODE_PREDICATES.get(mutator)
 	if (!predicate) return false
 	const scriptKind = filePath.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS
@@ -541,15 +541,32 @@ function lineHasMutatorNode(source, filePath, line, mutator) {
 	// Registry lines are Stryker report lines, which are 0-based: the editor shows the code at
 	// line + 1. Matching the editor line keeps the registry reviewable in a plain editor.
 	const editorLine = line + 1
+	// The registry stores Stryker's 0-based start line and column. Stryker's mutant location for
+	// condition-shaped mutators points at the mutated sub-expression (for an if statement, the
+	// test; for a logical expression, the operand), not always at the whole node, so collect the
+	// candidate roots for the mutator and then match the column against the root or any of its
+	// expression descendants on that line. Pinning the column stops a same-line edit from
+	// silently re-binding an accepted equivalence to a different mutant.
 	let found = false
+	function matchesColumn(node) {
+		const start = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile))
+		if (start.line + 1 !== editorLine) return false
+		if (start.character === column) return true
+		let childMatch = false
+		ts.forEachChild(node, (child) => {
+			if (childMatch) return
+			// Walk only expression-shaped children: a condition's operands are expressions, while
+			// the statement bodies a matched node contains are not, so this stays line-scoped.
+			if (!ts.isExpression(child) && !ts.isIfStatement(child) && !ts.isConditionalExpression(child)) return
+			if (matchesColumn(child)) childMatch = true
+		})
+		return childMatch
+	}
 	function visit(node) {
 		if (found) return
-		if (predicate(node)) {
-			const start = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1
-			if (start === editorLine) {
-				found = true
-				return
-			}
+		if (predicate(node) && matchesColumn(node)) {
+			found = true
+			return
 		}
 		ts.forEachChild(node, visit)
 	}
@@ -574,9 +591,21 @@ export function validateEquivalenceEntries(equivalences, readSource) {
 			problems.push(entry.file + ":" + entry.line + ": unknown mutator " + entry.mutator)
 			continue
 		}
-		if (!lineHasMutatorNode(source, entry.file, entry.line, entry.mutator)) {
+		if (!Number.isInteger(entry.column) || entry.column < 0) {
+			problems.push(entry.file + ":" + entry.line + ": missing start column")
+			continue
+		}
+		if (!lineHasMutatorNode(source, entry.file, entry.line, entry.column, entry.mutator)) {
 			problems.push(
-				entry.file + ":" + entry.line + ": expected " + entry.mutator + " code at line " + (entry.line + 1),
+				entry.file +
+					":" +
+					entry.line +
+					":" +
+					entry.column +
+					": expected " +
+					entry.mutator +
+					" code at line " +
+					(entry.line + 1),
 			)
 		}
 	}
@@ -589,7 +618,7 @@ export function applyEquivalences(counts, equivalences, packageEntry, reportedFi
 	// Matching is count-limited: a compound condition emits several mutants that share the key
 	// (same line, mutator and replacement, different column), so one registry entry accepts
 	// exactly one mutant and any further mutant with that key stays blocking.
-	const entryKey = (entry) => `${entry.file}:${entry.line}:${entry.mutator}:${entry.replacement}`
+	const entryKey = (entry) => `${entry.file}:${entry.line}:${entry.column}:${entry.mutator}:${entry.replacement}`
 	const remaining = new Map()
 	for (const entry of equivalences) {
 		const key = entryKey(entry)
@@ -599,7 +628,7 @@ export function applyEquivalences(counts, equivalences, packageEntry, reportedFi
 	const blocking = []
 	let equivalent = 0
 	for (const mutant of counts.blocking) {
-		const key = `${packageEntry.root}/${mutant.filePath}:${mutant.location?.start?.line}:${mutant.mutatorName}:${mutant.replacement}`
+		const key = `${packageEntry.root}/${mutant.filePath}:${mutant.location?.start?.line}:${mutant.location?.start?.column}:${mutant.mutatorName}:${mutant.replacement}`
 		const left = remaining.get(key) ?? 0
 		if (left > 0) {
 			remaining.set(key, left - 1)
