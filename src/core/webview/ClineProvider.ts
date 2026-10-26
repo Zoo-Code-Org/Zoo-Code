@@ -4767,6 +4767,18 @@ export class ClineProvider
 		const previousSharedValues = Object.fromEntries(
 			Object.keys(sanitizedValues).map((key) => [key, this.contextProxy.getValue(key as keyof RooCodeSettings)]),
 		) as RooCodeSettings
+
+		// Snapshot this view's local overlays for the keys the mutation touches, including
+		// whether each key had an override: a failed write must restore the shared store AND the
+		// view-local half (or its absence), not just the shared values.
+		const localOverlaySnapshot: Partial<
+			Record<"mode" | "currentApiConfigName", { present: boolean; value: unknown }>
+		> = {}
+		for (const key of ["mode", "currentApiConfigName"] as const) {
+			if (key in sanitizedValues) {
+				localOverlaySnapshot[key] = { present: key in this.viewLocalState, value: this.viewLocalState[key] }
+			}
+		}
 		await this.contextProxy.setValues(sanitizedValues)
 		try {
 			await this._saveViewLocalStateFromMutation(sanitizedValues)
@@ -4774,6 +4786,28 @@ export class ClineProvider
 			// The per-view record did not land: restore the prior shared values so the two
 			// persistence layers cannot diverge, then surface the original failure.
 			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues)
+			// Restore the local overlay from the snapshot: the shared rollback alone would leave
+			// the view pinned to the overrides the failed write tried to apply.
+			const restoredOverlay: Partial<RooCodeSettings> = {}
+			for (const [key, snapshot] of Object.entries(localOverlaySnapshot)) {
+				;(restoredOverlay as Record<string, unknown>)[key] = snapshot.present ? snapshot.value : undefined
+			}
+			this._updateViewLocalStateFromMutation(restoredOverlay)
+			for (const key of Object.keys(localOverlaySnapshot) as ("mode" | "currentApiConfigName")[]) {
+				const snapshot = localOverlaySnapshot[key]!
+				try {
+					await this.saveViewState(key, snapshot.present ? (snapshot.value as never) : undefined)
+				} catch (restoreError) {
+					// The original write failure is what the caller must see; a failed overlay restore
+					// is logged rather than replacing it.
+					this.log(
+						"[ClineProvider#setValues] Failed to restore the local view override for " +
+							key +
+							": " +
+							(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+					)
+				}
+			}
 			throw error
 		}
 	}
