@@ -55,7 +55,7 @@ vi.mock("fs", async () => {
 		...actualFs, // Spread actual implementations
 		createWriteStream: vi.fn(actualFs.createWriteStream) as any, // Default to actual, but mockable
 		// Wrapped so a test can fail the parent-directory fsync that follows the commit rename.
-		fsyncSync: vi.fn(actualFs.fsyncSync),
+		fsync: vi.fn(actualFs.fsync) as any,
 	}
 })
 
@@ -125,12 +125,17 @@ describe("safeWriteJson", () => {
 			// commit rename. Failing only the second one is the PublishNotDurableError case:
 			// the bytes are in place, only their durability is unconfirmed.
 			let fsyncCalls = 0
-			vi.mocked(fsSyncActual.fsyncSync).mockImplementation(() => {
+			vi.mocked(fsSyncActual.fsync).mockImplementation(((
+				_fd: number,
+				callback: (error: Error | null) => void,
+			) => {
 				fsyncCalls++
 				if (fsyncCalls === 2) {
-					throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" })
+					callback(Object.assign(new Error("EIO: i/o error"), { code: "EIO" }))
+				} else {
+					callback(null)
 				}
-			})
+			}) as never)
 
 			const payload = { committed: "value" }
 			await expect(safeWriteJson(target, payload)).rejects.toThrow(/could not confirm it is durable/)
