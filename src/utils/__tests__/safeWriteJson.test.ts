@@ -55,7 +55,7 @@ vi.mock("fs", async () => {
 		...actualFs, // Spread actual implementations
 		createWriteStream: vi.fn(actualFs.createWriteStream) as any, // Default to actual, but mockable
 		// Wrapped so a test can fail the parent-directory fsync that follows the commit rename.
-		fsync: vi.fn(actualFs.fsync) as any,
+		fsync: vi.fn(actualFs.fsync),
 	}
 })
 
