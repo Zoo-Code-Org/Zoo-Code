@@ -98,6 +98,16 @@ jobs:
               run: pnpm check-types
             - name: Validate Code QA workflow
               run: pnpm test:code-qa-ci
+            - name: Validate Solheim provider smoke workflow
+              run: pnpm test:solheim-smoke-ci
+            - name: Test Solheim provider smoke units
+              run: pnpm test:solheim-smoke:unit
+            - name: Check Solheim provider smoke types
+              run: pnpm solheim-smoke:check-types
+            - name: Test agent evals units
+              run: pnpm test:agent-evals:unit
+            - name: Check agent evals types
+              run: pnpm agent-evals:check-types
             - name: Model-check task lifecycle protocols
               run: pnpm lifecycle:model-check
             - name: Validate MCP OAuth integration
