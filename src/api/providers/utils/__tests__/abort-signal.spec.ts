@@ -738,33 +738,35 @@ describe("createTimeoutError", () => {
 })
 
 describe("isTimeoutAbort", () => {
-	it("is true only when the merged signal timed out while the caller stayed live", () => {
-		const request = new AbortController()
-		const caller = new AbortController()
-		request.abort(createTimeoutError("Qwen Code"))
-
-		expect(isTimeoutAbort(request.signal, caller.signal)).toBe(true)
-	})
-
-	it("is false for a caller cancellation", () => {
+	it("is true when the timeout aborted first and the caller aborted later", () => {
+		// Both orders must classify the same way: the merged signal retains the reason of the
+		// first abort, so a timeout that fired first stays a deadline even after a caller stop.
 		const request = new AbortController()
 		const caller = new AbortController()
 		request.abort(createTimeoutError("Qwen Code"))
 		caller.abort()
 
-		expect(isTimeoutAbort(request.signal, caller.signal)).toBe(false)
+		expect(isTimeoutAbort(request.signal)).toBe(true)
+	})
+
+	it("is false when the caller aborted first and the merged signal kept the caller reason", () => {
+		const request = new AbortController()
+		const caller = new AbortController()
+		caller.abort()
+		request.abort(caller.signal.reason)
+
+		expect(isTimeoutAbort(request.signal)).toBe(false)
 	})
 
 	it("is false when the request was aborted for a non-timeout reason", () => {
 		const request = new AbortController()
-		const caller = new AbortController()
 		request.abort(new Error("shutdown"))
 
-		expect(isTimeoutAbort(request.signal, caller.signal)).toBe(false)
+		expect(isTimeoutAbort(request.signal)).toBe(false)
 	})
 
 	it("is false without an aborted request signal", () => {
-		expect(isTimeoutAbort(undefined, undefined)).toBe(false)
-		expect(isTimeoutAbort(new AbortController().signal, undefined)).toBe(false)
+		expect(isTimeoutAbort(undefined)).toBe(false)
+		expect(isTimeoutAbort(new AbortController().signal)).toBe(false)
 	})
 })

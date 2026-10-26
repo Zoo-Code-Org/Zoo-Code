@@ -322,9 +322,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		requestSignal: AbortSignal | undefined,
 		callerSignal: AbortSignal | undefined,
 	): Error {
-		return isTimeoutAbort(requestSignal, callerSignal)
-			? createTimeoutError("LM Studio")
-			: createAbortError("LM Studio")
+		return isTimeoutAbort(requestSignal) ? createTimeoutError("LM Studio") : createAbortError("LM Studio")
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {

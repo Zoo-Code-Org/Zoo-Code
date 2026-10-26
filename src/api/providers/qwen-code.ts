@@ -482,7 +482,7 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 			// A timeout is not a caller cancellation: surface the distinct
 			// TimeoutError when the merged signal ended because its own timer
 			// elapsed. The auth wait and the request both settle through here.
-			if (isRequestAborted(error, requestSignal) && isTimeoutAbort(requestSignal, options?.abortSignal)) {
+			if (isRequestAborted(error, requestSignal) && isTimeoutAbort(requestSignal)) {
 				throw createTimeoutError("Qwen Code")
 			}
 			throw error

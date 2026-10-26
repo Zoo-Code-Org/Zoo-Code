@@ -307,6 +307,11 @@ export function createTimeoutError(providerName: string): Error {
  * Whether an abort-shaped failure came from the merged signal's own timeout rather than from the
  * caller's stop signal.
  */
-export function isTimeoutAbort(requestSignal: AbortSignal | undefined, callerSignal: AbortSignal | undefined): boolean {
-	return Boolean(requestSignal?.aborted && !callerSignal?.aborted && requestSignal.reason?.name === "TimeoutError")
+export function isTimeoutAbort(requestSignal: AbortSignal | undefined): boolean {
+	// Classify by the merged signal's retained abort reason: if its own timeout fired first, the
+	// reason stays the TimeoutError even when the caller aborts later, so the failure must still be
+	// reported as a deadline. A caller-first abort retains the caller's reason instead.
+	return Boolean(
+		requestSignal?.aborted && (requestSignal.reason as { name?: string } | undefined)?.name === "TimeoutError",
+	)
 }
