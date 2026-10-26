@@ -4,6 +4,8 @@ import { Fzf } from "fzf"
 import { highlightFzfMatch } from "@/utils/highlight"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 
+import { getTaskDisplayTitle } from "./types"
+
 type SortOption = "newest" | "oldest" | "mostExpensive" | "mostTokens" | "mostRelevant"
 
 export const useTaskSearch = () => {
@@ -33,7 +35,7 @@ export const useTaskSearch = () => {
 
 	const fzf = useMemo(() => {
 		return new Fzf(presentableTasks, {
-			selector: (item) => item.task,
+			selector: getTaskDisplayTitle,
 		})
 	}, [presentableTasks])
 
@@ -44,12 +46,13 @@ export const useTaskSearch = () => {
 			const searchResults = fzf.find(searchQuery)
 			results = searchResults.map((result) => {
 				const positions = Array.from(result.positions)
-				const taskEndIndex = result.item.task.length
+				const displayTitle = getTaskDisplayTitle(result.item)
+				const taskEndIndex = displayTitle.length
 
 				return {
 					...result.item,
 					highlight: highlightFzfMatch(
-						result.item.task,
+						displayTitle,
 						positions.filter((p) => p < taskEndIndex),
 					),
 					workspace: result.item.workspace,

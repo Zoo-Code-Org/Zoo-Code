@@ -79,6 +79,9 @@ reviews:
               Require regression coverage at the lowest valid harness with behavior-focused
               assertions, including relevant negative, error, false/unset, and boundary cases.
               Check cleanup and deterministic async behavior and prefer shared typed test helpers.
+              For guards and validators, require tests for both the accept path and the reject path
+              through every public entry point; a reject-only matrix cannot catch a guard that rejects
+              good input.
               Visible webview changes require a durable Playwright component snapshot; behavior-only
               changes do not.
               Reject weak assertions on values that could take multiple forms: .toBeDefined() or

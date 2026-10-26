@@ -125,6 +125,19 @@ export const parseVercelAiGatewayModel = ({ id, model }: { id: string; model: Ve
 		description: model.description ?? model.name,
 	}
 
+	if (id === "google/gemini-4-argon") {
+		// The gateway catalog reports context_window and max_tokens of 1,000,000,
+		// but Google's authoritative limits are a shared 1,048,576-token window
+		// (input + thinking + output) and a 65,536-token single-request output cap
+		// (longer decodes use continuation tokens).
+		modelInfo.contextWindow = 1_048_576
+		modelInfo.maxTokens = 65_536
+		modelInfo.supportsReasoningEffort = ["low", "medium", "high"]
+		modelInfo.reasoningEffort = "medium"
+		// The Google backend ignores temperature/top_p/top_k on this model.
+		modelInfo.supportsTemperature = false
+	}
+
 	if (id === "openai/gpt-6-astra" || id === "openai/gpt-6-astra-fast") {
 		modelInfo.supportsReasoningEffort = ["low", "medium", "high", "xhigh", "max"]
 		modelInfo.requiredReasoningEffort = true

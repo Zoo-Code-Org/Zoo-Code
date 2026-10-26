@@ -89,6 +89,24 @@ describe("filterNativeToolsForMode - disabledTools", () => {
 		expect(resultNames).not.toContain("search_and_replace")
 		expect(resultNames).not.toContain("edit")
 	})
+
+	it("keeps the attempt_completion declaration when disabledTools lists it under a maximally restricted mode", () => {
+		const restrictedMode: ModeConfig = {
+			slug: "control-only",
+			name: "Control Only",
+			roleDefinition: "",
+			groups: [],
+		}
+		const tools = [makeTool("read_file"), makeTool("attempt_completion")]
+
+		const result = filterNativeToolsForMode(tools, "control-only", [restrictedMode], undefined, undefined, {
+			disabledTools: ["attempt_completion", "read_file"],
+		})
+
+		const names = result.map((t) => ("function" in t && t.function ? t.function.name : ""))
+		expect(names).toContain("attempt_completion")
+		expect(names).not.toContain("read_file")
+	})
 })
 
 describe("filterNativeToolsForMode - settings round-trips", () => {

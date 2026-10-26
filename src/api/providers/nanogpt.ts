@@ -27,6 +27,7 @@ import { RouterProvider } from "./router-provider"
 import { getNanoGptModels } from "./fetchers/nanogpt"
 import { handleProviderError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
 
 type NanoGptUsage = OpenAI.CompletionUsage & {
 	cache_read_input_tokens?: number
@@ -228,10 +229,20 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 		}
 
 		try {
-			const response = await this.client.chat.completions.create(body, {
-				signal: options?.abortSignal,
-				timeout: options?.timeoutMs,
-			})
+			// The OpenAI SDK rejects a present-but-undefined or unusable `timeout`, so
+			// only forward a real value, rounded and capped like mergeAbortSignalAndTimeout.
+			const requestOptions: OpenAI.RequestOptions = {}
+			if (options?.abortSignal !== undefined) {
+				requestOptions.signal = options.abortSignal
+			}
+			const timeoutMs = options?.timeoutMs
+			if (hasUsableTimeout(timeoutMs)) {
+				requestOptions.timeout = toSdkTimeoutMs(timeoutMs)
+			}
+			const response = await this.client.chat.completions.create(
+				body,
+				Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
+			)
 			return response.choices[0]?.message.content ?? ""
 		} catch (error) {
 			throw this.createSafeError("completion", error)

@@ -43,6 +43,9 @@ vitest.mock("../fetchers/modelCache", () => ({
 			// Responses-format models (Zoo-Code-Org/Zoo-Code#1431 and issue #1979).
 			"gpt-5.6-luna": { ...opencodeGoModels["gpt-5.6-luna"] },
 			"gpt-6-luna": { ...opencodeGoModels["gpt-6-luna"] },
+			"grok-4.6": { ...opencodeGoModels["grok-4.6"] },
+			"muse-spark-1.3-contributor": { ...opencodeGoModels["muse-spark-1.3-contributor"] },
+			"muse-spark-1.2-contributor": { ...opencodeGoModels["muse-spark-1.2-contributor"] },
 		})
 	}),
 	refreshModels: vitest.fn().mockImplementation(function () {
@@ -51,6 +54,9 @@ vitest.mock("../fetchers/modelCache", () => ({
 			"qwen3.7-max": { ...opencodeGoModels["qwen3.7-max"] },
 			"gpt-5.6-luna": { ...opencodeGoModels["gpt-5.6-luna"] },
 			"gpt-6-luna": { ...opencodeGoModels["gpt-6-luna"] },
+			"grok-4.6": { ...opencodeGoModels["grok-4.6"] },
+			"muse-spark-1.3-contributor": { ...opencodeGoModels["muse-spark-1.3-contributor"] },
+			"muse-spark-1.2-contributor": { ...opencodeGoModels["muse-spark-1.2-contributor"] },
 		})
 	}),
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
@@ -200,17 +206,16 @@ describe("OpencodeGoHandler", () => {
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 			await collectStream(handler.createMessage("sys", messages))
 
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					model: "glm-5.1",
-					stream: true,
-					stream_options: { include_usage: true },
-					// glm-5.1 maxTokens (131_072) is clamped to 20% of its 204_800
-					// context window => 40_960.
-					max_completion_tokens: 40_960,
-					temperature: expect.any(Number),
-				}),
-			)
+			const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs).toMatchObject({
+				model: "glm-5.1",
+				stream: true,
+				stream_options: { include_usage: true },
+				// glm-5.1 maxTokens (131_072) is clamped to 20% of its 204_800
+				// context window => 40_960.
+				max_completion_tokens: 40_960,
+				temperature: expect.any(Number),
+			})
 		})
 
 		it("sends the stable conversation ID to chat completions", async () => {
@@ -224,18 +229,31 @@ describe("OpencodeGoHandler", () => {
 			})
 		})
 
+		it("falls back to a stable per-instance session ID when no taskId is provided", async () => {
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const sessionId = mockCreate.mock.calls[0][1]?.headers["x-opencode-session"]
+			expect(sessionId).toEqual(expect.any(String))
+
+			// The same handler instance reuses its session ID across requests.
+			await collectStream(handler.createMessage("sys", messages))
+			expect(mockCreate.mock.calls[1][1]?.headers["x-opencode-session"]).toBe(sessionId)
+		})
+
 		it("forwards the model's default reasoning_effort for reasoning-capable models", async () => {
 			const handler = new OpencodeGoHandler(mockOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 			await collectStream(handler.createMessage("sys", messages))
 
 			// glm-5.1 advertises supportsReasoningEffort with a default of "medium".
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					model: "glm-5.1",
-					reasoning_effort: "medium",
-				}),
-			)
+			const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs).toMatchObject({
+				model: "glm-5.1",
+				reasoning_effort: "medium",
+			})
 		})
 
 		it("omits reasoning_effort when the user disables reasoning", async () => {
@@ -385,7 +403,8 @@ describe("OpencodeGoHandler", () => {
 
 			await collectStream(handler.createMessage("sys", messages))
 
-			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 999 }))
+			const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.max_completion_tokens).toBe(999)
 		})
 	})
 
@@ -394,15 +413,14 @@ describe("OpencodeGoHandler", () => {
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "the answer" } }] })
 			const handler = new OpencodeGoHandler(mockOptions)
 			expect(await handler.completePrompt("ping")).toBe("the answer")
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					model: "glm-5.1",
-					stream: false,
-					// glm-5.1 maxTokens (131_072) clamped to 20% of 204_800 => 40_960.
-					max_completion_tokens: 40_960,
-					reasoning_effort: "medium",
-				}),
-			)
+			const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs).toMatchObject({
+				model: "glm-5.1",
+				stream: false,
+				// glm-5.1 maxTokens (131_072) clamped to 20% of 204_800 => 40_960.
+				max_completion_tokens: 40_960,
+				reasoning_effort: "medium",
+			})
 		})
 
 		it("wraps errors with an Opencode Go-specific message", async () => {
@@ -427,7 +445,22 @@ describe("OpencodeGoHandler", () => {
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
 			const handler = new OpencodeGoHandler({ ...mockOptions, includeMaxTokens: true, modelMaxTokens: 4321 })
 			await handler.completePrompt("ping")
-			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 4321 }))
+			const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.max_completion_tokens).toBe(4321)
+		})
+
+		it("sends the per-instance session ID on non-streaming completions", async () => {
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+			const handler = new OpencodeGoHandler(mockOptions)
+
+			await handler.completePrompt("ping")
+			const sessionId = mockCreate.mock.calls[0][1]?.headers["x-opencode-session"]
+			expect(sessionId).toEqual(expect.any(String))
+
+			// completePrompt has no taskId metadata, so the per-instance ID is
+			// reused across calls on the same handler.
+			await handler.completePrompt("ping")
+			expect(mockCreate.mock.calls[1][1]?.headers["x-opencode-session"]).toBe(sessionId)
 		})
 	})
 
@@ -483,13 +516,12 @@ describe("OpencodeGoHandler", () => {
 
 			await collectStream(handler.createMessage("sys", messages))
 
-			expect(mockAnthropicCreate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					model: "qwen3.7-max",
-					stream: true,
-					system: expect.arrayContaining([expect.objectContaining({ type: "text", text: "sys" })]),
-				}),
-			)
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs).toMatchObject({
+				model: "qwen3.7-max",
+				stream: true,
+				system: expect.arrayContaining([expect.objectContaining({ type: "text", text: "sys" })]),
+			})
 			// The OpenAI chat completions endpoint must NOT be used for this model.
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
@@ -503,6 +535,20 @@ describe("OpencodeGoHandler", () => {
 			expect(mockAnthropicCreate.mock.calls[0][1]?.headers).toMatchObject({
 				"x-opencode-session": "conversation-123",
 			})
+		})
+
+		it("falls back to a stable per-instance session ID when no taskId is provided", async () => {
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const sessionId = mockAnthropicCreate.mock.calls[0][1]?.headers["x-opencode-session"]
+			expect(sessionId).toEqual(expect.any(String))
+
+			// The same handler instance reuses its session ID across requests.
+			await collectStream(handler.createMessage("sys", messages))
+			expect(mockAnthropicCreate.mock.calls[1][1]?.headers["x-opencode-session"]).toBe(sessionId)
 		})
 
 		it("streams text, tool-call, usage and cost chunks from the Anthropic stream", async () => {
@@ -571,17 +617,16 @@ describe("OpencodeGoHandler", () => {
 
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			expect(await handler.completePrompt("ping")).toBe("the answer")
-			expect(mockAnthropicCreate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					model: "qwen3.7-max",
-					stream: false,
-					messages: [{ role: "user", content: "ping" }],
-					// qwen3.7-max maxTokens (65_536) clamped to 20% of its 1M
-					// context window (200_000) => 65_536. includeMaxTokens is off,
-					// so the model default is used.
-					max_tokens: 65_536,
-				}),
-			)
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs).toMatchObject({
+				model: "qwen3.7-max",
+				stream: false,
+				messages: [{ role: "user", content: "ping" }],
+				// qwen3.7-max maxTokens (65_536) clamped to 20% of its 1M
+				// context window (200_000) => 65_536. includeMaxTokens is off,
+				// so the model default is used.
+				max_tokens: 65_536,
+			})
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
@@ -596,7 +641,39 @@ describe("OpencodeGoHandler", () => {
 				modelMaxTokens: 2048,
 			})
 			await handler.completePrompt("ping")
-			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 2048 }))
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.max_tokens).toBe(2048)
+		})
+
+		it("completePrompt falls back to the model max_tokens when includeMaxTokens is on but modelMaxTokens is unset", async () => {
+			mockAnthropicCreate.mockResolvedValue({
+				content: [{ type: "text", text: "ok" }],
+			})
+
+			const handler = new OpencodeGoHandler({ ...anthropicOptions, includeMaxTokens: true })
+			await handler.completePrompt("ping")
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as Record<string, unknown>
+			// qwen3.7-max maxTokens (65_536) clamped to 20% of 1M context => 65_536.
+			expect(callArgs.max_tokens).toBe(65_536)
+		})
+
+		it("completePrompt sends the per-instance session ID via the Anthropic client default headers", async () => {
+			mockAnthropicCreate.mockResolvedValue({
+				content: [{ type: "text", text: "ok" }],
+			})
+
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			await handler.completePrompt("ping")
+
+			// completePrompt passes no per-request options; the session header
+			// is a default header on the Anthropic client (streaming overrides
+			// it with taskId when available).
+			expect(mockAnthropicCreate.mock.calls[0][1]).toBeUndefined()
+			expect(Anthropic).toHaveBeenCalledWith(
+				expect.objectContaining({
+					defaultHeaders: expect.objectContaining({ "x-opencode-session": expect.any(String) }),
+				}),
+			)
 		})
 
 		it("completePrompt rethrows non-Error values unchanged from the Anthropic path", async () => {
@@ -756,7 +833,8 @@ describe("OpencodeGoHandler", () => {
 
 			await collectStream(handler.createMessage("sys", messages))
 
-			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 8192 }))
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.max_tokens).toBe(8192)
 		})
 
 		it("falls back to the model max_tokens when includeMaxTokens is on but modelMaxTokens is unset", async () => {
@@ -766,7 +844,8 @@ describe("OpencodeGoHandler", () => {
 			await collectStream(handler.createMessage("sys", messages))
 
 			// qwen3.7-max maxTokens (65_536) clamped to 20% of 1M context => 65_536.
-			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 65_536 }))
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.max_tokens).toBe(65_536)
 		})
 
 		it("accumulates output tokens across message_delta events into the final cost", async () => {
@@ -880,6 +959,22 @@ describe("OpencodeGoHandler", () => {
 				signal: controller.signal,
 				headers: { "x-opencode-session": "test-task" },
 			})
+		})
+
+		it("falls back to a stable per-instance session ID when no taskId is provided", async () => {
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const requestOptions = mockResponsesCreate.mock.calls[0][1] as { headers: Record<string, string> }
+			const sessionId = requestOptions.headers["x-opencode-session"]
+			expect(sessionId).toEqual(expect.any(String))
+
+			// The same handler instance reuses its session ID across requests.
+			await collectStream(handler.createMessage("sys", messages))
+			const secondOptions = mockResponsesCreate.mock.calls[1][1] as { headers: Record<string, string> }
+			expect(secondOptions.headers["x-opencode-session"]).toBe(sessionId)
 		})
 
 		it("closes the Responses iterator when the consumer stops early", async () => {
@@ -1026,7 +1121,7 @@ describe("OpencodeGoHandler", () => {
 			expect(callArgs.store).toBe(false)
 			const input = callArgs.input as unknown[]
 			expect(input.some((item) => (item as { role?: string }).role === "system")).toBe(false)
-			// The gateway rejects temperature for Responses-format models.
+			// No custom temperature is set, so the provider default is not sent.
 			expect(callArgs.temperature).toBeUndefined()
 			// No tools were provided, so no tools/tool_choice are sent.
 			expect(callArgs.tools).toBeUndefined()
@@ -1378,8 +1473,22 @@ describe("OpencodeGoHandler", () => {
 
 			await handler.completePrompt("ping", { abortSignal: controller.signal })
 
-			expect(mockResponsesCreate.mock.calls[0][1]).toEqual({ signal: controller.signal })
+			expect(mockResponsesCreate.mock.calls[0][1]).toEqual({
+				signal: controller.signal,
+				headers: { "x-opencode-session": expect.any(String) },
+			})
 			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("completePrompt sends the per-instance session ID to the Responses endpoint", async () => {
+			mockResponsesCreate.mockResolvedValue({ output_text: "Hello!" })
+			const handler = new OpencodeGoHandler(lunaOptions)
+
+			await handler.completePrompt("ping")
+
+			expect(mockResponsesCreate.mock.calls[0][1]?.headers).toMatchObject({
+				"x-opencode-session": expect.any(String),
+			})
 		})
 
 		it("completePrompt wraps errors with an Opencode Go-specific message", async () => {
@@ -1395,6 +1504,141 @@ describe("OpencodeGoHandler", () => {
 			await expect(async () => {
 				await collectStream(handler.createMessage("sys", messages))
 			}).rejects.toThrow("Opencode Go completion error: internal server error")
+		})
+
+		describe("temperature (Zoo-Code-Org/Zoo-Code#2055)", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const streamRequest = async (options: ApiHandlerOptions) => {
+				await collectStream(new OpencodeGoHandler(options).createMessage("sys", messages))
+				return mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			}
+
+			const completeRequest = async (options: ApiHandlerOptions) => {
+				mockResponsesCreate.mockResolvedValue({ output_text: "Hello!" })
+				await new OpencodeGoHandler(options).completePrompt("ping")
+				return mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			}
+
+			const paths = [
+				["streaming", streamRequest],
+				["non-streaming", completeRequest],
+			] as const
+
+			describe.each(paths)("%s request", (_path, sendRequest) => {
+				it.each([
+					["grok-4.6", undefined],
+					["muse-spark-1.3-contributor", undefined],
+					["muse-spark-1.2-contributor", undefined],
+					["gpt-5.6-luna", "none"],
+					["gpt-6-luna", "none"],
+				] as const)("forwards a custom temperature for %s (effort %s)", async (modelId, reasoningEffort) => {
+					const callArgs = await sendRequest({
+						opencodeGoApiKey: "test-key",
+						opencodeGoModelId: modelId,
+						modelTemperature: 0.37,
+						...(reasoningEffort && { reasoningEffort }),
+					})
+
+					// The value keeps the UI's 0.01 resolution.
+					expect(callArgs.temperature).toBe(0.37)
+				})
+
+				it.each([
+					["grok-4.6", "low"],
+					["grok-4.6", "high"],
+					["muse-spark-1.3-contributor", "minimal"],
+					["muse-spark-1.2-contributor", "high"],
+				] as const)(
+					"forwards a custom temperature for %s with explicit effort %s",
+					async (modelId, reasoningEffort) => {
+						const callArgs = await sendRequest({
+							opencodeGoApiKey: "test-key",
+							opencodeGoModelId: modelId,
+							modelTemperature: 0.37,
+							reasoningEffort,
+						})
+
+						// Grok and Muse support does not depend on reasoning effort.
+						expect(callArgs.reasoning).toEqual({ effort: reasoningEffort })
+						expect(callArgs.temperature).toBe(0.37)
+					},
+				)
+
+				it("omits temperature for a stale none effort when reasoning effort is switched off", async () => {
+					// A saved "none" does not reach the wire while the toggle is off,
+					// so the configuration is unverified and temperature is omitted.
+					const callArgs = await sendRequest({
+						...lunaOptions,
+						modelTemperature: 0.5,
+						reasoningEffort: "none",
+						enableReasoningEffort: false,
+					})
+
+					expect(callArgs).not.toHaveProperty("reasoning")
+					expect(callArgs).not.toHaveProperty("temperature")
+				})
+
+				it.each([
+					["gpt-5.6-luna", "low"],
+					["gpt-5.6-luna", "max"],
+					["gpt-6-luna", "medium"],
+					["gpt-6-luna", "xhigh"],
+					["gpt-6-luna", "disable"],
+				] as const)("omits a saved temperature for %s with effort %s", async (modelId, reasoningEffort) => {
+					const callArgs = await sendRequest({
+						opencodeGoApiKey: "test-key",
+						opencodeGoModelId: modelId,
+						modelTemperature: 0.5,
+						reasoningEffort,
+					})
+
+					expect(callArgs).not.toHaveProperty("temperature")
+				})
+
+				it("omits temperature 1 for a GPT Luna model with a non-none effort", async () => {
+					// Temperature 1 is the only value the gateway accepted with
+					// reasoning, but it is the model default, so it is omitted.
+					const callArgs = await sendRequest({
+						opencodeGoApiKey: "test-key",
+						opencodeGoModelId: "gpt-5.6-luna",
+						modelTemperature: 1,
+						reasoningEffort: "high",
+					})
+
+					expect(callArgs).not.toHaveProperty("temperature")
+				})
+
+				it("omits a saved temperature for a GPT Luna model on its default effort", async () => {
+					const callArgs = await sendRequest({ ...gpt6LunaOptions, modelTemperature: 0.5 })
+
+					expect(callArgs.reasoning).toEqual({ effort: "medium" })
+					expect(callArgs).not.toHaveProperty("temperature")
+				})
+
+				it.each([undefined, null])(
+					"omits temperature when no custom value is set (%s)",
+					async (modelTemperature) => {
+						const callArgs = await sendRequest({
+							opencodeGoApiKey: "test-key",
+							opencodeGoModelId: "grok-4.6",
+							modelTemperature,
+						})
+
+						expect(callArgs).not.toHaveProperty("temperature")
+					},
+				)
+
+				it("forwards temperature 0 as an explicit custom value", async () => {
+					const callArgs = await sendRequest({
+						opencodeGoApiKey: "test-key",
+						opencodeGoModelId: "grok-4.6",
+						modelTemperature: 0,
+					})
+
+					expect(callArgs.temperature).toBe(0)
+				})
+			})
 		})
 
 		it("classifies documented Responses models as Responses-format and other models as not", () => {
