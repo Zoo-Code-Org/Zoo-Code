@@ -251,9 +251,8 @@ export class ClineProvider
 	private currentWorkspacePath: string | undefined
 	private _disposed = false
 	private lastWebviewHeartbeatAt = 0
-	// Bumped on every accepted heartbeat, including multiple heartbeats in the
-	// same millisecond; the recovery reload compares revisions around its
-	// awaited HTML generation so no accepted heartbeat is missed.
+	// Bumped on every heartbeat or grace reset, including events in the same
+	// millisecond; pending recovery must yield to either sign of renewed grace.
 	private webviewHeartbeatRevision = 0
 	private webviewRecoveryAttempts = 0
 	private static readonly WEBVIEW_RECOVERY_ATTEMPT_LIMIT = 3
@@ -3598,7 +3597,10 @@ export class ClineProvider
 			if (this.view?.visible !== true) {
 				return
 			}
-			if (now - this.lastWebviewHeartbeatAt <= ClineProvider.WEBVIEW_HEARTBEAT_STALE_MS) {
+			if (
+				now - this.lastWebviewHeartbeatAt <= ClineProvider.WEBVIEW_HEARTBEAT_STALE_MS ||
+				this.webviewRecoveryAttempts >= ClineProvider.WEBVIEW_RECOVERY_ATTEMPT_LIMIT
+			) {
 				return
 			}
 			this.log("[Zoo Code] Webview heartbeat stale while visible; reloading webview (dead renderer?)")

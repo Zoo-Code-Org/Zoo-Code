@@ -1147,12 +1147,15 @@ describe("ClineProvider", () => {
 			await vi.advanceTimersByTimeAsync(180_000)
 			expect(generateHtml).toHaveBeenCalledTimes(3)
 
+			const log = vi.spyOn(provider, "log")
+
 			// Visibility changes and host suspension grant grace, but cannot
 			// replenish attempts for a renderer that has never responded.
 			visibilityCallback()
 			vi.setSystemTime(Date.now() + 120_000)
 			await vi.advanceTimersByTimeAsync(600_000)
 			expect(generateHtml).toHaveBeenCalledTimes(3)
+			expect(log).not.toHaveBeenCalledWith(expect.stringContaining("Webview heartbeat stale"))
 
 			await webviewMessageHandler(provider, { type: "webviewHeartbeat" })
 			await vi.advanceTimersByTimeAsync(120_000)
