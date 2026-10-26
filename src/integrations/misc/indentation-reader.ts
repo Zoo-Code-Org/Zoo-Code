@@ -79,26 +79,6 @@ const BLOCK_START_PATTERNS = [
 	/\bdo\s*$/, // Ruby, Lua
 ]
 
-/** Patterns for file header lines (imports, comments, etc.) */
-const HEADER_PATTERNS = [
-	/^import\s/, // ES6 imports
-	/^from\s.*import/, // Python imports
-	/^const\s.*=\s*require/, // CommonJS requires
-	/^#!/, // Shebang
-	/^\/\*/, // Block comment start
-	/^\*/, // Block comment continuation
-	/^\s*\*\//, // Block comment end
-	/^\/\//, // Line comment
-	/^#(?!include)/, // Python/shell comment (not C #include)
-	/^"""/, // Python docstring
-	/^'''/, // Python docstring
-	/^use\s/, // Rust use
-	/^package\s/, // Go/Java package
-	/^require\s/, // Lua require
-	/^@/, // Decorators (Python, TypeScript)
-	/^"use\s/, // "use strict", "use client"
-]
-
 /** Comment prefixes for header detection (Codex standard) */
 const COMMENT_PREFIXES = ["#", "//", "--", "/*", "*", "'''", '"""']
 
@@ -178,52 +158,6 @@ function trimEmptyLines(lines: LineRecord[]): void {
 		lines.pop()
 	}
 }
-
-/**
- * Find the file header (imports, top-level comments, etc.).
- * Returns the end index of the header section.
- */
-function findHeaderEnd(lines: LineRecord[]): number {
-	let lastHeaderIdx = -1
-	let inBlockComment = false
-
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i]
-		const trimmed = line.content.trim()
-
-		// Track block comments
-		if (trimmed.startsWith("/*")) inBlockComment = true
-		if (trimmed.endsWith("*/")) {
-			inBlockComment = false
-			lastHeaderIdx = i
-			continue
-		}
-		if (inBlockComment) {
-			lastHeaderIdx = i
-			continue
-		}
-
-		// Check if this is a header line
-		if (line.isBlank) {
-			// Blank lines are part of header if we haven't seen content yet
-			if (lastHeaderIdx === i - 1) {
-				lastHeaderIdx = i
-			}
-			continue
-		}
-
-		const isHeader = HEADER_PATTERNS.some((pattern) => pattern.test(trimmed))
-		if (isHeader) {
-			lastHeaderIdx = i
-		} else if (line.indentLevel === 0) {
-			// Hit first non-header top-level content
-			break
-		}
-	}
-
-	return lastHeaderIdx
-}
-
 /**
  * Format lines with line numbers, applying truncation to long lines.
  */
@@ -238,7 +172,11 @@ export function formatWithLineNumbers(lines: LineRecord[], maxLineLength: number
 
 			// Truncate long lines
 			if (content.length > maxLineLength) {
-				content = content.substring(0, maxLineLength - 3) + "..."
+				let end = maxLineLength - 3
+				// Never split a UTF-16 surrogate pair before encoding the model result.
+				const last = content.charCodeAt(end - 1)
+				if (last >= 0xd800 && last <= 0xdbff) end--
+				content = content.substring(0, end) + "..."
 			}
 
 			return `${lineNum} | ${content}`

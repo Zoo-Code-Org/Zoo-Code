@@ -18,10 +18,12 @@ import { providerIdentifiers } from "./provider-identifiers.js"
 
 /**
  * Default delay in milliseconds after writes to allow diagnostics to detect potential problems.
- * This delay is particularly important for Go and other languages where tools like goimports
- * need time to automatically clean up unused imports.
+ * Defaults to 0: the write path adds no artificial pacing by default, and post-save
+ * diagnostics are reported after the (zero) delay. Users who rely on auto-formatters that
+ * settle asynchronously (e.g. goimports for Go) can raise this setting to give formatters
+ * time to settle before diagnostics are captured.
  */
-export const DEFAULT_WRITE_DELAY_MS = 1000
+export const DEFAULT_WRITE_DELAY_MS = 0
 
 /**
  * Default values for the "auto-close files Zoo opened" settings.
@@ -46,6 +48,9 @@ export const DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES = false
  * or formatting differences, accepting a higher risk of unintended edits.
  */
 export const DEFAULT_DIFF_FUZZY_THRESHOLD = 1.0
+
+// Preserve the existing terminal-dependent output display until users opt in.
+export const DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT = false
 
 export const DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED = false
 
@@ -234,6 +239,7 @@ export const globalSettingsSchema = z.object({
 	terminalOutputPreviewSize: z.enum(["small", "medium", "large"]).optional(),
 	terminalShellIntegrationTimeout: z.number().optional(),
 	terminalShellIntegrationDisabled: z.boolean().optional(),
+	collapseCommandOutputByDefault: z.boolean().optional(),
 	terminalCommandDelay: z.number().optional(),
 	terminalPowershellCounter: z.boolean().optional(),
 	terminalZshClearEolMark: z.boolean().optional(),
@@ -302,7 +308,10 @@ export const globalSettingsSchema = z.object({
 
 	/**
 	 * List of native tool names to globally disable.
-	 * Tools in this list will be excluded from prompt generation and rejected at execution time.
+	 * Tools in this list are excluded from prompt generation and rejected at
+	 * execution time. The tool the task loop completes through
+	 * (attempt_completion) cannot be disabled this way: an entry naming it is
+	 * ignored at policy resolution.
 	 */
 	disabledTools: z.array(toolNamesSchema).optional(),
 })
@@ -356,6 +365,7 @@ export const SECRET_STATE_KEYS = [
 	"vercelAiGatewayApiKey",
 	"opencodeGoApiKey",
 	"kenariApiKey",
+	"ioIntelligenceApiKey",
 	"nanoGptApiKey",
 	"basetenApiKey",
 ] as const

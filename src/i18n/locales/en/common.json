@@ -44,6 +44,7 @@
 		"search_commits": "Failed to search commits",
 		"save_api_config": "Failed to save api configuration",
 		"create_api_config": "Failed to create api configuration",
+		"update_profile_model_partial": "Failed to update the model and could not restore the previous API configuration. Check your API configuration in Settings.",
 		"rename_api_config": "Failed to rename api configuration",
 		"load_api_config": "Failed to load api configuration",
 		"delete_api_config": "Failed to delete api configuration",

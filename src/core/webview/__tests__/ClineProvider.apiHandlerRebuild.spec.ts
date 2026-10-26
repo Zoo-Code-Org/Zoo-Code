@@ -1,6 +1,8 @@
+import { WebviewFocusTracker } from "../WebviewFocusTracker"
 // npx vitest core/webview/__tests__/ClineProvider.apiHandlerRebuild.spec.ts
 
 import * as vscode from "vscode"
+import { makeCompositeDisposable } from "../../../test-utils/vscode"
 
 import { TelemetryService } from "@roo-code/telemetry"
 import { getModelId, RooCodeEventName } from "@roo-code/types"
@@ -43,6 +45,7 @@ vi.mock("vscode", () => ({
 	ExtensionContext: vi.fn(),
 	OutputChannel: vi.fn(),
 	WebviewView: vi.fn(),
+	Disposable: { from: (...subscriptions: vscode.Disposable[]) => makeCompositeDisposable(...subscriptions) },
 	Uri: {
 		joinPath: vi.fn(),
 		file: vi.fn(),
@@ -230,7 +233,13 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			}),
 		} as unknown as vscode.WebviewView
 
-		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+		provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
 
 		// Mock providerSettingsManager
 		;(provider as any).providerSettingsManager = {
@@ -416,6 +425,397 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 			// Should not call buildApiHandler when there's no task
 			expect(buildApiHandlerMock).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("updateProfileModel", () => {
+		const storedProfile = {
+			name: "test-config",
+			id: "test-id",
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+			rateLimitSeconds: 5,
+			reasoningEffort: "high",
+		}
+
+		beforeEach(() => {
+			provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue(storedProfile)
+			vi.mocked(vscode.window.showErrorMessage).mockClear()
+		})
+
+		test("merges the patch into the latest stored profile, keeping newer settings and clearing null keys", async () => {
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+				reasoningEffort: null,
+			})
+
+			const saveConfig = vi.mocked(provider["providerSettingsManager"].saveConfig)
+			expect(saveConfig).toHaveBeenCalledTimes(1)
+			const [name, saved] = saveConfig.mock.calls[0]
+			expect(name).toBe("test-config")
+			expect(saved).toMatchObject({
+				id: "test-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "anthropic/claude",
+				rateLimitSeconds: 5,
+			})
+			expect(saved).not.toHaveProperty("reasoningEffort")
+			expect(saved).not.toHaveProperty("name")
+		})
+
+		test.each([
+			["reasoningEffort", "high"],
+			["modelMaxTokens", 4096],
+			["modelMaxThinkingTokens", 2048],
+			["awsCustomArn", "arn:aws:bedrock:us-east-1:123456789012:inference-profile/old"],
+			["awsCustomArnBaseModelId", "anthropic.claude-3-sonnet-20240229-v1:0"],
+			["awsModelContextWindow", 200000],
+		])("clears the reset-only key %s when the patch sets it to null", async (key, storedValue) => {
+			provider["providerSettingsManager"].getProfile = vi
+				.fn()
+				.mockResolvedValue({ ...storedProfile, [key]: storedValue })
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+				[key]: null,
+			})
+
+			const saveConfig = vi.mocked(provider["providerSettingsManager"].saveConfig)
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+			expect(saveConfig).toHaveBeenCalledTimes(1)
+			const saved = saveConfig.mock.calls[0][1]
+			expect(saved).toMatchObject({ openRouterModelId: "anthropic/claude" })
+			expect(saved).not.toHaveProperty(key)
+		})
+
+		test("rebuilds the current task API handler with the new model", async () => {
+			const mockTask = new Task({ ...defaultTaskOptions })
+			mockTask.api = {
+				getModel: vi.fn().mockReturnValue({ id: "openai/gpt-4", info: { contextWindow: 128000 } }),
+			} as unknown as typeof mockTask.api
+			await provider.addClineToStack(mockTask)
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+			})
+
+			expect(mockTask.updateApiConfiguration).toHaveBeenCalledWith(
+				expect.objectContaining({ openRouterModelId: "anthropic/claude" }),
+			)
+		})
+
+		test("rejects the update when the stored provider differs from the expected provider", async () => {
+			await provider.updateProfileModel("test-config", providerIdentifiers.anthropic, {
+				apiModelId: "claude-sonnet-4-5",
+			})
+
+			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+		})
+
+		test("treats a stored profile without apiProvider as anthropic and persists that provider", async () => {
+			const { apiProvider: _apiProvider, ...unsetProfile } = storedProfile
+			provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue(unsetProfile)
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.anthropic, {
+				apiModelId: "claude-sonnet-4-5",
+			})
+
+			const saveConfig = vi.mocked(provider["providerSettingsManager"].saveConfig)
+			expect(saveConfig).toHaveBeenCalledTimes(1)
+			expect(saveConfig.mock.calls[0][1]).toMatchObject({
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-sonnet-4-5",
+			})
+		})
+
+		test("rejects patch keys outside the model and reset allow-list", async () => {
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+				openRouterApiKey: "stolen",
+			})
+
+			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+		})
+
+		test("only allows reset keys to be cleared, so a patch cannot set a Bedrock custom ARN", async () => {
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+				awsCustomArn: "arn:aws:bedrock:us-east-1:123456789012:inference-profile/other-model",
+			})
+
+			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+		})
+
+		describe("Bedrock custom ARN invariant", () => {
+			const arn = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/unvetted"
+			const bedrockWithArn = {
+				name: "test-config",
+				id: "test-id",
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId: "custom-arn",
+				awsCustomArn: arn,
+				awsCustomArnBaseModelId: "anthropic.claude-3-sonnet-20240229-v1:0",
+				awsModelContextWindow: 200000,
+				awsRegion: "us-east-1",
+			}
+
+			beforeEach(() => {
+				provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue(bedrockWithArn)
+			})
+
+			test("drops the retained ARN and its context fields when the patch omits them", async () => {
+				await provider.updateProfileModel("test-config", providerIdentifiers.bedrock, {
+					apiModelId: "anthropic.claude-3-haiku-20240307-v1:0",
+				})
+
+				const saveConfig = vi.mocked(provider["providerSettingsManager"].saveConfig)
+				expect(saveConfig).toHaveBeenCalledTimes(1)
+				const saved = saveConfig.mock.calls[0][1]
+				expect(saved).toMatchObject({
+					apiModelId: "anthropic.claude-3-haiku-20240307-v1:0",
+					awsRegion: "us-east-1",
+				})
+				expect(saved).not.toHaveProperty("awsCustomArn")
+				expect(saved).not.toHaveProperty("awsCustomArnBaseModelId")
+				expect(saved).not.toHaveProperty("awsModelContextWindow")
+			})
+
+			test("keeps the ARN while custom-arn stays selected", async () => {
+				await provider.updateProfileModel("test-config", providerIdentifiers.bedrock, {
+					apiModelId: "custom-arn",
+				})
+
+				expect(vi.mocked(provider["providerSettingsManager"].saveConfig).mock.calls[0][1]).toMatchObject({
+					apiModelId: "custom-arn",
+					awsCustomArn: arn,
+				})
+			})
+
+			test("rejects selecting custom-arn when the profile has no ARN", async () => {
+				provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue({
+					name: "test-config",
+					id: "test-id",
+					apiProvider: providerIdentifiers.bedrock,
+					apiModelId: "anthropic.claude-3-haiku-20240307-v1:0",
+				})
+
+				await provider.updateProfileModel("test-config", providerIdentifiers.bedrock, {
+					apiModelId: "custom-arn",
+				})
+
+				expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
+				expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+			})
+		})
+
+		test("rejects an empty or non-string model id", async () => {
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, { openRouterModelId: "" })
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, { openRouterModelId: 42 })
+
+			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
+		})
+
+		test("restores the previous profile when activation fails after the new profile was saved", async () => {
+			const manager = provider["providerSettingsManager"]
+			vi.mocked(manager.setModeConfig).mockRejectedValueOnce(new Error("activation failed"))
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+			})
+
+			const saved = vi.mocked(manager.saveConfig).mock.calls.map(([, config]) => config.openRouterModelId)
+			expect(saved).toEqual(["anthropic/claude", "openai/gpt-4"])
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.create_api_config")
+		})
+
+		test("reports a partial state when the previous profile cannot be restored", async () => {
+			const manager = provider["providerSettingsManager"]
+			vi.mocked(manager.setModeConfig).mockRejectedValue(new Error("activation failed"))
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+			})
+
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.update_profile_model_partial")
+		})
+
+		test("finishes activation after the caller timed out instead of leaving a saved but inactive profile", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const realGetState = provider.getState.bind(provider)
+				let release!: () => void
+				const gate = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				let calls = 0
+				vi.spyOn(provider, "getState").mockImplementation(async () => {
+					// 1st call: allow-list check. 2nd call: activation inside persistProviderProfile.
+					if (++calls === 2) await gate
+					return realGetState()
+				})
+
+				const update = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+					openRouterModelId: "anthropic/claude",
+				})
+
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+				await update
+				expect(provider["providerSettingsManager"].setModeConfig).not.toHaveBeenCalled()
+
+				release()
+				await vi.advanceTimersByTimeAsync(0)
+
+				const manager = provider["providerSettingsManager"]
+				expect(manager.setModeConfig).toHaveBeenCalledTimes(1)
+				expect(vi.mocked(manager.saveConfig).mock.calls.map(([, config]) => config.openRouterModelId)).toEqual([
+					"anthropic/claude",
+				])
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		test("upsertProviderProfile finishes activation after the caller timed out", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const realGetState = provider.getState.bind(provider)
+				let release!: () => void
+				const gate = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				let calls = 0
+				vi.spyOn(provider, "getState").mockImplementation(async () => {
+					// 1st call: activation inside persistProviderProfile.
+					if (++calls === 1) await gate
+					return realGetState()
+				})
+
+				const upsert = provider.upsertProviderProfile(
+					"test-config",
+					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "anthropic/claude" },
+					true,
+				)
+
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+				await expect(upsert).resolves.toBeUndefined()
+
+				const manager = provider["providerSettingsManager"]
+				expect(manager.setModeConfig).not.toHaveBeenCalled()
+
+				release()
+				await vi.advanceTimersByTimeAsync(0)
+
+				expect(manager.saveConfig).toHaveBeenCalledTimes(1)
+				expect(manager.setModeConfig).toHaveBeenCalledTimes(1)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		test("holds the next profile mutation until a timed-out model update settles", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const realGetState = provider.getState.bind(provider)
+				let release!: () => void
+				const gate = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				let calls = 0
+				vi.spyOn(provider, "getState").mockImplementation(async () => {
+					if (++calls === 2) await gate
+					return realGetState()
+				})
+				const manager = provider["providerSettingsManager"]
+				manager.activateProfile = vi.fn().mockResolvedValue({
+					name: "other-profile",
+					id: "other-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4.1-mini",
+				})
+
+				const update = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+					openRouterModelId: "anthropic/claude",
+				})
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+				await update
+
+				const next = provider.activateProviderProfile({ name: "other-profile" })
+				await vi.advanceTimersByTimeAsync(0)
+				expect(manager.activateProfile).not.toHaveBeenCalled()
+
+				release()
+				await vi.advanceTimersByTimeAsync(0)
+				await next
+
+				expect(manager.activateProfile).toHaveBeenCalledTimes(1)
+				// One write set from the model update, one from the queued activation.
+				expect(manager.setModeConfig).toHaveBeenCalledTimes(2)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		test("waits for every activation write before restoring the previous profile", async () => {
+			const manager = provider["providerSettingsManager"]
+			const events: string[] = []
+			let releaseContext!: () => void
+			const contextWrite = new Promise<void>((resolve) => {
+				releaseContext = resolve
+			})
+			vi.mocked(manager.setModeConfig).mockImplementationOnce(async () => {
+				events.push("activation:failed")
+				throw new Error("activation failed")
+			})
+			vi.spyOn(provider.contextProxy, "setProviderSettings").mockImplementationOnce(async () => {
+				await contextWrite
+				events.push("context:written")
+			})
+			vi.mocked(manager.saveConfig).mockImplementation(async (_name, config) => {
+				events.push(`save:${config.openRouterModelId}`)
+				return "test-id"
+			})
+
+			const update = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+			})
+			await vi.waitFor(() => expect(events).toContain("activation:failed"))
+			expect(events).not.toContain("save:openai/gpt-4")
+
+			releaseContext()
+			await update
+
+			expect(events).toEqual([
+				"save:anthropic/claude",
+				"activation:failed",
+				"context:written",
+				"save:openai/gpt-4",
+			])
+		})
+
+		test("rejects a model that the organization allow-list forbids", async () => {
+			const realGetState = provider.getState.bind(provider)
+			vi.spyOn(provider, "getState").mockImplementation(async () => ({
+				...(await realGetState()),
+				organizationAllowList: {
+					allowAll: false,
+					providers: {
+						[providerIdentifiers.openrouter]: { allowAll: false, models: ["openai/gpt-4"] },
+					},
+				},
+			}))
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+			})
+
+			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
 		})
 	})
 
