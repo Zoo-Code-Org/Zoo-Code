@@ -152,8 +152,3 @@ export function createReadFileTool(options: ReadFileToolOptions = {}): OpenAI.Ch
 		},
 	} satisfies OpenAI.Chat.ChatCompletionTool
 }
-
-/**
- * Default read_file tool with all parameters
- */
-export const read_file = createReadFileTool()

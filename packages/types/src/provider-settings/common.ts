@@ -17,10 +17,8 @@ export const API_MODEL_ID_FIELD = "apiModelId"
 // map `null` to `undefined` before validation; the return type strips `null` from
 // the output because it can never survive the preprocessing step.
 const nullableOptional = <Schema extends z.ZodTypeAny>(schema: Schema) =>
-	z.preprocess((value) => (value === null ? undefined : value), schema) as unknown as z.ZodType<
-		Exclude<z.infer<Schema>, null>,
-		z.ZodTypeDef,
-		z.input<Schema>
+	z.preprocess((value) => (value === null ? undefined : value), schema) as unknown as z.ZodOptional<
+		z.ZodType<Exclude<z.infer<Schema>, null>, z.input<Schema>>
 	>
 
 export const baseProviderSettingsShape = {
@@ -59,7 +57,7 @@ export type ProviderDefinition = {
 	apiProvider: ProviderIdentifier
 	settingsShape: z.ZodRawShape
 	modelIdKey?: string
-	schema: z.ZodDiscriminatedUnionOption<typeof API_PROVIDER_FIELD>
+	schema: z.ZodObject
 	getModelId: ProviderModelIdAccessor
 }
 

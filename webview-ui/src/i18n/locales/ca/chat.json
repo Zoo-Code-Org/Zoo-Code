@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Selecciona el mode d'interacció",
 	"selectApiConfig": "Seleccioneu la configuració de l'API",
+	"selectModel": "Selecciona el model",
+	"modelSelector": {
+		"title": "Models",
+		"settings": "Configuració del model",
+		"description": "Tria el model que s'utilitzarà per a aquesta configuració d'API.",
+		"searchPlaceholder": "Cerca models...",
+		"unsupportedTooltip": "El model d'aquest proveïdor es configura a Configuració",
+		"loading": "Carregant models..."
+	},
 	"lockApiConfigAcrossModes": "Bloqueja la configuració de l'API a tots els modes en aquest espai de treball",
 	"unlockApiConfigAcrossModes": "La configuració de l'API està bloquejada a tots els modes en aquest espai de treball (fes clic per desbloquejar)",
 	"enhancePrompt": "Millora la sol·licitud amb context addicional",
@@ -343,10 +352,10 @@
 		"title": "S'ha publicat Zoo Code {{version}}",
 		"support": "Dona suport a Zoo Code fent-nos una estrella a <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Què hi ha de nou al Zoo Code v3.88.0",
-			"highlight1": "✨ Suport de proveïdors i models: Fes servir Grok Build i un suport millorat de models personalitzats. Aquesta versió també corregeix els límits de models de Bedrock i envia la configuració de verbositat de Codex.",
-			"highlight2": "🧭 Fiabilitat de les tasques: Aquesta versió corregeix la gestió de les cancel·lacions, la continuació dels torns d'eines i el desat dels missatges de tasca.",
-			"highlight3": "⚡ Edició i xat més ràpids: Les escriptures de fitxers ja no utilitzen retards artificials per defecte. Els missatges del xat porten menys dades de fitxers, i les accions de codi arriben a l'últim xat actiu."
+			"heading": "Què hi ha de nou al Zoo Code v3.92.0",
+			"highlight1": "✨ Tria de models més ràpida i compatibilitat millorada: Canvia de model des de l'editor de missatges del xat. Utilitza Claude Haiku 5.5 a Amazon Bedrock, obtén unes capacitats de Kimi K3 més precises a OpenRouter i utilitza els límits corregits de Gemini 4 Argon a Vercel AI Gateway.",
+			"highlight2": "🧭 Fluxos de treball de terminal, edició, xat i remots més fiables: Configura la sortida de les ordres perquè es replegui per defecte quan vulguis, obtén errors d'edició més clars, mantén visibles les files de raonament i d'API i evita problemes d'inici i de proxy als espais de treball remots.",
+			"highlight3": "🔌 Marketplace d'MCP ampliat: Connecta Zoo Code a AnySearch, Mailtea i Tradehand mitjançant el marketplace d'MCP."
 		},
 		"cloudAgents": {
 			"heading": "Novetats al núvol:",
@@ -487,6 +496,10 @@
 		"serversPart_other": "{{count}} servidors MCP",
 		"messageTemplate": "Tens {{tools}} habilitades via {{servers}}. Un nombre tant alt pot confondre el model i portar a errors. Intenta mantenir-lo per sota de {{threshold}}.",
 		"openMcpSettings": "Obrir configuració de MCP"
+	},
+	"ignoredDisabledTools": {
+		"title": "Eina desactivada ignorada",
+		"messageTemplate": "Les eines següents no es poden desactivar, per això les entrades de disabledTools s'han ignorat: {{tools}}."
 	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"

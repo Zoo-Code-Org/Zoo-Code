@@ -48,6 +48,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			didCompleteReadingStream: false,
 			didRejectTool: false,
 			didAlreadyUseTool: false,
+			activeToolContexts: new Map(),
 			consecutiveMistakeCount: 0,
 			getTaskMode: vi.fn().mockResolvedValue("code"),
 			api: {
