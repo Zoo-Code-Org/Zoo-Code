@@ -9,7 +9,6 @@ import { type Task } from "../core/task/Task"
 import { API } from "../extension/api"
 import * as ProfileValidatorMod from "../shared/ProfileValidator"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
-import { makeClineProviderFactory } from "../test-utils/provider"
 
 type PrivateClineProviderMethods = {
 	createTask: (

@@ -29,7 +29,6 @@ vi.mock("@roo-code/ipc", () => ({
 vi.mock("../services/command/commands", () => ({ getCommands: vi.fn().mockResolvedValue([]) }))
 
 import { API } from "../extension/api"
-import { makeClineProviderFactory } from "../test-utils/provider"
 
 function makeProviderMock() {
 	const emitter = new EventEmitter()

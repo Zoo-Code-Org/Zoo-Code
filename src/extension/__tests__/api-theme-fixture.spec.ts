@@ -3,7 +3,6 @@ import type * as vscode from "vscode"
 
 import { API } from "../api"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
-import { makeClineProviderFactory } from "../../test-utils/provider"
 
 vi.mock("@roo-code/ipc", () => ({
 	IpcServer: class {},

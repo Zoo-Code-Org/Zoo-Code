@@ -5,7 +5,6 @@ import { API } from "../api"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
 import { Terminal } from "../../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
-import { makeClineProviderFactory } from "../../test-utils/provider"
 
 vi.mock("@roo-code/ipc", () => ({
 	IpcServer: class {},

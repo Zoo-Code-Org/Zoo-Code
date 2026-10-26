@@ -4,7 +4,6 @@ import { RooCodeEventName } from "@roo-code/types"
 
 import { API } from "../api"
 import { ClineProvider } from "../../core/webview/ClineProvider"
-import { makeClineProviderFactory } from "../../test-utils/provider"
 
 vi.mock("vscode")
 vi.mock("../../core/webview/ClineProvider")

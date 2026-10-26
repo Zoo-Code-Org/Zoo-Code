@@ -4,7 +4,6 @@ import * as vscode from "vscode"
 import { API } from "../api"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { readTaskMessages, TaskMessagesReadError } from "../../core/task-persistence/taskMessages"
-import { makeClineProviderFactory } from "../../test-utils/provider"
 
 vi.mock("vscode")
 vi.mock("../../core/webview/ClineProvider")

@@ -5,14 +5,6 @@ import { providerIdentifiers } from "@roo-code/types"
 import { API } from "../api"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
 import type { OutputChannel } from "vscode"
-// The merged API constructor requires a ClineProviderFactory; these specs drive
-// tab creation through the mocked createClineTabPanel, so the factory must never
-// be called. Cast structurally: the class type carries private members.
-const makeUnusedTabFactory = () =>
-	({
-		createInNewTab: vi.fn().mockRejectedValue(new Error("Unexpected editor-tab creation in this test")),
-	}) as unknown as ConstructorParameters<typeof API>[2]
-
 vi.mock("@roo-code/ipc", () => ({
 	IpcServer: class {},
 }))

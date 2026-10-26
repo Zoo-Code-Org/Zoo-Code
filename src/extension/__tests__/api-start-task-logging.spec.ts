@@ -14,7 +14,6 @@ import {
 import { API } from "../api"
 import { Package } from "../../shared/package"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
-import { makeClineProviderFactory } from "../../test-utils/provider"
 
 const { commandHandlers, sentMessages } = vi.hoisted(() => ({
 	commandHandlers: [] as Array<(clientId: string, command: unknown) => Promise<void>>,

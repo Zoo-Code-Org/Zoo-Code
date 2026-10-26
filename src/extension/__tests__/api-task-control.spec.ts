@@ -7,14 +7,6 @@ import { RooCodeEventName, type ModeConfig, type RooCodeSettings } from "@roo-co
 
 import { API } from "../api"
 import { ClineProvider } from "../../core/webview/ClineProvider"
-// The merged API constructor requires a ClineProviderFactory; these specs drive
-// tab creation through the mocked createClineTabPanel, so the factory must never
-// be called. Cast structurally: the class type carries private members.
-const makeUnusedTabFactory = () =>
-	({
-		createInNewTab: vi.fn().mockRejectedValue(new Error("Unexpected editor-tab creation in this test")),
-	}) as unknown as ConstructorParameters<typeof API>[2]
-
 const { createClineTabPanelMock } = vi.hoisted(() => ({
 	createClineTabPanelMock: vi.fn(),
 }))
