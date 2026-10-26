@@ -1415,26 +1415,11 @@ describe("OpenAiNativeHandler", () => {
 				expect(mockFetch).not.toHaveBeenCalled()
 			})
 
-			it("should take the fallback when the request's own signal aborted but the SDK error is not a cancellation", async () => {
-				// Regression guard for the catch-path condition: a terminal SDK error that
-				// merely races the abort must not be reclassified as a cancellation, so the
-				// fallback still runs instead of throwing an AbortError.
-				const mockFetch = vitest
-					.fn()
-					.mockImplementation((_url: unknown, _options: { signal?: AbortSignal }) => {
-						const body = new ReadableStream<Uint8Array>({
-							start: (startController) => {
-								startController.enqueue(
-									new TextEncoder().encode(
-										'data: {"type":"response.text.delta","delta":"fallback"}\n\n',
-									),
-								)
-								startController.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-								startController.close()
-							},
-						})
-						return Promise.resolve({ ok: true, body })
-					})
+			it("should not take the fallback when the request's own signal aborted even if the SDK error is not a cancellation", async () => {
+				// A cancelled request must not start fallback work. The SDK can fail with a terminal
+				// error in the same tick the caller aborts; the catch path reports the cancellation
+				// contract and never issues the second POST the fallback would make.
+				const mockFetch = vitest.fn()
 				global.fetch = mockFetch as typeof fetch
 				const controller = new AbortController()
 				const terminalError = new Error("SDK connection reset")
@@ -1458,20 +1443,71 @@ describe("OpenAiNativeHandler", () => {
 				await tick()
 				controller.abort()
 
-				// The fallback is entered (the fetch is issued) rather than the SDK error
-				// being reclassified as a cancellation. Both halves of the contract must
-				// hold: the fallback request carries an already-aborted signal (so a real
-				// fetch would reject instead of issuing a second POST), and the loop's
-				// aborted check surfaces the cancellation as the contract AbortError
-				// instead of resolving with an empty stream.
 				await expect(collected).rejects.toMatchObject({
 					name: "AbortError",
 					message: "The OpenAI Native request was aborted",
 				})
-				expect(mockFetch).toHaveBeenCalledTimes(1)
-				const fetchOptions = mockFetch.mock.calls[0]?.[1] as { signal?: AbortSignal } | undefined
-				expect(fetchOptions?.signal).toBeInstanceOf(AbortSignal)
-				expect(fetchOptions?.signal?.aborted).toBe(true)
+				// No fallback POST for a cancelled request, even though the SDK failure was terminal.
+				expect(mockFetch).not.toHaveBeenCalled()
+			})
+
+			it("should keep a streaming request's controller when completePrompt uses its own signal", async () => {
+				// completePrompt is a request-local signal path: it must not take over or clear the
+				// controller owned by an in-flight createMessage on the same handler, and aborting
+				// the completion signal must not cancel the stream.
+				const streamExternal = new AbortController()
+				const completeExternal = new AbortController()
+				let streamSdkSignal: AbortSignal | undefined
+				let completeSdkSignal: AbortSignal | undefined
+				let releaseStream!: () => void
+				const streamGate = new Promise<void>((resolve) => {
+					releaseStream = resolve
+				})
+				mockResponsesCreate.mockImplementationOnce((_body: unknown, options: { signal?: AbortSignal }) => {
+					streamSdkSignal = options?.signal
+					return Promise.resolve(
+						(async function* () {
+							yield { type: "response.output_text.delta", delta: "one" }
+							await streamGate
+							yield { type: "response.output_text.delta", delta: " two" }
+						})(),
+					)
+				})
+				mockResponsesCreate.mockImplementationOnce((_body: unknown, options: { signal?: AbortSignal }) => {
+					completeSdkSignal = options?.signal
+					return Promise.resolve({
+						output: [{ type: "message", content: [{ type: "output_text", text: "done" }] }],
+					})
+				})
+
+				const streaming = collectStream(
+					handler.createMessage(
+						systemPrompt,
+						messages,
+						makeCreateMessageMetadata({ abortSignal: streamExternal.signal }),
+					),
+				)
+				await tick()
+				expect(streamSdkSignal).toBeDefined()
+
+				const completion = await handler.completePrompt("prompt", {
+					abortSignal: completeExternal.signal,
+				})
+				expect(completion).toBe("done")
+				// The completion used its own request signal, not the streaming request's.
+				expect(completeSdkSignal).toBeDefined()
+				expect(completeSdkSignal).not.toBe(streamSdkSignal)
+				expect(completion === "done" && streamSdkSignal?.aborted).toBe(false)
+				// The streaming request still owns the handler's controller.
+				expect(handler["abortController"]?.signal).toBe(streamSdkSignal)
+
+				// Aborting the completion signal after the fact must not cancel the stream.
+				completeExternal.abort()
+				expect(streamSdkSignal?.aborted).toBe(false)
+
+				releaseStream()
+				const chunks = await streaming
+				expect(textChunks(chunks).map((chunk) => chunk.text)).toEqual(["one", " two"])
 			})
 
 			it("should rethrow a native AbortError from the SDK as-is instead of normalizing it", async () => {
