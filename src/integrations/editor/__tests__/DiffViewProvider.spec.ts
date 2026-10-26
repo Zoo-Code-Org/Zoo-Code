@@ -876,24 +876,43 @@ describe("DiffViewProvider", () => {
 			)
 		})
 
-		it("surfaces a failed DACL restore as a rejection instead of a completed save", async () => {
+		it("reports a post-commit DACL restore failure as a warning instead of a failed save", async () => {
 			const { DaclRestoreError, safeWriteText } = await import("../../../services/file-safety/safeWriteText")
 			vi.mocked(safeWriteText).mockClear()
-			// The primitive reports a lost DACL after the commit rename as DaclRestoreError.
-			// The direct-save path must not swallow it: a caller that sees saveDirectly
-			// resolve would report a save whose access rights silently changed.
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+			// The primitive reports a lost DACL after the commit rename as DaclRestoreError:
+			// the content is already on disk, so re-writing cannot change the access rights.
+			// The tool layer must still record the write as done, or it keeps stale state and
+			// retries content that is already published.
 			vi.mocked(safeWriteText).mockRejectedValueOnce(new DaclRestoreError(`${mockCwd}/test.ts`, null))
 
-			await expect(
-				diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200),
-			).rejects.toBeInstanceOf(DaclRestoreError)
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200)
 
-			// The rejection is the primitive's own - the publish was attempted exactly once,
-			// not retried into a success the caller could observe.
+			expect(result.finalContent).toBe("new content")
+			expect(warn).toHaveBeenCalledWith(expect.stringContaining("content committed with a warning"))
 			const publishCalls = vi.mocked(safeWriteText).mock.calls.filter(function (call) {
 				return call[0] === `${mockCwd}/test.ts`
 			})
 			expect(publishCalls).toHaveLength(1)
+			warn.mockRestore()
+		})
+
+		it("reports an unconfirmed-durability publish as a warning instead of a failed save", async () => {
+			const { PublishNotDurableError, safeWriteText } =
+				await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+			// The rename landed before the durability failure was observed, so the content is
+			// committed: a re-write would duplicate the work and skip the save bookkeeping.
+			vi.mocked(safeWriteText).mockRejectedValueOnce(
+				new PublishNotDurableError(`${mockCwd}/test.ts`, "directory fsync failed"),
+			)
+
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200)
+
+			expect(result.finalContent).toBe("new content")
+			expect(warn).toHaveBeenCalledWith(expect.stringContaining("content committed with a warning"))
+			warn.mockRestore()
 		})
 
 		beforeEach(() => {

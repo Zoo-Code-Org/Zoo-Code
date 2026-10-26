@@ -710,15 +710,12 @@ describe("safeWriteText", () => {
 			expect(restoreCalls.length).toBeGreaterThan(0)
 		})
 
-		it("skips the DACL save and restore for the rest of the process once a restore reports the missing privilege", async () => {
+		it("skips the DACL save and restore after a restore reports the missing privilege and still succeeds", async () => {
 			// The memo is process-wide, so this test runs against a fresh module instance:
 			// otherwise the write below would disable DACL handling for every later test in
 			// the file. vi.mock factories still apply to the re-imported module.
 			vi.resetModules()
-			// The re-imported module has its own class identity, so the rejection is matched
-			// against the class this instance throws, not the one imported at the top.
-			const { safeWriteText: freshWriteText, DaclRestoreError: FreshDaclRestoreError } =
-				await import("../safeWriteText")
+			const { safeWriteText: freshWriteText } = await import("../safeWriteText")
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -733,9 +730,9 @@ describe("safeWriteText", () => {
 			}) as unknown as typeof execFile
 			const options = { platform: "win32", execFileRunner: runner }
 
-			// The first publish still loses its DACL, so it is reported as the typed error -
-			// the memo only changes what LATER writes in this process pay for.
-			await expect(freshWriteText(targetPath, "data", options)).rejects.toBeInstanceOf(FreshDaclRestoreError)
+			// A host that cannot restore DACLs cannot do better, and the content is committed:
+			// the publish succeeds with one warning instead of failing every overwrite.
+			await expect(freshWriteText(targetPath, "data", options)).resolves.toBeUndefined()
 			// Exactly one save and one restore: the 1300 exit tells the restore it is
 			// the missing privilege, so the transient retry must not run.
 			expect(calls).toBe(2)
@@ -743,9 +740,9 @@ describe("safeWriteText", () => {
 
 			calls = 0
 			warn.mockClear()
-			// The memo buys the zero-spawn path; it does not buy a silent success. This write
-			// still replaced the target's descriptor, so it is still reported.
-			await expect(freshWriteText(targetPath, "data", options)).rejects.toBeInstanceOf(FreshDaclRestoreError)
+			// The memo buys the zero-spawn path; the access-rights limitation was already
+			// reported once for this process, so the write resolves without repeating it.
+			await expect(freshWriteText(targetPath, "data", options)).resolves.toBeUndefined()
 
 			expect(calls).toBe(0)
 			expect(warn).not.toHaveBeenCalled()
@@ -753,15 +750,11 @@ describe("safeWriteText", () => {
 			warn.mockRestore()
 		})
 
-		it("win32 DACL: a later write that ran with restoration disabled reports the lost DACL", async () => {
-			// The memo skips the save/restore pair to save the process spawns. It must not also
-			// change the answer: the commit is a rename, so a later write over an existing target
-			// still hands the path a file created with a different descriptor, and with the pair
-			// skipped nothing saved the old one and nothing can put it back. Resolving quietly
-			// would tell the caller the access rights are unchanged when they are not.
+		it("does not retain a backup when the only defect is the missing restore privilege", async () => {
+			// The DACL limitation is a host capability, not a data-integrity failure, so the
+			// publish is a success and the backup is not needed as a descriptor-recovery copy.
 			vi.resetModules()
-			const { safeWriteText: freshWriteText, DaclRestoreError: FreshDaclRestoreError } =
-				await import("../safeWriteText")
+			const { safeWriteText: freshWriteText } = await import("../safeWriteText")
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -775,69 +768,39 @@ describe("safeWriteText", () => {
 			}) as unknown as typeof execFile
 			const options = { platform: "win32", execFileRunner: runner, backup: true }
 
-			// First write: capture ran, restore reported 1300, memo set, own loss reported.
-			await expect(freshWriteText(targetPath, "data", options)).rejects.toBeInstanceOf(FreshDaclRestoreError)
+			await expect(freshWriteText(targetPath, "data", options)).resolves.toBeUndefined()
 
-			calls = 0
-			vi.mocked(fs.copyFile).mockClear()
-			vi.mocked(fs.unlink).mockClear()
-			const second = await _rejectionReport(freshWriteText(targetPath, "data", options))
-
-			// The condition reaches the caller as the same post-commit error a failed restore
-			// uses, instead of a resolved write, and the report names the condition it is
-			// reporting: a reader must be able to tell 'this host cannot restore' apart from
-			// 'the restore command failed this time'.
-			expect(second.name).toBe("DaclRestoreError")
-			expect(second.message).toContain("restoration is disabled")
-			// Restoration stayed disabled: the memo still buys zero process spawns.
-			expect(calls).toBe(0)
-			// The content is still committed - a landed publish whose access rights changed,
-			// not a refused write.
+			expect(calls).toBe(2)
+			// The content is committed and the backup is cleaned up like any successful publish.
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
-			// And the backup copy, now the only artifact carrying the original descriptor, was
-			// really created and really retained.
 			const copies = vi.mocked(fs.copyFile).mock.calls
 			expect(copies).toHaveLength(1)
-			expect(String(copies[0]?.[0])).toBe(targetPath)
 			const backupDestination = String(copies[0]?.[1])
 			expect(
 				vi.mocked(fs.unlink).mock.calls.filter((call) => String(call[0]) === backupDestination),
-			).toHaveLength(0)
+			).toHaveLength(1)
 			warn.mockRestore()
 		})
 
-		it("win32 DACL: restoration disabled does not reject a write to a brand-new target", async () => {
-			// A file that did not exist has no descriptor to lose - it takes a default one at
-			// creation either way. Reporting the condition there would fail ordinary saves on
-			// every un-elevated Windows host, so the report is scoped to replaced targets.
+		it("keeps a non-privilege restore failure as the typed post-commit error", async () => {
+			// A restore failure that is not the host capability limit could clear on a retry or
+			// point at a real ACL problem, so it stays an error even though the content committed.
 			vi.resetModules()
 			const { safeWriteText: freshWriteText, DaclRestoreError: FreshDaclRestoreError } =
 				await import("../safeWriteText")
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
-			const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
-			const privilegeFailure = Object.assign(new Error("Access is denied."), { code: 1300 })
+			const restoreFailure = new Error("icacls failed for an unrelated reason")
 			const runner = vi.fn((...args: unknown[]) => {
 				const cb = args[args.length - 1] as (err: Error | null) => void
-				cb(args[1] && String((args[1] as string[])[1]) === "/restore" ? privilegeFailure : null)
+				cb(args[1] && String((args[1] as string[])[1]) === "/restore" ? restoreFailure : null)
 			}) as unknown as typeof execFile
-			const options = { platform: "win32", execFileRunner: runner }
 
-			await expect(freshWriteText(targetPath, "data", options)).rejects.toBeInstanceOf(FreshDaclRestoreError)
-
-			// From here the target is gone: the step 2b probe must read ENOENT as "nothing to
-			// preserve" and let the publish resolve.
-			vi.mocked(fs.access).mockImplementation(async (p) => {
-				if (typeof p === "string" && p.endsWith("target.txt")) {
-					throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
-				}
-				return undefined
-			})
-
-			await expect(freshWriteText(targetPath, "data", options)).resolves.toBeUndefined()
+			await expect(
+				freshWriteText(targetPath, "data", { platform: "win32", execFileRunner: runner }),
+			).rejects.toBeInstanceOf(FreshDaclRestoreError)
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
-			warn.mockRestore()
 		})
 
 		it("win32 DACL save args are [targetPath, /save, dumpPath] before backup rename", async () => {

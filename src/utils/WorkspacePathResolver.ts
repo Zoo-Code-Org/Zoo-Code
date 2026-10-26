@@ -36,7 +36,18 @@ function normalizeCase(p: string): string {
  * may itself be reached via a symlink. Callers should always compare two `resolveRealPath()` results
  * rather than mixing with raw `uri.fsPath` — `arePathsEqual()` does not case-fold on macOS.
  */
-export async function resolveRealPath(target: string): Promise<string> {
+export interface ResolveRealPathOptions {
+	/**
+	 * Lowercase the result on case-insensitive filesystems (default true). Workspace
+	 * comparisons want the folded form; callers that use the result for filesystem
+	 * operations (locks, renames) must pass false so the on-disk case is preserved.
+	 */
+	caseFold?: boolean
+}
+
+export async function resolveRealPath(target: string, options: ResolveRealPathOptions = {}): Promise<string> {
+	const caseFold = options.caseFold ?? true
+	const finish = (resolved: string): string => (caseFold ? normalizeCase(resolved) : resolved)
 	let current = path.resolve(target)
 	const trailing: string[] = []
 
@@ -45,7 +56,7 @@ export async function resolveRealPath(target: string): Promise<string> {
 		try {
 			const resolved = await fs.realpath(current)
 			const joined = trailing.length > 0 ? path.join(resolved, ...trailing.reverse()) : resolved
-			return normalizeCase(joined)
+			return finish(joined)
 		} catch (err) {
 			if (!isErrnoException(err, "ENOENT")) {
 				// Non-ENOENT (e.g. EACCES, ELOOP, ENOTDIR): propagate so the caller's
@@ -56,8 +67,8 @@ export async function resolveRealPath(target: string): Promise<string> {
 			const parent = path.dirname(current)
 			if (parent === current) {
 				// Reached the filesystem root without finding an existing path; fall back to the
-				// lexically resolved path (still case-normalized for consistent comparisons).
-				return normalizeCase(path.resolve(target))
+				// lexically resolved path (case-normalized for comparisons unless disabled).
+				return finish(path.resolve(target))
 			}
 
 			trailing.push(path.basename(current))

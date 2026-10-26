@@ -1,6 +1,8 @@
 import * as path from "path"
 import * as lockfile from "proper-lockfile"
 
+import { resolveRealPath } from "./WorkspacePathResolver"
+
 /**
  * Shared staleness window for per-file advisory locks. This module owns the
  * single advisory lock protocol used by `safeWriteJson` and by callers that
@@ -15,8 +17,21 @@ export const LOCK_STALE_MS = 31_000
  * returned function exactly once and must not acquire the same lock again
  * while holding it.
  */
+/**
+ * Resolve the canonical path the advisory lock is keyed on.
+ *
+ * Locks must key on the referent, not the caller's alias: two writers reaching one file
+ * through a symlinked ancestor would otherwise serialize on different locks and lose each
+ * other's updates. resolveRealPath resolves the nearest existing ancestor, so a file that
+ * does not exist yet under a symlinked directory still locks under the real directory. Case
+ * folding is disabled because the result is used for filesystem operations, not comparisons.
+ */
+export async function resolveFileLockPath(filePath: string): Promise<string> {
+	return resolveRealPath(path.resolve(filePath), { caseFold: false })
+}
+
 export async function acquireFileLock(filePath: string): Promise<() => Promise<void>> {
-	const absoluteFilePath = path.resolve(filePath)
+	const absoluteFilePath = await resolveFileLockPath(filePath)
 	try {
 		return await lockfile.lock(absoluteFilePath, {
 			stale: LOCK_STALE_MS,

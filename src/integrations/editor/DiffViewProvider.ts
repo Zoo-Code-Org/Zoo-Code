@@ -19,7 +19,12 @@ import { arePathsEqual, getReadablePath } from "../../utils/path"
 import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
 import { Task } from "../../core/task/Task"
-import { assertPublishWithinAuthorizedRoot, safeWriteText } from "../../services/file-safety/safeWriteText"
+import {
+	assertPublishWithinAuthorizedRoot,
+	DaclRestoreError,
+	PublishNotDurableError,
+	safeWriteText,
+} from "../../services/file-safety/safeWriteText"
 
 import { DecorationController } from "./DecorationController"
 
@@ -1180,7 +1185,20 @@ export class DiffViewProvider {
 					: undefined
 			if (code !== "ENOENT") throw error
 		}
-		await safeWriteText(absolutePath, content, { authorizedRoot: this.cwd })
+		try {
+			await safeWriteText(absolutePath, content, { authorizedRoot: this.cwd })
+		} catch (error) {
+			// Both errors are raised after the atomic rename committed the content: they
+			// describe a durability or access-rights condition the tool layer cannot fix by
+			// writing again. Treat the save as completed so the tool's bookkeeping matches
+			// the disk (and content already on disk is not retried), and surface the
+			// condition as a warning instead.
+			if (error instanceof PublishNotDurableError || error instanceof DaclRestoreError) {
+				console.warn(`saveDirectly: content committed with a warning: ${error.message}`)
+			} else {
+				throw error
+			}
+		}
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
