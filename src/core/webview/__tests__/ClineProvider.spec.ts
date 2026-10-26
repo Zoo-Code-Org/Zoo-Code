@@ -2921,6 +2921,10 @@ describe("ClineProvider", () => {
 			)
 			await provider.contextProxy.setValue("mode", "architect")
 			await provider.contextProxy.setValue("currentApiConfigName", "current-config")
+			// This view has its own overrides before the failed write; the rollback must restore
+			// them (the shared rollback alone would leave the view pinned to the failed values).
+			await provider.saveViewState("mode", "architect")
+			await provider.saveViewState("currentApiConfigName", "current-config")
 			const originalUpdate = mockContext.globalState.update
 			mockContext.globalState.update = vi.fn().mockImplementation((key: string) => {
 				if (key === "viewStates") {
@@ -2934,7 +2938,8 @@ describe("ClineProvider", () => {
 			)
 			expect(provider.getValue("mode")).toBe("architect")
 			expect(provider.getValue("currentApiConfigName")).toBe("current-config")
-			expect(provider["viewLocalState"].mode).toBeUndefined()
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("current-config")
 
 			mockContext.globalState.update = originalUpdate
 			await provider.dispose()
