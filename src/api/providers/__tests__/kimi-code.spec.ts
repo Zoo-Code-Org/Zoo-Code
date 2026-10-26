@@ -3,6 +3,7 @@ import { KimiCodeHandler } from "../kimi-code"
 
 import { clearAllMocks } from "../../../test-utils/reset"
 import { captureError } from "../../../test-utils/errors"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import OpenAI from "openai"
 import { Stream } from "openai/streaming"
@@ -138,6 +139,34 @@ describe("KimiCodeHandler", () => {
 			// expected - mock is incomplete
 		}
 		expect(mockForceRefreshAccessToken).toHaveBeenCalledOnce()
+	})
+
+	it("does not refresh or retry when the caller cancels before the 401 retry branch", async () => {
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
+		const controller = new AbortController()
+		// The completion request answers 401 in the same tick the caller cancels: the retry
+		// branch must observe the cancellation and stop instead of forcing an OAuth refresh
+		// and a second completion request.
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementationOnce(async () => {
+			controller.abort()
+			return new Response(null, { status: 401 })
+		})
+
+		const error = await captureError(
+			(async () => {
+				for await (const _chunk of handler.createMessage(
+					"system",
+					[{ role: "user", content: "test" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				)) {
+					// consume
+				}
+			})(),
+		)
+
+		expect(error).toMatchObject({ name: "AbortError" })
+		expect(mockForceRefreshAccessToken).not.toHaveBeenCalled()
+		expect(fetchSpy).toHaveBeenCalledTimes(1)
 	})
 
 	it("force-refreshes and retries exactly once after a non-streaming OAuth 401", async () => {

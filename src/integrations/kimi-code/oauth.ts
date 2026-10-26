@@ -139,12 +139,21 @@ async function requestDeviceToken(deviceCode: string, signal?: AbortSignal): Pro
 	}
 }
 
-export async function refreshKimiCodeAccessToken(credentials: KimiCodeCredentials): Promise<KimiCodeCredentials> {
-	const response = await postForm(KIMI_CODE_OAUTH_CONFIG.tokenEndpoint, {
-		grant_type: "refresh_token",
-		refresh_token: credentials.refreshToken,
-		client_id: KIMI_CODE_OAUTH_CONFIG.clientId,
-	})
+export async function refreshKimiCodeAccessToken(
+	credentials: KimiCodeCredentials,
+	signal?: AbortSignal,
+): Promise<KimiCodeCredentials> {
+	// The caller's signal aborts the token POST itself, not just the caller's wait: a cancelled
+	// task must not keep a refresh request (and its rotated refresh token) in flight.
+	const response = await postForm(
+		KIMI_CODE_OAUTH_CONFIG.tokenEndpoint,
+		{
+			grant_type: "refresh_token",
+			refresh_token: credentials.refreshToken,
+			client_id: KIMI_CODE_OAUTH_CONFIG.clientId,
+		},
+		signal,
+	)
 	if (!response.ok) throw await readOAuthError(response)
 	const tokens = tokenResponseSchema.parse(await response.json())
 	return {
@@ -239,7 +248,7 @@ export class KimiCodeOAuthManager {
 		return (await this.getAccessToken()) !== null
 	}
 
-	async getAccessToken(forceRefresh = false): Promise<string | null> {
+	async getAccessToken(forceRefresh = false, signal?: AbortSignal): Promise<string | null> {
 		const credentials = await this.loadCredentials()
 		if (!credentials) return null
 		if (!forceRefresh && Date.now() < credentials.expiresAt - TOKEN_EXPIRY_BUFFER_MS) {
@@ -247,13 +256,16 @@ export class KimiCodeOAuthManager {
 		}
 		if (!this.refreshPromise) {
 			const generation = this.credentialsGeneration
-			this.refreshPromise = refreshKimiCodeAccessToken(credentials)
+			this.refreshPromise = refreshKimiCodeAccessToken(credentials, signal)
 				.then(async (next) => {
 					if (!(await this.saveCredentials(next, () => generation === this.credentialsGeneration)))
 						return null
 					return next
 				})
 				.catch(async (error) => {
+					// A caller cancellation (or its abort-shaped fetch rejection) must reach the
+					// caller as a cancellation instead of the "not authenticated" null path.
+					if (signal?.aborted) throw error
 					if (error instanceof KimiCodeOAuthError && error.code === "invalid_grant") {
 						this.credentialsGeneration++
 						await this.context?.secrets.delete(KIMI_CODE_CREDENTIALS_KEY)
@@ -269,8 +281,8 @@ export class KimiCodeOAuthManager {
 		return (await this.refreshPromise)?.accessToken ?? null
 	}
 
-	async forceRefreshAccessToken(): Promise<string | null> {
-		return this.getAccessToken(true)
+	async forceRefreshAccessToken(signal?: AbortSignal): Promise<string | null> {
+		return this.getAccessToken(true, signal)
 	}
 
 	async startAuthorization(): Promise<KimiCodeDeviceAuthorization> {

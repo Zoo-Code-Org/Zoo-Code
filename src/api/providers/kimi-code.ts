@@ -66,21 +66,21 @@ export class KimiCodeHandler extends OpenAiHandler {
 			: getKimiCodeModels(options.apiKey)
 	}
 
-	private async resolveAccessToken(forceRefresh = false): Promise<string> {
+	private async resolveAccessToken(forceRefresh = false, signal?: AbortSignal): Promise<string> {
 		if ((this.kimiOptions.kimiCodeAuthMethod ?? OAUTH_AUTH_METHOD) === API_KEY_AUTH_METHOD) {
 			if (!this.kimiOptions.kimiCodeApiKey) throw new Error("Kimi Code API key is required")
 			return this.kimiOptions.kimiCodeApiKey
 		}
 
 		const token = forceRefresh
-			? await kimiCodeOAuthManager.forceRefreshAccessToken()
-			: await kimiCodeOAuthManager.getAccessToken()
+			? await kimiCodeOAuthManager.forceRefreshAccessToken(signal)
+			: await kimiCodeOAuthManager.getAccessToken(false, signal)
 		if (!token) throw new Error("Not authenticated with Kimi Code. Sign in from provider settings.")
 		return token
 	}
 
 	private async prepareRequest(forceRefresh = false, abortSignal?: AbortSignal): Promise<void> {
-		const accessToken = await this.resolveAccessToken(forceRefresh)
+		const accessToken = await this.resolveAccessToken(forceRefresh, abortSignal)
 		this.client.apiKey = accessToken
 		if (!this.modelDiscoveryAttempted) {
 			this.modelDiscoveryAttempted = true

@@ -1,4 +1,4 @@
-import { KIMI_CODE_OAUTH_CONFIG, KimiCodeOAuthManager } from "../oauth"
+import { KIMI_CODE_OAUTH_CONFIG, KimiCodeOAuthManager, refreshKimiCodeAccessToken } from "../oauth"
 
 const createContext = () => {
 	const values = new Map<string, string>()
@@ -461,5 +461,44 @@ describe("KimiCodeOAuthManager", () => {
 		await manager.getAccessToken()
 		const stored = JSON.parse(values.get("kimi-code-oauth-credentials")!)
 		expect(stored.refreshToken).toBe("keep")
+	})
+
+	it("threads the caller abort signal into the token refresh request", async () => {
+		const controller = new AbortController()
+		controller.abort()
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+			// The forwarded request signal must already be aborted when the caller cancelled.
+			expect((init as RequestInit | undefined)?.signal?.aborted).toBe(true)
+			throw new DOMException("This operation was aborted", "AbortError")
+		})
+
+		await expect(
+			refreshKimiCodeAccessToken(
+				{ type: "kimi-code", accessToken: "old", refreshToken: "refresh", expiresAt: 0 },
+				controller.signal,
+			),
+		).rejects.toMatchObject({ name: "AbortError" })
+		expect(fetchSpy).toHaveBeenCalledTimes(1)
+	})
+
+	it("reports a cancelled refresh instead of returning the not-authenticated null", async () => {
+		const { context, values } = createContext()
+		values.set(
+			"kimi-code-oauth-credentials",
+			JSON.stringify({ type: "kimi-code", accessToken: "old", refreshToken: "refresh", expiresAt: 0 }),
+		)
+		const manager = new KimiCodeOAuthManager()
+		manager.initialize(context)
+		const controller = new AbortController()
+		controller.abort()
+		vi.spyOn(globalThis, "fetch").mockRejectedValue(new DOMException("This operation was aborted", "AbortError"))
+
+		await expect(manager.getAccessToken(false, controller.signal)).rejects.toMatchObject({ name: "AbortError" })
+		// The cancellation must not store anything or log the user out.
+		expect(context.secrets.store).not.toHaveBeenCalled()
+		expect(context.secrets.delete).not.toHaveBeenCalled()
+
+		// forceRefreshAccessToken forwards the same caller signal.
+		await expect(manager.forceRefreshAccessToken(controller.signal)).rejects.toMatchObject({ name: "AbortError" })
 	})
 })
