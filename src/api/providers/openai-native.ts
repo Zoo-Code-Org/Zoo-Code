@@ -535,9 +535,13 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			}
 			// A cancelled request must not start fallback work: the fallback fetch would carry an
 			// already-aborted signal, so it can only issue a second POST nobody is waiting for.
-			// Surface the contract cancellation instead; a terminal SDK error that merely raced
-			// the abort is not reclassified here (that is the branch above).
+			// A terminal SDK failure that merely raced the abort keeps its numeric HTTP status
+			// (retry, backoff and the UI read it); a status-less failure surfaces as the contract
+			// cancellation instead.
 			if (requestController.signal.aborted) {
+				if (hasNumericHttpStatus(sdkErr)) {
+					throw sdkErr
+				}
 				throw createAbortError(this.providerName)
 			}
 			// For errors, fallback to manual SSE via fetch

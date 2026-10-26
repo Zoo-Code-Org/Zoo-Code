@@ -1451,6 +1451,42 @@ describe("OpenAiNativeHandler", () => {
 				expect(mockFetch).not.toHaveBeenCalled()
 			})
 
+			it("should keep a terminal status-carrying SDK error that races the caller's abort", async () => {
+				// A 429 can land in the same tick the caller cancels: the numeric status is what
+				// retry, backoff and the UI read, so it is propagated (no fallback POST either).
+				const mockFetch = vitest.fn()
+				global.fetch = mockFetch as typeof fetch
+				const controller = new AbortController()
+				const rateLimited = Object.assign(new Error("Rate limit exceeded"), { status: 429 })
+				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
+					return new Promise((_resolve, reject) => {
+						if (options?.signal?.aborted) {
+							reject(rateLimited)
+							return
+						}
+						options?.signal?.addEventListener("abort", () => reject(rateLimited), { once: true })
+					})
+				})
+
+				const collected = collectStream(
+					handler.createMessage(
+						systemPrompt,
+						messages,
+						makeCreateMessageMetadata({ abortSignal: controller.signal }),
+					),
+				)
+				await tick()
+				controller.abort()
+
+				const error = await collected.then(
+					() => undefined,
+					(e: unknown) => e,
+				)
+				expect(error).toMatchObject({ status: 429 })
+				expect((error as Error).message).toContain("Rate limit exceeded")
+				expect(mockFetch).not.toHaveBeenCalled()
+			})
+
 			it("should keep a streaming request's controller when completePrompt uses its own signal", async () => {
 				// completePrompt is a request-local signal path: it must not take over or clear the
 				// controller owned by an in-flight createMessage on the same handler, and aborting
