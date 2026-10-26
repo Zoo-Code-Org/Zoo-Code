@@ -2744,7 +2744,7 @@ describe("VsCodeLmHandler", () => {
 
 		it("should reject with an AbortError when the request is cancelled during the final output-token count", async () => {
 			// The post-count guard covers the window between the completion check and the usage
-			// chunk: a cancellation that lands inside internalCountTokens must still reject.
+			// chunk: a cancellation that lands inside the host token count must still reject.
 			const controller = new AbortController()
 			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
 				stream: (async function* () {
@@ -2756,37 +2756,28 @@ describe("VsCodeLmHandler", () => {
 					return
 				})(),
 			})
+			// The host counts the output text after streaming: abort when that count runs.
+			const originalCountTokens = mockLanguageModelChat.countTokens.getMockImplementation()
+			mockLanguageModelChat.countTokens.mockImplementation(async (...args: unknown[]) => {
+				if (String(args[0] ?? "").includes("ok")) {
+					controller.abort()
+				}
+				return 1
+			})
 
-			// The first call counts the input messages; the output count is the second call.
-			let countCalls = 0
-			const countSpy = vi
-				.spyOn(
-					handler as unknown as { internalCountTokens: (text: string) => Promise<number> },
-					"internalCountTokens",
-				)
-				.mockImplementation(async () => {
-					countCalls++
-					if (countCalls > 1) {
-						controller.abort()
-						return 0
-					}
-					return 1
-				})
-
-			try {
-				const stream = handler.createMessage(
-					"You are a helpful assistant",
-					[{ role: "user" as const, content: "Hello" }],
-					makeCreateMessageMetadata({ abortSignal: controller.signal }),
-				)
-				await expect(collectStream(stream)).rejects.toSatisfy(
-					(error) =>
-						error instanceof Error &&
-						error.name === "AbortError" &&
-						error.message === "The VS Code LM request was aborted",
-				)
-			} finally {
-				countSpy.mockRestore()
+			const stream = handler.createMessage(
+				"You are a helpful assistant",
+				[{ role: "user" as const, content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+			await expect(collectStream(stream)).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "The VS Code LM request was aborted",
+			)
+			if (originalCountTokens) {
+				mockLanguageModelChat.countTokens.mockImplementation(originalCountTokens)
 			}
 		})
 
