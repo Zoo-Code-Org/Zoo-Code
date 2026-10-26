@@ -472,6 +472,117 @@ export function loadEquivalences(repoRoot) {
 	return parsed.equivalences ?? []
 }
 
+const MUTATOR_NODE_PREDICATES = new Map([
+	[
+		"ConditionalExpression",
+		(node) =>
+			ts.isConditionalExpression(node) ||
+			ts.isIfStatement(node) ||
+			// Stryker also emits ConditionalExpression mutants for logical expressions that gate
+			// execution (the same && can yield both ConditionalExpression and LogicalOperator).
+			(ts.isBinaryExpression(node) &&
+				[
+					ts.SyntaxKind.AmpersandAmpersandToken,
+					ts.SyntaxKind.BarBarToken,
+					ts.SyntaxKind.QuestionQuestionToken,
+				].includes(node.operatorToken.kind)),
+	],
+	[
+		"LogicalOperator",
+		(node) =>
+			ts.isBinaryExpression(node) &&
+			[
+				ts.SyntaxKind.AmpersandAmpersandToken,
+				ts.SyntaxKind.BarBarToken,
+				ts.SyntaxKind.QuestionQuestionToken,
+			].includes(node.operatorToken.kind),
+	],
+	[
+		"EqualityOperator",
+		(node) =>
+			ts.isBinaryExpression(node) &&
+			[
+				ts.SyntaxKind.EqualsEqualsToken,
+				ts.SyntaxKind.ExclamationEqualsToken,
+				ts.SyntaxKind.EqualsEqualsEqualsToken,
+				ts.SyntaxKind.ExclamationEqualsEqualsToken,
+				// Stryker's EqualityOperator also swaps relational operators.
+				ts.SyntaxKind.LessThanToken,
+				ts.SyntaxKind.GreaterThanToken,
+				ts.SyntaxKind.LessThanEqualsToken,
+				ts.SyntaxKind.GreaterThanEqualsToken,
+			].includes(node.operatorToken.kind),
+	],
+	["BooleanLiteral", (node) => node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword],
+	["ObjectLiteral", (node) => ts.isObjectLiteralExpression(node)],
+	["ArrayDeclaration", (node) => ts.isArrayLiteralExpression(node)],
+	["CallExpression", (node) => ts.isCallExpression(node)],
+	["StringLiteral", (node) => ts.isStringLiteral(node) || ts.isTemplateLiteral(node)],
+	["BlockStatement", (node) => ts.isBlock(node)],
+	[
+		"ArithmeticOperator",
+		(node) =>
+			ts.isBinaryExpression(node) &&
+			[
+				ts.SyntaxKind.PlusToken,
+				ts.SyntaxKind.MinusToken,
+				ts.SyntaxKind.AsteriskToken,
+				ts.SyntaxKind.SlashToken,
+				ts.SyntaxKind.PercentToken,
+			].includes(node.operatorToken.kind),
+	],
+])
+
+function lineHasMutatorNode(source, filePath, line, mutator) {
+	const predicate = MUTATOR_NODE_PREDICATES.get(mutator)
+	if (!predicate) return false
+	const scriptKind = filePath.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+	const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, scriptKind)
+	// Registry lines are Stryker report lines, which are 0-based: the editor shows the code at
+	// line + 1. Matching the editor line keeps the registry reviewable in a plain editor.
+	const editorLine = line + 1
+	let found = false
+	function visit(node) {
+		if (found) return
+		if (predicate(node)) {
+			const start = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1
+			if (start === editorLine) {
+				found = true
+				return
+			}
+		}
+		ts.forEachChild(node, visit)
+	}
+	visit(sourceFile)
+	return found
+}
+
+/**
+ * Check that every registry entry's line really holds code of the named mutator at the checked-in
+ * head. Entries are keyed by report line, so a refactor that shifts code silently disables the
+ * exclusion; this validator fails the gate instead of letting the entry drift.
+ */
+export function validateEquivalenceEntries(equivalences, readSource) {
+	const problems = []
+	for (const entry of equivalences) {
+		const source = readSource(entry.file)
+		if (source === undefined) {
+			problems.push(entry.file + ": file not found")
+			continue
+		}
+		if (!MUTATOR_NODE_PREDICATES.has(entry.mutator)) {
+			problems.push(entry.file + ":" + entry.line + ": unknown mutator " + entry.mutator)
+			continue
+		}
+		if (!lineHasMutatorNode(source, entry.file, entry.line, entry.mutator)) {
+			problems.push(
+				entry.file + ":" + entry.line + ": expected " + entry.mutator + " code at line " + (entry.line + 1),
+			)
+		}
+	}
+	return problems
+}
+
 export function applyEquivalences(counts, equivalences, packageEntry, reportedFiles = new Set()) {
 	// The key includes the replacement: one condition yields both `=> true` and `=> false`
 	// ConditionalExpression mutants, and only the reviewed replacement may be accepted.
@@ -863,6 +974,13 @@ function main() {
 	if (!baseSha || !headSha) throw new Error("--base and --head are required")
 
 	const reportRoot = path.resolve(repoRoot, argument("--reports") ?? "reports/mutation")
+	const registryProblems = validateEquivalenceEntries(loadEquivalences(repoRoot), (file) => {
+		const filePath = path.join(repoRoot, file)
+		return fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf8") : undefined
+	})
+	if (registryProblems.length > 0) {
+		throw new Error("Stryker equivalence registry is stale:\n" + registryProblems.join("\n"))
+	}
 	const manifest = selectFromGit(repoRoot, baseSha, headSha)
 	if (manifest.packages.length === 0) {
 		appendSummary([], manifest.advisories, manifest)

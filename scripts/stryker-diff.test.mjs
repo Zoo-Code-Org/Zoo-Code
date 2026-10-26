@@ -34,6 +34,7 @@ import {
 	selectFromGit,
 	testsFromMutationReport,
 	validateDisableDirectives,
+	validateEquivalenceEntries,
 } from "./stryker-diff.mjs"
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
@@ -1225,6 +1226,60 @@ describe("accepted equivalent mutants", () => {
 			assert.equal(typeof entry.replacement, "string")
 			assert.ok(entry.reason.length > 20)
 		}
+	})
+
+	it("rejects an entry whose line does not hold the named mutator", () => {
+		const source = ["const a = 1", "const b = a === 2 ? 3 : 4", "const c = { once: true }", ""].join("\n")
+		const readSource = () => source
+		const conditional = {
+			file: "src/example.ts",
+			line: 1,
+			mutator: "ConditionalExpression",
+			replacement: "true",
+			reason: "example",
+		}
+
+		// Report lines are 0-based: line 1 is the ternary on editor line 2.
+		assert.deepEqual(validateEquivalenceEntries([conditional], readSource), [])
+
+		// The object literal is on editor line 3, so report line 2, not 1.
+		const driftedObject = { ...conditional, mutator: "ObjectLiteral", line: 1 }
+		assert.match(
+			validateEquivalenceEntries([driftedObject], readSource).join("\n"),
+			/src\/example\.ts:1: expected ObjectLiteral code at line 2/,
+		)
+
+		// ConditionalExpression is a different node kind than the object literal.
+		const driftedConditional = { ...conditional, line: 2 }
+		assert.match(
+			validateEquivalenceEntries([driftedConditional], readSource).join("\n"),
+			/expected ConditionalExpression code at line 3/,
+		)
+	})
+
+	it("rejects an entry with an unknown mutator or missing file", () => {
+		const source = "const a = 1\n"
+		const unknown = { file: "src/example.ts", line: 0, mutator: "NotAMutator", replacement: "x", reason: "example" }
+		const problems = validateEquivalenceEntries([unknown], () => source)
+		assert.match(problems.join("\n"), /unknown mutator NotAMutator/)
+
+		const missing = { ...unknown, mutator: "ConditionalExpression", file: "src/missing.ts" }
+		assert.match(
+			validateEquivalenceEntries([missing], () => undefined).join("\n"),
+			/src\/missing\.ts: file not found/,
+		)
+	})
+
+	it("validates every shipped registry entry against the checked-in head", () => {
+		const equivalences = loadEquivalences(repositoryRoot)
+		assert.ok(equivalences.length > 0)
+		assert.deepEqual(
+			validateEquivalenceEntries(equivalences, (file) => {
+				const filePath = path.join(repositoryRoot, file)
+				return fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf8") : undefined
+			}),
+			[],
+		)
 	})
 
 	it("reports the equivalent column in the summary", () => {
