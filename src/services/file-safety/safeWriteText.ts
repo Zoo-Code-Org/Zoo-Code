@@ -3,6 +3,8 @@ import * as fsSync from "fs"
 import * as path from "path"
 import { execFile } from "child_process"
 
+import { resolveRealPath } from "../../utils/WorkspacePathResolver"
+
 /**
  * Options for safeWriteText atomic text publish primitive.
  */
@@ -102,10 +104,15 @@ export class PublishNotDurableError extends Error {
 }
 
 /**
- * The content is committed but the saved DACL could not be put back on it, so the file at the
- * target answers to different access rights than the one it replaced. Reported as an error rather
- * than a warning: the caller has to know that the publish changed who can read the file. Raised
- * after the commit rename, so the content is at the target and the backup copy is retained.
+ * The content is committed but a captured DACL could not be put back on it, so the file at the
+ * target answers to different access rights than the one it replaced. Raised after the commit
+ * rename, so the content is at the target and the backup copy is retained.
+ *
+ * A host that cannot restore DACLs at all (icacls /restore exits 1300 because the process lacks
+ * the backup/restore privilege) is treated as a logged host limitation instead: the content is
+ * committed and no retry can fix the capability, so failing every overwrite there would break
+ * ordinary saves without changing the outcome. Only restore failures that a retry or a caller
+ * could address are raised as this error.
  */
 export class DaclRestoreError extends Error {
 	constructor(
@@ -391,24 +398,10 @@ function _isWithinRoot(root: string, target: string): boolean {
  * lexically while the write lands wherever the parent link points.
  */
 async function _realpathNearestExisting(targetPath: string): Promise<string> {
-	const missing: string[] = []
-	let current = targetPath
-	for (;;) {
-		try {
-			const real = await fs.realpath(current)
-			return missing.length === 0 ? real : path.join(real, ...missing.reverse())
-		} catch (error: unknown) {
-			if (_errorCode(error) !== "ENOENT") {
-				throw error
-			}
-			const parent = path.dirname(current)
-			if (parent === current) {
-				return targetPath
-			}
-			missing.push(path.basename(current))
-			current = parent
-		}
-	}
+	// Same walk as WorkspacePathResolver.resolveRealPath, with case folding off: the result is
+	// compared against the authorized root and used for publish decisions, so the on-disk case
+	// must be preserved and a non-ENOENT error must fail closed (both provided by the helper).
+	return resolveRealPath(targetPath, { caseFold: false })
 }
 /**
  * Refuse a publish whose retained target escaped the caller's authorized root
@@ -525,12 +518,6 @@ export async function safeWriteText(filePath: string, content: string, options?:
 	let daclRestoreError: DaclRestoreError | null = null
 	let daclDumpPath: string | null = null // tracked for cleanup in finally
 	let daclSaved = false // restore step runs only when the save succeeded
-	// Set when restoration is disabled for this process and this write replaces an existing
-	// target. The commit is a rename, and a rename does not hand the target the descriptor of
-	// the file it replaced, so the published file answers to inherited access rights that
-	// nothing saved and nothing can put back. Reported after the commit like a failed restore:
-	// the content is committed, so this is not a failure to roll back.
-	let daclPreservationSkipped = false
 
 	const platform = options?.platform ?? process.platform
 
@@ -689,22 +676,6 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				}
 				daclDumpPath = null
 			}
-		} else if (platform === "win32") {
-			// -- Step 2b (win32): restoration is disabled for this process ----------------
-			// The memo skips the save/restore pair to save the process spawns, but the commit is
-			// still a rename over whatever sits at the target, and a rename does not hand the
-			// published file the descriptor of the file it replaced. A brand-new file takes a
-			// default descriptor and loses nothing, so only an existing target is a real loss -
-			// and that loss has to reach the caller instead of resolving quietly. One probe, no
-			// process spawn: the memo keeps its cost saving.
-			try {
-				await fs.access(targetPath)
-				daclPreservationSkipped = true
-			} catch (probeError: unknown) {
-				// Same rule as the capture probe: only ENOENT proves there is no descriptor to
-				// preserve. An unreadable target is not evidence that a plain success is safe.
-				if (_errorCode(probeError) !== "ENOENT") throw probeError
-			}
 		}
 
 		try {
@@ -775,38 +746,30 @@ export async function safeWriteText(filePath: string, content: string, options?:
 					attempt = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
 				}
 				if (!attempt.restored) {
-					if (attempt.privilegeUnavailable && !daclRestorePrivilegeUnavailable) {
-						daclRestorePrivilegeUnavailable = true
-						console.warn(
-							"safeWriteText: this host cannot restore DACLs (icacls /restore reports a missing privilege), so later writes in this process will skip saving and restoring them.",
-						)
+					// A host without the backup/restore privilege cannot do better: no retry
+					// grants a privilege mid-process, and the content is already committed. Warn
+					// once, memo the limitation, and let the publish succeed - failing every
+					// overwrite on such a host would break ordinary saves without changing the
+					// access rights. Non-privilege restore failures stay errors: those are the
+					// failures a caller or a later retry could actually address.
+					if (attempt.privilegeUnavailable) {
+						if (!daclRestorePrivilegeUnavailable) {
+							daclRestorePrivilegeUnavailable = true
+							console.warn(
+								"safeWriteText: this host cannot restore DACLs (icacls /restore reports a missing privilege); the published content keeps the access rights inherited from its directory, and later writes in this process skip saving and restoring them.",
+							)
+						}
+					} else {
+						// The content is committed, but the published file answers to a different
+						// DACL than the one that was saved, and nothing here verified an equivalent
+						// restrictive ACL on the replacement. Reported as an error rather than a
+						// warning: a publish that changed who can read the file must not look like
+						// an ordinary successful save. Thrown after the rollback handler below - the
+						// content is committed, so this is not a failure to roll back, and the
+						// backup has to survive for recovery.
+						daclRestoreError = new DaclRestoreError(targetPath, null)
 					}
-					// The content is committed, but the published file answers to a different DACL
-					// than the one that was saved, and nothing here verified an equivalent
-					// restrictive ACL on the replacement. Reported as an error rather than a
-					// warning: a publish that changed who can read the file must not look like an
-					// ordinary successful save. Thrown after the rollback handler below - the
-					// content is committed, so this is not a failure to roll back, and the backup
-					// has to survive for recovery.
-					daclRestoreError = new DaclRestoreError(targetPath, null)
 				}
-			}
-
-			// -- Step 5b (win32): restoration disabled for this process ------------------
-			// Nothing was captured, so nothing could be restored: the published file answers to
-			// the descriptor it was created with, not the one the file it replaced had. Reported
-			// as the same post-commit error as a failed restore, because from the caller's side
-			// it is the same fact - the content is committed and the access rights changed - and
-			// it keeps the promise that no caller can observe success for a publish whose DACL
-			// was not preserved. It also has to run before step 6: with no dump in play, the
-			// retained backup copy is the only artifact still carrying the original descriptor
-			// (CopyFileW hands the destination the source's security attributes).
-			if (daclPreservationSkipped && daclRestoreError === null) {
-				daclRestoreError = new DaclRestoreError(
-					targetPath,
-					null,
-					"DACL restoration is disabled on this host, so the access rights of the file it replaced were not preserved",
-				)
 			}
 
 			// -- Step 6 (backup:true): delete backup only on a fully successful publish --
