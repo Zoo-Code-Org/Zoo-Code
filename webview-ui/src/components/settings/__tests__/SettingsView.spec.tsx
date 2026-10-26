@@ -46,17 +46,18 @@ vi.mock("../ApiConfigManager", () => ({
 }))
 
 vi.mock("@vscode/webview-ui-toolkit/react", () => ({
-	VSCodeButton: ({ children, onClick, appearance, "data-testid": dataTestId }: any) =>
+	VSCodeButton: ({ children, onClick, appearance, disabled, "data-testid": dataTestId }: any) =>
 		appearance === "icon" ? (
 			<button
 				onClick={onClick}
+				disabled={disabled}
 				className="codicon codicon-close"
 				aria-label="Remove command"
 				data-testid={dataTestId}>
 				<span className="codicon codicon-close" />
 			</button>
 		) : (
-			<button onClick={onClick} data-appearance={appearance} data-testid={dataTestId}>
+			<button onClick={onClick} disabled={disabled} data-appearance={appearance} data-testid={dataTestId}>
 				{children}
 			</button>
 		),
@@ -190,8 +191,13 @@ vi.mock("@/components/ui", () => ({
 			data-testid={dataTestId}
 		/>
 	),
-	Button: ({ children, onClick, variant, className, "data-testid": dataTestId }: any) => (
-		<button onClick={onClick} data-variant={variant} className={className} data-testid={dataTestId}>
+	Button: ({ children, onClick, variant, className, disabled, "data-testid": dataTestId }: any) => (
+		<button
+			onClick={onClick}
+			disabled={disabled}
+			data-variant={variant}
+			className={className}
+			data-testid={dataTestId}>
 			{children}
 		</button>
 	),
@@ -985,24 +991,25 @@ describe("SettingsView - Experiments", () => {
 		vi.clearAllMocks()
 	})
 
-	it("persists only the experiment the user toggled, not the whole map", () => {
+	it("persists only the experiment the user toggled, not the whole map", async () => {
 		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { imageGeneration: false } })
-
-		// Make a non-experimental change first so Save is enabled and the submit handler runs.
-		activateTab("autoApprove")
-		fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-execute-toggle"))
-
 		activateTab("experimental")
-		const content = getSettingsContent()
 
-		// Toggle the chat-diff experiment through the settings control.
-		const label = within(content).getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name").closest("label")
+		const saveButton = screen.getByTestId("save-button")
+		// The experiment toggle alone must enable Save: no unrelated setting change is needed.
+		await waitFor(() => expect(saveButton).toBeDisabled())
+
+		const label = await waitFor(() => {
+			const content = getSettingsContent()
+			return within(content).getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name").closest("label")
+		})
 		expect(label).not.toBeNull()
 		const checkbox = label!.querySelector('input[type="checkbox"]')
 		expect(checkbox).not.toBeNull()
 		fireEvent.click(checkbox as HTMLInputElement)
+		await waitFor(() => expect(saveButton).toBeEnabled())
 
-		fireEvent.click(screen.getByTestId("save-button"))
+		fireEvent.click(saveButton)
 
 		// Only the toggled key is sent: the host merges the received map over the stored
 		// experiments, so sending the whole live map would freeze other defaults.
