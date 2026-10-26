@@ -10,17 +10,6 @@ import { resolveRealPath } from "../../utils/WorkspacePathResolver"
  */
 export interface SafeWriteTextOptions {
 	/**
-	 * When true, copy the target to a backup file before the commit rename. The
-	 * commit is a single atomic rename, so the target is never removed first and
-	 * nothing restores from the copy: it is deleted after a confirmed commit, and
-	 * kept on disk when the commit could not be confirmed durable or the saved
-	 * DACL could not be restored, so the previous content and its security
-	 * descriptor stay recoverable. Costs a full read+write of the old file, so
-	 * callers that do not need that recovery copy should leave this off.
-	 */
-	backup?: boolean
-
-	/**
 	 * Platform override for testing.  When omitted the real process.platform
 	 * value is used.  Set to "win32" or "linux" / "darwin" from tests so that
 	 * both branches are reachable without needing a real Windows runner.
@@ -106,7 +95,7 @@ export class PublishNotDurableError extends Error {
 /**
  * The content is committed but a captured DACL could not be put back on it, so the file at the
  * target answers to different access rights than the one it replaced. Raised after the commit
- * rename, so the content is at the target and the backup copy is retained.
+ * rename, so the content is at the target.
  *
  * A host that cannot restore DACLs at all (icacls /restore exits 1300 because the process lacks
  * the backup/restore privilege) is treated as a logged host limitation instead: the content is
@@ -333,12 +322,11 @@ const _ICACLS_PRIVILEGE_EXIT_CODE = 1300
  * 1. Write content to a temp file in a private per-write staging subdir
  *    (same volume -> atomic rename guaranteed).
  * 2. fsync the temp file, then close it.
- * 3. win32 only: if target exists save its DACL dump BEFORE backup rename.
- * 4. Optionally rename target -> backup (when backup:true).
- * 5. Atomic rename temp -> target.
- * 6. win32 only: restore DACL onto the directory AFTER commit rename.
- * 7. On success: delete backup (if any) and unlink DACL dump.
- * 8. On failure: rollback backup to target path; clean up temp + dump.
+ * 3. win32 only: if target exists save its DACL dump BEFORE the commit rename.
+ * 4. Atomic rename temp -> target.
+ * 5. win32 only: restore DACL onto the directory AFTER commit rename.
+ * 6. On success: unlink DACL dump.
+ * 7. On failure: clean up temp + dump (the target was never moved).
  */
 
 /**
@@ -507,20 +495,13 @@ export async function safeWriteText(filePath: string, content: string, options?:
 		}
 	}
 
-	let backupPath: string | null = null
-	let backupCreated = false
-	// Set as soon as the backup destination is chosen, before the copy runs: a copyFile that
-	// fails part way can still leave a partial file at that path, and it has to be cleaned up
-	// like a completed backup would be.
-	let backupAttempted = false
 	// Set when the commit landed but its durability could not be confirmed. The
 	// content is in place, so there is nothing to roll back, but the caller must
 	// not be told the publish is durable.
 	let durabilityError: unknown = null
 	// Set when the commit landed but the saved DACL could not be put back on the published file.
 	// The content is in place, so there is nothing to roll back, but the caller must not observe a
-	// success whose access rights changed, and the backup is the only artifact still carrying the
-	// original security descriptor, so it has to survive for recovery.
+	// success whose access rights changed.
 	let daclRestoreError: DaclRestoreError | null = null
 	let daclDumpPath: string | null = null // tracked for cleanup in finally
 	let daclSaved = false // restore step runs only when the save succeeded
@@ -615,7 +596,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			}
 		}
 
-		// -- Step 2 (win32): save DACL BEFORE backup rename ---------------
+		// -- Step 2 (win32): save DACL BEFORE the commit rename -----------
 		// Once a restore has proven this host cannot restore at all, saving a dump it cannot
 		// apply is three process spawns per write for nothing, so the pair is skipped. The
 		// skip is decided here, not in step 5, because the save is the expensive half.
@@ -634,7 +615,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 					// original back. icacls /save does not need the backup/restore privileges that /restore
 					// does (measured: /restore exits 1300 un-elevated), so refusing here does not break
 					// ordinary hosts - it removes the exposure instead of accepting it. The staging file,
-					// any partial backup and the dump are cleaned by the rollback below.
+					// the dump is cleaned by the rollback below.
 					daclSaved = false
 					// This throw leaves the try/finally that owns cleanup, so release the artifacts here:
 					// the staged file and the (unusable) dump must not be orphaned. Removal is retried once
@@ -685,27 +666,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 		}
 
 		try {
-			// -- Step 3 (backup:true): copy the target to a backup ----------------
-			// The target must stay at its canonical path until the single atomic rename
-			// below publishes the staged file. Renaming the target away first would leave
-			// the path missing if that publish rename failed, so the backup is a copy and
-			// there is nothing to roll back.
-			if (options?.backup) {
-				try {
-					await fs.access(targetPath)
-					backupPath = _tempName(dirPath, "safeWriteText.bak")
-					backupAttempted = true
-					await fs.copyFile(targetPath, backupPath)
-					backupCreated = true
-				} catch (err: unknown) {
-					const code =
-						typeof err === "object" && err !== null && "code" in err
-							? (err as { code?: string }).code
-							: undefined
-					if (code !== "ENOENT") throw err
-				}
-			}
-			// -- Step 4: atomic rename temp -> target ---------------------
+			// -- Step 3: atomic rename temp -> target ---------------------
 			// On Windows the rename can be rejected while another process holds the
 			// target without FILE_SHARE_DELETE. The previous fs.writeFile path tolerated
 			// that, so retry a bounded number of times before failing.
@@ -736,7 +697,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				} catch (error: unknown) {
 					// The rename committed, so the content is in place and there is nothing to
 					// roll back, but the directory entry is not confirmed durable. Record it so
-					// the call fails and the backup is kept for recovery.
+					// the call fails and the publish is reported as not durable.
 					durabilityError = error
 				}
 			}
@@ -771,38 +732,8 @@ export async function safeWriteText(filePath: string, content: string, options?:
 						// restrictive ACL on the replacement. Reported as an error rather than a
 						// warning: a publish that changed who can read the file must not look like
 						// an ordinary successful save. Thrown after the rollback handler below - the
-						// content is committed, so this is not a failure to roll back, and the
-						// backup has to survive for recovery.
+						// content is committed, so this is not a failure to roll back.
 						daclRestoreError = new DaclRestoreError(targetPath, null)
-					}
-				}
-			}
-
-			// -- Step 6 (backup:true): delete backup only on a fully successful publish --
-			// Kept when durability is unconfirmed (the rename may be lost on power loss) AND when
-			// the DACL restore failed: that backup is the only artifact still carrying the target's
-			// original security descriptor, so deleting it would destroy the recovery path.
-			// A copy that failed part way leaves a partial file at backupPath with backupCreated
-			// never set, so the condition has to cover backupAttempted too: after a successful
-			// publish nothing else would ever remove that half-written backup.
-			if (
-				(backupCreated || backupAttempted) &&
-				backupPath &&
-				durabilityError === null &&
-				daclRestoreError === null
-			) {
-				try {
-					await fs.unlink(backupPath)
-				} catch {
-					// One bounded retry: the backup can still be held open by another process right
-					// after the commit rename. If that fails too the path is surfaced instead of
-					// silently abandoned - an orphaned backup is acceptable, an invisible one is not.
-					try {
-						await fs.unlink(backupPath)
-					} catch (cleanupError: unknown) {
-						console.warn(
-							`safeWriteText: the write to ${targetPath} committed but its backup copy could not be removed at ${backupPath} (${String(cleanupError)}); the copy is left in place.`,
-						)
 					}
 				}
 			}
@@ -829,24 +760,9 @@ export async function safeWriteText(filePath: string, content: string, options?:
 		// tempPath is now the committed file; no cleanup needed.
 	} catch (originalError: unknown) {
 		// -- Rollback / cleanup on failure ----------------------------------
-		if ((backupCreated || backupAttempted) && backupPath) {
-			// Covers a copyFile that failed after creating the destination: the partial file
-			// would otherwise be orphaned next to the target.
-			// The target was never moved, so rollback is just removing the backup copy.
-			try {
-				await fs.unlink(backupPath)
-			} catch (cleanupError: unknown) {
-				// Cleanup failure is non-fatal, but an invisible orphan is worse than a visible one:
-				// the original error is still the one that gets thrown.
-				console.warn(
-					`safeWriteText: the write to ${targetPath} failed and its backup copy at ${backupPath} could not be removed (${String(cleanupError)}).`,
-				)
-			}
-		}
-
 		// Always clean up the staging temp file on failure. A single swallowed unlink is not enough:
 		// a transient EBUSY/EPERM would silently leave the temp inside the staging directory, and nothing
-		// would ever report the retained path. Bounded retry, same shape as the DACL and backup cleanup.
+		// would ever report the retained path. Bounded retry, same shape as the DACL cleanup.
 		for (let attempt = 0; attempt < 2; attempt++) {
 			try {
 				await fs.unlink(tempPath)
@@ -876,15 +792,14 @@ export async function safeWriteText(filePath: string, content: string, options?:
 	await _releaseStagingDir()
 
 	// Raised outside the rollback handler on purpose: the content is committed, so
-	// this is not a failure to roll back, and the backup must survive for recovery.
+	// this is not a failure to roll back.
 	if (durabilityError !== null) {
 		const reason = durabilityError instanceof Error ? durabilityError.message : String(durabilityError)
 		throw new PublishNotDurableError(targetPath, reason)
 	}
 
 	// Raised outside the rollback handler for the same reason as PublishNotDurableError: the
-	// content is committed, so this is not a failure to roll back, and the backup retained above
-	// is the only artifact still carrying the target's original security descriptor. A restore
+	// content is committed, so this is not a failure to roll back. A restore
 	// failure therefore reaches the caller as its own error: no caller can observe success for a
 	// publish whose DACL was not restored.
 	if (daclRestoreError !== null) {
