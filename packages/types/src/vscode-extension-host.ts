@@ -12,7 +12,7 @@ import type { CloudUserInfo, CloudOrganizationMembership, OrganizationAllowList,
 import type { SerializedCustomToolDefinition } from "./custom-tool.js"
 import type { GitCommit } from "./git.js"
 import type { McpServer } from "./mcp.js"
-import { RouterModelsMessageType, type ModelRecord, type RouterModels } from "./model.js"
+import { RouterModelsMessageType, type ModelInfo, type ModelRecord, type RouterModels } from "./model.js"
 import { LmStudioModelsMessageType } from "./providers/lm-studio.js"
 import { OllamaModelsMessageType } from "./providers/ollama.js"
 import { OpenAiModelsMessageType } from "./providers/openai.js"
@@ -48,6 +48,8 @@ export interface ExtensionMessage {
 		| typeof OllamaModelsMessageType.ollamaModels
 		| typeof LmStudioModelsMessageType.lmStudioModels
 		| typeof VsCodeLmModelsMessageType.vsCodeLmModels
+		| typeof VsCodeLmModelsMessageType.githubCopilotModels
+		| typeof VsCodeLmModelsMessageType.githubCopilotSignInResult
 		| "vsCodeLmApiAvailable"
 		| "updatePrompt"
 		| "systemPrompt"
@@ -106,11 +108,14 @@ export interface ExtensionMessage {
 		| "skills"
 		| "rules"
 		| "fileContent"
+		| "originalContent"
 		| "rooHistoryImportProgress"
 		| "themeFixtureProbeRequest"
 	text?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
+	/** For originalContent: the pre-edit file content of the requested tool message (null when unavailable) */
+	originalContentInfo?: { ts: number; messageId?: string; taskId?: string; content: string | null }
 	payload?: any // eslint-disable-line @typescript-eslint/no-explicit-any
 	checkpointWarning?: {
 		type: "WAIT_TIMEOUT" | "INIT_TIMEOUT"
@@ -143,7 +148,16 @@ export interface ExtensionMessage {
 	openAiModels?: string[]
 	ollamaModels?: ModelRecord
 	lmStudioModels?: ModelRecord
-	vsCodeLmModels?: { vendor?: string; family?: string; version?: string; id?: string }[]
+	vsCodeLmModels?: {
+		vendor?: string
+		family?: string
+		version?: string
+		id?: string
+		name?: string
+		maxInputTokens?: number
+		modelInfo?: ModelInfo
+	}[]
+	githubCopilotAccount?: string | null
 	mcpServers?: McpServer[]
 	commits?: GitCommit[]
 	listApiConfig?: ProviderSettingsEntry[]
@@ -296,6 +310,7 @@ export type ExtensionState = Pick<
 	| "terminalOutputPreviewSize"
 	| "terminalShellIntegrationTimeout"
 	| "terminalShellIntegrationDisabled"
+	| "collapseCommandOutputByDefault"
 	| "terminalCommandDelay"
 	| "terminalPowershellCounter"
 	| "terminalZshClearEolMark"
@@ -466,6 +481,7 @@ export interface WebviewMessage {
 		| "currentApiConfigName"
 		| "saveApiConfiguration"
 		| "upsertApiConfiguration"
+		| "updateProfileModel"
 		| "deleteApiConfiguration"
 		| "loadApiConfiguration"
 		| "loadApiConfigurationById"
@@ -487,6 +503,7 @@ export interface WebviewMessage {
 		| "deleteTaskWithId"
 		| "abandonSubtaskWithId"
 		| "exportTaskWithId"
+		| "renameTaskWithId"
 		| "importSettings"
 		| "exportSettings"
 		| "resetState"
@@ -497,10 +514,14 @@ export interface WebviewMessage {
 		| typeof LmStudioModelsMessageType.requestLmStudioModels
 		| "requestRooModels"
 		| typeof VsCodeLmModelsMessageType.requestVsCodeLmModels
+		| typeof VsCodeLmModelsMessageType.githubCopilotSignIn
+		| typeof VsCodeLmModelsMessageType.githubCopilotReconnect
+		| typeof VsCodeLmModelsMessageType.githubCopilotManageAccount
 		| "openImage"
 		| "saveImage"
 		| "openFile"
 		| "readFileContent"
+		| "readOriginalContent"
 		| "openMention"
 		| "cancelTask"
 		| "cancelAutoApproval"
@@ -700,6 +721,7 @@ export interface WebviewMessage {
 	terminalOperation?: "continue" | "abort"
 	messageTs?: number
 	timestamp?: number // For webviewHeartbeat
+	messageId?: string
 	restoreCheckpoint?: boolean
 	historyPreviewCollapsed?: boolean
 	filters?: { type?: string; search?: string; tags?: string[] }
@@ -862,6 +884,8 @@ export interface ClineSayTool {
 	content?: string
 	// Original file content before first edit (for merged diff display in FileChangesPanel)
 	originalContent?: string
+	// Length of the originalContent the extension left out of the webview state (request it with readOriginalContent)
+	originalContentLength?: number
 	// Unified diff statistics computed by the extension
 	diffStats?: { added: number; removed: number }
 	regex?: string

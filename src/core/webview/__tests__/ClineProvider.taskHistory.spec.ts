@@ -3,7 +3,7 @@ import { WebviewFocusTracker } from "../WebviewFocusTracker"
 
 import * as vscode from "vscode"
 import { makeCompositeDisposable } from "../../../test-utils/vscode"
-import type { HistoryItem, ExtensionMessage } from "@roo-code/types"
+import type { HistoryItem } from "@roo-code/types"
 import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -594,6 +594,100 @@ describe("ClineProvider Task History Synchronization", () => {
 		})
 	})
 
+	describe("renameTaskWithId", () => {
+		const getStored = (id: string) => provider.taskHistoryStore.get(id)
+
+		it("stores a trimmed title and broadcasts the updated item", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			provider.isViewLaunched = true
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-rename", task: "Original prompt" }))
+			mockPostMessage.mockClear()
+
+			await provider.renameTaskWithId("task-rename", "  Renamed  ")
+
+			expect(getStored("task-rename")).toMatchObject({ title: "Renamed", task: "Original prompt" })
+			const updates = findCallsByType(mockPostMessage.mock.calls, "taskHistoryItemUpdated")
+			expect(updates.at(-1)?.[0].taskHistoryItem).toMatchObject({ id: "task-rename", title: "Renamed" })
+		})
+
+		it.each([
+			["an empty string", ""],
+			["whitespace", "   "],
+			["undefined", undefined],
+		])("clears the title when given %s", async (_label, title) => {
+			// Set the starting title through the rename path: updateTaskHistory drops `title`.
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-clear", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			await provider.renameTaskWithId("task-clear", "Old title")
+			expect(getStored("task-clear")?.title).toBe("Old title")
+
+			await provider.renameTaskWithId("task-clear", title)
+
+			expect(getStored("task-clear")?.title).toBeUndefined()
+			expect(getStored("task-clear")?.task).toBe("Original prompt")
+		})
+
+		it("keeps the title when the task later saves metadata without one", async () => {
+			const item = createHistoryItem({ id: "task-keep", task: "Original prompt", status: "active" })
+			await provider.updateTaskHistory(item, { broadcast: false })
+			await provider.renameTaskWithId("task-keep", "Renamed")
+
+			// Mirrors Task.saveClineMessages(), whose taskMetadata() result never carries a title.
+			await provider.updateTaskHistory({ ...item, tokensIn: 500 }, { broadcast: false })
+
+			expect(getStored("task-keep")).toMatchObject({ title: "Renamed", tokensIn: 500 })
+		})
+
+		it("keeps a concurrent task save that is queued before the rename", async () => {
+			const item = createHistoryItem({ id: "task-race", task: "Original prompt", status: "active" })
+			await provider.updateTaskHistory(item, { broadcast: false })
+
+			// Start the save without awaiting it, so the rename runs while the save is queued.
+			const save = provider.updateTaskHistory({ ...item, tokensIn: 500 }, { broadcast: false })
+			const rename = provider.renameTaskWithId("task-race", "Renamed")
+			await Promise.all([save, rename])
+
+			expect(getStored("task-race")).toMatchObject({ title: "Renamed", tokensIn: 500 })
+		})
+
+		it("does not write a title through a full-item update", async () => {
+			await provider.updateTaskHistory(
+				createHistoryItem({ id: "task-title-owner", task: "Original prompt", title: "Stale title" }),
+				{ broadcast: false },
+			)
+
+			expect(getStored("task-title-owner")).toMatchObject({ id: "task-title-owner", task: "Original prompt" })
+			expect(getStored("task-title-owner")?.title).toBeUndefined()
+		})
+
+		it("does not revert a rename when a full-item update from an older snapshot lands", async () => {
+			const item = createHistoryItem({ id: "task-stale-write", task: "Original prompt", status: "active" })
+			await provider.updateTaskHistory(item, { broadcast: false })
+
+			// A prior rename leaves a title on the record; a caller reading the item now
+			// (e.g. onTaskCompleted, mode or profile switch) captures it in a pre-lock snapshot.
+			await provider.renameTaskWithId("task-stale-write", "Old title")
+			const staleSnapshot = { ...item, title: "Old title" }
+
+			// A queued rename completes after the snapshot was taken.
+			await provider.renameTaskWithId("task-stale-write", "Renamed")
+
+			await provider.updateTaskHistory({ ...staleSnapshot, status: "completed" }, { broadcast: false })
+
+			expect(getStored("task-stale-write")).toMatchObject({ title: "Renamed", status: "completed" })
+		})
+
+		it("does nothing for an unknown task", async () => {
+			const logSpy = vi.spyOn(provider, "log")
+
+			await provider.renameTaskWithId("missing-task", "Renamed")
+
+			expect(getStored("missing-task")).toBeUndefined()
+			expect(logSpy).toHaveBeenCalledWith("[renameTaskWithId] task missing-task not found in history")
+		})
+	})
+
 	describe("broadcastTaskHistoryUpdate", () => {
 		it("sends taskHistoryUpdated message with sorted history", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
@@ -717,11 +811,32 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(state.currentTaskId).toBe(activeTask.taskId)
 		})
 
+		it("passes the profile's tool repetition limits to the Task when resuming from history", async () => {
+			const state = await provider.getState()
+			vi.spyOn(provider, "getState").mockResolvedValue({
+				...state,
+				apiConfiguration: { ...state.apiConfiguration, consecutiveMistakeLimit: 6, toolRepetitionSoftLimit: 4 },
+			})
+
+			await provider.createTaskWithHistoryItem(createHistoryItem({ id: "resumed-task", task: "Resumed task" }), {
+				startTask: false,
+			})
+
+			expect(vi.mocked(Task)).toHaveBeenCalledWith(
+				expect.objectContaining({
+					historyItem: expect.objectContaining({ id: "resumed-task" }),
+					consecutiveMistakeLimit: 6,
+					toolRepetitionSoftLimit: 4,
+				}),
+			)
+		})
+
 		it("validates and applies the delegated child's effective profile", async () => {
 			const effectiveConfiguration = {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "allowed-child-model",
 				consecutiveMistakeLimit: 7,
+				toolRepetitionSoftLimit: 4,
 			}
 			const isProfileAllowed = vi.spyOn(ProfileValidator, "isProfileAllowed").mockReturnValue(true)
 			const parentTask = { taskId: "parent", workspacePath: "/test/workspace" } as Task
@@ -736,7 +851,9 @@ describe("ClineProvider Task History Synchronization", () => {
 			})
 
 			expect(isProfileAllowed).toHaveBeenCalledWith(effectiveConfiguration, expect.anything())
-			expect(vi.mocked(Task)).toHaveBeenCalledWith(expect.objectContaining({ consecutiveMistakeLimit: 7 }))
+			expect(vi.mocked(Task)).toHaveBeenCalledWith(
+				expect.objectContaining({ consecutiveMistakeLimit: 7, toolRepetitionSoftLimit: 4 }),
+			)
 		})
 
 		it("rejects a delegated child when its effective profile is not allowed", async () => {

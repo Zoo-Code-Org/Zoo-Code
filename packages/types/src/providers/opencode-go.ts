@@ -1,4 +1,4 @@
-import type { ModelInfo } from "../model.js"
+import type { ModelInfo, ReasoningEffortExtended } from "../model.js"
 
 // Opencode "Go" plan — OpenAI-compatible gateway.
 // https://opencode.ai/docs/go/ · base URL: https://opencode.ai/zen/go/v1
@@ -565,8 +565,8 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 	},
 
 	// --- OpenAI Responses ---
-	// Luna is curated here because the Go gateway's model catalogue does not
-	// currently provide its capability metadata. These values intentionally
+	// Luna models are curated here because the Go gateway's model catalogue does
+	// not currently provide their capability metadata. These values intentionally
 	// describe the Go Responses route, not the OpenAI-native or Codex routes.
 	"gpt-5.6-luna": {
 		maxTokens: 128_000,
@@ -574,6 +574,9 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsMaxTokens: true,
+		// Temperature is accepted only with reasoning effort "none"; see
+		// OPENCODE_GO_TEMPERATURE_REASONING_EFFORTS.
+		supportsTemperature: false,
 		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
 		reasoningEffort: "medium",
 		inputPrice: 0.2,
@@ -589,6 +592,30 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		},
 		description:
 			"GPT-5.6 Luna is OpenAI's fast reasoning model with a 1M context window. Available via the Opencode Go plan.",
+	},
+	"gpt-6-luna": {
+		maxTokens: 128_000,
+		contextWindow: 1_050_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		// Temperature is accepted only with reasoning effort "none"; see
+		// OPENCODE_GO_TEMPERATURE_REASONING_EFFORTS.
+		supportsTemperature: false,
+		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+		reasoningEffort: "medium",
+		inputPrice: 0.1,
+		outputPrice: 0.5,
+		cacheWritesPrice: 0.125,
+		cacheReadsPrice: 0.01,
+		longContextPricing: {
+			thresholdTokens: 272_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 1.5,
+			cacheWritesPriceMultiplier: 2,
+			cacheReadsPriceMultiplier: 2,
+		},
+		description: "GPT-6 Luna via the OpenCode Go Responses API.",
 	},
 	"grok-4.5": {
 		maxTokens: 500_000,
@@ -616,6 +643,7 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsMaxTokens: true,
+		supportsTemperature: true,
 		supportsReasoningEffort: ["low", "medium", "high", "xhigh"],
 		reasoningEffort: "high",
 		inputPrice: 2.0,
@@ -636,6 +664,7 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsMaxTokens: true,
+		supportsTemperature: true,
 		supportsReasoningEffort: ["minimal", "low", "medium", "high", "xhigh"],
 		reasoningEffort: "medium",
 		inputPrice: 0.1,
@@ -650,6 +679,7 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsMaxTokens: true,
+		supportsTemperature: true,
 		supportsReasoningEffort: ["minimal", "low", "medium", "high", "xhigh"],
 		reasoningEffort: "medium",
 		inputPrice: 0.1,
@@ -708,6 +738,7 @@ export const OPENCODE_GO_ANTHROPIC_FORMAT_MODELS = new Set<string>([
 export const OPENCODE_GO_RESPONSES_FORMAT_MODELS = new Set<string>([
 	// --- OpenAI ---
 	"gpt-5.6-luna",
+	"gpt-6-luna",
 	// --- xAI ---
 	"grok-4.6",
 	// --- Meta ---
@@ -733,6 +764,54 @@ export function isOpencodeGoAnthropicFormatModel(modelId: string): boolean {
  */
 export function isOpencodeGoResponsesFormatModel(modelId: string): boolean {
 	return OPENCODE_GO_RESPONSES_FORMAT_MODELS.has(modelId)
+}
+
+/**
+ * Reasoning efforts for which a Responses-format model accepts `temperature`
+ * even though its registry entry declares `supportsTemperature: false`.
+ *
+ * Live probes of the Go gateway (Zoo-Code-Org/Zoo-Code#2006) found that the
+ * GPT Luna models accept every tested temperature (0–2) with reasoning effort
+ * `"none"`. With any other effort they return HTTP 400 "unsupported
+ * parameter" for every value except `1`. Temperature `1` is the OpenAI
+ * reasoning-model default, so accepting it does not show real support: the
+ * gateway allows only the default value. Temperature is therefore omitted for
+ * every effort other than `"none"`, including a request that would send `1`
+ * (Zoo-Code-Org/Zoo-Code#2055).
+ */
+export const OPENCODE_GO_TEMPERATURE_REASONING_EFFORTS: Readonly<Record<string, readonly ReasoningEffortExtended[]>> = {
+	"gpt-5.6-luna": ["none"],
+	"gpt-6-luna": ["none"],
+}
+
+/**
+ * Returns `true` when a Responses-format Go model accepts `temperature` for
+ * the effective reasoning effort that will be sent on the wire.
+ *
+ * Support is opt-in (Zoo-Code-Org/Zoo-Code#2055): a Responses model must
+ * declare `supportsTemperature: true` in the registry, or list the effort in
+ * {@link OPENCODE_GO_TEMPERATURE_REASONING_EFFORTS}. A model without either
+ * entry, or an unknown model ID, never receives `temperature`. Timeouts and
+ * HTTP 5xx results are not evidence for or against support.
+ *
+ * @param modelId - The Go model ID.
+ * @param reasoningEffort - The effective effort sent with the request, or
+ *   `undefined` when the request omits `reasoning.effort`.
+ */
+export function opencodeGoResponsesSupportsTemperature(
+	modelId: string,
+	reasoningEffort: ReasoningEffortExtended | undefined,
+): boolean {
+	if (!isOpencodeGoResponsesFormatModel(modelId)) {
+		return false
+	}
+
+	const efforts = OPENCODE_GO_TEMPERATURE_REASONING_EFFORTS[modelId]
+	if (efforts) {
+		return reasoningEffort !== undefined && efforts.includes(reasoningEffort)
+	}
+
+	return getOpencodeGoModelInfo(modelId)?.supportsTemperature === true
 }
 
 /**

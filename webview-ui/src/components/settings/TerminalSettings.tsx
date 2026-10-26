@@ -7,7 +7,11 @@ import { buildDocLink } from "@src/utils/docLinks"
 import { useEvent, useMount } from "react-use"
 import { Terminal } from "lucide-react"
 
-import { type ExtensionMessage, type TerminalOutputPreviewSize } from "@roo-code/types"
+import {
+	type ExtensionMessage,
+	type TerminalOutputPreviewSize,
+	DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT,
+} from "@roo-code/types"
 
 import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Slider, Button } from "@/components/ui"
@@ -21,6 +25,7 @@ type TerminalSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	terminalOutputPreviewSize?: TerminalOutputPreviewSize
 	terminalShellIntegrationTimeout?: number
 	terminalShellIntegrationDisabled?: boolean
+	collapseCommandOutputByDefault?: boolean
 	terminalCommandDelay?: number
 	terminalPowershellCounter?: boolean
 	terminalZshClearEolMark?: boolean
@@ -33,6 +38,7 @@ type TerminalSettingsProps = HTMLAttributes<HTMLDivElement> & {
 		| "terminalOutputPreviewSize"
 		| "terminalShellIntegrationTimeout"
 		| "terminalShellIntegrationDisabled"
+		| "collapseCommandOutputByDefault"
 		| "terminalCommandDelay"
 		| "terminalPowershellCounter"
 		| "terminalZshClearEolMark"
@@ -51,6 +57,7 @@ export const TerminalSettings = ({
 	terminalOutputPreviewSize,
 	terminalShellIntegrationTimeout,
 	terminalShellIntegrationDisabled,
+	collapseCommandOutputByDefault,
 	terminalCommandDelay,
 	terminalPowershellCounter,
 	terminalZshClearEolMark,
@@ -150,6 +157,26 @@ export const TerminalSettings = ({
 						</SearchableSetting>
 					</div>
 				</div>
+
+				<SearchableSetting
+					settingId="terminal-collapse-command-output"
+					section="terminal"
+					label={t("settings:terminal.collapseCommandOutput.label")}>
+					<VSCodeCheckbox
+						checked={collapseCommandOutputByDefault ?? DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT}
+						onChange={(event) =>
+							setCachedStateField(
+								"collapseCommandOutputByDefault",
+								(event.target as HTMLInputElement).checked,
+							)
+						}
+						data-testid="terminal-collapse-command-output-checkbox">
+						<span className="font-medium">{t("settings:terminal.collapseCommandOutput.label")}</span>
+					</VSCodeCheckbox>
+					<div className="text-vscode-descriptionForeground text-sm mt-1">
+						{t("settings:terminal.collapseCommandOutput.description")}
+					</div>
+				</SearchableSetting>
 
 				{/* Advanced Settings */}
 				<div className="flex flex-col gap-3">

@@ -38,12 +38,6 @@ const hardcore = {
 
 // Title and branding colors
 export const titleColor = hardcore.orange // Orange for title
-export const welcomeText = hardcore.text // Standard text
-export const asciiColor = hardcore.cyan // Cyan for ASCII art
-
-// Tips section colors
-export const tipsHeader = hardcore.orange // Orange for tips headers
-export const tipsText = hardcore.subtext0 // Subtle text for tips
 
 // Header text colors (for messages)
 export const userHeader = hardcore.purple // Purple for user header
@@ -61,9 +55,6 @@ export const thinkingText = hardcore.overlay2 // Subtle gray for thinking text
 export const borderColor = hardcore.surface1 // Surface color for borders
 export const borderColorActive = hardcore.purple // Active/focused border color
 export const dimText = hardcore.overlay1 // Dim text
-export const promptColor = hardcore.overlay2 // Prompt indicator
-export const promptColorActive = hardcore.cyan // Active prompt color
-export const placeholderColor = hardcore.overlay0 // Placeholder text
 
 // Status colors
 export const successColor = hardcore.green // Green for success
