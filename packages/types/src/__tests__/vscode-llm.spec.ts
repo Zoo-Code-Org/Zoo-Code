@@ -16,15 +16,15 @@ describe("vscodeLlmModels", () => {
 		expect(vscodeLlmModels["gemini-2.5-pro"].maxInputTokens).toBe(108594)
 	})
 	it.each([
-		["claude-opus-5", "Claude Opus 5", 935793, "advertised, unverified"],
-		["claude-sonnet-5", "Claude Sonnet 5", 925449, "measured"],
-		["gpt-5.6-luna", "GPT-5.6 Luna", 199753, "measured"],
-		["gpt-5.6-sol", "GPT-5.6 Sol", 271785, "measured"],
-		["gpt-5.6-terra", "GPT-5.6 Terra", 271785, "measured"],
-		["gemini-3.6-flash", "Gemini 3.6 Flash", 935793, "advertised, unverified"],
-	] as const)("preserves PR #13 row %s (%s), limit %i (%s)", (...[family, name, limit]) => {
+		["claude-opus-5", "Claude Opus 5", 935793, 197897],
+		["claude-sonnet-5", "Claude Sonnet 5", 925449, 925449],
+		["gpt-5.6-luna", "GPT-5.6 Luna", 199753, 199753],
+		["gpt-5.6-sol", "GPT-5.6 Sol", 271785, 271785],
+		["gpt-5.6-terra", "GPT-5.6 Terra", 271785, 271785],
+		["gemini-3.6-flash", "Gemini 3.6 Flash", 935793, 197897],
+	] as const)("preserves PR #13 row %s (%s) with PR #14 ceilings", (family, name, contextWindow, maxInputTokens) => {
 		expect(vscodeLlmModels[family]).toEqual({
-			contextWindow: limit,
+			contextWindow,
 			supportsImages: true,
 			supportsPromptCache: false,
 			inputPrice: 0,
@@ -33,7 +33,7 @@ describe("vscodeLlmModels", () => {
 			version: family,
 			name,
 			supportsToolCalling: true,
-			maxInputTokens: limit,
+			maxInputTokens,
 		})
 	})
 

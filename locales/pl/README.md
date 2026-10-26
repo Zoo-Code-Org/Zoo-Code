@@ -45,11 +45,11 @@ Zoo Code rozwija fundament stworzony przez Roo Code i stale rozszerza go o:
 - **Bardziej niezawodne workflow terminala i edycji** — poprawki przedwczesnego kończenia poleceń terminala, race condition stanu zadań, zarządzania kontekstem, edycji diff i użycia narzędzi właściwych dla providerów.
 - **Większą kontrolę nad workspace** — zarządzanie regułami, ograniczenia MCP dla poszczególnych trybów, kontrolę ścieżek multi-root, opcje reasoning modeli i akcje przeglądu zmian po ukończeniu.
 
-## Nowości w v3.88.0
+## Nowości w v3.92.0
 
-- ✨ **Obsługa dostawców i modeli:** Korzystaj z Grok Build oraz ulepszonej obsługi modeli niestandardowych. Ta wersja poprawia także limity modeli Bedrock i wysyła ustawienie szczegółowości Codex.
-- 🧭 **Niezawodność zadań:** Ta wersja poprawia obsługę przerywania, kontynuowanie tur narzędzi oraz zapisywanie wiadomości zadań.
-- ⚡ **Szybsza edycja i czat:** Zapisywanie plików nie używa już domyślnie sztucznych opóźnień. Wiadomości czatu zawierają mniej danych plików, a akcje kodu trafiają do ostatnio aktywnego czatu.
+- ✨ **Szybszy wybór modeli i lepsza obsługa modeli:** Przełączaj modele w polu tworzenia wiadomości na czacie. Korzystaj z Claude Haiku 5.5 w Amazon Bedrock, uzyskaj dokładniejsze możliwości Kimi K3 w OpenRouter i używaj poprawionych limitów Gemini 4 Argon w Vercel AI Gateway.
+- 🧭 **Bardziej niezawodne przepływy pracy w terminalu, edycji, czacie i środowiskach zdalnych:** Jeśli chcesz, domyślnie zwijaj dane wyjściowe poleceń, otrzymuj wyraźniejsze informacje o błędach edycji, zachowaj widoczne wiersze rozumowania i API oraz unikaj problemów z uruchamianiem i proxy w zdalnych obszarach roboczych.
+- 🔌 **Rozszerzony marketplace MCP:** Połącz Zoo Code z AnySearch, Mailtea i Tradehand przez marketplace MCP.
 
 ## Co Zoo Code może zrobić dla CIEBIE?
 

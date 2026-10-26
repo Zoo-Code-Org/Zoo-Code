@@ -38,14 +38,18 @@ export function projectRunState(fields: RunStateFields): RunStateFields {
 	return { ...fields, didFinishAbortingStream: fields.isStreaming && fields.didFinishAbortingStream }
 }
 
-export function applyRunEvent(state: RunState, event: RunEvent, rejections: RunRejection[]): RunState {
+export function applyRunEvent(
+	state: RunState,
+	event: RunEvent,
+	rejections: RunRejection[],
+): { state: RunState; rejected: boolean } {
 	const result = nextRunState(state, event)
 	if ("ok" in result) {
-		return result.ok
+		return { state: result.ok, rejected: false }
 	}
 	rejections.push({ event, state })
 	if (rejections.length > MAX_RUN_REJECTIONS) {
 		rejections.shift()
 	}
-	return state
+	return { state, rejected: true }
 }

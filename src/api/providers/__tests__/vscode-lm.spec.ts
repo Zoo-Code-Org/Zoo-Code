@@ -62,8 +62,27 @@ vi.mock("vscode", () => {
 		LanguageModelTextPart: MockLanguageModelTextPart,
 		LanguageModelToolCallPart: MockLanguageModelToolCallPart,
 		LanguageModelToolResultPart: MockLanguageModelToolResultPart,
+		LanguageModelDataPart: class {
+			constructor(
+				public data: Uint8Array,
+				public mimeType: string,
+			) {}
+			static image(data: Uint8Array, mimeType: string) {
+				return new this(data, mimeType)
+			}
+		},
 		lm: {
 			selectChatModels: vi.fn(),
+		},
+		authentication: {
+			getSession: vi.fn(),
+		},
+		extensions: {
+			getExtension: vi.fn(),
+		},
+		commands: {
+			getCommands: vi.fn(),
+			executeCommand: vi.fn(),
 		},
 	}
 })
@@ -71,6 +90,7 @@ vi.mock("vscode", () => {
 import * as vscode from "vscode"
 import {
 	VsCodeLmHandler,
+	getVsCodeLmModels,
 	extractLeakedToolCalls,
 	trailingPartialToolMarkerLength,
 	middleOutTruncate,
@@ -87,7 +107,7 @@ import { normalizeToolSchema } from "../../../utils/json-schema"
 import { getMcpServerTools } from "../../../core/prompts/tools/native-tools/mcp_server"
 import type { McpHub } from "../../../services/mcp/McpHub"
 import { clearAllMocks } from "../../../test-utils/reset"
-import { collectStream } from "../../../test-utils/stream"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 const mockLanguageModelChat = {
 	id: "test-model",
@@ -121,6 +141,194 @@ describe("VsCodeLmHandler", () => {
 		handler.dispose()
 	})
 
+	describe("image input", () => {
+		const image: Anthropic.ImageBlockParam = {
+			type: "image",
+			source: { type: "base64", media_type: "image/png", data: "iVBORw==" },
+		}
+		const capabilityCases = [
+			{ capabilities: { supportsImageToText: true }, expected: true },
+			{ capabilities: { supportsImageToText: false, imageInput: true }, expected: false },
+			{ capabilities: { imageInput: true }, expected: true },
+			{ capabilities: { imageInput: false }, expected: false },
+			{ capabilities: {}, expected: undefined },
+			{ capabilities: undefined, expected: undefined },
+		]
+
+		it.each(capabilityCases)(
+			"uses host capabilities $capabilities for model info and listing",
+			async ({ capabilities, expected }) => {
+				await handler.initializeClient()
+				const client = { ...mockLanguageModelChat, family: vscodeLlmDefaultModelId, capabilities }
+				handler["client"] = client
+				vi.mocked(vscode.lm.selectChatModels).mockResolvedValue([client])
+
+				expect(handler.getModel().info.supportsImages).toBe(expected)
+				expect((await getVsCodeLmModels())[0].modelInfo.supportsImages).toBe(expected)
+			},
+		)
+
+		it.each(
+			(["message", "tool_result"] as const).flatMap((path) =>
+				[true, false, undefined].map((supportsImages) => ({ path, supportsImages })),
+			),
+		)(
+			"forwards image bytes in the $path path only when supported ($supportsImages)",
+			async ({ path, supportsImages }) => {
+				await handler.initializeClient()
+				const sendRequest = vi.fn<vscode.LanguageModelChat["sendRequest"]>().mockResolvedValue({
+					stream: asyncStreamFrom([new vscode.LanguageModelTextPart("done")]),
+					text: asyncStreamFrom(["done"]),
+				})
+				const countTokens = vi.fn<vscode.LanguageModelChat["countTokens"]>().mockResolvedValue(37)
+				handler["client"] = {
+					...mockLanguageModelChat,
+					...{ capabilities: { supportsImageToText: supportsImages } },
+					sendRequest,
+					countTokens,
+				}
+				const messages: Anthropic.Messages.MessageParam[] =
+					path === "message"
+						? [{ role: "user", content: [{ type: "text", text: "look" }, image] }]
+						: [
+								{
+									role: "assistant",
+									content: [{ type: "tool_use", id: "image-tool", name: "read_file", input: {} }],
+								},
+								{
+									role: "user",
+									content: [
+										{
+											type: "tool_result",
+											tool_use_id: "image-tool",
+											content: [{ type: "text", text: "look" }, image],
+										},
+									],
+								},
+							]
+				const chunks = await collectStream(handler.createMessage("system", messages))
+				const sent = sendRequest.mock.calls[0][0]
+				expect(chunks).toContainEqual({ type: "usage", inputTokens: sent.length * 37, outputTokens: 37 })
+				const counted = countTokens.mock.calls.map(([content]) => content)
+				if (supportsImages) {
+					expect(counted).toEqual(expect.arrayContaining(sent))
+				} else {
+					expect(counted.every((content) => typeof content === "string")).toBe(true)
+				}
+				const content = sent[sent.length - 1].content
+				const parts =
+					path === "tool_result" && content[0] instanceof vscode.LanguageModelToolResultPart
+						? content[0].content
+						: content
+				expect(parts[0]).toMatchObject({ value: "look" })
+				if (supportsImages) {
+					expect(parts[1]).toMatchObject({
+						mimeType: "image/png",
+						data: Buffer.from("iVBORw==", "base64"),
+					})
+				} else {
+					expect(parts[1]).toBeInstanceOf(vscode.LanguageModelTextPart)
+					expect(parts[1]).toMatchObject({ value: expect.stringContaining("not supported") })
+				}
+			},
+		)
+
+		it.each(["message", "tool_result"] as const)("counts native image bytes in %s content", async (path) => {
+			await handler.initializeClient()
+			const countTokens = vi.fn<vscode.LanguageModelChat["countTokens"]>().mockResolvedValue(321)
+			handler["client"] = {
+				...mockLanguageModelChat,
+				...{ capabilities: { imageInput: true } },
+				countTokens,
+			}
+			const content: Anthropic.Messages.ContentBlockParam[] =
+				path === "message" ? [image] : [{ type: "tool_result", tool_use_id: "image-tool", content: [image] }]
+
+			await expect(handler.countTokens(content)).resolves.toBe(321)
+			const counted = countTokens.mock.calls[0][0]
+			expect(counted).not.toEqual(expect.any(String))
+			if (typeof counted === "string") throw new Error("Expected an intact chat message")
+			const part = counted.content[0]
+			const imagePart = part instanceof vscode.LanguageModelToolResultPart ? part.content[0] : part
+			expect(imagePart).toMatchObject({ mimeType: "image/png", data: Buffer.from("iVBORw==", "base64") })
+		})
+
+		const imageCapable = { imageInput: true }
+		it.each([
+			{ capabilities: imageCapable, liveWindow: 100, curatedWindow: 200, inputTokens: 100, accepted: true },
+			{ capabilities: imageCapable, liveWindow: 100, curatedWindow: 200, inputTokens: 101, accepted: false },
+			{ capabilities: imageCapable, liveWindow: 200, curatedWindow: 100, inputTokens: 100, accepted: true },
+			{ capabilities: imageCapable, liveWindow: 200, curatedWindow: 100, inputTokens: 101, accepted: false },
+			{ capabilities: {}, liveWindow: 100, curatedWindow: 200, inputTokens: 101, accepted: true },
+			{
+				capabilities: { supportsImageToText: false },
+				liveWindow: 200,
+				curatedWindow: 100,
+				inputTokens: 101,
+				accepted: true,
+			},
+		])("checks measured input against both windows only for image models: %j", async (fixture) => {
+			await handler.initializeClient()
+			const userRole = vscode.LanguageModelChatMessage.User("").role
+			const sendRequest = vi.fn<vscode.LanguageModelChat["sendRequest"]>().mockResolvedValue({
+				stream: asyncStreamFrom([new vscode.LanguageModelTextPart("done")]),
+				text: asyncStreamFrom(["done"]),
+			})
+			handler["client"] = {
+				...mockLanguageModelChat,
+				...{ capabilities: fixture.capabilities },
+				maxInputTokens: fixture.liveWindow,
+				sendRequest,
+				// Image models count whole messages; text-only models count extracted strings.
+				countTokens: vi.fn<vscode.LanguageModelChat["countTokens"]>().mockImplementation(async (content) => {
+					if (typeof content === "string") {
+						return fixture.capabilities === imageCapable ? 0 : fixture.inputTokens
+					}
+					return content.role === userRole ? fixture.inputTokens : 0
+				}),
+			}
+			const windowSpy = vi.spyOn(handler, "getCondenseContextWindow").mockReturnValue(fixture.curatedWindow)
+			try {
+				const request = collectStream(handler.createMessage("system", [{ role: "user", content: [image] }]))
+				if (fixture.capabilities !== imageCapable) {
+					await expect(request).resolves.toContainEqual({ type: "text", text: "done" })
+					expect(sendRequest).toHaveBeenCalledTimes(1)
+				} else if (fixture.accepted) {
+					await expect(request).resolves.toContainEqual({
+						type: "usage",
+						inputTokens: fixture.inputTokens,
+						outputTokens: 0,
+					})
+					expect(sendRequest).toHaveBeenCalledTimes(1)
+				} else {
+					await expect(request).rejects.toSatisfy(checkContextWindowExceededError)
+					expect(sendRequest).not.toHaveBeenCalled()
+				}
+			} finally {
+				windowSpy.mockRestore()
+			}
+		})
+
+		it("does not advertise image input before a model has been selected", async () => {
+			await handler.initializeClient()
+			handler["client"] = null
+			expect(handler.getModel().info.supportsImages).toBeUndefined()
+		})
+
+		it("disables image support on hosts without image parts, even when the model reports support", async () => {
+			await handler.initializeClient()
+			handler["client"] = { ...mockLanguageModelChat, ...{ capabilities: { imageInput: true } } }
+			const dataPart: { image: unknown } = Reflect.get(vscode, "LanguageModelDataPart")
+			const original = dataPart.image
+			try {
+				dataPart.image = undefined
+				expect(handler.getModel().info.supportsImages).toBe(false)
+			} finally {
+				dataPart.image = original
+			}
+		})
+	})
+
 	describe("constructor", () => {
 		it("should initialize with provided options", () => {
 			expect(handler).toBeDefined()
@@ -140,6 +348,41 @@ describe("VsCodeLmHandler", () => {
 			expect(handler).toBeDefined()
 			// The constructor triggers initializeClient which calls selectChatModels
 			expect(vscode.lm.selectChatModels).toHaveBeenCalled()
+		})
+
+		describe("when the initial model lookup fails", () => {
+			let deferred: VsCodeLmHandler
+
+			beforeEach(() => {
+				vi.spyOn(console, "error").mockImplementation(() => {})
+				vi.spyOn(console, "debug").mockImplementation(() => {})
+				;(vscode.lm.selectChatModels as Mock).mockRejectedValueOnce(new Error("models not ready"))
+				deferred = new VsCodeLmHandler(defaultOptions)
+			})
+
+			afterEach(() => {
+				deferred.dispose()
+				vi.restoreAllMocks()
+			})
+
+			it("does not throw from the constructor and logs that setup is deferred", async () => {
+				expect(deferred["client"]).toBeNull()
+				await vi.waitFor(() =>
+					expect(console.debug).toHaveBeenCalledWith(
+						"Zoo Code <Language Model API>: Initial client setup failed; retrying on first use:",
+						expect.objectContaining({ message: expect.stringContaining("models not ready") }),
+					),
+				)
+				expect(deferred["client"]).toBeNull()
+			})
+
+			it("creates the client on first use once the lookup succeeds", async () => {
+				await vi.waitFor(() => expect(console.debug).toHaveBeenCalled())
+				;(vscode.lm.selectChatModels as Mock).mockResolvedValue([{ ...mockLanguageModelChat }])
+
+				await expect(deferred["getClient"]()).resolves.toMatchObject({ id: mockLanguageModelChat.id })
+				expect(deferred["client"]).not.toBeNull()
+			})
 		})
 	})
 
@@ -169,6 +412,28 @@ describe("VsCodeLmHandler", () => {
 			expect(client).toBeDefined()
 			expect(client.id).toBe("default-lm")
 			expect(client.vendor).toBe("vscode")
+		})
+
+		it("gives the placeholder client a working stream, text and token counter", async () => {
+			;(vscode.lm.selectChatModels as Mock).mockResolvedValueOnce([])
+			const client = await handler["createClient"]({})
+
+			const response = await client.sendRequest([], {}, new vscode.CancellationTokenSource().token)
+			const streamed: unknown[] = []
+			for await (const part of response.stream) streamed.push(part)
+			const text: string[] = []
+			for await (const chunk of response.text) text.push(chunk)
+
+			expect(streamed).toHaveLength(1)
+			expect(streamed[0]).toBeInstanceOf(vscode.LanguageModelTextPart)
+			expect(text.join("")).toContain("functionality is limited")
+			await expect(client.countTokens("anything")).resolves.toBe(0)
+		})
+
+		it("counts nothing for input that is neither text nor a chat message", async () => {
+			handler["client"] = mockLanguageModelChat
+			await expect(handler["internalCountTokens"]({} as never)).resolves.toBe(0)
+			expect(mockLanguageModelChat.countTokens).not.toHaveBeenCalled()
 		})
 
 		it("should throw a Zoo Code branded error when selectChatModels fails", async () => {
@@ -407,65 +672,66 @@ describe("VsCodeLmHandler", () => {
 			})
 
 			describe("offered tool name recovery", () => {
-				it.each([
-					{
-						label: "encoded surrogate",
-						rawName: "read\uD800file",
-						declaredName: "read_uD800file",
-						leakedName: "read_uD800file",
-						expectedName: "read\uD800file",
-					},
-					{
-						label: "encoded marker",
-						rawName: "get_uuid",
-						declaredName: "get_uuuid",
-						leakedName: "get_uuuid",
-						expectedName: "get_uuid",
-					},
-					{
-						label: "raw marker",
-						rawName: "get_uuid",
-						declaredName: "get_uuuid",
-						leakedName: "get_uuid",
-						expectedName: "get_uuid",
-					},
-				])("recovers $label with its original schema and split invariance", async (fixture) => {
+				it.each(
+					[
+						{
+							label: "encoded surrogate",
+							rawName: "read\uD800file",
+							declaredName: "read_uD800file",
+							leakedName: "read_uD800file",
+							expectedName: "read\uD800file",
+						},
+						{
+							label: "encoded marker",
+							rawName: "get_uuid",
+							declaredName: "get_uuuid",
+							leakedName: "get_uuuid",
+							expectedName: "get_uuid",
+						},
+						{
+							label: "raw marker",
+							rawName: "get_uuid",
+							declaredName: "get_uuuid",
+							leakedName: "get_uuid",
+							expectedName: "get_uuid",
+						},
+					].flatMap((fixture) => [false, true].map((split) => ({ ...fixture, split }))),
+				)("recovers $label with its original schema (split stream: $split)", async (fixture) => {
 					const text =
 						`<function_calls><invoke name="${fixture.leakedName}">` +
 						'<parameter name="count">7</parameter></invoke></function_calls>'
-					const split = text.indexOf(fixture.leakedName) + 5
-					for (const parts of [[text], [text.slice(0, split), text.slice(split)]]) {
-						streamTextParts(parts)
-						const chunks = await collectStream(
-							handler.createMessage("system", [{ role: "user", content: "hi" }], {
-								taskId: "test-task",
-								tools: [
-									{
-										type: "function",
-										function: {
-											name: fixture.rawName,
-											parameters: { type: "object", properties: { count: { type: "number" } } },
-										},
+					const splitAt = text.indexOf(fixture.leakedName) + 5
+					const parts = fixture.split ? [text.slice(0, splitAt), text.slice(splitAt)] : [text]
+					streamTextParts(parts)
+					const chunks = await collectStream(
+						handler.createMessage("system", [{ role: "user", content: "hi" }], {
+							taskId: "test-task",
+							tools: [
+								{
+									type: "function",
+									function: {
+										name: fixture.rawName,
+										parameters: { type: "object", properties: { count: { type: "number" } } },
 									},
-								],
-							}),
-						)
-						expect(mockLanguageModelChat.sendRequest).toHaveBeenLastCalledWith(
-							expect.any(Array),
-							expect.objectContaining({
-								tools: [expect.objectContaining({ name: fixture.declaredName })],
-							}),
-							expect.anything(),
-						)
-						expect(chunks.filter((chunk) => chunk.type !== "usage")).toEqual([
-							{
-								type: "tool_call",
-								id: expect.stringMatching(/^vscodelm-salvaged-\d+-0$/),
-								name: fixture.expectedName,
-								arguments: '{"count":7}',
-							},
-						])
-					}
+								},
+							],
+						}),
+					)
+					expect(mockLanguageModelChat.sendRequest).toHaveBeenLastCalledWith(
+						expect.any(Array),
+						expect.objectContaining({
+							tools: [expect.objectContaining({ name: fixture.declaredName })],
+						}),
+						expect.anything(),
+					)
+					expect(chunks.filter((chunk) => chunk.type !== "usage")).toEqual([
+						{
+							type: "tool_call",
+							id: expect.stringMatching(/^vscodelm-salvaged-\d+-0$/),
+							name: fixture.expectedName,
+							arguments: '{"count":7}',
+						},
+					])
 				})
 
 				it.each([false, true])(
@@ -1302,7 +1568,7 @@ describe("VsCodeLmHandler", () => {
 				// Greedy char deletion keeps the part count, so a printed repro still names its split points.
 				const shrink = async (parts: string[], frozen: ReadonlySet<number>, problem: string) => {
 					let current = parts
-					for (let progress = true; progress; ) {
+					for (let progress = true; progress;) {
 						progress = false
 						for (let partIndex = current.length - 1; partIndex >= 0; partIndex--) {
 							if (frozen.has(partIndex)) {
@@ -4095,12 +4361,8 @@ describe("context-window tool_result truncation", () => {
 			expect(middleOutTruncate(text, 200)).toBe(text)
 		})
 
-		it("stays within a limit too small to hold the truncation marker", () => {
-			const text = "A".repeat(500)
-			for (const limit of [1, 5, 50]) {
-				const result = middleOutTruncate(text, limit)
-				expect(result).toBe("A".repeat(limit))
-			}
+		it.each([1, 5, 50])("stays within a limit too small to hold the truncation marker (%s)", (limit) => {
+			expect(middleOutTruncate("A".repeat(500), limit)).toBe("A".repeat(limit))
 		})
 
 		it("does not end a marker-less truncation on a lone high surrogate", () => {
@@ -4449,5 +4711,59 @@ describe("context-window tool_result truncation", () => {
 			expect(parts[0].type).toBe("text")
 			expect(String(parts[0].text)).toContain("characters truncated")
 		})
+	})
+})
+
+describe("getVsCodeLmModels", () => {
+	const liveModel = (overrides: Record<string, unknown> = {}) => ({
+		...mockLanguageModelChat,
+		id: "listed-model",
+		vendor: "copilot",
+		family: "listed-family",
+		...overrides,
+	})
+
+	beforeEach(() => vi.clearAllMocks())
+
+	it("returns serializable model metadata with host-reported image support", async () => {
+		const model = liveModel({ capabilities: { supportsImageToText: true } })
+		vi.mocked(vscode.lm.selectChatModels).mockResolvedValue([model])
+
+		const models = await getVsCodeLmModels()
+		expect(models[0]).toMatchObject({ id: model.id, family: model.family, modelInfo: { supportsImages: true } })
+		expect(models[0]).not.toHaveProperty("sendRequest")
+		expect(models[0]).not.toHaveProperty("countTokens")
+		expect(JSON.parse(JSON.stringify(models))).toMatchObject([
+			{ id: model.id, modelInfo: { supportsImages: true } },
+		])
+	})
+
+	it("asks the host for every model, whatever the vendor", async () => {
+		vi.mocked(vscode.lm.selectChatModels).mockResolvedValue([])
+		await getVsCodeLmModels()
+		expect(vscode.lm.selectChatModels).toHaveBeenCalledWith({})
+	})
+
+	it("omits models that can never work", async () => {
+		vi.mocked(vscode.lm.selectChatModels).mockResolvedValue([
+			liveModel({ id: "claude-3.7-sonnet" }),
+			liveModel({ id: "kept" }),
+		] as never)
+
+		expect((await getVsCodeLmModels()).map((model) => model.id)).toEqual(["kept"])
+	})
+
+	it("reports a host that has no models as an empty list", async () => {
+		vi.mocked(vscode.lm.selectChatModels).mockResolvedValue(undefined as never)
+		await expect(getVsCodeLmModels()).resolves.toEqual([])
+	})
+
+	it("keeps its long-standing behaviour of answering a failed lookup with an empty list", async () => {
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+		vi.mocked(vscode.lm.selectChatModels).mockRejectedValue(new Error("host unavailable"))
+
+		await expect(getVsCodeLmModels()).resolves.toEqual([])
+		expect(logged).toHaveBeenCalledWith(expect.stringContaining("host unavailable"))
+		logged.mockRestore()
 	})
 })

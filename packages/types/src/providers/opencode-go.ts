@@ -1,4 +1,4 @@
-import type { ModelInfo } from "../model.js"
+import type { ModelInfo, ReasoningEffortExtended } from "../model.js"
 
 // Opencode "Go" plan — OpenAI-compatible gateway.
 // https://opencode.ai/docs/go/ · base URL: https://opencode.ai/zen/go/v1
@@ -574,6 +574,9 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsMaxTokens: true,
+		// Temperature is accepted only with reasoning effort "none"; see
+		// OPENCODE_GO_TEMPERATURE_REASONING_EFFORTS.
+		supportsTemperature: false,
 		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
 		reasoningEffort: "medium",
 		inputPrice: 0.2,
@@ -596,8 +599,8 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsMaxTokens: true,
-		// The OpenCode Go Responses model silently drops `temperature`, so the
-		// UI temperature control would otherwise render as a dead control.
+		// Temperature is accepted only with reasoning effort "none"; see
+		// OPENCODE_GO_TEMPERATURE_REASONING_EFFORTS.
 		supportsTemperature: false,
 		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
 		reasoningEffort: "medium",
@@ -640,6 +643,7 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsMaxTokens: true,
+		supportsTemperature: true,
 		supportsReasoningEffort: ["low", "medium", "high", "xhigh"],
 		reasoningEffort: "high",
 		inputPrice: 2.0,
@@ -660,6 +664,7 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsMaxTokens: true,
+		supportsTemperature: true,
 		supportsReasoningEffort: ["minimal", "low", "medium", "high", "xhigh"],
 		reasoningEffort: "medium",
 		inputPrice: 0.1,
@@ -674,6 +679,7 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsMaxTokens: true,
+		supportsTemperature: true,
 		supportsReasoningEffort: ["minimal", "low", "medium", "high", "xhigh"],
 		reasoningEffort: "medium",
 		inputPrice: 0.1,
@@ -758,6 +764,54 @@ export function isOpencodeGoAnthropicFormatModel(modelId: string): boolean {
  */
 export function isOpencodeGoResponsesFormatModel(modelId: string): boolean {
 	return OPENCODE_GO_RESPONSES_FORMAT_MODELS.has(modelId)
+}
+
+/**
+ * Reasoning efforts for which a Responses-format model accepts `temperature`
+ * even though its registry entry declares `supportsTemperature: false`.
+ *
+ * Live probes of the Go gateway (Zoo-Code-Org/Zoo-Code#2006) found that the
+ * GPT Luna models accept every tested temperature (0–2) with reasoning effort
+ * `"none"`. With any other effort they return HTTP 400 "unsupported
+ * parameter" for every value except `1`. Temperature `1` is the OpenAI
+ * reasoning-model default, so accepting it does not show real support: the
+ * gateway allows only the default value. Temperature is therefore omitted for
+ * every effort other than `"none"`, including a request that would send `1`
+ * (Zoo-Code-Org/Zoo-Code#2055).
+ */
+export const OPENCODE_GO_TEMPERATURE_REASONING_EFFORTS: Readonly<Record<string, readonly ReasoningEffortExtended[]>> = {
+	"gpt-5.6-luna": ["none"],
+	"gpt-6-luna": ["none"],
+}
+
+/**
+ * Returns `true` when a Responses-format Go model accepts `temperature` for
+ * the effective reasoning effort that will be sent on the wire.
+ *
+ * Support is opt-in (Zoo-Code-Org/Zoo-Code#2055): a Responses model must
+ * declare `supportsTemperature: true` in the registry, or list the effort in
+ * {@link OPENCODE_GO_TEMPERATURE_REASONING_EFFORTS}. A model without either
+ * entry, or an unknown model ID, never receives `temperature`. Timeouts and
+ * HTTP 5xx results are not evidence for or against support.
+ *
+ * @param modelId - The Go model ID.
+ * @param reasoningEffort - The effective effort sent with the request, or
+ *   `undefined` when the request omits `reasoning.effort`.
+ */
+export function opencodeGoResponsesSupportsTemperature(
+	modelId: string,
+	reasoningEffort: ReasoningEffortExtended | undefined,
+): boolean {
+	if (!isOpencodeGoResponsesFormatModel(modelId)) {
+		return false
+	}
+
+	const efforts = OPENCODE_GO_TEMPERATURE_REASONING_EFFORTS[modelId]
+	if (efforts) {
+		return reasoningEffort !== undefined && efforts.includes(reasoningEffort)
+	}
+
+	return getOpencodeGoModelInfo(modelId)?.supportsTemperature === true
 }
 
 /**
