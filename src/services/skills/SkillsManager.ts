@@ -145,7 +145,7 @@ export class SkillsManager {
 	 * roots are scanned.
 	 */
 	private async sweepStaleSkillTempFiles(): Promise<void> {
-		const tempPattern = /^\..*\.SKILL\.md\..*\.tmp$/
+		const tempPattern = /^\.SKILL\.md\..*\.tmp$/
 		const roots = (await this.getSkillsDirectories()).map((entry) => entry.dir)
 		for (const root of roots) {
 			let entries: unknown[]
@@ -735,17 +735,25 @@ export class SkillsManager {
 			`.${path.basename(filePath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
 		)
 		this.activeTempFiles.add(temporaryPath)
+		// Only a write that actually created the sidecar through exclusive creation may remove it:
+		// when wx fails because the path already exists, that file belongs to someone else.
+		let ownsTemporaryPath = false
 		try {
 			// Exclusive creation: a pre-created symlink at the generated name cannot be followed.
 			await fs.writeFile(temporaryPath, content, { encoding: "utf-8", flag: "wx" })
+			ownsTemporaryPath = true
 			// Re-validate the final target immediately before the rename: the target (or an
 			// ancestor) can change between the caller's resolution and this publish.
 			await validateTarget?.(filePath)
 			await fs.rename(temporaryPath, filePath)
 		} catch (error) {
-			// Best effort: a partial temp file must not be left behind. The original
-			// failure is the one the caller needs to see.
-			await fs.unlink(temporaryPath).catch(() => {})
+			// Best effort: a partial temp file must not be left behind, but an EEXIST failure means
+			// exclusive creation never acquired the path and the existing file belongs to someone
+			// else. Any other failure may have created a partial sidecar and is cleaned up; the
+			// original failure is the one the caller needs to see.
+			if (ownsTemporaryPath || (error as { code?: string })?.code !== "EEXIST") {
+				await fs.unlink(temporaryPath).catch(() => {})
+			}
 			throw error
 		} finally {
 			this.activeTempFiles.delete(temporaryPath)

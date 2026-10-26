@@ -2379,6 +2379,24 @@ Instructions`)
 			expect(mockRm).not.toHaveBeenCalled()
 		})
 
+		it("preserves an existing file when exclusive staging fails because the name exists", async () => {
+			mockDirectoryExists.mockResolvedValue(false)
+			mockRealpath.mockImplementation(async (p: string) => p)
+			mockReaddir.mockResolvedValue([])
+			mockFileExists.mockResolvedValue(false)
+			mockMkdir.mockResolvedValue(p(GLOBAL_ROO_DIR, "skills", "exists"))
+			const existsError = Object.assign(new Error("EEXIST: file already exists"), { code: "EEXIST" })
+			mockWriteFile.mockRejectedValueOnce(existsError)
+			mockUnlink.mockResolvedValue(undefined)
+
+			await expect(skillsManager.createSkill("exists", "global", "Description")).rejects.toBe(existsError)
+
+			// wx failed before this write owned the path: the existing file must not be unlinked.
+			expect(mockUnlink).not.toHaveBeenCalled()
+			expect(mockRename).not.toHaveBeenCalled()
+			expect(skillsManager["activeTempFiles"].size).toBe(0)
+		})
+
 		it("removes the temp file and rethrows the original error when the create rename fails", async () => {
 			mockDirectoryExists.mockResolvedValue(false)
 			mockRealpath.mockImplementation(async (p: string) => p)
@@ -4050,6 +4068,39 @@ Instructions`)
 			})
 		})
 	})
+	it("stops creating watchers once the manager is disposed", async () => {
+		const createWatcher = vi.mocked(vscode.workspace.createFileSystemWatcher)
+		const originalNodeEnv = process.env.NODE_ENV
+		process.env.NODE_ENV = "development"
+		try {
+			createWatcher.mockClear()
+			await skillsManager["setupFileWatchers"]()
+			expect(createWatcher).toHaveBeenCalled()
+
+			createWatcher.mockClear()
+			await skillsManager.dispose()
+			await skillsManager["setupFileWatchers"]()
+			expect(createWatcher).not.toHaveBeenCalled()
+		} finally {
+			process.env.NODE_ENV = originalNodeEnv
+		}
+	})
+
+	it("sweeps a staged sidecar left by a previous host", async () => {
+		const staleName = ".SKILL.md.123.abc.tmp"
+		mockReaddir.mockImplementation(async (_dir: string, options?: { withFileTypes?: boolean }) => {
+			if (options?.withFileTypes) {
+				return []
+			}
+			return [staleName]
+		})
+		mockUnlink.mockResolvedValue(undefined)
+
+		await skillsManager["sweepStaleSkillTempFiles"]()
+
+		expect(mockUnlink).toHaveBeenCalledWith(p(globalSkillsDir, staleName))
+	})
+
 	it("does not start watchers when initialization runs after disposal", async () => {
 		const createWatcher = vi.mocked(vscode.workspace.createFileSystemWatcher)
 		await skillsManager.dispose()
