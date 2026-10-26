@@ -1222,8 +1222,13 @@ describe("ClineProvider", () => {
 		})
 
 		test("stops watching and clears the view when the sidebar webview is disposed", async () => {
+			mockWebviewView.webview.onDidReceiveMessage = vi.fn(() => ({ dispose: vi.fn() }))
 			await provider.resolveWebviewView(mockWebviewView)
 			const htmlAfterResolve = mockWebviewView.webview.html
+			const epochBefore = provider["webviewRecoveryEpoch"]
+			const trackedDisposables = [...provider["resolvedViewDisposables"]]
+			expect(trackedDisposables).not.toHaveLength(0)
+			const disposeSpies = trackedDisposables.map((disposable) => vi.spyOn(disposable, "dispose"))
 
 			// Precondition: the watchdog interval was actually scheduled, so the
 			// null check below proves disposal stopped it rather than it never
@@ -1235,8 +1240,12 @@ describe("ClineProvider", () => {
 			// stale view reference so no recovery reload targets the dead view.
 			disposeCallback()
 			expect(provider["webviewWatchdogInterval"]).toBeNull()
-			// @ts-ignore - accessing private property for testing
-			expect(provider.view).toBeUndefined()
+			expect(provider["view"]).toBeUndefined()
+			expect(provider["resolvedViewDisposables"]).toHaveLength(0)
+			for (const disposeSpy of disposeSpies) {
+				expect(disposeSpy).toHaveBeenCalledOnce()
+			}
+			expect(provider["webviewRecoveryEpoch"]).toBe(epochBefore + 1)
 
 			await vi.advanceTimersByTimeAsync(180_000)
 
