@@ -72,9 +72,24 @@ describe("acquireFileLock", () => {
 			await release
 		})
 
-		await entered
-		await expect(acquireFileLock(referentPath)).rejects.toThrow()
-		releaseOperation()
-		await holding
+		let contention: Promise<() => Promise<void>> | undefined
+		let acquiredRelease: (() => Promise<void>) | undefined
+		try {
+			await entered
+			// Pin the failure kind: proper-lockfile rejects with ELOCKED, so this asserts lock
+			// contention rather than an unrelated lockfile failure.
+			contention = acquireFileLock(referentPath)
+			await expect(contention).rejects.toMatchObject({ code: "ELOCKED" })
+		} finally {
+			releaseOperation()
+			await holding
+			// If the second acquisition unexpectedly succeeded despite the assertion above, release
+			// it as well: a failing assertion must not strand the lock for the rest of the suite.
+			acquiredRelease = await contention?.then(
+				(releaseLock) => releaseLock,
+				() => undefined,
+			)
+			await acquiredRelease?.()
+		}
 	}, 15_000)
 })

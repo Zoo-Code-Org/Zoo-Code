@@ -189,13 +189,18 @@ describe("CacheManager", () => {
 			cacheManager.updateHash("test.ts", "hash")
 			const { PublishNotDurableError } = await import("../../file-safety/safeWriteText")
 			const consoleWarnSpy = vitest.spyOn(console, "warn").mockImplementation(function () {})
-			;(safeWriteJson as Mock).mockRejectedValue(new PublishNotDurableError(mockCachePath.fsPath, "EIO"))
+			const committedError = new PublishNotDurableError(mockCachePath.fsPath, "EIO")
+			;(safeWriteJson as Mock).mockRejectedValue(committedError)
 
 			await cacheManager.clearCacheFile()
 
-			// The empty object is already on disk, so the old hashes must not survive in memory.
+			// The empty object is already on disk, so the old hashes must not survive in memory,
+			// and the warning names the exact post-commit error the consumer had to tolerate.
 			expect(cacheManager.getAllHashes()).toEqual({})
-			expect(consoleWarnSpy).toHaveBeenCalled()
+			expect(consoleWarnSpy).toHaveBeenCalledWith(
+				"Cache file content committed but not fully verified:",
+				committedError,
+			)
 			consoleWarnSpy.mockRestore()
 		})
 
