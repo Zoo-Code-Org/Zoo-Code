@@ -6,8 +6,40 @@ import {
 	type RouterModels,
 	getModelId,
 	isDynamicProvider,
+	parseOpenAiExtraBody,
 	providerIdentifiers,
+	githubCopilotLanguageModel,
 } from "@roo-code/types"
+
+type OpenAiExtraBodyParseResult = ReturnType<typeof parseOpenAiExtraBody>
+type OpenAiExtraBodyTranslationKey = `settings:validation.openAiExtraBody.${
+	"invalidJson" | "objectRequired" | "reservedKeys"}`
+type OpenAiExtraBodyTranslationFunction = (key: OpenAiExtraBodyTranslationKey, options?: { keys: string }) => string
+
+export function formatOpenAiExtraBodyValidationError(
+	result: OpenAiExtraBodyParseResult,
+	t: OpenAiExtraBodyTranslationFunction,
+): string | undefined {
+	if (result.success) {
+		return undefined
+	}
+
+	if (result.reason === "reservedKeys") {
+		return t("settings:validation.openAiExtraBody.reservedKeys", {
+			keys: result.reservedKeys?.join(", ") ?? "",
+		})
+	}
+
+	return t(`settings:validation.openAiExtraBody.${result.reason}`)
+}
+
+function validateOpenAiExtraBody(apiConfiguration: ProviderSettings): string | undefined {
+	if (apiConfiguration.apiProvider !== providerIdentifiers.openai) {
+		return undefined
+	}
+
+	return formatOpenAiExtraBodyValidationError(parseOpenAiExtraBody(apiConfiguration.openAiExtraBody), i18next.t)
+}
 
 export function validateApiConfiguration(
 	apiConfiguration: ProviderSettings,
@@ -19,6 +51,12 @@ export function validateApiConfiguration(
 
 	if (keysAndIdsPresentErrorMessage) {
 		return keysAndIdsPresentErrorMessage
+	}
+
+	const extraBodyError = validateOpenAiExtraBody(apiConfiguration)
+
+	if (extraBodyError) {
+		return extraBodyError
 	}
 
 	const organizationAllowListError = validateProviderAgainstOrganizationSettings(
@@ -108,6 +146,14 @@ function validateModelsAndKeysProvided(
 				return i18next.t("settings:validation.modelSelector")
 			}
 			break
+		case providerIdentifiers.githubCopilot:
+			if (
+				apiConfiguration.vsCodeLmModelSelector?.vendor !== githubCopilotLanguageModel.vendor ||
+				(!apiConfiguration.vsCodeLmModelSelector.id && !apiConfiguration.vsCodeLmModelSelector.family)
+			) {
+				return i18next.t("settings:validation.modelSelector")
+			}
+			break
 		case providerIdentifiers.fireworks:
 			if (!apiConfiguration.fireworksApiKey) {
 				return i18next.t("settings:validation.apiKey")
@@ -140,6 +186,11 @@ function validateModelsAndKeysProvided(
 			break
 		case providerIdentifiers.kenari:
 			if (!apiConfiguration.kenariApiKey) {
+				return i18next.t("settings:validation.apiKey")
+			}
+			break
+		case providerIdentifiers.ioIntelligence:
+			if (!apiConfiguration.ioIntelligenceApiKey) {
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
@@ -309,6 +360,12 @@ export function validateApiConfigurationExcludingModelErrors(
 		if (keysAndIdsPresentErrorMessage) {
 			return keysAndIdsPresentErrorMessage
 		}
+	}
+
+	const extraBodyError = validateOpenAiExtraBody(apiConfiguration)
+
+	if (extraBodyError) {
+		return extraBodyError
 	}
 
 	const organizationAllowListError = validateProviderAgainstOrganizationSettings(

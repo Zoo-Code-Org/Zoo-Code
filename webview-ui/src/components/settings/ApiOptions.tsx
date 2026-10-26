@@ -7,6 +7,7 @@ import { ExternalLinkIcon } from "@radix-ui/react-icons"
 import {
 	type ProviderName,
 	type ProviderSettings,
+	isDynamicProvider,
 	isRetiredProvider,
 	providerIdentifiers,
 	DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
@@ -14,6 +15,8 @@ import {
 	OpenAiModelsMessageType,
 	RouterModelsMessageType,
 	VsCodeLmModelsMessageType,
+	DEFAULT_TOOL_REPETITION_SOFT_LIMIT,
+	normalizeToolRepetitionSoftLimit,
 } from "@roo-code/types"
 
 import {
@@ -24,7 +27,9 @@ import {
 	getStaticModelsForProvider,
 	shouldUseGenericModelPicker,
 	handleModelChangeSideEffects,
+	toBedrockModelId,
 } from "./utils/providerModelConfig"
+import { isTemperatureControlSupported } from "./utils/temperatureSupport"
 
 import { vscode } from "@src/utils/vscode"
 import { validateApiConfigurationExcludingModelErrors, getModelValidationError } from "@src/utils/validate"
@@ -81,6 +86,7 @@ import {
 	VercelAiGateway,
 	OpenCodeGo,
 	Kenari,
+	IOIntelligence,
 	NanoGPT,
 	ZooGateway,
 	MiniMax,
@@ -97,6 +103,7 @@ import { TodoListSettingsControl } from "./TodoListSettingsControl"
 import { TemperatureControl } from "./TemperatureControl"
 import { RateLimitSecondsControl } from "./RateLimitSecondsControl"
 import { ConsecutiveMistakeLimitControl } from "./ConsecutiveMistakeLimitControl"
+import { ToolRepetitionLimitControl } from "./ToolRepetitionLimitControl"
 import { BedrockCustomArn } from "./providers/BedrockCustomArn"
 import { buildDocLink } from "@src/utils/docLinks"
 import { BookOpenText } from "lucide-react"
@@ -180,8 +187,13 @@ const ApiOptions = ({
 		: selectedProvider
 	const isRetiredSelectedProvider =
 		typeof apiConfiguration.apiProvider === "string" && isRetiredProvider(apiConfiguration.apiProvider)
+	const routerProvider =
+		activeSelectedProvider && isDynamicProvider(activeSelectedProvider) ? activeSelectedProvider : undefined
 
-	const { data: routerModels, refetch: refetchRouterModels } = useRouterModels()
+	const { data: routerModels, refetch: refetchRouterModels } = useRouterModels({
+		enabled: !!routerProvider,
+		provider: routerProvider,
+	})
 	useZooGatewayRouterModelsSync()
 
 	const { data: openRouterModelProviders } = useOpenRouterModelProviders(
@@ -236,18 +248,31 @@ const ApiOptions = ({
 				})
 			} else if (selectedProvider === providerIdentifiers.lmstudio) {
 				requestLmStudioModels(apiConfiguration?.lmStudioBaseUrl)
-			} else if (selectedProvider === providerIdentifiers.vscodeLm) {
-				vscode.postMessage({ type: VsCodeLmModelsMessageType.requestVsCodeLmModels })
+			} else if (
+				selectedProvider === providerIdentifiers.vscodeLm ||
+				selectedProvider === providerIdentifiers.githubCopilot
+			) {
+				vscode.postMessage({
+					type: VsCodeLmModelsMessageType.requestVsCodeLmModels,
+					// Only Copilot needs scoping; the legacy provider keeps its original unscoped request.
+					...(selectedProvider === providerIdentifiers.githubCopilot && {
+						apiConfiguration: { apiProvider: selectedProvider },
+					}),
+				})
 			} else if (selectedProvider === providerIdentifiers.litellm) {
 				vscode.postMessage({
 					type: RouterModelsMessageType.requestRouterModels,
 					values: {
+						provider: providerIdentifiers.litellm,
 						litellmApiKey: apiConfiguration?.litellmApiKey,
 						litellmBaseUrl: apiConfiguration?.litellmBaseUrl,
 					},
 				})
 			} else if (selectedProvider === providerIdentifiers.poe) {
-				vscode.postMessage({ type: RouterModelsMessageType.requestRouterModels })
+				vscode.postMessage({
+					type: RouterModelsMessageType.requestRouterModels,
+					values: { provider: providerIdentifiers.poe },
+				})
 			}
 		},
 		250,
@@ -610,8 +635,10 @@ const ApiOptions = ({
 						<Mimo apiConfiguration={apiConfiguration} setApiConfigurationField={setApiConfigurationField} />
 					)}
 
-					{selectedProvider === providerIdentifiers.vscodeLm && (
+					{(selectedProvider === providerIdentifiers.vscodeLm ||
+						selectedProvider === providerIdentifiers.githubCopilot) && (
 						<VSCodeLM
+							key={selectedProvider}
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 						/>
@@ -673,6 +700,17 @@ const ApiOptions = ({
 
 					{selectedProvider === providerIdentifiers.kenari && (
 						<Kenari
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							routerModels={routerModels}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
+							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
+					{selectedProvider === providerIdentifiers.ioIntelligence && (
+						<IOIntelligence
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 							routerModels={routerModels}
@@ -746,6 +784,11 @@ const ApiOptions = ({
 								organizationAllowList={organizationAllowList}
 								errorMessage={modelValidationError}
 								simplifySettings={fromWelcomeView}
+								valueTransform={
+									activeSelectedProvider === providerIdentifiers.bedrock
+										? toBedrockModelId
+										: undefined
+								}
 								onModelChange={(modelId) =>
 									handleModelChangeSideEffects(
 										activeSelectedProvider,
@@ -794,7 +837,12 @@ const ApiOptions = ({
 									todoListEnabled={apiConfiguration.todoListEnabled}
 									onChange={(field, value) => setApiConfigurationField(field, value)}
 								/>
-								{selectedModelInfo?.supportsTemperature !== false && (
+								{isTemperatureControlSupported({
+									provider: activeSelectedProvider,
+									modelId: selectedModelId,
+									modelInfo: selectedModelInfo,
+									apiConfiguration,
+								}) && (
 									<TemperatureControl
 										value={apiConfiguration.modelTemperature}
 										onChange={handleInputChange("modelTemperature", noTransform)}
@@ -812,7 +860,37 @@ const ApiOptions = ({
 											? apiConfiguration.consecutiveMistakeLimit
 											: DEFAULT_CONSECUTIVE_MISTAKE_LIMIT
 									}
-									onChange={(value) => setApiConfigurationField("consecutiveMistakeLimit", value)}
+									onChange={(value) => {
+										setApiConfigurationField("consecutiveMistakeLimit", value)
+										// Re-clamp the soft limit so it never ends up at or above the new
+										// hard limit, which would make the soft-block path unreachable.
+										const currentSoft =
+											apiConfiguration.toolRepetitionSoftLimit !== undefined
+												? apiConfiguration.toolRepetitionSoftLimit
+												: DEFAULT_TOOL_REPETITION_SOFT_LIMIT
+										const clampedSoft = normalizeToolRepetitionSoftLimit(currentSoft, value)
+										if (clampedSoft !== currentSoft) {
+											setApiConfigurationField("toolRepetitionSoftLimit", clampedSoft)
+										}
+									}}
+								/>
+								<ToolRepetitionLimitControl
+									softValue={
+										apiConfiguration.toolRepetitionSoftLimit !== undefined
+											? apiConfiguration.toolRepetitionSoftLimit
+											: DEFAULT_TOOL_REPETITION_SOFT_LIMIT
+									}
+									onSoftChange={(value) =>
+										setApiConfigurationField(
+											"toolRepetitionSoftLimit",
+											normalizeToolRepetitionSoftLimit(
+												value,
+												apiConfiguration.consecutiveMistakeLimit !== undefined
+													? apiConfiguration.consecutiveMistakeLimit
+													: DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
+											),
+										)
+									}
 								/>
 								{selectedProvider === providerIdentifiers.poe && (
 									<VSCodeTextField

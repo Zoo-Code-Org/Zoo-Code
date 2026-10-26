@@ -1,9 +1,10 @@
 import { expect, test } from "../../../../../playwright/coverage-fixture"
 import { mountedStory } from "../../../../../playwright/mounted-story"
+import { applyVisualTheme, visualThemes } from "../../../../../playwright/themes"
 
 test("renders Azure OpenAI endpoint and deployment guidance in the VS Code dark theme", async ({ mount, page }) => {
-	// The full provider bundle leaves a bare Zod reference after gallery tree-shaking.
-	await page.evaluate(() => Object.assign(globalThis, { z: undefined }))
+	// The full provider bundle leaves bare Zod references after gallery tree-shaking.
+	await page.evaluate(() => Object.assign(globalThis, { z: undefined, z$1: undefined }))
 	const component = mountedStory(await mount("openai-compatible-azure"))
 
 	await component.evaluate((element) => {
@@ -30,3 +31,20 @@ test("renders Azure OpenAI endpoint and deployment guidance in the VS Code dark 
 
 	await expect(component).toHaveScreenshot("openai-compatible-azure-guidance-dark.png")
 })
+
+for (const theme of visualThemes) {
+	test(`renders a populated Extra Body editor in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
+		await page.evaluate(() => Object.assign(globalThis, { z: undefined, z$1: undefined }))
+		const component = mountedStory(await mount("openai-compatible-extra-body"))
+		await applyVisualTheme(page, theme)
+
+		await expect.poll(() => component.getByTestId("openai-extra-body-input").isVisible()).toBe(true)
+
+		await component.evaluate(async () => {
+			await document.fonts.ready
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+		})
+
+		await expect(component).toHaveScreenshot(`openai-compatible-extra-body-${theme.name}.png`)
+	})
+}

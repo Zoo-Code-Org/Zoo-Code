@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Sélectionner le mode d'interaction",
 	"selectApiConfig": "Sélectionner la configuration de l'API",
+	"selectModel": "Sélectionner le modèle",
+	"modelSelector": {
+		"title": "Modèles",
+		"settings": "Paramètres du modèle",
+		"description": "Choisissez le modèle utilisé pour cette configuration d'API.",
+		"searchPlaceholder": "Rechercher des modèles...",
+		"unsupportedTooltip": "Le modèle de ce fournisseur se configure dans les Paramètres",
+		"loading": "Chargement des modèles..."
+	},
 	"lockApiConfigAcrossModes": "Verrouiller la configuration API pour tous les modes dans cet espace de travail",
 	"unlockApiConfigAcrossModes": "La configuration API est verrouillée pour tous les modes dans cet espace de travail (cliquer pour déverrouiller)",
 	"enhancePrompt": "Améliorer la requête avec un contexte supplémentaire",
@@ -343,10 +352,10 @@
 		"title": "Zoo Code {{version}} est disponible",
 		"support": "Soutiens Zoo Code en nous donnant une étoile sur <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Nouveautés :",
-			"highlight1": "🤖 Essaie GLM-5.3-Flash et Gemini 3.7 Flash à 50 % de réduction pendant 2 semaines, et MiniMax M3 totalement GRATUIT pour les utilisateurs avec un solde sur le nouveau Zoo Gateway : <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "Nouveau modèle — GLM-5.3-Flash est désormais disponible via Z AI.",
-			"highlight3": "Correctifs de fiabilité — approbations de sous-tâches restaurées, sortie d'outils vide de Vertex Gemini 3.7, échecs de démarrage du terminal, erreurs du service en arrière-plan et la lisibilité des thèmes d'IDE."
+			"heading": "Nouveautés de Zoo Code v3.92.0",
+			"highlight1": "✨ Choix de modèle plus rapide et meilleure prise en charge des modèles : Change de modèle depuis la zone de saisie du chat. Utilise Claude Haiku 5.5 sur Amazon Bedrock, bénéficie de capacités Kimi K3 plus précises sur OpenRouter et profite des limites corrigées de Gemini 4 Argon sur Vercel AI Gateway.",
+			"highlight2": "🧭 Workflows de terminal, d'édition, de chat et à distance plus fiables : Choisis de réduire la sortie des commandes par défaut, obtiens des erreurs d'édition plus claires, garde les lignes de raisonnement et d'API visibles et évite les problèmes de démarrage et de proxy dans les espaces de travail distants.",
+			"highlight3": "🔌 Marketplace MCP enrichi : Connecte Zoo Code à AnySearch, Mailtea et Tradehand via le marketplace MCP."
 		},
 		"cloudAgents": {
 			"heading": "Nouveautés dans le Cloud :",
@@ -487,6 +496,10 @@
 		"serversPart_other": "{{count}} serveurs MCP",
 		"messageTemplate": "Tu as {{tools}} activés via {{servers}}. Un nombre aussi élevé peut confondre le modèle et entraîner des erreurs. Essaie de le maintenir en dessous de {{threshold}}.",
 		"openMcpSettings": "Ouvrir les paramètres MCP"
+	},
+	"ignoredDisabledTools": {
+		"title": "Outil désactivé ignoré",
+		"messageTemplate": "Les outils suivants ne peuvent pas être désactivés ; leurs entrées disabledTools ont été ignorées : {{tools}}."
 	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"

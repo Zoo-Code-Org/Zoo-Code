@@ -60,6 +60,10 @@ import {
 	bedrockModels,
 	SERVICE_TIER_KEY,
 	ApiProviderError,
+	BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL,
+	BEDROCK_DEFAULT_CONTEXT,
+	BEDROCK_MAX_TOKENS,
+	type ProviderSettings,
 } from "@roo-code/types"
 
 import type { Anthropic } from "@anthropic-ai/sdk"
@@ -68,7 +72,11 @@ import { NodeHttpHandler } from "@smithy/node-http-handler"
 import { HttpProxyAgent } from "http-proxy-agent"
 import { HttpsProxyAgent } from "https-proxy-agent"
 
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import type { ApiStreamChunk } from "../../transform/stream"
+import { OutputTokenLimitError } from "../utils/output-token-limit-error"
 
 // Get access to the mocked functions
 const mockConverseStreamCommand = vi.mocked(ConverseStreamCommand)
@@ -92,6 +100,87 @@ describe("AwsBedrockHandler", () => {
 			awsRegion: "us-east-1",
 		})
 	})
+
+	it.each(["max_tokens", "end_turn", "tool_use", "stop_sequence"])(
+		"reports truncation only for %s, after preserving usage",
+		async (stopReason) => {
+			handler["client"].send = vi.fn().mockResolvedValue({
+				stream: asyncStreamFrom([
+					{ contentBlockDelta: { delta: { reasoningContent: { text: "Still thinking" } } } },
+					{ messageStop: { stopReason } },
+					{ metadata: { usage: { inputTokens: 37, outputTokens: 16384 } } },
+				]),
+			})
+			const chunks: ApiStreamChunk[] = []
+			const consume = async () => {
+				for await (const chunk of handler.createMessage("system", [{ role: "user", content: "hello" }])) {
+					chunks.push(chunk)
+				}
+			}
+			if (stopReason === "max_tokens") {
+				const error = await consume().then(
+					() => undefined,
+					(e: unknown) => e,
+				)
+				expect(error).toBeInstanceOf(OutputTokenLimitError)
+				expect((error as Error).message).toContain(
+					"Output token limit reached. Consider increasing Max Output Tokens",
+				)
+			} else {
+				await expect(consume()).resolves.toBeUndefined()
+			}
+			expect(chunks).toEqual(
+				expect.arrayContaining([
+					{ type: "reasoning", text: "Still thinking" },
+					expect.objectContaining({ type: "usage", inputTokens: 37, outputTokens: 16384 }),
+				]),
+			)
+		},
+	)
+
+	it.each(
+		(
+			[
+				["anthropic.claude-sonnet-4-5-20250929-v1:0", 64_000],
+				["anthropic.claude-sonnet-4-6", 64_000],
+				["anthropic.claude-sonnet-5", 128_000],
+				["anthropic.claude-opus-4-7", 128_000],
+				["anthropic.claude-opus-4-8", 128_000],
+				["anthropic.claude-opus-5", 128_000],
+				["anthropic.claude-opus-5-5", 128_000],
+				["anthropic.claude-haiku-5-5", 128_000],
+			] as const
+		).flatMap(([apiModelId, ceiling]) =>
+			[true, false].flatMap((enableReasoningEffort) =>
+				[undefined, ceiling].map((modelMaxTokens) => ({
+					apiModelId,
+					ceiling,
+					enableReasoningEffort,
+					modelMaxTokens,
+				})),
+			),
+		),
+	)(
+		"exposes $apiModelId output ceiling without raising request defaults (reasoning effort: $enableReasoningEffort, modelMaxTokens: $modelMaxTokens)",
+		async ({ apiModelId, ceiling, enableReasoningEffort, modelMaxTokens }) => {
+			const provider = new AwsBedrockHandler({ apiModelId, enableReasoningEffort, modelMaxTokens })
+			const modelInfo = provider.getModel().info
+			expect(modelInfo.maxTokens).toBe(ceiling)
+			provider["client"].send = vi.fn().mockResolvedValue({ stream: asyncStreamFrom([]) })
+			await collectStream(provider.createMessage("system", [{ role: "user", content: "hello" }]))
+			const expected =
+				modelMaxTokens && (enableReasoningEffort || modelInfo.supportsMaxTokens)
+					? ceiling
+					: enableReasoningEffort
+						? 16_384
+						: 8192
+			expect(mockConverseStreamCommand).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					inferenceConfig: expect.objectContaining({ maxTokens: expected }),
+				}),
+			)
+		},
+	)
 
 	describe("getModel", () => {
 		it("should return the correct model info for a standard model", () => {
@@ -828,6 +917,40 @@ describe("AwsBedrockHandler", () => {
 			expect(model.maxTokens).toBe(8192)
 		})
 
+		it("should return Claude Fable 5.1 model info", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-fable-5-1",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("anthropic.claude-fable-5-1")
+			expect(model.info.maxTokens).toBe(128_000)
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.cacheReadsPrice).toBe(0.25)
+			expect(model.info.minTokensPerCachePoint).toBe(512)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+			expect(model.maxTokens).toBe(8192)
+		})
+
+		it("should apply global inference prefix for Claude Fable 5.1 when awsUseGlobalInference is true", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-fable-5-1",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+				awsUseGlobalInference: true,
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("global.anthropic.claude-fable-5-1")
+		})
+
 		it("should apply global inference prefix for Claude Fable 5 when awsUseGlobalInference is true", () => {
 			const handler = new AwsBedrockHandler({
 				apiModelId: "anthropic.claude-fable-5",
@@ -901,6 +1024,107 @@ describe("AwsBedrockHandler", () => {
 
 			const model = handler.getModel()
 			expect(model.id).toBe("global.anthropic.claude-opus-5")
+		})
+
+		it("should return Claude Opus 5.5 model info", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-5-5",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("anthropic.claude-opus-5-5")
+			expect(model.info.maxTokens).toBe(128_000)
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.inputPrice).toBe(4.0)
+			expect(model.info.outputPrice).toBe(20.0)
+			expect(model.info.minTokensPerCachePoint).toBe(512)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+			expect(model.maxTokens).toBe(8192)
+		})
+
+		it("should apply global inference prefix for Claude Opus 5.5 when awsUseGlobalInference is true", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-5-5",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+				awsUseGlobalInference: true,
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("global.anthropic.claude-opus-5-5")
+		})
+
+		it("should return Claude Haiku 5.5 model info", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-haiku-5-5",
+				awsAccessKey: "",
+				awsSecretKey: "",
+				awsRegion: "us-east-1",
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("anthropic.claude-haiku-5-5")
+			expect(model.info.maxTokens).toBe(128_000)
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.inputPrice).toBe(0.1)
+			expect(model.info.outputPrice).toBe(0.5)
+			expect(model.info.cacheWritesPrice).toBe(0.125)
+			expect(model.info.cacheReadsPrice).toBe(0.01)
+			expect(model.info.minTokensPerCachePoint).toBe(512)
+			expect(model.info.maxCachePoints).toBe(4)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+			expect(model.maxTokens).toBe(8192)
+		})
+
+		it.each([
+			{
+				label: "regional (us.)",
+				option: { awsUseCrossRegionInference: true },
+				expectedId: "us.anthropic.claude-haiku-5-5",
+			},
+			{
+				label: "global",
+				option: { awsUseGlobalInference: true },
+				expectedId: "global.anthropic.claude-haiku-5-5",
+			},
+		])("should apply the $label inference profile prefix for Claude Haiku 5.5", ({ option, expectedId }) => {
+			// The user-verified invocation path: regional and global prefixes
+			// must keep the known catalog entry's prompt-cache capability.
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-haiku-5-5",
+				awsAccessKey: "",
+				awsSecretKey: "",
+				awsRegion: "us-east-1",
+				...option,
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe(expectedId)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.minTokensPerCachePoint).toBe(512)
+		})
+
+		it("should resolve a stored us.-prefixed Claude Haiku 5.5 id to catalog info", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "us.anthropic.claude-haiku-5-5",
+				awsAccessKey: "",
+				awsSecretKey: "",
+				awsRegion: "us-east-1",
+			})
+
+			const model = handler.getModel()
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.inputPrice).toBe(0.1)
 		})
 	})
 
@@ -1361,12 +1585,8 @@ describe("AwsBedrockHandler", () => {
 	})
 
 	describe("error telemetry", () => {
-		let mockSend: ReturnType<typeof vi.fn>
-
 		beforeEach(() => {
 			mockCaptureException.mockClear()
-			// Get access to the mock send function from the mocked client
-			mockSend = vi.mocked(BedrockRuntimeClient).mock.results[0]?.value?.send
 		})
 
 		it("should capture telemetry on createMessage error", async () => {
@@ -1664,24 +1884,83 @@ describe("AwsBedrockHandler", () => {
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
 
-		it("should omit thinking and temperature for Claude Opus 4.8 when reasoning is disabled", async () => {
-			const opus48Handler = new AwsBedrockHandler({
-				apiModelId: "anthropic.claude-opus-4-8",
+		it("should send adaptive thinking and omit temperature for Claude Haiku 5.5 when reasoning is enabled", async () => {
+			// Haiku 5.5 shares the Sonnet 5 / Opus 5 adaptive-thinking contract:
+			// budget_tokens causes a 400, so thinking.type must be "adaptive".
+			// effort and display are handler-internal defaults, not part of this
+			// scenario, so only the thinking type is pinned here.
+			const haiku55Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-haiku-5-5",
 				awsAccessKey: "test-access-key",
 				awsSecretKey: "test-secret-key",
 				awsRegion: "us-east-1",
-				enableReasoningEffort: false,
+				enableReasoningEffort: true,
 			})
 
-			const generator = opus48Handler.createMessage("System prompt", messages)
+			const generator = haiku55Handler.createMessage("System prompt", messages)
 			await generator.next()
 
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
 
-			// Without reasoning enabled, no adaptive thinking payload is sent.
-			expect(commandArg.additionalModelRequestFields?.thinking).toBeUndefined()
-			// Temperature is still omitted for 4.8 because the API rejects sampling params.
+			expect(commandArg.additionalModelRequestFields).toEqual(
+				expect.objectContaining({
+					thinking: expect.objectContaining({ type: "adaptive" }),
+				}),
+			)
+			// Haiku 5.5 rejects sampling parameters: temperature must be omitted.
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("should omit thinking and temperature for Claude Opus 4.8 when reasoning is disabled", async () => {
+			const provider = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-4-8",
+				enableReasoningEffort: false,
+			})
+			await collectStream(provider.createMessage("System prompt", messages))
+
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+			expect(commandArg.additionalModelRequestFields).not.toHaveProperty("thinking")
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it.each([
+			"anthropic.claude-sonnet-5",
+			"anthropic.claude-opus-5",
+			"us.anthropic.claude-opus-5",
+			"anthropic.claude-haiku-5-5",
+			"us.anthropic.claude-haiku-5-5",
+		])("explicitly disables thinking for %s when reasoning is disabled", async (apiModelId) => {
+			const provider = new AwsBedrockHandler({
+				apiModelId,
+				enableReasoningEffort: false,
+				modelMaxTokens: 32_000,
+			})
+			await collectStream(provider.createMessage("System prompt", messages))
+
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+			expect(commandArg.additionalModelRequestFields).toEqual(
+				expect.objectContaining({ thinking: { type: "disabled" } }),
+			)
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it.each([
+			"anthropic.claude-fable-5",
+			"anthropic.claude-fable-5-1",
+			"anthropic.claude-opus-5-5",
+			"global.anthropic.claude-opus-5-5",
+		])("omits thinking for adaptive-only %s when reasoning is disabled", async (apiModelId) => {
+			// These models reject thinking.type "disabled" with a 400.
+			const provider = new AwsBedrockHandler({
+				apiModelId,
+				enableReasoningEffort: false,
+				modelMaxTokens: 32_000,
+			})
+			await collectStream(provider.createMessage("System prompt", messages))
+
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+			expect(commandArg.additionalModelRequestFields ?? {}).not.toHaveProperty("thinking")
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
 
@@ -1758,6 +2037,28 @@ describe("AwsBedrockHandler", () => {
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
 
+		it("completePrompt should omit temperature for Claude Haiku 5.5 (non-stream path)", async () => {
+			// Regression guard for the non-stream path: completePrompt must guard
+			// temperature the same way createMessage does, otherwise adaptive-thinking
+			// models like Haiku 5.5 return a 400 from Bedrock.
+			const mockConverseCommand = vi.mocked(ConverseCommand)
+
+			const haiku55Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-haiku-5-5",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			await haiku55Handler.completePrompt("Test prompt")
+
+			expect(mockConverseCommand).toHaveBeenCalled()
+			const commandArg = mockConverseCommand.mock.calls[0][0]
+
+			// Haiku 5.5 must NOT receive temperature in the non-stream inferenceConfig.
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
 		it("completePrompt should still send temperature for older Claude Opus 4.6 (non-stream path)", async () => {
 			// 4.6 and earlier still accept sampling parameters, so completePrompt must
 			// continue to send temperature for them.
@@ -1779,6 +2080,173 @@ describe("AwsBedrockHandler", () => {
 			expect(commandArg.inferenceConfig?.temperature).toBeDefined()
 		})
 
+		describe("custom ARN base model", () => {
+			const appProfileArn = "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abcd1234efgh"
+			const createCustomArnHandler = (options: Partial<ProviderSettings> = {}) =>
+				new AwsBedrockHandler({
+					apiModelId: "custom-arn",
+					awsCustomArn: appProfileArn,
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-west-2",
+					...options,
+				})
+			const sendFirstRequest = async (handler: AwsBedrockHandler) => {
+				await handler.createMessage("System prompt", messages).next()
+				return mockConverseStreamCommand.mock.calls[0][0]
+			}
+
+			it("uses Opus 5.5 capabilities: native 1M context, adaptive thinking, no temperature", async () => {
+				const handler = createCustomArnHandler({
+					awsCustomArnBaseModelId: "anthropic.claude-opus-5-5",
+					enableReasoningEffort: true,
+				})
+
+				expect(handler.getModel().info.contextWindow).toBe(1_000_000)
+				expect(handler.getModel().info.maxTokens).toBe(bedrockModels["anthropic.claude-opus-5-5"].maxTokens)
+
+				const input = await sendFirstRequest(handler)
+				expect(input).toMatchObject({
+					modelId: appProfileArn,
+					additionalModelRequestFields: {
+						thinking: { type: "adaptive", display: "summarized" },
+						output_config: { effort: "xhigh" },
+					},
+				})
+				expect(input.additionalModelRequestFields).not.toMatchObject({
+					anthropic_beta: expect.arrayContaining(["context-1m-2025-08-07"]),
+				})
+				expect(input.inferenceConfig?.temperature).toBeUndefined()
+			})
+
+			it("sends the 1M context beta for an Opus 4.8 base model when enabled", async () => {
+				const handler = createCustomArnHandler({
+					awsCustomArnBaseModelId: "anthropic.claude-opus-4-8",
+					awsBedrock1MContext: true,
+				})
+
+				expect(handler.getModel().info.contextWindow).toBe(1_000_000)
+				const input = await sendFirstRequest(handler)
+				expect(input).toMatchObject({
+					modelId: appProfileArn,
+					additionalModelRequestFields: {
+						anthropic_beta: expect.arrayContaining(["context-1m-2025-08-07"]),
+					},
+				})
+			})
+
+			it("keeps budget thinking and temperature for a Sonnet 4.5 base model", async () => {
+				const input = await sendFirstRequest(
+					createCustomArnHandler({
+						awsCustomArnBaseModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0",
+						enableReasoningEffort: true,
+					}),
+				)
+
+				expect(input).toMatchObject({ additionalModelRequestFields: { thinking: { type: "enabled" } } })
+				expect(input.inferenceConfig?.temperature).toBeDefined()
+			})
+
+			it("sends no Anthropic fields for a non-Anthropic base model", async () => {
+				const handler = createCustomArnHandler({ awsCustomArnBaseModelId: "meta.llama3-3-70b-instruct-v1:0" })
+
+				const llama = bedrockModels["meta.llama3-3-70b-instruct-v1:0"]
+				expect(handler.getModel().info).toMatchObject({
+					contextWindow: llama.contextWindow,
+					maxTokens: llama.maxTokens,
+					inputPrice: llama.inputPrice,
+				})
+				const input = await sendFirstRequest(handler)
+				expect(input.modelId).toBe(appProfileArn)
+				expect(input.additionalModelRequestFields).toBeUndefined()
+				expect(input.inferenceConfig?.temperature).toBeDefined()
+			})
+
+			it("uses the generic fallback with user limits when the model is not listed", () => {
+				expect(createCustomArnHandler().getModel().info).toMatchObject({
+					contextWindow: BEDROCK_DEFAULT_CONTEXT,
+					maxTokens: BEDROCK_MAX_TOKENS,
+				})
+				expect(
+					createCustomArnHandler({ awsModelContextWindow: 32_000, modelMaxTokens: 2048 }).getModel().info,
+				).toMatchObject({ contextWindow: 32_000, maxTokens: 2048 })
+			})
+
+			it("applies capabilities of a model named in an inference profile ARN", async () => {
+				const input = await sendFirstRequest(
+					createCustomArnHandler({
+						awsCustomArn:
+							"arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-opus-4-8",
+						awsRegion: "us-east-1",
+						awsBedrock1MContext: true,
+					}),
+				)
+
+				expect(input).toMatchObject({
+					additionalModelRequestFields: { anthropic_beta: expect.arrayContaining(["context-1m-2025-08-07"]) },
+				})
+				expect(input.inferenceConfig?.temperature).toBeUndefined()
+			})
+
+			it("completePrompt omits temperature for an adaptive base model (non-stream path)", async () => {
+				const mockConverseCommand = vi.mocked(ConverseCommand)
+				mockConverseCommand.mockClear()
+
+				await createCustomArnHandler({ awsCustomArnBaseModelId: "anthropic.claude-opus-5-5" }).completePrompt(
+					"Test prompt",
+				)
+
+				const input = mockConverseCommand.mock.calls[0][0]
+				expect(input.modelId).toBe(appProfileArn)
+				expect(input.inferenceConfig?.temperature).toBeUndefined()
+			})
+
+			it("ignores the base model for foundation-model ARNs, which already name the invoked model", () => {
+				const handler = createCustomArnHandler({
+					awsCustomArn:
+						"arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsRegion: "us-east-1",
+					awsCustomArnBaseModelId: "anthropic.claude-opus-5-5",
+				})
+
+				expect(handler.getModel().id).toBe("anthropic.claude-3-5-sonnet-20241022-v2:0")
+			})
+
+			it("uses the generic fallback for an explicit Other choice even when the ARN names a model", async () => {
+				const profileArn =
+					"arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-opus-4-8"
+				const handler = createCustomArnHandler({
+					awsCustomArn: profileArn,
+					awsRegion: "us-east-1",
+					awsCustomArnBaseModelId: BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL,
+					awsBedrock1MContext: true,
+				})
+
+				expect(handler.getModel().info).toMatchObject({
+					contextWindow: BEDROCK_DEFAULT_CONTEXT,
+					maxTokens: BEDROCK_MAX_TOKENS,
+				})
+				const input = await sendFirstRequest(handler)
+				expect(input.modelId).toBe(profileArn)
+				expect(input.additionalModelRequestFields).toBeUndefined()
+				expect(input.inferenceConfig?.temperature).toBeDefined()
+			})
+
+			it("keeps the named model for a foundation-model ARN even with an explicit Other choice", () => {
+				const handler = createCustomArnHandler({
+					awsCustomArn:
+						"arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsRegion: "us-east-1",
+					awsCustomArnBaseModelId: BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL,
+				})
+
+				expect(handler.getModel()).toMatchObject({
+					id: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					info: { contextWindow: bedrockModels["anthropic.claude-3-5-sonnet-20241022-v2:0"].contextWindow },
+				})
+			})
+		})
+
 		describe("isAdaptiveThinkingModel detection", () => {
 			// Unit-cover the private guard directly (same pattern the suite uses for
 			// parseBaseModelId / getPrefixForRegion). This exercises all four model
@@ -1798,6 +2266,8 @@ describe("AwsBedrockHandler", () => {
 				expect(isAdaptiveThinkingModel("anthropic.claude-fable-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-opus-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("anthropic.claude-opus-5-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("anthropic.claude-haiku-5-5")).toBe(true)
 				// Future-proof Sonnet patterns — guarded even before a registry entry exists.
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-7")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-8")).toBe(true)
@@ -1808,6 +2278,8 @@ describe("AwsBedrockHandler", () => {
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-fable-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-sonnet-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-opus-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("global.anthropic.claude-opus-5-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("global.anthropic.claude-haiku-5-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("eu.anthropic.claude-sonnet-4-7")).toBe(true)
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-opus-4-8")).toBe(true)
 			})
@@ -1817,7 +2289,663 @@ describe("AwsBedrockHandler", () => {
 				expect(isAdaptiveThinkingModel("anthropic.claude-opus-4-5-20251101-v1:0")).toBe(false)
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-6")).toBe(false)
 				expect(isAdaptiveThinkingModel("anthropic.claude-3-5-sonnet-20241022-v2:0")).toBe(false)
+				expect(isAdaptiveThinkingModel("anthropic.claude-haiku-4-5-20251001-v1:0")).toBe(false)
 				expect(isAdaptiveThinkingModel("amazon.nova-lite-v1:0")).toBe(false)
+			})
+		})
+
+		describe("completePrompt and createMessage: abort signal and listener lifecycle", () => {
+			it("should pass abort signal through to client.send", async () => {
+				const mockSend = vi.fn()
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				// Set up the mock on the handler's client instance directly
+				const clientInstance = handler["client"]
+				expect(clientInstance).toBeDefined()
+				clientInstance.send = mockSend
+
+				const controller = new AbortController()
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [{ type: "text", text: "response" }] }, stopReason: null },
+				})
+
+				await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+
+				expect(mockSend).toHaveBeenCalledWith(expect.any(Object), { abortSignal: controller.signal })
+			})
+
+			it("should work without options (backward compatible)", async () => {
+				const mockSend = vi.fn()
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const clientInstance = handler["client"]
+				expect(clientInstance).toBeDefined()
+				clientInstance.send = mockSend
+
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [{ type: "text", text: "response" }] }, stopReason: null },
+				})
+
+				const result = await handler.completePrompt("test prompt")
+
+				expect(result).toBe("response")
+				expect(mockSend).toHaveBeenCalledWith(expect.any(Object), undefined)
+			})
+
+			it("completePrompt should pass timeoutMs through to client", async () => {
+				const mockSend = vi.fn()
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const clientInstance = handler["client"]
+				clientInstance.send = mockSend
+
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [{ type: "text", text: "response" }] }, stopReason: null },
+				})
+
+				await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+
+				expect(mockSend).toHaveBeenCalled()
+				// Verify the second argument (sendOptions) contains an abortSignal derived from timeoutMs
+				const sendOptions = mockSend.mock.calls[0][1]
+				expect(sendOptions).toBeDefined()
+				expect(sendOptions?.abortSignal).toBeDefined()
+				// The signal must not be aborted yet (i.e. a real timeout signal was created,
+				// not a no-op placeholder)
+				expect(sendOptions?.abortSignal.aborted).toBe(false)
+			})
+
+			it("completePrompt should merge abortSignal and timeoutMs", async () => {
+				const mockSend = vi.fn()
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const clientInstance = handler["client"]
+				clientInstance.send = mockSend
+
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [{ type: "text", text: "response" }] }, stopReason: null },
+				})
+
+				const controller = new AbortController()
+				await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
+
+				expect(mockSend).toHaveBeenCalled()
+				const sendOptions = mockSend.mock.calls[0][1]
+				expect(sendOptions?.abortSignal).toBeDefined()
+				// AbortSignal.any() returns a new composite object; if the merge were skipped and
+				// the external signal returned directly, this assertion would fail
+				expect(sendOptions?.abortSignal).not.toBe(controller.signal)
+				// The merged signal propagates the external abort
+				controller.abort()
+				expect(sendOptions?.abortSignal.aborted).toBe(true)
+			})
+
+			it("should abort the merged signal mid-flight when the external abortSignal fires", async () => {
+				// This test keeps client.send pending so it can verify that aborting the external
+				// signal while the request is in flight propagates through the composite signal
+				// and cancels the SDK call — a post-completion check cannot prove this.
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const controller = new AbortController()
+				let internalSignalCaptured: AbortSignal | undefined
+
+				const mockSend = vi
+					.fn()
+					.mockImplementation((_command: unknown, options?: { abortSignal?: AbortSignal }) => {
+						internalSignalCaptured = options?.abortSignal
+						return new Promise<unknown>((_resolve, reject) => {
+							internalSignalCaptured?.addEventListener(
+								"abort",
+								() => reject(new DOMException("The operation was aborted.", "AbortError")),
+								{ once: true },
+							)
+						})
+					})
+				handler["client"].send = mockSend
+
+				// Pass timeoutMs so mergeAbortSignalAndTimeout creates a composite via AbortSignal.any()
+				const sendPromise = handler.completePrompt("test prompt", {
+					abortSignal: controller.signal,
+					timeoutMs: 5000,
+				})
+
+				// Wait until client.send is in flight and the composite signal is captured
+				await vi.waitFor(() => {
+					expect(internalSignalCaptured).toBeDefined()
+				})
+
+				// The composite is a distinct object — not the same reference as the external signal
+				expect(internalSignalCaptured).not.toBe(controller.signal)
+				expect(internalSignalCaptured?.aborted).toBe(false)
+
+				// Abort mid-flight; the composite must propagate it immediately (synchronous)
+				controller.abort()
+				expect(internalSignalCaptured?.aborted).toBe(true)
+
+				await expect(sendPromise).rejects.toMatchObject({ name: "AbortError" })
+			})
+
+			it("should abort immediately when signal is already aborted and timeoutMs > 0", async () => {
+				const mockSend = vi.fn()
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const clientInstance = handler["client"]
+				clientInstance.send = mockSend
+
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [{ type: "text", text: "response" }] }, stopReason: null },
+				})
+
+				const controller = new AbortController()
+				controller.abort() // Pre-abort the signal
+
+				await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
+
+				expect(mockSend).toHaveBeenCalled()
+				const sendOptions = mockSend.mock.calls[0][1]
+				expect(sendOptions?.abortSignal).toBeDefined()
+				expect(sendOptions?.abortSignal.aborted).toBe(true)
+				// AbortSignal.any() always returns a new composite; this distinguishes the merged
+				// path from a mutation that returns the pre-aborted external signal directly
+				expect(sendOptions?.abortSignal).not.toBe(controller.signal)
+			})
+
+			it("should return undefined sendOptions when timeoutMs is 0 and no signal", async () => {
+				const mockSend = vi.fn()
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const clientInstance = handler["client"]
+				clientInstance.send = mockSend
+
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [{ type: "text", text: "response" }] }, stopReason: null },
+				})
+
+				await handler.completePrompt("test prompt", { timeoutMs: 0 })
+
+				expect(mockSend).toHaveBeenCalled()
+				const sendOptions = mockSend.mock.calls[0][1]
+				// When timeoutMs is 0 and no abortSignal, bedrock.ts returns undefined (no signal created)
+				expect(sendOptions).toBeUndefined()
+			})
+
+			it("should return empty string when response content is empty", async () => {
+				const mockSend = vi.fn()
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const clientInstance = handler["client"]
+				clientInstance.send = mockSend
+
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [{ type: "text", text: "" }] }, stopReason: null },
+				})
+
+				const result = await handler.completePrompt("test prompt")
+
+				expect(result).toBe("")
+			})
+
+			it("should return empty string when response text extraction throws after validation", async () => {
+				const mockSend = vi.fn()
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const clientInstance = handler["client"]
+				clientInstance.send = mockSend
+
+				let textAccessCount = 0
+				const contentBlock = {
+					type: "text",
+					get text() {
+						textAccessCount++
+						if (textAccessCount >= 3) {
+							throw new Error("text getter failed")
+						}
+						return "response"
+					},
+				}
+
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [contentBlock] }, stopReason: null },
+				})
+
+				const result = await handler.completePrompt("test prompt")
+
+				expect(result).toBe("")
+			})
+
+			it("should return empty string when response content array is empty", async () => {
+				const mockSend = vi.fn()
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const clientInstance = handler["client"]
+				clientInstance.send = mockSend
+
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [] }, stopReason: null },
+				})
+
+				const result = await handler.completePrompt("test prompt")
+
+				expect(result).toBe("")
+			})
+
+			it("completePrompt should reject with AbortError when the signal is aborted while client.send is in flight", async () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const controller = new AbortController()
+				let rejectSend: ((err: unknown) => void) | undefined
+
+				// mockSend hangs until the abort signal fires
+				const mockSend = vi
+					.fn()
+					.mockImplementation((_command: unknown, options?: { abortSignal?: AbortSignal }) => {
+						return new Promise<unknown>((_resolve, reject) => {
+							rejectSend = reject
+							options?.abortSignal?.addEventListener(
+								"abort",
+								() => {
+									const abortError = new DOMException("The operation was aborted.", "AbortError")
+									reject(abortError)
+								},
+								{ once: true },
+							)
+						})
+					})
+				handler["client"].send = mockSend
+
+				const sendPromise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+
+				// Wait until send is in flight
+				await vi.waitFor(() => {
+					expect(rejectSend).toBeDefined()
+				})
+
+				// Abort mid-flight; completePrompt must reject with AbortError.
+				// Also assert the ABORT classification is applied: the error message must come
+				// from the ABORT template ("Request was aborted"), not the GENERIC fallback.
+				// This proves "ABORT" sits in errorTypeOrder before competing patterns.
+				controller.abort()
+
+				await expect(sendPromise).rejects.toMatchObject({
+					name: "AbortError",
+					message: expect.stringContaining("Request was aborted"),
+				})
+			})
+
+			it("createMessage should reject with an AbortError when the external signal is already aborted", async () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				let sendAbortSignal: AbortSignal | undefined
+				const mockSend = vi
+					.fn()
+					.mockImplementation(async (_command: unknown, options?: { abortSignal?: AbortSignal }) => {
+						sendAbortSignal = options?.abortSignal
+						if (options?.abortSignal?.aborted) {
+							const abortError = new Error("The operation was aborted")
+							abortError.name = "AbortError"
+							throw abortError
+						}
+						return { stream: [] }
+					})
+				handler["client"].send = mockSend
+
+				const controller = new AbortController()
+				controller.abort()
+
+				const generator = handler.createMessage(
+					"You are a helpful assistant",
+					[{ role: "user", content: "Hello" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				)
+
+				let thrown: unknown
+				try {
+					for await (const _chunk of generator) {
+						// error chunks are yielded before the rethrow
+					}
+				} catch (error) {
+					thrown = error
+				}
+
+				expect(mockSend).toHaveBeenCalledTimes(1)
+				// The internal controller must have been aborted by the pre-aborted external signal
+				expect(sendAbortSignal).toBeDefined()
+				expect(sendAbortSignal?.aborted).toBe(true)
+				expect(thrown).toMatchObject({ name: "AbortError" })
+			})
+
+			it("createMessage should abort the in-flight request when the external signal is aborted mid-stream", async () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				let internalSignal: AbortSignal | undefined
+				const mockSend = vi
+					.fn()
+					.mockImplementation((_command: unknown, options?: { abortSignal?: AbortSignal }) => {
+						internalSignal = options?.abortSignal
+						return new Promise<void>((_resolve, reject) => {
+							internalSignal?.addEventListener(
+								"abort",
+								() => {
+									const abortError = new Error("The operation was aborted")
+									abortError.name = "AbortError"
+									reject(abortError)
+								},
+								{ once: true },
+							)
+						})
+					})
+				handler["client"].send = mockSend
+
+				const controller = new AbortController()
+
+				// Spy before createMessage so we capture the exact listener the production code registers
+				const addSpy = vi.spyOn(controller.signal, "addEventListener")
+				const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+
+				try {
+					const generator = handler.createMessage(
+						"You are a helpful assistant",
+						[{ role: "user", content: "Hello" }],
+						makeCreateMessageMetadata({ abortSignal: controller.signal }),
+					)
+
+					const consumed = (async () => {
+						for await (const _chunk of generator) {
+							// ignore chunks
+						}
+					})()
+
+					// Wait until the request is in flight and the internal signal is captured
+					await vi.waitFor(() => {
+						expect(internalSignal).toBeDefined()
+					})
+					expect(internalSignal?.aborted).toBe(false)
+
+					// Abort the external signal mid-flight; the stream must reject with an AbortError
+					controller.abort()
+
+					await expect(consumed).rejects.toMatchObject({ name: "AbortError" })
+
+					// Verify the finally block removed the exact listener it registered (error path cleanup)
+					const registeredListener = addSpy.mock.calls.find(([type]) => type === "abort")?.[1]
+					expect(registeredListener).toBeDefined()
+					expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+				} finally {
+					addSpy.mockRestore()
+					removeSpy.mockRestore()
+				}
+			})
+
+			it("createMessage should detach the external abort listener when the request completes", async () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const streamChunks = [
+					JSON.stringify({ contentBlockDelta: { delta: { text: "hello" } } }),
+					JSON.stringify({ messageStop: {} }),
+				]
+
+				let secondSendSignal: AbortSignal | undefined
+				const mockSend = vi
+					.fn()
+					.mockResolvedValueOnce({ stream: streamChunks })
+					.mockImplementation(async (_command: unknown, options?: { abortSignal?: AbortSignal }) => {
+						secondSendSignal = options?.abortSignal
+						return { stream: streamChunks }
+					})
+				handler["client"].send = mockSend
+
+				// First request completes normally with its own external signal.
+				// Spy on both add and remove so we can assert the exact same function
+				// reference was registered and then detached — expect.any(Function) would
+				// pass even if a different listener were removed, leaving the real one attached.
+				const firstController = new AbortController()
+				const firstAddSpy = vi.spyOn(firstController.signal, "addEventListener")
+				const firstRemoveSpy = vi.spyOn(firstController.signal, "removeEventListener")
+				const firstGenerator = handler.createMessage(
+					"You are a helpful assistant",
+					[{ role: "user", content: "Hello" }],
+					makeCreateMessageMetadata({ abortSignal: firstController.signal }),
+				)
+				const firstText = await (async () => {
+					let text = ""
+					for await (const chunk of firstGenerator) {
+						if (chunk.type === "text") {
+							text += chunk.text
+						}
+					}
+					return text
+				})()
+				expect(firstText).toBe("hello")
+
+				// The bridge listener must be detached as soon as the request completes.
+				// Extract the exact function reference that was registered so we can assert
+				// the same reference (not just any function) was passed to removeEventListener.
+				const abortAddCall = firstAddSpy.mock.calls.find(([type]) => type === "abort")
+				const registeredAbortListener = abortAddCall?.[1]
+				expect(registeredAbortListener).toBeDefined()
+				expect(firstRemoveSpy).toHaveBeenCalledWith("abort", registeredAbortListener)
+
+				// Second request starts with a DIFFERENT external signal
+				const secondController = new AbortController()
+				const secondGenerator = handler.createMessage(
+					"You are a helpful assistant",
+					[{ role: "user", content: "Hello" }],
+					makeCreateMessageMetadata({ abortSignal: secondController.signal }),
+				)
+				const secondText = await (async () => {
+					let text = ""
+					for await (const chunk of secondGenerator) {
+						if (chunk.type === "text") {
+							text += chunk.text
+						}
+					}
+					return text
+				})()
+				expect(secondText).toBe("hello")
+
+				// Aborting the first (already completed) signal late must not cancel the second request
+				firstController.abort()
+				expect(secondSendSignal).toBeDefined()
+				expect(secondSendSignal?.aborted).toBe(false)
+
+				firstAddSpy.mockRestore()
+				firstRemoveSpy.mockRestore()
+			})
+
+			it("createMessage should clear the request timeout when the generator is terminated early", async () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				// The stream yields one chunk and then hangs until released, so the
+				// generator is suspended mid-stream when it is terminated early.
+				let release: (() => void) | undefined
+				const pendingChunk = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				const mockStream = async function* (): AsyncGenerator<string> {
+					yield JSON.stringify({ contentBlockDelta: { delta: { text: "hello" } } })
+					await pendingChunk
+				}
+				const mockSend = vi.fn().mockImplementation(() => Promise.resolve({ stream: mockStream() }))
+				handler["client"].send = mockSend
+
+				const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout")
+				const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout")
+
+				const generator = handler.createMessage(
+					"You are a helpful assistant",
+					[{ role: "user", content: "Hello" }],
+					makeCreateMessageMetadata(),
+				)
+
+				// Consume the first chunk; the generator is now suspended mid-stream
+				const firstResult = await generator.next()
+				expect(firstResult.done).toBe(false)
+				expect(firstResult.value).toEqual({ type: "text", text: "hello" })
+
+				// Terminate the generator early (before the stream completes)
+				const returnPromise = generator.return(undefined)
+				release?.()
+				await returnPromise
+
+				// The 10-minute request timer scheduled by createMessage must have been cleared
+				const timerIndex = setTimeoutSpy.mock.calls.findIndex(([, delay]) => delay === 10 * 60 * 1000)
+				expect(timerIndex).toBeGreaterThanOrEqual(0)
+				const timeoutHandle: NodeJS.Timeout | undefined = setTimeoutSpy.mock.results[timerIndex]?.value
+				expect(timeoutHandle).toBeDefined()
+				expect(clearTimeoutSpy).toHaveBeenCalledWith(timeoutHandle)
+
+				// Belt and braces: make sure no real 10-minute timer survives the test
+				setTimeoutSpy.mockRestore()
+				clearTimeoutSpy.mockRestore()
+				clearTimeout(timeoutHandle)
+			})
+
+			it("createMessage should abort the in-flight request when the 10 minute request timeout fires", async () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				let internalSignal: AbortSignal | undefined
+				const mockSend = vi
+					.fn()
+					.mockImplementation((_command: unknown, options?: { abortSignal?: AbortSignal }) => {
+						internalSignal = options?.abortSignal
+						return new Promise<unknown>((_resolve, reject) => {
+							internalSignal?.addEventListener(
+								"abort",
+								() => {
+									const abortError = new Error("The operation was aborted")
+									abortError.name = "AbortError"
+									reject(abortError)
+								},
+								{ once: true },
+							)
+						})
+					})
+				handler["client"].send = mockSend
+
+				// Capture the 10-minute request timer scheduled by createMessage
+				const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout")
+
+				const generator = handler.createMessage(
+					"You are a helpful assistant",
+					[{ role: "user", content: "Hello" }],
+					makeCreateMessageMetadata(),
+				)
+				const consumed = (async () => {
+					for await (const _chunk of generator) {
+						// ignore chunks
+					}
+				})()
+
+				// Wait until the request is in flight and the 10-minute timer is scheduled
+				let timeoutHandle: NodeJS.Timeout | undefined
+				let timeoutCallback: (() => void) | undefined
+				await vi.waitFor(() => {
+					const timerIndex = setTimeoutSpy.mock.calls.findIndex(([, delay]) => delay === 10 * 60 * 1000)
+					expect(timerIndex).toBeGreaterThanOrEqual(0)
+					expect(internalSignal).toBeDefined()
+					timeoutHandle = setTimeoutSpy.mock.results[timerIndex]?.value as NodeJS.Timeout
+					timeoutCallback = setTimeoutSpy.mock.calls[timerIndex]?.[0] as () => void
+				})
+				expect(internalSignal?.aborted).toBe(false)
+
+				// Fire the 10-minute request timeout: it must abort the request-local
+				// controller, which cancels the in-flight request with an AbortError.
+				timeoutCallback?.()
+
+				await expect(consumed).rejects.toMatchObject({ name: "AbortError" })
+
+				// Belt and braces: make sure no real 10-minute timer survives the test
+				setTimeoutSpy.mockRestore()
+				clearTimeout(timeoutHandle)
 			})
 		})
 	})

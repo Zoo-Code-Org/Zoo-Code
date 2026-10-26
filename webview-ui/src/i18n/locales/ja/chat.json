@@ -113,6 +113,15 @@
 	},
 	"selectMode": "対話モードを選択",
 	"selectApiConfig": "API構成を選択",
+	"selectModel": "モデルを選択",
+	"modelSelector": {
+		"title": "モデル",
+		"settings": "モデル設定",
+		"description": "この API 設定で使用するモデルを選択します。",
+		"searchPlaceholder": "モデルを検索...",
+		"unsupportedTooltip": "このプロバイダーのモデルは設定で構成します",
+		"loading": "モデルを読み込み中..."
+	},
 	"lockApiConfigAcrossModes": "このワークスペースのすべてのモードでAPI構成をロック",
 	"unlockApiConfigAcrossModes": "このワークスペースのすべてのモードでAPI構成がロックされています（クリックで解除）",
 	"enhancePrompt": "追加コンテキストでプロンプトを強化",
@@ -343,10 +352,10 @@
 		"title": "Zoo Code {{version}} リリース",
 		"support": "<githubLink>GitHub</githubLink>でスターを付けて Zoo Code を応援してください。",
 		"release": {
-			"heading": "新機能:",
-			"highlight1": "🤖 新しい Zoo Gateway に残高があるユーザーは、GLM-5.3-Flash と Gemini 3.7 Flash を 2 週間 50% 割引で、MiniMax M3 を完全無料でお試しいただけます: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "新しいモデル — GLM-5.3-Flash が Z AI で利用可能になりました。",
-			"highlight3": "信頼性の修正 — サブタスクの承認を復元し、Vertex Gemini 3.7 のツール出力が空になる問題、ターミナルの起動失敗、バックグラウンドサービスのエラー、テーマでの読みやすさを修正しました。"
+			"heading": "Zoo Code v3.92.0 の新機能",
+			"highlight1": "✨ より速いモデル選択と強化されたモデルサポート: チャット入力欄からモデルを切り替えられます。Amazon Bedrock で Claude Haiku 5.5 を使用し、OpenRouter でより正確な Kimi K3 の機能を利用し、Vercel AI Gateway で修正された Gemini 4 Argon の制限を適用できます。",
+			"highlight2": "🧭 より信頼性の高いターミナル、編集、チャット、リモートワークフロー: 必要に応じてコマンド出力をデフォルトで折りたたみ、編集エラーをより明確に確認し、推論行と API 行を表示したままにして、リモートワークスペースでの起動とプロキシの問題を回避できます。",
+			"highlight3": "🔌 MCP Marketplace の拡充: MCP Marketplace から Zoo Code を AnySearch、Mailtea、Tradehand に接続できます。"
 		},
 		"cloudAgents": {
 			"heading": "クラウドの新機能:",
@@ -487,6 +496,10 @@
 		"serversPart_other": "{{count}} MCP サーバー",
 		"messageTemplate": "{{servers}}経由で{{tools}}が有効になっています。このような高い数は、モデルを混乱させてエラーを引き起こす可能性があります。{{threshold}}以下に保つようにしてください。",
 		"openMcpSettings": "MCP 設定を開く"
+	},
+	"ignoredDisabledTools": {
+		"title": "無効化されたツールは無視されました",
+		"messageTemplate": "次のツールは無効化できないため、対応する disabledTools エントリは無視されました: {{tools}}。"
 	},
 	"readCommandOutput": {
 		"title": "Zooがコマンド出力を読み込みました"

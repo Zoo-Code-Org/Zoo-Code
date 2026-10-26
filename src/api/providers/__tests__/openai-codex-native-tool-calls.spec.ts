@@ -7,6 +7,7 @@ import type { ApiHandlerOptions } from "../../../shared/api"
 import { NativeToolCallParser } from "../../../core/assistant-message/NativeToolCallParser"
 import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
 import { Package } from "../../../shared/package"
+import type { ApiStreamChunk } from "../../../api/transform/stream"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 describe("OpenAiCodexHandler native tool calls", () => {
@@ -15,8 +16,6 @@ describe("OpenAiCodexHandler native tool calls", () => {
 
 	beforeEach(() => {
 		vi.restoreAllMocks()
-		NativeToolCallParser.clearRawChunkState()
-		NativeToolCallParser.clearAllStreamingToolCalls()
 
 		mockOptions = {
 			apiModelId: "gpt-5.2-2025-12-11",
@@ -76,17 +75,21 @@ describe("OpenAiCodexHandler native tool calls", () => {
 			tools: [],
 		})
 
-		const chunks: any[] = []
+		const parserScope = NativeToolCallParser.createScope()
+		const chunks: ApiStreamChunk[] = []
 		for await (const chunk of stream) {
 			chunks.push(chunk)
 			if (chunk.type === "tool_call_partial") {
 				// Simulate Task.ts behavior so finish_reason handling can emit tool_call_end elsewhere
-				NativeToolCallParser.processRawChunk({
-					index: chunk.index,
-					id: chunk.id,
-					name: chunk.name,
-					arguments: chunk.arguments,
-				})
+				NativeToolCallParser.processRawChunk(
+					{
+						index: chunk.index,
+						id: chunk.id,
+						name: chunk.name,
+						arguments: chunk.arguments,
+					},
+					parserScope,
+				)
 			}
 		}
 
@@ -522,5 +525,114 @@ describe("OpenAiCodexHandler native tool calls", () => {
 				}),
 			}),
 		)
+	})
+
+	describe("createMessage abort signal", () => {
+		it("should bridge the external abortSignal into the internal AbortController", async () => {
+			vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+			vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+			// The mock transport pauses mid-flight until the request-local signal aborts
+			const mockCreate = vi.fn().mockImplementation(async (_body: unknown, init?: { signal?: AbortSignal }) => {
+				return {
+					async *[Symbol.asyncIterator]() {
+						yield { type: "response.text.delta", delta: "test" }
+						await new Promise<void>((resolve) => {
+							const signal = init?.signal
+							if (!signal || signal.aborted) {
+								resolve()
+								return
+							}
+							signal.addEventListener("abort", () => resolve(), { once: true })
+						})
+						yield {
+							type: "response.completed",
+							response: {
+								id: "resp_1",
+								status: "completed",
+								output: [{ type: "message", content: [{ type: "output_text", text: "test" }] }],
+								usage: { input_tokens: 1, output_tokens: 1 },
+							},
+						}
+						// Arrives after the abort resolves the pause: the loop guard must break before
+						// processing the completed event and this delta.
+						yield { type: "response.text.delta", delta: "post-abort" }
+					},
+				}
+			})
+			Object.assign(handler, {
+				client: {
+					responses: { create: mockCreate },
+				},
+			})
+
+			const controller = new AbortController()
+			const stream = handler.createMessage("system", [{ role: "user", content: "hello" }], {
+				taskId: "t",
+				abortSignal: controller.signal,
+			})
+
+			// Consume the stream (the mock transport pauses mid-flight)
+			const collected = collectStream(stream)
+
+			// Wait until the request has started; the bridge listener is registered before
+			// the SDK call, so aborting now lands mid-flight
+			await vi.waitFor(() => expect(mockCreate).toHaveBeenCalled())
+
+			// Abort the external signal mid-flight; the bridge must abort the request-local controller
+			controller.abort()
+
+			const chunks = await collected
+			// Exactly the pre-abort delta: the completed event and the post-abort delta only arrive
+			// once the abort resolves the transport's pause, so the loop guard must break before
+			// processing either.
+			expect(chunks).toEqual([{ type: "text", text: "test" }])
+
+			expect(mockCreate).toHaveBeenCalled()
+			const createCallArgs = mockCreate.mock.calls[0][1] as { signal?: AbortSignal }
+			// The captured (request-local) signal passed to the SDK must now be aborted
+			expect(createCallArgs.signal).toBeDefined()
+			expect(createCallArgs.signal).toBeInstanceOf(AbortSignal)
+			expect(createCallArgs.signal?.aborted).toBe(true)
+		})
+
+		it("should immediately abort when the external signal is already aborted", async () => {
+			vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+			vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+			const mockCreate = vi.fn().mockResolvedValue({
+				async *[Symbol.asyncIterator]() {
+					yield { type: "response.text.delta", delta: "test" }
+					yield {
+						type: "response.completed",
+						response: {
+							id: "resp_1",
+							status: "completed",
+							output: [{ type: "message", content: [{ type: "output_text", text: "test" }] }],
+							usage: { input_tokens: 1, output_tokens: 1 },
+						},
+					}
+				},
+			})
+			Object.assign(handler, {
+				client: {
+					responses: { create: mockCreate },
+				},
+			})
+
+			const controller = new AbortController()
+			controller.abort() // Pre-abort
+
+			const stream = handler.createMessage("system", [{ role: "user", content: "hello" }], {
+				taskId: "t",
+				abortSignal: controller.signal,
+			})
+
+			// A pre-aborted signal settles in the OAuth race before the SDK is reached: the abort
+			// contract must win over the request setup, so the stream rejects and the SDK is never
+			// called with a signal that is already aborted.
+			await expect(collectStream(stream)).rejects.toMatchObject({ name: "AbortError" })
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
 	})
 })

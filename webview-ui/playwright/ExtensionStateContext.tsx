@@ -1,4 +1,5 @@
 import React, { createContext, useContext } from "react"
+import { providerIdentifiers } from "@roo-code/types"
 
 const noop = () => undefined
 
@@ -14,7 +15,7 @@ const defaultState = {
 	currentApiConfigName: "Default",
 	listApiConfigMeta: [{ id: "default", name: "Default", modelId: "claude-sonnet" }],
 	pinnedApiConfigs: {},
-	apiConfiguration: { apiProvider: "anthropic" },
+	apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
 	enterBehavior: "send",
 	lockApiConfigAcrossModes: false,
 	telemetrySetting: "enabled",

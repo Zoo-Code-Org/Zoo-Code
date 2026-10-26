@@ -10,8 +10,13 @@ import {
 
 import { Poe } from "../Poe"
 
-const { mockUseExtensionState } = vi.hoisted(() => ({
+const { mockUseExtensionState, postMessageMock } = vi.hoisted(() => ({
 	mockUseExtensionState: vi.fn(),
+	postMessageMock: vi.fn(),
+}))
+
+vi.mock("@src/utils/vscode", () => ({
+	vscode: { postMessage: postMessageMock },
 }))
 
 vi.mock("@src/context/ExtensionStateContext", () => ({
@@ -123,6 +128,14 @@ describe("Poe", () => {
 		)
 
 		fireEvent.click(screen.getByTestId("refresh-button"))
+		expect(postMessageMock).toHaveBeenCalledWith({
+			type: "requestRouterModels",
+			values: {
+				provider: providerIdentifiers.poe,
+				poeApiKey: "test-key",
+				poeBaseUrl: undefined,
+			},
+		})
 		act(() => {
 			window.dispatchEvent(new MessageEvent("message", { data: { type: "routerModels" } }))
 		})

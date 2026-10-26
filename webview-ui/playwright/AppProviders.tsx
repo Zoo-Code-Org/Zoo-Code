@@ -1,9 +1,10 @@
 import React, { useState } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { I18nextProvider } from "react-i18next"
+import { providerIdentifiers } from "@roo-code/types"
 
 import { ExtensionStateContextProvider } from "@/context/ExtensionStateContext"
-import { TranslationProvider } from "@/i18n/TranslationContext"
+import TranslationProvider from "@/i18n/TranslationContext"
 import i18next, { loadTranslations } from "@/i18n/setup"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { TranslationContext as PlaywrightTranslationContext } from "@src/i18n/TranslationContext"
@@ -23,7 +24,7 @@ const defaultInitialState: InitialState = {
 	taskHistory: [],
 	shouldShowAnnouncement: false,
 	telemetrySetting: "enabled",
-	apiConfiguration: { apiProvider: "anthropic" },
+	apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
 	currentApiConfigName: "Default",
 	listApiConfigMeta: [{ id: "default", name: "Default", modelId: "claude-sonnet" }],
 	pinnedApiConfigs: {},

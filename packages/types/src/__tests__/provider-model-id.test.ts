@@ -1,4 +1,11 @@
-import { getModelId, modelIdKeys, providerIdentifiers, type ProviderSettings } from "../index.js"
+import { retiredProviderIdentifiers } from "../provider-identifiers.js"
+import {
+	getModelId,
+	modelIdKeys,
+	providerIdentifiers,
+	providerSettingsSchema,
+	type ProviderSettings,
+} from "../index.js"
 
 const expectedModelIdKeys = [
 	"apiModelId",
@@ -14,6 +21,7 @@ const expectedModelIdKeys = [
 	"opencodeGoModelId",
 	"kenariModelId",
 	"nanoGptModelId",
+	"ioIntelligenceModelId",
 	"zooGatewayModelId",
 ] as const
 
@@ -53,6 +61,40 @@ describe("getModelId", () => {
 		expect(getModelId(settings)).toBe("vscode-model")
 	})
 
+	it("preserves the exact Copilot model ID through the provider settings schema", () => {
+		const settings: ProviderSettings = {
+			apiProvider: providerIdentifiers.githubCopilot,
+			vsCodeLmModelSelector: { vendor: "copilot", family: "gpt-4o", id: "copilot-model", version: "1" },
+		}
+		expect(getModelId(settings)).toBe("copilot-model")
+	})
+
+	it("persists only the selector's identity, never live model capabilities", () => {
+		const saved = providerSettingsSchema.parse({
+			apiProvider: providerIdentifiers.githubCopilot,
+			vsCodeLmModelSelector: { vendor: "copilot", id: "dynamic-model", family: "dynamic-model", version: "1" },
+		})
+		expect(saved.vsCodeLmModelSelector).toEqual({
+			vendor: "copilot",
+			id: "dynamic-model",
+			family: "dynamic-model",
+			version: "1",
+		})
+	})
+
+	it("drops a stale capability snapshot from profiles saved by earlier builds", () => {
+		const saved = providerSettingsSchema.parse({
+			apiProvider: providerIdentifiers.githubCopilot,
+			vsCodeLmModelSelector: {
+				vendor: "copilot",
+				id: "old-model",
+				modelInfo: { contextWindow: 1, supportsImages: false, supportsPromptCache: false },
+			},
+		})
+		expect(getModelId(saved)).toBe("old-model")
+		expect(saved.vsCodeLmModelSelector).not.toHaveProperty("modelInfo")
+	})
+
 	it("uses openAiModelId for OpenAI Compatible", () => {
 		const settings: ProviderSettings = {
 			apiProvider: providerIdentifiers.openai,
@@ -75,7 +117,7 @@ describe("getModelId", () => {
 
 	it("preserves legacy model ID precedence for retired providers", () => {
 		const settings: ProviderSettings = {
-			apiProvider: "groq",
+			apiProvider: retiredProviderIdentifiers.groq,
 			lmStudioDraftModelId: "draft-model",
 			requestyModelId: "requesty-model",
 		}

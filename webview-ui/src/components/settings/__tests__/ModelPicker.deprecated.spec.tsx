@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 // npx vitest src/components/settings/__tests__/ModelPicker.deprecated.spec.tsx
 
 import { screen } from "@testing-library/react"
@@ -49,7 +50,7 @@ vi.mock("@/components/ui/hooks/useSelectedModel", () => ({
 		return {
 			id: modelId,
 			info: models[modelId],
-			provider: "openrouter",
+			provider: providerIdentifiers.openrouter,
 			isLoading: false,
 			isError: false,
 		}
@@ -97,7 +98,7 @@ describe("ModelPicker - Deprecated Models", () => {
 				modelIdKey="openRouterModelId"
 				serviceName="Test Service"
 				serviceUrl="https://test.com"
-				apiConfiguration={{ apiProvider: "openrouter" }}
+				apiConfiguration={{ apiProvider: providerIdentifiers.openrouter }}
 				setApiConfigurationField={mockSetApiConfigurationField}
 				organizationAllowList={{ allowAll: true, providers: {} }}
 			/>,
@@ -125,7 +126,7 @@ describe("ModelPicker - Deprecated Models", () => {
 				serviceName="Test Service"
 				serviceUrl="https://test.com"
 				apiConfiguration={{
-					apiProvider: "openrouter",
+					apiProvider: providerIdentifiers.openrouter,
 					openRouterModelId: "deprecated-model",
 				}}
 				setApiConfigurationField={mockSetApiConfigurationField}
@@ -150,7 +151,7 @@ describe("ModelPicker - Deprecated Models", () => {
 				modelIdKey="openRouterModelId"
 				serviceName="Test Service"
 				serviceUrl="https://test.com"
-				apiConfiguration={{ apiProvider: "openrouter" }}
+				apiConfiguration={{ apiProvider: providerIdentifiers.openrouter }}
 				setApiConfigurationField={mockSetApiConfigurationField}
 				organizationAllowList={{ allowAll: true, providers: {} }}
 			/>,
@@ -178,7 +179,7 @@ describe("ModelPicker - Deprecated Models", () => {
 				serviceName="Test Service"
 				serviceUrl="https://test.com"
 				apiConfiguration={{
-					apiProvider: "openrouter",
+					apiProvider: providerIdentifiers.openrouter,
 					openRouterModelId: "deprecated-model",
 				}}
 				setApiConfigurationField={mockSetApiConfigurationField}

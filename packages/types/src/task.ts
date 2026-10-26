@@ -87,6 +87,7 @@ export interface CreateTaskOptions {
 	taskId?: string
 	enableCheckpoints?: boolean
 	consecutiveMistakeLimit?: number
+	toolRepetitionSoftLimit?: number
 	experiments?: Record<string, boolean>
 	initialTodos?: TodoItem[]
 	/** Initial status for the task's history item (e.g., "active" for child tasks) */
@@ -101,7 +102,6 @@ export enum TaskStatus {
 	Interactive = "interactive",
 	Resumable = "resumable",
 	Idle = "idle",
-	None = "none",
 }
 
 export const taskMetadataSchema = z.object({
@@ -128,7 +128,7 @@ export interface TaskLike {
 	approveAsk(options?: { text?: string; images?: string[] }): void
 	denyAsk(options?: { text?: string; images?: string[] }): void
 	submitUserMessage(text: string, images?: string[], mode?: string, providerProfile?: string): Promise<void>
-	abortTask(): void
+	abortTask(): Promise<void>
 }
 
 export type TaskEvents = {

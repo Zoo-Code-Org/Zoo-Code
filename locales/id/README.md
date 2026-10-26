@@ -46,12 +46,11 @@ Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memper
 - **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
 - **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
 
-## Yang Baru di v3.80.1
+## Yang Baru di v3.92.0
 
-🤖 Coba GLM-5.3-Flash dan Gemini 3.7 Flash dengan diskon 50% selama 2 minggu, dan dapatkan MiniMax M3 sepenuhnya GRATIS bagi pengguna dengan saldo di Zoo Gateway baru. https://zoocode.dev/models
-
-- **Model baru** — GLM-5.3-Flash kini tersedia melalui Z AI.
-- **Perbaikan keandalan** — persetujuan subtask dipulihkan, output tool kosong pada Vertex Gemini 3.7, kegagalan startup terminal, error background service, dan keterbacaan tema turut diperbaiki.
+- ✨ **Pilihan model lebih cepat dan dukungan model lebih kuat:** Ganti model dari kolom penulisan chat. Gunakan Claude Haiku 5.5 di Amazon Bedrock, dapatkan kapabilitas Kimi K3 yang lebih akurat di OpenRouter, dan gunakan batas Gemini 4 Argon yang telah diperbaiki di Vercel AI Gateway.
+- 🧭 **Alur kerja terminal, pengeditan, chat, dan remote yang lebih andal:** Atur output perintah agar diciutkan secara default jika kamu mau, dapatkan kegagalan pengeditan yang lebih jelas, pertahankan baris reasoning dan API tetap terlihat, serta hindari masalah startup dan proxy di workspace remote.
+- 🔌 **Marketplace MCP yang diperluas:** Hubungkan Zoo Code ke AnySearch, Mailtea, dan Tradehand melalui marketplace MCP.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 

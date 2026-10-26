@@ -112,6 +112,21 @@ describe("LmStudioHandler", () => {
 			expect(textChunks[0].text).toBe("Test response")
 		})
 
+		it("should forward the task abortSignal to the client request", async () => {
+			const controller = new AbortController()
+
+			await collectStream(
+				handler.createMessage(systemPrompt, messages, {
+					taskId: "test-task",
+					abortSignal: controller.signal,
+				}),
+			)
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ stream: true }), {
+				signal: controller.signal,
+			})
+		})
+
 		it("streams reasoning chunks from delta.reasoning_content", async () => {
 			// Regression: Qwen3 / DeepSeek-R1 style models served by LM Studio emit
 			// thinking via reasoning_content, not <think> tags inside content.
@@ -239,7 +254,7 @@ describe("LmStudioHandler", () => {
 			const modelInfo = handler.getModel()
 			expect(modelInfo.id).toBe(mockOptions.lmStudioModelId)
 			expect(modelInfo.info).toBeDefined()
-			expect(modelInfo.info.maxTokens).toBe(-1)
+			expect(modelInfo.info.maxTokens).toBeUndefined()
 			expect(modelInfo.info.contextWindow).toBe(128_000)
 		})
 	})

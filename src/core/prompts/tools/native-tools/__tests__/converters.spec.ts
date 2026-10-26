@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest"
 import type OpenAI from "openai"
-import type Anthropic from "@anthropic-ai/sdk"
 import {
 	convertOpenAIToolToAnthropic,
 	convertOpenAIToolsToAnthropic,
@@ -157,9 +156,9 @@ describe("converters", () => {
 			expect(result).toEqual({ type: "auto", disable_parallel_tool_use: true })
 		})
 
-		it("should return undefined for 'none' tool choice", () => {
+		it("should return none for 'none' tool choice", () => {
 			const result = convertOpenAIToolChoiceToAnthropic("none")
-			expect(result).toBeUndefined()
+			expect(result).toEqual({ type: "none" })
 		})
 
 		it("should return auto for 'auto' tool choice", () => {

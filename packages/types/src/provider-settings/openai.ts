@@ -6,6 +6,82 @@ import { baseProviderSettingsShape, createModelIdAccessor, createProviderDefinit
 
 export const OPEN_AI_MODEL_ID_FIELD = "openAiModelId"
 
+/**
+ * Default for the OpenAI `openAiStrictToolSchemas` setting.
+ * When true (default), non-MCP tools are sent with strict: true and their
+ * schemas are normalized for OpenAI strict mode. Some OpenAI-compatible
+ * proxies reject strict: true; set this to false for those endpoints.
+ */
+export const DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS = true
+
+const OPENAI_EXTRA_BODY_RESERVED_KEYS = [
+	// Prototype-pollution defenses; remaining keys are request-owned, including tool-call protocol controls.
+	"__proto__",
+	"constructor",
+	"prototype",
+	"max_completion_tokens",
+	"max_tokens",
+	"messages",
+	"model",
+	"parallel_tool_calls",
+	"reasoning",
+	"reasoning_effort",
+	"response_format",
+	"stream",
+	"stream_options",
+	"temperature",
+	"tool_choice",
+	"tools",
+] as const
+
+type OpenAiExtraBodyParseResult =
+	| { success: true; data: Record<string, unknown> }
+	| {
+			success: false
+			reason: "invalidJson" | "objectRequired" | "reservedKeys"
+			data: Record<string, unknown>
+			reservedKeys?: string[]
+	  }
+
+export function parseOpenAiExtraBody(value: string | undefined): OpenAiExtraBodyParseResult {
+	if (!value?.trim()) {
+		return { success: true, data: {} }
+	}
+
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(value)
+	} catch {
+		return { success: false, reason: "invalidJson", data: {} }
+	}
+
+	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return { success: false, reason: "objectRequired", data: {} }
+	}
+
+	const entries = Object.entries(parsed)
+	const reservedKeys = entries
+		.map(([key]) => key)
+		.filter((key) => (OPENAI_EXTRA_BODY_RESERVED_KEYS as readonly string[]).includes(key))
+	const data = Object.fromEntries(entries.filter(([key]) => !reservedKeys.includes(key)))
+
+	if (reservedKeys.length > 0) {
+		return { success: false, reason: "reservedKeys", reservedKeys, data }
+	}
+
+	return { success: true, data }
+}
+
+const openAiExtraBodySchema = z
+	.string()
+	.superRefine((value, ctx) => {
+		const result = parseOpenAiExtraBody(value)
+		if (!result.success) {
+			ctx.addIssue({ code: "custom", message: result.reason })
+		}
+	})
+	.optional()
+
 export const openAiProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.openai,
 	modelIdKey: OPEN_AI_MODEL_ID_FIELD,
@@ -15,6 +91,7 @@ export const openAiProviderDefinition = createProviderDefinition({
 		openAiBaseUrl: z.string().optional(),
 		openAiApiKey: z.string().optional(),
 		openAiR1FormatEnabled: z.boolean().optional(),
+		openAiStrictToolSchemas: z.boolean().optional(),
 		[OPEN_AI_MODEL_ID_FIELD]: z.string().optional(),
 		openAiCustomModelInfo: modelInfoSchema.nullish(),
 		openAiUseAzure: z.boolean().optional(),
@@ -22,5 +99,6 @@ export const openAiProviderDefinition = createProviderDefinition({
 		openAiStreamingEnabled: z.boolean().optional(),
 		openAiHostHeader: z.string().optional(), // Keep temporarily for backward compatibility during migration.
 		openAiHeaders: z.record(z.string(), z.string()).optional(),
+		openAiExtraBody: openAiExtraBodySchema,
 	},
 })

@@ -1,4 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk"
+import crypto from "crypto"
 
 import { type ProviderSettings, getApiProtocol, getModelId, isRetiredProvider } from "@roo-code/types"
 
@@ -57,6 +58,7 @@ function prepareAssistantMessage(
 
 	const messageWithTs: any = {
 		...message,
+		messageId: crypto.randomUUID(),
 		...(responseId ? { id: responseId } : {}),
 		ts: Date.now(),
 	}
@@ -80,6 +82,13 @@ function prepareAssistantMessage(
 			type: "reasoning",
 			text: reasoning,
 			summary: [] as any[],
+			// A visible summary must not discard the encrypted state needed for continuation.
+			...(reasoningData?.encrypted_content
+				? {
+						encrypted_content: reasoningData.encrypted_content,
+						...(reasoningData.id ? { id: reasoningData.id } : {}),
+					}
+				: {}),
 		}
 
 		prependContentBlock(messageWithTs, reasoningBlock)
@@ -127,7 +136,7 @@ function prepareUserMessage(message: Anthropic.MessageParam, apiConversationHist
 	}
 
 	const validatedMessage = validateAndFixToolResultIds(messageToAdd, historyForValidation)
-	return { ...validatedMessage, ts: Date.now() }
+	return { ...validatedMessage, messageId: crypto.randomUUID(), ts: Date.now() }
 }
 
 function prependContentBlock(message: any, block: any): void {

@@ -1,11 +1,18 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import * as os from "os"
 import * as path from "path"
 import * as fs from "fs/promises"
 
+import type { ClineMessage } from "@roo-code/types"
+
 // Mocks (use hoisted to avoid initialization ordering issues)
 const hoisted = vi.hoisted(() => ({
 	safeWriteJsonMock: vi.fn().mockResolvedValue(undefined),
+	readFileMock: vi.fn(),
+}))
+vi.mock("fs/promises", async (importOriginal) => ({
+	...(await importOriginal<typeof import("fs/promises")>()),
+	readFile: hoisted.readFileMock,
 }))
 vi.mock("../../../utils/safeWriteJson", () => ({
 	safeWriteJson: hoisted.safeWriteJsonMock,
@@ -13,13 +20,21 @@ vi.mock("../../../utils/safeWriteJson", () => ({
 
 // Import after mocks
 import { saveTaskMessages, readTaskMessages } from "../taskMessages"
+import { formatErrorDetail } from "../readFileWithMissingRetry"
 
 let tmpBaseDir: string
 
 beforeEach(async () => {
 	hoisted.safeWriteJsonMock.mockClear()
+	const actualFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+	hoisted.readFileMock.mockReset().mockImplementation(actualFs.readFile)
 	// Create a unique, writable temp directory to act as globalStoragePath
 	tmpBaseDir = await fs.mkdtemp(path.join(os.tmpdir(), "roo-test-"))
+})
+
+afterEach(() => {
+	vi.useRealTimers()
+	vi.restoreAllMocks()
 })
 
 describe("taskMessages.saveTaskMessages", () => {
@@ -48,6 +63,7 @@ describe("taskMessages.saveTaskMessages", () => {
 		expect(hoisted.safeWriteJsonMock).toHaveBeenCalledTimes(1)
 		const [, persisted] = hoisted.safeWriteJsonMock.mock.calls[0]
 		expect(persisted).toEqual(messages)
+		expect(hoisted.safeWriteJsonMock.mock.calls[0][2]).toBeUndefined()
 	})
 
 	it("persists messages without modification when no metadata", async () => {
@@ -65,10 +81,46 @@ describe("taskMessages.saveTaskMessages", () => {
 		const [, persisted] = hoisted.safeWriteJsonMock.mock.calls[0]
 		expect(persisted).toEqual(messages)
 	})
+
+	it("passes the history merge callback only when requested", async () => {
+		const messages: ClineMessage[] = [{ ts: 2, type: "say", say: "text", text: "incoming" }]
+		hoisted.safeWriteJsonMock.mockImplementationOnce(async (_path, data, options) =>
+			options.merge([{ ts: 1, type: "say", say: "text", text: "disk" }], data),
+		)
+		const savedMessages = await saveTaskMessages({
+			messages,
+			taskId: "task-merge",
+			globalStoragePath: tmpBaseDir,
+			merge: true,
+		})
+
+		expect(hoisted.safeWriteJsonMock.mock.calls[0][2]?.merge).toBeTypeOf("function")
+		expect(savedMessages).toEqual([
+			expect.objectContaining({ ts: 1, text: "disk" }),
+			expect.objectContaining({ ts: 2, text: "incoming" }),
+		])
+	})
+
+	it("propagates a forced write failure without swallowing or replacing it", async () => {
+		// Fault injection: simulate an interrupted/failed final write (e.g. the
+		// extension host quitting mid-save or the disk refusing the write). The
+		// save must reject with the original error so callers never treat the
+		// messages as durably persisted, and the underlying code stays visible.
+		const writeFailure = Object.assign(new Error("no space left on device"), { code: "ENOSPC" })
+		hoisted.safeWriteJsonMock.mockRejectedValueOnce(writeFailure)
+
+		await expect(
+			saveTaskMessages({
+				messages: [{ ts: 1, type: "say", say: "text", text: "unsaved" }],
+				taskId: "task-write-failure",
+				globalStoragePath: tmpBaseDir,
+			}),
+		).rejects.toBe(writeFailure)
+	})
 })
 
 describe("taskMessages.readTaskMessages", () => {
-	it("returns empty array when file contains invalid JSON", async () => {
+	it("rejects invalid JSON without treating it as empty history", async () => {
 		const taskId = "task-corrupt-json"
 		// Manually create the task directory and write corrupted JSON
 		const taskDir = path.join(tmpBaseDir, "tasks", taskId)
@@ -76,26 +128,104 @@ describe("taskMessages.readTaskMessages", () => {
 		const filePath = path.join(taskDir, "ui_messages.json")
 		await fs.writeFile(filePath, "{not valid json!!!", "utf8")
 
-		const result = await readTaskMessages({
-			taskId,
-			globalStoragePath: tmpBaseDir,
+		await expect(readTaskMessages({ taskId, globalStoragePath: tmpBaseDir })).rejects.toMatchObject({
+			kind: "invalid",
 		})
-
-		expect(result).toEqual([])
 	})
 
-	it("returns [] when file contains valid JSON that is not an array", async () => {
+	it("rejects valid non-array JSON without treating it as empty history", async () => {
 		const taskId = "task-non-array-json"
 		const taskDir = path.join(tmpBaseDir, "tasks", taskId)
 		await fs.mkdir(taskDir, { recursive: true })
 		const filePath = path.join(taskDir, "ui_messages.json")
 		await fs.writeFile(filePath, JSON.stringify("hello"), "utf8")
 
-		const result = await readTaskMessages({
-			taskId,
-			globalStoragePath: tmpBaseDir,
+		await expect(readTaskMessages({ taskId, globalStoragePath: tmpBaseDir })).rejects.toMatchObject({
+			kind: "invalid",
 		})
+	})
 
-		expect(result).toEqual([])
+	it("distinguishes a missing history file from an empty history", async () => {
+		await expect(readTaskMessages({ taskId: "task-missing", globalStoragePath: tmpBaseDir })).rejects.toMatchObject(
+			{ kind: "not_found" },
+		)
+	})
+
+	it("returns an explicitly persisted empty history", async () => {
+		const taskId = "task-empty"
+		const taskDir = path.join(tmpBaseDir, "tasks", taskId)
+		await fs.mkdir(taskDir, { recursive: true })
+		await fs.writeFile(path.join(taskDir, "ui_messages.json"), "[]", "utf8")
+
+		await expect(readTaskMessages({ taskId, globalStoragePath: tmpBaseDir })).resolves.toEqual([])
+	})
+
+	it("retries one transient missing-file read after a jittered delay", async () => {
+		vi.spyOn(Math, "random").mockReturnValue(0)
+		const missing = Object.assign(new Error("missing"), { code: "ENOENT" })
+		hoisted.readFileMock.mockRejectedValueOnce(missing).mockResolvedValueOnce("[]")
+
+		await expect(readTaskMessages({ taskId: "task-retry", globalStoragePath: tmpBaseDir })).resolves.toEqual([])
+		expect(hoisted.readFileMock).toHaveBeenCalledTimes(2)
+	})
+
+	it("throws with the underlying error code when the missing-file retry also fails", async () => {
+		vi.spyOn(Math, "random").mockReturnValue(0)
+		const missing = Object.assign(new Error("missing"), { code: "ENOENT" })
+		hoisted.readFileMock.mockRejectedValue(missing)
+
+		const error = await readTaskMessages({ taskId: "task-still-missing", globalStoragePath: tmpBaseDir }).catch(
+			(caught: unknown) => caught,
+		)
+		expect(error).toMatchObject({
+			kind: "not_found",
+			originalError: missing,
+			message: expect.stringContaining("(code: ENOENT)"),
+		})
+		expect(hoisted.readFileMock).toHaveBeenCalledTimes(2)
+	})
+
+	it("does not retry non-ENOENT read failures and surfaces the underlying code", async () => {
+		const denied = Object.assign(new Error("denied"), { code: "EACCES" })
+		hoisted.readFileMock.mockRejectedValueOnce(denied)
+
+		const error = await readTaskMessages({ taskId: "task-denied", globalStoragePath: tmpBaseDir }).catch(
+			(caught: unknown) => caught,
+		)
+		expect(error).toMatchObject({ kind: "io_error" })
+		expect((error as Error).message).toContain("(code: EACCES)")
+		expect(hoisted.readFileMock).toHaveBeenCalledTimes(1)
+	})
+
+	it("surfaces the parse error detail for a torn (half-written) file", async () => {
+		// Fault injection: a truncated/torn write leaves invalid JSON on disk.
+		// The read error must identify the parse failure (not a missing file)
+		// so a torn write is distinguishable from a late write in the logs.
+		const taskId = "task-torn-write"
+		const taskDir = path.join(tmpBaseDir, "tasks", taskId)
+		await fs.mkdir(taskDir, { recursive: true })
+		await fs.writeFile(path.join(taskDir, "ui_messages.json"), '[{"ts":1,"type":"sa', "utf8")
+
+		const error = await readTaskMessages({ taskId, globalStoragePath: tmpBaseDir }).catch(
+			(caught: unknown) => caught,
+		)
+		expect(error).toMatchObject({ kind: "invalid" })
+		expect((error as Error).message).toContain("SyntaxError")
+	})
+})
+
+describe("readFileWithMissingRetry formatErrorDetail", () => {
+	it("prefers the filesystem error code when present", () => {
+		expect(formatErrorDetail(Object.assign(new Error("missing"), { code: "ENOENT" }))).toBe(" (code: ENOENT)")
+	})
+
+	it("falls back to the error name and message", () => {
+		expect(formatErrorDetail(new SyntaxError("Unexpected end of JSON input"))).toBe(
+			" (SyntaxError: Unexpected end of JSON input)",
+		)
+	})
+
+	it("stringifies non-error causes", () => {
+		expect(formatErrorDetail("boom")).toBe(" (boom)")
 	})
 })

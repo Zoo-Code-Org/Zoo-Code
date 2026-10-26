@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import React, { useMemo } from "react"
 import { VSCodeCheckbox, VSCodeTextField, VSCodeDropdown, VSCodeOption } from "@vscode/webview-ui-toolkit/react"
 import { IMAGE_GENERATION_MODELS, type ImageGenerationProvider, getImageGenerationProvider } from "@roo-code/types"
@@ -87,7 +88,7 @@ export const ImageGenerationSettings = ({
 		setImageGenerationSelectedModel(value)
 	}
 
-	const requiresApiKey = currentProvider === "openrouter"
+	const requiresApiKey = currentProvider === providerIdentifiers.openrouter
 	const isConfigured = !requiresApiKey || (requiresApiKey && openRouterImageApiKey)
 
 	return (
@@ -114,7 +115,7 @@ export const ImageGenerationSettings = ({
 							value={currentProvider}
 							onChange={(e: any) => handleProviderChange(e.target.value)}
 							className="w-full">
-							<VSCodeOption value="openrouter" className="py-2 px-3">
+							<VSCodeOption value={providerIdentifiers.openrouter} className="py-2 px-3">
 								OpenRouter
 							</VSCodeOption>
 						</VSCodeDropdown>
@@ -124,7 +125,7 @@ export const ImageGenerationSettings = ({
 					</div>
 
 					{/* API Key Configuration (only for OpenRouter) */}
-					{currentProvider === "openrouter" && (
+					{currentProvider === providerIdentifiers.openrouter && (
 						<div>
 							<label className="block font-medium mb-1">
 								{t("settings:experimental.IMAGE_GENERATION.openRouterApiKeyLabel")}

@@ -7,21 +7,44 @@ import {
 	VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE,
 	VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS,
 	providerIdentifiers,
+	type ModelInfo,
+	type ModelRecord,
+	type ReasoningEffortExtended,
 } from "@roo-code/types"
 
-import { ApiHandlerOptions } from "../../shared/api"
+import { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import { ApiStream } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { addCacheBreakpoints } from "../transform/caching/vercel-ai-gateway"
 
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import type {
+	SingleCompletionHandler,
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+} from "../index"
 import { RouterProvider } from "./router-provider"
+import { getVercelAiGatewayModels } from "./fetchers/vercel-ai-gateway"
 
 // Extend OpenAI's CompletionUsage to include Vercel AI Gateway specific fields
 interface VercelAiGatewayUsage extends OpenAI.CompletionUsage {
 	cache_creation_input_tokens?: number
 	cost?: number
+}
+
+function getReasoningEffort(options: ApiHandlerOptions, info: ModelInfo): ReasoningEffortExtended | undefined {
+	const configured = options.reasoningEffort
+	const reasoningDisabled =
+		configured === "disable" || configured === "none" || options.enableReasoningEffort === false
+	const supported = info.supportsReasoningEffort
+
+	if (!reasoningDisabled && configured && configured !== "minimal") {
+		if (supported === true || (Array.isArray(supported) && supported.includes(configured))) return configured
+	}
+
+	const fallback = info.reasoningEffort
+	return info.requiredReasoningEffort && fallback && fallback !== "none" ? fallback : undefined
 }
 
 export class VercelAiGatewayHandler extends RouterProvider implements SingleCompletionHandler {
@@ -35,6 +58,15 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 			defaultModelId: vercelAiGatewayDefaultModelId,
 			defaultModelInfo: vercelAiGatewayDefaultModelInfo,
 		})
+	}
+
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: false, keyScoped: false, authScoped: false }
+	}
+
+	async fetchModels(_options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getVercelAiGatewayModels(undefined, ...fetchOpts)
 	}
 
 	override async *createMessage(
@@ -54,6 +86,7 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 		}
 
 		const supportsTemperature = info.supportsTemperature !== false && this.supportsTemperature(modelId)
+		const reasoningEffort = getReasoningEffort(this.options, info)
 
 		const body: OpenAI.Chat.ChatCompletionCreateParams = {
 			model: modelId,
@@ -67,6 +100,9 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 			tools: this.convertToolsForOpenAI(metadata?.tools),
 			tool_choice: metadata?.tool_choice,
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+		}
+		if (reasoningEffort) {
+			;(body as { reasoning_effort?: ReasoningEffortExtended }).reasoning_effort = reasoningEffort
 		}
 
 		const completion = await this.client.chat.completions.create(body)
@@ -118,14 +154,18 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 		}
 	}
 
-	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
 		const { id: modelId, info } = await this.fetchModel()
 
 		try {
+			const reasoningEffort = getReasoningEffort(this.options, info)
 			const requestOptions: OpenAI.Chat.ChatCompletionCreateParams = {
 				model: modelId,
 				messages: [{ role: "user", content: prompt }],
 				stream: false,
+			}
+			if (reasoningEffort) {
+				;(requestOptions as { reasoning_effort?: ReasoningEffortExtended }).reasoning_effort = reasoningEffort
 			}
 
 			if (info.supportsTemperature !== false && this.supportsTemperature(modelId)) {

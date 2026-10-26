@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Interaktionsmodus auswählen",
 	"selectApiConfig": "API-Konfiguration auswählen",
+	"selectModel": "Modell auswählen",
+	"modelSelector": {
+		"title": "Modelle",
+		"settings": "Modelleinstellungen",
+		"description": "Wähle das Modell für diese API-Konfiguration aus.",
+		"searchPlaceholder": "Modelle suchen...",
+		"unsupportedTooltip": "Das Modell dieses Anbieters wird in den Einstellungen konfiguriert",
+		"loading": "Modelle werden geladen..."
+	},
 	"lockApiConfigAcrossModes": "API-Konfiguration für alle Modi in diesem Arbeitsbereich sperren",
 	"unlockApiConfigAcrossModes": "API-Konfiguration ist für alle Modi in diesem Arbeitsbereich gesperrt (klicke zum Entsperren)",
 	"enhancePrompt": "Prompt mit zusätzlichem Kontext verbessern",
@@ -343,10 +352,10 @@
 		"title": "Zoo Code {{version}} veröffentlicht",
 		"support": "Bitte unterstütze Zoo Code, indem du uns auf <githubLink>GitHub</githubLink> einen Stern gibst.",
 		"release": {
-			"heading": "Was ist neu:",
-			"highlight1": "🤖 Teste GLM-5.3-Flash und Gemini 3.7 Flash zwei Wochen lang mit 50 % Rabatt und MiniMax M3 komplett KOSTENLOS für Nutzer mit Guthaben auf dem neuen Zoo Gateway: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "Neues Modell — GLM-5.3-Flash ist jetzt über Z AI verfügbar.",
-			"highlight3": "Zuverlässigkeits-Fixes — Unteraufgaben-Genehmigungen wiederhergestellt, leere Tool-Ausgabe bei Vertex Gemini 3.7, Fehler beim Terminalstart, Fehler im Hintergrunddienst und die Lesbarkeit der IDE-Themes."
+			"heading": "Was ist neu in Zoo Code v3.92.0",
+			"highlight1": "✨ Schnellere Modellauswahl und bessere Modellunterstützung: Wechsle das Modell direkt im Chat-Eingabefeld. Nutze Claude Haiku 5.5 auf Amazon Bedrock, profitiere von präziseren Kimi K3-Funktionen auf OpenRouter und verwende die korrigierten Limits für Gemini 4 Argon auf Vercel AI Gateway.",
+			"highlight2": "🧭 Zuverlässigere Workflows für Terminal, Bearbeitung, Chat und Remote-Umgebungen: Lass Befehlsausgaben auf Wunsch standardmäßig einklappen, erhalte klarere Fehlermeldungen bei der Bearbeitung, halte Reasoning- und API-Zeilen sichtbar und vermeide Start- und Proxy-Probleme in Remote-Workspaces.",
+			"highlight3": "🔌 Erweiterter MCP Marketplace: Verbinde Zoo Code über den MCP Marketplace mit AnySearch, Mailtea und Tradehand."
 		},
 		"cloudAgents": {
 			"heading": "Neu in der Cloud:",
@@ -487,6 +496,10 @@
 		"serversPart_other": "{{count}} MCP-Server",
 		"messageTemplate": "Du hast {{tools}} über {{servers}} aktiviert. Eine so hohe Anzahl kann das Modell verwirren und zu Fehlern führen. Versuche, es unter {{threshold}} zu halten.",
 		"openMcpSettings": "MCP-Einstellungen öffnen"
+	},
+	"ignoredDisabledTools": {
+		"title": "Deaktiviertes Tool ignoriert",
+		"messageTemplate": "Die folgenden Tools können nicht deaktiviert werden; die entsprechenden disabledTools-Einträge wurden ignoriert: {{tools}}."
 	},
 	"readCommandOutput": {
 		"title": "Zoo las Befehlsausgabe"

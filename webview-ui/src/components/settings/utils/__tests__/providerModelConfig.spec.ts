@@ -1,5 +1,6 @@
 import {
 	anthropicDefaultModelId,
+	ioIntelligenceDefaultModelId,
 	mainlandZAiDefaultModelId,
 	nanoGptDefaultModelId,
 	providerIdentifiers,
@@ -17,7 +18,10 @@ import {
 	PROVIDERS_WITH_CUSTOM_MODEL_UI,
 	shouldUseGenericModelPicker,
 	handleModelChangeSideEffects,
+	toBedrockModelId,
 } from "../providerModelConfig"
+
+const appProfileArn = "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abcd1234efgh"
 
 describe("providerModelConfig", () => {
 	describe("PROVIDER_SERVICE_CONFIG", () => {
@@ -64,7 +68,7 @@ describe("providerModelConfig", () => {
 
 	describe("getProviderServiceConfig", () => {
 		it("returns correct config for known provider", () => {
-			const config = getProviderServiceConfig("gemini")
+			const config = getProviderServiceConfig(providerIdentifiers.gemini)
 			expect(config.serviceName).toBe("Google Gemini")
 			expect(config.serviceUrl).toBe("https://ai.google.dev")
 		})
@@ -87,7 +91,7 @@ describe("providerModelConfig", () => {
 
 	describe("getDefaultModelIdForProvider", () => {
 		it("returns default model ID for known provider", () => {
-			const defaultId = getDefaultModelIdForProvider("anthropic")
+			const defaultId = getDefaultModelIdForProvider(providerIdentifiers.anthropic)
 			expect(defaultId).toBeDefined()
 			expect(typeof defaultId).toBe("string")
 			expect(defaultId.length).toBeGreaterThan(0)
@@ -99,15 +103,15 @@ describe("providerModelConfig", () => {
 		})
 
 		it("returns international default for Z.ai without apiConfiguration", () => {
-			const defaultId = getDefaultModelIdForProvider("zai")
+			const defaultId = getDefaultModelIdForProvider(providerIdentifiers.zai)
 			expect(defaultId).toBeDefined()
 			expect(typeof defaultId).toBe("string")
 			expect(defaultId.length).toBeGreaterThan(0)
 		})
 
 		it("returns mainland default for Z.ai with china_coding entrypoint", () => {
-			const defaultId = getDefaultModelIdForProvider("zai", {
-				apiProvider: "zai",
+			const defaultId = getDefaultModelIdForProvider(providerIdentifiers.zai, {
+				apiProvider: providerIdentifiers.zai,
 				zaiApiLine: "china_coding",
 			})
 			expect(defaultId).toBeDefined()
@@ -118,16 +122,16 @@ describe("providerModelConfig", () => {
 
 		it("returns mainland default for Z.ai with china_api entrypoint", () => {
 			expect(
-				getDefaultModelIdForProvider("zai", {
-					apiProvider: "zai",
+				getDefaultModelIdForProvider(providerIdentifiers.zai, {
+					apiProvider: providerIdentifiers.zai,
 					zaiApiLine: "china_api",
 				}),
 			).toBe(mainlandZAiDefaultModelId)
 		})
 
 		it("returns international default for Z.ai with international_coding entrypoint", () => {
-			const defaultId = getDefaultModelIdForProvider("zai", {
-				apiProvider: "zai",
+			const defaultId = getDefaultModelIdForProvider(providerIdentifiers.zai, {
+				apiProvider: providerIdentifiers.zai,
 				zaiApiLine: "international_coding",
 			})
 			expect(defaultId).toBeDefined()
@@ -137,12 +141,12 @@ describe("providerModelConfig", () => {
 
 		it("uses mainland or international defaults based on zaiApiLine setting", () => {
 			// Verify the function correctly routes to appropriate defaults
-			const chinaDefault = getDefaultModelIdForProvider("zai", {
-				apiProvider: "zai",
+			const chinaDefault = getDefaultModelIdForProvider(providerIdentifiers.zai, {
+				apiProvider: providerIdentifiers.zai,
 				zaiApiLine: "china_coding",
 			})
-			const internationalDefault = getDefaultModelIdForProvider("zai", {
-				apiProvider: "zai",
+			const internationalDefault = getDefaultModelIdForProvider(providerIdentifiers.zai, {
+				apiProvider: providerIdentifiers.zai,
 				zaiApiLine: "international_coding",
 			})
 			// Both should return valid model IDs (they may or may not be the same)
@@ -181,6 +185,13 @@ describe("providerModelConfig", () => {
 				default: nanoGptDefaultModelId,
 			})
 		})
+
+		it("returns IO Intelligence's dynamic model field and fallback", () => {
+			expect(getProviderModelConfig(providerIdentifiers.ioIntelligence)).toEqual({
+				field: "ioIntelligenceModelId",
+				default: ioIntelligenceDefaultModelId,
+			})
+		})
 	})
 
 	describe("getProviderDocsSlug", () => {
@@ -191,36 +202,36 @@ describe("providerModelConfig", () => {
 
 	describe("getStaticModelsForProvider", () => {
 		it("returns models for anthropic provider", () => {
-			const models = getStaticModelsForProvider("anthropic")
+			const models = getStaticModelsForProvider(providerIdentifiers.anthropic)
 			expect(Object.keys(models).length).toBeGreaterThan(0)
 		})
 
 		it("adds custom-arn option for bedrock provider", () => {
-			const models = getStaticModelsForProvider("bedrock", "Use Custom ARN")
+			const models = getStaticModelsForProvider(providerIdentifiers.bedrock, "Use Custom ARN")
 			expect(models["custom-arn"]).toBeDefined()
 			expect(models["custom-arn"].description).toBe("Use Custom ARN")
 		})
 
 		it("returns empty object for providers without static models", () => {
-			const models = getStaticModelsForProvider("openrouter")
+			const models = getStaticModelsForProvider(providerIdentifiers.openrouter)
 			expect(Object.keys(models).length).toBe(0)
 		})
 
 		it("shows GLM-5.3 models for international Z.ai API and Coding Plan entrypoints", () => {
-			const internationalCoding = getStaticModelsForProvider("zai", undefined, {
-				apiProvider: "zai",
+			const internationalCoding = getStaticModelsForProvider(providerIdentifiers.zai, undefined, {
+				apiProvider: providerIdentifiers.zai,
 				zaiApiLine: "international_coding",
 			})
-			const chinaCoding = getStaticModelsForProvider("zai", undefined, {
-				apiProvider: "zai",
+			const chinaCoding = getStaticModelsForProvider(providerIdentifiers.zai, undefined, {
+				apiProvider: providerIdentifiers.zai,
 				zaiApiLine: "china_coding",
 			})
-			const internationalApi = getStaticModelsForProvider("zai", undefined, {
-				apiProvider: "zai",
+			const internationalApi = getStaticModelsForProvider(providerIdentifiers.zai, undefined, {
+				apiProvider: providerIdentifiers.zai,
 				zaiApiLine: "international_api",
 			})
-			const chinaApi = getStaticModelsForProvider("zai", undefined, {
-				apiProvider: "zai",
+			const chinaApi = getStaticModelsForProvider(providerIdentifiers.zai, undefined, {
+				apiProvider: providerIdentifiers.zai,
 				zaiApiLine: "china_api",
 			})
 
@@ -237,16 +248,16 @@ describe("providerModelConfig", () => {
 
 	describe("isStaticModelProvider", () => {
 		it("returns true for providers with static models", () => {
-			expect(isStaticModelProvider("anthropic")).toBe(true)
-			expect(isStaticModelProvider("bedrock")).toBe(true)
-			expect(isStaticModelProvider("gemini")).toBe(true)
+			expect(isStaticModelProvider(providerIdentifiers.anthropic)).toBe(true)
+			expect(isStaticModelProvider(providerIdentifiers.bedrock)).toBe(true)
+			expect(isStaticModelProvider(providerIdentifiers.gemini)).toBe(true)
 			expect(isStaticModelProvider(providerIdentifiers.openaiNative)).toBe(true)
 		})
 
 		it("returns false for providers without static models", () => {
-			expect(isStaticModelProvider("openrouter")).toBe(false)
-			expect(isStaticModelProvider("ollama")).toBe(false)
-			expect(isStaticModelProvider("lmstudio")).toBe(false)
+			expect(isStaticModelProvider(providerIdentifiers.openrouter)).toBe(false)
+			expect(isStaticModelProvider(providerIdentifiers.ollama)).toBe(false)
+			expect(isStaticModelProvider(providerIdentifiers.lmstudio)).toBe(false)
 		})
 	})
 
@@ -292,6 +303,8 @@ describe("providerModelConfig", () => {
 			handleModelChangeSideEffects(providerIdentifiers.bedrock, "anthropic.claude", setApiConfigurationField)
 
 			expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArn", "")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArnBaseModelId", "")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("awsModelContextWindow", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxThinkingTokens", undefined)
@@ -303,6 +316,11 @@ describe("providerModelConfig", () => {
 			handleModelChangeSideEffects(providerIdentifiers.bedrock, "custom-arn", setApiConfigurationField)
 
 			expect(setApiConfigurationField).not.toHaveBeenCalledWith("awsCustomArn", expect.anything())
+			expect(
+				setApiConfigurationField.mock.calls.filter(
+					([field]) => field === "awsCustomArnBaseModelId" || field === "awsModelContextWindow",
+				),
+			).toHaveLength(0)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxThinkingTokens", undefined)
@@ -317,6 +335,40 @@ describe("providerModelConfig", () => {
 			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxThinkingTokens", undefined)
+		})
+
+		it("stores a pasted ARN as the Bedrock custom ARN, trimmed", () => {
+			const setApiConfigurationField = vi.fn()
+
+			handleModelChangeSideEffects(providerIdentifiers.bedrock, ` ${appProfileArn}\n`, setApiConfigurationField)
+
+			expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArn", appProfileArn)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArnBaseModelId", "")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("awsModelContextWindow", undefined)
+			expect(setApiConfigurationField).not.toHaveBeenCalledWith("awsCustomArn", "")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
+		})
+
+		it("does not treat an ARN as a custom ARN for non-Bedrock providers", () => {
+			const setApiConfigurationField = vi.fn()
+
+			handleModelChangeSideEffects(providerIdentifiers.anthropic, appProfileArn, setApiConfigurationField)
+
+			expect(setApiConfigurationField).not.toHaveBeenCalledWith("awsCustomArn", expect.anything())
+		})
+	})
+
+	describe("toBedrockModelId", () => {
+		it("maps a pasted ARN to the custom-arn pseudo-model", () => {
+			expect(toBedrockModelId(appProfileArn)).toBe("custom-arn")
+			expect(toBedrockModelId(`  ${appProfileArn}`)).toBe("custom-arn")
+		})
+
+		it("keeps regular model IDs unchanged", () => {
+			expect(toBedrockModelId("anthropic.claude-sonnet-4-5-20250929-v1:0")).toBe(
+				"anthropic.claude-sonnet-4-5-20250929-v1:0",
+			)
+			expect(toBedrockModelId("custom-arn")).toBe("custom-arn")
 		})
 	})
 })

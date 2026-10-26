@@ -1,17 +1,46 @@
 // npx vitest src/components/settings/__tests__/ModelPicker.spec.tsx
 
 import { screen, fireEvent, renderWithExtensionState } from "@/utils/test-utils"
-import { act } from "react"
+import { act, type ReactNode } from "react"
 import { QueryClient } from "@tanstack/react-query"
+import { type Mock } from "vitest"
 
-import { ModelInfo, providerIdentifiers } from "@roo-code/types"
+import {
+	bedrockDefaultModelId,
+	ioIntelligenceDefaultModelId,
+	litellmDefaultModelId,
+	type ModelInfo,
+	type ProviderSettings,
+	type RouterModels,
+	providerIdentifiers,
+} from "@roo-code/types"
 
 import { ModelPicker } from "../ModelPicker"
+import {
+	getStaticModelsForProvider,
+	handleModelChangeSideEffects,
+	toBedrockModelId,
+} from "../utils/providerModelConfig"
+import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
+
+type SetApiConfigurationField = <K extends keyof ProviderSettings>(
+	field: K,
+	value: ProviderSettings[K],
+	isUserAction?: boolean,
+) => void
+
+// useRouterModels returns a react-query observable result; these tests only need the stable state fields.
+const createRouterModelsResult = (data: Partial<RouterModels>): ReturnType<typeof useRouterModels> =>
+	({ data, isLoading: false, isError: false }) as ReturnType<typeof useRouterModels>
 
 vi.mock("@src/context/ExtensionStateContext", () => ({
-	ExtensionStateContextProvider: ({ children }: any) => children,
+	ExtensionStateContextProvider: ({ children }: { children: ReactNode }) => children,
 	useExtensionState: vi.fn(),
 }))
+
+vi.mock("@src/components/ui/hooks/useRouterModels")
+
+const mockUseRouterModels = useRouterModels as Mock<typeof useRouterModels>
 
 Element.prototype.scrollIntoView = vi.fn()
 
@@ -34,8 +63,9 @@ describe("ModelPicker", () => {
 		model2: { name: "Model 2", description: "Test model 2", ...modelInfo },
 	}
 
+	const apiConfiguration: ProviderSettings = {}
 	const defaultProps = {
-		apiConfiguration: {},
+		apiConfiguration,
 		defaultModelId: "model1",
 		modelIdKey: "openRouterModelId" as const,
 		serviceName: "Test Service",
@@ -55,6 +85,8 @@ describe("ModelPicker", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		vi.useFakeTimers()
+		// Default: no router models available. Provider-specific tests override per test.
+		mockUseRouterModels.mockReturnValue(createRouterModelsResult({}))
 	})
 
 	afterEach(() => {
@@ -252,6 +284,267 @@ describe("ModelPicker", () => {
 			})
 
 			expect(screen.getByTestId("automatic-fetch-hint")).toBeInTheDocument()
+		})
+	})
+
+	describe("LiteLLM custom model selection", () => {
+		const litellmModels: Record<string, ModelInfo> = {
+			"gpt-4o-mini": { description: "LiteLLM proxy model", ...modelInfo },
+		}
+
+		const renderLiteLLMPicker = (apiConfiguration: ProviderSettings, setField: SetApiConfigurationField) =>
+			renderWithExtensionState(
+				<ModelPicker
+					apiConfiguration={apiConfiguration}
+					defaultModelId={litellmDefaultModelId}
+					models={litellmModels}
+					modelIdKey="litellmModelId"
+					serviceName="LiteLLM"
+					serviceUrl="https://docs.litellm.ai/"
+					setApiConfigurationField={setField}
+					organizationAllowList={{ allowAll: true, providers: {} }}
+				/>,
+				{ queryClient },
+			)
+
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ litellm: litellmModels }))
+		})
+
+		it("keeps a custom model ID in the picker instead of reverting to the default", async () => {
+			// Regression: on the LiteLLM settings screen the user could not change the
+			// model ID to a value absent from the fetched /models list -- the picker
+			// silently reverted to the hardcoded default model after the selection.
+			const customModelId = "my-litellm-alias"
+			let apiConfiguration: ProviderSettings = { apiProvider: providerIdentifiers.litellm }
+			const setField = vi.fn(function <K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K]) {
+				apiConfiguration = { ...apiConfiguration, [field]: value }
+			})
+
+			const { rerender } = await act(async () => {
+				return renderLiteLLMPicker(apiConfiguration, setField)
+			})
+
+			// Before any selection the picker shows the provider default.
+			expect(screen.getByTestId("model-picker-button")).toHaveTextContent(litellmDefaultModelId)
+
+			// Open the popover and type a model ID that is not in the fetched list.
+			await act(async () => {
+				fireEvent.click(screen.getByTestId("model-picker-button"))
+			})
+			await act(async () => {
+				vi.advanceTimersByTime(100)
+			})
+			await act(async () => {
+				fireEvent.input(screen.getByTestId("model-input"), { target: { value: customModelId } })
+			})
+			await act(async () => {
+				vi.advanceTimersByTime(100)
+			})
+			await act(async () => {
+				fireEvent.click(screen.getByTestId("use-custom-model"))
+			})
+			await act(async () => {
+				vi.advanceTimersByTime(100)
+			})
+
+			expect(setField).toHaveBeenCalledWith("litellmModelId", customModelId)
+
+			// Re-render with the updated configuration (as SettingsView does after the
+			// setter runs) and assert the selection is kept, not reset to the default.
+			await act(async () => {
+				rerender(
+					<ModelPicker
+						apiConfiguration={apiConfiguration}
+						defaultModelId={litellmDefaultModelId}
+						models={litellmModels}
+						modelIdKey="litellmModelId"
+						serviceName="LiteLLM"
+						serviceUrl="https://docs.litellm.ai/"
+						setApiConfigurationField={setField}
+						organizationAllowList={{ allowAll: true, providers: {} }}
+					/>,
+				)
+			})
+
+			expect(screen.getByTestId("model-picker-button")).toHaveTextContent(customModelId)
+			expect(screen.getByTestId("model-picker-button")).not.toHaveTextContent(litellmDefaultModelId)
+		})
+	})
+
+	describe("IO Intelligence custom model selection", () => {
+		const ioIntelligenceModels: Record<string, ModelInfo> = {
+			"meta-llama/Llama-3.3-70B-Instruct": { description: "Catalog model", ...modelInfo },
+		}
+
+		const renderIOIntelligencePicker = (apiConfiguration: ProviderSettings, setField: SetApiConfigurationField) =>
+			renderWithExtensionState(
+				<ModelPicker
+					apiConfiguration={apiConfiguration}
+					defaultModelId={ioIntelligenceDefaultModelId}
+					models={ioIntelligenceModels}
+					modelIdKey="ioIntelligenceModelId"
+					serviceName="IO Intelligence"
+					serviceUrl="https://io.net/intelligence"
+					setApiConfigurationField={setField}
+					organizationAllowList={{ allowAll: true, providers: {} }}
+				/>,
+				{ queryClient },
+			)
+
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ "io-intelligence": ioIntelligenceModels }))
+		})
+
+		it("keeps a custom model ID in the picker instead of reverting to the default", async () => {
+			// The stored id is what the handler sends requests with, so the picker
+			// must keep displaying it even though the fetched catalog lacks it.
+			const customModelId = "custom-org/custom-model"
+			let apiConfiguration: ProviderSettings = { apiProvider: providerIdentifiers.ioIntelligence }
+			const setField = vi.fn(function <K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K]) {
+				apiConfiguration = { ...apiConfiguration, [field]: value }
+			})
+
+			const { rerender } = await act(async () => {
+				return renderIOIntelligencePicker(apiConfiguration, setField)
+			})
+
+			expect(screen.getByTestId("model-picker-button")).toHaveTextContent(ioIntelligenceDefaultModelId)
+
+			await act(async () => {
+				fireEvent.click(screen.getByTestId("model-picker-button"))
+			})
+			await act(async () => {
+				vi.advanceTimersByTime(100)
+			})
+			await act(async () => {
+				fireEvent.input(screen.getByTestId("model-input"), { target: { value: customModelId } })
+			})
+			await act(async () => {
+				vi.advanceTimersByTime(100)
+			})
+			await act(async () => {
+				fireEvent.click(screen.getByTestId("use-custom-model"))
+			})
+			await act(async () => {
+				vi.advanceTimersByTime(100)
+			})
+
+			expect(setField).toHaveBeenCalledWith("ioIntelligenceModelId", customModelId)
+
+			await act(async () => {
+				rerender(
+					<ModelPicker
+						apiConfiguration={apiConfiguration}
+						defaultModelId={ioIntelligenceDefaultModelId}
+						models={ioIntelligenceModels}
+						modelIdKey="ioIntelligenceModelId"
+						serviceName="IO Intelligence"
+						serviceUrl="https://io.net/intelligence"
+						setApiConfigurationField={setField}
+						organizationAllowList={{ allowAll: true, providers: {} }}
+					/>,
+				)
+			})
+
+			expect(screen.getByTestId("model-picker-button")).toHaveTextContent(customModelId)
+			expect(screen.getByTestId("model-picker-button")).not.toHaveTextContent(ioIntelligenceDefaultModelId)
+		})
+	})
+
+	describe("Bedrock pasted ARN", () => {
+		const appProfileArn = "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abcd1234efgh"
+		const bedrockModels = getStaticModelsForProvider(providerIdentifiers.bedrock)
+
+		const renderBedrockPicker = (apiConfiguration: ProviderSettings, setField: SetApiConfigurationField) => (
+			<ModelPicker
+				apiConfiguration={apiConfiguration}
+				defaultModelId={bedrockDefaultModelId}
+				models={bedrockModels}
+				modelIdKey="apiModelId"
+				serviceName="Amazon Bedrock"
+				serviceUrl="https://aws.amazon.com/bedrock"
+				setApiConfigurationField={setField}
+				organizationAllowList={{ allowAll: true, providers: {} }}
+				valueTransform={toBedrockModelId}
+				onModelChange={(modelId) =>
+					handleModelChangeSideEffects(providerIdentifiers.bedrock, modelId, setField)
+				}
+			/>
+		)
+
+		it("selects the custom-arn pseudo-model and fills the custom ARN when an ARN is pasted", async () => {
+			let apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId: bedrockDefaultModelId,
+			}
+			const setField = vi.fn(function <K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K]) {
+				apiConfiguration = { ...apiConfiguration, [field]: value }
+			})
+
+			const { rerender } = await act(async () =>
+				renderWithExtensionState(renderBedrockPicker(apiConfiguration, setField), { queryClient }),
+			)
+
+			await act(async () => {
+				fireEvent.click(screen.getByTestId("model-picker-button"))
+			})
+			await act(async () => {
+				vi.advanceTimersByTime(100)
+			})
+			await act(async () => {
+				fireEvent.input(screen.getByTestId("model-input"), { target: { value: appProfileArn } })
+			})
+			await act(async () => {
+				vi.advanceTimersByTime(100)
+			})
+			await act(async () => {
+				fireEvent.click(screen.getByTestId("use-custom-model"))
+			})
+			await act(async () => {
+				vi.advanceTimersByTime(100)
+			})
+
+			expect(apiConfiguration.apiModelId).toBe("custom-arn")
+			expect(apiConfiguration.awsCustomArn).toBe(appProfileArn)
+			expect(setField).not.toHaveBeenCalledWith("apiModelId", appProfileArn)
+
+			await act(async () => {
+				rerender(renderBedrockPicker(apiConfiguration, setField))
+			})
+
+			expect(screen.getByTestId("model-picker-button")).toHaveTextContent("custom-arn")
+		})
+
+		it("clears the custom ARN when a regular Bedrock model is selected", async () => {
+			let apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId: "custom-arn",
+				awsCustomArn: appProfileArn,
+			}
+			const setField = vi.fn(function <K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K]) {
+				apiConfiguration = { ...apiConfiguration, [field]: value }
+			})
+
+			await act(async () =>
+				renderWithExtensionState(renderBedrockPicker(apiConfiguration, setField), { queryClient }),
+			)
+
+			await act(async () => {
+				fireEvent.click(screen.getByTestId("model-picker-button"))
+			})
+			await act(async () => {
+				vi.advanceTimersByTime(100)
+			})
+			await act(async () => {
+				fireEvent.click(screen.getByTestId(`model-option-${bedrockDefaultModelId}`))
+			})
+			await act(async () => {
+				vi.advanceTimersByTime(100)
+			})
+
+			expect(apiConfiguration.apiModelId).toBe(bedrockDefaultModelId)
+			expect(apiConfiguration.awsCustomArn).toBe("")
 		})
 	})
 })

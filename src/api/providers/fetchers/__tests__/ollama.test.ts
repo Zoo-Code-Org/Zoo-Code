@@ -1,6 +1,6 @@
 import axios from "axios"
 
-import { getOllamaModels, parseOllamaModel } from "../ollama"
+import { getOllamaModels, isIpv4LoopbackHost, isSecureOllamaEndpoint, parseOllamaModel } from "../ollama"
 import ollamaModelsData from "./fixtures/ollama-model-details.json"
 
 // Mock axios
@@ -116,7 +116,196 @@ describe("Ollama Fetcher", () => {
 		})
 	})
 
+	describe("isSecureOllamaEndpoint", () => {
+		it("should treat loopback HTTP endpoints as safe", () => {
+			expect(isSecureOllamaEndpoint("http://localhost:11434")).toBe(true)
+			expect(isSecureOllamaEndpoint("http://127.0.0.1:11434")).toBe(true)
+			expect(isSecureOllamaEndpoint("http://[::1]:11434")).toBe(true)
+		})
+
+		it("should only treat strict 127.0.0.0/8 IPv4 literals as safe", () => {
+			// Regression: the old /^127\./ prefix also matched DNS names such as
+			// 127.example.com, which would leak the key over cleartext HTTP.
+			expect(isSecureOllamaEndpoint("http://127.example.com:11434")).toBe(false)
+			expect(isSecureOllamaEndpoint("http://127.99.99.99:11434")).toBe(true) // rest of 127.0.0.0/8
+			expect(isSecureOllamaEndpoint("http://127.0.0.255:11434")).toBe(true) // range edge
+			expect(isSecureOllamaEndpoint("http://1270.0.0.1:11434")).toBe(false) // 1270 is not a valid octet
+			expect(isSecureOllamaEndpoint("http://127.256.0.1:11434")).toBe(false)
+			expect(isSecureOllamaEndpoint("http://one.two.three.four:11434")).toBe(false)
+		})
+
+		it("should treat any HTTPS endpoint as safe", () => {
+			expect(isSecureOllamaEndpoint("https://ollama.example.com")).toBe(true)
+			expect(isSecureOllamaEndpoint("https://10.0.0.5:11434")).toBe(true)
+		})
+
+		it("should treat remote HTTP endpoints as unsafe", () => {
+			expect(isSecureOllamaEndpoint("http://ollama.example.com:11434")).toBe(false)
+			expect(isSecureOllamaEndpoint("http://10.0.0.5:11434")).toBe(false)
+		})
+
+		it("should treat unparseable endpoints as unsafe", () => {
+			expect(isSecureOllamaEndpoint("not a url")).toBe(false)
+		})
+
+		it("should judge the real host, not look-alike text", () => {
+			// userinfo spoof: the host is evil.com
+			expect(isSecureOllamaEndpoint("http://127.0.0.1@evil.com:11434")).toBe(false)
+			expect(isSecureOllamaEndpoint("http://localhost@evil.com:11434")).toBe(false)
+			// look-alike host names
+			expect(isSecureOllamaEndpoint("http://localhost.evil.com:11434")).toBe(false)
+			expect(isSecureOllamaEndpoint("http://notlocalhost:11434")).toBe(false)
+		})
+
+		it("should fail closed for a schemeless host", () => {
+			expect(isSecureOllamaEndpoint("localhost:11434")).toBe(false)
+			expect(isSecureOllamaEndpoint("127.0.0.1:11434")).toBe(false)
+		})
+	})
+
+	describe("isIpv4LoopbackHost", () => {
+		it("should accept only four-octet 127/8 literals", () => {
+			expect(isIpv4LoopbackHost("127.0.0.1")).toBe(true)
+			expect(isIpv4LoopbackHost("127.255.255.255")).toBe(true)
+			expect(isIpv4LoopbackHost("0.0.0.1")).toBe(false)
+		})
+
+		it("should accept an octet of 255 and reject 256", () => {
+			expect(isIpv4LoopbackHost("127.255.255.255")).toBe(true)
+			expect(isIpv4LoopbackHost("127.0.0.256")).toBe(false)
+			expect(isIpv4LoopbackHost("127.0.256.0")).toBe(false)
+			expect(isIpv4LoopbackHost("127.256.0.0")).toBe(false)
+		})
+
+		it("should reject hosts with the wrong octet count", () => {
+			expect(isIpv4LoopbackHost("127.0.0")).toBe(false)
+			expect(isIpv4LoopbackHost("127.0.0.0.1")).toBe(false)
+		})
+
+		it("should reject non-numeric octets even when they parse as numbers", () => {
+			// Number("0x4") === 4 and Number("1e2") === 100, so only the anchored
+			// octet regex rejects these inputs.
+			expect(isIpv4LoopbackHost("127.0.0.0x4")).toBe(false)
+			expect(isIpv4LoopbackHost("127.1e2.0.1")).toBe(false)
+		})
+
+		it("should reject out-of-range octets", () => {
+			expect(isIpv4LoopbackHost("127.999.0.1")).toBe(false)
+			expect(isIpv4LoopbackHost("0127.0.0.1")).toBe(false)
+		})
+	})
+
 	describe("getOllamaModels", () => {
+		// Shared /api/tags and /api/show mock payloads. Each call returns fresh
+		// objects so tests cannot share mutable state.
+		const makeOllamaTagsPayload = (modelName: string) => ({
+			models: [
+				{
+					name: modelName,
+					model: modelName,
+					modified_at: "2025-06-03T09:23:22.610222878-04:00",
+					size: 14333928010,
+					digest: "6a5f0c01d2c96c687d79e32fdd25b87087feb376bf9838f854d10be8cf3c10a5",
+					details: {
+						family: "llama",
+						families: ["llama"],
+						format: "gguf",
+						parameter_size: "23.6B",
+						parent_model: "",
+						quantization_level: "Q4_K_M",
+					},
+				},
+			],
+		})
+		const makeOllamaShowPayload = () => ({
+			license: "Mock License",
+			modelfile: "FROM /path/to/blob\nTEMPLATE {{ .Prompt }}",
+			parameters: "num_ctx 4096\nstop_token <eos>",
+			template: "{{ .System }}USER: {{ .Prompt }}ASSISTANT:",
+			modified_at: "2025-06-03T09:23:22.610222878-04:00",
+			details: {
+				parent_model: "",
+				format: "gguf",
+				family: "llama",
+				families: ["llama"],
+				parameter_size: "23.6B",
+				quantization_level: "Q4_K_M",
+			},
+			model_info: {
+				"ollama.context_length": 4096,
+				"some.other.info": "value",
+			},
+			capabilities: ["completion", "tools"], // Has tools capability
+		})
+
+		it("should omit the Authorization header for a remote HTTP endpoint", async () => {
+			const baseUrl = "http://ollama.example.com:11434"
+			const apiKey = "test-api-key-123"
+
+			mockedAxios.get.mockResolvedValueOnce({ data: { models: [] } })
+
+			const result = await getOllamaModels(baseUrl, apiKey)
+
+			expect(mockedAxios.get).toHaveBeenCalledTimes(1)
+			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/api/tags`, { headers: {} })
+			expect(result).toEqual({})
+		})
+
+		it("should include the Authorization header for an HTTPS endpoint", async () => {
+			const baseUrl = "https://ollama.example.com:11434"
+			const apiKey = "test-api-key-123"
+
+			mockedAxios.get.mockResolvedValueOnce({ data: { models: [] } })
+
+			const result = await getOllamaModels(baseUrl, apiKey)
+
+			expect(mockedAxios.get).toHaveBeenCalledTimes(1)
+			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/api/tags`, {
+				headers: { Authorization: `Bearer ${apiKey}` },
+			})
+			expect(result).toEqual({})
+		})
+
+		it.each(["http://localhost:11434", "http://[::1]:11434"])(
+			"should send the Authorization header and disable proxy routing for a loopback endpoint %s",
+			async (baseUrl) => {
+				const apiKey = "test-api-key-123"
+				const modelName = "devstral2to16:latest"
+
+				mockedAxios.get.mockResolvedValueOnce({ data: makeOllamaTagsPayload(modelName) })
+				mockedAxios.post.mockResolvedValueOnce({ data: makeOllamaShowPayload() })
+
+				const result = await getOllamaModels(baseUrl, apiKey)
+
+				// A cleartext loopback request carrying the bearer token must not
+				// be routed through any HTTP proxy, otherwise the proxy would see
+				// the credential in cleartext (CWE-319). Both requests bypass the
+				// proxy. The IPv6 loopback [::1] is treated the same as the IPv4
+				// loopback: the credential is attached and proxy routing is
+				// disabled.
+				const expectedHeaders = { Authorization: `Bearer ${apiKey}` }
+				expect(mockedAxios.get).toHaveBeenCalledTimes(1)
+				expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/api/tags`, {
+					headers: expectedHeaders,
+					proxy: false,
+				})
+
+				expect(mockedAxios.post).toHaveBeenCalledTimes(1)
+				expect(mockedAxios.post).toHaveBeenCalledWith(
+					`${baseUrl}/api/show`,
+					{ model: modelName },
+					{
+						headers: expectedHeaders,
+						proxy: false,
+					},
+				)
+
+				expect(typeof result).toBe("object")
+				expect(Object.keys(result).length).toBe(1)
+				expect(result[modelName]).toBeDefined()
+			},
+		)
+
 		it("should fetch model list from /api/tags and include models with tools capability", async () => {
 			const baseUrl = "http://localhost:11434"
 			const modelName = "devstral2to16:latest"
@@ -238,7 +427,7 @@ describe("Ollama Fetcher", () => {
 		it("should return an empty list if the initial /api/tags call fails", async () => {
 			const baseUrl = "http://localhost:11434"
 			mockedAxios.get.mockRejectedValueOnce(new Error("Network error"))
-			const consoleInfoSpy = vi.spyOn(console, "error").mockImplementation(function () {}) // Spy and suppress output
+			vi.spyOn(console, "error").mockImplementation(function () {}) // Spy and suppress output
 
 			const result = await getOllamaModels(baseUrl)
 
@@ -265,6 +454,46 @@ describe("Ollama Fetcher", () => {
 			expect(result).toEqual({})
 
 			consoleInfoSpy.mockRestore() // Restore original console.info
+		})
+
+		it("should warn once per origin when the API key is dropped for a remote HTTP endpoint", async () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(function () {})
+			mockedAxios.get.mockResolvedValue({ data: { models: [] } })
+			const url = "http://user:secret@drop-warn.example.com:11434/v1?token=abc"
+
+			await getOllamaModels(url, "test-api-key")
+			await getOllamaModels(url, "test-api-key")
+
+			const dropWarnings = warnSpy.mock.calls.filter(([m]) => String(m).includes("API key is set"))
+			expect(dropWarnings).toHaveLength(1)
+			const text = String(dropWarnings[0][0])
+			expect(text).toContain("http://drop-warn.example.com:11434")
+			expect(text).not.toMatch(/secret|test-api-key|token/)
+			expect(mockedAxios.get.mock.calls[0][1]).toEqual(expect.objectContaining({ headers: {} }))
+			warnSpy.mockRestore()
+		})
+
+		it("should not warn about a dropped key when none is set or the endpoint is secure", async () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(function () {})
+			mockedAxios.get.mockResolvedValue({ data: { models: [] } })
+
+			await getOllamaModels("http://nokey-warn.example.com:11434")
+			await getOllamaModels("https://secure-warn.example.com", "test-api-key")
+
+			expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("API key is set"))
+			warnSpy.mockRestore()
+		})
+
+		it("should log only the origin of a base URL that holds credentials and a query", async () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(function () {})
+			const error = new Error("Connection refused")
+			;(error as NodeJS.ErrnoException).code = "ECONNREFUSED"
+			mockedAxios.get.mockRejectedValueOnce(error)
+
+			await getOllamaModels("http://user:pass@localhost:11434/path?token=secret")
+
+			expect(warnSpy).toHaveBeenCalledWith("Failed connecting to Ollama at http://localhost:11434")
+			warnSpy.mockRestore()
 		})
 
 		it("should handle models with null families field in API response", async () => {
@@ -336,61 +565,25 @@ describe("Ollama Fetcher", () => {
 			const apiKey = "test-api-key-123"
 			const modelName = "test-model:latest"
 
-			const mockApiTagsResponse = {
-				models: [
-					{
-						name: modelName,
-						model: modelName,
-						modified_at: "2025-06-03T09:23:22.610222878-04:00",
-						size: 14333928010,
-						digest: "6a5f0c01d2c96c687d79e32fdd25b87087feb376bf9838f854d10be8cf3c10a5",
-						details: {
-							family: "llama",
-							families: ["llama"],
-							format: "gguf",
-							parameter_size: "23.6B",
-							parent_model: "",
-							quantization_level: "Q4_K_M",
-						},
-					},
-				],
-			}
-			const mockApiShowResponse = {
-				license: "Mock License",
-				modelfile: "FROM /path/to/blob\nTEMPLATE {{ .Prompt }}",
-				parameters: "num_ctx 4096\nstop_token <eos>",
-				template: "{{ .System }}USER: {{ .Prompt }}ASSISTANT:",
-				modified_at: "2025-06-03T09:23:22.610222878-04:00",
-				details: {
-					parent_model: "",
-					format: "gguf",
-					family: "llama",
-					families: ["llama"],
-					parameter_size: "23.6B",
-					quantization_level: "Q4_K_M",
-				},
-				model_info: {
-					"ollama.context_length": 4096,
-					"some.other.info": "value",
-				},
-				capabilities: ["completion", "tools"], // Has tools capability
-			}
-
-			mockedAxios.get.mockResolvedValueOnce({ data: mockApiTagsResponse })
-			mockedAxios.post.mockResolvedValueOnce({ data: mockApiShowResponse })
+			mockedAxios.get.mockResolvedValueOnce({ data: makeOllamaTagsPayload(modelName) })
+			mockedAxios.post.mockResolvedValueOnce({ data: makeOllamaShowPayload() })
 
 			const result = await getOllamaModels(baseUrl, apiKey)
 
 			const expectedHeaders = { Authorization: `Bearer ${apiKey}` }
-
+			// Cleartext loopback + bearer token: the fetcher also disables proxy
+			// routing on both requests (CWE-319).
 			expect(mockedAxios.get).toHaveBeenCalledTimes(1)
-			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/api/tags`, { headers: expectedHeaders })
+			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/api/tags`, {
+				headers: expectedHeaders,
+				proxy: false,
+			})
 
 			expect(mockedAxios.post).toHaveBeenCalledTimes(1)
 			expect(mockedAxios.post).toHaveBeenCalledWith(
 				`${baseUrl}/api/show`,
 				{ model: modelName },
-				{ headers: expectedHeaders },
+				{ headers: expectedHeaders, proxy: false },
 			)
 
 			expect(typeof result).toBe("object")
@@ -482,6 +675,83 @@ describe("Ollama Fetcher", () => {
 				`Error fetching details for model ${failingModel}:`,
 				expect.any(Error),
 			)
+
+			consoleErrorSpy.mockRestore()
+		})
+
+		it("should pass the caller's abort signal to both the list and per-model requests", async () => {
+			const baseUrl = "http://localhost:11434"
+			const controller = new AbortController()
+
+			mockedAxios.get.mockResolvedValueOnce({
+				data: {
+					models: [
+						{
+							name: "test-model:latest",
+							model: "test-model:latest",
+							details: { family: "llama", parameter_size: "7B" },
+						},
+					],
+				},
+			})
+			mockedAxios.post.mockResolvedValueOnce({ data: { details: { family: "llama" }, model_info: {} } })
+
+			await getOllamaModels(baseUrl, undefined, { signal: controller.signal })
+
+			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/api/tags`, {
+				headers: {},
+				signal: controller.signal,
+			})
+			expect(mockedAxios.post).toHaveBeenCalledWith(
+				`${baseUrl}/api/show`,
+				{ model: "test-model:latest" },
+				{ headers: {}, signal: controller.signal },
+			)
+		})
+
+		it("should reject with an AbortError when the signal aborts the fan-out requests", async () => {
+			const baseUrl = "http://localhost:11434"
+			const controller = new AbortController()
+
+			mockedAxios.get.mockResolvedValueOnce({
+				data: {
+					models: [
+						{
+							name: "model-a:latest",
+							model: "model-a:latest",
+							details: { family: "llama", parameter_size: "7B" },
+						},
+						{
+							name: "model-b:latest",
+							model: "model-b:latest",
+							details: { family: "llama", parameter_size: "7B" },
+						},
+					],
+				},
+			})
+			mockedAxios.post.mockImplementation((_url: string, _body: unknown, config?: { signal?: AbortSignal }) => {
+				// Mirror the HTTP client: a request rejects when its signal fires,
+				// including when the signal was already aborted when the request started.
+				return new Promise<never>((_resolve, reject) => {
+					if (config?.signal?.aborted) {
+						reject(new Error("canceled"))
+						return
+					}
+					config?.signal?.addEventListener?.("abort", () => reject(new Error("canceled")), { once: true })
+				})
+			})
+
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
+
+			// The abort lands while the model list is still awaiting, so every
+			// per-model request is created already-aborted; the fan-out's per-model
+			// catch swallows those rejections, and the function-level abort guard
+			// must still turn the pending cancellation into a rejection rather
+			// than an (empty) success.
+			const fetchPromise = getOllamaModels(baseUrl, undefined, { signal: controller.signal })
+			controller.abort()
+
+			await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
 
 			consoleErrorSpy.mockRestore()
 		})

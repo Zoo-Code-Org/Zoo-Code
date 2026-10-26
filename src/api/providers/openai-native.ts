@@ -10,7 +10,6 @@ import {
 	OpenAiNativeModelId,
 	openAiNativeModels,
 	OPENAI_NATIVE_DEFAULT_TEMPERATURE,
-	type ReasoningEffort,
 	type VerbosityLevel,
 	type ReasoningEffortExtended,
 	OpenAiServiceTier,
@@ -122,11 +121,17 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		const hasCacheMissTokens = typeof inputDetails?.cache_miss_tokens === "number"
 		const cachedFromDetails = hasCachedTokens ? inputDetails.cached_tokens : 0
 		const missFromDetails = hasCacheMissTokens ? inputDetails.cache_miss_tokens : 0
+		const writesFromDetails =
+			typeof inputDetails?.cache_write_tokens === "number" ? inputDetails.cache_write_tokens : 0
 
 		// If total input tokens are missing but we have details, derive from them
 		let totalInputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0
-		if (totalInputTokens === 0 && inputDetails && (cachedFromDetails > 0 || missFromDetails > 0)) {
-			totalInputTokens = cachedFromDetails + missFromDetails
+		if (
+			totalInputTokens === 0 &&
+			inputDetails &&
+			(cachedFromDetails > 0 || missFromDetails > 0 || writesFromDetails > 0)
+		) {
+			totalInputTokens = cachedFromDetails + missFromDetails + writesFromDetails
 		}
 
 		const totalOutputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0
@@ -134,7 +139,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		// Note: missFromDetails is NOT used as fallback for cache writes
 		// Cache miss tokens represent tokens that weren't found in cache (part of input)
 		// Cache write tokens represent tokens being written to cache for future use
-		const cacheWriteTokens = usage.cache_creation_input_tokens ?? usage.cache_write_tokens ?? 0
+		const cacheWriteTokens = usage.cache_creation_input_tokens ?? usage.cache_write_tokens ?? writesFromDetails
 
 		const cacheReadTokens =
 			usage.cache_read_input_tokens ?? usage.cache_read_tokens ?? usage.cached_tokens ?? cachedFromDetails ?? 0
@@ -204,7 +209,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		this.streamedToolCallIds.clear()
 
 		// Use Responses API for ALL models
-		const { verbosity, reasoning } = this.getModel()
+		const { verbosity } = this.getModel()
 
 		// Resolve reasoning effort for models that support it
 		const reasoningEffort = this.getReasoningEffort(model)
@@ -445,7 +450,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 					yield outChunk
 				}
 			}
-		} catch (sdkErr: any) {
+		} catch {
 			// For errors, fallback to manual SSE via fetch
 			yield* this.makeResponsesApiRequest(requestBody, model, metadata, systemPrompt, messages)
 		} finally {
@@ -453,7 +458,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		}
 	}
 
-	private formatFullConversation(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): any {
+	private formatFullConversation(_systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): any {
 		// Format the entire conversation history for the Responses API using structured format
 		// The Responses API (like Realtime API) accepts a list of items, which can be messages, function calls, or function call outputs.
 		const formattedInput: any[] = []
@@ -553,8 +558,8 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		requestBody: any,
 		model: OpenAiNativeModel,
 		metadata?: ApiHandlerCreateMessageMetadata,
-		systemPrompt?: string,
-		messages?: Anthropic.Messages.MessageParam[],
+		_systemPrompt?: string,
+		_messages?: Anthropic.Messages.MessageParam[],
 	): ApiStream {
 		const apiKey = this.options.openAiNativeApiKey ?? NOT_PROVIDED
 		const baseUrl = this.options.openAiNativeBaseUrl || "https://api.openai.com"
@@ -676,8 +681,6 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		const decoder = new TextDecoder()
 		let buffer = ""
 		let hasContent = false
-		const totalInputTokens = 0
-		const totalOutputTokens = 0
 
 		try {
 			while (true) {
@@ -1123,10 +1126,8 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			// If we didn't get any content, don't throw - the API might have returned an empty response
 			// This can happen in certain edge cases and shouldn't break the flow
 		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error)
-			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")
-			TelemetryService.instance.captureException(apiError)
-
+			// No captureException here: the createMessage catch captures this
+			// failure once when the rethrown error propagates.
 			if (error instanceof Error) {
 				throw new Error(`Error processing response stream: ${error.message}`)
 			}
@@ -1386,9 +1387,20 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	}
 
 	private getReasoningEffort(model: OpenAiNativeModel): ReasoningEffortExtended | undefined {
-		// Single source of truth: user setting overrides, else model default (from types).
-		const selected = (this.options.reasoningEffort as any) ?? (model.info.reasoningEffort as any)
-		return selected && selected !== "disable" ? (selected as any) : undefined
+		const supported = model.info.supportsReasoningEffort
+		const configured = this.options.reasoningEffort
+		const fallback = model.info.reasoningEffort
+
+		if (configured === "disable" && !model.info.requiredReasoningEffort) return undefined
+		if (this.options.enableReasoningEffort === false && !model.info.requiredReasoningEffort) return undefined
+
+		if (Array.isArray(supported)) {
+			if (configured && configured !== "disable" && supported.includes(configured)) return configured
+			return fallback && supported.includes(fallback) ? fallback : undefined
+		}
+
+		const selected = configured === "disable" ? fallback : (configured ?? fallback)
+		return selected
 	}
 
 	/**
@@ -1488,7 +1500,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	getResponseId(): string | undefined {
 		return this.lastResponseId
 	}
-	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
 		try {
 			this.abortController = new AbortController()
 

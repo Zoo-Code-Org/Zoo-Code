@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import * as assert from "assert"
 
 import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
@@ -190,7 +191,7 @@ suite("Gemini provider", function () {
 		const aimockUrl = process.env.AIMOCK_URL
 		const isRecord = process.env.AIMOCK_RECORD === "true"
 		await globalThis.api.setConfiguration({
-			apiProvider: "openrouter" as const,
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
 			openRouterModelId: "openai/gpt-4.1",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
@@ -207,7 +208,7 @@ suite("Gemini provider", function () {
 			const promptTag = `gemini-e2e:reasoning-${reasoningEffort}`
 
 			await api.setConfiguration({
-				apiProvider: "gemini" as const,
+				apiProvider: providerIdentifiers.gemini,
 				geminiApiKey: aimockUrl && !isRecord ? "mock-key" : GEMINI_API_KEY!,
 				apiModelId: GEMINI_MODEL_ID,
 				enableReasoningEffort: reasoningEffort !== "disable",

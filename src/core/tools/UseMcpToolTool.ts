@@ -147,7 +147,9 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 		if (typeof params.arguments === "string") {
 			try {
 				params.arguments = JSON.parse(params.arguments)
-			} catch {}
+			} catch {
+				// Keep the raw string. The type check below reports the error.
+			}
 		}
 
 		let parsedArguments: Record<string, unknown> | undefined

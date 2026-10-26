@@ -10,6 +10,12 @@ import type { WebviewThemeFixture } from "./vscode-extension-host.js"
 
 export type RooCodeAPIEvents = RooCodeEvents
 
+export interface TaskApiConversationHistorySequence {
+	userText: string
+	assistantToolName: string
+	assistantToolInputText: string
+}
+
 export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	/**
 	 * Starts a new task with an optional initial message and images.
@@ -52,6 +58,25 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 * @returns The number of persisted API conversation history entries, or 0 if unavailable.
 	 */
 	getTaskApiConversationHistoryLength(taskId: string): Promise<number>
+	/**
+	 * Checks for an ordered user turn and assistant tool call in persisted API history.
+	 * @param taskId The ID of the task.
+	 * @param sequence The expected user text and assistant tool-call markers.
+	 * @returns True when the expected turns exist in order, or false if unavailable.
+	 */
+	hasTaskApiConversationHistorySequence(
+		taskId: string,
+		sequence: TaskApiConversationHistorySequence,
+	): Promise<boolean>
+	/**
+	 * Checks whether the persisted ui_messages.json for a task contains a
+	 * message with the given text. Reads from disk, so it only returns true
+	 * once the final write is durable. Intended for use in tests only.
+	 * @param taskId The ID of the task.
+	 * @param text The text to look for in persisted UI messages.
+	 * @returns True when a persisted UI message contains the text, or false if unavailable.
+	 */
+	hasTaskUiMessageText(taskId: string, text: string): Promise<boolean>
 	/**
 	 * Returns the current task stack.
 	 * @returns An array of task IDs.

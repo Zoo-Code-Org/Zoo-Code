@@ -98,6 +98,29 @@ describe("FireworksHandler", () => {
 		expect(model.info).toEqual(expect.objectContaining(fireworksModels[testModelId]))
 	})
 
+	it("should omit max_tokens for a custom model", async () => {
+		const handlerWithCustomModel = new FireworksHandler({
+			apiModelId: "accounts/fireworks/models/deepseek-v4p1-flash",
+			fireworksApiKey: "test-fireworks-api-key",
+		})
+
+		await collectStream(handlerWithCustomModel.createMessage("system prompt", []))
+
+		expect(mockCreate.mock.calls[0][0].model).toBe("accounts/fireworks/models/deepseek-v4p1-flash")
+		expect(mockCreate.mock.calls[0][0].max_tokens).toBeUndefined()
+	})
+
+	it("should still send a positive max_tokens for a known model", async () => {
+		const handlerWithModel = new FireworksHandler({
+			apiModelId: "accounts/fireworks/models/kimi-k2-instruct",
+			fireworksApiKey: "test-fireworks-api-key",
+		})
+
+		await collectStream(handlerWithModel.createMessage("system prompt", []))
+
+		expect(mockCreate.mock.calls[0][0].max_tokens).toBe(16384)
+	})
+
 	it.each([
 		{
 			modelId: "accounts/fireworks/models/glm-5p1" as const,
@@ -127,6 +150,13 @@ describe("FireworksHandler", () => {
 			outputPrice: 3.96,
 			cacheReadsPrice: 0.044,
 		},
+		{
+			modelId: "accounts/fireworks/models/deepseek-v4-flash-vision-exp" as const,
+			contextWindow: 1_048_576,
+			inputPrice: 0.22,
+			outputPrice: 0.66,
+			cacheReadsPrice: 0.007,
+		},
 	])(
 		"should expose newly added model $modelId",
 		({ modelId, contextWindow, inputPrice, outputPrice, cacheReadsPrice }) => {
@@ -146,6 +176,16 @@ describe("FireworksHandler", () => {
 			expect(handlerWithModel.getModel().id).toBe(modelId)
 		},
 	)
+
+	it("should expose vision support for DeepSeek V4 Flash Vision Exp", () => {
+		const model = fireworksModels["accounts/fireworks/models/deepseek-v4-flash-vision-exp"]
+
+		expect(model).toMatchObject({
+			supportsImages: true,
+			supportsPromptCache: true,
+			supportsMaxTokens: true,
+		})
+	})
 
 	it("should return Kimi K2 Instruct model with correct configuration", () => {
 		const testModelId: FireworksModelId = "accounts/fireworks/models/kimi-k2-instruct"

@@ -18,11 +18,15 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
 import { providerIdentifiers } from "@roo-code/types"
+import type { ModelInfo } from "@roo-code/types"
+
+import { applyOpenRouterMoonshotK3Profile } from "../fetchers/openrouter"
 
 import { OpenRouterHandler } from "../openrouter"
 import { Package } from "../../../shared/package"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { collectStreamAndParseToolCalls } from "../../../test-utils/native-tool-call-stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("openai")
@@ -40,6 +44,14 @@ vitest.mock("@roo-code/telemetry", () => ({
 			captureException: (...args: unknown[]) => mockCaptureException(...args),
 		},
 	},
+}))
+
+const { mockGetModelEndpoints } = vitest.hoisted(() => ({
+	mockGetModelEndpoints: vitest.fn(),
+}))
+
+vitest.mock("../fetchers/modelEndpointCache", () => ({
+	getModelEndpoints: mockGetModelEndpoints,
 }))
 
 vitest.mock("../fetchers/modelCache", () => ({
@@ -100,11 +112,24 @@ vitest.mock("../fetchers/modelCache", () => ({
 				excludedTools: ["existing_excluded"],
 				includedTools: ["existing_included"],
 			},
+			// Stale cache record simulating what users cached before the Moonshot K3
+			// profile existed: the fabricated 0.2 context-window max_tokens and a
+			// boolean supportsReasoningEffort with no default effort.
+			"moonshotai/kimi-k3": {
+				maxTokens: 209716,
+				contextWindow: 1000000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				inputPrice: 0.6,
+				outputPrice: 3,
+				description: "Kimi K3",
+				supportsReasoningEffort: true,
+			},
 		})
 	}),
-	refreshModels: vitest.fn(async (options) => {
+	refreshModels: vitest.fn(async (options, handler) => {
 		const { getModels } = await import("../fetchers/modelCache")
-		return getModels(options)
+		return getModels(options, handler)
 	}),
 }))
 
@@ -114,7 +139,13 @@ describe("OpenRouterHandler", () => {
 		openRouterModelId: "anthropic/claude-sonnet-4",
 	})
 
-	beforeEach(() => clearAllMocks())
+	beforeEach(() => {
+		clearAllMocks()
+		// Endpoint records default to "not fetched" (same as the real guard for
+		// missing options); tests that exercise the specific-provider branch
+		// override this per test.
+		mockGetModelEndpoints.mockResolvedValue({})
+	})
 
 	it("initializes with correct options", () => {
 		const handler = new OpenRouterHandler(mockOptions)
@@ -236,8 +267,122 @@ describe("OpenRouterHandler", () => {
 			expect(result.info.excludedTools).toBeUndefined()
 			expect(result.info.includedTools).toBeUndefined()
 		})
+
+		it("applies the Moonshot K3 profile to stale cached model info", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "moonshotai/kimi-k3",
+				}),
+			)
+
+			const result = await handler.fetchModel()
+
+			// The stale cache record carried a fabricated max_tokens (209716) and a
+			// boolean supportsReasoningEffort with no default effort; the profile must
+			// correct all of that before any request parameters are derived.
+			expect(result.id).toBe("moonshotai/kimi-k3")
+			expect(result.maxTokens).toBe(32768)
+			expect(result.temperature).toBe(1)
+			expect(result.reasoningEffort).toBe("high")
+			expect(result.reasoning).toEqual({ effort: "high" })
+			expect(result.info.maxTokens).toBe(32768)
+			expect(result.info.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(result.info.reasoningEffort).toBe("high")
+			expect(result.info.supportsTemperature).toBe(true)
+			expect(result.info.defaultTemperature).toBe(1)
+		})
+
+		it("applies the Moonshot K3 profile to a stale specific-provider endpoint record", async () => {
+			// Endpoint records are cached separately from the parent model cache and
+			// are selected before the profile is applied. A stale endpoint record
+			// (fabricated max_tokens, boolean supportsReasoningEffort, no reasoning
+			// default, no temperature default) must be corrected for the selected
+			// endpoint.
+			mockGetModelEndpoints.mockResolvedValue({
+				moonshotai: {
+					maxTokens: 209716,
+					contextWindow: 1000000,
+					supportsImages: true,
+					supportsPromptCache: true,
+					inputPrice: 0.6,
+					outputPrice: 3,
+					description: "Kimi K3 (Moonshot endpoint)",
+					supportsReasoningEffort: true,
+				},
+			})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "moonshotai/kimi-k3",
+					openRouterSpecificProvider: "moonshotai",
+				}),
+			)
+
+			const result = await handler.fetchModel()
+
+			// The selected endpoint record (not the parent model cache entry) must be
+			// profiled: a regression that applied the profile before endpoint
+			// selection would send the stale endpoint values.
+			expect(result.id).toBe("moonshotai/kimi-k3")
+			expect(result.info.maxTokens).toBe(32768)
+			expect(result.info.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(result.info.reasoningEffort).toBe("high")
+			expect(result.info.supportsTemperature).toBe(true)
+			expect(result.info.defaultTemperature).toBe(1)
+			expect(result.maxTokens).toBe(32768)
+			expect(result.temperature).toBe(1)
+			expect(result.reasoningEffort).toBe("high")
+			expect(result.reasoning).toEqual({ effort: "high" })
+		})
 	})
 
+	describe("applyOpenRouterMoonshotK3Profile", () => {
+		// Stale cache record shape: fabricated 0.2 context-window max_tokens and a
+		// boolean supportsReasoningEffort with no default effort (pre-profile).
+		const staleK3Record: ModelInfo = {
+			maxTokens: 209_716,
+			contextWindow: 1_000_000,
+			supportsImages: true,
+			supportsPromptCache: true,
+			inputPrice: 0.6,
+			outputPrice: 3,
+			description: "Kimi K3 (stale cache)",
+			supportsReasoningEffort: true,
+		}
+
+		it("applies the profile to the exact moonshotai/kimi-k3 id", () => {
+			const result = applyOpenRouterMoonshotK3Profile("moonshotai/kimi-k3", { ...staleK3Record })
+
+			expect(result.maxTokens).toBe(32_768)
+			expect(result.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(result.reasoningEffort).toBe("high")
+			expect(result.supportsTemperature).toBe(true)
+			expect(result.defaultTemperature).toBe(1.0)
+			// Unprofiled fields pass through from the (stale) record
+			expect(result.contextWindow).toBe(1_000_000)
+			expect(result.description).toBe("Kimi K3 (stale cache)")
+		})
+
+		it("applies the profile to the tilde-prefixed rolling alias", () => {
+			const result = applyOpenRouterMoonshotK3Profile("~moonshotai/kimi-latest", { ...staleK3Record })
+
+			// The catalogue keeps the ~ prefix on the rolling alias id, so the profile
+			// must recognize the exact string rather than a stripped or bare alias
+			expect(result.maxTokens).toBe(32_768)
+			expect(result.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(result.reasoningEffort).toBe("high")
+			expect(result.supportsTemperature).toBe(true)
+			expect(result.defaultTemperature).toBe(1.0)
+		})
+
+		it("leaves non-K3 model records untouched", () => {
+			const record: ModelInfo = { ...staleK3Record }
+
+			expect(applyOpenRouterMoonshotK3Profile("moonshotai/kimi-k2-thinking", record)).toBe(record)
+		})
+	})
 	describe("createMessage", () => {
 		it("generates correct stream chunks", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
@@ -477,9 +622,6 @@ describe("OpenRouterHandler", () => {
 			// Import NativeToolCallParser to set up state
 			const { NativeToolCallParser } = await import("../../../core/assistant-message/NativeToolCallParser")
 
-			// Clear any previous state
-			NativeToolCallParser.clearRawChunkState()
-
 			const handler = new OpenRouterHandler(mockOptions)
 
 			const mockStream = asyncStreamFrom([
@@ -519,18 +661,22 @@ describe("OpenRouterHandler", () => {
 			} as any
 
 			const generator = handler.createMessage("test", [])
+			const parserScope = NativeToolCallParser.createScope()
 			const chunks = []
 
 			for await (const chunk of generator) {
 				// Simulate what Task.ts does: when we receive tool_call_partial,
 				// process it through NativeToolCallParser to populate rawChunkTracker
 				if (chunk.type === "tool_call_partial") {
-					NativeToolCallParser.processRawChunk({
-						index: chunk.index,
-						id: chunk.id,
-						name: chunk.name,
-						arguments: chunk.arguments,
-					})
+					NativeToolCallParser.processRawChunk(
+						{
+							index: chunk.index,
+							id: chunk.id,
+							name: chunk.name,
+							arguments: chunk.arguments,
+						},
+						parserScope,
+					)
 				}
 				chunks.push(chunk)
 			}
@@ -542,6 +688,179 @@ describe("OpenRouterHandler", () => {
 			expect(partialChunks).toHaveLength(1)
 			expect(endChunks).toHaveLength(1)
 			expect(endChunks[0].id).toBe("call_openrouter_test")
+		})
+
+		it("sends profiled max_tokens, explicit temperature 1.0, and reasoning effort for moonshotai/kimi-k3", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "moonshotai/kimi-k3",
+				}),
+			)
+
+			const mockStream = asyncStreamFrom([{ id: "test-id", choices: [{ delta: { content: "ok" } }] }])
+			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
+			const chatStub = { completions: { create: mockCreate } }
+			// The vitest-mocked OpenAI class is structurally incompatible with the narrow
+			// chat stub; the double assertion routes through unknown (instead of any) to
+			// keep this file's no-explicit-any budget flat.
+			const openAiPrototype = OpenAI as unknown as { prototype: { chat?: unknown } }
+			const originalChat = openAiPrototype.prototype.chat
+			openAiPrototype.prototype.chat = chatStub
+
+			try {
+				const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "test message" }]
+				await collectStream(handler.createMessage("test system prompt", messages))
+
+				const [requestParams] = mockCreate.mock.calls[0] as [Record<string, unknown>]
+				expect(requestParams).toMatchObject({
+					model: "moonshotai/kimi-k3",
+					max_tokens: 32768,
+					temperature: 1,
+					reasoning: { effort: "high" },
+				})
+				// K3 is fixed at temperature 1.0 upstream (issue #1316); the request
+				// must carry it explicitly.
+			} finally {
+				// Restore the original prototype property so this stub cannot leak
+				// into later tests; clearAllMocks does not undo prototype assignment.
+				openAiPrototype.prototype.chat = originalChat
+			}
+		})
+
+		it("emits completion only for identified calls and clears completed IDs", async () => {
+			const toolCall = (id?: string) => ({
+				id: "stream",
+				choices: [
+					{
+						delta: {
+							tool_calls: [
+								{ index: 0, id, function: { name: "read_file", arguments: '{"path":"test.ts"}' } },
+							],
+						},
+						index: 0,
+					},
+				],
+			})
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValueOnce(
+					asyncStreamFrom([
+						toolCall(),
+						{ id: "stream", choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }] },
+					]),
+				)
+				.mockResolvedValueOnce(
+					asyncStreamFrom([
+						toolCall("call_openrouter_stop"),
+						{ id: "stream", choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+					]),
+				)
+				.mockResolvedValueOnce(
+					asyncStreamFrom([
+						toolCall("call_openrouter_once"),
+						{ id: "stream", choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }] },
+						{ id: "stream", choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }] },
+					]),
+				)
+			Object.defineProperty(OpenAI.prototype, "chat", {
+				configurable: true,
+				value: { completions: { create: mockCreate } },
+			})
+			const handler = new OpenRouterHandler(mockOptions)
+
+			const idlessChunks = await collectStream(handler.createMessage("idless", []))
+			const stoppedChunks = await collectStream(handler.createMessage("stopped", []))
+			const completedChunks = await collectStream(handler.createMessage("completed", []))
+
+			expect(idlessChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([])
+			expect(stoppedChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([])
+			expect(completedChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
+				{ type: "tool_call_end", id: "call_openrouter_once" },
+			])
+		})
+
+		it("isolates overlapping tool-call finalization between provider streams", async () => {
+			let releaseFirstStream: (() => void) | undefined
+			let markFirstStreamPaused: (() => void) | undefined
+			const firstStreamRelease = new Promise<void>((resolve) => {
+				releaseFirstStream = resolve
+			})
+			const firstStreamPaused = new Promise<void>((resolve) => {
+				markFirstStreamPaused = resolve
+			})
+			const firstStream = async function* () {
+				yield {
+					id: "stream-a",
+					choices: [
+						{
+							delta: {
+								tool_calls: [
+									{
+										index: 0,
+										id: "call_openrouter_a",
+										function: { name: "read_file", arguments: '{"path":"a' },
+									},
+								],
+							},
+							index: 0,
+						},
+					],
+				}
+				markFirstStreamPaused?.()
+				await firstStreamRelease
+				yield {
+					id: "stream-a",
+					choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }],
+				}
+			}
+			const secondStream = asyncStreamFrom([
+				{
+					id: "stream-b",
+					choices: [
+						{
+							delta: {
+								tool_calls: [
+									{
+										index: 0,
+										id: "call_openrouter_b",
+										function: { name: "read_file", arguments: '{"path":"b' },
+									},
+								],
+							},
+							index: 0,
+						},
+					],
+				},
+				{ id: "stream-b", choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }] },
+			])
+			const mockCreate = vitest.fn().mockResolvedValueOnce(firstStream()).mockResolvedValueOnce(secondStream)
+			Object.defineProperty(OpenAI.prototype, "chat", {
+				configurable: true,
+				value: { completions: { create: mockCreate } },
+			})
+			const handler = new OpenRouterHandler(mockOptions)
+
+			const firstChunksPromise = collectStreamAndParseToolCalls(handler.createMessage("first", []))
+			await firstStreamPaused
+			const secondChunks = await collectStreamAndParseToolCalls(handler.createMessage("second", []))
+			releaseFirstStream?.()
+			const firstChunks = await firstChunksPromise
+
+			expect(secondChunks.chunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
+				{ type: "tool_call_end", id: "call_openrouter_b" },
+			])
+			expect(firstChunks.chunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
+				{ type: "tool_call_end", id: "call_openrouter_a" },
+			])
+			expect(firstChunks.parserEvents).toEqual([
+				{ type: "tool_call_start", id: "call_openrouter_a", name: "read_file" },
+				{ type: "tool_call_delta", id: "call_openrouter_a", name: "read_file", delta: '{"path":"a' },
+			])
+			expect(secondChunks.parserEvents).toEqual([
+				{ type: "tool_call_start", id: "call_openrouter_b", name: "read_file" },
+				{ type: "tool_call_delta", id: "call_openrouter_b", name: "read_file", delta: '{"path":"b' },
+			])
 		})
 	})
 
@@ -714,6 +1033,13 @@ describe("OpenRouterHandler", () => {
 					status: 429,
 				}),
 			)
+		})
+	})
+
+	describe("model catalog", () => {
+		it("reports its cache scope", () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			expect(handler.getModelCacheScope()).toEqual({ urlScoped: false, keyScoped: false, authScoped: false })
 		})
 	})
 })

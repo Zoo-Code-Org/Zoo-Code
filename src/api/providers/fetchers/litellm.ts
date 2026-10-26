@@ -4,15 +4,21 @@ import type { ModelRecord } from "@roo-code/types"
 import { isLiteLLMPreserveReasoningModel } from "@roo-code/types"
 
 import { DEFAULT_HEADERS } from "../constants"
+import { throwIfAborted } from "../utils/abort-signal"
 /**
  * Fetches available models from a LiteLLM server
  *
  * @param apiKey The API key for the LiteLLM server
  * @param baseUrl The base URL of the LiteLLM server
+ * @param opts Optional per-request controls; `signal` cancels the in-flight request.
  * @returns A promise that resolves to a record of model IDs to model info
  * @throws Will throw an error if the request fails or the response is not as expected.
  */
-export async function getLiteLLMModels(apiKey: string, baseUrl: string): Promise<ModelRecord> {
+export async function getLiteLLMModels(
+	apiKey: string,
+	baseUrl: string,
+	opts?: { signal?: AbortSignal },
+): Promise<ModelRecord> {
 	try {
 		const headers: Record<string, string> = {
 			"Content-Type": "application/json",
@@ -28,8 +34,7 @@ export async function getLiteLLMModels(apiKey: string, baseUrl: string): Promise
 		// Normalize the pathname by removing trailing slashes and multiple slashes
 		urlObj.pathname = urlObj.pathname.replace(/\/+$/, "").replace(/\/+/g, "/") + "/v1/model/info"
 		const url = urlObj.href
-		// Added timeout to prevent indefinite hanging
-		const response = await axios.get(url, { headers, timeout: 5000 })
+		const response = await axios.get(url, { headers, signal: opts?.signal })
 		const models: ModelRecord = {}
 
 		// Process the model info from the response
@@ -40,6 +45,8 @@ export async function getLiteLLMModels(apiKey: string, baseUrl: string): Promise
 				const litellmModelName = model?.litellm_params?.model as string | undefined
 
 				if (!modelName || !modelInfo || !litellmModelName) continue
+
+				const isGpt6Astra = litellmModelName === "openai/responses/gpt-6-astra"
 
 				// LiteLLM's /v1/model/info never reports reasoning capability flags, so infer
 				// preserveReasoning from explicit model ids in either the alias or routed model name.
@@ -61,6 +68,21 @@ export async function getLiteLLMModels(apiKey: string, baseUrl: string): Promise
 					cacheReadsPrice: modelInfo.cache_read_input_token_cost
 						? modelInfo.cache_read_input_token_cost * 1000000
 						: undefined,
+					...(isGpt6Astra && {
+						contextWindow: 1_050_000,
+						supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+						requiredReasoningEffort: true,
+						reasoningEffort: "medium",
+						supportsTemperature: false,
+						requiresResponsesApi: true,
+						longContextPricing: {
+							thresholdTokens: 272_000,
+							inputPriceMultiplier: 2,
+							outputPriceMultiplier: 1.5,
+							cacheWritesPriceMultiplier: 2,
+							cacheReadsPriceMultiplier: 2,
+						},
+					}),
 					...(preservesReasoning && { preserveReasoning: true }),
 					description: `${modelName} via LiteLLM proxy`,
 				}
@@ -73,6 +95,11 @@ export async function getLiteLLMModels(apiKey: string, baseUrl: string): Promise
 
 		return models
 	} catch (error: any) {
+		// Surface cancellation as a plain AbortError: wrapping it in the
+		// "Failed to fetch" messages below would hide the abort from callers
+		// that discriminate on the error name.
+		throwIfAborted(opts?.signal)
+
 		console.error("Error fetching LiteLLM models:", error.message ? error.message : error)
 		if (axios.isAxiosError(error) && error.response) {
 			throw new Error(

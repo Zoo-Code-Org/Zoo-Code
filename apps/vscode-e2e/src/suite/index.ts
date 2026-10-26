@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import * as path from "path"
 import Mocha from "mocha"
 import { glob } from "glob"
@@ -20,7 +21,7 @@ export async function run() {
 	const isRecord = process.env.AIMOCK_RECORD === "true"
 
 	await api.setConfiguration({
-		apiProvider: "openrouter" as const,
+		apiProvider: providerIdentifiers.openrouter,
 		// In record mode, forward the real key so aimock can proxy it to OpenRouter.
 		// In replay mode, "mock-key" is sufficient — aimock never contacts the real API.
 		openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,

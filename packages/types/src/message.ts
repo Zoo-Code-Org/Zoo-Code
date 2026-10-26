@@ -140,6 +140,7 @@ export function isNonBlockingAsk(ask: ClineAsk): ask is NonBlockingAsk {
  * - `condense_context_error`: Error occurred during context condensation
  * - `codebase_search_result`: Results from searching the codebase
  * - `too_many_tools_warning`: Warning that too many MCP tools are enabled, which may confuse the LLM
+ * - `ignored_disabled_tools_warning`: Warning that a `disabledTools` entry names a protocol tool, which user settings cannot disable
  */
 export const clineSays = [
 	"error",
@@ -170,6 +171,7 @@ export const clineSays = [
 	"codebase_search_result",
 	"user_edit_todos",
 	"too_many_tools_warning",
+	"ignored_disabled_tools_warning",
 	"tool",
 ] as const
 
@@ -248,6 +250,7 @@ export type ContextTruncation = z.infer<typeof contextTruncationSchema>
  * Note: These fields are mutually exclusive - a message will have at most one of them.
  */
 export const clineMessageSchema = z.object({
+	messageId: z.string().optional(),
 	ts: z.number(),
 	type: z.union([z.literal("ask"), z.literal("say")]),
 	ask: clineAskSchema.optional(),

@@ -1,11 +1,15 @@
+import { WebviewFocusTracker } from "../WebviewFocusTracker"
 // pnpm --filter roo-cline test core/webview/__tests__/ClineProvider.taskHistory.spec.ts
 
 import * as vscode from "vscode"
-import type { HistoryItem, ExtensionMessage } from "@roo-code/types"
-import { RooCodeEventName } from "@roo-code/types"
+import { makeCompositeDisposable } from "../../../test-utils/vscode"
+import type { HistoryItem } from "@roo-code/types"
+import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { ContextProxy } from "../../config/ContextProxy"
+import { Task } from "../../task/Task"
+import { ProfileValidator } from "../../../shared/ProfileValidator"
 import { ClineProvider } from "../ClineProvider"
 
 // Mock setup
@@ -102,6 +106,7 @@ vi.mock("vscode", () => ({
 	ExtensionContext: vi.fn(),
 	OutputChannel: vi.fn(),
 	WebviewView: vi.fn(),
+	Disposable: { from: (...subscriptions: vscode.Disposable[]) => makeCompositeDisposable(...subscriptions) },
 	Uri: {
 		joinPath: vi.fn(),
 		file: vi.fn(),
@@ -241,6 +246,7 @@ vi.mock("@roo-code/cloud", () => ({
 				getOrganizationMemberships: vi.fn().mockResolvedValue([]),
 				getUserSettings: vi.fn().mockReturnValue(null),
 				isTaskSyncEnabled: vi.fn().mockReturnValue(false),
+				off: vi.fn(),
 			}
 		},
 	},
@@ -346,7 +352,13 @@ describe("ClineProvider Task History Synchronization", () => {
 			}),
 		} as unknown as vscode.WebviewView
 
-		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+		provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
 
 		// Wait for the async TaskHistoryStore initialization to complete
 		// (fire-and-forget from the constructor; microtasks need to flush)
@@ -383,6 +395,32 @@ describe("ClineProvider Task History Synchronization", () => {
 	const findCallsByType = (calls: any[][], type: string) => {
 		return calls.filter((call) => call[0]?.type === type)
 	}
+
+	it("uses per-task files without registering a globalState write-through callback", () => {
+		expect(provider.taskHistoryStore["onWrite"]).toBeUndefined()
+	})
+
+	it("does not write task history to globalState after a history mutation", async () => {
+		vi.mocked(mockContext.globalState.update).mockClear()
+
+		await provider.updateTaskHistory(createHistoryItem({ id: "file-backed-task", task: "File-backed task" }), {
+			broadcast: false,
+		})
+
+		expect(mockContext.globalState.update).not.toHaveBeenCalledWith("taskHistory", expect.anything())
+	})
+
+	it("does not write task history to globalState during disposal", async () => {
+		await provider.updateTaskHistory(
+			createHistoryItem({ id: "disposed-file-backed-task", task: "Disposed file-backed task" }),
+			{ broadcast: false },
+		)
+		vi.mocked(mockContext.globalState.update).mockClear()
+
+		await provider.dispose()
+
+		expect(mockContext.globalState.update).not.toHaveBeenCalledWith("taskHistory", expect.anything())
+	})
 
 	describe("updateTaskHistory", () => {
 		it("broadcasts task history update by default", async () => {
@@ -559,6 +597,100 @@ describe("ClineProvider Task History Synchronization", () => {
 		})
 	})
 
+	describe("renameTaskWithId", () => {
+		const getStored = (id: string) => provider.taskHistoryStore.get(id)
+
+		it("stores a trimmed title and broadcasts the updated item", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			provider.isViewLaunched = true
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-rename", task: "Original prompt" }))
+			mockPostMessage.mockClear()
+
+			await provider.renameTaskWithId("task-rename", "  Renamed  ")
+
+			expect(getStored("task-rename")).toMatchObject({ title: "Renamed", task: "Original prompt" })
+			const updates = findCallsByType(mockPostMessage.mock.calls, "taskHistoryItemUpdated")
+			expect(updates.at(-1)?.[0].taskHistoryItem).toMatchObject({ id: "task-rename", title: "Renamed" })
+		})
+
+		it.each([
+			["an empty string", ""],
+			["whitespace", "   "],
+			["undefined", undefined],
+		])("clears the title when given %s", async (_label, title) => {
+			// Set the starting title through the rename path: updateTaskHistory drops `title`.
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-clear", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			await provider.renameTaskWithId("task-clear", "Old title")
+			expect(getStored("task-clear")?.title).toBe("Old title")
+
+			await provider.renameTaskWithId("task-clear", title)
+
+			expect(getStored("task-clear")?.title).toBeUndefined()
+			expect(getStored("task-clear")?.task).toBe("Original prompt")
+		})
+
+		it("keeps the title when the task later saves metadata without one", async () => {
+			const item = createHistoryItem({ id: "task-keep", task: "Original prompt", status: "active" })
+			await provider.updateTaskHistory(item, { broadcast: false })
+			await provider.renameTaskWithId("task-keep", "Renamed")
+
+			// Mirrors Task.saveClineMessages(), whose taskMetadata() result never carries a title.
+			await provider.updateTaskHistory({ ...item, tokensIn: 500 }, { broadcast: false })
+
+			expect(getStored("task-keep")).toMatchObject({ title: "Renamed", tokensIn: 500 })
+		})
+
+		it("keeps a concurrent task save that is queued before the rename", async () => {
+			const item = createHistoryItem({ id: "task-race", task: "Original prompt", status: "active" })
+			await provider.updateTaskHistory(item, { broadcast: false })
+
+			// Start the save without awaiting it, so the rename runs while the save is queued.
+			const save = provider.updateTaskHistory({ ...item, tokensIn: 500 }, { broadcast: false })
+			const rename = provider.renameTaskWithId("task-race", "Renamed")
+			await Promise.all([save, rename])
+
+			expect(getStored("task-race")).toMatchObject({ title: "Renamed", tokensIn: 500 })
+		})
+
+		it("does not write a title through a full-item update", async () => {
+			await provider.updateTaskHistory(
+				createHistoryItem({ id: "task-title-owner", task: "Original prompt", title: "Stale title" }),
+				{ broadcast: false },
+			)
+
+			expect(getStored("task-title-owner")).toMatchObject({ id: "task-title-owner", task: "Original prompt" })
+			expect(getStored("task-title-owner")?.title).toBeUndefined()
+		})
+
+		it("does not revert a rename when a full-item update from an older snapshot lands", async () => {
+			const item = createHistoryItem({ id: "task-stale-write", task: "Original prompt", status: "active" })
+			await provider.updateTaskHistory(item, { broadcast: false })
+
+			// A prior rename leaves a title on the record; a caller reading the item now
+			// (e.g. onTaskCompleted, mode or profile switch) captures it in a pre-lock snapshot.
+			await provider.renameTaskWithId("task-stale-write", "Old title")
+			const staleSnapshot = { ...item, title: "Old title" }
+
+			// A queued rename completes after the snapshot was taken.
+			await provider.renameTaskWithId("task-stale-write", "Renamed")
+
+			await provider.updateTaskHistory({ ...staleSnapshot, status: "completed" }, { broadcast: false })
+
+			expect(getStored("task-stale-write")).toMatchObject({ title: "Renamed", status: "completed" })
+		})
+
+		it("does nothing for an unknown task", async () => {
+			const logSpy = vi.spyOn(provider, "log")
+
+			await provider.renameTaskWithId("missing-task", "Renamed")
+
+			expect(getStored("missing-task")).toBeUndefined()
+			expect(logSpy).toHaveBeenCalledWith("[renameTaskWithId] task missing-task not found in history")
+		})
+	})
+
 	describe("broadcastTaskHistoryUpdate", () => {
 		it("sends taskHistoryUpdated message with sorted history", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
@@ -640,6 +772,114 @@ describe("ClineProvider Task History Synchronization", () => {
 	})
 
 	describe("task history includes all workspaces", () => {
+		it("uses the default profile name when no task is active and no profile is saved", async () => {
+			await provider["updateGlobalState"]("currentApiConfigName", undefined)
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.currentTaskId).toBeUndefined()
+			expect(state.currentApiConfigName).toBe("default")
+		})
+
+		it("projects the active task's local mode and provider profile", async () => {
+			const activeTask = {
+				taskId: "task-local-context",
+				taskMode: "ask",
+				taskApiConfigName: undefined,
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "task-local-model",
+				},
+				clineMessages: [],
+				todoList: [],
+				messageQueueService: { messages: [] },
+			}
+			// The module-level Task mock intentionally implements only the fields this provider-state test reads.
+			provider["taskRegistry"].push(activeTask as unknown as Task)
+			await provider.updateTaskHistory(
+				createHistoryItem({
+					id: activeTask.taskId,
+					task: "Task-local context",
+					mode: "ask",
+					apiConfigName: undefined,
+				}),
+				{ broadcast: false },
+			)
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.mode).toBe("ask")
+			expect(state.currentApiConfigName).toBeUndefined()
+			expect(state.apiConfiguration).toEqual(activeTask.apiConfiguration)
+			expect(state.currentTaskId).toBe(activeTask.taskId)
+		})
+
+		it("passes the profile's tool repetition limits to the Task when resuming from history", async () => {
+			const state = await provider.getState()
+			vi.spyOn(provider, "getState").mockResolvedValue({
+				...state,
+				apiConfiguration: { ...state.apiConfiguration, consecutiveMistakeLimit: 6, toolRepetitionSoftLimit: 4 },
+			})
+
+			await provider.createTaskWithHistoryItem(createHistoryItem({ id: "resumed-task", task: "Resumed task" }), {
+				startTask: false,
+			})
+
+			expect(vi.mocked(Task)).toHaveBeenCalledWith(
+				expect.objectContaining({
+					historyItem: expect.objectContaining({ id: "resumed-task" }),
+					consecutiveMistakeLimit: 6,
+					toolRepetitionSoftLimit: 4,
+				}),
+			)
+		})
+
+		it("validates and applies the delegated child's effective profile", async () => {
+			const effectiveConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "allowed-child-model",
+				consecutiveMistakeLimit: 7,
+				toolRepetitionSoftLimit: 4,
+			}
+			const isProfileAllowed = vi.spyOn(ProfileValidator, "isProfileAllowed").mockReturnValue(true)
+			const parentTask = { taskId: "parent", workspacePath: "/test/workspace" } as Task
+
+			await provider.createTask("child", undefined, parentTask, {
+				startTask: false,
+				handoffExecutionContext: {
+					mode: "ask",
+					apiConfigName: "allowed-child",
+					apiConfiguration: effectiveConfiguration,
+				},
+			})
+
+			expect(isProfileAllowed).toHaveBeenCalledWith(effectiveConfiguration, expect.anything())
+			expect(vi.mocked(Task)).toHaveBeenCalledWith(
+				expect.objectContaining({ consecutiveMistakeLimit: 7, toolRepetitionSoftLimit: 4 }),
+			)
+		})
+
+		it("rejects a delegated child when its effective profile is not allowed", async () => {
+			const effectiveConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "blocked-child-model",
+			}
+			vi.spyOn(ProfileValidator, "isProfileAllowed").mockReturnValue(false)
+			const parentTask = { taskId: "parent", workspacePath: "/test/workspace" } as Task
+
+			await expect(
+				provider.createTask("child", undefined, parentTask, {
+					startTask: false,
+					handoffExecutionContext: {
+						mode: "ask",
+						apiConfigName: "blocked-child",
+						apiConfiguration: effectiveConfiguration,
+					},
+				}),
+			).rejects.toThrow("errors.violated_organization_allowlist")
+			expect(vi.mocked(Task)).not.toHaveBeenCalled()
+		})
+
 		it("getStateToPostToWebview returns tasks from all workspaces", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 
@@ -845,6 +1085,35 @@ describe("ClineProvider Task History Synchronization", () => {
 			await fakeTask.emit(RooCodeEventName.TaskCompleted, "task-cb-3", {}, {})
 
 			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[onTaskCompleted] Failed to write"))
+		})
+
+		it("onTaskAborted does not call createTaskWithHistoryItem", async () => {
+			// Store the item so getTaskWithId succeeds: without it, the old branch's catch
+			// swallows the error and the test passes even if the branch comes back.
+			const existing = createHistoryItem({ id: "task-abort-1", task: "T" })
+			await provider.updateTaskHistory(existing, { broadcast: false })
+
+			const createSpy = vi.spyOn(provider, "createTaskWithHistoryItem")
+			const abortedListener = vi.fn()
+			provider.on(RooCodeEventName.TaskAborted, abortedListener)
+
+			const fakeTask = { ...makeFakeTask("task-abort-1"), abortReason: "streaming_failed" }
+			// Double cast: taskCreationCallback reads only on/taskId/abortReason from the fake.
+			provider["taskCreationCallback"](fakeTask as unknown as Task)
+			await fakeTask.emit(RooCodeEventName.TaskAborted)
+
+			expect(abortedListener).toHaveBeenCalledExactlyOnceWith("task-abort-1")
+			expect(createSpy).not.toHaveBeenCalled()
+		})
+
+		it("emits delegated completion through the provider after the child is disposed", () => {
+			const listener = vi.fn()
+			provider.on(RooCodeEventName.TaskCompleted, listener)
+
+			provider.emitDelegatedTaskCompleted("child-task", {} as never, {})
+
+			expect(listener).toHaveBeenCalledTimes(1)
+			expect(listener).toHaveBeenCalledWith("child-task", {}, {})
 		})
 	})
 })

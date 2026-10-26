@@ -123,111 +123,110 @@ const TypeFieldSchema = z.union([JsonSchemaTypeSchema, z.array(JsonSchemaTypeSch
  *
  * Uses recursive parsing so transformations apply to all nested schemas automatically.
  */
-const NormalizedToolSchemaInternal: z.ZodType<Record<string, unknown>, z.ZodTypeDef, Record<string, unknown>> = z.lazy(
-	() =>
-		z
-			.object({
-				// Accept both single type and array of types, transform array to anyOf
-				type: TypeFieldSchema.optional(),
-				properties: z.record(z.string(), NormalizedToolSchemaInternal).optional(),
-				items: z.union([NormalizedToolSchemaInternal, z.array(NormalizedToolSchemaInternal)]).optional(),
-				required: z.array(z.string()).optional(),
-				// Don't set default here - we'll handle it conditionally in the transform
-				additionalProperties: z.union([z.boolean(), NormalizedToolSchemaInternal]).optional(),
-				description: z.string().optional(),
-				default: z.unknown().optional(),
-				enum: z.array(JsonSchemaEnumValueSchema).optional(),
-				const: JsonSchemaEnumValueSchema.optional(),
-				anyOf: z.array(NormalizedToolSchemaInternal).optional(),
-				oneOf: z.array(NormalizedToolSchemaInternal).optional(),
-				allOf: z.array(NormalizedToolSchemaInternal).optional(),
-				$ref: z.string().optional(),
-				minimum: z.number().optional(),
-				maximum: z.number().optional(),
-				minLength: z.number().optional(),
-				maxLength: z.number().optional(),
-				pattern: z.string().optional(),
-				minItems: z.number().optional(),
-				maxItems: z.number().optional(),
-				uniqueItems: z.boolean().optional(),
-				// Format field - unsupported values will be stripped in transform
-				format: z.string().optional(),
-			})
-			.passthrough()
-			.transform((schema) => {
-				const {
-					type,
-					required,
-					properties,
-					additionalProperties,
-					format,
-					items,
-					minItems,
-					maxItems,
-					uniqueItems,
-					...rest
-				} = schema
-				const result: Record<string, unknown> = { ...rest }
+const NormalizedToolSchemaInternal: z.ZodType<Record<string, unknown>, Record<string, unknown>> = z.lazy(() =>
+	z
+		.object({
+			// Accept both single type and array of types, transform array to anyOf
+			type: TypeFieldSchema.optional(),
+			properties: z.record(z.string(), NormalizedToolSchemaInternal).optional(),
+			items: z.union([NormalizedToolSchemaInternal, z.array(NormalizedToolSchemaInternal)]).optional(),
+			required: z.array(z.string()).optional(),
+			// Don't set default here - we'll handle it conditionally in the transform
+			additionalProperties: z.union([z.boolean(), NormalizedToolSchemaInternal]).optional(),
+			description: z.string().optional(),
+			default: z.unknown().optional(),
+			enum: z.array(JsonSchemaEnumValueSchema).optional(),
+			const: JsonSchemaEnumValueSchema.optional(),
+			anyOf: z.array(NormalizedToolSchemaInternal).optional(),
+			oneOf: z.array(NormalizedToolSchemaInternal).optional(),
+			allOf: z.array(NormalizedToolSchemaInternal).optional(),
+			$ref: z.string().optional(),
+			minimum: z.number().optional(),
+			maximum: z.number().optional(),
+			minLength: z.number().optional(),
+			maxLength: z.number().optional(),
+			pattern: z.string().optional(),
+			minItems: z.number().optional(),
+			maxItems: z.number().optional(),
+			uniqueItems: z.boolean().optional(),
+			// Format field - unsupported values will be stripped in transform
+			format: z.string().optional(),
+		})
+		.passthrough()
+		.transform((schema) => {
+			const {
+				type,
+				required,
+				properties,
+				additionalProperties: _additionalProperties,
+				format,
+				items,
+				minItems,
+				maxItems,
+				uniqueItems,
+				...rest
+			} = schema
+			const result: Record<string, unknown> = { ...rest }
 
-				// Determine if this schema represents an object type
-				const isObjectType =
-					type === "object" || (Array.isArray(type) && type.includes("object")) || properties !== undefined
+			// Determine if this schema represents an object type
+			const isObjectType =
+				type === "object" || (Array.isArray(type) && type.includes("object")) || properties !== undefined
 
-				// Collect array-specific properties for potential use in type handling
-				const arrayProps = { items, minItems, maxItems, uniqueItems }
+			// Collect array-specific properties for potential use in type handling
+			const arrayProps = { items, minItems, maxItems, uniqueItems }
 
-				// If type is an array, convert to anyOf format (JSON Schema 2020-12)
-				// Array-specific properties must be moved inside the array variant
-				if (Array.isArray(type)) {
-					result.anyOf = type.map((t) => {
-						if (t === "array") {
-							return applyArrayProperties({ type: t }, arrayProps)
-						}
-						return { type: t }
-					})
-				} else if (type !== undefined) {
-					result.type = type
-					// For single "array" type, preserve array-specific properties at root
-					if (type === "array") {
-						applyArrayProperties(result, arrayProps)
+			// If type is an array, convert to anyOf format (JSON Schema 2020-12)
+			// Array-specific properties must be moved inside the array variant
+			if (Array.isArray(type)) {
+				result.anyOf = type.map((t) => {
+					if (t === "array") {
+						return applyArrayProperties({ type: t }, arrayProps)
+					}
+					return { type: t }
+				})
+			} else if (type !== undefined) {
+				result.type = type
+				// For single "array" type, preserve array-specific properties at root
+				if (type === "array") {
+					applyArrayProperties(result, arrayProps)
+				}
+			}
+
+			// Strip unsupported format values for OpenAI compatibility
+			// Only include format if it's a supported value
+			if (format && OPENAI_SUPPORTED_FORMATS.has(format)) {
+				result.format = format
+			}
+
+			// Handle properties and required for strict mode
+			if (properties) {
+				result.properties = properties
+				if (required) {
+					const propertyKeys = Object.keys(properties)
+					const filteredRequired = required.filter((key) => propertyKeys.includes(key))
+					if (filteredRequired.length > 0) {
+						result.required = filteredRequired
 					}
 				}
+			} else if (result.type === "object" || (Array.isArray(type) && type.includes("object"))) {
+				// For type: "object" without properties, add empty properties
+				// This is required by OpenAI strict mode
+				result.properties = {}
+			}
 
-				// Strip unsupported format values for OpenAI compatibility
-				// Only include format if it's a supported value
-				if (format && OPENAI_SUPPORTED_FORMATS.has(format)) {
-					result.format = format
-				}
+			// Only add additionalProperties for object-type schemas
+			// Adding it to primitive types (string, number, etc.) is invalid JSON Schema
+			if (isObjectType) {
+				// For strict mode compatibility, we MUST set additionalProperties to false
+				// Even if the original schema had {} (any) or true, we force false because
+				// OpenAI/OpenRouter strict mode rejects schemas with additionalProperties != false
+				// The original schema intent (allowing arbitrary properties) is incompatible with strict mode
+				result.additionalProperties = false
+			}
+			// For non-object types, don't include additionalProperties at all
 
-				// Handle properties and required for strict mode
-				if (properties) {
-					result.properties = properties
-					if (required) {
-						const propertyKeys = Object.keys(properties)
-						const filteredRequired = required.filter((key) => propertyKeys.includes(key))
-						if (filteredRequired.length > 0) {
-							result.required = filteredRequired
-						}
-					}
-				} else if (result.type === "object" || (Array.isArray(type) && type.includes("object"))) {
-					// For type: "object" without properties, add empty properties
-					// This is required by OpenAI strict mode
-					result.properties = {}
-				}
-
-				// Only add additionalProperties for object-type schemas
-				// Adding it to primitive types (string, number, etc.) is invalid JSON Schema
-				if (isObjectType) {
-					// For strict mode compatibility, we MUST set additionalProperties to false
-					// Even if the original schema had {} (any) or true, we force false because
-					// OpenAI/OpenRouter strict mode rejects schemas with additionalProperties != false
-					// The original schema intent (allowing arbitrary properties) is incompatible with strict mode
-					result.additionalProperties = false
-				}
-				// For non-object types, don't include additionalProperties at all
-
-				return result
-			}),
+			return result
+		}),
 )
 
 /**

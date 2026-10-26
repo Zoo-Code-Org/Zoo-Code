@@ -18,7 +18,7 @@ vi.mock("vscrui", () => ({
 	),
 }))
 
-// Mock the VSCodeTextField and VSCodeButton components
+// Mock the VS Code form components
 vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	VSCodeTextField: ({
 		children,
@@ -51,6 +51,12 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 		<button onClick={onClick} title={title} data-testid={`vscode-button-${appearance}`}>
 			{children}
 		</button>
+	),
+	VSCodeTextArea: ({ value, onInput, children, ...rest }: any) => (
+		<label>
+			{children}
+			<textarea value={value} onChange={(event) => onInput?.(event)} {...rest} />
+		</label>
 	),
 }))
 
@@ -428,5 +434,123 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 				reasoningEffort: "max",
 			})
 		})
+	})
+
+	describe("Extra Body", () => {
+		it("renders an undefined value as an editable empty field without a validation error", () => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={{ openAiExtraBody: undefined } as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			const input = screen.getByTestId("openai-extra-body-input")
+			expect(screen.getByText("settings:providers.extraBody")).toHaveAttribute("id", "openai-extra-body-label")
+			expect(screen.getByText("settings:providers.extraBodyDescription")).toHaveAttribute(
+				"id",
+				"openai-extra-body-description",
+			)
+			expect(input).toHaveValue("")
+			expect(input).toHaveAttribute(
+				"placeholder",
+				'{\n  "metadata": {\n    "completion_window": "balanced"\n  }\n}',
+			)
+			expect(input).toHaveAttribute("aria-describedby", "openai-extra-body-description")
+			expect(input).not.toHaveAttribute("aria-invalid", "true")
+			expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+
+			fireEvent.change(input, { target: { value: '{"store":false}' } })
+
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("openAiExtraBody", '{"store":false}')
+		})
+
+		it("renders the saved JSON and updates the cached provider field", () => {
+			const openAiExtraBody = JSON.stringify({ metadata: { completion_window: "balanced" } }, null, 2)
+
+			render(
+				<OpenAICompatible
+					apiConfiguration={{ openAiExtraBody } as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			const input = screen.getByTestId("openai-extra-body-input")
+			expect(input).toHaveValue(openAiExtraBody)
+
+			fireEvent.change(input, { target: { value: '{"store":false}' } })
+
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("openAiExtraBody", '{"store":false}')
+		})
+
+		it("marks invalid JSON and describes the validation error", () => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={{ openAiExtraBody: "not json" } as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			const input = screen.getByTestId("openai-extra-body-input")
+			expect(input).toHaveAttribute("aria-invalid", "true")
+			expect(input).toHaveAttribute("aria-describedby", "openai-extra-body-description openai-extra-body-error")
+			expect(screen.getByText("settings:validation.openAiExtraBody.invalidJson")).toBeInTheDocument()
+		})
+	})
+})
+
+describe("OpenAICompatible Component - openAiStrictToolSchemas checkbox", () => {
+	const mockSetApiConfigurationField = vi.fn()
+	const mockOrganizationAllowList = {
+		allowAll: true,
+		providers: {},
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("should default to checked when openAiStrictToolSchemas is undefined", () => {
+		render(
+			<OpenAICompatible
+				apiConfiguration={{} as ProviderSettings}
+				setApiConfigurationField={mockSetApiConfigurationField}
+				organizationAllowList={mockOrganizationAllowList}
+			/>,
+		)
+
+		const checkboxInput = screen.getByTestId("checkbox-input-settings:providers.openaistricttoolschemas")
+		expect(checkboxInput).toBeChecked()
+	})
+
+	it("should show checkbox as unchecked when openAiStrictToolSchemas is false", () => {
+		render(
+			<OpenAICompatible
+				apiConfiguration={{ openAiStrictToolSchemas: false } as ProviderSettings}
+				setApiConfigurationField={mockSetApiConfigurationField}
+				organizationAllowList={mockOrganizationAllowList}
+			/>,
+		)
+
+		const checkboxInput = screen.getByTestId("checkbox-input-settings:providers.openaistricttoolschemas")
+		expect(checkboxInput).not.toBeChecked()
+	})
+
+	it("should call setApiConfigurationField when toggled", () => {
+		render(
+			<OpenAICompatible
+				apiConfiguration={{ openAiStrictToolSchemas: true } as ProviderSettings}
+				setApiConfigurationField={mockSetApiConfigurationField}
+				organizationAllowList={mockOrganizationAllowList}
+			/>,
+		)
+
+		const checkboxInput = screen.getByTestId("checkbox-input-settings:providers.openaistricttoolschemas")
+		fireEvent.click(checkboxInput)
+
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("openAiStrictToolSchemas", false)
 	})
 })

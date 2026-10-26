@@ -66,6 +66,20 @@ vitest.mock("../fetchers/modelCache", () => ({
 				cacheReadsPrice: 1,
 				description: "Claude Fable 5",
 			},
+			"anthropic/claude-fable-5.1": {
+				maxTokens: 128000,
+				contextWindow: 1000000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsReasoningBudget: true,
+				supportsReasoningBinary: true,
+				supportsTemperature: false,
+				inputPrice: 10,
+				outputPrice: 50,
+				cacheWritesPrice: 12.5,
+				cacheReadsPrice: 0.25,
+				description: "Claude Fable 5.1",
+			},
 			"anthropic/claude-sonnet-5": {
 				maxTokens: 128000,
 				contextWindow: 1000000,
@@ -96,9 +110,9 @@ vitest.mock("../fetchers/modelCache", () => ({
 			},
 		})
 	}),
-	refreshModels: vitest.fn(async (options) => {
+	refreshModels: vitest.fn(async (options, handler) => {
 		const { getModels } = await import("../fetchers/modelCache")
-		return getModels(options)
+		return getModels(options, handler)
 	}),
 }))
 
@@ -275,7 +289,40 @@ describe("RequestyHandler", () => {
 				expect.objectContaining({
 					model: "anthropic/claude-fable-5",
 					max_tokens: 32768,
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
+					temperature: undefined,
+				}),
+			)
+		})
+
+		it("uses adaptive thinking for Claude Fable 5.1 when reasoning is enabled", async () => {
+			const handler = new RequestyHandler(
+				makeApiHandlerOptions({
+					requestyApiKey: "test-key",
+					requestyModelId: "anthropic/claude-fable-5.1",
+					enableReasoningEffort: true,
+					modelMaxTokens: 32768,
+				}),
+			)
+
+			mockCreate.mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "test-id",
+						choices: [{ delta: {} }],
+						usage: { prompt_tokens: 10, completion_tokens: 20 },
+					},
+				]),
+			)
+
+			const generator = handler.createMessage("test system prompt", [{ role: "user" as const, content: "test" }])
+			await generator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "anthropic/claude-fable-5.1",
+					max_tokens: 32768,
+					thinking: { type: "adaptive", display: "summarized" },
 					temperature: undefined,
 				}),
 			)
@@ -308,7 +355,7 @@ describe("RequestyHandler", () => {
 				expect.objectContaining({
 					model: "anthropic/claude-sonnet-5",
 					max_tokens: 32768,
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 					temperature: undefined,
 				}),
 			)
@@ -341,7 +388,7 @@ describe("RequestyHandler", () => {
 				expect.objectContaining({
 					model: "anthropic/claude-opus-5",
 					max_tokens: 32768,
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 					temperature: undefined,
 				}),
 			)
@@ -654,6 +701,13 @@ describe("RequestyHandler", () => {
 			mockCreate.mockRejectedValue(new Error("Unexpected error"))
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("Unexpected error")
+		})
+	})
+
+	describe("model catalog", () => {
+		it("reports its cache scope", () => {
+			const handler = new RequestyHandler(mockOptions)
+			expect(handler.getModelCacheScope()).toEqual({ urlScoped: true, keyScoped: true, authScoped: false })
 		})
 	})
 })

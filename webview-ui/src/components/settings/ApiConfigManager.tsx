@@ -255,7 +255,7 @@ const ApiConfigManager = ({
 							placeholder={t("settings:common.select")}
 							searchPlaceholder={t("settings:providers.searchPlaceholder")}
 							emptyMessage={t("settings:providers.noMatchFound")}
-							className="grow"
+							className="min-w-0 shrink"
 							data-testid="select-component"
 						/>
 						<StandardTooltip content={t("settings:providers.addProfile")}>

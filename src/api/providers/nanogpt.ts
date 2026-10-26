@@ -7,17 +7,27 @@ import {
 	nanoGptDefaultModelId,
 	nanoGptDefaultModelInfo,
 	providerIdentifiers,
+	type ModelInfo,
+	type ModelRecord,
 	type NanoGptRoutingPreference,
+	type ReasoningEffortExtended,
 } from "@roo-code/types"
 
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import type { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
-import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions, SingleCompletionHandler } from "../index"
+import type {
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+	SingleCompletionHandler,
+} from "../index"
 import { RouterProvider } from "./router-provider"
+import { getNanoGptModels } from "./fetchers/nanogpt"
 import { handleProviderError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
 
 type NanoGptUsage = OpenAI.CompletionUsage & {
 	cache_read_input_tokens?: number
@@ -29,21 +39,46 @@ type NanoGptCachingRequest = { caching?: true }
 
 const NANO_GPT_MERGED_TOOL_RESULT_MODELS = new Set(["meta/muse-spark-1.2-contributor"])
 
-const OPENAI_REASONING_EFFORTS = ["low", "medium", "high"] as const
-type OpenAiReasoningEffort = (typeof OPENAI_REASONING_EFFORTS)[number]
+const NANO_GPT_ASTRA_MODEL_IDS = new Set(["openai/gpt-6-astra", "openai/gpt-6-astra-pro"])
+const NANO_GPT_REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
 
-function getReasoningEffort(options: ApiHandlerOptions, supported: unknown): OpenAiReasoningEffort | undefined {
-	const effort = options.reasoningEffort
-	const selectedEffort = OPENAI_REASONING_EFFORTS.find((candidate) => candidate === effort)
-	if (!selectedEffort) {
+function getReasoningEffort(options: ApiHandlerOptions, info: ModelInfo): ReasoningEffortExtended | undefined {
+	const configured = options.reasoningEffort
+	// "none" with enableReasoningEffort: true is an explicit level selection, not a disable.
+	const reasoningDisabled =
+		configured === "disable" ||
+		(configured === "none" && options.enableReasoningEffort !== true) ||
+		options.enableReasoningEffort === false
+	const supported = info.supportsReasoningEffort
+
+	if (reasoningDisabled && (supported === true || (Array.isArray(supported) && supported.includes("disable")))) {
 		return undefined
 	}
 
-	if (supported === true || (Array.isArray(supported) && supported.includes(selectedEffort))) {
-		return selectedEffort
+	// When "none" is explicitly enabled, resolve it to the lowest canonical supported effort.
+	const noneEnabled = !reasoningDisabled && configured === "none"
+	const candidates = [reasoningDisabled ? undefined : configured, info.reasoningEffort]
+	if (noneEnabled || (Array.isArray(supported) && !supported.includes("disable"))) {
+		candidates.push(
+			NANO_GPT_REASONING_EFFORTS.find(
+				(effort) => supported === true || (Array.isArray(supported) && supported.includes(effort)),
+			),
+		)
 	}
 
-	return undefined
+	for (const effort of candidates) {
+		if (
+			effort &&
+			effort !== "none" &&
+			effort !== "minimal" &&
+			(supported === true || (Array.isArray(supported) && supported.includes(effort)))
+		) {
+			return effort
+		}
+	}
+
+	const fallback = info.reasoningEffort
+	return info.requiredReasoningEffort && fallback && fallback !== "none" ? fallback : undefined
 }
 
 function mapNanoGptUsage(usage: NanoGptUsage): ApiStreamUsageChunk {
@@ -70,6 +105,15 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 		})
 	}
 
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: false, keyScoped: true, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getNanoGptModels(options.apiKey, ...fetchOpts)
+	}
+
 	private getRequestModelId(canonicalModelId: string): string {
 		return applyNanoGptRoutingPreference(
 			canonicalModelId,
@@ -93,6 +137,7 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		const { id: canonicalModelId, info } = await this.fetchModel()
+		const isAstra = NANO_GPT_ASTRA_MODEL_IDS.has(canonicalModelId)
 		const body: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming & NanoGptCachingRequest = {
 			model: this.getRequestModelId(canonicalModelId),
 			messages: [
@@ -104,32 +149,41 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 			stream: true,
 			stream_options: { include_usage: true },
 			max_tokens: info.maxTokens ?? undefined,
-			tools: this.convertToolsForOpenAI(metadata?.tools),
+			// Preserve the declared schema instead of making every optional field
+			// required for OpenAI strict mode (e.g. read_file's indentation options).
+			// Non-strict generation still retains every original required constraint.
+			tools: metadata?.tools?.map((tool) =>
+				tool.type === "function" ? { ...tool, function: { ...tool.function, strict: false } } : tool,
+			),
 			tool_choice: metadata?.tool_choice,
-			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+			parallel_tool_calls: isAstra ? false : (metadata?.parallelToolCalls ?? true),
 			...(this.options.nanoGptRoutingPreference === "caching" ? { caching: true } : {}),
 		}
 
-		if (this.options.modelTemperature !== undefined && this.supportsTemperature(canonicalModelId)) {
+		if (
+			this.options.modelTemperature !== undefined &&
+			info.supportsTemperature !== false &&
+			this.supportsTemperature(canonicalModelId)
+		) {
 			body.temperature = this.options.modelTemperature
 		}
 
-		const reasoningEffort = getReasoningEffort(this.options, info.supportsReasoningEffort)
+		const reasoningEffort = getReasoningEffort(this.options, info)
 		if (reasoningEffort) {
-			body.reasoning_effort = reasoningEffort
+			;(body as { reasoning_effort?: ReasoningEffortExtended }).reasoning_effort = reasoningEffort
 		}
 
 		try {
 			const completion = await this.client.chat.completions.create(body, { signal: metadata?.abortSignal })
 			for await (const chunk of completion) {
 				const delta = chunk.choices[0]?.delta
-				if (delta?.content) {
-					yield { type: "text", text: delta.content }
-				}
-
 				const reasoning = extractReasoningFromDelta(delta)
 				if (reasoning) {
 					yield { type: "reasoning", text: reasoning }
+				}
+
+				if (delta?.content) {
+					yield { type: "text", text: delta.content }
 				}
 
 				for (const toolCall of delta?.tool_calls ?? []) {
@@ -161,20 +215,34 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 			...(this.options.nanoGptRoutingPreference === "caching" ? { caching: true } : {}),
 		}
 
-		if (this.options.modelTemperature !== undefined && this.supportsTemperature(canonicalModelId)) {
+		if (
+			this.options.modelTemperature !== undefined &&
+			info.supportsTemperature !== false &&
+			this.supportsTemperature(canonicalModelId)
+		) {
 			body.temperature = this.options.modelTemperature
 		}
 
-		const reasoningEffort = getReasoningEffort(this.options, info.supportsReasoningEffort)
+		const reasoningEffort = getReasoningEffort(this.options, info)
 		if (reasoningEffort) {
-			body.reasoning_effort = reasoningEffort
+			;(body as { reasoning_effort?: ReasoningEffortExtended }).reasoning_effort = reasoningEffort
 		}
 
 		try {
-			const response = await this.client.chat.completions.create(body, {
-				signal: options?.abortSignal,
-				timeout: options?.timeoutMs,
-			})
+			// The OpenAI SDK rejects a present-but-undefined or unusable `timeout`, so
+			// only forward a real value, rounded and capped like mergeAbortSignalAndTimeout.
+			const requestOptions: OpenAI.RequestOptions = {}
+			if (options?.abortSignal !== undefined) {
+				requestOptions.signal = options.abortSignal
+			}
+			const timeoutMs = options?.timeoutMs
+			if (hasUsableTimeout(timeoutMs)) {
+				requestOptions.timeout = toSdkTimeoutMs(timeoutMs)
+			}
+			const response = await this.client.chat.completions.create(
+				body,
+				Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
+			)
 			return response.choices[0]?.message.content ?? ""
 		} catch (error) {
 			throw this.createSafeError("completion", error)

@@ -8,11 +8,15 @@ import {
 	isOpencodeGoAnthropicFormatModel,
 	isOpencodeGoResponsesFormatModel,
 	getOpencodeGoModelInfo,
+	OPENCODE_GO_TEMPERATURE_REASONING_EFFORTS,
+	opencodeGoResponsesSupportsTemperature,
 } from "../providers/opencode-go.js"
+import { reasoningEffortsExtended } from "../model.js"
 
 describe("opencode-go registry", () => {
 	const anthropicFormatModels = [
 		"qwen3.8-max",
+		"qwen3.8-flash",
 		"qwen3.7-max",
 		"qwen3.7-plus",
 		"qwen3.6-plus",
@@ -32,6 +36,16 @@ describe("opencode-go registry", () => {
 		"mimo-v2.5-pro",
 		"deepseek-v4-pro",
 		"deepseek-v4-flash",
+		"deepseek-v4.1-flash",
+		"omen-alpha",
+		"grok-4.5",
+	]
+	const responsesFormatModels = [
+		"gpt-5.6-luna",
+		"gpt-6-luna",
+		"grok-4.6",
+		"muse-spark-1.3-contributor",
+		"muse-spark-1.2-contributor",
 	]
 
 	describe("isOpencodeGoAnthropicFormatModel", () => {
@@ -133,11 +147,13 @@ describe("opencode-go registry", () => {
 
 	describe("OPENCODE_GO_RESPONSES_FORMAT_MODELS", () => {
 		it("contains exactly the Responses-only models", () => {
-			expect([...OPENCODE_GO_RESPONSES_FORMAT_MODELS].sort()).toEqual(["gpt-5.6-luna"])
+			expect([...OPENCODE_GO_RESPONSES_FORMAT_MODELS].sort()).toEqual([...responsesFormatModels].sort())
 		})
 
-		it("classifies gpt-5.6-luna as Responses-format", () => {
-			expect(isOpencodeGoResponsesFormatModel("gpt-5.6-luna")).toBe(true)
+		it("classifies every Responses-only model as Responses-format", () => {
+			for (const id of responsesFormatModels) {
+				expect(isOpencodeGoResponsesFormatModel(id)).toBe(true)
+			}
 		})
 
 		it("classifies Anthropic-format and OpenAI-compatible models as non-Responses-format", () => {
@@ -156,6 +172,8 @@ describe("opencode-go registry", () => {
 
 		it("curates gpt-5.6-luna with its Go Responses capabilities", () => {
 			expect(getOpencodeGoModelInfo("gpt-5.6-luna")).toMatchObject({
+				supportsMaxTokens: true,
+				supportsTemperature: false,
 				maxTokens: 128_000,
 				contextWindow: 1_050_000,
 				supportsImages: true,
@@ -176,6 +194,30 @@ describe("opencode-go registry", () => {
 			})
 		})
 
+		it("curates gpt-6-luna with its documented Responses capabilities and pricing", () => {
+			expect(getOpencodeGoModelInfo("gpt-6-luna")).toMatchObject({
+				maxTokens: 128_000,
+				supportsMaxTokens: true,
+				supportsTemperature: false,
+				contextWindow: 1_050_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+				reasoningEffort: "medium",
+				inputPrice: 0.1,
+				outputPrice: 0.5,
+				cacheWritesPrice: 0.125,
+				cacheReadsPrice: 0.01,
+				longContextPricing: {
+					thresholdTokens: 272_000,
+					inputPriceMultiplier: 2,
+					outputPriceMultiplier: 1.5,
+					cacheWritesPriceMultiplier: 2,
+					cacheReadsPriceMultiplier: 2,
+				},
+			})
+		})
+
 		it("is disjoint from the Anthropic-format set", () => {
 			for (const id of OPENCODE_GO_RESPONSES_FORMAT_MODELS) {
 				expect(OPENCODE_GO_ANTHROPIC_FORMAT_MODELS.has(id)).toBe(false)
@@ -183,7 +225,278 @@ describe("opencode-go registry", () => {
 		})
 	})
 
+	describe("opencodeGoResponsesSupportsTemperature (Zoo-Code-Org/Zoo-Code#2055)", () => {
+		const gptLunaModels = ["gpt-5.6-luna", "gpt-6-luna"]
+		const alwaysSupportedModels = ["grok-4.6", "muse-spark-1.3-contributor", "muse-spark-1.2-contributor"]
+
+		it.each(alwaysSupportedModels)("%s supports temperature for every effort and with none sent", (id) => {
+			expect(getOpencodeGoModelInfo(id)?.supportsTemperature).toBe(true)
+			expect(opencodeGoResponsesSupportsTemperature(id, undefined)).toBe(true)
+			for (const effort of reasoningEffortsExtended) {
+				expect(opencodeGoResponsesSupportsTemperature(id, effort)).toBe(true)
+			}
+		})
+
+		it.each(gptLunaModels)("%s supports temperature only with reasoning effort none", (id) => {
+			expect(getOpencodeGoModelInfo(id)?.supportsTemperature).toBe(false)
+			expect(opencodeGoResponsesSupportsTemperature(id, "none")).toBe(true)
+			for (const effort of reasoningEffortsExtended.filter((e) => e !== "none")) {
+				expect(opencodeGoResponsesSupportsTemperature(id, effort)).toBe(false)
+			}
+			// No effort on the wire is not a verified configuration.
+			expect(opencodeGoResponsesSupportsTemperature(id, undefined)).toBe(false)
+		})
+
+		it("lists only the GPT Luna models in the effort-conditional table", () => {
+			expect(Object.keys(OPENCODE_GO_TEMPERATURE_REASONING_EFFORTS).sort()).toEqual(gptLunaModels)
+		})
+
+		it("lists only advertised efforts for Responses models in the effort-conditional table", () => {
+			for (const [id, efforts] of Object.entries(OPENCODE_GO_TEMPERATURE_REASONING_EFFORTS)) {
+				expect(isOpencodeGoResponsesFormatModel(id)).toBe(true)
+				// The table overrides a baseline opt-out, so the model must declare one.
+				expect(getOpencodeGoModelInfo(id)?.supportsTemperature).toBe(false)
+				const advertised = getOpencodeGoModelInfo(id)?.supportsReasoningEffort
+				expect(Array.isArray(advertised)).toBe(true)
+				for (const effort of efforts) {
+					expect(advertised).toContain(effort)
+				}
+			}
+		})
+
+		it("declares an explicit temperature capability for every Responses-format model", () => {
+			for (const id of OPENCODE_GO_RESPONSES_FORMAT_MODELS) {
+				expect(typeof getOpencodeGoModelInfo(id)?.supportsTemperature).toBe("boolean")
+			}
+		})
+
+		it("returns false for unknown and non-Responses models", () => {
+			expect(opencodeGoResponsesSupportsTemperature("some-future-model", "none")).toBe(false)
+			// kimi-k2.6 declares supportsTemperature: true but is not a Responses model.
+			expect(opencodeGoResponsesSupportsTemperature("kimi-k2.6", undefined)).toBe(false)
+		})
+	})
+
 	describe("opencodeGoModels registry invariants", () => {
+		it.each([
+			{
+				id: "glm-5.3-flash",
+				expected: {
+					maxTokens: 131_072,
+					contextWindow: 1_000_000,
+					supportsImages: true,
+					supportsPromptCache: true,
+					supportsMaxTokens: true,
+					supportsReasoningEffort: ["low", "high", "max"],
+					inputPrice: 0.15,
+					outputPrice: 0.5,
+					cacheReadsPrice: 0.03,
+				},
+			},
+			{
+				id: "kimi-k2.7-code",
+				expected: {
+					maxTokens: 262_144,
+					contextWindow: 262_144,
+					supportsImages: true,
+					supportsPromptCache: true,
+					supportsMaxTokens: true,
+					inputPrice: 0.95,
+					outputPrice: 4,
+					cacheReadsPrice: 0.19,
+				},
+			},
+			{
+				id: "deepseek-v4.1-flash",
+				expected: {
+					maxTokens: 384_000,
+					contextWindow: 1_000_000,
+					supportsImages: true,
+					supportsPromptCache: true,
+					supportsMaxTokens: true,
+					inputPrice: 0.3,
+					outputPrice: 1.2,
+					cacheReadsPrice: 0.006,
+				},
+			},
+			{
+				id: "longcat-2.0",
+				expected: {
+					maxTokens: 131_072,
+					contextWindow: 1_000_000,
+					supportsImages: false,
+					supportsReasoningBinary: true,
+					inputPrice: 0.3,
+					outputPrice: 1.2,
+					cacheReadsPrice: 0.006,
+				},
+			},
+			{
+				id: "mimo-v2-pro",
+				expected: {
+					maxTokens: 128_000,
+					contextWindow: 1_048_576,
+					supportsImages: false,
+					supportsPromptCache: false,
+					inputPrice: 1,
+					outputPrice: 3,
+					cacheReadsPrice: 0.2,
+					longContextPricing: {
+						thresholdTokens: 256_000,
+						inputPriceMultiplier: 2,
+						outputPriceMultiplier: 2,
+						cacheReadsPriceMultiplier: 2,
+					},
+				},
+			},
+			{
+				id: "mimo-v2-omni",
+				expected: {
+					maxTokens: 128_000,
+					contextWindow: 262_144,
+					supportsImages: true,
+					supportsPromptCache: false,
+					inputPrice: 0.4,
+					outputPrice: 2,
+					cacheReadsPrice: 0.08,
+				},
+			},
+			{
+				id: "qwen3.5-plus",
+				expected: {
+					maxTokens: 65_536,
+					contextWindow: 262_144,
+					supportsImages: true,
+					supportsReasoningBudget: true,
+					supportsReasoningBinary: true,
+					inputPrice: 0.2,
+					outputPrice: 1.2,
+					cacheReadsPrice: 0.02,
+					cacheWritesPrice: 0.25,
+				},
+			},
+			{
+				id: "qwen3.8-flash",
+				expected: {
+					maxTokens: 131_072,
+					contextWindow: 1_000_000,
+					supportsImages: true,
+					supportsMaxTokens: true,
+					supportsReasoningBudget: true,
+					supportsReasoningBinary: true,
+					inputPrice: 0.15,
+					outputPrice: 0.47,
+					cacheReadsPrice: 0.016,
+					cacheWritesPrice: 0.2,
+				},
+			},
+			{
+				id: "deepseek-v4-flash-vision-exp",
+				expected: {
+					maxTokens: 384_000,
+					contextWindow: 1_000_000,
+					supportsImages: true,
+					supportsReasoningEffort: ["disable", "low", "high", "max"],
+					inputPrice: 0.44,
+					outputPrice: 1.32,
+					cacheReadsPrice: 0.014,
+				},
+			},
+			{
+				id: "hy4-preview",
+				expected: {
+					maxTokens: 64_000,
+					contextWindow: 1_024_000,
+					supportsImages: false,
+					supportsReasoningEffort: ["disable", "high"],
+					inputPrice: 0.834,
+					outputPrice: 2.501,
+					cacheReadsPrice: 0.042,
+				},
+			},
+			...(["hy3", "hy3-preview"] as const).map((id) => ({
+				id,
+				expected: {
+					maxTokens: 64_000,
+					contextWindow: 256_000,
+					supportsImages: false,
+					supportsReasoningEffort: ["disable", "low", "high"],
+					inputPrice: 0.14,
+					outputPrice: 0.58,
+					cacheReadsPrice: 0.035,
+				},
+			})),
+			{
+				id: "omen-alpha",
+				expected: {
+					maxTokens: 128_000,
+					contextWindow: 500_000,
+					supportsImages: true,
+					supportsPromptCache: true,
+					supportsMaxTokens: true,
+					supportsReasoningEffort: ["low", "high"],
+					reasoningEffort: "high",
+					preserveReasoning: true,
+					supportsTemperature: true,
+					inputPrice: 0.2,
+					outputPrice: 0.66,
+					cacheReadsPrice: 0.04,
+				},
+			},
+			{
+				id: "grok-4.5",
+				expected: {
+					maxTokens: 500_000,
+					contextWindow: 500_000,
+					supportsImages: true,
+					supportsReasoningEffort: ["low", "medium", "high"],
+					inputPrice: 2,
+					outputPrice: 6,
+					cacheReadsPrice: 0.3,
+					longContextPricing: {
+						thresholdTokens: 200_000,
+						inputPriceMultiplier: 2,
+						outputPriceMultiplier: 2,
+						cacheReadsPriceMultiplier: 2,
+					},
+				},
+			},
+			{
+				id: "grok-4.6",
+				expected: {
+					maxTokens: 500_000,
+					contextWindow: 500_000,
+					supportsImages: true,
+					supportsReasoningEffort: ["low", "medium", "high", "xhigh"],
+					inputPrice: 2,
+					outputPrice: 6,
+					cacheReadsPrice: 0.5,
+					longContextPricing: {
+						thresholdTokens: 200_000,
+						inputPriceMultiplier: 2,
+						outputPriceMultiplier: 2,
+						cacheReadsPriceMultiplier: 2,
+					},
+				},
+			},
+			...(["muse-spark-1.3-contributor", "muse-spark-1.2-contributor"] as const).map((id) => ({
+				id,
+				expected: {
+					maxTokens: 131_072,
+					contextWindow: 1_048_576,
+					supportsImages: true,
+					supportsPromptCache: true,
+					supportsMaxTokens: true,
+					supportsReasoningEffort: ["minimal", "low", "medium", "high", "xhigh"],
+					inputPrice: 0.1,
+					outputPrice: 0.2,
+					cacheReadsPrice: 0.002,
+				},
+			})),
+		])("keeps independently asserted metadata for $id", ({ id, expected }) => {
+			expect(getOpencodeGoModelInfo(id)).toMatchObject(expected)
+		})
+
 		it("every entry has a positive maxTokens and contextWindow", () => {
 			for (const [id, info] of Object.entries(opencodeGoModels)) {
 				expect(info.maxTokens).toBeGreaterThan(0)
@@ -226,6 +539,7 @@ describe("opencode-go registry", () => {
 		it("DeepSeek entries expose supportsMaxTokens so the max-output slider is available", () => {
 			expect(getOpencodeGoModelInfo("deepseek-v4-pro")?.supportsMaxTokens).toBe(true)
 			expect(getOpencodeGoModelInfo("deepseek-v4-flash")?.supportsMaxTokens).toBe(true)
+			expect(getOpencodeGoModelInfo("deepseek-v4.1-flash")?.supportsMaxTokens).toBe(true)
 		})
 	})
 

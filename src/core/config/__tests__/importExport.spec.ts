@@ -5,7 +5,6 @@ import * as path from "path"
 
 import * as vscode from "vscode"
 
-import type { ProviderName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { clearAllMocks } from "../../../test-utils/reset"
@@ -349,7 +348,10 @@ describe("importExport", () => {
 				customModesManager: mockCustomModesManager,
 			})
 
-			expect(result).toEqual({ success: false, error: "[providerProfiles.currentApiConfigName]: Required" })
+			expect(result).toEqual({
+				success: false,
+				error: "[providerProfiles.currentApiConfigName]: Invalid input: expected string, received undefined",
+			})
 			expect(fs.readFile).toHaveBeenCalledWith("/mock/path/settings.json", "utf-8")
 			expect(mockProviderSettingsManager.import).not.toHaveBeenCalled()
 			expect(mockContextProxy.setValues).not.toHaveBeenCalled()
@@ -1239,6 +1241,58 @@ describe("importExport", () => {
 				showWarningMessageSpy.mockRestore()
 				consoleWarnSpy.mockRestore()
 			})
+
+			it.each([
+				{ imageGenerationProvider: providerIdentifiers.openrouter, expectedWarnings: undefined },
+				{
+					imageGenerationProvider: retiredProviderIdentifiers.roo,
+					expectedWarnings: [
+						'Setting "globalSettings.imageGenerationProvider" used unsupported value "roo" and was cleared during import.',
+					],
+				},
+			])(
+				"only clears the retired image provider: $imageGenerationProvider",
+				async ({ imageGenerationProvider, expectedWarnings }) => {
+					;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])
+					;(fs.readFile as Mock).mockResolvedValue(
+						JSON.stringify({
+							providerProfiles: {
+								currentApiConfigName: "valid-profile",
+								apiConfigs: {
+									"valid-profile": { apiProvider: providerIdentifiers.openai, id: "valid-id" },
+								},
+							},
+							globalSettings: {
+								imageGenerationProvider,
+								customInstructions: "roo",
+							},
+						}),
+					)
+					mockProviderSettingsManager.export.mockResolvedValue({
+						currentApiConfigName: "default",
+						apiConfigs: { default: { apiProvider: providerIdentifiers.anthropic, id: "default-id" } },
+					})
+					mockProviderSettingsManager.listConfig.mockResolvedValue([
+						{ name: "valid-profile", id: "valid-id", apiProvider: providerIdentifiers.openai },
+					])
+
+					const result = await importSettings({
+						providerSettingsManager: mockProviderSettingsManager,
+						contextProxy: mockContextProxy,
+						customModesManager: mockCustomModesManager,
+					})
+
+					expect(result.success).toBe(true)
+					expect(result.warnings).toEqual(expectedWarnings)
+					expect(mockContextProxy.setValues).toHaveBeenCalledTimes(1)
+					expect(mockContextProxy.setValues).toHaveBeenCalledWith(
+						expect.objectContaining({
+							imageGenerationProvider: expectedWarnings ? undefined : providerIdentifiers.openrouter,
+							customInstructions: "roo",
+						}),
+					)
+				},
+			)
 
 			it("should normalize imageGenerationProvider roo while preserving other global settings", async () => {
 				;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])

@@ -35,7 +35,7 @@ describe("Opencode Go Fetchers", () => {
 
 			expect(mockedAxios.get).toHaveBeenCalledWith("https://opencode.ai/zen/go/v1/models", {
 				headers: { Authorization: "Bearer test-key" },
-				timeout: 10_000,
+				signal: undefined,
 			})
 
 			expect(Object.keys(models).sort()).toEqual(["deepseek-v4-pro", "glm-5.1"])
@@ -75,6 +75,50 @@ describe("Opencode Go Fetchers", () => {
 			})
 		})
 
+		it("keeps curated Responses temperature support after merging live metadata", async () => {
+			mockedAxios.get.mockResolvedValue({
+				data: {
+					data: [
+						{ id: "grok-4.6", context_window: 400_000 },
+						{ id: "muse-spark-1.2-contributor", max_tokens: 65_536 },
+						{ id: "gpt-5.6-luna", context_window: 900_000 },
+					],
+				},
+			})
+
+			const models = await getOpencodeGoModels("k")
+
+			// Live limits never override the curated temperature capability
+			// (Zoo-Code-Org/Zoo-Code#2055).
+			expect(models["grok-4.6"]).toMatchObject({ contextWindow: 400_000, supportsTemperature: true })
+			expect(models["muse-spark-1.2-contributor"]).toMatchObject({ maxTokens: 65_536, supportsTemperature: true })
+			expect(models["gpt-5.6-luna"]).toMatchObject({ contextWindow: 900_000, supportsTemperature: false })
+		})
+
+		it("uses curated gpt-6-luna metadata when the live model omits metadata", async () => {
+			mockedAxios.get.mockResolvedValue({ data: { data: [{ id: "gpt-6-luna" }] } })
+
+			const models = await getOpencodeGoModels("k")
+
+			expect(models["gpt-6-luna"]).toMatchObject({
+				contextWindow: 1_050_000,
+				maxTokens: 128_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsMaxTokens: true,
+				// The Go gateway accepts `temperature` for `gpt-6-luna` only with
+				// reasoning effort "none", so the static baseline opts out and the
+				// effort-aware rule opts back in (Zoo-Code-Org/Zoo-Code#2055).
+				supportsTemperature: false,
+				supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+				reasoningEffort: "medium",
+				inputPrice: 0.1,
+				outputPrice: 0.5,
+				cacheWritesPrice: 0.125,
+				cacheReadsPrice: 0.01,
+			})
+		})
+
 		it("falls back to default context/max tokens for an unknown model when metadata is absent", async () => {
 			mockedAxios.get.mockResolvedValue({ data: { data: [{ id: "some-unknown-model" }] } })
 
@@ -84,6 +128,38 @@ describe("Opencode Go Fetchers", () => {
 				contextWindow: opencodeGoDefaultModelInfo.contextWindow,
 				maxTokens: opencodeGoDefaultModelInfo.maxTokens,
 				supportsPromptCache: false,
+			})
+		})
+
+		it("uses native model info when the endpoint returns only an OpenCode Go model ID", async () => {
+			mockedAxios.get.mockResolvedValue({
+				data: {
+					data: [
+						{ id: "gpt-5.6-luna" },
+						{ id: "hy4-preview" },
+						{ id: "deepseek-v4-flash-vision-exp" },
+						{ id: "muse-spark-1.3-contributor" },
+					],
+				},
+			})
+
+			const models = await getOpencodeGoModels("k")
+
+			expect(models["gpt-5.6-luna"]).toMatchObject({ contextWindow: 1_050_000, maxTokens: 128_000 })
+			expect(models["hy4-preview"]).toMatchObject({ contextWindow: 1_024_000, maxTokens: 64_000 })
+			expect(models["deepseek-v4-flash-vision-exp"]).toMatchObject({
+				contextWindow: 1_000_000,
+				maxTokens: 384_000,
+			})
+			expect(models["muse-spark-1.3-contributor"]).toMatchObject({
+				contextWindow: 1_048_576,
+				maxTokens: 131_072,
+				supportsImages: true,
+				supportsMaxTokens: true,
+				supportsReasoningEffort: ["minimal", "low", "medium", "high", "xhigh"],
+				inputPrice: 0.1,
+				outputPrice: 0.2,
+				cacheReadsPrice: 0.002,
 			})
 		})
 
@@ -118,9 +194,92 @@ describe("Opencode Go Fetchers", () => {
 
 			warnSpy.mockRestore()
 		})
+
+		it("forwards the caller's abort signal to the request", async () => {
+			mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+			const controller = new AbortController()
+
+			await getOpencodeGoModels("test-key", { signal: controller.signal })
+
+			expect(mockedAxios.get).toHaveBeenCalledWith("https://opencode.ai/zen/go/v1/models", {
+				headers: { Authorization: "Bearer test-key" },
+				signal: controller.signal,
+			})
+		})
+
+		it("rejects with an AbortError when the signal aborts the pending request", async () => {
+			const controller = new AbortController()
+			mockedAxios.get.mockImplementation((_url: string, config?: { signal?: AbortSignal }) => {
+				// Mirror the HTTP client: a pending request rejects when its signal fires.
+				return new Promise<never>((_resolve, reject) => {
+					config?.signal?.addEventListener?.("abort", () => reject(new Error("canceled")), { once: true })
+				})
+			})
+
+			const fetchPromise = getOpencodeGoModels("k", { signal: controller.signal })
+			controller.abort()
+
+			await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
+		})
 	})
 
 	describe("parseOpencodeGoModel", () => {
+		it("has complete model info for every model returned by OpenCode Go", () => {
+			const modelIds = [
+				"minimax-m3",
+				"minimax-m2.7",
+				"minimax-m2.5",
+				"kimi-k3",
+				"kimi-k2.7-code",
+				"kimi-k2.6",
+				"longcat-2.0",
+				"kimi-k2.5",
+				"glm-5.2",
+				"glm-5.3-flash",
+				"glm-5.3",
+				"glm-5.1",
+				"glm-5",
+				"deepseek-v4-pro",
+				"deepseek-v4-flash",
+				"deepseek-v4.1-flash",
+				"deepseek-v4-flash-vision-exp",
+				"qwen3.7-max",
+				"qwen3.8-max",
+				"qwen3.8-flash",
+				"qwen3.7-plus",
+				"qwen3.6-plus",
+				"qwen3.5-plus",
+				"mimo-v2-pro",
+				"mimo-v2-omni",
+				"mimo-v2.5-pro",
+				"mimo-v2.5",
+				"hy4-preview",
+				"hy3",
+				"hy3-preview",
+				"gpt-5.6-luna",
+				"gpt-6-luna",
+				"grok-4.5",
+				"grok-4.6",
+				"muse-spark-1.3-contributor",
+				"muse-spark-1.2-contributor",
+				"omen-alpha",
+			]
+			expect(Object.keys(opencodeGoModels).sort()).toEqual([...modelIds].sort())
+
+			for (const modelId of modelIds) {
+				const info = getOpencodeGoModelInfo(modelId)
+				expect(info, modelId).toBeDefined()
+				expect(info?.contextWindow, modelId).toBeGreaterThan(0)
+				expect(info?.maxTokens, modelId).toBeGreaterThan(0)
+				expect(info?.supportsImages, modelId).toEqual(expect.any(Boolean))
+				expect(info?.supportsPromptCache, modelId).toEqual(expect.any(Boolean))
+				expect(info?.inputPrice, modelId).toEqual(expect.any(Number))
+				expect(info?.outputPrice, modelId).toEqual(expect.any(Number))
+				expect(info?.cacheReadsPrice, modelId).toEqual(expect.any(Number))
+				expect(info?.description, modelId).toBeTruthy()
+			}
+		})
+
 		it("merges live endpoint values over the native registry for a curated model", () => {
 			const info = parseOpencodeGoModel({ id: "glm-5.1", context_window: 150000, max_output_tokens: 8000 })
 			// Live values win for volatile fields.
@@ -134,6 +293,20 @@ describe("Opencode Go Fetchers", () => {
 			expect(info.inputPrice).toBe(1.4)
 		})
 
+		it("keeps gpt-6-luna live limits authoritative over its curated metadata", () => {
+			const info = parseOpencodeGoModel({
+				id: "gpt-6-luna",
+				context_window: 1_000_000,
+				max_output_tokens: 64_000,
+			})
+
+			expect(info.contextWindow).toBe(1_000_000)
+			expect(info.maxTokens).toBe(64_000)
+			expect(info.supportsImages).toBe(true)
+			expect(info.inputPrice).toBe(0.1)
+			expect(info.cacheWritesPrice).toBe(0.125)
+		})
+
 		it("uses native registry defaults when the live payload omits volatile fields", () => {
 			const info = parseOpencodeGoModel({ id: "deepseek-v4-flash" })
 			const native = getOpencodeGoModelInfo("deepseek-v4-flash")!
@@ -142,6 +315,19 @@ describe("Opencode Go Fetchers", () => {
 			expect(info.supportsPromptCache).toBe(true)
 			expect(info.preserveReasoning).toBe(true)
 			expect(info.supportsReasoningEffort).toEqual(["disable", "low", "medium", "high", "xhigh"])
+		})
+
+		it("resolves DeepSeek V4.1 Flash to its 1M context when live metadata is absent", () => {
+			const info = parseOpencodeGoModel({ id: "deepseek-v4.1-flash" })
+			expect(info.contextWindow).toBe(1_000_000)
+			expect(info.maxTokens).toBe(384_000)
+			expect(info.supportsPromptCache).toBe(true)
+			expect(info.supportsMaxTokens).toBe(true)
+			expect(info.supportsReasoningEffort).toEqual(["disable", "low", "medium", "high", "xhigh"])
+			expect(info.supportsImages).toBe(true)
+			expect(info.inputPrice).toBe(0.3)
+			expect(info.outputPrice).toBe(1.2)
+			expect(info.cacheReadsPrice).toBe(0.006)
 		})
 
 		it("resolves GLM-5.2 with its 1M context and High/Max reasoning effort", () => {
