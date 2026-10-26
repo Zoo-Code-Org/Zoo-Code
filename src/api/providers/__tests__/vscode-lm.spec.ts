@@ -4423,6 +4423,77 @@ describe("VsCodeLmHandler", () => {
 			}
 		})
 
+		it("should reject with an AbortError when the external signal aborts during client initialization", async () => {
+			// Gate client initialization so the abort lands while getClient() is pending.
+			let releaseClient: () => void = () => {}
+			const clientGate = new Promise<void>((resolve) => {
+				releaseClient = resolve
+			})
+			let notifySelectCalled: () => void = () => {}
+			const selectCalled = new Promise<void>((resolve) => {
+				notifySelectCalled = resolve
+			})
+			;(vscode.lm.selectChatModels as Mock).mockImplementation(() => {
+				notifySelectCalled()
+				return clientGate.then(() => [{ ...mockLanguageModelChat }])
+			})
+			handler["client"] = null
+
+			const controller = new AbortController()
+			const promise = handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+			// Defensive: the abort may reject before the client gate settles.
+			void promise.catch(() => {})
+			await selectCalled
+			controller.abort()
+
+			const tokenSource = tokenSourceInstance()
+			expect(tokenSource.cancel).toHaveBeenCalled()
+			releaseClient()
+
+			await expect(promise).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "The VS Code LM request was aborted",
+			)
+			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
+		})
+
+		it("cancels an active completion request when the handler is disposed during client initialization", async () => {
+			// A completion still waiting on client initialization must be cancelled by
+			// handler disposal, not left running with no owner.
+			let releaseClient: () => void = () => {}
+			const clientGate = new Promise<void>((resolve) => {
+				releaseClient = resolve
+			})
+			let notifySelectCalled: () => void = () => {}
+			const selectCalled = new Promise<void>((resolve) => {
+				notifySelectCalled = resolve
+			})
+			;(vscode.lm.selectChatModels as Mock).mockImplementation(() => {
+				notifySelectCalled()
+				return clientGate.then(() => [{ ...mockLanguageModelChat }])
+			})
+			handler["client"] = null
+
+			const promise = handler.completePrompt("Test prompt")
+			void promise.catch(() => {})
+			await selectCalled
+			const tokenSource = tokenSourceInstance()
+
+			handler.dispose()
+
+			expect(tokenSource.cancel).toHaveBeenCalled()
+			releaseClient()
+			await expect(promise).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "The VS Code LM request was aborted",
+			)
+			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
+		})
+
 		it("should apply both the abort signal and timeoutMs", async () => {
 			const mockModel = { ...mockLanguageModelChat }
 			;(vscode.lm.selectChatModels as Mock).mockResolvedValueOnce([mockModel])

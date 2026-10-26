@@ -28,7 +28,7 @@ import { CONTEXT_WINDOW_EXCEEDED_STATUS } from "../../core/context/context-manag
 
 import { BaseProvider } from "./base-provider"
 import { getVsCodeLmModelInfo } from "./vscode-lm-capabilities"
-import { createAbortError } from "./utils/abort-signal"
+import { createAbortError, hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
 /**
@@ -770,6 +770,9 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 	// Provider label for the shared abort contract (createAbortError).
 	private readonly providerName = "VS Code LM"
 	private currentRequestCancellation: vscode.CancellationTokenSource | null
+	// completePrompt requests do not use currentRequestCancellation (which belongs to
+	// createMessage); they are tracked here so handler disposal cancels them too.
+	private activeCompletionTokens = new Set<vscode.CancellationTokenSource>()
 
 	constructor(options: ApiHandlerOptions) {
 		super()
@@ -960,6 +963,14 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			this.currentRequestCancellation.cancel()
 			this.currentRequestCancellation.dispose()
 		}
+
+		// Cancel every in-flight completion request: a host request still running after the
+		// handler is disposed would otherwise keep streaming with no owner to stop it.
+		for (const tokenSource of this.activeCompletionTokens) {
+			tokenSource.cancel()
+			tokenSource.dispose()
+		}
+		this.activeCompletionTokens.clear()
 	}
 
 	/**
@@ -1638,6 +1649,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		// established before client initialization so the getClient() await is covered
 		// by the timeout, the abort bridge, and the finally cleanup below.
 		const tokenSource = new vscode.CancellationTokenSource()
+		this.activeCompletionTokens.add(tokenSource)
 		const externalAbortSignal = options?.abortSignal
 
 		// Apply the timeout only when the effective value (option, else the provider-wide
@@ -1647,13 +1659,11 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		// lookup still cancels the request before any sendRequest call.
 		let timeoutId: ReturnType<typeof setTimeout> | undefined
 		const timeoutMs = options?.timeoutMs ?? this.timeoutMs
-		if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
-			// Node clamps delays above 2^31-1 ms to 1 ms (and Infinity coerces the
-			// same way), which would cancel almost immediately, and truncates
-			// fractional delays; round up and cap so the semantics match
-			// mergeAbortSignalAndTimeout, and treat non-finite values as
-			// "no timeout".
-			timeoutId = setTimeout(() => tokenSource.cancel(), Math.min(Math.ceil(timeoutMs), 2_147_483_647))
+		if (hasUsableTimeout(timeoutMs)) {
+			// hasUsableTimeout/toSdkTimeoutMs own the "disabled" and non-finite semantics:
+			// Node clamps large delays to 1 ms and rejects fractional ones, so only a
+			// rounded, capped budget reaches setTimeout.
+			timeoutId = setTimeout(() => tokenSource.cancel(), toSdkTimeoutMs(timeoutMs))
 		}
 
 		// Bridge the external abort signal: a pre-aborted signal cancels the token
@@ -1729,6 +1739,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			if (externalAbortSignal && onAbort) {
 				externalAbortSignal.removeEventListener("abort", onAbort)
 			}
+			this.activeCompletionTokens.delete(tokenSource)
 			tokenSource.dispose()
 		}
 	}
