@@ -76,16 +76,15 @@ export class IpcServer extends EventEmitter<IpcServerEvents> implements RooCodeI
 
 	private onMessage(data: unknown) {
 		if (typeof data !== "object") {
-			this.log(`[server#onMessage] invalid data -> ${JSON.stringify(data)}`)
+			this.log("[server#onMessage] invalid data")
 			return
 		}
 
 		const result = ipcMessageSchema.safeParse(data)
 
 		if (!result.success) {
-			this.log(
-				`[server#onMessage] invalid payload -> ${JSON.stringify(result.error.issues)} -> ${JSON.stringify(data)}`,
-			)
+			// Both the input and Zod issue values/paths may contain credentials.
+			this.log("[server#onMessage] invalid payload", { issueCount: result.error.issues.length })
 
 			return
 		}
@@ -98,7 +97,7 @@ export class IpcServer extends EventEmitter<IpcServerEvents> implements RooCodeI
 					this.emit(IpcMessageType.TaskCommand, payload.clientId, payload.data)
 					break
 				default:
-					this.log(`[server#onMessage] unhandled payload: ${JSON.stringify(payload)}`)
+					this.log("[server#onMessage] unhandled payload")
 					break
 			}
 		}

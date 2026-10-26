@@ -381,10 +381,10 @@
 		"title": "Zoo Code {{version}} Dirilis",
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Yang baru di Zoo Code v3.90.0",
-			"highlight1": "✨ Provider dan model: GitHub Copilot sekarang menjadi provider: masuk dan Zoo Code memuat model Copilot kamu. IO Intelligence adalah provider dengan API key sendiri. Gemini 4 Argon ada di Gemini dan Vertex. GPT-6 Luna ada di OpenCode Go. Gemini 4 Argon dan GPT-6 Luna juga ada di Zoo Gateway.",
-			"highlight2": "🧭 Eksekusi tool: Mengulang tool call yang sama memunculkan peringatan, lalu Zoo Code menghentikan loop itu. Menonaktifkan attempt_completion tidak lagi membuat task tidak bisa selesai. Pesan antrean melewati pemeriksaan perlindungan perintah yang sama dengan perintah yang kamu kirim langsung.",
-			"highlight3": "⚡ Reasoning dan streaming: Adaptive thinking Anthropic tampil di chat, dan thinking token dihitung. Toggle R1 menyimpan reasoning dari llama.cpp, Ollama, dan LM Studio. Codex menyimpan encrypted reasoning bersama ringkasan yang kamu lihat. Stream language model VS Code memakai guarded recovery saat stream gagal."
+			"heading": "Yang baru di Zoo Code v3.92.0",
+			"highlight1": "✨ Pilihan model lebih cepat dan dukungan model lebih kuat: Ganti model dari kolom penulisan chat. Gunakan Claude Haiku 5.5 di Amazon Bedrock, dapatkan kapabilitas Kimi K3 yang lebih akurat di OpenRouter, dan gunakan batas Gemini 4 Argon yang telah diperbaiki di Vercel AI Gateway.",
+			"highlight2": "🧭 Alur kerja terminal, pengeditan, chat, dan remote yang lebih andal: Atur output perintah agar diciutkan secara default jika kamu mau, dapatkan kegagalan pengeditan yang lebih jelas, pertahankan baris reasoning dan API tetap terlihat, serta hindari masalah startup dan proxy di workspace remote.",
+			"highlight3": "🔌 Marketplace MCP yang diperluas: Hubungkan Zoo Code ke AnySearch, Mailtea, dan Tradehand melalui marketplace MCP."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",
