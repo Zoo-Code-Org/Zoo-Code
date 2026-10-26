@@ -3,10 +3,8 @@ import { RooCodeEventName } from "@roo-code/types"
 
 import { API } from "../api"
 import { ClineProvider } from "../../core/webview/ClineProvider"
-import type { ClineProviderFactory } from "../../core/webview/ClineProviderFactory"
 import type { Task } from "../../core/task/Task"
 import { Package } from "../../shared/package"
-import { makeClineProviderFactory } from "../../test-utils/provider"
 import { createClineTabPanel } from "../../activate/registerCommands"
 import type { WebviewFocusTracker } from "../../core/webview/WebviewFocusTracker"
 
@@ -37,7 +35,6 @@ describe("API - startNewTask routing", () => {
 	let editor: ReturnType<typeof createProvider>
 	let outputChannel: vscode.OutputChannel
 	let api: API
-	let providerFactory: ClineProviderFactory
 
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -53,10 +50,8 @@ describe("API - startNewTask routing", () => {
 			hide: vi.fn(),
 			dispose: vi.fn(),
 		}
-		providerFactory = makeClineProviderFactory()
-		vi.mocked(providerFactory.createInNewTab).mockResolvedValue(editor)
 		vi.mocked(createClineTabPanel).mockResolvedValue(editor as unknown as ClineProvider)
-		api = new API(outputChannel, sidebar, providerFactory)
+		api = new API(outputChannel, sidebar)
 	})
 
 	it.each([true, false, undefined])("routes a task with newTab=%s to the requested provider", async (newTab) => {
@@ -78,14 +73,12 @@ describe("API - startNewTask routing", () => {
 				outputChannel,
 				webviewFocusTracker: sidebar.webviewFocusTracker,
 			})
-			expect(providerFactory.createInNewTab).not.toHaveBeenCalled()
 			expect(editor.on).toHaveBeenCalledWith(RooCodeEventName.TaskCreated, expect.any(Function))
 			expect(editor.on).toHaveBeenCalledWith(RooCodeEventName.TaskCompleted, expect.any(Function))
 		} else {
 			expect(vscode.commands.executeCommand).toHaveBeenCalledExactlyOnceWith(
 				`${Package.name}.SidebarProvider.focus`,
 			)
-			expect(providerFactory.createInNewTab).not.toHaveBeenCalled()
 			expect(editor.on).not.toHaveBeenCalled()
 		}
 		expect(target.evictCurrentTask).toHaveBeenCalledOnce()

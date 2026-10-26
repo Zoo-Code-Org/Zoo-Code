@@ -39,7 +39,7 @@ describe("API#getTaskApiConversationHistoryLength", () => {
 			}),
 		} as unknown as ClineProvider
 
-		api = new API(mockOutputChannel, mockProvider, makeClineProviderFactory(), undefined, true)
+		api = new API(mockOutputChannel, mockProvider, undefined, true)
 	})
 
 	it("returns the persisted api conversation history length", async () => {

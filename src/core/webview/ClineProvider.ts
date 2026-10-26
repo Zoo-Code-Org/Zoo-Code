@@ -3224,6 +3224,7 @@ export class ClineProvider
 		const hadPreviousOverlay = "apiConfiguration" in this.viewLocalState
 		const previousOverlay = this.viewLocalState.apiConfiguration
 		const previousOwnViewState = previousViewStates[this.viewStateId]
+		const managerSelectionSnapshot = await this._snapshotProviderManagerSelection()
 
 		// Commit the secret deletion before the compensating writes. If the deletion
 		// fails, nothing else runs: the durable pins still reference the profile that
@@ -3409,6 +3410,16 @@ export class ClineProvider
 					currentApiConfigName: hadPreviousLocalPin ? previousLocalPin : undefined,
 					apiConfiguration: hadPreviousOverlay ? previousOverlay : undefined,
 				})
+				try {
+					// The activation path wrote the manager-owned selection: restore the pre-delete one.
+					await this._restoreProviderManagerSelection(managerSelectionSnapshot)
+				} catch (restoreError) {
+					this.log(
+						`[deleteProviderProfile] failed to restore the manager selection: ${
+							restoreError instanceof Error ? restoreError.message : String(restoreError)
+						}`,
+					)
+				}
 			} catch (restoreError) {
 				this.log(
 					`[deleteProviderProfile] failed to restore the local view pin: ${

@@ -22,7 +22,7 @@ describe("API - terminal profile", () => {
 		} as unknown as ClineProvider
 
 		Terminal.setTerminalProfile(undefined)
-		api = new API(outputChannel, provider, makeClineProviderFactory())
+		api = new API(outputChannel, provider)
 	})
 
 	afterEach(() => {

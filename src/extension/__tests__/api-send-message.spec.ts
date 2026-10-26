@@ -35,7 +35,7 @@ describe("API - SendMessage Command", () => {
 		mockLog = vi.fn<(...args: any[]) => void>()
 
 		// Create API instance with logging enabled for testing
-		api = new API(mockOutputChannel, mockProvider, makeClineProviderFactory(), undefined, true)
+		api = new API(mockOutputChannel, mockProvider, undefined, true)
 		// Override the log method to use our mock
 		;(api as any).log = mockLog
 	})

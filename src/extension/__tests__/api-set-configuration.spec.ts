@@ -44,11 +44,7 @@ describe("API.setConfiguration", () => {
 			},
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
 		})
-		const api = new API(
-			Object.assign({} as OutputChannel, { appendLine: vi.fn() }),
-			provider,
-			makeUnusedTabFactory(),
-		)
+		const api = new API(Object.assign({} as OutputChannel, { appendLine: vi.fn() }), provider)
 		const configuration = {
 			apiProvider: providerIdentifiers.bedrock,
 			currentApiConfigName: "default",

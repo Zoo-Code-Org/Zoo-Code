@@ -133,7 +133,7 @@ describe("API task controls", () => {
 		vi.clearAllMocks()
 		outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
 		sidebarProvider = createProvider("sidebar-task")
-		api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory())
+		api = new API(outputChannel, asClineProvider(sidebarProvider))
 	})
 
 	describe("startNewTask", () => {
@@ -415,7 +415,7 @@ describe("API task controls", () => {
 
 		it("responds without switching modes and logs when the requested mode is invalid", async () => {
 			const task = createTask("task-invalid-mode")
-			api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory(), undefined, true)
+			api = new API(outputChannel, asClineProvider(sidebarProvider), undefined, true)
 			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
 
 			await expect(
@@ -460,7 +460,7 @@ describe("API task controls - registry identity, listener wiring, and mode-switc
 		vi.clearAllMocks()
 		outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
 		sidebarProvider = createProvider("sidebar-task")
-		api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory())
+		api = new API(outputChannel, asClineProvider(sidebarProvider))
 	})
 
 	it("keeps the new registration when a replaced task instance tears down", async () => {
@@ -481,7 +481,7 @@ describe("API task controls - registry identity, listener wiring, and mode-switc
 
 	it("still delivers the follow-up answer when the mode switch fails", async () => {
 		const task = createTask("task-failing-switch")
-		api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory(), undefined, true)
+		api = new API(outputChannel, asClineProvider(sidebarProvider), undefined, true)
 		sidebarProvider.handleModeSwitch.mockRejectedValueOnce(new Error("persist failed"))
 		sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
 
@@ -529,7 +529,7 @@ describe("API task controls - registry identity, listener wiring, and mode-switc
 
 		it("rejects the task ask and global-state surface in production mode", async () => {
 			sidebarProvider.context = withProductionContext()
-			api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory())
+			api = new API(outputChannel, asClineProvider(sidebarProvider))
 
 			// Pin the method name in each message: the guard builds the error from the
 			// method argument, and a partial match would leave the argument untested.
@@ -550,7 +550,7 @@ describe("API task controls - registry identity, listener wiring, and mode-switc
 				extensionMode: vscode.ExtensionMode.Test,
 				globalState: { get, update },
 			}
-			api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory())
+			api = new API(outputChannel, asClineProvider(sidebarProvider))
 
 			expect(api.getGlobalState("mode")).toBe("code")
 			expect(get).toHaveBeenCalledWith("mode")
@@ -566,7 +566,7 @@ describe("API task controls - registry identity, listener wiring, and mode-switc
 				extensionMode: vscode.ExtensionMode.Test,
 				globalState: { get, update },
 			}
-			api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory())
+			api = new API(outputChannel, asClineProvider(sidebarProvider))
 
 			// The generic only constrains typed callers; a crafted runtime key must
 			// be refused by the schema check before it reaches globalState storage.
@@ -589,7 +589,7 @@ describe("API task controls - registry identity, listener wiring, and mode-switc
 				extensionMode: vscode.ExtensionMode.Test,
 				globalState: { get, update },
 			}
-			api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory())
+			api = new API(outputChannel, asClineProvider(sidebarProvider))
 
 			// mimoApiKey and openAiHeaders are schema keys but carry credentials; the
 			// test-only API must refuse them before storage access, both directions.
@@ -613,7 +613,7 @@ describe("API task controls - registry identity, listener wiring, and mode-switc
 				extensionMode: vscode.ExtensionMode.Test,
 				globalState: { get, update },
 			}
-			api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory())
+			api = new API(outputChannel, asClineProvider(sidebarProvider))
 
 			// Task history carries user PII and stays unreachable even though it is a
 			// plain GlobalState key.

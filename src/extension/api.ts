@@ -71,7 +71,6 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 	constructor(
 		outputChannel: vscode.OutputChannel,
 		provider: ClineProvider,
-		private readonly providerFactory: ClineProviderFactory,
 		socketPath?: string,
 		enableLogging = false,
 	) {

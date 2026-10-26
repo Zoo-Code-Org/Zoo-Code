@@ -35,7 +35,7 @@ describe("API#hasTaskUiMessageText", () => {
 			on: vi.fn(),
 		} as unknown as ClineProvider
 
-		api = new API(mockOutputChannel, mockProvider, makeClineProviderFactory())
+		api = new API(mockOutputChannel, mockProvider)
 	})
 
 	it("returns true when a persisted ui message contains the text", async () => {

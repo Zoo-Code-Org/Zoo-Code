@@ -42,7 +42,9 @@ suite("Roo Code View State", function () {
 	test("sidebar and tab panel keep mode isolated through the real ContextProxy singleton", async () => {
 		const modeEvents: Array<{ taskId: string; mode: string }> = []
 		const completionHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
-			if (message.type === "ask" && message.ask === "completion_result") {
+			// Only a completed ask may be approved: a partial update is a progress frame, not an
+			// approval prompt, and answering it races the final payload.
+			if (message.partial !== true && message.type === "ask" && message.ask === "completion_result") {
 				void globalThis.api.approveTaskAsk(taskId)
 			}
 		}
@@ -195,7 +197,7 @@ suite("Roo Code View State", function () {
 		}
 
 		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
-			if (message.type === "ask" && message.ask === "followup" && message.text) {
+			if (message.partial !== true && message.type === "ask" && message.ask === "followup" && message.text) {
 				try {
 					const parsed = JSON.parse(message.text) as { suggest?: Array<{ answer: string; mode?: string }> }
 					const suggestion = parsed.suggest?.[0]
@@ -209,7 +211,7 @@ suite("Roo Code View State", function () {
 				}
 			}
 
-			if (message.type === "ask" && message.ask === "completion_result") {
+			if (message.partial !== true && message.type === "ask" && message.ask === "completion_result") {
 				void globalThis.api.approveTaskAsk(taskId)
 			}
 		}
@@ -386,68 +388,75 @@ suite("Roo Code View State", function () {
 		// sidebar provider is a per-extension singleton that does not re-read durable
 		// viewStates when its webview is re-shown, so its in-memory value is the one
 		// getConfiguration() reports after the reload.
-		const markedIds: string[] = []
-		{
-			const persisted = globalThis.api.getGlobalState("viewStates") as GlobalState["viewStates"]
-			assert.ok(persisted, "Expected persisted viewStates before writing the rehydration marker")
-
-			const marked: NonNullable<GlobalState["viewStates"]> = { ...persisted }
-			for (const [viewStateId, entry] of Object.entries(marked)) {
-				if (entry.mode === "ask") {
-					marked[viewStateId] = { ...entry, mode: "build" }
-					markedIds.push(viewStateId)
-				}
-			}
-			assert.ok(markedIds.length > 0, "Expected a persisted 'ask' entry to mark before the reload")
-			await globalThis.api.setGlobalState("viewStates", marked)
-		}
-
-		// Hide the primary sidebar and let the dispose settle, show it again and let
-		// the webview recreation settle; the waitFor below then polls for the
-		// reloaded webview to report the provider's state (no extra fixed wait is
-		// needed once polling starts).
-		await vscode.commands.executeCommand("workbench.action.toggleSidebarVisibility")
-		await sleep(2_000)
-		await vscode.commands.executeCommand("workbench.action.toggleSidebarVisibility")
-		await sleep(2_000)
-
-		// (a) Every durable entry the marker was written to still holds the build mode
-		// after the reload. A wipe, prune, or re-key of the durable map during the
-		// cycle would drop or rename the marked entries, and no unrelated entry can
-		// substitute for them. Poll in case the just-written memento value lags a
-		// synchronous read.
-		await waitFor(
-			() => {
+		// Restore the real durable map after the test, including on assertion failure: the marker
+		// below rewrites user state that later suites would otherwise inherit.
+		const originalViewStates = globalThis.api.getGlobalState("viewStates") as GlobalState["viewStates"]
+		try {
+			const markedIds: string[] = []
+			{
 				const persisted = globalThis.api.getGlobalState("viewStates") as GlobalState["viewStates"]
-				if (!persisted) {
-					return false
+				assert.ok(persisted, "Expected persisted viewStates before writing the rehydration marker")
+
+				const marked: NonNullable<GlobalState["viewStates"]> = { ...persisted }
+				for (const [viewStateId, entry] of Object.entries(marked)) {
+					if (entry.mode === "ask") {
+						marked[viewStateId] = { ...entry, mode: "build" }
+						markedIds.push(viewStateId)
+					}
 				}
+				assert.ok(markedIds.length > 0, "Expected a persisted 'ask' entry to mark before the reload")
+				await globalThis.api.setGlobalState("viewStates", marked)
+			}
 
-				return markedIds.every((id) => persisted[id]?.mode === "build")
-			},
-			{ timeout: 30_000 },
-		)
-		const viewStates = globalThis.api.getGlobalState("viewStates") as GlobalState["viewStates"]
-		assert.ok(viewStates, "Expected persisted viewStates to exist after the sidebar webview reload")
-		assert.ok(
-			markedIds.every((id) => viewStates[id]?.mode === "build"),
-			"Expected every marked view-state id to still hold the rehydration marker after the reload",
-		)
+			// Hide the primary sidebar and let the dispose settle, show it again and let
+			// the webview recreation settle; the waitFor below then polls for the
+			// reloaded webview to report the provider's state (no extra fixed wait is
+			// needed once polling starts).
+			await vscode.commands.executeCommand("workbench.action.toggleSidebarVisibility")
+			await sleep(2_000)
+			await vscode.commands.executeCommand("workbench.action.toggleSidebarVisibility")
+			await sleep(2_000)
 
-		// (b) The reloaded sidebar view still reports the pre-reload in-memory mode.
-		// getConfiguration() always reads the sidebar provider, so a regression that
-		// wipes the provider's view state during the hide/show cycle surfaces as the
-		// view falling back to the global mode instead of 'ask'.
-		assert.strictEqual(globalThis.api.getConfiguration().mode, "ask")
+			// (a) Every durable entry the marker was written to still holds the build mode
+			// after the reload. A wipe, prune, or re-key of the durable map during the
+			// cycle would drop or rename the marked entries, and no unrelated entry can
+			// substitute for them. Poll in case the just-written memento value lags a
+			// synchronous read.
+			await waitFor(
+				() => {
+					const persisted = globalThis.api.getGlobalState("viewStates") as GlobalState["viewStates"]
+					if (!persisted) {
+						return false
+					}
 
-		// (c) Deliberately skipped: asserting that a fresh task started from this view
-		// inherits the view's mode is not possible here — there is no deterministic
-		// extension-side getter for a fresh task's inherited mode. startNewTask takes
-		// an explicit configuration and the Task constructor reads the provider state
-		// at a timing the extension API does not expose, so any such assertion would
-		// require a new API surface (out of scope for this test-only unit) or a
-		// non-deterministic poll. Mode inheritance is already exercised by the two
-		// isolation tests above through their per-task TaskModeSwitched events and
-		// the persisted per-view entries they assert on.
+					return markedIds.every((id) => persisted[id]?.mode === "build")
+				},
+				{ timeout: 30_000 },
+			)
+			const viewStates = globalThis.api.getGlobalState("viewStates") as GlobalState["viewStates"]
+			assert.ok(viewStates, "Expected persisted viewStates to exist after the sidebar webview reload")
+			assert.ok(
+				markedIds.every((id) => viewStates[id]?.mode === "build"),
+				"Expected every marked view-state id to still hold the rehydration marker after the reload",
+			)
+
+			// (b) The reloaded sidebar view still reports the pre-reload in-memory mode.
+			// getConfiguration() always reads the sidebar provider, so a regression that
+			// wipes the provider's view state during the hide/show cycle surfaces as the
+			// view falling back to the global mode instead of 'ask'.
+			assert.strictEqual(globalThis.api.getConfiguration().mode, "ask")
+
+			// (c) Deliberately skipped: asserting that a fresh task started from this view
+			// inherits the view's mode is not possible here — there is no deterministic
+			// extension-side getter for a fresh task's inherited mode. startNewTask takes
+			// an explicit configuration and the Task constructor reads the provider state
+			// at a timing the extension API does not expose, so any such assertion would
+			// require a new API surface (out of scope for this test-only unit) or a
+			// non-deterministic poll. Mode inheritance is already exercised by the two
+			// isolation tests above through their per-task TaskModeSwitched events and
+			// the persisted per-view entries they assert on.
+		} finally {
+			await globalThis.api.setGlobalState("viewStates", originalViewStates)
+		}
 	})
 })

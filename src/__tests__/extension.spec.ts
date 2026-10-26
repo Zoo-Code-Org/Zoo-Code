@@ -313,34 +313,8 @@ describe("extension.ts", () => {
 		secretChanges.dispose()
 	})
 
-	test("injects a factory instance with this activation's dependencies without reading the sidebar tracker", async () => {
-		vi.resetModules()
-		const { API } = await import("../extension/api")
-		const { openClineInNewTab } = await import("../activate/registerCommands")
-		const { ClineProviderFactory } = await import("../core/webview/ClineProviderFactory")
-		const { WebviewFocusTracker } = await import("../core/webview/WebviewFocusTracker")
-		const { ClineProvider } = await import("../core/webview/ClineProvider")
-		const { activate } = await import("../extension")
-		const vscode = await import("vscode")
-		await activate(mockContext)
-
-		const tracker = mockContext.subscriptions.find((entry) => entry instanceof WebviewFocusTracker)
-		const outputChannel = vi.mocked(vscode.window.createOutputChannel).mock.results[0].value
-		const sidebar = vi.mocked(ClineProvider).mock.results[0].value
-		const providerFactory = vi.mocked(API).mock.calls[0][2]
-		expect(providerFactory).toBeInstanceOf(ClineProviderFactory)
-		expect(sidebar.webviewFocusTracker).toBeUndefined()
-		expect(openClineInNewTab).not.toHaveBeenCalled()
-		vi.mocked(openClineInNewTab).mockResolvedValueOnce(sidebar)
-
-		await expect(providerFactory.createInNewTab()).resolves.toBe(sidebar)
-		expect(openClineInNewTab).toHaveBeenCalledExactlyOnceWith({
-			context: mockContext,
-			outputChannel,
-			webviewFocusTracker: tracker,
-		})
-		tracker?.dispose()
-	})
+	// The API no longer accepts a provider factory: a fresh tab is created directly by
+	// API.startNewTask (covered in api-start-new-task.spec), so there is no factory to inject.
 
 	test("initializes the code index scope and registers it for extension cleanup", async () => {
 		vi.resetModules()

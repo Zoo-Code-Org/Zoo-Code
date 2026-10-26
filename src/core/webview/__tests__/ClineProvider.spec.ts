@@ -3447,26 +3447,33 @@ describe("ClineProvider", () => {
 			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
 			// The caller-side timeout rejection is expected: runToCompletion only
 			// keeps the QUEUE waiting for the run, it does not silence the caller.
-			const switchSettled = provider.handleModeSwitch("programmer").catch(() => undefined)
-			await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1000)
+			let switchSettled: Promise<void> = Promise.resolve()
+			try {
+				switchSettled = provider.handleModeSwitch("programmer").catch(() => undefined)
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1000)
 
-			// The queue tail is still the mode switch: a later mutation must
-			// not start while the switch's writes are still in flight.
-			let secondStarted = false
-			void provider["enqueueProviderProfileMutation"](async () => {
-				secondStarted = true
-			})
-			await vi.advanceTimersByTimeAsync(0)
-			expect(secondStarted).toBe(false)
+				// The queue tail is still the mode switch: a later mutation must
+				// not start while the switch's writes are still in flight.
+				let secondStarted = false
+				void provider["enqueueProviderProfileMutation"](async () => {
+					secondStarted = true
+				})
+				await vi.advanceTimersByTimeAsync(0)
+				expect(secondStarted).toBe(false)
 
-			release()
-			await switchSettled
-			await vi.advanceTimersByTimeAsync(0)
-			expect(secondStarted).toBe(true)
-
-			switchSpy.mockRestore()
-			vi.useRealTimers()
-			await provider.dispose()
+				release()
+				await switchSettled
+				await vi.advanceTimersByTimeAsync(0)
+				expect(secondStarted).toBe(true)
+			} finally {
+				// Release the gate before restoring the spy so queued mutations can settle even
+				// when an assertion above failed.
+				release()
+				await switchSettled
+				switchSpy.mockRestore()
+				vi.useRealTimers()
+				await provider.dispose()
+			}
 		})
 
 		it("does not resurrect a pruned sibling entry that the sibling cleared mid-window", async () => {

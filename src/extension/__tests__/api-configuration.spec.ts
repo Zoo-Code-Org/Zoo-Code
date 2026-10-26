@@ -38,7 +38,7 @@ describe("API - configuration", () => {
 			getValues,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		const api = new API(outputChannel, provider, makeClineProviderFactory())
+		const api = new API(outputChannel, provider)
 
 		const configuration = api.getConfiguration() as Record<string, unknown>
 
@@ -63,7 +63,7 @@ describe("API - configuration", () => {
 			getValues,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		const api = new API(outputChannel, provider, makeClineProviderFactory())
+		const api = new API(outputChannel, provider)
 
 		const configuration = api.getConfiguration() as Record<string, unknown>
 
@@ -84,7 +84,7 @@ describe("API - configuration", () => {
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		const api = new API(outputChannel, provider, makeClineProviderFactory())
+		const api = new API(outputChannel, provider)
 
 		await api.setConfiguration({
 			currentApiConfigName: "default",
@@ -115,7 +115,7 @@ describe("API - configuration", () => {
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		const api = new API(outputChannel, provider, makeClineProviderFactory())
+		const api = new API(outputChannel, provider)
 
 		await api.setConfiguration({
 			currentApiConfigName: "default",
@@ -149,7 +149,7 @@ describe("API - configuration", () => {
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		const api = new API(outputChannel, provider, makeClineProviderFactory())
+		const api = new API(outputChannel, provider)
 
 		await api.setConfiguration({ currentApiConfigName: "default" })
 
@@ -177,7 +177,7 @@ describe("API - configuration", () => {
 			getValues,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		const api = new API(outputChannel, provider, makeUnusedTabFactory())
+		const api = new API(outputChannel, provider)
 
 		const configuration = api.getConfiguration()
 
@@ -211,7 +211,7 @@ describe("API - configuration", () => {
 			getValues,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		const api = new API(outputChannel, provider, makeClineProviderFactory())
+		const api = new API(outputChannel, provider)
 
 		const configuration = api.getConfiguration()
 
@@ -245,7 +245,7 @@ describe("API - configuration", () => {
 			getValues,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		const api = new API(outputChannel, provider, makeClineProviderFactory())
+		const api = new API(outputChannel, provider)
 
 		const configuration = api.getConfiguration()
 
@@ -282,7 +282,7 @@ describe("API - configuration", () => {
 			getValues,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		const api = new API(outputChannel, provider, makeClineProviderFactory())
+		const api = new API(outputChannel, provider)
 
 		const configuration = api.getConfiguration()
 
@@ -314,7 +314,7 @@ describe("API - configuration", () => {
 			getValues,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		const api = new API(outputChannel, provider, makeClineProviderFactory())
+		const api = new API(outputChannel, provider)
 
 		const configuration = api.getConfiguration()
 
@@ -349,7 +349,7 @@ describe("API - configuration", () => {
 			getValues,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		const api = new API(outputChannel, provider, makeClineProviderFactory())
+		const api = new API(outputChannel, provider)
 
 		const configuration = api.getConfiguration()
 
@@ -380,7 +380,7 @@ describe("API - configuration", () => {
 			getValues,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		const api = new API(outputChannel, provider, makeClineProviderFactory())
+		const api = new API(outputChannel, provider)
 
 		const configuration = api.getConfiguration()
 
