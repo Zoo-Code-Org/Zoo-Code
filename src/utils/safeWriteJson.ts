@@ -8,6 +8,7 @@ import {
 	safeWriteText,
 	DaclRestoreError,
 	PublishNotDurableError,
+	isPublishCommittedError,
 	type SafeWriteTextOptions,
 } from "../services/file-safety/safeWriteText"
 
@@ -223,4 +224,4 @@ async function _streamDataToFile(targetPath: string, data: any, prettyPrint = fa
 	})
 }
 
-export { safeWriteJson }
+export { safeWriteJson, isPublishCommittedError }

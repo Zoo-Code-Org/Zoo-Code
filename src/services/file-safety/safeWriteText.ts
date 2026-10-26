@@ -114,6 +114,16 @@ export class DaclRestoreError extends Error {
 	}
 }
 
+/**
+ * True when the atomic rename already committed the content even though the publish reported
+ * an error: the directory entry is not confirmed durable, or the saved DACL could not be put
+ * back. Callers must treat the write as committed (update their in-memory state and never retry
+ * the content), while still surfacing the unconfirmed durability/access-rights condition.
+ */
+export function isPublishCommittedError(error: unknown): error is PublishNotDurableError | DaclRestoreError {
+	return error instanceof PublishNotDurableError || error instanceof DaclRestoreError
+}
+
 function _errorCode(error: unknown): string | undefined {
 	return typeof error === "object" && error !== null && "code" in error
 		? (error as { code?: string }).code

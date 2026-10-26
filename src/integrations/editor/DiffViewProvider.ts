@@ -21,8 +21,7 @@ import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
 import { Task } from "../../core/task/Task"
 import {
 	assertPublishWithinAuthorizedRoot,
-	DaclRestoreError,
-	PublishNotDurableError,
+	isPublishCommittedError,
 	safeWriteText,
 } from "../../services/file-safety/safeWriteText"
 
@@ -1193,7 +1192,7 @@ export class DiffViewProvider {
 			// writing again. Treat the save as completed so the tool's bookkeeping matches
 			// the disk (and content already on disk is not retried), and surface the
 			// condition as a warning instead.
-			if (error instanceof PublishNotDurableError || error instanceof DaclRestoreError) {
+			if (isPublishCommittedError(error)) {
 				console.warn(`saveDirectly: content committed with a warning: ${error.message}`)
 			} else {
 				throw error

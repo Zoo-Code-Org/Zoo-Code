@@ -2,7 +2,7 @@ import * as vscode from "vscode"
 import { createHash } from "crypto"
 import { ICacheManager } from "./interfaces/cache"
 import debounce from "lodash.debounce"
-import { safeWriteJson } from "../../utils/safeWriteJson"
+import { isPublishCommittedError, safeWriteJson } from "../../utils/safeWriteJson"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 
@@ -70,6 +70,14 @@ export class CacheManager implements ICacheManager {
 			await safeWriteJson(this.cachePath.fsPath, {})
 			this.fileHashes = {}
 		} catch (error) {
+			if (isPublishCommittedError(error)) {
+				// The empty cache object is already committed on disk: only its durability or the
+				// restored access rights could not be confirmed. Keeping the old in-memory hashes
+				// would make the process disagree with the file it just published.
+				this.fileHashes = {}
+				console.warn("Cache file content committed but not fully verified:", error)
+				return
+			}
 			console.error("Failed to clear cache file:", error, this.cachePath)
 			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 				error: error instanceof Error ? error.message : String(error),
