@@ -533,6 +533,9 @@ const MUTATOR_NODE_PREDICATES = new Map([
 	],
 ])
 
+// Mutators whose Stryker start location can point at a sub-expression of the mutated node.
+const MUTATOR_SUBELEMENT_LOCATIONS = new Set(["ConditionalExpression", "LogicalOperator"])
+
 function lineHasMutatorNode(source, filePath, line, column, mutator) {
 	const predicate = MUTATOR_NODE_PREDICATES.get(mutator)
 	if (!predicate) return false
@@ -548,10 +551,17 @@ function lineHasMutatorNode(source, filePath, line, column, mutator) {
 	// expression descendants on that line. Pinning the column stops a same-line edit from
 	// silently re-binding an accepted equivalence to a different mutant.
 	let found = false
+	// Stryker reports a condition-shaped mutant's location at the mutated sub-expression (for an
+	// if statement the test, for a logical expression the operand), so only those mutators may
+	// match a descendant at the recorded column. Every other mutator must have its own node start
+	// exactly at the column: an identifier that happens to sit at a removed call's former column
+	// must not validate a CallExpression entry.
+	const allowDescendantColumn = MUTATOR_SUBELEMENT_LOCATIONS.has(mutator)
 	function matchesColumn(node) {
 		const start = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile))
 		if (start.line + 1 !== editorLine) return false
 		if (start.character === column) return true
+		if (!allowDescendantColumn) return false
 		let childMatch = false
 		ts.forEachChild(node, (child) => {
 			if (childMatch) return

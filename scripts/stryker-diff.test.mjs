@@ -1299,6 +1299,31 @@ describe("accepted equivalent mutants", () => {
 		)
 	})
 
+	it("rejects a CallExpression entry whose recorded column now holds only an identifier", () => {
+		// A registered call edited from outer(inner(arg)) to outer(arg) leaves the identifier
+		// arg at the removed inner call's former column. Descendant-column matching is only for
+		// condition-shaped mutators, so an identifier must not validate a CallExpression entry.
+		const sourceBefore = "const y = outer(inner(arg))\n"
+		const sourceAfter = "const y = outer(arg)\n"
+		const entry = {
+			file: "src/example.ts",
+			line: 0,
+			column: 16,
+			mutator: "CallExpression",
+			replacement: "undefined",
+			reason: "example",
+		}
+
+		assert.deepEqual(
+			validateEquivalenceEntries([entry], () => sourceBefore),
+			[],
+		)
+		assert.match(
+			validateEquivalenceEntries([entry], () => sourceAfter).join("\n"),
+			/src\/example\.ts:0:16: expected CallExpression code at line 1/,
+		)
+	})
+
 	it("rejects an entry with an unknown mutator or missing file", () => {
 		const source = "const a = 1\n"
 		const unknown = { file: "src/example.ts", line: 0, mutator: "NotAMutator", replacement: "x", reason: "example" }

@@ -3,14 +3,6 @@
 	"equivalences": [
 		{
 			"file": "src/api/providers/openai-codex.ts",
-			"line": 274,
-			"mutator": "ConditionalExpression",
-			"replacement": "false",
-			"reason": "the false mutant differs only if an abort lands between the OAuth race settle and this catch, a microtask window",
-			"column": 7
-		},
-		{
-			"file": "src/api/providers/openai-codex.ts",
 			"line": 1457,
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
