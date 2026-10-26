@@ -2534,6 +2534,35 @@ Body here.`
 			expect(parsed2.data.description).toBe(description)
 		})
 
+		it("propagates a realpath failure instead of writing through the unresolved path", async () => {
+			const skillDir = p(globalSkillsDir, "unresolvable-skill")
+			const skillMd = p(skillDir, "SKILL.md")
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockReaddir.mockImplementation(async (dir: string) =>
+				dir === globalSkillsDir ? ["unresolvable-skill"] : [],
+			)
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === skillDir) {
+					return { isDirectory: () => true }
+				}
+				throw enoent()
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === skillMd)
+			mockReadFile.mockResolvedValue("---\nname: unresolvable-skill\ndescription: A skill\n---\nInstructions")
+
+			await skillsManager.discoverSkills()
+			// The discovered path resolves, but the publish-time resolution fails: the write must
+			// not fall back to the unresolved (potentially symlinked) path.
+			const resolutionError = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			mockRealpath.mockRejectedValueOnce(resolutionError)
+
+			await expect(skillsManager.updateSkillModes("unresolvable-skill", "global", ["code"])).rejects.toBe(
+				resolutionError,
+			)
+			expect(mockWriteFile).not.toHaveBeenCalled()
+			expect(mockRename).not.toHaveBeenCalled()
+		})
+
 		it("should throw error for invalid skill name", async () => {
 			await expect(skillsManager.createSkill("Invalid-Name", "global", "Description")).rejects.toThrow(
 				"Skill name must be lowercase letters/numbers/hyphens only",

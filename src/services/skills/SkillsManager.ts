@@ -1100,13 +1100,9 @@ Add your skill instructions here.
 		const newContent = matter.stringify(body, frontmatter, SKILL_YAML_DUMP_OPTIONS)
 		// Resolve the link target first: publishing through the temp+rename must update the file
 		// the skill was discovered through, not replace a symlinked SKILL.md with a regular file.
-		let targetPath = skill.path
-		try {
-			targetPath = await fs.realpath(skill.path)
-		} catch {
-			// Unresolvable path (already missing, or a platform without realpath): keep the
-			// discovered path and let the write report the real failure.
-		}
+		// A resolution failure propagates: publishing through the unresolved path could replace a
+		// symlink with a regular file (or write somewhere other than the target the caller saw).
+		const targetPath = await fs.realpath(skill.path)
 		await this.writeSkillFileAtomically(targetPath, newContent)
 
 		// Refresh skills list
