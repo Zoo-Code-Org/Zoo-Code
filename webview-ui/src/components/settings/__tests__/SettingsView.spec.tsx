@@ -988,6 +988,10 @@ describe("SettingsView - Experiments", () => {
 	it("persists only the experiment the user toggled, not the whole map", () => {
 		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { imageGeneration: false } })
 
+		// Make a non-experimental change first so Save is enabled and the submit handler runs.
+		activateTab("autoApprove")
+		fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-execute-toggle"))
+
 		activateTab("experimental")
 		const content = getSettingsContent()
 
@@ -1014,7 +1018,11 @@ describe("SettingsView - Experiments", () => {
 	})
 
 	it("does not persist the experiments map when no experiment changed", () => {
-		const { activateTab } = renderSettingsView({ experiments: { imageGeneration: false } })
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { imageGeneration: false } })
+
+		// A real non-experimental change guarantees Save is enabled and the handler runs.
+		activateTab("autoApprove")
+		fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-execute-toggle"))
 
 		activateTab("experimental")
 		fireEvent.click(screen.getByTestId("save-button"))

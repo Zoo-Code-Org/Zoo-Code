@@ -486,7 +486,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			vscode.postMessage({ type: "telemetrySetting", text: telemetrySetting })
 			vscode.postMessage({ type: "debugSetting", bool: cachedState.debug })
 
-			changedExperiments.current.clear()
+			// Keep the submitted ids until the extension state reflects them: a second Save in
+			// the same tick must compare against the last submitted values, not stale host state.
 			setChangeDetected(false)
 		}
 	}
