@@ -208,6 +208,16 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
  * against VS Code ExtensionMode.Production, so only test hosts and the e2e
  * harness keep access.
  */
+/**
+ * GlobalState keys addressable through the test-only API surface.
+ *
+ * `taskHistory` is excluded at the type level because it carries user PII and the
+ * runtime refuses it for both accessors. Credential-bearing keys are still refused
+ * at runtime (a key union cannot express the resolution), and `setGlobalState`
+ * additionally requires the key to have a global-settings value schema.
+ */
+export type TestableGlobalStateKey = Exclude<keyof GlobalState, "taskHistory">
+
 export interface RooCodeTestOnlyApi {
 	/**
 	 * Programmatically approves the pending ask for a task by ID. Intended for use in tests only.
@@ -223,13 +233,17 @@ export interface RooCodeTestOnlyApi {
 	 */
 	selectTaskFollowupSuggestion(options: { taskId: string; answer: string; mode?: string }): Promise<boolean>
 	/**
-	 * Returns a value from VS Code globalState. Intended for use in tests only.
+	 * GlobalState keys the test-only accessors can address. `taskHistory` is excluded
+	 * because it carries user PII and both runtime methods reject it; credential-bearing
+	 * keys are rejected at runtime as well, which a key union cannot express.
 	 */
-	getGlobalState<K extends keyof GlobalState>(key: K): GlobalState[K]
+	getGlobalState<K extends TestableGlobalStateKey>(key: K): GlobalState[K]
 	/**
-	 * Writes a value to VS Code globalState. Intended for use in tests only.
+	 * Writes a value to VS Code globalState. Intended for use in tests only. The
+	 * implementation additionally requires the key to have a global-settings value
+	 * schema and rejects credential-bearing keys and `taskHistory` at runtime.
 	 */
-	setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): Promise<void>
+	setGlobalState<K extends TestableGlobalStateKey>(key: K, value: GlobalState[K]): Promise<void>
 }
 
 export interface RooCodeTestAPI extends RooCodeAPI {

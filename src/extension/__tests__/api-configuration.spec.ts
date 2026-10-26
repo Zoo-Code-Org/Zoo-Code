@@ -19,6 +19,88 @@ vi.mock("@roo-code/ipc", () => ({
 }))
 
 describe("API - configuration", () => {
+	it("keeps per-view viewStates out of the flattened configuration", () => {
+		const getValues = vi.fn().mockReturnValue({
+			mode: "code",
+			currentApiConfigName: "view-profile",
+			viewStates: { "sidebar-1": { mode: "architect", updatedAt: 5 } },
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.openai,
+				apiModelId: "gpt-4o",
+			},
+		})
+		// Structural double: API.getConfiguration() only reads sidebarProvider.getValues()
+		// from the provider; the double assertion adapts this minimal shape to the
+		// constructor's ClineProvider parameter (same pattern as the tests above).
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getValues,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		const configuration = api.getConfiguration() as Record<string, unknown>
+
+		// viewStates is per-view durable state owned by the extension host: a caller
+		// that round-trips the configuration must not see (and later write back) a
+		// snapshot that can clobber newer per-view selections.
+		expect(configuration.viewStates).toBeUndefined()
+		expect(configuration.mode).toBe("code")
+		expect(configuration.apiModelId).toBe("gpt-4o")
+	})
+
+	it("keeps per-view viewStates out of the configuration when no profile is nested", () => {
+		const getValues = vi.fn().mockReturnValue({
+			mode: "code",
+			apiProvider: providerIdentifiers.anthropic,
+			viewStates: { "sidebar-1": { mode: "architect", updatedAt: 5 } },
+		})
+		// Structural double: see the note on the double above.
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getValues,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		const configuration = api.getConfiguration() as Record<string, unknown>
+
+		expect(configuration.viewStates).toBeUndefined()
+		expect(configuration.apiProvider).toBe(providerIdentifiers.anthropic)
+	})
+
+	it("refuses a caller-supplied viewStates snapshot when writing configuration", async () => {
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const saveConfig = vi.fn().mockResolvedValue("default-id")
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getValue: vi.fn(),
+			setValues,
+			contextProxy: { setValues },
+			providerSettingsManager: { saveConfig },
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await api.setConfiguration({
+			currentApiConfigName: "default",
+			apiProvider: providerIdentifiers.openai,
+			viewStates: { "sidebar-1": { mode: "code", updatedAt: 1 } },
+		} as never)
+
+		// The stale per-view snapshot is dropped before storage: neither the shared
+		// write nor the profile save may carry it back in.
+		expect(setValues).toHaveBeenCalledWith(expect.not.objectContaining({ viewStates: expect.anything() }))
+		expect(saveConfig).toHaveBeenCalledWith(
+			"default",
+			expect.not.objectContaining({ viewStates: expect.anything() }),
+		)
+	})
+
 	it("persists every supplied mode API config mapping", async () => {
 		const setValues = vi.fn().mockResolvedValue(undefined)
 		const saveConfig = vi.fn().mockResolvedValue("default-id")

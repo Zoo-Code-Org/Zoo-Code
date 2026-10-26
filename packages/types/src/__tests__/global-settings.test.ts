@@ -1,5 +1,6 @@
 import {
 	DEFAULT_ALWAYS_DENY_UNAPPROVED_COMMANDS,
+	SECRET_STATE_KEYS,
 	DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED,
 	GLOBAL_SETTINGS_KEYS,
 	globalSettingsSchema,
@@ -19,6 +20,13 @@ describe("destructive command guard global setting", () => {
 
 	it("rejects non-boolean setting values", () => {
 		expect(() => globalSettingsSchema.parse({ destructiveCommandGuardEnabled: "true" })).toThrow()
+	})
+})
+
+describe("provider api-key secret registration", () => {
+	it("stores mimo and poe api keys in secret storage, not plaintext global state", () => {
+		expect(SECRET_STATE_KEYS).toContain("mimoApiKey")
+		expect(SECRET_STATE_KEYS).toContain("poeApiKey")
 	})
 })
 
