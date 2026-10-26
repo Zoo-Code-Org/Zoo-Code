@@ -7,7 +7,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
 			"reason": "the false mutant differs only if an abort lands between the transport last pre-yield check and this consumer resumption",
-			"column": 8
+			"column": 8,
+			"node": "if (requestSignal?.aborted) { break }"
 		},
 		{
 			"file": "src/api/providers/openai.ts",
@@ -15,7 +16,8 @@
 			"mutator": "LogicalOperator",
 			"replacement": "this.options.openAiStrictToolSchemas && DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS",
 			"reason": "an unset option makes && yield undefined so the parameter default supplies the same strict value as ??",
-			"column": 28
+			"column": 28,
+			"node": "this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS"
 		},
 		{
 			"file": "src/api/providers/openai.ts",
@@ -23,7 +25,8 @@
 			"mutator": "LogicalOperator",
 			"replacement": "this.options.openAiStrictToolSchemas && DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS",
 			"reason": "an unset option makes && yield undefined so the parameter default supplies the same strict value as ??",
-			"column": 28
+			"column": 28,
+			"node": "this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS"
 		},
 		{
 			"file": "src/api/providers/utils/abort-signal.ts",
@@ -31,7 +34,8 @@
 			"mutator": "BooleanLiteral",
 			"replacement": "false",
 			"reason": "a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable",
-			"column": 52
+			"column": 52,
+			"node": "true"
 		},
 		{
 			"file": "src/api/providers/utils/abort-signal.ts",
@@ -39,7 +43,8 @@
 			"mutator": "ObjectLiteral",
 			"replacement": "{}",
 			"reason": "a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable",
-			"column": 44
+			"column": 44,
+			"node": "{ once: true }"
 		},
 		{
 			"file": "src/core/assistant-message/NativeToolCallParser.ts",
@@ -47,7 +52,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
 			"reason": "the guard and delete are both GC-only; observable behavior is identical",
-			"column": 6
+			"column": 6,
+			"node": "if (streamingToolCalls.size === 0) { this.streamingToolCallsByScope.delete(scope) }"
 		},
 		{
 			"file": "src/core/assistant-message/NativeToolCallParser.ts",
@@ -55,7 +61,8 @@
 			"mutator": "CallExpression",
 			"replacement": ";",
 			"reason": "deleting an empty WeakMap entry is only observable as GC eligibility",
-			"column": 3
+			"column": 3,
+			"node": "this.streamingToolCallsByScope.delete(scope)"
 		},
 		{
 			"file": "src/core/task/Task.ts",
@@ -63,7 +70,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
 			"reason": "only tool_use and mcp_tool_use entries ever carry an id, so the guard is always true on this path",
-			"column": 12
+			"column": 12,
+			"node": "(entry.type === \"tool_use\" || entry.type === \"mcp_tool_use\") && (entry as { id?: string }).id === event.id"
 		},
 		{
 			"file": "src/core/task/Task.ts",
@@ -71,7 +79,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
 			"reason": "event.name is always a string on this path; delta events carry the tracked start name",
-			"column": 14
+			"column": 14,
+			"node": "if (event.name !== undefined) { streamingKey = NativeToolCallParser.makeStreamingKey(event.id, event.name) } else { const legacyEntry = NativeToolCallParser.getStreamingToolCallById( event.id, nativeToolCallParserScope, ) streamingKey = legacyEntry ? NativeToolCallParser.makeStreamingKey( legacyEntry.id, legacyEntry.name, ) : undefined }"
 		},
 		{
 			"file": "src/core/task/Task.ts",
@@ -79,7 +88,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
 			"reason": "makeStreamingKey always returns a string and the legacy lookup branch is unreachable",
-			"column": 11
+			"column": 11,
+			"node": "streamingKey === undefined ? null : NativeToolCallParser.processStreamingChunk( streamingKey, event.delta, nativeToolCallParserScope, )"
 		},
 		{
 			"file": "src/core/task/Task.ts",
@@ -87,7 +97,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
 			"reason": "streamingKey is always a defined string on this path (same invariant as the guard above)",
-			"column": 14
+			"column": 14,
+			"node": "if (partialToolUse && streamingKey !== undefined) { // Reuse the compound key built above: it is exactly the key the start event // registered under, so the delta lookup needs no second encoding. const toolUseIndex = this.streamingToolCallIndices.get(streamingKey) if (toolUseIndex !== undefined) { // Store the ID for native protocol ;(partialToolUse as any).id = event.id // Update the existing tool use with new partial data this.assistantMessageContent[toolUseIndex] = partialToolUse // Present updated tool use /* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */ this.presentAssistantMessageSafe() } }"
 		},
 		{
 			"file": "src/core/task/Task.ts",
@@ -95,7 +106,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
 			"reason": "streamingKey is always a defined string on this path (same invariant as the guard above)",
-			"column": 14
+			"column": 14,
+			"node": "if (partialToolUse && streamingKey !== undefined) { // Reuse the compound key built above: it is exactly the key the start event // registered under, so the delta lookup needs no second encoding. const toolUseIndex = this.streamingToolCallIndices.get(streamingKey) if (toolUseIndex !== undefined) { // Store the ID for native protocol ;(partialToolUse as any).id = event.id // Update the existing tool use with new partial data this.assistantMessageContent[toolUseIndex] = partialToolUse // Present updated tool use /* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */ this.presentAssistantMessageSafe() } }"
 		},
 		{
 			"file": "src/core/task/Task.ts",
@@ -103,7 +115,8 @@
 			"mutator": "EqualityOperator",
 			"replacement": "streamingKey === undefined",
 			"reason": "streamingKey is always a defined string on this path (same invariant as the guard above)",
-			"column": 32
+			"column": 32,
+			"node": "streamingKey !== undefined"
 		},
 		{
 			"file": "src/core/task/Task.ts",
@@ -111,7 +124,8 @@
 			"mutator": "LogicalOperator",
 			"replacement": "event.name && event.id",
 			"reason": "finalizeRawChunks emits end events with the tracked start name, so the ?? fallback is unreachable",
-			"column": 22
+			"column": 22,
+			"node": "event.name ?? event.id"
 		},
 		{
 			"file": "src/core/task/Task.ts",
@@ -119,7 +133,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
 			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
-			"column": 10
+			"column": 10,
+			"node": "if (finalToolUse === null && toolUseIndex === undefined) { const resolved = NativeToolCallParser.getStreamingToolCallById( event.id, nativeToolCallParserScope, ) if (resolved) { eventName = resolved.name dedupKey = NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name) finalToolUse = NativeToolCallParser.finalizeStreamingToolCall( dedupKey, nativeToolCallParserScope, ) toolUseIndex = this.streamingToolCallIndices.get(dedupKey) } }"
 		},
 		{
 			"file": "src/core/task/Task.ts",
@@ -127,7 +142,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
 			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
-			"column": 10
+			"column": 10,
+			"node": "if (finalToolUse === null && toolUseIndex === undefined) { const resolved = NativeToolCallParser.getStreamingToolCallById( event.id, nativeToolCallParserScope, ) if (resolved) { eventName = resolved.name dedupKey = NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name) finalToolUse = NativeToolCallParser.finalizeStreamingToolCall( dedupKey, nativeToolCallParserScope, ) toolUseIndex = this.streamingToolCallIndices.get(dedupKey) } }"
 		},
 		{
 			"file": "src/core/task/Task.ts",
@@ -135,7 +151,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
 			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
-			"column": 10
+			"column": 10,
+			"node": "if (finalToolUse === null && toolUseIndex === undefined) { const resolved = NativeToolCallParser.getStreamingToolCallById( event.id, nativeToolCallParserScope, ) if (resolved) { eventName = resolved.name dedupKey = NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name) finalToolUse = NativeToolCallParser.finalizeStreamingToolCall( dedupKey, nativeToolCallParserScope, ) toolUseIndex = this.streamingToolCallIndices.get(dedupKey) } }"
 		},
 		{
 			"file": "src/core/task/Task.ts",
@@ -143,7 +160,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
 			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
-			"column": 35
+			"column": 35,
+			"node": "if (finalToolUse === null && toolUseIndex === undefined) { const resolved = NativeToolCallParser.getStreamingToolCallById( event.id, nativeToolCallParserScope, ) if (resolved) { eventName = resolved.name dedupKey = NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name) finalToolUse = NativeToolCallParser.finalizeStreamingToolCall( dedupKey, nativeToolCallParserScope, ) toolUseIndex = this.streamingToolCallIndices.get(dedupKey) } }"
 		},
 		{
 			"file": "src/core/task/Task.ts",
@@ -151,7 +169,8 @@
 			"mutator": "EqualityOperator",
 			"replacement": "finalToolUse !== null",
 			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
-			"column": 10
+			"column": 10,
+			"node": "finalToolUse === null"
 		},
 		{
 			"file": "src/core/task/Task.ts",
@@ -159,7 +178,8 @@
 			"mutator": "EqualityOperator",
 			"replacement": "toolUseIndex !== undefined",
 			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
-			"column": 35
+			"column": 35,
+			"node": "toolUseIndex === undefined"
 		},
 		{
 			"file": "src/core/task/Task.ts",
@@ -167,7 +187,8 @@
 			"mutator": "LogicalOperator",
 			"replacement": "finalToolUse === null || toolUseIndex === undefined",
 			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
-			"column": 10
+			"column": 10,
+			"node": "finalToolUse === null && toolUseIndex === undefined"
 		},
 		{
 			"file": "src/core/task/Task.ts",
@@ -175,7 +196,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
 			"reason": "unreachable defensive region: getStreamingToolCallById can only resolve when the both-miss case is reachable",
-			"column": 11
+			"column": 11,
+			"node": "if (resolved) { eventName = resolved.name dedupKey = NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name) finalToolUse = NativeToolCallParser.finalizeStreamingToolCall( dedupKey, nativeToolCallParserScope, ) toolUseIndex = this.streamingToolCallIndices.get(dedupKey) }"
 		},
 		{
 			"file": "src/core/task/Task.ts",
@@ -183,7 +205,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
 			"reason": "unreachable defensive region: getStreamingToolCallById can only resolve when the both-miss case is reachable",
-			"column": 11
+			"column": 11,
+			"node": "if (resolved) { eventName = resolved.name dedupKey = NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name) finalToolUse = NativeToolCallParser.finalizeStreamingToolCall( dedupKey, nativeToolCallParserScope, ) toolUseIndex = this.streamingToolCallIndices.get(dedupKey) }"
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
@@ -191,7 +214,8 @@
 			"mutator": "EqualityOperator",
 			"replacement": "i <= maxIterations",
 			"reason": "defensive iteration bound: valid percent-encoding strictly reduces escape depth per decode, so the bound is never hit",
-			"column": 17
+			"column": 17,
+			"node": "i < maxIterations"
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
@@ -199,7 +223,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
 			"reason": "ENOENT is the only expected code on a walk toward an existing ancestor; anything else must fail closed",
-			"column": 7
+			"column": 7,
+			"node": "if (code !== \"ENOENT\") { return null }"
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
@@ -207,7 +232,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
 			"reason": "lstat succeeding after realpath ENOENT means a dangling symlink, so the true branch is unreachable",
-			"column": 8
+			"column": 8,
+			"node": "if (stat.isSymbolicLink()) { return null }"
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
@@ -215,7 +241,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
 			"reason": "with no folders the realFolders set stays empty and the empty-set fail-closed returns the same result",
-			"column": 5
+			"column": 5,
+			"node": "if (!folders || folders.length === 0) { return true }"
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
@@ -223,7 +250,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
 			"reason": "with no folders the realFolders set stays empty and the empty-set fail-closed returns the same result",
-			"column": 17
+			"column": 17,
+			"node": "if (!folders || folders.length === 0) { return true }"
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
@@ -231,7 +259,8 @@
 			"mutator": "LogicalOperator",
 			"replacement": "!folders && folders.length === 0",
 			"reason": "with no folders the realFolders set stays empty and the empty-set fail-closed returns the same result",
-			"column": 5
+			"column": 5,
+			"node": "!folders || folders.length === 0"
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
@@ -239,7 +268,8 @@
 			"mutator": "ArrayDeclaration",
 			"replacement": "[\"Stryker was here\"]",
 			"reason": "the array is always populated (or fails closed at the empty check) before the containment test, so the initial literal is unobservable",
-			"column": 31
+			"column": 31,
+			"node": "[]"
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
@@ -247,7 +277,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
 			"reason": "a null real can never match a resolved target, and the empty-set fail-closed is unaffected by an extra null entry",
-			"column": 6
+			"column": 6,
+			"node": "if (real) { realFolders.push(real) }"
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
@@ -255,7 +286,8 @@
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
 			"reason": "if no folder could be realized the containment set is empty, so fail-closed is equivalent",
-			"column": 5
+			"column": 5,
+			"node": "if (realFolders.length === 0) { return true }"
 		}
 	]
 }

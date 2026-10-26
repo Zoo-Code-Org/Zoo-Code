@@ -1258,6 +1258,10 @@ describe("accepted equivalent mutants", () => {
 			assert.ok(entry.mutator)
 			assert.equal(typeof entry.replacement, "string")
 			assert.ok(entry.reason.length > 20)
+			// The node fingerprint binds the entry to the exact AST node, so a same-line edit that
+			// leaves a different expression cannot silently re-bind the accepted equivalence.
+			assert.equal(typeof entry.node, "string")
+			assert.ok(entry.node.length > 0)
 		}
 	})
 
@@ -1334,6 +1338,48 @@ describe("accepted equivalent mutants", () => {
 		assert.match(
 			validateEquivalenceEntries([missing], () => undefined).join("\n"),
 			/src\/missing\.ts: file not found/,
+		)
+	})
+
+	it("rejects an entry with a missing or negative start column", () => {
+		const source = "const a = 1\nconst b = a === 2 ? 3 : 4\n"
+		const base = {
+			file: "src/example.ts",
+			line: 1,
+			column: 10,
+			mutator: "ConditionalExpression",
+			replacement: "true",
+			reason: "example",
+		}
+
+		const missing = { ...base }
+		delete missing.column
+		assert.match(
+			validateEquivalenceEntries([missing], () => source).join("\n"),
+			/src\/example\.ts:1: missing start column/,
+		)
+
+		const negative = { ...base, column: -1 }
+		assert.match(
+			validateEquivalenceEntries([negative], () => source).join("\n"),
+			/src\/example\.ts:1: missing start column/,
+		)
+	})
+
+	it("rejects an entry whose node fingerprint does not match the current AST node", () => {
+		const source = "const a = 1\nconst b = a === 2 ? 3 : 4\n"
+		const entry = {
+			file: "src/example.ts",
+			line: 1,
+			column: 10,
+			mutator: "ConditionalExpression",
+			replacement: "true",
+			reason: "example",
+			node: "a !== 2 ? 3 : 4",
+		}
+		assert.match(
+			validateEquivalenceEntries([entry], () => source).join("\n"),
+			/node fingerprint mismatch for ConditionalExpression/,
 		)
 	})
 

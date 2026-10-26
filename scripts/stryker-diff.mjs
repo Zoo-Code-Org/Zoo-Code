@@ -536,9 +536,10 @@ const MUTATOR_NODE_PREDICATES = new Map([
 // Mutators whose Stryker start location can point at a sub-expression of the mutated node.
 const MUTATOR_SUBELEMENT_LOCATIONS = new Set(["ConditionalExpression", "LogicalOperator"])
 
-function lineHasMutatorNode(source, filePath, line, column, mutator) {
+/** The AST node matched for one registry entry's line/column/mutator, or undefined. */
+function findMatchedMutatorNode(source, filePath, line, column, mutator) {
 	const predicate = MUTATOR_NODE_PREDICATES.get(mutator)
-	if (!predicate) return false
+	if (!predicate) return undefined
 	const scriptKind = filePath.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS
 	const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, scriptKind)
 	// Registry lines are Stryker report lines, which are 0-based: the editor shows the code at
@@ -550,7 +551,7 @@ function lineHasMutatorNode(source, filePath, line, column, mutator) {
 	// candidate roots for the mutator and then match the column against the root or any of its
 	// expression descendants on that line. Pinning the column stops a same-line edit from
 	// silently re-binding an accepted equivalence to a different mutant.
-	let found = false
+	let matchedNode
 	// Stryker reports a condition-shaped mutant's location at the mutated sub-expression (for an
 	// if statement the test, for a logical expression the operand), so only those mutators may
 	// match a descendant at the recorded column. Every other mutator must have its own node start
@@ -573,15 +574,20 @@ function lineHasMutatorNode(source, filePath, line, column, mutator) {
 		return childMatch
 	}
 	function visit(node) {
-		if (found) return
+		if (matchedNode) return
 		if (predicate(node) && matchesColumn(node)) {
-			found = true
+			matchedNode = node
 			return
 		}
 		ts.forEachChild(node, visit)
 	}
 	visit(sourceFile)
-	return found
+	return matchedNode
+}
+
+/** Normalize source text for a stable node fingerprint across whitespace-only edits. */
+function normalizeNodeText(text) {
+	return text.replace(/\s+/g, " ").trim()
 }
 
 /**
@@ -605,7 +611,8 @@ export function validateEquivalenceEntries(equivalences, readSource) {
 			problems.push(entry.file + ":" + entry.line + ": missing start column")
 			continue
 		}
-		if (!lineHasMutatorNode(source, entry.file, entry.line, entry.column, entry.mutator)) {
+		const matchedNode = findMatchedMutatorNode(source, entry.file, entry.line, entry.column, entry.mutator)
+		if (!matchedNode) {
 			problems.push(
 				entry.file +
 					":" +
@@ -617,6 +624,23 @@ export function validateEquivalenceEntries(equivalences, readSource) {
 					" code at line " +
 					(entry.line + 1),
 			)
+			continue
+		}
+		// The node fingerprint binds the entry to this exact AST node: a same-line/column refactor
+		// that leaves a different expression in place invalidates the entry instead of silently
+		// re-binding the accepted equivalence.
+		if (typeof entry.node === "string") {
+			if (normalizeNodeText(matchedNode.getText()) !== normalizeNodeText(entry.node)) {
+				problems.push(
+					entry.file +
+						":" +
+						entry.line +
+						":" +
+						entry.column +
+						": node fingerprint mismatch for " +
+						entry.mutator,
+				)
+			}
 		}
 	}
 	return problems
