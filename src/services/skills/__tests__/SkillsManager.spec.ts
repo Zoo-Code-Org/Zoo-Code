@@ -4214,6 +4214,33 @@ Instructions`)
 		expect(mockRename).not.toHaveBeenCalled()
 	})
 
+	it("never runs a queued directory operation after the manager is disposed", async () => {
+		let releaseFirst!: () => void
+		const firstGate = new Promise<void>((resolve) => {
+			releaseFirst = resolve
+		})
+		let firstStarted = false
+		let secondRan = false
+
+		const first = skillsManager["withDirectoryLock"](globalSkillsDir, async () => {
+			firstStarted = true
+			await firstGate
+		})
+		await vi.waitFor(() => expect(firstStarted).toBe(true))
+
+		// The second operation is queued behind the first and must be rejected after disposal
+		// without running its callback.
+		const second = skillsManager["withDirectoryLock"](globalSkillsDir, async () => {
+			secondRan = true
+		})
+		await skillsManager.dispose()
+		releaseFirst()
+
+		await first
+		await expect(second).rejects.toThrow("SkillsManager is disposed")
+		expect(secondRan).toBe(false)
+	})
+
 	it("removes tracked temp sidecars on dispose", async () => {
 		mockUnlink.mockResolvedValue(undefined)
 		skillsManager["activeTempFiles"].add("/mock/skills/foo/.SKILL.md.123.abc.tmp")
