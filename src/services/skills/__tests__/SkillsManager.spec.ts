@@ -2329,13 +2329,54 @@ Instructions`)
 			mockWriteFile.mockRejectedValueOnce(Object.assign(new Error("ENOSPC"), { code: "ENOSPC" }))
 			mockUnlink.mockResolvedValue(undefined)
 			mockRm.mockResolvedValue(undefined)
+			mockRmdir.mockResolvedValue(undefined)
 
 			await expect(skillsManager.createSkill("failing-skill", "global", "Description")).rejects.toThrow("ENOSPC")
 
-			// The partially written temp file and the directory this call created are removed;
-			// the original persistence error is what the caller sees.
+			// The partially written temp file is removed and the directory this call created is
+			// removed only while empty (rmdir, never a recursive rm that could take ancestors
+			// reported by mkdir(recursive) with unrelated skills); the original persistence
+			// error is what the caller sees.
 			expect(mockUnlink).toHaveBeenCalledWith(expect.stringMatching(/\.SKILL\.md\.[^/\\]+\.tmp$/))
-			expect(mockRm).toHaveBeenCalledWith(createdDir, { recursive: true, force: true })
+			expect(mockRmdir).toHaveBeenCalledWith(p(GLOBAL_ROO_DIR, "skills", "failing-skill"))
+			expect(mockRm).not.toHaveBeenCalled()
+		})
+
+		it("leaves a non-empty skill directory alone when the empty-only removal fails", async () => {
+			mockDirectoryExists.mockResolvedValue(false)
+			mockRealpath.mockImplementation(async (p: string) => p)
+			mockReaddir.mockResolvedValue([])
+			mockFileExists.mockResolvedValue(false)
+			mockMkdir.mockResolvedValue(p(GLOBAL_ROO_DIR, "skills", "busy-skill"))
+			mockWriteFile.mockRejectedValueOnce(Object.assign(new Error("ENOSPC"), { code: "ENOSPC" }))
+			mockUnlink.mockResolvedValue(undefined)
+			mockRmdir.mockRejectedValueOnce(Object.assign(new Error("ENOTEMPTY"), { code: "ENOTEMPTY" }))
+
+			// A failed cleanup (the temp file survived, another skill appeared, ...) must not
+			// mask or replace the persistence failure.
+			await expect(skillsManager.createSkill("busy-skill", "global", "Description")).rejects.toThrow("ENOSPC")
+			expect(mockRmdir).toHaveBeenCalledWith(p(GLOBAL_ROO_DIR, "skills", "busy-skill"))
+			expect(mockRm).not.toHaveBeenCalled()
+		})
+
+		it("never recursively removes an ancestor reported by recursive mkdir", async () => {
+			mockDirectoryExists.mockResolvedValue(false)
+			mockRealpath.mockImplementation(async (p: string) => p)
+			mockReaddir.mockResolvedValue([])
+			mockFileExists.mockResolvedValue(false)
+			// mkdir(recursive) reports the first ancestor it created; removing that value
+			// recursively could take the sibling skill directories under it with it.
+			mockMkdir.mockResolvedValue(p(GLOBAL_ROO_DIR, "skills"))
+			mockWriteFile.mockRejectedValueOnce(Object.assign(new Error("ENOSPC"), { code: "ENOSPC" }))
+			mockUnlink.mockResolvedValue(undefined)
+			mockRm.mockResolvedValue(undefined)
+			mockRmdir.mockResolvedValue(undefined)
+
+			await expect(skillsManager.createSkill("isolated-skill", "global", "Description")).rejects.toThrow("ENOSPC")
+
+			// Only this skill's directory is considered, and only for an empty-only removal.
+			expect(mockRmdir).toHaveBeenCalledWith(p(GLOBAL_ROO_DIR, "skills", "isolated-skill"))
+			expect(mockRm).not.toHaveBeenCalled()
 		})
 
 		it("does not remove a pre-existing skill directory when persistence fails", async () => {
@@ -2352,6 +2393,7 @@ Instructions`)
 			await expect(skillsManager.createSkill("owned-skill", "global", "Description")).rejects.toThrow("EACCES")
 
 			expect(mockRm).not.toHaveBeenCalled()
+			expect(mockRmdir).not.toHaveBeenCalled()
 			expect(mockUnlink).toHaveBeenCalledWith(expect.stringMatching(/\.SKILL\.md\.[^/\\]+\.tmp$/))
 		})
 

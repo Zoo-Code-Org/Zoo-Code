@@ -756,12 +756,15 @@ Add your skill instructions here.
 `
 		const skillContent = matter.stringify(body, frontmatter, SKILL_YAML_DUMP_OPTIONS)
 		// Publish the SKILL.md atomically, and leave no half-created skill directory behind
-		// when persistence fails.
+		// when persistence fails. mkdir(recursive) can report the first ancestor it created
+		// (.roo or skills), so a recursive removal of that value could delete unrelated
+		// skills: only this call's own skill directory is removed, and only while it is
+		// empty. Any created ancestor stays behind like the empty directory it is.
 		try {
 			await this.writeSkillFileAtomically(skillMdPath, skillContent)
 		} catch (error) {
 			if (createdDir) {
-				await fs.rm(createdDir, { recursive: true, force: true }).catch(() => {})
+				await fs.rmdir(skillDir).catch(() => {})
 			}
 			throw error
 		}
@@ -1095,7 +1098,16 @@ Add your skill instructions here.
 		// values from being reflowed into folded block scalars, keeping the
 		// file stable (see issue #859).
 		const newContent = matter.stringify(body, frontmatter, SKILL_YAML_DUMP_OPTIONS)
-		await this.writeSkillFileAtomically(skill.path, newContent)
+		// Resolve the link target first: publishing through the temp+rename must update the file
+		// the skill was discovered through, not replace a symlinked SKILL.md with a regular file.
+		let targetPath = skill.path
+		try {
+			targetPath = await fs.realpath(skill.path)
+		} catch {
+			// Unresolvable path (already missing, or a platform without realpath): keep the
+			// discovered path and let the write report the real failure.
+		}
+		await this.writeSkillFileAtomically(targetPath, newContent)
 
 		// Refresh skills list
 		await this.discoverSkills()
