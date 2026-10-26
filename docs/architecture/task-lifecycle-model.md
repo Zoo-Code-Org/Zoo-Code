@@ -102,7 +102,7 @@ The model maps its state to production fields as follows:
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `phase`, `index`           | `Task.assistantMessageContent` partial flags, matching `tool_result` blocks in `userMessageContent`, and `currentStreamingContentIndex` |
 | `stream`                   | `didCompleteReadingStream`                                                                                                              |
-| `lock`, `owner`, `pending` | `presentAssistantMessageLocked` and `presentAssistantMessageHasPendingUpdates`, owned by the `presentAssistantMessage` wrapper          |
+| `lock`, `owner`, `pending` | `dispatchState` (not `IDLE`) and `pendingWork` (not `null`), owned by the `presentAssistantMessage` wrapper                             |
 | `latch`                    | `userMessageContentReady`                                                                                                               |
 | `epoch`                    | the per-request reset in the request loop (`Task.ts`)                                                                                   |
 | `poll` and `post-wait`     | the `pWaitFor` condition and the abort check that follows it                                                                            |
