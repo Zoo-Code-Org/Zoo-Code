@@ -113,6 +113,10 @@ export class SkillsManager {
 	// Atomic SKILL.md writes in flight, tracked so dispose() can remove temp sidecars if the
 	// extension host stops between the staged write and the rename.
 	private activeTempFiles: Set<string> = new Set()
+	// Per-directory serialization for SKILL.md sidecar cleanup and writes. The queue is static so
+	// every SkillsManager instance in this process shares it: a sweep cannot unlink a sidecar that
+	// another instance is still writing, and writes cannot interleave their validate/rename steps.
+	private static directoryQueues: Map<string, Promise<void>> = new Map()
 
 	constructor(provider: ClineProvider) {
 		this.providerRef = new WeakRef(provider)
@@ -145,7 +149,7 @@ export class SkillsManager {
 	 * roots are scanned.
 	 */
 	private async sweepStaleSkillTempFiles(): Promise<void> {
-		const tempPattern = /^\.SKILL\.md\..*\.tmp$/
+		const tempPattern = /^\.SKILL\.md\.\d+\.[a-z0-9]+\.tmp$/
 		const roots = (await this.getSkillsDirectories()).map((entry) => entry.dir)
 		for (const root of roots) {
 			let entries: unknown[]
@@ -161,16 +165,18 @@ export class SkillsManager {
 				directories.push(path.join(root, String(dirent.name)))
 			}
 			for (const directory of directories) {
-				let files: string[]
-				try {
-					files = await fs.readdir(directory)
-				} catch {
-					continue
-				}
-				for (const file of files) {
-					if (!tempPattern.test(file)) continue
-					await fs.unlink(path.join(directory, file)).catch(() => {})
-				}
+				await this.withDirectoryLock(directory, async () => {
+					let files: string[]
+					try {
+						files = await fs.readdir(directory)
+					} catch {
+						return
+					}
+					for (const file of files) {
+						if (!tempPattern.test(file)) continue
+						await fs.unlink(path.join(directory, file)).catch(() => {})
+					}
+				})
 			}
 		}
 	}
@@ -724,40 +730,60 @@ export class SkillsManager {
 	 * must not leave a truncated SKILL.md that the loader would silently misparse.
 	 * The temp file is removed when the write or rename fails.
 	 */
+	private async withDirectoryLock<T>(directory: string, operation: () => Promise<T>): Promise<T> {
+		const key = path.resolve(directory)
+		const previous = SkillsManager.directoryQueues.get(key) ?? Promise.resolve()
+		const run = previous.then(operation)
+		const tracked = run.then(
+			() => undefined,
+			() => undefined,
+		)
+		SkillsManager.directoryQueues.set(key, tracked)
+		try {
+			return await run
+		} finally {
+			if (SkillsManager.directoryQueues.get(key) === tracked) {
+				SkillsManager.directoryQueues.delete(key)
+			}
+		}
+	}
+
 	private async writeSkillFileAtomically(
 		filePath: string,
 		content: string,
 		validateTarget?: (targetPath: string) => Promise<void>,
 	): Promise<void> {
 		const directory = path.dirname(filePath)
-		const temporaryPath = path.join(
-			directory,
-			`.${path.basename(filePath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
-		)
-		this.activeTempFiles.add(temporaryPath)
-		// Only a write that actually created the sidecar through exclusive creation may remove it:
-		// when wx fails because the path already exists, that file belongs to someone else.
-		let ownsTemporaryPath = false
-		try {
-			// Exclusive creation: a pre-created symlink at the generated name cannot be followed.
-			await fs.writeFile(temporaryPath, content, { encoding: "utf-8", flag: "wx" })
-			ownsTemporaryPath = true
-			// Re-validate the final target immediately before the rename: the target (or an
-			// ancestor) can change between the caller's resolution and this publish.
-			await validateTarget?.(filePath)
-			await fs.rename(temporaryPath, filePath)
-		} catch (error) {
-			// Best effort: a partial temp file must not be left behind, but an EEXIST failure means
-			// exclusive creation never acquired the path and the existing file belongs to someone
-			// else. Any other failure may have created a partial sidecar and is cleaned up; the
-			// original failure is the one the caller needs to see.
-			if (ownsTemporaryPath || (error as { code?: string })?.code !== "EEXIST") {
-				await fs.unlink(temporaryPath).catch(() => {})
+		await this.withDirectoryLock(directory, async () => {
+			const temporaryPath = path.join(
+				directory,
+				`.${path.basename(filePath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+			)
+			this.activeTempFiles.add(temporaryPath)
+			// Only a write that actually created the sidecar through exclusive creation may remove
+			// it: when wx fails because the path already exists, that file belongs to someone else.
+			let ownsTemporaryPath = false
+			try {
+				// Exclusive creation: a pre-created symlink at the generated name cannot be followed.
+				await fs.writeFile(temporaryPath, content, { encoding: "utf-8", flag: "wx" })
+				ownsTemporaryPath = true
+				// Re-validate the final target immediately before the rename: the target (or an
+				// ancestor) can change between the caller's resolution and this publish.
+				await validateTarget?.(filePath)
+				await fs.rename(temporaryPath, filePath)
+			} catch (error) {
+				// Best effort: a partial temp file must not be left behind, but an EEXIST failure
+				// means exclusive creation never acquired the path and the existing file belongs to
+				// someone else. Any other failure may have created a partial sidecar and is cleaned
+				// up; the original failure is the one the caller needs to see.
+				if (ownsTemporaryPath || (error as { code?: string })?.code !== "EEXIST") {
+					await fs.unlink(temporaryPath).catch(() => {})
+				}
+				throw error
+			} finally {
+				this.activeTempFiles.delete(temporaryPath)
 			}
-			throw error
-		} finally {
-			this.activeTempFiles.delete(temporaryPath)
-		}
+		})
 	}
 
 	async createSkill(
