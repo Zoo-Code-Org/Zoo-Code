@@ -226,23 +226,35 @@ test("writeMutationSummary cleans its temp file when the rename fails", (t) => {
 	const root = makeRoot(t)
 	const reportRoot = path.join(root, "reports", "mutation")
 	writeReport(reportRoot, "pkg", { files: { "src/a.ts": { mutants: mutants("Killed") } } })
-	// The target is a directory, so the atomic rename fails after the temp file exists.
+	// A regular existing file is the target, so the initial read succeeds and the write really
+	// reaches the rename step; the rename itself then fails.
 	const outputFile = path.join(root, "summary.md")
-	fs.mkdirSync(outputFile, { recursive: true })
+	fs.writeFileSync(outputFile, "existing summary\n", "utf8")
 	const logs = []
 	const originalLog = console.log
+	const originalRename = fs.renameSync
+	let renameAttempts = 0
 	console.log = (message) => {
 		logs.push(String(message))
 	}
+	fs.renameSync = () => {
+		renameAttempts += 1
+		throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" })
+	}
 	t.after(() => {
 		console.log = originalLog
+		fs.renameSync = originalRename
 	})
 
 	assert.doesNotThrow(() => writeMutationSummary({ reportRoot, cwd: root, outputFile }))
 
-	assert.match(logs.join("\n"), /Could not write the per-file mutation summary/)
+	// The write got past the read and the temp write, and the temp file was cleaned up.
+	assert.equal(renameAttempts, 1)
+	assert.match(logs.join("\n"), /Could not write the per-file mutation summary: EIO/)
 	assert.deepEqual(
 		fs.readdirSync(root).filter((entry) => entry.includes(".tmp")),
 		[],
 	)
+	// The failed rename left the existing summary untouched.
+	assert.equal(fs.readFileSync(outputFile, "utf8"), "existing summary\n")
 })
