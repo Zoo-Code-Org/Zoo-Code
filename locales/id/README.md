@@ -46,11 +46,11 @@ Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memper
 - **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
 - **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
 
-## Yang Baru di v3.90.0
+## Yang Baru di v3.92.0
 
-- ✨ **Provider dan model:** GitHub Copilot sekarang menjadi provider: masuk dan Zoo Code memuat model Copilot kamu. IO Intelligence adalah provider dengan API key sendiri. Gemini 4 Argon ada di Gemini dan Vertex. GPT-6 Luna ada di OpenCode Go. Gemini 4 Argon dan GPT-6 Luna juga ada di Zoo Gateway.
-- 🧭 **Eksekusi tool:** Mengulang tool call yang sama memunculkan peringatan, lalu Zoo Code menghentikan loop itu. Menonaktifkan `attempt_completion` tidak lagi membuat task tidak bisa selesai. Pesan antrean melewati pemeriksaan perlindungan perintah yang sama dengan perintah yang kamu kirim langsung.
-- ⚡ **Reasoning dan streaming:** Adaptive thinking Anthropic tampil di chat, dan thinking token dihitung. Toggle R1 menyimpan reasoning dari llama.cpp, Ollama, dan LM Studio. Codex menyimpan encrypted reasoning bersama ringkasan yang kamu lihat. Stream language model VS Code memakai guarded recovery saat stream gagal.
+- ✨ **Pilihan model lebih cepat dan dukungan model lebih kuat:** Ganti model dari kolom penulisan chat. Gunakan Claude Haiku 5.5 di Amazon Bedrock, dapatkan kapabilitas Kimi K3 yang lebih akurat di OpenRouter, dan gunakan batas Gemini 4 Argon yang telah diperbaiki di Vercel AI Gateway.
+- 🧭 **Alur kerja terminal, pengeditan, chat, dan remote yang lebih andal:** Atur output perintah agar diciutkan secara default jika kamu mau, dapatkan kegagalan pengeditan yang lebih jelas, pertahankan baris reasoning dan API tetap terlihat, serta hindari masalah startup dan proxy di workspace remote.
+- 🔌 **Marketplace MCP yang diperluas:** Hubungkan Zoo Code ke AnySearch, Mailtea, dan Tradehand melalui marketplace MCP.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 

@@ -21,6 +21,19 @@ import { SecretStorageService } from "./SecretStorageService"
 import { startCallbackServer, stopCallbackServer } from "./utils/callbackServer"
 import { fetchOAuthAuthServerMetadata } from "./utils/oauth"
 
+export type McpOAuthResource = "auto" | false | string
+
+export interface McpOAuthClientOptions {
+	clientId: string
+	scope?: string
+	redirectUri?: string
+	resource?: McpOAuthResource
+}
+
+interface McpOAuthProviderOptions extends Partial<McpOAuthClientOptions> {
+	skipDiscovery?: boolean
+}
+
 /**
  * Implements the MCP SDK's OAuthClientProvider interface for VS Code.
  *
@@ -76,6 +89,8 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 	private _refreshPromise: Promise<OAuthTokens> | null = null
 	/** Stored by redirectToAuthorization(); opened on-demand via openBrowser(). */
 	private _pendingAuthorizationUrl: URL | null = null
+	/** Resource used by the authorization request and subsequent token requests. */
+	private _effectiveResourceIndicator: string | null
 	/** Deduplicates concurrent _ensureCallbackServer() calls. */
 	private _ensureServerPromise: Promise<void> | null = null
 
@@ -89,11 +104,17 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		private readonly _tokenEndpointAuthMethod: string,
 		private readonly _grantTypes: McpOAuthGrantType[],
 		private readonly _scopes: string[],
+		private readonly _scopeConfigured: boolean,
 		private readonly _state: string,
 		private readonly _authServerMeta: Record<string, any> | null,
 		private readonly _resourceIndicator: string | null,
+		private readonly _resourceDisabled: boolean,
 		private readonly _clientName: string,
-	) {}
+		private readonly _configuredRedirectUri?: string,
+		private readonly _configuredClientId?: string,
+	) {
+		this._effectiveResourceIndicator = _resourceIndicator
+	}
 
 	/**
 	 * Factory — discovers OAuth Authorization Server metadata once (RFC 9728 +
@@ -109,7 +130,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		serverUrl: string,
 		secretStorage: SecretStorageService,
 		serverName?: string,
-		options?: { skipDiscovery?: boolean },
+		options?: McpOAuthProviderOptions,
 	): Promise<McpOAuthClientProvider> {
 		let authServerMeta: Record<string, any> | null = null
 		let resourceIndicator: string | null = null
@@ -121,7 +142,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 			//  - RFC 8707 resource indicator (injected into authorization URL)
 			const discovery = await fetchOAuthAuthServerMetadata(serverUrl)
 			authServerMeta = discovery?.authServerMeta ?? null
-			resourceIndicator = discovery?.resourceIndicator ?? null
+			resourceIndicator = resolveResourceIndicator(options?.resource, discovery?.resourceIndicator)
 
 			// Cache the result so subsequent connections can skip the probe.
 			if (!authServerMeta) {
@@ -134,7 +155,18 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		const authMethods: string[] = authServerMeta?.token_endpoint_auth_methods_supported ?? []
 		const tokenEndpointAuthMethod = authMethods.includes("none") ? "none" : "client_secret_post"
 		const grantTypes = selectMcpOAuthGrantTypes(authServerMeta?.grant_types_supported)
-		const scopes: string[] = authServerMeta?.scopes_supported ?? []
+		const configuredScope = options?.scope
+		const scopeConfigured = configuredScope !== undefined
+		const scopes = scopeConfigured
+			? configuredScope.split(/\s+/).filter((scope) => scope.length > 0)
+			: (authServerMeta?.scopes_supported ?? [])
+
+		const storedData = await secretStorage.getOAuthData(serverUrl, options?.clientId)
+		const issuerMatches = typeof storedData?.issuer === "string" && storedData.issuer === authServerMeta?.issuer
+		const storedResourceIndicator =
+			!resourceIndicator && options?.resource !== false && issuerMatches
+				? storedData?.resource_indicator
+				: undefined
 
 		// Generate a CSRF state token for the OAuth flow.
 		const state = Array.from(crypto.getRandomValues(new Uint8Array(16)))
@@ -144,7 +176,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		// We start the callback server lazily in `redirectToAuthorization()` or `waitForAuthCode()`.
 		// We use a default port (0) initially; it will be updated when the server starts.
 
-		return new McpOAuthClientProvider(
+		const provider = new McpOAuthClientProvider(
 			serverUrl,
 			secretStorage,
 			null,
@@ -154,11 +186,35 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 			tokenEndpointAuthMethod,
 			grantTypes,
 			scopes,
+			scopeConfigured,
 			state,
 			authServerMeta,
 			resourceIndicator,
+			options?.resource === false,
 			serverName || "Roo Code",
+			options?.redirectUri,
+			options?.clientId,
 		)
+		if (storedResourceIndicator) {
+			provider._effectiveResourceIndicator = storedResourceIndicator
+		}
+
+		if (options?.clientId) {
+			if (options.redirectUri) {
+				getCallbackAddress(options.redirectUri)
+			} else {
+				// A static client skips DCR, which normally starts the callback server.
+				// Start it here so the SDK never receives port 0 as redirect_uri.
+				await provider._ensureCallbackServer()
+			}
+			provider._clientInfo = {
+				client_id: options.clientId,
+				redirect_uris: [provider.redirectUrl],
+				token_endpoint_auth_method: "none",
+			}
+		}
+
+		return provider
 	}
 
 	// ── OAuthClientProvider interface ────────────────────────────────────────
@@ -169,7 +225,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 	}
 
 	get redirectUrl(): string {
-		return `http://localhost:${this._port}/callback`
+		return this._configuredRedirectUri ?? `http://127.0.0.1:${this._port}/callback`
 	}
 
 	private _ensureCallbackServer(): Promise<void> {
@@ -187,14 +243,34 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 
 	private async _doStartCallbackServer(): Promise<void> {
 		this._closed = false
-		const { server, port, result, cancel } = await startCallbackServer(this._port, this._state)
+		const { port: configuredPort, host } = getCallbackAddress(this._configuredRedirectUri)
+		const { server, port, result, cancel } = await startCallbackServer(
+			configuredPort ?? this._port,
+			this._state,
+			host,
+		)
 		this._server = server
 		this._port = port
 		this._cancelCallbackServer = cancel
-		this._authCodePromise = result.then((r) => {
+		const authCodePromise = result.then((r) => {
 			if (r.error) throw new Error(`OAuth authorization failed: ${r.error}`)
 			if (!r.code) throw new Error("No authorization code received in callback")
 			return r.code
+		})
+		this._authCodePromise = authCodePromise
+
+		// Static clients can start this promise before waitForAuthCode() observes it.
+		// Observe rejection now to prevent an unhandled rejection, but keep the original
+		// promise so waitForAuthCode() still receives the callback error. Stop only this
+		// promise's listener before clearing it so a later flow can bind a fresh listener.
+		void authCodePromise.catch(async () => {
+			if (this._authCodePromise === authCodePromise && this._server === server) {
+				await stopCallbackServer(server, cancel).catch(() => {})
+				if (this._authCodePromise === authCodePromise && this._server === server) {
+					this._server = null
+					this._cancelCallbackServer = null
+				}
+			}
 		})
 	}
 
@@ -235,7 +311,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		if (this._clientInfo) return // already registered
 
 		// Check if we have a cached client_id from previous registration
-		const cachedData = await this._secretStorage.getOAuthData(this._serverUrl)
+		const cachedData = await this._secretStorage.getOAuthData(this._serverUrl, this._configuredClientId)
 		// Reuse the cached registration only for the issuer that created it. Otherwise
 		// the stored client_secret would go to an authorization server the MCP server chose.
 		if (cachedData?.client_info && cachedData.issuer === this._authServerMeta?.issuer) {
@@ -271,7 +347,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 	}
 
 	async tokens(): Promise<OAuthTokens | undefined> {
-		const data = await this._secretStorage.getOAuthData(this._serverUrl)
+		const data = await this._secretStorage.getOAuthData(this._serverUrl, this._configuredClientId)
 		if (!data) return undefined
 
 		// If the access token is still valid (with 5m buffer), return it.
@@ -284,8 +360,14 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 			// Never send the refresh token to an authorization server other than the one
 			// that issued it. Data without an issuer (saved by older versions) is cleared.
 			if (data.issuer !== this._authServerMeta?.issuer) {
-				await this._secretStorage.deleteOAuthData(this._serverUrl)
+				await this._secretStorage.deleteOAuthData(this._serverUrl, this._configuredClientId)
 				return undefined
+			}
+
+			// Restore the authorization resource after a restart only when the current
+			// configuration or discovery did not already select one.
+			if (!this._effectiveResourceIndicator && !this._resourceDisabled) {
+				this._effectiveResourceIndicator = data.resource_indicator ?? null
 			}
 			if (this._refreshPromise) {
 				return this._refreshPromise
@@ -308,7 +390,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 			} catch (error) {
 				console.error(`Failed to refresh MCP OAuth token for ${this._serverUrl}:`, error)
 				// Clear stale tokens on refresh failure so we don't keep retrying a dead refresh token
-				await this._secretStorage.deleteOAuthData(this._serverUrl)
+				await this._secretStorage.deleteOAuthData(this._serverUrl, this._configuredClientId)
 				// Fall through to return undefined, which triggers full re-auth
 			}
 		}
@@ -322,12 +404,17 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 			clientIdOverride && this._clientInfo
 				? { ...this._clientInfo, client_id: clientIdOverride }
 				: this._clientInfo
-		await this._secretStorage.saveOAuthData(this._serverUrl, {
-			tokens,
-			expires_at,
-			...(this._authServerMeta?.issuer ? { issuer: this._authServerMeta.issuer as string } : {}),
-			...(clientInfo ? { client_info: clientInfo } : {}),
-		})
+		await this._secretStorage.saveOAuthData(
+			this._serverUrl,
+			{
+				tokens,
+				expires_at,
+				...(this._authServerMeta?.issuer ? { issuer: this._authServerMeta.issuer as string } : {}),
+				...(this._effectiveResourceIndicator ? { resource_indicator: this._effectiveResourceIndicator } : {}),
+				...(clientInfo ? { client_info: clientInfo } : {}),
+			},
+			this._configuredClientId,
+		)
 	}
 
 	async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
@@ -343,10 +430,24 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		// with path components, causing it to fall back to a default "/authorize" path.
 		// We correct the URL using our pre-fetched metadata:
 		//  1. Replace the origin+pathname with the real authorization_endpoint.
-		//  2. Preserve all SDK-generated query params (client_id, code_challenge, etc.)
-		//  3. Add `scope` when the server advertises scopes but the SDK omitted it.
-		//  4. Add RFC 8707 `resource` parameter when the protected resource metadata
-		//     advertised a resource indicator.
+		//  2. Preserve all SDK-generated query params (client_id, code_challenge, etc.).
+		//  3. Override SDK scopes when the configuration explicitly supplies a scope.
+		//  4. Set an explicit or discovered RFC 8707 `resource` parameter. Preserve
+		//     an SDK-generated value unless the configuration disables it.
+		if (this._resourceIndicator) {
+			authorizationUrl.searchParams.set("resource", this._resourceIndicator)
+			this._effectiveResourceIndicator = this._resourceIndicator
+		} else if (this._resourceDisabled) {
+			authorizationUrl.searchParams.delete("resource")
+			this._effectiveResourceIndicator = null
+		} else {
+			const sdkResourceIndicator = authorizationUrl.searchParams.get("resource")
+			if (sdkResourceIndicator) {
+				this._effectiveResourceIndicator = sdkResourceIndicator
+			} else if (this._effectiveResourceIndicator) {
+				authorizationUrl.searchParams.set("resource", this._effectiveResourceIndicator)
+			}
+		}
 		let correctedUrl = authorizationUrl
 		if (this._authServerMeta?.authorization_endpoint) {
 			try {
@@ -366,19 +467,20 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 				authorizationUrl.searchParams.forEach((value, key) => {
 					fixed.searchParams.set(key, value)
 				})
-				// Ensure the scope param is present — the SDK sometimes omits it
-				if (!fixed.searchParams.has("scope") && this._scopes.length > 0) {
-					fixed.searchParams.set("scope", this._scopes.join(" "))
-				}
-				// RFC 8707: inject the resource indicator so the auth server can
-				// scope the issued access token to this specific resource server.
-				if (this._resourceIndicator && !fixed.searchParams.has("resource")) {
-					fixed.searchParams.set("resource", this._resourceIndicator)
-				}
 				correctedUrl = fixed
 			} catch {
 				// Fall through and use the original URL if correction fails
 			}
+		}
+
+		if (this._scopeConfigured) {
+			if (this._scopes.length > 0) {
+				correctedUrl.searchParams.set("scope", this._scopes.join(" "))
+			} else {
+				correctedUrl.searchParams.delete("scope")
+			}
+		} else if (!correctedUrl.searchParams.has("scope") && this._scopes.length > 0) {
+			correctedUrl.searchParams.set("scope", this._scopes.join(" "))
 		}
 
 		// Store the (possibly corrected) URL; it will be opened by openBrowser()
@@ -420,7 +522,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 	 * Rejects on error or 5-minute timeout.
 	 */
 	async waitForAuthCode(): Promise<string> {
-		if (!this._authCodePromise) {
+		if (!this._authCodePromise || !this._server) {
 			await this._ensureCallbackServer()
 		}
 		return this._authCodePromise!
@@ -462,8 +564,8 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 
 		// RFC 8707: include resource indicator so servers that bind token requests
 		// to a specific resource can validate the exchange.
-		if (this._resourceIndicator) {
-			params.resource = this._resourceIndicator
+		if (this._effectiveResourceIndicator) {
+			params.resource = this._effectiveResourceIndicator
 		}
 
 		// Include client_secret in the body when the auth method is client_secret_post.
@@ -514,8 +616,8 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		}
 
 		// RFC 8707: include resource indicator in refresh requests too.
-		if (this._resourceIndicator) {
-			params.resource = this._resourceIndicator
+		if (this._effectiveResourceIndicator) {
+			params.resource = this._effectiveResourceIndicator
 		}
 
 		if (this._tokenEndpointAuthMethod === "client_secret_post" && this._clientInfo?.client_secret) {
@@ -537,8 +639,12 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		}
 
 		const tokens = (await response.json()) as OAuthTokens
-		await this.saveTokens(tokens, clientId)
-		return tokens
+		const mergedTokens: OAuthTokens = {
+			...tokens,
+			refresh_token: tokens.refresh_token ?? refreshToken,
+		}
+		await this.saveTokens(mergedTokens, clientId)
+		return mergedTokens
 	}
 
 	/** Close the local callback server. Always call this when done. */
@@ -556,4 +662,32 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 			this._authCodePromise = null
 		}
 	}
+}
+
+function resolveResourceIndicator(configured: McpOAuthResource | undefined, discovered?: string | null): string | null {
+	if (configured === false) return null
+	if (configured && configured !== "auto") return configured
+	return discovered ?? null
+}
+
+function getCallbackAddress(redirectUri?: string): { port?: number; host: "localhost" | "127.0.0.1" } {
+	if (!redirectUri) return { host: "127.0.0.1" }
+	const url = new URL(redirectUri)
+	if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
+		throw new Error("MCP OAuth redirectUri must use a loopback host")
+	}
+	if (url.protocol !== "http:") {
+		throw new Error("MCP OAuth redirectUri must use HTTP on a loopback host")
+	}
+	if (url.pathname !== "/callback") {
+		throw new Error("MCP OAuth redirectUri path must be /callback")
+	}
+	if (url.username || url.password || url.search || url.hash) {
+		throw new Error("MCP OAuth redirectUri must not contain credentials, a query, or a fragment")
+	}
+	const port = Number(url.port)
+	if (!Number.isInteger(port) || port < 1 || port > 65535) {
+		throw new Error("MCP OAuth redirectUri must specify a valid port")
+	}
+	return { port, host: url.hostname }
 }
