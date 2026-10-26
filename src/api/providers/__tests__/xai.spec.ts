@@ -105,7 +105,6 @@ describe("XAIHandler", () => {
 				store: false,
 				include: ["reasoning.encrypted_content"],
 			}),
-			undefined,
 		)
 	})
 
@@ -235,7 +234,6 @@ describe("XAIHandler", () => {
 				tool_choice: "auto",
 				parallel_tool_calls: true,
 			}),
-			undefined,
 		)
 	})
 
@@ -264,7 +262,6 @@ describe("XAIHandler", () => {
 			expect.objectContaining({
 				parallel_tool_calls: false,
 			}),
-			undefined,
 		)
 	})
 
@@ -279,7 +276,6 @@ describe("XAIHandler", () => {
 				max_output_tokens: 65_536,
 				temperature: 0,
 			}),
-			undefined,
 		)
 	})
 
@@ -540,9 +536,9 @@ describe("XAIHandler", () => {
 		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
 
 		await handler.completePrompt("test prompt", { abortSignal: controller.signal })
-		expect(mockResponsesCreate.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ model: expect.any(String) }), {
-			signal: controller.signal,
-		})
+		expect(mockResponsesCreate.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ model: expect.any(String) }))
+		const requestOptions = mockResponsesCreate.mock.calls[0]?.[1] as { signal?: AbortSignal } | undefined
+		expect(requestOptions?.signal).toBe(controller.signal)
 	})
 
 	it("completePrompt should work without options (backward compatible)", async () => {
@@ -550,10 +546,7 @@ describe("XAIHandler", () => {
 
 		const result = await handler.completePrompt("test prompt")
 		expect(result).toBe("response")
-		expect(mockResponsesCreate.mock.calls[0]?.[0]).toEqual(
-			expect.objectContaining({ model: expect.any(String) }),
-			undefined,
-		)
+		expect(mockResponsesCreate.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ model: expect.any(String) }))
 	})
 
 	it("completePrompt should send the full Responses API request body", async () => {
@@ -561,14 +554,11 @@ describe("XAIHandler", () => {
 
 		await handler.completePrompt("test prompt")
 
-		expect(mockResponsesCreate.mock.calls[0]?.[0]).toEqual(
-			{
-				model: xaiDefaultModelId,
-				input: [{ role: "user", content: [{ type: "input_text", text: "test prompt" }] }],
-				store: false,
-			},
-			undefined,
-		)
+		expect(mockResponsesCreate.mock.calls[0]?.[0]).toEqual({
+			model: xaiDefaultModelId,
+			input: [{ role: "user", content: [{ type: "input_text", text: "test prompt" }] }],
+			store: false,
+		})
 	})
 
 	it("completePrompt should pass timeout through to client", async () => {
@@ -576,10 +566,10 @@ describe("XAIHandler", () => {
 		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
 
 		await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
-		expect(mockResponsesCreate.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ model: expect.any(String) }), {
-			signal: controller.signal,
-			timeout: 5000,
-		})
+		expect(mockResponsesCreate.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ model: expect.any(String) }))
+		const requestOptions = mockResponsesCreate.mock.calls[0]?.[1] as
+			{ signal?: AbortSignal; timeout?: number } | undefined
+		expect(requestOptions).toMatchObject({ signal: controller.signal, timeout: 5000 })
 	})
 
 	it.each([
@@ -596,10 +586,8 @@ describe("XAIHandler", () => {
 			await handler.completePrompt("test prompt", { timeoutMs: input })
 			expect(mockResponsesCreate.mock.calls[0]?.[0]).toEqual(
 				expect.objectContaining({ model: expect.any(String) }),
-				{
-					timeout: forwarded,
-				},
 			)
+			expect(mockResponsesCreate.mock.calls[0]?.[1]).toMatchObject({ timeout: forwarded })
 		},
 	)
 
@@ -613,8 +601,9 @@ describe("XAIHandler", () => {
 			await handler.completePrompt("test prompt", { timeoutMs })
 			expect(mockResponsesCreate.mock.calls[0]?.[0]).toEqual(
 				expect.objectContaining({ model: expect.any(String) }),
-				undefined,
 			)
+			// No usable timeout and no signal means the SDK options argument is omitted entirely.
+			expect(mockResponsesCreate.mock.calls[0]?.[1]).toBeUndefined()
 		},
 	)
 
@@ -635,7 +624,6 @@ describe("XAIHandler", () => {
 					effort: "high",
 				}),
 			}),
-			undefined,
 		)
 	})
 
@@ -656,7 +644,6 @@ describe("XAIHandler", () => {
 					effort: "high",
 				}),
 			}),
-			undefined,
 		)
 	})
 
@@ -678,7 +665,6 @@ describe("XAIHandler", () => {
 					effort: "low",
 				}),
 			}),
-			undefined,
 		)
 	})
 
