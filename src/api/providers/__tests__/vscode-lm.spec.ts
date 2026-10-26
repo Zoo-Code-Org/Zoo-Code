@@ -2483,32 +2483,46 @@ describe("VsCodeLmHandler", () => {
 			// Admission is strict: a conversation that lands exactly on the raw budget fits, so the
 			// request must be sent. The >= mutant refuses exactly this boundary, which is the
 			// off-by-one this test exists to catch.
-			const contextWindow = handler.getCondenseContextWindow()
-			const targetRawBudgetChars = 1_000
-			const systemPrompt = "S".repeat(Math.floor(contextWindow * 0.8 * 3) - targetRawBudgetChars)
-			const messages: Anthropic.Messages.MessageParam[] = [
-				{
-					role: "user",
-					content: [{ type: "text", text: "Y".repeat(targetRawBudgetChars) }],
-				},
-			]
+			// Use a window whose 0.8 * 3 char budget is a whole number (a multiple of 5 tokens lands
+			// on whole characters): with a fractional budget the exact-equality request cannot be
+			// expressed in character units, and both the > check and a >= mutant would admit it.
+			const family = handler["client"]?.family ?? defaultOptions.vsCodeLmModelSelector?.family
+			const staticModel =
+				(family && vscodeLlmModels[family as keyof typeof vscodeLlmModels]) ||
+				vscodeLlmModels[vscodeLlmDefaultModelId]
+			const originalMaxInputTokens = staticModel.maxInputTokens
+			try {
+				;(staticModel as { maxInputTokens: number }).maxInputTokens = 128_000
+				const contextWindow = handler.getCondenseContextWindow()
+				expect(contextWindow * 0.8 * 3).toBe(307_200)
+				const targetRawBudgetChars = 1_000
+				const systemPrompt = "S".repeat(contextWindow * 0.8 * 3 - targetRawBudgetChars)
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{
+						role: "user",
+						content: [{ type: "text", text: "Y".repeat(targetRawBudgetChars) }],
+					},
+				]
 
-			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
-				stream: (async function* () {
-					yield new vscode.LanguageModelTextPart("ok")
-					return
-				})(),
-				text: (async function* () {
-					yield "ok"
-					return
-				})(),
-			})
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelTextPart("ok")
+						return
+					})(),
+					text: (async function* () {
+						yield "ok"
+						return
+					})(),
+				})
 
-			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
-			const chunks = await collectStream(stream)
+				const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
+				const chunks = await collectStream(stream)
 
-			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalled()
-			expect(chunks).toContainEqual({ type: "text", text: "ok" })
+				expect(mockLanguageModelChat.sendRequest).toHaveBeenCalled()
+				expect(chunks).toContainEqual({ type: "text", text: "ok" })
+			} finally {
+				;(staticModel as { maxInputTokens: number }).maxInputTokens = originalMaxInputTokens
+			}
 		})
 		it("should handle native tool calls when tools are provided", async () => {
 			const systemPrompt = "You are a helpful assistant"
@@ -2726,6 +2740,54 @@ describe("VsCodeLmHandler", () => {
 
 			// No host request is started for an already-aborted signal.
 			expect(mockLanguageModelChat.sendRequest).not.toHaveBeenCalled()
+		})
+
+		it("should reject with an AbortError when the request is cancelled during the final output-token count", async () => {
+			// The post-count guard covers the window between the completion check and the usage
+			// chunk: a cancellation that lands inside internalCountTokens must still reject.
+			const controller = new AbortController()
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("ok")
+					return
+				})(),
+				text: (async function* () {
+					yield "ok"
+					return
+				})(),
+			})
+
+			// The first call counts the input messages; the output count is the second call.
+			let countCalls = 0
+			const countSpy = vi
+				.spyOn(
+					handler as unknown as { internalCountTokens: (text: string) => Promise<number> },
+					"internalCountTokens",
+				)
+				.mockImplementation(async () => {
+					countCalls++
+					if (countCalls > 1) {
+						controller.abort()
+						return 0
+					}
+					return 1
+				})
+
+			try {
+				const stream = handler.createMessage(
+					"You are a helpful assistant",
+					[{ role: "user" as const, content: "Hello" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				)
+				await expect(collectStream(stream)).rejects.toSatisfy(
+					(error) =>
+						error instanceof Error &&
+						error.name === "AbortError" &&
+						error.message === "The VS Code LM request was aborted",
+				)
+			} finally {
+				countSpy.mockRestore()
+			}
 		})
 
 		it("should reject with an AbortError when the external signal aborts during client initialization", async () => {

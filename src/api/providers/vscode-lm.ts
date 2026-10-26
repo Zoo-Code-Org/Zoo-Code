@@ -1505,6 +1505,14 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// Count tokens in the accumulated text after stream completion
 			const totalOutputTokens: number = await this.internalCountTokens(accumulatedText)
 
+			// internalCountTokens returns 0 on cancellation: re-check before reporting usage so an
+			// abort landing during the count rejects with the contract AbortError instead of
+			// completing normally with a zero-output usage chunk. The guard above the count runs
+			// before the await and does not cover this window.
+			if (externalAbortSignal?.aborted || cancellationTokenSource.token.isCancellationRequested) {
+				throw createAbortError(this.providerName)
+			}
+
 			// Report final usage after stream completion
 			yield {
 				type: "usage",
