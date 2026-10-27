@@ -94,24 +94,6 @@
 		{
 			"file": "src/core/task/Task.ts",
 			"line": 4344,
-			"mutator": "ConditionalExpression",
-			"replacement": "false",
-			"reason": "streamingKey is always a defined string on this path (same invariant as the guard above)",
-			"column": 14,
-			"node": "if (partialToolUse && streamingKey !== undefined) { // Reuse the compound key built above: it is exactly the key the start event // registered under, so the delta lookup needs no second encoding. const toolUseIndex = this.streamingToolCallIndices.get(streamingKey) if (toolUseIndex !== undefined) { // Store the ID for native protocol ;(partialToolUse as any).id = event.id // Update the existing tool use with new partial data this.assistantMessageContent[toolUseIndex] = partialToolUse // Present updated tool use /* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */ this.presentAssistantMessageSafe() } }"
-		},
-		{
-			"file": "src/core/task/Task.ts",
-			"line": 4344,
-			"mutator": "ConditionalExpression",
-			"replacement": "true",
-			"reason": "streamingKey is always a defined string on this path (same invariant as the guard above)",
-			"column": 14,
-			"node": "if (partialToolUse && streamingKey !== undefined) { // Reuse the compound key built above: it is exactly the key the start event // registered under, so the delta lookup needs no second encoding. const toolUseIndex = this.streamingToolCallIndices.get(streamingKey) if (toolUseIndex !== undefined) { // Store the ID for native protocol ;(partialToolUse as any).id = event.id // Update the existing tool use with new partial data this.assistantMessageContent[toolUseIndex] = partialToolUse // Present updated tool use /* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */ this.presentAssistantMessageSafe() } }"
-		},
-		{
-			"file": "src/core/task/Task.ts",
-			"line": 4344,
 			"mutator": "EqualityOperator",
 			"replacement": "streamingKey === undefined",
 			"reason": "streamingKey is always a defined string on this path (same invariant as the guard above)",
@@ -234,33 +216,6 @@
 			"reason": "lstat succeeding after realpath ENOENT means a dangling symlink, so the true branch is unreachable",
 			"column": 8,
 			"node": "if (stat.isSymbolicLink()) { return null }"
-		},
-		{
-			"file": "src/utils/pathUtils.ts",
-			"line": 113,
-			"mutator": "ConditionalExpression",
-			"replacement": "false",
-			"reason": "with no folders the realFolders set stays empty and the empty-set fail-closed returns the same result",
-			"column": 5,
-			"node": "if (!folders || folders.length === 0) { return true }"
-		},
-		{
-			"file": "src/utils/pathUtils.ts",
-			"line": 113,
-			"mutator": "ConditionalExpression",
-			"replacement": "false",
-			"reason": "with no folders the realFolders set stays empty and the empty-set fail-closed returns the same result",
-			"column": 17,
-			"node": "if (!folders || folders.length === 0) { return true }"
-		},
-		{
-			"file": "src/utils/pathUtils.ts",
-			"line": 113,
-			"mutator": "LogicalOperator",
-			"replacement": "!folders && folders.length === 0",
-			"reason": "with no folders the realFolders set stays empty and the empty-set fail-closed returns the same result",
-			"column": 5,
-			"node": "!folders || folders.length === 0"
 		},
 		{
 			"file": "src/utils/pathUtils.ts",
