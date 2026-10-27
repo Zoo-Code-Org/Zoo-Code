@@ -245,6 +245,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		prevApiConfigName.current = currentApiConfigName
 		prevMode.current = mode
 		changedExperiments.current.clear()
+		// The edit session resets here too: a pending submitted baseline no longer applies.
+		submittedExperiments.current.clear()
 		setChangeDetected(false)
 	}, [currentApiConfigName, mode, extensionState])
 
@@ -537,6 +539,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			if (confirm) {
 				// Discard changes: Reset state and flag
 				setCachedState(extensionState) // Revert to original state
+				submittedExperiments.current.clear()
 				changedExperiments.current.clear()
 				setChangeDetected(false) // Reset change flag
 				confirmDialogHandler.current?.() // Execute the pending action (e.g., tab switch)

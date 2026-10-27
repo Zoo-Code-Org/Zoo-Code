@@ -1136,6 +1136,91 @@ describe("SettingsView - Experiments", () => {
 		expect(experimentPayloads[1]?.experiments).toEqual({ preventFocusDisruption: false })
 	})
 
+	it("clears the pending submitted baseline on an API/profile change", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { imageGeneration: false } })
+		activateTab("experimental")
+
+		const saveButton = screen.getByTestId("save-button")
+		await waitFor(() => expect(saveButton).toBeDisabled())
+		const label = await waitFor(() => {
+			const content = getSettingsContent()
+			return within(content).getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name").closest("label")
+		})
+		const checkbox = label!.querySelector('input[type="checkbox"]') as HTMLInputElement
+
+		// Create a pending submitted baseline of false.
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(saveButton)
+
+		// An API/profile change resets the settings edit session.
+		act(() => {
+			mockPostMessage({ currentApiConfigName: "other-config" })
+		})
+		await waitFor(() => expect(checkbox).toBeChecked())
+		await waitFor(() => expect(saveButton).toBeDisabled())
+
+		// The reset must have dropped the pending baseline so this change is persisted.
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(saveButton)
+
+		const experimentPayloads = vi
+			.mocked(vscode.postMessage)
+			.mock.calls.filter(([message]) => (message as { type?: string }).type === "updateSettings")
+			.map(
+				([message]) =>
+					(message as { updatedSettings: { experiments?: Record<string, boolean> } }).updatedSettings,
+			)
+			.filter((settings) => settings.experiments !== undefined)
+		expect(experimentPayloads.length).toBeGreaterThanOrEqual(2)
+		expect(experimentPayloads[experimentPayloads.length - 1]?.experiments).toEqual({
+			preventFocusDisruption: false,
+		})
+	})
+
+	it("clears the pending submitted baseline on a confirmed discard", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { imageGeneration: false } })
+		activateTab("experimental")
+
+		const saveButton = screen.getByTestId("save-button")
+		await waitFor(() => expect(saveButton).toBeDisabled())
+		const label = await waitFor(() => {
+			const content = getSettingsContent()
+			return within(content).getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name").closest("label")
+		})
+		const checkbox = label!.querySelector('input[type="checkbox"]') as HTMLInputElement
+
+		// Create a pending submitted baseline of false.
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(saveButton)
+
+		// Confirming Discard resets the settings edit session.
+		fireEvent.click(screen.getByText("settings:common.done"))
+		fireEvent.click(screen.getByTestId("alert-dialog-action"))
+		await waitFor(() => expect(checkbox).toBeChecked())
+		await waitFor(() => expect(saveButton).toBeDisabled())
+
+		// The reset must have dropped the pending baseline so this change is persisted.
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(saveButton)
+
+		const experimentPayloads = vi
+			.mocked(vscode.postMessage)
+			.mock.calls.filter(([message]) => (message as { type?: string }).type === "updateSettings")
+			.map(
+				([message]) =>
+					(message as { updatedSettings: { experiments?: Record<string, boolean> } }).updatedSettings,
+			)
+			.filter((settings) => settings.experiments !== undefined)
+		expect(experimentPayloads.length).toBeGreaterThanOrEqual(2)
+		expect(experimentPayloads[experimentPayloads.length - 1]?.experiments).toEqual({
+			preventFocusDisruption: false,
+		})
+	})
+
 	it("does not persist the experiments map when no experiment changed", () => {
 		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { imageGeneration: false } })
 
