@@ -593,6 +593,94 @@ describe("ClineProvider", () => {
 		expect(ClineProvider.getVisibleInstance()).toBe(provider)
 	})
 
+	test("keeps a replacement sidebar view's listeners when the old view disposes", async () => {
+		const makeView = () => {
+			const disposables: Array<{ dispose: ReturnType<typeof vi.fn> }> = []
+			let disposeCallback: (() => void | Promise<void>) | undefined
+			const view = {
+				webview: {
+					postMessage: vi.fn().mockResolvedValue(true),
+					html: "",
+					options: {},
+					onDidReceiveMessage: vi.fn(() => {
+						const disposable = { dispose: vi.fn() }
+						disposables.push(disposable)
+						return disposable
+					}),
+					asWebviewUri: vi.fn(),
+					cspSource: "vscode-webview://test-csp-source",
+				},
+				visible: true,
+				onDidDispose: vi.fn((callback: () => void | Promise<void>) => {
+					disposeCallback = callback
+					return { dispose: vi.fn() }
+				}),
+				onDidChangeVisibility: vi.fn(() => {
+					const disposable = { dispose: vi.fn() }
+					disposables.push(disposable)
+					return disposable
+				}),
+			} as unknown as vscode.WebviewView
+			return {
+				view,
+				disposables,
+				triggerDispose: async () => {
+					await disposeCallback?.()
+				},
+			}
+		}
+		const first = makeView()
+		const second = makeView()
+		provider.getMcpHub = vi.fn().mockReturnValue({
+			listTools: vi.fn().mockResolvedValue([]),
+			callTool: vi.fn(),
+			listResources: vi.fn(),
+			readResource: vi.fn(),
+			getAllServers: vi.fn().mockReturnValue([]),
+		})
+
+		await provider.resolveWebviewView(first.view)
+		// The replacement resolves before the old view's disposal callback runs.
+		await provider.resolveWebviewView(second.view)
+
+		await first.triggerDispose()
+
+		// Cleanup is scoped to the surface that went away: the replacement keeps every listener.
+		for (const disposable of second.disposables) {
+			expect(disposable.dispose).not.toHaveBeenCalled()
+		}
+		for (const disposable of first.disposables) {
+			expect(disposable.dispose).toHaveBeenCalled()
+		}
+		await provider.dispose()
+	})
+
+	describe("getInstanceForView", () => {
+		it("returns the instance that owns the given view", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			expect(ClineProvider.getInstanceForView(mockWebviewView)).toBe(provider)
+		})
+
+		it("returns undefined when no live instance owns the view", () => {
+			expect(ClineProvider.getInstanceForView({} as vscode.WebviewView)).toBeUndefined()
+		})
+
+		it("excludes an instance whose disposal has started", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			expect(ClineProvider.getInstanceForView(mockWebviewView)).toBe(provider)
+
+			// dispose() marks the instance disposed synchronously but only removes it from
+			// activeInstances once its ASYNCHRONOUS task cleanup finishes. A tab command
+			// queued inside that window must not be handed this provider: it would re-run task
+			// eviction and workspace refresh on top of the disposal already doing them.
+			const disposal = provider.dispose()
+			expect(ClineProvider.getInstanceForView(mockWebviewView)).toBeUndefined()
+
+			await expect(disposal).resolves.toBeUndefined()
+		})
+	})
+
 	test("reports an unresolved webview as not visible", () => {
 		expect(provider.isViewVisible).toBe(false)
 	})
