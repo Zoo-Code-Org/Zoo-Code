@@ -228,6 +228,7 @@ describe("ClineProvider failed history restoration cleanup", () => {
 		writeToFileTool["taskPartialStreamState"].set(key, {
 			lastSeenPartialPath: undefined,
 			streamFailed: false,
+			differentPathStream: false,
 			streamError: undefined,
 			task,
 			abortCleanup,
