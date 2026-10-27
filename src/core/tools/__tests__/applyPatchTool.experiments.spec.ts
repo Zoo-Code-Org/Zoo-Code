@@ -192,6 +192,8 @@ describe("ApplyPatchTool focus-disruption routing (L2)", () => {
 		expect(fixture.diffViewProvider.open).not.toHaveBeenCalled()
 		expect(fixture.diffViewProvider.saveChanges).not.toHaveBeenCalled()
 		expect(fixture.didEditFile).toBe(true)
+		expect(pushToolResult).toHaveBeenCalledWith("Changes successfully applied.")
+		expect(handleError).not.toHaveBeenCalled()
 	})
 
 	it("updates a file through the diff editor when the user opted out", async () => {
