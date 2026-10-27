@@ -86,10 +86,17 @@ export class DirtyEvaluatedTreeError extends Error {
 export async function assertEvaluatedTreeClean(root: string): Promise<void> {
 	const { execFile } = await import("node:child_process")
 	const { promisify } = await import("node:util")
-	const { stdout } = await promisify(execFile)("git", ["status", "--porcelain"], {
-		cwd: root,
-		timeout: 30_000,
-	})
+	// The flags override the caller's git configuration: status.showUntrackedFiles
+	// would otherwise hide untracked files and submodule.<name>.ignore would
+	// otherwise hide submodule dirtiness, so a modified checkout could pass.
+	const { stdout } = await promisify(execFile)(
+		"git",
+		["status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"],
+		{
+			cwd: root,
+			timeout: 30_000,
+		},
+	)
 	const entries = stdout
 		.split("\n")
 		.map((line) => line.trim())
