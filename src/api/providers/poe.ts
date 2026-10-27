@@ -241,6 +241,12 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 			error.name = "TimeoutError"
 			return error
 		}
+		// The merged signal keeps the FIRST abort reason. A timeout that fires before the caller
+		// aborts must stay a TimeoutError even if the caller signal aborts before the late result
+		// settles, so classify by the signal's reason rather than the caller signal's later state.
+		const abortedByTimeout = () =>
+			Boolean(mergedAbortSignal?.aborted) &&
+			(mergedAbortSignal?.reason as { name?: string } | undefined)?.name === "TimeoutError"
 		try {
 			const { text } = await generateText({
 				model: this.poe(id),
@@ -250,11 +256,12 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 
 			if (mergedAbortSignal?.aborted) {
 				// The response resolved after the request was aborted: do not return the late result.
-				// A caller abort and a timeout are classified distinctly so retries/UI can tell them apart.
-				if (callerAbortSignal?.aborted) {
-					throw createAbortError("Poe")
+				// Classify by the first abort cause: a timeout that fired first stays a TimeoutError
+				// even if the caller signal aborted before the late result settled.
+				if (abortedByTimeout()) {
+					throw timeoutError()
 				}
-				throw timeoutError()
+				throw createAbortError("Poe")
 			}
 			return text
 		} catch (error) {
@@ -262,11 +269,11 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 			// report it as a provider failure. A per-request timeout that the caller's signal did
 			// not cause is surfaced as the distinct TimeoutError (the series contract), also
 			// without a telemetry capture.
-			if (callerAbortSignal?.aborted) {
-				throw createAbortError("Poe")
-			}
 			if (mergedAbortSignal?.aborted) {
-				throw timeoutError()
+				if (abortedByTimeout()) {
+					throw timeoutError()
+				}
+				throw createAbortError("Poe")
 			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			TelemetryService.instance.captureException(

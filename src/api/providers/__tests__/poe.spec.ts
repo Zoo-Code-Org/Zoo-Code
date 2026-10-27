@@ -718,6 +718,31 @@ describe("PoeHandler", () => {
 			)
 		})
 
+		it("keeps TimeoutError when the timeout fires before a later caller abort and late result", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const callerController = new AbortController()
+			let mergedSignal: AbortSignal | undefined
+			mockGenerateText.mockImplementationOnce(async (args: { abortSignal?: AbortSignal }) => {
+				mergedSignal = args.abortSignal
+				// Let the 20 ms timeout fire first, then abort the caller, then settle late.
+				await new Promise<void>((resolve) => setTimeout(resolve, 40))
+				callerController.abort()
+				return { text: "late result" }
+			})
+
+			const promise = handler.completePrompt("test prompt", {
+				abortSignal: callerController.signal,
+				timeoutMs: 20,
+			})
+
+			await expect(promise).rejects.toMatchObject({
+				name: "TimeoutError",
+				message: "The Poe completion request timed out",
+			})
+			expect(mergedSignal?.reason).toMatchObject({ name: "TimeoutError" })
+			expect(mockCaptureException).not.toHaveBeenCalled()
+		})
+
 		it("reports failures with the canonical provider identifier", async () => {
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
 			mockGenerateText.mockRejectedValueOnce(new Error("generation failed"))
