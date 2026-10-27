@@ -1811,21 +1811,33 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// - Final state is emitted when updates stop (trailing: true)
 			this.debouncedEmitTokenUsage(tokenUsage, this.toolUsage)
 
-			// Guard: don't update the history item for abandoned tasks. Fire-and-forget
-			// saveClineMessages() calls can reach updateTaskHistory() after
-			// abandonSubtask's atomicUpdatePair() has already cleared
-			// parentTaskId/rootTaskId; writing this live Task's stale values would
-			// silently reattach the severed parent-child link.
+			const provider = this.providerRef.deref()
+
+			// Fire-and-forget saveClineMessages() calls can reach this point after
+			// abandonSubtask's atomicUpdatePair() cleared parentTaskId/rootTaskId. Writing
+			// this live Task's stale link values would silently reattach the severed
+			// parent-child link. Keep the upsert (so a plain cancel still records its
+			// metadata) but omit the link keys when the store already has this task's row:
+			// upsertCore merges over the existing record, so omitted keys keep the
+			// severed/null values while tokens, cost, ts and title are refreshed.
 			if (this.abandoned) {
-				// The message write succeeded, and the boolean reflects the message write
-				// only (see method docs): returning false here would make callers retry an
-				// already-persisted save (persistQueuedFeedbackAndAcknowledge) or skip a
-				// durable-state-gated update whose on-disk record is in fact current
-				// (finalizePartialToolAsk). Only the history write is intentionally skipped.
+				const existing = provider?.taskHistoryStore.get(this.taskId)
+				if (!existing) {
+					// The message write succeeded, and the boolean reflects the message write
+					// only (see method docs): returning false here would make callers retry an
+					// already-persisted save (persistQueuedFeedbackAndAcknowledge) or skip a
+					// durable-state-gated update whose on-disk record is in fact current
+					// (finalizePartialToolAsk). No stored row means there is no link to
+					// reattach, and creating one here would write a task the store never had.
+					return true
+				}
+				const { parentTaskId: _parentTaskId, rootTaskId: _rootTaskId, ...detachedHistoryItem } = historyItem
+				await provider?.updateTaskHistory(
+					existing.status ? { ...detachedHistoryItem, status: existing.status } : detachedHistoryItem,
+				)
 				return true
 			}
 
-			const provider = this.providerRef.deref()
 			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
 			await provider?.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
 		} catch (error) {

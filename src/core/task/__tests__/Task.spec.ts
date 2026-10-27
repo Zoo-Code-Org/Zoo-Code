@@ -8358,6 +8358,51 @@ describe("saveClineMessages abandoned guard (#1021)", () => {
 		}
 	})
 
+	it("refreshes an existing history row without reattaching the severed link when abandoned", async () => {
+		const saveSpy = vi.spyOn(taskMessagesModule, "saveTaskMessages").mockResolvedValue([])
+		const metaSpy = vi.spyOn(taskMetadataModule, "taskMetadata").mockResolvedValue({
+			historyItem: { ...staleHistoryItem, tokensIn: 11, tokensOut: 7, totalCost: 0.02 },
+			tokenUsage: getApiMetrics([]),
+		})
+
+		try {
+			const mockProvider = makeMockProvider()
+			// The row already exists with the severed link; a plain cancel's final save
+			// must refresh metadata but keep the link severed (upsertCore merges, so the
+			// link keys must be omitted from the update).
+			;(mockProvider.taskHistoryStore.get as ReturnType<typeof vi.fn>).mockReturnValue({
+				id: "orphan-subtask",
+				status: "completed",
+			})
+			const task = createTask(mockProvider)
+			task.clineMessages = [{ ts: 1, type: "say", say: "text", text: "seeded message" }]
+			task.requestAbort(true)
+
+			const saved = await getTaskTestAccess(task).saveClineMessages()
+
+			expect(saved).toBe(true)
+			expect(mockProvider.updateTaskHistory).toHaveBeenCalledTimes(1)
+			const update = (mockProvider.updateTaskHistory as ReturnType<typeof vi.fn>).mock.calls[0][0]
+			// Metadata is refreshed...
+			expect(update).toEqual(
+				expect.objectContaining({
+					id: "orphan-subtask",
+					tokensIn: 11,
+					tokensOut: 7,
+					totalCost: 0.02,
+					status: "completed",
+				}),
+			)
+			// ...but the update carries no link keys: the merge must leave the stored
+			// severed link untouched.
+			expect(update).not.toHaveProperty("parentTaskId")
+			expect(update).not.toHaveProperty("rootTaskId")
+		} finally {
+			saveSpy.mockRestore()
+			metaSpy.mockRestore()
+		}
+	})
+
 	it("updates task history for a non-abandoned task (guard does not block the normal path)", async () => {
 		const saveSpy = vi.spyOn(taskMessagesModule, "saveTaskMessages").mockResolvedValue([])
 		const metaSpy = vi
