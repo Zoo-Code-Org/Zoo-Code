@@ -1196,8 +1196,12 @@ describe("SettingsView - Experiments", () => {
 		await waitFor(() => expect(saveButton).toBeEnabled())
 		fireEvent.click(saveButton)
 
-		// Confirming Discard resets the settings edit session.
+		// Make a new unsaved edit after the Save, then confirm Discard: the dialog must open and
+		// its confirmation is what resets the edit session.
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
 		fireEvent.click(screen.getByText("settings:common.done"))
+		await waitFor(() => expect(screen.getByTestId("alert-dialog-action")).toBeInTheDocument())
 		fireEvent.click(screen.getByTestId("alert-dialog-action"))
 		await waitFor(() => expect(checkbox).toBeChecked())
 		await waitFor(() => expect(saveButton).toBeDisabled())

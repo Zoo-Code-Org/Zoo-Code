@@ -137,43 +137,50 @@ describe("ApplyPatchTool focus-disruption routing (L2)", () => {
 	}
 
 	async function runPatch(patch: string) {
+		const pushToolResult = vi.fn()
+		const handleError = vi.fn().mockResolvedValue(undefined)
 		await tool.execute({ patch }, fixture as unknown as Task, {
 			askApproval: vi.fn().mockImplementation(async () => approved),
-			handleError: vi.fn().mockResolvedValue(undefined),
-			pushToolResult: vi.fn(),
+			handleError,
+			pushToolResult,
 			toolCallId: "tool-call-1",
 		})
+		return { pushToolResult, handleError }
 	}
 
 	it("adds a file through the direct save when no experiment value is stored", async () => {
 		setExperiments({})
 		vi.mocked(fileExistsAtPath).mockResolvedValue(false)
 
-		await runPatch(addPatch)
+		const { pushToolResult, handleError } = await runPatch(addPatch)
 
 		expect(fixture.diffViewProvider.saveDirectly).toHaveBeenCalledWith("src/new.ts", "line one\n", true, true, 0)
 		expect(fixture.diffViewProvider.open).not.toHaveBeenCalled()
 		expect(fixture.diffViewProvider.saveChanges).not.toHaveBeenCalled()
 		expect(fixture.didEditFile).toBe(true)
+		expect(pushToolResult).toHaveBeenCalledWith("Changes successfully applied.")
+		expect(handleError).not.toHaveBeenCalled()
 	})
 
 	it("adds a file through the diff editor when the user opted out", async () => {
 		setExperiments({ preventFocusDisruption: false })
 		vi.mocked(fileExistsAtPath).mockResolvedValue(false)
 
-		await runPatch(addPatch)
+		const { pushToolResult, handleError } = await runPatch(addPatch)
 
 		expect(fixture.diffViewProvider.open).toHaveBeenCalledWith("src/new.ts")
 		expect(fixture.diffViewProvider.update).toHaveBeenCalledWith("line one\n", true)
 		expect(fixture.diffViewProvider.saveChanges).toHaveBeenCalled()
 		expect(fixture.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+		expect(pushToolResult).toHaveBeenCalledWith("Changes successfully applied.")
+		expect(handleError).not.toHaveBeenCalled()
 	})
 
 	it("updates a file through the direct save when no experiment value is stored", async () => {
 		setExperiments({})
 		vi.mocked(fileExistsAtPath).mockResolvedValue(true)
 
-		await runPatch(updatePatch)
+		const { pushToolResult, handleError } = await runPatch(updatePatch)
 
 		expect(fixture.diffViewProvider.saveDirectly).toHaveBeenCalledWith(
 			"src/existing.ts",
@@ -191,11 +198,63 @@ describe("ApplyPatchTool focus-disruption routing (L2)", () => {
 		setExperiments({ preventFocusDisruption: false })
 		vi.mocked(fileExistsAtPath).mockResolvedValue(true)
 
-		await runPatch(updatePatch)
+		const { pushToolResult, handleError } = await runPatch(updatePatch)
 
 		expect(fixture.diffViewProvider.open).toHaveBeenCalledWith("src/existing.ts")
 		expect(fixture.diffViewProvider.update).toHaveBeenCalledWith("updated file content\n", true)
 		expect(fixture.diffViewProvider.saveChanges).toHaveBeenCalled()
+		expect(fixture.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+		expect(pushToolResult).toHaveBeenCalledWith("Changes successfully applied.")
+		expect(handleError).not.toHaveBeenCalled()
+	})
+
+	it("rejects an add-file patch without saving when the experiment is unset", async () => {
+		approved = false
+		setExperiments({})
+		vi.mocked(fileExistsAtPath).mockResolvedValue(false)
+
+		const { pushToolResult } = await runPatch(addPatch)
+
+		expect(fixture.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+		expect(fixture.diffViewProvider.open).not.toHaveBeenCalled()
+		expect(pushToolResult).toHaveBeenCalledWith("Changes were rejected by the user.")
+	})
+
+	it("reverts the diff editor and does not save a rejected add-file patch when opted out", async () => {
+		approved = false
+		setExperiments({ preventFocusDisruption: false })
+		vi.mocked(fileExistsAtPath).mockResolvedValue(false)
+
+		await runPatch(addPatch)
+
+		expect(fixture.diffViewProvider.open).toHaveBeenCalled()
+		expect(fixture.diffViewProvider.revertChanges).toHaveBeenCalled()
+		expect(fixture.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+		expect(fixture.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+	})
+
+	it("rejects an update-file patch without saving when the experiment is unset", async () => {
+		approved = false
+		setExperiments({})
+		vi.mocked(fileExistsAtPath).mockResolvedValue(true)
+
+		const { pushToolResult } = await runPatch(updatePatch)
+
+		expect(fixture.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+		expect(fixture.diffViewProvider.open).not.toHaveBeenCalled()
+		expect(pushToolResult).toHaveBeenCalledWith("Changes were rejected by the user.")
+	})
+
+	it("reverts the diff editor and does not save a rejected update-file patch when opted out", async () => {
+		approved = false
+		setExperiments({ preventFocusDisruption: false })
+		vi.mocked(fileExistsAtPath).mockResolvedValue(true)
+
+		await runPatch(updatePatch)
+
+		expect(fixture.diffViewProvider.open).toHaveBeenCalled()
+		expect(fixture.diffViewProvider.revertChanges).toHaveBeenCalled()
+		expect(fixture.diffViewProvider.saveChanges).not.toHaveBeenCalled()
 		expect(fixture.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
 	})
 })
