@@ -25,11 +25,20 @@ import {
 import { StringCache } from "@/utils/stringCache"
 
 const TestComponent = () => {
-	const { allowedCommands, setAllowedCommands, soundEnabled, showRooIgnoredFiles, setShowRooIgnoredFiles } =
-		useExtensionState()
+	const {
+		allowedCommands,
+		setAllowedCommands,
+		soundEnabled,
+		showRooIgnoredFiles,
+		setShowRooIgnoredFiles,
+		clineMessages,
+		currentTaskId,
+	} = useExtensionState()
 
 	return (
 		<div>
+			<div data-testid="cline-messages">{JSON.stringify(clineMessages)}</div>
+			<div data-testid="current-task-id">{currentTaskId ?? "no-task"}</div>
 			<div data-testid="allowed-commands">{JSON.stringify(allowedCommands)}</div>
 			<div data-testid="sound-enabled">{JSON.stringify(soundEnabled)}</div>
 			<div data-testid="show-rooignored-files">{JSON.stringify(showRooIgnoredFiles)}</div>
@@ -41,6 +50,10 @@ const TestComponent = () => {
 			</button>
 		</div>
 	)
+}
+
+const expectMessages = (messages: ClineMessage[]) => {
+	expect(JSON.parse(screen.getByTestId("cline-messages").textContent!)).toEqual(messages)
 }
 
 const RulesTestComponent = () => {
@@ -168,8 +181,13 @@ describe("ExtensionStateContext", () => {
 		(scenario) => {
 			const internSpy = vi.spyOn(StringCache.prototype, "intern")
 			const payload: ClineMessage = { ts: 1, type: "say", say: "text", text: "seed" }
+			const oldTaskOnly: ClineMessage = { ts: 2, type: "say", say: "text", text: "old-task-only" }
 			render(
-				<ExtensionStateContextProvider initialState={{ currentTaskId: "task-a", clineMessages: [payload] }}>
+				<ExtensionStateContextProvider
+					initialState={{
+						currentTaskId: "task-a",
+						clineMessages: scenario === "task switch" ? [payload, oldTaskOnly] : [payload],
+					}}>
 					<TestComponent />
 				</ExtensionStateContextProvider>,
 			)
@@ -179,17 +197,22 @@ describe("ExtensionStateContext", () => {
 				internSpy.mockClear()
 				dispatch({ type: "state", state: { currentTaskId: "task-b", clineMessages: [{ ...payload }] } })
 				expect(internSpy).toHaveBeenCalledWith(payload)
+				expectMessages([payload])
+				expect(screen.getByTestId("current-task-id")).toHaveTextContent("task-b")
 			} else {
 				const updated = { ...payload, text: "updated" }
 				dispatch({ type: "messageUpdated", clineMessage: updated })
+				expectMessages([updated])
 				internSpy.mockClear()
 				dispatch({ type: "state", state: { currentTaskId: "task-a", clineMessages: [{ ...updated }] } })
 				expect(internSpy).not.toHaveBeenCalledWith(updated)
+				expectMessages([updated])
 			}
 		},
 	)
 
 	it("ignores task identity in pushes without messages", () => {
+		// Settings, telemetry and mode refreshes do not switch tasks; their snapshots can arrive late.
 		const initial = { ...createInitialExtensionState(), currentTaskId: "task-a" }
 		expect(mergeExtensionState(initial, { currentTaskId: "old" }).currentTaskId).toBe("task-a")
 		const internSpy = vi.spyOn(StringCache.prototype, "intern")
@@ -208,6 +231,8 @@ describe("ExtensionStateContext", () => {
 			),
 		)
 		expect(cache.size).toBe(size)
+		expectMessages([payload])
+		expect(screen.getByTestId("current-task-id")).toHaveTextContent("task-a")
 		internSpy.mockClear()
 		act(() =>
 			window.dispatchEvent(
@@ -217,6 +242,8 @@ describe("ExtensionStateContext", () => {
 			),
 		)
 		expect(internSpy).not.toHaveBeenCalledWith(payload)
+		expectMessages([payload])
+		expect(screen.getByTestId("current-task-id")).toHaveTextContent("task-a")
 	})
 
 	it("does not retain partial messages or re-intern unchanged snapshot messages", () => {
@@ -242,6 +269,7 @@ describe("ExtensionStateContext", () => {
 
 	it("clears a serialized absent task id and preserves task identity on stale snapshots", () => {
 		const initial = { ...createInitialExtensionState(), currentTaskId: "task-a", clineMessagesSeq: 5 }
+		// JSON serialization intentionally drops undefined, reproducing the extension transport.
 		const cleared = mergeExtensionState(
 			initial,
 			JSON.parse(JSON.stringify({ currentTaskId: undefined, clineMessages: [], clineMessagesSeq: 6 })),
@@ -328,6 +356,7 @@ describe("ExtensionStateContext", () => {
 		act(() => {
 			window.dispatchEvent(
 				new MessageEvent("message", {
+					// Keep the JSON round trip: structuredClone would preserve the absent-task key.
 					data: JSON.parse(
 						JSON.stringify({ type: "state", state: { currentTaskId: undefined, clineMessages: [] } }),
 					),
@@ -363,6 +392,7 @@ describe("ExtensionStateContext", () => {
 			)
 		})
 		expect(internSpy).not.toHaveBeenCalledWith(staleMessage)
+		expectMessages([])
 
 		act(() => {
 			window.dispatchEvent(
@@ -372,6 +402,7 @@ describe("ExtensionStateContext", () => {
 			)
 		})
 		expect(internSpy).toHaveBeenCalledWith(currentMessage)
+		expectMessages([currentMessage])
 		internSpy.mockClear()
 		act(() => {
 			window.dispatchEvent(
@@ -381,6 +412,7 @@ describe("ExtensionStateContext", () => {
 			)
 		})
 		expect(internSpy).not.toHaveBeenCalledWith(staleMessage)
+		expectMessages([currentMessage])
 	})
 
 	it("does not intern an update for a message outside the current task", () => {
@@ -402,6 +434,7 @@ describe("ExtensionStateContext", () => {
 		})
 
 		expect(internSpy).not.toHaveBeenCalledWith(unknownMessage)
+		expectMessages([currentMessage])
 	})
 
 	it("initializes with empty allowedCommands array", () => {

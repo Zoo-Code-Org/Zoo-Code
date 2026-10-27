@@ -737,7 +737,10 @@ describe("ChatView - Virtualization Configuration", () => {
 		const row = await screen.findByTestId("chat-row")
 		const instance = row.getAttribute("data-instance")
 		expect(instance).not.toBeNull()
-		mockPostMessage({ clineMessages: [task, { ...partial, text: "Completed", partial: false }] })
+		await dispatchExtensionMessage({
+			type: "messageUpdated",
+			clineMessage: { ...partial, text: "Completed", partial: false },
+		})
 		await waitFor(() => expect(screen.getByTestId("chat-row")).toHaveTextContent("Completed"))
 		expect(screen.getByTestId("chat-row").getAttribute("data-instance")).toBe(instance)
 	})
