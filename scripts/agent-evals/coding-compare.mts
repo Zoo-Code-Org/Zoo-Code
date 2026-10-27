@@ -1,8 +1,10 @@
 // Paired comparison driver. Verifies both commits against an explicit trust
-// policy, checks out each approved commit into a temporary worktree, prepares
-// pinned dependencies and builds that exact commit, runs one trusted coding
-// side per commit against its worktree with identical repetition counts, then
-// writes the JSON and Markdown comparison reports.
+// policy, checks out each approved commit into a fresh detached temporary
+// worktree, and runs one trusted coding side per commit with identical
+// repetition counts. Each side then constructs its own fresh detached
+// worktree of that exact commit, installs the frozen dependencies, and
+// builds inside it before any host launch. The driver writes the JSON and
+// Markdown comparison reports.
 //
 // Trust model. The side script, fixtures, grader, and report builder all run
 // from this trusted checkout. Only the extension host loads the evaluated
@@ -10,14 +12,17 @@
 // the one named provider variable. A commit runs only when its full SHA is
 // listed in the operator's trust policy; refs are resolved and checked
 // against the policy before any worktree or process exists. The side process
-// re-checks the root it was handed against the same policy.
+// re-checks the commit it was handed against the same policy, constructs a
+// fresh detached worktree of it, and installs and builds inside that
+// worktree before any launch.
 //
-// Process containment. Install, build, worktree, and side children receive
-// only an allowlisted environment, so the driver's secrets never reach them.
-// Each runs detached in its own process group under one guard, so SIGINT and
-// SIGTERM aimed at the driver alone terminate the tracked group with a bounded
-// SIGTERM-then-SIGKILL escalation before the scratch cleanup runs, and an
-// interrupt leaves no orphan host behind.
+// Process containment. Worktree, side, and the sides' install and build
+// children receive only an allowlisted environment, so the driver's secrets
+// never reach them. Each runs detached in its own process group under a
+// guard, so SIGINT and SIGTERM aimed at the driver alone terminate the side
+// group with a bounded SIGTERM-then-SIGKILL escalation before the scratch
+// cleanup runs, the side runs the same escalation for its own children, and
+// an interrupt leaves no orphan host behind.
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -28,8 +33,6 @@ import { createInterruptFlag, createSideProcessGuard, type SideKillOutcome } fro
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 
-const INSTALL_TIMEOUT_MS = 10 * 60_000
-const BUILD_TIMEOUT_MS = 30 * 60_000
 const WORKTREE_TIMEOUT_MS = 120_000
 const SIDE_KILL_GRACE_MS = 30_000
 const DEFAULT_SIDE_TIMEOUT_MINUTES = 120
@@ -98,23 +101,11 @@ const readArgs = (): {
 	}
 }
 
-// Prepares the worktree of one evaluated commit. Dependencies install from
-// the worktree's own frozen lockfile, and that exact commit's extension and
-// webview build from its own sources. No artifact crosses sides.
-const prepareWorktree = async (worktree: string): Promise<void> => {
-	await runBoundedPreparation(
-		sideGuard,
-		interruptFlag.isInterrupted,
-		"pnpm",
-		["install", "--frozen-lockfile"],
-		worktree,
-		INSTALL_TIMEOUT_MS,
-	)
-	await runBoundedPreparation(sideGuard, interruptFlag.isInterrupted, "pnpm", ["build"], worktree, BUILD_TIMEOUT_MS)
-}
-
 // One side's full preparation: the detached worktree add of that exact
-// commit, then the install and build inside it.
+// commit. The side derives its own fresh worktree of this commit, installs
+// the frozen dependencies, and builds there before any host launch, so the
+// executed build output is always the side's own product of the approved
+// commit.
 const prepareSideWorktree = async (commit: string, worktree: string): Promise<void> => {
 	await runBoundedPreparation(
 		sideGuard,
@@ -124,7 +115,6 @@ const prepareSideWorktree = async (commit: string, worktree: string): Promise<vo
 		root,
 		WORKTREE_TIMEOUT_MS,
 	)
-	await prepareWorktree(worktree)
 }
 
 const inputs = readArgs()

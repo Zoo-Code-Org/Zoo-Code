@@ -2,12 +2,22 @@
 // commit through the substrate, grades each final workspace, and writes one
 // side-results file with the pinned inputs. Trusted repo code only: the
 // provider credential stays with this process and the extension host; the
-// grader never receives it. The extension under test comes from the evaluated
-// root, which must be an approved commit and a tree that matches that commit
-// exactly before any host is created or any credential is read.
+// grader never receives it.
+//
+// The extension under test is never a caller-prepared tree. The side resolves
+// the evaluated root's HEAD commit, requires its approval, and then
+// constructs a fresh detached worktree of that exact commit in private
+// scratch space. The frozen install, the build, and every host launch run
+// inside that worktree, so the executed content is only this side's own
+// product of the approved commit. Dirty files, untracked files, ignored
+// dependencies, stale build output, and symlinks in the caller's tree can
+// never reach it.
+import { execFile } from "node:child_process"
 import fs from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { promisify } from "node:util"
 import { createHostRuntime } from "./launcher.ts"
 import { createContainerGradingRuntime } from "./container-runtime.ts"
 import { runCodingFixtureOnce } from "./coding-run.ts"
@@ -16,7 +26,7 @@ import { CODING_SUITE_ID, codingSuiteDigest, ensureCodingSuiteRegistered } from 
 import { GRADER_VERSION } from "./coding-grader.ts"
 import { digestValue } from "./coding-digest.ts"
 import type { SidePins } from "./coding-pins.ts"
-import { invalidateSideArtifacts } from "./coding-compare.ts"
+import { invalidateSideArtifacts, runBoundedPreparation } from "./coding-compare.ts"
 import {
 	assertCommitsApproved,
 	assertCredentialEnvAllowed,
@@ -25,9 +35,20 @@ import {
 	resolveCommit,
 } from "./coding-trust.ts"
 import { executeSideFlow, type SideRepetition } from "./coding-side-flow.ts"
-import { createInterruptFlag } from "./side-process-guard.ts"
+import { createInterruptFlag, createSideProcessGuard } from "./side-process-guard.ts"
+
+const execFileAsync = promisify(execFile)
 
 const thisRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
+
+// The side owns the worktree construction, the frozen install, and the build
+// of the approved commit. All steps consume the side's own wall clock, and a
+// step past its bound is killed as a group like an expired run.
+const WORKTREE_TIMEOUT_MS = 120_000
+const INSTALL_TIMEOUT_MS = 10 * 60_000
+const BUILD_TIMEOUT_MS = 30 * 60_000
+const WORKTREE_REMOVE_TIMEOUT_MS = 30_000
+const SIDE_KILL_GRACE_MS = 30_000
 
 const readArgs = (): {
 	reps: number
@@ -59,8 +80,9 @@ const readArgs = (): {
 		reps: Number(read("reps") ?? "3"),
 		out: path.resolve(out),
 		credentialEnv,
-		// Repository root of the extension under test. The trusted harness
-		// code drives the run; only the extension host loads this tree.
+		// Repository whose HEAD commit this side evaluates. The trusted
+		// harness code drives the run; only the extension host loads the
+		// fresh worktree this side builds from the approved commit.
 		evaluatedRoot: path.resolve(read("evaluated-root") ?? thisRoot),
 		trustFile: path.resolve(trustFile),
 	}
@@ -92,19 +114,15 @@ const readVscodeTarget = async (root: string): Promise<string> => {
 const { reps, out, credentialEnv, evaluatedRoot, trustFile } = readArgs()
 if (!Number.isInteger(reps) || reps < 1) throw new Error("--reps must be a positive integer")
 const sideLabel = readSideLabel()
-// Trust gate. The evaluated root is loaded by the extension host and receives
-// the credential, so its resolved full commit must be approved before any
-// directory is prepared, any host is created, or the credential is read. The
-// comparison driver checks its resolved commits first; this second check binds
-// the root that was actually passed in. The commit of an unapproved root is
-// unreadable or foreign, and both fail closed here.
+// Trust gate. The evaluated root names the repository whose HEAD commit this
+// side evaluates, so that commit must be approved before any directory is
+// prepared, any host is created, or the credential is read. The comparison
+// driver checks its resolved commits first; this second check binds the root
+// that was actually passed in. The commit of an unapproved root is unreadable
+// or foreign, and both fail closed here.
 const policy = await loadTrustPolicy(trustFile)
 const evaluatedCommit = await resolveCommit("HEAD", evaluatedRoot)
 assertCommitsApproved(policy, [evaluatedCommit])
-// The approval covers the commit only, so the tree the host loads must also
-// match that commit. A tracked or untracked change makes the executed files
-// differ from the approved content, and the side stops here.
-await assertEvaluatedTreeClean(evaluatedRoot)
 // Fail before any directory, run, or result file exists. An empty credential
 // would otherwise produce a plausible file of infrastructure failures.
 const credential = process.env[credentialEnv]
@@ -114,14 +132,21 @@ if (credential === undefined || credential.length === 0) {
 ensureCodingSuiteRegistered()
 
 // Side-level interrupt. A SIGINT or SIGTERM that reaches this process arms
-// one flag at most once. The flow checks it before each repetition and
-// before publication, so an interrupted side starts no new repetition and
-// never publishes the completion marker. The substrate registers its own
-// host teardown listener per run; the two listeners stay independent and
-// the flag never consumes their signals.
+// one flag at most once and starts the preparation guard's escalation, so
+// a bounded install or build never outlives the side. The flow checks the
+// flag before each repetition and before publication, so an interrupted
+// side starts no new repetition and never publishes the completion marker.
+// The substrate registers its own host teardown listener per run; the
+// listeners stay independent and the flag never consumes their signals.
 const interrupt = createInterruptFlag()
-process.on("SIGINT", () => interrupt.signal("SIGINT"))
-process.on("SIGTERM", () => interrupt.signal("SIGTERM"))
+const prepGuard = createSideProcessGuard(SIDE_KILL_GRACE_MS)
+let prepSettled: Promise<unknown> = Promise.resolve()
+const onSideInterrupt = (signal: NodeJS.Signals): void => {
+	interrupt.signal(signal)
+	prepSettled = prepGuard.interrupt()
+}
+process.on("SIGINT", () => onSideInterrupt("SIGINT"))
+process.on("SIGTERM", () => onSideInterrupt("SIGTERM"))
 
 // Live sides always grade in the container runtime. The local subprocess
 // runtime stays available to unit tests only.
@@ -132,6 +157,25 @@ const gradingRuntime = createContainerGradingRuntime()
 // require side-results.json, and it exists only after this invocation
 // completes.
 await invalidateSideArtifacts(out)
+
+// Private scratch space for the fresh evaluated tree. The caller's root
+// contributes only the approved commit object; nothing from its working
+// tree, its ignored dependencies, or its build output is copied, linked, or
+// executed.
+const sideScratch = await fs.mkdtemp(path.join(os.tmpdir(), "coding-evals-side-"))
+const evaluatedWorktree = path.join(sideScratch, "worktree")
+
+// Removal is best effort and bounded, like the comparison flow cleanup. The
+// escalation of an in-flight preparation child settles before any tree is
+// removed, so no child is still writing while its tree is deleted.
+const removePreparedTree = async (): Promise<void> => {
+	await prepSettled
+	await execFileAsync("git", ["worktree", "remove", "--force", evaluatedWorktree], {
+		cwd: evaluatedRoot,
+		timeout: WORKTREE_REMOVE_TIMEOUT_MS,
+	}).catch(() => {})
+	await fs.rm(sideScratch, { recursive: true, force: true }).catch(() => {})
+}
 
 const projection = CODING_FIXTURE_BUNDLES[0]?.fixture.settingsProjection ?? {}
 
@@ -160,44 +204,102 @@ const buildPins = async (): Promise<SidePins> => {
 		runnerEnvironment: {
 			os: process.platform,
 			nodeVersion: process.version,
-			vscodeTarget: await readVscodeTarget(evaluatedRoot),
+			vscodeTarget: await readVscodeTarget(evaluatedWorktree),
 		},
 	}
 }
 
-const { runs, completed } = await executeSideFlow({
-	repetitions,
-	out,
-	isInterrupted: interrupt.isInterrupted,
-	runRepetition: async ({ fixtureName, repIndex }) => {
-		const artifactsDir = path.join(out, "artifacts", `${fixtureName}-rep${repIndex}`)
-		await fs.mkdir(artifactsDir, { recursive: true })
-		return runCodingFixtureOnce({
-			fixtureName,
-			repIndex,
-			credential,
-			runtime: createHostRuntime({
-				root: evaluatedRoot,
-				artifactsDir,
-				vscodeCachePath: path.join(thisRoot, "apps/vscode-e2e/.vscode-test"),
-			}),
-			gradingRuntime,
-			scratchDir: artifactsDir,
-		})
-	},
-	// Publication point and completion marker. side-results.json appears
-	// atomically only after every repetition of this invocation finished, so
-	// a reader that sees the file sees a complete side of the current run. A
-	// missing file means an interrupted side; consumers must treat it as a
-	// failed side and never pair partial output.
-	buildResult: async (runs) => ({ pins: await buildPins(), runs }),
-})
+// Everything after the gates runs under one cleanup: the prepared tree is
+// removed on completion, on failure, and on interruption alike, and an
+// interrupted side exits with the conventional signal code after that
+// removal. A thrown failure is deferred until the removal finished, so no
+// error path leaks the worktree.
+let interruptedExitCode: number | undefined
+let failure: unknown
+try {
+	await runBoundedPreparation(
+		prepGuard,
+		interrupt.isInterrupted,
+		"git",
+		["worktree", "add", "--detach", evaluatedWorktree, evaluatedCommit],
+		evaluatedRoot,
+		WORKTREE_TIMEOUT_MS,
+	)
+	// The approval names one commit, so the constructed tree must resolve to
+	// exactly that commit and hold no other content.
+	const preparedCommit = await resolveCommit("HEAD", evaluatedWorktree)
+	if (preparedCommit !== evaluatedCommit) {
+		throw new Error(`prepared evaluated worktree is at ${preparedCommit}, not the approved ${evaluatedCommit}`)
+	}
+	await assertEvaluatedTreeClean(evaluatedWorktree)
+	// The install and the build run inside the fresh worktree, so the entry
+	// the host loads is always this side's own product of the approved
+	// commit. The preparation children receive only the allowlisted
+	// environment, so the credential never reaches them.
+	await runBoundedPreparation(
+		prepGuard,
+		interrupt.isInterrupted,
+		"pnpm",
+		["install", "--frozen-lockfile"],
+		evaluatedWorktree,
+		INSTALL_TIMEOUT_MS,
+	)
+	await runBoundedPreparation(
+		prepGuard,
+		interrupt.isInterrupted,
+		"pnpm",
+		["build"],
+		evaluatedWorktree,
+		BUILD_TIMEOUT_MS,
+	)
 
-if (!completed) {
-	// An interrupted side exits with the conventional signal code and without
-	// side-results.json, so consumers treat it as a failed side.
-	console.error(`coding-evals side interrupted by ${interrupt.name() ?? "signal"}; side-results.json not published`)
-	process.exit(interrupt.exitCode())
+	const { runs, completed } = await executeSideFlow({
+		repetitions,
+		out,
+		isInterrupted: interrupt.isInterrupted,
+		runRepetition: async ({ fixtureName, repIndex }) => {
+			const artifactsDir = path.join(out, "artifacts", `${fixtureName}-rep${repIndex}`)
+			await fs.mkdir(artifactsDir, { recursive: true })
+			return runCodingFixtureOnce({
+				fixtureName,
+				repIndex,
+				credential,
+				runtime: createHostRuntime({
+					root: evaluatedWorktree,
+					artifactsDir,
+					vscodeCachePath: path.join(thisRoot, "apps/vscode-e2e/.vscode-test"),
+				}),
+				gradingRuntime,
+				scratchDir: artifactsDir,
+			})
+		},
+		// Publication point and completion marker. side-results.json appears
+		// atomically only after every repetition of this invocation finished,
+		// so a reader that sees the file sees a complete side of the current
+		// run. A missing file means an interrupted side; consumers must treat
+		// it as a failed side and never pair partial output.
+		buildResult: async (runs) => ({ pins: await buildPins(), runs }),
+	})
+
+	if (!completed) {
+		console.error(
+			`coding-evals side interrupted by ${interrupt.name() ?? "signal"}; side-results.json not published`,
+		)
+		interruptedExitCode = interrupt.exitCode()
+	} else {
+		const correct = runs.filter((record) => record.outcome.outcome === "correct").length
+		console.log(
+			`coding-evals side complete: ${correct}/${runs.length} correct, suite ${codingSuiteDigest().slice(0, 12)}`,
+		)
+	}
+} catch (error) {
+	if (interrupt.isInterrupted()) {
+		console.error("coding-evals side interrupted during preparation; side-results.json not published")
+		interruptedExitCode = interrupt.exitCode()
+	} else {
+		failure = error
+	}
 }
-const correct = runs.filter((record) => record.outcome.outcome === "correct").length
-console.log(`coding-evals side complete: ${correct}/${runs.length} correct, suite ${codingSuiteDigest().slice(0, 12)}`)
+await removePreparedTree()
+if (failure !== undefined) throw failure
+if (interruptedExitCode !== undefined) process.exit(interruptedExitCode)
