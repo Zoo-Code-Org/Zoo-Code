@@ -60,15 +60,12 @@ function makeMcpHub(
 function makeSkillsManager(n: number): Pick<SkillsManager, "getSkillsForMode"> {
 	return {
 		getSkillsForMode: () =>
-			Array.from(
-				{ length: n },
-				(_, i): SkillMetadata => ({
-					name: `skill-${i}`,
-					description: `Skill ${i}`,
-					path: `./skills/${i}`,
-					source: "global",
-				}),
-			),
+			Array.from({ length: n }, (_, i): SkillMetadata => ({
+				name: `skill-${i}`,
+				description: `Skill ${i}`,
+				path: `./skills/${i}`,
+				source: "global",
+			})),
 	}
 }
 

@@ -20,6 +20,7 @@
 	"apiCostLabel": "Biaya API:",
 	"copyPrompt": "Salin Prompt",
 	"exportTask": "Ekspor Tugas",
+	"renameTask": "Ganti Nama Tugas",
 	"deleteTask": "Hapus Tugas",
 	"deleteTaskMessage": "Apakah kamu yakin ingin menghapus tugas ini? Aksi ini tidak dapat dibatalkan.",
 	"cancel": "Batal",

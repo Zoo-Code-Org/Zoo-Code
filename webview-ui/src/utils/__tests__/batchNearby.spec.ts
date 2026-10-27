@@ -450,4 +450,62 @@ describe("batchNearby", () => {
 		expect(result[1].text).toBe("feedback")
 		expect(result[2].text).toBe('BATCH:{"tool":"readFile","path":"c.ts"},{"tool":"readFile","path":"d.ts"}')
 	})
+
+	describe("ignorable items around a batch", () => {
+		const options = {
+			isTarget: isMatch,
+			isIgnorableBetweenTargets,
+			isBoundary,
+			synthesize: synthesizeBatch,
+		}
+
+		test("consumes ignorable items between targets but keeps the ones after the last target", () => {
+			const betweenRequest = msg("between request", "say", "api_req_started")
+			const nextRequest = msg("next request", "say", "api_req_started")
+			const nextReasoning = msg("next reasoning", "say", "reasoning")
+
+			const result = batchNearby(
+				[msg("match-1", "ask"), betweenRequest, msg("match-2", "ask"), nextRequest, nextReasoning],
+				options,
+			)
+
+			expect(result.map((m) => m.text)).toEqual(["BATCH:match-1,match-2", "next request", "next reasoning"])
+		})
+
+		test("keeps trailing ignorable items when the batch is followed by a boundary", () => {
+			const result = batchNearby(
+				[
+					msg("match-1", "ask"),
+					msg("match-2", "ask"),
+					msg("next request", "say", "api_req_started"),
+					msg("visible text", "say", "text"),
+				],
+				options,
+			)
+
+			expect(result.map((m) => m.text)).toEqual(["BATCH:match-1,match-2", "next request", "visible text"])
+		})
+
+		test("keeps ignorable items that follow a single target", () => {
+			const messages = [msg("match-1", "ask"), msg("next request", "say", "api_req_started")]
+
+			expect(batchNearby(messages, options)).toEqual(messages)
+		})
+
+		test("does not duplicate ignorable items between three targets", () => {
+			const result = batchNearby(
+				[
+					msg("match-1", "ask"),
+					msg("req a", "say", "api_req_started"),
+					msg("match-2", "ask"),
+					msg("req b", "say", "api_req_started"),
+					msg("match-3", "ask"),
+					msg("req c", "say", "api_req_started"),
+				],
+				options,
+			)
+
+			expect(result.map((m) => m.text)).toEqual(["BATCH:match-1,match-2,match-3", "req c"])
+		})
+	})
 })

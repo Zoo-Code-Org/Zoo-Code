@@ -80,6 +80,7 @@ export async function extractZipArchive(archivePath: string, destination: string
 	await runProcess("unzip", ["-o", archivePath, "-d", destination])
 }
 
+/** @internal Exported for focused implementation tests. */
 export async function extractSingleFileZipArchive(
 	archivePath: string,
 	destination: string,
@@ -108,6 +109,7 @@ export async function extractSingleFileZipArchive(
 	await runPowerShell(script)
 }
 
+/** @internal Exported for focused implementation tests. */
 export async function extractSingleFileTarXzArchive(
 	archivePath: string,
 	destination: string,
