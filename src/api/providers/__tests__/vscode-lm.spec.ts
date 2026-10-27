@@ -2924,11 +2924,11 @@ describe("VsCodeLmHandler", () => {
 			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
 				stream: (async function* () {
 					await streamGate
-					return
+					yield* [] as vscode.LanguageModelTextPart[]
 				})(),
 				text: (async function* () {
 					await streamGate
-					return
+					yield* [] as string[]
 				})(),
 			})
 
