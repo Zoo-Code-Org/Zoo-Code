@@ -743,10 +743,14 @@ describe("openClineInNewTab", () => {
 			openClineInNewTabForApi({ context: mockContext, outputChannel: mockOutputChannel, webviewFocusTracker }),
 		])
 
-		expect(first).toBeDefined()
-		expect(second).toBeDefined()
+		// Identity, not just construction: sharing the first provider between both
+		// callers would satisfy mere defined/count assertions.
+		const created = vi.mocked(ClineProvider).mock.results.map((result) => result.value)
+		expect(created).toHaveLength(2)
+		expect(created[0]).toBe(first)
+		expect(created[1]).toBe(second)
+		expect(first).not.toBe(second)
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
-		expect(ClineProvider).toHaveBeenCalledTimes(2)
 		// The tracked tab must be the last created panel, not a reused provider.
 		expect(ClineProvider.getInstanceForView as Mock).not.toHaveBeenCalled()
 	})
