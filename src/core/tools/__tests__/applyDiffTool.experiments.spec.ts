@@ -2,6 +2,53 @@ import fs from "fs/promises"
 
 import type { DiffResult, ToolResponse } from "../../../shared/tools"
 import type { Task } from "../../task/Task"
+
+type Experiments = Record<string, boolean>
+
+interface ProviderFixture {
+	getState: () => Promise<{ experiments?: Experiments }>
+}
+
+interface DiffViewFixture {
+	editType: string | undefined
+	originalContent: string
+	open: (path: string) => Promise<void>
+	update: (content: string, final: boolean) => Promise<void>
+	reset: () => Promise<void>
+	revertChanges: () => Promise<void>
+	saveChanges: (diagnosticsEnabled?: boolean, writeDelayMs?: number) => Promise<void>
+	saveDirectly: (
+		path: string,
+		content: string,
+		open?: boolean,
+		diagnosticsEnabled?: boolean,
+		writeDelayMs?: number,
+	) => Promise<void>
+	scrollToFirstDiff: () => void
+	pushToolWriteResult: () => Promise<string>
+}
+
+/** The structural slice of Task this tool touches; the single cast to Task happens at construction. */
+interface TaskFixture {
+	cwd: string
+	consecutiveMistakeCount: number
+	consecutiveMistakeCountForApplyDiff: Map<string, number>
+	didEditFile: boolean
+	api: { getModel: () => { id: string } }
+	rooIgnoreController: { validateAccess: (path: string) => boolean }
+	rooProtectedController: { isWriteProtected: (path: string) => boolean }
+	providerRef: { deref: () => ProviderFixture | undefined }
+	diffViewProvider: DiffViewFixture
+	fileContextTracker: { trackFileContext: (path: string, source: string) => Promise<void> }
+	say: (type: string, text?: string) => Promise<void>
+	recordToolError: (tool: string, error?: string) => void
+	sayAndCreateMissingParamError: (tool: string, param: string) => Promise<string>
+	processQueuedMessages: () => void
+	diffStrategy: {
+		getName: () => string
+		applyDiff: (original: string, diff: string) => Promise<DiffResult>
+	}
+}
 import { fileExistsAtPath } from "../../../utils/fs"
 import type { ToolCallbacks } from "../BaseTool"
 import { applyDiffTool } from "../ApplyDiffTool"
@@ -47,6 +94,7 @@ describe("ApplyDiffTool focus-disruption routing (L2)", () => {
 	const testFilePath = "test/file.txt"
 	const diffContent = "<<<<<<< SEARCH\nline one\n=======\nline one edited\n>>>>>>> REPLACE"
 
+	let fixture: TaskFixture
 	let mockTask: Task
 	let mockAskApproval: ReturnType<typeof vi.fn<ToolCallbacks["askApproval"]>>
 	let mockHandleError: ReturnType<typeof vi.fn<ToolCallbacks["handleError"]>>
@@ -63,7 +111,7 @@ describe("ApplyDiffTool focus-disruption routing (L2)", () => {
 		mockAskApproval = vi.fn().mockImplementation(async () => approved)
 		mockHandleError = vi.fn().mockResolvedValue(undefined)
 
-		mockTask = {
+		fixture = {
 			cwd: "/workspace",
 			api: { getModel: () => ({ id: "claude-test" }) },
 			consecutiveMistakeCount: 0,
@@ -93,7 +141,9 @@ describe("ApplyDiffTool focus-disruption routing (L2)", () => {
 				getName: () => "test",
 				applyDiff: vi.fn().mockResolvedValue({ success: true, content: "updated content" } as DiffResult),
 			},
-		} as unknown as Task
+		}
+		// One documented construction-site assertion: every member above is individually typed.
+		mockTask = fixture as unknown as Task
 	})
 
 	function setExperiments(experiments: Record<string, boolean>) {
@@ -141,6 +191,7 @@ describe("ApplyDiffTool focus-disruption routing (L2)", () => {
 		expect(mockTask.diffViewProvider.update).toHaveBeenCalledWith("updated content", true)
 		expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalled()
 		expect(mockTask.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+		expect(String(pushedResult)).toContain("Changes successfully applied.")
 	})
 
 	it("does not save when the direct chat-diff approval is rejected", async () => {

@@ -265,6 +265,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 		handledSettingsImportedAt.current = settingsImportedAt
 		changedExperiments.current.clear()
+		// Imported state replaces the settings the pending baseline was compared against: drop it so
+		// it cannot suppress a later save of the newly imported value.
+		submittedExperiments.current.clear()
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
 		setChangeDetected(false)
 	}, [settingsImportedAt, extensionState])

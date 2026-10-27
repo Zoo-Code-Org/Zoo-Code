@@ -1094,6 +1094,48 @@ describe("SettingsView - Experiments", () => {
 		expect(updateSettingsCalls[1]?.experiments).toEqual({ preventFocusDisruption: true })
 	})
 
+	it("clears the pending submitted baseline when settings are imported", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { imageGeneration: false } })
+		activateTab("experimental")
+
+		const saveButton = screen.getByTestId("save-button")
+		await waitFor(() => expect(saveButton).toBeDisabled())
+		const label = await waitFor(() => {
+			const content = getSettingsContent()
+			return within(content).getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name").closest("label")
+		})
+		const checkbox = label!.querySelector('input[type="checkbox"]') as HTMLInputElement
+
+		// Save default-on -> false to create a pending submitted baseline of false.
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(saveButton)
+
+		// Import replaces the settings: the pending baseline must be dropped.
+		act(() => {
+			mockPostMessage({ settingsImportedAt: Date.now(), experiments: {} })
+		})
+		await waitFor(() => expect(checkbox).toBeChecked())
+		await waitFor(() => expect(saveButton).toBeDisabled())
+
+		// Toggling off now equals the dropped baseline; if it were still pending, the save would be
+		// skipped. The import must have cleared it so the change is persisted.
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(saveButton)
+
+		const experimentPayloads = vi
+			.mocked(vscode.postMessage)
+			.mock.calls.filter(([message]) => (message as { type?: string }).type === "updateSettings")
+			.map(
+				([message]) =>
+					(message as { updatedSettings: { experiments?: Record<string, boolean> } }).updatedSettings,
+			)
+			.filter((settings) => settings.experiments !== undefined)
+		expect(experimentPayloads).toHaveLength(2)
+		expect(experimentPayloads[1]?.experiments).toEqual({ preventFocusDisruption: false })
+	})
+
 	it("does not persist the experiments map when no experiment changed", () => {
 		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { imageGeneration: false } })
 
