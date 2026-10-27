@@ -411,6 +411,12 @@
 		"getOpencodeGoApiKey": "Ottieni chiave API Opencode Go",
 		"kenariApiKey": "Chiave API Kenari",
 		"getKenariApiKey": "Ottieni chiave API Kenari",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "Chiave API IO Intelligence",
+			"getApiKey": "Ottieni chiave API IO Intelligence",
+			"model": "Modello"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Chiave API NanoGPT",
@@ -616,7 +622,7 @@
 			"baseUrl": "URL base (opzionale)",
 			"modelId": "ID modello",
 			"apiKey": "Chiave API Ollama",
-			"apiKeyHelp": "Chiave API opzionale per istanze Ollama autenticate o servizi cloud. Lascia vuoto per installazioni locali.",
+			"apiKeyHelp": "Chiave API opzionale per istanze Ollama che richiedono autenticazione, o per servizi cloud. Zoo Code invia la chiave solo a endpoint HTTPS o loopback. Un endpoint HTTP remoto non riceve la chiave, perché la chiave viaggerebbe in chiaro. Usa HTTPS per un'istanza remota che richiede una chiave. Lascia vuoto per un'installazione locale.",
 			"numCtx": "Dimensione della finestra di contesto (num_ctx)",
 			"numCtxHelp": "Sovrascrive la dimensione predefinita della finestra di contesto del modello. Lasciare vuoto per utilizzare la configurazione del Modelfile del modello. Il valore minimo è 128.",
 			"thinking": "Abilita ragionamento",
@@ -845,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Comprimi l’output dei comandi per impostazione predefinita",
+			"description": "Mostra compresso l’output dei comandi, incluso quello del terminale inline. Espandilo manualmente quando necessario. L’esecuzione dei comandi non cambia."
+		},
 		"basic": {
 			"label": "Impostazioni terminale: Base",
 			"description": "Impostazioni base del terminale"

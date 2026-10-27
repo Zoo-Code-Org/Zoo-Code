@@ -99,6 +99,7 @@ export const dynamicProviders = [
 	providerIdentifiers.opencodeGo,
 	providerIdentifiers.kenari,
 	providerIdentifiers.nanogpt,
+	providerIdentifiers.ioIntelligence,
 	providerIdentifiers.kimiCode,
 ] as const
 
@@ -238,7 +239,7 @@ const indexProviderDefinitions = (
 const providerDefinitions = indexProviderDefinitions(providerDefinitionList)
 
 const defaultSchema = z.object({
-	[API_PROVIDER_FIELD]: z.undefined(),
+	[API_PROVIDER_FIELD]: z.undefined().optional(),
 })
 
 type ProviderDefinitionSchemas<D extends readonly ProviderDefinition[]> = {
@@ -265,7 +266,7 @@ export const providerSettingsSchemaDiscriminated = z.discriminatedUnion(API_PROV
 
 type ProviderSettingsShape = UnionToIntersection<(typeof providerDefinitionList)[number][typeof SETTINGS_SHAPE_FIELD]>
 
-const providerSettingsObjectSchema = providerDefinitionList.reduce<z.AnyZodObject>(
+const providerSettingsObjectSchema = providerDefinitionList.reduce<z.ZodObject>(
 	(schema, definition) => schema.merge(z.object(definition[SETTINGS_SHAPE_FIELD])),
 	z.object({}),
 )
@@ -313,6 +314,7 @@ export const modelIdKeys = [
 	"opencodeGoModelId",
 	"kenariModelId",
 	"nanoGptModelId",
+	"ioIntelligenceModelId",
 	"zooGatewayModelId",
 ] as const satisfies readonly ModelIdKey[]
 
@@ -546,6 +548,11 @@ export const MODELS_BY_PROVIDER: Record<
 	},
 	[providerIdentifiers.opencodeGo]: { id: providerIdentifiers.opencodeGo, label: "Opencode Go", models: [] },
 	[providerIdentifiers.kenari]: { id: providerIdentifiers.kenari, label: "Kenari", models: [] },
+	[providerIdentifiers.ioIntelligence]: {
+		id: providerIdentifiers.ioIntelligence,
+		label: "IO Intelligence",
+		models: [],
+	},
 	[providerIdentifiers.nanogpt]: { id: providerIdentifiers.nanogpt, label: "NanoGPT", models: [] },
 	[providerIdentifiers.zooGateway]: { id: providerIdentifiers.zooGateway, label: "Zoo Gateway", models: [] },
 
