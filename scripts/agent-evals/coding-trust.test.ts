@@ -21,11 +21,25 @@ const execFileAsync = promisify(execFile)
 const sha = (c: string): string => c.repeat(40)
 
 // One throwaway repository with one empty commit. It stands in for an
-// evaluated root; no code from it ever runs in these checks.
-const makeRepo = async (dir: string): Promise<string> => {
-	const repo = path.join(dir, "repo")
+// evaluated root; no code from it ever runs in these checks. The commit
+// identity lives in the repository's local config only.
+const makeRepo = async (dir: string, name = "repo"): Promise<string> => {
+	const repo = path.join(dir, name)
 	await fs.mkdir(repo)
 	await execFileAsync("git", ["init", "-q"], { cwd: repo })
+	// The operator's git config may force signed commits, and the
+	// throwaway fixture has no key or tty.
+	await execFileAsync("git", ["config", "commit.gpgsign", "false"], { cwd: repo })
+	await execFileAsync("git", ["config", "user.email", "fixture@example.test"], { cwd: repo })
+	await execFileAsync("git", ["config", "user.name", "fixture"], { cwd: repo })
+	await execFileAsync("git", ["commit", "--allow-empty", "-q", "-m", "fixture"], { cwd: repo })
+	return repo
+}
+
+const commitAll = async (repo: string, message: string): Promise<void> => {
+	await execFileAsync("git", ["add", "-A"], { cwd: repo })
+	// Submodule checkouts are clones without the fixture's local config, so
+	// the flags travel with the command instead of any stored config.
 	await execFileAsync(
 		"git",
 		[
@@ -33,25 +47,36 @@ const makeRepo = async (dir: string): Promise<string> => {
 			"user.email=fixture@example.test",
 			"-c",
 			"user.name=fixture",
-			// The operator's git config may force signed commits, and the
-			// throwaway fixture has no key or tty.
 			"-c",
 			"commit.gpgsign=false",
 			"commit",
-			"--allow-empty",
 			"-q",
 			"-m",
-			"fixture",
+			message,
 		],
 		{ cwd: repo },
 	)
-	return repo
 }
 
 const writePolicy = async (dir: string, content: unknown): Promise<string> => {
 	const file = path.join(dir, "trust-policy.json")
 	await fs.writeFile(file, JSON.stringify(content))
 	return file
+}
+
+// A superproject with one clean submodule checked out from a throwaway local
+// origin. Nothing from it runs in these checks. `name` keeps the on-disk
+// repositories of separate cases apart inside one temporary directory.
+const makeSuperWithSubmodule = async (dir: string, name: string): Promise<{ superRepo: string; sub: string }> => {
+	const origin = await makeRepo(dir, `${name}-origin`)
+	await fs.writeFile(path.join(origin, "lib.txt"), "library\n")
+	await commitAll(origin, "library")
+	const superRepo = await makeRepo(dir, `${name}-super`)
+	await execFileAsync("git", ["-c", "protocol.file.allow=always", "submodule", "add", "-q", origin, "sub"], {
+		cwd: superRepo,
+	})
+	await commitAll(superRepo, "submodule")
+	return { superRepo, sub: path.join(superRepo, "sub") }
 }
 
 describe("trust policy", () => {
@@ -235,6 +260,136 @@ describe("evaluated tree cleanliness gate", () => {
 			const repo = await makeRepo(dir)
 			await fs.writeFile(path.join(repo, "untracked.txt"), "x")
 			await assert.rejects(assertEvaluatedTreeClean(repo), DirtyEvaluatedTreeError)
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("rejects untracked files when the caller config tells status to hide them", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "coding-trust-test-"))
+		try {
+			// status.showUntrackedFiles=no makes a plain status report an
+			// empty result; the gate must not trust that setting.
+			const cases = [
+				{
+					name: "root",
+					makeDirty: async (repo: string) => {
+						await fs.writeFile(path.join(repo, "untracked.txt"), "x")
+					},
+				},
+				{
+					name: "nested",
+					makeDirty: async (repo: string) => {
+						await fs.mkdir(path.join(repo, "nested"))
+						await fs.writeFile(path.join(repo, "nested", "untracked.txt"), "x")
+					},
+				},
+			]
+			for (const [index, { name, makeDirty }] of cases.entries()) {
+				const repo = await makeRepo(dir, `hide-untracked-${index}`)
+				await execFileAsync("git", ["config", "status.showUntrackedFiles", "no"], { cwd: repo })
+				await makeDirty(repo)
+				await assert.rejects(assertEvaluatedTreeClean(repo), (error: unknown) => {
+					assert.ok(error instanceof DirtyEvaluatedTreeError)
+					assert.ok(
+						error.entries.some((entry) => entry.includes("untracked.txt")),
+						name,
+					)
+					return true
+				})
+			}
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("rejects staged changes under the same hiding config", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "coding-trust-test-"))
+		try {
+			const cases = [
+				{
+					name: "staged new file",
+					stage: async (repo: string) => {
+						await fs.writeFile(path.join(repo, "staged.txt"), "x")
+						await execFileAsync("git", ["add", "staged.txt"], { cwd: repo })
+					},
+				},
+				{
+					name: "staged modification",
+					stage: async (repo: string) => {
+						await fs.writeFile(path.join(repo, "tracked.txt"), "approved\n")
+						await commitAll(repo, "tracked")
+						await fs.writeFile(path.join(repo, "tracked.txt"), "changed\n")
+						await execFileAsync("git", ["add", "tracked.txt"], { cwd: repo })
+					},
+				},
+			]
+			for (const [index, { name, stage }] of cases.entries()) {
+				const repo = await makeRepo(dir, `staged-${index}`)
+				await execFileAsync("git", ["config", "status.showUntrackedFiles", "no"], { cwd: repo })
+				await stage(repo)
+				await assert.rejects(assertEvaluatedTreeClean(repo), (error: unknown) => {
+					assert.ok(error instanceof DirtyEvaluatedTreeError, name)
+					return true
+				})
+			}
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("accepts a clean superproject whose submodule the caller config ignores", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "coding-trust-test-"))
+		try {
+			const { superRepo } = await makeSuperWithSubmodule(dir, "clean")
+			// submodule.<name>.ignore=all must not turn the explicit
+			// --ignore-submodules=none scan into a false rejection.
+			await execFileAsync("git", ["config", "submodule.sub.ignore", "all"], { cwd: superRepo })
+			await assert.doesNotReject(assertEvaluatedTreeClean(superRepo))
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("rejects dirty submodules the caller config ignores", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "coding-trust-test-"))
+		try {
+			const cases = [
+				{
+					name: "modified submodule content",
+					makeDirty: async (sub: string) => {
+						await fs.writeFile(path.join(sub, "lib.txt"), "changed\n")
+					},
+				},
+				{
+					name: "untracked submodule content",
+					makeDirty: async (sub: string) => {
+						await fs.writeFile(path.join(sub, "extra.txt"), "x")
+					},
+				},
+				{
+					name: "submodule checked out past the approved commit",
+					makeDirty: async (sub: string) => {
+						await fs.writeFile(path.join(sub, "lib.txt"), "advanced\n")
+						await commitAll(sub, "advance")
+					},
+				},
+			]
+			for (const [index, { name, makeDirty }] of cases.entries()) {
+				const { superRepo, sub } = await makeSuperWithSubmodule(dir, `dirty-${index}`)
+				// ignore=all hides every submodule change from a plain
+				// status, so only the gate's explicit flag sees the dirt.
+				await execFileAsync("git", ["config", "submodule.sub.ignore", "all"], { cwd: superRepo })
+				await makeDirty(sub)
+				await assert.rejects(assertEvaluatedTreeClean(superRepo), (error: unknown) => {
+					assert.ok(error instanceof DirtyEvaluatedTreeError)
+					assert.ok(
+						error.entries.some((entry) => entry.includes("sub")),
+						name,
+					)
+					return true
+				})
+			}
 		} finally {
 			await fs.rm(dir, { recursive: true, force: true })
 		}
