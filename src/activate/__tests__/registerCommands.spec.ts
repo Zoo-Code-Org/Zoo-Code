@@ -8,7 +8,14 @@ import { ContextProxy } from "../../core/config/ContextProxy"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { MdmService } from "../../services/mdm/MdmService"
 
-import { getPanel, getVisibleProviderOrLog, openClineInNewTab, registerCommands, setPanel } from "../registerCommands"
+import {
+	getPanel,
+	getVisibleProviderOrLog,
+	openClineInNewTab,
+	openClineInNewTabForApi,
+	registerCommands,
+	setPanel,
+} from "../registerCommands"
 
 vi.mock("execa", () => ({
 	execa: vi.fn(),
@@ -724,6 +731,24 @@ describe("openClineInNewTab", () => {
 			type: "action",
 			action: "didBecomeVisible",
 		})
+	})
+
+	it("creates a distinct provider for each independent API tab request", async () => {
+		const webviewFocusTracker = new WebviewFocusTracker()
+
+		// Independent API task requests must not share one provider: each gets its own panel
+		// and provider even though the earlier request tracked a tab.
+		const [first, second] = await Promise.all([
+			openClineInNewTabForApi({ context: mockContext, outputChannel: mockOutputChannel, webviewFocusTracker }),
+			openClineInNewTabForApi({ context: mockContext, outputChannel: mockOutputChannel, webviewFocusTracker }),
+		])
+
+		expect(first).toBeDefined()
+		expect(second).toBeDefined()
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
+		expect(ClineProvider).toHaveBeenCalledTimes(2)
+		// The tracked tab must be the last created panel, not a reused provider.
+		expect(ClineProvider.getInstanceForView as Mock).not.toHaveBeenCalled()
 	})
 
 	it("creates a new tab panel when the tracked tab's provider has been disposed", async () => {

@@ -3473,6 +3473,53 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("keeps a committed non-active deletion when the state post rejects", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const otherProfile: ProviderSettingsEntry = {
+				name: "other-profile",
+				id: "other-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const saveSpy = vi.fn()
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: saveSpy,
+				getProfile: vi.fn().mockResolvedValue({
+					name: "other-profile",
+					id: "other-id",
+					apiProvider: providerIdentifiers.openrouter,
+				}),
+				activateProfile: vi.fn(),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			// The deletion has already committed when the trailing post fails: the post is
+			// best-effort, so it must not reach the outer compensation and resurrect the profile.
+			vi.spyOn(provider, "postStateToWebview").mockRejectedValue(new Error("state post unavailable"))
+			vi.spyOn(provider, "log").mockImplementation(() => {})
+			await provider.contextProxy.setValue("listApiConfigMeta", [keeperProfile, otherProfile])
+			await provider.setValue("currentApiConfigName", "keeper-profile")
+
+			await expect(provider.deleteProviderProfile(otherProfile)).resolves.toBeUndefined()
+
+			expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledTimes(1)
+			expect(saveSpy).not.toHaveBeenCalled()
+			const entries = provider.contextProxy.getValue("listApiConfigMeta") as ProviderSettingsEntry[]
+			expect(entries.some((entry) => entry.name === "other-profile")).toBe(false)
+			await provider.dispose()
+		})
+
 		it("should swallow only the typed not-found signal when pruning a stale profile entry", async () => {
 			const provider = new ClineProvider(
 				mockContext,

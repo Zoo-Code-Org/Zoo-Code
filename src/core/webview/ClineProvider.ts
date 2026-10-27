@@ -3262,7 +3262,22 @@ export class ClineProvider
 				if (persistedRepointLanded) {
 					try {
 						const restoreViewStates = ClineProvider.persistedViewStateWriteQueue.then(async () => {
-							await this.contextProxy.setValue("viewStates", { ...previousPersistedViewStates })
+							// Merge rather than overwrite: sibling views can persist mode/state
+							// changes through persistedViewStateWriteQueue between the snapshot
+							// and this compensation, and those writes must survive. Restore only
+							// the entries that named the deleted profile in the snapshot.
+							const merged = this.getPersistedViewStates({ fresh: true })
+							let changed = false
+							for (const [viewId, entry] of Object.entries(previousPersistedViewStates)) {
+								if (entry?.currentApiConfigName !== profileToDelete.name) {
+									continue
+								}
+								merged[viewId] = entry
+								changed = true
+							}
+							if (changed) {
+								await this.contextProxy.setValue("viewStates", merged)
+							}
 						})
 						ClineProvider.persistedViewStateWriteQueue = restoreViewStates.catch(() => {})
 						await restoreViewStates
@@ -3378,14 +3393,25 @@ export class ClineProvider
 					)
 				}
 
-				await this.postStateToWebview()
+				// The deletion already committed: a failing post must not reach the outer
+				// compensation below, which would restore the deleted profile. Log it instead.
+				await this.postStateToWebview().catch((postError: unknown) =>
+					this.log(
+						`deleteProviderProfile: deletion committed; state post failed: ${postError instanceof Error ? postError.message : String(postError)}`,
+					),
+				)
 				if (activationFailed) {
 					throw new ProfileDeletionActivationError(profileToActivate, activationError)
 				}
 				return
 			}
 
-			await this.postStateToWebview()
+			// Same contract on the non-active path: the deletion stands even if this post fails.
+			await this.postStateToWebview().catch((postError: unknown) =>
+				this.log(
+					`deleteProviderProfile: deletion committed; state post failed: ${postError instanceof Error ? postError.message : String(postError)}`,
+				),
+			)
 		} catch (error) {
 			// Two failures must NOT be compensated here: a replacement activation
 			// failure after the deletion committed (documented contract: the

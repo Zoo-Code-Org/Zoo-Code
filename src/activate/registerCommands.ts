@@ -30,11 +30,14 @@ export function getVisibleProviderOrLog(outputChannel: vscode.OutputChannel): Cl
 let sidebarPanel: vscode.WebviewView | undefined = undefined
 let tabPanel: vscode.WebviewPanel | undefined = undefined
 
-// In-flight "open in editor" creation shared by overlapping calls: a
+// In-flight "open in editor" creation shared by overlapping UI calls: a
 // double-click starts before the first call tracks its new panel, so
-// concurrent callers must share one creation instead of racing to create
-// two tab panels.
+// concurrent UI callers must share one creation instead of racing to create
+// two tab panels. API task creation deliberately does NOT share this promise:
+// two independent API.startNewTask({ newTab: true }) requests must each receive
+// their own provider, so they are serialized through apiTabPanelCreation.
 let pendingTabPanelCreation: Promise<ClineProvider> | undefined
+let apiTabPanelCreation: Promise<void> | undefined
 
 /**
  * Get the currently active panel.
@@ -293,6 +296,11 @@ type OpenClineInNewTabOptions = {
 	webviewFocusTracker: WebviewFocusTracker
 }
 
+type CreateTabPanelOptions = OpenClineInNewTabOptions & {
+	/** UI opens reuse the tracked tab; API opens must create a distinct provider per request. */
+	reuseTrackedPanel?: boolean
+}
+
 export const openClineInNewTab = async ({ context, outputChannel, webviewFocusTracker }: OpenClineInNewTabOptions) => {
 	if (pendingTabPanelCreation) {
 		return pendingTabPanelCreation
@@ -319,6 +327,26 @@ export const openClineInNewTab = async ({ context, outputChannel, webviewFocusTr
 }
 
 /**
+ * Create a tab provider for an independent API task request.
+ *
+ * Unlike openClineInNewTab, concurrent calls must NOT share one provider: two
+ * independent API.startNewTask({ newTab: true }) requests register their own
+ * listeners and create their own top-level tasks, so a shared provider would let
+ * one task evict the other. Creations are serialized so the tab/provider globals
+ * are not raced, and each request creates a fresh provider (no reuse of the
+ * tracked panel).
+ */
+export const openClineInNewTabForApi = async (options: OpenClineInNewTabOptions): Promise<ClineProvider> => {
+	const previous = apiTabPanelCreation ?? Promise.resolve()
+	const creation = previous.then(() => createTabPanelUnlocked({ ...options, reuseTrackedPanel: false }))
+	apiTabPanelCreation = creation.then(
+		() => undefined,
+		() => undefined,
+	)
+	return creation
+}
+
+	/**
  * Undo a tab creation that failed part way through. A ClineProvider that was constructed
  * but never resolved stays registered in ClineProvider.activeInstances with its listeners
  * attached, and setPanel may already have pointed the tracked tab ref at a panel nobody
@@ -360,10 +388,16 @@ async function disposeFailedTabCreation(
 
 // The unserialized tab-creation body. Only openClineInNewTab may call it,
 // after it has stored the shared in-flight promise.
-const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTracker }: OpenClineInNewTabOptions) => {
+const createTabPanelUnlocked = async ({
+	context,
+	outputChannel,
+	webviewFocusTracker,
+	reuseTrackedPanel = true,
+}: CreateTabPanelOptions) => {
 	// Reuse the tracked tab instead of opening a second one: a repeated
-	// "Open in editor" click reveals the existing tab's panel.
-	if (tabPanel) {
+	// "Open in editor" click reveals the existing tab's panel. API task creation
+	// passes reuseTrackedPanel=false so every independent request gets its own provider.
+	if (reuseTrackedPanel && tabPanel) {
 		const existingProvider = ClineProvider.getInstanceForView(tabPanel)
 		if (existingProvider) {
 			await tabPanel.reveal()
