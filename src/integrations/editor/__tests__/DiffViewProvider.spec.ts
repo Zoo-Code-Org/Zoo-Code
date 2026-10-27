@@ -959,6 +959,88 @@ describe("DiffViewProvider", () => {
 			expect(mockTask.say).not.toHaveBeenCalled()
 		})
 
+		it("keeps each overlapping save's own diagnostics baseline", async () => {
+			const mockDelay = vi.mocked(delay)
+			mockDelay.mockClear()
+			vi.mocked(vscode.languages.getDiagnostics).mockClear()
+
+			// Both saves are started before either tail runs. The first save's pre-save
+			// snapshot is empty, the second save's snapshot already has the problem (it
+			// landed between the two writes); the post snapshot has it too. Each tail must
+			// compare against its OWN captured baseline: the first emits once and the
+			// second emits nothing. Using the shared this.preDiagnostics would emit zero.
+			const diag: vscode.Diagnostic = {
+				severity: vscode.DiagnosticSeverity.Error,
+				range: new vscode.Range(0, 0, 0, 1),
+				message: "overlap-problem",
+			}
+			const diagnostics: [vscode.Uri, vscode.Diagnostic[]][] = [[makeUri(mockCwd + "/test.ts"), [diag]]]
+			vi.mocked(vscode.languages.getDiagnostics)
+				.mockReturnValueOnce([])
+				.mockReturnValueOnce(diagnostics)
+				.mockReturnValue(diagnostics)
+
+			// Gate both tail delays so the two saves overlap before either tail runs.
+			const releases: Array<() => void> = []
+			mockDelay.mockImplementation(
+				() =>
+					new Promise<void>((resolve) => {
+						releases.push(resolve)
+					}),
+			)
+
+			await diffViewProvider.saveDirectly("test.ts", "first", true, true, 100)
+			await diffViewProvider.saveDirectly("test.ts", "second", true, true, 100)
+			expect(releases).toHaveLength(2)
+
+			releases.forEach((release) => release())
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			expect(mockTask.say).toHaveBeenCalledTimes(1)
+			expect(mockTask.say.mock.calls[0]?.[1]).toContain("overlap-problem")
+
+			mockDelay.mockImplementation(() => Promise.resolve())
+		})
+
+		it("stops a tail whose delay is aborted before any diagnostics work", async () => {
+			const mockDelay = vi.mocked(delay)
+			mockDelay.mockClear()
+			vi.mocked(vscode.languages.getDiagnostics).mockClear()
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			// The mocked delay rejects with an AbortError when the tail's signal aborts;
+			// cancellation lands during the wait, before the post-save snapshot.
+			mockDelay.mockImplementation(
+				(_ms: number, options?: { signal?: AbortSignal }) =>
+					new Promise<void>((_resolve, reject) => {
+						options?.signal?.addEventListener(
+							"abort",
+							() => reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+							{ once: true },
+						)
+					}),
+			)
+
+			try {
+				await diffViewProvider.saveDirectly("test.ts", "content", true, true, 100)
+				await new Promise((resolve) => setTimeout(resolve, 0))
+				// Only saveDirectly's pre-save snapshot ran so far.
+				expect(vscode.languages.getDiagnostics).toHaveBeenCalledTimes(1)
+
+				diffViewProvider.cancelPostSaveDiagnosticsTails()
+				await new Promise((resolve) => setTimeout(resolve, 0))
+
+				// The aborted tail returns before querying diagnostics or emitting anything.
+				expect(vscode.languages.getDiagnostics).toHaveBeenCalledTimes(1)
+				expect(mockTask.say).not.toHaveBeenCalled()
+				expect(warnSpy).not.toHaveBeenCalled()
+			} finally {
+				warnSpy.mockRestore()
+				mockDelay.mockImplementation(() => Promise.resolve())
+			}
+		})
+
 		it("attributes only the saved file's new problems to the saved file", async () => {
 			vi.mocked(vscode.languages.getDiagnostics).mockClear()
 
