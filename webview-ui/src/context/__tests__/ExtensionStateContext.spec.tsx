@@ -7,6 +7,7 @@ import {
 	type ExperimentId,
 	type ExtensionState,
 	type ClineMessage,
+	type ExtensionMessage,
 	type MarketplaceItem,
 	type MarketplaceInstalledMetadata,
 	type RouterModels,
@@ -113,13 +114,207 @@ const InitialStateTestComponent = () => {
 }
 
 describe("ExtensionStateContext", () => {
-	it("clears the task-scoped message cache only on explicit task transitions", () => {
-		const clearSpy = vi.spyOn(StringCache.prototype, "clear")
+	afterEach(() => vi.restoreAllMocks())
+	it.each(["initial", "state", "messageUpdated", "taskHistoryUpdated", "taskHistoryItemUpdated"] as const)(
+		"interns accepted payloads through %s",
+		(entry) => {
+			const internSpy = vi.spyOn(StringCache.prototype, "intern")
+			const payload: ClineMessage = { ts: 1, type: "say", say: "text", text: "accepted" }
+			const item = { id: "task-a", number: 1, ts: 1, task: "history", tokensIn: 0, tokensOut: 0, totalCost: 0 }
+			render(
+				<ExtensionStateContextProvider initialState={{ clineMessages: [payload] }}>
+					<TestComponent />
+				</ExtensionStateContextProvider>,
+			)
+			if (entry === "initial") {
+				expect(internSpy).toHaveBeenCalledWith(payload)
+				const cache = internSpy.mock.contexts[0]
+				expect(cache).toBeInstanceOf(StringCache)
+				if (!(cache instanceof StringCache)) throw new Error("Missing cache")
+				expect(typeof cache["shouldIntern"]).toBe("function")
+				expect(cache.size).toBeGreaterThan(0)
+				return
+			}
+			const caches = internSpy.mock.contexts.filter((cache): cache is StringCache => cache instanceof StringCache)
+			const targetCache = caches.find(
+				(cache) => (cache["shouldIntern"] !== undefined) === (entry === "state" || entry === "messageUpdated"),
+			)
+			if (!targetCache) throw new Error("Missing target cache")
+			const sizeBefore = targetCache.size
+			internSpy.mockClear()
+			const messages: Record<Exclude<typeof entry, "initial">, ExtensionMessage> = {
+				state: { type: "state", state: { clineMessages: [{ ...payload, text: "changed" }] } },
+				messageUpdated: { type: "messageUpdated", clineMessage: { ...payload, text: "updated" } },
+				taskHistoryUpdated: { type: "taskHistoryUpdated", taskHistory: [item] },
+				taskHistoryItemUpdated: { type: "taskHistoryItemUpdated", taskHistoryItem: item },
+			}
+			act(() => window.dispatchEvent(new MessageEvent("message", { data: messages[entry] })))
+			expect(internSpy.mock.contexts).toEqual([targetCache])
+			expect(targetCache.size).toBeGreaterThan(sizeBefore)
+			expect(internSpy).toHaveBeenCalledWith(
+				entry === "state"
+					? expect.objectContaining({ text: "changed" })
+					: entry === "messageUpdated"
+						? { ...payload, text: "updated" }
+						: entry === "taskHistoryUpdated"
+							? [item]
+							: item,
+			)
+		},
+	)
+
+	it.each(["task switch", "message update"] as const)(
+		"keeps the message mirror synchronized after %s",
+		(scenario) => {
+			const internSpy = vi.spyOn(StringCache.prototype, "intern")
+			const payload: ClineMessage = { ts: 1, type: "say", say: "text", text: "seed" }
+			render(
+				<ExtensionStateContextProvider initialState={{ currentTaskId: "task-a", clineMessages: [payload] }}>
+					<TestComponent />
+				</ExtensionStateContextProvider>,
+			)
+			const dispatch = (data: ExtensionMessage) =>
+				act(() => window.dispatchEvent(new MessageEvent("message", { data })))
+			if (scenario === "task switch") {
+				internSpy.mockClear()
+				dispatch({ type: "state", state: { currentTaskId: "task-b", clineMessages: [{ ...payload }] } })
+				expect(internSpy).toHaveBeenCalledWith(payload)
+			} else {
+				const updated = { ...payload, text: "updated" }
+				dispatch({ type: "messageUpdated", clineMessage: updated })
+				internSpy.mockClear()
+				dispatch({ type: "state", state: { currentTaskId: "task-a", clineMessages: [{ ...updated }] } })
+				expect(internSpy).not.toHaveBeenCalledWith(updated)
+			}
+		},
+	)
+
+	it("ignores task identity in pushes without messages", () => {
+		const initial = { ...createInitialExtensionState(), currentTaskId: "task-a" }
+		expect(mergeExtensionState(initial, { currentTaskId: "old" }).currentTaskId).toBe("task-a")
+		const internSpy = vi.spyOn(StringCache.prototype, "intern")
+		const payload: ClineMessage = { ts: 1, type: "say", say: "text", text: "seed" }
 		render(
-			<ExtensionStateContextProvider initialState={{ currentTaskId: "task-a" }}>
+			<ExtensionStateContextProvider initialState={{ ...initial, clineMessages: [payload] }}>
 				<TestComponent />
 			</ExtensionStateContextProvider>,
 		)
+		const cache = internSpy.mock.contexts[0]
+		if (!(cache instanceof StringCache)) throw new Error("Missing cache")
+		const size = cache.size
+		act(() =>
+			window.dispatchEvent(
+				new MessageEvent("message", { data: { type: "state", state: { currentTaskId: "old" } } }),
+			),
+		)
+		expect(cache.size).toBe(size)
+		internSpy.mockClear()
+		act(() =>
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "state", state: { currentTaskId: "task-a", clineMessages: [{ ...payload }] } },
+				}),
+			),
+		)
+		expect(internSpy).not.toHaveBeenCalledWith(payload)
+	})
+
+	it("does not retain partial messages or re-intern unchanged snapshot messages", () => {
+		const internSpy = vi.spyOn(StringCache.prototype, "intern")
+		const payload: ClineMessage = { ts: 1, type: "say", say: "text", text: "streaming", partial: true }
+		render(
+			<ExtensionStateContextProvider initialState={{ clineMessages: [payload] }}>
+				<TestComponent />
+			</ExtensionStateContextProvider>,
+		)
+		const cache = internSpy.mock.contexts[0]
+		if (!(cache instanceof StringCache)) throw new Error("Missing message cache")
+		expect(cache?.size).toBe(0)
+		internSpy.mockClear()
+		act(() =>
+			window.dispatchEvent(
+				new MessageEvent("message", { data: { type: "state", state: { clineMessages: [{ ...payload }] } } }),
+			),
+		)
+		expect(internSpy).not.toHaveBeenCalledWith(payload)
+		expect(cache?.size).toBe(0)
+	})
+
+	it("clears a serialized absent task id and preserves task identity on stale snapshots", () => {
+		const initial = { ...createInitialExtensionState(), currentTaskId: "task-a", clineMessagesSeq: 5 }
+		const cleared = mergeExtensionState(
+			initial,
+			JSON.parse(JSON.stringify({ currentTaskId: undefined, clineMessages: [], clineMessagesSeq: 6 })),
+		)
+		expect(cleared.currentTaskId).toBeUndefined()
+		const stale = mergeExtensionState(initial, {
+			currentTaskId: "old-task",
+			clineMessages: [],
+			clineMessagesSeq: 4,
+		})
+		expect(stale.currentTaskId).toBe("task-a")
+	})
+
+	it("preserves the message cache on stale task pushes and rebuilds replaced history", () => {
+		const internSpy = vi.spyOn(StringCache.prototype, "intern")
+		render(
+			<ExtensionStateContextProvider
+				initialState={{
+					currentTaskId: "task-a",
+					clineMessagesSeq: 5,
+					clineMessages: [{ ts: 1, type: "say", say: "text", text: "seed" }],
+				}}>
+				<TestComponent />
+			</ExtensionStateContextProvider>,
+		)
+		const messageCache = internSpy.mock.contexts[0]
+		const historyCache = internSpy.mock.contexts[1]
+		if (!(messageCache instanceof StringCache) || !(historyCache instanceof StringCache))
+			throw new Error("Missing caches")
+		const messageSize = messageCache.size
+		historyCache.intern("removed-history")
+		act(() =>
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "state", state: { currentTaskId: "old", clineMessages: [], clineMessagesSeq: 4 } },
+				}),
+			),
+		)
+		expect(messageCache.size).toBe(messageSize)
+		act(() =>
+			window.dispatchEvent(
+				new MessageEvent("message", { data: { type: "taskHistoryUpdated", taskHistory: [] } }),
+			),
+		)
+		expect(historyCache.size).toBe(0)
+		expect(messageCache.size).toBe(messageSize)
+		historyCache.intern("removed-again")
+		act(() =>
+			window.dispatchEvent(new MessageEvent("message", { data: { type: "state", state: { taskHistory: [] } } })),
+		)
+		expect(historyCache.size).toBe(0)
+	})
+
+	it("clears the task-scoped message cache only on explicit task transitions", () => {
+		const internSpy = vi.spyOn(StringCache.prototype, "intern")
+		const clearSpy = vi.spyOn(StringCache.prototype, "clear")
+		render(
+			<ExtensionStateContextProvider
+				initialState={{
+					currentTaskId: "task-a",
+					clineMessages: [{ ts: 1, type: "say", say: "text", text: "seed" }],
+				}}>
+				<TestComponent />
+			</ExtensionStateContextProvider>,
+		)
+		const messageCache = internSpy.mock.contexts[0]
+		const historyCache = internSpy.mock.contexts[1]
+		if (!(messageCache instanceof StringCache) || !(historyCache instanceof StringCache)) {
+			throw new Error("Missing provider caches")
+		}
+		expect(messageCache?.size).toBeGreaterThan(0)
+		historyCache?.intern("history-seed")
+		const historySize = historyCache?.size
 		clearSpy.mockClear()
 
 		act(() => {
@@ -132,13 +327,21 @@ describe("ExtensionStateContext", () => {
 
 		act(() => {
 			window.dispatchEvent(
-				new MessageEvent("message", { data: { type: "state", state: { currentTaskId: undefined } } }),
+				new MessageEvent("message", {
+					data: JSON.parse(
+						JSON.stringify({ type: "state", state: { currentTaskId: undefined, clineMessages: [] } }),
+					),
+				}),
 			)
 			window.dispatchEvent(
-				new MessageEvent("message", { data: { type: "state", state: { currentTaskId: "task-b" } } }),
+				new MessageEvent("message", {
+					data: { type: "state", state: { currentTaskId: "task-b", clineMessages: [] } },
+				}),
 			)
 		})
 		expect(clearSpy).toHaveBeenCalledTimes(2)
+		expect(messageCache?.size).toBe(0)
+		expect(historyCache?.size).toBe(historySize)
 	})
 
 	it("does not intern messages from stale sequenced state updates", () => {
@@ -155,7 +358,7 @@ describe("ExtensionStateContext", () => {
 		act(() => {
 			window.dispatchEvent(
 				new MessageEvent("message", {
-					data: { type: "state", state: { clineMessages: [staleMessage], clineMessagesSeq: 4 } },
+					data: { type: "state", state: { clineMessages: [staleMessage], clineMessagesSeq: 5 } },
 				}),
 			)
 		})
@@ -169,6 +372,15 @@ describe("ExtensionStateContext", () => {
 			)
 		})
 		expect(internSpy).toHaveBeenCalledWith(currentMessage)
+		internSpy.mockClear()
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "state", state: { clineMessages: [staleMessage], clineMessagesSeq: 6 } },
+				}),
+			)
+		})
+		expect(internSpy).not.toHaveBeenCalledWith(staleMessage)
 	})
 
 	it("does not intern an update for a message outside the current task", () => {

@@ -210,7 +210,7 @@ describe("App", () => {
 		expect(chatView.getAttribute("data-hidden")).toBe("false")
 	}, 10000)
 
-	it("remounts chat on task transitions but preserves it across tab changes", async () => {
+	it("preserves chat state across task and tab changes", async () => {
 		const state = {
 			didHydrateState: true,
 			showWelcome: false,
@@ -232,11 +232,11 @@ describe("App", () => {
 		state.currentTaskId = "task-b"
 		rerender(<AppWithProviders />)
 		const secondInstance = screen.getByTestId("chat-view").getAttribute("data-instance")
-		expect(secondInstance).not.toBe(firstInstance)
+		expect(secondInstance).toBe(firstInstance)
 
 		state.currentTaskId = undefined
 		rerender(<AppWithProviders />)
-		expect(screen.getByTestId("chat-view").getAttribute("data-instance")).not.toBe(secondInstance)
+		expect(screen.getByTestId("chat-view").getAttribute("data-instance")).toBe(secondInstance)
 	})
 
 	it.each(["sidebar", "editor"])(

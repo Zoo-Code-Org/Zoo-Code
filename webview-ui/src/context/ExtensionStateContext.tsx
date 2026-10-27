@@ -12,6 +12,7 @@ import {
 	type OrganizationAllowList,
 	type CloudOrganizationMembership,
 	type ExtensionMessage,
+	type ClineMessage,
 	type ExtensionState,
 	type MarketplaceInstalledMetadata,
 	type SkillMetadata,
@@ -186,6 +187,12 @@ export const mergeExtensionState = (prevState: ExtensionState, newState: Partial
 	) {
 		rest.clineMessages = prevState.clineMessages
 		rest.clineMessagesSeq = prevState.clineMessagesSeq
+		rest.currentTaskId = prevState.currentTaskId
+	} else if (newState.clineMessages !== undefined) {
+		rest.currentTaskId = newState.currentTaskId
+	} else {
+		// Pushes without messages cannot establish task identity.
+		rest.currentTaskId = prevState.currentTaskId
 	}
 
 	// Note that we completely replace the previous apiConfiguration and customSupportPrompts objects
@@ -291,6 +298,7 @@ export const ExtensionStateContextProvider: React.FC<{
 }> = ({ children, initialState }) => {
 	const [historyCache] = useState(() => new StringCache())
 	const [messageCache] = useState(() => new StringCache((value) => !("partial" in value) || value.partial !== true))
+	const messagesRef = useRef(initialState?.clineMessages ?? [])
 	const currentTaskIdRef = useRef(initialState?.currentTaskId)
 	const clineMessagesSeqRef = useRef(initialState?.clineMessagesSeq)
 
@@ -360,12 +368,6 @@ export const ExtensionStateContextProvider: React.FC<{
 			switch (message.type) {
 				case "state": {
 					const newState = message.state ?? {}
-					if (Object.prototype.hasOwnProperty.call(newState, "currentTaskId")) {
-						if (newState.currentTaskId !== currentTaskIdRef.current) {
-							messageCache.clear()
-							currentTaskIdRef.current = newState.currentTaskId
-						}
-					}
 
 					const messagesAreStale =
 						newState.clineMessages !== undefined &&
@@ -373,10 +375,31 @@ export const ExtensionStateContextProvider: React.FC<{
 						clineMessagesSeqRef.current !== undefined &&
 						newState.clineMessagesSeq <= clineMessagesSeqRef.current
 
-					if (newState.clineMessages && !messagesAreStale) {
-						for (const clineMessage of newState.clineMessages) {
-							messageCache.intern(clineMessage)
+					if (!messagesAreStale && newState.clineMessages !== undefined) {
+						if (newState.currentTaskId !== currentTaskIdRef.current) {
+							messageCache.clear()
+							messagesRef.current = []
+							currentTaskIdRef.current = newState.currentTaskId
 						}
+					}
+
+					if (newState.clineMessages && !messagesAreStale) {
+						const previousMessages = new Map(messagesRef.current.map((item) => [item.ts, item]))
+						for (const clineMessage of newState.clineMessages) {
+							const previous = previousMessages.get(clineMessage.ts)
+							if (
+								previous &&
+								Object.keys(clineMessage).length === Object.keys(previous).length &&
+								Object.entries(clineMessage).every(
+									([key, value]) => previous[key as keyof ClineMessage] === value,
+								)
+							) {
+								Object.assign(clineMessage, previous)
+							} else {
+								messageCache.intern(clineMessage)
+							}
+						}
+						messagesRef.current = newState.clineMessages
 					}
 					if (
 						newState.clineMessagesSeq !== undefined &&
@@ -386,6 +409,7 @@ export const ExtensionStateContextProvider: React.FC<{
 						clineMessagesSeqRef.current = newState.clineMessagesSeq
 					}
 					if (newState.taskHistory) {
+						historyCache.clear()
 						historyCache.intern(newState.taskHistory)
 					}
 					if (newState.currentTaskItem) {
@@ -455,11 +479,17 @@ export const ExtensionStateContextProvider: React.FC<{
 				}
 				case "messageUpdated": {
 					const clineMessage = message.clineMessage!
+					const messageIndex = messagesRef.current.findIndex((item) => item.ts === clineMessage.ts)
+					if (messageIndex !== -1) {
+						messageCache.intern(clineMessage)
+						messagesRef.current = messagesRef.current.map((item, index) =>
+							index === messageIndex ? clineMessage : item,
+						)
+					}
 					setState((prevState) => {
 						// worth noting it will never be possible for a more up-to-date message to be sent here or in normal messages post since the presentAssistantContent function uses lock
 						const lastIndex = findLastIndex(prevState.clineMessages, (msg) => msg.ts === clineMessage.ts)
 						if (lastIndex !== -1) {
-							messageCache.intern(clineMessage)
 							const newClineMessages = [...prevState.clineMessages]
 							newClineMessages[lastIndex] = clineMessage
 							return { ...prevState, clineMessages: newClineMessages }
@@ -520,6 +550,7 @@ export const ExtensionStateContextProvider: React.FC<{
 				case "taskHistoryUpdated": {
 					// Efficiently update just the task history without replacing entire state
 					if (message.taskHistory !== undefined) {
+						historyCache.clear()
 						historyCache.intern(message.taskHistory)
 						setState((prevState) => ({
 							...prevState,

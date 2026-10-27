@@ -1,6 +1,33 @@
 import { StringCache } from "../stringCache"
 
 describe("StringCache", () => {
+	it.each([
+		{ entries: 2, characters: 1000, values: ["a", "b", "c"], retained: ["b", "c"] },
+		{ entries: 2, characters: 3, values: ["abc"], retained: ["abc"] },
+		{ entries: 0, characters: 1000, values: ["a"], retained: [] },
+	])(
+		"honors independent limits: $entries entries, $characters characters",
+		({ entries, characters, values, retained }) => {
+			const cache = new StringCache(undefined, entries, characters)
+			cache.intern(values)
+			expect([...cache["cache"].keys()]).toEqual(retained)
+		},
+	)
+
+	it("bounds entry count and retained characters, skipping oversized strings", () => {
+		const cache = new StringCache(undefined, 2, 6)
+		cache.intern(["aaa", "bbb", "ccc"])
+		expect(cache.size).toBe(2)
+		expect([...cache["cache"].keys()]).toEqual(["bbb", "ccc"])
+		cache.intern("oversized")
+		expect(cache.size).toBe(2)
+		cache.intern("dddd")
+		expect([...cache["cache"].keys()]).toEqual(["dddd"])
+		cache.clear()
+		cache.intern(["aaa", "bbb"])
+		expect(cache.size).toBe(2)
+	})
+
 	it("interns strings recursively without retaining duplicate or empty values", () => {
 		const cache = new StringCache()
 		const value = {
