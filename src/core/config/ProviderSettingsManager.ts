@@ -55,6 +55,19 @@ export const providerProfilesSchema = z.object({
 
 export type ProviderProfiles = z.infer<typeof providerProfilesSchema>
 
+/**
+ * Signals that a profile's configuration no longer exists. Callers that treat an
+ * already-deleted profile as an idempotent no-op branch on this type instead of
+ * matching error message text, which a profile name containing the phrase could
+ * otherwise spoof.
+ */
+export class ProviderSettingsNotFoundError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "ProviderSettingsNotFoundError"
+	}
+}
+
 export class ProviderSettingsManager {
 	private static readonly SCOPE_PREFIX = "roo_cline_config_"
 	private readonly defaultConfigId = this.generateId()
@@ -483,6 +496,22 @@ export class ProviderSettingsManager {
 	}
 
 	/**
+	 * Read the manager-owned current profile selection. Exposed for callers that
+	 * snapshot the full activation state before a mutation group so a failure can
+	 * compensate the manager store as well as its ContextProxy copies.
+	 */
+	public async getCurrentProfileName(): Promise<string | undefined> {
+		try {
+			return await this.lock(async () => {
+				const providerProfiles = await this.load()
+				return providerProfiles.currentApiConfigName
+			})
+		} catch (error) {
+			throw new Error(`Failed to read the active profile: ${error instanceof Error ? error.message : error}`)
+		}
+	}
+
+	/**
 	 * Activate a profile by name or ID.
 	 */
 	public async activateProfile(
@@ -511,7 +540,7 @@ export class ProviderSettingsManager {
 				const providerProfiles = await this.load()
 
 				if (!providerProfiles.apiConfigs[name]) {
-					throw new Error(`Config '${name}' not found`)
+					throw new ProviderSettingsNotFoundError(`Config '${name}' not found`)
 				}
 
 				if (Object.keys(providerProfiles.apiConfigs).length === 1) {
@@ -522,6 +551,11 @@ export class ProviderSettingsManager {
 				await this.store(providerProfiles)
 			})
 		} catch (error) {
+			// A missing config is a caller-meaningful signal, not a failure: rethrow it
+			// unwrapped so callers can branch on the type instead of message text.
+			if (error instanceof ProviderSettingsNotFoundError) {
+				throw error
+			}
 			throw new Error(`Failed to delete config: ${error}`)
 		}
 	}

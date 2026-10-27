@@ -3,14 +3,18 @@ import { RooCodeEventName } from "@roo-code/types"
 
 import { API } from "../api"
 import { ClineProvider } from "../../core/webview/ClineProvider"
-import type { ClineProviderFactory } from "../../core/webview/ClineProviderFactory"
 import type { Task } from "../../core/task/Task"
 import { Package } from "../../shared/package"
-import { makeClineProviderFactory } from "../../test-utils/provider"
+import { createClineTabPanel } from "../../activate/registerCommands"
+import type { WebviewFocusTracker } from "../../core/webview/WebviewFocusTracker"
 
 vi.mock("vscode", () => ({ commands: { executeCommand: vi.fn().mockResolvedValue(undefined) } }))
 vi.mock("@roo-code/ipc", () => ({ IpcServer: class {} }))
 vi.mock("../../core/webview/ClineProvider", () => ({ ClineProvider: class {} }))
+// F6 design: startNewTask({ newTab: true }) opens a fresh tab through
+// createClineTabPanel (never reusing the tracked tab), not through the
+// provider factory, so the module function is the seam under test here.
+vi.mock("../../activate/registerCommands", () => ({ createClineTabPanel: vi.fn() }))
 
 function createProvider(taskId: string) {
 	// Only the task identity is consumed by this API path; task execution is outside this test's scope.
@@ -21,6 +25,8 @@ function createProvider(taskId: string) {
 		postStateToWebview: vi.fn<ClineProvider["postStateToWebview"]>().mockResolvedValue(undefined),
 		postMessageToWebview: vi.fn<ClineProvider["postMessageToWebview"]>().mockResolvedValue(undefined),
 		createTask: vi.fn<ClineProvider["createTask"]>().mockResolvedValue(task),
+		context: { extensionUri: undefined } as unknown as vscode.ExtensionContext,
+		webviewFocusTracker: {} as WebviewFocusTracker,
 	})
 }
 
@@ -29,7 +35,6 @@ describe("API - startNewTask routing", () => {
 	let editor: ReturnType<typeof createProvider>
 	let outputChannel: vscode.OutputChannel
 	let api: API
-	let providerFactory: ClineProviderFactory
 
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -45,9 +50,8 @@ describe("API - startNewTask routing", () => {
 			hide: vi.fn(),
 			dispose: vi.fn(),
 		}
-		providerFactory = makeClineProviderFactory()
-		vi.mocked(providerFactory.createInNewTab).mockResolvedValue(editor)
-		api = new API(outputChannel, sidebar, providerFactory)
+		vi.mocked(createClineTabPanel).mockResolvedValue(editor as unknown as ClineProvider)
+		api = new API(outputChannel, sidebar)
 	})
 
 	it.each([true, false, undefined])("routes a task with newTab=%s to the requested provider", async (newTab) => {
@@ -62,15 +66,19 @@ describe("API - startNewTask routing", () => {
 			expect(vscode.commands.executeCommand).toHaveBeenNthCalledWith(1, "workbench.action.files.revert")
 			expect(vscode.commands.executeCommand).toHaveBeenNthCalledWith(2, "workbench.action.closeAllEditors")
 			expect(vscode.commands.executeCommand).toHaveBeenCalledTimes(2)
-			expect(providerFactory.createInNewTab).toHaveBeenCalledExactlyOnceWith()
-			expect(vi.mocked(providerFactory.createInNewTab).mock.contexts[0]).toBe(providerFactory)
+			// The fresh tab is created through createClineTabPanel with the sidebar
+			// provider's context/output channel/tracker, never through the factory.
+			expect(createClineTabPanel).toHaveBeenCalledExactlyOnceWith({
+				context: sidebar.context,
+				outputChannel,
+				webviewFocusTracker: sidebar.webviewFocusTracker,
+			})
 			expect(editor.on).toHaveBeenCalledWith(RooCodeEventName.TaskCreated, expect.any(Function))
 			expect(editor.on).toHaveBeenCalledWith(RooCodeEventName.TaskCompleted, expect.any(Function))
 		} else {
 			expect(vscode.commands.executeCommand).toHaveBeenCalledExactlyOnceWith(
 				`${Package.name}.SidebarProvider.focus`,
 			)
-			expect(providerFactory.createInNewTab).not.toHaveBeenCalled()
 			expect(editor.on).not.toHaveBeenCalled()
 		}
 		expect(target.evictCurrentTask).toHaveBeenCalledOnce()
@@ -98,7 +106,7 @@ describe("API - startNewTask routing", () => {
 
 	it("propagates tab-opening failures without starting a task in another chat", async () => {
 		const error = new Error("Cannot open editor chat")
-		vi.mocked(providerFactory.createInNewTab).mockRejectedValueOnce(error)
+		vi.mocked(createClineTabPanel).mockRejectedValueOnce(error)
 
 		await expect(api.startNewTask({ configuration: {}, newTab: true })).rejects.toBe(error)
 

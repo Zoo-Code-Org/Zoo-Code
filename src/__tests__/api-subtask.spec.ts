@@ -29,7 +29,6 @@ vi.mock("@roo-code/ipc", () => ({
 vi.mock("../services/command/commands", () => ({ getCommands: vi.fn().mockResolvedValue([]) }))
 
 import { API } from "../extension/api"
-import { makeClineProviderFactory } from "../test-utils/provider"
 
 function makeProviderMock() {
 	const emitter = new EventEmitter()
@@ -64,7 +63,7 @@ describe("API.clearCurrentTask()", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		provider = makeProviderMock()
-		api = new API({} as any, provider as any, makeClineProviderFactory())
+		api = new API({} as any, provider as any)
 	})
 
 	it("calls evictCurrentTask then postStateToWebview on sidebarProvider", async () => {
@@ -85,7 +84,7 @@ describe("API.abandonSubtask()", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		provider = makeProviderMock()
-		api = new API({} as any, provider as any, makeClineProviderFactory())
+		api = new API({} as any, provider as any)
 	})
 
 	it("delegates to sidebarProvider.abandonSubtask and returns its result", async () => {

@@ -3,7 +3,6 @@ import type * as vscode from "vscode"
 
 import { API } from "../api"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
-import { makeClineProviderFactory } from "../../test-utils/provider"
 
 vi.mock("@roo-code/ipc", () => ({
 	IpcServer: class {},
@@ -23,7 +22,7 @@ describe("API - theme fixture probe", () => {
 			requestWebviewThemeFixture,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		const api = new API(outputChannel, provider, makeClineProviderFactory())
+		const api = new API(outputChannel, provider)
 
 		await expect(api.captureWebviewThemeFixture()).resolves.toEqual(fixture)
 		expect(requestWebviewThemeFixture).toHaveBeenCalledOnce()
@@ -36,7 +35,7 @@ describe("API - theme fixture probe", () => {
 			latestAnnouncementId: "current-announcement",
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		const api = new API(outputChannel, provider, makeClineProviderFactory())
+		const api = new API(outputChannel, provider)
 
 		expect(api.getLatestAnnouncementId()).toBe("current-announcement")
 	})

@@ -14,7 +14,6 @@ import {
 import { API } from "../api"
 import { Package } from "../../shared/package"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
-import { makeClineProviderFactory } from "../../test-utils/provider"
 
 const { commandHandlers, sentMessages } = vi.hoisted(() => ({
 	commandHandlers: [] as Array<(clientId: string, command: unknown) => Promise<void>>,
@@ -72,7 +71,7 @@ function buildApi(createTaskImpl?: () => Promise<{ taskId: string }>, postStateT
 
 	const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {})
 	const executeCommand = vi.spyOn(vscode.commands, "executeCommand").mockResolvedValue(undefined)
-	const api = new API(outputChannel, provider, makeClineProviderFactory(), "/tmp/final-smoke-test.sock", true)
+	const api = new API(outputChannel, provider, "/tmp/final-smoke-test.sock", true)
 
 	const collectLogs = () =>
 		[

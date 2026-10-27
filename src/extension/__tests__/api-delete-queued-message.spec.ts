@@ -3,7 +3,6 @@ import * as vscode from "vscode"
 
 import { API } from "../api"
 import { ClineProvider } from "../../core/webview/ClineProvider"
-import { makeClineProviderFactory } from "../../test-utils/provider"
 
 vi.mock("vscode")
 vi.mock("../../core/webview/ClineProvider")
@@ -37,7 +36,7 @@ describe("API - DeleteQueuedMessage Command", () => {
 
 		mockLog = vi.fn()
 
-		api = new API(mockOutputChannel, mockProvider, makeClineProviderFactory(), undefined, true)
+		api = new API(mockOutputChannel, mockProvider, undefined, true)
 		;(api as any).log = mockLog
 	})
 
