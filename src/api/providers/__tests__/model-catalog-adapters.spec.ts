@@ -267,6 +267,7 @@ describe("model catalog adapters", () => {
 			fetcher.mockReset()
 			fetcher.mockResolvedValue(CATALOG)
 		}
+		fetchers.getZooGatewayModels.mockResolvedValue({ kind: "ok", models: CATALOG })
 	})
 
 	describe.each(cases)("$name", ({ create, fetcher, scope, expectedArgs, forwardsSignal }) => {

@@ -154,6 +154,9 @@ export async function clearZooCodeToken(): Promise<void> {
 	await secretStorage.delete(ZOO_CODE_TOKEN_KEY)
 	_cachedToken = undefined
 	_sessionCleared = true
+	const { clearAuthSessionModelsForProvider } = await import("../api/providers/fetchers/modelCache")
+	const { providerIdentifiers } = await import("@roo-code/types")
+	clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
 }
 
 export function getZooCodeBaseUrl(): string {

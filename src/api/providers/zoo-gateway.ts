@@ -19,6 +19,7 @@ import { t } from "../../i18n"
 import { ApiStream } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { addCacheBreakpoints } from "../transform/caching/vercel-ai-gateway"
+import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
 import type {
 	SingleCompletionHandler,
@@ -181,8 +182,22 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 		return { urlScoped: true, keyScoped: true, authScoped: true }
 	}
 
+	override getModel() {
+		const model = super.getModel()
+		// Anthropic thinking is signature-based. Other gateway models reject the next
+		// turn unless the previous assistant reasoning is still on the request.
+		if (model.id.startsWith("anthropic/")) {
+			return model
+		}
+		return { ...model, info: { ...model.info, preserveReasoning: true } }
+	}
+
 	async fetchModels(options: GetModelsOptions): Promise<ModelRecord> {
-		return getZooGatewayModels({ zooSessionToken: options.apiKey, zooGatewayBaseUrl: options.baseUrl })
+		const result = await getZooGatewayModels({
+			zooSessionToken: options.apiKey,
+			zooGatewayBaseUrl: options.baseUrl,
+		})
+		return result.kind === "ok" ? result.models : {}
 	}
 
 	private ensureAuthenticated(): void {
@@ -248,6 +263,12 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 				}
 
 				const delta = chunk.choices[0]?.delta
+
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
+
 				if (delta?.content) {
 					yield {
 						type: "text",
