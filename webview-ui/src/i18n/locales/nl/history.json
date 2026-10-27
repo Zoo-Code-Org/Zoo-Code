@@ -13,6 +13,7 @@
 	"deleteTaskTitle": "Taak verwijderen (Shift + Klik om bevestiging over te slaan)",
 	"copyPrompt": "Prompt kopiëren",
 	"exportTask": "Taak exporteren",
+	"renameTask": "Taak hernoemen",
 	"deleteTask": "Taak verwijderen",
 	"deleteTaskMessage": "Weet je zeker dat je deze taak wilt verwijderen? Deze actie kan niet ongedaan worden gemaakt.",
 	"cancel": "Annuleren",

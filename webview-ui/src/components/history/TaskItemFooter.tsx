@@ -4,6 +4,7 @@ import { formatTimeAgo } from "@/utils/format"
 import { CopyButton } from "./CopyButton"
 import { ExportButton } from "./ExportButton"
 import { DeleteButton } from "./DeleteButton"
+import { RenameButton } from "./RenameButton"
 import { StandardTooltip } from "../ui/standard-tooltip"
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { Split } from "lucide-react"
@@ -15,6 +16,7 @@ export interface TaskItemFooterProps {
 	isSelectionMode?: boolean
 	isSubtask?: boolean
 	onDelete?: (taskId: string) => void
+	onRename?: () => void
 }
 
 const TaskItemFooter: React.FC<TaskItemFooterProps> = ({
@@ -23,6 +25,7 @@ const TaskItemFooter: React.FC<TaskItemFooterProps> = ({
 	isSelectionMode = false,
 	isSubtask = false,
 	onDelete,
+	onRename,
 }) => {
 	const { t } = useAppTranslation()
 
@@ -63,6 +66,7 @@ const TaskItemFooter: React.FC<TaskItemFooterProps> = ({
 			{/* Action Buttons for non-compact view */}
 			{!isSelectionMode && (
 				<div className="flex flex-row gap-0 -mx-1.5 items-center text-vscode-descriptionForeground/60 hover:text-vscode-descriptionForeground opacity-0 group-hover:opacity-100">
+					{variant === "full" && onRename && <RenameButton onRename={onRename} />}
 					<CopyButton itemTask={item.task} />
 					{variant === "full" && <ExportButton itemId={item.id} />}
 					{onDelete && <DeleteButton itemId={item.id} onDelete={onDelete} />}

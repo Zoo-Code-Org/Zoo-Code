@@ -58,7 +58,7 @@ export async function extractTextFromXLSX(source: Buffer): Promise<string> {
 export function formatWorkbook(workbook: ExcelJS.Workbook): string {
 	let excelText = ""
 
-	workbook.eachSheet((worksheet, sheetId) => {
+	workbook.eachSheet((worksheet, _sheetId) => {
 		if (worksheet.state === "hidden" || worksheet.state === "veryHidden") {
 			return
 		}
@@ -74,7 +74,7 @@ export function formatWorkbook(workbook: ExcelJS.Workbook): string {
 			const rowTexts: string[] = []
 			let hasContent = false
 
-			row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+			row.eachCell({ includeEmpty: true }, (cell, _colNumber) => {
 				const cellText = formatCellValue(cell)
 				if (cellText.trim()) {
 					hasContent = true

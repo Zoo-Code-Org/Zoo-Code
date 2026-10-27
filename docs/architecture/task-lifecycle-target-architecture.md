@@ -190,12 +190,28 @@ type RunState = {
 	generation: number
 	stream: Stream
 	ask: Ask
+	turn: Turn
 	latches: Latches
 	lastCompletionAskTs?: number
 }
 
+type Turn = {
+	waitingForFirstChunk: boolean
+	toolRejected: boolean
+	toolUsed: boolean
+	toolFailed: boolean
+	streamReadComplete: boolean
+}
+
 type RunEvent =
 	| { tag: "initialized" }
+	| { tag: "turnStarted" }
+	| { tag: "firstChunkAwaitStarted" }
+	| { tag: "firstChunkAwaitEnded" }
+	| { tag: "toolRejected" }
+	| { tag: "toolUsed" }
+	| { tag: "toolFailed" }
+	| { tag: "streamReadCompleted" }
 	| { tag: "streamStarted" }
 	| { tag: "streamCleanupFinished" }
 	| { tag: "streamEnded" }
@@ -229,25 +245,32 @@ Queued user input is out of scope for the kernel. The queued-input bugs (#1308, 
 7. Abort drain. The chunk loop sees `abort`. If the task is not abandoned, the loop calls `abortStream` (`Task.ts:3492`). Only a non-abandoned abort reaches this call, for example a checkpoint-restore delete or a dispose. `abortStream` sets `didFinishAbortingStream` (`Task.ts:3225`). The `finally` block clears `isStreaming` (`Task.ts:3756`).
 8. Stream failure. A stream error without `abort` also calls `abortStream("streaming_failed")` (`Task.ts:3714`), which sets `didFinishAbortingStream` (`Task.ts:3225`). Then the loop retries. It does not abort. The per-request reset block (`Task.ts:3228-3245`) does not reset `didFinishAbortingStream`. Only `resumeAfterDelegation` resets it (`Task.ts:2884`). So the field stays true across later requests (race R-1 below).
 9. Completion. `attempt_completion` asks `completion_result` during the turn (`AttemptCompletionTool.ts:221`). The ask is usually still pending after the stream ends. On accept the task ends. On feedback the loop continues.
-10. New instance. `reopenParentFromDelegation` builds a new instance and calls `resumeAfterDelegation` (`ClineProvider.ts:4357, 4404`). Latches are per instance. No path reuses an aborted instance. The resets at `Task.ts:2881-2886` write the default values on the new instance.
+10. New instance. `reopenParentFromDelegation` builds a new instance and calls `resumeAfterDelegation` (`ClineProvider.ts:4357, 4404`). Latches are per instance. No path reuses an aborted instance. `resumeAfterDelegation` no longer resets the latches. It resets only the stream fields (`Task.ts:2884-2886`).
 
 #### Transitions
 
 Each event has a guard and an effect. If the guard fails, the event returns `rejected` with the state unchanged. An effect changes only the fields it names.
 
-| Event                   | Guard                                                              | Effect                                                                                        |
-| ----------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| `initialized`           | phase is uninitialized                                             | phase = running                                                                               |
-| `streamStarted`         | phase is running, stream is none                                   | generation + 1, stream = live(generation, cleanupFinished false), lastCompletionAskTs = empty |
-| `streamCleanupFinished` | stream is live                                                     | stream.cleanupFinished = true                                                                 |
-| `streamEnded`           | stream is live                                                     | stream = none                                                                                 |
-| `askStarted`            | phase is running, abort is false                                   | ask = the new ask. lastCompletionAskTs = its askTs if it is a completion ask, else empty      |
-| `askSettled`            | none                                                               | if ask.askTs equals the event askTs, ask = none. Else no change                               |
-| `completionAccepted`    | phase is running, abort is false, askTs equals lastCompletionAskTs | phase = completed, ask = none                                                                 |
-| `reasonSet`             | none                                                               | if reason is empty, reason = the new reason. Else no change                                   |
-| `abortRequested`        | none                                                               | abort = true. If the event has abandoned true, abandoned = true                               |
-| `abandonRequested`      | abort is true                                                      | abandoned = true                                                                              |
-| `disposeRequested`      | none                                                               | abort = true, disposed = true                                                                 |
+| Event                    | Guard                                                              | Effect                                                                                         |
+| ------------------------ | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `initialized`            | phase is uninitialized                                             | phase = running                                                                                |
+| `turnStarted`            | none                                                               | toolRejected, toolUsed, toolFailed, streamReadComplete = false. waitingForFirstChunk unchanged |
+| `firstChunkAwaitStarted` | none                                                               | turn.waitingForFirstChunk = true                                                               |
+| `firstChunkAwaitEnded`   | none                                                               | turn.waitingForFirstChunk = false                                                              |
+| `toolRejected`           | none                                                               | turn.toolRejected = true                                                                       |
+| `toolUsed`               | none                                                               | turn.toolUsed = true                                                                           |
+| `toolFailed`             | none                                                               | turn.toolFailed = true                                                                         |
+| `streamReadCompleted`    | none                                                               | turn.streamReadComplete = true                                                                 |
+| `streamStarted`          | phase is running, stream is none                                   | generation + 1, stream = live(generation, cleanupFinished false), lastCompletionAskTs = empty  |
+| `streamCleanupFinished`  | stream is live                                                     | stream.cleanupFinished = true                                                                  |
+| `streamEnded`            | stream is live                                                     | stream = none                                                                                  |
+| `askStarted`             | phase is running, abort is false                                   | ask = the new ask. lastCompletionAskTs = its askTs if it is a completion ask, else empty       |
+| `askSettled`             | none                                                               | if ask.askTs equals the event askTs, ask = none. Else no change                                |
+| `completionAccepted`     | phase is running, abort is false, askTs equals lastCompletionAskTs | phase = completed, ask = none                                                                  |
+| `reasonSet`              | none                                                               | if reason is empty, reason = the new reason. Else no change                                    |
+| `abortRequested`         | none                                                               | abort = true. If the event has abandoned true, abandoned = true                                |
+| `abandonRequested`       | abort is true                                                      | abandoned = true                                                                               |
+| `disposeRequested`       | none                                                               | abort = true, disposed = true                                                                  |
 
 Transition notes:
 
@@ -323,6 +346,18 @@ The `didFinishAbortingStream` getter is false after the stream ends. The only re
 #### Turn sub-machine
 
 The turn sub-machine holds five within-turn fields: `isWaitingForFirstChunk`, `didRejectTool`, `didAlreadyUseTool`, `didToolFailInCurrentTurn`, and `didCompleteReadingStream`. A turn is one request iteration of the loop. It starts at the per-request reset block (`Task.ts:3228-3245`), before `streamStarted`. It ends when the next iteration starts. It is independent of the stream region, because the loop writes these fields after the stream ends (`Task.ts:3768, 3810, 3830, 4029`).
+
+Turn events have no guard. The loop and the tools write these fields in every phase, after abort, and after the stream ends. No other event changes the turn. Event and field names map to the `Task` fields as follows.
+
+| Kernel field (event)                                    | `Task` field               |
+| ------------------------------------------------------- | -------------------------- |
+| `waitingForFirstChunk` (`firstChunkAwaitStarted/Ended`) | `isWaitingForFirstChunk`   |
+| `toolRejected` (`toolRejected`)                         | `didRejectTool`            |
+| `toolUsed` (`toolUsed`)                                 | `didAlreadyUseTool`        |
+| `toolFailed` (`toolFailed`)                             | `didToolFailInCurrentTurn` |
+| `streamReadComplete` (`streamReadCompleted`)            | `didCompleteReadingStream` |
+
+`turnStarted` does not reset `waitingForFirstChunk`. The legacy reset block does not clear `isWaitingForFirstChunk`, and `attemptApiRequest` clears it. If the chunk loop breaks on the first chunk, the generator never resumes and the flag stays true. The kernel keeps that behavior, so RSK-10 and RSK-16 do not change graceful-abort timing at `ClineProvider.ts:3641`.
 
 #### External writers
 

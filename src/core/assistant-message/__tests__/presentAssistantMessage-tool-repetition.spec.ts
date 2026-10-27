@@ -161,6 +161,7 @@ describe("presentAssistantMessage - Tool Repetition Detection", () => {
 			didCompleteReadingStream: false,
 			didRejectTool: false,
 			didAlreadyUseTool: false,
+			activeToolContexts: new Map(),
 			consecutiveMistakeCount: 0,
 			consecutiveMistakeLimit: HARD_LIMIT,
 			clineMessages: [],

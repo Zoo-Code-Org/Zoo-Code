@@ -20,6 +20,7 @@
 	"apiCostLabel": "Cost d'API:",
 	"copyPrompt": "Copiar prompt",
 	"exportTask": "Exportar tasca",
+	"renameTask": "Canvia el nom de la tasca",
 	"deleteTask": "Eliminar tasca",
 	"deleteTaskMessage": "Estàs segur que vols eliminar aquesta tasca? Aquesta acció no es pot desfer.",
 	"cancel": "Cancel·lar",
