@@ -346,7 +346,7 @@ export const openClineInNewTabForApi = async (options: OpenClineInNewTabOptions)
 	return creation
 }
 
-	/**
+/**
  * Undo a tab creation that failed part way through. A ClineProvider that was constructed
  * but never resolved stays registered in ClineProvider.activeInstances with its listeners
  * attached, and setPanel may already have pointed the tracked tab ref at a panel nobody
