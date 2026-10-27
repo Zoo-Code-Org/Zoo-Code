@@ -494,6 +494,31 @@ describe("searchReplaceTool", () => {
 			}
 		})
 
+		it("reports a committed-write buffer conflict without telling the model to retry the edit", async () => {
+			// saveDirectly publishes first and then throws when an open buffer has different
+			// unsaved edits. The tool must surface the committed-write contract, not a retry
+			// instruction: re-reading and re-applying a non-idempotent edit would duplicate it.
+			const { CommittedWriteBufferConflictError } = await import(
+				"../../../integrations/editor/committedWriteBufferConflictError"
+			)
+			const conflictError = new CommittedWriteBufferConflictError("test.ts")
+			mockCline.diffViewProvider.saveDirectly.mockRejectedValue(conflictError)
+
+			const result = await executeSearchReplaceTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(mockHandleError).toHaveBeenCalledWith("search and replace", conflictError)
+			const message = conflictError.message
+			expect(message).toContain("write is already committed")
+			expect(message).toContain("do not retry")
+			expect(message).not.toContain("then retry")
+			// The rejected save did not edit the file.
+			expect(mockCline.didEditFile).toBe(false)
+			expect(result).toBeUndefined()
+		})
+
 		it("surfaces the unobserved edit remediation as a tool error and publishes nothing", async () => {
 			const guardError = new Error("File not read yet -- read the file, then retry.")
 			mockCline.diffViewProvider.saveDirectly.mockRejectedValue(guardError)

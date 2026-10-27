@@ -1,4 +1,4 @@
-import { DiffViewProvider, DIFF_VIEW_URI_SCHEME, DIFF_VIEW_LABEL_CHANGES } from "../DiffViewProvider"
+import { CommittedWriteBufferConflictError, DiffViewProvider, DIFF_VIEW_URI_SCHEME, DIFF_VIEW_LABEL_CHANGES } from "../DiffViewProvider"
 import * as vscode from "vscode"
 import * as path from "path"
 import delay from "delay"
@@ -1187,9 +1187,15 @@ describe("DiffViewProvider", () => {
 			const documents = vscode.workspace.textDocuments as vscode.TextDocument[]
 			documents.push(docDouble)
 			try {
-				await expect(diffViewProvider.saveDirectly("test.ts", "new content", false, false, 0)).rejects.toThrow(
-					/unsaved edits that differ from the guarded publish/,
-				)
+				const conflict = await diffViewProvider
+					.saveDirectly("test.ts", "new content", false, false, 0)
+					.catch((error: unknown) => error)
+				expect(conflict).toBeInstanceOf(CommittedWriteBufferConflictError)
+				expect((conflict as Error).name).toBe("CommittedWriteBufferConflictError")
+				// The model must be told the write is committed and must not retry the edit.
+				expect((conflict as Error).message).toContain("write is already committed")
+				expect((conflict as Error).message).toContain("do not retry")
+				expect((conflict as Error).message).not.toContain("then retry")
 
 				// No revert ran: the user's edits are still in the buffer.
 				expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.files.revert")

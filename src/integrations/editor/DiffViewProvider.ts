@@ -1,4 +1,8 @@
 import * as vscode from "vscode"
+
+import { CommittedWriteBufferConflictError } from "./committedWriteBufferConflictError"
+
+export { CommittedWriteBufferConflictError }
 import * as path from "path"
 import * as fs from "fs/promises"
 import * as diff from "diff"
@@ -1796,11 +1800,10 @@ export class DiffViewProvider {
 			// buffer (or one whose text already equals the published content) may be reloaded;
 			// a buffer with different unsaved edits is retained and the conflict is reported.
 			if (openTarget.isDirty && openTarget.getText() !== content) {
-				throw new Error(
-					`saveDirectly: ${absolutePath} is open with unsaved edits that differ from the guarded publish; ` +
-						"the buffer was kept so those edits are not lost. Save or discard it, then retry. " +
-						"The published content is already on disk.",
-				)
+				// The publish already committed: report the committed-write buffer conflict.
+				// A generic error would tell the model to retry a non-idempotent edit
+				// (SearchReplaceTool/EditTool would re-read and duplicate the change).
+				throw new CommittedWriteBufferConflictError(absolutePath)
 			}
 			const reconciled = await this.revertDocument(openTarget).catch(() => false)
 			if (!reconciled) {
