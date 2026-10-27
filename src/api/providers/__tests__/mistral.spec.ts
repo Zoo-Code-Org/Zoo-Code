@@ -942,7 +942,11 @@ describe("MistralHandler", () => {
 			})
 
 			const error = await collectStream(
-				handler.createMessage(systemPrompt, messages, { abortSignal: controller.signal }),
+				handler.createMessage(
+					systemPrompt,
+					messages,
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
 			).catch((e: unknown) => e)
 
 			expect(error).toBeInstanceOf(Error)
