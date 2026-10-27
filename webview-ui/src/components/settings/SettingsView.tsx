@@ -156,6 +156,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	// extension merges the received map over the stored experiments, so writing the whole
 	// live map would freeze every other experiment at today's default.
 	const changedExperiments = useRef(new Set<ExperimentId>())
+	// Last value submitted per experiment. Until the extension state reflects it, this is the
+	// comparison baseline: comparing against the (stale) host state could drop a follow-up edit.
+	const submittedExperiments = useRef(new Map<ExperimentId, boolean>())
 
 	const [cachedState, setCachedState] = useState(() => extensionState)
 
@@ -244,6 +247,15 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		changedExperiments.current.clear()
 		setChangeDetected(false)
 	}, [currentApiConfigName, mode, extensionState])
+
+	// Drop a submitted baseline once the extension state confirms that value.
+	useEffect(() => {
+		for (const [id, value] of submittedExperiments.current) {
+			if ((extensionState.experiments?.[id] ?? experimentDefault[id]) === value) {
+				submittedExperiments.current.delete(id)
+			}
+		}
+	}, [extensionState.experiments])
 
 	// Bust the cache when settings are imported.
 	useEffect(() => {
@@ -396,9 +408,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			const experimentChanges: Record<string, boolean> = {}
 			for (const id of changedExperiments.current) {
 				const value = experiments?.[id] ?? experimentDefault[id]
-				// Compare against the live/default baseline, not a bare false: a user toggling
-				// a default-on experiment off is a real change that must be persisted.
-				if (value !== (extensionState.experiments?.[id] ?? experimentDefault[id])) {
+				// Baseline: the last submitted value while the host has not confirmed it yet, then
+				// the live state/default. This keeps a follow-up edit made before the state round-trip
+				// from being compared against stale host values.
+				const baseline = submittedExperiments.current.has(id)
+					? submittedExperiments.current.get(id)
+					: (extensionState.experiments?.[id] ?? experimentDefault[id])
+				if (value !== baseline) {
 					experimentChanges[id] = value
 				}
 			}
@@ -486,8 +502,15 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			vscode.postMessage({ type: "telemetrySetting", text: telemetrySetting })
 			vscode.postMessage({ type: "debugSetting", bool: cachedState.debug })
 
-			// Keep the submitted ids until the extension state reflects them: a second Save in
-			// the same tick must compare against the last submitted values, not stale host state.
+			// Remember what was submitted until the extension state confirms it.
+			for (const id of changedExperiments.current) {
+				const submitted = experimentChanges[id]
+				if (submitted === undefined) {
+					submittedExperiments.current.delete(id)
+				} else {
+					submittedExperiments.current.set(id, submitted)
+				}
+			}
 			setChangeDetected(false)
 		}
 	}

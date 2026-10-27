@@ -1060,6 +1060,40 @@ describe("SettingsView - Experiments", () => {
 		)
 	})
 
+	it("keeps a follow-up experiment edit when the previous save is not yet confirmed", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { imageGeneration: false } })
+		activateTab("experimental")
+
+		const saveButton = screen.getByTestId("save-button")
+		await waitFor(() => expect(saveButton).toBeDisabled())
+		const label = await waitFor(() => {
+			const content = getSettingsContent()
+			return within(content).getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name").closest("label")
+		})
+		const checkbox = label!.querySelector('input[type="checkbox"]') as HTMLInputElement
+
+		// Save the default-on -> false change, then (before the host state round-trip) toggle it
+		// back on. The second Save must compare against the submitted false, not the stale default.
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(saveButton)
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(saveButton)
+
+		const updateSettingsCalls = vi
+			.mocked(vscode.postMessage)
+			.mock.calls.filter(([message]) => (message as { type?: string }).type === "updateSettings")
+			.map(
+				([message]) =>
+					(message as { updatedSettings: { experiments?: Record<string, boolean> } }).updatedSettings,
+			)
+			.filter((settings) => settings.experiments !== undefined)
+		expect(updateSettingsCalls).toHaveLength(2)
+		expect(updateSettingsCalls[0]?.experiments).toEqual({ preventFocusDisruption: false })
+		expect(updateSettingsCalls[1]?.experiments).toEqual({ preventFocusDisruption: true })
+	})
+
 	it("does not persist the experiments map when no experiment changed", () => {
 		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { imageGeneration: false } })
 
