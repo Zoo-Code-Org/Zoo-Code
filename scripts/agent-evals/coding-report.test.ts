@@ -11,6 +11,7 @@ import {
 	readPublishedComparisonReport,
 	runComparison,
 	validateSideResultFile,
+	type SideArtifactRemover,
 	type SideExecutor,
 } from "./coding-compare.ts"
 import { writeFileAtomic, writeJsonAtomic } from "./fs-atomic.ts"
@@ -485,6 +486,59 @@ describe("side artifact invalidation", () => {
 			await fs.mkdir(stalePath)
 			await fs.writeFile(path.join(stalePath, "occupied"), "x")
 			await assert.rejects(invalidateSideArtifacts(dir))
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("removes the authoritative side result before the artifacts tree", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "side-invalidate-test-"))
+		try {
+			await writeJsonAtomic(path.join(dir, "side-results.json"), { stale: true })
+			await fs.mkdir(path.join(dir, "artifacts", "clamp-range-rep4"), { recursive: true })
+			const removed: string[] = []
+			const remove: SideArtifactRemover = async (target, options) => {
+				removed.push(path.relative(dir, target))
+				await fs.rm(target, options)
+			}
+			await invalidateSideArtifacts(dir, remove)
+			assert.deepEqual(removed, ["side-results.json", "artifacts"])
+			assert.deepEqual(await fs.readdir(dir), [])
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("fails closed when artifact removal fails after the result is gone", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "side-invalidate-test-"))
+		try {
+			await writeJsonAtomic(path.join(dir, "side-results.json"), { stale: true })
+			const remove: SideArtifactRemover = (target, options) =>
+				target === path.join(dir, "artifacts")
+					? Promise.reject(new Error("artifact removal blocked"))
+					: fs.rm(target, options)
+			await assert.rejects(invalidateSideArtifacts(dir, remove), /artifact removal blocked/)
+			// The authoritative result is already gone, so the generation is
+			// incomplete and every consumer fails closed until the new atomic
+			// publication.
+			await assert.rejects(fs.access(path.join(dir, "side-results.json")))
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("leaves publication working after invalidation", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "side-invalidate-test-"))
+		try {
+			await writeJsonAtomic(path.join(dir, "side-results.json"), { stale: true })
+			await fs.mkdir(path.join(dir, "artifacts", "old"), { recursive: true })
+			await invalidateSideArtifacts(dir)
+			assert.deepEqual(await fs.readdir(dir), [])
+			// The new generation publishes atomically into the invalidated
+			// directory and is complete again.
+			await writeJsonAtomic(path.join(dir, "side-results.json"), { pins: { fresh: true } })
+			const parsed = JSON.parse(await fs.readFile(path.join(dir, "side-results.json"), "utf8")) as unknown
+			assert.deepEqual(parsed, { pins: { fresh: true } })
 		} finally {
 			await fs.rm(dir, { recursive: true, force: true })
 		}

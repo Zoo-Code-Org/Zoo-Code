@@ -129,8 +129,9 @@ export interface CompareSideWiring {
 	credentialEnv: string
 	sideTimeoutMs: number
 	killGraceMs: number
-	// Prepares the side's worktree: the detached worktree add of this exact
-	// commit, the frozen dependency install, and the build of that commit.
+	// Prepares the commit source for one side: the detached worktree add of
+	// this exact commit. The side constructs its own fresh worktree of the
+	// same commit and installs and builds inside it before any host launch.
 	prepareWorktree: (commit: string, worktree: string) => Promise<void>
 	// Creates the side output directory. This is the last async boundary
 	// before the spawn; tests arm the interrupt inside it.
@@ -420,12 +421,19 @@ export async function readPublishedComparisonReport(outDir: string): Promise<Com
 	return parsed as ComparisonReport
 }
 
-// Removes the previous side generation before a side executes. After this
-// point a crash can no longer present stale results as fresh output, because
-// consumers require side-results.json, and it exists only after the current
-// invocation completes. A stale file that cannot be removed fails the side
-// before any run spends budget.
-export async function invalidateSideArtifacts(outDir: string): Promise<void> {
-	await fs.rm(path.join(outDir, "artifacts"), { recursive: true, force: true })
-	await fs.rm(path.join(outDir, sideResultFileName()), { force: true })
+// Removes the previous side generation before a side executes. The
+// authoritative result is removed first, so every stop after that point, an
+// error or an interruption alike, leaves the generation incomplete: consumers
+// require side-results.json, and it exists only after the new atomic
+// publication completes. A result that cannot be removed, or an artifacts
+// tree that cannot be removed after it, fails the side before any run spends
+// budget.
+export type SideArtifactRemover = (target: string, options: { force?: boolean; recursive?: boolean }) => Promise<void>
+
+export async function invalidateSideArtifacts(
+	outDir: string,
+	remove: SideArtifactRemover = (target, options) => fs.rm(target, options),
+): Promise<void> {
+	await remove(path.join(outDir, sideResultFileName()), { force: true })
+	await remove(path.join(outDir, "artifacts"), { recursive: true, force: true })
 }
