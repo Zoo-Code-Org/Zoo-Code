@@ -235,26 +235,33 @@ describe("comparison flow outcome and cleanup", () => {
 					},
 				}),
 			)
-			return { outcome, sides, dir }
+			// Observed before this helper's finally: a removal here would
+			// mask a flow cleanup that left the scratch directory behind.
+			const scratchDirExists = await fs.access(dir).then(
+				() => true,
+				() => false,
+			)
+			return { outcome, sides, scratchDirExists }
 		} finally {
 			await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
 		}
 	}
 
 	it("reports SIGINT and finishes cleanup when a side fails under the interrupt", async () => {
-		const { outcome, sides, dir } = await interruptedRun("SIGINT")
+		const { outcome, sides, scratchDirExists } = await interruptedRun("SIGINT")
 		assert.deepEqual(outcome, { status: "interrupted", signal: "SIGINT" })
 		// The interrupted side stopped the flow before the candidate started.
 		assert.deepEqual(sides, ["baseline"])
-		// The cleanup completed before the outcome resolved.
-		await assert.rejects(fs.access(dir))
+		// The observation happened before the helper's own teardown, so a
+		// false value proves the flow's cleanup removed the directory.
+		assert.equal(scratchDirExists, false)
 	})
 
 	it("reports SIGTERM and finishes cleanup when a side fails under the interrupt", async () => {
-		const { outcome, sides, dir } = await interruptedRun("SIGTERM")
+		const { outcome, sides, scratchDirExists } = await interruptedRun("SIGTERM")
 		assert.deepEqual(outcome, { status: "interrupted", signal: "SIGTERM" })
 		assert.deepEqual(sides, ["baseline"])
-		await assert.rejects(fs.access(dir))
+		assert.equal(scratchDirExists, false)
 	})
 
 	it("keeps a non-interrupt failure a failure and cleans up anyway", async () => {

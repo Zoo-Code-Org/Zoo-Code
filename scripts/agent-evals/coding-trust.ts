@@ -77,12 +77,11 @@ export class DirtyEvaluatedTreeError extends Error {
 	}
 }
 
-// Gate before any host launch. The evaluated root must match its approved
-// commit exactly, so a modified checkout can never run under that commit's
-// approval. Ignored files, such as dependency installs and build outputs,
-// stay outside commit identity and outside this check: the approval does not
-// attest them. The comparison driver closes that gap by loading only a fresh
-// detached worktree built from the approved commit.
+// Gate before any host launch. The executed tree must match its approved
+// commit exactly, so modified or planted content can never run under that
+// commit's approval. The side runs this check against the fresh detached
+// worktree it constructed from the approved commit. The caller's own tree is
+// never executed at all, so its ignored files need no approval.
 export async function assertEvaluatedTreeClean(root: string): Promise<void> {
 	const { execFile } = await import("node:child_process")
 	const { promisify } = await import("node:util")
