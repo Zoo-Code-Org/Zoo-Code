@@ -347,6 +347,43 @@ describe("writeToFileTool", () => {
 
 			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+			// The partial ask is opened before the guard used to run; the different-path
+			// stream must not leave a spinner behind in the first place.
+			expect(mockCline.ask).not.toHaveBeenCalledWith("tool", expect.anything(), true)
+		})
+
+		it("preserves the retained session when a different path's stream fails to parse", async () => {
+			// The retained session belongs to another, approved edit: a parse failure on a
+			// different path's stream must not discard or reset it.
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.isEditingDifferentPath = vi.fn(() => true)
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+
+			await executeWriteFileTool({ path: "other.txt" }, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({ path: "other.txt" }, { fileExists: false, isPartial: true })
+
+			// Final block arrives without native arguments, so execute() is skipped and the
+			// parse-failure teardown runs.
+			const toolUse: ToolUse = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: { path: "other.txt", content: "streamed content" },
+				partial: false,
+			}
+			await writeToFileTool.handle(mockCline, toolUse as ToolUse<"write_to_file">, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockHandleError).toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
+			// The retained session's own delta is untouched.
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
 		})
 
 		it("does not create directories when file exists", async () => {

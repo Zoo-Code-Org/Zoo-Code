@@ -28,6 +28,8 @@ interface WriteToFileParams {
 interface TaskPartialStreamState {
 	/** Last path seen during streaming; undefined until the first delta. */
 	lastSeenPartialPath: string | undefined
+	/** True once this stream was found to be editing a different path than the retained session. */
+	differentPathStream: boolean
 	/** True once a streaming delta hit a fatal filesystem error. */
 	streamFailed: boolean
 	/** The original filesystem error of the failed streaming delta, reported once
@@ -91,6 +93,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		const state: TaskPartialStreamState = {
 			lastSeenPartialPath: undefined,
+			differentPathStream: false,
 			streamFailed: false,
 			streamError: undefined,
 			task,
@@ -284,6 +287,18 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		const state = this.taskPartialStreamState.get(this.getPartialStreamFailureKey(task))
 		if (!state) {
 			return false
+		}
+		if (state.differentPathStream) {
+			// This stream never owned the diff session: it belongs to another path's retained,
+			// approved edit. Discarding or resetting the view here would throw that edit away,
+			// so only release this stream's own bookkeeping and report any streaming failure.
+			this.resetTaskPartialState(task)
+			if (!state.streamError) {
+				return false
+			}
+			void parseError
+			await callbacks.handleError("writing file", state.streamError)
+			return true
 		}
 		// Streaming may have opened the diff view with unapproved partial content.
 		// execute() never runs on this path, so its error cleanup (revert + reset)
@@ -694,6 +709,15 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				isProtected: isWriteProtected,
 			}
 
+			// A retained session belongs to its own path: streaming a different path's deltas
+			// must not open a partial ask (the final rejection in execute() does not finalize it,
+			// leaving a spinner) and must not touch the diff view. Remember the stream so a
+			// later parse failure does not discard the retained, approved session.
+			if (task.diffViewProvider.isEditingDifferentPath(relPath!)) {
+				partialStreamState.differentPathStream = true
+				return
+			}
+
 			partialMessage = JSON.stringify(sharedMessageProps)
 			await task.ask("tool", partialMessage, block.partial).catch(() => {})
 
@@ -716,13 +740,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		if (newContent) {
 			try {
-				// A retained session belongs to its own path: streaming a different path's
-				// deltas would skip open() (isEditing is true) and write this path's content
-				// into the old document. Leave the preview alone and let execute() report the
-				// rejection with the remediation.
-				if (task.diffViewProvider.isEditingDifferentPath(relPath!)) {
-					return
-				}
 				if (!task.diffViewProvider.isEditing) {
 					await task.diffViewProvider.open(relPath!)
 				}
