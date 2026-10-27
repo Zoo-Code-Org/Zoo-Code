@@ -260,16 +260,24 @@ describe("getRequestyModels", () => {
 	it("returns the empty fallback and logs a dedicated timeout when discovery exceeds the deadline", async () => {
 		vi.useFakeTimers()
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		// The merged deadline uses the native AbortSignal.timeout, which fake timers cannot
+		// advance. Drive it with a controller scheduled by fake setTimeout instead so the test
+		// is deterministic and does not wait 10 real seconds.
+		const timeoutSpy = vi
+			.spyOn(AbortSignal, "timeout")
+			.mockImplementation(((ms: number) => {
+				const controller = new AbortController()
+				setTimeout(() => controller.abort(new DOMException("The operation timed out.", "TimeoutError")), ms)
+				return controller.signal
+			}) as unknown as typeof AbortSignal.timeout)
 		try {
 			mockAxiosGet.mockImplementationOnce(
 				((_url: string, config?: { signal?: AbortSignal }) =>
 					new Promise((_resolve, reject) => {
 						// Axios rejects with the abort reason when the merged deadline fires.
-						config?.signal?.addEventListener(
-							"abort",
-							() => reject(new DOMException("The operation was aborted.", "AbortError")),
-							{ once: true },
-						)
+						config?.signal?.addEventListener("abort", () => reject(config.signal?.reason), {
+							once: true,
+						})
 					})) as unknown as typeof axios.get,
 			)
 
@@ -281,6 +289,7 @@ describe("getRequestyModels", () => {
 			expect(models).toEqual({})
 			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("timed out"))
 		} finally {
+			timeoutSpy.mockRestore()
 			errorSpy.mockRestore()
 			vi.useRealTimers()
 		}
