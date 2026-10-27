@@ -45,7 +45,7 @@ export class CodeIndexOrchestrator {
 			await this.fileWatcher.initialize()
 
 			this._fileWatcherSubscriptions = [
-				this.fileWatcher.onDidStartBatchProcessing((filePaths: string[]) => {}),
+				this.fileWatcher.onDidStartBatchProcessing((_filePaths: string[]) => {}),
 				this.fileWatcher.onBatchProgressUpdate(({ processedInBatch, totalInBatch, currentFile }) => {
 					if (totalInBatch > 0 && this.stateManager.state !== "Indexing") {
 						this.stateManager.setSystemState("Indexing", "Processing file changes...")
@@ -71,13 +71,6 @@ export class CodeIndexOrchestrator {
 				this.fileWatcher.onDidFinishBatchProcessing((summary: BatchProcessingSummary) => {
 					if (summary.batchError) {
 						console.error(`[CodeIndexOrchestrator] Batch processing failed:`, summary.batchError)
-					} else {
-						const successCount = summary.processedFiles.filter(
-							(f: { status: string }) => f.status === "success",
-						).length
-						const errorCount = summary.processedFiles.filter(
-							(f: { status: string }) => f.status === "error" || f.status === "local_error",
-						).length
 					}
 				}),
 			]

@@ -96,7 +96,7 @@ export function sanitizeMcpName(name: string): string {
 	let sanitized = name.replace(/\s+/g, "_")
 
 	// Only allow alphanumeric, underscores, and hyphens
-	sanitized = sanitized.replace(/[^a-zA-Z0-9_\-]/g, "")
+	sanitized = sanitized.replace(/[^a-zA-Z0-9_-]/g, "")
 
 	// Replace any double-hyphen sequences with single hyphen to avoid separator conflicts
 	sanitized = sanitized.replace(/--+/g, "-")

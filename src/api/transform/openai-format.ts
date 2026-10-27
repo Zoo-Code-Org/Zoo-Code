@@ -256,21 +256,12 @@ export function sanitizeGeminiMessages(
 }
 
 /**
- * A reasoning content block (DeepSeek / Z.ai interleaved thinking) that may
- * appear in an assistant message's content array. Not part of Anthropic's
- * ContentBlockParam union, so it's declared separately here.
- */
-interface ReasoningContentBlock {
-	type: "reasoning"
-	text?: string
-}
-
-/**
- * Extracts the reasoning text if `part` is a {@link ReasoningContentBlock}, or `undefined`
- * otherwise. Providers like DeepSeek / Z.ai emit a `"reasoning"` content block that isn't part of
- * Anthropic's `ContentBlockParam` union, so `part` is treated as `unknown` and its shape is
+ * Extracts the reasoning text if `part` is a reasoning content block (DeepSeek / Z.ai interleaved
+ * thinking, i.e. `{ type: "reasoning", text?: string }`), or `undefined` otherwise. Providers like
+ * DeepSeek / Z.ai emit a `"reasoning"` content block that isn't part of Anthropic's
+ * `ContentBlockParam` union, so `part` is treated as `unknown` and its shape is
  * validated at runtime rather than assumed via a cast. A boolean type-guard isn't viable here:
- * TypeScript can't narrow `part` to `ReasoningContentBlock` because their `type` literals don't
+ * TypeScript can't narrow `part` to a reasoning block because their `type` literals don't
  * overlap with any variant of `ContentBlockParam`, so the narrowed type collapses to `never`.
  */
 function getReasoningBlockText(part: unknown): string | undefined {
@@ -338,7 +329,7 @@ export function convertToOpenAiMessages(
 			// conversation state client-side, we don't use `store: true`, and sending
 			// back the `id` field causes a 404 error.
 			if (detail?.format === "openai-responses-v1" && detail?.id) {
-				const { id, ...rest } = detail
+				const { id: _id, ...rest } = detail
 				return rest
 			}
 			return detail

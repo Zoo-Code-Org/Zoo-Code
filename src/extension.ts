@@ -28,6 +28,7 @@ import { Package } from "./shared/package"
 import { formatLanguage } from "./shared/language"
 import { ContextProxy } from "./core/config/ContextProxy"
 import { ClineProvider } from "./core/webview/ClineProvider"
+import { registerCopilotModelBroadcast } from "./services/language-models/copilotModelBroadcast"
 import { ClineProviderFactory } from "./core/webview/ClineProviderFactory"
 import { WebviewFocusTracker } from "./core/webview/WebviewFocusTracker"
 import { DIFF_VIEW_URI_SCHEME } from "./integrations/editor/DiffViewProvider"
@@ -51,6 +52,7 @@ import {
 	CodeActionProvider,
 } from "./activate"
 import { initializeI18n } from "./i18n"
+import { buildApiHandler } from "./api"
 import { initializeModelCacheRefresh } from "./api/providers/fetchers/modelCache"
 import { initZooCodeAuth } from "./services/zoo-code-auth"
 
@@ -195,6 +197,13 @@ export async function activate(context: vscode.ExtensionContext) {
 			// own PostHog client (gated separately in TelemetryClient.ts) can't keep
 			// sending events after the global toggle flips off mid-session.
 			void ClineProvider.getVisibleInstance()?.postStateToWebviewWithoutClineMessages()
+		}),
+	)
+
+	context.subscriptions.push(
+		registerCopilotModelBroadcast({
+			getTargets: () => ClineProvider.getAllInstances(),
+			log: (message) => outputChannel.appendLine(message),
 		}),
 	)
 
@@ -381,7 +390,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	}
 
 	// Initialize background model cache refresh
-	void initializeModelCacheRefresh().catch((error) => {
+	void initializeModelCacheRefresh((provider) => buildApiHandler({ apiProvider: provider })).catch((error) => {
 		outputChannel.appendLine(
 			`[ModelCache] Background refresh initialization failed: ${error instanceof Error ? error.message : String(error)}`,
 		)
