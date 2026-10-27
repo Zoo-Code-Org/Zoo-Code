@@ -16,6 +16,7 @@ import { ApiHandlerOptions } from "../../shared/api"
 import { convertToMistralMessages } from "../transform/mistral-format"
 import { ApiStream } from "../transform/stream"
 import { createAbortError, isRequestAborted, mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
+import { createTimeoutError } from "./utils/request-timeout"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 
 import { BaseProvider } from "./base-provider"
@@ -113,6 +114,9 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 		requestBuilder.addMergedSignal(new AbortController(), metadata)
 		const requestSignal = requestBuilder.getOption("signal")
 
+		// The try intentionally wraps both the stream open and the consumption loop:
+		// a mid-stream non-abort failure must be reported once as a Mistral completion
+		// error (and captured for telemetry) instead of escaping half-reported.
 		let response
 		try {
 			response = await this.client.chat.stream(requestOptions, {
@@ -188,9 +192,11 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 			// abort) ends the loop without throwing otherwise.
 			throwIfAborted(requestSignal)
 		} catch (error) {
-			// Aborted request: covers both the external signal and SDK-native
-			// abort errors that may surface before the signal flag propagates.
-			if (isRequestAborted(error, metadata?.abortSignal)) {
+			// Aborted request: covers both the external signal and SDK-native abort
+			// errors that may surface before the SDK's signal flag propagates. Check
+			// the merged request signal (not just the caller's) so a plain SDK error
+			// arriving after a cancellation still surfaces as an AbortError.
+			if (isRequestAborted(error, requestSignal)) {
 				throw createAbortError("Mistral")
 			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
@@ -233,15 +239,16 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 		throwIfAborted(options?.abortSignal)
 
 		const { id: model, temperature } = this.getModel()
+		const callerAbortSignal = options?.abortSignal
+		// Build a single signal that combines the external abort with the per-request
+		// timeout (timeoutMs <= 0 disables the timeout; see mergeAbortSignalAndTimeout).
+		const requestAbortSignal = mergeAbortSignalAndTimeout(callerAbortSignal, options?.timeoutMs)
 
 		try {
 			// Build Mistral SDK RequestOptions
 			const requestOptions: Parameters<typeof this.client.chat.complete>[1] = {}
-			// Build a single signal that combines the external abort with the per-request
-			// timeout (timeoutMs <= 0 disables the timeout; see mergeAbortSignalAndTimeout).
-			const signal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
-			if (signal) {
-				requestOptions.fetchOptions = { signal }
+			if (requestAbortSignal) {
+				requestOptions.fetchOptions = { signal: requestAbortSignal }
 			}
 
 			const response = await this.client.chat.complete(
@@ -265,9 +272,16 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 
 			return content || ""
 		} catch (error) {
-			// Aborted request: covers both the external signal and SDK-native
-			// abort errors that may surface before the signal flag propagates.
-			if (isRequestAborted(error, options?.abortSignal)) {
+			// The merged signal covers both the caller's abort and the per-request
+			// timeout. A timeout the caller did not cause is the series' TimeoutError,
+			// not a completion failure (the Mistral SDK throws RequestTimeoutError,
+			// which does not match the abort-name checks on its own).
+			if (isRequestAborted(error, requestAbortSignal)) {
+				if (requestAbortSignal?.aborted) {
+					throw callerAbortSignal?.aborted
+						? createAbortError("Mistral")
+						: createTimeoutError("Mistral", "completion request")
+				}
 				throw createAbortError("Mistral")
 			}
 			const errorMessage = error instanceof Error ? error.message : String(error)

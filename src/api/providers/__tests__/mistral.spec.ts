@@ -867,6 +867,47 @@ describe("MistralHandler", () => {
 			expect((error as Error).message).toBe("The Mistral request was aborted")
 		})
 
+		it("should surface a TimeoutError when the per-request timeout fires", async () => {
+			vi.useFakeTimers()
+			// The merged deadline uses native AbortSignal.timeout; drive it with fake
+			// timers so the test is deterministic and does not wait in real time.
+			const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation(((ms: number) => {
+				const controller = new AbortController()
+				setTimeout(() => controller.abort(new DOMException("timed out", "TimeoutError")), ms)
+				return controller.signal
+			}) as unknown as typeof AbortSignal.timeout)
+			try {
+				mockComplete.mockImplementation(
+					(_options: unknown, requestOptions?: { fetchOptions?: { signal?: AbortSignal } }) =>
+						new Promise<never>((_resolve, reject) => {
+							// The SDK rejects with its own RequestTimeoutError when the
+							// fetch signal aborts, which does not match the abort-name checks.
+							const fail = () =>
+								reject(Object.assign(new Error("Request timed out"), { name: "RequestTimeoutError" }))
+							const signal = requestOptions?.fetchOptions?.signal
+							if (signal?.aborted) {
+								fail()
+								return
+							}
+							signal?.addEventListener("abort", fail, { once: true })
+						}),
+				)
+
+				const promise = handler.completePrompt("Test prompt", { timeoutMs: 100 })
+				const assertion = expect(promise).rejects.toMatchObject({
+					name: "TimeoutError",
+					message: "The Mistral completion request timed out",
+				})
+				await vi.advanceTimersByTimeAsync(150)
+				await assertion
+				// A timeout is not a user cancellation but still not a provider failure.
+				expect(mockCaptureException).not.toHaveBeenCalled()
+			} finally {
+				timeoutSpy.mockRestore()
+				vi.useRealTimers()
+			}
+		})
+
 		it("should surface a standard AbortError when the SDK throws an abort error before the signal flag propagates", async () => {
 			// The signal flag has not propagated yet, but the SDK rejects with its
 			// own abort error: isRequestAborted must catch the error-name branch.
@@ -890,6 +931,25 @@ describe("MistralHandler", () => {
 				content: [{ type: "text", text: "Hello!" }],
 			},
 		]
+
+		it("should surface an AbortError when a plain SDK error arrives after the external signal aborts", async () => {
+			const controller = new AbortController()
+			// The SDK rejects with a plain, non-abort error after the caller
+			// cancelled: the merged-signal check must still classify it as AbortError.
+			mockCreate.mockImplementationOnce(async () => {
+				controller.abort()
+				throw new Error("socket closed")
+			})
+
+			const error = await collectStream(
+				handler.createMessage(systemPrompt, messages, { abortSignal: controller.signal }),
+			).catch((e: unknown) => e)
+
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Mistral request was aborted")
+			expect(mockCaptureException).not.toHaveBeenCalled()
+		})
 
 		it("should reject immediately with AbortError when the external signal is pre-aborted", async () => {
 			const controller = new AbortController()
