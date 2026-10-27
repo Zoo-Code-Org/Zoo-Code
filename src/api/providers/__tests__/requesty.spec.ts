@@ -724,6 +724,25 @@ describe("RequestyHandler", () => {
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("Unexpected error")
 		})
+		it.each([
+			["an external signal", { abortSignal: new AbortController().signal }],
+			["a per-request timeout", { timeoutMs: 5_000 }],
+		])(
+			"does not classify an ordinary SDK failure as an abort when %s is configured",
+			async (_label, options: { abortSignal?: AbortSignal; timeoutMs?: number }) => {
+				// The catch must key on the MERGED SIGNAL BEING ABORTED, not on the signal merely
+				// being configured: a real API failure with a live signal is a provider error.
+				const handler = new RequestyHandler(mockOptions)
+				mockCreate.mockRejectedValue(new Error("API Error"))
+
+				const error = await handler.completePrompt("test prompt", options).catch((e: unknown) => e)
+
+				expect(error).toBeInstanceOf(Error)
+				expect((error as Error).name).not.toBe("AbortError")
+				expect((error as Error).message).toContain("API Error")
+			},
+		)
+
 		it("should pass abort signal through to client", async () => {
 			const handler = new RequestyHandler(mockOptions)
 			const controller = new AbortController()
