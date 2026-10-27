@@ -134,8 +134,8 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 		mockedFsPromises.default.readlink.mockImplementation(async () => {
 			throw new Error("not a symbolic link")
 		})
-		vi.mocked(withFileLock).mockImplementation(
-			async (filePath: string, operation: (p: string) => Promise<void>) => operation(filePath),
+		vi.mocked(withFileLock).mockImplementation(async (filePath: string, operation: (p: string) => Promise<void>) =>
+			operation(filePath),
 		)
 	})
 
@@ -794,14 +794,16 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
 		const heldKeys: string[] = []
 		let statUnderLock = false
-		vi.mocked(withFileLock).mockImplementation(async (filePath: string, operation: (p: string) => Promise<void>) => {
-			heldKeys.push(String(filePath))
-			try {
-				return await operation(filePath)
-			} finally {
-				heldKeys.length = 0
-			}
-		})
+		vi.mocked(withFileLock).mockImplementation(
+			async (filePath: string, operation: (p: string) => Promise<void>) => {
+				heldKeys.push(String(filePath))
+				try {
+					return await operation(filePath)
+				} finally {
+					heldKeys.length = 0
+				}
+			},
+		)
 		const statImpl = mockedFsPromises.default.stat.getMockImplementation()
 		mockedFsPromises.default.stat.mockImplementation(async (p: unknown) => {
 			if (String(p) === sourceKey && heldKeys.includes(sourceKey)) {
@@ -855,14 +857,16 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		})
 		const heldKeys: string[] = []
 		let statUnderLock = false
-		vi.mocked(withFileLock).mockImplementation(async (filePath: string, operation: (p: string) => Promise<void>) => {
-			heldKeys.push(String(filePath))
-			try {
-				return await operation(filePath)
-			} finally {
-				heldKeys.length = 0
-			}
-		})
+		vi.mocked(withFileLock).mockImplementation(
+			async (filePath: string, operation: (p: string) => Promise<void>) => {
+				heldKeys.push(String(filePath))
+				try {
+					return await operation(filePath)
+				} finally {
+					heldKeys.length = 0
+				}
+			},
+		)
 		const statImpl = mockedFsPromises.default.stat.getMockImplementation()
 		mockedFsPromises.default.stat.mockImplementation(async (p: unknown) => {
 			if (String(p) === sourceKey && heldKeys.includes(referentKey)) {
