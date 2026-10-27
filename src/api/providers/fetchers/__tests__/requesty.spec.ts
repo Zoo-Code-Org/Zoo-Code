@@ -256,4 +256,33 @@ describe("getRequestyModels", () => {
 
 		await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
 	})
+
+	it("returns the empty fallback and logs a dedicated timeout when discovery exceeds the deadline", async () => {
+		vi.useFakeTimers()
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			mockAxiosGet.mockImplementationOnce(
+				((_url: string, config?: { signal?: AbortSignal }) =>
+					new Promise((_resolve, reject) => {
+						// Axios rejects with the abort reason when the merged deadline fires.
+						config?.signal?.addEventListener(
+							"abort",
+							() => reject(new DOMException("The operation was aborted.", "AbortError")),
+							{ once: true },
+						)
+					})) as unknown as typeof axios.get,
+			)
+
+			const pending = getRequestyModels()
+			await vi.advanceTimersByTimeAsync(10_000)
+			const models = await pending
+
+			// The fallback is intentional: callers use the cached/default model info.
+			expect(models).toEqual({})
+			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("timed out"))
+		} finally {
+			errorSpy.mockRestore()
+			vi.useRealTimers()
+		}
+	})
 })

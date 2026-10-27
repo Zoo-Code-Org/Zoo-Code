@@ -30,6 +30,7 @@ import type {
 import { toRequestyServiceUrl } from "../../shared/utils/requesty"
 import { handleOpenAIError } from "./utils/error-handler"
 import {
+	bridgeExternalAbortSignal,
 	createAbortError,
 	isRequestAborted,
 	mergeAbortSignalAndTimeout,
@@ -162,36 +163,24 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		// Per-request AbortController: external aborts cancel the in-flight request
-		// without replacing the client-level timeout, which remains the default safety net.
-		const controller = new AbortController()
-
-		// Bridge the external abort signal into the per-request controller:
-		// - pre-aborted guard: abort immediately when the signal is already aborted
-		// - { once: true }: the listener removes itself after the first abort
-		// - explicit removal in finally: the listener must not outlive a request that
-		//   completes (or fails) without being aborted
-		const externalAbortSignal = metadata?.abortSignal
-		let removeExternalAbortListener: (() => void) | undefined
-		if (externalAbortSignal) {
-			if (externalAbortSignal.aborted) {
-				controller.abort()
-			} else {
-				const onExternalAbort = () => controller.abort()
-				externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
-				removeExternalAbortListener = () => externalAbortSignal.removeEventListener("abort", onExternalAbort)
-			}
-		}
+		// Bridge the external abort signal into a request-local controller using the shared
+		// helper (pre-aborted guard, once-only listener, retained cleanup). The request keeps a
+		// signal for the SDK even without an external one: a never-aborting fallback preserves the
+		// previous behavior of always passing a signal to the client.
+		const { signal: bridgedSignal, dispose: removeExternalAbortListener } = bridgeExternalAbortSignal(
+			metadata?.abortSignal,
+		)
+		const requestSignal = bridgedSignal ?? new AbortController().signal
 
 		try {
 			// The request was already aborted before we started: fail fast without calling the API.
-			if (controller.signal.aborted) {
+			if (requestSignal.aborted) {
 				throw createAbortError("Requesty")
 			}
 
 			// Model discovery is shared single-flight: the lookup carries no signal (see fetchModel),
 			// so this request's abort or timeout cannot reject the shared fetch for concurrent
-			// callers. Per-request cancellation is the rejectOnAbort race below: controller.signal
+			// callers. Per-request cancellation is the rejectOnAbort race below: requestSignal
 			// bridges the external abort, and the race settles this waiter promptly while the
 			// underlying fetch keeps running to serve the other waiters.
 			const {
@@ -201,7 +190,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 				temperature,
 				reasoningEffort: reasoning_effort,
 				reasoning: thinking,
-			} = await rejectOnAbort(this.fetchModel(), controller.signal, this.providerName)
+			} = await rejectOnAbort(this.fetchModel(), requestSignal, this.providerName)
 
 			const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
 				{ role: "system", content: systemPrompt },
@@ -228,11 +217,11 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 			let stream
 			try {
 				// With streaming params type, SDK returns an async iterable stream
-				stream = await this.client.chat.completions.create(completionParams, { signal: controller.signal })
+				stream = await this.client.chat.completions.create(completionParams, { signal: requestSignal })
 			} catch (error) {
 				// Aborted requests are user-initiated: surface them as AbortError instead of
 				// a completion error.
-				if (controller.signal.aborted) {
+				if (requestSignal.aborted) {
 					throw createAbortError("Requesty")
 				}
 				throw handleOpenAIError(error, this.providerName)
@@ -247,7 +236,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 					// abort can land between two yields of the same chunk: the guarded yields
 					// below re-check before emitting (the first yield of a chunk is covered by
 					// this check alone — no suspension point separates them).
-					if (controller.signal.aborted) {
+					if (requestSignal.aborted) {
 						break
 					}
 
@@ -264,14 +253,14 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 					if (delta?.content) {
 						// Re-check before emitting: the consumer may have aborted while
 						// processing a previously yielded part of this chunk.
-						throwIfAborted(controller.signal)
+						throwIfAborted(requestSignal)
 						yield { type: "text", text: delta.content }
 					}
 
 					// Handle native tool calls
 					if (delta && "tool_calls" in delta && Array.isArray(delta.tool_calls)) {
 						for (const toolCall of delta.tool_calls) {
-							throwIfAborted(controller.signal)
+							throwIfAborted(requestSignal)
 							yield {
 								type: "tool_call_partial",
 								index: toolCall.index,
@@ -290,7 +279,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 				// openai@5.23.2's stream iterator swallows a mid-stream AbortError and returns
 				// normally instead of throwing, so the catch below would never run: without this
 				// check, createMessage completes silently after yielding partial output.
-				if (controller.signal.aborted) {
+				if (requestSignal.aborted) {
 					throw createAbortError(this.providerName)
 				}
 
@@ -300,13 +289,13 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 			} catch (error) {
 				// Normalize abort-driven stream failures (SDK abort or timeout errors) to a
 				// DOM-standard AbortError so callers can detect the aborted request.
-				if (controller.signal.aborted) {
+				if (requestSignal.aborted) {
 					throw createAbortError("Requesty")
 				}
 				throw error
 			}
 		} finally {
-			removeExternalAbortListener?.()
+			removeExternalAbortListener()
 		}
 	}
 
