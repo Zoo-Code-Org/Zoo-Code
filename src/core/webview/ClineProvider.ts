@@ -3889,7 +3889,12 @@ export class ClineProvider
 			// the next load. Re-point those persisted pins to the survivor too.
 			await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
 
-			await this.postStateToWebview()
+			// Same contract on the non-active path: the deletion stands even if this post fails.
+			await this.postStateToWebview().catch((postError: unknown) =>
+				this.log(
+					`deleteProviderProfile: deletion committed; state post failed: ${postError instanceof Error ? postError.message : String(postError)}`,
+				),
+			)
 		} catch (error) {
 			// Two failures must NOT be compensated here: a replacement activation
 			// failure after the deletion committed (documented contract: the
