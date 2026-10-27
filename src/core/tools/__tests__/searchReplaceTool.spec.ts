@@ -498,9 +498,8 @@ describe("searchReplaceTool", () => {
 			// saveDirectly publishes first and then throws when an open buffer has different
 			// unsaved edits. The tool must surface the committed-write contract, not a retry
 			// instruction: re-reading and re-applying a non-idempotent edit would duplicate it.
-			const { CommittedWriteBufferConflictError } = await import(
-				"../../../integrations/editor/committedWriteBufferConflictError"
-			)
+			const { CommittedWriteBufferConflictError } =
+				await import("../../../integrations/editor/committedWriteBufferConflictError")
 			const conflictError = new CommittedWriteBufferConflictError("test.ts")
 			mockCline.diffViewProvider.saveDirectly.mockRejectedValue(conflictError)
 
