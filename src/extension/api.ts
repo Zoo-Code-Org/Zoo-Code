@@ -629,18 +629,144 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	public async setConfiguration(values: RooCodeSettings) {
-		await this.sidebarProvider.contextProxy.setValues(values)
-		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
+		// Derive the saved profile name once so the sibling refresh and the save
+		// agree on the empty-string fallback.
+		const savedProfileName = values.currentApiConfigName || "default"
+		const manager = this.sidebarProvider.providerSettingsManager
+		// Read existence from the store rather than the cached profile list: a stale
+		// list could hide an existing record and let rollback delete it. A failed
+		// existence read is treated as "may exist" so rollback never deletes blindly.
+		let recordExisted: boolean
+		try {
+			recordExisted = await manager.hasConfig(savedProfileName)
+		} catch {
+			recordExisted = true
+		}
+		const previousValues = this.getConfiguration()
+		const previousSharedSettings = this.sidebarProvider.contextProxy.getProviderSettings()
+		// Fail closed BEFORE any write: an existing record that cannot be read
+		// aborts the call while nothing has been mutated.
+		let previousRecord: Awaited<ReturnType<typeof manager.getProfile>> | undefined
+		if (recordExisted) {
+			previousRecord = await manager.getProfile({ name: savedProfileName })
+		}
+		// Capture the prior mapping of every mode this payload touches, so a
+		// partial mode fan-out rolls back completely - including mappings this
+		// call creates for the first time (an undefined prior id restores the
+		// no-mapping semantics getModeConfigId reports).
+		const previousModeConfigs: Array<[Mode, string | undefined]> = []
 		if (values.modeApiConfigs) {
-			await Promise.all(
-				Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
-					this.sidebarProvider.providerSettingsManager.setModeConfig(mode as Mode, configId),
-				),
-			)
+			for (const mode of Object.keys(values.modeApiConfigs)) {
+				previousModeConfigs.push([mode as Mode, await manager.getModeConfigId(mode as Mode)])
+			}
+		}
+		// Persist the profile record before the shared/sibling refresh: saveConfig
+		// validates before storing, so a rejected save leaves every domain
+		// untouched and no rollback is needed.
+		await manager.saveConfig(savedProfileName, values)
+		try {
+			await this.sidebarProvider.setValues(values, { savedProfileName })
+			if (values.modeApiConfigs) {
+				await Promise.all(
+					Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
+						manager.setModeConfig(mode as Mode, configId),
+					),
+				)
+			}
+		} catch (error) {
+			// The save landed: roll back every domain this mutation touched - the
+			// profile record, the sibling overlays pinned to it, the complete
+			// settings round trip (global values, view-local state, and sibling
+			// overlays), the shared provider settings, and the mode mappings.
+			// Each restore is independent and logged; the original failure is
+			// what the caller sees.
+			let previousSettings: ProviderSettings | undefined
+			if (previousRecord) {
+				const { name: _previousName, id: _previousId, ...rest } = previousRecord
+				previousSettings = rest
+			}
+			try {
+				if (recordExisted && previousSettings) {
+					await manager.saveConfig(savedProfileName, previousSettings)
+				} else {
+					await manager.deleteConfig(savedProfileName)
+				}
+			} catch (restoreError) {
+				this.log(
+					`[setConfiguration] failed to restore the profile record '${savedProfileName}': ` +
+						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+				)
+			}
+			const previousProfileName = previousValues.currentApiConfigName || "default"
+			try {
+				await this.sidebarProvider.setValues(previousValues, { savedProfileName: previousProfileName })
+			} catch (restoreError) {
+				this.log(
+					"[setConfiguration] failed to restore the previous configuration values: " +
+						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+				)
+			}
+			// Replay the restored record to the sibling overlays pinned to the
+			// saved profile AFTER the configuration restore: when the saved profile
+			// is also the active profile, the restore above refreshes the same
+			// siblings with non-secret values, and this replay must be the last
+			// refresh so the overlays end on the restored record's settings. An
+			// absent prior profile restores an empty overlay.
+			try {
+				await this.sidebarProvider.refreshViewLocalStateForUpdatedProfile(
+					savedProfileName,
+					previousSettings ?? {},
+				)
+			} catch (restoreError) {
+				this.log(
+					"[setConfiguration] failed to refresh the overlays pinned to '" +
+						savedProfileName +
+						"': " +
+						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+				)
+			}
+			// When the mutation switched profiles, the configuration restore above
+			// refreshed siblings pinned to the previous profile from non-secret
+			// values; replay that profile's complete stored record so those
+			// overlays keep their credentials. A previous profile that cannot be
+			// read keeps the restore's non-secret refresh.
+			if (previousProfileName !== savedProfileName) {
+				try {
+					const previousProfileRecord = await manager.getProfile({ name: previousProfileName })
+					const { name: _ppName, id: _ppId, ...previousProfileSettings } = previousProfileRecord
+					await this.sidebarProvider.refreshViewLocalStateForUpdatedProfile(
+						previousProfileName,
+						previousProfileSettings,
+					)
+				} catch (restoreError) {
+					this.log(
+						"[setConfiguration] failed to refresh the overlays pinned to '" +
+							previousProfileName +
+							"': " +
+							(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+					)
+				}
+			}
+			try {
+				await this.sidebarProvider.contextProxy.setProviderSettings(previousSharedSettings)
+			} catch (restoreError) {
+				this.log(
+					"[setConfiguration] failed to restore the shared provider settings: " +
+						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+				)
+			}
+			try {
+				await Promise.all(previousModeConfigs.map(([mode, configId]) => manager.setModeConfig(mode, configId)))
+			} catch (restoreError) {
+				this.log(
+					"[setConfiguration] failed to restore the mode API config mappings: " +
+						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+				)
+			}
+			throw error
 		}
 		await this.sidebarProvider.postStateToWebview()
 	}
-
 	public setTerminalProfile(name: string | undefined): void {
 		const previousProfile = Terminal.getTerminalProfile()
 		Terminal.setTerminalProfile(name)

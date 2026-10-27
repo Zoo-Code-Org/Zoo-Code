@@ -1,0 +1,77 @@
+import { describe, expect, it, vi } from "vitest"
+import { makeClineProviderFactory } from "../../test-utils/provider"
+
+import { providerIdentifiers } from "@roo-code/types"
+
+import { API } from "../api"
+import type { ClineProvider } from "../../core/webview/ClineProvider"
+import type { OutputChannel } from "vscode"
+
+vi.mock("@roo-code/ipc", () => ({
+	IpcServer: class {},
+}))
+
+vi.mock("../../integrations/terminal/Terminal", () => ({
+	Terminal: {
+		getTerminalProfile: vi.fn(),
+		setTerminalProfile: vi.fn(),
+	},
+}))
+
+vi.mock("../../integrations/terminal/TerminalRegistry", () => ({
+	TerminalRegistry: {
+		closeIdleTerminals: vi.fn(),
+	},
+}))
+
+describe("API.setConfiguration", () => {
+	it("routes configuration through ClineProvider.setValues so view-local state stays in sync", async () => {
+		const provider = Object.assign({} as ClineProvider, {
+			context: {},
+			on: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([
+				{
+					name: "default",
+					id: "default-id",
+				},
+			]),
+			getValues: vi.fn().mockReturnValue({}),
+			setValues: vi.fn().mockResolvedValue(undefined),
+			contextProxy: {
+				setValues: vi.fn().mockResolvedValue(undefined),
+				getProviderSettings: vi.fn().mockReturnValue({}),
+			},
+			providerSettingsManager: {
+				saveConfig: vi.fn().mockResolvedValue("default-id"),
+				// The accept path records whether the profile existed before saving; without it
+				// the call throws and the test only passes through the catch fallback.
+				hasConfig: vi.fn().mockResolvedValue(true),
+				getProfile: vi.fn().mockResolvedValue({
+					name: "default",
+					id: "default-id",
+					apiProvider: providerIdentifiers.bedrock,
+				}),
+			},
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		})
+		const api = new API(
+			Object.assign({} as OutputChannel, { appendLine: vi.fn() }),
+			provider,
+			makeClineProviderFactory(),
+		)
+		const configuration = {
+			apiProvider: providerIdentifiers.bedrock,
+			currentApiConfigName: "default",
+			awsRegion: "us-east-1",
+			apiModelId: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+		}
+
+		await api.setConfiguration(configuration)
+
+		expect(provider.setValues).toHaveBeenCalledWith(configuration, { savedProfileName: "default" })
+		expect(provider.contextProxy.setValues).not.toHaveBeenCalled()
+		expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith("default", configuration)
+		expect(provider.providerSettingsManager.hasConfig).toHaveBeenCalledWith("default")
+		expect(provider.postStateToWebview).toHaveBeenCalled()
+	})
+})
