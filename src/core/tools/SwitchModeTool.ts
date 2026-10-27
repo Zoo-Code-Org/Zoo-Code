@@ -55,8 +55,19 @@ export class SwitchModeTool extends BaseTool<"switch_mode"> {
 				return
 			}
 
-			// Switch the mode using shared handler
-			await task.providerRef.deref()?.handleModeSwitch(mode_slug)
+			// Switch the mode using shared handler. Pass this task explicitly so the
+			// switch is scoped to it rather than the provider's currently focused task.
+			// A provider released mid-turn (its view disposed) cannot execute the switch:
+			// the optional chain would swallow the call, so guard explicitly and report
+			// the failure instead of a false success.
+			const provider = task.providerRef.deref()
+			if (!provider) {
+				task.recordToolError("switch_mode")
+				task.didToolFailInCurrentTurn = true
+				pushToolResult(formatResponse.toolError("Cannot switch mode: the provider is no longer available."))
+				return
+			}
+			await provider.handleModeSwitch(mode_slug, task)
 
 			pushToolResult(
 				`Successfully switched from ${getModeBySlug(currentMode)?.name ?? currentMode} mode to ${
