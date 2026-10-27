@@ -2914,6 +2914,48 @@ describe("VsCodeLmHandler", () => {
 			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", addEventListenerSpy.mock.calls[0][1])
 		})
 
+		it("should reject with the canonical AbortError when only the external signal aborts", async () => {
+			// Parity with the completePrompt signal-only case: neutralise the bridged token
+			// cancel so only externalAbortSignal.aborted is true, then end the stream quietly.
+			let releaseStream: () => void = () => {}
+			const streamGate = new Promise<void>((resolve) => {
+				releaseStream = resolve
+			})
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					await streamGate
+					return
+				})(),
+				text: (async function* () {
+					await streamGate
+					return
+				})(),
+			})
+
+			const controller = new AbortController()
+			const stream = handler.createMessage(
+				"system",
+				[{ role: "user", content: "hi" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+			const firstChunk = stream.next()
+			await vi.waitFor(() => expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(1))
+
+			// Only the external signal aborts: the bridge's token cancel is a no-op.
+			;(tokenSourceInstance().cancel as Mock).mockImplementation(() => {})
+			controller.abort()
+			expect(tokenSourceInstance().token.isCancellationRequested).toBe(false)
+
+			releaseStream()
+
+			await expect(firstChunk).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "The VS Code LM request was aborted",
+			)
+		})
+
 		it("should cancel the request token when the consumer stops consuming early", async () => {
 			const systemPrompt = "You are a helpful assistant"
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
@@ -4267,6 +4309,92 @@ describe("VsCodeLmHandler", () => {
 			expect(mockLanguageModelChat.sendRequest.mock.calls[0][2]).toBe(tokenSource.token)
 			expect(tokenSource.cancel).not.toHaveBeenCalled()
 			expect(tokenSource.dispose).toHaveBeenCalled()
+		})
+
+		it("dispose cancels and disposes a streaming completion", async () => {
+			let releaseStream: () => void = () => {}
+			const streamGate = new Promise<void>((resolve) => {
+				releaseStream = resolve
+			})
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					await streamGate
+					yield new vscode.LanguageModelTextPart("partial")
+				})(),
+				text: (async function* () {
+					await streamGate
+					yield "partial"
+				})(),
+			})
+			handler["client"] = mockLanguageModelChat
+
+			const completion = handler.completePrompt("Test prompt").catch((error: unknown) => error)
+			await vi.waitFor(() => expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(1))
+			const tokenSource = tokenSourceInstance()
+
+			handler.dispose()
+			expect(tokenSource.cancel).toHaveBeenCalled()
+			expect(tokenSource.dispose).toHaveBeenCalled()
+
+			releaseStream()
+			const error = await completion
+			expect((error as Error).name).toBe("AbortError")
+		})
+
+		it("dispose cancels every concurrent completion", async () => {
+			let releaseStream: () => void = () => {}
+			const streamGate = new Promise<void>((resolve) => {
+				releaseStream = resolve
+			})
+			const gatedResponse = () => ({
+				stream: (async function* () {
+					await streamGate
+					yield new vscode.LanguageModelTextPart("partial")
+				})(),
+				text: (async function* () {
+					await streamGate
+					yield "partial"
+				})(),
+			})
+			mockLanguageModelChat.sendRequest
+				.mockResolvedValueOnce(gatedResponse())
+				.mockResolvedValueOnce(gatedResponse())
+			handler["client"] = mockLanguageModelChat
+
+			const first = handler.completePrompt("First").catch((error: unknown) => error)
+			const second = handler.completePrompt("Second").catch((error: unknown) => error)
+			await vi.waitFor(() => expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(2))
+			const firstSource = tokenSourceInstance(0)
+			const secondSource = tokenSourceInstance(1)
+
+			handler.dispose()
+			expect(firstSource.cancel).toHaveBeenCalled()
+			expect(firstSource.dispose).toHaveBeenCalled()
+			expect(secondSource.cancel).toHaveBeenCalled()
+			expect(secondSource.dispose).toHaveBeenCalled()
+
+			releaseStream()
+			await Promise.all([first, second])
+		})
+
+		it("dispose after a finished completion does not cancel it again", async () => {
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("done")
+				})(),
+				text: (async function* () {
+					yield "done"
+				})(),
+			})
+			handler["client"] = mockLanguageModelChat
+
+			await expect(handler.completePrompt("Test prompt")).resolves.toBe("done")
+			const tokenSource = tokenSourceInstance()
+			// The finished completion removed itself from the active set in its finally block.
+			expect(tokenSource.dispose).toHaveBeenCalled()
+
+			handler.dispose()
+			expect(tokenSource.cancel).not.toHaveBeenCalled()
 		})
 
 		it("should attach and detach the abort listener around the completion", async () => {
