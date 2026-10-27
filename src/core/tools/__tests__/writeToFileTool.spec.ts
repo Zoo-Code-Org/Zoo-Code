@@ -980,6 +980,7 @@ describe("writeToFileTool", () => {
 			return {
 				lastSeenPartialPath,
 				streamFailed: false,
+				differentPathStream: false,
 				streamError: undefined,
 				task: mockCline,
 				abortCleanup: () => {},
