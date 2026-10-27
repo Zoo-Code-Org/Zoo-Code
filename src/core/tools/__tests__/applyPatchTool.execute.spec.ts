@@ -125,6 +125,20 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 		tool = new ApplyPatchTool()
 	})
 
+	afterEach(() => {
+		// vi.clearAllMocks() keeps implementations, so a test that swaps realpath/lstat
+		// or records lock keys must not leak those implementations into later tests
+		// (e.g. the symlink referent mapping would otherwise break the plain-source test).
+		mockedFsPromises.default.realpath.mockImplementation(async (p: unknown) => String(p))
+		mockedFsPromises.default.lstat.mockImplementation(async () => ({ isSymbolicLink: () => false }))
+		mockedFsPromises.default.readlink.mockImplementation(async () => {
+			throw new Error("not a symbolic link")
+		})
+		vi.mocked(withFileLock).mockImplementation(
+			async (filePath: string, operation: (p: string) => Promise<void>) => operation(filePath),
+		)
+	})
+
 	it("deletes the file and records no local tool usage on success", async () => {
 		const patch = `*** Begin Patch
 *** Delete File: src/obsolete.ts
@@ -778,6 +792,30 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		// the lock a peer could stage a write to the source between the version
 		// check and the unlink.
 		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		const heldKeys: string[] = []
+		let statUnderLock = false
+		vi.mocked(withFileLock).mockImplementation(async (filePath: string, operation: (p: string) => Promise<void>) => {
+			heldKeys.push(String(filePath))
+			try {
+				return await operation(filePath)
+			} finally {
+				heldKeys.length = 0
+			}
+		})
+		const statImpl = mockedFsPromises.default.stat.getMockImplementation()
+		mockedFsPromises.default.stat.mockImplementation(async (p: unknown) => {
+			if (String(p) === sourceKey && heldKeys.includes(sourceKey)) {
+				statUnderLock = true
+			}
+			return statImpl ? statImpl(p) : undefined
+		})
+		const unlinkImpl = mockedFsPromises.default.unlink.getMockImplementation()
+		mockedFsPromises.default.unlink.mockImplementation(async (p: unknown) => {
+			// Assertion placed inside the call: a deletion moved outside the lock would
+			// fail here instead of passing on post-execution argument checks alone.
+			expect(heldKeys).toContain(sourceKey)
+			return unlinkImpl ? unlinkImpl(p) : undefined
+		})
 
 		await tool.execute({ patch: movePatch }, mockTask as Task, {
 			askApproval: mockAskApproval,
@@ -791,6 +829,8 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		// Exact key, not a suffix match: a key such as /elsewhere/old.ts would have
 		// satisfied the old assertion while serializing the wrong path.
 		expect(lockKeys).toContain(sourceKey)
+		// The source lock was held while the guarded deletion stat'd and unlinked the source.
+		expect(statUnderLock).toBe(true)
 		// The source name is what the deletion names; nothing else may be unlinked.
 		expect(mockedFsPromises.default.unlink).toHaveBeenCalledWith(sourceKey)
 		for (const call of mockedFsPromises.default.unlink.mock.calls) {
@@ -812,6 +852,29 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		mockedFsPromises.default.readlink.mockImplementation(async (p: unknown) => {
 			if (String(p) === sourceKey) return "real/old.ts"
 			throw new Error("not a symbolic link")
+		})
+		const heldKeys: string[] = []
+		let statUnderLock = false
+		vi.mocked(withFileLock).mockImplementation(async (filePath: string, operation: (p: string) => Promise<void>) => {
+			heldKeys.push(String(filePath))
+			try {
+				return await operation(filePath)
+			} finally {
+				heldKeys.length = 0
+			}
+		})
+		const statImpl = mockedFsPromises.default.stat.getMockImplementation()
+		mockedFsPromises.default.stat.mockImplementation(async (p: unknown) => {
+			if (String(p) === sourceKey && heldKeys.includes(referentKey)) {
+				statUnderLock = true
+			}
+			return statImpl ? statImpl(p) : undefined
+		})
+		const unlinkImpl = mockedFsPromises.default.unlink.getMockImplementation()
+		mockedFsPromises.default.unlink.mockImplementation(async (p: unknown) => {
+			// The referent lock must be held while the named source path is unlinked.
+			expect(heldKeys).toContain(referentKey)
+			return unlinkImpl ? unlinkImpl(p) : undefined
 		})
 		// The referent is a distinct path: resolvePublishTarget follows the link, so
 		// resolveLockKey returns the referent key the lock must use.
@@ -835,6 +898,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		// the source path this move asked to remove.
 		const lockKeys = vi.mocked(withFileLock).mock.calls.map((call) => String(call[0]))
 		expect(lockKeys).toContain(referentKey)
+		expect(statUnderLock).toBe(true)
 		const unlinked = mockedFsPromises.default.unlink.mock.calls.map((call) => String(call[0]))
 		expect(unlinked).toContain(sourceKey)
 		expect(unlinked).not.toContain(referentKey)
