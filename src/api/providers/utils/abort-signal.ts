@@ -5,6 +5,19 @@
  * native AbortSignal.timeout() API, which self-manages its timer — callers do
  * not need to (and cannot) clear it manually.
  */
+/** A timeout is usable when it is finite and positive (SDKs treat 0 as immediate abort). */
+export function hasUsableTimeout(timeoutMs?: number): timeoutMs is number {
+	return typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
+}
+
+/** Maximum delay a Node timer (and therefore an SDK timeout option) accepts. */
+export const MAX_TIMEOUT_MS = 2_147_483_647
+
+/** Convert a validated timeout to the value forwarded to an SDK: round up fractions, cap at the max delay. */
+export function toSdkTimeoutMs(timeoutMs: number): number {
+	return Math.min(Math.max(1, Math.ceil(timeoutMs)), MAX_TIMEOUT_MS)
+}
+
 export function mergeAbortSignalAndTimeout(externalSignal?: AbortSignal, timeoutMs?: number): AbortSignal | undefined {
 	const hasTimeout = typeof timeoutMs === "number" && timeoutMs > 0
 

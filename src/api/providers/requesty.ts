@@ -30,6 +30,8 @@ import type {
 import { toRequestyServiceUrl } from "../../shared/utils/requesty"
 import { handleOpenAIError } from "./utils/error-handler"
 import {
+	hasUsableTimeout,
+	toSdkTimeoutMs,
 	createAbortError,
 	isRequestAborted,
 	mergeAbortSignalAndTimeout,
@@ -268,7 +270,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 		// to the SDK timeout.
 		const createOptions: OpenAI.RequestOptions = {
 			...(requestAbortSignal && { signal: requestAbortSignal }),
-			...(typeof options?.timeoutMs === "number" && options.timeoutMs > 0 && { timeout: options.timeoutMs }),
+			...(hasUsableTimeout(options?.timeoutMs) && { timeout: toSdkTimeoutMs(options.timeoutMs) }),
 		}
 
 		let response: OpenAI.Chat.ChatCompletion
