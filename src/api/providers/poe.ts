@@ -231,11 +231,16 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		const { id } = this.getModel()
-		// Merge the caller's abort signal with the per-request timeout (timeoutMs <= 0 disables it).
-		// A caller-supplied timeout wins; otherwise fall back to the configured request
-		// timeout. An explicit non-positive timeoutMs still means "disabled", so the
-		// fallback must not resurrect it.
-		const mergedAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs ?? this.timeoutMs)
+		// Backward compatible with callers that pass no options: only a caller-supplied timeout
+		// bounds the request (timeoutMs <= 0 disables it). The configured provider request timeout
+		// is NOT applied here, matching the pre-PR behavior of this method.
+		const callerAbortSignal = options?.abortSignal
+		const mergedAbortSignal = mergeAbortSignalAndTimeout(callerAbortSignal, options?.timeoutMs)
+		const timeoutError = () => {
+			const error = new Error("The Poe completion request timed out")
+			error.name = "TimeoutError"
+			return error
+		}
 		try {
 			const { text } = await generateText({
 				model: this.poe(id),
@@ -245,15 +250,23 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 
 			if (mergedAbortSignal?.aborted) {
 				// The response resolved after the request was aborted: do not return the late result.
-				// Stryker disable next-line StringLiteral: this late-result error is always caught by the catch below, which rethrows the canonical abort error while the signal is still aborted, so the message built here is never observable
-				throw createAbortError("Poe")
+				// A caller abort and a timeout are classified distinctly so retries/UI can tell them apart.
+				if (callerAbortSignal?.aborted) {
+					throw createAbortError("Poe")
+				}
+				throw timeoutError()
 			}
 			return text
 		} catch (error) {
-			// Aborted requests are user-initiated: surface them as AbortError (this also covers
-			// timeouts, which abort the same signal) instead of a completion error.
-			if (mergedAbortSignal?.aborted) {
+			// A caller abort is user-initiated: surface it as the contract AbortError and do not
+			// report it as a provider failure. A per-request timeout that the caller's signal did
+			// not cause is surfaced as the distinct TimeoutError (the series contract), also
+			// without a telemetry capture.
+			if (callerAbortSignal?.aborted) {
 				throw createAbortError("Poe")
+			}
+			if (mergedAbortSignal?.aborted) {
+				throw timeoutError()
 			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			TelemetryService.instance.captureException(

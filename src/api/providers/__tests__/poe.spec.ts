@@ -262,6 +262,7 @@ describe("PoeHandler", () => {
 			})
 			// Fail fast before any model lookup: no API work happens once the signal is aborted.
 			expect(mockGetModelsFromCache).not.toHaveBeenCalled()
+			expect(mockCaptureException).not.toHaveBeenCalled()
 		})
 
 		it("aborts the in-flight stream and rejects with AbortError when the external signal aborts", async () => {
@@ -310,6 +311,7 @@ describe("PoeHandler", () => {
 				name: "AbortError",
 				message: "The Poe request was aborted",
 			})
+			expect(mockCaptureException).not.toHaveBeenCalled()
 			expect(chunks).toContainEqual({ type: "text", text: "Hello " })
 		})
 
@@ -739,33 +741,22 @@ describe("PoeHandler", () => {
 
 			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
 			const callArgs = mockGenerateText.mock.calls[0][0]
-			// The configured request timeout now also bounds the call, so the signal handed to
-			// generateText is the merged one rather than the caller's own signal; the caller
-			// signal must still be able to abort it.
-			expect(callArgs.abortSignal).toBeInstanceOf(AbortSignal)
-			expect(callArgs.abortSignal).not.toBe(controller.signal)
+			// No timeout was supplied: the caller's own signal is forwarded unchanged.
+			expect(callArgs.abortSignal).toBe(controller.signal)
 			expect(callArgs.abortSignal.aborted).toBe(false)
 			controller.abort()
 			expect(callArgs.abortSignal.aborted).toBe(true)
 		})
 
-		it("applies the configured request timeout when the caller supplies no options", async () => {
+		it("does not apply a timeout when the caller supplies no options", async () => {
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
 			mockGenerateText.mockResolvedValueOnce({ text: "response" })
 
 			const result = await handler.completePrompt("test prompt")
 			expect(result).toBe("response")
-			expect(mockGenerateText).toHaveBeenCalledWith(
-				expect.objectContaining({
-					model: mockLanguageModel,
-					prompt: "test prompt",
-				}),
-			)
-			// No caller options must not mean no timeout: the configured apiRequestTimeout
-			// still bounds the request, otherwise a prompt-enhancement call can hang past it.
-			const callArgs = mockGenerateText.mock.calls[0][0]
-			expect(callArgs.abortSignal).toBeInstanceOf(AbortSignal)
-			expect(callArgs.abortSignal.aborted).toBe(false)
+			// Backward compatible: no options means no timeout and no signal, matching the
+			// pre-PR behavior (only a caller-supplied timeoutMs bounds the request).
+			expect(mockGenerateText.mock.calls[0][0]).not.toHaveProperty("abortSignal")
 		})
 
 		it("keeps an explicit non-positive timeout disabled", async () => {
@@ -818,12 +809,14 @@ describe("PoeHandler", () => {
 			// The per-request timeout is embedded in the abort signal passed to the SDK...
 			expect(callArgs.abortSignal).toBeInstanceOf(AbortSignal)
 
-			// ...and when it fires before the response settles, the provider rejects with
-			// the canonical AbortError instead of returning the late result.
+			// ...and when it fires before the response settles, the provider rejects with the
+			// distinct TimeoutError instead of returning the late result (a timeout is not a
+			// caller cancellation). It is not captured as a provider failure.
 			await expect(promise).rejects.toMatchObject({
-				name: "AbortError",
-				message: "The Poe request was aborted",
+				name: "TimeoutError",
+				message: "The Poe completion request timed out",
 			})
+			expect(mockCaptureException).not.toHaveBeenCalled()
 		})
 
 		it("completePrompt rejects with AbortError when the external signal aborts mid-flight", async () => {
@@ -856,6 +849,8 @@ describe("PoeHandler", () => {
 			})
 			// The merged signal should be aborted once the user signal aborts.
 			expect(callArgs.abortSignal.aborted).toBe(true)
+			// A cancellation is user-initiated: it must not be reported as a provider failure.
+			expect(mockCaptureException).not.toHaveBeenCalled()
 		})
 
 		it("completePrompt should handle timeoutMs=0 as no timeout", async () => {
@@ -901,6 +896,7 @@ describe("PoeHandler", () => {
 				name: "AbortError",
 				message: "The Poe request was aborted",
 			})
+			expect(mockCaptureException).not.toHaveBeenCalled()
 		})
 
 		it("passes reasoning effort to streamText via createMessage", async () => {
