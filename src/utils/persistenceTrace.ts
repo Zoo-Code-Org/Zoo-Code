@@ -18,6 +18,8 @@
 
 export type PersistenceTraceStage =
 	| "json-recovery-failed"
+	| "json-recovered"
+	| "json-cleanup-failed"
 	| "ui-messages-recovery"
 	| "ui-messages-write-start"
 	| "ui-messages-backup-rename"

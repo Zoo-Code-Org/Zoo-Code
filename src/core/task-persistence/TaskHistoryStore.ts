@@ -92,13 +92,9 @@ export class TaskHistoryStore {
 	private initializationRetryTimer: ReturnType<typeof setTimeout> | null = null
 	private resolveInitializationRetry: (() => void) | undefined
 	private initializationHealthy = false
-
-	/**
-	 * Resolves after initialization succeeds or ends in terminal failure.
-	 * Check isHealthy to distinguish readiness from an unsuccessful attempt.
-	 */
-	public readonly initialized: Promise<void>
-	private resolveInitialized!: () => void
+	private initializationActiveIds: ReadonlySet<string> | undefined
+	private migrationActiveIds: ReadonlySet<string> | undefined
+	private migrationComplete = false
 
 	/** Whether startup completed successfully with a full snapshot. */
 	get isHealthy(): boolean {
@@ -114,9 +110,6 @@ export class TaskHistoryStore {
 	constructor(globalStoragePath: string, options?: TaskHistoryStoreOptions) {
 		this.globalStoragePath = globalStoragePath
 		this.onWrite = options?.onWrite
-		this.initialized = new Promise<void>((resolve) => {
-			this.resolveInitialized = resolve
-		})
 	}
 
 	// ────────────────────────────── Lifecycle ──────────────────────────────
@@ -135,32 +128,27 @@ export class TaskHistoryStore {
 	}
 
 	private async initializeWithRetry(): Promise<void> {
-		try {
-			for (let attempt = 0; ; attempt++) {
-				try {
-					if (this.disposed) throw new Error("TaskHistoryStore was disposed during initialization")
-					await this.initializeAttempt()
-					if (this.disposed) throw new Error("TaskHistoryStore was disposed during initialization")
-					this.initializationHealthy = true
-					return
-				} catch (error) {
-					const code = getErrorCode(error)
-					const delay = TaskHistoryStore.INITIALIZATION_RETRY_DELAYS_MS[attempt]
-					if (this.disposed || (code !== "ELOCKED" && code !== "EBUSY") || delay === undefined) throw error
-					console.warn(`[TaskHistoryStore] Initialization failed with ${code}; retrying in ${delay}ms`)
-					await new Promise<void>((resolve) => {
-						this.resolveInitializationRetry = resolve
-						this.initializationRetryTimer = setTimeout(resolve, delay)
-					})
-					this.initializationRetryTimer = null
-					this.resolveInitializationRetry = undefined
-					if (this.disposed) throw error
-				}
+		for (let attempt = 0; ; attempt++) {
+			try {
+				if (this.disposed) throw new Error("TaskHistoryStore was disposed during initialization")
+				await this.initializeAttempt()
+				if (this.disposed) throw new Error("TaskHistoryStore was disposed during initialization")
+				this.initializationHealthy = true
+				this.initializationActiveIds = undefined
+				return
+			} catch (error) {
+				const code = getErrorCode(error)
+				const delay = TaskHistoryStore.INITIALIZATION_RETRY_DELAYS_MS[attempt]
+				if (this.disposed || (code !== "ELOCKED" && code !== "EBUSY") || delay === undefined) throw error
+				console.warn(`[TaskHistoryStore] Initialization failed with ${code}; retrying in ${delay}ms`)
+				await new Promise<void>((resolve) => {
+					this.resolveInitializationRetry = resolve
+					this.initializationRetryTimer = setTimeout(resolve, delay)
+				})
+				this.initializationRetryTimer = null
+				this.resolveInitializationRetry = undefined
+				if (this.disposed) throw error
 			}
-		} finally {
-			// Completion after exhaustion is distinct from a healthy snapshot.
-			// Activation can continue; callers inspect isHealthy for readiness.
-			this.resolveInitialized()
 		}
 	}
 
@@ -172,8 +160,8 @@ export class TaskHistoryStore {
 		await this.reconcile({ forceRefresh: true })
 		// Capture which active tasks were present in persisted state before replay can
 		// change any statuses. Reconciliation must not treat a replay-repaired parent
-		// as an orphaned active child in the same startup pass.
-		const persistedActiveIds = this.getPersistedActiveIds()
+		// as an orphaned active child in this process, including subsequent retries.
+		const persistedActiveIds = (this.initializationActiveIds ??= this.getPersistedActiveIds())
 
 		// 2. Complete any two-record repair interrupted after its intent was durable.
 		// Replay must succeed before repair or health publication. Lock failures
@@ -330,17 +318,7 @@ export class TaskHistoryStore {
 			this.cache.delete(taskId)
 			this.taskFileMtimes.delete(taskId)
 
-			// Remove per-task file (best-effort)
-			try {
-				const filePath = await this.getTaskFilePath(taskId)
-				await withFileLock(filePath, async (absoluteFilePath) => {
-					await removeJsonBackups(absoluteFilePath)
-					await fs.unlink(absoluteFilePath)
-				})
-			} catch (error) {
-				if (getErrorCode(error) !== "ENOENT")
-					console.warn(`[TaskHistoryStore] Failed to delete task ${taskId}:`, error)
-			}
+			await this.deleteTaskFile(taskId)
 
 			// Call onWrite callback inside the lock for serialized write-through
 			if (this.onWrite) {
@@ -362,17 +340,7 @@ export class TaskHistoryStore {
 				this.cache.delete(taskId)
 				this.taskFileMtimes.delete(taskId)
 
-				// Remove per-task file (best-effort)
-				try {
-					const filePath = await this.getTaskFilePath(taskId)
-					await withFileLock(filePath, async (absoluteFilePath) => {
-						await removeJsonBackups(absoluteFilePath)
-						await fs.unlink(absoluteFilePath)
-					})
-				} catch (error) {
-					if (getErrorCode(error) !== "ENOENT")
-						console.warn(`[TaskHistoryStore] Failed to delete task ${taskId}:`, error)
-				}
+				await this.deleteTaskFile(taskId)
 			}
 
 			// Call onWrite callback inside the lock for serialized write-through
@@ -380,6 +348,21 @@ export class TaskHistoryStore {
 				await this.onWrite(this.getAll())
 			}
 		})
+	}
+
+	private async deleteTaskFile(taskId: string): Promise<void> {
+		try {
+			const filePath = await this.getTaskFilePath(taskId)
+			await withFileLock(filePath, async (absoluteFilePath) => {
+				// If backup cleanup fails, retain the canonical copy too. Deleting it
+				// would allow a subsequent reader to restore older task state.
+				await removeJsonBackups(absoluteFilePath)
+				await fs.unlink(absoluteFilePath)
+			})
+		} catch (error) {
+			if (getErrorCode(error) !== "ENOENT")
+				console.warn(`[TaskHistoryStore] Failed to delete task ${taskId}:`, error)
+		}
 	}
 
 	// ────────────────────────────── Reconciliation ──────────────────────────────
@@ -878,13 +861,19 @@ export class TaskHistoryStore {
 	 *
 	 * For each entry in the globalState array, writes a `history_item.json`
 	 * file if one doesn't already exist. This is idempotent and safe to re-run.
+	 * commitMigration persists the caller's completion marker under the store
+	 * lock after repairs; it must not re-enter this store.
 	 */
-	async migrateFromGlobalState(taskHistoryEntries: HistoryItem[]): Promise<void> {
+	async migrateFromGlobalState(
+		taskHistoryEntries: HistoryItem[],
+		commitMigration?: () => Promise<void>,
+	): Promise<void> {
 		if (!taskHistoryEntries || taskHistoryEntries.length === 0) {
 			return
 		}
 
 		await this.withLock(async () => {
+			if (this.migrationComplete) return
 			const tasksDir = await this.getTasksDir()
 
 			for (const item of taskHistoryEntries) {
@@ -916,7 +905,12 @@ export class TaskHistoryStore {
 
 			// Repair any delegation inconsistencies introduced by the migrated entries.
 			// Run the lock-free core because migration already holds the store lock.
-			await this.reconcileDelegationStateCore(this.getPersistedActiveIds())
+			await this.reconcileDelegationStateCore((this.migrationActiveIds ??= this.getPersistedActiveIds()))
+			// Marker persistence is part of the migration epoch. A failed marker write
+			// must retain this snapshot for the provider's next explicit retry.
+			await commitMigration?.()
+			this.migrationActiveIds = undefined
+			this.migrationComplete = true
 		})
 	}
 

@@ -193,6 +193,7 @@ async function recoverInterruptedReplacementUnchecked(
 			// In particular, a merge must never observe null in this state.
 			await restoreBackup(newestBackupPath, absoluteFilePath)
 			restoredFrom = newestBackupPath
+			tracePersistenceEvent("json-recovered", { filePath: absoluteFilePath })
 		}
 	}
 
@@ -200,6 +201,10 @@ async function recoverInterruptedReplacementUnchecked(
 		try {
 			await fs.unlink(orphanPath)
 		} catch (cleanupError) {
+			tracePersistenceEvent("json-cleanup-failed", {
+				filePath: absoluteFilePath,
+				detail: getErrorCode(cleanupError) ?? "IO_ERROR",
+			})
 			console.error(`Failed to clean up interrupted-write leftover ${orphanPath}:`, cleanupError)
 		}
 	}
@@ -213,7 +218,7 @@ async function withRecoveryTrace<T>(absoluteFilePath: string, operation: () => P
 	} catch (error) {
 		tracePersistenceEvent("json-recovery-failed", {
 			filePath: absoluteFilePath,
-			detail: getErrorCode(error) ?? String(error),
+			detail: getErrorCode(error) ?? "IO_ERROR",
 		})
 		throw error
 	}
@@ -271,12 +276,12 @@ export async function removeJsonBackups(absoluteFilePath: string): Promise<void>
  * - Supports pretty-printing with indentation while maintaining streaming efficiency.
  *
  * @param {string} filePath - The absolute path to the target file.
- * @param {any} data - The data to serialize to JSON and write.
+ * @param {unknown} data - The data to serialize to JSON and write.
  * @param {SafeWriteJsonOptions} options - Optional configuration for JSON formatting.
  * @returns {Promise<void>}
  */
 
-async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJsonOptions): Promise<void> {
+async function safeWriteJson(filePath: string, data: unknown, options?: SafeWriteJsonOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 	let releaseLock = async () => {} // Initialized to a no-op
 
@@ -290,7 +295,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		// Verify directory exists after creation attempt
 		await fs.access(dirPath)
-	} catch (dirError: any) {
+	} catch (dirError) {
 		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
 		throw dirError
 	}
@@ -316,7 +321,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		const recovery = await withRecoveryTrace(absoluteFilePath, () =>
 			recoverInterruptedReplacementUnchecked(absoluteFilePath),
 		).catch((error: unknown) => {
-			notifyTrace(options?.trace, { stage: "recover", detail: `failed: ${getErrorCode(error) ?? String(error)}` })
+			notifyTrace(options?.trace, { stage: "recover", detail: `failed: ${getErrorCode(error) ?? "IO_ERROR"}` })
 			throw error
 		})
 		if (recovery.foundLeftovers) {
@@ -451,7 +456,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
  * @param prettyPrint Whether to format the JSON with indentation.
  * @returns Promise<void>
  */
-async function _streamDataToFile(targetPath: string, data: any, prettyPrint = false): Promise<void> {
+async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint = false): Promise<void> {
 	// Stream data to avoid high memory usage for large JSON objects.
 	const fileWriteStream = fsSync.createWriteStream(targetPath, { encoding: "utf8" })
 

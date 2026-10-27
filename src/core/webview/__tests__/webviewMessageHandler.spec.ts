@@ -119,6 +119,7 @@ const mockClineProvider = {
 		globalStorageUri: { fsPath: "/mock/global/storage" },
 	},
 	contextProxy: {
+		globalStorageUri: { fsPath: "/mock/global/storage" },
 		context: {
 			extensionPath: "/mock/extension/path",
 			globalStorageUri: { fsPath: "/mock/global/storage" },
@@ -3064,5 +3065,42 @@ describe("webviewMessageHandler - renameTaskWithId", () => {
 		await webviewMessageHandler(mockClineProvider, { type: "renameTaskWithId", ...payload })
 
 		expect(vi.mocked(mockClineProvider.renameTaskWithId).mock.calls).toEqual(expectedCalls)
+	})
+})
+
+describe("debug history recovery boundary", () => {
+	it.each(
+		(["openDebugApiHistory", "openDebugUiHistory"] as const).flatMap((type) =>
+			(["available", "ENOENT", "ELOCKED"] as const).map((outcome) => ({ type, outcome })),
+		),
+	)("uses recovery for $type with $outcome", async ({ type, outcome }) => {
+		const { webviewMessageHandler: handle } = await import("../webviewMessageHandler")
+		const storage = await import("../../../utils/storage")
+		const reader = await import("../../task-persistence/readFileWithMissingRetry")
+		const directory = vi.spyOn(storage, "getTaskDirectoryPath").mockResolvedValue("/mock/task")
+		const read = vi.spyOn(reader, "readFileWithMissingRetry")
+		// This debug-history action reads only taskId from the active Task.
+		const task = { taskId: "debug-history" } as import("../../task/Task").Task
+		const current = vi.spyOn(mockClineProvider, "getCurrentTask").mockReturnValue(task)
+		vi.mocked(fs.writeFile).mockClear()
+		vi.mocked(vscode.window.showErrorMessage).mockClear()
+		if (outcome === "available") read.mockResolvedValue("[]")
+		else read.mockRejectedValue(Object.assign(new Error(outcome), { code: outcome }))
+		try {
+			await handle(mockClineProvider, { type })
+			const file = type === "openDebugApiHistory" ? "api_conversation_history.json" : "ui_messages.json"
+			expect(read).toHaveBeenCalledWith(path.join("/mock/task", file))
+			if (outcome === "available") expect(fs.writeFile).toHaveBeenCalled()
+			else {
+				expect(fs.writeFile).not.toHaveBeenCalled()
+				expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+					outcome === "ENOENT" ? `File not found: ${file}` : "Failed to open debug history: ELOCKED",
+				)
+			}
+		} finally {
+			directory.mockRestore()
+			read.mockRestore()
+			current.mockRestore()
+		}
 	})
 })

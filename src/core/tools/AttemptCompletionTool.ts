@@ -26,7 +26,10 @@ export interface AttemptCompletionCallbacks extends ToolCallbacks {
  */
 interface DelegationProvider {
 	log(message: string): void
-	getTaskWithId(id: string): Promise<{ historyItem: HistoryItem }>
+	getTaskWithId(
+		id: string,
+		options?: { includeApiConversationHistory?: boolean },
+	): Promise<{ historyItem: HistoryItem }>
 	setPendingTaskAction(taskId: string, pendingAction: PendingTaskAction): Promise<void>
 	clearPendingTaskAction(taskId: string, actionId: string): Promise<boolean>
 	emitDelegatedTaskCompleted(
@@ -110,7 +113,9 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 				if (provider) {
 					let historyLookupTaskId = task.taskId
 					try {
-						const { historyItem } = await provider.getTaskWithId(task.taskId)
+						const { historyItem } = await provider.getTaskWithId(task.taskId, {
+							includeApiConversationHistory: false,
+						})
 						const status = historyItem?.status
 
 						if (status === "completed") {
@@ -121,7 +126,9 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 							isStaleHistoryReplay = true
 						} else if (status === "active" || status === "interrupted") {
 							historyLookupTaskId = task.parentTaskId
-							const { historyItem: parentHistory } = await provider.getTaskWithId(task.parentTaskId)
+							const { historyItem: parentHistory } = await provider.getTaskWithId(task.parentTaskId, {
+								includeApiConversationHistory: false,
+							})
 
 							if (
 								(parentHistory?.status === "delegated" || parentHistory?.status === "active") &&

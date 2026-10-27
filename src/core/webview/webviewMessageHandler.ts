@@ -1,3 +1,4 @@
+import { getErrorCode, readFileWithMissingRetry } from "../task-persistence/readFileWithMissingRetry"
 import { safeWriteJson } from "../../utils/safeWriteJson"
 import * as path from "path"
 import * as os from "os"
@@ -4086,14 +4087,14 @@ export const webviewMessageHandler = async (
 					message.type === "openDebugApiHistory" ? "api_conversation_history.json" : "ui_messages.json"
 				const sourceFilePath = path.join(taskDirPath, fileName)
 
-				// Check if file exists
-				if (!(await fileExistsAtPath(sourceFilePath))) {
+				let content: string
+				try {
+					content = await readFileWithMissingRetry(sourceFilePath)
+				} catch (error) {
+					if (getErrorCode(error) !== "ENOENT") throw error
 					vscode.window.showErrorMessage(`File not found: ${fileName}`)
 					break
 				}
-
-				// Read the source file
-				const content = await fs.readFile(sourceFilePath, "utf8")
 				let jsonContent: unknown
 
 				try {

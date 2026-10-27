@@ -6,7 +6,7 @@ Zoo Code checks task lifecycle protocols through one umbrella command for indepe
 pnpm lifecycle:model-check
 ```
 
-The baseline command runs nine independent bounded checks in sequence:
+The baseline command runs ten independent bounded checks in sequence:
 
 1. the persisted task delegation lifecycle;
 2. shared-store concurrency across task-history hosts;
@@ -15,8 +15,9 @@ The baseline command runs nine independent bounded checks in sequence:
 5. request-stream parser scoping;
 6. completion persistence;
 7. delegated-mode reader refinement;
-8. tool-turn continuation; and
-9. production JSON replacement crash points.
+8. tool-turn continuation;
+9. production JSON replacement crash points; and
+10. production task-history initialization retries.
 
 The planned two-sibling fan-out protocol is intentionally outside the baseline and CI umbrella. Run it explicitly with `pnpm fanout-protocol:model-check`; it describes optional future functionality, not current production coverage.
 
@@ -102,6 +103,7 @@ A failed refresh keeps the last cached record.
 Initialization retries only `ELOCKED` and `EBUSY`.
 It uses one timeout chain with delays of 1, 2, 4, 8, 8, and 8 seconds.
 Each retry repeats the full scan before delegation repair.
+The active-task snapshot from the first complete scan is preserved across retries, including an explicit retry after terminal failure, so this process’s repairs are not reclassified as crash evidence. Successful initialization clears the snapshot.
 Replay and repair failures propagate through the same retry policy.
 An intent read error is not treated as malformed JSON.
 Lock acquisition has separate retries, which add time to this sequence.
@@ -112,15 +114,18 @@ Disposal cancels a pending retry.
 
 `initialize()` rejects after a persistent error or exhausted retries.
 The provider therefore skips legacy migration after initialization failure.
-`initialized` resolves after success or terminal failure.
 `isHealthy` is true only after a successful attempt.
 Webview state publication does not wait for this attempt.
-It uses legacy history while the store is unhealthy, or omits history when requested.
+It uses legacy history until both store initialization and legacy migration succeed, or omits history when requested.
 The provider posts fresh state after successful initialization.
 
 Activation can continue after terminal failure.
 The cache can remain incomplete, and observers do not start.
-The provider logs the error.
+The provider logs the error code, stack, degraded legacy mode, and the retry behavior.
+Explicit open, export, delete, and cost queries wait for pending provider initialization, or start another attempt after a terminal failure. Runtime metadata reads return an already-cached task immediately, so cancellation, completion, and delegation do not wait for unrelated startup recovery.
+A failed attempt reports unavailable history rather than a missing task.
+Metadata-only cost, open, and delete operations do not load API conversation history.
+Migration retains its original active-task snapshot across explicit retries and clears it after successful repair and persistence of the migration-complete marker. A marker write failure retains the snapshot for the next retry. State-publication errors do not change history readiness, and disposal does not log a degraded-history warning.
 A persistent warning and manual retry action are tracked in [#2179](https://github.com/Zoo-Code-Org/Zoo-Code/issues/2179).
 
 ### Tests and model limits
@@ -128,6 +133,8 @@ A persistent warning and manual retry action are tracked in [#2179](https://gith
 `TaskHistoryStore.recovery.spec.ts` checks startup, reconciliation, invalidation, failed restores, fresh locks, and stale-lock recovery.
 `TaskHistoryStore.initialization.spec.ts` checks retries, persistent failures, shared initialization, health state, and disposal.
 These tests use temporary files or controlled timers.
+The initialization suite also commits a nested-child repair, injects a later retryable write failure, and verifies that the retry preserves the repaired parent as active on disk.
+The task-history initialization checker below explores nested delegation repair and same-process retries through production code. The persisted reducer and JSON replacement crash models retain their separate scopes.
 
 This boundary controls which records reach the lifecycle reducers.
 It does not change their transitions.
@@ -334,6 +341,7 @@ The baseline records stream, filesystem, and advisory-lock calls.
 Recovery also records descriptor opens, stat, reads, writes, and closes.
 Recovery copies a validated regular backup into a new temporary file before commit.
 The original backup remains available across failed copies and interrupted commits.
+After the restore rename succeeds, leftover cleanup removes the backup before an incoming write commits.
 Each recorded call gets a SIGKILL before and after it.
 Each call also gets one injected EPERM, EBUSY, EACCES, or EIO error.
 Each resulting state gets four isolated follow-ups: read, write, delete, and cold initialization.
@@ -370,15 +378,17 @@ Deletion follow-ups run without injected faults.
 The best-effort delete API can resolve after an I/O failure; this check does not strengthen that contract.
 
 The bounds are seven baseline scenarios, 128 filesystem calls per execution, and 2,000 injected cases.
+Backup-recovery seeds include an incomplete `.new_` file, multiple backups, and committed JSON larger than 64 KiB. The newer-canonical scenario combines these leftovers with an existing canonical record.
 Budget exhaustion fails the command.
 A violation prints the observed trace through the first failing boundary.
 This prefix is replayable, but it is not a shortest interleaving counterexample.
-Four source mutations must fail with their named invariants:
+Five source mutations must fail with their named invariants:
 
 - Swallowing a failed backup restore must violate backup preservation, invariant 2.
 - Omitting backup removal from deletion must violate no resurrection, invariant 4.
 - Ignoring an existing canonical file during reader recovery must violate reader preservation, invariant 6.
 - Swallowing a replay I/O failure must violate initialization integrity, invariant 5.
+- Selecting the oldest backup must violate backup preservation, invariant 2; backup seeds carry distinct committed payloads.
 
 The cold-start oracle requires injected non-retryable intent read errors to reject initialization.
 Checking only rejected attempts would miss a swallowed error followed by false health.
@@ -391,3 +401,19 @@ It also excludes crash combinations with additional replay-injected faults beyon
 It also excludes native Windows open-handle semantics and power-loss durability.
 The existing subprocess SIGKILL tests and extension-host restart tests remain separate checks.
 See the [JSON persistence contract](./json-persistence-audit.md) for caller coverage and remaining gaps.
+
+## Task-history initialization retry check
+
+The CI lifecycle-check step has a ten-minute timeout.
+
+`pnpm history-initialization:model-check` runs a bounded production-backed exploration and its mutation test. It is included in `pnpm lifecycle:model-check`.
+
+The harness bundles `TaskHistoryStore`, substitutes the VS Code storage-path adapter, and sets the six retry delays to zero without changing retry count or control flow. Each execution uses a fresh store and real temporary files. It enumerates all 24 scan orders for a grandparent awaiting a delegated parent, that parent awaiting an active child, and an independent invalid delegation. Three initial states enter ordinary repair, replay of a durable repair intent, or legacy migration into initially empty task directories. Migration exercises explicit caller retries through its public entry point; the provider tests cover the caller orchestration.
+
+Each order runs without faults and with `ELOCKED` or `EBUSY` injected before or after each of the three task-file writes. Before-write failures repeat once or twice; after-write failures occur once, after the real write has committed but before its caller receives the result. The complete bound is 1,368 executions, at most eight task-file write attempts per execution, and at most two injected retries. Every scheduled fault and resulting retry must be reached. Losing a scenario or exceeding a bound fails the check.
+
+The invariant requires healthy initialization, exact expected disk records, matching cache records, and removal of the completed repair intent. In particular, the recovered parent stays active and its grandparent keeps the delegation to it. A failure prints the scenario, scan order, fault schedule, scans, attempted writes, and committed writes. This trace is deterministic and replayable, but is not a shortest-state counterexample.
+
+The `resnapshot-active` source mutation restores the original startup bug by recomputing the active-task snapshot on every attempt. The mutation test must fail with the initialization invariant after a committed parent repair and a second scan. The `resnapshot-migration` mutation removes the corresponding migration snapshot guard and must fail after a committed parent repair and a second migration attempt. These checks demonstrate that the checker detects both regressions rather than merely accepting the current implementation.
+
+This check exhausts only the declared orders and fault schedules. It does not prove concurrent-host behavior, process crashes, arbitrary task graphs, wall-clock backoff, or arbitrary-length failures. The JSON crash campaign and persisted reducer models cover separate boundaries.

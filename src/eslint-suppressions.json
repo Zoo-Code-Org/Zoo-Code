@@ -1039,11 +1039,6 @@
 			"count": 3
 		}
 	},
-	"core/webview/__tests__/diagnosticsHandler.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
-		}
-	},
 	"core/webview/__tests__/messageEnhancer.test.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 8
@@ -1677,11 +1672,6 @@
 	"utils/export.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
-		}
-	},
-	"utils/safeWriteJson.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
 		}
 	},
 	"vitest.setup.ts": {

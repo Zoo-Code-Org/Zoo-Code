@@ -186,7 +186,7 @@ function value(cost: number) {
 		id: "child",
 		number: 1,
 		ts: 1,
-		task: "child",
+		task: cost === 0 ? "child-" + "x".repeat(70 * 1024) : "child",
 		tokensIn: 0,
 		tokensOut: 0,
 		totalCost: cost,
@@ -216,6 +216,9 @@ function seed(root: string, mode: Mode | "delete") {
 		fs.writeFileSync(path.join(root, relativeCanonical), encoded[mode === "newer" ? 1 : 0])
 	if (["restore", "read", "cold", "newer", "delete"].includes(mode)) {
 		fs.writeFileSync(path.join(root, "tasks", "child", ".history_item.json.bak_seed.tmp"), encoded[0])
+		const older = path.join(root, "tasks", "child", ".history_item.json.bak_older.tmp")
+		fs.writeFileSync(older, JSON.stringify({ ...value(0), ts: 0, task: "older committed history" }))
+		fs.utimesSync(older, new Date(1_000), new Date(1_000))
 		fs.writeFileSync(path.join(root, "tasks", "child", ".history_item.json.new_seed.tmp"), '{"partial":')
 	}
 }
@@ -344,6 +347,16 @@ async function bundleAt(destination: string, mutation?: string) {
 									"/* mutation: omit backup removal */",
 								)
 							}
+							if (mutation === "oldest-backup-first" && args.path.endsWith("safeWriteJson.ts")) {
+								const original = "b.mtimeMs - a.mtimeMs || b.backupPath.localeCompare(a.backupPath)"
+								assert(source.includes(original), "Backup selection mutation anchor changed")
+								source = source.replace(
+									original,
+									"a.mtimeMs - b.mtimeMs || a.backupPath.localeCompare(b.backupPath)",
+								)
+								applied = true
+							}
+
 							if (mutation === "swallowed-replay-error" && args.path.endsWith("TaskHistoryStore.ts")) {
 								const original = "await this.replayDelegationRepairIntent()"
 								assert(source.includes(original), "Replay mutation anchor changed")
@@ -510,6 +523,11 @@ async function main() {
 			await runCase(bundle, path.join(work, "replay-mutant"), "cold", { step: read.n, kind: "EIO" })
 			throw new Error("Replay mutant survived")
 		}
+		if (mutation === "oldest-backup-first") {
+			await runCase(bundle, path.join(work, "oldest-backup-mutant"), "restore")
+			throw new Error("Oldest-backup mutant survived")
+		}
+
 		assert(!mutation, "Unknown mutation")
 		const workers = Number(process.env.JSON_REPLACEMENT_WORKERS ?? 4)
 		assert(

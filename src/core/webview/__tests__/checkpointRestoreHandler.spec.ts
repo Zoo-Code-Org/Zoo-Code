@@ -188,7 +188,9 @@ describe("checkpointRestoreHandler", () => {
 			})
 
 			// Verify getTaskWithId was called
-			expect(mockProvider.getTaskWithId).toHaveBeenCalledWith("test-task-123")
+			expect(mockProvider.getTaskWithId).toHaveBeenCalledWith("test-task-123", {
+				includeApiConversationHistory: false,
+			})
 
 			// Verify createTaskWithHistoryItem was called with the correct history item
 			expect(mockProvider.createTaskWithHistoryItem).toHaveBeenCalledWith(expectedHistoryItem)

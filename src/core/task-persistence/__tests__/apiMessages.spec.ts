@@ -4,10 +4,12 @@ import * as os from "os"
 import * as path from "path"
 import * as fs from "fs/promises"
 
-const hoisted = vi.hoisted(() => ({ readFileMock: vi.fn() }))
+const hoisted = vi.hoisted(() => ({ readFileMock: vi.fn(), renameMock: vi.fn(), unlinkMock: vi.fn() }))
 vi.mock("fs/promises", async (importOriginal) => ({
 	...(await importOriginal<typeof import("fs/promises")>()),
 	readFile: hoisted.readFileMock,
+	rename: hoisted.renameMock,
+	unlink: hoisted.unlinkMock,
 }))
 
 import { readApiMessages, saveApiMessages } from "../apiMessages"
@@ -17,6 +19,8 @@ let tmpBaseDir: string
 beforeEach(async () => {
 	const actualFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
 	hoisted.readFileMock.mockReset().mockImplementation(actualFs.readFile)
+	hoisted.renameMock.mockReset().mockImplementation(actualFs.rename)
+	hoisted.unlinkMock.mockReset().mockImplementation(actualFs.unlink)
 	tmpBaseDir = await fs.mkdtemp(path.join(os.tmpdir(), "roo-test-api-"))
 })
 
@@ -96,6 +100,23 @@ describe("apiMessages.readApiMessages", () => {
 		await expect(readApiMessages({ taskId, globalStoragePath: tmpBaseDir })).resolves.toEqual(legacyMessages)
 		await expect(fs.readFile(currentPath, "utf8").then(JSON.parse)).resolves.toEqual(legacyMessages)
 		await expect(fs.access(oldPath)).rejects.toMatchObject({ code: "ENOENT" })
+	})
+
+	it.each(["write", "unlink"])("preserves the legacy source when migration %s fails", async (operation) => {
+		const taskId = "failed-legacy-migration"
+		const taskDir = path.join(tmpBaseDir, "tasks", taskId)
+		await fs.mkdir(taskDir, { recursive: true })
+		const legacy = path.join(taskDir, "claude_messages.json")
+		const current = path.join(taskDir, "api_conversation_history.json")
+		const messages = [{ role: "user", content: "committed" }]
+		await fs.writeFile(legacy, JSON.stringify(messages))
+		const error = Object.assign(new Error("migration failed"), { code: "EIO" })
+		if (operation === "write") hoisted.renameMock.mockRejectedValueOnce(error)
+		else hoisted.unlinkMock.mockRejectedValueOnce(error)
+		await expect(readApiMessages({ taskId, globalStoragePath: tmpBaseDir })).rejects.toThrow()
+		expect(JSON.parse(await fs.readFile(legacy, "utf8"))).toEqual(messages)
+		if (operation === "write") await expect(fs.access(current)).rejects.toMatchObject({ code: "ENOENT" })
+		else expect(JSON.parse(await fs.readFile(current, "utf8"))).toEqual(messages)
 	})
 
 	it("retries one transient missing-file read", async () => {

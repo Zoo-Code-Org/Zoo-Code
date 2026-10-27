@@ -3,7 +3,6 @@ import fs from "node:fs"
 import path from "node:path"
 import { describe, it } from "node:test"
 import { fileURLToPath } from "node:url"
-import ts from "typescript"
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const workflow = fs.readFileSync(path.join(repositoryRoot, ".github/workflows/code-qa.yml"), "utf8")
@@ -138,39 +137,10 @@ describe("Knip quality gate", () => {
 	})
 })
 
-describe("restart artifact privacy gate", () => {
-	it("compiles the artifact tests without extension-host suites or workspace build dependencies", () => {
-		const appRoot = path.join(repositoryRoot, "apps/vscode-e2e")
-		const manifest = JSON.parse(fs.readFileSync(path.join(appRoot, "package.json"), "utf8"))
-		assert.match(manifest.scripts["test:restart-artifacts"], /tsc -p tsconfig\.restart-artifacts\.json/)
-		const config = ts.readConfigFile(path.join(appRoot, "tsconfig.restart-artifacts.json"), ts.sys.readFile)
-		assert.equal(config.error, undefined)
-		const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, appRoot)
-		assert.deepEqual(parsed.errors, [])
-		assert.deepEqual(
-			parsed.fileNames.map((file) => path.resolve(file)),
-			[path.join(appRoot, "src/restart/scenarioWorkspace.test.ts")],
-		)
-		const program = ts.createProgram(parsed.fileNames, parsed.options)
-		const restartRoot = path.join(appRoot, "src/restart") + path.sep
-		const workspaceRoot = path.join(repositoryRoot, "packages") + path.sep
-		for (const source of program.getSourceFiles()) {
-			const sourcePath = path.resolve(source.fileName)
-			assert.ok(!sourcePath.startsWith(workspaceRoot), `Unexpected workspace dependency: ${sourcePath}`)
-			if (!source.isDeclarationFile) {
-				assert.ok(sourcePath.startsWith(restartRoot), `Unexpected application source: ${sourcePath}`)
-			}
-		}
-	})
-
-	it("runs the package-local artifact tests in the compile job on pull requests", () => {
-		const compile = workflow.match(/\n    compile:\n(?<body>[\s\S]*?)\n    [a-z-]+:/)?.groups?.body
-		assert.ok(compile, "missing compile job")
-		assert.match(compile, /name: Test restart artifact sanitization/)
-		assert.match(
-			workflowStep("Test restart artifact sanitization"),
-			/run: pnpm --filter @roo-code\/vscode-e2e test:restart-artifacts\s*$/,
-		)
-		assert.doesNotMatch(workflowStep("Test restart artifact sanitization"), /continue-on-error|if:/)
+describe("lifecycle verification timeout", () => {
+	it("gives the bounded check suite an explicit ten-minute budget", () => {
+		const step = workflowStep("Model-check task lifecycle protocols")
+		assert.match(step, /timeout-minutes: 10/)
+		assert.match(step, /run: pnpm lifecycle:model-check/)
 	})
 })

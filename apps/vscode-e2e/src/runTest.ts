@@ -21,11 +21,7 @@ import { addSearchFilesResultFixtures } from "./fixtures/search-files"
 import { addSubtaskFixtures } from "./fixtures/subtasks"
 import { addUseMcpToolResultFixtures } from "./fixtures/use-mcp-tool"
 import { addWriteToFileResultFixtures } from "./fixtures/write-to-file"
-import {
-	createScenarioWorkspace,
-	preserveScenarioWorkspaceForRunner,
-	removeScenarioWorkspace,
-} from "./restart/scenarioWorkspace"
+import { createScenarioWorkspace, removeScenarioWorkspace } from "./restart/scenarioWorkspace"
 import { runRestartScenario } from "./restart/vscodeCoordinator"
 
 function getCliFlagValue(flag: string) {
@@ -99,7 +95,6 @@ async function main() {
 
 	let testWorkspace: string | undefined
 	let scenarioWorkspace: Awaited<ReturnType<typeof createScenarioWorkspace>> | undefined
-	let runFailed = false
 
 	try {
 		// Create a temporary workspace folder for regular tests. Restart scenarios own
@@ -223,7 +218,6 @@ async function main() {
 			})
 		}
 	} catch (error) {
-		runFailed = true
 		console.error("Failed to run tests", error)
 		process.exitCode = 1
 	} finally {
@@ -231,18 +225,7 @@ async function main() {
 			await fs.rm(testWorkspace, { recursive: true, force: true })
 		}
 		if (scenarioWorkspace) {
-			// Keep metadata from a failed restart scenario for CI inspection.
-			// Raw histories, phase errors, and logs must never enter the artifact.
-			if (runFailed) {
-				try {
-					const preservedAt = await preserveScenarioWorkspaceForRunner(scenarioWorkspace)
-					console.error(`Restart scenario diagnostics saved for failure inspection: ${preservedAt}`)
-				} catch (preserveError) {
-					console.error("Failed to preserve the restart scenario workspace:", preserveError)
-				}
-			} else {
-				await removeScenarioWorkspace(scenarioWorkspace)
-			}
+			await removeScenarioWorkspace(scenarioWorkspace)
 		}
 		await mock?.stop()
 	}

@@ -2,6 +2,8 @@ import * as fs from "fs/promises"
 import * as os from "os"
 import * as path from "path"
 
+import type { HistoryItem } from "@roo-code/types"
+
 import { TaskHistoryStore } from "../TaskHistoryStore"
 
 vi.mock("fs/promises", async () => {
@@ -9,6 +11,25 @@ vi.mock("fs/promises", async () => {
 	return { ...actual, readdir: vi.fn(actual.readdir), readFile: vi.fn(actual.readFile) }
 })
 const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+
+function nestedItems(): HistoryItem[] {
+	return (
+		[
+			{ id: "grandparent", status: "delegated", awaitingChildId: "parent" },
+			{ id: "parent", status: "delegated", awaitingChildId: "child", parentTaskId: "grandparent" },
+			{ id: "child", status: "active", parentTaskId: "parent" },
+			{ id: "broken", status: "delegated" },
+		] satisfies Pick<HistoryItem, "id" | "status" | "awaitingChildId" | "parentTaskId">[]
+	).map((item, index) => ({
+		number: index,
+		ts: index + 1,
+		task: item.id,
+		tokensIn: 0,
+		tokensOut: 0,
+		totalCost: 0,
+		...item,
+	}))
+}
 
 describe("TaskHistoryStore initialization retries", () => {
 	let root: string
@@ -33,6 +54,21 @@ describe("TaskHistoryStore initialization retries", () => {
 		await vi.waitFor(() => expect(store["initializationRetryTimer"]).not.toBeNull())
 	}
 
+	async function seedNestedItems() {
+		const items = nestedItems()
+		for (const item of items) {
+			const directory = path.join(root, "tasks", item.id)
+			await fs.mkdir(directory, { recursive: true })
+			await fs.writeFile(path.join(directory, "history_item.json"), JSON.stringify(item))
+		}
+		// The nested repair must commit before the unrelated failure.
+		const reconcile = store.reconcile.bind(store)
+		vi.spyOn(store, "reconcile").mockImplementation(async (options) => {
+			await reconcile(options)
+			store["cache"] = new Map(items.map(({ id }) => [id, store.get(id)!]))
+		})
+	}
+
 	it.each(["ELOCKED", "EBUSY"])(
 		"retries %s without publishing readiness or starting observers early",
 		async (code) => {
@@ -40,8 +76,8 @@ describe("TaskHistoryStore initialization retries", () => {
 				.spyOn(store, "reconcile")
 				.mockRejectedValueOnce(Object.assign(new Error(code), { code }))
 			const settled = vi.fn()
-			void store.initialized.then(settled)
 			const pending = store.initialize()
+			void pending.then(settled)
 			expect(store.initialize()).toBe(pending)
 			await waitForRetry()
 			expect(store.isHealthy).toBe(false)
@@ -52,7 +88,6 @@ describe("TaskHistoryStore initialization retries", () => {
 
 			await vi.advanceTimersByTimeAsync(1_000)
 			await pending
-			await store.initialized
 			expect(store.isHealthy).toBe(true)
 			expect(settled).toHaveBeenCalledTimes(1)
 			expect(reconcile).toHaveBeenCalledTimes(2)
@@ -66,7 +101,6 @@ describe("TaskHistoryStore initialization retries", () => {
 	it.each(["EACCES", "EIO", "EISDIR"])("reports %s as unsuccessful without scheduling retries", async (code) => {
 		const reconcile = vi.spyOn(store, "reconcile").mockRejectedValueOnce(Object.assign(new Error(code), { code }))
 		await expect(store.initialize()).rejects.toMatchObject({ code })
-		await store.initialized
 		expect(store.isHealthy).toBe(false)
 		expect(reconcile).toHaveBeenCalledTimes(1)
 		expect(vi.getTimerCount()).toBe(0)
@@ -76,7 +110,6 @@ describe("TaskHistoryStore initialization retries", () => {
 	it("does not publish health when listing task directories fails persistently", async () => {
 		vi.mocked(fs.readdir).mockRejectedValueOnce(Object.assign(new Error("cannot list history"), { code: "EACCES" }))
 		await expect(store.initialize()).rejects.toMatchObject({ code: "EACCES" })
-		await store.initialized
 		expect(store.isHealthy).toBe(false)
 		expect(vi.getTimerCount()).toBe(0)
 	})
@@ -149,6 +182,108 @@ describe("TaskHistoryStore initialization retries", () => {
 		}
 	})
 
+	it.each(["ELOCKED", "EBUSY"])("keeps a repaired nested parent active after a later %s failure", async (code) => {
+		await seedNestedItems()
+		const write = store["writeTaskFile"].bind(store)
+		let failed = false
+		store["writeTaskFile"] = vi.fn(async (item, delta) => {
+			if (item.id === "broken" && !failed) {
+				failed = true
+				throw Object.assign(new Error("repair busy"), { code })
+			}
+			return write(item, delta)
+		})
+		const pending = store.initialize()
+		await waitForRetry()
+		expect(store.get("parent")?.status).toBe("active")
+		expect(store.get("child")?.status).toBe("interrupted")
+		await vi.advanceTimersByTimeAsync(1_000)
+		await pending
+		expect(store.isHealthy).toBe(true)
+		expect(store.get("grandparent")).toMatchObject({ status: "delegated", awaitingChildId: "parent" })
+		expect(store.get("parent")?.status).toBe("active")
+		expect(store.get("child")?.status).toBe("interrupted")
+		const disk = JSON.parse(await fs.readFile(path.join(root, "tasks", "parent", "history_item.json"), "utf8"))
+		expect(disk.status).toBe("active")
+	})
+
+	it("retries explicitly after a terminal partial repair failure and releases its snapshot on success", async () => {
+		await seedNestedItems()
+		const write = store["writeTaskFile"].bind(store)
+		let failed = false
+		store["writeTaskFile"] = async (item, delta) => {
+			if (item.id === "broken" && !failed) {
+				failed = true
+				throw Object.assign(new Error("repair failed"), { code: "EIO" })
+			}
+			return write(item, delta)
+		}
+		await expect(store.initialize()).rejects.toMatchObject({ code: "EIO" })
+		expect(store.isHealthy).toBe(false)
+		expect(store.get("parent")?.status).toBe("active")
+		expect(store["initializationActiveIds"]).toEqual(new Set(["child"]))
+		const retry = store.initialize()
+		expect(store.initialize()).toBe(retry)
+		await retry
+		expect(store.isHealthy).toBe(true)
+		expect(store.get("grandparent")).toMatchObject({ status: "delegated", awaitingChildId: "parent" })
+		expect(store.get("parent")?.status).toBe("active")
+		expect(store["initializationActiveIds"]).toBeUndefined()
+	})
+
+	it.each(["ELOCKED", "EBUSY"])(
+		"preserves a repaired nested parent when legacy migration retries %s",
+		async (code) => {
+			const items = nestedItems()
+			for (const item of items) await fs.mkdir(path.join(root, "tasks", item.id), { recursive: true })
+			await store.initialize()
+			const write = store["writeTaskFile"].bind(store)
+			let failed = false
+			store["writeTaskFile"] = async (item, delta) => {
+				if (item.id === "broken" && !failed) {
+					failed = true
+					throw Object.assign(new Error("migration busy"), { code })
+				}
+				return write(item, delta)
+			}
+			await expect(store.migrateFromGlobalState(items)).rejects.toMatchObject({ code })
+			expect(store.get("parent")?.status).toBe("active")
+			await store.migrateFromGlobalState(items)
+			expect(store.get("grandparent")).toMatchObject({ status: "delegated", awaitingChildId: "parent" })
+			expect(store.get("parent")?.status).toBe("active")
+			expect(store.get("child")?.status).toBe("interrupted")
+			expect(store["migrationActiveIds"]).toBeUndefined()
+		},
+	)
+
+	it("retains the migration snapshot until its completion marker is committed", async () => {
+		const items = nestedItems()
+		for (const item of items) await fs.mkdir(path.join(root, "tasks", item.id), { recursive: true })
+		await store.initialize()
+		const commit = vi
+			.fn<() => Promise<void>>()
+			.mockRejectedValueOnce(Object.assign(new Error("marker write failed"), { code: "EIO" }))
+			.mockResolvedValue(undefined)
+		await expect(store.migrateFromGlobalState(items, commit)).rejects.toMatchObject({ code: "EIO" })
+		expect(store.get("parent")?.status).toBe("active")
+		expect(store["migrationActiveIds"]).toEqual(new Set(["child"]))
+		await store.migrateFromGlobalState(items, commit)
+		expect(commit).toHaveBeenCalledTimes(2)
+		expect(store.get("grandparent")).toMatchObject({ status: "delegated", awaitingChildId: "parent" })
+		expect(store.get("parent")?.status).toBe("active")
+		expect(store["migrationActiveIds"]).toBeUndefined()
+	})
+
+	it("keeps a completed nested migration idempotent after releasing its snapshot", async () => {
+		const items = nestedItems()
+		for (const item of items) await fs.mkdir(path.join(root, "tasks", item.id), { recursive: true })
+		await store.initialize()
+		await Promise.all([store.migrateFromGlobalState(items), store.migrateFromGlobalState(items)])
+		expect(store["migrationActiveIds"]).toBeUndefined()
+		expect(store.get("grandparent")).toMatchObject({ status: "delegated", awaitingChildId: "parent" })
+		expect(store.get("parent")?.status).toBe("active")
+	})
+
 	it("caps backoff at eight seconds and gives up after six retries", async () => {
 		const error = Object.assign(new Error("busy"), { code: "EBUSY" })
 		const reconcile = vi.spyOn(store, "reconcile").mockRejectedValue(error)
@@ -162,7 +297,6 @@ describe("TaskHistoryStore initialization retries", () => {
 			if (index < 5) await waitForRetry()
 		}
 		expect(await result).toBe(error)
-		await store.initialized
 		expect(store.isHealthy).toBe(false)
 		expect(vi.getTimerCount()).toBe(0)
 		expect(store["fsWatcher"]).toBeNull()
@@ -175,7 +309,6 @@ describe("TaskHistoryStore initialization retries", () => {
 		await waitForRetry()
 		store.dispose()
 		expect(await result).toBe(error)
-		await store.initialized
 		await vi.advanceTimersByTimeAsync(60_000)
 		expect(store.isHealthy).toBe(false)
 		expect(reconcile).toHaveBeenCalledTimes(1)

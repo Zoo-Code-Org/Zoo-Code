@@ -267,7 +267,10 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		await vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`)
 		await this.waitForWebviewLaunch(5_000)
 
-		const { historyItem } = await this.sidebarProvider.getTaskWithId(taskId)
+		const { historyItem } = await this.sidebarProvider.getTaskWithId(taskId, {
+			includeApiConversationHistory: false,
+			waitForInitialization: true,
+		})
 		await this.sidebarProvider.createTaskWithHistoryItem(historyItem)
 
 		if (this.sidebarProvider.viewLaunched) {
@@ -281,7 +284,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 	public async isTaskInHistory(taskId: string): Promise<boolean> {
 		try {
-			await this.sidebarProvider.getTaskWithId(taskId)
+			await this.sidebarProvider.getTaskWithId(taskId, { includeApiConversationHistory: false })
 			return true
 		} catch {
 			return false
@@ -357,7 +360,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		let uiMessages: Awaited<ReturnType<typeof readTaskMessages>>
 		try {
 			// Reject unknown ids first: readTaskMessages creates the task directory.
-			await this.sidebarProvider.getTaskWithId(taskId)
+			await this.sidebarProvider.getTaskWithId(taskId, { includeApiConversationHistory: false })
 			uiMessages = await readTaskMessages({
 				taskId,
 				globalStoragePath: this.sidebarProvider.contextProxy.globalStorageUri.fsPath,

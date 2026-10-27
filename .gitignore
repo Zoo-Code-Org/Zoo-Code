@@ -28,7 +28,6 @@ AGENTS.local.md
 apps/vscode-e2e/playwright-report-electron/
 apps/vscode-e2e/test-results-electron/
 apps/vscode-e2e/heap-results/
-apps/vscode-e2e/test-failures/
 
 # Docs
 docs/_site/

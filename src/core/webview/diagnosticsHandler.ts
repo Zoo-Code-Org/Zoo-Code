@@ -4,7 +4,7 @@ import * as fs from "fs/promises"
 import * as vscode from "vscode"
 
 import { getTaskDirectoryPath } from "../../utils/storage"
-import { fileExistsAtPath } from "../../utils/fs"
+import { getErrorCode, readFileWithMissingRetry } from "../task-persistence/readFileWithMissingRetry"
 
 export interface ErrorDiagnosticsValues {
 	timestamp?: string
@@ -42,14 +42,16 @@ export async function generateErrorDiagnostics(params: GenerateDiagnosticsParams
 		const apiHistoryPath = path.join(taskDirPath, "api_conversation_history.json")
 		let history: unknown = []
 
-		if (await fileExistsAtPath(apiHistoryPath)) {
-			const content = await fs.readFile(apiHistoryPath, "utf8")
+		try {
+			const content = await readFileWithMissingRetry(apiHistoryPath)
 			try {
 				history = JSON.parse(content)
 			} catch {
 				// If parsing fails, fall back to empty history but still generate diagnostics file
 				vscode.window.showErrorMessage("Failed to parse api_conversation_history.json")
 			}
+		} catch (error) {
+			if (getErrorCode(error) !== "ENOENT") throw error
 		}
 
 		const diagnostics = {

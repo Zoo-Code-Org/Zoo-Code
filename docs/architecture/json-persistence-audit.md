@@ -30,7 +30,7 @@ The results also include the function declaration and text examples.
 - Read recovery checks the canonical file and backups again under that lock.
 - Recovery rejects backup symlinks and non-regular files.
 - It validates the open backup descriptor before copying bytes into an exclusive temporary file.
-- It publishes that regular file by rename and retains the backup until commit.
+- It publishes that regular file by rename, then removes the restored backup during leftover cleanup.
 
 Recovery uses `O_NOFOLLOW` where Node provides it.
 Descriptor and pathname identity checks also apply on platforms without that flag.
@@ -51,8 +51,11 @@ The event does not include file contents.
 UI-message writes also emit task-specific events.
 A trace sink failure does not replace the filesystem error.
 
-Leftover-file cleanup errors go to the console.
+Successful backup restoration emits `json-recovered`.
+Leftover-file cleanup errors emit `json-cleanup-failed` with the canonical path and error code, and also go to the console.
 These errors do not reject a write that otherwise succeeded.
+
+Trace events are local diagnostics and can include absolute paths, task IDs, and filesystem error details. Treat extension logs as private when sharing them.
 
 ## Consumers
 
@@ -115,6 +118,7 @@ Its read path can have different behavior.
 - Returns an empty history only when both history files are missing.
 - Throws other read errors.
 - Deletes legacy history only after it saves the new file.
+- Migration replacement failure keeps the legacy source; unlink failure reports an error while keeping the newly committed current file and the legacy source.
 
 ### `core/task-persistence/TaskHistoryStore.ts`
 
@@ -125,6 +129,8 @@ Its read path can have different behavior.
 - Keeps cached records when a refresh fails.
 - Removes backups under the file lock before it deletes canonical history.
 - Logs deletion errors other than `ENOENT`.
+- If backup removal fails, canonical deletion is skipped to avoid restoring stale data later. The best-effort API still evicts the cache. Since the canonical record remains on disk, a later scan or restart can show the task again; this API does not confirm durable deletion.
+- The legacy global-state migration writer backfills missing per-task files and then repairs delegations. Its active-task snapshot survives an explicit retry after a partial repair.
 - Reads repair intents directly from the canonical path.
 - The repair-intent recovery gap is tracked in [#2176](https://github.com/Zoo-Code-Org/Zoo-Code/issues/2176).
 
@@ -138,7 +144,8 @@ Its read path can have different behavior.
 
 ## Other readers and write paths
 
-Legacy history can be displayed while initialization is pending or has failed.
+Legacy history can be displayed while initialization or legacy migration is pending or has failed.
+All history-list readers use the same readiness rule, including base state, webview state, broadcasts, and recent tasks. Explicit open, export, delete, and cost queries wait for the shared provider initialization attempt and retry after a terminal failure. Runtime metadata reads for cached tasks bypass that wait so startup cannot block cancellation, completion, or delegation. A failed attempt produces an availability error, rather than declaring a task absent.
 After migration, per-task reads and metadata updates use the file-backed store.
 The persisted migration marker keeps this rule active during later startup retries.
 A stale legacy row cannot supply a missing task record.
@@ -146,7 +153,9 @@ A stale legacy row cannot supply a missing task record.
 `ClineProvider.getTaskWithId` reads API history through the recovery reader.
 It returns an empty history for `SyntaxError` or `ENOENT`.
 It throws other read errors.
+Metadata-only callers explicitly skip API-history loading, including cancellation, completion/delegation guards, checkpoint restoration, and extension metadata queries. Export and conversation readers retain the full read.
 Task loading and parent reopening also use the message readers.
+Error diagnostics and debug API/UI history actions read through `readFileWithMissingRetry`, so a canonical-only existence check cannot bypass backup recovery.
 These read paths do not already hold the same file lock.
 Provider delegation locks and store mutexes are separate locks.
 
@@ -172,3 +181,32 @@ The [restart E2E test](../../apps/vscode-e2e/src/suite/restart-persistence.test.
 
 Injected `EPERM` failures do not prove native Windows behavior.
 Native Windows open-handle checks are tracked in [#2178](https://github.com/Zoo-Code-Org/Zoo-Code/issues/2178).
+
+## Write-path correspondence
+
+Every production `safeWriteJson` call is covered by the consumer inventory above. This table distinguishes writers that share a module, including the legacy migration and repair-intent paths.
+
+| Writer / operation                                   | Persistence authority and read path                                          | Failure / recovery boundary                                                                    |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Endpoint cache; model cache                          | Fetched models replace disposable cache files; direct or synchronous readers | Missing cache is refetched; refresh errors are reported                                        |
+| MCP global creation                                  | Settings file under shared writer lock, with merge-preserving creation       | Restored settings survive creation                                                             |
+| MCP disabled flags, server edits, and config updates | Settings read before the writer lock                                         | Cross-process read-modify-write gap remains #2173                                              |
+| Project MCP settings creation                        | Canonical absence checked before default write                               | Restored-settings overwrite gap remains #2175                                                  |
+| Code-index save and clear                            | Derived file hashes; VS Code filesystem reader                               | Rebuildable cache; save errors logged                                                          |
+| Settings export                                      | User-selected snapshot file                                                  | Write failure reported; direct import reader                                                   |
+| File-context metadata save                           | Task-local metadata, canonical-only reader                                   | Backup recovery gap remains #2177                                                              |
+| UI-message save                                      | Snapshot merge or replacement; recovery-aware reader                         | Trace and typed read/save error paths                                                          |
+| API-message save                                     | Snapshot merge or replacement; recovery-aware reader                         | I/O errors propagate                                                                           |
+| Legacy API-message migration                         | Legacy history copied to current file, then legacy source unlinked           | Failed replacement preserves source; failed unlink preserves committed current history         |
+| Task-history migration                               | Legacy global state backfills missing files                                  | Provider remains in legacy mode until migration and repair succeed; retry snapshot preserved   |
+| Task-history administrative and delta writes         | Per-task files; disk merge under file lock where configured                  | Forced scans and failed refreshes retain evidence                                              |
+| Rejected-action compare-and-clear                    | Locked disk record owns conditional settlement                               | Validation and matching action ID are checked inside merge                                     |
+| Delegation repair intent                             | Task records are authoritative; intent journals a guarded two-record repair  | Intent reader remains a raw canonical read (#2176); replay must succeed before ordinary repair |
+
+The initialization verifier explores failures before and after nested repair writes and preserves ancestor links across same-process retries, including explicit migration retries. Provider tests cover failed migration publication and a delayed post that captured legacy history before initialization, then resumes after the healthy post. The sending path refreshes that delayed history list before publication.
+
+## Concurrency and deletion limits
+
+Advisory lock expiry does not fence a paused former owner. A process that resumes after stale-lock takeover can overwrite or resurrect state; preventing this requires ownership fencing across writes, restores, and deletes.
+
+A failed backup unlink can leave older committed bytes alongside a valid canonical file. Supported deletion removes backups under the shared lock before deleting the canonical file; an external unlink that bypasses this protocol can expose a leftover backup to recovery.

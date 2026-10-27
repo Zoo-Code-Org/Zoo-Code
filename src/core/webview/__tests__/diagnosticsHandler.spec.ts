@@ -24,9 +24,9 @@ vi.mock("../../../utils/storage", () => ({
 	getTaskDirectoryPath: vi.fn(async () => "/mock/task-dir"),
 }))
 
-// Mock fs utilities
-vi.mock("../../../utils/fs", () => ({
-	fileExistsAtPath: vi.fn(),
+vi.mock("../../task-persistence/readFileWithMissingRetry", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../task-persistence/readFileWithMissingRetry")>()),
+	readFileWithMissingRetry: vi.fn(),
 }))
 
 // Mock fs/promises
@@ -46,7 +46,7 @@ vi.mock("fs/promises", () => {
 
 import * as vscode from "vscode"
 import * as fs from "fs/promises"
-import * as fsUtils from "../../../utils/fs"
+import { readFileWithMissingRetry } from "../../task-persistence/readFileWithMissingRetry"
 import { generateErrorDiagnostics } from "../diagnosticsHandler"
 
 describe("generateErrorDiagnostics", () => {
@@ -54,11 +54,14 @@ describe("generateErrorDiagnostics", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		vi.mocked(readFileWithMissingRetry)
+			.mockReset()
+			.mockRejectedValue(Object.assign(new Error("missing"), { code: "ENOENT" }))
+		vi.mocked(fs.writeFile).mockReset().mockResolvedValue()
 	})
 
 	it("generates a diagnostics file with error metadata and history", async () => {
-		vi.mocked(fsUtils.fileExistsAtPath).mockResolvedValue(true as any)
-		vi.mocked(fs.readFile).mockResolvedValue('[{"role": "user", "content": "test"}]' as any)
+		vi.mocked(readFileWithMissingRetry).mockResolvedValue('[{"role": "user", "content": "test"}]')
 
 		const result = await generateErrorDiagnostics({
 			taskId: "test-task-id",
@@ -77,7 +80,9 @@ describe("generateErrorDiagnostics", () => {
 		expect(result.filePath).toContain("zoo-diagnostics-")
 
 		// Verify we attempted to read API history
-		expect(fs.readFile).toHaveBeenCalledWith(path.join("/mock/task-dir", "api_conversation_history.json"), "utf8")
+		expect(readFileWithMissingRetry).toHaveBeenCalledWith(
+			path.join("/mock/task-dir", "api_conversation_history.json"),
+		)
 
 		// Verify we wrote a diagnostics file with the expected content
 		expect(fs.writeFile).toHaveBeenCalledTimes(1)
@@ -100,8 +105,6 @@ describe("generateErrorDiagnostics", () => {
 	})
 
 	it("uses empty history when API history file does not exist", async () => {
-		vi.mocked(fsUtils.fileExistsAtPath).mockResolvedValue(false as any)
-
 		const result = await generateErrorDiagnostics({
 			taskId: "test-task-id",
 			globalStoragePath: "/mock/global/storage",
@@ -117,8 +120,8 @@ describe("generateErrorDiagnostics", () => {
 
 		expect(result.success).toBe(true)
 
-		// Should not attempt to read file when it doesn't exist
-		expect(fs.readFile).not.toHaveBeenCalled()
+		// The recovery reader must decide absence, rather than a canonical-only existence check.
+		expect(readFileWithMissingRetry).toHaveBeenCalledOnce()
 
 		// Verify empty history in output
 		const [, writtenContent] = vi.mocked(fs.writeFile).mock.calls[0]
@@ -126,8 +129,6 @@ describe("generateErrorDiagnostics", () => {
 	})
 
 	it("uses default values when values are not provided", async () => {
-		vi.mocked(fsUtils.fileExistsAtPath).mockResolvedValue(false as any)
-
 		const result = await generateErrorDiagnostics({
 			taskId: "test-task-id",
 			globalStoragePath: "/mock/global/storage",
@@ -145,8 +146,7 @@ describe("generateErrorDiagnostics", () => {
 	})
 
 	it("handles JSON parse error gracefully", async () => {
-		vi.mocked(fsUtils.fileExistsAtPath).mockResolvedValue(true as any)
-		vi.mocked(fs.readFile).mockResolvedValue("invalid json" as any)
+		vi.mocked(readFileWithMissingRetry).mockResolvedValue("invalid json")
 
 		const result = await generateErrorDiagnostics({
 			taskId: "test-task-id",
@@ -171,7 +171,6 @@ describe("generateErrorDiagnostics", () => {
 	})
 
 	it("returns error result when file write fails", async () => {
-		vi.mocked(fsUtils.fileExistsAtPath).mockResolvedValue(false as any)
 		vi.mocked(fs.writeFile).mockRejectedValue(new Error("Write failed"))
 
 		const result = await generateErrorDiagnostics({
@@ -184,5 +183,15 @@ describe("generateErrorDiagnostics", () => {
 		expect(result.error).toBe("Write failed")
 		expect(mockLog).toHaveBeenCalledWith("Error generating diagnostics: Write failed")
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Failed to generate diagnostics: Write failed")
+	})
+	it.each(["ELOCKED", "EIO"])("reports %s instead of generating diagnostics with missing history", async (code) => {
+		vi.mocked(readFileWithMissingRetry).mockRejectedValue(Object.assign(new Error(code), { code }))
+		const result = await generateErrorDiagnostics({
+			taskId: "test-task-id",
+			globalStoragePath: "/mock/global/storage",
+			log: mockLog,
+		})
+		expect(result.success).toBe(false)
+		expect(fs.writeFile).not.toHaveBeenCalled()
 	})
 })

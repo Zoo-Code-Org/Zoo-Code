@@ -5,6 +5,7 @@ import * as path from "path"
 import type { HistoryItem } from "@roo-code/types"
 
 import { TaskHistoryStore } from "../TaskHistoryStore"
+import * as jsonIo from "../../../utils/safeWriteJson"
 import { acquireFileLock, LOCK_STALE_MS } from "../../../utils/fileLock"
 
 vi.mock("fs/promises", async () => {
@@ -178,4 +179,35 @@ describe("TaskHistoryStore interrupted history recovery", () => {
 		expect(store.get(child.id)).toEqual(child)
 		expect(JSON.parse(await fs.readFile(backup, "utf8"))).toEqual(child)
 	})
+	it.each(["ELOCKED", "EACCES", "EIO"])("invalidate retains its cached record on %s", async (code) => {
+		await store.initialize()
+		vi.mocked(fs.readFile).mockImplementation(async (...args) => {
+			if (String(args[0]) === canonical) throw Object.assign(new Error(code), { code })
+			return actual.readFile(...args)
+		})
+		await expect(store.invalidate(child.id)).rejects.toMatchObject({ code })
+		expect(store.get(child.id)).toEqual(child)
+	})
+	it.each(["forced reconcile", "background reconcile", "invalidate"] as const)(
+		"retains its last record after recovery is locked during %s",
+		async (entry) => {
+			await store.initialize()
+			await fs.rename(canonical, backup)
+			const error = Object.assign(new Error("recovery locked"), { code: "ELOCKED" })
+			const recover = vi.spyOn(jsonIo, "recoverJsonFile").mockRejectedValueOnce(error)
+			try {
+				const pending =
+					entry === "invalidate"
+						? store.invalidate(child.id)
+						: store.reconcile({ forceRefresh: entry === "forced reconcile" })
+				if (entry === "background reconcile") await expect(pending).resolves.toBeUndefined()
+				else await expect(pending).rejects.toBe(error)
+				expect(recover).toHaveBeenCalledWith(canonical)
+				expect(store.get(child.id)).toEqual(child)
+				expect(JSON.parse(await fs.readFile(backup, "utf8"))).toEqual(child)
+			} finally {
+				recover.mockRestore()
+			}
+		},
+	)
 })

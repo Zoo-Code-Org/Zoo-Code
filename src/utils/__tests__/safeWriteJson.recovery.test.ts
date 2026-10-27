@@ -1,4 +1,6 @@
 import * as fs from "fs/promises"
+import { constants } from "fs"
+import { execFileSync } from "child_process"
 import * as os from "os"
 import * as path from "path"
 
@@ -15,6 +17,7 @@ vi.mock("fs/promises", async () => {
 		...actual,
 		access: vi.fn(actual.access),
 		rename: vi.fn(actual.rename),
+		unlink: vi.fn(actual.unlink),
 		lstat: vi.fn(actual.lstat),
 		open: vi.fn(actual.open),
 		readdir: vi.fn(actual.readdir),
@@ -32,6 +35,7 @@ describe("interrupted JSON recovery", () => {
 	beforeEach(async () => {
 		vi.mocked(fs.access).mockReset().mockImplementation(actual.access)
 		vi.mocked(fs.rename).mockReset().mockImplementation(actual.rename)
+		vi.mocked(fs.unlink).mockReset().mockImplementation(actual.unlink)
 		vi.mocked(fs.lstat).mockReset().mockImplementation(actual.lstat)
 		vi.mocked(fs.open).mockReset().mockImplementation(actual.open)
 		vi.mocked(fs.readdir).mockReset().mockImplementation(actual.readdir)
@@ -77,6 +81,85 @@ describe("interrupted JSON recovery", () => {
 		await expect(fs.lstat(canonical)).rejects.toMatchObject({ code: "ENOENT" })
 	})
 
+	it.each(["before", "opened", "after"] as const)(
+		"rejects non-regular %s metadata even when identity is unchanged",
+		async (phase) => {
+			let sourceOpened = false
+			let checked = false
+			vi.mocked(fs.open).mockImplementation(async (file, flags, mode) => {
+				const source = await actual.open(file, flags, mode)
+				if (file === backup) {
+					sourceOpened = true
+					if (phase === "opened") {
+						const stats = await source.stat({ bigint: true })
+						Object.defineProperty(stats, "isFile", { value: () => false })
+						vi.spyOn(source, "stat").mockResolvedValue(stats)
+						checked = true
+					}
+				}
+				return source
+			})
+			vi.mocked(fs.lstat).mockImplementation(async (...args) => {
+				const stats = await actual.lstat(...args)
+				if (
+					args[0] === backup &&
+					args[1]?.bigint &&
+					phase !== "opened" &&
+					sourceOpened === (phase === "after")
+				) {
+					Object.defineProperty(stats, "isFile", { value: () => false })
+					checked = true
+				}
+				return stats
+			})
+			await expect(recoverJsonFile(canonical)).rejects.toMatchObject({ code: "EINVAL" })
+			expect(checked).toBe(true)
+			await expect(fs.access(canonical)).rejects.toMatchObject({ code: "ENOENT" })
+			expect(JSON.parse(await fs.readFile(backup, "utf8"))).toEqual({ committed: true })
+		},
+	)
+
+	it.skipIf(process.platform === "win32" || !constants.O_NOFOLLOW)(
+		"refuses a symlink swap at the open syscall",
+		async () => {
+			const secret = path.join(dir, "secret.json")
+			await fs.writeFile(secret, '{"secret":true}')
+			vi.mocked(fs.open).mockImplementation(async (file, flags, mode) => {
+				if (file === backup) {
+					// Assert before opening: the guard must apply even before descriptor validation.
+					expect(typeof flags).toBe("number")
+					if (typeof flags === "number") expect(flags & constants.O_NOFOLLOW).toBe(constants.O_NOFOLLOW)
+					await actual.rename(backup, backup + ".saved")
+					await fs.symlink(secret, backup)
+				}
+				return actual.open(file, flags, mode)
+			})
+			await expect(recoverJsonFile(canonical)).rejects.toMatchObject({ code: "ELOOP" })
+			await expect(fs.access(canonical)).rejects.toMatchObject({ code: "ENOENT" })
+			expect(await fs.readFile(secret, "utf8")).toBe('{"secret":true}')
+		},
+	)
+
+	it.skipIf(process.platform === "win32" || !constants.O_NONBLOCK)(
+		"rejects a FIFO swapped in before open without blocking",
+		async () => {
+			vi.mocked(fs.open).mockImplementation(async (file, flags, mode) => {
+				if (file === backup) {
+					// Fail safely before a possibly blocking syscall if this flag is removed.
+					expect(typeof flags).toBe("number")
+					if (typeof flags === "number") expect(flags & constants.O_NONBLOCK).toBe(constants.O_NONBLOCK)
+					await actual.rename(backup, backup + ".saved")
+					execFileSync("mkfifo", [backup])
+				}
+				return actual.open(file, flags, mode)
+			})
+			await expect(recoverJsonFile(canonical)).rejects.toMatchObject({ code: "EINVAL" })
+			expect((await fs.lstat(backup)).isFIFO()).toBe(true)
+			await expect(fs.access(canonical)).rejects.toMatchObject({ code: "ENOENT" })
+			expect(JSON.parse(await fs.readFile(backup + ".saved", "utf8"))).toEqual({ committed: true })
+		},
+	)
+
 	it.skipIf(process.platform === "win32")("rejects a swapped backup even without O_NOFOLLOW", async () => {
 		const secret = path.join(dir, "secrets.json")
 		await fs.writeFile(secret, JSON.stringify({ secret: true }))
@@ -99,21 +182,93 @@ describe("interrupted JSON recovery", () => {
 		async () => {
 			const secret = path.join(dir, "secrets.json")
 			await fs.writeFile(secret, JSON.stringify({ secret: true }))
-			let inspections = 0
+			let swapped = false
+			let sourceOpened = false
+			vi.mocked(fs.open).mockImplementation(async (file, flags, mode) => {
+				const handle = await actual.open(file, flags, mode)
+				if (file === backup) sourceOpened = true
+				return handle
+			})
 			vi.mocked(fs.lstat).mockImplementation(async (...args) => {
 				const stats = await actual.lstat(...args)
-				if (args[0] === backup && ++inspections === 3) {
+				if (args[0] === backup && sourceOpened && !swapped) {
+					swapped = true
 					await fs.rename(backup, backup + ".saved")
 					await fs.symlink(secret, backup)
 				}
 				return stats
 			})
 			await recoverJsonFile(canonical)
+			expect(swapped).toBe(true)
+			expect((await fs.lstat(backup + ".saved")).isFile()).toBe(true)
 			expect((await fs.lstat(canonical)).isFile()).toBe(true)
 			expect(JSON.parse(await fs.readFile(canonical, "utf8"))).toEqual({ committed: true })
 			expect(JSON.parse(await fs.readFile(secret, "utf8"))).toEqual({ secret: true })
 		},
 	)
+
+	it.each(
+		(["dev", "ino"] as const).flatMap((field) => (["before", "after"] as const).map((phase) => ({ field, phase }))),
+	)("rejects a regular backup with a changed $phase $field identity", async ({ field, phase }) => {
+		let sourceOpened = false
+		let changed = false
+		vi.mocked(fs.open).mockImplementation(async (file, flags, mode) => {
+			const handle = await actual.open(file, flags, mode)
+			if (file === backup) sourceOpened = true
+			return handle
+		})
+		vi.mocked(fs.lstat).mockImplementation(async (...args) => {
+			const stats = await actual.lstat(...args)
+			if (args[0] === backup && args[1]?.bigint && sourceOpened === (phase === "after")) {
+				const value = stats[field]
+				Object.defineProperty(stats, field, { value: typeof value === "bigint" ? value + 1n : value + 1 })
+				changed = true
+			}
+			return stats
+		})
+		await expect(recoverJsonFile(canonical)).rejects.toMatchObject({ code: "EINVAL" })
+		expect(changed).toBe(true)
+		expect(await fs.readdir(dir)).toEqual([path.basename(backup)])
+	})
+
+	it.each(["before-open", "after-open"])("rejects a different regular inode swapped %s", async (stage) => {
+		let swapped = false
+		const swap = async () => {
+			await actual.rename(backup, backup + ".saved")
+			await fs.writeFile(backup, JSON.stringify({ replacement: true }))
+			swapped = true
+		}
+		vi.mocked(fs.open).mockImplementation(async (file, flags, mode) => {
+			if (file !== backup) return actual.open(file, flags, mode)
+			if (stage === "before-open") await swap()
+			const source = await actual.open(file, flags, mode)
+			if (stage === "after-open") await swap()
+			return source
+		})
+		await expect(recoverJsonFile(canonical)).rejects.toMatchObject({ code: "EINVAL" })
+		expect(swapped).toBe(true)
+		await expect(fs.access(canonical)).rejects.toMatchObject({ code: "ENOENT" })
+		expect((await fs.readdir(dir)).filter((name) => name.includes(".new_"))).toEqual([])
+		expect(JSON.parse(await fs.readFile(backup + ".saved", "utf8"))).toEqual({ committed: true })
+	})
+
+	it("keeps restored data readable when backup cleanup fails", async () => {
+		const error = ioError("EACCES")
+		vi.mocked(fs.unlink).mockImplementation(async (file) => {
+			if (file === backup) throw error
+			return actual.unlink(file)
+		})
+		const log = vi.spyOn(console, "error").mockImplementation(() => {})
+		const lines: string[] = []
+		setPersistenceTraceSink((line) => lines.push(line))
+		await recoverJsonFile(canonical)
+		expect(JSON.parse(await fs.readFile(canonical, "utf8"))).toEqual({ committed: true })
+		expect(JSON.parse(await fs.readFile(backup, "utf8"))).toEqual({ committed: true })
+		expect(log).toHaveBeenCalledWith(expect.stringContaining("leftover"), error)
+		expect(lines.map((line) => JSON.parse(line.slice("[persistence-trace] ".length)))).toContainEqual(
+			expect.objectContaining({ stage: "json-cleanup-failed", detail: "EACCES" }),
+		)
+	})
 
 	it("copies a regular backup across multiple buffers before publishing it", async () => {
 		const committed = JSON.stringify({ text: "x".repeat(150 * 1024) })
@@ -131,6 +286,7 @@ describe("interrupted JSON recovery", () => {
 		await expect(safeWriteJson(canonical, {}, { merge, trace })).rejects.toMatchObject({ code: "EIO" })
 		expect(JSON.parse(await fs.readFile(backup, "utf8"))).toEqual({ committed: true })
 		expect(merge).not.toHaveBeenCalled()
+		expect((await fs.readdir(dir)).filter((name) => name.includes(".new_"))).toEqual([])
 		expect(trace).toHaveBeenCalledWith({ stage: "recover", detail: "failed: EIO" })
 		await expect(fs.access(canonical)).rejects.toMatchObject({ code: "ENOENT" })
 		// Failure also releases the lock, allowing the next attempt to recover.
@@ -154,6 +310,17 @@ describe("interrupted JSON recovery", () => {
 		await expect(safeWriteJson(canonical, {})).rejects.toMatchObject({ code: "EIO" })
 		await expect(fs.access(backup)).resolves.toBeUndefined()
 		await expect(fs.access(canonical)).rejects.toMatchObject({ code: "ENOENT" })
+	})
+
+	it("breaks equal-mtime backup ties by name and discards incomplete replacements", async () => {
+		const newest = path.join(dir, ".history.json.bak_9_new.tmp")
+		const incomplete = path.join(dir, ".history.json.new_99_uncommitted.tmp")
+		await fs.writeFile(newest, JSON.stringify({ newest: true }))
+		await fs.writeFile(incomplete, '{"partial":')
+		for (const file of [backup, newest]) await fs.utimes(file, new Date(1_000), new Date(1_000))
+		await recoverJsonFile(canonical)
+		expect(JSON.parse(await fs.readFile(canonical, "utf8"))).toEqual({ newest: true })
+		expect(await fs.readdir(dir)).toEqual(["history.json"])
 	})
 
 	it("ignores a vanished backup while restoring the newest available committed state", async () => {
@@ -218,12 +385,15 @@ describe("interrupted JSON recovery", () => {
 			(line) => JSON.parse(line.slice("[persistence-trace] ".length)) as { stage: string; taskId: string },
 		)
 		expect(events.map((event) => event.stage)).toEqual([
+			"json-recovered",
 			"ui-messages-recovery",
 			"ui-messages-write-start",
 			"ui-messages-replacement-rename",
 			"ui-messages-write-complete",
 		])
-		expect(events.every((event) => event.taskId === taskId)).toBe(true)
+		expect(
+			events.filter((event) => event.stage.startsWith("ui-messages")).every((event) => event.taskId === taskId),
+		).toBe(true)
 	})
 
 	it("does not acquire a recovery lock for a genuinely missing file", async () => {
