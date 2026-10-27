@@ -229,7 +229,7 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		const { id } = this.getModel()
 		// Backward compatible with callers that pass no options: only a caller-supplied timeout
 		// bounds the request (timeoutMs <= 0 disables it). The configured provider request timeout
