@@ -941,17 +941,30 @@ describe("DiffViewProvider", () => {
 			expect(mockTask.say.mock.calls[0]?.[1]).toContain("New problems detected after saving file: test.ts")
 		})
 
-		it("does not start a post-save diagnostics tail once the tails have been cancelled", async () => {
+		it("does not start a tail when cancellation lands while the save is awaiting the write", async () => {
 			const mockDelay = vi.mocked(delay)
 			mockDelay.mockClear()
 			vi.mocked(vscode.languages.getDiagnostics).mockClear()
 
-			// A save that was already awaiting its file operations can reach the tail start
-			// after Task disposal has cancelled the tails. The latch has to refuse it.
+			// Hold the publish pending, start the save, cancel (Task disposal), then release:
+			// the save's tail-start point is reached after cancellation and must refuse to
+			// start the tail.
+			const fs = await import("fs/promises")
+			const writeFileMock = vi.mocked(fs.writeFile)
+			let releaseWrite!: () => void
+			writeFileMock.mockImplementationOnce(
+				() =>
+					new Promise<void>((resolve) => {
+						releaseWrite = resolve
+					}) as never,
+			)
+			const savePromise = diffViewProvider.saveDirectly("test.ts", "new content", true, true, 100)
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			expect(writeFileMock).toHaveBeenCalledTimes(1)
+
 			diffViewProvider.cancelPostSaveDiagnosticsTails()
-
-			await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 100)
-
+			releaseWrite()
+			await savePromise
 			await new Promise((resolve) => setTimeout(resolve, 0))
 
 			expect(mockDelay).not.toHaveBeenCalled()
