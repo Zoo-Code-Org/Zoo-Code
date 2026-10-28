@@ -808,20 +808,20 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		}) as unknown as typeof withFileLock)
 		const statImpl = mockedFsPromises.default.stat.getMockImplementation() as
 			((...args: unknown[]) => unknown) | undefined
-		mockedFsPromises.default.stat.mockImplementation(async (p: unknown) => {
+		mockedFsPromises.default.stat.mockImplementation((async (p: unknown) => {
 			if (String(p) === sourceKey && heldKeys.includes(sourceKey)) {
 				statUnderLock = true
 			}
 			return statImpl ? statImpl(p) : undefined
-		})
+		}) as never)
 		const unlinkImpl = mockedFsPromises.default.unlink.getMockImplementation() as
 			((...args: unknown[]) => unknown) | undefined
-		mockedFsPromises.default.unlink.mockImplementation(async (p: unknown) => {
+		mockedFsPromises.default.unlink.mockImplementation((async (p: unknown) => {
 			// Assertion placed inside the call: a deletion moved outside the lock would
 			// fail here instead of passing on post-execution argument checks alone.
 			expect(heldKeys).toContain(sourceKey)
 			return unlinkImpl ? unlinkImpl(p) : undefined
-		})
+		}) as never)
 
 		await tool.execute({ patch: movePatch }, mockTask as Task, {
 			askApproval: mockAskApproval,
@@ -874,19 +874,19 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		}) as unknown as typeof withFileLock)
 		const statImpl = mockedFsPromises.default.stat.getMockImplementation() as
 			((...args: unknown[]) => unknown) | undefined
-		mockedFsPromises.default.stat.mockImplementation(async (p: unknown) => {
+		mockedFsPromises.default.stat.mockImplementation((async (p: unknown) => {
 			if (String(p) === sourceKey && heldKeys.includes(referentKey)) {
 				statUnderLock = true
 			}
 			return statImpl ? statImpl(p) : undefined
-		})
+		}) as never)
 		const unlinkImpl = mockedFsPromises.default.unlink.getMockImplementation() as
 			((...args: unknown[]) => unknown) | undefined
-		mockedFsPromises.default.unlink.mockImplementation(async (p: unknown) => {
+		mockedFsPromises.default.unlink.mockImplementation((async (p: unknown) => {
 			// The referent lock must be held while the named source path is unlinked.
 			expect(heldKeys).toContain(referentKey)
 			return unlinkImpl ? unlinkImpl(p) : undefined
-		})
+		}) as never)
 		// The referent is a distinct path: resolvePublishTarget follows the link, so
 		// resolveLockKey returns the referent key the lock must use.
 		mockedFsPromises.default.realpath.mockImplementation(async (p: unknown) => {
