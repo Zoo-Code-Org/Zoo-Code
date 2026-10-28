@@ -65,6 +65,13 @@ const completedStreaming = deepFreeze(
 )
 const allEvents: RunEvent[] = [
 	{ tag: "initialized" },
+	{ tag: "turnStarted" },
+	{ tag: "firstChunkAwaitStarted" },
+	{ tag: "firstChunkAwaitEnded" },
+	{ tag: "toolRejected" },
+	{ tag: "toolUsed" },
+	{ tag: "toolFailed" },
+	{ tag: "streamReadCompleted" },
 	{ tag: "streamStarted" },
 	{ tag: "streamCleanupFinished" },
 	{ tag: "streamEnded" },
@@ -78,6 +85,112 @@ const allEvents: RunEvent[] = [
 ]
 
 describe("nextRunState", () => {
+	describe("turn", () => {
+		const allSet = {
+			waitingForFirstChunk: true,
+			toolRejected: true,
+			toolUsed: true,
+			toolFailed: true,
+			streamReadComplete: true,
+		}
+		const dirty = deepFreeze({ ...running, turn: allSet })
+		const clean = deepFreeze({ ...running, turn: { ...running.turn } })
+		const turnEvents = [
+			["firstChunkAwaitStarted", "waitingForFirstChunk"],
+			["toolRejected", "toolRejected"],
+			["toolUsed", "toolUsed"],
+			["toolFailed", "toolFailed"],
+			["streamReadCompleted", "streamReadComplete"],
+		] as const
+
+		it.each(turnEvents)("%s sets only %s", (tag, field) => {
+			const next = accept(clean, { tag })
+			expect(next.turn).toEqual({ ...clean.turn, [field]: true })
+			expect({ ...next, turn: clean.turn }).toEqual(clean)
+		})
+
+		it.each(turnEvents)("%s keeps the other four fields when they are set", (tag, field) => {
+			const base = deepFreeze({ ...running, turn: { ...allSet, [field]: false } })
+			expect(accept(base, { tag }).turn).toEqual(allSet)
+		})
+
+		it("firstChunkAwaitEnded clears only waitingForFirstChunk", () => {
+			const state = run([{ tag: "firstChunkAwaitStarted" }, { tag: "toolUsed" }], running)
+			expect(accept(state, { tag: "firstChunkAwaitEnded" }).turn).toEqual({
+				...state.turn,
+				waitingForFirstChunk: false,
+			})
+		})
+
+		it("firstChunkAwaitEnded keeps the other four fields when they are set", () => {
+			expect(accept(dirty, { tag: "firstChunkAwaitEnded" }).turn).toEqual({
+				...allSet,
+				waitingForFirstChunk: false,
+			})
+		})
+
+		it.each(["streamStarted", "streamCleanupFinished", "streamEnded"] as const)(
+			"%s leaves the turn unchanged",
+			(tag) => {
+				const live = deepFreeze({ ...(tag === "streamStarted" ? running : streaming), turn: allSet })
+				expect(accept(live, { tag }).turn).toEqual(allSet)
+			},
+		)
+
+		it("initialized leaves the turn unchanged", () => {
+			expect(accept({ ...initialRunState, turn: allSet }, { tag: "initialized" }).turn).toEqual(allSet)
+		})
+
+		it("turnStarted resets the four per-request fields and keeps waitingForFirstChunk", () => {
+			expect(accept(dirty, { tag: "turnStarted" }).turn).toEqual({
+				...running.turn,
+				waitingForFirstChunk: true,
+			})
+		})
+
+		it.each([initialRunState, completed, aborted])("accepts every turn event when the phase is $phase", (state) => {
+			const turnEvents: RunEvent[] = [
+				{ tag: "turnStarted" },
+				{ tag: "firstChunkAwaitStarted" },
+				{ tag: "firstChunkAwaitEnded" },
+				{ tag: "toolRejected" },
+				{ tag: "toolUsed" },
+				{ tag: "toolFailed" },
+				{ tag: "streamReadCompleted" },
+			]
+			for (const event of turnEvents) {
+				expect(nextRunState(state, event)).toHaveProperty("ok")
+			}
+		})
+
+		it("accepts tool writes after the stream ends", () => {
+			const ended = run([{ tag: "streamEnded" }, { tag: "toolUsed" }, { tag: "toolFailed" }], streaming)
+			expect(ended.stream).toEqual({ tag: "none" })
+			expect(ended.turn).toMatchObject({ toolUsed: true, toolFailed: true })
+		})
+
+		it("clears the first-chunk wait when abort lands before the first chunk", () => {
+			const state = run(
+				[
+					{ tag: "turnStarted" },
+					{ tag: "streamStarted" },
+					{ tag: "firstChunkAwaitStarted" },
+					{ tag: "abortRequested", abandoned: false },
+					{ tag: "firstChunkAwaitEnded" },
+				],
+				running,
+			)
+			expect(state.latches.abort).toBe(true)
+			expect(state.turn.waitingForFirstChunk).toBe(false)
+			expect(state.turn.streamReadComplete).toBe(false)
+		})
+
+		it("a turn started after an abort still resets the fields", () => {
+			const state = run([{ tag: "toolFailed" }, { tag: "abortRequested", abandoned: false }], running)
+			expect(accept(state, { tag: "turnStarted" }).turn).toEqual(running.turn)
+		})
+	})
+
 	describe("initialized", () => {
 		it("moves uninitialized to running", () => {
 			acceptOnly(initialRunState, { tag: "initialized" }, { phase: "running" })
@@ -414,9 +527,17 @@ describe("nextRunState", () => {
 			generation: 0,
 			stream: { tag: "none" },
 			ask: { tag: "none" },
+			turn: {
+				waitingForFirstChunk: false,
+				toolRejected: false,
+				toolUsed: false,
+				toolFailed: false,
+				streamReadComplete: false,
+			},
 			latches: { abort: false, abandoned: false, disposed: false },
 		})
 		expect(Object.isFrozen(initialRunState)).toBe(true)
+		expect(Object.isFrozen(initialRunState.turn)).toBe(true)
 		expect(Object.isFrozen(initialRunState.stream)).toBe(true)
 		expect(Object.isFrozen(initialRunState.ask)).toBe(true)
 		expect(Object.isFrozen(initialRunState.latches)).toBe(true)

@@ -27,6 +27,7 @@ import {
 import { CONTEXT_WINDOW_EXCEEDED_STATUS } from "../../core/context/context-management/context-error-handling"
 
 import { BaseProvider } from "./base-provider"
+import { getVsCodeLmModelInfo } from "./vscode-lm-capabilities"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
 /**
@@ -49,6 +50,22 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
 					) as object)
 				: undefined,
 		}))
+}
+
+/** Structural check, so it holds for any host that supplies chat messages rather than one specific class. */
+function isChatMessage(value: unknown): value is vscode.LanguageModelChatMessage {
+	return typeof value === "object" && value !== null && "role" in value && "content" in value
+}
+
+/** True when any block, including those nested in tool results, carries an image. */
+export function containsImageBlock(content: unknown): boolean {
+	return (
+		Array.isArray(content) &&
+		content.some(
+			(block: { type?: string; content?: unknown }) =>
+				block.type === "image" || (block.type === "tool_result" && containsImageBlock(block.content)),
+		)
+	)
 }
 
 /**
@@ -96,7 +113,11 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
  * contain bare markup, so passing it through is the safer default rather than a security boundary.
  * Widening to the bare case needs a reproduction first.
  */
-/** Upper bound on an incomplete `<invoke ...` tail held back between chunks. */
+// Latching on a bare `<invoke` would let any prose mentioning the tag stop real-time streaming for
+// the rest of the response, so the marker only counts once the `name="` attribute has arrived.
+const LEAKED_TOOL_CALL_START = /<\/?(?:antml:)?function_calls(?:\s|>)|<(?:antml:)?invoke\s+name="/i
+
+/** Bounds generic tag fragments, not prefixes that can still become valid recovery markup. */
 const MAX_PARTIAL_INVOKE_CARRY = 64
 
 /**
@@ -223,12 +244,30 @@ function stripTagsCompletely(text: string): string {
  * be detected intact.
  */
 export function trailingPartialToolMarkerLength(text: string): number {
+	const tailStart = text.lastIndexOf("<")
+	const tail = text.slice(tailStart).toLowerCase()
+	if (
+		tailStart !== -1 &&
+		[
+			"<function_calls",
+			"</function_calls",
+			"<antml:function_calls",
+			"</antml:function_calls",
+			"<invoke",
+			"<antml:invoke",
+		].some((marker) => marker.startsWith(tail))
+	) {
+		return tail.length
+	}
+	// Whitespace in a valid unfinished opener has no length limit in the whole-input parser.
+	if (/<(?:antml:)?invoke\s+(?:n(?:a(?:m(?:e(?:=)?)?)?)?)?$/i.test(text)) {
+		return text.length - tailStart
+	}
 	const partialTag = text.match(/<(?:antml:)?[a-zA-Z_]*$/)
 	if (partialTag) {
 		return partialTag[0].length <= MAX_PARTIAL_INVOKE_CARRY ? partialTag[0].length : 0
 	}
-	// An `<invoke` whose `name="` attribute hasn't arrived yet: hold it back so the marker can
-	// latch on the next chunk, bounded so ordinary prose is never swallowed.
+	// Non-matching invoke fragments remain bounded so ordinary prose can resume streaming.
 	const partialInvoke = text.match(/<(?:antml:)?invoke\b[^<>]*$/i)
 	return partialInvoke && partialInvoke[0].length <= MAX_PARTIAL_INVOKE_CARRY ? partialInvoke[0].length : 0
 }
@@ -371,18 +410,8 @@ function declaredParamType(schema: Record<string, unknown> | undefined, paramNam
  * details), and only when the request would otherwise exceed the budget.
  */
 
-/**
- * Conservative characters-per-token ratio used to turn a token window into a character budget.
- *
- * `client.countTokens` is the model's real tokenizer, but it counts only a string: it cannot price
- * the tool schemas, image placeholders, or per-message framing the backend adds, so it cannot give
- * the true total for the request we are about to send. It is also an async, per-call RPC, and the
- * budget is needed for every message on every turn. We therefore keep a character estimate here
- * and stay deliberately conservative — 3 chars/token rather than the ~4 typical of English —
- * because the token-dense JSON, logs, and code that dominate oversized tool results tokenize to
- * fewer characters per token than prose. Under-counting biases toward trimming too early, which is
- * recoverable; over-counting sends an over-window request, which is not.
- */
+// Text trimming uses 3 chars/token rather than ~4 for token-dense code and logs.
+// Native image input is counted separately by the host before sending; this budget is text-only.
 const VSCODE_LM_BUDGET_CHARS_PER_TOKEN = 3
 
 /**
@@ -395,11 +424,7 @@ const VSCODE_LM_INPUT_BUDGET_FRACTION = 0.8
 /** A tool_result is never shrunk below this many characters, so a truncated result stays useful. */
 const MIN_TOOL_RESULT_CHARS = 2000
 
-/**
- * Length charged for an image block. VS Code LM cannot carry image data, so
- * `convertToVsCodeLmMessages` replaces each image with a sentence-long textual placeholder; this
- * is that placeholder's approximate length.
- */
+/** Approximate placeholder length; the text-only budget does not measure native image tokens. */
 const IMAGE_PLACEHOLDER_CHARS = 64
 
 function readToolResultText(block: Anthropic.Messages.ContentBlockParam): string | undefined {
@@ -475,7 +500,11 @@ export function middleOutTruncate(text: string, maxChars: number): string {
 	return `${head}${buildMarker(removed)}${tail}`
 }
 
-/** Estimated character cost of a whole conversation, using the same accounting as truncation. */
+/**
+ * Estimated character cost of a whole conversation, using the same accounting as truncation.
+ *
+ * @internal Exported for focused implementation tests.
+ */
 export function estimateMessagesChars(messages: Anthropic.Messages.MessageParam[]): number {
 	return messages.reduce((sum, message) => sum + estimateContentChars(message.content), 0)
 }
@@ -497,8 +526,6 @@ function estimateContentChars(content: Anthropic.Messages.MessageParam["content"
 		} else if (type === "tool_use") {
 			total += JSON.stringify((block as Anthropic.Messages.ToolUseBlockParam).input ?? {}).length
 		} else if (type === "image") {
-			// VS Code LM cannot send image data; convertToVsCodeLmMessages substitutes a textual
-			// placeholder, so charge that placeholder's real length rather than a token-sized guess.
 			total += IMAGE_PLACEHOLDER_CHARS
 		}
 	}
@@ -663,11 +690,23 @@ function parseLeakedInvokeParams(
  *
  * `validTools` may be a bare name set (no schemas, so every parameter stays a literal string) or a
  * map from tool name to its parameter schema, which enables typed conversion.
+ *
+ * @internal Exported for focused implementation tests.
  */
 export function extractLeakedToolCalls(
 	text: string,
 	validTools: ReadonlySet<string> | LeakedToolSchemas,
 	precedingText = "",
+): { calls: Array<{ name: string; input: Record<string, unknown> }>; leftoverText: string } {
+	const scan = new QuotingScanState()
+	scan.advance(precedingText)
+	return extractLeakedToolCallsWithState(text, validTools, scan)
+}
+
+function extractLeakedToolCallsWithState(
+	text: string,
+	validTools: ReadonlySet<string> | LeakedToolSchemas,
+	scan: QuotingScanState,
 ): { calls: Array<{ name: string; input: Record<string, unknown> }>; leftoverText: string } {
 	const schemaFor = (name: string) =>
 		validTools instanceof Map ? (validTools.get(name) as Record<string, unknown> | undefined) : undefined
@@ -676,10 +715,6 @@ export function extractLeakedToolCalls(
 	let leftover = ""
 	let lastIndex = 0
 
-	// Quote detection needs the text streamed before the buffer, since a fence may have opened
-	// there. Scanned once by state that only ever moves forward, not re-scanned per candidate.
-	const scan = new QuotingScanState()
-	scan.advance(precedingText)
 	let scannedUpTo = 0
 
 	const openPattern = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>/gi
@@ -715,6 +750,7 @@ export function extractLeakedToolCalls(
 		openPattern.lastIndex = blockEnd
 	}
 	leftover += text.slice(lastIndex)
+	scan.advance(text.slice(scannedUpTo))
 
 	// Once a call is recovered its `<function_calls>` wrapper is spent markup, so drop every wrapper
 	// tag (cosmetic; also avoids re-teaching the model this format when the turn replays as history).
@@ -728,7 +764,7 @@ export function extractLeakedToolCalls(
 
 export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
-	private client: vscode.LanguageModelChat | null
+	protected client: vscode.LanguageModelChat | null
 	private disposable: vscode.Disposable | null
 	private currentRequestCancellation: vscode.CancellationTokenSource | null
 
@@ -751,7 +787,12 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 					}
 				}
 			})
-			this.initializeClient()
+			void this.initializeClient().catch((error) => {
+				console.debug(
+					"Zoo Code <Language Model API>: Initial client setup failed; retrying on first use:",
+					error,
+				)
+			})
 		} catch (error) {
 			// Ensure cleanup if constructor fails
 			this.dispose()
@@ -805,33 +846,89 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				return models[0]
 			}
 
-			// Create a minimal model if no models are available
-			return {
-				id: "default-lm",
-				name: "Default Language Model",
-				vendor: "vscode",
-				family: "lm",
-				version: "1.0",
-				maxInputTokens: 8192,
-				sendRequest: async (_messages, _options, _token) => {
-					// Provide a minimal implementation
-					return {
-						stream: (async function* () {
-							yield new vscode.LanguageModelTextPart(
-								"Language model functionality is limited. Please check VS Code configuration.",
-							)
-						})(),
-						text: (async function* () {
-							yield "Language model functionality is limited. Please check VS Code configuration."
-						})(),
-					}
-				},
-				countTokens: async () => 0,
-			}
+			return this.createFallbackClient()
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : "Unknown error"
 			throw new Error(`Zoo Code <Language Model API>: Failed to select model: ${errorMessage}`)
 		}
+	}
+
+	/**
+	 * Client used when no installed model matches the selector. Subclasses whose models are not
+	 * interchangeable with a stub may refuse instead.
+	 */
+	protected createFallbackClient(): vscode.LanguageModelChat {
+		return {
+			id: "default-lm",
+			name: "Default Language Model",
+			vendor: "vscode",
+			family: "lm",
+			version: "1.0",
+			maxInputTokens: 8192,
+			sendRequest: async () => ({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart(
+						"Language model functionality is limited. Please check VS Code configuration.",
+					)
+				})(),
+				text: (async function* () {
+					yield "Language model functionality is limited. Please check VS Code configuration."
+				})(),
+			}),
+			countTokens: async () => 0,
+		}
+	}
+
+	/** Model info for a live client. */
+	protected deriveModelInfo(client: vscode.LanguageModelChat, modelId: string): ModelInfo {
+		return {
+			maxTokens: -1, // Unlimited tokens by default
+			contextWindow:
+				typeof client.maxInputTokens === "number"
+					? Math.max(0, client.maxInputTokens)
+					: openAiModelInfoSaneDefaults.contextWindow,
+			supportsImages: getVsCodeLmModelInfo(client).supportsImages,
+			supportsPromptCache: true,
+			inputPrice: 0,
+			outputPrice: 0,
+			description: `VSCode Language Model: ${modelId}`,
+		}
+	}
+
+	/** Model info reported before any client exists. */
+	protected getFallbackModelInfo(): ModelInfo {
+		return { ...openAiModelInfoSaneDefaults, supportsImages: undefined }
+	}
+
+	/** Whether image parts are sent to the model. */
+	protected supportsImageInput(info: ModelInfo): boolean {
+		return info.supportsImages === true
+	}
+
+	/** Rejects a request the selected model cannot serve before anything is sent. */
+	protected assertRequestSupported(_messages: Anthropic.Messages.MessageParam[], _info: ModelInfo): void {}
+
+	/** Rejects a request whose measured input exceeds what the model accepts. */
+	protected assertWithinContextWindow(inputTokens: number, info: ModelInfo): void {
+		// Native images are absent from the character budget; use the host's measured input too.
+		if (
+			this.supportsImageInput(info) &&
+			inputTokens > Math.min(this.getCondenseContextWindow(), info.contextWindow)
+		) {
+			throw Object.assign(
+				new Error(
+					"The request exceeds the selected VS Code model's input context window. Condense the conversation or start a new task.",
+				),
+				{ status: CONTEXT_WINDOW_EXCEEDED_STATUS },
+			)
+		}
+	}
+
+	/** The form in which a chat message is handed to the host's token counter. */
+	protected prepareMessageForCounting(
+		message: vscode.LanguageModelChatMessage,
+	): string | vscode.LanguageModelChatMessage {
+		return this.supportsImageInput(this.getModel().info) ? message : extractTextCountFromMessage(message)
 	}
 
 	/**
@@ -870,14 +967,17 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 	 * @returns A promise resolving to the token count
 	 */
 	override async countTokens(content: Array<Anthropic.Messages.ContentBlockParam>): Promise<number> {
-		// Convert Anthropic content blocks to a string for VSCode LM token counting
+		if (this.supportsImageInput(this.getModel().info) && containsImageBlock(content)) {
+			return this.calculateTotalInputTokens(convertToVsCodeLmMessages([{ role: "user", content }], true))
+		}
+
+		// Preserve text-only counting for models that cannot send native images.
 		let textContent = ""
 
 		for (const block of content) {
 			if (block.type === "text") {
 				textContent += block.text || ""
 			} else if (block.type === "image") {
-				// VSCode LM doesn't support images directly, so we'll just use a placeholder
 				textContent += "[IMAGE]"
 			}
 		}
@@ -918,13 +1018,13 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 
 			if (typeof text === "string") {
 				tokenCount = await this.client.countTokens(text, cancellationToken)
-			} else if (text instanceof vscode.LanguageModelChatMessage) {
+			} else if (isChatMessage(text)) {
 				// For chat messages, ensure we have content
 				if (!text.content || (Array.isArray(text.content) && text.content.length === 0)) {
 					console.debug("Zoo Code <Language Model API>: Empty chat message content")
 					return 0
 				}
-				const countMessage = extractTextCountFromMessage(text)
+				const countMessage = this.prepareMessageForCounting(text)
 				tokenCount = await this.client.countTokens(countMessage, cancellationToken)
 			} else {
 				console.warn("Zoo Code <Language Model API>: Invalid input type for token counting")
@@ -967,13 +1067,13 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		}
 	}
 
-	private async calculateTotalInputTokens(vsCodeLmMessages: vscode.LanguageModelChatMessage[]): Promise<number> {
+	protected async calculateTotalInputTokens(vsCodeLmMessages: vscode.LanguageModelChatMessage[]): Promise<number> {
 		const messageTokens: number[] = await Promise.all(vsCodeLmMessages.map((msg) => this.internalCountTokens(msg)))
 
 		return messageTokens.reduce((sum: number, tokens: number): number => sum + tokens, 0)
 	}
 
-	private ensureCleanState(): void {
+	protected ensureCleanState(): void {
 		if (this.currentRequestCancellation) {
 			this.currentRequestCancellation.cancel()
 			this.currentRequestCancellation.dispose()
@@ -981,7 +1081,19 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		}
 	}
 
-	private async getClient(): Promise<vscode.LanguageModelChat> {
+	/**
+	 * Releases one request's cancellation source. Unlike ensureCleanState(), it leaves a newer
+	 * request alone: a request that fails after another has started must not cancel that one.
+	 */
+	protected releaseRequestCancellation(source: vscode.CancellationTokenSource): void {
+		source.cancel()
+		source.dispose()
+		if (this.currentRequestCancellation === source) {
+			this.currentRequestCancellation = null
+		}
+	}
+
+	protected async getClient(): Promise<vscode.LanguageModelChat> {
 		if (!this.client) {
 			console.debug("Zoo Code <Language Model API>: Getting client with options:", {
 				vsCodeLmModelSelector: this.options.vsCodeLmModelSelector,
@@ -1042,12 +1154,14 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		// Ensure clean state before starting a new request
 		this.ensureCleanState()
 		const client: vscode.LanguageModelChat = await this.getClient()
+		const modelInfo = this.getModel().info
 
 		// Process messages
 		const cleanedMessages = messages.map((msg) => ({
 			...msg,
 			content: this.cleanMessageContent(msg.content),
 		}))
+		this.assertRequestSupported(cleanedMessages, modelInfo)
 
 		// Keep context-window trimming on OUR side. Copilot's backend trims an over-window request
 		// without preserving tool_use/tool_result pairing, which orphans a tool_result and triggers a
@@ -1091,29 +1205,135 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		// Convert Anthropic messages to VS Code LM messages
 		const vsCodeLmMessages: vscode.LanguageModelChatMessage[] = [
 			vscode.LanguageModelChatMessage.Assistant(sanitizeSurrogates(systemPrompt)),
-			...convertToVsCodeLmMessages(cleanedMessages),
+			...convertToVsCodeLmMessages(cleanedMessages, this.supportsImageInput(modelInfo)),
 		]
 
-		// Initialize cancellation token for the request
-		this.currentRequestCancellation = new vscode.CancellationTokenSource()
-
-		// Calculate input tokens before starting the stream
-		const totalInputTokens: number = await this.calculateTotalInputTokens(vsCodeLmMessages)
+		// Initialize cancellation token for the request. The caller's abort signal is
+		// connected to it at the start of the request `try` below, so its `finally`
+		// removes the listener on every exit path.
+		const requestCancellation = new vscode.CancellationTokenSource()
+		this.currentRequestCancellation = requestCancellation
+		const abortSignal = metadata?.abortSignal
+		// Recorded separately from the token: cleanup also cancels the token, so the
+		// token alone cannot tell a caller's abort apart from an ordinary failure.
+		let abortedByCaller = false
+		const cancelOnAbort = () => {
+			abortedByCaller = true
+			requestCancellation.cancel()
+		}
 
 		// Accumulate the text and count at the end of the stream to reduce token counting overhead.
 		let accumulatedText: string = ""
 
+		// Only offered tools may be recovered; their schemas keep recovered parameters typed
+		// rather than passing every value through as a string.
+		const providedTools = (metadata?.tools ?? [])
+			.filter((tool) => tool.type === "function")
+			.filter((tool) => tool.function.name.length > 0)
+		const providedToolSchemas = new Map(
+			providedTools.map((tool) => [
+				tool.function.name,
+				tool.function.parameters as Record<string, unknown> | undefined,
+			]),
+		)
+		const encodedToolAliases = new Map<string, string | undefined>()
+		for (const tool of providedTools) {
+			const encodedName = sanitizeToolNameSurrogates(tool.function.name)
+			// Raw names retain their schema and meaning even when another tool encodes to that name.
+			if (!providedToolSchemas.has(encodedName)) {
+				encodedToolAliases.set(
+					encodedName,
+					encodedToolAliases.has(encodedName) ? undefined : tool.function.name,
+				)
+			}
+		}
+		for (const [encodedName, originalName] of encodedToolAliases) {
+			if (originalName !== undefined) {
+				providedToolSchemas.set(encodedName, providedToolSchemas.get(originalName))
+			}
+		}
+		const salvageLeakedToolCalls = providedToolSchemas.size > 0
+		let salvageBuffer: string[] | undefined
+		let salvageCarry = ""
+		let salvageCarryIsInvokeWhitespace = false
+		let salvagePrecedingText: string[] = []
+		const salvageScan = new QuotingScanState()
+		let salvagedToolCallIndex = 0
+
+		const parseSalvage = (span: string): ApiStreamChunk[] => {
+			const drained: ApiStreamChunk[] = []
+			const { calls, leftoverText } = extractLeakedToolCallsWithState(span, providedToolSchemas, salvageScan)
+			if (leftoverText) {
+				drained.push({ type: "text", text: leftoverText })
+			}
+			for (const call of calls) {
+				const originalName = encodedToolAliases.get(call.name) ?? call.name
+				console.warn(
+					"Zoo Code <Language Model API>: Recovered a tool call the model emitted as text instead of a structured tool call:",
+					{ name: originalName, params: Object.keys(call.input) },
+				)
+				drained.push({
+					type: "tool_call",
+					id: `vscodelm-salvaged-${Date.now()}-${salvagedToolCallIndex++}`,
+					name: originalName,
+					arguments: JSON.stringify(call.input),
+				})
+			}
+			return drained
+		}
+
+		// Only EOF or a native call ends a text segment: even closed invokes cannot settle global
+		// wrapper stripping or text-before-call ordering while more text may arrive. No size cap is safe.
+		// Native boundaries finalize markup, but retain quote/wrapper state outside completed bodies.
+		const flushSalvage = (): ApiStreamChunk[] => {
+			if (!salvageLeakedToolCalls) {
+				return []
+			}
+
+			salvageScan.advance(salvagePrecedingText.join(""))
+			salvagePrecedingText = []
+			if (!salvageBuffer) {
+				const carried = salvageCarry
+				salvageCarry = ""
+				salvageCarryIsInvokeWhitespace = false
+				salvageScan.advance(carried)
+				return carried ? [{ type: "text", text: carried }] : []
+			}
+
+			const buffered = salvageBuffer.join("")
+			salvageBuffer = undefined
+			return parseSalvage(buffered)
+		}
+
 		try {
+			// Let the caller's abort cancel the host work before any of it starts. Token
+			// counting and the request both take this token, so an abort during either
+			// ends it instead of leaving it pending; an abort that already happened
+			// cancels at once.
+			if (abortSignal?.aborted) {
+				cancelOnAbort()
+			} else {
+				abortSignal?.addEventListener("abort", cancelOnAbort, { once: true })
+			}
+
+			// Calculate input tokens before starting the stream.
+			const totalInputTokens: number = await this.calculateTotalInputTokens(vsCodeLmMessages)
+			// Token counting reports a cancelled count as zero, so stop here rather than
+			// send a request the caller has already abandoned.
+			if (abortedByCaller) {
+				throw new vscode.CancellationError()
+			}
+			this.assertWithinContextWindow(totalInputTokens, modelInfo)
+
 			// Create the response stream with required options
 			const requestOptions: vscode.LanguageModelChatRequestOptions = {
 				justification: `Zoo Code would like to use '${client.name}' from '${client.vendor}', Click 'Allow' to proceed.`,
 				tools: convertToVsCodeLmTools(metadata?.tools ?? []),
 			}
-
 			const response: vscode.LanguageModelChatResponse = await client.sendRequest(
 				vsCodeLmMessages,
 				requestOptions,
-				this.currentRequestCancellation.token,
+				requestCancellation.token,
 			)
 
 			// Consume the stream and handle both text and tool call chunks
@@ -1126,11 +1346,50 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 					}
 
 					accumulatedText += chunk.value
-					yield {
-						type: "text",
-						text: chunk.value,
+
+					// Fast path: when we didn't offer any tools there is nothing to salvage, so
+					// stream the text straight through exactly as before.
+					if (!salvageLeakedToolCalls) {
+						yield { type: "text", text: chunk.value }
+						continue
+					}
+
+					if (salvageBuffer) {
+						salvageBuffer.push(chunk.value)
+						continue
+					}
+
+					// An unfinished invoke can carry unlimited whitespace; do not rescan it for every chunk.
+					if (salvageCarryIsInvokeWhitespace && /^\s*$/.test(chunk.value)) {
+						salvageCarry += chunk.value
+						continue
+					}
+					salvageCarryIsInvokeWhitespace = false
+
+					// Watch for the start of a leaked tool-call block, carrying a small tail across
+					// chunks so a marker split across chunk boundaries is still detected.
+					const combined = salvageCarry + chunk.value
+					const markerMatch = combined.match(LEAKED_TOOL_CALL_START)
+					if (markerMatch) {
+						const before = combined.slice(0, markerMatch.index)
+						if (before) {
+							salvagePrecedingText.push(before)
+							yield { type: "text", text: before }
+						}
+						salvageBuffer = [combined.slice(markerMatch.index)]
+						salvageCarry = ""
+					} else {
+						const carryLength = trailingPartialToolMarkerLength(combined)
+						const emit = carryLength > 0 ? combined.slice(0, combined.length - carryLength) : combined
+						salvageCarry = carryLength > 0 ? combined.slice(combined.length - carryLength) : ""
+						salvageCarryIsInvokeWhitespace = /^<(?:antml:)?invoke\s+$/i.test(salvageCarry)
+						if (emit) {
+							salvagePrecedingText.push(emit)
+							yield { type: "text", text: emit }
+						}
 					}
 				} else if (chunk instanceof vscode.LanguageModelToolCallPart) {
+					yield* flushSalvage()
 					try {
 						// Validate tool call parameters
 						if (!chunk.name || typeof chunk.name !== "string") {
@@ -1178,6 +1437,9 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				}
 			}
 
+			// Flush any leaked tool-call recovery state accumulated during streaming.
+			yield* flushSalvage()
+
 			// Count tokens in the accumulated text after stream completion
 			const totalOutputTokens: number = await this.internalCountTokens(accumulatedText)
 
@@ -1188,9 +1450,11 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				outputTokens: totalOutputTokens,
 			}
 		} catch (error: unknown) {
-			this.ensureCleanState()
+			// Releases this request's cancellation source, never a newer request's. That cancels
+			// its token too, which is why a caller's abort is read from `abortedByCaller`.
+			this.releaseRequestCancellation(requestCancellation)
 
-			if (error instanceof vscode.CancellationError) {
+			if (error instanceof vscode.CancellationError || abortedByCaller) {
 				throw new Error("Zoo Code <Language Model API>: Request cancelled by user")
 			}
 
@@ -1214,6 +1478,9 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				console.error("Zoo Code <Language Model API>: Unknown stream error:", errorMessage)
 				throw new Error(`Zoo Code <Language Model API>: Response stream error: ${errorMessage}`)
 			}
+		} finally {
+			// Runs on completion, failure, and early close via the generator's return().
+			abortSignal?.removeEventListener("abort", cancelOnAbort)
 		}
 	}
 
@@ -1240,22 +1507,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			const modelParts = [this.client.vendor, this.client.family, this.client.version].filter(Boolean)
 
 			const modelId = this.client.id || modelParts.join(SELECTOR_SEPARATOR)
-
-			// Build model info with conservative defaults for missing values
-			const modelInfo: ModelInfo = {
-				maxTokens: -1, // Unlimited tokens by default
-				contextWindow:
-					typeof this.client.maxInputTokens === "number"
-						? Math.max(0, this.client.maxInputTokens)
-						: openAiModelInfoSaneDefaults.contextWindow,
-				supportsImages: false, // VSCode Language Model API currently doesn't support image inputs
-				supportsPromptCache: true,
-				inputPrice: 0,
-				outputPrice: 0,
-				description: `VSCode Language Model: ${modelId}`,
-			}
-
-			return { id: modelId, info: modelInfo }
+			return { id: modelId, info: this.deriveModelInfo(this.client, modelId) }
 		}
 
 		// Fallback when no client is available
@@ -1268,7 +1520,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		return {
 			id: fallbackId,
 			info: {
-				...openAiModelInfoSaneDefaults,
+				...this.getFallbackModelInfo(),
 				description: `VSCode Language Model (Fallback): ${fallbackId}`,
 			},
 		}
@@ -1294,13 +1546,31 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		return this.getModel().info.contextWindow
 	}
 
+	/** Request options for single-shot completions; the generic provider sends none. */
+	protected getCompletionRequestOptions(_client: vscode.LanguageModelChat): vscode.LanguageModelChatRequestOptions {
+		return {}
+	}
+
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		const cancellation = new vscode.CancellationTokenSource()
+		const cancel = () => cancellation.cancel()
+		const abortSignal = options?.abortSignal
+		const timeoutMs = options?.timeoutMs ?? this.timeoutMs
+		const timer = timeoutMs > 0 ? setTimeout(cancel, timeoutMs) : undefined
+		if (abortSignal?.aborted) {
+			cancel()
+		} else {
+			abortSignal?.addEventListener("abort", cancel, { once: true })
+		}
 		try {
+			if (cancellation.token.isCancellationRequested) {
+				throw new vscode.CancellationError()
+			}
 			const client = await this.getClient()
 			const response = await client.sendRequest(
 				[vscode.LanguageModelChatMessage.User(prompt)],
-				{},
-				new vscode.CancellationTokenSource().token,
+				this.getCompletionRequestOptions(client),
+				cancellation.token,
 			)
 			let result = ""
 			for await (const chunk of response.stream) {
@@ -1314,17 +1584,31 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				throw new Error(`VSCode LM completion error: ${error.message}`)
 			}
 			throw error
+		} finally {
+			if (timer) clearTimeout(timer)
+			abortSignal?.removeEventListener("abort", cancel)
+			cancellation.dispose()
 		}
 	}
 }
 
 // Static blacklist of VS Code Language Model IDs that should be excluded from the model list e.g. because they will never work
-const VSCODE_LM_STATIC_BLACKLIST: string[] = ["claude-3.7-sonnet", "claude-3.7-sonnet-thought"]
+export const VSCODE_LM_STATIC_BLACKLIST: string[] = ["claude-3.7-sonnet", "claude-3.7-sonnet-thought"]
 
 export async function getVsCodeLmModels() {
 	try {
 		const models = (await vscode.lm.selectChatModels({})) || []
-		return models.filter((model) => !VSCODE_LM_STATIC_BLACKLIST.includes(model.id))
+		return models
+			.filter((model) => !VSCODE_LM_STATIC_BLACKLIST.includes(model.id))
+			.map((model) => ({
+				id: model.id,
+				vendor: model.vendor,
+				family: model.family,
+				version: model.version,
+				name: model.name,
+				maxInputTokens: model.maxInputTokens,
+				modelInfo: getVsCodeLmModelInfo(model),
+			}))
 	} catch (error) {
 		console.error(
 			`Error fetching VS Code LM models: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
