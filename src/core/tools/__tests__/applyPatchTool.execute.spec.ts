@@ -149,6 +149,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockAskApproval).toHaveBeenCalled()

@@ -50,6 +50,7 @@ describe("presentAssistantMessage - Unknown Tool Handling", () => {
 			didCompleteReadingStream: false,
 			didRejectTool: false,
 			didAlreadyUseTool: false,
+			activeToolContexts: new Map(),
 			consecutiveMistakeCount: 0,
 			clineMessages: [],
 			getTaskMode: vi.fn().mockResolvedValue("code"),

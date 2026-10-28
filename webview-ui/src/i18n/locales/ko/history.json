@@ -13,6 +13,7 @@
 	"deleteTaskTitle": "작업 삭제 (Shift + 클릭으로 확인 생략)",
 	"copyPrompt": "프롬프트 복사",
 	"exportTask": "작업 내보내기",
+	"renameTask": "작업 이름 바꾸기",
 	"deleteTask": "작업 삭제",
 	"deleteTaskMessage": "이 작업을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
 	"cancel": "취소",

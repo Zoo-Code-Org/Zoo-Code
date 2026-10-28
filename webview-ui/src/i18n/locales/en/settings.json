@@ -491,6 +491,12 @@
 		"getOpencodeGoApiKey": "Get Opencode Go API Key",
 		"kenariApiKey": "Kenari API Key",
 		"getKenariApiKey": "Get Kenari API Key",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "IO Intelligence API Key",
+			"getApiKey": "Get IO Intelligence API Key",
+			"model": "Model"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API Key",
@@ -659,6 +665,16 @@
 		"enablePromptCaching": "Enable prompt caching",
 		"enablePromptCachingTitle": "Enable prompt caching to improve performance and reduce costs for supported models.",
 		"cacheUsageNote": "Note: If you don't see cache usage, try selecting a different model and then selecting your desired model again.",
+		"githubCopilot": {
+			"accountActions": "GitHub Copilot account actions",
+			"signIn": "Sign in to GitHub",
+			"reconnect": "Reconnect GitHub",
+			"signedIn": "Signed in as {{account}}",
+			"connecting": "Connecting...",
+			"noModels": "No Copilot models available. Install or enable GitHub Copilot Chat, sign in with an eligible GitHub account, then refresh. Signing in does not confirm a Copilot subscription. GitHub plan, premium-request, and rate limits apply.",
+			"manageAccount": "Manage GitHub account",
+			"manageAccountDescription": "Opens VS Code's account menu, where you can sign out of GitHub. Signing out affects Copilot and other extensions using this account."
+		},
 		"vscodeLmModel": "Language Model",
 		"vscodeLmWarning": "Note: Models accessed via the VS Code Language Model API may be wrapped or fine-tuned by the provider, so behavior can differ from using the same model directly from a typical provider or router. To use a model from the Language Model dropdown, first switch to that model and then click Accept in the Copilot Chat prompt; otherwise you may see an error such as 400 \"The requested model is not supported\".",
 		"googleCloudSetup": {
@@ -686,7 +702,7 @@
 			"baseUrl": "Base URL (optional)",
 			"modelId": "Model ID",
 			"apiKey": "Ollama API Key",
-			"apiKeyHelp": "Optional API key for authenticated Ollama instances or cloud services. Leave empty for local installations.",
+			"apiKeyHelp": "Optional API key for Ollama instances that need authentication, or for cloud services. Zoo Code sends the key only to HTTPS or loopback endpoints. A remote HTTP endpoint gets no key, because the key would travel in plain text. Use HTTPS for a remote instance that needs a key. Leave this empty for a local installation.",
 			"numCtx": "Context Window Size (num_ctx)",
 			"numCtxHelp": "Override the model's default context window size. Leave empty to use the model's Modelfile configuration. Minimum value is 128.",
 			"thinking": "Enable Thinking",
@@ -915,6 +931,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Collapse command output by default",
+			"description": "Start command output collapsed, including Inline Terminal output. Expand it manually when needed. This does not change how commands run."
+		},
 		"basic": {
 			"label": "Terminal Settings: Basic",
 			"description": "Basic terminal settings"
@@ -1082,8 +1102,14 @@
 		"rangeDescription": "Higher values make output more random, lower values make it more deterministic."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Image support not reported",
+		"toolSupportUnknown": "Tool support not reported",
+		"promptCacheManagedByCopilot": "Prompt caching managed by GitHub Copilot",
+		"promptCacheCopilotDetails": "Caching depends on the model and GitHub Copilot backend. Zoo Code cannot configure cache retention or observe cache hits through the VS Code API.",
 		"supportsImages": "Supports images",
 		"noImages": "Does not support images",
+		"supportsTools": "Supports tools",
+		"noTools": "Does not support tools",
 		"supportsPromptCache": "Supports prompt caching",
 		"noPromptCache": "Does not support prompt caching",
 		"contextWindow": "Context Window:",
