@@ -1355,8 +1355,9 @@ describe("OpencodeGoHandler", () => {
 			const controller = new AbortController()
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			await handler.completePrompt("ping", { abortSignal: controller.signal })
+			// Resolution and the request share the merged deadline signal, not the caller signal.
 			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
-				signal: controller.signal,
+				signal: expect.any(AbortSignal),
 			})
 		})
 
@@ -1366,16 +1367,19 @@ describe("OpencodeGoHandler", () => {
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			await handler.completePrompt("ping", { abortSignal: controller.signal, timeoutMs: 10000 })
 			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
-				signal: controller.signal,
+				signal: expect.any(AbortSignal),
 				timeout: 10000,
 			})
 		})
 
-		it("completePrompt passes only timeoutMs when no signal is provided", async () => {
+		it("completePrompt passes the timeout deadline signal and timeoutMs when no caller signal is provided", async () => {
 			mockAnthropicCreate.mockResolvedValue({ content: [{ type: "text", text: "response" }] })
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			await handler.completePrompt("ping", { timeoutMs: 5000 })
+			// The per-request timeout now also bounds model resolution, so the merged deadline
+			// signal is forwarded alongside the SDK timeout option.
 			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+				signal: expect.any(AbortSignal),
 				timeout: 5000,
 			})
 		})
@@ -1542,7 +1546,7 @@ describe("OpencodeGoHandler", () => {
 				await handler.completePrompt("ping", { abortSignal: controller.signal })
 				expect(mockCreate).toHaveBeenCalledWith(
 					expect.objectContaining({ model: expect.any(String), stream: false }),
-					{ signal: controller.signal, headers: { "x-opencode-session": expect.any(String) } },
+					{ signal: expect.any(AbortSignal), headers: { "x-opencode-session": expect.any(String) } },
 				)
 			})
 
@@ -1557,7 +1561,7 @@ describe("OpencodeGoHandler", () => {
 				expect(mockCreate).toHaveBeenCalledWith(
 					expect.objectContaining({ model: expect.any(String), stream: false }),
 					{
-						signal: controller.signal,
+						signal: expect.any(AbortSignal),
 						timeout: 10000,
 						headers: { "x-opencode-session": expect.any(String) },
 					},
@@ -1573,7 +1577,11 @@ describe("OpencodeGoHandler", () => {
 				await handler.completePrompt("ping", { timeoutMs: 5000 })
 				expect(mockCreate).toHaveBeenCalledWith(
 					expect.objectContaining({ model: expect.any(String), stream: false }),
-					{ timeout: 5000, headers: { "x-opencode-session": expect.any(String) } },
+					{
+						signal: expect.any(AbortSignal),
+						timeout: 5000,
+						headers: { "x-opencode-session": expect.any(String) },
+					},
 				)
 			})
 
@@ -2659,7 +2667,7 @@ describe("OpencodeGoHandler", () => {
 			await handler.completePrompt("ping", { abortSignal: controller.signal })
 
 			expect(mockResponsesCreate.mock.calls[0][1]).toEqual({
-				signal: controller.signal,
+				signal: expect.any(AbortSignal),
 				headers: { "x-opencode-session": expect.any(String) },
 			})
 			expect(mockCreate).not.toHaveBeenCalled()
@@ -2672,6 +2680,7 @@ describe("OpencodeGoHandler", () => {
 			await handler.completePrompt("ping", { timeoutMs: 5_000 })
 
 			expect(mockResponsesCreate.mock.calls[0][1]).toEqual({
+				signal: expect.any(AbortSignal),
 				timeout: 5_000,
 				headers: { "x-opencode-session": expect.any(String) },
 			})

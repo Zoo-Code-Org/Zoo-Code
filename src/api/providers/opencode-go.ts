@@ -867,7 +867,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				// throw on negative/non-finite values, so only a usable budget is
 				// forwarded.
 				const requestOptions: Anthropic.RequestOptions = {
-					...(options?.abortSignal && { signal: options.abortSignal }),
+					...(resolutionAbortSignal && { signal: resolutionAbortSignal }),
 				}
 				if (hasUsableTimeout(timeoutMs)) {
 					requestOptions.timeout = toSdkTimeoutMs(timeoutMs)
@@ -920,7 +920,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				// non-finite semantics, so the SDK option is only set for a usable
 				// budget.
 				const createOptions: OpenAI.RequestOptions = {
-					...(options?.abortSignal && { signal: options.abortSignal }),
+					...(resolutionAbortSignal && { signal: resolutionAbortSignal }),
 				}
 				if (hasUsableTimeout(timeoutMs)) {
 					createOptions.timeout = toSdkTimeoutMs(timeoutMs)
@@ -998,7 +998,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			// path: hasUsableTimeout/toSdkTimeoutMs own the disabled and non-finite
 			// semantics.
 			const createOptions: OpenAI.RequestOptions = {
-				...(options?.abortSignal && { signal: options.abortSignal }),
+				...(resolutionAbortSignal && { signal: resolutionAbortSignal }),
 			}
 			if (hasUsableTimeout(timeoutMs)) {
 				createOptions.timeout = toSdkTimeoutMs(timeoutMs)
