@@ -886,9 +886,7 @@ describe("PR review-state workflow", () => {
 
 		// A malformed map reaches the shard's JSON.parse catch: warn and leave the label as it is
 		// rather than deciding from a map that could not be read.
-		expect(result.warning).toHaveBeenCalledWith(
-			expect.stringContaining("Could not read the open pull request map"),
-		)
+		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("Could not read the open pull request map"))
 		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
 		expect(result.setFailed).not.toHaveBeenCalled()
 	})
