@@ -1,4 +1,8 @@
-import { discoverOAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/client/auth.js"
+import {
+	discoverOAuthProtectedResourceMetadata,
+	extractResourceMetadataUrl,
+} from "@modelcontextprotocol/sdk/client/auth.js"
+import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/shared/auth.js"
 
 /**
  * Result of a successful OAuth discovery for an MCP server.
@@ -34,7 +38,9 @@ export interface OAuthDiscoveryResult {
  *
  * Performs two discovery steps:
  *  1. RFC 9728 – fetches the Protected Resource Metadata to find the issuer URL
- *     and the RFC 8707 resource indicator.
+ *     and the RFC 8707 resource indicator.  When the well-known URLs fail, falls
+ *     back to the `resource_metadata` URL from the server's 401 `WWW-Authenticate`
+ *     header (RFC 9728 §5.1), for servers that host the metadata elsewhere.
  *  2. RFC 8414 §3.1 – constructs the well-known discovery URL by inserting
  *     `/.well-known/oauth-authorization-server` *between* the host and the issuer
  *     path (not appended after the path).
@@ -52,7 +58,7 @@ export async function fetchOAuthAuthServerMetadata(serverUrl: string): Promise<O
 		// capture the resource indicator for RFC 8707.
 		// The SDK does not accept an AbortSignal, so we race it against a timeout.
 		const resourceMeta = await Promise.race([
-			discoverOAuthProtectedResourceMetadata(serverUrl),
+			discoverProtectedResourceMetadata(serverUrl),
 			new Promise<never>((_, reject) =>
 				setTimeout(() => reject(new Error("OAuth discovery timeout")), DISCOVERY_TIMEOUT_MS),
 			),
@@ -84,4 +90,41 @@ export async function fetchOAuthAuthServerMetadata(serverUrl: string): Promise<O
 	} catch {
 		return null
 	}
+}
+
+async function discoverProtectedResourceMetadata(serverUrl: string): Promise<OAuthProtectedResourceMetadata> {
+	try {
+		return await discoverOAuthProtectedResourceMetadata(serverUrl)
+	} catch (wellKnownError) {
+		const resourceMetadataUrl = await probeResourceMetadataUrl(serverUrl)
+		if (!resourceMetadataUrl) throw wellKnownError
+		return discoverOAuthProtectedResourceMetadata(serverUrl, { resourceMetadataUrl })
+	}
+}
+
+/**
+ * Sends an unauthenticated MCP `initialize` request and returns the
+ * `resource_metadata` URL from the 401 `WWW-Authenticate` header, if any.
+ */
+async function probeResourceMetadataUrl(serverUrl: string): Promise<URL | undefined> {
+	const response = await fetch(serverUrl, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			Accept: "application/json, text/event-stream",
+		},
+		body: JSON.stringify({
+			jsonrpc: "2.0",
+			id: 0,
+			method: "initialize",
+			params: {
+				protocolVersion: "2025-06-18",
+				capabilities: {},
+				clientInfo: { name: "oauth-discovery", version: "1.0.0" },
+			},
+		}),
+		signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
+	})
+	await response.body?.cancel().catch(() => {})
+	return response.status === 401 ? extractResourceMetadataUrl(response) : undefined
 }

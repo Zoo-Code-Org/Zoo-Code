@@ -3,9 +3,13 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest"
 // Mock the SDK's discoverOAuthProtectedResourceMetadata
 vi.mock("@modelcontextprotocol/sdk/client/auth.js", () => ({
 	discoverOAuthProtectedResourceMetadata: vi.fn(),
+	extractResourceMetadataUrl: vi.fn(),
 }))
 
-import { discoverOAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/client/auth.js"
+import {
+	discoverOAuthProtectedResourceMetadata,
+	extractResourceMetadataUrl,
+} from "@modelcontextprotocol/sdk/client/auth.js"
 import { fetchOAuthAuthServerMetadata } from "../oauth"
 
 const mockFetch = vi.fn()
@@ -33,9 +37,51 @@ describe("fetchOAuthAuthServerMetadata", () => {
 
 	it("returns null when discoverOAuthProtectedResourceMetadata throws", async () => {
 		;(discoverOAuthProtectedResourceMetadata as any).mockRejectedValue(new Error("network error"))
+		mockFetch.mockResolvedValueOnce({ status: 200, body: null })
 
 		const result = await fetchOAuthAuthServerMetadata("https://example.com/mcp")
 		expect(result).toBeNull()
+		expect(extractResourceMetadataUrl).not.toHaveBeenCalled()
+	})
+
+	it("falls back to the resource_metadata URL from the 401 WWW-Authenticate header", async () => {
+		const resourceMetadataUrl = new URL("https://example.com/core/.well-known/oauth-protected-resource/mcp")
+		vi.mocked(discoverOAuthProtectedResourceMetadata)
+			.mockRejectedValueOnce(
+				new Error("Resource server does not implement OAuth 2.0 Protected Resource Metadata."),
+			)
+			.mockResolvedValueOnce({
+				resource: "https://example.com/core/mcp",
+				authorization_servers: ["https://auth.example.com"],
+			})
+		vi.mocked(extractResourceMetadataUrl).mockReturnValueOnce(resourceMetadataUrl)
+		const meta = { issuer: "https://auth.example.com" }
+		mockFetch
+			.mockResolvedValueOnce({ status: 401, body: null })
+			.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(meta) })
+
+		const result = await fetchOAuthAuthServerMetadata("https://example.com/core/mcp")
+
+		expect(mockFetch).toHaveBeenNthCalledWith(
+			1,
+			"https://example.com/core/mcp",
+			expect.objectContaining({ method: "POST" }),
+		)
+		expect(discoverOAuthProtectedResourceMetadata).toHaveBeenLastCalledWith("https://example.com/core/mcp", {
+			resourceMetadataUrl,
+		})
+		expect(result).toEqual({ authServerMeta: meta, resourceIndicator: "https://example.com/core/mcp" })
+	})
+
+	it("returns null when the 401 response has no resource_metadata URL", async () => {
+		vi.mocked(discoverOAuthProtectedResourceMetadata).mockRejectedValueOnce(new Error("not found"))
+		vi.mocked(extractResourceMetadataUrl).mockReturnValueOnce(undefined)
+		mockFetch.mockResolvedValueOnce({ status: 401, body: null })
+
+		const result = await fetchOAuthAuthServerMetadata("https://example.com/mcp")
+
+		expect(result).toBeNull()
+		expect(discoverOAuthProtectedResourceMetadata).toHaveBeenCalledTimes(1)
 	})
 
 	it("constructs the RFC 8414 discovery URL correctly for an issuer with a path", async () => {
