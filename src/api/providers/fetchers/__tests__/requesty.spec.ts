@@ -263,13 +263,11 @@ describe("getRequestyModels", () => {
 		// The merged deadline uses the native AbortSignal.timeout, which fake timers cannot
 		// advance. Drive it with a controller scheduled by fake setTimeout instead so the test
 		// is deterministic and does not wait 10 real seconds.
-		const timeoutSpy = vi
-			.spyOn(AbortSignal, "timeout")
-			.mockImplementation(((ms: number) => {
-				const controller = new AbortController()
-				setTimeout(() => controller.abort(new DOMException("The operation timed out.", "TimeoutError")), ms)
-				return controller.signal
-			}) as unknown as typeof AbortSignal.timeout)
+		const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation(((ms: number) => {
+			const controller = new AbortController()
+			setTimeout(() => controller.abort(new DOMException("The operation timed out.", "TimeoutError")), ms)
+			return controller.signal
+		}) as unknown as typeof AbortSignal.timeout)
 		try {
 			mockAxiosGet.mockImplementationOnce(
 				((_url: string, config?: { signal?: AbortSignal }) =>
