@@ -40,6 +40,7 @@ import {
 	VERTEX_1M_CONTEXT_MODEL_IDS,
 	isDynamicProvider,
 	isRetiredProvider,
+	getModelId,
 	getProviderDefaultModelId,
 	providerIdentifiers,
 	githubCopilotLanguageModel,
@@ -162,7 +163,7 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 				})
 			: activeProvider === providerIdentifiers.kimiCode && apiConfiguration
 				? {
-						id: apiConfiguration.apiModelId || getProviderDefaultModelId(providerIdentifiers.kimiCode),
+						id: getModelId(apiConfiguration) || getProviderDefaultModelId(providerIdentifiers.kimiCode),
 						info: kimiCodeDefaultModelInfo,
 					}
 				: { id: getProviderDefaultModelId(activeProvider ?? providerIdentifiers.openrouter), info: undefined }
@@ -210,7 +211,7 @@ function getSelectedModel({
 	switch (provider) {
 		case providerIdentifiers.openrouter: {
 			const id = getValidatedModelId(
-				apiConfiguration.openRouterModelId,
+				getModelId(apiConfiguration),
 				routerModels[providerIdentifiers.openrouter],
 				defaultModelId,
 			)
@@ -230,7 +231,7 @@ function getSelectedModel({
 		}
 		case providerIdentifiers.requesty: {
 			const id = getValidatedModelId(
-				apiConfiguration.requestyModelId,
+				getModelId(apiConfiguration),
 				routerModels[providerIdentifiers.requesty],
 				defaultModelId,
 			)
@@ -239,7 +240,7 @@ function getSelectedModel({
 		}
 		case providerIdentifiers.unbound: {
 			const id = getValidatedModelId(
-				apiConfiguration.unboundModelId,
+				getModelId(apiConfiguration),
 				routerModels[providerIdentifiers.unbound],
 				defaultModelId,
 			)
@@ -258,20 +259,20 @@ function getSelectedModel({
 			// than a phantom model that does not exist on the server.
 			const litellmModels = routerModels[providerIdentifiers.litellm]
 			const id =
-				apiConfiguration.litellmModelId ??
+				getModelId(apiConfiguration) ??
 				(litellmModels && Object.keys(litellmModels).length > 0 ? defaultModelId : "")
 			const routerInfo = litellmModels?.[id]
 			return { id, info: routerInfo ?? litellmDefaultModelInfo }
 		}
 		case providerIdentifiers.xai: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const id = getModelId(apiConfiguration) ?? defaultModelId
 			const info = xaiModels[id as keyof typeof xaiModels]
 			return info ? { id, info } : { id, info: undefined }
 		}
 		case providerIdentifiers.baseten:
-			return getStaticCatalogModel(apiConfiguration.apiModelId, basetenModels, defaultModelId)
+			return getStaticCatalogModel(getModelId(apiConfiguration), basetenModels, defaultModelId)
 		case providerIdentifiers.bedrock: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const id = getModelId(apiConfiguration) ?? defaultModelId
 
 			// A custom ARN takes the capabilities of the model it points to; "Other" mirrors the provider fallback.
 			if (id === "custom-arn") {
@@ -330,7 +331,7 @@ function getSelectedModel({
 			return { id, info: baseInfo }
 		}
 		case providerIdentifiers.vertex: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const id = getModelId(apiConfiguration) ?? defaultModelId
 			const baseInfo = vertexModels[id as keyof typeof vertexModels]
 
 			// Apply 1M context for supported Claude 4 models when enabled
@@ -353,7 +354,7 @@ function getSelectedModel({
 			return { id, info: baseInfo }
 		}
 		case providerIdentifiers.gemini: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const id = getModelId(apiConfiguration) ?? defaultModelId
 			const info = geminiModels[id as keyof typeof geminiModels]
 			return { id, info }
 		}
@@ -361,7 +362,7 @@ function getSelectedModel({
 			const availableModels = routerModels[providerIdentifiers.deepseek]
 				? { ...deepSeekModels, ...routerModels[providerIdentifiers.deepseek] }
 				: deepSeekModels
-			const id = getValidatedModelId(apiConfiguration.apiModelId, availableModels, defaultModelId)
+			const id = getValidatedModelId(getModelId(apiConfiguration), availableModels, defaultModelId)
 			const routerInfo = routerModels[providerIdentifiers.deepseek]?.[id]
 			const staticInfo = deepSeekModels[id as keyof typeof deepSeekModels]
 			return { id, info: routerInfo ?? staticInfo }
@@ -370,24 +371,24 @@ function getSelectedModel({
 			const availableModels = routerModels[providerIdentifiers.moonshot]
 				? { ...moonshotModels, ...routerModels[providerIdentifiers.moonshot] }
 				: moonshotModels
-			const id = getValidatedModelId(apiConfiguration.apiModelId, availableModels, defaultModelId)
+			const id = getValidatedModelId(getModelId(apiConfiguration), availableModels, defaultModelId)
 			const routerInfo = routerModels[providerIdentifiers.moonshot]?.[id]
 			const staticInfo = moonshotModels[id as keyof typeof moonshotModels]
 			return { id, info: routerInfo ?? staticInfo }
 		}
 		case providerIdentifiers.kimiCode: {
-			const configuredId = apiConfiguration.apiModelId
+			const configuredId = getModelId(apiConfiguration)
 			const availableModels = routerModels[providerIdentifiers.kimiCode]
 			const id = configuredId || defaultModelId
 			return { id, info: availableModels?.[id] ?? kimiCodeDefaultModelInfo }
 		}
 		case providerIdentifiers.minimax: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const id = getModelId(apiConfiguration) ?? defaultModelId
 			const info = minimaxModels[id as keyof typeof minimaxModels]
 			return { id, info }
 		}
 		case providerIdentifiers.mimo: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const id = getModelId(apiConfiguration) ?? defaultModelId
 			const info = mimoModels[id as keyof typeof mimoModels] ?? mimoModels["mimo-v2.5-pro"]
 			return { id, info }
 		}
@@ -396,31 +397,31 @@ function getSelectedModel({
 			const isChina = zaiApiLineConfigs[apiLine].isChina
 			const models = getZAiModels(apiLine)
 			const defaultModelId = getProviderDefaultModelId(provider, { isChina })
-			const configuredId = apiConfiguration.apiModelId
+			const configuredId = getModelId(apiConfiguration)
 			if (configuredId) {
 				return { id: configuredId, info: models[configuredId] ?? openAiModelInfoSaneDefaults }
 			}
 			return { id: defaultModelId, info: models[defaultModelId] }
 		}
 		case providerIdentifiers.openaiNative: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const id = getModelId(apiConfiguration) ?? defaultModelId
 			const info = openAiNativeModels[id as keyof typeof openAiNativeModels]
 			return { id, info }
 		}
 		case providerIdentifiers.mistral: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const id = getModelId(apiConfiguration) ?? defaultModelId
 			const info = mistralModels[id as keyof typeof mistralModels]
 			return { id, info }
 		}
 		case providerIdentifiers.openai: {
-			const id = apiConfiguration.openAiModelId ?? ""
+			const id = getModelId(apiConfiguration) ?? ""
 			const customInfo = apiConfiguration?.openAiCustomModelInfo
 			const info = customInfo ?? openAiModelInfoSaneDefaults
 			return { id, info }
 		}
 		case providerIdentifiers.ollama: {
-			const id = apiConfiguration.ollamaModelId ?? ""
-			const info = ollamaModels && ollamaModels[apiConfiguration.ollamaModelId!]
+			const id = getModelId(apiConfiguration) ?? ""
+			const info = ollamaModels && ollamaModels[id]
 
 			const adjustedInfo =
 				info?.contextWindow &&
@@ -435,8 +436,8 @@ function getSelectedModel({
 			}
 		}
 		case providerIdentifiers.lmstudio: {
-			const id = apiConfiguration.lmStudioModelId ?? ""
-			const modelInfo = lmStudioModels && lmStudioModels[apiConfiguration.lmStudioModelId!]
+			const id = getModelId(apiConfiguration) ?? ""
+			const modelInfo = lmStudioModels && lmStudioModels[id]
 			return {
 				id,
 				info: modelInfo ? { ...lMStudioDefaultModelInfo, ...modelInfo } : undefined,
@@ -502,32 +503,32 @@ function getSelectedModel({
 			return { id, info }
 		}
 		case providerIdentifiers.sambanova:
-			return getStaticCatalogModel(apiConfiguration.apiModelId, sambaNovaModels, defaultModelId)
+			return getStaticCatalogModel(getModelId(apiConfiguration), sambaNovaModels, defaultModelId)
 		case providerIdentifiers.fireworks:
-			return getStaticCatalogModel(apiConfiguration.apiModelId, fireworksModels, defaultModelId)
+			return getStaticCatalogModel(getModelId(apiConfiguration), fireworksModels, defaultModelId)
 		case providerIdentifiers.friendli: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const id = getModelId(apiConfiguration) ?? defaultModelId
 			const info = friendliModels[id as keyof typeof friendliModels]
 			return { id, info }
 		}
 		case providerIdentifiers.poe: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const id = getModelId(apiConfiguration) ?? defaultModelId
 			const info = routerModels[providerIdentifiers.poe]?.[id]
 			return { id, info }
 		}
 		case providerIdentifiers.qwenCode: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const id = getModelId(apiConfiguration) ?? defaultModelId
 			const info = qwenCodeModels[id as keyof typeof qwenCodeModels]
 			return { id, info }
 		}
 		case providerIdentifiers.openaiCodex: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const id = getModelId(apiConfiguration) ?? defaultModelId
 			const info = openAiCodexModels[id as keyof typeof openAiCodexModels]
 			return { id, info }
 		}
 		case providerIdentifiers.vercelAiGateway: {
 			const id = getValidatedModelId(
-				apiConfiguration.vercelAiGatewayModelId,
+				getModelId(apiConfiguration),
 				routerModels[providerIdentifiers.vercelAiGateway],
 				defaultModelId,
 			)
@@ -536,7 +537,7 @@ function getSelectedModel({
 		}
 		case providerIdentifiers.opencodeGo: {
 			const id = getValidatedModelId(
-				apiConfiguration.opencodeGoModelId,
+				getModelId(apiConfiguration),
 				routerModels[providerIdentifiers.opencodeGo],
 				defaultModelId,
 			)
@@ -547,7 +548,7 @@ function getSelectedModel({
 		}
 		case providerIdentifiers.kenari: {
 			const id = getValidatedModelId(
-				apiConfiguration.kenariModelId,
+				getModelId(apiConfiguration),
 				routerModels[providerIdentifiers.kenari],
 				defaultModelId,
 			)
@@ -561,13 +562,13 @@ function getSelectedModel({
 			// "Use custom model" path stores ids absent from the fetched catalog)
 			// and the handler sends requests with it, so keep it instead of
 			// displaying a default model that requests do not use.
-			const id = apiConfiguration.ioIntelligenceModelId || defaultModelId
+			const id = getModelId(apiConfiguration) || defaultModelId
 			const info = routerModels[providerIdentifiers.ioIntelligence]?.[id] ?? ioIntelligenceDefaultModelInfo
 			return { id, info }
 		}
 		case providerIdentifiers.nanogpt: {
 			const id = getValidatedModelId(
-				apiConfiguration.nanoGptModelId,
+				getModelId(apiConfiguration),
 				routerModels[providerIdentifiers.nanogpt],
 				defaultModelId,
 			)
@@ -576,7 +577,7 @@ function getSelectedModel({
 		}
 		case providerIdentifiers.zooGateway: {
 			const id = getValidatedModelId(
-				apiConfiguration.zooGatewayModelId,
+				getModelId(apiConfiguration),
 				routerModels[providerIdentifiers.zooGateway],
 				defaultModelId,
 			)
@@ -586,7 +587,7 @@ function getSelectedModel({
 		case providerIdentifiers.anthropic:
 		case providerIdentifiers.geminiCli:
 		case providerIdentifiers.fakeAi: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const id = getModelId(apiConfiguration) ?? defaultModelId
 			const baseInfo = anthropicModels[id as keyof typeof anthropicModels]
 
 			// Apply 1M context beta tier pricing for supported Claude 4 models
