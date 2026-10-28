@@ -251,8 +251,11 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		// (pre-aborted guard, once-only listener, retained cleanup): the request-local
 		// signal is always defined for the streaming helpers, and dispose() detaches the
 		// listener when the request ends instead of leaking one per completed request.
-		const { signal: requestSignal, dispose: detachExternalAbortSignal } =
+		const { signal: bridgedSignal, dispose: detachExternalAbortSignal } =
 			bridgeExternalAbortSignal(externalAbortSignal)
+		// The streaming helpers always forward a signal: keep the never-aborting fallback the
+		// previous inline controller provided when the caller has no external signal.
+		const requestSignal = bridgedSignal ?? new AbortController().signal
 
 		if (format === "anthropic") {
 			try {
