@@ -391,7 +391,7 @@
 	},
 	"api/providers/openai.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 3
+			"count": 2
 		}
 	},
 	"api/providers/openrouter.ts": {
@@ -1476,7 +1476,7 @@
 	},
 	"services/mcp/McpHub.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 8
+			"count": 7
 		}
 	},
 	"services/mcp/McpOAuthClientProvider.ts": {
@@ -1496,17 +1496,12 @@
 	},
 	"services/mcp/__tests__/McpOAuthClientProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 20
+			"count": 18
 		}
 	},
 	"services/mcp/__tests__/SecretStorageService.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
-		}
-	},
-	"services/mcp/utils/__tests__/callbackServer.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
 		}
 	},
 	"services/mcp/utils/__tests__/oauth.spec.ts": {

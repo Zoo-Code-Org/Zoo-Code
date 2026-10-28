@@ -1,4 +1,29 @@
 /**
+ * Whether a timeout value is usable as an SDK `timeout` option: a finite
+ * number greater than zero.
+ *
+ * The value `0` means "no explicit timeout" across this series (the SDKs turn
+ * `timeout: 0` into an immediate abort), and negative, `NaN`, `Infinity` and
+ * fractional values make the SDK's own validation throw — so none of them may
+ * be forwarded.
+ */
+export function hasUsableTimeout(timeoutMs?: number): timeoutMs is number {
+	return typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
+}
+
+/** Maximum delay a Node timer (and therefore an SDK timeout option) accepts. */
+export const MAX_TIMEOUT_MS = 2_147_483_647
+
+/**
+ * Convert a validated timeout to the value forwarded to an SDK or Node timer:
+ * round fractions up (uint32 validation rejects them) and cap at the maximum
+ * delay (Node clamps larger values to 1 ms otherwise).
+ */
+export function toSdkTimeoutMs(timeoutMs: number): number {
+	return Math.min(Math.max(1, Math.ceil(timeoutMs)), MAX_TIMEOUT_MS)
+}
+
+/**
  * Merge an optional external abort signal with an optional timeout.
  *
  * Timeout values <= 0 and non-finite values are treated as disabled; finite
@@ -12,13 +37,13 @@ export function mergeAbortSignalAndTimeout(externalSignal?: AbortSignal, timeout
 	// abort almost immediately; treat non-finite values as "no timeout",
 	// round fractional delays up to whole milliseconds (uint32 validation
 	// throws for 1500.5), and cap the rest.
-	const hasTimeout = typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
+	const hasTimeout = hasUsableTimeout(timeoutMs)
 
 	if (!hasTimeout) {
 		return externalSignal
 	}
 
-	const timeoutSignal = AbortSignal.timeout(Math.min(Math.max(1, Math.ceil(timeoutMs)), 2_147_483_647))
+	const timeoutSignal = AbortSignal.timeout(toSdkTimeoutMs(timeoutMs))
 
 	if (!externalSignal) {
 		return timeoutSignal
@@ -40,6 +65,45 @@ export function mergeAbortSignals(primarySignal: AbortSignal, secondarySignal?: 
 	}
 
 	return AbortSignal.any([primarySignal, secondarySignal])
+}
+
+/**
+ * Bridge an optional caller-owned (external) abort signal to a per-request
+ * signal, with an explicit detach handle.
+ *
+ * The returned `signal` aborts together with the external signal (immediately
+ * if it is already aborted). Callers must invoke `dispose()` once the request
+ * ends - on completion, failure, and early generator exit alike: the listener
+ * is registered on the caller's long-lived signal, and an anonymous listener
+ * left attached would outlive the request and retain the per-request
+ * controller for every completed request.
+ *
+ * With no external signal, returns `{ signal: undefined, dispose: noop }` so
+ * the client-level timeout remains the only cancellation mechanism.
+ */
+export function bridgeExternalAbortSignal(externalSignal?: AbortSignal): {
+	signal?: AbortSignal
+	dispose: () => void
+} {
+	if (!externalSignal) {
+		return { signal: undefined, dispose: () => {} }
+	}
+
+	const controller = new AbortController()
+	if (externalSignal.aborted) {
+		controller.abort()
+		return { signal: controller.signal, dispose: () => {} }
+	}
+
+	// Retain the callback so the listener can be detached once this request
+	// ends: an anonymous listener on a long-lived external signal would
+	// outlive the request and retain the per-request controller.
+	const onExternalAbort = () => controller.abort()
+	externalSignal.addEventListener("abort", onExternalAbort, { once: true })
+	return {
+		signal: controller.signal,
+		dispose: () => externalSignal.removeEventListener("abort", onExternalAbort),
+	}
 }
 
 /**
@@ -110,7 +174,6 @@ export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, provi
 	}
 	return new Promise<T>((resolve, reject) => {
 		const onAbort = () => reject(createAbortError(providerName))
-		// Stryker disable next-line ObjectLiteral,BooleanLiteral: a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable
 		signal.addEventListener("abort", onAbort, { once: true })
 		void pending.then(
 			(value) => {

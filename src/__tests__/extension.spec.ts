@@ -170,7 +170,7 @@ vi.mock("../extension/api", () => ({
 	}),
 }))
 
-vi.mock("../activate/registerCommands", () => ({ openClineInNewTab: vi.fn() }))
+vi.mock("../activate/registerCommands", () => ({ openClineInNewTab: vi.fn(), openClineInNewTabForApi: vi.fn() }))
 
 vi.mock("../activate", () => ({
 	handleUri: vi.fn(),
@@ -316,7 +316,7 @@ describe("extension.ts", () => {
 	test("injects a factory instance with this activation's dependencies without reading the sidebar tracker", async () => {
 		vi.resetModules()
 		const { API } = await import("../extension/api")
-		const { openClineInNewTab } = await import("../activate/registerCommands")
+		const { openClineInNewTabForApi } = await import("../activate/registerCommands")
 		const { ClineProviderFactory } = await import("../core/webview/ClineProviderFactory")
 		const { WebviewFocusTracker } = await import("../core/webview/WebviewFocusTracker")
 		const { ClineProvider } = await import("../core/webview/ClineProvider")
@@ -330,11 +330,11 @@ describe("extension.ts", () => {
 		const providerFactory = vi.mocked(API).mock.calls[0][2]
 		expect(providerFactory).toBeInstanceOf(ClineProviderFactory)
 		expect(sidebar.webviewFocusTracker).toBeUndefined()
-		expect(openClineInNewTab).not.toHaveBeenCalled()
-		vi.mocked(openClineInNewTab).mockResolvedValueOnce(sidebar)
+		expect(openClineInNewTabForApi).not.toHaveBeenCalled()
+		vi.mocked(openClineInNewTabForApi).mockResolvedValueOnce(sidebar)
 
 		await expect(providerFactory.createInNewTab()).resolves.toBe(sidebar)
-		expect(openClineInNewTab).toHaveBeenCalledExactlyOnceWith({
+		expect(openClineInNewTabForApi).toHaveBeenCalledExactlyOnceWith({
 			context: mockContext,
 			outputChannel,
 			webviewFocusTracker: tracker,
