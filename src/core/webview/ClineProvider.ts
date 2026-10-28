@@ -1048,6 +1048,31 @@ export class ClineProvider
 		this.view = webviewView
 		const inTabMode = "onDidChangeViewState" in webviewView
 
+		// Register disposal before awaiting HTML or state so closing the view during
+		// either load invalidates this resolve and prevents later listener installation.
+		webviewView.onDidDispose(
+			async () => {
+				// A view that is no longer current must not clear the current
+				// view's resources or dispose the provider.
+				if (webviewView !== this.view) {
+					return
+				}
+
+				if (inTabMode) {
+					this.log("Disposing ClineProvider instance for tab view")
+					await this.dispose()
+				} else {
+					this.log("Clearing webview resources for sidebar view")
+					this.view = undefined
+					this.clearWebviewResources()
+				}
+			},
+			null,
+			// View-scoped, like the other view subscriptions: disposed both when
+			// the view is disposed and when a different view replaces it.
+			this.webviewDisposables,
+		)
+
 		if (inTabMode) {
 			setPanel(webviewView, "tab")
 		} else if ("onDidChangeVisibility" in webviewView) {
@@ -1158,31 +1183,6 @@ export class ClineProvider
 
 			this.webviewDisposables.push(visibilityDisposable)
 		}
-
-		// Listen for when the view is disposed
-		// This happens when the user closes the view or when the view is closed programmatically
-		webviewView.onDidDispose(
-			async () => {
-				// A view that is no longer current must not clear the current
-				// view's resources or dispose the provider.
-				if (webviewView !== this.view) {
-					return
-				}
-
-				if (inTabMode) {
-					this.log("Disposing ClineProvider instance for tab view")
-					await this.dispose()
-				} else {
-					this.log("Clearing webview resources for sidebar view")
-					this.view = undefined
-					this.clearWebviewResources()
-				}
-			},
-			null,
-			// View-scoped, like the other view subscriptions: disposed both when
-			// the view is disposed and when a different view replaces it.
-			this.webviewDisposables,
-		)
 
 		// Listen for when color changes
 		const configDisposable = vscode.workspace.onDidChangeConfiguration(async (e) => {

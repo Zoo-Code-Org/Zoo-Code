@@ -147,11 +147,12 @@ function makeDeferred<T>() {
 const flushAsync = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 
 /** An emitter-backed vscode.Event that also reports how many listeners are installed. */
-function makeViewEvent<T>() {
+function makeViewEvent<T>(retainDisposedListeners = false) {
 	const listeners = new Set<(value: T) => unknown>()
 	const event: vscode.Event<T> = (listener, _thisArgs, disposables) => {
 		listeners.add(listener)
-		const subscription = { dispose: () => listeners.delete(listener) }
+		// Retention models callbacks already queued when their subscription is disposed.
+		const subscription = { dispose: () => !retainDisposedListeners && listeners.delete(listener) }
 		// Real VS Code events push the subscription into the provided array.
 		disposables?.push(subscription)
 		return subscription
@@ -163,10 +164,10 @@ function makeViewEvent<T>() {
 	}
 }
 
-function createSidebarView() {
-	const messages = makeViewEvent<WebviewMessage>()
-	const visibility = makeViewEvent<void>()
-	const disposed = makeViewEvent<void>()
+function createSidebarView(retainDisposedListeners = false) {
+	const messages = makeViewEvent<WebviewMessage>(retainDisposedListeners)
+	const visibility = makeViewEvent<void>(retainDisposedListeners)
+	const disposed = makeViewEvent<void>(retainDisposedListeners)
 	const postMessage = vi.fn<(message: ExtensionMessage) => Promise<boolean>>().mockResolvedValue(true)
 	const view: vscode.WebviewView = {
 		viewType: ClineProvider.sideBarId,
@@ -184,6 +185,25 @@ function createSidebarView() {
 		show: vi.fn(),
 	}
 	return { view, messages, visibility, disposed, postMessage }
+}
+
+function createPanelView(retainDisposedListeners = false) {
+	const sidebar = createSidebarView(retainDisposedListeners)
+	const viewState = makeViewEvent<vscode.WebviewPanelOnDidChangeViewStateEvent>(retainDisposedListeners)
+	const view: vscode.WebviewPanel = {
+		webview: sidebar.view.webview,
+		viewType: "test-panel",
+		viewColumn: undefined,
+		title: "Test panel",
+		options: {},
+		visible: true,
+		active: true,
+		onDidDispose: sidebar.disposed.event,
+		onDidChangeViewState: viewState.event,
+		reveal: vi.fn(),
+		dispose: vi.fn(),
+	}
+	return { ...sidebar, view, viewState }
 }
 
 describe("ClineProvider - stale view lifecycle", () => {
@@ -380,7 +400,7 @@ describe("ClineProvider - stale view lifecycle", () => {
 	})
 
 	test("events from a replaced view are ignored and do not disturb the current view", async () => {
-		const first = createSidebarView()
+		const first = createSidebarView(true)
 		const second = createSidebarView()
 		await provider.resolveWebviewView(first.view)
 		await provider.resolveWebviewView(second.view)
@@ -390,13 +410,87 @@ describe("ClineProvider - stale view lifecycle", () => {
 		expect(vi.mocked(webviewMessageHandler)).not.toHaveBeenCalled()
 
 		first.visibility.fire()
+		await flushAsync()
 		expect(first.postMessage).not.toHaveBeenCalled()
+		expect(second.postMessage).not.toHaveBeenCalled()
 
 		// A stale dispose must not clear the current view's listeners.
 		first.disposed.fire()
+		expect(provider["view"]).toBe(second.view)
 		second.visibility.fire()
 		await flushAsync()
 		expect(second.postMessage).toHaveBeenCalledWith({ type: "action", action: "didBecomeVisible" })
+	})
+
+	test("a queued configuration callback from a replaced view sends no theme", async () => {
+		const first = createSidebarView()
+		const second = createSidebarView()
+		await provider.resolveWebviewView(first.view)
+		const listener = vi.mocked(vscode.workspace.onDidChangeConfiguration).mock.calls.at(-1)![0]
+		await provider.resolveWebviewView(second.view)
+
+		await listener({ affectsConfiguration: () => true })
+
+		expect(first.postMessage).not.toHaveBeenCalled()
+		expect(second.postMessage).not.toHaveBeenCalled()
+	})
+
+	test.each(["html", "state"] as const)("disposing a view during %s loading stops its resolve", async (stage) => {
+		const first = createSidebarView()
+		const html = makeDeferred<string>()
+		const state = makeDeferred<ProviderState>()
+		const realState = await provider.getState()
+		provider["getHtmlContent"] = vi
+			.fn()
+			.mockImplementation(() => (stage === "html" ? html.promise : Promise.resolve("document")))
+		const stateSpy = vi.spyOn(provider, "getState").mockImplementation(() => state.promise)
+		const resolving = provider.resolveWebviewView(first.view)
+		await flushAsync()
+
+		first.disposed.fire()
+		expect(provider["view"]).toBeUndefined()
+		html.resolve("document")
+		state.resolve(realState)
+		await resolving
+		stateSpy.mockRestore()
+
+		expect(first.view.webview.html).toBe(stage === "html" ? "" : "document")
+		expect(first.messages.listenerCount()).toBe(0)
+		expect(first.visibility.listenerCount()).toBe(0)
+		expect(first.disposed.listenerCount()).toBe(0)
+	})
+
+	test("panel replacement disposes the focus tracker and ignores queued panel events", async () => {
+		const first = createPanelView(true)
+		const second = createPanelView()
+		const disposeFocus = vi.fn()
+		const focusSpy = vi
+			.spyOn(provider.webviewFocusTracker, "init")
+			.mockReturnValueOnce({ dispose: disposeFocus })
+			.mockReturnValue({ dispose: vi.fn() })
+		const disposeSpy = vi.spyOn(provider, "dispose")
+		await provider.resolveWebviewView(first.view)
+		expect(disposeFocus).not.toHaveBeenCalled()
+		await provider.resolveWebviewView(second.view)
+		expect(disposeFocus).toHaveBeenCalledTimes(1)
+
+		first.viewState.fire({ webviewPanel: first.view })
+		first.disposed.fire()
+		await flushAsync()
+		expect(first.postMessage).not.toHaveBeenCalled()
+		expect(second.postMessage).not.toHaveBeenCalled()
+		expect(disposeSpy).not.toHaveBeenCalled()
+		expect(provider["view"]).toBe(second.view)
+
+		second.viewState.fire({ webviewPanel: second.view })
+		await flushAsync()
+		expect(second.postMessage).toHaveBeenCalledWith({ type: "action", action: "didBecomeVisible" })
+		second.disposed.fire()
+		await flushAsync()
+		expect(disposeSpy).toHaveBeenCalledTimes(1)
+		expect(ClineProvider.getAllInstances()).not.toContain(provider)
+		focusSpy.mockRestore()
+		disposeSpy.mockRestore()
 	})
 
 	test("disposing the sidebar view clears the current view and its subscriptions", async () => {
