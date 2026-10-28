@@ -352,10 +352,10 @@
 		"title": "Zoo Code {{version}} 출시",
 		"support": "<githubLink>GitHub</githubLink>에서 별표를 눌러 Zoo Code를 응원해 주세요.",
 		"release": {
-			"heading": "Zoo Code v3.90.0의 새로운 기능",
-			"highlight1": "✨ Provider와 모델: GitHub Copilot이 이제 provider입니다. 로그인하면 Zoo Code가 Copilot 모델을 불러옵니다. IO Intelligence는 자체 API 키를 쓰는 provider입니다. Gemini 4 Argon은 Gemini와 Vertex에 있습니다. GPT-6 Luna는 OpenCode Go에 있습니다. Gemini 4 Argon과 GPT-6 Luna는 Zoo Gateway에도 있습니다.",
-			"highlight2": "🧭 도구 실행: 같은 도구 호출을 반복하면 경고가 나오고, 그다음 Zoo Code가 그 루프를 멈춥니다. attempt_completion을 꺼도 작업이 끝나지 못하는 상태가 되지 않습니다. 대기 중인 메시지는 직접 보내는 명령과 같은 명령 보호 검사를 거칩니다.",
-			"highlight3": "⚡ 추론과 스트리밍: Anthropic adaptive thinking이 채팅에 표시되고 thinking token이 집계됩니다. R1 토글은 llama.cpp, Ollama, LM Studio의 추론을 유지합니다. Codex는 보이는 요약과 함께 암호화된 추론을 유지합니다. VS Code language model 스트림은 스트림이 실패하면 guarded recovery를 사용합니다."
+			"heading": "Zoo Code v3.92.0의 새로운 기능",
+			"highlight1": "✨ 더 빠른 모델 선택과 강화된 모델 지원: 채팅 작성창에서 모델을 전환하세요. Amazon Bedrock에서 Claude Haiku 5.5를 사용하고, OpenRouter에서 더 정확한 Kimi K3 기능을 이용하며, Vercel AI Gateway에서 수정된 Gemini 4 Argon 한도를 적용하세요.",
+			"highlight2": "🧭 더 안정적인 터미널, 편집, 채팅 및 원격 워크플로: 원할 때 명령 출력을 기본적으로 접고, 편집 실패 원인을 더 명확히 확인하며, 추론 및 API 행을 계속 표시하고, 원격 워크스페이스의 시작 및 프록시 문제를 방지하세요.",
+			"highlight3": "🔌 확장된 MCP 마켓플레이스: MCP 마켓플레이스를 통해 Zoo Code를 AnySearch, Mailtea, Tradehand에 연결하세요."
 		},
 		"cloudAgents": {
 			"heading": "클라우드의 새로운 기능:",
