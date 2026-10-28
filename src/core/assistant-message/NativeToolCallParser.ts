@@ -446,7 +446,7 @@ export class NativeToolCallParser {
 	 * @param originalName - The original tool name as called by the model (if different from canonical name)
 	 */
 	private static createPartialToolUse(
-		id: string,
+		_id: string,
 		name: ToolName,
 		partialArgs: Record<string, any>,
 		partial: boolean,

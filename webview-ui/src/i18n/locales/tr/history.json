@@ -13,6 +13,7 @@
 	"deleteTaskTitle": "Görevi Sil (Onayı atlamak için Shift + Tıkla)",
 	"copyPrompt": "Promptu Kopyala",
 	"exportTask": "Görevi Dışa Aktar",
+	"renameTask": "Görevi Yeniden Adlandır",
 	"deleteTask": "Görevi Sil",
 	"deleteTaskMessage": "Bu görevi silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.",
 	"cancel": "İptal",

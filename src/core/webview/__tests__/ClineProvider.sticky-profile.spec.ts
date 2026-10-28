@@ -294,8 +294,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 				cspSource: "vscode-webview://test-csp-source",
 			},
 			visible: true,
-			onDidDispose: vi.fn().mockImplementation((callback) => {
-				callback()
+			onDidDispose: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),
 			onDidChangeVisibility: vi.fn().mockImplementation(() => {
@@ -806,20 +805,6 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			const task1 = {
 				taskId: "task-1",
 				_taskApiConfigName: "profile-a",
-				setTaskApiConfigName: vi.fn().mockImplementation(function (this: any, name: string) {
-					this._taskApiConfigName = name
-				}),
-				emit: vi.fn(),
-				saveClineMessages: vi.fn(),
-				clineMessages: [],
-				apiConversationHistory: [],
-				updateApiConfiguration: vi.fn(),
-			}
-
-			// Create task 2 with profile B
-			const task2 = {
-				taskId: "task-2",
-				_taskApiConfigName: "profile-b",
 				setTaskApiConfigName: vi.fn().mockImplementation(function (this: any, name: string) {
 					this._taskApiConfigName = name
 				}),

@@ -10,15 +10,6 @@ export function initializeI18n(language: string): void {
 }
 
 /**
- * Get the current language
- *
- * @returns The current language code
- */
-export function getCurrentLanguage(): string {
-	return i18next.language
-}
-
-/**
  * Change the current language
  *
  * @param language The language code to change to

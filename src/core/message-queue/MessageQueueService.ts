@@ -4,12 +4,6 @@ import { v4 as uuidv4 } from "uuid"
 
 import { QueuedMessage } from "@roo-code/types"
 
-export interface MessageQueueState {
-	messages: QueuedMessage[]
-	isProcessing: boolean
-	isPaused: boolean
-}
-
 export interface QueueEvents {
 	stateChanged: [messages: QueuedMessage[]]
 }
