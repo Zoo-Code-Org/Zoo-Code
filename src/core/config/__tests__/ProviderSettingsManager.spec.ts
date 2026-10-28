@@ -12,13 +12,19 @@ import {
 import { clearAllMocks } from "../../../test-utils/reset"
 import { makeExtensionContext } from "../../../test-utils/vscode"
 
-import { ProviderSettingsManager, ProviderProfiles, SyncCloudProfilesResult } from "../ProviderSettingsManager"
+import { ProviderSettingsManager, ProviderProfiles } from "../ProviderSettingsManager"
 
 // `export()` builds an API handler per profile to read model capabilities. Mock
 // buildApiHandler with the real @roo-code/types model definitions so the token-field
 // filtering is driven by real capability flags, and so this suite stays isolated from
 // sibling specs that also mock "../../../api" (avoids a cross-file mock leak under
 // Vitest's singleFork pool).
+// Every handler export() builds, so tests can check each temporary one is released. A test can
+// set `failGetModel` to make reading model info throw.
+const builtHandlers = vi.hoisted(() =>
+	Object.assign([] as Array<{ apiProvider?: string; dispose: ReturnType<typeof vi.fn> }>, { failGetModel: false }),
+)
+
 vi.mock("../../../api", async () => {
 	const types = await vi.importActual<typeof import("@roo-code/types")>("@roo-code/types")
 	const zaiModels = { ...types.internationalZAiModels, ...types.mainlandZAiModels } as Record<string, unknown>
@@ -35,9 +41,19 @@ vi.mock("../../../api", async () => {
 		}
 	}
 	return {
-		buildApiHandler: (config: any) => ({
-			getModel: () => ({ id: config?.apiModelId ?? "", info: modelInfoFor(config) }),
-		}),
+		buildApiHandler: (config: { apiProvider?: string; apiModelId?: string }) => {
+			const handler = {
+				apiProvider: config?.apiProvider,
+				getModel: () => {
+					if (builtHandlers.failGetModel) throw new Error("no model info")
+					return { id: config?.apiModelId ?? "", info: modelInfoFor(config) }
+				},
+				// Handlers such as GitHub Copilot hold a host listener export() must release.
+				dispose: vi.fn(),
+			}
+			builtHandlers.push(handler)
+			return handler
+		},
 	}
 })
 
@@ -99,6 +115,7 @@ describe("ProviderSettingsManager", () => {
 						rateLimitSecondsMigrated: true,
 						openAiHeadersMigrated: true,
 						consecutiveMistakeLimitMigrated: true,
+						toolRepetitionLimitsMigrated: true,
 						todoListEnabledMigrated: true,
 						claudeCodeLegacySettingsMigrated: true,
 						routerProviderMigrated: true,
@@ -219,6 +236,217 @@ describe("ProviderSettingsManager", () => {
 			expect(storedConfig.migrations.consecutiveMistakeLimitMigrated).toEqual(true)
 		})
 
+		it("should call migrateToolRepetitionLimits if it has not done so already", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						default: {
+							config: {},
+							id: "default",
+						},
+						existing: {
+							apiProvider: providerIdentifiers.anthropic,
+							consecutiveMistakeLimit: 7,
+						},
+						preset: {
+							apiProvider: providerIdentifiers.anthropic,
+							// Pre-existing repetition limits should not be overwritten
+							toolRepetitionSoftLimit: 1,
+						},
+						unlimited: {
+							apiProvider: providerIdentifiers.anthropic,
+							// Hard stop disabled: the soft tier must be disabled too
+							consecutiveMistakeLimit: 0,
+						},
+						unlimitedPreset: {
+							apiProvider: providerIdentifiers.anthropic,
+							consecutiveMistakeLimit: 0,
+							// An explicit soft limit is preserved even when the hard stop is disabled
+							toolRepetitionSoftLimit: 4,
+						},
+					},
+					migrations: {
+						rateLimitSecondsMigrated: true,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: true,
+						toolRepetitionLimitsMigrated: false,
+					},
+				}),
+			)
+
+			await providerSettingsManager.initialize()
+
+			const calls = mockSecrets.store.mock.calls
+			const storedConfig = JSON.parse(calls[calls.length - 1][1])
+
+			// Default soft limit applied everywhere it was missing
+			expect(storedConfig.apiConfigs.default.toolRepetitionSoftLimit).toEqual(2)
+			expect(storedConfig.apiConfigs.existing.toolRepetitionSoftLimit).toEqual(2)
+
+			// Pre-existing soft limit is not overwritten
+			expect(storedConfig.apiConfigs.preset.toolRepetitionSoftLimit).toEqual(1)
+
+			// Profiles with the hard stop disabled keep the soft tier disabled
+			expect(storedConfig.apiConfigs.unlimited.toolRepetitionSoftLimit).toEqual(0)
+			expect(storedConfig.apiConfigs.unlimited.consecutiveMistakeLimit).toEqual(0)
+			expect(storedConfig.apiConfigs.unlimitedPreset.toolRepetitionSoftLimit).toEqual(4)
+
+			expect(storedConfig.migrations.toolRepetitionLimitsMigrated).toEqual(true)
+		})
+
+		it("should preserve profiles with persisted null repetition limits and let migrations default them", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						default: {
+							apiProvider: providerIdentifiers.anthropic,
+							id: "default",
+							// A previously persisted null value must not cause the profile to be dropped
+							// during load() before migrateToolRepetitionLimits can default it.
+							consecutiveMistakeLimit: null,
+							toolRepetitionSoftLimit: null,
+						},
+					},
+					migrations: {
+						rateLimitSecondsMigrated: true,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: false,
+						toolRepetitionLimitsMigrated: false,
+					},
+				}),
+			)
+
+			await providerSettingsManager.initialize()
+
+			const calls = mockSecrets.store.mock.calls
+			const storedConfig = JSON.parse(calls[calls.length - 1][1])
+
+			// The profile must survive load() rather than being silently deleted.
+			expect(storedConfig.apiConfigs.default).toBeDefined()
+			// null values are normalized to defaults by the migrations.
+			expect(storedConfig.apiConfigs.default.consecutiveMistakeLimit).toEqual(3)
+			expect(storedConfig.apiConfigs.default.toolRepetitionSoftLimit).toEqual(2)
+		})
+
+		it("should not mark toolRepetitionLimitsMigrated complete when the migration fails", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						default: {
+							apiProvider: providerIdentifiers.anthropic,
+							id: "default",
+						},
+					},
+					migrations: {
+						rateLimitSecondsMigrated: true,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: true,
+						toolRepetitionLimitsMigrated: false,
+						todoListEnabledMigrated: true,
+						claudeCodeLegacySettingsMigrated: true,
+						routerProviderMigrated: true,
+					},
+				}),
+			)
+
+			// Typed view of the private method so it can be spied on without `as any`.
+			const migrationSpy = vi
+				.spyOn(
+					providerSettingsManager as unknown as {
+						migrateToolRepetitionLimits: (profiles: ProviderProfiles) => Promise<boolean>
+					},
+					"migrateToolRepetitionLimits",
+				)
+				.mockResolvedValue(false)
+
+			await providerSettingsManager.initialize()
+
+			expect(migrationSpy).toHaveBeenCalledTimes(1)
+			const calls = mockSecrets.store.mock.calls
+			const storedConfig = JSON.parse(calls[calls.length - 1][1])
+			// The flag must remain false so the migration is retried on next initialization.
+			expect(storedConfig.migrations.toolRepetitionLimitsMigrated).toBe(false)
+		})
+
+		it("should retry the tool repetition migration on the next initialize after a failure", async () => {
+			const persisted = {
+				currentApiConfigName: "default",
+				apiConfigs: {
+					default: {
+						apiProvider: providerIdentifiers.anthropic,
+						id: "default",
+					},
+				},
+				migrations: {
+					rateLimitSecondsMigrated: true,
+					openAiHeadersMigrated: true,
+					consecutiveMistakeLimitMigrated: true,
+					toolRepetitionLimitsMigrated: false,
+					todoListEnabledMigrated: true,
+					claudeCodeLegacySettingsMigrated: true,
+					routerProviderMigrated: true,
+				},
+			}
+			let stored = JSON.stringify(persisted)
+			mockSecrets.get.mockImplementation(async () => stored)
+			mockSecrets.store.mockImplementation(async (_key: string, value: string) => {
+				stored = value
+			})
+
+			const migrationSpy = vi
+				.spyOn(
+					providerSettingsManager as unknown as {
+						migrateToolRepetitionLimits: (profiles: ProviderProfiles) => Promise<boolean>
+					},
+					"migrateToolRepetitionLimits",
+				)
+				.mockResolvedValueOnce(false)
+
+			await providerSettingsManager.initialize()
+			expect(JSON.parse(stored).migrations.toolRepetitionLimitsMigrated).toBe(false)
+
+			// Second run uses the real implementation and succeeds.
+			await providerSettingsManager.initialize()
+			expect(migrationSpy).toHaveBeenCalledTimes(2)
+			const finalConfig = JSON.parse(stored)
+			expect(finalConfig.migrations.toolRepetitionLimitsMigrated).toBe(true)
+			expect(finalConfig.apiConfigs.default.toolRepetitionSoftLimit).toEqual(2)
+		})
+
+		it("should not throw and report failure if migrateToolRepetitionLimits encounters an error", async () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			// A frozen apiConfig causes the property assignment inside the migration
+			// to throw in strict mode, exercising the catch/error branch.
+			const frozenConfig = Object.freeze({ apiProvider: providerIdentifiers.anthropic })
+			const providerProfiles = {
+				currentApiConfigName: "default",
+				apiConfigs: {
+					frozen: frozenConfig,
+				},
+			} as unknown as ProviderProfiles
+
+			// The migration must swallow the error and report failure so the caller
+			// does not mark the migration as complete.
+			await expect(
+				(
+					providerSettingsManager as unknown as {
+						migrateToolRepetitionLimits: (profiles: ProviderProfiles) => Promise<boolean>
+					}
+				).migrateToolRepetitionLimits(providerProfiles),
+			).resolves.toBe(false)
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to migrate tool repetition limits"),
+				expect.anything(),
+			)
+
+			consoleErrorSpy.mockRestore()
+		})
+
 		it("should call migrateTodoListEnabled if it has not done so already", async () => {
 			mockSecrets.get.mockResolvedValue(
 				JSON.stringify({
@@ -334,7 +562,7 @@ describe("ProviderSettingsManager", () => {
 				apiProvider: retiredProviderIdentifiers.roo,
 				apiModelId: "roo/code-supernova",
 				rooApiKey: "router-key",
-			} as any)
+			} as unknown as ProviderSettings)
 
 			const calls = mockSecrets.store.mock.calls
 			const storedConfig = JSON.parse(calls[calls.length - 1][1])
@@ -980,6 +1208,58 @@ describe("ProviderSettingsManager", () => {
 	})
 
 	describe("Export", () => {
+		it("releases every temporary API handler it builds to read model info", async () => {
+			builtHandlers.length = 0
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "copilot",
+					apiConfigs: {
+						copilot: { id: "copilot-id", apiProvider: providerIdentifiers.githubCopilot },
+						glm: { id: "glm-id", apiProvider: providerIdentifiers.zai, apiModelId: "glm-5.1" },
+					},
+				} satisfies ProviderProfiles),
+			)
+
+			await providerSettingsManager.export()
+
+			expect(builtHandlers.map((handler) => handler.apiProvider).sort()).toEqual(
+				[providerIdentifiers.githubCopilot, providerIdentifiers.zai].sort(),
+			)
+			for (const handler of builtHandlers) {
+				expect(handler.dispose).toHaveBeenCalledOnce()
+			}
+		})
+
+		it("still exports, and still releases the handler, when reading model info fails", async () => {
+			builtHandlers.length = 0
+			builtHandlers.failGetModel = true
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			try {
+				mockSecrets.get.mockResolvedValue(
+					JSON.stringify({
+						currentApiConfigName: "copilot",
+						apiConfigs: {
+							copilot: {
+								id: "copilot-id",
+								apiProvider: providerIdentifiers.githubCopilot,
+								modelMaxTokens: 1,
+							},
+						},
+					} satisfies ProviderProfiles),
+				)
+
+				const exported = await providerSettingsManager.export()
+
+				// Filtering is skipped rather than guessing, and the handler is still released.
+				expect(exported.apiConfigs.copilot.modelMaxTokens).toBe(1)
+				expect(builtHandlers).toHaveLength(1)
+				expect(builtHandlers[0].dispose).toHaveBeenCalledOnce()
+			} finally {
+				builtHandlers.failGetModel = false
+				warnSpy.mockRestore()
+			}
+		})
+
 		it("should preserve retired provider profiles with full fields", async () => {
 			const existingConfig: ProviderProfiles = {
 				currentApiConfigName: "retired",

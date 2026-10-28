@@ -47,11 +47,11 @@ O Zoo Code aproveita a base criada pelo Roo Code e continua ampliando-a com:
 - **Workflows de terminal e edição mais confiáveis** — correções para encerramento prematuro do terminal, race conditions no estado das tarefas, gerenciamento de contexto, edição de diff e uso de ferramentas específicas de cada provider.
 - **Mais controle sobre seu workspace** — gerenciamento de regras, restrições de MCP por modo, controles de caminhos multi-root, opções de reasoning dos modelos e ações para revisar alterações ao concluir uma tarefa.
 
-## Novidades na v3.86.0
+## Novidades na v3.92.0
 
-- ✨ **Suporte a novos modelos:** Use GPT-6.1 Sol, aproveite o limite de saída corrigido do Claude Opus 5.5 e selecione DeepSeek V4.1 Flash no OpenCode Go.
-- 🧭 **Cancelamentos e interrupções de tarefas confiáveis:** Preserve o primeiro motivo do cancelamento, redefina o estado de cancelamento do stream a cada requisição e impeça tarefas interrompidas de executar novamente subtarefas rejeitadas.
-- 🛠️ **Ferramentas, prompts e streaming da interface confiáveis:** Mantenha intactos os argumentos das ferramentas recebidos por streaming, aplique a política de ferramentas MCP, evite números de linha inventados e torne as atualizações do chat mais fluidas.
+- ✨ **Escolha de modelos mais rápida e suporte aprimorado a modelos:** Troque de modelo pelo campo de composição do chat. Use Claude Haiku 5.5 no Amazon Bedrock, obtenha recursos mais precisos do Kimi K3 no OpenRouter e use os limites corrigidos do Gemini 4 Argon no Vercel AI Gateway.
+- 🧭 **Fluxos de trabalho de terminal, edição, chat e ambientes remotos mais confiáveis:** Escolha recolher a saída de comandos por padrão, veja falhas de edição mais claras, mantenha visíveis as linhas de raciocínio e de API e evite problemas de inicialização e proxy em espaços de trabalho remotos.
+- 🔌 **Marketplace de MCP expandido:** Conecte o Zoo Code ao AnySearch, Mailtea e Tradehand pelo marketplace de MCP.
 
 ## O que o Zoo Code pode fazer por VOCÊ?
 

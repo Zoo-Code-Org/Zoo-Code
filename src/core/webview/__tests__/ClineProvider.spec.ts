@@ -536,8 +536,7 @@ describe("ClineProvider", () => {
 				cspSource: "vscode-webview://test-csp-source",
 			},
 			visible: true,
-			onDidDispose: vi.fn().mockImplementation((callback) => {
-				callback()
+			onDidDispose: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),
 			onDidChangeVisibility: vi.fn().mockImplementation(() => {
@@ -595,6 +594,48 @@ describe("ClineProvider", () => {
 
 	test("reports an unresolved webview as not visible", () => {
 		expect(provider.isViewVisible).toBe(false)
+	})
+
+	describe("instance registry", () => {
+		let originalInstances: Set<ClineProvider>
+
+		beforeEach(() => {
+			originalInstances = ClineProvider["activeInstances"]
+			ClineProvider["activeInstances"] = new Set()
+		})
+
+		afterEach(() => {
+			ClineProvider["activeInstances"] = originalInstances
+		})
+
+		const newProvider = () =>
+			new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				provider.webviewFocusTracker,
+			)
+
+		it("lists a provider from the moment it is constructed, so extension-wide broadcasts reach it", () => {
+			const created = newProvider()
+			expect(ClineProvider.getAllInstances()).toEqual([created])
+		})
+
+		it("lists every provider that is open, in the sidebar or an editor tab", () => {
+			const first = newProvider()
+			const second = newProvider()
+			expect(ClineProvider.getAllInstances()).toEqual([first, second])
+		})
+
+		it("stops listing a provider once it is disposed, so broadcasts do not reach a closed view", async () => {
+			const kept = newProvider()
+			const closed = newProvider()
+
+			await closed.dispose()
+
+			expect(ClineProvider.getAllInstances()).toEqual([kept])
+		})
 	})
 
 	describe("Add to Context destination", () => {
@@ -952,6 +993,13 @@ describe("ClineProvider", () => {
 	})
 
 	test("loads full model details when preparing an LM Studio task", async () => {
+		// buildApiHandler is a module-level mock shared across describes; pin its return value
+		// so this test always passes a handler double to forceFullModelDetailsLoad.
+		const { buildApiHandler } = await import("../../../api")
+		vi.mocked(buildApiHandler).mockReturnValue({
+			getModel: vi.fn().mockReturnValue({ id: "claude-3-sonnet" }),
+		} as unknown as ReturnType<typeof buildApiHandler>)
+
 		await provider.performPreparationTasks({
 			apiConfiguration: {
 				apiProvider: providerIdentifiers.lmstudio,
@@ -960,7 +1008,7 @@ describe("ClineProvider", () => {
 			},
 		} as Task)
 
-		expect(forceFullModelDetailsLoad).toHaveBeenCalledWith("http://localhost:1234", "test-model")
+		expect(forceFullModelDetailsLoad).toHaveBeenCalledWith("http://localhost:1234", "test-model", expect.anything())
 	})
 
 	test("does not reload full model details when the LM Studio model is already loaded", async () => {
@@ -2176,6 +2224,16 @@ describe("ClineProvider", () => {
 
 		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
 	})
+
+	test.each([true, false, undefined])(
+		"returns the saved output collapse preference (%s) to the webview",
+		async (value) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("collapseCommandOutputByDefault", value)
+			expect((await provider.getState()).collapseCommandOutputByDefault).toBe(value ?? false)
+			expect((await provider.getStateToPostToWebview()).collapseCommandOutputByDefault).toBe(value ?? false)
+		},
+	)
 
 	test("getState applies fallback defaults for write, diff, and terminal settings", async () => {
 		// Mock globalState.get to return undefined for the fallback settings
@@ -4360,9 +4418,40 @@ describe("ClineProvider - Router Models", () => {
 	let mockOutputChannel: vscode.OutputChannel
 	let mockWebviewView: any
 	let mockPostMessage: any
+	// One distinct handler double per provider, so assertions can prove that each getModels
+	// call receives the handler built for its own provider rather than just any handler.
+	let handlersByProvider: Map<string | undefined, object>
 
-	beforeEach(() => {
+	const handlerForProvider = (providerName: string) => {
+		const handler = handlersByProvider.get(providerName)
+		if (!handler) {
+			throw new Error(`buildApiHandler was never called for provider "${providerName}"`)
+		}
+		return handler
+	}
+
+	beforeEach(async () => {
 		vi.clearAllMocks()
+
+		// An earlier test leaves a one-shot throwing implementation on buildApiHandler that
+		// vi.clearAllMocks() does not remove. Reset it so the router-model fetches receive a
+		// real handler double instead of throwing on the first provider. The double assertion
+		// is required because the mock only needs the getModel member the tests exercise.
+		const { buildApiHandler } = await import("../../../api")
+		handlersByProvider = new Map()
+		vi.mocked(buildApiHandler).mockReset()
+		vi.mocked(buildApiHandler).mockImplementation((configuration) => {
+			const providerName = configuration.apiProvider
+			let handler = handlersByProvider.get(providerName)
+			if (!handler) {
+				handler = {
+					providerName,
+					getModel: vi.fn().mockReturnValue({ id: "claude-3-sonnet" }),
+				}
+				handlersByProvider.set(providerName, handler)
+			}
+			return handler as unknown as ReturnType<typeof buildApiHandler>
+		})
 
 		const globalState: Record<string, string | undefined> = {}
 		const secrets: Record<string, string | undefined> = {}
@@ -4422,8 +4511,7 @@ describe("ClineProvider - Router Models", () => {
 				asWebviewUri: vi.fn(),
 			},
 			visible: true,
-			onDidDispose: vi.fn().mockImplementation((callback) => {
-				callback()
+			onDidDispose: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),
 			onDidChangeVisibility: vi.fn().mockImplementation(() => {
@@ -4478,22 +4566,50 @@ describe("ClineProvider - Router Models", () => {
 
 		await messageHandler({ type: "requestRouterModels" })
 
-		// Verify getModels was called for each provider with correct options
-		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.openrouter })
-		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.requesty, apiKey: "requesty-key" })
-		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.unbound })
-		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.vercelAiGateway })
-		expect(getModels).toHaveBeenCalledWith({
-			provider: providerIdentifiers.litellm,
-			apiKey: "litellm-key",
-			baseUrl: "http://localhost:4000",
-		})
+		// Verify getModels was called for each provider with correct options and that provider's handler.
+		expect(getModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.openrouter },
+			handlerForProvider(providerIdentifiers.openrouter),
+		)
+		expect(getModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.requesty, apiKey: "requesty-key" },
+			handlerForProvider(providerIdentifiers.requesty),
+		)
+		expect(getModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.unbound },
+			handlerForProvider(providerIdentifiers.unbound),
+		)
+		expect(getModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.vercelAiGateway },
+			handlerForProvider(providerIdentifiers.vercelAiGateway),
+		)
+		expect(getModels).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.litellm,
+				apiKey: "litellm-key",
+				baseUrl: "http://localhost:4000",
+			},
+			handlerForProvider(providerIdentifiers.litellm),
+		)
 		// Opencode Go's /models endpoint is public, so it is fetched like the other no-auth routers.
-		expect(getModels).toHaveBeenCalledWith(expect.objectContaining({ provider: providerIdentifiers.opencodeGo }))
+		expect(getModels).toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.opencodeGo }),
+			handlerForProvider(providerIdentifiers.opencodeGo),
+		)
 		// Kenari's /models endpoint is public, so it is fetched like the other no-auth routers.
-		expect(getModels).toHaveBeenCalledWith(expect.objectContaining({ provider: providerIdentifiers.kenari }))
+		expect(getModels).toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.kenari }),
+			handlerForProvider(providerIdentifiers.kenari),
+		)
 		// NanoGPT's detailed catalog is public and may be scoped by an optional key.
-		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.nanogpt, apiKey: undefined })
+		expect(getModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.nanogpt, apiKey: undefined },
+			handlerForProvider(providerIdentifiers.nanogpt),
+		)
+		// Every getModels call must receive the handler built for the provider it fetches.
+		for (const [options, handler] of vi.mocked(getModels).mock.calls) {
+			expect(handler).toBe(handlerForProvider(options.provider))
+		}
 
 		// Verify response was sent
 		expect(mockPostMessage).toHaveBeenCalledWith({
@@ -4512,6 +4628,7 @@ describe("ClineProvider - Router Models", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -4547,6 +4664,7 @@ describe("ClineProvider - Router Models", () => {
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm fail
 			.mockResolvedValueOnce(mockModels) // opencode-go (public endpoint)
 			.mockResolvedValueOnce(mockModels) // kenari (public endpoint)
+			.mockResolvedValueOnce(mockModels) // io-intelligence (public endpoint)
 			.mockResolvedValueOnce(mockModels) // nanogpt (public endpoint)
 
 		await messageHandler({ type: "requestRouterModels" })
@@ -4568,6 +4686,7 @@ describe("ClineProvider - Router Models", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -4618,11 +4737,14 @@ describe("ClineProvider - Router Models", () => {
 		})
 
 		// Verify LiteLLM was called with values from message
-		expect(getModels).toHaveBeenCalledWith({
-			provider: providerIdentifiers.litellm,
-			apiKey: "message-litellm-key",
-			baseUrl: "http://message-url:4000",
-		})
+		expect(getModels).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.litellm,
+				apiKey: "message-litellm-key",
+				baseUrl: "http://message-url:4000",
+			},
+			handlerForProvider(providerIdentifiers.litellm),
+		)
 	})
 
 	test("skips LiteLLM when neither config nor message values are provided", async () => {
@@ -4650,6 +4772,7 @@ describe("ClineProvider - Router Models", () => {
 			expect.objectContaining({
 				provider: providerIdentifiers.litellm,
 			}),
+			expect.anything(),
 		)
 
 		// Verify response includes empty object for LiteLLM
@@ -4669,6 +4792,7 @@ describe("ClineProvider - Router Models", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -4697,10 +4821,13 @@ describe("ClineProvider - Router Models", () => {
 			type: "requestLmStudioModels",
 		})
 
-		expect(getModels).toHaveBeenCalledWith({
-			provider: providerIdentifiers.lmstudio,
-			baseUrl: "http://localhost:1234",
-		})
+		expect(getModels).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.lmstudio,
+				baseUrl: "http://localhost:1234",
+			},
+			handlerForProvider(providerIdentifiers.lmstudio),
+		)
 	})
 })
 
@@ -4782,8 +4909,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				asWebviewUri: vi.fn(),
 			},
 			visible: true,
-			onDidDispose: vi.fn().mockImplementation((callback) => {
-				callback()
+			onDidDispose: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),
 			onDidChangeVisibility: vi.fn().mockImplementation(() => {

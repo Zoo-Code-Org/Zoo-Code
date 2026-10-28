@@ -14,7 +14,7 @@ import {
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import {
 	convertToOpenAiMessages,
@@ -31,10 +31,16 @@ import { getModelParams } from "../transform/model-params"
 
 import { getModels } from "./fetchers/modelCache"
 import { getModelEndpoints } from "./fetchers/modelEndpointCache"
+import { applyOpenRouterMoonshotK3Profile, getOpenRouterModels } from "./fetchers/openrouter"
 
 import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
-import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions, SingleCompletionHandler } from "../index"
+import type {
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+	SingleCompletionHandler,
+} from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
 import { generateImageWithProvider, ImageGenerationResult } from "./utils/image-generation"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
@@ -61,16 +67,6 @@ const OpenRouterErrorResponseSchema = z.object({
 		})
 		.optional(),
 })
-
-// OpenRouter error structure that may include error.metadata.raw with actual upstream error
-// This is for caught exceptions which have the error wrapped in an "error" property
-interface OpenRouterErrorResponse {
-	error?: {
-		message?: string
-		code?: number
-		metadata?: { raw?: string }
-	}
-}
 
 // Direct error object structure (for streaming errors passed directly)
 interface OpenRouterError {
@@ -160,15 +156,27 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		})
 	}
 
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: false, keyScoped: false, authScoped: false }
+	}
+
+	async fetchModels(_options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getOpenRouterModels(undefined, ...fetchOpts)
+	}
+
 	private async loadDynamicModels(): Promise<void> {
 		try {
 			const [models, endpoints] = await Promise.all([
-				getModels({ provider: providerIdentifiers.openrouter }),
-				getModelEndpoints({
-					router: providerIdentifiers.openrouter,
-					modelId: this.options.openRouterModelId,
-					endpoint: this.options.openRouterSpecificProvider,
-				}),
+				getModels({ provider: providerIdentifiers.openrouter }, this),
+				getModelEndpoints(
+					{
+						router: providerIdentifiers.openrouter,
+						modelId: this.options.openRouterModelId,
+						endpoint: this.options.openRouterSpecificProvider,
+					},
+					this,
+				),
 			])
 
 			this.models = models
@@ -543,12 +551,15 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 	public async fetchModel() {
 		const [models, endpoints] = await Promise.all([
-			getModels({ provider: providerIdentifiers.openrouter }),
-			getModelEndpoints({
-				router: providerIdentifiers.openrouter,
-				modelId: this.options.openRouterModelId,
-				endpoint: this.options.openRouterSpecificProvider,
-			}),
+			getModels({ provider: providerIdentifiers.openrouter }, this),
+			getModelEndpoints(
+				{
+					router: providerIdentifiers.openrouter,
+					modelId: this.options.openRouterModelId,
+					endpoint: this.options.openRouterSpecificProvider,
+				},
+				this,
+			),
 		])
 
 		this.models = models
@@ -566,6 +577,12 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			info = this.endpoints[this.options.openRouterSpecificProvider]
 		}
 
+		// Re-apply the Moonshot K3 profile at consumption time: model records are
+		// persisted in the model cache, so records cached before the profile existed
+		// still carry the fabricated max_tokens value and a boolean
+		// supportsReasoningEffort with no default effort.
+		info = applyOpenRouterMoonshotK3Profile(id, info)
+
 		// Apply tool preferences for models accessed through routers (OpenAI, Gemini)
 		info = applyRouterToolPreferences(id, info)
 
@@ -582,7 +599,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		return { id, info, topP: isDeepSeekR1 ? 0.95 : undefined, ...params }
 	}
 
-	async completePrompt(prompt: string, options?: CompletePromptOptions) {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions) {
 		const { id: modelId, maxTokens, temperature, reasoning } = await this.fetchModel()
 
 		const completionParams: OpenRouterChatCompletionParams = {

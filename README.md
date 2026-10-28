@@ -46,11 +46,11 @@ Zoo Code builds on the foundation created by Roo Code and continues to expand it
 - **More dependable terminal and editing workflows** — fixes for premature terminal completion, task-state races, context management, diff editing, and provider-specific tool use.
 - **More control over your workspace** — rules management, per-mode MCP restrictions, multi-root path controls, model reasoning options, and completion change review actions.
 
-## What's New in v3.86.0
+## What's New in v3.92.0
 
-- ✨ **New model support:** Use GPT-6.1 Sol, get the corrected Claude Opus 5.5 output budget, and select DeepSeek V4.1 Flash on OpenCode Go.
-- 🧭 **Reliable task aborts and interruptions:** Preserve the first abort reason, reset stream-abort state for each request, and stop interrupted tasks from replaying rejected subtasks.
-- 🛠️ **Dependable tools, prompts, and UI streaming:** Keep streamed tool arguments intact, enforce MCP tool policy, prevent invented line numbers, and smooth chat updates.
+- ✨ **Faster model choice and stronger model support:** Switch models from the chat composer. Use Claude Haiku 5.5 on Amazon Bedrock, get more accurate Kimi K3 capabilities on OpenRouter, and use corrected Gemini 4 Argon limits on Vercel AI Gateway.
+- 🧭 **More reliable terminal, editing, chat, and remote workflows:** Collapse command output by default when you choose, get clearer editing failures, keep reasoning and API rows visible, and avoid startup and proxy issues in remote workspaces.
+- 🔌 **Expanded MCP marketplace:** Connect Zoo Code to AnySearch, Mailtea, and Tradehand through the MCP marketplace.
 
 <details>
   <summary>🌐 Available languages</summary>
