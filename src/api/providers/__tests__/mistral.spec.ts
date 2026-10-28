@@ -871,11 +871,11 @@ describe("MistralHandler", () => {
 			vi.useFakeTimers()
 			// The merged deadline uses native AbortSignal.timeout; drive it with fake
 			// timers so the test is deterministic and does not wait in real time.
-			const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation(((ms: number) => {
+			const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms = 0) => {
 				const controller = new AbortController()
 				setTimeout(() => controller.abort(new DOMException("timed out", "TimeoutError")), ms)
 				return controller.signal
-			}) as unknown as typeof AbortSignal.timeout)
+			})
 			try {
 				mockComplete.mockImplementation(
 					(_options: unknown, requestOptions?: { fetchOptions?: { signal?: AbortSignal } }) =>
@@ -902,6 +902,74 @@ describe("MistralHandler", () => {
 				await assertion
 				// A timeout is not a user cancellation but still not a provider failure.
 				expect(mockCaptureException).not.toHaveBeenCalled()
+			} finally {
+				timeoutSpy.mockRestore()
+				vi.useRealTimers()
+			}
+		})
+
+		it("keeps TimeoutError when the timeout fires before a later caller abort", async () => {
+			vi.useFakeTimers()
+			const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms = 0) => {
+				const controller = new AbortController()
+				setTimeout(() => controller.abort(new DOMException("timed out", "TimeoutError")), ms)
+				return controller.signal
+			})
+			const caller = new AbortController()
+			try {
+				mockComplete.mockImplementation(
+					(_options: unknown, requestOptions?: { fetchOptions?: { signal?: AbortSignal } }) =>
+						new Promise<never>((_resolve, reject) => {
+							const signal = requestOptions?.fetchOptions?.signal
+							const fail = () =>
+								reject(Object.assign(new Error("Request timed out"), { name: "RequestTimeoutError" }))
+							signal?.addEventListener("abort", fail, { once: true })
+						}),
+				)
+
+				const promise = handler.completePrompt("Test prompt", { abortSignal: caller.signal, timeoutMs: 100 })
+				const assertion = expect(promise).rejects.toMatchObject({ name: "TimeoutError" })
+				// Timeout fires first, then the caller also aborts before the rejection settles.
+				await vi.advanceTimersByTimeAsync(120)
+				caller.abort()
+				await assertion
+			} finally {
+				timeoutSpy.mockRestore()
+				vi.useRealTimers()
+			}
+		})
+
+		it("keeps AbortError when the caller aborts before the timeout fires", async () => {
+			vi.useFakeTimers()
+			const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms = 0) => {
+				const controller = new AbortController()
+				setTimeout(() => controller.abort(new DOMException("timed out", "TimeoutError")), ms)
+				return controller.signal
+			})
+			const caller = new AbortController()
+			try {
+				mockComplete.mockImplementation(
+					(_options: unknown, requestOptions?: { fetchOptions?: { signal?: AbortSignal } }) =>
+						new Promise<never>((_resolve, reject) => {
+							const signal = requestOptions?.fetchOptions?.signal
+							const fail = () => reject(new Error("socket closed"))
+							caller.signal.addEventListener(
+								"abort",
+								() => {
+									// Caller aborts first; the mock then rejects a plain error.
+									fail()
+								},
+								{ once: true },
+							)
+							if (signal?.aborted) fail()
+						}),
+				)
+
+				const promise = handler.completePrompt("Test prompt", { abortSignal: caller.signal, timeoutMs: 100 })
+				const assertion = expect(promise).rejects.toMatchObject({ name: "AbortError" })
+				caller.abort()
+				await assertion
+				expect(caller.signal.aborted).toBe(true)
 			} finally {
 				timeoutSpy.mockRestore()
 				vi.useRealTimers()

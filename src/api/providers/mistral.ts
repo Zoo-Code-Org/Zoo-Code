@@ -278,9 +278,14 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 			// which does not match the abort-name checks on its own).
 			if (isRequestAborted(error, requestAbortSignal)) {
 				if (requestAbortSignal?.aborted) {
-					throw callerAbortSignal?.aborted
-						? createAbortError("Mistral")
-						: createTimeoutError("Mistral", "completion request")
+					// The merged signal keeps the FIRST abort reason: a timeout that fired before
+					// the caller aborted must stay a TimeoutError even if the caller signal is
+					// aborted by the time the catch runs.
+					const abortedByTimeout =
+						(requestAbortSignal.reason as { name?: string } | undefined)?.name === "TimeoutError"
+					throw abortedByTimeout
+						? createTimeoutError("Mistral", "completion request")
+						: createAbortError("Mistral")
 				}
 				throw createAbortError("Mistral")
 			}
