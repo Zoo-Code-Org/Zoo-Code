@@ -312,7 +312,11 @@ export function resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPu
 // pull request keeps the merge commit as the diff head.
 export function resolveCiInvocation(repoRoot, eventBaseSha, mergeCommitSha, prHeadSha, openPullRequests = []) {
 	const resolved = resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPullRequests)
-	return { baseSha: resolved.baseSha, diffHead: resolved.stackedOn ? prHeadSha : mergeCommitSha, stackedOn: resolved.stackedOn }
+	return {
+		baseSha: resolved.baseSha,
+		diffHead: resolved.stackedOn ? prHeadSha : mergeCommitSha,
+		stackedOn: resolved.stackedOn,
+	}
 }
 
 // Selection, source reads, and Stryker must all see the same tree. The workflow checks out
@@ -873,15 +877,24 @@ export function parseStackedMap(value) {
 		for (let i = index; i < text.length; i++) {
 			const char = text[i]
 			if (inString) {
-				if (char === "\\") { i += 1; continue }
-				if (char === "\"") inString = false
+				if (char === "\\") {
+					i += 1
+					continue
+				}
+				if (char === '"') inString = false
 				continue
 			}
-			if (char === "\"") { inString = true; continue }
+			if (char === '"') {
+				inString = true
+				continue
+			}
 			if (char === "[") depth += 1
 			else if (char === "]") {
 				depth -= 1
-				if (depth === 0) { end = i; break }
+				if (depth === 0) {
+					end = i
+					break
+				}
 			}
 		}
 		if (depth !== 0 || end < 0) return []
@@ -892,7 +905,9 @@ export function parseStackedMap(value) {
 			return []
 		}
 		if (!Array.isArray(parsed)) return []
-		entries.push(...parsed.filter((entry) => entry && entry.number && /^[0-9a-f]{40}$/i.test(String(entry.headSha))))
+		entries.push(
+			...parsed.filter((entry) => entry && entry.number && /^[0-9a-f]{40}$/i.test(String(entry.headSha))),
+		)
 		index = end + 1
 	}
 	return entries
@@ -917,14 +932,21 @@ function main() {
 	// uses its own head, and the working tree is aligned to that head below.
 	const prHeadSha = argument("--pr-head") ?? headSha
 	const invocation = resolveCiInvocation(repoRoot, baseSha, headSha, prHeadSha, openPullRequests)
-	if (invocation.stackedOn) console.log(`Stacked unit: measured against the head of parent PR #${invocation.stackedOn}, not the event base.`)
+	if (invocation.stackedOn)
+		console.log(
+			`Stacked unit: measured against the head of parent PR #${invocation.stackedOn}, not the event base.`,
+		)
 	if (invocation.stackedOn && alignExecutionTree(repoRoot, invocation.diffHead)) {
-		console.log(`Aligned the working tree to the diff head ${invocation.diffHead.slice(0, 12)} so selection, source reads, and mutation run on the same tree.`)
+		console.log(
+			`Aligned the working tree to the diff head ${invocation.diffHead.slice(0, 12)} so selection, source reads, and mutation run on the same tree.`,
+		)
 	}
 
 	const reportRoot = path.resolve(repoRoot, argument("--reports") ?? "reports/mutation")
 	const manifest = {
-		...selectFromGit(repoRoot, invocation.baseSha, invocation.diffHead, { preserveBase: Boolean(invocation.stackedOn) }),
+		...selectFromGit(repoRoot, invocation.baseSha, invocation.diffHead, {
+			preserveBase: Boolean(invocation.stackedOn),
+		}),
 		stackedOn: invocation.stackedOn,
 	}
 	if (manifest.packages.length === 0) {

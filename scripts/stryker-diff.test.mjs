@@ -63,7 +63,9 @@ describe("mutation testing workflow", () => {
 		assert.ok(!workflow.includes("HEAD_SHA: ${{ github.event.pull_request.head.sha }}"))
 		assert.ok(workflow.includes('BASE_SHA="$(git rev-parse "$HEAD_SHA^1")"'))
 		assert.ok(workflow.includes("pull-requests: read"))
-		assert.ok(workflow.includes('PR_HEAD_SHA="$(git rev-parse "$HEAD_SHA^2" 2>/dev/null || git rev-parse "$HEAD_SHA")"'))
+		assert.ok(
+			workflow.includes('PR_HEAD_SHA="$(git rev-parse "$HEAD_SHA^2" 2>/dev/null || git rev-parse "$HEAD_SHA")"'),
+		)
 		assert.ok(workflow.includes('--stacked-map "$STACKED_MAP"'))
 		assert.ok(workflow.includes('--pr-head "$PR_HEAD_SHA"'))
 		// The open pull request map must cover every page, otherwise a parent unit beyond the first
@@ -257,7 +259,9 @@ describe("stacked unit base resolution", () => {
 		const { repository, eventBaseSha, parentSha, childSha } = createSyntheticStack()
 
 		try {
-			const resolved = resolveStackedUnitBase(repository, eventBaseSha, childSha, [{ number: 1, headSha: parentSha }])
+			const resolved = resolveStackedUnitBase(repository, eventBaseSha, childSha, [
+				{ number: 1, headSha: parentSha },
+			])
 			assert.equal(resolved.baseSha, parentSha)
 			assert.equal(resolved.stackedOn, 1)
 
@@ -285,7 +289,9 @@ describe("stacked unit base resolution", () => {
 			run("merge", "--no-ff", "--quiet", "-m", "merge", childSha)
 			const mergeSha = run("rev-parse", "HEAD")
 
-			const resolved = resolveStackedUnitBase(repository, advancedBase, childSha, [{ number: 1, headSha: parentSha }])
+			const resolved = resolveStackedUnitBase(repository, advancedBase, childSha, [
+				{ number: 1, headSha: parentSha },
+			])
 			assert.equal(resolved.baseSha, parentSha)
 			assert.equal(resolved.stackedOn, 1)
 
@@ -327,10 +333,10 @@ describe("stacked unit base resolution", () => {
 
 			// A multi-commit pull request must not be charged only its last commit.
 			const manifest = selectFromGit(repository, resolved.baseSha, childSha)
-			assert.deepEqual(
-				manifest.packages.flatMap((entry) => entry.files.map((file) => file.path)).sort(),
-				["packages/core/src/unit1.ts", "packages/core/src/unit2.ts"],
-			)
+			assert.deepEqual(manifest.packages.flatMap((entry) => entry.files.map((file) => file.path)).sort(), [
+				"packages/core/src/unit1.ts",
+				"packages/core/src/unit2.ts",
+			])
 			void parentSha
 		} finally {
 			fs.rmSync(repository, { recursive: true, force: true })
@@ -359,10 +365,10 @@ describe("stacked unit base resolution", () => {
 
 			// The cumulative delta the cap has to see when the parent never gets gated.
 			const manifest = selectFromGit(repository, draft.baseSha, childSha, { preserveBase: true })
-			assert.deepEqual(
-				manifest.packages.flatMap((entry) => entry.files.map((file) => file.path)).sort(),
-				["packages/core/src/unit1.ts", "packages/core/src/unit2.ts"],
-			)
+			assert.deepEqual(manifest.packages.flatMap((entry) => entry.files.map((file) => file.path)).sort(), [
+				"packages/core/src/unit1.ts",
+				"packages/core/src/unit2.ts",
+			])
 		} finally {
 			fs.rmSync(repository, { recursive: true, force: true })
 		}
@@ -371,8 +377,8 @@ describe("stacked unit base resolution", () => {
 	it("degrades to the event base for an unparsable stacked map", () => {
 		assert.deepEqual(parseStackedMap("not json"), [])
 		assert.deepEqual(parseStackedMap('{"number": 1}'), [])
-		assert.deepEqual(parseStackedMap("[{\"number\": 1, \"headSha\": \"abc\"}]"), [])
-		assert.deepEqual(parseStackedMap("[{\"number\": 1, \"headSha\": \"" + "a".repeat(40) + "\"}]"), [
+		assert.deepEqual(parseStackedMap('[{"number": 1, "headSha": "abc"}]'), [])
+		assert.deepEqual(parseStackedMap('[{"number": 1, "headSha": "' + "a".repeat(40) + '"}]'), [
 			{ number: 1, headSha: "a".repeat(40) },
 		])
 
@@ -380,7 +386,12 @@ describe("stacked unit base resolution", () => {
 		// document rather than inside the first array.
 		assert.deepEqual(
 			parseStackedMap(
-				"[{\"number\": 1, \"headSha\": \"" + "b".repeat(40) + "\"}]" + "[{\"number\": 2, \"headSha\": \"" + "c".repeat(40) + "\"}]",
+				'[{"number": 1, "headSha": "' +
+					"b".repeat(40) +
+					'"}]' +
+					'[{"number": 2, "headSha": "' +
+					"c".repeat(40) +
+					'"}]',
 			),
 			[
 				{ number: 1, headSha: "b".repeat(40) },
@@ -389,8 +400,8 @@ describe("stacked unit base resolution", () => {
 		)
 		// Trailing content cannot be consumed as a page, so the whole map is rejected rather than
 		// keeping a partial entry that could select a parent base.
-		assert.deepEqual(parseStackedMap("[{\"number\": 1, \"headSha\": \"" + "d".repeat(40) + "\"}]garbage"), [])
-		assert.deepEqual(parseStackedMap("[{\"number\": 1, \"headSha\": \"" + "d".repeat(40) + "\"}] [{\"number\": 2"), [])
+		assert.deepEqual(parseStackedMap('[{"number": 1, "headSha": "' + "d".repeat(40) + '"}]garbage'), [])
+		assert.deepEqual(parseStackedMap('[{"number": 1, "headSha": "' + "d".repeat(40) + '"}] [{"number": 2'), [])
 	})
 
 	it("the ci command picks the diff head from the commit graph", () => {
@@ -407,7 +418,9 @@ describe("stacked unit base resolution", () => {
 
 			// Stacked: base is the parent PR head and the diff head is the PR head, not the merge
 			// commit, so the base advance is not charged to this unit.
-			const stacked = resolveCiInvocation(repository, advancedBase, mergeSha, childSha, [{ number: 1, headSha: parentSha }])
+			const stacked = resolveCiInvocation(repository, advancedBase, mergeSha, childSha, [
+				{ number: 1, headSha: parentSha },
+			])
 			assert.equal(stacked.baseSha, parentSha)
 			assert.equal(stacked.diffHead, childSha)
 			assert.equal(stacked.stackedOn, 1)
@@ -431,11 +444,21 @@ describe("stacked unit base resolution", () => {
 			run("commit", "--quiet", "-m", "unit 3")
 			run("merge", "--no-ff", "--quiet", "-m", "unit merge", parentSha)
 			const multiParentHead = run("rev-parse", "HEAD")
-			assert.equal(run("rev-list", "--parents", "-n", "1", multiParentHead).trim().split(/\s+/).slice(1).length, 2)
-			const multi = resolveStackedUnitBase(repository, advancedBase, multiParentHead, [{ number: 1, headSha: parentSha }])
+			assert.equal(
+				run("rev-list", "--parents", "-n", "1", multiParentHead).trim().split(/\s+/).slice(1).length,
+				2,
+			)
+			const multi = resolveStackedUnitBase(repository, advancedBase, multiParentHead, [
+				{ number: 1, headSha: parentSha },
+			])
 			assert.equal(multi.baseSha, advancedBase)
 			assert.equal(multi.stackedOn, null)
-			assert.equal(resolveCiInvocation(repository, advancedBase, multiParentHead, multiParentHead, [{ number: 1, headSha: parentSha }]).stackedOn, null)
+			assert.equal(
+				resolveCiInvocation(repository, advancedBase, multiParentHead, multiParentHead, [
+					{ number: 1, headSha: parentSha },
+				]).stackedOn,
+				null,
+			)
 
 			// The guard, not the map lookup, has to reject this merge: its FIRST parent is the open
 			// pull request head. Without the parents.length guard that match would win, the merge would
@@ -479,14 +502,19 @@ describe("stacked unit base resolution", () => {
 			run("merge", "--no-ff", "--quiet", "-m", "merge", childSha)
 			const mergeSha = run("rev-parse", "HEAD")
 
-			const invocation = resolveCiInvocation(repository, advancedBase, mergeSha, childSha, [{ number: 1, headSha: parentSha }])
+			const invocation = resolveCiInvocation(repository, advancedBase, mergeSha, childSha, [
+				{ number: 1, headSha: parentSha },
+			])
 			assert.equal(invocation.diffHead, childSha)
 			assert.equal(run("rev-parse", "HEAD").toLowerCase(), mergeSha.toLowerCase())
 
 			assert.equal(alignExecutionTree(repository, invocation.diffHead), true)
 			assert.equal(run("rev-parse", "HEAD").toLowerCase(), childSha.toLowerCase())
 			// The tree Stryker would mutate is now the unit tree, not the merge tree.
-			assert.equal(fs.readFileSync(path.join(repository, "packages/core/src/unit2.ts"), "utf8").replace(/\r/g, ""), "export const unit2 = () => 2\n")
+			assert.equal(
+				fs.readFileSync(path.join(repository, "packages/core/src/unit2.ts"), "utf8").replace(/\r/g, ""),
+				"export const unit2 = () => 2\n",
+			)
 			// Aligning again is a no-op.
 			assert.equal(alignExecutionTree(repository, invocation.diffHead), false)
 		} finally {
@@ -1246,7 +1274,19 @@ describe("failure output", () => {
 	})
 
 	it("names the parent pull request when the unit was measured against a stacked base", () => {
-		const rows = [{ id: "extension", changedLines: 12, valid: 3, killed: 3, timeout: 0, survived: 0, noCoverage: 0, blocking: [], result: "Pass" }]
+		const rows = [
+			{
+				id: "extension",
+				changedLines: 12,
+				valid: 3,
+				killed: 3,
+				timeout: 0,
+				survived: 0,
+				noCoverage: 0,
+				blocking: [],
+				result: "Pass",
+			},
+		]
 		const summary = formatSummary(rows, [], { stackedOn: 1914 })
 		assert.ok(summary.includes("Stacked unit: measured against the head of parent PR #1914, not the event base."))
 
