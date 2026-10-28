@@ -977,10 +977,14 @@ describe("writeToFileTool", () => {
 			// With no preview open (isEditing=false), releaseEarlyDirectories is the only
 			// directory cleanup owner: the removal must run before reset() clears createdDirs.
 			// The denied-path report rejecting must not skip either step.
+			const adoptedDirs = ["/mock-workspace/test/nested"]
+			mockedCreateDirectoriesForFile.mockResolvedValue(adoptedDirs)
 			mockCline.diffViewProvider.isEditing = false
 			await executeWriteFileTool({ content: "" }, { isPartial: true })
 			await executeWriteFileTool({ content: "" }, { isPartial: true })
 			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			// The adopted list is non-empty: the cleanup below really has directories to remove.
+			expect(mockCline.diffViewProvider.adoptCreatedDirectories).toHaveBeenCalledWith(adoptedDirs)
 
 			mockCline.say.mockRejectedValue(new Error("report failed"))
 			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
@@ -997,6 +1001,7 @@ describe("writeToFileTool", () => {
 			} finally {
 				errorSpy.mockRestore()
 				mockCline.say.mockResolvedValue(undefined)
+				mockedCreateDirectoriesForFile.mockResolvedValue([])
 				writeToFileTool["taskPartialStreamState"].clear()
 			}
 		})
