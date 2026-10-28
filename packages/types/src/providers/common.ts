@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { reasoningEffortSettingSchema, verbosityLevelsSchema } from "../model.js"
-import type { ProviderIdentifier } from "../provider-identifiers.js"
+import { type ProviderIdentifier } from "../provider-identifiers.js"
 
 export const API_PROVIDER_FIELD = "apiProvider"
 export const SETTINGS_SHAPE_FIELD = "settingsShape"

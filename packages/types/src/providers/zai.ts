@@ -1,5 +1,13 @@
-import type { ModelInfo } from "../model.js"
-import { ZaiApiLine } from "../provider-settings.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 // Z AI
 // https://docs.z.ai/guides/llm/glm-4-32b-0414-128k
@@ -561,3 +569,17 @@ export function getZAiModels(apiLine: ZaiApiLine = "international_coding"): Reco
 		? { ...regionalModels, ...mainlandZAiCodingPlanOnlyModels }
 		: regionalModels
 }
+
+export const zaiApiLineSchema = z.enum(["international_coding", "china_coding", "international_api", "china_api"])
+export type ZaiApiLine = z.infer<typeof zaiApiLineSchema>
+
+export const zaiProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.zai,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	schema: {
+		...apiModelIdProviderModelShape,
+		zaiApiKey: z.string().optional(),
+		zaiApiLine: zaiApiLineSchema.optional(),
+	},
+})

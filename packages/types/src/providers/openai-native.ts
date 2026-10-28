@@ -1,7 +1,7 @@
 import { z } from "zod"
 
-import { providerIdentifiers } from "../provider-identifiers.js"
 import { serviceTierSchema } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
 import {
 	API_MODEL_ID_FIELD,
 	apiModelIdProviderModelShape,

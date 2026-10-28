@@ -8,7 +8,7 @@ import {
 	providerSettingsSchemaDiscriminated,
 } from "../provider-settings.js"
 import { OpenAiCodexServiceTier, OpenAiServiceTier } from "../model.js"
-import { providerDefinitionList } from "../provider-settings/index.js"
+import { providerDefinitionList } from "../providers/index.js"
 
 describe("provider settings discriminated union", () => {
 	it("composes exactly one provider-specific definition for every provider", () => {

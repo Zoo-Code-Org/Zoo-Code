@@ -1,4 +1,13 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 // https://docs.mistral.ai/getting-started/models/models_overview/
 export type MistralModelId = keyof typeof mistralModels
@@ -81,3 +90,14 @@ export const mistralModels = {
 } as const satisfies Record<string, ModelInfo>
 
 export const MISTRAL_DEFAULT_TEMPERATURE = 1
+
+export const mistralProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.mistral,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	schema: {
+		...apiModelIdProviderModelShape,
+		mistralApiKey: z.string().optional(),
+		mistralCodestralUrl: z.string().optional(),
+	},
+})

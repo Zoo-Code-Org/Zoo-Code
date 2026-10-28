@@ -1,7 +1,7 @@
 import { z } from "zod"
 
-import { providerDefinitionList, type ProviderDefinition } from "./provider-settings/index.js"
-import { API_PROVIDER_FIELD, SETTINGS_SHAPE_FIELD } from "./provider-settings/common.js"
+import { providerDefinitionList, type ProviderDefinition } from "./providers/index.js"
+import { API_PROVIDER_FIELD, SETTINGS_SHAPE_FIELD } from "./providers/common.js"
 export {
 	DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS,
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
@@ -14,7 +14,7 @@ export {
 	type NanoGptRoutingPreference,
 	zaiApiLineSchema,
 	type ZaiApiLine,
-} from "./provider-settings/index.js"
+} from "./providers/index.js"
 
 import { codebaseIndexProviderSchema } from "./codebase-index.js"
 import type { UnionToIntersection } from "./type-fu.js"

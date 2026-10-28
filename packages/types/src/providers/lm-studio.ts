@@ -1,6 +1,8 @@
 import { z } from "zod"
 
-import type { ModelInfo } from "../model.js"
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import { baseProviderSettingsShape, createModelIdAccessor, createProviderDefinition } from "./common.js"
 
 export const lmStudioModelsMessageTypes = ["requestLmStudioModels", "lmStudioModels"] as const
 
@@ -26,3 +28,18 @@ export const lMStudioDefaultModelInfo: ModelInfo = {
 	cacheReadsPrice: 0,
 	description: "LM Studio hosted models",
 }
+
+export const LM_STUDIO_MODEL_ID_FIELD = "lmStudioModelId"
+
+export const lmStudioProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.lmstudio,
+	modelIdKey: LM_STUDIO_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(LM_STUDIO_MODEL_ID_FIELD),
+	schema: {
+		...baseProviderSettingsShape,
+		[LM_STUDIO_MODEL_ID_FIELD]: z.string().optional(),
+		lmStudioBaseUrl: z.string().optional(),
+		lmStudioDraftModelId: z.string().optional(),
+		lmStudioSpeculativeDecodingEnabled: z.boolean().optional(),
+	},
+})
