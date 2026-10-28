@@ -159,6 +159,30 @@ export interface ExtensionStateContextType extends ExtensionState {
 
 export const ExtensionStateContext = createContext<ExtensionStateContextType | undefined>(undefined)
 
+const messagesAreStale = (incoming: Partial<ExtensionState>, currentSequence: number | undefined): boolean =>
+	incoming.clineMessages !== undefined &&
+	incoming.clineMessagesSeq !== undefined &&
+	currentSequence !== undefined &&
+	incoming.clineMessagesSeq <= currentSequence
+
+function internMessages(messages: ClineMessage[], previousMessages: ClineMessage[], cache: StringCache): void {
+	const previousByTimestamp = new Map(previousMessages.map((item) => [item.ts, item]))
+	for (const message of messages) {
+		const previous = previousByTimestamp.get(message.ts)
+		if (
+			previous &&
+			Object.keys(message).length === Object.keys(previous).length &&
+			Object.entries(message).every(([key, value]) => previous[key as keyof ClineMessage] === value)
+		) {
+			// Keep the incoming object, but rebind equal strings to the previous snapshot's
+			// instances, including strings that have already left the bounded FIFO cache.
+			Object.assign(message, previous)
+		} else {
+			cache.intern(message)
+		}
+	}
+}
+
 export const mergeExtensionState = (prevState: ExtensionState, newState: Partial<ExtensionState>) => {
 	const { customModePrompts: prevCustomModePrompts, experiments: prevExperiments, ...prevRest } = prevState
 
@@ -179,12 +203,7 @@ export const mergeExtensionState = (prevState: ExtensionState, newState: Partial
 	// concurrent state pushes. If a stale push arrives after a newer one, its clineMessages
 	// would overwrite the newer messages. The sequence number prevents this by only applying
 	// clineMessages when the incoming seq is strictly greater than the last applied seq.
-	if (
-		newState.clineMessagesSeq !== undefined &&
-		prevState.clineMessagesSeq !== undefined &&
-		newState.clineMessagesSeq <= prevState.clineMessagesSeq &&
-		newState.clineMessages !== undefined
-	) {
+	if (messagesAreStale(newState, prevState.clineMessagesSeq)) {
 		rest.clineMessages = prevState.clineMessages
 		rest.clineMessagesSeq = prevState.clineMessagesSeq
 		rest.currentTaskId = prevState.currentTaskId
@@ -369,13 +388,9 @@ export const ExtensionStateContextProvider: React.FC<{
 				case "state": {
 					const newState = message.state ?? {}
 
-					const messagesAreStale =
-						newState.clineMessages !== undefined &&
-						newState.clineMessagesSeq !== undefined &&
-						clineMessagesSeqRef.current !== undefined &&
-						newState.clineMessagesSeq <= clineMessagesSeqRef.current
+					const staleMessages = messagesAreStale(newState, clineMessagesSeqRef.current)
 
-					if (!messagesAreStale && newState.clineMessages !== undefined) {
+					if (!staleMessages && newState.clineMessages !== undefined) {
 						if (newState.currentTaskId !== currentTaskIdRef.current) {
 							messageCache.clear()
 							messagesRef.current = []
@@ -383,22 +398,8 @@ export const ExtensionStateContextProvider: React.FC<{
 						}
 					}
 
-					if (newState.clineMessages && !messagesAreStale) {
-						const previousMessages = new Map(messagesRef.current.map((item) => [item.ts, item]))
-						for (const clineMessage of newState.clineMessages) {
-							const previous = previousMessages.get(clineMessage.ts)
-							if (
-								previous &&
-								Object.keys(clineMessage).length === Object.keys(previous).length &&
-								Object.entries(clineMessage).every(
-									([key, value]) => previous[key as keyof ClineMessage] === value,
-								)
-							) {
-								Object.assign(clineMessage, previous)
-							} else {
-								messageCache.intern(clineMessage)
-							}
-						}
+					if (newState.clineMessages && !staleMessages) {
+						internMessages(newState.clineMessages, messagesRef.current, messageCache)
 						messagesRef.current = newState.clineMessages
 					}
 					if (
@@ -479,7 +480,7 @@ export const ExtensionStateContextProvider: React.FC<{
 				}
 				case "messageUpdated": {
 					const clineMessage = message.clineMessage!
-					const messageIndex = messagesRef.current.findIndex((item) => item.ts === clineMessage.ts)
+					const messageIndex = findLastIndex(messagesRef.current, (item) => item.ts === clineMessage.ts)
 					if (messageIndex !== -1) {
 						messageCache.intern(clineMessage)
 						messagesRef.current = messagesRef.current.map((item, index) =>

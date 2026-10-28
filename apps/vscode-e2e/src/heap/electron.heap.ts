@@ -44,7 +44,8 @@ async function capture(client: CDPSession, file: string) {
 }
 
 for (const workload of ["repeated", "unique"] satisfies Workload[]) {
-	test(`webview retained heap: ${workload} tool outputs`, async ({ browserName: _browserName }, testInfo) => {
+	test(`webview retained heap: ${workload} tool outputs`, async () => {
+		const testInfo = test.info()
 		const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "zoo-heap-"))
 		const workspace = path.join(temporaryRoot, "workspace")
 		const userData = path.join(temporaryRoot, "user-data")

@@ -33,10 +33,14 @@ const TestComponent = () => {
 		setShowRooIgnoredFiles,
 		clineMessages,
 		currentTaskId,
+		taskHistory,
+		currentTaskItem,
 	} = useExtensionState()
 
 	return (
 		<div>
+			<div data-testid="task-history">{JSON.stringify(taskHistory)}</div>
+			<div data-testid="current-task-item">{JSON.stringify(currentTaskItem)}</div>
 			<div data-testid="cline-messages">{JSON.stringify(clineMessages)}</div>
 			<div data-testid="current-task-id">{currentTaskId ?? "no-task"}</div>
 			<div data-testid="allowed-commands">{JSON.stringify(allowedCommands)}</div>
@@ -54,6 +58,16 @@ const TestComponent = () => {
 
 const expectMessages = (messages: ClineMessage[]) => {
 	expect(JSON.parse(screen.getByTestId("cline-messages").textContent!)).toEqual(messages)
+}
+
+type InternSpy = { mock: { contexts: readonly unknown[] } }
+
+const cacheFor = (spy: InternSpy, kind: "message" | "history"): StringCache => {
+	const cache = spy.mock.contexts.find(
+		(value) => value instanceof StringCache && (value["shouldIntern"] !== undefined) === (kind === "message"),
+	)
+	if (!(cache instanceof StringCache)) throw new Error(`Missing ${kind} cache`)
+	return cache
 }
 
 const RulesTestComponent = () => {
@@ -128,6 +142,84 @@ const InitialStateTestComponent = () => {
 
 describe("ExtensionStateContext", () => {
 	afterEach(() => vi.restoreAllMocks())
+	it("interns initial history and current task items and subsequent state pushes", () => {
+		const internSpy = vi.spyOn(StringCache.prototype, "intern")
+		const item = { id: "task-a", number: 1, ts: 1, task: "history", tokensIn: 0, tokensOut: 0, totalCost: 0 }
+		const currentTaskItem = { ...item, id: "task-b", task: "current" }
+		const taskHistory = [item]
+		render(
+			<ExtensionStateContextProvider initialState={{ taskHistory, currentTaskItem }}>
+				<TestComponent />
+			</ExtensionStateContextProvider>,
+		)
+		const cache = cacheFor(internSpy, "history")
+		expect(internSpy).toHaveBeenCalledWith(taskHistory)
+		expect(internSpy).toHaveBeenCalledWith(currentTaskItem)
+		expect(cache.size).toBe(4)
+		expect(JSON.parse(screen.getByTestId("task-history").textContent!)).toEqual(taskHistory)
+		expect(JSON.parse(screen.getByTestId("current-task-item").textContent!)).toEqual(currentTaskItem)
+
+		internSpy.mockClear()
+		const updated = { ...currentTaskItem, task: "updated" }
+		act(() =>
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "state", state: { currentTaskItem: updated } },
+				}),
+			),
+		)
+		expect(internSpy).toHaveBeenCalledWith(updated)
+		expect(internSpy.mock.contexts).toEqual([cache])
+		expect(cache.size).toBe(5)
+		expect(JSON.parse(screen.getByTestId("current-task-item").textContent!)).toEqual(updated)
+	})
+
+	it("does not restore a key dropped by a snapshot message", () => {
+		const payload: ClineMessage = { ts: 1, type: "say", say: "text", text: "seed", partial: false }
+		const internSpy = vi.spyOn(StringCache.prototype, "intern")
+		render(
+			<ExtensionStateContextProvider initialState={{ clineMessages: [payload] }}>
+				<TestComponent />
+			</ExtensionStateContextProvider>,
+		)
+		internSpy.mockClear()
+		const updated: ClineMessage = { ts: 1, type: "say", say: "text", text: "seed" }
+		act(() =>
+			window.dispatchEvent(
+				new MessageEvent("message", { data: { type: "state", state: { clineMessages: [updated] } } }),
+			),
+		)
+		expect(JSON.parse(screen.getByTestId("cline-messages").textContent!)[0]).not.toHaveProperty("partial")
+		expectMessages([{ ts: 1, type: "say", say: "text", text: "seed" }])
+		expect(internSpy).toHaveBeenCalledWith(updated)
+	})
+
+	it("updates the last duplicate timestamp in both the message mirror and rendered state", () => {
+		const first: ClineMessage = { ts: 1, type: "say", say: "text", text: "first" }
+		const last = { ...first, text: "last" }
+		const updated = { ...last, text: "updated" }
+		const internSpy = vi.spyOn(StringCache.prototype, "intern")
+		render(
+			<ExtensionStateContextProvider initialState={{ clineMessages: [first, last] }}>
+				<TestComponent />
+			</ExtensionStateContextProvider>,
+		)
+		act(() =>
+			window.dispatchEvent(
+				new MessageEvent("message", { data: { type: "messageUpdated", clineMessage: updated } }),
+			),
+		)
+		expectMessages([first, updated])
+		internSpy.mockClear()
+		act(() =>
+			window.dispatchEvent(
+				new MessageEvent("message", { data: { type: "state", state: { clineMessages: [{ ...updated }] } } }),
+			),
+		)
+		expect(internSpy).not.toHaveBeenCalledWith(updated)
+		expectMessages([updated])
+	})
+
 	it.each(["initial", "state", "messageUpdated", "taskHistoryUpdated", "taskHistoryItemUpdated"] as const)(
 		"interns accepted payloads through %s",
 		(entry) => {
@@ -141,7 +233,7 @@ describe("ExtensionStateContext", () => {
 			)
 			if (entry === "initial") {
 				expect(internSpy).toHaveBeenCalledWith(payload)
-				const cache = internSpy.mock.contexts[0]
+				const cache = cacheFor(internSpy, "message")
 				expect(cache).toBeInstanceOf(StringCache)
 				if (!(cache instanceof StringCache)) throw new Error("Missing cache")
 				expect(typeof cache["shouldIntern"]).toBe("function")
@@ -164,6 +256,9 @@ describe("ExtensionStateContext", () => {
 			act(() => window.dispatchEvent(new MessageEvent("message", { data: messages[entry] })))
 			expect(internSpy.mock.contexts).toEqual([targetCache])
 			expect(targetCache.size).toBeGreaterThan(sizeBefore)
+			if (entry === "taskHistoryUpdated" || entry === "taskHistoryItemUpdated") {
+				expect(JSON.parse(screen.getByTestId("task-history").textContent!)).toEqual([item])
+			}
 			expect(internSpy).toHaveBeenCalledWith(
 				entry === "state"
 					? expect.objectContaining({ text: "changed" })
@@ -222,7 +317,7 @@ describe("ExtensionStateContext", () => {
 				<TestComponent />
 			</ExtensionStateContextProvider>,
 		)
-		const cache = internSpy.mock.contexts[0]
+		const cache = cacheFor(internSpy, "message")
 		if (!(cache instanceof StringCache)) throw new Error("Missing cache")
 		const size = cache.size
 		act(() =>
@@ -254,7 +349,7 @@ describe("ExtensionStateContext", () => {
 				<TestComponent />
 			</ExtensionStateContextProvider>,
 		)
-		const cache = internSpy.mock.contexts[0]
+		const cache = cacheFor(internSpy, "message")
 		if (!(cache instanceof StringCache)) throw new Error("Missing message cache")
 		expect(cache?.size).toBe(0)
 		internSpy.mockClear()
@@ -295,8 +390,8 @@ describe("ExtensionStateContext", () => {
 				<TestComponent />
 			</ExtensionStateContextProvider>,
 		)
-		const messageCache = internSpy.mock.contexts[0]
-		const historyCache = internSpy.mock.contexts[1]
+		const messageCache = cacheFor(internSpy, "message")
+		const historyCache = cacheFor(internSpy, "history")
 		if (!(messageCache instanceof StringCache) || !(historyCache instanceof StringCache))
 			throw new Error("Missing caches")
 		const messageSize = messageCache.size
@@ -308,6 +403,23 @@ describe("ExtensionStateContext", () => {
 				}),
 			),
 		)
+		expect(messageCache.size).toBe(messageSize)
+		const clearSpy = vi.spyOn(StringCache.prototype, "clear")
+		act(() =>
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "state",
+						state: {
+							currentTaskId: "task-a",
+							clineMessages: [{ ts: 1, type: "say", say: "text", text: "seed" }],
+							clineMessagesSeq: 6,
+						},
+					},
+				}),
+			),
+		)
+		expect(clearSpy).not.toHaveBeenCalled()
 		expect(messageCache.size).toBe(messageSize)
 		act(() =>
 			window.dispatchEvent(
@@ -335,8 +447,8 @@ describe("ExtensionStateContext", () => {
 				<TestComponent />
 			</ExtensionStateContextProvider>,
 		)
-		const messageCache = internSpy.mock.contexts[0]
-		const historyCache = internSpy.mock.contexts[1]
+		const messageCache = cacheFor(internSpy, "message")
+		const historyCache = cacheFor(internSpy, "history")
 		if (!(messageCache instanceof StringCache) || !(historyCache instanceof StringCache)) {
 			throw new Error("Missing provider caches")
 		}

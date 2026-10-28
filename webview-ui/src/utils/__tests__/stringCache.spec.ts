@@ -14,6 +14,14 @@ describe("StringCache", () => {
 		},
 	)
 
+	it("does not refresh FIFO order on a cache hit", () => {
+		const cache = new StringCache(undefined, 2)
+		cache.intern(["first", "second"])
+		cache.intern("first")
+		cache.intern("third")
+		expect([...cache["cache"].keys()]).toEqual(["second", "third"])
+	})
+
 	it("bounds entry count and retained characters, skipping oversized strings", () => {
 		const cache = new StringCache(undefined, 2, 6)
 		cache.intern(["aaa", "bbb", "ccc"])
@@ -35,6 +43,8 @@ describe("StringCache", () => {
 			nested: [{ label: "shared" }, { label: "other" }],
 			empty: "",
 			count: 1,
+			nullable: null,
+			optional: undefined,
 		}
 
 		expect(cache.intern(value)).toBe(value)

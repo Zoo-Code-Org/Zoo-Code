@@ -41,14 +41,13 @@ async function main() {
 		await fs.mkdir(path.join(extension, "webview-ui"), { recursive: true })
 		await link(path.join(repositoryRoot, "src/webview-ui/audio"), path.join(extension, "webview-ui/audio"))
 		if (variant === "base") {
-			// Hold the host, styles and unrelated code constant; compare the three
-			// production webview modules changed by this PR with their base versions.
-			for (const file of ["App.tsx", "components/chat/ChatView.tsx", "context/ExtensionStateContext.tsx"]) {
-				const contents = execFileSync("git", ["show", `${base}:webview-ui/src/${file}`], {
-					cwd: repositoryRoot,
-				})
-				await fs.writeFile(path.join(root, "webview-ui/src", file), contents)
-			}
+			// Hold the host, styles and unrelated code constant; compare only the
+			// state context module with its base version.
+			const file = "context/ExtensionStateContext.tsx"
+			const contents = execFileSync("git", ["show", `${base}:webview-ui/src/${file}`], {
+				cwd: repositoryRoot,
+			})
+			await fs.writeFile(path.join(root, "webview-ui/src", file), contents)
 		}
 		// Source maps do not affect runtime behavior and are omitted in both builds
 		// to keep this diagnostic usable on memory-constrained runners.

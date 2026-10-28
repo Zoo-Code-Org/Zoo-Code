@@ -13,8 +13,8 @@ pnpm --dir apps/vscode-e2e heap:summarize
 ```
 
 `heap:build` creates isolated base and candidate webview builds in `heap-results/builds`.
-The extension host is identical for both. Base replaces the three production webview
-modules changed by PR #1466 with their versions at `git merge-base HEAD origin/main`.
+The extension host is identical for both. Base replaces `webview-ui/src/context/ExtensionStateContext.tsx`
+with its version at `git merge-base HEAD origin/main`.
 Override that reference with `HEAP_BASE_REF`. Source maps are disabled for both builds
 to reduce build memory; production minification is preserved. Source files in your
 checkout are untouched.
