@@ -2949,4 +2949,54 @@ describe("OpencodeGoHandler", () => {
 			expect(isOpencodeGoAnthropicFormatModel("some-unknown-model")).toBe(false)
 		})
 	})
+
+	describe("completePrompt shared timeout deadline", () => {
+		const delayResolveModel = (handler: OpencodeGoHandler, delayMs: number) =>
+			vi
+				.spyOn(handler as unknown as { resolveModel: () => Promise<unknown> }, "resolveModel")
+				.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({}), delayMs)))
+
+		it.each([
+			[
+				"Anthropic",
+				() => new OpencodeGoHandler({ ...mockOptions, opencodeGoModelId: "qwen3.7-max" }),
+				mockAnthropicCreate,
+			],
+			[
+				"Responses",
+				() => new OpencodeGoHandler({ ...mockOptions, opencodeGoModelId: "gpt-5.6-luna" }),
+				mockResponsesCreate,
+			],
+			["OpenAI", () => new OpencodeGoHandler(mockOptions), mockCreate],
+		])("bounds %s model resolution by the request timeout", async (_label, makeHandler, createMock) => {
+			const handler = makeHandler() as OpencodeGoHandler
+			delayResolveModel(handler, 80)
+
+			const error = await handler.completePrompt("ping", { timeoutMs: 20 }).catch((caught: unknown) => caught)
+
+			expect(error).toMatchObject({ name: "AbortError" })
+			// Resolution timed out, so no completion request may start.
+			expect(createMock).not.toHaveBeenCalled()
+		})
+
+		it("rejects at the deadline even while the SDK retry delay keeps the request pending", async () => {
+			// The SDK's internal retry backoff is not covered by the request signal; without the
+			// rejectOnAbort race this promise would never settle and the test would time out.
+			let requestSignal: AbortSignal | undefined
+			mockCreate.mockImplementation(
+				(_params: unknown, options?: { signal?: AbortSignal }) =>
+					new Promise((_resolve) => {
+						requestSignal = options?.signal
+					}),
+			)
+			const handler = new OpencodeGoHandler(mockOptions)
+
+			const started = Date.now()
+			const error = await handler.completePrompt("ping", { timeoutMs: 30 }).catch((caught: unknown) => caught)
+
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect(Date.now() - started).toBeLessThan(1_000)
+			expect(requestSignal?.aborted).toBe(true)
+		})
+	})
 })

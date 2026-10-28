@@ -47,6 +47,7 @@ import {
 	hasUsableTimeout,
 	isRequestAborted,
 	mergeAbortSignalAndTimeout,
+	rejectOnAbort,
 	resolveModelWithAbort,
 	toSdkTimeoutMs,
 } from "./utils/abort-signal"
@@ -926,7 +927,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 					createOptions.timeout = toSdkTimeoutMs(timeoutMs)
 				}
 
-				const response = await this.client.responses.create(
+				const pendingResponse = this.client.responses.create(
 					{
 						model: modelId,
 						input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
@@ -955,6 +956,11 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 					},
 					{ ...createOptions, headers: { "x-opencode-session": this.sessionId } },
 				)
+				// The SDK's own retry delays are not covered by the request signal: race the
+				// promise against the merged deadline so a retry backoff cannot outlast timeoutMs.
+				const response = resolutionAbortSignal
+					? await rejectOnAbort(pendingResponse, resolutionAbortSignal, "Opencode Go")
+					: await pendingResponse
 				return response.output_text || ""
 			} catch (error) {
 				// Preserve abort identity (series standard): caller-initiated
@@ -1004,10 +1010,15 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				createOptions.timeout = toSdkTimeoutMs(timeoutMs)
 			}
 
-			const response = await this.client.chat.completions.create(requestOptions, {
+			const pendingResponse = this.client.chat.completions.create(requestOptions, {
 				...createOptions,
 				headers: { "x-opencode-session": this.sessionId },
 			})
+			// Race the SDK promise against the merged deadline so a retry delay longer than
+			// timeoutMs cannot keep this completion waiting past the caller's budget.
+			const response = resolutionAbortSignal
+				? await rejectOnAbort(pendingResponse, resolutionAbortSignal, "Opencode Go")
+				: await pendingResponse
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
 			// Preserve abort identity (series standard): caller-initiated
