@@ -103,6 +103,8 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 			didAlreadyUseTool: false,
 			consecutiveMistakeCount: 0,
 			consecutiveMistakeLimit: 3,
+			// Added by the tool-context bookkeeping in presentAssistantMessageBlock.
+			activeToolContexts: new Map(),
 			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
 			clineMessages: [],
 			getTaskMode: vi.fn().mockResolvedValue("code"),

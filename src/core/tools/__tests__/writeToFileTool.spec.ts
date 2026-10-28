@@ -905,6 +905,7 @@ describe("writeToFileTool", () => {
 						askApproval: mockAskApproval,
 						handleError: mockHandleError,
 						pushToolResult: vi.fn(),
+						toolCallId: "test-tool-call-id",
 					}),
 				).rejects.toThrow("report failed")
 
@@ -995,6 +996,7 @@ describe("writeToFileTool", () => {
 					askApproval: mockAskApproval,
 					handleError: mockHandleError,
 					pushToolResult: mockPushToolResult,
+					toolCallId: "test-tool-call-id",
 				})
 
 				expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
@@ -1030,6 +1032,7 @@ describe("writeToFileTool", () => {
 					askApproval: mockAskApproval,
 					handleError: mockHandleError,
 					pushToolResult: mockPushToolResult,
+					toolCallId: "test-tool-call-id",
 				})
 
 				expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
@@ -1121,6 +1124,7 @@ describe("writeToFileTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
@@ -1159,6 +1163,7 @@ describe("writeToFileTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockCline.diffViewProvider.removeAdoptedDirectories).toHaveBeenCalledTimes(1)
@@ -1191,6 +1196,7 @@ describe("writeToFileTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockCline.sayAndCreateMissingParamError).toHaveBeenCalledWith("write_to_file", "content")
@@ -1372,6 +1378,7 @@ describe("writeToFileTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
@@ -1779,6 +1786,7 @@ describe("writeToFileTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockHandleError).toHaveBeenCalledTimes(1)
@@ -1813,6 +1821,7 @@ describe("writeToFileTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockHandleError).toHaveBeenCalledTimes(1)
@@ -1922,6 +1931,7 @@ describe("writeToFileTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
