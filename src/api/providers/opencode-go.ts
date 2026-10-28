@@ -42,9 +42,11 @@ import {
 	convertOpenAIToolChoiceToAnthropic,
 } from "../../core/prompts/tools/native-tools/converters"
 import {
+	bridgeExternalAbortSignal,
 	createAbortError,
 	hasUsableTimeout,
 	isRequestAborted,
+	mergeAbortSignalAndTimeout,
 	resolveModelWithAbort,
 	toSdkTimeoutMs,
 } from "./utils/abort-signal"
@@ -245,23 +247,12 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		const resolved = await resolveModelWithAbort(() => this.resolveModel(), externalAbortSignal, "Opencode Go")
 		const { id: modelId, info, format, temperature, reasoningEffort, maxTokens } = resolved
 
-		// Per-request controller so an external abort signal (e.g. task
-		// cancellation) can interrupt the in-flight streaming request.
-		// Bridge it to our controller using the Bedrock pattern:
-		// - pre-aborted guard: check if already aborted before adding listener
-		// - { once: true }: remove listener after first abort to avoid leaks
-		// The listener is stored so it can be detached when the request ends:
-		// { once: true } only removes it on abort, so a task-scoped signal
-		// would otherwise accumulate one listener per request.
-		const controller = new AbortController()
-		const abortListener = () => controller.abort()
-		if (externalAbortSignal) {
-			if (externalAbortSignal.aborted) {
-				controller.abort()
-			} else {
-				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
-			}
-		}
+		// Per-request signal bridged from the caller's abort signal via the shared helper
+		// (pre-aborted guard, once-only listener, retained cleanup): the request-local
+		// signal is always defined for the streaming helpers, and dispose() detaches the
+		// listener when the request ends instead of leaking one per completed request.
+		const { signal: requestSignal, dispose: detachExternalAbortSignal } =
+			bridgeExternalAbortSignal(externalAbortSignal)
 
 		if (format === "anthropic") {
 			try {
@@ -272,19 +263,19 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 					maxTokens,
 					systemPrompt,
 					messages,
-					controller.signal,
+					requestSignal,
 					metadata,
 				)
 			} catch (error) {
 				// Preserve abort identity (series standard): a cancellation that
 				// surfaces mid-stream must normalize to the provider AbortError,
 				// matching the OpenAI streaming branch.
-				if (isRequestAborted(error, controller.signal)) {
+				if (isRequestAborted(error, requestSignal)) {
 					throw createAbortError("Opencode Go")
 				}
 				throw error
 			} finally {
-				externalAbortSignal?.removeEventListener("abort", abortListener)
+				detachExternalAbortSignal()
 			}
 			return
 		}
@@ -298,19 +289,19 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 					reasoningEffort,
 					systemPrompt,
 					messages,
-					controller.signal,
+					requestSignal,
 					metadata,
 				)
 			} catch (error) {
 				// Preserve abort identity (series standard): a cancellation that
 				// surfaces mid-stream must normalize to the provider AbortError,
 				// matching the OpenAI streaming branch.
-				if (isRequestAborted(error, controller.signal)) {
+				if (isRequestAborted(error, requestSignal)) {
 					throw createAbortError("Opencode Go")
 				}
 				throw error
 			} finally {
-				externalAbortSignal?.removeEventListener("abort", abortListener)
+				detachExternalAbortSignal()
 			}
 
 			return
@@ -350,7 +341,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			}
 
 			const completion = await this.client.chat.completions.create(body, {
-				signal: controller.signal,
+				signal: requestSignal,
 				headers: { "x-opencode-session": metadata?.taskId ?? this.sessionId },
 			})
 
@@ -393,12 +384,12 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			// Preserve abort identity (series standard): surface a cancelled
 			// request as a DOM-standard AbortError rather than leaking the
 			// raw SDK abort error.
-			if (isRequestAborted(error, controller.signal)) {
+			if (isRequestAborted(error, requestSignal)) {
 				throw createAbortError("Opencode Go")
 			}
 			throw error
 		} finally {
-			externalAbortSignal?.removeEventListener("abort", abortListener)
+			detachExternalAbortSignal()
 		}
 	}
 
@@ -448,7 +439,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		reasoningEffort: ReasoningEffortExtended | undefined,
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
-		abortSignal: AbortSignal,
+		abortSignal: AbortSignal | undefined,
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		const input = convertToResponsesApiInput(messages)
@@ -607,7 +598,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		maxTokens: number | undefined,
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
-		abortSignal: AbortSignal,
+		abortSignal: AbortSignal | undefined,
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		const cacheControl: CacheControlEphemeral = { type: "ephemeral" }
@@ -853,15 +844,16 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		// Establish the cancellation scope around model resolution, matching
 		// createMessage: a pre-aborted signal rejects before the /models lookup
 		// starts, a signal that fires mid-lookup settles on the standardized
-		// AbortError instead of the raw lookup failure, and timeoutMs bounds
-		// this phase too.
+		// AbortError instead of the raw lookup failure, and the caller's per-request
+		// timeout bounds this phase too (merged deadline passed to the resolver).
+		const resolutionAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
 		const {
 			id: modelId,
 			format,
 			temperature,
 			reasoningEffort,
 			maxTokens,
-		} = await resolveModelWithAbort(() => this.resolveModel(), options?.abortSignal, "Opencode Go")
+		} = await resolveModelWithAbort(() => this.resolveModel(), resolutionAbortSignal, "Opencode Go")
 		const timeoutMs = options?.timeoutMs
 
 		if (format === "anthropic") {
