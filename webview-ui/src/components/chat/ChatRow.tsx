@@ -1069,14 +1069,13 @@ export const ChatRowContent = ({
 							showCopyButton={true}
 						/>
 					)
-				case "subtask_result":
-					const completedChildTaskId =
-						getLinkedChildTaskId(
-							message,
-							clineMessages,
-							currentTaskItem?.childIds ?? [],
-							currentTaskItem?.completedByChildId,
-						) ?? currentTaskItem?.completedByChildId
+				case "subtask_result": {
+					const completedChildTaskId = getLinkedChildTaskId(
+						message,
+						clineMessages,
+						currentTaskItem?.childIds ?? [],
+						currentTaskItem?.completedByChildId,
+					)
 					return (
 						<div className="border-l border-muted-foreground/80 ml-2 pl-4 pt-2 pb-1 -mt-5">
 							<div style={headerStyle}>
@@ -1096,6 +1095,7 @@ export const ChatRowContent = ({
 							)}
 						</div>
 					)
+				}
 				case "reasoning":
 					return (
 						<ReasoningBlock

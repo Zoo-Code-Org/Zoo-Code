@@ -229,6 +229,17 @@ describe("ChatRow - subtask links", () => {
 			expectSubtaskLink("completed-child")
 		})
 
+		it("does not link an earlier result to the latest completed child when its position is taken", () => {
+			const earlierResult = subtaskResult(2000)
+			renderChatRow(earlierResult, { childIds: ["second-child"], completedByChildId: "second-child" }, [
+				newTask(1000),
+				earlierResult,
+				newTask(3000, "second-child"),
+				subtaskResult(4000),
+			])
+			expect(screen.queryByRole("button", { name: "Go to subtask" })).not.toBeInTheDocument()
+		})
+
 		it.each([false, true])("does not link an unresolved result with preceding ask: %s", (includeAsk) => {
 			const result = subtaskResult(2000)
 			renderChatRow(result, undefined, [...(includeAsk ? [newTask(1000)] : []), result])
