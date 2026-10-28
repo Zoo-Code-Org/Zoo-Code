@@ -179,6 +179,30 @@ export const anthropicModels = {
 		description:
 			"Claude Opus 5.5 is Anthropic's most capable model for complex agentic coding and enterprise work.",
 	},
+	"claude-haiku-5-5": {
+		maxTokens: 128_000,
+		contextWindow: 1_000_000, // 1M context window native (no beta header required)
+		supportsImages: true,
+		supportsPromptCache: true,
+		// Standard pricing (prompts of 100,000 tokens or fewer) from Anthropic's
+		// pricing page. Prompts over 100,000 tokens bill at tiered rates
+		// ($0.50 in / $2.50 out / $0.625 5m cache write / $0.05 cache read per
+		// million tokens) that this entry does not model.
+		// https://platform.claude.com/docs/en/about-claude/pricing
+		inputPrice: 0.1, // $0.10 per million input tokens
+		outputPrice: 0.5, // $0.50 per million output tokens
+		cacheWritesPrice: 0.125, // $0.125 per million tokens (5m cache writes)
+		cacheReadsPrice: 0.01, // $0.01 per million tokens (cache hits / refreshes)
+		// Haiku 5.5 uses the same adaptive-thinking / binary-toggle convention as
+		// Sonnet 5 and Opus 5 on the direct Anthropic provider path. Manual
+		// extended thinking (budget_tokens) is not accepted, and sampling
+		// parameters (temperature/top_p/top_k) must be omitted.
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		description:
+			"Claude Haiku 5.5 is the fastest, most efficient Claude 5.5 model, built for high-volume, latency-sensitive coding and agent work.",
+	},
 	"claude-fable-5-1": {
 		maxTokens: 128_000, // Overridden to 8k if `enableReasoningEffort` is false.
 		contextWindow: 1_000_000,

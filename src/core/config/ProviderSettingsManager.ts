@@ -9,6 +9,7 @@ import {
 	isSecretStateKey,
 	ProviderSettingsEntry,
 	DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
+	DEFAULT_TOOL_REPETITION_SOFT_LIMIT,
 	getModelId,
 	type ProviderName,
 	isProviderName,
@@ -18,6 +19,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import { Mode, modes } from "../../shared/modes"
 import { buildApiHandler } from "../../api"
+import { disposeApiHandler } from "../../api/dispose-api-handler"
 import { downgradeLegacyRooConfig } from "./routerRemoval"
 
 // Type-safe model migrations mapping
@@ -43,6 +45,7 @@ export const providerProfilesSchema = z.object({
 			rateLimitSecondsMigrated: z.boolean().optional(),
 			openAiHeadersMigrated: z.boolean().optional(),
 			consecutiveMistakeLimitMigrated: z.boolean().optional(),
+			toolRepetitionLimitsMigrated: z.boolean().optional(),
 			todoListEnabledMigrated: z.boolean().optional(),
 			claudeCodeLegacySettingsMigrated: z.boolean().optional(),
 			routerProviderMigrated: z.boolean().optional(),
@@ -68,6 +71,7 @@ export class ProviderSettingsManager {
 			rateLimitSecondsMigrated: true, // Mark as migrated on fresh installs
 			openAiHeadersMigrated: true, // Mark as migrated on fresh installs
 			consecutiveMistakeLimitMigrated: true, // Mark as migrated on fresh installs
+			toolRepetitionLimitsMigrated: true, // Mark as migrated on fresh installs
 			todoListEnabledMigrated: true, // Mark as migrated on fresh installs
 			claudeCodeLegacySettingsMigrated: true, // Mark as migrated on fresh installs
 			routerProviderMigrated: true, // Mark as migrated on fresh installs
@@ -174,6 +178,15 @@ export class ProviderSettingsManager {
 					isDirty = true
 				}
 
+				if (!providerProfiles.migrations.toolRepetitionLimitsMigrated) {
+					// Partial defaults are safe to persist; the flag stays unset so the migration retries.
+					const migrated = await this.migrateToolRepetitionLimits(providerProfiles)
+					if (migrated) {
+						providerProfiles.migrations.toolRepetitionLimitsMigrated = true
+					}
+					isDirty = true
+				}
+
 				if (!providerProfiles.migrations.todoListEnabledMigrated) {
 					await this.migrateTodoListEnabled(providerProfiles)
 					providerProfiles.migrations.todoListEnabledMigrated = true
@@ -261,13 +274,37 @@ export class ProviderSettingsManager {
 
 	private async migrateConsecutiveMistakeLimit(providerProfiles: ProviderProfiles) {
 		try {
-			for (const [name, apiConfig] of Object.entries(providerProfiles.apiConfigs)) {
+			for (const [, apiConfig] of Object.entries(providerProfiles.apiConfigs)) {
 				if (apiConfig.consecutiveMistakeLimit == null) {
 					apiConfig.consecutiveMistakeLimit = DEFAULT_CONSECUTIVE_MISTAKE_LIMIT
 				}
 			}
 		} catch (error) {
 			console.error(`[MigrateConsecutiveMistakeLimit] Failed to migrate consecutive mistake limit:`, error)
+		}
+	}
+
+	/**
+	 * Defaults `toolRepetitionSoftLimit` on every profile that lacks it.
+	 * Profiles that explicitly disabled the hard stop (`consecutiveMistakeLimit === 0`)
+	 * get the soft tier disabled too, so existing "unlimited" profiles keep
+	 * their previous behavior instead of silently soft-blocking repeats forever.
+	 * Returns true only if every profile was processed successfully, so the
+	 * caller can avoid marking the migration complete after a failure.
+	 */
+	private async migrateToolRepetitionLimits(providerProfiles: ProviderProfiles): Promise<boolean> {
+		try {
+			for (const [_name, apiConfig] of Object.entries(providerProfiles.apiConfigs)) {
+				// Default the soft warning threshold.
+				if (apiConfig.toolRepetitionSoftLimit == null) {
+					apiConfig.toolRepetitionSoftLimit =
+						apiConfig.consecutiveMistakeLimit === 0 ? 0 : DEFAULT_TOOL_REPETITION_SOFT_LIMIT
+				}
+			}
+			return true
+		} catch (error) {
+			console.error(`[MigrateToolRepetitionLimits] Failed to migrate tool repetition limits:`, error)
+			return false
 		}
 	}
 
@@ -559,8 +596,9 @@ export class ProviderSettingsManager {
 					}
 
 					// Try to build an API handler to get model information
+					let apiHandler: ReturnType<typeof buildApiHandler> | undefined
 					try {
-						const apiHandler = buildApiHandler(configs[name])
+						apiHandler = buildApiHandler(configs[name])
 						const modelInfo = apiHandler.getModel().info
 
 						// Check if the model supports reasoning budgets
@@ -583,6 +621,12 @@ export class ProviderSettingsManager {
 						// If we can't build the API handler or get model info, skip filtering
 						// to avoid accidental data loss from incomplete configurations
 						console.warn(`Skipping token field filtering for config '${name}': ${error}`)
+					} finally {
+						try {
+							disposeApiHandler(apiHandler)
+						} catch (error) {
+							console.warn(`Could not release the API handler for config '${name}': ${error}`)
+						}
 					}
 				}
 				return profiles
@@ -695,7 +739,7 @@ export class ProviderSettingsManager {
 			)
 			// Return a new config object without the invalid apiProvider
 			// This effectively resets the profile so the user can select a valid provider
-			const { apiProvider, ...restConfig } = config
+			const { apiProvider: _apiProvider, ...restConfig } = config
 			return restConfig
 		}
 

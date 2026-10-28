@@ -1,3 +1,5 @@
+import type { ClineApiReqCancelReason } from "@roo-code/types"
+import { WebviewFocusTracker } from "../WebviewFocusTracker"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import * as vscode from "vscode"
 
@@ -350,6 +352,7 @@ describe("ClineProvider flicker-free cancel", () => {
 			mockOutputChannel,
 			"sidebar",
 			mockContextProxy as unknown as ContextProxy,
+			new WebviewFocusTracker(),
 		)
 
 		// Mock provider methods
@@ -386,6 +389,13 @@ describe("ClineProvider flicker-free cancel", () => {
 			emit: vi.fn(),
 			abortTask: vi.fn().mockResolvedValue(undefined),
 			abandoned: false,
+			abortReason: undefined as ClineApiReqCancelReason | undefined,
+			setAbortReason(reason: ClineApiReqCancelReason) {
+				this.abortReason ??= reason
+			},
+			requestAbandon() {
+				this.abandoned = true
+			},
 			dispose: vi.fn(),
 			on: vi.fn(),
 			off: vi.fn(),
@@ -622,6 +632,13 @@ describe("ClineProvider flicker-free cancel", () => {
 			cancelCurrentRequest: vi.fn(),
 			abortTask: vi.fn().mockResolvedValue(undefined),
 			abandoned: false,
+			abortReason: undefined as ClineApiReqCancelReason | undefined,
+			setAbortReason(reason: ClineApiReqCancelReason) {
+				this.abortReason ??= reason
+			},
+			requestAbandon() {
+				this.abandoned = true
+			},
 			isStreaming: false,
 			didFinishAbortingStream: true,
 			isWaitingForFirstChunk: false,
@@ -642,7 +659,16 @@ describe("ClineProvider flicker-free cancel", () => {
 			.spyOn(provider, "createTaskWithHistoryItem")
 			.mockResolvedValue(undefined as unknown as CreatedHistoryTask)
 
+		const setAbortReasonSpy = vi.spyOn(mockTask1, "setAbortReason")
+		const abortTaskSpy = vi.spyOn(mockTask1, "abortTask")
+		const requestAbandonSpy = vi.spyOn(mockTask1, "requestAbandon")
+
 		await provider.cancelTask()
+
+		expect(setAbortReasonSpy).toHaveBeenCalledBefore(abortTaskSpy)
+		expect(abortTaskSpy).toHaveBeenCalledBefore(requestAbandonSpy)
+		expect(mockTask1.abortReason).toBe("user_cancelled")
+		expect(mockTask1.abandoned).toBe(true)
 
 		// Child is marked interrupted, not detached
 		expect(updateTaskHistorySpy).toHaveBeenCalledWith(
@@ -705,6 +731,13 @@ describe("ClineProvider flicker-free cancel", () => {
 				cancelCurrentRequest: vi.fn(),
 				abortTask: vi.fn().mockResolvedValue(undefined),
 				abandoned: false,
+				abortReason: undefined as ClineApiReqCancelReason | undefined,
+				setAbortReason(reason: ClineApiReqCancelReason) {
+					this.abortReason ??= reason
+				},
+				requestAbandon() {
+					this.abandoned = true
+				},
 				isStreaming: false,
 				didFinishAbortingStream: true,
 				isWaitingForFirstChunk: false,
@@ -778,6 +811,13 @@ describe("ClineProvider flicker-free cancel", () => {
 			cancelCurrentRequest: vi.fn(),
 			abortTask: vi.fn().mockResolvedValue(undefined),
 			abandoned: false,
+			abortReason: undefined as ClineApiReqCancelReason | undefined,
+			setAbortReason(reason: ClineApiReqCancelReason) {
+				this.abortReason ??= reason
+			},
+			requestAbandon() {
+				this.abandoned = true
+			},
 			isStreaming: false,
 			didFinishAbortingStream: true,
 			isWaitingForFirstChunk: false,
@@ -837,6 +877,13 @@ describe("ClineProvider flicker-free cancel", () => {
 			cancelCurrentRequest: vi.fn(),
 			abortTask: vi.fn().mockResolvedValue(undefined),
 			abandoned: false,
+			abortReason: undefined as ClineApiReqCancelReason | undefined,
+			setAbortReason(reason: ClineApiReqCancelReason) {
+				this.abortReason ??= reason
+			},
+			requestAbandon() {
+				this.abandoned = true
+			},
 			isStreaming: false,
 			didFinishAbortingStream: true,
 			isWaitingForFirstChunk: false,
@@ -902,6 +949,13 @@ describe("ClineProvider flicker-free cancel", () => {
 			cancelCurrentRequest: vi.fn(),
 			abortTask: vi.fn().mockResolvedValue(undefined),
 			abandoned: false,
+			abortReason: undefined as ClineApiReqCancelReason | undefined,
+			setAbortReason(reason: ClineApiReqCancelReason) {
+				this.abortReason ??= reason
+			},
+			requestAbandon() {
+				this.abandoned = true
+			},
 			isStreaming: false,
 			didFinishAbortingStream: true,
 			isWaitingForFirstChunk: false,
@@ -964,6 +1018,13 @@ describe("ClineProvider flicker-free cancel", () => {
 			cancelCurrentRequest: vi.fn(),
 			abortTask: vi.fn().mockResolvedValue(undefined),
 			abandoned: false,
+			abortReason: undefined as ClineApiReqCancelReason | undefined,
+			setAbortReason(reason: ClineApiReqCancelReason) {
+				this.abortReason ??= reason
+			},
+			requestAbandon() {
+				this.abandoned = true
+			},
 			isStreaming: false,
 			didFinishAbortingStream: true,
 			isWaitingForFirstChunk: false,

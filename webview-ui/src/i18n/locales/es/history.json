@@ -20,6 +20,7 @@
 	"apiCostLabel": "Costo de API:",
 	"copyPrompt": "Copiar prompt",
 	"exportTask": "Exportar tarea",
+	"renameTask": "Renombrar tarea",
 	"deleteTask": "Eliminar tarea",
 	"deleteTaskMessage": "¿Estás seguro de que quieres eliminar esta tarea? Esta acción no se puede deshacer.",
 	"cancel": "Cancelar",
