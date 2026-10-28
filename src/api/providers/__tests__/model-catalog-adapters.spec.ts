@@ -159,7 +159,7 @@ const cases: AdapterCase[] = [
 		fetcher: "getKimiCodeModels",
 		scope: { urlScoped: false, keyScoped: true, authScoped: true },
 		expectedArgs: [API_KEY],
-		forwardsSignal: false,
+		forwardsSignal: true,
 	},
 	{
 		name: "LiteLLM",

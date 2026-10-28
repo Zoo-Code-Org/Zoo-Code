@@ -13,18 +13,27 @@ import { getApiRequestTimeout } from "../utils/timeout-config"
 
 import { clearAllMocks } from "../../../test-utils/reset"
 
-// Mock OpenAI and capture constructor calls
-const mockOpenAIConstructor = vitest.fn()
+// Mock OpenAI and capture constructor calls. The abort error class must stay the
+// real one: error-handler classifies it with instanceof, so a stand-in would make
+// the timeout assertion pass for the wrong reason.
+const { mockOpenAIConstructor, mockCreate } = vitest.hoisted(() => ({
+	mockOpenAIConstructor: vitest.fn(),
+	mockCreate: vitest.fn(),
+}))
 
-vitest.mock("openai", () => {
+// The abort error class must stay the real one: error-handler classifies it with
+// instanceof, so a stand-in would make the timeout assertion pass for the wrong reason.
+vitest.mock("openai", async (importOriginal) => {
+	const actual = (await importOriginal()) as { APIUserAbortError: new () => Error }
 	return {
 		__esModule: true,
+		APIUserAbortError: actual.APIUserAbortError,
 		default: vitest.fn().mockImplementation(function (config) {
 			mockOpenAIConstructor(config)
 			return {
 				chat: {
 					completions: {
-						create: vitest.fn(),
+						create: mockCreate,
 					},
 				},
 			}
@@ -117,5 +126,33 @@ describe("BaseOpenAiCompatibleProvider Timeout Configuration", () => {
 				defaultHeaders: expect.any(Object),
 			}),
 		)
+	})
+
+	it("keeps a timeout classified as a timeout while the caller signal is still live", async () => {
+		vitest.mocked(getApiRequestTimeout).mockReturnValue(600000)
+		const provider = new TestOpenAiCompatibleProvider("test-api-key")
+		const controller = new AbortController()
+
+		// The SDK reports the abort only after the merged timeout signal has fired, so
+		// the classification depends on the timeout reason rather than the caller signal.
+		const openai = await import("openai")
+		let requestSignal: AbortSignal | undefined
+		mockCreate.mockImplementation(async (_params: unknown, config: { signal?: AbortSignal }) => {
+			requestSignal = config.signal
+			await new Promise((resolve) => setTimeout(resolve, 20))
+			throw new openai.APIUserAbortError()
+		})
+
+		const error = await provider
+			.completePrompt("hi", { abortSignal: controller.signal, timeoutMs: 5 })
+			.catch((caught: unknown) => caught)
+
+		expect((error as Error).name).toBe("TimeoutError")
+		expect((error as Error).message).toBe("TestProvider request timed out")
+		expect((error as Error).cause).toBeInstanceOf(openai.APIUserAbortError)
+		// The caller never cancelled: the timeout fired on the merged signal.
+		expect(controller.signal.aborted).toBe(false)
+		expect(requestSignal?.aborted).toBe(true)
+		expect(requestSignal?.reason?.name).toBe("TimeoutError")
 	})
 })

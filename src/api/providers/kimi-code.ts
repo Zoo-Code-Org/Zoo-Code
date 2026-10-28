@@ -13,13 +13,14 @@ import {
 import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { kimiCodeOAuthManager } from "../../integrations/kimi-code/oauth"
 
-import type { ApiHandlerCreateMessageMetadata, ModelCacheScope } from "../index"
+import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions, ModelCacheScope } from "../index"
 import type { ApiStream } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 
 import { OpenAiHandler } from "./openai"
 import { NOT_PROVIDED } from "./constants"
 import { getModels } from "./fetchers/modelCache"
+import { isRequestAborted, throwIfAborted } from "./utils/abort-signal"
 import { getKimiCodeModels } from "./fetchers/kimi-code"
 
 const OAUTH_AUTH_METHOD: KimiCodeAuthMethod = "oauth"
@@ -55,31 +56,47 @@ export class KimiCodeHandler extends OpenAiHandler {
 		return { urlScoped: false, keyScoped: true, authScoped: true }
 	}
 
-	async fetchModels(options: GetModelsOptions): Promise<ModelRecord> {
-		return getKimiCodeModels(options.apiKey)
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		// Forward cancellation (explicit model-cache signal, else the caller
+		// signal carried on options) so a cancellation during discovery aborts
+		// the in-flight discovery HTTP request, not just the caller's wait.
+		const cancellation = signal ?? options.signal
+		return cancellation
+			? getKimiCodeModels(options.apiKey, { signal: cancellation })
+			: getKimiCodeModels(options.apiKey)
 	}
 
-	private async resolveAccessToken(forceRefresh = false): Promise<string> {
+	private async resolveAccessToken(forceRefresh = false, signal?: AbortSignal): Promise<string> {
 		if ((this.kimiOptions.kimiCodeAuthMethod ?? OAUTH_AUTH_METHOD) === API_KEY_AUTH_METHOD) {
 			if (!this.kimiOptions.kimiCodeApiKey) throw new Error("Kimi Code API key is required")
 			return this.kimiOptions.kimiCodeApiKey
 		}
 
 		const token = forceRefresh
-			? await kimiCodeOAuthManager.forceRefreshAccessToken()
-			: await kimiCodeOAuthManager.getAccessToken()
+			? await kimiCodeOAuthManager.forceRefreshAccessToken(signal)
+			: await kimiCodeOAuthManager.getAccessToken(false, signal)
 		if (!token) throw new Error("Not authenticated with Kimi Code. Sign in from provider settings.")
 		return token
 	}
 
-	private async prepareRequest(forceRefresh = false): Promise<void> {
-		const accessToken = await this.resolveAccessToken(forceRefresh)
+	private async prepareRequest(forceRefresh = false, abortSignal?: AbortSignal): Promise<void> {
+		const accessToken = await this.resolveAccessToken(forceRefresh, abortSignal)
 		this.client.apiKey = accessToken
 		if (!this.modelDiscoveryAttempted) {
 			this.modelDiscoveryAttempted = true
 			try {
-				this.models = await getModels({ provider: providerIdentifiers.kimiCode, apiKey: accessToken }, this)
+				this.models = await getModels(
+					{ provider: providerIdentifiers.kimiCode, apiKey: accessToken, signal: abortSignal },
+					this,
+				)
 			} catch (error) {
+				// A caller cancellation must not consume the single discovery attempt:
+				// reset the flag so a later request on this handler retries discovery
+				// instead of keeping fallback metadata. Ordinary discovery failures
+				// keep the one-attempt behavior.
+				if (isRequestAborted(error, abortSignal)) {
+					this.modelDiscoveryAttempted = false
+				}
 				// Model discovery is best-effort; preserve the configured ID and fallback metadata.
 				console.debug("[KimiCode] Model discovery failed; using fallback model metadata", {
 					message: error instanceof Error ? error.message : String(error),
@@ -97,24 +114,35 @@ export class KimiCodeHandler extends OpenAiHandler {
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		await this.prepareRequest()
+		throwIfAborted(metadata?.abortSignal)
+		await this.prepareRequest(false, metadata?.abortSignal)
+		// Preparation awaits model discovery; a cancellation that lands during it must
+		// stop here rather than issue the completion request.
+		throwIfAborted(metadata?.abortSignal)
 		try {
 			yield* super.createMessage(systemPrompt, messages, metadata)
 		} catch (error) {
 			if (getHttpStatus(error) !== 401 || !this.canRefreshOAuth()) throw error
-			await this.prepareRequest(true)
+			// Never start an OAuth refresh + retry for a caller that has already cancelled.
+			throwIfAborted(metadata?.abortSignal)
+			await this.prepareRequest(true, metadata?.abortSignal)
 			yield* super.createMessage(systemPrompt, messages, metadata)
 		}
 	}
 
-	override async completePrompt(prompt: string): Promise<string> {
-		await this.prepareRequest()
+	override async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		throwIfAborted(options?.abortSignal)
+		await this.prepareRequest(false, options?.abortSignal)
+		throwIfAborted(options?.abortSignal)
 		try {
-			return await super.completePrompt(prompt)
+			// Forward abort/timeout options so the inherited OpenAiHandler wiring
+			// applies (the createMessage override inherits the same via metadata).
+			return await super.completePrompt(prompt, options)
 		} catch (error) {
 			if (getHttpStatus(error) !== 401 || !this.canRefreshOAuth()) throw error
-			await this.prepareRequest(true)
-			return super.completePrompt(prompt)
+			throwIfAborted(options?.abortSignal)
+			await this.prepareRequest(true, options?.abortSignal)
+			return super.completePrompt(prompt, options)
 		}
 	}
 
