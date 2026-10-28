@@ -219,7 +219,6 @@ export class ClineProvider
 	public static readonly sideBarId = `${Package.name}.SidebarProvider`
 	public static readonly tabPanelId = `${Package.name}.TabPanelProvider`
 	private static activeInstances: Set<ClineProvider> = new Set()
-	private disposables: vscode.Disposable[] = []
 	private webviewDisposables: vscode.Disposable[] = []
 	private pendingThemeFixtureProbes = new Map<
 		string,
@@ -900,14 +899,6 @@ export class ClineProvider
 		// Clean up cloud service event listener
 		if (CloudService.hasInstance()) {
 			CloudService.instance.off("settings-updated", this.handleCloudSettingsUpdate)
-		}
-
-		while (this.disposables.length) {
-			const x = this.disposables.pop()
-
-			if (x) {
-				x.dispose()
-			}
 		}
 
 		this._workspaceTracker?.dispose()
