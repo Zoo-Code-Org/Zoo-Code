@@ -272,6 +272,69 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(stat).toHaveBeenCalledTimes(2)
 	})
 
+	it("removes the partial observation this call created when the diff cannot be applied", async () => {
+		// The edit never happens, so the partial authorization earned from the tool's own
+		// read must not outlive the failed call. It is removed only while it is still the
+		// same observation.
+		const key = path.resolve(mockTask.cwd, "src/thing.ts")
+		mockTask.diffStrategy = {
+			applyDiff: vi.fn().mockResolvedValue({ success: false, error: "no match" }),
+		} as unknown as Task["diffStrategy"]
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		expect(mockTask.observationRegistry.get(key)).toBeUndefined()
+	})
+
+	it("keeps a partial observation replaced by another operation on a failed diff", async () => {
+		const key = path.resolve(mockTask.cwd, "src/thing.ts")
+		mockTask.diffStrategy = {
+			applyDiff: vi.fn().mockImplementation(async () => {
+				// Another operation publishes/observes this path while the diff is failing.
+				mockTask.observationRegistry.observe(key, "1:2:99:9:9", true)
+				return { success: false, error: "no match" }
+			}),
+		} as unknown as Task["diffStrategy"]
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		// The replaced observation belongs to the other operation, not this failed call.
+		expect(mockTask.observationRegistry.get(key)?.version).toBe("1:2:99:9:9")
+	})
+
+	it("removes the partial observation when the user denies the edit", async () => {
+		const key = path.resolve(mockTask.cwd, "src/thing.ts")
+		mockTask.providerRef = {
+			deref: () => ({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					experiments: { preventFocusDisruption: false },
+				}),
+			}),
+		} as unknown as Task["providerRef"]
+		mockAskApproval.mockResolvedValue(false)
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		expect(mockTask.observationRegistry.get(key)).toBeUndefined()
+	})
+
 	it("keeps a complete model observation complete when the tool read matches its version", async () => {
 		// The model read the file in full first. The tool's own read of the same version
 		// must not downgrade that earned completeness to a partial observation.

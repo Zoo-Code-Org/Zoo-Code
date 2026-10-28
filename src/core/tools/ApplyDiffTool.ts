@@ -38,6 +38,20 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 			diffContent = unescapeHtmlEntities(diffContent)
 		}
 
+		// Identity of a partial observation this call created (undefined when the model had
+		// already observed the file): only this exact observation may be removed on a failure
+		// exit, so a replaced or published observation is never discarded here. Declared outside
+		// the try so the catch exit can use it too.
+		let partialObservation: { path: string; version: string } | undefined
+		const forgetPartialObservationIfCurrent = () => {
+			if (
+				partialObservation &&
+				task.observationRegistry.get(partialObservation.path)?.version === partialObservation.version
+			) {
+				task.observationRegistry.forget(partialObservation.path)
+			}
+		}
+
 		try {
 			if (!relPath) {
 				task.consecutiveMistakeCount++
@@ -95,6 +109,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					const prior = task.observationRegistry.get(absolutePath)
 					if (prior === undefined) {
 						task.observationRegistry.observe(absolutePath, preReadToken, false)
+						partialObservation = { path: absolutePath, version: preReadToken }
 					} else if (prior.version === preReadToken) {
 						task.observationRegistry.observe(absolutePath, preReadToken, prior.complete === true)
 					}
@@ -141,6 +156,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				task.recordToolError("apply_diff", formattedError)
 
 				pushToolResult(formattedError)
+				forgetPartialObservationIfCurrent()
 				return
 			}
 
@@ -197,6 +213,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				const didApprove = await askApproval("tool", completeMessage, toolProgressStatus, isWriteProtected)
 
 				if (!didApprove) {
+					forgetPartialObservationIfCurrent()
 					return
 				}
 
@@ -245,6 +262,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 
 				if (!didApprove) {
 					await task.diffViewProvider.revertChanges()
+					forgetPartialObservationIfCurrent()
 					task.processQueuedMessages()
 					return
 				}
@@ -301,6 +319,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 			return
 		} catch (error) {
 			await handleError("applying diff", error as Error)
+			forgetPartialObservationIfCurrent()
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
 			task.processQueuedMessages()
