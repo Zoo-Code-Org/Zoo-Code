@@ -4276,7 +4276,11 @@ export class ClineProvider
 				if (!tool || typeof tool !== "object" || !("tool" in tool) || tool.tool !== "newTask") continue
 
 				// Never walk past the newest delegation and stamp an earlier rejected ask.
-				if (!candidate.childTaskId) {
+				// startSubtask delegates without an ask, so the newest ask may belong to another delegation.
+				// NewTaskTool shows the raw content but delegates with one level of "\\@" unescaped.
+				const askContent = "content" in tool && typeof tool.content === "string" ? tool.content : undefined
+				const matchesDelegation = askContent?.replace(/\\\\@/g, "\\@") === message
+				if (matchesDelegation && !candidate.childTaskId) {
 					candidate.childTaskId = child.taskId
 					await saveTaskMessages({
 						messages: parentMessages,

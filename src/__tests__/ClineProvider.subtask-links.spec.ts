@@ -16,12 +16,12 @@ import { readTaskMessages } from "../core/task-persistence/taskMessages"
 import { saveTaskMessages } from "../core/task-persistence"
 import { makeProviderStub } from "./helpers/provider-stub"
 
-function newTask(ts: number, childTaskId?: string): ClineMessage {
+function newTask(ts: number, childTaskId?: string, content = "Do work"): ClineMessage {
 	return {
 		ts,
 		type: "ask",
 		ask: "tool",
-		text: JSON.stringify({ tool: "newTask", mode: "code", content: "Do work" }),
+		text: JSON.stringify({ tool: "newTask", mode: "code", content }),
 		...(childTaskId ? { childTaskId } : {}),
 	}
 }
@@ -132,6 +132,26 @@ describe("persisted subtask links", () => {
 			expect(messages[0]?.childTaskId).toBeUndefined()
 		},
 	)
+
+	it.each([
+		{ askContent: "Do work", delegatedMessage: "Do work", stamped: true },
+		{ askContent: "See \\\\@file", delegatedMessage: "See \\@file", stamped: true },
+		{ askContent: "Other work", delegatedMessage: "Do work", stamped: false },
+	])("stamps the newest ask only when it matches the delegation: %j", async (scenario) => {
+		const { askContent, delegatedMessage, stamped } = scenario
+		const messages = [newTask(1, undefined, delegatedMessage), newTask(2, undefined, askContent)]
+		vi.mocked(readTaskMessages).mockResolvedValue(messages)
+		const { provider, child } = makeLinkProvider()
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			...delegation,
+			message: delegatedMessage,
+		})
+
+		expect(messages[0].childTaskId).toBeUndefined()
+		expect(messages[1].childTaskId).toBe(stamped ? "child" : undefined)
+		expect(vi.mocked(saveTaskMessages).mock.calls).toHaveLength(stamped ? 1 : 0)
+		expect(child.run).toHaveBeenCalledOnce()
+	})
 
 	it("does not stamp a rejected delegation", async () => {
 		const { provider, taskHistoryStore } = makeLinkProvider()
