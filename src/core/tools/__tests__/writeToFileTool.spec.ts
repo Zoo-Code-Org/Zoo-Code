@@ -942,7 +942,7 @@ describe("writeToFileTool", () => {
 				writeToFileTool["taskPartialStreamState"].clear()
 			}
 		})
-		it("still releases adopted directories and resets when the discard report also rejects", async () => {
+		it("still reaches the diff-view reset when the discard report also rejects", async () => {
 			// The early-exit teardown discards the preview, then reports a failed discard through
 			// say(). That report is wrapped in .catch, but the directory release and the reset must
 			// still run: a rejected report must not skip them.
@@ -969,6 +969,34 @@ describe("writeToFileTool", () => {
 				mockCline.say.mockResolvedValue(undefined)
 				mockCline.diffViewProvider.isEditing = false
 				mockCline.diffViewProvider.discardUnapprovedStream.mockResolvedValue(undefined)
+				writeToFileTool["taskPartialStreamState"].clear()
+			}
+		})
+
+		it("releases adopted directories before reset when the denied-path report rejects", async () => {
+			// With no preview open (isEditing=false), releaseEarlyDirectories is the only
+			// directory cleanup owner: the removal must run before reset() clears createdDirs.
+			// The denied-path report rejecting must not skip either step.
+			mockCline.diffViewProvider.isEditing = false
+			await executeWriteFileTool({ content: "" }, { isPartial: true })
+			await executeWriteFileTool({ content: "" }, { isPartial: true })
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+
+			mockCline.say.mockRejectedValue(new Error("report failed"))
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				await executeWriteFileTool({}, { accessAllowed: false }).catch(() => {})
+
+				expect(mockCline.diffViewProvider.removeAdoptedDirectories).toHaveBeenCalledTimes(1)
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+				// Ordering: reset() drops createdDirs, so removal must happen first.
+				expect(mockCline.diffViewProvider.removeAdoptedDirectories.mock.invocationCallOrder[0]).toBeLessThan(
+					mockCline.diffViewProvider.reset.mock.invocationCallOrder[0],
+				)
+			} finally {
+				errorSpy.mockRestore()
+				mockCline.say.mockResolvedValue(undefined)
 				writeToFileTool["taskPartialStreamState"].clear()
 			}
 		})
