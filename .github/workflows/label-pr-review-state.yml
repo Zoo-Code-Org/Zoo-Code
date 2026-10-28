@@ -47,8 +47,9 @@ on:
 
 permissions:
     # This privileged workflow only reads PR/check metadata and writes issue labels,
-    # comments, and commit statuses. All unspecified permissions, including contents,
-    # are none; no fork code or configuration is checked out or executed.
+    # comments, and commit statuses. All unspecified permissions are none; contents is
+    # read-only and used only for the commit-parent lookup below. No fork code or
+    # configuration is checked out or executed.
     pull-requests: write
     issues: write
     checks: read
@@ -211,11 +212,22 @@ jobs:
                       // Build the open-PR head map once here for every shard: a sweep would otherwise
                       // multiply the paginated open-PR read by every shard against the Actions token
                       // budget. Sweep triggers already hold the full open list, so the map costs them
-                      // no extra read. An empty output means the map was unavailable (or nothing was
-                      // resolved); shards then skip the stacked label rather than deciding from an
-                      // empty map.
+                      // no extra read.
+                      //
+                      // The map only describes which commits are open pull request heads, so it can
+                      // only change when a pull request's head is (re)published: opened, reopened, or
+                      // synchronize. Reviews, comments, workflow_run completions, and manual dispatch
+                      // cannot change it, so they skip the paginated read entirely and pass a sentinel
+                      // that tells shards the label was not evaluated. Reading it on every direct event
+                      // would add one full open-PR listing to each review and status-comment run.
+                      //
+                      // An empty output means the map was unavailable this run; shards then skip the
+                      // stacked label rather than deciding from an empty map.
+                      const stackMayHaveChanged =
+                        context.eventName === 'pull_request_target' &&
+                        ['opened', 'reopened', 'synchronize'].includes(context.payload.action);
                       let openPrHeadsOutput = '';
-                      if (prNumbers.length > 0) {
+                      if (prNumbers.length > 0 && (openPrsCache || stackMayHaveChanged)) {
                         try {
                           const openPrsForMap = openPrsCache ?? (await github.paginate(github.rest.pulls.list, {
                             owner, repo, state: 'open', per_page: 100,
@@ -231,6 +243,13 @@ jobs:
                         } catch (error) {
                           core.warning(`Could not read the open pull request map: ${error.message}; shards will skip the stacked label this run`);
                         }
+                      } else if (prNumbers.length > 0) {
+                        // Sentinel: this event cannot change a stacked relationship, so the label was
+                        // not evaluated rather than found unavailable. Shards skip it silently.
+                        openPrHeadsOutput = 'not-evaluated';
+                        core.info(
+                          `Open-PR head map not read: ${context.eventName} cannot change a stacked unit; shards skip the stacked label.`
+                        );
                       }
                       core.setOutput('open_pr_heads', openPrHeadsOutput);
 
@@ -853,15 +872,22 @@ jobs:
                       const failures = [];
 
                       // The open-PR head map is built once in the resolve job and passed through the
-                      // job env, so a sweep pays one paginated read instead of one per shard. An empty
-                      // value means the map was unavailable this run: leave existing stacked labels as
-                      // they are rather than deciding from an empty map, which would look like
-                      // "no open parents" and remove valid labels.
+                      // job env, so a sweep pays one paginated read instead of one per shard. The resolve
+                      // job passes NOT_EVALUATED_MAP when the event could not change a stacked
+                      // relationship, and an empty value when it tried to read the map and failed.
+                      // Either way existing stacked labels are left as they are: a map that is absent,
+                      // empty, or not read must never look like "no open parents" and remove them.
+                      const NOT_EVALUATED_MAP = 'not-evaluated';
                       let openPrHeads = null;
                       if (prs.length > 0) {
-                        if (process.env.OPEN_PR_HEADS) {
+                        const emittedMap = process.env.OPEN_PR_HEADS;
+                        if (emittedMap === NOT_EVALUATED_MAP) {
+                          core.info(
+                            `PR #${prs[0].number}: this event cannot change a stacked unit; skipping the stacked label`
+                          );
+                        } else if (emittedMap) {
                           try {
-                            openPrHeads = new Map(Object.entries(JSON.parse(process.env.OPEN_PR_HEADS)));
+                            openPrHeads = new Map(Object.entries(JSON.parse(emittedMap)));
                           } catch (error) {
                             core.warning(`Could not read the open pull request map: ${error.message}; skipping the stacked label for this run`);
                           }

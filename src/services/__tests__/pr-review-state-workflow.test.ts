@@ -36,6 +36,9 @@ interface HarnessOptions {
 	headShaSequence?: string[]
 	fork?: boolean
 	eventName?: string
+	// pull_request_target activity type; it decides whether the resolve job reads the open-PR
+	// head map (only opened/reopened/synchronize can change a stacked relationship).
+	action?: string
 	issueCommentActor?: string
 	workflowRunAssociated?: boolean
 	workflowRunFallback?: "match" | "sha-mismatch" | "base-mismatch" | "none"
@@ -210,7 +213,7 @@ function buildEventPayload(eventName: string, options: HarnessOptions) {
 							},
 						}
 					: {
-							action: "ready_for_review",
+							action: options.action ?? "ready_for_review",
 							pull_request: pullRequestPayload,
 						}
 }
@@ -662,6 +665,8 @@ async function runResolve(options: HarnessOptions = {}) {
 		info: core.info,
 		warning: core.warning,
 		prNumbers: () => (prNumbersOutput !== undefined ? (JSON.parse(prNumbersOutput) as number[]) : undefined),
+		// The sentinel is deliberately not JSON: pin the exact emitted value instead of guessing.
+		openPrHeadsRaw: () => openPrHeadsOutput,
 		openPrHeads: () => (openPrHeadsOutput ? (JSON.parse(openPrHeadsOutput) as Record<string, number>) : null),
 	}
 }
@@ -817,6 +822,75 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).not.toHaveBeenCalled()
 		expect(result.removeLabel).not.toHaveBeenCalled()
 		expect(result.getCommit).not.toHaveBeenCalled()
+	})
+
+	// The pair of the read-only test above: the guard skips a fork PR only when the RUN is
+	// read-only too. These two pin the accept side, so dropping either half of
+	// `isReadOnlyRun && isForkPR(pr)` cannot pass silently.
+	it("adds the stacked label on a same-repository review event", async () => {
+		const result = await runWorkflow({
+			eventName: "pull_request_review",
+			fork: false,
+			commitParents: [OLD_SHA],
+			openPrHeads: [{ number: 1436, sha: OLD_SHA }],
+		})
+
+		// A review of a base-repository PR runs with a writable token, so the label still mutates.
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["stacked"] }))
+	})
+
+	it("adds the stacked label to a fork PR on a writable run", async () => {
+		const result = await runWorkflow({
+			eventName: "pull_request_target",
+			action: "synchronize",
+			fork: true,
+			commitParents: [OLD_SHA],
+			openPrHeads: [{ number: 1436, sha: OLD_SHA }],
+		})
+
+		// pull_request_target runs in the base repository with a writable token, so a fork PR is
+		// reconciled normally; only the fork pull_request_review run is read-only.
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["stacked"] }))
+	})
+	it("skips the stacked label silently when the event could not evaluate the head map", async () => {
+		const result = await runWorkflow({
+			eventName: "workflow_dispatch",
+			openPrHeadsEnv: "not-evaluated",
+			labels: ["stacked", "awaiting-maintainer"],
+			permissions: { maintainer: "write" },
+			reviews: [
+				{
+					login: "maintainer",
+					type: "User",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		// Not evaluated is not the same as unavailable: the label is left alone without a warning,
+		// because the resolve job deliberately skipped the read for a non-head-publishing event.
+		expect(result.info).toHaveBeenCalledWith(expect.stringContaining("cannot change a stacked unit"))
+		expect(result.warning).not.toHaveBeenCalledWith(expect.stringContaining("open pull request map"))
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
+		// Review-state reconciliation still runs for the PR.
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.setFailed).not.toHaveBeenCalled()
+	})
+
+	it("warns and leaves the stacked label alone when the head map is not JSON", async () => {
+		const result = await runWorkflow({
+			openPrHeadsEnv: "{not-json",
+			labels: ["stacked"],
+		})
+
+		// A malformed map reaches the shard's JSON.parse catch: warn and leave the label as it is
+		// rather than deciding from a map that could not be read.
+		expect(result.warning).toHaveBeenCalledWith(
+			expect.stringContaining("Could not read the open pull request map"),
+		)
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
+		expect(result.setFailed).not.toHaveBeenCalled()
 	})
 
 	it("advises instead of failing when the stacked parent cannot be read", async () => {
@@ -2590,19 +2664,37 @@ describe("PR review-state workflow", () => {
 		expect(pages[0].info).toHaveBeenCalledWith(expect.stringContaining("450"))
 	})
 
-	it("reconciles only the requested PR during manual dispatch", async () => {
+	it("reconciles only the requested PR during manual dispatch and does not read the head map", async () => {
 		const resolution = await runResolve({ eventName: "workflow_dispatch", workflowDispatchPrNumber: 1437 })
 
-		// One paginated read builds the open-PR head map once for the whole fan-out.
-		expect(resolution.listPullRequests).toHaveBeenCalledTimes(1)
+		// A manual dispatch cannot publish a head commit, so it cannot change a stacked relationship:
+		// the paginated open-PR read is skipped and shards are told the label was not evaluated.
+		expect(resolution.listPullRequests).not.toHaveBeenCalled()
 		expect(resolution.prNumbers()).toEqual([1437])
+		expect(resolution.openPrHeadsRaw()).toBe("not-evaluated")
+		expect(resolution.info).toHaveBeenCalledWith(expect.stringContaining("cannot change a stacked unit"))
 
-		const result = await runWorkflow({ eventName: "workflow_dispatch", workflowDispatchPrNumber: 1437 })
+		const result = await runWorkflow({
+			eventName: "workflow_dispatch",
+			workflowDispatchPrNumber: 1437,
+			openPrHeadsEnv: "not-evaluated",
+		})
 
-		// The shard receives the map through the env; only the requested PR is reconciled.
+		// The shard receives the sentinel through the env; only the requested PR is reconciled.
 		expect(result.listPullRequests).not.toHaveBeenCalled()
+		expect(result.warning).not.toHaveBeenCalledWith(expect.stringContaining("open pull request map"))
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
+
+	it.each(["opened", "reopened", "synchronize"])(
+		"reads the head map on a %s event, which can publish a head commit",
+		async (action) => {
+			const resolution = await runResolve({ eventName: "pull_request_target", action })
+
+			expect(resolution.listPullRequests).toHaveBeenCalledTimes(1)
+			expect(resolution.openPrHeads()).toEqual({ [SHA.toLowerCase()]: 1437 })
+		},
+	)
 
 	it("reuses the sweep's open list for the head map without an extra read", async () => {
 		const resolution = await runResolve({ eventName: "schedule" })
@@ -2614,8 +2706,8 @@ describe("PR review-state workflow", () => {
 
 	it("passes an empty head map to shards when the open list cannot be read", async () => {
 		const resolution = await runResolve({
-			eventName: "workflow_dispatch",
-			workflowDispatchPrNumber: 1437,
+			eventName: "pull_request_target",
+			action: "synchronize",
 			openPrHeadsError: true,
 		})
 
@@ -2630,8 +2722,8 @@ describe("PR review-state workflow", () => {
 
 	it("treats an empty open-PR list as an unavailable head map", async () => {
 		const resolution = await runResolve({
-			eventName: "workflow_dispatch",
-			workflowDispatchPrNumber: 1437,
+			eventName: "pull_request_target",
+			action: "synchronize",
 			emptyOpenList: true,
 		})
 
@@ -2670,8 +2762,8 @@ describe("PR review-state workflow", () => {
 		expect(String(workflow.jobs.reconcile.env.OPEN_PR_HEADS)).toContain("needs.resolve.outputs.open_pr_heads")
 
 		const resolution = await runResolve({
-			eventName: "workflow_dispatch",
-			workflowDispatchPrNumber: 1437,
+			eventName: "pull_request_target",
+			action: "synchronize",
 			openPrHeads: [{ number: 1436, sha: OLD_SHA }],
 		})
 		const emitted = resolution.setOutput.mock.calls.find(([name]) => name === "open_pr_heads")?.[1] as string
@@ -2714,8 +2806,10 @@ describe("PR review-state workflow", () => {
 	it("reconciles the PR associated with a workflow run", async () => {
 		const resolution = await runResolve({ eventName: "workflow_run" })
 
-		// Associated runs need no lookup, but the head map is still built once here.
-		expect(resolution.listPullRequests).toHaveBeenCalledTimes(1)
+		// Associated runs need no lookup, and a workflow_run cannot publish a head commit, so the
+		// head map is not read here either.
+		expect(resolution.listPullRequests).not.toHaveBeenCalled()
+		expect(resolution.openPrHeadsRaw()).toBe("not-evaluated")
 		expect(resolution.prNumbers()).toEqual([1437])
 
 		const result = await runWorkflow({ eventName: "workflow_run" })
