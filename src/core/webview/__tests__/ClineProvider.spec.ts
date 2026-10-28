@@ -31,14 +31,16 @@ import { defaultModeSlug } from "../../../shared/modes"
 import { experimentDefault } from "../../../shared/experiments"
 import { setTtsEnabled } from "../../../utils/tts"
 import { ContextProxy } from "../../config/ContextProxy"
-import { ProviderSettingsManager } from "../../config/ProviderSettingsManager"
+import { ProviderSettingsManager, ProviderSettingsNotFoundError } from "../../config/ProviderSettingsManager"
 import { importSettingsFromPath } from "../../config/importExport"
 import { WorkspaceIndexingEnablementManager } from "../../../services/code-index/workspace-indexing-enablement-manager"
 import { Task, TaskOptions } from "../../task/Task"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
+import { t } from "../../../i18n"
 
 import { ClineProvider } from "../ClineProvider"
 import { webviewMessageHandler } from "../webviewMessageHandler"
+import type { MdmService } from "../../../services/mdm/MdmService"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { MessageManager } from "../../message-manager"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../../api/providers/fetchers/lmstudio"
@@ -428,6 +430,52 @@ afterAll(() => {
 	vi.restoreAllMocks()
 })
 
+/**
+ * Minimal profile shape the stalled getProfile double resolves to. The
+ * settings fields are optional so a lookup that resolves name-only (a
+ * profile with no configured provider) also type-checks.
+ */
+type StalledProfile = {
+	name: string
+	apiProvider?: string
+	openRouterModelId?: string
+}
+
+/**
+ * Swap the provider's ProviderSettingsManager for a double whose getProfile
+ * stalls until the test resolves it, so tests can mutate view state while
+ * loadViewState is in flight. The double only backs getProfile, the member
+ * loadViewState awaits; the documented @ts-ignore replaces the per-test
+ * suppressions the inlined copies used.
+ */
+function stallProviderSettingsProfile(provider: ClineProvider) {
+	let resolveProfile: (value: StalledProfile) => void = () => {}
+	const getProfileSpy = vi.fn(() => {
+		// Only one lookup is resolvable: resolveProfile is bound to the first
+		// promise's resolver, so a second getProfile would strand its promise.
+		// Fail loudly instead of hanging.
+		if (getProfileSpy.mock.calls.length > 1) {
+			throw new Error(
+				"stallProviderSettingsProfile: getProfile called more than once; only one lookup is resolvable",
+			)
+		}
+		return new Promise<StalledProfile>((resolve) => (resolveProfile = resolve))
+	})
+	// @ts-ignore - Reassign the readonly providerSettingsManager for the test; the double only backs getProfile.
+	provider.providerSettingsManager = { getProfile: getProfileSpy }
+	// Return a stable wrapper around the closure binding: resolveProfile is
+	// reassigned to the pending promise's resolver once getProfile is called,
+	// so returning the variable directly would hand the test the initial no-op.
+	return { getProfile: getProfileSpy, resolveProfile: (value: StalledProfile) => resolveProfile(value) }
+}
+
+/**
+ * The host-minted claim stored with a durable view-states entry. A test that adopts an
+ * entry another provider wrote has to present it, exactly like a webview does on launch.
+ */
+function persistedViewStateClaim(context: vscode.ExtensionContext, viewStateId: string): string | undefined {
+	return context.globalState.get<RooCodeSettings["viewStates"]>("viewStates")?.[viewStateId]?.claimToken
+}
 describe("ClineProvider", () => {
 	beforeAll(() => {
 		vi.mocked(Task).mockImplementation(function (options: any) {
