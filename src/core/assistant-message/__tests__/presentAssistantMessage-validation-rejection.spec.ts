@@ -103,8 +103,6 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 			didAlreadyUseTool: false,
 			consecutiveMistakeCount: 0,
 			consecutiveMistakeLimit: 3,
-			// Added by the tool-context bookkeeping in presentAssistantMessageBlock.
-			activeToolContexts: new Map(),
 			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
 			clineMessages: [],
 			getTaskMode: vi.fn().mockResolvedValue("code"),
@@ -121,6 +119,9 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 				return true
 			}),
 		}
+		// Added by the tool-context bookkeeping in presentAssistantMessageBlock; assigned after
+		// the literal so the mock stays assignable when the structural type lags the runtime.
+		Object.assign(mockTask, { activeToolContexts: new Map() })
 	})
 
 	const writeBlock = () => [

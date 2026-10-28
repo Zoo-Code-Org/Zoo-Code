@@ -24,6 +24,7 @@ const buildCallbacks = (): ToolCallbacks => ({
 	askApproval: vi.fn().mockResolvedValue({ response: "yesButtonClicked" }),
 	handleError: vi.fn().mockResolvedValue(undefined),
 	pushToolResult: vi.fn(),
+	toolCallId: "test-tool-call-id",
 })
 
 describe("BaseTool parse-failure path with the default stream-release hook", () => {
