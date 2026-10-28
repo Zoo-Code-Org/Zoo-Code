@@ -4259,6 +4259,40 @@ export class ClineProvider
 			throw err
 		}
 
+		// Stamp only committed delegations; rejected ones must not link to a rolled-back child.
+		try {
+			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
+			const parentMessages = await readTaskMessages({ taskId: parentTaskId, globalStoragePath })
+			for (let messageIndex = parentMessages.length - 1; messageIndex >= 0; messageIndex--) {
+				const candidate = parentMessages[messageIndex]
+				if (candidate.type !== "ask" || candidate.ask !== "tool" || !candidate.text) continue
+
+				let tool: unknown
+				try {
+					tool = JSON.parse(candidate.text)
+				} catch {
+					continue
+				}
+				if (!tool || typeof tool !== "object" || !("tool" in tool) || tool.tool !== "newTask") continue
+
+				// Never walk past the newest delegation and stamp an earlier rejected ask.
+				if (!candidate.childTaskId) {
+					candidate.childTaskId = child.taskId
+					await saveTaskMessages({
+						messages: parentMessages,
+						taskId: parentTaskId,
+						globalStoragePath,
+						merge: true,
+					})
+				}
+				break
+			}
+		} catch (error) {
+			this.log(
+				`[delegateParentAndOpenChild] Failed to save child link for parent ${parentTaskId}: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+
 		// 6) Start the child task now that parent metadata is safely persisted.
 		scheduleTask(this.taskScheduler, child, "delegateParentAndOpenChild")
 
@@ -4351,14 +4385,18 @@ export class ClineProvider
 				say: "subtask_result",
 				text: completionResultSummary,
 				ts,
+				childTaskId,
 			}
 			const lastParentClineMessage = parentClineMessages.at(-1)
 			if (
 				lastParentClineMessage?.type !== "say" ||
 				lastParentClineMessage.say !== "subtask_result" ||
-				lastParentClineMessage.text !== completionResultSummary
+				lastParentClineMessage.text !== completionResultSummary ||
+				(lastParentClineMessage.childTaskId !== undefined && lastParentClineMessage.childTaskId !== childTaskId)
 			) {
 				parentClineMessages.push(subtaskUiMessage)
+			} else {
+				lastParentClineMessage.childTaskId = childTaskId
 			}
 			parentClineMessages = await saveTaskMessages({
 				messages: parentClineMessages,

@@ -112,6 +112,46 @@ function getPreviousTodos(messages: ClineMessage[], currentMessageTs: number): a
 	return []
 }
 
+function isNewTaskMessage(message: ClineMessage): boolean {
+	return (
+		message.type === "ask" &&
+		message.ask === "tool" &&
+		safeJsonParse<ClineSayTool>(message.text)?.tool === "newTask"
+	)
+}
+
+function getLinkedChildTaskId(
+	message: ClineMessage,
+	messages: ClineMessage[],
+	childIds: string[],
+	completedByChildId?: string,
+): string | undefined {
+	if (message.childTaskId) return message.childTaskId
+
+	const messageIndex = messages.findIndex((candidate) => candidate.ts === message.ts)
+	if (messageIndex < 0) return undefined
+
+	const precedingNewTasks = messages.slice(0, messageIndex + 1).filter(isNewTaskMessage)
+	const newTask = precedingNewTasks.at(-1)
+	if (newTask?.childTaskId) return newTask.childTaskId
+
+	// The latest completed child is more reliable than positional guesses after rejected legacy asks.
+	if (
+		message.say === "subtask_result" &&
+		completedByChildId &&
+		!messages.slice(messageIndex + 1).some((candidate) => candidate.say === "subtask_result")
+	) {
+		return completedByChildId
+	}
+
+	const childTaskId = childIds[precedingNewTasks.length - 1]
+	// Rejected asks must not borrow a child explicitly assigned to another approval.
+	const isAssignedToAnotherAsk = messages.some(
+		(candidate) => isNewTaskMessage(candidate) && candidate.childTaskId === childTaskId,
+	)
+	return isAssignedToAnotherAsk ? undefined : childTaskId
+}
+
 interface ChatRowProps {
 	message: ClineMessage
 	lastModifiedMessage?: ClineMessage
@@ -856,23 +896,7 @@ export const ChatRowContent = ({
 					</>
 				)
 			case "newTask":
-				// Find all newTask messages to determine which child task ID corresponds to this message
-				const newTaskMessages = clineMessages.filter((msg) => {
-					if (msg.type === "ask" && msg.ask === "tool") {
-						const t = safeJsonParse<ClineSayTool>(msg.text)
-						return t?.tool === "newTask"
-					}
-					return false
-				})
-				const thisNewTaskIndex = newTaskMessages.findIndex((msg) => msg.ts === message.ts)
-				const childIds = currentTaskItem?.childIds || []
-
-				// Only get the child task ID if this newTask has been approved (has a corresponding entry in childIds)
-				// This prevents showing a link to a previous task when the current newTask is still awaiting approval
-				// Note: We don't use delegatedToId here because it persists after child tasks complete and would
-				// incorrectly point to the previous task when a new newTask is awaiting approval
-				const childTaskId =
-					thisNewTaskIndex >= 0 && thisNewTaskIndex < childIds.length ? childIds[thisNewTaskIndex] : undefined
+				const childTaskId = getLinkedChildTaskId(message, clineMessages, currentTaskItem?.childIds ?? [])
 
 				// Check if the next message is a subtask_result - if so, don't show the button
 				// since the result is displayed right after this message
@@ -1046,8 +1070,13 @@ export const ChatRowContent = ({
 						/>
 					)
 				case "subtask_result":
-					// Get the child task ID that produced this result
-					const completedChildTaskId = currentTaskItem?.completedByChildId
+					const completedChildTaskId =
+						getLinkedChildTaskId(
+							message,
+							clineMessages,
+							currentTaskItem?.childIds ?? [],
+							currentTaskItem?.completedByChildId,
+						) ?? currentTaskItem?.completedByChildId
 					return (
 						<div className="border-l border-muted-foreground/80 ml-2 pl-4 pt-2 pb-1 -mt-5">
 							<div style={headerStyle}>
