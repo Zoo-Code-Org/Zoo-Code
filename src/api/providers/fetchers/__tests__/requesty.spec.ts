@@ -191,16 +191,75 @@ describe("getRequestyModels", () => {
 		expect(sonnet.supportsTemperature).toBeUndefined()
 	})
 
-	it("passes the caller's abort signal to the catalog request", async () => {
+	it("threads a wall-clock merged signal and the bounded timeout into the models request", async () => {
 		const controller = new AbortController()
 		mockAxiosGet.mockResolvedValueOnce({ data: { data: [] } })
 
 		await getRequestyModels(undefined, undefined, { signal: controller.signal })
 
+		// The shared axios mock accumulates calls across this file's tests, so assert on
+		// the call this test just made (the last one) rather than a global call count.
+		const calls = mockAxiosGet.mock.calls
+		const config = calls[calls.length - 1]?.[1]
+		expect(config?.signal).toBeInstanceOf(AbortSignal)
+		// The request signal is the caller's signal merged with the wall-clock
+		// deadline, not the raw caller signal: axios's timeout option resets when
+		// headers arrive, so only the merged signal enforces the 10_000 ms limit.
+		expect(config?.signal).not.toBe(controller.signal)
+		expect(config?.timeout).toBe(10_000)
+
+		// The caller's abort still propagates through the merged signal.
+		controller.abort()
+		expect(config?.signal?.aborted).toBe(true)
+	})
+
+	it("applies the bounded timeout as a standalone timeout signal when no signal is provided", async () => {
+		mockAxiosGet.mockResolvedValueOnce({ data: { data: [] } })
+
+		await getRequestyModels()
+
+		const calls = mockAxiosGet.mock.calls
+		const config = calls[calls.length - 1]?.[1]
+		// Even without a caller signal the request carries the wall-clock deadline
+		// as its own timeout signal.
+		expect(config?.signal).toBeInstanceOf(AbortSignal)
+		expect(config?.signal?.aborted).toBe(false)
+		expect(config?.timeout).toBe(10_000)
+	})
+
+	it("passes a merged request signal and the bounded timeout to the catalog request", async () => {
+		const controller = new AbortController()
+		mockAxiosGet.mockResolvedValueOnce({ data: { data: [] } })
+
+		await getRequestyModels(undefined, undefined, { signal: controller.signal })
+
+		const calls = mockAxiosGet.mock.calls
+		const config = calls[calls.length - 1]?.[1]
 		expect(mockAxiosGet).toHaveBeenCalledWith("https://router.requesty.ai/v1/models", {
 			headers: {},
-			signal: controller.signal,
+			signal: config?.signal,
+			timeout: 10_000,
 		})
+		expect(config?.signal).toBeInstanceOf(AbortSignal)
+	})
+
+	it("aborts the catalog request when the caller signal aborts after the request signal was merged", async () => {
+		const controller = new AbortController()
+		let requestSignal: AbortSignal | undefined
+		mockAxiosGet.mockImplementation(((_url: string, config?: { signal?: AbortSignal }) => {
+			requestSignal = config?.signal
+			// Mirror the HTTP client: reject when the request signal fires.
+			return new Promise<never>((_resolve, reject) => {
+				requestSignal?.addEventListener("abort", () => reject(new Error("canceled")), { once: true })
+			})
+		}) as typeof axios.get)
+
+		const fetchPromise = getRequestyModels(undefined, undefined, { signal: controller.signal })
+		expect(requestSignal).toBeInstanceOf(AbortSignal)
+		expect(requestSignal).not.toBe(controller.signal)
+		controller.abort()
+
+		await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
 	})
 
 	it("rejects with an AbortError when the signal aborts the pending request", async () => {
@@ -221,5 +280,41 @@ describe("getRequestyModels", () => {
 		controller.abort()
 
 		await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
+	})
+
+	it("returns the empty fallback and logs a dedicated timeout when discovery exceeds the deadline", async () => {
+		vi.useFakeTimers()
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		// The merged deadline uses the native AbortSignal.timeout, which fake timers cannot
+		// advance. Drive it with a controller scheduled by fake setTimeout instead so the test
+		// is deterministic and does not wait 10 real seconds.
+		const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation(((ms: number) => {
+			const controller = new AbortController()
+			setTimeout(() => controller.abort(new DOMException("The operation timed out.", "TimeoutError")), ms)
+			return controller.signal
+		}) as unknown as typeof AbortSignal.timeout)
+		try {
+			mockAxiosGet.mockImplementationOnce(
+				((_url: string, config?: { signal?: AbortSignal }) =>
+					new Promise((_resolve, reject) => {
+						// Axios rejects with the abort reason when the merged deadline fires.
+						config?.signal?.addEventListener("abort", () => reject(config.signal?.reason), {
+							once: true,
+						})
+					})) as unknown as typeof axios.get,
+			)
+
+			const pending = getRequestyModels()
+			await vi.advanceTimersByTimeAsync(10_000)
+			const models = await pending
+
+			// The fallback is intentional: callers use the cached/default model info.
+			expect(models).toEqual({})
+			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("timed out"))
+		} finally {
+			timeoutSpy.mockRestore()
+			errorSpy.mockRestore()
+			vi.useRealTimers()
+		}
 	})
 })
