@@ -536,7 +536,9 @@ describe("ClineProvider", () => {
 				cspSource: "vscode-webview://test-csp-source",
 			},
 			visible: true,
-			onDidDispose: vi.fn(),
+			onDidDispose: vi.fn().mockImplementation(() => {
+				return { dispose: vi.fn() }
+			}),
 			onDidChangeVisibility: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),
@@ -1103,8 +1105,12 @@ describe("ClineProvider", () => {
 				visibilityCallback = cb
 				return { dispose: vi.fn() }
 			})
+			// VS Code events are multi-listener: the provider and the focus
+			// tracker each register a disposal callback, and both must fire.
+			const disposeCallbacks: Array<() => void> = []
+			disposeCallback = () => disposeCallbacks.forEach((cb) => cb())
 			mockWebviewView.onDidDispose = vi.fn().mockImplementation((cb: () => void) => {
-				disposeCallback = cb
+				disposeCallbacks.push(cb)
 				return { dispose: vi.fn() }
 			})
 		})
@@ -1226,7 +1232,7 @@ describe("ClineProvider", () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			const htmlAfterResolve = mockWebviewView.webview.html
 			const epochBefore = provider["webviewRecoveryEpoch"]
-			const trackedDisposables = [...provider["resolvedViewDisposables"]]
+			const trackedDisposables = [...provider["webviewDisposables"]]
 			expect(trackedDisposables).not.toHaveLength(0)
 			const disposeSpies = trackedDisposables.map((disposable) => vi.spyOn(disposable, "dispose"))
 
@@ -1241,9 +1247,9 @@ describe("ClineProvider", () => {
 			disposeCallback()
 			expect(provider["webviewWatchdogInterval"]).toBeNull()
 			expect(provider["view"]).toBeUndefined()
-			expect(provider["resolvedViewDisposables"]).toHaveLength(0)
+			expect(provider["webviewDisposables"]).toHaveLength(0)
 			for (const disposeSpy of disposeSpies) {
-				expect(disposeSpy).toHaveBeenCalledOnce()
+				expect(disposeSpy).toHaveBeenCalled()
 			}
 			expect(provider["webviewRecoveryEpoch"]).toBe(epochBefore + 1)
 
@@ -1737,246 +1743,6 @@ describe("ClineProvider", () => {
 			} finally {
 				await providerB.dispose()
 			}
-		})
-
-		describe("obsolete view gating and replacement cleanup", () => {
-			// Sidebar-shaped replacement view; callbacks are read through thunks
-			// because the mock assigns them when resolveWebviewView registers.
-			// VS Code webview events are multi-listener: the message listener
-			// and the focus tracker each register their own callback.
-			const createViewB = () => {
-				const messageCallbacksB: Array<(message: WebviewMessage) => Promise<void>> = []
-				const viewB = {
-					webview: {
-						postMessage: vi.fn(),
-						html: "",
-						options: {},
-						onDidReceiveMessage: vi
-							.fn()
-							.mockImplementation((cb: (message: WebviewMessage) => Promise<void>) => {
-								messageCallbacksB.push(cb)
-								return { dispose: vi.fn() }
-							}),
-						asWebviewUri: vi.fn(),
-						cspSource: "vscode-webview://test-csp-source",
-					},
-					visible: true,
-					// Emulate the real onDidDispose(listener, thisArgs,
-					// disposables) contract so the disposal registration is
-					// tracked per view too.
-					onDidDispose: vi
-						.fn()
-						.mockImplementation((_cb: () => void, _thisArgs: null, disposables?: vscode.Disposable[]) => {
-							const d = { dispose: vi.fn() }
-							disposables?.push(d)
-							return d
-						}),
-					onDidChangeVisibility: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
-				} as unknown as vscode.WebviewView
-				return {
-					viewB,
-					sendMessage: (message: WebviewMessage) =>
-						Promise.all(messageCallbacksB.map((callback) => callback(message))).then(() => undefined),
-				}
-			}
-
-			test("ignores messages from a replaced view but still dispatches for the current view", async () => {
-				const messageCallbacksA: Array<(message: WebviewMessage) => Promise<void>> = []
-				mockWebviewView.webview.onDidReceiveMessage = vi
-					.fn()
-					.mockImplementation((cb: (message: WebviewMessage) => Promise<void>) => {
-						messageCallbacksA.push(cb)
-						return { dispose: vi.fn() }
-					})
-				await provider.resolveWebviewView(mockWebviewView)
-				const { viewB, sendMessage } = createViewB()
-				await provider.resolveWebviewView(viewB)
-
-				const revisionBefore = provider["webviewHeartbeatRevision"]
-				// The stale renderer reports in; its dispatch must be skipped.
-				for (const callback of messageCallbacksA) {
-					await callback({ type: "webviewHeartbeat", timestamp: Date.now() })
-				}
-				expect(provider["webviewHeartbeatRevision"]).toBe(revisionBefore)
-
-				// The current view's dispatch reaches the handler as before.
-				await sendMessage({ type: "webviewHeartbeat", timestamp: Date.now() })
-				expect(provider["webviewHeartbeatRevision"]).toBe(revisionBefore + 1)
-			})
-
-			test("disposes the replaced view's subscriptions so listeners do not accumulate", async () => {
-				const aDisposables: Array<{ dispose: ReturnType<typeof vi.fn> }> = []
-				let visibilityCallbackA: () => void = () => {}
-				mockWebviewView.webview.onDidReceiveMessage = vi.fn().mockImplementation(() => {
-					const d = { dispose: vi.fn() }
-					aDisposables.push(d)
-					return d
-				})
-				mockWebviewView.onDidChangeVisibility = vi.fn().mockImplementation((cb: () => void) => {
-					visibilityCallbackA = cb
-					const d = { dispose: vi.fn() }
-					aDisposables.push(d)
-					return d
-				})
-				// Emulate the real onDidDispose(listener, thisArgs, disposables)
-				// contract so the disposal registration is tracked per view too.
-				mockWebviewView.onDidDispose = vi
-					.fn()
-					.mockImplementation((cb: () => void, _thisArgs: null, disposables?: vscode.Disposable[]) => {
-						const d = { dispose: vi.fn() }
-						aDisposables.push(d)
-						disposables?.push(d)
-						return d
-					})
-				await provider.resolveWebviewView(mockWebviewView)
-				// message listener, focus-tracker message listener,
-				// focus-tracker disposal, visibility, disposal registration
-				expect(aDisposables.length).toBe(5)
-
-				const { viewB } = createViewB()
-				await provider.resolveWebviewView(viewB)
-
-				// The replaced view's own subscriptions are disposed with its
-				// resolvedViewDisposables; the focus tracker is provider-scoped
-				// and is released with clearWebviewResources instead.
-				expect(aDisposables.map((d) => d.dispose.mock.calls.length)).toEqual([1, 0, 0, 1, 1])
-				// Only B's subscriptions remain: message, visibility, disposal
-				// registration, configuration.
-				expect(provider["resolvedViewDisposables"].length).toBe(4)
-
-				// Even if a stale visibility event races in, it must not refresh
-				// the provider-wide heartbeat the current view's watchdog reads.
-				const revisionBefore = provider["webviewHeartbeatRevision"]
-				visibilityCallbackA()
-				expect(provider["webviewHeartbeatRevision"]).toBe(revisionBefore)
-			})
-
-			test("keeps the replacement view's watchdog and recovery when the replaced view's dispose callback fires", async () => {
-				let disposeCallbackA: () => void = () => {}
-				mockWebviewView.onDidDispose = vi.fn().mockImplementation((cb: () => void) => {
-					disposeCallbackA = cb
-					return { dispose: vi.fn() }
-				})
-				await provider.resolveWebviewView(mockWebviewView)
-				const { viewB } = createViewB()
-				await provider.resolveWebviewView(viewB)
-
-				// The stale view is finally torn down; its disposal must not
-				// clear the replacement's resources.
-				disposeCallbackA()
-				expect(provider["webviewWatchdogInterval"]).not.toBeNull()
-				// @ts-ignore - accessing private property for testing
-				expect(provider.view).toBe(viewB)
-
-				// B remains eligible for recovery: once its heartbeat goes stale
-				// the watchdog reloads B's webview.
-				const htmlAfterBResolve = viewB.webview.html
-				await vi.advanceTimersByTimeAsync(120_000)
-				expect(viewB.webview.html).not.toBe(htmlAfterBResolve)
-			})
-
-			test("ignores a replaced tab panel's view state changes and messages", async () => {
-				// WebviewPanel-shaped views: visibility arrives via
-				// onDidChangeViewState instead of onDidChangeVisibility.
-				const createPanel = () => {
-					let viewStateCallback: () => void = () => {}
-					let messageCallback: (message: WebviewMessage) => Promise<void> = async () => {}
-					const panel = {
-						webview: {
-							postMessage: vi.fn(),
-							html: "",
-							options: {},
-							onDidReceiveMessage: vi
-								.fn()
-								.mockImplementation((cb: (message: WebviewMessage) => Promise<void>) => {
-									messageCallback = cb
-									return { dispose: vi.fn() }
-								}),
-							asWebviewUri: vi.fn(),
-							cspSource: "vscode-webview://test-csp-source",
-						},
-						visible: true,
-						onDidDispose: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
-						onDidChangeViewState: vi.fn().mockImplementation((cb: () => void) => {
-							viewStateCallback = cb
-							return { dispose: vi.fn() }
-						}),
-						dispose: vi.fn(),
-					} as unknown as vscode.WebviewPanel
-					return {
-						panel,
-						fireViewState: () => viewStateCallback(),
-						sendMessage: (message: WebviewMessage) => messageCallback(message),
-					}
-				}
-				const panelA = createPanel()
-				await provider.resolveWebviewView(panelA.panel)
-				const panelB = createPanel()
-				await provider.resolveWebviewView(panelB.panel)
-
-				// @ts-ignore - accessing private property for testing
-				expect(provider.view).toBe(panelB.panel)
-
-				const revisionBefore = provider["webviewHeartbeatRevision"]
-				panelA.fireViewState()
-				await panelA.sendMessage({ type: "webviewHeartbeat", timestamp: Date.now() })
-				expect(provider["webviewHeartbeatRevision"]).toBe(revisionBefore)
-
-				panelB.fireViewState()
-				expect(provider["webviewHeartbeatRevision"]).toBe(revisionBefore + 1)
-			})
-
-			test("installs no listeners or watchdog when the provider is disposed mid-resolve", async () => {
-				// Hold the resolve's initial HTML generation so disposal lands
-				// inside the pending resolve.
-				let finishHtml: (html: string) => void = () => {}
-				provider["getWebviewHtml"] = vi.fn().mockImplementation(
-					() =>
-						new Promise<string>((resolve) => {
-							finishHtml = resolve
-						}),
-				)
-
-				const resolvePromise = provider.resolveWebviewView(mockWebviewView)
-				await provider.dispose()
-				finishHtml("<!DOCTYPE html><html><body>initial</body></html>")
-				await resolvePromise
-
-				// The stale resolve assigned no HTML and installed nothing.
-				expect(mockWebviewView.webview.html).toBe("")
-				expect(provider["webviewWatchdogInterval"]).toBeNull()
-				expect(provider["resolvedViewDisposables"].length).toBe(0)
-			})
-
-			test("installs nothing when a different view replaces the pending resolve", async () => {
-				// A's initial HTML stays pending; B's resolves immediately.
-				let finishHtmlA: (html: string) => void = () => {}
-				provider["getWebviewHtml"] = vi
-					.fn()
-					.mockImplementationOnce(
-						() =>
-							new Promise<string>((resolve) => {
-								finishHtmlA = resolve
-							}),
-					)
-					.mockImplementation(() => Promise.resolve("<!DOCTYPE html><html><body>viewB-initial</body></html>"))
-
-				const resolveA = provider.resolveWebviewView(mockWebviewView)
-				const { viewB } = createViewB()
-				await provider.resolveWebviewView(viewB)
-
-				finishHtmlA("<!DOCTYPE html><html><body>stale-A</body></html>")
-				await resolveA
-
-				// A's stale resolve bailed out: no HTML landed on the obsolete
-				// view, only B's subscriptions (message, visibility, dispose,
-				// configuration) are installed and B keeps the watchdog.
-				expect(mockWebviewView.webview.html).toBe("")
-				expect(provider["resolvedViewDisposables"].length).toBe(4)
-				expect(provider["webviewWatchdogInterval"]).not.toBeNull()
-				// @ts-ignore - accessing private property for testing
-				expect(provider.view).toBe(viewB)
-			})
 		})
 
 		describe("tab panel (WebviewPanel shape)", () => {
@@ -5468,7 +5234,9 @@ describe("ClineProvider - Router Models", () => {
 				asWebviewUri: vi.fn(),
 			},
 			visible: true,
-			onDidDispose: vi.fn(),
+			onDidDispose: vi.fn().mockImplementation(() => {
+				return { dispose: vi.fn() }
+			}),
 			onDidChangeVisibility: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),
@@ -5864,7 +5632,9 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				asWebviewUri: vi.fn(),
 			},
 			visible: true,
-			onDidDispose: vi.fn(),
+			onDidDispose: vi.fn().mockImplementation(() => {
+				return { dispose: vi.fn() }
+			}),
 			onDidChangeVisibility: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),

@@ -343,7 +343,9 @@ describe("ClineProvider Task History Synchronization", () => {
 				cspSource: "vscode-webview://test-csp-source",
 			},
 			visible: true,
-			onDidDispose: vi.fn(),
+			onDidDispose: vi.fn().mockImplementation(() => {
+				return { dispose: vi.fn() }
+			}),
 			onDidChangeVisibility: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),

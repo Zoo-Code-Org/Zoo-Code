@@ -219,14 +219,7 @@ export class ClineProvider
 	public static readonly sideBarId = `${Package.name}.SidebarProvider`
 	public static readonly tabPanelId = `${Package.name}.TabPanelProvider`
 	private static activeInstances: Set<ClineProvider> = new Set()
-	private disposables: vscode.Disposable[] = []
 	private webviewDisposables: vscode.Disposable[] = []
-	// Subscriptions tied to the currently resolved view (message, visibility,
-	// active-editor, and configuration listeners plus the view's disposal
-	// registration). Replacing the view disposes the previous entries before
-	// the replacement's are installed, so a stale view can neither dispatch
-	// messages nor refresh the provider-wide heartbeat.
-	private resolvedViewDisposables: vscode.Disposable[] = []
 	private pendingThemeFixtureProbes = new Map<
 		string,
 		{
@@ -861,7 +854,6 @@ export class ClineProvider
 		// Invalidate any recovery reload still awaiting its HTML so it cannot
 		// reassign webview.html on the disposed view.
 		this.webviewRecoveryEpoch++
-		this.disposeResolvedViewResources()
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()
 			if (x) {
@@ -870,14 +862,13 @@ export class ClineProvider
 		}
 	}
 
-	/** Disposes the subscriptions registered for the previously resolved view. */
-	private disposeResolvedViewResources() {
-		while (this.resolvedViewDisposables.length) {
-			const x = this.resolvedViewDisposables.pop()
-			if (x) {
-				x.dispose()
-			}
-		}
+	/**
+	 * True when an in-flight resolve no longer belongs to the provider's current
+	 * view because the view was disposed or replaced (or the provider itself was
+	 * disposed) while the resolve was awaiting HTML or state hydration.
+	 */
+	private isStaleViewResolve(webviewView: vscode.WebviewView | vscode.WebviewPanel): boolean {
+		return this._disposed || this.view !== webviewView
 	}
 
 	/** Drain one task's memoized cleanup without preventing the remaining provider shutdown work. */
@@ -935,14 +926,6 @@ export class ClineProvider
 		// Clean up cloud service event listener
 		if (CloudService.hasInstance()) {
 			CloudService.instance.off("settings-updated", this.handleCloudSettingsUpdate)
-		}
-
-		while (this.disposables.length) {
-			const x = this.disposables.pop()
-
-			if (x) {
-				x.dispose()
-			}
 		}
 
 		this._workspaceTracker?.dispose()
@@ -1074,21 +1057,39 @@ export class ClineProvider
 	}
 
 	async resolveWebviewView(webviewView: vscode.WebviewView | vscode.WebviewPanel) {
-		// Replacing the watched view invalidates a recovery reload still
-		// awaiting its HTML (same epoch bump as clearWebviewResources), so the
-		// stale recovery can neither block nor reassign the replacement view's
-		// recovery. Re-resolving the same view, or the first resolve, leaves
-		// the epoch alone.
-		if (this.view && this.view !== webviewView) {
-			this.webviewRecoveryEpoch++
-			// The replaced view's listeners must not outlive it: dispose them
-			// before the replacement's subscriptions are installed below so no
-			// duplicate message/visibility/editor/configuration listeners
-			// accumulate across A-to-B replacements.
-			this.disposeResolvedViewResources()
+		// A different view replaces the current one: dispose its subscriptions so
+		// the replaced view can no longer dispatch messages or refresh provider state.
+		if (this.view !== webviewView) {
+			this.clearWebviewResources()
 		}
+
 		this.view = webviewView
 		const inTabMode = "onDidChangeViewState" in webviewView
+
+		// Register disposal before awaiting HTML or state so closing the view during
+		// either load invalidates this resolve and prevents later listener installation.
+		webviewView.onDidDispose(
+			async () => {
+				// A view that is no longer current must not clear the current
+				// view's resources or dispose the provider.
+				if (webviewView !== this.view) {
+					return
+				}
+
+				if (inTabMode) {
+					this.log("Disposing ClineProvider instance for tab view")
+					await this.dispose()
+				} else {
+					this.log("Clearing webview resources for sidebar view")
+					this.view = undefined
+					this.clearWebviewResources()
+				}
+			},
+			null,
+			// View-scoped, like the other view subscriptions: disposed both when
+			// the view is disposed and when a different view replaces it.
+			this.webviewDisposables,
+		)
 
 		if (inTabMode) {
 			setPanel(webviewView, "tab")
@@ -1110,13 +1111,13 @@ export class ClineProvider
 		}
 
 		const html = await this.getWebviewHtml(webviewView.webview)
-		// The await yields; a disposal or replacement that landed mid-generation
-		// must not receive this HTML. The VS Code API throws when assigning to a
-		// destroyed webview, and a stale resolve must not touch the obsolete
-		// view it no longer owns.
-		if (this._disposed || this.view !== webviewView) {
+
+		// The HTML load above can finish after the view was disposed or replaced.
+		// A stale resolve must not assign HTML to a view the provider no longer owns.
+		if (this.isStaleViewResolve(webviewView)) {
 			return
 		}
+
 		webviewView.webview.html = html
 
 		// Initialize out-of-scope variables that need to receive persistent
@@ -1149,12 +1150,9 @@ export class ClineProvider
 			},
 		)
 
-		// The awaits above yield; disposal or a view replacement may have
-		// landed while this resolve was pending. Installing listeners or the
-		// watchdog now would leak an interval on a disposed provider (the
-		// recovery path's _disposed check cannot stop the interval itself) or
-		// duplicate the replacement view's subscriptions.
-		if (this._disposed || this.view !== webviewView) {
+		// State hydration can also finish after the view was disposed or replaced.
+		// A stale resolve must not install listeners on a view the provider no longer owns.
+		if (this.isStaleViewResolve(webviewView)) {
 			return
 		}
 
@@ -1172,11 +1170,11 @@ export class ClineProvider
 			// WebviewView and WebviewPanel have all the same properties except
 			// for this visibility listener panel.
 			const viewStateDisposable = webviewView.onDidChangeViewState(() => {
-				if (this.view !== webviewView) {
-					// A replaced view must not refresh the provider-wide
-					// heartbeat the current view's watchdog relies on.
+				// Ignore events from a view that is no longer the current view.
+				if (webviewView !== this.view) {
 					return
 				}
+
 				if (this.view?.visible) {
 					// Hidden webviews throttle timers, so grant a fresh grace
 					// window instead of counting throttled heartbeats as a crash.
@@ -1187,15 +1185,15 @@ export class ClineProvider
 				}
 			})
 
-			this.resolvedViewDisposables.push(viewStateDisposable)
+			this.webviewDisposables.push(viewStateDisposable)
 		} else if ("onDidChangeVisibility" in webviewView) {
 			// sidebar
 			const visibilityDisposable = webviewView.onDidChangeVisibility(() => {
-				if (this.view !== webviewView) {
-					// A replaced view must not refresh the provider-wide
-					// heartbeat the current view's watchdog relies on.
+				// Ignore events from a view that is no longer the current view.
+				if (webviewView !== this.view) {
 					return
 				}
+
 				if (this.view?.visible) {
 					// Hidden webviews throttle timers, so grant a fresh grace
 					// window instead of counting throttled heartbeats as a crash.
@@ -1206,38 +1204,22 @@ export class ClineProvider
 				}
 			})
 
-			this.resolvedViewDisposables.push(visibilityDisposable)
+			this.webviewDisposables.push(visibilityDisposable)
 		}
-
-		// Listen for when the view is disposed
-		// This happens when the user closes the view or when the view is closed programmatically
-		webviewView.onDidDispose(
-			async () => {
-				if (inTabMode) {
-					this.log("Disposing ClineProvider instance for tab view")
-					await this.dispose()
-				} else {
-					if (this.view === webviewView) {
-						this.log("Clearing webview resources for sidebar view")
-						this.clearWebviewResources()
-						// Drop the disposed view so nothing keeps polling it
-						// (e.g. the recovery watchdog) for the provider's lifetime.
-						this.view = undefined
-					}
-				}
-			},
-			null,
-			this.resolvedViewDisposables,
-		)
 
 		// Listen for when color changes
 		const configDisposable = vscode.workspace.onDidChangeConfiguration(async (e) => {
+			// Ignore configuration refreshes scoped to a view that is no longer current.
+			if (webviewView !== this.view) {
+				return
+			}
+
 			if (e && e.affectsConfiguration("workbench.colorTheme")) {
 				// Sends latest theme name to webview
 				await this.postMessageToWebview({ type: "theme", text: JSON.stringify(await getTheme()) })
 			}
 		})
-		this.resolvedViewDisposables.push(configDisposable)
+		this.webviewDisposables.push(configDisposable)
 
 		// If the extension is starting a new session, clear previous task state.
 		// But don't clear if there's already an active task (e.g., resumed via IPC/bridge).
@@ -1798,20 +1780,20 @@ export class ClineProvider
 	 * Sets up an event listener to listen for messages passed from the webview context and
 	 * executes code based on the message that is received.
 	 *
-	 * @param webviewView The resolved webview view or panel
+	 * @param webviewView The view whose webview messages are listened to
 	 */
 	private setWebviewMessageListener(webviewView: vscode.WebviewView | vscode.WebviewPanel) {
 		const onReceiveMessage = async (message: WebviewMessage) => {
-			// A replaced view's listener stays registered until the provider
-			// clears its subscriptions; never let a stale renderer dispatch.
-			if (this.view !== webviewView) {
+			// Ignore messages from a view that is no longer the current view.
+			if (webviewView !== this.view) {
 				return
 			}
+
 			await webviewMessageHandler(this, message, this.marketplaceManager)
 		}
 
 		const messageDisposable = webviewView.webview.onDidReceiveMessage(onReceiveMessage)
-		this.resolvedViewDisposables.push(messageDisposable)
+		this.webviewDisposables.push(messageDisposable)
 	}
 
 	/**
