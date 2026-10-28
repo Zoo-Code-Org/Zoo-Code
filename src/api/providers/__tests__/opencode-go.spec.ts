@@ -2980,6 +2980,11 @@ describe("OpencodeGoHandler", () => {
 		})
 
 		it.each([
+			[
+				"Anthropic",
+				() => new OpencodeGoHandler({ ...mockOptions, opencodeGoModelId: "qwen3.7-max" }),
+				mockAnthropicCreate,
+			],
 			["Chat Completions", () => new OpencodeGoHandler(mockOptions), mockCreate],
 			[
 				"Responses",

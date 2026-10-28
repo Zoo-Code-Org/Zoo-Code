@@ -874,7 +874,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 					requestOptions.timeout = toSdkTimeoutMs(timeoutMs)
 				}
 
-				const message = await this.anthropicClient.messages.create(
+				const pendingMessage = this.anthropicClient.messages.create(
 					{
 						model: modelId,
 						// Honour the same includeMaxTokens/modelMaxTokens override
@@ -891,6 +891,11 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 					},
 					Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
 				)
+				// Race the SDK promise against the merged deadline, like the other two formats:
+				// a retry backoff longer than timeoutMs must not outlast the caller's budget.
+				const message = resolutionAbortSignal
+					? await rejectOnAbort(pendingMessage, resolutionAbortSignal, "Opencode Go")
+					: await pendingMessage
 
 				const content = message.content.find(({ type }) => type === "text")
 				return content?.type === "text" ? content.text : ""
