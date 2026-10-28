@@ -916,22 +916,24 @@ describe("MistralHandler", () => {
 				return controller.signal
 			})
 			const caller = new AbortController()
+			let rejectRequest: ((error: Error) => void) | undefined
 			try {
+				// Control rejection explicitly: advance the timeout, abort the caller, then reject
+				// the request. Both signals are already aborted when completePrompt's catch runs,
+				// so the test really pins the first-cause classification.
 				mockComplete.mockImplementation(
-					(_options: unknown, requestOptions?: { fetchOptions?: { signal?: AbortSignal } }) =>
+					() =>
 						new Promise<never>((_resolve, reject) => {
-							const signal = requestOptions?.fetchOptions?.signal
-							const fail = () =>
-								reject(Object.assign(new Error("Request timed out"), { name: "RequestTimeoutError" }))
-							signal?.addEventListener("abort", fail, { once: true })
+							rejectRequest = reject
 						}),
 				)
 
 				const promise = handler.completePrompt("Test prompt", { abortSignal: caller.signal, timeoutMs: 100 })
 				const assertion = expect(promise).rejects.toMatchObject({ name: "TimeoutError" })
-				// Timeout fires first, then the caller also aborts before the rejection settles.
 				await vi.advanceTimersByTimeAsync(120)
 				caller.abort()
+				expect(caller.signal.aborted).toBe(true)
+				rejectRequest?.(Object.assign(new Error("Request timed out"), { name: "RequestTimeoutError" }))
 				await assertion
 			} finally {
 				timeoutSpy.mockRestore()
