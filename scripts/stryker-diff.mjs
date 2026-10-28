@@ -292,10 +292,16 @@ export function resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPu
 	const parents = git(repoRoot, ["rev-list", "--parents", "-n", "1", prHeadSha]).trim().split(/\s+/).slice(1)
 	// A unit is one commit on top of its parent. A head with more than one parent is a merge on the
 	// unit branch itself, so its diff is not a single unit delta and the event base is kept even when
-	// one of those parents is an open pull request head.
+	// its first parent is an open pull request head.
 	if (parents.length !== 1) return { baseSha: eventBaseSha, stackedOn: null }
 	const parentSha = parents[0].toLowerCase()
-	const parent = openPullRequests.find((pr) => String(pr.headSha).toLowerCase() === parentSha)
+	// The merge queue runs no gate of its own, so the per-pull-request gate is the only enforcement
+	// point for the changed-line cap. A DRAFT pull request is never gated (the workflow skips draft
+	// runs), so its head cannot be the base this unit is measured against: the unit would be charged
+	// only its own delta while the draft's content rides into the base through the unit that merges
+	// it. Such a unit keeps the event base, so that content is charged to the pull request that would
+	// actually land it. Anyone reading a "stacked" base here can assume the parent was gated.
+	const parent = openPullRequests.find((pr) => pr.draft !== true && String(pr.headSha).toLowerCase() === parentSha)
 	if (!parent) return { baseSha: eventBaseSha, stackedOn: null }
 	return { baseSha: parentSha, stackedOn: parent.number }
 }

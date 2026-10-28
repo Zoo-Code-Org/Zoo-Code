@@ -16,7 +16,9 @@ concurrency:
 jobs:
     # The open pull request map is read in a job that never checks out or runs pull-request
     # code, so the token cannot reach anything the contributor controls. Only the filtered map
-    # crosses into the job that runs the gate.
+    # crosses into the job that runs the gate. Each entry carries the draft flag: a draft pull
+    # request is not gated, so the gate refuses its head as a stacked base and measures the unit
+    # against the event base instead.
     stacked_map:
         name: Resolve the stacked parent
         runs-on: ubuntu-latest
@@ -37,7 +39,7 @@ jobs:
                   # measuring against the event base.
                   # --jq runs once per page, so a paginated call emits one JSON array per page; the
                   # gate reads that stream, not a single array.
-                  STACKED_MAP="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" --jq '[.[] | {number: .number, headSha: .head.sha}]')" || STACKED_MAP="$(printf '[]')"
+                  STACKED_MAP="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" --jq '[.[] | {number: .number, headSha: .head.sha, draft: (.draft == true)}]')" || STACKED_MAP="$(printf '[]')"
                   # Publish the whole value as one record from a validated string, and let a failed
                   # write abort the job: a truncated or skipped output would leave the gate measuring
                   # against the event base while still reporting success.

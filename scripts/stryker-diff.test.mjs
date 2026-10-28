@@ -72,7 +72,9 @@ describe("mutation testing workflow", () => {
 		// and the parser has to accept the resulting stream of page arrays.
 		assert.ok(workflow.includes("gh api --paginate"))
 		assert.ok(!workflow.includes("--slurp"))
-		assert.ok(workflow.includes("[.[] | {number: .number, headSha: .head.sha}]"))
+		// The map has to carry the draft flag: the gate refuses a draft head as a stacked base,
+		// because a draft pull request is not gated (see the draft-base case below).
+		assert.ok(workflow.includes("[.[] | {number: .number, headSha: .head.sha, draft: (.draft == true)}]"))
 		// The fallback has to be a command: these steps run bash with -e, so a bare '[]' is executed
 		// as a program name instead of producing JSON.
 		assert.ok(workflow.includes("printf '[]'"))
@@ -335,6 +337,37 @@ describe("stacked unit base resolution", () => {
 		}
 	})
 
+	it("keeps the event base when the parent head belongs to a draft pull request", () => {
+		// A draft pull request is not gated, so it cannot be the base a unit is measured against: the
+		// unit would be charged only its own delta while the draft's content lands through it. The
+		// unit keeps the event base instead, so that content is charged where it would land.
+		const { repository, eventBaseSha, parentSha, childSha } = createSyntheticStack()
+
+		try {
+			const draft = resolveStackedUnitBase(repository, eventBaseSha, childSha, [
+				{ number: 1, headSha: parentSha, draft: true },
+			])
+			assert.equal(draft.baseSha, eventBaseSha)
+			assert.equal(draft.stackedOn, null)
+
+			// The same entry, ready for review: the parent was gated, so it is the unit's base again.
+			const ready = resolveStackedUnitBase(repository, eventBaseSha, childSha, [
+				{ number: 1, headSha: parentSha, draft: false },
+			])
+			assert.equal(ready.baseSha, parentSha)
+			assert.equal(ready.stackedOn, 1)
+
+			// The cumulative delta the cap has to see when the parent never gets gated.
+			const manifest = selectFromGit(repository, draft.baseSha, childSha, { preserveBase: true })
+			assert.deepEqual(
+				manifest.packages.flatMap((entry) => entry.files.map((file) => file.path)).sort(),
+				["packages/core/src/unit1.ts", "packages/core/src/unit2.ts"],
+			)
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+
 	it("degrades to the event base for an unparsable stacked map", () => {
 		assert.deepEqual(parseStackedMap("not json"), [])
 		assert.deepEqual(parseStackedMap('{"number": 1}'), [])
@@ -403,6 +436,30 @@ describe("stacked unit base resolution", () => {
 			assert.equal(multi.baseSha, advancedBase)
 			assert.equal(multi.stackedOn, null)
 			assert.equal(resolveCiInvocation(repository, advancedBase, multiParentHead, multiParentHead, [{ number: 1, headSha: parentSha }]).stackedOn, null)
+
+			// The guard, not the map lookup, has to reject this merge: its FIRST parent is the open
+			// pull request head. Without the parents.length guard that match would win, the merge would
+			// be treated as a one-commit unit, and only the second-parent delta would be charged.
+			const mergeTree = run("rev-parse", `${parentSha}^{tree}`)
+			const firstParentOpenPrMerge = run(
+				"commit-tree",
+				mergeTree,
+				"-p",
+				parentSha,
+				"-p",
+				advancedBase,
+				"-m",
+				"unit merge with the open pull request head first",
+			)
+			assert.equal(
+				run("rev-list", "--parents", "-n", "1", firstParentOpenPrMerge).trim().split(/\s+/).slice(1)[0],
+				parentSha,
+			)
+			const firstParentLookup = resolveStackedUnitBase(repository, advancedBase, firstParentOpenPrMerge, [
+				{ number: 1, headSha: parentSha, draft: false },
+			])
+			assert.equal(firstParentLookup.baseSha, advancedBase)
+			assert.equal(firstParentLookup.stackedOn, null)
 		} finally {
 			fs.rmSync(repository, { recursive: true, force: true })
 		}
