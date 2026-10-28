@@ -203,15 +203,21 @@ export const mergeExtensionState = (prevState: ExtensionState, newState: Partial
 	// concurrent state pushes. If a stale push arrives after a newer one, its clineMessages
 	// would overwrite the newer messages. The sequence number prevents this by only applying
 	// clineMessages when the incoming seq is strictly greater than the last applied seq.
+	const keepTaskIdentity =
+		messagesAreStale(newState, prevState.clineMessagesSeq) || newState.clineMessages === undefined
 	if (messagesAreStale(newState, prevState.clineMessagesSeq)) {
 		rest.clineMessages = prevState.clineMessages
 		rest.clineMessagesSeq = prevState.clineMessagesSeq
+	}
+	if (keepTaskIdentity) {
+		// Pushes without fresh messages cannot establish task identity. Keep the task item with
+		// the pinned ID when it describes another task; same-task item updates still apply.
+		if (newState.currentTaskId !== prevState.currentTaskId) {
+			rest.currentTaskItem = prevState.currentTaskItem
+		}
 		rest.currentTaskId = prevState.currentTaskId
-	} else if (newState.clineMessages !== undefined) {
-		rest.currentTaskId = newState.currentTaskId
 	} else {
-		// Pushes without messages cannot establish task identity.
-		rest.currentTaskId = prevState.currentTaskId
+		rest.currentTaskId = newState.currentTaskId
 	}
 
 	// Note that we completely replace the previous apiConfiguration and customSupportPrompts objects

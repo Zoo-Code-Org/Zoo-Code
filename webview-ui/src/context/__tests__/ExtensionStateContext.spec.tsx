@@ -306,6 +306,37 @@ describe("ExtensionStateContext", () => {
 		},
 	)
 
+	it("keeps the task item with the pinned task id unless it updates the same task", () => {
+		const item = (id: string, task: string) => ({
+			id,
+			number: 1,
+			ts: 1,
+			task,
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		})
+		const initial = {
+			...createInitialExtensionState(),
+			currentTaskId: "task-a",
+			currentTaskItem: item("task-a", "a"),
+			clineMessagesSeq: 5,
+		}
+		const other = { currentTaskId: "task-b", currentTaskItem: item("task-b", "b") }
+		const sameTask = { currentTaskId: "task-a", currentTaskItem: item("task-a", "a2") }
+		const stale = { clineMessages: [], clineMessagesSeq: 4 }
+
+		for (const extra of [{}, stale]) {
+			expect(mergeExtensionState(initial, { ...other, ...extra }).currentTaskItem).toBe(initial.currentTaskItem)
+			expect(mergeExtensionState(initial, { ...sameTask, ...extra }).currentTaskItem).toBe(
+				sameTask.currentTaskItem,
+			)
+		}
+		expect(mergeExtensionState(initial, { ...other, clineMessages: [], clineMessagesSeq: 6 }).currentTaskItem).toBe(
+			other.currentTaskItem,
+		)
+	})
+
 	it("ignores task identity in pushes without messages", () => {
 		// Settings, telemetry and mode refreshes do not switch tasks; their snapshots can arrive late.
 		const initial = { ...createInitialExtensionState(), currentTaskId: "task-a" }
