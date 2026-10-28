@@ -2979,24 +2979,34 @@ describe("OpencodeGoHandler", () => {
 			expect(createMock).not.toHaveBeenCalled()
 		})
 
-		it("rejects at the deadline even while the SDK retry delay keeps the request pending", async () => {
-			// The SDK's internal retry backoff is not covered by the request signal; without the
-			// rejectOnAbort race this promise would never settle and the test would time out.
-			let requestSignal: AbortSignal | undefined
-			mockCreate.mockImplementation(
-				(_params: unknown, options?: { signal?: AbortSignal }) =>
-					new Promise((_resolve) => {
-						requestSignal = options?.signal
-					}),
-			)
-			const handler = new OpencodeGoHandler(mockOptions)
+		it.each([
+			["Chat Completions", () => new OpencodeGoHandler(mockOptions), mockCreate],
+			[
+				"Responses",
+				() => new OpencodeGoHandler({ ...mockOptions, opencodeGoModelId: "gpt-5.6-luna" }),
+				mockResponsesCreate,
+			],
+		])(
+			"rejects at the deadline even while the SDK retry delay keeps the %s request pending",
+			async (_label, makeHandler, createMock) => {
+				// The SDK's internal retry backoff is not covered by the request signal; without the
+				// rejectOnAbort race this promise would never settle and the test would time out.
+				let requestSignal: AbortSignal | undefined
+				createMock.mockImplementation(
+					(_params: unknown, options?: { signal?: AbortSignal }) =>
+						new Promise((_resolve) => {
+							requestSignal = options?.signal
+						}),
+				)
+				const handler = makeHandler() as OpencodeGoHandler
 
-			const started = Date.now()
-			const error = await handler.completePrompt("ping", { timeoutMs: 30 }).catch((caught: unknown) => caught)
+				const started = Date.now()
+				const error = await handler.completePrompt("ping", { timeoutMs: 30 }).catch((caught: unknown) => caught)
 
-			expect(error).toMatchObject({ name: "AbortError" })
-			expect(Date.now() - started).toBeLessThan(1_000)
-			expect(requestSignal?.aborted).toBe(true)
-		})
+				expect(error).toMatchObject({ name: "AbortError" })
+				expect(Date.now() - started).toBeLessThan(1_000)
+				expect(requestSignal?.aborted).toBe(true)
+			},
+		)
 	})
 })
