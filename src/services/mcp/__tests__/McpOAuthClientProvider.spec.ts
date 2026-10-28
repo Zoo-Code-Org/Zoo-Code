@@ -586,7 +586,7 @@ describe("McpOAuthClientProvider", () => {
 			const secretStorage = createMockSecretStorage()
 			const serverUrl = "https://example.com/mcp"
 			const clientId = "registered-client"
-			const discoveredResource = "https://discovered.example.com/"
+			const discoveredResource = "https://example.com/mcp"
 			await secretStorage.saveOAuthData(
 				serverUrl,
 				{
@@ -637,7 +637,7 @@ describe("McpOAuthClientProvider", () => {
 				},
 				clientId,
 			)
-			mockOAuthDiscovery("https://discovered.example.com/")
+			mockOAuthDiscovery("https://example.com/mcp")
 			const provider = await McpOAuthClientProvider.create(serverUrl, secretStorage, undefined, {
 				clientId,
 				resource: explicitResource,

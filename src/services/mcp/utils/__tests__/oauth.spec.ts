@@ -75,9 +75,11 @@ describe("fetchOAuthAuthServerMetadata", () => {
 			headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
 		})
 		expect(JSON.parse(probeInit.body as string)).toMatchObject({ jsonrpc: "2.0", method: "initialize" })
-		expect(discoverOAuthProtectedResourceMetadata).toHaveBeenLastCalledWith("https://example.com/core/mcp", {
-			resourceMetadataUrl: new URL("https://example.com/core/.well-known/oauth-protected-resource/mcp"),
-		})
+		expect(discoverOAuthProtectedResourceMetadata).toHaveBeenLastCalledWith(
+			"https://example.com/core/mcp",
+			{ resourceMetadataUrl: new URL("https://example.com/core/.well-known/oauth-protected-resource/mcp") },
+			expect.any(Function),
+		)
 		expect(result).toEqual({ authServerMeta: meta, resourceIndicator: "https://example.com/core/mcp" })
 	})
 
@@ -124,19 +126,58 @@ describe("fetchOAuthAuthServerMetadata", () => {
 		}
 	})
 
-	it("returns null when a protected resource metadata lookup exceeds its timeout", async () => {
+	it("aborts a protected resource metadata lookup that exceeds its timeout", async () => {
 		vi.useFakeTimers()
 		try {
-			vi.mocked(discoverOAuthProtectedResourceMetadata).mockImplementationOnce(() => new Promise(() => {}))
-			mockFetch.mockResolvedValueOnce(new Response(null, { status: 200 }))
+			vi.mocked(discoverOAuthProtectedResourceMetadata).mockImplementationOnce(async (url, _opts, fetchFn) => {
+				await fetchFn!(url)
+				throw new Error("unreachable")
+			})
+			let lookupSignal: AbortSignal | undefined
+			mockFetch
+				.mockImplementationOnce((_url: string, init: RequestInit) => {
+					lookupSignal = init.signal ?? undefined
+					return new Promise(() => {})
+				})
+				.mockResolvedValueOnce(new Response(null, { status: 200 }))
 
 			const result = fetchOAuthAuthServerMetadata("https://example.com/mcp")
 			await vi.advanceTimersByTimeAsync(5_000)
 
 			await expect(result).resolves.toBeNull()
+			expect(lookupSignal?.aborted).toBe(true)
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+
+	it("rejects well-known metadata whose resource does not match the server URL", async () => {
+		vi.mocked(discoverOAuthProtectedResourceMetadata).mockResolvedValueOnce({
+			resource: "https://other.example.com/mcp",
+			authorization_servers: ["https://auth.example.com"],
+		})
+		mockFetch.mockResolvedValueOnce(new Response(null, { status: 200 }))
+
+		const result = await fetchOAuthAuthServerMetadata("https://example.com/mcp")
+
+		expect(result).toBeNull()
+		expect(mockFetch).toHaveBeenCalledTimes(1)
+	})
+
+	it("rejects fallback metadata whose resource does not match the server URL", async () => {
+		vi.mocked(discoverOAuthProtectedResourceMetadata)
+			.mockRejectedValueOnce(new Error("not found"))
+			.mockResolvedValueOnce({
+				resource: "https://example.com/other",
+				authorization_servers: ["https://auth.example.com"],
+			})
+		mockFetch.mockResolvedValueOnce(unauthorized('Bearer resource_metadata="https://example.com/metadata"'))
+
+		const result = await fetchOAuthAuthServerMetadata("https://example.com/mcp")
+
+		expect(result).toBeNull()
+		expect(discoverOAuthProtectedResourceMetadata).toHaveBeenCalledTimes(2)
+		expect(mockFetch).toHaveBeenCalledTimes(1)
 	})
 
 	it("constructs the RFC 8414 discovery URL correctly for an issuer with a path", async () => {

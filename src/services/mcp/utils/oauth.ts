@@ -1,4 +1,5 @@
 import { discoverOAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/client/auth.js"
+import { checkResourceAllowed } from "@modelcontextprotocol/sdk/shared/auth-utils.js"
 import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/shared/auth.js"
 
 /**
@@ -85,25 +86,57 @@ export async function fetchOAuthAuthServerMetadata(serverUrl: string): Promise<O
 
 async function discoverProtectedResourceMetadata(serverUrl: string): Promise<OAuthProtectedResourceMetadata> {
 	try {
-		return await withDiscoveryTimeout(discoverOAuthProtectedResourceMetadata(serverUrl))
+		return assertResourceMatches(
+			serverUrl,
+			await withDiscoveryTimeout((fetchFn) =>
+				discoverOAuthProtectedResourceMetadata(serverUrl, undefined, fetchFn),
+			),
+		)
 	} catch (wellKnownError) {
 		const resourceMetadataUrl = await probeResourceMetadataUrl(serverUrl)
 		if (!resourceMetadataUrl) throw wellKnownError
-		return withDiscoveryTimeout(discoverOAuthProtectedResourceMetadata(serverUrl, { resourceMetadataUrl }))
+		return assertResourceMatches(
+			serverUrl,
+			await withDiscoveryTimeout((fetchFn) =>
+				discoverOAuthProtectedResourceMetadata(serverUrl, { resourceMetadataUrl }, fetchFn),
+			),
+		)
 	}
 }
 
 /**
- * The SDK does not accept an AbortSignal, so each lookup races its own timeout.
- * A slow well-known lookup therefore cannot consume the fallback's budget.
+ * RFC 9728 §3.3: the metadata must describe the resource it was fetched for.
+ * Its `resource` is later sent as the RFC 8707 resource indicator.
  */
-async function withDiscoveryTimeout<T>(promise: Promise<T>): Promise<T> {
+function assertResourceMatches(
+	serverUrl: string,
+	metadata: OAuthProtectedResourceMetadata,
+): OAuthProtectedResourceMetadata {
+	if (
+		metadata.resource &&
+		!checkResourceAllowed({ requestedResource: serverUrl, configuredResource: metadata.resource })
+	) {
+		throw new Error(`Protected resource metadata for ${metadata.resource} does not match ${serverUrl}`)
+	}
+	return metadata
+}
+
+/**
+ * Gives each lookup its own timeout, so a slow well-known lookup cannot consume
+ * the fallback's budget. The timeout aborts the lookup's requests through the
+ * SDK fetch hook.
+ */
+async function withDiscoveryTimeout<T>(lookup: (fetchFn: typeof fetch) => Promise<T>): Promise<T> {
+	const controller = new AbortController()
 	let timer: ReturnType<typeof setTimeout> | undefined
 	try {
 		return await Promise.race([
-			promise,
+			lookup((input, init) => fetch(input, { ...init, signal: controller.signal })),
 			new Promise<never>((_, reject) => {
-				timer = setTimeout(() => reject(new Error("OAuth discovery timeout")), DISCOVERY_TIMEOUT_MS)
+				timer = setTimeout(() => {
+					controller.abort()
+					reject(new Error("OAuth discovery timeout"))
+				}, DISCOVERY_TIMEOUT_MS)
 			}),
 		])
 	} finally {
