@@ -14,7 +14,6 @@ import {
 	safeWriteText,
 	StagingPathError,
 	type PublishResidue,
-	type SafeWriteTextOptions,
 } from "../safeWriteText"
 
 // Full mock for fs/promises — all methods are vi.fn() stubs
