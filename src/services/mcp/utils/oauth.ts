@@ -1,7 +1,4 @@
-import {
-	discoverOAuthProtectedResourceMetadata,
-	extractResourceMetadataUrl,
-} from "@modelcontextprotocol/sdk/client/auth.js"
+import { discoverOAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/client/auth.js"
 import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/shared/auth.js"
 
 /**
@@ -56,13 +53,7 @@ export async function fetchOAuthAuthServerMetadata(serverUrl: string): Promise<O
 	try {
 		// Step 1 – RFC 9728: resolve the authorization server issuer URL and
 		// capture the resource indicator for RFC 8707.
-		// The SDK does not accept an AbortSignal, so we race it against a timeout.
-		const resourceMeta = await Promise.race([
-			discoverProtectedResourceMetadata(serverUrl),
-			new Promise<never>((_, reject) =>
-				setTimeout(() => reject(new Error("OAuth discovery timeout")), DISCOVERY_TIMEOUT_MS),
-			),
-		])
+		const resourceMeta = await discoverProtectedResourceMetadata(serverUrl)
 		const authServers = resourceMeta.authorization_servers
 		if (!authServers?.length) return null
 
@@ -94,11 +85,29 @@ export async function fetchOAuthAuthServerMetadata(serverUrl: string): Promise<O
 
 async function discoverProtectedResourceMetadata(serverUrl: string): Promise<OAuthProtectedResourceMetadata> {
 	try {
-		return await discoverOAuthProtectedResourceMetadata(serverUrl)
+		return await withDiscoveryTimeout(discoverOAuthProtectedResourceMetadata(serverUrl))
 	} catch (wellKnownError) {
 		const resourceMetadataUrl = await probeResourceMetadataUrl(serverUrl)
 		if (!resourceMetadataUrl) throw wellKnownError
-		return discoverOAuthProtectedResourceMetadata(serverUrl, { resourceMetadataUrl })
+		return withDiscoveryTimeout(discoverOAuthProtectedResourceMetadata(serverUrl, { resourceMetadataUrl }))
+	}
+}
+
+/**
+ * The SDK does not accept an AbortSignal, so each lookup races its own timeout.
+ * A slow well-known lookup therefore cannot consume the fallback's budget.
+ */
+async function withDiscoveryTimeout<T>(promise: Promise<T>): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined
+	try {
+		return await Promise.race([
+			promise,
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => reject(new Error("OAuth discovery timeout")), DISCOVERY_TIMEOUT_MS)
+			}),
+		])
+	} finally {
+		clearTimeout(timer)
 	}
 }
 
@@ -126,5 +135,19 @@ async function probeResourceMetadataUrl(serverUrl: string): Promise<URL | undefi
 		signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
 	})
 	await response.body?.cancel().catch(() => {})
-	return response.status === 401 ? extractResourceMetadataUrl(response) : undefined
+	return response.status === 401 ? extractResourceMetadataUrl(response.headers.get("WWW-Authenticate")) : undefined
+}
+
+/**
+ * Reads the `resource_metadata` parameter of a Bearer challenge. Unlike the SDK
+ * helper, matches the parameter name case-insensitively (RFC 9110 §11.2).
+ */
+function extractResourceMetadataUrl(header: string | null): URL | undefined {
+	const match = header && /^bearer\s+(?:.*[\s,])?resource_metadata\s*=\s*"([^"]*)"/i.exec(header)
+	if (!match) return undefined
+	try {
+		return new URL(match[1])
+	} catch {
+		return undefined
+	}
 }

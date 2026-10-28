@@ -3,18 +3,22 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest"
 // Mock the SDK's discoverOAuthProtectedResourceMetadata
 vi.mock("@modelcontextprotocol/sdk/client/auth.js", () => ({
 	discoverOAuthProtectedResourceMetadata: vi.fn(),
-	extractResourceMetadataUrl: vi.fn(),
 }))
 
-import {
-	discoverOAuthProtectedResourceMetadata,
-	extractResourceMetadataUrl,
-} from "@modelcontextprotocol/sdk/client/auth.js"
+import { discoverOAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/client/auth.js"
 import { fetchOAuthAuthServerMetadata } from "../oauth"
 
 const mockFetch = vi.fn()
 const originalFetch = global.fetch
 global.fetch = mockFetch
+
+const unauthorized = (wwwAuthenticate?: string) =>
+	new Response(null, {
+		status: 401,
+		headers: wwwAuthenticate ? { "WWW-Authenticate": wwwAuthenticate } : {},
+	})
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 describe("fetchOAuthAuthServerMetadata", () => {
 	beforeEach(() => {
@@ -37,15 +41,18 @@ describe("fetchOAuthAuthServerMetadata", () => {
 
 	it("returns null when discoverOAuthProtectedResourceMetadata throws", async () => {
 		;(discoverOAuthProtectedResourceMetadata as any).mockRejectedValue(new Error("network error"))
-		mockFetch.mockResolvedValueOnce({ status: 200, body: null })
+		mockFetch.mockResolvedValueOnce(new Response(null, { status: 200 }))
 
 		const result = await fetchOAuthAuthServerMetadata("https://example.com/mcp")
 		expect(result).toBeNull()
-		expect(extractResourceMetadataUrl).not.toHaveBeenCalled()
+		expect(discoverOAuthProtectedResourceMetadata).toHaveBeenCalledTimes(1)
 	})
 
-	it("falls back to the resource_metadata URL from the 401 WWW-Authenticate header", async () => {
-		const resourceMetadataUrl = new URL("https://example.com/core/.well-known/oauth-protected-resource/mcp")
+	it.each([
+		'Bearer resource_metadata="https://example.com/core/.well-known/oauth-protected-resource/mcp"',
+		'Bearer RESOURCE_METADATA="https://example.com/core/.well-known/oauth-protected-resource/mcp"',
+		'bearer error="invalid_token", resource_metadata = "https://example.com/core/.well-known/oauth-protected-resource/mcp"',
+	])("falls back to the resource_metadata URL from the 401 header: %s", async (wwwAuthenticate) => {
 		vi.mocked(discoverOAuthProtectedResourceMetadata)
 			.mockRejectedValueOnce(
 				new Error("Resource server does not implement OAuth 2.0 Protected Resource Metadata."),
@@ -54,34 +61,82 @@ describe("fetchOAuthAuthServerMetadata", () => {
 				resource: "https://example.com/core/mcp",
 				authorization_servers: ["https://auth.example.com"],
 			})
-		vi.mocked(extractResourceMetadataUrl).mockReturnValueOnce(resourceMetadataUrl)
 		const meta = { issuer: "https://auth.example.com" }
 		mockFetch
-			.mockResolvedValueOnce({ status: 401, body: null })
+			.mockResolvedValueOnce(unauthorized(wwwAuthenticate))
 			.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(meta) })
 
 		const result = await fetchOAuthAuthServerMetadata("https://example.com/core/mcp")
 
-		expect(mockFetch).toHaveBeenNthCalledWith(
-			1,
-			"https://example.com/core/mcp",
-			expect.objectContaining({ method: "POST" }),
-		)
+		const [probeUrl, probeInit] = mockFetch.mock.calls[0] as [string, RequestInit]
+		expect(probeUrl).toBe("https://example.com/core/mcp")
+		expect(probeInit).toMatchObject({
+			method: "POST",
+			headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+		})
+		expect(JSON.parse(probeInit.body as string)).toMatchObject({ jsonrpc: "2.0", method: "initialize" })
 		expect(discoverOAuthProtectedResourceMetadata).toHaveBeenLastCalledWith("https://example.com/core/mcp", {
-			resourceMetadataUrl,
+			resourceMetadataUrl: new URL("https://example.com/core/.well-known/oauth-protected-resource/mcp"),
 		})
 		expect(result).toEqual({ authServerMeta: meta, resourceIndicator: "https://example.com/core/mcp" })
 	})
 
-	it("returns null when the 401 response has no resource_metadata URL", async () => {
+	it.each([
+		["no WWW-Authenticate header", undefined],
+		["no resource_metadata parameter", 'Bearer realm="mcp"'],
+		["a non-Bearer challenge", 'Basic resource_metadata="https://example.com/metadata"'],
+		["an invalid URL", 'Bearer resource_metadata="not a url"'],
+	])("returns null when the 401 response has %s", async (_case, wwwAuthenticate) => {
 		vi.mocked(discoverOAuthProtectedResourceMetadata).mockRejectedValueOnce(new Error("not found"))
-		vi.mocked(extractResourceMetadataUrl).mockReturnValueOnce(undefined)
-		mockFetch.mockResolvedValueOnce({ status: 401, body: null })
+		mockFetch.mockResolvedValueOnce(unauthorized(wwwAuthenticate))
 
 		const result = await fetchOAuthAuthServerMetadata("https://example.com/mcp")
 
 		expect(result).toBeNull()
 		expect(discoverOAuthProtectedResourceMetadata).toHaveBeenCalledTimes(1)
+	})
+
+	it("gives the fallback its own timeout budget after a slow well-known lookup", async () => {
+		vi.useFakeTimers()
+		try {
+			vi.mocked(discoverOAuthProtectedResourceMetadata)
+				.mockImplementationOnce(() => delay(4_500).then(() => Promise.reject(new Error("not found"))))
+				.mockImplementationOnce(() =>
+					delay(1_000).then(() => ({
+						resource: "https://example.com/mcp",
+						authorization_servers: ["https://auth.example.com"],
+					})),
+				)
+			const meta = { issuer: "https://auth.example.com" }
+			mockFetch
+				.mockResolvedValueOnce(unauthorized('Bearer resource_metadata="https://example.com/metadata"'))
+				.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(meta) })
+
+			const result = fetchOAuthAuthServerMetadata("https://example.com/mcp")
+			await vi.advanceTimersByTimeAsync(6_000)
+
+			await expect(result).resolves.toEqual({
+				authServerMeta: meta,
+				resourceIndicator: "https://example.com/mcp",
+			})
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("returns null when a protected resource metadata lookup exceeds its timeout", async () => {
+		vi.useFakeTimers()
+		try {
+			vi.mocked(discoverOAuthProtectedResourceMetadata).mockImplementationOnce(() => new Promise(() => {}))
+			mockFetch.mockResolvedValueOnce(new Response(null, { status: 200 }))
+
+			const result = fetchOAuthAuthServerMetadata("https://example.com/mcp")
+			await vi.advanceTimersByTimeAsync(5_000)
+
+			await expect(result).resolves.toBeNull()
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	it("constructs the RFC 8414 discovery URL correctly for an issuer with a path", async () => {
