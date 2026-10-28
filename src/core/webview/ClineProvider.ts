@@ -4267,19 +4267,19 @@ export class ClineProvider
 				const candidate = parentMessages[messageIndex]
 				if (candidate.type !== "ask" || candidate.ask !== "tool" || !candidate.text) continue
 
-				let tool: unknown
+				let tool: { tool?: unknown; content?: unknown } | null
 				try {
-					tool = JSON.parse(candidate.text)
+					tool = JSON.parse(candidate.text) as { tool?: unknown; content?: unknown } | null
 				} catch {
 					continue
 				}
-				if (!tool || typeof tool !== "object" || !("tool" in tool) || tool.tool !== "newTask") continue
+				if (tool?.tool !== "newTask") continue
 
 				// Never walk past the newest delegation and stamp an earlier rejected ask.
 				// startSubtask delegates without an ask, so the newest ask may belong to another delegation.
 				// NewTaskTool shows the raw content but delegates with one level of "\\@" unescaped.
-				const askContent = "content" in tool && typeof tool.content === "string" ? tool.content : undefined
-				const matchesDelegation = askContent?.replace(/\\\\@/g, "\\@") === message
+				const matchesDelegation =
+					typeof tool.content === "string" && tool.content.replace(/\\\\@/g, "\\@") === message
 				if (matchesDelegation && !candidate.childTaskId) {
 					candidate.childTaskId = child.taskId
 					await saveTaskMessages({

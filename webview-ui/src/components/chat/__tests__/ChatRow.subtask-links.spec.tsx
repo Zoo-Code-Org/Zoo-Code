@@ -240,6 +240,20 @@ describe("ChatRow - subtask links", () => {
 			expect(screen.queryByRole("button", { name: "Go to subtask" })).not.toBeInTheDocument()
 		})
 
+		it.each([
+			{ ts: 1500, type: "say", say: "text", text: newTask(0).text },
+			{ ts: 1500, type: "ask", ask: "followup", text: newTask(0).text },
+		] as ClineMessage[])("does not count non-tool-ask newTask JSON as a delegation: %j", (lookalike) => {
+			const result = subtaskResult(2000)
+			renderChatRow(result, { childIds: ["first-child", "second-child"] }, [newTask(1000), lookalike, result])
+			expectSubtaskLink("first-child")
+		})
+
+		it("does not link a result missing from the message list", () => {
+			renderChatRow(subtaskResult(2000), { completedByChildId: "completed-child" }, [newTask(1000)])
+			expect(screen.queryByRole("button", { name: "Go to subtask" })).not.toBeInTheDocument()
+		})
+
 		it.each([false, true])("does not link an unresolved result with preceding ask: %s", (includeAsk) => {
 			const result = subtaskResult(2000)
 			renderChatRow(result, undefined, [...(includeAsk ? [newTask(1000)] : []), result])

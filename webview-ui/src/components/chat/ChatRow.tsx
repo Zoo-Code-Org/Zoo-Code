@@ -135,9 +135,8 @@ function getLinkedChildTaskId(
 	const newTask = precedingNewTasks.at(-1)
 	if (newTask?.childTaskId) return newTask.childTaskId
 
-	// The latest completed child is more reliable than positional guesses after rejected legacy asks.
+	// Only subtask_result rows pass completedByChildId; it beats positional guesses after rejected legacy asks.
 	if (
-		message.say === "subtask_result" &&
 		completedByChildId &&
 		!messages.slice(messageIndex + 1).some((candidate) => candidate.say === "subtask_result")
 	) {

@@ -120,7 +120,34 @@ describe("persisted subtask links", () => {
 		const saveOrder = vi.mocked(saveTaskMessages).mock.invocationCallOrder[0]
 		expect(taskHistoryStore.atomicReadAndUpdate.mock.invocationCallOrder[0]).toBeLessThan(saveOrder)
 		expect(saveOrder).toBeLessThan(child.run.mock.invocationCallOrder[0])
+		expect(readTaskMessages).toHaveBeenCalledWith({ taskId: "parent", globalStoragePath: "/storage" })
 	})
+
+	it.each<ClineMessage>([
+		{ ts: 3, type: "say", say: "text", text: newTask(0).text },
+		{ ts: 3, type: "ask", ask: "followup", text: newTask(0).text },
+		{ ts: 3, type: "ask", ask: "tool", text: "null" },
+		{ ts: 3, type: "ask", ask: "tool", text: JSON.stringify({ tool: "readFile", content: "Do work" }) },
+	])("skips a newer non-delegation message and stamps the delegation ask: %j", async (newer) => {
+		const messages = [newTask(1), newer]
+		vi.mocked(readTaskMessages).mockResolvedValue(messages)
+		const { provider } = makeLinkProvider()
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, delegation)
+		expect(messages[0].childTaskId).toBe("child")
+		expect(newer.childTaskId).toBeUndefined()
+	})
+
+	it.each([{ tool: "newTask" }, { tool: "newTask", content: 42 }])(
+		"does not stamp or log a newest ask without string content: %j",
+		async (tool) => {
+			const messages: ClineMessage[] = [{ ts: 1, type: "ask", ask: "tool", text: JSON.stringify(tool) }]
+			vi.mocked(readTaskMessages).mockResolvedValue(messages)
+			const { provider } = makeLinkProvider()
+			await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, delegation)
+			expect(messages[0].childTaskId).toBeUndefined()
+			expect(provider.log).not.toHaveBeenCalledWith(expect.stringContaining("Failed to save child link"))
+		},
+	)
 
 	it.each([{ messages: [] }, { messages: [newTask(1), newTask(2, "existing-child")] }])(
 		"does not write or stamp older asks when no pending delegation exists: %j",
@@ -202,4 +229,22 @@ describe("persisted subtask links", () => {
 			expect(reopenedParent.overwriteClineMessages).toHaveBeenCalledWith(saved, false)
 		},
 	)
+
+	it("appends the result after a non-result message with the same text", async () => {
+		const { provider, records } = makeLinkProvider()
+		const parent = records.get("parent")!
+		records.set("parent", { ...parent, status: "delegated", awaitingChildId: "child", childIds: ["child"] })
+		records.set("child", { ...parent, id: "child", parentTaskId: "parent" })
+		vi.mocked(readTaskMessages).mockResolvedValue([{ ts: 1, type: "say", say: "text", text: "Done" }])
+
+		await ClineProvider.prototype.reopenParentFromDelegation.call(provider, {
+			parentTaskId: "parent",
+			childTaskId: "child",
+			completionResultSummary: "Done",
+		})
+
+		const saved = vi.mocked(saveTaskMessages).mock.calls[0][0].messages
+		expect(saved).toHaveLength(2)
+		expect(saved.at(-1)).toMatchObject({ say: "subtask_result", childTaskId: "child" })
+	})
 })
