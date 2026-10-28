@@ -112,6 +112,9 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			scrollToFirstDiff: vi.fn(),
 			pushToolWriteResult: vi.fn().mockResolvedValue("Saved file"),
 			reset: vi.fn().mockResolvedValue(undefined),
+			// Used by the approval-denial branch: the denial must complete through its own
+			// path (no catch, no handleError) while the observation is cleaned up.
+			revertChanges: vi.fn().mockResolvedValue(undefined),
 		}
 		mockTask = {
 			cwd: "/workspace/project",
@@ -332,7 +335,10 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			toolCallId: "test-tool-call-id",
 		})
 
+		// The denial cleanup completed through its own path, not the catch: the observation is
+		// removed and no tool error was reported.
 		expect(mockTask.observationRegistry.get(key)).toBeUndefined()
+		expect(mockHandleError).not.toHaveBeenCalled()
 	})
 
 	it("keeps a complete model observation complete when the tool read matches its version", async () => {
