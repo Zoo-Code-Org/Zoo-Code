@@ -94,7 +94,7 @@ export class DaclInspectionError extends Error {
 		readonly causeError: unknown,
 	) {
 		const detail = phase === "save" ? "its DACL could not be saved" : "its access rights could not be checked"
-		super(`safeWriteText: refusing to publish over ${targetPath} because ${detail}`)
+		super(`safeWriteText: refusing to publish over ${targetPath} because ${detail}`, { cause: causeError })
 		this.name = "DaclInspectionError"
 	}
 }
@@ -109,7 +109,9 @@ export class DaclRestoreError extends Error {
 		readonly targetPath: string,
 		readonly causeError: unknown,
 	) {
-		super(`safeWriteText: content committed at ${targetPath}, but its saved access rights could not be restored`)
+		super(`safeWriteText: content committed at ${targetPath}, but its saved access rights could not be restored`, {
+			cause: causeError,
+		})
 		this.name = "DaclRestoreError"
 	}
 }
@@ -196,9 +198,13 @@ function _fsyncFile(fd: number): void {
 }
 
 /** Save the DACL of *srcPath* to a dump file on Windows.
- * Returns true when the dump was written successfully; false otherwise.
- * Never throws — callers treat failure as "skip DACL handling". */
-async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
+ * Returns null when the dump was written successfully, otherwise the icacls error so the
+ * caller can attach it as the cause of the refusal. Never throws. */
+async function _saveDaclWindows(
+	srcPath: string,
+	dumpPath: string,
+	execFileRunner?: typeof execFile,
+): Promise<unknown | null> {
 	const runner = execFileRunner ?? execFile
 	try {
 		await new Promise<void>((resolve, reject) => {
@@ -206,19 +212,19 @@ async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunne
 				err ? reject(err) : resolve(),
 			)
 		})
-		return true
-	} catch {
-		return false
+		return null
+	} catch (error: unknown) {
+		return error
 	}
 }
 
 /** Restore a DACL dump onto *dirPath* on Windows.
- * Returns whether icacls succeeded; the caller reports a failure. */
+ * Returns null on success, otherwise the icacls error so the caller can attach it as the cause. */
 async function _restoreDaclWindows(
 	dirPath: string,
 	dumpPath: string,
 	execFileRunner?: typeof execFile,
-): Promise<boolean> {
+): Promise<unknown | null> {
 	const runner = execFileRunner ?? execFile
 	try {
 		await new Promise<void>((resolve, reject) => {
@@ -226,9 +232,9 @@ async function _restoreDaclWindows(
 				err ? reject(err) : resolve(),
 			)
 		})
-		return true
-	} catch {
-		return false
+		return null
+	} catch (error: unknown) {
+		return error
 	}
 }
 
@@ -423,6 +429,7 @@ export async function safeWriteText(
 	// write created so its cleanup removes its own directory, not a shared one.
 	let stagingDir: string | null = null
 	let tempPath: string
+	let committed = false
 	if (options?.tempPath) {
 		// A caller-supplied staging file is only safe when it is the file this
 		// write is staging, not an arbitrary path. Two properties are checked:
@@ -562,8 +569,8 @@ export async function safeWriteText(
 			}
 			if (accessError === null) {
 				const dumpPath = _tempName(dirPath, "safeWriteText.acl")
-				const saved = await _saveDaclWindows(targetPath, dumpPath, options?.execFileRunner)
-				if (saved) {
+				const saveDaclError = await _saveDaclWindows(targetPath, dumpPath, options?.execFileRunner)
+				if (saveDaclError === null) {
 					// Only a successfully saved dump may be restored onto the
 					// committed file (step 5).
 					daclDumpPath = dumpPath
@@ -581,7 +588,7 @@ export async function safeWriteText(
 					// still holds its content, and this throw lands in the catch at the bottom of this
 					// try - the one place that unlinks the staged file and removes this write's own
 					// staging directory before rethrowing - so a refused publish strands no residue.
-					throw new DaclInspectionError(targetPath, "save", null)
+					throw new DaclInspectionError(targetPath, "save", saveDaclError)
 				}
 			} else if (errorCode(accessError) !== "ENOENT") {
 				// Not "absent": the target is there but its access rights could not be read (EACCES,
@@ -653,6 +660,7 @@ export async function safeWriteText(
 
 			// -- Step 4: atomic rename temp -> target ---------------------
 			await fs.rename(tempPath, targetPath)
+			committed = true
 
 			// -- Step 4b (POSIX): fsync the parent directory so the directory entry
 			// changed by the commit rename is durable, not just the file content.
@@ -681,15 +689,24 @@ export async function safeWriteText(
 			// and on every failed save.
 			if (daclDumpPath !== null) {
 				const restoredDir = path.dirname(targetPath)
-				const restored = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
-				if (!restored) {
+				const restoreDaclError = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
+				if (restoreDaclError !== null) {
 					// The content is committed, but the published file answers to a different
 					// DACL from the one that was saved, and nothing here verified an equivalent
 					// restrictive ACL on the replacement. This is reported as an error rather than a
 					// warning: the caller has to know that the save changed who can read the file.
+					// Keep the dump: it is the only artifact an operator can use to run
+					// `icacls /restore` by hand, so the finally below must not delete it.
+					const keptDumpPath = daclDumpPath
+					daclDumpPath = null
+					leftoverPaths.push(keptDumpPath)
+					warn(
+						`safeWriteText: committed ${targetPath} but could not restore its saved access rights; ` +
+							`the DACL dump is kept at ${keptDumpPath} so it can be restored manually.`,
+					)
 					// Contract change - this used to warn and resolve, which let a publish that
 					// widened access look like an ordinary successful save.
-					throw new DaclRestoreError(targetPath, null)
+					throw new DaclRestoreError(targetPath, restoreDaclError)
 				}
 			}
 
@@ -761,7 +778,12 @@ export async function safeWriteText(
 		// The staged file and this write's own staging directory go through the same cleanup path as
 		// every other residue, so a failure at either is recorded and reported on the error below
 		// instead of being swallowed here: a caller that catches a throw has no result to read.
-		await cleanResidue(tempPath, fs.unlink)
+		// Once the rename committed, tempPath names a path this write no longer owns: a caller
+		// reusing a fixed temp name (safeWriteJson) may have already staged a NEW file there, and
+		// unlinking by name would delete that writer's file.
+		if (!committed) {
+			await cleanResidue(tempPath, fs.unlink)
+		}
 
 		// A failed self-staged write must not leave its staging directory behind.
 		// Only the directory this write created, and only after its temp file is
