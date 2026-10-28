@@ -6886,6 +6886,154 @@ describe("Cline", () => {
 			discardSpy.mockRestore()
 		})
 
+		it("discards a create preview from the stream abort path, not only from disposal", async () => {
+			// A cancelled stream never reached approval. abortStream() used to revert unconditionally,
+			// and revertChanges()'s create branch SAVES the dirty buffer - the partial model output -
+			// before deleting the file, so a failed delete left unapproved bytes on disk. The abort
+			// path now shares disposal's release, so this pins it to the discard.
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.mkdirSync(taskDir, { recursive: true })
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "abort release create",
+				startTask: false,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			// The streaming loop checks this.abort right after the presenter hands off a chunk, so the
+			// cancel lands mid-stream and reaches abortStream(-"user_cancelled") with the view open.
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {
+				task.abort = true
+			})
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "partial model output" }]),
+			)
+			const revertSpy = vi.spyOn(task.diffViewProvider, "revertChanges").mockResolvedValue(undefined)
+			const discardSpy = vi.spyOn(task.diffViewProvider, "discardUnapprovedStream").mockResolvedValue(undefined)
+			task.diffViewProvider.isEditing = true
+			task.diffViewProvider.editType = "create"
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "cancel this stream" }]).catch(() => {})
+
+			expect(discardSpy).toHaveBeenCalledTimes(1)
+			expect(revertSpy).not.toHaveBeenCalled()
+			revertSpy.mockRestore()
+			discardSpy.mockRestore()
+		})
+
+		it("reverts a modify preview from the stream abort path, whose restore is the content on disk", async () => {
+			// The pair of the test above: a modify has prior content, so the shared release keeps
+			// reverting it and shows what was on disk before the stream started.
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.mkdirSync(taskDir, { recursive: true })
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "abort release modify",
+				startTask: false,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {
+				task.abort = true
+			})
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "partial model output" }]),
+			)
+			const revertSpy = vi.spyOn(task.diffViewProvider, "revertChanges").mockResolvedValue(undefined)
+			const discardSpy = vi.spyOn(task.diffViewProvider, "discardUnapprovedStream").mockResolvedValue(undefined)
+			task.diffViewProvider.isEditing = true
+			task.diffViewProvider.editType = "modify"
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "cancel this stream" }]).catch(() => {})
+
+			expect(revertSpy).toHaveBeenCalledTimes(1)
+			expect(discardSpy).not.toHaveBeenCalled()
+			revertSpy.mockRestore()
+			discardSpy.mockRestore()
+		})
+
+		it("starts one release per diff view and hands every later caller the same promise", async () => {
+			// Single owner: a release one path already started must not be repeated by the other over
+			// the same buffer (a second revertChanges() could roll back content the first release
+			// already restored). The promise is stored on the first call and returned afterwards.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "single release owner",
+				startTask: false,
+			})
+			await task["taskApiConfigReady"]
+			task.diffViewProvider.isEditing = true
+			task.diffViewProvider.editType = "create"
+			let releaseDiscard: (() => void) | undefined
+			const discardGate = new Promise<void>((resolve) => {
+				releaseDiscard = resolve
+			})
+			const discardSpy = vi
+				.spyOn(task.diffViewProvider, "discardUnapprovedStream")
+				.mockImplementation(() => discardGate)
+
+			const first = task["releaseUnapprovedDiffView"]()
+			const second = task["releaseUnapprovedDiffView"]()
+
+			expect(second).toBe(first)
+			expect(discardSpy).toHaveBeenCalledTimes(1)
+
+			releaseDiscard?.()
+			await first
+			discardSpy.mockRestore()
+		})
+
+		it("does not start a release when no diff view is open", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "no diff view to release",
+				startTask: false,
+			})
+			await task["taskApiConfigReady"]
+			const discardSpy = vi.spyOn(task.diffViewProvider, "discardUnapprovedStream").mockResolvedValue(undefined)
+			const revertSpy = vi.spyOn(task.diffViewProvider, "revertChanges").mockResolvedValue(undefined)
+
+			const release = task["releaseUnapprovedDiffView"]()
+			await release
+
+			expect(revertSpy).not.toHaveBeenCalled()
+			expect(discardSpy).not.toHaveBeenCalled()
+			revertSpy.mockRestore()
+			discardSpy.mockRestore()
+		})
+
+		it("does not roll the same view back again when disposal follows the stream teardown", async () => {
+			// The interleaving the single-owner promise exists for: the abort teardown released the
+			// view, then disposal runs while isEditing is still true (the mocked release does not reset
+			// the provider) and must await that release instead of starting a second one.
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.mkdirSync(taskDir, { recursive: true })
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "dispose after abort release",
+				startTask: false,
+			})
+			await task["taskApiConfigReady"]
+			task.isStreaming = true
+			task.diffViewProvider.isEditing = true
+			task.diffViewProvider.editType = "create"
+			const discardSpy = vi.spyOn(task.diffViewProvider, "discardUnapprovedStream").mockResolvedValue(undefined)
+			const revertSpy = vi.spyOn(task.diffViewProvider, "revertChanges").mockResolvedValue(undefined)
+
+			await task["releaseUnapprovedDiffView"]()
+			await task.dispose()
+
+			expect(discardSpy).toHaveBeenCalledTimes(1)
+			expect(revertSpy).not.toHaveBeenCalled()
+			discardSpy.mockRestore()
+			revertSpy.mockRestore()
+		})
+
 		it("does not block teardown when a pending metadata repair has an unsettled api-config init", async () => {
 			// persistTaskMetadata() awaits taskApiConfigReady. For a task whose async api-config
 			// initialization never settles, an unconditional dispose-time retry would hang the

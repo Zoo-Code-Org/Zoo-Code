@@ -497,7 +497,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private telemetryMessageCountsBaseline: { user: number; assistant: number } = { user: 0, assistant: 0 }
 	private abortPromise?: Promise<void>
 	private disposalPromise?: Promise<void>
-	private diffReversionPromise: Promise<void> = Promise.resolve()
+	// Undefined until a diff view with unapproved content starts being released. The promise is
+	// the single owner of that release: disposal and the stream abort teardown both await it
+	// instead of starting a second rollback over the same buffer (see releaseUnapprovedDiffView).
+	private diffReversionPromise: Promise<void> | undefined
 
 	// Checkpoints
 	enableCheckpoints: boolean
@@ -3585,18 +3588,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		try {
-			// If we're not streaming then `abortStream` won't be called.
+			// If we're not streaming then `abortStream` won't be called; when it already ran, it
+			// started the one release this task may perform and isEditing is already false.
 			if (this.isStreaming && this.diffViewProvider.isEditing) {
-				// A cancelled stream was never approved. For a create, revertChanges() saves the dirty
-				// buffer - the partial content the model streamed - before deleting the file, so a
-				// failed delete leaves unapproved bytes on disk; the discard path empties the buffer
-				// first, so the only bytes that can reach the placeholder are none. A modify still
-				// reverts, which restores the content already on disk.
-				const releaseUnapprovedEdit =
-					this.diffViewProvider.editType === "modify"
-						? this.diffViewProvider.revertChanges()
-						: this.diffViewProvider.discardUnapprovedStream()
-				this.diffReversionPromise = releaseUnapprovedEdit.catch(console.error)
+				void this.releaseUnapprovedDiffView()
 			}
 		} catch (error) {
 			console.error("Error reverting diff changes:", error)
@@ -3625,10 +3620,46 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
-	 * The diff teardown this disposal started, for a continuation that observes its own
+	 * Release a diff view whose content this task never approved.
+	 *
+	 * Both disposal and the stream abort teardown reach an abandoned diff view, and each used
+	 * to start its own rollback. That left two defects: abortStream() reverted unconditionally,
+	 * and revertChanges()'s create branch SAVES the dirty buffer - the partial model output
+	 * nobody approved - before deleting the file, so a failed delete left it on disk; and a
+	 * release one path had already started could be repeated by the other over the same view.
+	 *
+	 * The promise is the single owner of the release. It is assigned synchronously, before any
+	 * await, because abortTaskOnce() and waitForDiffReversion() await it immediately after the
+	 * trigger; a later caller gets that same promise instead of a second rollback.
+	 *
+	 * The edit type selects the mechanism. A modify's restore is the content already on disk,
+	 * so revertChanges() puts the editor back where the stream started. A create has no prior
+	 * content: discardUnapprovedStream() empties the buffer first, so the only bytes that can
+	 * ever reach the placeholder are none.
+	 *
+	 * Cleared at the start of the next API request, because each request's diff view is a new
+	 * session that has to be able to release itself.
+	 */
+	private releaseUnapprovedDiffView(): Promise<void> {
+		if (this.diffReversionPromise) {
+			return this.diffReversionPromise
+		}
+		if (!this.diffViewProvider.isEditing) {
+			return Promise.resolve()
+		}
+		const releaseUnapprovedEdit =
+			this.diffViewProvider.editType === "modify"
+				? this.diffViewProvider.revertChanges()
+				: this.diffViewProvider.discardUnapprovedStream()
+		this.diffReversionPromise = releaseUnapprovedEdit.catch(console.error)
+		return this.diffReversionPromise
+	}
+
+	/**
+	 * The diff teardown this task started, for a continuation that observes its own
 	 * stream released mid-await. Single-owner by construction: the in-flight
-	 * handlePartial() waits for the discard Task.dispose() already started instead of
-	 * running an independent one over the same buffer.
+	 * handlePartial() waits for the discard disposal or the abort teardown already started
+	 * instead of running an independent one over the same buffer.
 	 */
 	public async waitForDiffReversion(): Promise<void> {
 		await this.diffReversionPromise
@@ -3994,9 +4025,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}
 
 				const abortStream = async (cancelReason: ClineApiReqCancelReason, streamingFailedMessage?: string) => {
-					if (this.diffViewProvider.isEditing) {
-						await this.diffViewProvider.revertChanges() // closes diff view
-					}
+					// A cancelled or failed stream never reached approval, so its diff view holds
+					// content the user never approved. Same release as disposal: the edit type
+					// decides the mechanism (a create must be discarded, never reverted - that
+					// SAVES the dirty buffer), and a release disposal already started is awaited
+					// instead of rolled back a second time over the same view.
+					await this.releaseUnapprovedDiffView()
 
 					// if last message is a partial we need to update and save it
 					const lastMessage = this.clineMessages.at(-1)
@@ -4044,6 +4078,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				const nativeToolCallParserScope = NativeToolCallParser.createScope()
 
 				await this.diffViewProvider.reset()
+				// A new request opens a new diff-view session: the previous stream's release (if it
+				// had one) is over, and this session's abandoned view has to be able to release
+				// itself instead of awaiting the settled promise of the one before.
+				this.diffReversionPromise = undefined
 
 				await this.safeEnsureModelFetched()
 
