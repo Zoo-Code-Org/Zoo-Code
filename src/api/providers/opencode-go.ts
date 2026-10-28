@@ -42,6 +42,7 @@ import {
 	convertOpenAIToolChoiceToAnthropic,
 } from "../../core/prompts/tools/native-tools/converters"
 import {
+	bridgeExternalAbortSignal,
 	createAbortError,
 	hasUsableTimeout,
 	isRequestAborted,
@@ -245,23 +246,13 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		const resolved = await resolveModelWithAbort(() => this.resolveModel(), externalAbortSignal, "Opencode Go")
 		const { id: modelId, info, format, temperature, reasoningEffort, maxTokens } = resolved
 
-		// Per-request controller so an external abort signal (e.g. task
-		// cancellation) can interrupt the in-flight streaming request.
-		// Bridge it to our controller using the Bedrock pattern:
-		// - pre-aborted guard: check if already aborted before adding listener
-		// - { once: true }: remove listener after first abort to avoid leaks
-		// The listener is stored so it can be detached when the request ends:
-		// { once: true } only removes it on abort, so a task-scoped signal
-		// would otherwise accumulate one listener per request.
-		const controller = new AbortController()
-		const abortListener = () => controller.abort()
-		if (externalAbortSignal) {
-			if (externalAbortSignal.aborted) {
-				controller.abort()
-			} else {
-				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
-			}
-		}
+		// Per-request signal bridged from the caller's abort signal via the shared helper
+		// (pre-aborted guard, once-only listener, retained cleanup). The never-aborting
+		// fallback preserves the previous always-signal behaviour when the caller has no
+		// external signal, and dispose() detaches the listener when the request ends.
+		const { signal: bridgedSignal, dispose: detachExternalAbortSignal } =
+			bridgeExternalAbortSignal(externalAbortSignal)
+		const requestSignal = bridgedSignal ?? new AbortController().signal
 
 		if (format === "anthropic") {
 			try {
@@ -272,19 +263,19 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 					maxTokens,
 					systemPrompt,
 					messages,
-					controller.signal,
+					requestSignal,
 					metadata,
 				)
 			} catch (error) {
 				// Preserve abort identity (series standard): a cancellation that
 				// surfaces mid-stream must normalize to the provider AbortError,
 				// matching the OpenAI streaming branch.
-				if (isRequestAborted(error, controller.signal)) {
+				if (isRequestAborted(error, requestSignal)) {
 					throw createAbortError("Opencode Go")
 				}
 				throw error
 			} finally {
-				externalAbortSignal?.removeEventListener("abort", abortListener)
+				detachExternalAbortSignal()
 			}
 			return
 		}
@@ -298,19 +289,19 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 					reasoningEffort,
 					systemPrompt,
 					messages,
-					controller.signal,
+					requestSignal,
 					metadata,
 				)
 			} catch (error) {
 				// Preserve abort identity (series standard): a cancellation that
 				// surfaces mid-stream must normalize to the provider AbortError,
 				// matching the OpenAI streaming branch.
-				if (isRequestAborted(error, controller.signal)) {
+				if (isRequestAborted(error, requestSignal)) {
 					throw createAbortError("Opencode Go")
 				}
 				throw error
 			} finally {
-				externalAbortSignal?.removeEventListener("abort", abortListener)
+				detachExternalAbortSignal()
 			}
 			return
 		}
@@ -349,13 +340,13 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				}),
 			}
 		} catch (error) {
-			externalAbortSignal?.removeEventListener("abort", abortListener)
+			detachExternalAbortSignal()
 			throw error
 		}
 
 		try {
 			const completion = await this.client.chat.completions.create(body, {
-				signal: controller.signal,
+				signal: requestSignal,
 				headers: { "x-opencode-session": metadata?.taskId ?? this.sessionId },
 			})
 
@@ -398,12 +389,12 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			// Preserve abort identity (series standard): surface a cancelled
 			// request as a DOM-standard AbortError rather than leaking the
 			// raw SDK abort error.
-			if (isRequestAborted(error, controller.signal)) {
+			if (isRequestAborted(error, requestSignal)) {
 				throw createAbortError("Opencode Go")
 			}
 			throw error
 		} finally {
-			externalAbortSignal?.removeEventListener("abort", abortListener)
+			detachExternalAbortSignal()
 		}
 	}
 

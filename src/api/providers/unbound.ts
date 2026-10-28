@@ -30,6 +30,7 @@ import type {
 import { handleOpenAIError } from "./utils/error-handler"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 import {
+	bridgeExternalAbortSignal,
 	createAbortError,
 	hasUsableTimeout,
 	isRequestAborted,
@@ -190,28 +191,18 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 			tool_choice: metadata?.tool_choice,
 		}
 
-		// Per-request controller so an external abort signal (e.g. task
-		// cancellation) can interrupt the in-flight streaming request.
-		// Bridge it to our controller using the Bedrock pattern:
-		// - pre-aborted guard: check if already aborted before adding listener
-		// - { once: true }: remove listener after first abort to avoid leaks
-		// The listener is stored so it can be detached when the request ends:
-		// { once: true } only removes it on abort, so a task-scoped signal
-		// would otherwise accumulate one listener per request.
-		const controller = new AbortController()
-		const abortListener = () => controller.abort()
-		if (externalAbortSignal) {
-			if (externalAbortSignal.aborted) {
-				controller.abort()
-			} else {
-				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
-			}
-		}
+		// Per-request signal bridged from the caller's abort signal via the shared helper
+		// (pre-aborted guard, once-only listener, retained cleanup). The never-aborting
+		// fallback preserves the previous always-signal behaviour when the caller has no
+		// external signal, and dispose() detaches the listener when the request ends.
+		const { signal: bridgedSignal, dispose: detachExternalAbortSignal } =
+			bridgeExternalAbortSignal(externalAbortSignal)
+		const requestSignal = bridgedSignal ?? new AbortController().signal
 
 		try {
 			let stream
 			try {
-				stream = await this.client.chat.completions.create(completionParams, { signal: controller.signal })
+				stream = await this.client.chat.completions.create(completionParams, { signal: requestSignal })
 			} catch (error) {
 				// Preserve abort identity (series standard): a cancelled request
 				// must surface as a DOM-standard AbortError, not a wrapped
@@ -267,7 +258,7 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 				throw error
 			}
 		} finally {
-			externalAbortSignal?.removeEventListener("abort", abortListener)
+			detachExternalAbortSignal()
 		}
 	}
 
