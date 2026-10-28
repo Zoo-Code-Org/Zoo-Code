@@ -2341,6 +2341,8 @@ describe("DiffViewProvider", () => {
 			await expect(diffViewProvider.saveChanges(false, 0)).rejects.toThrow("save rejected")
 
 			expect(diffViewProvider["placeholderPath"]).toBe(mockTargetPath)
+			// A rejected save never committed: the teardown must NOT treat it as a landed write.
+			expect(diffViewProvider.approvedSaveCommitted).toBe(false)
 		})
 
 		it("keeps placeholder ownership and fails typed when the approved save reports false", async () => {
@@ -2356,6 +2358,8 @@ describe("DiffViewProvider", () => {
 			await expect(diffViewProvider.saveChanges(false, 0)).rejects.toThrow(DocumentSaveFailedError)
 
 			expect(save).toHaveBeenCalledTimes(1)
+			// A reported-failure save never committed either.
+			expect(diffViewProvider.approvedSaveCommitted).toBe(false)
 			// Ownership stays with this edit: the discard is what removes the placeholder a
 			// reported-failure save left behind.
 			expect(diffViewProvider["placeholderPath"]).toBe(mockTargetPath)

@@ -940,6 +940,37 @@ describe("writeToFileTool", () => {
 				writeToFileTool["taskPartialStreamState"].clear()
 			}
 		})
+		it("still releases adopted directories and resets when the discard report also rejects", async () => {
+			// The early-exit teardown discards the preview, then reports a failed discard through
+			// say(). That report is wrapped in .catch, but the directory release and the reset must
+			// still run: a rejected report must not skip them.
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.discardUnapprovedStream.mockRejectedValue(new Error("discard failed"))
+			mockCline.say.mockRejectedValue(new Error("report failed"))
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				// The denied-path report itself rejects; the teardown still has to run.
+				await executeWriteFileTool({}, { accessAllowed: false }).catch(() => {})
+
+				expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+				// The rejected report must not skip the rest of the early-exit teardown: the reset
+				// (and, for a stream that never opened the view, the directory release it precedes)
+				// still runs.
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+				expect(errorSpy).toHaveBeenCalledWith(
+					"Error reporting write_to_file discard failure:",
+					expect.any(Error),
+				)
+			} finally {
+				errorSpy.mockRestore()
+				mockCline.say.mockResolvedValue(undefined)
+				mockCline.diffViewProvider.isEditing = false
+				mockCline.diffViewProvider.discardUnapprovedStream.mockResolvedValue(undefined)
+				writeToFileTool["taskPartialStreamState"].clear()
+			}
+		})
+
 		it("discards a streamed preview when the completed call lacks a path", async () => {
 			// Streaming can open the diff view and fill it with unapproved content before the
 			// completed call reaches execute(). A malformed completed call must not just reset:
@@ -1130,6 +1161,11 @@ describe("writeToFileTool", () => {
 			})
 
 			expect(mockCline.diffViewProvider.removeAdoptedDirectories).toHaveBeenCalledTimes(1)
+			// Ordering matters: reset() clears createdDirs, so the removal must run first or the
+			// directories of the write that never happened stay behind with no owner.
+			expect(mockCline.diffViewProvider.removeAdoptedDirectories.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.diffViewProvider.reset.mock.invocationCallOrder[0],
+			)
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
 
