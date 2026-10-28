@@ -16,7 +16,7 @@ function mockUri(fsPath: string, scheme = "file") {
 		scheme,
 		authority: "",
 		path: fsPath,
-		toString: (skipEncoding?: boolean) => `${scheme}://${fsPath}`,
+		toString: (_skipEncoding?: boolean) => `${scheme}://${fsPath}`,
 	}
 }
 

@@ -75,6 +75,50 @@ describe("Opencode Go Fetchers", () => {
 			})
 		})
 
+		it("keeps curated Responses temperature support after merging live metadata", async () => {
+			mockedAxios.get.mockResolvedValue({
+				data: {
+					data: [
+						{ id: "grok-4.6", context_window: 400_000 },
+						{ id: "muse-spark-1.2-contributor", max_tokens: 65_536 },
+						{ id: "gpt-5.6-luna", context_window: 900_000 },
+					],
+				},
+			})
+
+			const models = await getOpencodeGoModels("k")
+
+			// Live limits never override the curated temperature capability
+			// (Zoo-Code-Org/Zoo-Code#2055).
+			expect(models["grok-4.6"]).toMatchObject({ contextWindow: 400_000, supportsTemperature: true })
+			expect(models["muse-spark-1.2-contributor"]).toMatchObject({ maxTokens: 65_536, supportsTemperature: true })
+			expect(models["gpt-5.6-luna"]).toMatchObject({ contextWindow: 900_000, supportsTemperature: false })
+		})
+
+		it("uses curated gpt-6-luna metadata when the live model omits metadata", async () => {
+			mockedAxios.get.mockResolvedValue({ data: { data: [{ id: "gpt-6-luna" }] } })
+
+			const models = await getOpencodeGoModels("k")
+
+			expect(models["gpt-6-luna"]).toMatchObject({
+				contextWindow: 1_050_000,
+				maxTokens: 128_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsMaxTokens: true,
+				// The Go gateway accepts `temperature` for `gpt-6-luna` only with
+				// reasoning effort "none", so the static baseline opts out and the
+				// effort-aware rule opts back in (Zoo-Code-Org/Zoo-Code#2055).
+				supportsTemperature: false,
+				supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+				reasoningEffort: "medium",
+				inputPrice: 0.1,
+				outputPrice: 0.5,
+				cacheWritesPrice: 0.125,
+				cacheReadsPrice: 0.01,
+			})
+		})
+
 		it("falls back to default context/max tokens for an unknown model when metadata is absent", async () => {
 			mockedAxios.get.mockResolvedValue({ data: { data: [{ id: "some-unknown-model" }] } })
 
@@ -213,6 +257,7 @@ describe("Opencode Go Fetchers", () => {
 				"hy3",
 				"hy3-preview",
 				"gpt-5.6-luna",
+				"gpt-6-luna",
 				"grok-4.5",
 				"grok-4.6",
 				"muse-spark-1.3-contributor",
@@ -246,6 +291,20 @@ describe("Opencode Go Fetchers", () => {
 			expect(info.supportsReasoningEffort).toEqual(["disable", "medium"])
 			expect(info.preserveReasoning).toBe(true)
 			expect(info.inputPrice).toBe(1.4)
+		})
+
+		it("keeps gpt-6-luna live limits authoritative over its curated metadata", () => {
+			const info = parseOpencodeGoModel({
+				id: "gpt-6-luna",
+				context_window: 1_000_000,
+				max_output_tokens: 64_000,
+			})
+
+			expect(info.contextWindow).toBe(1_000_000)
+			expect(info.maxTokens).toBe(64_000)
+			expect(info.supportsImages).toBe(true)
+			expect(info.inputPrice).toBe(0.1)
+			expect(info.cacheWritesPrice).toBe(0.125)
 		})
 
 		it("uses native registry defaults when the live payload omits volatile fields", () => {

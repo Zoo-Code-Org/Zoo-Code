@@ -1,15 +1,16 @@
+import { markToolRejected } from "../task/toolExecutionContext"
 import { serializeError } from "serialize-error"
 import { Anthropic } from "@anthropic-ai/sdk"
 
 import type { ToolName, ClineAsk, ToolProgressStatus } from "@roo-code/types"
-import { ConsecutiveMistakeError, TelemetryEventName } from "@roo-code/types"
+import { TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { customToolRegistry } from "@roo-code/core"
 
 import { t } from "../../i18n"
 
 import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
-import type { AutoApprovalContext, ToolParamName, ToolResponse, ToolUse, McpToolUse } from "../../shared/tools"
+import type { AutoApprovalContext, ToolResponse, ToolUse, McpToolUse } from "../../shared/tools"
 
 import { buildAutoDenyReason } from "../auto-approval"
 
@@ -38,7 +39,7 @@ import { skillTool } from "../tools/SkillTool"
 import { generateImageTool } from "../tools/GenerateImageTool"
 import { applyDiffTool as applyDiffToolClass } from "../tools/ApplyDiffTool"
 import { isValidToolName, validateToolUse } from "../tools/validateToolUse"
-import { buildToolRequirements } from "../prompts/tools/effective-tool-policy"
+import { buildToolRequirements, type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
 import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
 
 import { formatResponse } from "../prompts/responses"
@@ -86,9 +87,19 @@ export function toTelemetryToolName(
  * as it becomes available.
  */
 
-export async function presentAssistantMessage(cline: Task) {
+export async function presentAssistantMessage(cline: Task, policySnapshot: RequestPolicySnapshot) {
 	if (cline.abort) {
 		return
+	}
+
+	// Tool policy is frozen at request build; re-reading live settings here
+	// would let a mid-request settings edit contradict this request's prompt.
+	// The message must not end in "aborted" — the fire-and-forget wrapper
+	// suppresses only that suffix, so a missing snapshot logs as a real failure.
+	if (!policySnapshot) {
+		throw new Error(
+			`[presentAssistantMessage] task ${cline.taskId}.${cline.instanceId} missing request policy snapshot`,
+		)
 	}
 
 	if (cline.presentAssistantMessageLocked) {
@@ -103,7 +114,7 @@ export async function presentAssistantMessage(cline: Task) {
 		// The last pending check and the release below run in the same
 		// synchronous step, so no update can be stranded behind the lock.
 		do {
-			await presentAssistantMessageBlock(cline)
+			await presentAssistantMessageBlock(cline, policySnapshot)
 		} while (!cline.abort && cline.presentAssistantMessageHasPendingUpdates)
 	} finally {
 		// Tool handlers and provider-state reads can reject. Never strand the
@@ -112,7 +123,7 @@ export async function presentAssistantMessage(cline: Task) {
 	}
 }
 
-async function presentAssistantMessageBlock(cline: Task): Promise<void> {
+async function presentAssistantMessageBlock(cline: Task, policySnapshot: RequestPolicySnapshot): Promise<void> {
 	if (cline.abort) {
 		return
 	}
@@ -177,11 +188,14 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 			// Track if we've already pushed a tool result
 			let hasToolResult = false
 			const toolCallId = mcpBlock.id
+			if (toolCallId && !cline.activeToolContexts.has(toolCallId)) {
+				cline.activeToolContexts.set(toolCallId, { toolCallId, didReject: false })
+			}
 
 			// Store approval feedback to merge into tool result (GitHub #10465)
 			let approvalFeedback: { text: string; images?: string[] } | undefined
 
-			const pushToolResult = (content: ToolResponse, feedbackImages?: string[]) => {
+			const pushToolResult = (content: ToolResponse, _feedbackImages?: string[]) => {
 				if (hasToolResult) {
 					console.warn(
 						`[presentAssistantMessage] Skipping duplicate tool_result for mcp_tool_use: ${toolCallId}`,
@@ -229,8 +243,6 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 				hasToolResult = true
 			}
 
-			const toolDescription = () => `[mcp_tool: ${mcpBlock.serverName}/${mcpBlock.toolName}]`
-
 			const askApproval = async (
 				type: ClineAsk,
 				partialMessage?: string,
@@ -276,7 +288,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 					} else {
 						pushToolResult(formatResponse.toolDenied())
 					}
-					cline.didRejectTool = true
+					markToolRejected(cline, toolCallId ?? "")
 					return false
 				}
 
@@ -341,16 +353,16 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 			// errors repeatedly during streaming, pushing multiple tool_results for the
 			// same tool_use_id and making the stream appear frozen.
 			if (!mcpBlock.partial) {
-				const state = await cline.providerRef.deref()?.getState()
-				const { customModes, experiments: stateExperiments, disabledTools } = state ?? {}
+				// Policy inputs come from the request's frozen snapshot, never from a
+				// live provider-state re-read mid-stream.
+				const { customModes, experiments: stateExperiments, disabledTools } = policySnapshot
 				// Read the task-local mode, not the shared provider mode.
 				// A delegated child task may run in a different mode than its parent.
 				const taskMode = await cline.getTaskMode()
 
-				const modelInfo = cline.api.getModel()
 				// Resolve aliases in includedTools before validation
 				// e.g., "write_file" should resolve to "write_to_file"
-				const rawIncludedTools = modelInfo.info.includedTools
+				const rawIncludedTools = policySnapshot.modelInfo?.includedTools
 				const { resolveToolAlias } = await import("../prompts/tools/filter-tools-for-mode")
 				const includedTools = rawIncludedTools?.map((tool) => resolveToolAlias(tool))
 
@@ -362,7 +374,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 					// entry reaches the validator, which checks them before the
 					// always-available class. See `buildToolRequirements` in
 					// effective-tool-policy.ts.
-					const toolRequirements = buildToolRequirements(disabledTools, modelInfo.info)
+					const toolRequirements = buildToolRequirements(disabledTools, policySnapshot.modelInfo)
 
 					validateToolUse(
 						"use_mcp_tool",
@@ -401,6 +413,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 				askApproval,
 				handleError,
 				pushToolResult,
+				toolCallId: toolCallId ?? "",
 				onValidated: mcpBlock.partial
 					? undefined
 					: () => {
@@ -450,9 +463,9 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 				break
 			}
 
-			// Shared provider state supplies global settings; mode is owned by the task.
-			const state = await cline.providerRef.deref()?.getState()
-			const { customModes, experiments: stateExperiments, disabledTools } = state ?? {}
+			// Policy inputs come from the request's frozen snapshot, never from a
+			// live provider-state re-read mid-stream.
+			const { customModes, experiments: stateExperiments, disabledTools } = policySnapshot
 			// Read the task-local mode, not the shared provider mode.
 			// A delegated child task may run in a different mode than its parent.
 			const taskMode = await cline.getTaskMode()
@@ -584,6 +597,10 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 				}
 			}
 
+			if (!cline.activeToolContexts.has(toolCallId)) {
+				cline.activeToolContexts.set(toolCallId, { toolCallId, didReject: false })
+			}
+
 			// Store approval feedback to merge into tool result (GitHub #10465)
 			let approvalFeedback: { text: string; images?: string[] } | undefined
 
@@ -687,7 +704,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 					} else {
 						pushToolResult(formatResponse.toolDenied())
 					}
-					cline.didRejectTool = true
+					markToolRejected(cline, toolCallId)
 					return false
 				}
 
@@ -739,21 +756,21 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 			// during streaming, pushing multiple tool_results for the same tool_use_id and
 			// potentially causing the stream to appear frozen.
 			if (!block.partial) {
-				const modelInfo = cline.api.getModel()
 				// Resolve aliases in includedTools before validation
 				// e.g., "edit_file" should resolve to "apply_diff"
-				const rawIncludedTools = modelInfo?.info?.includedTools
+				const rawIncludedTools = policySnapshot.modelInfo?.includedTools
 				const { resolveToolAlias } = await import("../prompts/tools/filter-tools-for-mode")
 				const includedTools = rawIncludedTools?.map((tool) => resolveToolAlias(tool))
 
 				const isCustomTool = Boolean(stateExperiments?.customTools && customToolRegistry.has(block.name))
 
 				try {
-					// Build requirements through the shared policy module so every suppressed
-					// entry — disabled tools, and an excluded or disabled protocol tool — reaches
-					// the validator, which checks them before the always-available class. See
+					// Build requirements through the shared policy module so every entry that
+					// carries disabling weight — non-protocol disabled tools, and every excluded
+					// tool, protocol entries included on that leg — reaches the validator, which
+					// checks them before the always-available class. See
 					// `buildToolRequirements` in effective-tool-policy.ts.
-					const toolRequirements = buildToolRequirements(disabledTools, modelInfo?.info)
+					const toolRequirements = buildToolRequirements(disabledTools, policySnapshot.modelInfo)
 
 					validateToolUse(
 						block.name as ToolName,
@@ -805,11 +822,14 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 				cline.recordToolUsage(recordName)
 				TelemetryService.instance.captureToolUsage(cline.taskId, recordName)
 
-				// Track legacy format usage for read_file tool (for migration monitoring)
+				// Track legacy format usage for read_file tool (for migration monitoring).
+				// Model ids on telemetry events are non-policy labels: a live
+				// `getModel()` read is fine where nothing about this request's tool
+				// policy derives from the result.
 				if (block.name === "read_file" && block.usedLegacyFormat) {
 					TelemetryService.instance.captureEvent(TelemetryEventName.READ_FILE_LEGACY_FORMAT_USED, {
 						taskId: cline.taskId,
-						model: modelInfo?.id,
+						model: cline.api.getModel()?.id,
 					})
 				}
 			}
@@ -820,8 +840,17 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 				// block directly.
 				const repetitionCheck = cline.toolRepetitionDetector.check(block)
 
-				// If execution is not allowed, notify user and break.
-				if (!repetitionCheck.allowExecution && repetitionCheck.askUser) {
+				// Soft block: do NOT involve the user. Return an error to the
+				// model asking it to justify repeating the call (or try a
+				// different approach). The detector keeps counting so continued
+				// repetition will eventually escalate to a hard block.
+				if (repetitionCheck.action === "soft_block") {
+					pushToolResult(formatResponse.toolError(repetitionCheck.message))
+					break
+				}
+
+				// Hard block: stop and ask the user for guidance.
+				if (repetitionCheck.action === "hard_block") {
 					// Handle repetition similar to mistake_limit_reached pattern.
 					const { response, text, images } = await cline.ask(
 						repetitionCheck.askUser.messageKey as ClineAsk,
@@ -842,18 +871,15 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						await cline.say("user_feedback", text, images)
 					}
 
-					// Track tool repetition in telemetry via PostHog exception tracking and event.
-					TelemetryService.instance.captureConsecutiveMistakeError(cline.taskId)
-					TelemetryService.instance.captureException(
-						new ConsecutiveMistakeError(
-							`Tool repetition limit reached for ${block.name}`,
-							cline.taskId,
-							cline.consecutiveMistakeCount,
-							cline.consecutiveMistakeLimit,
-							"tool_repetition",
-							cline.apiConfiguration.apiProvider,
-							cline.api.getModel().id,
-						),
+					// Track tool repetition in telemetry via a named event.
+					// The detector's hard limit is consecutiveMistakeLimit and it blocks when the
+					// identical-call count reaches it, so that count equals the limit here.
+					// consecutiveMistakeCount is unrelated and can be zero.
+					TelemetryService.instance.captureConsecutiveMistakeError(
+						cline.taskId,
+						"tool_repetition",
+						cline.consecutiveMistakeLimit,
+						cline.consecutiveMistakeLimit,
 					)
 
 					// Return tool result message about the repetition
@@ -879,6 +905,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "update_todo_list":
@@ -886,6 +913,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "apply_diff":
@@ -894,6 +922,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "edit":
@@ -903,6 +932,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "search_replace":
@@ -911,6 +941,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "edit_file":
@@ -919,6 +950,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "apply_patch":
@@ -927,6 +959,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "read_file":
@@ -935,6 +968,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "list_files":
@@ -942,6 +976,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "codebase_search":
@@ -949,6 +984,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "search_files":
@@ -956,6 +992,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "execute_command":
@@ -963,6 +1000,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "read_command_output":
@@ -970,6 +1008,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "use_mcp_tool":
@@ -977,6 +1016,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "access_mcp_resource":
@@ -984,6 +1024,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "ask_followup_question":
@@ -991,6 +1032,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "switch_mode":
@@ -998,6 +1040,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "new_task":
@@ -1006,7 +1049,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
-						toolCallId: block.id,
+						toolCallId,
 					})
 					break
 				case "attempt_completion": {
@@ -1016,7 +1059,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						pushToolResult,
 						askFinishSubTaskApproval,
 						toolDescription,
-						toolCallId: block.id,
+						toolCallId,
 					}
 					await attemptCompletionTool.handle(
 						cline,
@@ -1030,6 +1073,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "skill":
@@ -1037,6 +1081,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				case "generate_image":
@@ -1045,6 +1090,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						askApproval,
 						handleError,
 						pushToolResult,
+						toolCallId,
 					})
 					break
 				default: {
@@ -1146,7 +1192,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 		if (cline.currentStreamingContentIndex < cline.assistantMessageContent.length) {
 			// There are already more content blocks to stream, so we'll call
 			// this function ourselves.
-			return await presentAssistantMessageBlock(cline)
+			return await presentAssistantMessageBlock(cline, policySnapshot)
 		} else {
 			// CRITICAL FIX: If we're out of bounds and the stream is complete, set userMessageContentReady
 			// This handles the case where assistantMessageContent is empty or becomes empty after processing
@@ -1157,7 +1203,9 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 	}
 
 	// Pending updates are drained by presentAssistantMessage, which owns the
-	// lock and checks for them immediately before releasing it.
+	// lock and checks for them immediately before releasing it. The drain
+	// re-enters the block helper with this request's policy snapshot, so
+	// draining never re-reads live settings either.
 }
 
 /**

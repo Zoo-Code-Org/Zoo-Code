@@ -11,80 +11,72 @@
 </sub>
 </div>
 
-# Kodeks Postępowania Covenant Współtwórców
+<a id="contributor-covenant-code-of-conduct"></a>
 
-## Nasze Zobowiązanie
+# Kodeks postępowania Contributor Covenant
 
-W interesie wspierania otwartego i przyjaznego środowiska, my jako
-współtwórcy i opiekunowie zobowiązujemy się uczynić uczestnictwo w naszym projekcie i
-naszej społeczności doświadczeniem wolnym od nękania dla wszystkich, niezależnie od wieku, rozmiaru
-ciała, niepełnosprawności, pochodzenia etnicznego, cech płciowych, tożsamości i ekspresji płciowej,
-poziomu doświadczenia, wykształcenia, statusu społeczno-ekonomicznego, narodowości, wyglądu
-osobistego, rasy, religii lub tożsamości i orientacji seksualnej.
+<a id="our-pledge"></a>
 
-## Nasze Standardy
+## Nasze zobowiązanie
 
-Przykłady zachowań, które przyczyniają się do tworzenia pozytywnego środowiska
-obejmują:
+Jesteśmy współtwórcami i opiekunami. Chcemy otwartego i przyjaznego środowiska. Zobowiązujemy się zapewnić wszystkim udział w projekcie i społeczności bez nękania. Dotyczy to każdego bez względu na wiek, rozmiar ciała, niepełnosprawność, pochodzenie etniczne, cechy płciowe, tożsamość i ekspresję płciową, poziom doświadczenia, wykształcenie, status społeczno-ekonomiczny, narodowość, wygląd, rasę, religię czy tożsamość i orientację seksualną.
 
-- Używanie przyjaznego i inkluzywnego języka
-- Szanowanie różnych punktów widzenia i doświadczeń
-- Wdzięczne przyjmowanie konstruktywnej krytyki
-- Skupianie się na tym, co najlepsze dla społeczności
-- Okazywanie empatii wobec innych członków społeczności
+<a id="our-standards"></a>
 
-Przykłady niedopuszczalnego zachowania uczestników obejmują:
+## Nasze standardy
 
-- Używanie języka lub obrazów o charakterze seksualnym oraz niepożądana uwaga lub
-  zaloty seksualne
-- Trolling, obraźliwe/poniżające komentarze i ataki personalne lub polityczne
-- Publiczne lub prywatne nękanie
-- Publikowanie prywatnych informacji innych osób, takich jak fizyczny lub elektroniczny
-  adres, bez wyraźnej zgody
-- Inne zachowania, które mogłyby zostać uznane za nieodpowiednie w
-  środowisku profesjonalnym
+Te zachowania pomagają tworzyć pozytywne środowisko:
 
-## Nasze Obowiązki
+- Używaj przyjaznego i włączającego języka.
+- Szanuj różne punkty widzenia i doświadczenia.
+- Przyjmuj konstruktywną krytykę z otwartością.
+- Skupiaj się na tym, co najlepsze dla społeczności.
+- Okazuj empatię innym członkom społeczności.
 
-Opiekunowie projektu są odpowiedzialni za wyjaśnianie standardów akceptowalnego
-zachowania i oczekuje się od nich podjęcia odpowiednich i sprawiedliwych działań naprawczych w
-odpowiedzi na wszelkie przypadki niedopuszczalnego zachowania.
+Te zachowania uczestników są niedopuszczalne:
 
-Opiekunowie projektu mają prawo i obowiązek usuwać, edytować lub
-odrzucać komentarze, commity, kod, edycje wiki, problemy i inne wkłady
-które nie są zgodne z niniejszym Kodeksem Postępowania, lub tymczasowo lub
-na stałe zablokować każdego współtwórcę za inne zachowania, które uznają za nieodpowiednie,
-zagrażające, obraźliwe lub szkodliwe.
+- Używanie języka lub obrazów o charakterze seksualnym.
+- Niechciana uwaga lub propozycje o charakterze seksualnym.
+- Trolling, obraźliwe lub poniżające komentarze oraz ataki osobiste lub polityczne.
+- Nękanie publicznie lub prywatnie.
+- Publikowanie prywatnych informacji innych osób bez ich wyraźnej zgody. Przykłady to adres fizyczny lub elektroniczny.
+- Inne zachowania, które można rozsądnie uznać za nieodpowiednie w środowisku zawodowym.
+
+<a id="our-responsibilities"></a>
+
+## Nasza odpowiedzialność
+
+Opiekunowie projektu muszą wyjaśniać standardy dopuszczalnego zachowania. Muszą podejmować odpowiednie i sprawiedliwe działania naprawcze, gdy uczestnik zachowuje się niedopuszczalnie.
+
+Opiekunowie mają prawo i obowiązek reagować na wkład niezgodny z tym kodeksem postępowania. Mogą usuwać, edytować lub odrzucać komentarze, commity, kod, zmiany wiki, zgłoszenia i inne formy wkładu. Mogą też tymczasowo lub na stałe wykluczyć współtwórcę za inne zachowania, które uznają za nieodpowiednie, groźne, obraźliwe lub szkodliwe.
+
+<a id="scope"></a>
 
 ## Zakres
 
-Ten Kodeks Postępowania ma zastosowanie zarówno w przestrzeniach projektu, jak i w przestrzeniach publicznych
-gdy osoba reprezentuje projekt lub jego społeczność. Przykłady
-reprezentowania projektu lub społeczności obejmują używanie oficjalnego adresu e-mail projektu,
-publikowanie za pośrednictwem oficjalnego konta w mediach społecznościowych lub działanie jako wyznaczony
-przedstawiciel na wydarzeniu online lub offline. Reprezentacja projektu może być
-dalej definiowana i wyjaśniana przez opiekunów projektu.
+Ten kodeks postępowania obowiązuje w przestrzeniach projektu. Obowiązuje też w przestrzeniach publicznych, gdy ktoś reprezentuje projekt lub jego społeczność. Przykłady reprezentowania projektu lub społeczności to:
 
-## Egzekwowanie
+- Używanie oficjalnego adresu e-mail projektu.
+- Publikowanie za pomocą oficjalnego konta w mediach społecznościowych.
+- Działanie jako wyznaczony przedstawiciel podczas wydarzenia online lub na żywo.
 
-Przypadki obraźliwego, nękającego lub w inny sposób niedopuszczalnego zachowania mogą być
-zgłaszane poprzez kontakt z zespołem projektu pod adresem support@zoocode.dev. Wszystkie skargi
-zostaną przejrzane i zbadane, co zaowocuje odpowiedzią, która
-zostanie uznana za niezbędną i odpowiednią do okoliczności. Zespół projektu jest
-zobowiązany do zachowania poufności w odniesieniu do zgłaszającego incydent.
-Dalsze szczegóły dotyczące konkretnych polityk egzekwowania mogą być publikowane osobno.
+Opiekunowie mogą określać i wyjaśniać, co oznacza reprezentowanie projektu.
 
-Opiekunowie projektu, którzy nie przestrzegają lub nie egzekwują Kodeksu Postępowania w dobrej
-wierze, mogą stanąć w obliczu tymczasowych lub trwałych reperkusji określonych przez innych
-członków kierownictwa projektu.
+<a id="enforcement"></a>
 
-## Atrybucja
+## Egzekwowanie zasad
 
-Niniejszy Kodeks Postępowania jest adaptacją [wersji Cline][cline_coc] [Covenant Współtwórców][homepage], wersja 1.4,
-dostępnej pod adresem https://www.contributor-covenant.org/version/1/4/code-of-conduct.html
+Aby zgłosić przemoc, nękanie lub inne niedopuszczalne zachowanie, skontaktuj się z zespołem projektu pod adresem support@zoocode.dev. Zespół analizuje i bada wszystkie skargi. Reaguje w sposób, który uznaje za konieczny i odpowiedni do okoliczności. Musi zachować poufność tożsamości osoby zgłaszającej zdarzenie. Może osobno opublikować więcej szczegółów dotyczących konkretnych zasad egzekwowania kodeksu.
+
+Opiekunowie muszą przestrzegać kodeksu i egzekwować go w dobrej wierze. W przeciwnym razie mogą ponieść tymczasowe lub trwałe konsekwencje. O konsekwencjach decydują inni członkowie kierownictwa projektu.
+
+<a id="attribution"></a>
+
+## Źródło
+
+This Code of Conduct is adapted from [Cline's version][cline_coc] of the [Contributor Covenant][homepage], version 1.4. It is available at https://www.contributor-covenant.org/version/1/4/code-of-conduct.html
 
 [cline_coc]: https://github.com/cline/cline/blob/main/CODE_OF_CONDUCT.md
 [homepage]: https://www.contributor-covenant.org
 
-Odpowiedzi na często zadawane pytania dotyczące tego kodeksu postępowania można znaleźć pod adresem
-https://www.contributor-covenant.org/faq
+For answers to common questions about this code of conduct, see https://www.contributor-covenant.org/faq
