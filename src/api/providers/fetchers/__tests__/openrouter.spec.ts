@@ -526,7 +526,7 @@ describe("OpenRouter API", () => {
 				model: mockModel,
 				inputModality: ["text", "image"],
 				outputModality: ["text"],
-				maxTokens: 128000,
+				maxTokens: 64000,
 				supportedParameters: ["reasoning", "include_reasoning"],
 			})
 
