@@ -39,6 +39,49 @@ describe("alwaysDenyUnapprovedCommands global setting", () => {
 	})
 })
 
+describe("viewStates global setting", () => {
+	it("parses a valid per-view record", () => {
+		const parsed = globalSettingsSchema.parse({
+			viewStates: {
+				"stable-view-1": { mode: "code", currentApiConfigName: "profile-a", updatedAt: 1730000000000 },
+				"stable-view-2": {},
+			},
+		})
+		expect(parsed.viewStates?.["stable-view-1"]).toEqual({
+			mode: "code",
+			currentApiConfigName: "profile-a",
+			updatedAt: 1730000000000,
+		})
+		expect(parsed.viewStates?.["stable-view-2"]).toEqual({})
+		expect(GLOBAL_SETTINGS_KEYS).toContain("viewStates")
+	})
+
+	it("parses an entry that carries the host-minted claim token", () => {
+		// The claim binds the entry to the webview that wrote it; a legacy entry without one
+		// still parses, because refusing it is setViewStateId's job, not the schema's.
+		const parsed = globalSettingsSchema.parse({
+			viewStates: {
+				"stable-view-1": { mode: "code", updatedAt: 1730000000000, claimToken: "7f9c-host-minted" },
+				"stable-view-2": { mode: "code" },
+			},
+		})
+		expect(parsed.viewStates?.["stable-view-1"]?.claimToken).toBe("7f9c-host-minted")
+		expect(parsed.viewStates?.["stable-view-2"]).toEqual({ mode: "code" })
+	})
+
+	it("rejects invalid field values inside a view entry", () => {
+		expect(() => globalSettingsSchema.parse({ viewStates: { v: { mode: 42 } } })).toThrow()
+		expect(() => globalSettingsSchema.parse({ viewStates: { v: { currentApiConfigName: 42 } } })).toThrow()
+		expect(() => globalSettingsSchema.parse({ viewStates: { v: { updatedAt: "soon" } } })).toThrow()
+		expect(() => globalSettingsSchema.parse({ viewStates: { v: { claimToken: 42 } } })).toThrow()
+	})
+
+	it("rejects non-object viewStates values", () => {
+		expect(() => globalSettingsSchema.parse({ viewStates: "not-a-record" })).toThrow()
+		expect(() => globalSettingsSchema.parse({ viewStates: { v: "not-an-entry" } })).toThrow()
+	})
+})
+
 describe("collapseCommandOutputByDefault global setting", () => {
 	it.each([true, false, undefined])("round-trips %s through the export/import schema", (value) => {
 		const settings = globalSettingsSchema.parse({ collapseCommandOutputByDefault: value })
