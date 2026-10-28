@@ -854,6 +854,8 @@ export class ClineProvider
 		// Invalidate any recovery reload still awaiting its HTML so it cannot
 		// reassign webview.html on the disposed view.
 		this.webviewRecoveryEpoch++
+		// A replacement renderer needs its own recovery-attempt budget.
+		this.webviewRecoveryAttempts = 0
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()
 			if (x) {

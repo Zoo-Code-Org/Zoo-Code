@@ -1168,14 +1168,41 @@ describe("ClineProvider", () => {
 			expect(generateHtml).toHaveBeenCalledTimes(4)
 		})
 
+		test("gives a replacement view a fresh recovery budget after exhausting attempts", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const generateHtml = vi.spyOn(provider, "getState")
+
+			await vi.advanceTimersByTimeAsync(480_000)
+			expect(generateHtml).toHaveBeenCalledTimes(3)
+
+			disposeCallback()
+			const replacementView = {
+				...mockWebviewView,
+				webview: { ...mockWebviewView.webview, html: "" },
+			}
+			await provider.resolveWebviewView(replacementView)
+			const htmlAfterResolve = replacementView.webview.html
+			generateHtml.mockClear()
+
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(replacementView.webview.html).toBe(htmlAfterResolve)
+			await vi.advanceTimersByTimeAsync(60_000)
+
+			expect(generateHtml).toHaveBeenCalledTimes(1)
+			expect(replacementView.webview.html).not.toBe(htmlAfterResolve)
+			expect(replacementView.webview.html).toContain("<title>Zoo Code</title>")
+		})
+
 		test("does not reload while the view is hidden even when the heartbeat is stale", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
 			const htmlAfterResolve = mockWebviewView.webview.html
+			const log = vi.spyOn(provider, "log")
 
 			await vi.advanceTimersByTimeAsync(180_000)
 
 			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+			expect(log).not.toHaveBeenCalledWith(expect.stringContaining("Webview heartbeat stale"))
 		})
 
 		test("resets the grace window when the view becomes visible", async () => {
@@ -1213,7 +1240,10 @@ describe("ClineProvider", () => {
 
 			// The grace window restarted at the post-sleep tick, so the
 			// watchdog still reloads once the heartbeat genuinely goes stale.
-			await vi.advanceTimersByTimeAsync(120_000)
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			await vi.advanceTimersByTimeAsync(60_000)
 			expect(mockWebviewView.webview.html).not.toBe(htmlAfterResolve)
 		})
 
@@ -1260,7 +1290,9 @@ describe("ClineProvider", () => {
 
 		test("does not stack watchdog intervals when resolveWebviewView runs again", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
+			const timersAfterFirstResolve = vi.getTimerCount()
 			await provider.resolveWebviewView(mockWebviewView)
+			expect(vi.getTimerCount()).toBe(timersAfterFirstResolve)
 
 			// getHtmlContent regenerates the HTML via one getState() call per reload,
 			// so getState invocations after this point count watchdog reloads.
