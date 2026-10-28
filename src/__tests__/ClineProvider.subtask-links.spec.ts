@@ -87,8 +87,7 @@ function makeLinkProvider() {
 
 const delegation = { parentTaskId: "parent", message: "Do work", initialTodos: [], mode: "code" }
 
-// Skipped: local vitest 4.1.11 does not apply vi.mock here (catalog pins 4.1.12); re-enable after reinstall.
-describe.skip("persisted subtask links", () => {
+describe("persisted subtask links", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		vi.mocked(readTaskMessages).mockResolvedValue([])
