@@ -2,7 +2,16 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { presentAssistantMessage } from "../presentAssistantMessage"
+import { type RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
 import { isValidToolName, validateToolUse } from "../../tools/validateToolUse"
+
+// Tool policy is frozen at request build and the presenter refuses to run without the
+// snapshot; these tests only exercise the presenter's bypass exits, so the empty policy is
+// enough (validateToolUse itself is mocked).
+const baseSnapshot: RequestPolicySnapshot = {
+	disabledTools: [],
+	customModes: [],
+}
 
 const mockTeardown = vi.hoisted(() => vi.fn())
 const mockWriteHandle = vi.hoisted(() => vi.fn())
@@ -57,6 +66,9 @@ describe("presentAssistantMessage - finalized block without nativeArgs", () => {
 			],
 			userMessageContent,
 			didCompleteReadingStream: false,
+			// The presenter keeps per-tool-call context in this map (added on main since this
+			// spec was written); the bypass exits below run after its first use.
+			activeToolContexts: new Map(),
 			didRejectTool: false,
 			didAlreadyUseTool: false,
 			consecutiveMistakeCount: 0,
@@ -81,7 +93,10 @@ describe("presentAssistantMessage - finalized block without nativeArgs", () => {
 	})
 
 	it("tears the write_to_file stream state down instead of dispatching the tool", async () => {
-		await presentAssistantMessage(mockTask as unknown as Parameters<typeof presentAssistantMessage>[0])
+		await presentAssistantMessage(
+			mockTask as unknown as Parameters<typeof presentAssistantMessage>[0],
+			baseSnapshot,
+		)
 
 		// The malformed call must not be executed, and exactly one error tool_result is
 		// emitted for the provider.
@@ -122,7 +137,10 @@ describe("presentAssistantMessage - finalized block without nativeArgs", () => {
 			throw new Error("write_to_file is not allowed to write restricted.ts in this mode")
 		})
 
-		await presentAssistantMessage(mockTask as unknown as Parameters<typeof presentAssistantMessage>[0])
+		await presentAssistantMessage(
+			mockTask as unknown as Parameters<typeof presentAssistantMessage>[0],
+			baseSnapshot,
+		)
 
 		expect(mockWriteHandle).not.toHaveBeenCalled()
 		expect(userMessageContent).toEqual([
@@ -148,12 +166,17 @@ describe("presentAssistantMessage - finalized block without nativeArgs", () => {
 				nativeArgs: { path: "same.ts", content: "same content" },
 			},
 		]
+		// The detector's result is a tagged union now (allow / soft_block / hard_block): only the
+		// hard block asks the user and stops the call, so that is the exit under test.
 		vi.mocked(mockTask.toolRepetitionDetector as unknown as { check: unknown }).check = vi.fn().mockReturnValue({
-			allowExecution: false,
+			action: "hard_block",
 			askUser: { messageKey: "tool_repetition", messageDetail: "write_to_file" },
 		})
 
-		await presentAssistantMessage(mockTask as unknown as Parameters<typeof presentAssistantMessage>[0])
+		await presentAssistantMessage(
+			mockTask as unknown as Parameters<typeof presentAssistantMessage>[0],
+			baseSnapshot,
+		)
 
 		expect(mockWriteHandle).not.toHaveBeenCalled()
 		// The repetition exit reports through the local pushToolResult, which wraps the

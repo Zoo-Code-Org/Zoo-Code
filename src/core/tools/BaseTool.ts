@@ -190,13 +190,17 @@ export abstract class BaseTool<TName extends ToolName> {
 	 * that state down and, when a streaming delta already failed, to report the
 	 * captured streaming error instead of the generic parse error.
 	 *
-	 * @param task - Task instance
-	 * @param callbacks - Tool execution callbacks
-	 * @param parseError - The native-argument parse error
+	 * @param _task - Task instance
+	 * @param _callbacks - Tool execution callbacks
+	 * @param _parseError - The native-argument parse error
 	 * @returns true when the override already reported the failure to the user,
 	 *   so handle() suppresses the generic parse error
 	 */
-	protected async onParameterParseFailure(task: Task, callbacks: ToolCallbacks, parseError: Error): Promise<boolean> {
+	protected async onParameterParseFailure(
+		_task: Task,
+		_callbacks: ToolCallbacks,
+		_parseError: Error,
+	): Promise<boolean> {
 		return false
 	}
 }

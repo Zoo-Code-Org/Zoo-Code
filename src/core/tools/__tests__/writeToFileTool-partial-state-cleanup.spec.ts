@@ -41,9 +41,6 @@ function buildTask(taskId: string, instanceId: string): Task {
 	return task as unknown as Task
 }
 
-// Private members are reached by bracket notation (AGENTS.md: no `as any`).
-const stateFor = (task: Task) => writeToFileTool["taskPartialStreamState"].get(`${task.taskId}.${task.instanceId}`)
-
 describe("WriteToFileTool per-task partial-state cleanup", () => {
 	afterEach(() => {
 		writeToFileTool["taskPartialStreamState"].clear()

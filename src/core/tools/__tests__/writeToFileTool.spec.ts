@@ -1032,6 +1032,7 @@ describe("writeToFileTool", () => {
 					askApproval: mockAskApproval,
 					handleError: mockHandleError,
 					pushToolResult: vi.fn(),
+					toolCallId: "toolu_handle_error",
 				})
 
 				expect(mockHandleError).toHaveBeenCalledTimes(1)
@@ -1098,6 +1099,7 @@ describe("writeToFileTool", () => {
 					askApproval: mockAskApproval,
 					handleError: mockHandleError,
 					pushToolResult: vi.fn(),
+					toolCallId: "toolu_parse_error",
 				})
 
 				// No streaming error was captured: the generic parse error is reported.
@@ -1435,6 +1437,7 @@ describe("writeToFileTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "toolu_finalize_ask",
 			})
 
 			// The parse error is still reported, and the open partial ask is finalized first.
@@ -1469,6 +1472,7 @@ describe("writeToFileTool", () => {
 					askApproval: mockAskApproval,
 					handleError: mockHandleError,
 					pushToolResult: vi.fn(),
+					toolCallId: "toolu_finalize_ask_rejects",
 				})
 
 				// Same no-argument contract as the sibling test above: the finalize call in
