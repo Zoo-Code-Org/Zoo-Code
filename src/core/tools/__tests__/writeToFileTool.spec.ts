@@ -493,6 +493,10 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
+			// The partial `tool` ask the deltas opened is finalized: this exit bypasses
+			// handle()/execute(), so nothing else closes it and the webview spinner would keep
+			// running for a call already reported as failed.
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledTimes(1)
 			// The malformed call itself is not re-reported (the guard already emitted the
 			// tool_result), and a successful rollback has no hazard to surface.
 			expect(mockHandleError).not.toHaveBeenCalled()
@@ -698,6 +702,9 @@ describe("writeToFileTool", () => {
 		})
 		it("does nothing when the task has no stream state to release", async () => {
 			await writeToFileTool.teardownAbandonedStream(mockCline)
+			// The guard comes first: no delta registered state, so there is no ask it could have
+			// opened either - finalizing here would close an unrelated partial ask.
+			expect(mockCline.finalizePartialToolAsk).not.toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
 			expect(mockCline.off).not.toHaveBeenCalled()

@@ -315,12 +315,21 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * ROLLBACK is the exception - the editor may still hold content this task never
 	 * approved, and that hazard has to be visible in the chat exactly as the parse-failure
 	 * and failed-stream teardowns report it.
+	 *
+	 * The open partial ask is finalized here for the same reason: streaming may have created
+	 * it (partial: true), and this exit never reaches the approval or error flow that closes
+	 * asks, so leaving it open keeps the webview spinner running for a call already reported.
 	 */
 	async teardownAbandonedStream(task: Task): Promise<void> {
 		if (!this.taskPartialStreamState.has(this.getPartialStreamFailureKey(task))) {
 			return
 		}
 
+		// A streamed delta may already have opened the partial `tool` ask (partial: true). This
+		// exit bypasses handle()/execute(), so nothing else would finalize it and the webview
+		// spinner would keep running for a call that has already been reported as failed. The
+		// missing-parameter, rooignore and parse-failure exits finalize the same ask.
+		await this.finalizePartialToolAskAfterFailure(task)
 		const released = await this.releaseAbandonedDiffView(task)
 		this.resetTaskPartialState(task)
 		await this.resetDiffViewAfterWrite(task)
