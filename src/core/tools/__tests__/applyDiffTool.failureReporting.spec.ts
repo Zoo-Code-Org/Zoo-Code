@@ -15,6 +15,16 @@ vi.mock("@roo-code/telemetry", () => ({
 vi.mock("fs/promises", () => ({
 	default: {
 		readFile: vi.fn().mockResolvedValue(""),
+		// apply_diff stats around its own read (same contract as ApplyPatchTool's hunk
+		// read): without this double the stat call throws and every failure-path test
+		// sees a spurious handleError("applying diff", TypeError).
+		stat: vi.fn().mockResolvedValue({
+			dev: 7n,
+			ino: 4242n,
+			size: 1234n,
+			mtimeNs: 1_700_000_000_123_456_789n,
+			ctimeNs: 1_700_000_000_789_999_999n,
+		}),
 	},
 }))
 
@@ -81,6 +91,10 @@ describe("ApplyDiffTool failure reporting", () => {
 						experiments: {},
 					}),
 				}),
+			},
+			observationRegistry: {
+				get: vi.fn().mockReturnValue(undefined),
+				observe: vi.fn(),
 			},
 			diffViewProvider: {
 				editType: undefined,
