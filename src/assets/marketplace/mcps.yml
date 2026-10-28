@@ -1,4 +1,38 @@
 items:
+    - id: anysearch
+      name: AnySearch
+      description:
+          Search infrastructure for AI agents over MCP — general web search, vertical domain search, parallel batch
+          search, and web page extraction. Gives AI agents up-to-date web knowledge for research, documentation lookup, and
+          fact-checking.
+      author: anysearch-team
+      url: https://anysearch.com
+      tags:
+          - search-engine
+          - web-search
+          - ai-agents
+          - content-extraction
+          - research
+      content:
+          - name: Remote Server
+            content: |
+                {
+                  "type": "streamable-http",
+                  "url": "https://api.anysearch.com/mcp",
+                  "headers": {
+                    "Authorization": "Bearer {{ANYSEARCH_API_KEY}}"
+                  }
+                }
+            parameters:
+                - name: AnySearch API Key
+                  key: ANYSEARCH_API_KEY
+                  placeholder: your_anysearch_api_key
+          - name: Remote Server (Anonymous)
+            content: |
+                {
+                  "type": "streamable-http",
+                  "url": "https://api.anysearch.com/mcp"
+                }
     - id: apify
       name: Apify Actors
       description:
@@ -1577,6 +1611,26 @@ items:
             key: LINEAR_PATH
             placeholder: /path/to/linear-mcp
             optional: true
+    - id: mailtea
+      name: Mailtea
+      description:
+          Send email and newsletters with Mailtea over MCP, covering transactional email, scheduled newsletters, contacts, senders,
+          domains and delivery status. Sign in with OAuth, no API key needed.
+      author: Mailtea
+      url: https://github.com/mailtea-app/mailtea-agent-plugin
+      tags:
+          - email
+          - newsletter
+          - transactional-email
+          - marketing
+          - communication
+      content:
+          - name: Remote MCP
+            content: |
+                {
+                  "type": "streamable-http",
+                  "url": "https://api.mailtea.app/mcp"
+                }
     - id: memory
       name: Knowledge Graph Memory
       description:
@@ -2937,6 +2991,25 @@ items:
                 - name: Local Timezone
                   key: LOCAL_TIMEZONE
                   placeholder: America/New_York
+    - id: tradehand
+      name: Tradehand
+      description:
+          Find and book local tradespeople. Search traders by trade and area, compare fixed prices and reviews, get
+          instant quotes, book and pay through a secure checkout link. Tradespeople use it to manage their business.
+      author: Outside HQ LTD
+      url: https://github.com/Humanleap/tradehand-agent-plugin
+      tags:
+          - local-services
+          - bookings
+          - quotes
+          - tradespeople
+      content:
+          - name: Remote Server
+            content: |
+                {
+                  "type": "streamable-http",
+                  "url": "https://tradehand.com/api/mcp"
+                }
     - id: verodat
       name: Verodat
       description:

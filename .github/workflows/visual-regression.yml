@@ -2,23 +2,12 @@ name: Visual Regression
 
 on:
     workflow_dispatch:
+    # No `paths` filter: this workflow backs the required `webview-visual`
+    # check. GitHub keeps path-filtered workflows "pending" on pull requests
+    # that do not match the filter, which blocks merging for a required check.
+    # The merge_group event ignores path filters, so the queue is unaffected.
     pull_request:
         types: [opened, reopened, ready_for_review, synchronize]
-        paths:
-            - "apps/vscode-e2e/package.json"
-            - "apps/vscode-e2e/src/theme-fixtures/**"
-            - "apps/vscode-e2e/src/visual/**"
-            - "apps/vscode-e2e/playwright-electron.config.ts"
-            - "packages/types/src/api.ts"
-            - "packages/types/src/vscode-extension-host.ts"
-            - "src/core/webview/ClineProvider.ts"
-            - "src/core/webview/webviewMessageHandler.ts"
-            - "src/extension/api.ts"
-            - "webview-ui/**"
-            - "src/shared/**"
-            - "package.json"
-            - "pnpm-lock.yaml"
-            - ".github/workflows/visual-regression.yml"
     merge_group:
         types: [checks_requested]
 
