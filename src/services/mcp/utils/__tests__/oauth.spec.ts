@@ -57,6 +57,8 @@ describe("fetchOAuthAuthServerMetadata", () => {
 		'Bearer RESOURCE_METADATA="https://example.com/core/.well-known/oauth-protected-resource/mcp"',
 		'bearer error="invalid_token", resource_metadata = "https://example.com/core/.well-known/oauth-protected-resource/mcp"',
 		'Basic realm="mcp", Bearer resource_metadata="https://example.com/core/.well-known/oauth-protected-resource/mcp"',
+		'Bearer error_description="bad \\"token\\", retry", resource_metadata="https://example.com/core/.well-known/oauth-protected-resource/mcp"',
+		'Bearer resource_metadata="not a url", Bearer resource_metadata="https://example.com/core/.well-known/oauth-protected-resource/mcp"',
 	])("falls back to the resource_metadata URL from the 401 header: %s", async (wwwAuthenticate) => {
 		vi.mocked(discoverOAuthProtectedResourceMetadata)
 			.mockRejectedValueOnce(

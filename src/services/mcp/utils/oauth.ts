@@ -170,7 +170,7 @@ async function probeResourceMetadataUrl(serverUrl: string): Promise<URL | undefi
 }
 
 /** An auth-param, optionally preceded by the auth-scheme that starts its challenge. */
-const AUTH_PARAM = /^\s*(?:([^\s="]+)\s+)?([^\s="]+)\s*=\s*(?:"([^"]*)"|([^\s"]*))\s*$/
+const AUTH_PARAM = /^\s*(?:([^\s="]+)\s+)?([^\s="]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^\s"]*))\s*$/
 
 /**
  * Reads the `resource_metadata` parameter of a Bearer challenge. Unlike the SDK
@@ -180,18 +180,36 @@ const AUTH_PARAM = /^\s*(?:([^\s="]+)\s+)?([^\s="]+)\s*=\s*(?:"([^"]*)"|([^\s"]*
 function extractResourceMetadataUrl(header: string | null): URL | undefined {
 	if (!header) return undefined
 	let scheme: string | undefined
-	// Commas outside quoted strings separate challenges and their auth-params.
-	for (const item of header.match(/(?:[^,"]|"[^"]*")+/g) ?? []) {
+	for (const item of splitAuthItems(header)) {
 		const param = AUTH_PARAM.exec(item)
 		const itemScheme = param ? param[1] : item.trim().split(/\s+/)[0]
 		if (itemScheme) scheme = itemScheme.toLowerCase()
 		if (scheme === "bearer" && param?.[2].toLowerCase() === "resource_metadata") {
-			try {
-				return new URL(param[3] ?? param[4])
-			} catch {
-				return undefined
-			}
+			const value = param[3]?.replace(/\\(.)/g, "$1") ?? param[4]
+			if (URL.canParse(value)) return new URL(value)
 		}
 	}
 	return undefined
+}
+
+/**
+ * Splits a WWW-Authenticate value on commas outside quoted strings. The commas
+ * separate challenges and their auth-params. A loop keeps this linear in the
+ * header length and handles escapes inside quoted strings (RFC 9110 §5.6.4).
+ */
+function splitAuthItems(header: string): string[] {
+	const items: string[] = []
+	let start = 0
+	let quoted = false
+	for (let i = 0; i < header.length; i++) {
+		const char = header[i]
+		if (quoted && char === "\\") i++
+		else if (char === '"') quoted = !quoted
+		else if (char === "," && !quoted) {
+			items.push(header.slice(start, i))
+			start = i + 1
+		}
+	}
+	items.push(header.slice(start))
+	return items
 }
