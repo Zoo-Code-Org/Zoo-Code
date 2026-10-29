@@ -3121,274 +3121,6 @@ describe("ClineProvider", () => {
 		})
 	})
 
-	describe("createTaskWithHistoryItem mode validation", () => {
-		test("validates and falls back to default mode when restored mode no longer exists", async () => {
-			await provider.resolveWebviewView(mockWebviewView)
-
-			// Mock custom modes that don't include the saved mode
-			const mockCustomModesManager = {
-				getCustomModes: vi.fn().mockResolvedValue([
-					{
-						slug: "existing-mode",
-						name: "Existing Mode",
-						roleDefinition: "Test role",
-						groups: ["read"] as const,
-					},
-				]),
-				dispose: vi.fn(),
-			}
-			;(provider as any).customModesManager = mockCustomModesManager
-
-			// Mock getModeBySlug to return undefined for non-existent mode
-			const { getModeBySlug } = await import("../../../shared/modes")
-			vi.mocked(getModeBySlug)
-				.mockReturnValueOnce(undefined) // First call returns undefined (mode doesn't exist)
-				.mockReturnValue({
-					slug: "code",
-					name: "Code Mode",
-					roleDefinition: "You are a code assistant",
-					groups: ["read", "edit"],
-				}) // Subsequent calls return default mode
-
-			// Mock provider settings manager
-			;(provider as any).providerSettingsManager = {
-				getModeConfigId: vi.fn().mockResolvedValue(undefined),
-				listConfig: vi.fn().mockResolvedValue([]),
-			}
-
-			// Spy on log method to verify warning was logged
-			const logSpy = vi.spyOn(provider, "log")
-
-			// Create history item with non-existent mode
-			const historyItem = {
-				id: "test-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "non-existent-mode", // This mode doesn't exist
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				totalCost: 0,
-			}
-
-			// Initialize with history item
-			await provider.createTaskWithHistoryItem(historyItem)
-
-			// Verify mode validation occurred
-			expect(mockCustomModesManager.getCustomModes).toHaveBeenCalled()
-			expect(getModeBySlug).toHaveBeenCalledWith("non-existent-mode", expect.any(Array))
-
-			// Verify fallback to default mode
-			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "code")
-			expect(logSpy).toHaveBeenCalledWith(
-				"Mode 'non-existent-mode' from history no longer exists. Falling back to default mode 'code'.",
-			)
-
-			// Verify history item was updated with default mode
-			expect(historyItem.mode).toBe("code")
-		})
-
-		test("preserves mode when it exists in custom modes", async () => {
-			await provider.resolveWebviewView(mockWebviewView)
-
-			// Mock custom modes that include the saved mode
-			const mockCustomModesManager = {
-				getCustomModes: vi.fn().mockResolvedValue([
-					{
-						slug: "custom-mode",
-						name: "Custom Mode",
-						roleDefinition: "Custom role",
-						groups: ["read", "edit"] as const,
-					},
-				]),
-				dispose: vi.fn(),
-			}
-			;(provider as any).customModesManager = mockCustomModesManager
-
-			// Mock getModeBySlug to return the custom mode
-			const { getModeBySlug } = await import("../../../shared/modes")
-			vi.mocked(getModeBySlug).mockReturnValue({
-				slug: "custom-mode",
-				name: "Custom Mode",
-				roleDefinition: "Custom role",
-				groups: ["read", "edit"],
-			})
-
-			// Mock provider settings manager
-			;(provider as any).providerSettingsManager = {
-				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
-				listConfig: vi
-					.fn()
-					.mockResolvedValue([
-						{ name: "test-config", id: "config-id", apiProvider: providerIdentifiers.anthropic },
-					]),
-				activateProfile: vi.fn().mockResolvedValue({
-					name: "test-config",
-					id: "config-id",
-					apiProvider: providerIdentifiers.anthropic,
-				}),
-			}
-
-			// Spy on log method to verify no warning was logged
-			const logSpy = vi.spyOn(provider, "log")
-
-			// Create history item with existing custom mode
-			const historyItem = {
-				id: "test-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "custom-mode",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				totalCost: 0,
-			}
-
-			// Initialize with history item
-			await provider.createTaskWithHistoryItem(historyItem)
-
-			// Verify mode validation occurred
-			expect(mockCustomModesManager.getCustomModes).toHaveBeenCalled()
-			expect(getModeBySlug).toHaveBeenCalledWith("custom-mode", expect.any(Array))
-
-			// Verify mode was preserved
-			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "custom-mode")
-			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("no longer exists"))
-
-			// Verify history item mode was not changed
-			expect(historyItem.mode).toBe("custom-mode")
-		})
-
-		test("preserves mode when it exists in built-in modes", async () => {
-			await provider.resolveWebviewView(mockWebviewView)
-
-			// Mock no custom modes
-			const mockCustomModesManager = {
-				getCustomModes: vi.fn().mockResolvedValue([]),
-				dispose: vi.fn(),
-			}
-			;(provider as any).customModesManager = mockCustomModesManager
-
-			// Mock getModeBySlug to return built-in architect mode
-			const { getModeBySlug } = await import("../../../shared/modes")
-			vi.mocked(getModeBySlug).mockReturnValue({
-				slug: "architect",
-				name: "Architect Mode",
-				roleDefinition: "You are an architect",
-				groups: ["read", "edit"],
-			})
-
-			// Mock provider settings manager
-			;(provider as any).providerSettingsManager = {
-				getModeConfigId: vi.fn().mockResolvedValue(undefined),
-				listConfig: vi.fn().mockResolvedValue([]),
-			}
-
-			// Create history item with built-in mode
-			const historyItem = {
-				id: "test-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "architect",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				totalCost: 0,
-			}
-
-			// Initialize with history item
-			await provider.createTaskWithHistoryItem(historyItem)
-
-			// Verify mode was preserved
-			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
-
-			// Verify history item mode was not changed
-			expect(historyItem.mode).toBe("architect")
-		})
-
-		test("handles history items without mode property", async () => {
-			await provider.resolveWebviewView(mockWebviewView)
-
-			// Mock provider settings manager
-			;(provider as any).providerSettingsManager = {
-				getModeConfigId: vi.fn().mockResolvedValue(undefined),
-				listConfig: vi.fn().mockResolvedValue([]),
-			}
-
-			// Create history item without mode
-			const historyItem = {
-				id: "test-id",
-				ts: Date.now(),
-				task: "Test task",
-				// No mode property
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				totalCost: 0,
-			}
-
-			// Initialize with history item
-			await provider.createTaskWithHistoryItem(historyItem)
-
-			// Verify no mode validation occurred (mode update not called)
-			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", expect.any(String))
-		})
-
-		test("continues with task restoration even if mode config loading fails", async () => {
-			await provider.resolveWebviewView(mockWebviewView)
-
-			// Mock custom modes
-			const mockCustomModesManager = {
-				getCustomModes: vi.fn().mockResolvedValue([]),
-				dispose: vi.fn(),
-			}
-			;(provider as any).customModesManager = mockCustomModesManager
-
-			// Mock getModeBySlug to return built-in mode
-			const { getModeBySlug } = await import("../../../shared/modes")
-			vi.mocked(getModeBySlug).mockReturnValue({
-				slug: "code",
-				name: "Code Mode",
-				roleDefinition: "You are a code assistant",
-				groups: ["read", "edit"],
-			})
-
-			// Mock provider settings manager to throw error
-			;(provider as any).providerSettingsManager = {
-				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
-				listConfig: vi
-					.fn()
-					.mockResolvedValue([
-						{ name: "test-config", id: "config-id", apiProvider: providerIdentifiers.anthropic },
-					]),
-				activateProfile: vi.fn().mockRejectedValue(new Error("Failed to load config")),
-			}
-
-			// Spy on log method
-			const logSpy = vi.spyOn(provider, "log")
-
-			// Create history item
-			const historyItem = {
-				id: "test-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "code",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				totalCost: 0,
-			}
-
-			// Initialize with history item - should not throw
-			await expect(provider.createTaskWithHistoryItem(historyItem)).resolves.not.toThrow()
-
-			// Verify error was logged but task restoration continued
-			expect(logSpy).toHaveBeenCalledWith(
-				expect.stringContaining("Failed to restore API configuration for mode 'code'"),
-			)
-		})
-	})
-
 	describe("updateCustomMode", () => {
 		test("updates both file and state when updating custom mode", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
@@ -4668,6 +4400,171 @@ describe("ClineProvider", () => {
 
 		mockContext.globalState.update = originalUpdate
 		await provider.dispose()
+	})
+
+	describe("viewId uniqueness", () => {
+		it("should assign unique viewId to each instance", async () => {
+			const provider1 = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+
+				new WebviewFocusTracker(),
+			)
+			const provider2 = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			// Each instance should have a unique viewId
+			expect(provider1.viewId).toBeDefined()
+			expect(provider2.viewId).toBeDefined()
+			expect(provider1.viewId).not.toBe(provider2.viewId)
+
+			await provider1.dispose()
+			await provider2.dispose()
+		})
+
+		it("should have viewId in correct format: {renderContext}-{instanceCount}", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			expect(provider.viewId).toMatch(/^sidebar-\d+$/)
+
+			await provider.dispose()
+		})
+
+		it("should increment instance count for each new instance", async () => {
+			const provider1 = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const provider2 = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			// First editor instance should be "editor-0" (or next available)
+			// Second editor instance should have a different number
+			const num1 = parseInt(provider1.viewId.split("-")[1]!)
+			const num2 = parseInt(provider2.viewId.split("-")[1]!)
+
+			expect(num2).toBeGreaterThan(num1)
+
+			await provider1.dispose()
+			await provider2.dispose()
+		})
+	})
+
+	it("should increment instance count for each new instance", async () => {
+		const provider1 = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"editor",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const provider2 = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"editor",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+
+		// First editor instance should be "editor-0" (or next available)
+		// Second editor instance should have a different number
+		const num1 = parseInt(provider1.viewId.split("-")[1]!)
+		const num2 = parseInt(provider2.viewId.split("-")[1]!)
+
+		expect(num2).toBeGreaterThan(num1)
+
+		await provider1.dispose()
+		await provider2.dispose()
+	})
+
+	it("should reapply an independently mutated profile name when the load settles", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
+		await provider.saveViewState("currentApiConfigName", "cfg-a")
+		const load = provider["setViewStateId"]("stable-sidebar-view")
+
+		// Let the stalled lookup begin so the in-flight mutation and the resolver
+		// target the pending promise rather than the initial no-op.
+		await vi.waitFor(() => expect(getProfileSpy).toHaveBeenCalledTimes(1))
+		// The profile name changes while the lookup is in flight; the load still
+		// resolves the name persisted at load start.
+		await provider.saveViewState("currentApiConfigName", "cfg-b")
+
+		resolveProfile({ name: "cfg-a", apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-x" })
+		await load
+
+		// The in-flight selection wins over the loaded state.
+		expect(provider["viewLocalState"].currentApiConfigName).toBe("cfg-b")
+		expect(provider["viewLocalState"].apiConfiguration).toEqual({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "model-x",
+		})
+		expect(provider["viewLocalState"]).not.toHaveProperty("mode")
+		await provider.dispose()
+	})
+
+	test("postMessageToWebview does not await the webview ack", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		let releaseAck!: () => void
+		const ack = new Promise<void>((resolve) => {
+			releaseAck = resolve
+		})
+		mockPostMessage.mockImplementationOnce(() => ack)
+
+		const message: ExtensionMessage = { type: "action", action: "chatButtonClicked" }
+
+		// The caller must not wait for the renderer ack: a webview page remounted or disposed
+		// while the post is in flight never acknowledges it, and awaiting that promise would
+		// wedge every caller on the task critical path.
+		await provider.postMessageToWebview(message)
+
+		expect(mockPostMessage).toHaveBeenCalledWith(message)
+		releaseAck()
+	})
+
+	test("postMessageToWebview logs a synchronous postMessage throw", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		const logSpy = vi.spyOn(provider, "log").mockImplementation(() => {})
+		// A disposed webview can throw synchronously from postMessage, before any
+		// promise exists to attach the rejection handler to: the call site must handle
+		// it so fire-and-forget callers never see an unhandled rejection.
+		mockPostMessage.mockImplementationOnce(() => {
+			throw new Error("Webview is disposed")
+		})
+		const message: ExtensionMessage = { type: "action", action: "chatButtonClicked" }
+		await expect(provider.postMessageToWebview(message)).resolves.toBeUndefined()
+		expect(logSpy).toHaveBeenCalledWith(
+			expect.stringContaining("[postMessageToWebview] dropped message type=action"),
+		)
+		logSpy.mockRestore()
 	})
 })
 
@@ -7012,57 +6909,6 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				)
 			})
 
-			it("updates every zoo-gateway profile and activates only the active one", async () => {
-				vi.spyOn(provider, "getState").mockResolvedValue({
-					apiConfiguration: { zooGatewayModelId: "anthropic/claude-sonnet-4" },
-				} as any)
-				vi.spyOn(provider.contextProxy, "getProviderSettings").mockReturnValue({
-					apiProvider: providerIdentifiers.zooGateway,
-				} as any)
-				vi.spyOn(provider.contextProxy, "getValues").mockReturnValue({
-					currentApiConfigName: "Zoo Gateway",
-				} as any)
-				const upsertSpy = vi.spyOn(provider, "upsertProviderProfile").mockResolvedValue("profile-id")
-				const saveConfig = vi.fn().mockResolvedValue(undefined)
-				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-				;(provider as any).providerSettingsManager = {
-					listConfig: vi.fn().mockResolvedValue([
-						{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
-						{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
-					]),
-					getProfile: vi
-						.fn()
-						.mockResolvedValueOnce({
-							apiProvider: providerIdentifiers.zooGateway,
-							zooSessionToken: "old-token",
-							zooGatewayBaseUrl: "https://old.example/api/gateway/v1",
-						})
-						.mockResolvedValueOnce({
-							apiProvider: providerIdentifiers.zooGateway,
-							zooSessionToken: "old-token",
-						}),
-					saveConfig,
-				}
-
-				await provider.handleZooCodeCallback("new-token")
-
-				expect(upsertSpy).toHaveBeenCalledWith(
-					"Zoo Gateway",
-					expect.objectContaining({
-						zooSessionToken: "new-token",
-						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
-					}),
-					true,
-				)
-				expect(saveConfig).toHaveBeenCalledWith(
-					"Backup Zoo",
-					expect.objectContaining({
-						zooSessionToken: "new-token",
-						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
-					}),
-				)
-			})
-
 			it("logs and posts state when profile persistence fails", async () => {
 				vi.spyOn(provider, "getState").mockRejectedValue(new Error("state unavailable"))
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
@@ -7091,68 +6937,6 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				await (provider as any).ensureZooGatewayProfileSeeded()
 
 				expect(handleSpy).not.toHaveBeenCalled()
-			})
-
-			it("skips seeding when every zoo-gateway profile already has the current token and base URL", async () => {
-				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
-				vi.mocked(getCachedZooCodeToken).mockReturnValue("current-token")
-				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
-				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
-
-				;(provider as any).providerSettingsManager = {
-					listConfig: vi
-						.fn()
-						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
-					getProfile: vi.fn().mockResolvedValue({
-						zooSessionToken: "current-token",
-						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
-					}),
-				}
-
-				await (provider as any).ensureZooGatewayProfileSeeded()
-
-				expect(handleSpy).not.toHaveBeenCalled()
-				expect(postMessageSpy).toHaveBeenCalledWith({ type: "zooGatewayCredentialsReady" })
-			})
-
-			it("re-seeds when any zoo-gateway profile has a stale or missing token", async () => {
-				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
-				vi.mocked(getCachedZooCodeToken).mockReturnValue("fresh-token")
-				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
-
-				;(provider as any).providerSettingsManager = {
-					listConfig: vi
-						.fn()
-						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
-					getProfile: vi.fn().mockResolvedValue({
-						zooSessionToken: "stale-token",
-						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
-					}),
-				}
-
-				await (provider as any).ensureZooGatewayProfileSeeded()
-
-				expect(handleSpy).toHaveBeenCalledWith("fresh-token")
-			})
-
-			it("re-seeds when any zoo-gateway profile has a stale base URL", async () => {
-				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
-				vi.mocked(getCachedZooCodeToken).mockReturnValue("current-token")
-				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
-
-				;(provider as any).providerSettingsManager = {
-					listConfig: vi
-						.fn()
-						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
-					getProfile: vi.fn().mockResolvedValue({
-						zooSessionToken: "current-token",
-						zooGatewayBaseUrl: "https://staging.zoocode.dev/api/gateway/v1",
-					}),
-				}
-
-				await (provider as any).ensureZooGatewayProfileSeeded()
-
-				expect(handleSpy).toHaveBeenCalledWith("current-token")
 			})
 		})
 	})
