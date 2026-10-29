@@ -30,8 +30,8 @@ import {
 	BEDROCK_DEFAULT_CONTEXT,
 	AWS_INFERENCE_PROFILE_MAPPING,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
+	getBedrockInferenceModelId,
 	BEDROCK_THINKING_DISABLE_MODEL_IDS,
-	BEDROCK_GLOBAL_INFERENCE_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_PRICING,
 	SERVICE_TIER_KEY,
@@ -359,9 +359,9 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	}
 
 	// Helper to guess model info from custom modelId string if not in bedrockModels
-	private guessModelInfoFromId(modelId: string): Partial<ModelInfo> {
+	private guessModelInfoFromId(modelId: string): ModelInfo {
 		// Define a mapping for model ID patterns and their configurations
-		const modelConfigMap: Record<string, Partial<ModelInfo>> = {
+		const modelConfigMap: Record<string, ModelInfo> = {
 			"claude-4": {
 				maxTokens: 8192,
 				contextWindow: 200_000,
@@ -428,6 +428,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			}
 		},
 	): ApiStream {
+		this.assertCustomArnProvided()
 		const modelConfig = this.getModel()
 		const usePromptCache = Boolean(
 			(this.options.awsUsePromptCache ?? true) && this.supportsAwsPromptCache(modelConfig),
@@ -880,6 +881,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		this.assertCustomArnProvided()
 		try {
 			const modelConfig = this.getModel()
 
@@ -1193,6 +1195,13 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		return modelId
 	}
 
+	// "custom-arn" is a picker sentinel, not a Bedrock model ID; never send it as ConverseCommand.modelId.
+	private assertCustomArnProvided(): void {
+		if (this.options.apiModelId === "custom-arn" && !this.options.awsCustomArn?.trim()) {
+			throw new Error("Enter a custom ARN in the Amazon Bedrock settings, or select a model from the list.")
+		}
+	}
+
 	//Prompt Router responses come back in a different sequence and the model used is in the response and must be fetched by name
 	getModelById(modelId: string, modelType?: string): { id: BedrockModelId | string; info: ModelInfo } {
 		// Try to find the model in bedrockModels
@@ -1213,9 +1222,8 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			// Use heuristics for model info, then allow overrides from ProviderSettings
 			const guessed = this.guessModelInfoFromId(modelId)
 			model = {
-				id: bedrockDefaultModelId,
+				id: modelId || bedrockDefaultModelId,
 				info: {
-					...JSON.parse(JSON.stringify(bedrockModels[bedrockDefaultModelId])),
 					...guessed,
 				},
 			}
@@ -1266,21 +1274,12 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			//a model was selected from the drop down
 			modelConfig = this.getModelById(this.options.apiModelId as string)
 
-			// Apply Global Inference prefix if enabled and supported (takes precedence over cross-region)
-			const baseIdForGlobal = this.parseBaseModelId(modelConfig.id)
-			if (
-				this.options.awsUseGlobalInference &&
-				BEDROCK_GLOBAL_INFERENCE_MODEL_IDS.includes(baseIdForGlobal as any)
-			) {
-				modelConfig.id = `global.${baseIdForGlobal}`
-			}
-			// Otherwise, add cross-region inference prefix if enabled
-			else if (this.options.awsUseCrossRegionInference && this.options.awsRegion) {
-				const prefix = AwsBedrockHandler.getPrefixForRegion(this.options.awsRegion)
-				if (prefix) {
-					modelConfig.id = `${prefix}${modelConfig.id}`
-				}
-			}
+			modelConfig.id = getBedrockInferenceModelId(
+				modelConfig.id,
+				this.options.awsRegion,
+				this.options.awsUseCrossRegionInference,
+				this.options.awsUseGlobalInference,
+			)
 		}
 
 		// Check if 1M context is enabled for supported Claude 4 models
@@ -1582,7 +1581,7 @@ Please try:
 			logLevel: "error",
 		},
 		ON_DEMAND_NOT_SUPPORTED: {
-			patterns: ["with on-demand throughput isn’t supported."],
+			patterns: ["on-demand throughput isn't supported", "on-demand throughput is not supported"],
 			messageTemplate: `
 1. Try enabling cross-region inference in settings.
 2. Or, create an inference profile and then leverage the "Use custom ARN..." option of the model selector in settings.`,
@@ -1647,7 +1646,7 @@ Please check:
 			return "THROTTLING"
 		}
 
-		const errorMessage = error.message.toLowerCase()
+		const errorMessage = error.message.toLowerCase().replace(/[‘’]/g, "'")
 		const errorName = error.name.toLowerCase()
 
 		// Check each error type's patterns in order of specificity (most specific first)
@@ -1683,6 +1682,11 @@ Please check:
 	private formatErrorMessage(error: unknown, errorType: string, _isStreamContext: boolean): string {
 		const definition = AwsBedrockHandler.ERROR_TYPES[errorType] || AwsBedrockHandler.ERROR_TYPES.GENERIC
 		let template = definition.messageTemplate
+		if (errorType === "ON_DEMAND_NOT_SUPPORTED" && this.options.awsCustomArn) {
+			// A custom ARN bypasses the routing checkboxes, so only a different ARN can fix this.
+			template = `
+Select a geographic or global inference-profile ARN in the "Use custom ARN..." option of the model selector in settings. The cross-region and global inference settings do not apply to a custom ARN.`
+		}
 
 		// Prepare template variables
 		const templateVars: Record<string, string> = {}

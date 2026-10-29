@@ -220,6 +220,7 @@ export class ClineProvider
 	public static readonly tabPanelId = `${Package.name}.TabPanelProvider`
 	private static activeInstances: Set<ClineProvider> = new Set()
 	private webviewDisposables: vscode.Disposable[] = []
+	public readonly bedrockCatalogRequests = new Map<string, AbortController>()
 	private pendingThemeFixtureProbes = new Map<
 		string,
 		{
@@ -827,6 +828,10 @@ export class ClineProvider
 	- https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
 	*/
 	private clearWebviewResources() {
+		for (const controller of this.bedrockCatalogRequests.values()) {
+			controller.abort()
+		}
+		this.bedrockCatalogRequests.clear()
 		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()

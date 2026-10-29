@@ -101,6 +101,66 @@ describe("AwsBedrockHandler", () => {
 		})
 	})
 
+	it.each(["isn't supported", "isn’t supported.", "is not supported"])(
+		"explains inference-profile errors with wording %s",
+		async (wording) => {
+			handler["client"].send = vi
+				.fn()
+				.mockRejectedValue(new Error(`Invocation with on-demand throughput ${wording}`))
+			const consume = async () => {
+				for await (const chunk of handler.createMessage("system", [{ role: "user", content: "hello" }])) {
+					void chunk
+				}
+			}
+			await expect(consume()).rejects.toThrow("Try enabling cross-region inference in settings")
+		},
+	)
+
+	it("directs a custom ARN to an inference-profile ARN, not the routing settings", async () => {
+		const provider = new AwsBedrockHandler({
+			awsCustomArn:
+				"arn:aws:bedrock:us-east-1:123456789012:foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
+			awsAccessKey: "test-access-key",
+			awsSecretKey: "test-secret-key",
+			awsRegion: "us-east-1",
+		})
+		provider["client"].send = vi
+			.fn()
+			.mockRejectedValue(new Error("Invocation with on-demand throughput isn't supported"))
+		const consume = async () => {
+			for await (const chunk of provider.createMessage("system", [{ role: "user", content: "hello" }])) {
+				void chunk
+			}
+		}
+		const error = await consume().then(
+			() => undefined,
+			(e: Error) => e,
+		)
+		expect(error?.message).toContain("inference-profile ARN")
+		expect(error?.message).not.toContain("Try enabling cross-region inference")
+	})
+
+	it("preserves a newly discovered foundation-model ID rather than invoking the default Claude model", () => {
+		const provider = new AwsBedrockHandler({
+			apiModelId: "custom-arn",
+			awsRegion: "eu-west-3",
+			awsCustomArn: "arn:aws:bedrock:eu-west-3::foundation-model/mistral.new-model-v1:0",
+		})
+		expect(provider.getModel().id).toBe("mistral.new-model-v1:0")
+		expect(provider.getModel().info.supportsReasoningBudget).not.toBe(true)
+	})
+
+	it("rejects the custom-arn sentinel before sending a request when no ARN is entered", async () => {
+		const provider = new AwsBedrockHandler({ apiModelId: "custom-arn", awsRegion: "eu-west-3" })
+		const send = vi.fn()
+		provider["client"].send = send
+		await expect(
+			collectStream(provider.createMessage("system", [{ role: "user", content: "hello" }])),
+		).rejects.toThrow("Enter a custom ARN")
+		await expect(provider.completePrompt("hello")).rejects.toThrow("Enter a custom ARN")
+		expect(send).not.toHaveBeenCalled()
+	})
+
 	it.each(["max_tokens", "end_turn", "tool_use", "stop_sequence"])(
 		"reports truncation only for %s, after preserving usage",
 		async (stopReason) => {

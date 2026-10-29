@@ -1,5 +1,7 @@
 import {
 	BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL,
+	BEDROCK_GLOBAL_INFERENCE_MODEL_IDS,
+	getBedrockInferenceModelId,
 	isBedrockFoundationModelArn,
 	resolveBedrockCustomArnBaseModelId,
 } from "../providers/bedrock.js"
@@ -115,5 +117,65 @@ describe("isBedrockFoundationModelArn", () => {
 		).toBe(false)
 		expect(isBedrockFoundationModelArn(undefined)).toBe(false)
 		expect(isBedrockFoundationModelArn("")).toBe(false)
+	})
+})
+
+describe("getBedrockInferenceModelId", () => {
+	const globalModel = BEDROCK_GLOBAL_INFERENCE_MODEL_IDS[0]
+	const regionalOnlyModel = "amazon.titan-text-express-v1"
+
+	it.each([
+		[
+			"strips an existing regional prefix",
+			"us.anthropic.claude-opus-4-8",
+			"eu-west-1",
+			false,
+			false,
+			"anthropic.claude-opus-4-8",
+		],
+		["strips an existing global prefix", `global.${globalModel}`, undefined, false, false, globalModel],
+		[
+			"uses the global profile for a supported model",
+			globalModel,
+			"us-east-1",
+			true,
+			true,
+			`global.${globalModel}`,
+		],
+		[
+			"falls back to the regional profile for a model without a global profile",
+			regionalOnlyModel,
+			"us-east-1",
+			true,
+			true,
+			`us.${regionalOnlyModel}`,
+		],
+		[
+			"maps a region to its geography prefix",
+			regionalOnlyModel,
+			"eu-west-1",
+			true,
+			false,
+			`eu.${regionalOnlyModel}`,
+		],
+		["keeps the model ID when no region is given", regionalOnlyModel, undefined, true, false, regionalOnlyModel],
+		[
+			"keeps the model ID for an unmapped region",
+			regionalOnlyModel,
+			"me-central-1",
+			true,
+			false,
+			regionalOnlyModel,
+		],
+		[
+			"keeps the model ID when cross-region is off",
+			regionalOnlyModel,
+			"us-east-1",
+			false,
+			false,
+			regionalOnlyModel,
+		],
+	] as const)("%s", (_name, modelId, region, crossRegion, global, expected) => {
+		expect(getBedrockInferenceModelId(modelId, region, crossRegion, global)).toBe(expected)
 	})
 })
