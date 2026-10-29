@@ -1543,8 +1543,39 @@ export class ClineProvider
 	}
 
 	async resolveWebviewView(webviewView: vscode.WebviewView | vscode.WebviewPanel) {
+		// A different view replaces the current one: dispose its subscriptions so
+		// the replaced view can no longer dispatch messages or refresh provider state.
+		if (this.view !== webviewView) {
+			this.clearWebviewResources()
+		}
+
 		this.view = webviewView
 		const inTabMode = "onDidChangeViewState" in webviewView
+
+		// Register disposal before awaiting HTML or state so closing the view during
+		// either load invalidates this resolve and prevents later listener installation.
+		webviewView.onDidDispose(
+			async () => {
+				// A view that is no longer current must not clear the current
+				// view's resources or dispose the provider.
+				if (webviewView !== this.view) {
+					return
+				}
+
+				if (inTabMode) {
+					this.log("Disposing ClineProvider instance for tab view")
+					await this.dispose()
+				} else {
+					this.log("Clearing webview resources for sidebar view")
+					this.view = undefined
+					this.clearWebviewResources()
+				}
+			},
+			null,
+			// View-scoped, like the other view subscriptions: disposed both when
+			// the view is disposed and when a different view replaces it.
+			this.webviewDisposables,
+		)
 
 		if (inTabMode) {
 			setPanel(webviewView, "tab")
@@ -1565,11 +1596,19 @@ export class ClineProvider
 			localResourceRoots: resourceRoots,
 		}
 
-		webviewView.webview.html =
+		const html =
 			this.contextProxy.extensionMode === vscode.ExtensionMode.Development &&
 			process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1"
 				? await this.getHMRHtmlContent(webviewView.webview)
 				: await this.getHtmlContent(webviewView.webview)
+
+		// The HTML load above can finish after the view was disposed or replaced.
+		// A stale resolve must not assign HTML to a view the provider no longer owns.
+		if (this.isStaleViewResolve(webviewView)) {
+			return
+		}
+
+		webviewView.webview.html = html
 
 		// Initialize out-of-scope variables that need to receive persistent
 		// global state values.
@@ -1601,9 +1640,15 @@ export class ClineProvider
 			},
 		)
 
+		// State hydration can also finish after the view was disposed or replaced.
+		// A stale resolve must not install listeners on a view the provider no longer owns.
+		if (this.isStaleViewResolve(webviewView)) {
+			return
+		}
+
 		// Sets up an event listener to listen for messages passed from the webview view context
 		// and executes code based on the message that is received.
-		this.setWebviewMessageListener(webviewView.webview)
+		this.setWebviewMessageListener(webviewView)
 		this.webviewDisposables.push(this.webviewFocusTracker.init(this, webviewView))
 
 		// Listen for when the panel becomes visible.
@@ -1612,6 +1657,11 @@ export class ClineProvider
 			// WebviewView and WebviewPanel have all the same properties except
 			// for this visibility listener panel.
 			const viewStateDisposable = webviewView.onDidChangeViewState(() => {
+				// Ignore events from a view that is no longer the current view.
+				if (webviewView !== this.view) {
+					return
+				}
+
 				if (this.view?.visible) {
 					void this.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
 				} else {
@@ -1623,6 +1673,11 @@ export class ClineProvider
 		} else if ("onDidChangeVisibility" in webviewView) {
 			// sidebar
 			const visibilityDisposable = webviewView.onDidChangeVisibility(() => {
+				// Ignore events from a view that is no longer the current view.
+				if (webviewView !== this.view) {
+					return
+				}
+
 				if (this.view?.visible) {
 					void this.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
 				} else {
@@ -1633,24 +1688,13 @@ export class ClineProvider
 			this.webviewDisposables.push(visibilityDisposable)
 		}
 
-		// Listen for when the view is disposed
-		// This happens when the user closes the view or when the view is closed programmatically
-		webviewView.onDidDispose(
-			async () => {
-				if (inTabMode) {
-					this.log("Disposing ClineProvider instance for tab view")
-					await this.dispose()
-				} else {
-					this.log("Clearing webview resources for sidebar view")
-					this.clearWebviewResources()
-				}
-			},
-			null,
-			this.webviewDisposables,
-		)
-
 		// Listen for when color changes
 		const configDisposable = vscode.workspace.onDidChangeConfiguration(async (e) => {
+			// Ignore configuration refreshes scoped to a view that is no longer current.
+			if (webviewView !== this.view) {
+				return
+			}
+
 			if (e && e.affectsConfiguration("workbench.colorTheme")) {
 				// Sends latest theme name to webview
 				await this.postMessageToWebview({ type: "theme", text: JSON.stringify(await getTheme()) })
@@ -2250,13 +2294,19 @@ export class ClineProvider
 	 * Sets up an event listener to listen for messages passed from the webview context and
 	 * executes code based on the message that is received.
 	 *
-	 * @param webview A reference to the extension webview
+	 * @param webviewView The view whose webview messages are listened to
 	 */
-	private setWebviewMessageListener(webview: vscode.Webview) {
-		const onReceiveMessage = async (message: WebviewMessage) =>
-			webviewMessageHandler(this, message, this.marketplaceManager)
+	private setWebviewMessageListener(webviewView: vscode.WebviewView | vscode.WebviewPanel) {
+		const onReceiveMessage = async (message: WebviewMessage) => {
+			// Ignore messages from a view that is no longer the current view.
+			if (webviewView !== this.view) {
+				return
+			}
 
-		const messageDisposable = webview.onDidReceiveMessage(onReceiveMessage)
+			await webviewMessageHandler(this, message, this.marketplaceManager)
+		}
+
+		const messageDisposable = webviewView.webview.onDidReceiveMessage(onReceiveMessage)
 		this.webviewDisposables.push(messageDisposable)
 	}
 
@@ -3955,6 +4005,10 @@ export class ClineProvider
 	 * Updates a task in the task history and optionally broadcasts the updated history to the webview.
 	 * Now delegates to TaskHistoryStore for per-task file persistence.
 	 *
+	 * This writer never owns the `title` field: `title` is written only by the rename path
+	 * (`renameTaskWithId` via `taskHistoryStore.atomicReadAndUpdate`). Callers here build items
+	 * from snapshots read before taking the store lock, so any title they carry can be stale.
+	 *
 	 * @param item The history item to update or add
 	 * @param options.broadcast Whether to broadcast the updated history to the webview (default: true)
 	 * @returns The updated task history array
@@ -3962,13 +4016,17 @@ export class ClineProvider
 	async updateTaskHistory(item: HistoryItem, options: { broadcast?: boolean } = {}): Promise<HistoryItem[]> {
 		const { broadcast = true } = options
 
-		const history = await this.taskHistoryStore.upsert(item)
+		// Drop the snapshot's title so upsertCore preserves the value held under the store lock
+		// instead of treating a stale title as a changed field and reverting a concurrent rename.
+		const { title: _title, ...itemWithoutTitle } = item
+
+		const history = await this.taskHistoryStore.upsert(itemWithoutTitle)
 		this.recentTasksCache = undefined
 
 		// Broadcast the updated history to the webview if requested.
 		// Prefer per-item updates to avoid repeatedly cloning/sending the full history.
 		if (broadcast && this.isViewLaunched) {
-			const updatedItem = this.taskHistoryStore.get(item.id) ?? item
+			const updatedItem = this.taskHistoryStore.get(item.id) ?? itemWithoutTitle
 			await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
 		}
 
