@@ -5,7 +5,7 @@ import { WebviewFocusTracker } from "../../core/webview/WebviewFocusTracker"
 import { ContextProxy } from "../../core/config/ContextProxy"
 import { makeExtensionContext } from "../../test-utils/vscode"
 
-import { getVisibleProviderOrLog, openClineInNewTab, registerCommands, setPanel } from "../registerCommands"
+import { getPanel, getVisibleProviderOrLog, openClineInNewTab, registerCommands, setPanel } from "../registerCommands"
 
 vi.mock("execa", () => ({
 	execa: vi.fn(),
@@ -460,6 +460,25 @@ describe("openClineInNewTab", () => {
 		setPanel(undefined, "sidebar")
 		setPanel(undefined, "tab")
 	})
+
+	it.each([false, true])(
+		"clears a closed tab reference only if it is still current (replacement: %s)",
+		async (replaced) => {
+			await openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			})
+			const panel = vi.mocked(vscode.window.createWebviewPanel).mock.results[0].value
+			const onDispose = vi.mocked(panel.onDidDispose).mock.calls[0][0]
+			const replacement = { ...panel }
+			if (replaced) setPanel(replacement, "tab")
+
+			onDispose()
+
+			expect(getPanel()).toBe(replaced ? replacement : undefined)
+		},
+	)
 
 	it("creates a webview panel with title 'Zoo Code'", async () => {
 		const webviewFocusTracker = new WebviewFocusTracker()

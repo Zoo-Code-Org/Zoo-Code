@@ -38,9 +38,10 @@ async function poll<T>(
 	throw new Error(`Timed out waiting for ${description}; latest value: ${JSON.stringify(latest)}`)
 }
 
-async function waitForFile(filePath: string) {
+async function waitForFile(filePath: string, probe?: () => Promise<void>) {
 	await poll(
 		async () => {
+			await probe?.()
 			try {
 				await fs.access(filePath)
 				return true
@@ -144,6 +145,22 @@ export async function run(): Promise<void> {
 		landmark = result
 	}
 
-	await fs.writeFile(readyPath, `${JSON.stringify({ scene, themeId, landmark, themeFixture }, null, 2)}\n`, "utf8")
-	await waitForFile(donePath)
+	await fs.writeFile(
+		readyPath,
+		`${JSON.stringify({ scene, themeId, landmark, themeFixture, taskIds: api.getCurrentTaskStack() }, null, 2)}\n`,
+		"utf8",
+	)
+	// A request written by Playwright after recovery proves a fresh round trip
+	// through the real host and compares its task stack with the initial one.
+	await waitForFile(donePath, async () => {
+		const request = `${donePath}.probe`
+		try {
+			await fs.access(request)
+		} catch {
+			return
+		}
+		await fs.unlink(request)
+		const fixture = await api.captureWebviewThemeFixture()
+		await fs.writeFile(`${request}.result`, JSON.stringify({ fixture, taskIds: api.getCurrentTaskStack() }), "utf8")
+	})
 }

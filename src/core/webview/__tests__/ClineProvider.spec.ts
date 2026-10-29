@@ -175,12 +175,15 @@ vi.mock("vscode", () => ({
 		QuickFix: { value: "quickfix" },
 		RefactorRewrite: { value: "refactor.rewrite" },
 	},
+	ViewColumn: { Active: -1 },
 	commands: {
+		getCommands: vi.fn().mockResolvedValue([]),
 		executeCommand: vi.fn().mockResolvedValue(undefined),
 	},
 	window: {
+		createWebviewPanel: vi.fn(),
 		showInformationMessage: vi.fn(),
-		showWarningMessage: vi.fn(),
+		showWarningMessage: vi.fn().mockResolvedValue(undefined),
 		showErrorMessage: vi.fn(),
 		showSaveDialog: vi.fn(),
 		showOpenDialog: vi.fn(),
@@ -273,7 +276,7 @@ vi.mock("../../../integrations/workspace/WorkspaceTracker", () => {
 })
 
 vi.mock("../../task/Task", () => ({
-	Task: vi.fn().mockImplementation(function (options: any) {
+	Task: vi.fn().mockImplementation(function (options: TaskOptions) {
 		return {
 			api: undefined,
 			abortTask: vi.fn(),
@@ -518,6 +521,7 @@ describe("ClineProvider", () => {
 
 		// Mock output channel
 		mockOutputChannel = {
+			show: vi.fn(),
 			appendLine: vi.fn(),
 			clear: vi.fn(),
 			dispose: vi.fn(),
@@ -1111,6 +1115,12 @@ describe("ClineProvider", () => {
 		}
 
 		beforeEach(() => {
+			vi.mocked(vscode.commands.executeCommand).mockReset().mockResolvedValue(undefined)
+			vi.mocked(vscode.window.showWarningMessage).mockResolvedValue(undefined)
+			vi.mocked(vscode.commands.getCommands).mockResolvedValue([
+				`${ClineProvider.sideBarId}.removeView`,
+				`${ClineProvider.sideBarId}.focus`,
+			])
 			// Fake timers must be active before resolveWebviewView so the
 			// watchdog interval is registered on the fake clock.
 			vi.useFakeTimers()
@@ -1219,7 +1229,7 @@ describe("ClineProvider", () => {
 			},
 		)
 
-		test("grants a new grace window after recovery and caps reloads until an actual heartbeat", async () => {
+		test("grants a new grace window after recovery and caps reloads until sustained heartbeats", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			const assignHtml = trackHtmlAssignments()
 
@@ -1242,7 +1252,182 @@ describe("ClineProvider", () => {
 
 			await webviewMessageHandler(provider, { type: "webviewHeartbeat" })
 			await vi.advanceTimersByTimeAsync(120_000)
+			expect(assignHtml).toHaveBeenCalledTimes(3)
+			// One mount heartbeat is insufficient: a new healthy window must
+			// span a full minute of periodic heartbeats before replenishing.
+			provider.updateWebviewHeartbeat()
+			await vi.advanceTimersByTimeAsync(30_000)
+			provider.updateWebviewHeartbeat()
+			await vi.advanceTimersByTimeAsync(30_000)
+			provider.updateWebviewHeartbeat()
+			await vi.advanceTimersByTimeAsync(120_000)
 			expect(assignHtml).toHaveBeenCalledTimes(4)
+		})
+
+		test.each([false, true])(
+			"recreates only the failed sidebar host, retaining its task and budget (interrupted: %s)",
+			async (interrupted) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				const task = new Task(defaultTaskOptions)
+				task.abort = interrupted
+				provider["taskRegistry"].push(task)
+				const evict = vi.spyOn(provider, "evictCurrentTask")
+				const remove = vi.spyOn(provider, "removeClineFromStack")
+				const replacement = { ...mockWebviewView, webview: { ...mockWebviewView.webview, html: "" } }
+				vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command) => {
+					if (command === `${ClineProvider.sideBarId}.removeView`) disposeCallback()
+					if (command === `${ClineProvider.sideBarId}.focus`) await provider.resolveWebviewView(replacement)
+				})
+
+				await vi.advanceTimersByTimeAsync(120_000)
+				expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith(`${ClineProvider.sideBarId}.removeView`)
+				await vi.advanceTimersByTimeAsync(10_000)
+
+				expect(vscode.commands.executeCommand).toHaveBeenCalledWith(`${ClineProvider.sideBarId}.removeView`)
+				expect(vscode.commands.executeCommand).toHaveBeenCalledWith(`${ClineProvider.sideBarId}.focus`, {
+					preserveFocus: true,
+				})
+				expect(provider["view"]).toBe(replacement)
+				expect(provider["webviewRecoveryAttempts"]).toBe(1)
+				expect(provider.getCurrentTask()).toBe(task)
+				expect(evict).not.toHaveBeenCalled()
+				expect(remove).not.toHaveBeenCalled()
+				expect(task.dispose).not.toHaveBeenCalled()
+				expect(task.abortTask).not.toHaveBeenCalled()
+			},
+		)
+
+		test.each(["heartbeat", "hidden", "disposed", "suspended"] as const)(
+			"does not recreate the host after %s during the confirmation window",
+			async (event) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				await vi.advanceTimersByTimeAsync(120_000)
+				if (event === "heartbeat") provider.updateWebviewHeartbeat()
+				if (event === "hidden")
+					Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
+				if (event === "disposed") await provider.dispose()
+				if (event === "suspended") vi.setSystemTime(Date.now() + 120_000)
+
+				await vi.advanceTimersByTimeAsync(10_000)
+
+				expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith(`${ClineProvider.sideBarId}.removeView`)
+			},
+		)
+
+		test.each(["heartbeat", "hidden", "disposed", "replacement"] as const)(
+			"cancels host recreation after %s during command discovery",
+			async (event) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				vi.mocked(vscode.commands.getCommands).mockImplementation(async () => {
+					if (event === "heartbeat") provider.updateWebviewHeartbeat()
+					if (event === "hidden")
+						Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
+					if (event === "disposed") await provider.dispose()
+					if (event === "replacement") provider["view"] = { ...mockWebviewView }
+					// Even an unavailable-command result must be ignored after cancellation.
+					return []
+				})
+
+				await vi.advanceTimersByTimeAsync(130_000)
+
+				expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith(`${ClineProvider.sideBarId}.removeView`)
+				expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+			},
+		)
+
+		test("ignores a late command-discovery error after a heartbeat returns", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			vi.mocked(vscode.commands.getCommands).mockImplementation(async () => {
+				provider.updateWebviewHeartbeat()
+				throw new Error("discovery failed")
+			})
+
+			await vi.advanceTimersByTimeAsync(130_000)
+
+			expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		})
+
+		test.each(["unavailable commands", "failed removal"] as const)(
+			"stops and notifies once when scoped recovery has %s",
+			async (failure) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				if (failure === "unavailable commands") vi.mocked(vscode.commands.getCommands).mockResolvedValue([])
+				if (failure === "failed removal")
+					vi.mocked(vscode.commands.executeCommand).mockRejectedValue(new Error("removal failed"))
+				const assignHtml = trackHtmlAssignments()
+
+				await vi.advanceTimersByTimeAsync(600_000)
+
+				expect(assignHtml).toHaveBeenCalledTimes(1)
+				expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+				expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.reloadWindow")
+				expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+					expect.stringContaining("Webview recovery stopped:"),
+				)
+			},
+		)
+
+		test.each(["Reload Window", "Show Logs"] as const)(
+			"runs only the selected recovery action: %s",
+			async (action) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				vi.mocked(vscode.commands.getCommands).mockResolvedValue([])
+				vi.mocked(vscode.window.showWarningMessage).mockImplementation(vi.fn().mockResolvedValue(action))
+
+				await vi.advanceTimersByTimeAsync(130_000)
+
+				if (action === "Reload Window")
+					expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow")
+				if (action === "Show Logs") {
+					expect(mockOutputChannel.show).toHaveBeenCalledTimes(1)
+					expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.reloadWindow")
+				}
+			},
+		)
+
+		test("ignores an old Reload Window choice after a heartbeat returns", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			vi.mocked(vscode.commands.getCommands).mockResolvedValue([])
+			let choose: (value: string) => void = () => {
+				throw new Error("Notification not shown")
+			}
+			const choice = new Promise<string>((resolve) => {
+				choose = resolve
+			})
+			vi.mocked(vscode.window.showWarningMessage).mockImplementation(vi.fn().mockReturnValue(choice))
+			await vi.advanceTimersByTimeAsync(130_000)
+
+			provider.updateWebviewHeartbeat()
+			choose("Reload Window")
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.reloadWindow")
+		})
+
+		test("bounds failed HTML generation and reports the exhausted budget once", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const generate = vi.spyOn(provider, "getState").mockRejectedValue(new Error("cannot generate"))
+			const assignHtml = trackHtmlAssignments()
+
+			await vi.advanceTimersByTimeAsync(600_000)
+
+			expect(generate).toHaveBeenCalledTimes(3)
+			expect(assignHtml).not.toHaveBeenCalled()
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		})
+
+		test("does not replenish attempts in a mount-heartbeat-crash loop", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const assignHtml = trackHtmlAssignments()
+			for (let attempt = 0; attempt < 3; attempt++) {
+				await vi.advanceTimersByTimeAsync(120_000)
+				provider.updateWebviewHeartbeat()
+			}
+			await vi.advanceTimersByTimeAsync(240_000)
+
+			expect(assignHtml).toHaveBeenCalledTimes(3)
+			expect(provider["webviewRecoveryAttempts"]).toBe(3)
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
 		})
 
 		test("gives a replacement view a fresh recovery budget after exhausting attempts", async () => {
@@ -1881,6 +2066,67 @@ describe("ClineProvider", () => {
 					}),
 					dispose: vi.fn(),
 				} as unknown as vscode.WebviewPanel
+			})
+
+			test.each([false, true])(
+				"replaces the tab host without disposing its provider or task (interrupted: %s)",
+				async (interrupted) => {
+					const callbacks: Array<() => unknown> = []
+					vi.mocked(mockWebviewPanel.onDidDispose).mockImplementation((listener) => {
+						callbacks.push(listener)
+						return { dispose: vi.fn() }
+					})
+					vi.mocked(mockWebviewPanel.dispose).mockImplementation(() => {
+						callbacks.forEach((callback) => callback())
+					})
+					mockWebviewPanel.title = "Zoo Code task"
+					await provider.resolveWebviewView(mockWebviewPanel)
+					const task = new Task(defaultTaskOptions)
+					task.abort = interrupted
+					provider["taskRegistry"].push(task)
+					const evict = vi.spyOn(provider, "evictCurrentTask")
+					const remove = vi.spyOn(provider, "removeClineFromStack")
+					const replacement = {
+						...mockWebviewPanel,
+						webview: { ...mockWebviewPanel.webview, html: "" },
+						onDidDispose: vi.fn(() => ({ dispose: vi.fn() })),
+						dispose: vi.fn(),
+					}
+					vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(replacement)
+
+					await vi.advanceTimersByTimeAsync(130_000)
+
+					expect(mockWebviewPanel.dispose).toHaveBeenCalledTimes(1)
+					expect(provider["view"]).toBe(replacement)
+					expect(provider["_disposed"]).toBe(false)
+					expect(provider["webviewRecoveryAttempts"]).toBe(1)
+					expect(provider.getCurrentTask()).toBe(task)
+					expect(evict).not.toHaveBeenCalled()
+					expect(remove).not.toHaveBeenCalled()
+					expect(task.dispose).not.toHaveBeenCalled()
+					expect(task.abortTask).not.toHaveBeenCalled()
+					expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith(
+						`${ClineProvider.sideBarId}.removeView`,
+					)
+				},
+			)
+
+			test("keeps the old tab and its task when replacement resolution fails before publication", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				const task = new Task(defaultTaskOptions)
+				provider["taskRegistry"].push(task)
+				const replacement = { ...mockWebviewPanel, dispose: vi.fn() }
+				vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(replacement)
+				vi.spyOn(provider, "resolveWebviewView").mockRejectedValue(new Error("resolver unavailable"))
+
+				await provider["recreateWebviewHostForRecovery"](mockWebviewPanel)
+
+				expect(mockWebviewPanel.dispose).not.toHaveBeenCalled()
+				expect(replacement.dispose).toHaveBeenCalledTimes(1)
+				expect(provider["view"]).toBe(mockWebviewPanel)
+				expect(provider.getCurrentTask()).toBe(task)
+				expect(task.dispose).not.toHaveBeenCalled()
+				expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
 			})
 
 			test("reloads the tab webview when the heartbeat is stale and the tab is visible", async () => {

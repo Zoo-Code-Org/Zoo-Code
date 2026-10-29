@@ -36,9 +36,12 @@ interface RunningScene {
 	page: Page
 	temporaryRoot: string
 	userDataPath: string
+	taskIds: string[]
 }
 
-async function waitForJson(filePath: string): Promise<{ landmark: string; scene: string; themeId: string }> {
+async function waitForJson(
+	filePath: string,
+): Promise<{ landmark: string; scene: string; themeId: string; taskIds: string[] }> {
 	const deadline = Date.now() + 90_000
 	while (Date.now() < deadline) {
 		try {
@@ -46,6 +49,7 @@ async function waitForJson(filePath: string): Promise<{ landmark: string; scene:
 				landmark: string
 				scene: string
 				themeId: string
+				taskIds: string[]
 			}
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT" && !(error instanceof SyntaxError)) throw error
@@ -150,7 +154,7 @@ export async function startScene(
 		})
 		const ready = await waitForJson(readyPath)
 		expect(ready).toMatchObject({ landmark: scenario.landmark, scene: scenario.scene, themeId: scenario.themeId })
-		return { app, donePath, logPath, mock, page, temporaryRoot, userDataPath }
+		return { app, donePath, logPath, mock, page, temporaryRoot, userDataPath, taskIds: ready.taskIds }
 	} catch (error) {
 		if (page) await page.screenshot({ path: testInfo.outputPath("workbench.png") }).catch(() => undefined)
 		await attachLogs(userDataPath, logPath, testInfo)

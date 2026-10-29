@@ -701,7 +701,7 @@ export const webviewMessageHandler = async (
 			provider.isViewLaunched = true
 			break
 		case "webviewHeartbeat":
-			// Timestamp-only update for the dead-renderer watchdog; no other side effects.
+			// Confirm renderer liveness and advance the watchdog recovery health window.
 			provider.updateWebviewHeartbeat()
 			break
 		case "newTask":

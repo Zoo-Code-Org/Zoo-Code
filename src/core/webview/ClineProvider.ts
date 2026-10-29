@@ -104,7 +104,7 @@ import { getWorkspaceGitInfo } from "../../utils/git"
 import { getWorkspacePath } from "../../utils/path"
 import { OrganizationAllowListViolationError } from "../../utils/errors"
 
-import { setPanel } from "../../activate/registerCommands"
+import { getPanel, setPanel } from "../../activate/registerCommands"
 
 import { t } from "../../i18n"
 
@@ -248,6 +248,13 @@ export class ClineProvider
 	// millisecond; pending recovery must yield to either sign of renewed grace.
 	private webviewHeartbeatRevision = 0
 	private webviewRecoveryAttempts = 0
+	private webviewRecoveryConfirmation: ReturnType<typeof setTimeout> | undefined
+	private webviewHostRecoveryInProgress = false
+	private webviewRecoveryFailureReported = false
+	private lastReceivedWebviewHeartbeatAt: number | undefined
+	private webviewHealthySince: number | undefined
+	private static readonly WEBVIEW_RECOVERY_CONFIRM_MS = 10_000
+	private static readonly WEBVIEW_HEALTHY_WINDOW_MS = 60_000
 	private static readonly WEBVIEW_RECOVERY_ATTEMPT_LIMIT = 3
 	private webviewWatchdogInterval: ReturnType<typeof setInterval> | null = null
 	// Bumped to invalidate an in-flight recovery reload when the provider or
@@ -854,8 +861,14 @@ export class ClineProvider
 		// Invalidate any recovery reload still awaiting its HTML so it cannot
 		// reassign webview.html on the disposed view.
 		this.webviewRecoveryEpoch++
-		// A replacement renderer needs its own recovery-attempt budget.
-		this.webviewRecoveryAttempts = 0
+		// User-opened replacements get a fresh budget; recreating a failed host
+		// must preserve its incident budget so crash loops remain bounded.
+		if (!this.webviewHostRecoveryInProgress) {
+			this.webviewRecoveryAttempts = 0
+			this.webviewRecoveryFailureReported = false
+		}
+		this.lastReceivedWebviewHeartbeatAt = undefined
+		this.webviewHealthySince = undefined
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()
 			if (x) {
@@ -1079,6 +1092,7 @@ export class ClineProvider
 				}
 
 				if (inTabMode) {
+					if (getPanel() === webviewView) setPanel(undefined, "tab")
 					this.log("Disposing ClineProvider instance for tab view")
 					await this.dispose()
 				} else {
@@ -1226,7 +1240,9 @@ export class ClineProvider
 		// If the extension is starting a new session, clear previous task state.
 		// But don't clear if there's already an active task (e.g., resumed via IPC/bridge).
 		const currentTask = this.getCurrentTask()
-		if (!currentTask || currentTask.abandoned || currentTask.abort) {
+		// Host recreation is a UI repair, including when the displayed task is
+		// interrupted. It must not evict or resume that task as a side effect.
+		if (!this.webviewHostRecoveryInProgress && (!currentTask || currentTask.abandoned || currentTask.abort)) {
 			await this.removeClineFromStack()
 		}
 
@@ -3544,14 +3560,34 @@ export class ClineProvider
 		)
 	}
 
-	/** Records that the webview renderer is alive; called on every webviewHeartbeat message. */
+	/** A heartbeat confirms liveness; only sustained health replenishes recovery attempts. */
 	public updateWebviewHeartbeat(): void {
+		const now = Date.now()
+		if (
+			this.lastReceivedWebviewHeartbeatAt === undefined ||
+			now - this.lastReceivedWebviewHeartbeatAt > ClineProvider.WEBVIEW_HEARTBEAT_STALE_MS
+		) {
+			this.webviewHealthySince = now
+		}
+		this.lastReceivedWebviewHeartbeatAt = now
+		if (this.webviewRecoveryConfirmation) {
+			this.log("[Zoo Code] Webview heartbeat returned after recovery")
+		}
 		this.resetWebviewHeartbeatGrace()
-		this.webviewRecoveryAttempts = 0
+		if (
+			this.webviewHealthySince !== undefined &&
+			now - this.webviewHealthySince >= ClineProvider.WEBVIEW_HEALTHY_WINDOW_MS
+		) {
+			if (this.webviewRecoveryAttempts > 0)
+				this.log("[Zoo Code] Webview recovery confirmed by sustained heartbeats")
+			this.webviewRecoveryAttempts = 0
+			this.webviewRecoveryFailureReported = false
+		}
 	}
 
 	/** Restarts the grace window and invalidates pending recovery without recording a heartbeat. */
 	private resetWebviewHeartbeatGrace(): void {
+		this.clearWebviewRecoveryConfirmation()
 		this.lastWebviewHeartbeatAt = Date.now()
 		this.webviewHeartbeatRevision++
 	}
@@ -3581,19 +3617,19 @@ export class ClineProvider
 			if (this.view?.visible !== true) {
 				return
 			}
-			if (
-				now - this.lastWebviewHeartbeatAt <= ClineProvider.WEBVIEW_HEARTBEAT_STALE_MS ||
-				this.webviewRecoveryAttempts >= ClineProvider.WEBVIEW_RECOVERY_ATTEMPT_LIMIT
-			) {
+			if (now - this.lastWebviewHeartbeatAt <= ClineProvider.WEBVIEW_HEARTBEAT_STALE_MS) return
+			if (this.webviewRecoveryAttempts >= ClineProvider.WEBVIEW_RECOVERY_ATTEMPT_LIMIT) {
+				this.reportWebviewRecoveryFailure("Recovery attempt limit reached without sustained heartbeats")
 				return
 			}
-			this.log("[Zoo Code] Webview heartbeat stale while visible; reloading webview (dead renderer?)")
+			this.log("[Zoo Code] Webview heartbeat stale while visible; attempting recovery")
 			void this.reloadWebviewForRecovery()
 		}, ClineProvider.WEBVIEW_WATCHDOG_TICK_MS)
 	}
 
 	/** Stops the renderer heartbeat watchdog; the webview it watches is gone. */
 	private stopWebviewWatchdog(): void {
+		this.clearWebviewRecoveryConfirmation()
 		if (this.webviewWatchdogInterval) {
 			clearInterval(this.webviewWatchdogInterval)
 			this.webviewWatchdogInterval = null
@@ -3601,9 +3637,8 @@ export class ClineProvider
 	}
 
 	/**
-	 * Reloads only this provider's own webview by regenerating its HTML (fresh
-	 * nonce) and reassigning `webview.html`, which forces VS Code to reload that
-	 * webview. Works for both sidebar (WebviewView) and tab (WebviewPanel) shapes.
+	 * First attempt: regenerate this view's HTML. A missing heartbeat escalates
+	 * to host recreation because HTML delivery cannot restart a dead renderer.
 	 */
 	private async reloadWebviewForRecovery(): Promise<void> {
 		const view = this.view
@@ -3621,6 +3656,10 @@ export class ClineProvider
 			return
 		}
 		this.webviewRecoveryInFlightEpoch = epoch
+		// Count the whole attempt, including HTML-generation failures.
+		this.webviewRecoveryAttempts++
+		this.lastReceivedWebviewHeartbeatAt = undefined
+		this.webviewHealthySince = undefined
 		// A heartbeat that arrives while the HTML is being generated means the
 		// renderer is alive again; comparing revisions (not timestamps) lets the
 		// post-await check catch heartbeats that land in the same millisecond.
@@ -3641,8 +3680,31 @@ export class ClineProvider
 				return
 			}
 			view.webview.html = html
-			this.webviewRecoveryAttempts++
 			this.resetWebviewHeartbeatGrace()
+			const revision = this.webviewHeartbeatRevision
+			const requestedAt = Date.now()
+			this.webviewRecoveryConfirmation = setTimeout(() => {
+				this.webviewRecoveryConfirmation = undefined
+				// A late confirmation timer can be a host suspend, just like a
+				// late watchdog tick. Let renderer timers resume before escalating.
+				if (Date.now() - requestedAt > ClineProvider.WEBVIEW_RECOVERY_CONFIRM_MS * 1.5) {
+					this.resetWebviewHeartbeatGrace()
+					return
+				}
+				if (
+					this._disposed ||
+					this.view !== view ||
+					this.webviewRecoveryEpoch !== epoch ||
+					this.webviewHeartbeatRevision !== revision ||
+					!view.visible
+				)
+					return
+				void this.recreateWebviewHostForRecovery(view).catch((error: unknown) => {
+					this.reportWebviewRecoveryFailure(
+						`Host recreation failed: ${error instanceof Error ? error.message : String(error)}`,
+					)
+				})
+			}, ClineProvider.WEBVIEW_RECOVERY_CONFIRM_MS)
 		} catch (error) {
 			this.log(`[Zoo Code] Failed to reload webview: ${error instanceof Error ? error.message : String(error)}`)
 		} finally {
@@ -3652,6 +3714,110 @@ export class ClineProvider
 				this.webviewRecoveryInFlightEpoch = undefined
 			}
 		}
+	}
+
+	private clearWebviewRecoveryConfirmation(): void {
+		if (this.webviewRecoveryConfirmation) clearTimeout(this.webviewRecoveryConfirmation)
+		this.webviewRecoveryConfirmation = undefined
+	}
+
+	/** Recreate the host/transport: sending more HTML cannot revive its dead renderer. */
+	private async recreateWebviewHostForRecovery(view: vscode.WebviewView | vscode.WebviewPanel): Promise<void> {
+		if (this.webviewHostRecoveryInProgress || this._disposed || this.view !== view || !view.visible) return
+		const revision = this.webviewHeartbeatRevision
+		let started = false
+		try {
+			let commands: string[] | undefined
+			if (!("onDidChangeViewState" in view)) {
+				// Generated VS Code view commands are not an extension API contract.
+				// Check availability and cover them against the pinned real host in E2E.
+				commands = await vscode.commands.getCommands(true)
+			}
+			if (
+				this.webviewHostRecoveryInProgress ||
+				this._disposed ||
+				this.view !== view ||
+				!view.visible ||
+				this.webviewHeartbeatRevision !== revision
+			)
+				return
+			if (
+				commands &&
+				(!commands.includes(`${ClineProvider.sideBarId}.removeView`) ||
+					!commands.includes(`${ClineProvider.sideBarId}.focus`))
+			) {
+				throw new Error("VS Code does not provide the scoped sidebar recreation commands")
+			}
+			this.webviewHostRecoveryInProgress = true
+			started = true
+			this.log("[Zoo Code] No heartbeat after HTML reload; recreating this webview host")
+			if ("onDidChangeViewState" in view) {
+				const replacement = vscode.window.createWebviewPanel(
+					ClineProvider.tabPanelId,
+					view.title,
+					{ viewColumn: view.viewColumn ?? vscode.ViewColumn.Active, preserveFocus: true },
+					{ ...view.options, ...view.webview.options },
+				)
+				replacement.iconPath = view.iconPath
+				// Resolve publishes the replacement before yielding. The old view's
+				// disposal must see it no longer owns this provider and its tasks.
+				const resolved = this.resolveWebviewView(replacement)
+				if (this.view === replacement) view.dispose()
+				else replacement.dispose()
+				await resolved
+			} else {
+				await vscode.commands.executeCommand(`${ClineProvider.sideBarId}.removeView`)
+				if (this._disposed) return
+				await vscode.commands.executeCommand(`${ClineProvider.sideBarId}.focus`, { preserveFocus: true })
+				await pWaitFor(
+					() =>
+						this._disposed ||
+						(this.view !== undefined && this.view !== view && this.webviewWatchdogInterval !== null),
+					{
+						interval: 50,
+						timeout: 10_000,
+					},
+				)
+			}
+		} catch (error) {
+			// A late discovery failure must not stop a recovered/replaced view.
+			// Once recreation starts, disposal of the old view is expected.
+			if (
+				this._disposed ||
+				(!started && (this.view !== view || this.webviewHeartbeatRevision !== revision || !view.visible))
+			)
+				return
+			if (started && this.lastReceivedWebviewHeartbeatAt !== undefined) return
+			this.reportWebviewRecoveryFailure(
+				`Host recreation failed: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		} finally {
+			if (started) this.webviewHostRecoveryInProgress = false
+		}
+	}
+
+	private reportWebviewRecoveryFailure(reason: string): void {
+		if (this._disposed || this.webviewRecoveryFailureReported) return
+		this.webviewRecoveryFailureReported = true
+		this.webviewRecoveryAttempts = ClineProvider.WEBVIEW_RECOVERY_ATTEMPT_LIMIT
+		this.log(`[Zoo Code] Webview recovery stopped: ${reason}`)
+		const revision = this.webviewHeartbeatRevision
+		void Promise.resolve(
+			vscode.window.showWarningMessage(
+				"Zoo Code's interface is not responding. Reloading the VS Code window will restart extensions and may interrupt running tasks.",
+				"Reload Window",
+				"Show Logs",
+			),
+		)
+			.then(async (action) => {
+				if (action === "Reload Window" && !this._disposed && this.webviewHeartbeatRevision === revision) {
+					await vscode.commands.executeCommand("workbench.action.reloadWindow")
+				}
+				if (action === "Show Logs") this.outputChannel.show()
+			})
+			.then(undefined, (error: unknown) => {
+				this.log(`[Zoo Code] Recovery notification failed: ${String(error)}`)
+			})
 	}
 
 	/** Builds the webview HTML using the same path as resolveWebviewView (HMR in development). */

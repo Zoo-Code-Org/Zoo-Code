@@ -295,7 +295,8 @@ export const openClineInNewTab = async ({ context, outputChannel, webviewFocusTr
 	// Handle panel closing events.
 	newPanel.onDidDispose(
 		() => {
-			setPanel(undefined, "tab")
+			// A recovery may already have installed a replacement panel.
+			if (tabPanel === newPanel) setPanel(undefined, "tab")
 		},
 		null,
 		context.subscriptions, // Also register dispose listener

@@ -1,8 +1,14 @@
+import fs from "fs/promises"
+import path from "path"
+
+import { glob } from "glob"
+
 import { downloadAndUnzipVSCode } from "@vscode/test-electron"
 import { expect, test, type Page } from "@playwright/test"
 
 import {
 	attachFailureArtifacts,
+	CHAT_RESULT,
 	extensionDevelopmentPath,
 	startScene,
 	stopScene,
@@ -25,11 +31,11 @@ function contentFrame(page: Page) {
 		.find((frame) => frame.url().includes("/fake.html"))
 }
 
-async function waitForWelcome(page: Page) {
+async function waitForContent(page: Page, landmark = scenario.landmark) {
 	await expect.poll(() => Boolean(contentFrame(page))).toBe(true)
 	const frame = contentFrame(page)
 	if (!frame) throw new Error("Zoo Code content frame not found")
-	await expect(frame.getByText(scenario.landmark, { exact: false })).toBeVisible()
+	await expect(frame.getByText(landmark, { exact: false })).toBeVisible()
 	return frame
 }
 
@@ -38,6 +44,9 @@ async function observeHeartbeats(page: Page, block = false) {
 	if (!parent) throw new Error("Zoo Code parent frame not found")
 	return parent.evaluateHandle((blockHeartbeats) => {
 		const observed = { block: blockHeartbeats, blocked: 0, forwarded: 0, launches: 0 }
+		// Reacquire the observation after a retained hidden frame reconnects;
+		// CDP handles from before suspension are not a readiness contract.
+		Reflect.set(window, Symbol.for("zooCode.heartbeatObservation"), observed)
 		const original = MessagePort.prototype.postMessage
 		// VS Code 1.100 forwards webview messages through this parent's port.
 		// Intercept only heartbeat payloads; all other host traffic stays real.
@@ -84,7 +93,7 @@ test("recovers when heartbeat delivery stops and resumes periodic heartbeats", a
 	test.setTimeout(4 * 60_000)
 	const running = await startScene(vscodeExecutablePath, scenario, testInfo)
 	try {
-		const frame = await waitForWelcome(running.page)
+		const frame = await waitForContent(running.page)
 		await frame.evaluate(() => {
 			document.documentElement.dataset.heartbeatDocument = "before-timeout"
 		})
@@ -93,7 +102,7 @@ test("recovers when heartbeat delivery stops and resumes periodic heartbeats", a
 			.poll(() => heartbeat.evaluate((state) => state.launches), { timeout: 150_000, intervals: [1_000] })
 			.toBeGreaterThan(0)
 		expect(await heartbeat.evaluate((state) => state.blocked)).toBeGreaterThan(0)
-		const recovered = await waitForWelcome(running.page)
+		const recovered = await waitForContent(running.page)
 		expect(await recovered.evaluate(() => document.documentElement.dataset.heartbeatDocument)).toBeUndefined()
 		// Mount effects can emit more than one launch/heartbeat message. Capture
 		// their counts after rendering, then require a later interval heartbeat.
@@ -113,9 +122,14 @@ test("recovers when heartbeat delivery stops and resumes periodic heartbeats", a
 
 test("recovers after the isolated Zoo Code renderer is terminated", async ({ browserName: _browserName }, testInfo) => {
 	test.setTimeout(4 * 60_000)
-	const running = await startScene(vscodeExecutablePath, scenario, testInfo)
+	const running = await startScene(
+		vscodeExecutablePath,
+		{ ...scenario, scene: "chat", startMock: true, landmark: CHAT_RESULT },
+		testInfo,
+	)
 	try {
-		const initial = await waitForWelcome(running.page)
+		expect(running.taskIds).toHaveLength(1)
+		const initial = await waitForContent(running.page, CHAT_RESULT)
 		await initial.evaluate(() => {
 			document.documentElement.dataset.heartbeatDocument = "before-crash"
 		})
@@ -145,7 +159,7 @@ test("recovers after the isolated Zoo Code renderer is terminated", async ({ bro
 				async () => {
 					try {
 						const frame = contentFrame(running.page)
-						if (!frame || !(await frame.getByText(scenario.landmark, { exact: false }).isVisible()))
+						if (!frame || !(await frame.getByText(CHAT_RESULT, { exact: false }).isVisible()))
 							return "missing"
 						return (
 							(await frame.locator("html").getAttribute("data-heartbeat-document", { timeout: 1_000 })) ??
@@ -158,7 +172,14 @@ test("recovers after the isolated Zoo Code renderer is terminated", async ({ bro
 				{ timeout: 150_000, intervals: [1_000] },
 			)
 			.toBe("recovered")
-		await waitForWelcome(running.page)
+		await waitForContent(running.page, CHAT_RESULT)
+		await fs.writeFile(`${running.donePath}.probe`, "probe")
+		await expect
+			.poll(async () => {
+				const result = await fs.readFile(`${running.donePath}.probe.result`, "utf8").catch(() => "")
+				return result ? (JSON.parse(result) as { taskIds: string[] }) : undefined
+			})
+			.toMatchObject({ taskIds: running.taskIds })
 		const heartbeat = await observeHeartbeats(running.page)
 		await expect.poll(() => heartbeat.evaluate((state) => state.forwarded), { timeout: 45_000 }).toBeGreaterThan(0)
 	} catch (error) {
@@ -175,36 +196,59 @@ test("keeps the same document when the sidebar is hidden past the stale threshol
 	test.setTimeout(4 * 60_000)
 	const running = await startScene(vscodeExecutablePath, scenario, testInfo)
 	try {
-		const frame = await waitForWelcome(running.page)
+		const frame = await waitForContent(running.page)
 		await frame.evaluate(() => {
 			document.documentElement.dataset.heartbeatDocument = "retained"
 		})
 		const heartbeat = await observeHeartbeats(running.page, true)
+		// Establish that the interceptor works before hiding. Chromium may
+		// suspend hidden renderer timers entirely, so no hidden tick is promised.
+		await expect.poll(() => heartbeat.evaluate((state) => state.blocked), { timeout: 45_000 }).toBeGreaterThan(0)
 		await running.page.keyboard.press("Control+b")
 		await expect(running.page.locator(".part.sidebar")).toBeHidden()
-		const deadline = Date.now() + 125_000
+		const deadline = performance.now() + 125_000
 		// Observe a complete production stale window and two watchdog ticks;
 		// this is a negative assertion window, not a delay for UI readiness.
 		await expect
-			.poll(
-				async () => {
-					expect(await frame.evaluate(() => document.documentElement.dataset.heartbeatDocument)).toBe(
-						"retained",
-					)
-					return Date.now()
-				},
-				{ timeout: 135_000, intervals: [1_000] },
-			)
+			.poll(() => performance.now(), { timeout: 135_000, intervals: [1_000] })
 			.toBeGreaterThanOrEqual(deadline)
-		expect(await heartbeat.evaluate((state) => state.blocked)).toBeGreaterThan(0)
+		const logs = await glob("logs/**/*Zoo-Code.log", { cwd: running.userDataPath })
+		expect(logs.length).toBeGreaterThan(0)
+		for (const logPath of logs) {
+			const output = await fs.readFile(path.join(running.userDataPath, logPath), "utf8")
+			expect(output).not.toContain("Webview heartbeat stale while visible")
+			expect(output).not.toContain("recreating this webview host")
+		}
 		await running.page.keyboard.press("Control+b")
 		await expect(running.page.locator(".part.sidebar")).toBeVisible()
-		const restored = await waitForWelcome(running.page)
+		const restored = await waitForContent(running.page)
 		expect(await restored.evaluate(() => document.documentElement.dataset.heartbeatDocument)).toBe("retained")
-		await heartbeat.evaluate((state) => {
+		const parent = restored.parentFrame()
+		if (!parent) throw new Error("Retained webview parent frame not found")
+		await parent.evaluate(() => {
+			const state: unknown = Reflect.get(window, Symbol.for("zooCode.heartbeatObservation"))
+			if (!state || typeof state !== "object" || !("block" in state))
+				throw new Error("Heartbeat observation was lost")
 			state.block = false
 		})
-		await expect.poll(() => heartbeat.evaluate((state) => state.forwarded), { timeout: 45_000 }).toBeGreaterThan(0)
+		await expect
+			.poll(
+				() =>
+					parent.evaluate(() => {
+						const state: unknown = Reflect.get(window, Symbol.for("zooCode.heartbeatObservation"))
+						if (
+							!state ||
+							typeof state !== "object" ||
+							!("forwarded" in state) ||
+							typeof state.forwarded !== "number"
+						) {
+							throw new Error("Heartbeat observation was lost")
+						}
+						return state.forwarded
+					}),
+				{ timeout: 45_000 },
+			)
+			.toBeGreaterThan(0)
 	} catch (error) {
 		await attachFailureArtifacts(running, testInfo)
 		throw error
