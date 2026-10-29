@@ -79,6 +79,7 @@ describe("fetchOAuthAuthServerMetadata", () => {
 		expect(probeUrl).toBe("https://example.com/core/mcp")
 		expect(probeInit).toMatchObject({
 			method: "POST",
+			redirect: "manual",
 			headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
 		})
 		expect(JSON.parse(probeInit.body as string)).toMatchObject({ jsonrpc: "2.0", method: "initialize" })
@@ -163,30 +164,44 @@ describe("fetchOAuthAuthServerMetadata", () => {
 		expect(mockFetch).toHaveBeenCalledTimes(1)
 	})
 
-	/** Makes the next SDK lookup fetch through its hook and never settle; returns the request signal. */
+	it("returns null when the probe is redirected", async () => {
+		vi.mocked(discoverOAuthProtectedResourceMetadata).mockRejectedValueOnce(new Error("not found"))
+		mockFetch.mockResolvedValueOnce(
+			new Response(null, { status: 307, headers: { Location: "http://127.0.0.1:8080/mcp" } }),
+		)
+
+		const result = await fetchOAuthAuthServerMetadata("https://example.com/mcp")
+
+		expect(result).toBeNull()
+		expect(mockFetch).toHaveBeenCalledTimes(1)
+		expect(discoverOAuthProtectedResourceMetadata).toHaveBeenCalledTimes(1)
+	})
+
+	/** Makes the next SDK lookup fetch through its hook and never settle; returns the request init. */
 	const hangNextLookup = () => {
-		const signal: { current?: AbortSignal } = {}
+		const request: { init?: RequestInit } = {}
 		vi.mocked(discoverOAuthProtectedResourceMetadata).mockImplementationOnce(async (url, _opts, fetchFn) => {
 			await fetchFn!(url)
 			throw new Error("unreachable")
 		})
 		mockFetch.mockImplementationOnce((_url: string, init: RequestInit) => {
-			signal.current = init.signal ?? undefined
+			request.init = init
 			return new Promise(() => {})
 		})
-		return signal
+		return request
 	}
 
 	it("aborts a timed-out well-known lookup and does not start the fallback", async () => {
 		vi.useFakeTimers()
 		try {
-			const lookupSignal = hangNextLookup()
+			const lookup = hangNextLookup()
 
 			const result = fetchOAuthAuthServerMetadata("https://example.com/mcp")
 			await vi.advanceTimersByTimeAsync(5_000)
 
 			await expect(result).resolves.toBeNull()
-			expect(lookupSignal.current?.aborted).toBe(true)
+			expect(lookup.init?.signal?.aborted).toBe(true)
+			expect(lookup.init?.redirect).toBeUndefined()
 			expect(mockFetch).toHaveBeenCalledTimes(1)
 			expect(discoverOAuthProtectedResourceMetadata).toHaveBeenCalledTimes(1)
 		} finally {
@@ -199,13 +214,14 @@ describe("fetchOAuthAuthServerMetadata", () => {
 		try {
 			vi.mocked(discoverOAuthProtectedResourceMetadata).mockRejectedValueOnce(new Error("not found"))
 			mockFetch.mockResolvedValueOnce(unauthorized('Bearer resource_metadata="https://example.com/metadata"'))
-			const lookupSignal = hangNextLookup()
+			const lookup = hangNextLookup()
 
 			const result = fetchOAuthAuthServerMetadata("https://example.com/mcp")
 			await vi.advanceTimersByTimeAsync(5_000)
 
 			await expect(result).resolves.toBeNull()
-			expect(lookupSignal.current?.aborted).toBe(true)
+			expect(lookup.init?.signal?.aborted).toBe(true)
+			expect(lookup.init?.redirect).toBe("manual")
 			expect(discoverOAuthProtectedResourceMetadata).toHaveBeenCalledTimes(2)
 		} finally {
 			vi.useRealTimers()

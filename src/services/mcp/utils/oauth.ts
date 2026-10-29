@@ -98,8 +98,10 @@ async function discoverProtectedResourceMetadata(serverUrl: string): Promise<OAu
 		// Fetch only metadata on the server's own origin, so a 401 header cannot
 		// direct the client to another host, such as a loopback or private address.
 		if (resourceMetadataUrl?.origin !== new URL(serverUrl).origin) throw wellKnownError
-		return withDiscoveryTimeout((fetchFn) =>
-			discoverOAuthProtectedResourceMetadata(serverUrl, { resourceMetadataUrl }, fetchFn),
+		// A redirect could still lead off-origin, so the metadata fetch does not follow one.
+		return withDiscoveryTimeout(
+			(fetchFn) => discoverOAuthProtectedResourceMetadata(serverUrl, { resourceMetadataUrl }, fetchFn),
+			{ redirect: "manual" },
 		)
 	}
 }
@@ -134,12 +136,15 @@ class DiscoveryTimeoutError extends Error {
  * the fallback's budget. The timeout aborts the lookup's requests through the
  * SDK fetch hook.
  */
-async function withDiscoveryTimeout<T>(lookup: (fetchFn: typeof fetch) => Promise<T>): Promise<T> {
+async function withDiscoveryTimeout<T>(
+	lookup: (fetchFn: typeof fetch) => Promise<T>,
+	requestInit?: RequestInit,
+): Promise<T> {
 	const controller = new AbortController()
 	let timer: ReturnType<typeof setTimeout> | undefined
 	try {
 		return await Promise.race([
-			lookup((input, init) => fetch(input, { ...init, signal: controller.signal })),
+			lookup((input, init) => fetch(input, { ...init, ...requestInit, signal: controller.signal })),
 			new Promise<never>((_, reject) => {
 				timer = setTimeout(() => {
 					controller.abort()
@@ -173,6 +178,8 @@ async function probeResourceMetadataUrl(serverUrl: string): Promise<URL | undefi
 				clientInfo: { name: "oauth-discovery", version: "1.0.0" },
 			},
 		}),
+		// The 401 must come from the configured server itself, not a redirect target.
+		redirect: "manual",
 		signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
 	})
 	await response.body?.cancel().catch(() => {})
