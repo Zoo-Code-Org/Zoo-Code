@@ -36,6 +36,9 @@ const globalSettingsExportSchema = globalSettingsSchema.omit({
 	taskHistory: true,
 	listApiConfigMeta: true,
 	currentApiConfigName: true,
+	// Host-minted claim tokens and per-view selections are not user-settings: exporting
+	// them would let a settings file be replayed as another view's identity.
+	viewStates: true,
 })
 
 export class ContextProxy {
