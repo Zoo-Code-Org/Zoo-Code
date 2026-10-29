@@ -363,13 +363,23 @@ export class ContextProxy {
 		return value !== undefined ? value : defaultValue
 	}
 
-	updateGlobalState<K extends GlobalStateKey>(key: K, value: GlobalState[K]) {
+	async updateGlobalState<K extends GlobalStateKey>(key: K, value: GlobalState[K]) {
 		if (isPassThroughStateKey(key)) {
 			return this.originalContext.globalState.update(key, value)
 		}
 
+		const previousCachedValue = this.stateCache[key]
 		this.stateCache[key] = value
-		return this.originalContext.globalState.update(key, value)
+
+		try {
+			return await this.originalContext.globalState.update(key, value)
+		} catch (error) {
+			// A rejected write must not leave the cache ahead of storage: callers that then
+			// read the cached value (e.g. the view-state load path) would act on a selection
+			// that was never persisted.
+			this.stateCache[key] = previousCachedValue
+			throw error
+		}
 	}
 
 	private getAllGlobalState(): GlobalState {
