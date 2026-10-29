@@ -91,12 +91,20 @@ export async function startScene(
 	const readyPath = path.join(temporaryRoot, "ready.json")
 	const donePath = path.join(temporaryRoot, "done")
 	const logPath = path.join(temporaryRoot, "scene.log")
-	await Promise.all([fs.mkdir(workspacePath), fs.mkdir(userDataPath), fs.mkdir(extensionsPath)])
 
 	let app: ElectronApplication | undefined
 	let mock: InstanceType<typeof LLMock> | undefined
 	let page: Page | undefined
 	try {
+		// Settle all directory operations before failure cleanup removes their parent.
+		const directories = await Promise.allSettled([
+			fs.mkdir(workspacePath),
+			fs.mkdir(userDataPath),
+			fs.mkdir(extensionsPath),
+		])
+		for (const result of directories) {
+			if (result.status === "rejected") throw result.reason
+		}
 		if (scenario.startMock) {
 			mock = new LLMock({ port: 0 })
 			mock.addFixture({
@@ -157,7 +165,7 @@ export async function startScene(
 		return { app, donePath, logPath, mock, page, temporaryRoot, userDataPath, taskIds: ready.taskIds }
 	} catch (error) {
 		if (page) await page.screenshot({ path: testInfo.outputPath("workbench.png") }).catch(() => undefined)
-		await attachLogs(userDataPath, logPath, testInfo)
+		await attachLogs(userDataPath, logPath, testInfo).catch(() => undefined)
 		await fs.writeFile(donePath, "done\n", "utf8").catch(() => undefined)
 		if (app) await stopTracing(app, testInfo)
 		await app?.close().catch(() => undefined)

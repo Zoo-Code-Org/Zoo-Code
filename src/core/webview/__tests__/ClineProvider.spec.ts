@@ -1255,11 +1255,16 @@ describe("ClineProvider", () => {
 			expect(assignHtml).toHaveBeenCalledTimes(3)
 			// One mount heartbeat is insufficient: a new healthy window must
 			// span a full minute of periodic heartbeats before replenishing.
+			const attempts = provider["webviewRecoveryAttempts"]
+			expect(attempts).toBe(3)
 			provider.updateWebviewHeartbeat()
+			expect(provider["webviewRecoveryAttempts"]).toBe(attempts)
 			await vi.advanceTimersByTimeAsync(30_000)
 			provider.updateWebviewHeartbeat()
+			expect(provider["webviewRecoveryAttempts"]).toBe(attempts)
 			await vi.advanceTimersByTimeAsync(30_000)
 			provider.updateWebviewHeartbeat()
+			expect(provider["webviewRecoveryAttempts"]).toBe(0)
 			await vi.advanceTimersByTimeAsync(120_000)
 			expect(assignHtml).toHaveBeenCalledTimes(4)
 		})
@@ -1402,6 +1407,44 @@ describe("ClineProvider", () => {
 			await vi.advanceTimersByTimeAsync(0)
 
 			expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.reloadWindow")
+		})
+
+		test("keeps the Reload Window action available after visibility grace resets", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			vi.mocked(vscode.commands.getCommands).mockResolvedValue([])
+			let choose: (value: string) => void = () => {
+				throw new Error("Notification not shown")
+			}
+			const choice = new Promise<string>((resolve) => {
+				choose = resolve
+			})
+			vi.mocked(vscode.window.showWarningMessage).mockImplementation(vi.fn().mockReturnValue(choice))
+			await vi.advanceTimersByTimeAsync(130_000)
+
+			visibilityCallback()
+			choose("Reload Window")
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow")
+		})
+
+		test("waits for the final HTML attempt to settle before reporting the limit", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			provider["webviewRecoveryAttempts"] = 2
+			let rejectHtml: (error: Error) => void = () => {
+				throw new Error("HTML not requested")
+			}
+			const html = new Promise<string>((_resolve, reject) => {
+				rejectHtml = reject
+			})
+			provider["getWebviewHtml"] = vi.fn<(webview: vscode.Webview) => Promise<string>>().mockReturnValue(html)
+			await vi.advanceTimersByTimeAsync(240_000)
+			expect(provider["webviewRecoveryAttempts"]).toBe(3)
+			expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+
+			rejectHtml(new Error("cannot generate"))
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
 		})
 
 		test("bounds failed HTML generation and reports the exhausted budget once", async () => {
@@ -2066,6 +2109,30 @@ describe("ClineProvider", () => {
 					}),
 					dispose: vi.fn(),
 				} as unknown as vscode.WebviewPanel
+			})
+
+			test("disposes the current tab provider and its watchdog registration", async () => {
+				const onDispose: Array<() => unknown> = []
+				const registration = { dispose: vi.fn() }
+				vi.mocked(mockWebviewPanel.onDidDispose).mockImplementation((listener, _thisArg, disposables) => {
+					onDispose.push(listener)
+					const disposable = onDispose.length === 1 ? registration : { dispose: vi.fn() }
+					disposables?.push(disposable)
+					return disposable
+				})
+				await provider.resolveWebviewView(mockWebviewPanel)
+				expect(provider["webviewWatchdogInterval"]).not.toBeNull()
+				const dispose = vi.spyOn(provider, "dispose")
+				const html = mockWebviewPanel.webview.html
+
+				await onDispose[0]()
+
+				expect(dispose).toHaveBeenCalledTimes(1)
+				expect(provider["_disposed"]).toBe(true)
+				expect(provider["webviewWatchdogInterval"]).toBeNull()
+				expect(registration.dispose).toHaveBeenCalledTimes(1)
+				await vi.advanceTimersByTimeAsync(600_000)
+				expect(mockWebviewPanel.webview.html).toBe(html)
 			})
 
 			test.each([false, true])(

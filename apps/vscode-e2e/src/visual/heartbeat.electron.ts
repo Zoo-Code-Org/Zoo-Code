@@ -90,7 +90,8 @@ test.beforeAll(async () => {
 test("recovers when heartbeat delivery stops and resumes periodic heartbeats", async ({
 	browserName: _browserName,
 }, testInfo) => {
-	test.setTimeout(4 * 60_000)
+	// Allow startup, stale detection, recovery observations, and cleanup.
+	test.setTimeout(8 * 60_000)
 	const running = await startScene(vscodeExecutablePath, scenario, testInfo)
 	try {
 		const frame = await waitForContent(running.page)
@@ -121,7 +122,8 @@ test("recovers when heartbeat delivery stops and resumes periodic heartbeats", a
 })
 
 test("recovers after the isolated Zoo Code renderer is terminated", async ({ browserName: _browserName }, testInfo) => {
-	test.setTimeout(4 * 60_000)
+	// Allow startup, stale detection, recovery observations, and cleanup.
+	test.setTimeout(8 * 60_000)
 	const running = await startScene(
 		vscodeExecutablePath,
 		{ ...scenario, scene: "chat", startMock: true, landmark: CHAT_RESULT },
@@ -193,7 +195,8 @@ test("recovers after the isolated Zoo Code renderer is terminated", async ({ bro
 test("keeps the same document when the sidebar is hidden past the stale threshold", async ({
 	browserName: _browserName,
 }, testInfo) => {
-	test.setTimeout(4 * 60_000)
+	// Allow 210s startup, 125s hidden, two 45s polls, and cleanup.
+	test.setTimeout(8 * 60_000)
 	const running = await startScene(vscodeExecutablePath, scenario, testInfo)
 	try {
 		const frame = await waitForContent(running.page)

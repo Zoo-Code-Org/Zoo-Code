@@ -252,6 +252,7 @@ export class ClineProvider
 	private webviewHostRecoveryInProgress = false
 	private webviewRecoveryFailureReported = false
 	private lastReceivedWebviewHeartbeatAt: number | undefined
+	private webviewHeartbeatCount = 0
 	private webviewHealthySince: number | undefined
 	private static readonly WEBVIEW_RECOVERY_CONFIRM_MS = 10_000
 	private static readonly WEBVIEW_HEALTHY_WINDOW_MS = 60_000
@@ -3570,6 +3571,7 @@ export class ClineProvider
 			this.webviewHealthySince = now
 		}
 		this.lastReceivedWebviewHeartbeatAt = now
+		this.webviewHeartbeatCount++
 		if (this.webviewRecoveryConfirmation) {
 			this.log("[Zoo Code] Webview heartbeat returned after recovery")
 		}
@@ -3619,7 +3621,10 @@ export class ClineProvider
 			}
 			if (now - this.lastWebviewHeartbeatAt <= ClineProvider.WEBVIEW_HEARTBEAT_STALE_MS) return
 			if (this.webviewRecoveryAttempts >= ClineProvider.WEBVIEW_RECOVERY_ATTEMPT_LIMIT) {
-				this.reportWebviewRecoveryFailure("Recovery attempt limit reached without sustained heartbeats")
+				// Let the final attempt finish generating HTML before declaring recovery stopped.
+				if (this.webviewRecoveryInFlightEpoch !== this.webviewRecoveryEpoch) {
+					this.reportWebviewRecoveryFailure("Recovery attempt limit reached without sustained heartbeats")
+				}
 				return
 			}
 			this.log("[Zoo Code] Webview heartbeat stale while visible; attempting recovery")
@@ -3801,7 +3806,7 @@ export class ClineProvider
 		this.webviewRecoveryFailureReported = true
 		this.webviewRecoveryAttempts = ClineProvider.WEBVIEW_RECOVERY_ATTEMPT_LIMIT
 		this.log(`[Zoo Code] Webview recovery stopped: ${reason}`)
-		const revision = this.webviewHeartbeatRevision
+		const heartbeatCount = this.webviewHeartbeatCount
 		void Promise.resolve(
 			vscode.window.showWarningMessage(
 				"Zoo Code's interface is not responding. Reloading the VS Code window will restart extensions and may interrupt running tasks.",
@@ -3810,7 +3815,7 @@ export class ClineProvider
 			),
 		)
 			.then(async (action) => {
-				if (action === "Reload Window" && !this._disposed && this.webviewHeartbeatRevision === revision) {
+				if (action === "Reload Window" && !this._disposed && this.webviewHeartbeatCount === heartbeatCount) {
 					await vscode.commands.executeCommand("workbench.action.reloadWindow")
 				}
 				if (action === "Show Logs") this.outputChannel.show()

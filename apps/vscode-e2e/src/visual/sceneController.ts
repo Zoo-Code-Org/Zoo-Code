@@ -159,8 +159,14 @@ export async function run(): Promise<void> {
 		} catch {
 			return
 		}
+		let fixture: WebviewThemeFixture
+		try {
+			fixture = await api.captureWebviewThemeFixture()
+		} catch (error) {
+			await log(`theme probe will retry: ${String(error)}`)
+			return
+		}
 		await fs.unlink(request)
-		const fixture = await api.captureWebviewThemeFixture()
 		await fs.writeFile(`${request}.result`, JSON.stringify({ fixture, taskIds: api.getCurrentTaskStack() }), "utf8")
 	})
 }
