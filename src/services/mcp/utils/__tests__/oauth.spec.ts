@@ -56,6 +56,7 @@ describe("fetchOAuthAuthServerMetadata", () => {
 		'Bearer resource_metadata="https://example.com/core/.well-known/oauth-protected-resource/mcp"',
 		'Bearer RESOURCE_METADATA="https://example.com/core/.well-known/oauth-protected-resource/mcp"',
 		'bearer error="invalid_token", resource_metadata = "https://example.com/core/.well-known/oauth-protected-resource/mcp"',
+		'Basic realm="mcp", Bearer resource_metadata="https://example.com/core/.well-known/oauth-protected-resource/mcp"',
 	])("falls back to the resource_metadata URL from the 401 header: %s", async (wwwAuthenticate) => {
 		vi.mocked(discoverOAuthProtectedResourceMetadata)
 			.mockRejectedValueOnce(
@@ -157,6 +158,7 @@ describe("fetchOAuthAuthServerMetadata", () => {
 
 	it.each([
 		["the server URL with a trailing slash", "https://example.com/mcp/", "https://example.com/mcp/"],
+		["the server URL with multiple trailing slashes", "https://example.com/mcp//", "https://example.com/mcp//"],
 		["a same-origin ancestor", "https://example.com/", "https://example.com/"],
 		["a child path", "https://example.com/mcp/child", null],
 		["another origin", "https://other.example.com/mcp", null],

@@ -171,10 +171,11 @@ async function probeResourceMetadataUrl(serverUrl: string): Promise<URL | undefi
 
 /**
  * Reads the `resource_metadata` parameter of a Bearer challenge. Unlike the SDK
- * helper, matches the parameter name case-insensitively (RFC 9110 §11.2).
+ * helper, matches the parameter name case-insensitively (RFC 9110 §11.2) and
+ * finds the Bearer challenge after other challenges in the same header.
  */
 function extractResourceMetadataUrl(header: string | null): URL | undefined {
-	const match = header && /^bearer\s+(?:.*[\s,])?resource_metadata\s*=\s*"([^"]*)"/i.exec(header)
+	const match = header && /(?:^|,)\s*bearer\s+(?:.*?[\s,])?resource_metadata\s*=\s*"([^"]*)"/i.exec(header)
 	if (!match) return undefined
 	try {
 		return new URL(match[1])
