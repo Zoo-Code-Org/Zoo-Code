@@ -131,6 +131,47 @@ describe("ChatView approval button tooltips", () => {
 			secondary: ["Deny", "Prevent this action from occurring"],
 		},
 		{
+			ask: "tool",
+			text: JSON.stringify({ tool: "readFile", batchFiles: [] }),
+			primary: ["Approve All", "Approve All"],
+			secondary: ["Deny All", "Deny All"],
+		},
+		{
+			ask: "tool",
+			text: JSON.stringify({ tool: "listFilesTopLevel", path: "src" }),
+			primary: ["Approve", "Allow this action to happen"],
+			secondary: ["Deny", "Prevent this action from occurring"],
+		},
+		{
+			ask: "tool",
+			text: JSON.stringify({ tool: "listFilesRecursive", batchDirs: [] }),
+			primary: ["Approve All", "Approve All"],
+			secondary: ["Deny All", "Deny All"],
+		},
+		{
+			ask: "tool",
+			text: JSON.stringify({ tool: "generateImage", path: "a.png" }),
+			primary: ["Save", "Save the message changes"],
+			secondary: ["Deny", "Prevent this action from occurring"],
+		},
+		{
+			ask: "tool",
+			text: JSON.stringify({ tool: "finishTask" }),
+			primary: ["Complete subtask and keep going", "Complete subtask and keep going"],
+		},
+		{
+			ask: "tool",
+			text: JSON.stringify({ tool: "searchFiles", path: "src" }),
+			primary: ["Approve", "Allow this action to happen"],
+			secondary: ["Deny", "Prevent this action from occurring"],
+		},
+		{
+			ask: "use_mcp_server",
+			text: JSON.stringify({ type: "use_mcp_tool", serverName: "s", toolName: "t" }),
+			primary: ["Approve", "Allow this action to happen"],
+			secondary: ["Deny", "Prevent this action from occurring"],
+		},
+		{
 			ask: "command",
 			text: "echo hi",
 			primary: ["Run", "Execute this command"],
@@ -150,6 +191,10 @@ describe("ChatView approval button tooltips", () => {
 			ask: "completion_result",
 			primary: ["Start New Task", "Begin a new task"],
 		},
+		{
+			ask: "resume_completed_task",
+			primary: ["Start New Task", "Begin a new task"],
+		},
 	])("maps the $ask $primary.0 prompt to its tooltips", async ({ ask, text, primary, secondary }) => {
 		renderWithExtensionState(<ChatView {...defaultProps} />)
 
@@ -159,5 +204,21 @@ describe("ChatView approval button tooltips", () => {
 		if (secondary) {
 			expect(tooltipOf(secondary[0])).toBe(secondary[1])
 		}
+	})
+
+	it("offers a new task instead of resuming a completed subtask", async () => {
+		renderWithExtensionState(<ChatView {...defaultProps} />)
+
+		await postState({
+			currentTaskItem: { id: "child", parentTaskId: "parent", ts: 1, task: "Initial task", number: 1 },
+			clineMessages: [
+				{ type: "say", say: "task", ts: 1, text: "Initial task" },
+				{ type: "say", say: "completion_result", ts: 2, text: "Done" },
+				{ type: "ask", ask: "resume_task", ts: 3, partial: false },
+			],
+		})
+
+		await waitFor(() => expect(tooltipOf("Start New Task")).toBe("Begin a new task"))
+		expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument()
 	})
 })
