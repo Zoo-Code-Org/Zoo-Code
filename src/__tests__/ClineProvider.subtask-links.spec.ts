@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { clineMessageSchema, type ClineMessage, type HistoryItem } from "@roo-code/types"
 
-vi.mock("../core/task-persistence/taskMessages", () => ({
+vi.mock("../core/task-persistence/taskMessages", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../core/task-persistence/taskMessages")>()),
 	readTaskMessages: vi.fn(),
 }))
 vi.mock("../core/task-persistence", async (importOriginal) => ({

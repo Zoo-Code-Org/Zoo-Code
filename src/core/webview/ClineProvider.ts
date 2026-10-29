@@ -4265,8 +4265,7 @@ export class ClineProvider
 			const parentMessages = await readTaskMessages({ taskId: parentTaskId, globalStoragePath })
 			for (let messageIndex = parentMessages.length - 1; messageIndex >= 0; messageIndex--) {
 				const candidate = parentMessages[messageIndex]
-				// Stryker disable next-line ConditionalExpression: equivalent mutant, only ask messages carry an ask field, so the ask check alone rejects say rows
-				if (candidate.type !== "ask" || candidate.ask !== "tool" || !candidate.text) continue
+				if (candidate.ask !== "tool" || !candidate.text) continue
 
 				let tool: { tool?: unknown; content?: unknown } | null
 				try {
