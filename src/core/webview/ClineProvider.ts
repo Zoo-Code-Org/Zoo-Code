@@ -149,6 +149,13 @@ type PersistedViewState = NonNullable<GlobalState["viewStates"]>[string]
 type ViewLocalStateValues = Partial<RooCodeSettings> & Partial<ExtensionState>
 
 /**
+ * The subset of view-local values that has a durable per-view record. `saveViewState`
+ * and the mutation path handle exactly these keys, so the generic stays narrow enough
+ * for the compiler to reject e.g. `writeDelayMs`.
+ */
+type PersistedViewStateValues = Pick<ViewLocalStateValues, "mode" | "currentApiConfigName" | "apiConfiguration">
+
+/**
  * https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default/weather-webview/src/providers/WeatherViewProvider.ts
  * https://github.com/KumarVariable/vscode-extension-sidebar-html/blob/master/src/customSidebarViewProvider.ts
  */
@@ -771,8 +778,19 @@ export class ClineProvider
 
 			delete states[previousViewStateId]
 
-			if (!states[nextViewStateId]) {
+			const existingStableEntry = states[nextViewStateId]
+
+			if (!existingStableEntry) {
 				states[nextViewStateId] = previous
+			} else {
+				// Registration can bind a claim-less legacy key just before this pre-launch entry
+				// is re-keyed. Keep the selections the stable entry already carries, but fill in
+				// anything it lacks so a mode chosen before launch is not silently dropped.
+				states[nextViewStateId] = {
+					...previous,
+					...existingStableEntry,
+					updatedAt: Math.max(previous.updatedAt ?? 0, existingStableEntry.updatedAt ?? 0),
+				}
 			}
 
 			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
@@ -5119,9 +5137,9 @@ export class ClineProvider
 	 * non-secret subset (mode, currentApiConfigName) is persisted durably under the view
 	 * id active when the change was made, re-keyed to the stable id on registration.
 	 */
-	public async saveViewState<K extends keyof ViewLocalStateValues>(
+	public async saveViewState<K extends keyof PersistedViewStateValues>(
 		key: K,
-		value: ViewLocalStateValues[K] | undefined,
+		value: PersistedViewStateValues[K] | undefined,
 	): Promise<void> {
 		await this._saveViewLocalStateFromMutation({ [key]: value } as ViewLocalStateValues)
 

@@ -3845,6 +3845,31 @@ describe("ClineProvider", () => {
 			}
 		})
 	})
+
+	it("keeps a pre-launch selection when registration re-keys it onto an existing stable entry", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+
+		await provider["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
+		const seeded = provider.contextProxy.getValue("viewStates") ?? {}
+		await provider.contextProxy.setValue("viewStates", {
+			...seeded,
+			"stable-view": { claimToken: "host-token", updatedAt: 2 },
+		})
+
+		await provider["rekeyPersistedViewStateEntry"]("stable-view")
+
+		expect(mockContext.globalState.get("viewStates")).toMatchObject({
+			"stable-view": { mode: "architect", claimToken: "host-token" },
+		})
+
+		await provider.dispose()
+	})
 })
 
 describe("webviewMessageHandler no-floating-promises coverage", () => {
