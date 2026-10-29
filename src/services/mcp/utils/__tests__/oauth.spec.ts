@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterAll } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest"
 
 // Mock the SDK's discoverOAuthProtectedResourceMetadata
 vi.mock("@modelcontextprotocol/sdk/client/auth.js", () => ({
@@ -23,6 +23,10 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 describe("fetchOAuthAuthServerMetadata", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+	})
+
+	afterEach(() => {
+		vi.restoreAllMocks()
 	})
 
 	afterAll(() => {
@@ -151,33 +155,45 @@ describe("fetchOAuthAuthServerMetadata", () => {
 		}
 	})
 
-	it("rejects well-known metadata whose resource does not match the server URL", async () => {
-		vi.mocked(discoverOAuthProtectedResourceMetadata).mockResolvedValueOnce({
-			resource: "https://other.example.com/mcp",
-			authorization_servers: ["https://auth.example.com"],
-		})
-		mockFetch.mockResolvedValueOnce(new Response(null, { status: 200 }))
+	it.each([
+		["the server URL with a trailing slash", "https://example.com/mcp/", "https://example.com/mcp/"],
+		["a same-origin ancestor", "https://example.com/", "https://example.com/"],
+		["a child path", "https://example.com/mcp/child", null],
+		["another origin", "https://other.example.com/mcp", null],
+		["an invalid URL", "not a url", null],
+	])(
+		"keeps OAuth when the metadata resource is %s and sends only a matching indicator",
+		async (_case, resource, expected) => {
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.mocked(discoverOAuthProtectedResourceMetadata).mockResolvedValueOnce({
+				resource,
+				authorization_servers: ["https://auth.example.com"],
+			})
+			const meta = { issuer: "https://auth.example.com" }
+			mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(meta) })
 
-		const result = await fetchOAuthAuthServerMetadata("https://example.com/mcp")
+			const result = await fetchOAuthAuthServerMetadata("https://example.com/mcp")
 
-		expect(result).toBeNull()
-		expect(mockFetch).toHaveBeenCalledTimes(1)
-	})
+			expect(result).toEqual({ authServerMeta: meta, resourceIndicator: expected })
+		},
+	)
 
-	it("rejects fallback metadata whose resource does not match the server URL", async () => {
+	it("keeps OAuth but drops a mismatched resource indicator from fallback metadata", async () => {
+		vi.spyOn(console, "warn").mockImplementation(() => {})
 		vi.mocked(discoverOAuthProtectedResourceMetadata)
 			.mockRejectedValueOnce(new Error("not found"))
 			.mockResolvedValueOnce({
 				resource: "https://example.com/other",
 				authorization_servers: ["https://auth.example.com"],
 			})
-		mockFetch.mockResolvedValueOnce(unauthorized('Bearer resource_metadata="https://example.com/metadata"'))
+		const meta = { issuer: "https://auth.example.com" }
+		mockFetch
+			.mockResolvedValueOnce(unauthorized('Bearer resource_metadata="https://example.com/metadata"'))
+			.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(meta) })
 
 		const result = await fetchOAuthAuthServerMetadata("https://example.com/mcp")
 
-		expect(result).toBeNull()
-		expect(discoverOAuthProtectedResourceMetadata).toHaveBeenCalledTimes(2)
-		expect(mockFetch).toHaveBeenCalledTimes(1)
+		expect(result).toEqual({ authServerMeta: meta, resourceIndicator: null })
 	})
 
 	it("constructs the RFC 8414 discovery URL correctly for an issuer with a path", async () => {

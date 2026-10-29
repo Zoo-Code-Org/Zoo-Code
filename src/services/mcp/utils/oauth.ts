@@ -62,7 +62,9 @@ export async function fetchOAuthAuthServerMetadata(serverUrl: string): Promise<O
 		// used as the `resource` parameter in the authorization request so the auth
 		// server can issue tokens scoped to this specific resource server.
 		const resourceIndicator: string | null =
-			typeof resourceMeta.resource === "string" ? resourceMeta.resource : null
+			typeof resourceMeta.resource === "string" && resourceMatches(serverUrl, resourceMeta.resource)
+				? resourceMeta.resource
+				: null
 
 		// Step 2 – RFC 8414 §3.1: build the well-known URL.
 		// For issuer "https://example.com/auth/public"
@@ -86,39 +88,35 @@ export async function fetchOAuthAuthServerMetadata(serverUrl: string): Promise<O
 
 async function discoverProtectedResourceMetadata(serverUrl: string): Promise<OAuthProtectedResourceMetadata> {
 	try {
-		return assertResourceMatches(
-			serverUrl,
-			await withDiscoveryTimeout((fetchFn) =>
-				discoverOAuthProtectedResourceMetadata(serverUrl, undefined, fetchFn),
-			),
+		return await withDiscoveryTimeout((fetchFn) =>
+			discoverOAuthProtectedResourceMetadata(serverUrl, undefined, fetchFn),
 		)
 	} catch (wellKnownError) {
 		const resourceMetadataUrl = await probeResourceMetadataUrl(serverUrl)
 		if (!resourceMetadataUrl) throw wellKnownError
-		return assertResourceMatches(
-			serverUrl,
-			await withDiscoveryTimeout((fetchFn) =>
-				discoverOAuthProtectedResourceMetadata(serverUrl, { resourceMetadataUrl }, fetchFn),
-			),
+		return withDiscoveryTimeout((fetchFn) =>
+			discoverOAuthProtectedResourceMetadata(serverUrl, { resourceMetadataUrl }, fetchFn),
 		)
 	}
 }
 
 /**
  * RFC 9728 §3.3: the metadata must describe the resource it was fetched for.
- * Its `resource` is later sent as the RFC 8707 resource indicator.
+ * Like the SDK, accepts the server URL or a same-origin ancestor of it. A
+ * trailing slash on the published resource is ignored, so `https://x/mcp/`
+ * matches `https://x/mcp`. A mismatched resource is not sent as the RFC 8707
+ * resource indicator, but the server still uses OAuth.
  */
-function assertResourceMatches(
-	serverUrl: string,
-	metadata: OAuthProtectedResourceMetadata,
-): OAuthProtectedResourceMetadata {
-	if (
-		metadata.resource &&
-		!checkResourceAllowed({ requestedResource: serverUrl, configuredResource: metadata.resource })
-	) {
-		throw new Error(`Protected resource metadata for ${metadata.resource} does not match ${serverUrl}`)
+function resourceMatches(serverUrl: string, resource: string): boolean {
+	try {
+		const configuredResource = new URL(resource)
+		configuredResource.pathname = configuredResource.pathname.replace(/\/+$/, "")
+		if (checkResourceAllowed({ requestedResource: serverUrl, configuredResource })) return true
+	} catch {
+		// An invalid resource URL is treated as a mismatch.
 	}
-	return metadata
+	console.warn(`[MCP OAuth] Ignoring resource indicator ${resource}: it does not match ${serverUrl}`)
+	return false
 }
 
 /**
