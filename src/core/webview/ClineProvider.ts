@@ -135,7 +135,8 @@ import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/provi
 
 import { ContextProxy } from "../config/ContextProxy"
 import { withoutInvalidDisplaySettings } from "../config/displaySettings"
-import { ProviderSettingsManager, ProviderSettingsNotFoundError } from "../config/ProviderSettingsManager"import { CustomModesManager } from "../config/CustomModesManager"
+import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
+import { CustomModesManager } from "../config/CustomModesManager"
 import { PendingActionSettlementError, Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
