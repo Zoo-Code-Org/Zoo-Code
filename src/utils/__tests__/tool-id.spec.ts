@@ -1,4 +1,10 @@
-import { sanitizeToolUseId, truncateOpenAiCallId, sanitizeOpenAiCallId, OPENAI_CALL_ID_MAX_LENGTH } from "../tool-id"
+import {
+	sanitizeToolUseId,
+	truncateOpenAiCallId,
+	sanitizeOpenAiCallId,
+	sanitizeLiteLlmCallId,
+	OPENAI_CALL_ID_MAX_LENGTH,
+} from "../tool-id"
 
 describe("sanitizeToolUseId", () => {
 	describe("valid IDs pass through unchanged", () => {
@@ -182,5 +188,31 @@ describe("sanitizeOpenAiCallId", () => {
 describe("OPENAI_CALL_ID_MAX_LENGTH constant", () => {
 	it("should be 64", () => {
 		expect(OPENAI_CALL_ID_MAX_LENGTH).toBe(64)
+	})
+})
+
+describe("sanitizeLiteLlmCallId", () => {
+	const signature = "AY89a18ErUKBAfkTYnDbzq6mGnRG5QS8VFogncpDzYVXzC0i_aDwY5o-0123456789abcdef"
+
+	it("keeps an id that carries a thought signature intact, however long", () => {
+		const id = `call_864944__thought__${signature}`
+
+		expect(id.length).toBeGreaterThan(OPENAI_CALL_ID_MAX_LENGTH)
+		expect(sanitizeLiteLlmCallId(id)).toBe(id)
+	})
+
+	it("still replaces invalid characters in an id that carries a thought signature", () => {
+		expect(sanitizeLiteLlmCallId("call_1__thought__ab+c/d=")).toBe("call_1__thought__ab_c_d_")
+	})
+
+	it("truncates other long ids like sanitizeOpenAiCallId", () => {
+		const id = "call_" + "x".repeat(100)
+
+		expect(sanitizeLiteLlmCallId(id)).toBe(sanitizeOpenAiCallId(id))
+		expect(sanitizeLiteLlmCallId(id).length).toBe(OPENAI_CALL_ID_MAX_LENGTH)
+	})
+
+	it("leaves short ids unchanged", () => {
+		expect(sanitizeLiteLlmCallId("toolu_123")).toBe("toolu_123")
 	})
 })

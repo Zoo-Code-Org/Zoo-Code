@@ -18,7 +18,7 @@ import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { convertToR1Format } from "../transform/r1-format"
 import { GEMINI_THOUGHT_SIGNATURE_BYPASS } from "../transform/gemini-format"
-import { sanitizeOpenAiCallId } from "../../utils/tool-id"
+import { sanitizeLiteLlmCallId } from "../../utils/tool-id"
 
 import type {
 	SingleCompletionHandler,
@@ -158,11 +158,11 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		// never gets inserted mid-turn and causes the model to drop prior reasoning_content.
 		const openAiMessages = info.preserveReasoning
 			? convertToR1Format(messages, {
-					normalizeToolCallId: sanitizeOpenAiCallId,
+					normalizeToolCallId: sanitizeLiteLlmCallId,
 					mergeToolResultText: true,
 				})
 			: convertToOpenAiMessages(messages, {
-					normalizeToolCallId: sanitizeOpenAiCallId,
+					normalizeToolCallId: sanitizeLiteLlmCallId,
 				})
 
 		// Prepare messages with cache control if enabled and supported
