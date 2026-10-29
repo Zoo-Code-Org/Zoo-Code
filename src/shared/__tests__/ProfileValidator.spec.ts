@@ -1,6 +1,11 @@
 // npx vitest run src/shared/__tests__/ProfileValidator.spec.ts
 
-import { providerIdentifiers, type ProviderSettings, type OrganizationAllowList } from "@roo-code/types"
+import {
+	providerIdentifiers,
+	retiredProviderIdentifiers,
+	type ProviderSettings,
+	type OrganizationAllowList,
+} from "@roo-code/types"
 
 import { ProfileValidator } from "../ProfileValidator"
 
@@ -27,6 +32,21 @@ describe("ProfileValidator", () => {
 			["requesty", { requestyModelId: "model" }],
 			["unbound", { unboundModelId: "model" }],
 			["ioIntelligence", { ioIntelligenceModelId: "model" }],
+			["poe", { apiModelId: "model" }],
+			["moonshot", { apiModelId: "model" }],
+			["kimiCode", { apiModelId: "model" }],
+			["minimax", { apiModelId: "model" }],
+			["mimo", { apiModelId: "model" }],
+			["openaiCodex", { apiModelId: "model" }],
+			["qwenCode", { apiModelId: "model" }],
+			["zai", { apiModelId: "model" }],
+			["baseten", { apiModelId: "model" }],
+			["geminiCli", { apiModelId: "model" }],
+			["vercelAiGateway", { vercelAiGatewayModelId: "model" }],
+			["zooGateway", { zooGatewayModelId: "model" }],
+			["nanogpt", { nanoGptModelId: "model" }],
+			["kenari", { kenariModelId: "model" }],
+			["opencodeGo", { opencodeGoModelId: "model" }],
 		])("resolves %s model fields through canonical identifiers", (identifierKey, profileSettings) => {
 			const canonicalIdentifier = providerIdentifiers[identifierKey as keyof typeof providerIdentifiers]
 			const modelId = "model"
@@ -374,6 +394,78 @@ describe("ProfileValidator", () => {
 			}
 
 			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
+		})
+
+		it("enforces the model allow-list for the fake-ai provider", () => {
+			const allowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: { [providerIdentifiers.fakeAi]: { allowAll: false, models: ["allowed-model"] } },
+			}
+
+			expect(
+				ProfileValidator.isProfileAllowed(
+					{ apiProvider: providerIdentifiers.fakeAi, apiModelId: "allowed-model" },
+					allowList,
+				),
+			).toBe(true)
+			expect(
+				ProfileValidator.isProfileAllowed(
+					{ apiProvider: providerIdentifiers.fakeAi, apiModelId: "other-model" },
+					allowList,
+				),
+			).toBe(false)
+		})
+
+		it("enforces the model allow-list for retired providers using legacy model ID precedence", () => {
+			// The removed local switch returned `undefined` for retired providers, so they
+			// could only pass via a provider-level `allowAll`. `getModelId()` resolves them
+			// through the legacy `modelIdKeys` precedence, so the model list now applies.
+			const allowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: {
+					[retiredProviderIdentifiers.groq]: { allowAll: false, models: ["allowed-model"] },
+				},
+			}
+
+			expect(
+				ProfileValidator.isProfileAllowed(
+					{ apiProvider: retiredProviderIdentifiers.groq, requestyModelId: "allowed-model" },
+					allowList,
+				),
+			).toBe(true)
+			expect(
+				ProfileValidator.isProfileAllowed(
+					{ apiProvider: retiredProviderIdentifiers.groq, requestyModelId: "other-model" },
+					allowList,
+				),
+			).toBe(false)
+		})
+
+		it("fails closed when the profile does not satisfy the provider schema", () => {
+			// `getModelId()` validates the profile before reading the model field, so an
+			// invalid profile resolves no model. That must deny rather than bypass the
+			// model allow-list.
+			const profile = {
+				apiProvider: providerIdentifiers.openai,
+				openAiModelId: "gpt-4",
+				openAiExtraBody: "{not-json",
+			} as ProviderSettings
+
+			expect(
+				ProfileValidator.isProfileAllowed(profile, {
+					allowAll: false,
+					providers: { [providerIdentifiers.openai]: { allowAll: false, models: ["gpt-4"] } },
+				}),
+			).toBe(false)
+
+			// A provider-level `allowAll` still permits the profile, matching the
+			// missing-model fallback.
+			expect(
+				ProfileValidator.isProfileAllowed(profile, {
+					allowAll: false,
+					providers: { [providerIdentifiers.openai]: { allowAll: true } },
+				}),
+			).toBe(true)
 		})
 
 		it("should handle providers with undefined models list gracefully", () => {
