@@ -46,6 +46,22 @@ describe("KimiCodeHandler", () => {
 		expect(handler.getModel().id).toBe("kimi-for-coding")
 	})
 
+	it.each([
+		{ includeMaxTokens: undefined, expected: false },
+		{ includeMaxTokens: false, expected: false },
+		{ includeMaxTokens: true, expected: true },
+	])(
+		"keeps max output tokens opt-in when includeMaxTokens is $includeMaxTokens",
+		({ includeMaxTokens, expected }) => {
+			const handler = new KimiCodeHandler({
+				kimiCodeAuthMethod: "api-key",
+				kimiCodeApiKey: "key",
+				includeMaxTokens,
+			})
+			expect(handler["options"].includeMaxTokens).toBe(expected)
+		},
+	)
+
 	it("uses API key when auth method is api-key", async () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "my-api-key" })
 		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])

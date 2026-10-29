@@ -14,6 +14,13 @@ export const OPEN_AI_MODEL_ID_FIELD = "openAiModelId"
  */
 export const DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS = true
 
+/**
+ * Default for the OpenAI Compatible "Include max output tokens" checkbox.
+ * The settings UI and the request builder must both read this so an unset
+ * value is shown and sent the same way.
+ */
+export const DEFAULT_OPEN_AI_INCLUDE_MAX_TOKENS = true
+
 const OPENAI_EXTRA_BODY_RESERVED_KEYS = [
 	// Prototype-pollution defenses; remaining keys are request-owned, including tool-call protocol controls.
 	"__proto__",
