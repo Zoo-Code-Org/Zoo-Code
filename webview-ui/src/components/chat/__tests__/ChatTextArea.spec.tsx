@@ -113,6 +113,9 @@ describe("ChatTextArea", () => {
 			;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 				filePaths: [],
 				openedTabs: [],
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.anthropic,
+				},
 				taskHistory: [],
 				cwd: "/test/workspace",
 			})
@@ -306,6 +309,9 @@ describe("ChatTextArea", () => {
 			;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 				filePaths: [],
 				openedTabs: [],
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.anthropic,
+				},
 				cwd: mockCwd,
 			})
 			mockConvertToMentionPath.mockClear()
@@ -947,6 +953,9 @@ describe("ChatTextArea", () => {
 			;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 				filePaths: [],
 				openedTabs: [],
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.anthropic,
+				},
 				taskHistory: [],
 				cwd: "/test/workspace",
 				commands: mockCommands,
@@ -1056,6 +1065,9 @@ describe("ChatTextArea", () => {
 			;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 				filePaths: [],
 				openedTabs: [],
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.anthropic,
+				},
 				taskHistory: [],
 				cwd: "/test/workspace",
 				commands: undefined,
@@ -1097,6 +1109,9 @@ describe("ChatTextArea", () => {
 				;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 					filePaths: [],
 					openedTabs: [],
+					apiConfiguration: {
+						apiProvider: providerIdentifiers.anthropic,
+					},
 					taskHistory: [],
 					cwd: "/test/workspace",
 				})
@@ -1120,6 +1135,9 @@ describe("ChatTextArea", () => {
 				;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 					filePaths: [],
 					openedTabs: [],
+					apiConfiguration: {
+						apiProvider: providerIdentifiers.anthropic,
+					},
 					taskHistory: [],
 					cwd: "/test/workspace",
 					enterBehavior: "newline",
