@@ -95,8 +95,32 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 	}
 
 	public async fetchModel() {
-		this.models = await getModels({ provider: providerIdentifiers.requesty, baseUrl: this.baseURL }, this)
+		// Pass the API key so the catalog request is authenticated and the cache entry is
+		// key-scoped. Requesty enforces per-key model allowlists, so a keyless (URL-only)
+		// entry would let one key's catalog be served to another key on the same server.
+		this.models = await getModels(
+			{
+				provider: providerIdentifiers.requesty,
+				apiKey: this.options.requestyApiKey,
+				baseUrl: this.baseURL,
+			},
+			this,
+		)
 		return this.getModel()
+	}
+
+	async ensureModelFetched(signal?: AbortSignal): Promise<void> {
+		await this.ensureCatalogLoaded(async () => {
+			// The caller's signal is deliberately not threaded into fetchModel(): this load
+			// is shared by every waiter on the handler, so binding it to one caller's signal
+			// would cancel the fetch for the others. The signal still detaches this caller's
+			// own wait (see ensureCatalogLoaded), and the shared fetch stays bounded by
+			// modelCache's single-flight timeout.
+			await this.fetchModel()
+			// fetchModel() returns model info, not the catalog, so report emptiness
+			// from the catalog it assigned: an empty response must stay retryable.
+			return Object.keys(this.models).length > 0
+		}, signal)
 	}
 
 	override getModel() {

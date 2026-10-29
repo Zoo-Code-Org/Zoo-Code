@@ -155,37 +155,61 @@ export function createAbortError(providerName: string): Error {
 }
 
 /**
- * Await `pending` but reject with the provider's abort error when `signal`
- * aborts first. For async phases that have no native signal support (model
- * discovery) yet must still settle promptly on cancellation. The underlying
- * promise keeps running (its settlement is ignored) — cancellation is
- * cooperative at this boundary.
+ * Await `pending` but settle early with `abortError` when `signal` aborts.
  *
- * The abort listener is detached once `pending` settles (success or
- * failure), so repeated calls on one signal do not accumulate listeners.
+ * The underlying promise keeps running (its settlement is ignored) —
+ * cancellation is cooperative at this boundary. The abort listener is detached
+ * once `pending` settles (success or failure), so repeated waits on one
+ * long-lived signal do not accumulate listeners.
+ *
+ * An already-aborted signal rejects without attaching a listener: it would
+ * never fire, so the wait would hang.
  */
-export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, providerName: string): Promise<T> {
+function raceAbort<T>(pending: Promise<T>, signal: AbortSignal, abortError: () => unknown): Promise<T> {
 	if (signal.aborted) {
-		// The caller has already cancelled, so this branch never consumes `pending`;
-		// attach a handler anyway so a rejecting `pending` cannot surface as an
-		// unhandled rejection.
+		// This branch never consumes `pending`; attach a handler anyway so a
+		// rejecting `pending` cannot surface as an unhandled rejection.
 		void pending.catch(() => {})
-		return Promise.reject(createAbortError(providerName))
+		return Promise.reject(abortError())
 	}
+
 	return new Promise<T>((resolve, reject) => {
-		const onAbort = () => reject(createAbortError(providerName))
+		const onAbort = () => reject(abortError())
 		signal.addEventListener("abort", onAbort, { once: true })
 		void pending.then(
 			(value) => {
 				signal.removeEventListener("abort", onAbort)
 				resolve(value)
 			},
-			(error) => {
+			(error: unknown) => {
 				signal.removeEventListener("abort", onAbort)
 				reject(error)
 			},
 		)
 	})
+}
+
+/**
+ * Await `pending` but reject with the provider's abort error when `signal`
+ * aborts first. For async phases that have no native signal support (model
+ * discovery) yet must still settle promptly on cancellation.
+ *
+ * Use {@link detachOnAbort} instead when the awaited work is shared with other
+ * callers and the caller's own abort reason must propagate unchanged.
+ */
+export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, providerName: string): Promise<T> {
+	return raceAbort(pending, signal, () => createAbortError(providerName))
+}
+
+/**
+ * Await `pending` but detach this waiter when `signal` aborts, rejecting with
+ * `signal.reason`. The shared work keeps running for other callers.
+ *
+ * Unlike {@link rejectOnAbort}, the caller's own reason is preserved instead of
+ * being normalized to `createAbortError(providerName)`.
+ */
+export function detachOnAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+	return raceAbort(pending, signal, () => signal.reason)
 }
 
 /**
