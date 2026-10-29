@@ -92,8 +92,12 @@ async function discoverProtectedResourceMetadata(serverUrl: string): Promise<OAu
 			discoverOAuthProtectedResourceMetadata(serverUrl, undefined, fetchFn),
 		)
 	} catch (wellKnownError) {
+		// A lookup that timed out may still be running, so do not start another.
+		if (wellKnownError instanceof DiscoveryTimeoutError) throw wellKnownError
 		const resourceMetadataUrl = await probeResourceMetadataUrl(serverUrl)
-		if (!resourceMetadataUrl) throw wellKnownError
+		// Fetch only metadata on the server's own origin, so a 401 header cannot
+		// direct the client to another host, such as a loopback or private address.
+		if (resourceMetadataUrl?.origin !== new URL(serverUrl).origin) throw wellKnownError
 		return withDiscoveryTimeout((fetchFn) =>
 			discoverOAuthProtectedResourceMetadata(serverUrl, { resourceMetadataUrl }, fetchFn),
 		)
@@ -119,6 +123,12 @@ function resourceMatches(serverUrl: string, resource: string): boolean {
 	return false
 }
 
+class DiscoveryTimeoutError extends Error {
+	constructor() {
+		super("OAuth discovery timeout")
+	}
+}
+
 /**
  * Gives each lookup its own timeout, so a slow well-known lookup cannot consume
  * the fallback's budget. The timeout aborts the lookup's requests through the
@@ -133,7 +143,7 @@ async function withDiscoveryTimeout<T>(lookup: (fetchFn: typeof fetch) => Promis
 			new Promise<never>((_, reject) => {
 				timer = setTimeout(() => {
 					controller.abort()
-					reject(new Error("OAuth discovery timeout"))
+					reject(new DiscoveryTimeoutError())
 				}, DISCOVERY_TIMEOUT_MS)
 			}),
 		])

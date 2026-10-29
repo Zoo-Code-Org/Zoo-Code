@@ -100,6 +100,8 @@ describe("fetchOAuthAuthServerMetadata", () => {
 		],
 		["a header that backtracks a naive parser", ",bearer\t!=" + "\t,!=".repeat(10_000)],
 		["an invalid URL", 'Bearer resource_metadata="not a url"'],
+		["a URL on another origin", 'Bearer resource_metadata="https://other.example.com/metadata"'],
+		["a loopback URL", 'Bearer resource_metadata="http://127.0.0.1:8080/admin"'],
 	])("returns null when the 401 response has %s", async (_case, wwwAuthenticate) => {
 		vi.mocked(discoverOAuthProtectedResourceMetadata).mockRejectedValueOnce(new Error("not found"))
 		mockFetch.mockResolvedValueOnce(unauthorized(wwwAuthenticate))
@@ -138,26 +140,73 @@ describe("fetchOAuthAuthServerMetadata", () => {
 		}
 	})
 
-	it("aborts a protected resource metadata lookup that exceeds its timeout", async () => {
+	it("returns null when the probe request fails", async () => {
+		vi.mocked(discoverOAuthProtectedResourceMetadata).mockRejectedValueOnce(new Error("not found"))
+		mockFetch.mockRejectedValueOnce(new Error("connection refused"))
+
+		const result = await fetchOAuthAuthServerMetadata("https://example.com/mcp")
+
+		expect(result).toBeNull()
+		expect(discoverOAuthProtectedResourceMetadata).toHaveBeenCalledTimes(1)
+	})
+
+	it("returns null when the fallback lookup fails", async () => {
+		vi.mocked(discoverOAuthProtectedResourceMetadata)
+			.mockRejectedValueOnce(new Error("not found"))
+			.mockRejectedValueOnce(new Error("invalid metadata"))
+		mockFetch.mockResolvedValueOnce(unauthorized('Bearer resource_metadata="https://example.com/metadata"'))
+
+		const result = await fetchOAuthAuthServerMetadata("https://example.com/mcp")
+
+		expect(result).toBeNull()
+		expect(discoverOAuthProtectedResourceMetadata).toHaveBeenCalledTimes(2)
+		expect(mockFetch).toHaveBeenCalledTimes(1)
+	})
+
+	/** Makes the next SDK lookup fetch through its hook and never settle; returns the request signal. */
+	const hangNextLookup = () => {
+		const signal: { current?: AbortSignal } = {}
+		vi.mocked(discoverOAuthProtectedResourceMetadata).mockImplementationOnce(async (url, _opts, fetchFn) => {
+			await fetchFn!(url)
+			throw new Error("unreachable")
+		})
+		mockFetch.mockImplementationOnce((_url: string, init: RequestInit) => {
+			signal.current = init.signal ?? undefined
+			return new Promise(() => {})
+		})
+		return signal
+	}
+
+	it("aborts a timed-out well-known lookup and does not start the fallback", async () => {
 		vi.useFakeTimers()
 		try {
-			vi.mocked(discoverOAuthProtectedResourceMetadata).mockImplementationOnce(async (url, _opts, fetchFn) => {
-				await fetchFn!(url)
-				throw new Error("unreachable")
-			})
-			let lookupSignal: AbortSignal | undefined
-			mockFetch
-				.mockImplementationOnce((_url: string, init: RequestInit) => {
-					lookupSignal = init.signal ?? undefined
-					return new Promise(() => {})
-				})
-				.mockResolvedValueOnce(new Response(null, { status: 200 }))
+			const lookupSignal = hangNextLookup()
 
 			const result = fetchOAuthAuthServerMetadata("https://example.com/mcp")
 			await vi.advanceTimersByTimeAsync(5_000)
 
 			await expect(result).resolves.toBeNull()
-			expect(lookupSignal?.aborted).toBe(true)
+			expect(lookupSignal.current?.aborted).toBe(true)
+			expect(mockFetch).toHaveBeenCalledTimes(1)
+			expect(discoverOAuthProtectedResourceMetadata).toHaveBeenCalledTimes(1)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("aborts a timed-out fallback lookup", async () => {
+		vi.useFakeTimers()
+		try {
+			vi.mocked(discoverOAuthProtectedResourceMetadata).mockRejectedValueOnce(new Error("not found"))
+			mockFetch.mockResolvedValueOnce(unauthorized('Bearer resource_metadata="https://example.com/metadata"'))
+			const lookupSignal = hangNextLookup()
+
+			const result = fetchOAuthAuthServerMetadata("https://example.com/mcp")
+			await vi.advanceTimersByTimeAsync(5_000)
+
+			await expect(result).resolves.toBeNull()
+			expect(lookupSignal.current?.aborted).toBe(true)
+			expect(discoverOAuthProtectedResourceMetadata).toHaveBeenCalledTimes(2)
 		} finally {
 			vi.useRealTimers()
 		}
