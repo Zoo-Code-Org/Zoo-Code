@@ -1198,6 +1198,37 @@ describe("key-scoped cache key derivation", () => {
 		const discriminator = cacheKey.split(":").pop() as string
 		expect(discriminator).toMatch(/^[0-9a-f]{8}$/)
 	})
+
+	it("never serves one key's catalog to another key on the same server", async () => {
+		// Requesty enforces per-key model allowlists, so a shared entry would expose one
+		// key's catalog to another. Drive the real getModels() cache path with a stateful
+		// in-memory store so a cache hit is observable.
+		const store = new Map<string, unknown>()
+		// NodeCache keys are `string | number`; the cache only ever writes string keys here.
+		mockCache.get.mockImplementation((key: string | number) => store.get(String(key)) as never)
+		mockCache.set.mockImplementation(((key: string | number, value: unknown) => {
+			store.set(String(key), value)
+			return true
+		}) as never)
+
+		const keyOneModels = { "key-one/model": mockModels["key-scoped/model"] }
+		const keyTwoModels = { "key-two/model": mockModels["key-scoped/model"] }
+		const fetchKeyOne = vi.fn().mockResolvedValue(keyOneModels)
+		const fetchKeyTwo = vi.fn().mockResolvedValue(keyTwoModels)
+		const handlerOne = makeHandler(REQUESTY_SCOPE, fetchKeyOne)
+		const handlerTwo = makeHandler(REQUESTY_SCOPE, fetchKeyTwo)
+
+		const keyOneOptions = { provider: keyScopedProvider, apiKey: "key-one" } as const
+		const keyTwoOptions = { provider: keyScopedProvider, apiKey: "key-two" } as const
+
+		await expect(getModels(keyOneOptions, handlerOne)).resolves.toEqual(keyOneModels)
+		await expect(getModels(keyTwoOptions, handlerTwo)).resolves.toEqual(keyTwoModels)
+
+		// Re-reading key one must hit its own entry, not key two's.
+		await expect(getModels(keyOneOptions, handlerOne)).resolves.toEqual(keyOneModels)
+		expect(fetchKeyOne).toHaveBeenCalledTimes(1)
+		expect(fetchKeyTwo).toHaveBeenCalledTimes(1)
+	})
 })
 
 describe("NanoGPT key-scoped cache isolation", () => {
