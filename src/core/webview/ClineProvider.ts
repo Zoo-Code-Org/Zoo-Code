@@ -1770,6 +1770,31 @@ export class ClineProvider
 			this.webviewDisposables,
 		)
 
+		// Register disposal before awaiting HTML or state so closing the view during
+		// either load invalidates this resolve and prevents later listener installation.
+		webviewView.onDidDispose(
+			async () => {
+				// A view that is no longer current must not clear the current
+				// view's resources or dispose the provider.
+				if (webviewView !== this.view) {
+					return
+				}
+
+				if (inTabMode) {
+					this.log("Disposing ClineProvider instance for tab view")
+					await this.dispose()
+				} else {
+					this.log("Clearing webview resources for sidebar view")
+					this.view = undefined
+					this.clearWebviewResources()
+				}
+			},
+			null,
+			// View-scoped, like the other view subscriptions: disposed both when
+			// the view is disposed and when a different view replaces it.
+			this.webviewDisposables,
+		)
+
 		if (inTabMode) {
 			setPanel(webviewView, "tab")
 		} else if ("onDidChangeVisibility" in webviewView) {
@@ -1794,6 +1819,14 @@ export class ClineProvider
 		// The HTML load above can finish after the view was disposed or replaced.
 		// A stale resolve must not assign HTML to a view the provider no longer owns.
 		if (this.isStaleViewResolve(webviewView, epoch)) {
+			return
+		}
+
+		webviewView.webview.html = html
+
+		// The HTML load above can finish after the view was disposed or replaced.
+		// A stale resolve must not assign HTML to a view the provider no longer owns.
+		if (this.isStaleViewResolve(webviewView)) {
 			return
 		}
 
@@ -1897,24 +1930,13 @@ export class ClineProvider
 			this.webviewDisposables.push(visibilityDisposable)
 		}
 
-		// Listen for when the view is disposed
-		// This happens when the user closes the view or when the view is closed programmatically
-		webviewView.onDidDispose(
-			async () => {
-				if (inTabMode) {
-					this.log("Disposing ClineProvider instance for tab view")
-					await this.dispose()
-				} else {
-					this.log("Clearing webview resources for sidebar view")
-					this.clearWebviewResources()
-				}
-			},
-			null,
-			this.webviewDisposables,
-		)
-
 		// Listen for when color changes
 		const configDisposable = vscode.workspace.onDidChangeConfiguration(async (e) => {
+			// Ignore configuration refreshes scoped to a view that is no longer current.
+			if (webviewView !== this.view) {
+				return
+			}
+
 			if (e && e.affectsConfiguration("workbench.colorTheme")) {
 				// Sends latest theme name to webview
 				await this.postMessageToWebview({ type: "theme", text: JSON.stringify(await getTheme()) })
@@ -2624,11 +2646,14 @@ export class ClineProvider
 	 * Sets up an event listener to listen for messages passed from the webview context and
 	 * executes code based on the message that is received.
 	 *
-	 * @param webview A reference to the extension webview
+	 * @param webviewView The view whose webview messages are listened to
 	 */
-	private setWebviewMessageListener(webview: vscode.Webview) {
-		const onReceiveMessage = async (message: WebviewMessage) =>
-			webviewMessageHandler(this, message, this.marketplaceManager)
+	private setWebviewMessageListener(webviewView: vscode.WebviewView | vscode.WebviewPanel) {
+		const onReceiveMessage = async (message: WebviewMessage) => {
+			// Ignore messages from a view that is no longer the current view.
+			if (webviewView !== this.view) {
+				return
+			}
 
 			const startedAt = Date.now()
 			this.diagnosticsRecorder.record({ boundary: "webview-in", phase: "start", type: message.type })
@@ -4462,7 +4487,7 @@ export class ClineProvider
 		// Broadcast the updated history to the webview if requested.
 		// Prefer per-item updates to avoid repeatedly cloning/sending the full history.
 		if (broadcast && this.isViewLaunched) {
-			const updatedItem = this.taskHistoryStore.get(item.id) ?? item
+			const updatedItem = this.taskHistoryStore.get(item.id) ?? itemWithoutTitle
 			await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
 		}
 
