@@ -46,11 +46,11 @@ Zoo Code phát triển trên nền tảng do Roo Code tạo ra và tiếp tục 
 - **Workflow terminal và chỉnh sửa đáng tin cậy hơn** — sửa lỗi terminal hoàn tất quá sớm, xung đột trạng thái tác vụ, quản lý ngữ cảnh, chỉnh sửa diff và sử dụng công cụ riêng của từng provider.
 - **Kiểm soát workspace tốt hơn** — quản lý quy tắc, giới hạn MCP theo từng chế độ, kiểm soát đường dẫn multi-root, tùy chọn reasoning của model và thao tác xem lại thay đổi khi hoàn tất.
 
-## Điểm mới trong v3.90.0
+## Điểm mới trong v3.92.0
 
-- ✨ **Provider và model:** GitHub Copilot giờ là một provider: đăng nhập và Zoo Code tải model Copilot của bạn. IO Intelligence là provider với API key riêng. Gemini 4 Argon có trên Gemini và Vertex. GPT-6 Luna có trên OpenCode Go. Gemini 4 Argon và GPT-6 Luna cũng có trên Zoo Gateway.
-- 🧭 **Thực thi tool:** Lặp lại cùng một tool call sẽ có cảnh báo, rồi Zoo Code dừng vòng lặp đó. Tắt `attempt_completion` không còn để task không thể hoàn thành. Tin nhắn trong hàng đợi chạy cùng kiểm tra bảo vệ lệnh như lệnh bạn gửi trực tiếp.
-- ⚡ **Suy luận và streaming:** Adaptive thinking của Anthropic hiện trong chat và thinking token được đếm. Công tắc R1 giữ suy luận từ llama.cpp, Ollama và LM Studio. Codex giữ suy luận đã mã hóa cùng bản tóm tắt bạn thấy. Stream language model của VS Code dùng guarded recovery khi stream lỗi.
+- ✨ **Lựa chọn model nhanh hơn và hỗ trợ model mạnh mẽ hơn:** Chuyển model ngay trong ô soạn chat. Dùng Claude Haiku 5.5 trên Amazon Bedrock, tận dụng các khả năng Kimi K3 chính xác hơn trên OpenRouter và dùng giới hạn Gemini 4 Argon đã được chỉnh sửa trên Vercel AI Gateway.
+- 🧭 **Quy trình terminal, chỉnh sửa, chat và làm việc từ xa đáng tin cậy hơn:** Tùy chọn thu gọn output lệnh theo mặc định, nhận thông báo lỗi chỉnh sửa rõ ràng hơn, giữ các hàng reasoning và API luôn hiển thị, đồng thời tránh sự cố khởi động và proxy trong workspace từ xa.
+- 🔌 **Mở rộng MCP marketplace:** Kết nối Zoo Code với AnySearch, Mailtea và Tradehand thông qua MCP marketplace.
 
 ## Zoo Code có thể làm gì cho BẠN?
 

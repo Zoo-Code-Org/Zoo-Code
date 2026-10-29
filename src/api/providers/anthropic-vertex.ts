@@ -24,6 +24,7 @@ import {
 } from "../../core/prompts/tools/native-tools/converters"
 
 import { BaseProvider } from "./base-provider"
+import { bridgeExternalAbortSignal, hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
 import { NOT_PROVIDED } from "./constants"
 import { parseVertexJsonCredentials } from "./utils/vertex-credentials"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
@@ -86,6 +87,15 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 			tool_choice: convertOpenAIToolChoiceToAnthropic(metadata?.tool_choice, metadata?.parallelToolCalls),
 		}
 
+		// Bridge the external abort signal from request metadata into a per-request
+		// controller so the SDK call is cancelled when the owning request is aborted
+		// (or when the signal is already aborted). Without an external signal the
+		// client-level timeout configured in the constructor remains the only
+		// cancellation mechanism, preserving the existing behavior.
+		const externalAbortSignal = metadata?.abortSignal
+		const { signal: abortSignal, dispose: removeExternalAbortListener } =
+			bridgeExternalAbortSignal(externalAbortSignal)
+
 		/**
 		 * Vertex API has specific limitations for prompt caching:
 		 * 1. Maximum of 4 blocks can have cache_control
@@ -114,109 +124,128 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 		} as Anthropic.Messages.MessageCreateParamsStreaming
 
 		// and prompt caching
-		const requestOptions = betas?.length ? { headers: { "anthropic-beta": betas.join(",") } } : undefined
+		const requestOptions: Anthropic.RequestOptions = {}
+		if (betas?.length) {
+			// Join rather than take the first entry: the header accepts a comma list, so a
+			// second beta added to the builder later is not silently dropped.
+			requestOptions.headers = { "anthropic-beta": betas.join(",") }
+		}
+		if (abortSignal) {
+			requestOptions.signal = abortSignal
+		}
 
-		const stream = await this.client.messages.create(params, requestOptions)
+		try {
+			const stream = await this.client.messages.create(
+				params,
+				Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
+			)
 
-		for await (const chunk of stream) {
-			switch (chunk.type) {
-				case "message_start": {
-					const usage = chunk.message!.usage
+			for await (const chunk of stream) {
+				switch (chunk.type) {
+					case "message_start": {
+						const usage = chunk.message!.usage
 
-					// `output_tokens_details.thinking_tokens` decomposes the billed
-					// output into internal reasoning tokens; surfaced for per-turn
-					// thinking telemetry (billing already includes it in output_tokens).
-					yield {
-						type: "usage",
-						inputTokens: usage.input_tokens || 0,
-						outputTokens: usage.output_tokens || 0,
-						cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
-						cacheReadTokens: usage.cache_read_input_tokens || undefined,
-						...(typeof usage.output_tokens_details?.thinking_tokens === "number"
-							? { reasoningTokens: usage.output_tokens_details!.thinking_tokens }
-							: {}),
+						// `output_tokens_details.thinking_tokens` decomposes the billed
+						// output into internal reasoning tokens; surfaced for per-turn
+						// thinking telemetry (billing already includes it in output_tokens).
+						yield {
+							type: "usage",
+							inputTokens: usage.input_tokens || 0,
+							outputTokens: usage.output_tokens || 0,
+							cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
+							cacheReadTokens: usage.cache_read_input_tokens || undefined,
+							...(typeof usage.output_tokens_details?.thinking_tokens === "number"
+								? { reasoningTokens: usage.output_tokens_details!.thinking_tokens }
+								: {}),
+						}
+
+						break
 					}
+					case "message_delta": {
+						const deltaThinkingTokens = chunk.usage!.output_tokens_details?.thinking_tokens
 
-					break
-				}
-				case "message_delta": {
-					const deltaThinkingTokens = chunk.usage!.output_tokens_details?.thinking_tokens
+						yield {
+							type: "usage",
+							inputTokens: 0,
+							outputTokens: chunk.usage!.output_tokens || 0,
+							...(typeof deltaThinkingTokens === "number"
+								? { reasoningTokens: deltaThinkingTokens }
+								: {}),
+						}
 
-					yield {
-						type: "usage",
-						inputTokens: 0,
-						outputTokens: chunk.usage!.output_tokens || 0,
-						...(typeof deltaThinkingTokens === "number" ? { reasoningTokens: deltaThinkingTokens } : {}),
+						break
 					}
+					case "content_block_start": {
+						switch (chunk.content_block!.type) {
+							case "text": {
+								if (chunk.index! > 0) {
+									yield { type: "text", text: "\n" }
+								}
 
-					break
-				}
-				case "content_block_start": {
-					switch (chunk.content_block!.type) {
-						case "text": {
-							if (chunk.index! > 0) {
-								yield { type: "text", text: "\n" }
+								yield { type: "text", text: chunk.content_block!.text }
+								break
 							}
+							case "thinking": {
+								if (chunk.index! > 0) {
+									yield { type: "reasoning", text: "\n" }
+								}
 
-							yield { type: "text", text: chunk.content_block!.text }
-							break
-						}
-						case "thinking": {
-							if (chunk.index! > 0) {
-								yield { type: "reasoning", text: "\n" }
+								yield { type: "reasoning", text: (chunk.content_block as any).thinking }
+								break
 							}
+							case "tool_use": {
+								// Emit initial tool call partial with id and name
+								yield {
+									type: "tool_call_partial",
+									index: chunk.index,
+									id: chunk.content_block!.id,
+									name: chunk.content_block!.name,
+									arguments: undefined,
+								}
+								break
+							}
+						}
 
-							yield { type: "reasoning", text: (chunk.content_block as any).thinking }
-							break
-						}
-						case "tool_use": {
-							// Emit initial tool call partial with id and name
-							yield {
-								type: "tool_call_partial",
-								index: chunk.index,
-								id: chunk.content_block!.id,
-								name: chunk.content_block!.name,
-								arguments: undefined,
-							}
-							break
-						}
+						break
 					}
-
-					break
-				}
-				case "content_block_delta": {
-					switch (chunk.delta!.type) {
-						case "text_delta": {
-							yield { type: "text", text: chunk.delta!.text }
-							break
-						}
-						case "thinking_delta": {
-							yield { type: "reasoning", text: (chunk.delta as any).thinking }
-							break
-						}
-						case "input_json_delta": {
-							// Emit tool call partial chunks as arguments stream in
-							yield {
-								type: "tool_call_partial",
-								index: chunk.index,
-								id: undefined,
-								name: undefined,
-								arguments: (chunk.delta as any).partial_json,
+					case "content_block_delta": {
+						switch (chunk.delta!.type) {
+							case "text_delta": {
+								yield { type: "text", text: chunk.delta!.text }
+								break
 							}
-							break
+							case "thinking_delta": {
+								yield { type: "reasoning", text: (chunk.delta as any).thinking }
+								break
+							}
+							case "input_json_delta": {
+								// Emit tool call partial chunks as arguments stream in
+								yield {
+									type: "tool_call_partial",
+									index: chunk.index,
+									id: undefined,
+									name: undefined,
+									arguments: (chunk.delta as any).partial_json,
+								}
+								break
+							}
 						}
-					}
 
-					break
-				}
-				case "content_block_stop": {
-					// Block complete - no action needed for now.
-					// NativeToolCallParser handles tool call completion
-					// Note: Signature for multi-turn thinking would require using stream.finalMessage()
-					// after iteration completes, which requires restructuring the streaming approach.
-					break
+						break
+					}
+					case "content_block_stop": {
+						// Block complete - no action needed for now.
+						// NativeToolCallParser handles tool call completion
+						// Note: Signature for multi-turn thinking would require using stream.finalMessage()
+						// after iteration completes, which requires restructuring the streaming approach.
+						break
+					}
 				}
 			}
+		} finally {
+			// Release the listener once the stream is consumed, whether the
+			// request completed, failed, or the generator was closed early.
+			removeExternalAbortListener?.()
 		}
 	}
 
@@ -280,7 +309,7 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions) {
+	async completePrompt(prompt: string, options?: CompletePromptOptions) {
 		try {
 			const {
 				id,
@@ -306,7 +335,23 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 				stream: false,
 			} as Anthropic.Messages.MessageCreateParamsNonStreaming
 
-			const response = await this.client.messages.create(params)
+			// Build request options with abortSignal and/or timeout handling
+			const requestOptions: Anthropic.RequestOptions = {}
+			if (options?.abortSignal) {
+				requestOptions.signal = options.abortSignal
+			}
+			const timeoutMs = options?.timeoutMs
+			// Only a usable finite positive timeout may be forwarded: the SDKs treat
+			// timeout: 0 as an immediate abort and throw on negative/non-finite values.
+			// Fractional delays are rounded up, matching mergeAbortSignalAndTimeout.
+			if (hasUsableTimeout(timeoutMs)) {
+				requestOptions.timeout = toSdkTimeoutMs(timeoutMs)
+			}
+
+			const response = await this.client.messages.create(
+				params,
+				Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
+			)
 			const content = response.content.find(({ type }) => type === "text")
 
 			return content?.type === "text" ? content.text : ""
