@@ -96,19 +96,19 @@
 		"@types/diff": "5.2.3",
 		"@types/jest": "29.5.14",
 		"@types/katex": "0.16.7",
-		"@types/node": "22.20.1",
+		"@types/node": "catalog:",
 		"@types/react": "18.3.31",
 		"@types/react-dom": "18.3.7",
 		"@types/stacktrace-js": "2.0.3",
 		"@types/vscode-webview": "1.57.5",
 		"@tailwindcss/vite": "4.3.3",
 		"@vitejs/plugin-react": "5.2.0",
-		"@vitest/coverage-v8": "4.1.11",
-		"@vitest/ui": "4.1.11",
+		"@vitest/coverage-v8": "catalog:",
+		"@vitest/ui": "catalog:",
 		"babel-plugin-react-compiler": "1.0.0",
 		"jsdom": "26.1.0",
 		"monocart-reporter": "2.12.2",
-		"vite": "8.3.4",
-		"vitest": "4.1.11"
+		"vite": "catalog:",
+		"vitest": "catalog:"
 	}
 }

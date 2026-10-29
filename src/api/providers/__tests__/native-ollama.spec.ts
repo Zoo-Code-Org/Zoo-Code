@@ -5,6 +5,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import { NativeOllamaHandler } from "../native-ollama"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { getOllamaModels } from "../fetchers/ollama"
+import { MODEL_CATALOG_FETCH_TIMEOUT_MS } from "../fetchers/modelCache"
 
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { clearAllMocks } from "../../../test-utils/reset"
@@ -1349,6 +1350,63 @@ describe("NativeOllamaHandler", () => {
 			const model = handler.getModel()
 			expect(model.id).toBe("llama2")
 			expect(model.info).toBeDefined()
+		})
+	})
+
+	describe("ensureModelFetched", () => {
+		it("bounds the catalog fetch with a fetch-local timeout signal", async () => {
+			mockGetOllamaModels.mockResolvedValue({
+				llama2: {
+					contextWindow: 8192,
+					maxTokens: 4096,
+					supportsImages: false,
+					supportsPromptCache: false,
+				},
+			})
+
+			const timeoutSpy = vi.spyOn(AbortSignal, "timeout")
+			try {
+				const controller = new AbortController()
+				await handler.ensureModelFetched(controller.signal)
+
+				// This path bypasses getModels()'s single-flight, so it must carry its
+				// own bound. The signal is fetch-local: the caller's signal is never
+				// forwarded, so one caller aborting cannot cancel the shared fetch.
+				const forwarded = mockGetOllamaModels.mock.calls[0]?.[2]?.signal
+				// Pinning the delay and the exact forwarded signal proves the bound is
+				// real: a plain new AbortController().signal would satisfy a weaker
+				// "is an AbortSignal" check while removing the timeout entirely.
+				expect(timeoutSpy).toHaveBeenCalledWith(MODEL_CATALOG_FETCH_TIMEOUT_MS)
+				expect(forwarded).toBe(timeoutSpy.mock.results[0]?.value)
+				expect(forwarded).not.toBe(controller.signal)
+				expect(forwarded?.aborted).toBe(false)
+			} finally {
+				timeoutSpy.mockRestore()
+			}
+		})
+
+		it("fetches the catalog once and populates this.models", async () => {
+			mockGetOllamaModels.mockResolvedValue({
+				llama2: {
+					contextWindow: 8192,
+					maxTokens: 4096,
+					supportsImages: false,
+					supportsPromptCache: false,
+				},
+			})
+
+			// Before the pre-warm the instance catalog is empty, so getModel()
+			// returns the sane defaults rather than the discovered metadata.
+			expect(handler.getModel().info.contextWindow).not.toBe(8192)
+
+			await handler.ensureModelFetched()
+
+			expect(mockGetOllamaModels).toHaveBeenCalledTimes(1)
+			expect(handler.getModel().info.contextWindow).toBe(8192)
+
+			// A second call is a memoized no-op.
+			await handler.ensureModelFetched()
+			expect(mockGetOllamaModels).toHaveBeenCalledTimes(1)
 		})
 	})
 
