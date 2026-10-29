@@ -983,6 +983,17 @@ describe("ProviderSettingsManager", () => {
 			)
 		})
 
+		it('keeps a storage failure whose message mentions "not found" out of the typed not-found signal', async () => {
+			mockSecrets.get.mockRejectedValue(new Error("vault: secret not found"))
+
+			// A message-based classifier would treat this as a missing profile. The typed
+			// signal must stay reserved for a missing config entry.
+			await expect(providerSettingsManager.deleteConfig("default")).rejects.not.toBeInstanceOf(
+				ProviderSettingsNotFoundError,
+			)
+			await expect(providerSettingsManager.deleteConfig("default")).rejects.toThrow("Failed to delete config")
+		})
+
 		it("should throw error when trying to delete last remaining config", async () => {
 			mockSecrets.get.mockResolvedValue(
 				JSON.stringify({
