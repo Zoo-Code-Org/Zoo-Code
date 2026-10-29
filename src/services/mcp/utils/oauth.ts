@@ -175,7 +175,13 @@ async function probeResourceMetadataUrl(serverUrl: string): Promise<URL | undefi
  * finds the Bearer challenge after other challenges in the same header.
  */
 function extractResourceMetadataUrl(header: string | null): URL | undefined {
-	const match = header && /(?:^|,)\s*bearer\s+(?:.*?[\s,])?resource_metadata\s*=\s*"([^"]*)"/i.exec(header)
+	// After "Bearer", skip only its own auth-params, so a later challenge's
+	// resource_metadata is never read as the Bearer one.
+	const match =
+		header &&
+		/(?:^|,)\s*bearer\s+(?:[\w!#$%&'*+.^`|~-]+\s*=\s*(?:"[^"]*"|[^\s,"]*)\s*,\s*)*resource_metadata\s*=\s*"([^"]*)"/i.exec(
+			header,
+		)
 	if (!match) return undefined
 	try {
 		return new URL(match[1])

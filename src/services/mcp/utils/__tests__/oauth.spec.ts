@@ -92,6 +92,10 @@ describe("fetchOAuthAuthServerMetadata", () => {
 		["no WWW-Authenticate header", undefined],
 		["no resource_metadata parameter", 'Bearer realm="mcp"'],
 		["a non-Bearer challenge", 'Basic resource_metadata="https://example.com/metadata"'],
+		[
+			"resource_metadata only in a later non-Bearer challenge",
+			'Bearer realm="mcp", Basic resource_metadata="https://other.example/metadata"',
+		],
 		["an invalid URL", 'Bearer resource_metadata="not a url"'],
 	])("returns null when the 401 response has %s", async (_case, wwwAuthenticate) => {
 		vi.mocked(discoverOAuthProtectedResourceMetadata).mockRejectedValueOnce(new Error("not found"))
