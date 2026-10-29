@@ -43,6 +43,9 @@ vitest.mock("../fetchers/modelCache", () => ({
 			// Responses-format models (Zoo-Code-Org/Zoo-Code#1431 and issue #1979).
 			"gpt-5.6-luna": { ...opencodeGoModels["gpt-5.6-luna"] },
 			"gpt-6-luna": { ...opencodeGoModels["gpt-6-luna"] },
+			"grok-4.6": { ...opencodeGoModels["grok-4.6"] },
+			"muse-spark-1.3-contributor": { ...opencodeGoModels["muse-spark-1.3-contributor"] },
+			"muse-spark-1.2-contributor": { ...opencodeGoModels["muse-spark-1.2-contributor"] },
 		})
 	}),
 	refreshModels: vitest.fn().mockImplementation(function () {
@@ -51,6 +54,9 @@ vitest.mock("../fetchers/modelCache", () => ({
 			"qwen3.7-max": { ...opencodeGoModels["qwen3.7-max"] },
 			"gpt-5.6-luna": { ...opencodeGoModels["gpt-5.6-luna"] },
 			"gpt-6-luna": { ...opencodeGoModels["gpt-6-luna"] },
+			"grok-4.6": { ...opencodeGoModels["grok-4.6"] },
+			"muse-spark-1.3-contributor": { ...opencodeGoModels["muse-spark-1.3-contributor"] },
+			"muse-spark-1.2-contributor": { ...opencodeGoModels["muse-spark-1.2-contributor"] },
 		})
 	}),
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
@@ -1115,7 +1121,7 @@ describe("OpencodeGoHandler", () => {
 			expect(callArgs.store).toBe(false)
 			const input = callArgs.input as unknown[]
 			expect(input.some((item) => (item as { role?: string }).role === "system")).toBe(false)
-			// The gateway rejects temperature for Responses-format models.
+			// No custom temperature is set, so the provider default is not sent.
 			expect(callArgs.temperature).toBeUndefined()
 			// No tools were provided, so no tools/tool_choice are sent.
 			expect(callArgs.tools).toBeUndefined()
@@ -1498,6 +1504,141 @@ describe("OpencodeGoHandler", () => {
 			await expect(async () => {
 				await collectStream(handler.createMessage("sys", messages))
 			}).rejects.toThrow("Opencode Go completion error: internal server error")
+		})
+
+		describe("temperature (Zoo-Code-Org/Zoo-Code#2055)", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const streamRequest = async (options: ApiHandlerOptions) => {
+				await collectStream(new OpencodeGoHandler(options).createMessage("sys", messages))
+				return mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			}
+
+			const completeRequest = async (options: ApiHandlerOptions) => {
+				mockResponsesCreate.mockResolvedValue({ output_text: "Hello!" })
+				await new OpencodeGoHandler(options).completePrompt("ping")
+				return mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			}
+
+			const paths = [
+				["streaming", streamRequest],
+				["non-streaming", completeRequest],
+			] as const
+
+			describe.each(paths)("%s request", (_path, sendRequest) => {
+				it.each([
+					["grok-4.6", undefined],
+					["muse-spark-1.3-contributor", undefined],
+					["muse-spark-1.2-contributor", undefined],
+					["gpt-5.6-luna", "none"],
+					["gpt-6-luna", "none"],
+				] as const)("forwards a custom temperature for %s (effort %s)", async (modelId, reasoningEffort) => {
+					const callArgs = await sendRequest({
+						opencodeGoApiKey: "test-key",
+						opencodeGoModelId: modelId,
+						modelTemperature: 0.37,
+						...(reasoningEffort && { reasoningEffort }),
+					})
+
+					// The value keeps the UI's 0.01 resolution.
+					expect(callArgs.temperature).toBe(0.37)
+				})
+
+				it.each([
+					["grok-4.6", "low"],
+					["grok-4.6", "high"],
+					["muse-spark-1.3-contributor", "minimal"],
+					["muse-spark-1.2-contributor", "high"],
+				] as const)(
+					"forwards a custom temperature for %s with explicit effort %s",
+					async (modelId, reasoningEffort) => {
+						const callArgs = await sendRequest({
+							opencodeGoApiKey: "test-key",
+							opencodeGoModelId: modelId,
+							modelTemperature: 0.37,
+							reasoningEffort,
+						})
+
+						// Grok and Muse support does not depend on reasoning effort.
+						expect(callArgs.reasoning).toEqual({ effort: reasoningEffort })
+						expect(callArgs.temperature).toBe(0.37)
+					},
+				)
+
+				it("omits temperature for a stale none effort when reasoning effort is switched off", async () => {
+					// A saved "none" does not reach the wire while the toggle is off,
+					// so the configuration is unverified and temperature is omitted.
+					const callArgs = await sendRequest({
+						...lunaOptions,
+						modelTemperature: 0.5,
+						reasoningEffort: "none",
+						enableReasoningEffort: false,
+					})
+
+					expect(callArgs).not.toHaveProperty("reasoning")
+					expect(callArgs).not.toHaveProperty("temperature")
+				})
+
+				it.each([
+					["gpt-5.6-luna", "low"],
+					["gpt-5.6-luna", "max"],
+					["gpt-6-luna", "medium"],
+					["gpt-6-luna", "xhigh"],
+					["gpt-6-luna", "disable"],
+				] as const)("omits a saved temperature for %s with effort %s", async (modelId, reasoningEffort) => {
+					const callArgs = await sendRequest({
+						opencodeGoApiKey: "test-key",
+						opencodeGoModelId: modelId,
+						modelTemperature: 0.5,
+						reasoningEffort,
+					})
+
+					expect(callArgs).not.toHaveProperty("temperature")
+				})
+
+				it("omits temperature 1 for a GPT Luna model with a non-none effort", async () => {
+					// Temperature 1 is the only value the gateway accepted with
+					// reasoning, but it is the model default, so it is omitted.
+					const callArgs = await sendRequest({
+						opencodeGoApiKey: "test-key",
+						opencodeGoModelId: "gpt-5.6-luna",
+						modelTemperature: 1,
+						reasoningEffort: "high",
+					})
+
+					expect(callArgs).not.toHaveProperty("temperature")
+				})
+
+				it("omits a saved temperature for a GPT Luna model on its default effort", async () => {
+					const callArgs = await sendRequest({ ...gpt6LunaOptions, modelTemperature: 0.5 })
+
+					expect(callArgs.reasoning).toEqual({ effort: "medium" })
+					expect(callArgs).not.toHaveProperty("temperature")
+				})
+
+				it.each([undefined, null])(
+					"omits temperature when no custom value is set (%s)",
+					async (modelTemperature) => {
+						const callArgs = await sendRequest({
+							opencodeGoApiKey: "test-key",
+							opencodeGoModelId: "grok-4.6",
+							modelTemperature,
+						})
+
+						expect(callArgs).not.toHaveProperty("temperature")
+					},
+				)
+
+				it("forwards temperature 0 as an explicit custom value", async () => {
+					const callArgs = await sendRequest({
+						opencodeGoApiKey: "test-key",
+						opencodeGoModelId: "grok-4.6",
+						modelTemperature: 0,
+					})
+
+					expect(callArgs.temperature).toBe(0)
+				})
+			})
 		})
 
 		it("classifies documented Responses models as Responses-format and other models as not", () => {
