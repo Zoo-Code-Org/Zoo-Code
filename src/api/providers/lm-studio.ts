@@ -23,7 +23,7 @@ import type {
 	CompletePromptOptions,
 	ModelCacheScope,
 } from "../index"
-import { getModelsFromCache } from "./fetchers/modelCache"
+import { getModels, getModelsFromCache } from "./fetchers/modelCache"
 import { getLMStudioModels } from "./fetchers/lmstudio"
 import { handleOpenAIError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
@@ -54,6 +54,21 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
 		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
 		return getLMStudioModels(options.baseUrl, ...fetchOpts)
+	}
+
+	async ensureModelFetched(signal?: AbortSignal): Promise<void> {
+		await this.ensureCatalogLoaded(async () => {
+			const models = await getModels(
+				{
+					provider: providerIdentifiers.lmstudio,
+					baseUrl: this.options.lmStudioBaseUrl,
+				},
+				this,
+			)
+			// getModels() does not cache an empty response, so an empty catalog must
+			// stay retryable instead of being memoized as a successful load.
+			return Object.keys(models).length > 0
+		}, signal)
 	}
 
 	override async *createMessage(

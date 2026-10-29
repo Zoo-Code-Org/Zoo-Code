@@ -7,6 +7,7 @@ import { ApiStream } from "../transform/stream"
 import { sanitizeSurrogates, sanitizeSurrogatesDeep } from "../transform/sanitize-surrogates"
 import { countTokens } from "../../utils/countTokens"
 import { isMcpTool } from "../../utils/mcp-name"
+import { detachOnAbort } from "./utils/abort-signal"
 import { getApiRequestTimeout } from "./utils/timeout-config"
 
 /**
@@ -14,6 +15,9 @@ import { getApiRequestTimeout } from "./utils/timeout-config"
  */
 export abstract class BaseProvider implements ApiHandler {
 	protected readonly timeoutMs: number = getApiRequestTimeout()
+
+	private catalogFetch?: Promise<void>
+	private catalogLoaded = false
 
 	abstract createMessage(
 		systemPrompt: string,
@@ -156,5 +160,45 @@ export abstract class BaseProvider implements ApiHandler {
 	 */
 	getModelCacheScope(): ModelCacheScope {
 		return { urlScoped: false, keyScoped: false, authScoped: false }
+	}
+
+	/**
+	 * Single-flight the one-time catalog load behind ensureModelFetched().
+	 *
+	 * Semantics mirror RouterProvider.ensureModelFetched():
+	 * - concurrent callers share one fetch;
+	 * - a load that produced models is never repeated (catalogLoaded);
+	 * - a failed load is retried by the next caller (the promise is cleared);
+	 * - a load that resolved with an empty catalog is retried too: getModels()
+	 *   deliberately does not cache an empty response, so memoizing it here would
+	 *   permanently pin the handler to the fallback model info;
+	 * - a caller's signal detaches only that caller's wait, never the shared fetch,
+	 *   because the fetch is already bounded by modelCache's 15 s single-flight.
+	 *
+	 * A loader returns `false` when the catalog it assigned is empty. Returning
+	 * `void` (or `true`) means the load counts as successful.
+	 */
+	protected async ensureCatalogLoaded(load: () => Promise<boolean | void>, signal?: AbortSignal): Promise<void> {
+		if (this.catalogLoaded) return
+		if (signal?.aborted) throw signal.reason
+
+		this.catalogFetch ??= load()
+			.then((hasCatalog) => {
+				this.catalogLoaded = hasCatalog !== false
+			})
+			.finally(() => {
+				this.catalogFetch = undefined
+			})
+
+		const fetch = this.catalogFetch
+
+		if (!signal) {
+			await fetch
+			return
+		}
+
+		// Detach this waiter as soon as the signal aborts; the shared in-flight
+		// fetch continues for any other waiter and still populates the cache.
+		await detachOnAbort(fetch, signal)
 	}
 }
