@@ -163,6 +163,7 @@ export const minimaxProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.minimax,
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => minimaxDefaultModelId,
 	schema: {
 		...apiModelIdProviderModelShape,
 		minimaxBaseUrl: z

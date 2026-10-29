@@ -833,6 +833,7 @@ export const opencodeGoProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.opencodeGo,
 	modelIdKey: OPENCODE_GO_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(OPENCODE_GO_MODEL_ID_FIELD),
+	getDefaultModelId: () => opencodeGoDefaultModelId,
 	schema: {
 		...baseProviderSettingsShape,
 		opencodeGoApiKey: z.string().optional(),

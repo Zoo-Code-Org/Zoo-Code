@@ -95,6 +95,7 @@ export const mistralProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.mistral,
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => mistralDefaultModelId,
 	schema: {
 		...apiModelIdProviderModelShape,
 		mistralApiKey: z.string().optional(),

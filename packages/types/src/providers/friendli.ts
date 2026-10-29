@@ -76,6 +76,7 @@ export const friendliProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.friendli,
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => friendliDefaultModelId,
 	schema: {
 		...apiModelIdProviderModelShape,
 		friendliApiKey: z.string().optional(),

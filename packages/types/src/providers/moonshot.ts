@@ -134,6 +134,7 @@ export const moonshotProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.moonshot,
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => moonshotDefaultModelId,
 	schema: {
 		...apiModelIdProviderModelShape,
 		moonshotBaseUrl: z

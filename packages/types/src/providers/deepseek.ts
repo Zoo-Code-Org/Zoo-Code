@@ -89,6 +89,7 @@ export const deepSeekProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.deepseek,
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => deepSeekDefaultModelId,
 	schema: {
 		...apiModelIdProviderModelShape,
 		deepSeekBaseUrl: z.string().optional(),

@@ -388,6 +388,7 @@ export const geminiProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.gemini,
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => geminiDefaultModelId,
 	schema: {
 		...apiModelIdProviderModelShape,
 		geminiApiKey: z.string().optional(),

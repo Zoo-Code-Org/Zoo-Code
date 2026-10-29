@@ -40,38 +40,6 @@ export * from "./zoo-gateway.js"
 
 export type { ProviderDefinition } from "./common.js"
 
-import { anthropicDefaultModelId } from "./anthropic.js"
-import { basetenDefaultModelId } from "./baseten.js"
-import { bedrockDefaultModelId } from "./bedrock.js"
-import { deepSeekDefaultModelId } from "./deepseek.js"
-import { fireworksDefaultModelId } from "./fireworks.js"
-import { friendliDefaultModelId } from "./friendli.js"
-import { geminiDefaultModelId } from "./gemini.js"
-import { litellmDefaultModelId } from "./lite-llm.js"
-import { mistralDefaultModelId } from "./mistral.js"
-import { moonshotDefaultModelId } from "./moonshot.js"
-import { openAiNativeDefaultModelId } from "./openai.js"
-import { openAiCodexDefaultModelId } from "./openai-codex.js"
-import { openRouterDefaultModelId } from "./openrouter.js"
-import { poeDefaultModelId } from "./poe.js"
-import { qwenCodeDefaultModelId } from "./qwen-code.js"
-import { requestyDefaultModelId } from "./requesty.js"
-import { sambaNovaDefaultModelId } from "./sambanova.js"
-import { unboundDefaultModelId } from "./unbound.js"
-import { vertexDefaultModelId } from "./vertex.js"
-import { vscodeLlmDefaultModelId } from "./vscode-llm.js"
-import { xaiDefaultModelId } from "./xai.js"
-import { vercelAiGatewayDefaultModelId } from "./vercel-ai-gateway.js"
-import { opencodeGoDefaultModelId } from "./opencode-go.js"
-import { kenariDefaultModelId } from "./kenari.js"
-import { ioIntelligenceDefaultModelId } from "./io-intelligence.js"
-import { nanoGptDefaultModelId } from "./nanogpt.js"
-import { kimiCodeDefaultModelId } from "./kimi-code.js"
-import { internationalZAiDefaultModelId, mainlandZAiDefaultModelId } from "./zai.js"
-import { minimaxDefaultModelId } from "./minimax.js"
-import { mimoDefaultModelId } from "./mimo.js"
-import { zooGatewayDefaultModelId } from "./zoo-gateway.js"
-
 import { anthropicProviderDefinition } from "./anthropic.js"
 import { basetenProviderDefinition } from "./baseten.js"
 import { bedrockProviderDefinition } from "./bedrock.js"
@@ -110,95 +78,6 @@ import { zaiProviderDefinition } from "./zai.js"
 import { zooGatewayProviderDefinition } from "./zoo-gateway.js"
 
 import type { ProviderDefinition } from "./common.js"
-
-// Import the ProviderName type from provider-settings to avoid duplication
-import type { ProviderName } from "../provider-settings.js"
-import { providerIdentifiers } from "../provider-identifiers.js"
-
-const NO_DEFAULT_MODEL_ID = ""
-
-/**
- * Get the default model ID for a given provider.
- * This function returns only the provider's default model ID, without considering user configuration.
- * Used as a fallback when provider models are still loading.
- */
-export function getProviderDefaultModelId(
-	provider: ProviderName,
-	options: { isChina?: boolean } = { isChina: false },
-): string {
-	switch (provider) {
-		case providerIdentifiers.openrouter:
-			return openRouterDefaultModelId
-		case providerIdentifiers.requesty:
-			return requestyDefaultModelId
-		case providerIdentifiers.litellm:
-			return litellmDefaultModelId
-		case providerIdentifiers.xai:
-			return xaiDefaultModelId
-		case providerIdentifiers.baseten:
-			return basetenDefaultModelId
-		case providerIdentifiers.bedrock:
-			return bedrockDefaultModelId
-		case providerIdentifiers.vertex:
-			return vertexDefaultModelId
-		case providerIdentifiers.gemini:
-			return geminiDefaultModelId
-		case providerIdentifiers.deepseek:
-			return deepSeekDefaultModelId
-		case providerIdentifiers.moonshot:
-			return moonshotDefaultModelId
-		case providerIdentifiers.minimax:
-			return minimaxDefaultModelId
-		case providerIdentifiers.mimo:
-			return mimoDefaultModelId
-		case providerIdentifiers.zai:
-			return options?.isChina ? mainlandZAiDefaultModelId : internationalZAiDefaultModelId
-		case providerIdentifiers.openaiNative:
-			return openAiNativeDefaultModelId
-		case providerIdentifiers.openaiCodex:
-			return openAiCodexDefaultModelId
-		case providerIdentifiers.mistral:
-			return mistralDefaultModelId
-		case providerIdentifiers.openai:
-		case providerIdentifiers.ollama:
-		case providerIdentifiers.lmstudio:
-			return NO_DEFAULT_MODEL_ID
-		case providerIdentifiers.vscodeLm:
-		case providerIdentifiers.githubCopilot:
-			return vscodeLlmDefaultModelId
-		case providerIdentifiers.sambanova:
-			return sambaNovaDefaultModelId
-		case providerIdentifiers.fireworks:
-			return fireworksDefaultModelId
-		case providerIdentifiers.friendli:
-			return friendliDefaultModelId
-		case providerIdentifiers.qwenCode:
-			return qwenCodeDefaultModelId
-		case providerIdentifiers.poe:
-			return poeDefaultModelId
-		case providerIdentifiers.unbound:
-			return unboundDefaultModelId
-		case providerIdentifiers.vercelAiGateway:
-			return vercelAiGatewayDefaultModelId
-		case providerIdentifiers.opencodeGo:
-			return opencodeGoDefaultModelId
-		case providerIdentifiers.kenari:
-			return kenariDefaultModelId
-		case providerIdentifiers.ioIntelligence:
-			return ioIntelligenceDefaultModelId
-		case providerIdentifiers.nanogpt:
-			return nanoGptDefaultModelId
-		case providerIdentifiers.kimiCode:
-			return kimiCodeDefaultModelId
-		case providerIdentifiers.zooGateway:
-			return zooGatewayDefaultModelId
-		case providerIdentifiers.anthropic:
-		case providerIdentifiers.geminiCli:
-		case providerIdentifiers.fakeAi:
-		default:
-			return anthropicDefaultModelId
-	}
-}
 
 export const providerDefinitionList = [
 	anthropicProviderDefinition,

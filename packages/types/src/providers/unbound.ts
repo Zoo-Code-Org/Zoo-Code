@@ -25,6 +25,7 @@ export const unboundProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.unbound,
 	modelIdKey: UNBOUND_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(UNBOUND_MODEL_ID_FIELD),
+	getDefaultModelId: () => unboundDefaultModelId,
 	schema: {
 		...baseProviderSettingsShape,
 		unboundApiKey: z.string().optional(),

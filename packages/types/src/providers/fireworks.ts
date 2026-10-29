@@ -334,6 +334,7 @@ export const fireworksProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.fireworks,
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => fireworksDefaultModelId,
 	schema: {
 		...apiModelIdProviderModelShape,
 		fireworksApiKey: z.string().optional(),

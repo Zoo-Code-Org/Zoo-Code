@@ -71,6 +71,7 @@ export const nanoGptProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.nanogpt,
 	modelIdKey: NANOGPT_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(NANOGPT_MODEL_ID_FIELD),
+	getDefaultModelId: () => nanoGptDefaultModelId,
 	schema: {
 		...baseProviderSettingsShape,
 		nanoGptApiKey: z.string().optional(),

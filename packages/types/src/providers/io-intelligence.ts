@@ -22,6 +22,7 @@ export const ioIntelligenceProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.ioIntelligence,
 	modelIdKey: IO_INTELLIGENCE_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(IO_INTELLIGENCE_MODEL_ID_FIELD),
+	getDefaultModelId: () => ioIntelligenceDefaultModelId,
 	schema: {
 		...baseProviderSettingsShape,
 		ioIntelligenceApiKey: z.string().optional(),

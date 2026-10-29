@@ -364,6 +364,7 @@ export const openAiCodexProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.openaiCodex,
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => openAiCodexDefaultModelId,
 	schema: {
 		...apiModelIdProviderModelShape,
 		// Codex "Fast" mode maps to the Responses API priority service tier.

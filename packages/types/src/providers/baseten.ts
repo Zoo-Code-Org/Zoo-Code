@@ -172,6 +172,7 @@ export const basetenProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.baseten,
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => basetenDefaultModelId,
 	schema: {
 		...apiModelIdProviderModelShape,
 		basetenApiKey: z.string().optional(),

@@ -35,6 +35,7 @@ export const kenariProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.kenari,
 	modelIdKey: KENARI_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(KENARI_MODEL_ID_FIELD),
+	getDefaultModelId: () => kenariDefaultModelId,
 	schema: {
 		...baseProviderSettingsShape,
 		kenariApiKey: z.string().optional(),

@@ -173,6 +173,7 @@ export const xaiProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.xai,
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => xaiDefaultModelId,
 	schema: {
 		...apiModelIdProviderModelShape,
 		xaiApiKey: z.string().optional(),

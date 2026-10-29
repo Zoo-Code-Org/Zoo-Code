@@ -362,6 +362,7 @@ export const anthropicProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.anthropic,
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => anthropicDefaultModelId,
 	schema: {
 		...apiModelIdProviderModelShape,
 		apiKey: z.string().optional(),

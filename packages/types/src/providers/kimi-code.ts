@@ -45,6 +45,7 @@ export const kimiCodeProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.kimiCode,
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => kimiCodeDefaultModelId,
 	schema: {
 		...apiModelIdProviderModelShape,
 		kimiCodeAuthMethod: kimiCodeAuthMethodSchema.optional(),

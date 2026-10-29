@@ -102,6 +102,7 @@ export const sambaNovaProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.sambanova,
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => sambaNovaDefaultModelId,
 	schema: {
 		...apiModelIdProviderModelShape,
 		sambaNovaApiKey: z.string().optional(),

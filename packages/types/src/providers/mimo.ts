@@ -74,6 +74,7 @@ export const mimoProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.mimo,
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => mimoDefaultModelId,
 	schema: {
 		...apiModelIdProviderModelShape,
 		mimoBaseUrl: z

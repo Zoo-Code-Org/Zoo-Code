@@ -826,6 +826,7 @@ export const vertexProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.vertex,
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => vertexDefaultModelId,
 	schema: {
 		...apiModelIdProviderModelShape,
 		vertexKeyFile: z.string().optional(),

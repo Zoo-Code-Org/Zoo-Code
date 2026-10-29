@@ -27,6 +27,7 @@ export const requestyProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.requesty,
 	modelIdKey: REQUESTY_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(REQUESTY_MODEL_ID_FIELD),
+	getDefaultModelId: () => requestyDefaultModelId,
 	schema: {
 		...baseProviderSettingsShape,
 		requestyBaseUrl: z.string().optional(),

@@ -111,6 +111,7 @@ export const openRouterProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.openrouter,
 	modelIdKey: OPEN_ROUTER_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(OPEN_ROUTER_MODEL_ID_FIELD),
+	getDefaultModelId: () => openRouterDefaultModelId,
 	schema: {
 		...baseProviderSettingsShape,
 		openRouterApiKey: z.string().optional(),

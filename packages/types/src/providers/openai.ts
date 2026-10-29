@@ -2,7 +2,12 @@ import { z } from "zod"
 
 import { modelInfoSchema, type ModelInfo } from "../model.js"
 import { providerIdentifiers } from "../provider-identifiers.js"
-import { baseProviderSettingsShape, createModelIdAccessor, createProviderDefinition } from "./common.js"
+import {
+	baseProviderSettingsShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+	NO_DEFAULT_MODEL_ID,
+} from "./common.js"
 
 // https://openai.com/api/pricing/
 export const openAiModelsMessageTypes = ["requestOpenAiModels", "openAiModels"] as const
@@ -1063,6 +1068,8 @@ export const openAiProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.openai,
 	modelIdKey: OPEN_AI_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(OPEN_AI_MODEL_ID_FIELD),
+	// OpenAI-compatible endpoints are fully user-configured, so there is no default.
+	getDefaultModelId: () => NO_DEFAULT_MODEL_ID,
 	schema: {
 		...baseProviderSettingsShape,
 		openAiBaseUrl: z.string().optional(),

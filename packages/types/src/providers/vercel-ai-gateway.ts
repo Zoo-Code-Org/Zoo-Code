@@ -133,6 +133,7 @@ export const vercelAiGatewayProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.vercelAiGateway,
 	modelIdKey: VERCEL_AI_GATEWAY_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(VERCEL_AI_GATEWAY_MODEL_ID_FIELD),
+	getDefaultModelId: () => vercelAiGatewayDefaultModelId,
 	schema: {
 		...baseProviderSettingsShape,
 		vercelAiGatewayApiKey: z.string().optional(),

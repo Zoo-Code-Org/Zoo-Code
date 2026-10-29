@@ -33,6 +33,7 @@ export const zooGatewayProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.zooGateway,
 	modelIdKey: ZOO_GATEWAY_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(ZOO_GATEWAY_MODEL_ID_FIELD),
+	getDefaultModelId: () => zooGatewayDefaultModelId,
 	schema: {
 		...baseProviderSettingsShape,
 		zooSessionToken: z.string().optional(),

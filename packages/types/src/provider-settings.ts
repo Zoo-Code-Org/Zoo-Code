@@ -25,6 +25,7 @@ import {
 	type RetiredProviderIdentifier,
 } from "./provider-identifiers.js"
 import {
+	anthropicDefaultModelId,
 	anthropicModels,
 	basetenModels,
 	bedrockModels,
@@ -357,6 +358,14 @@ export function getModelId(settings: ProviderSettings): string | undefined {
 	}
 
 	return undefined
+}
+
+/**
+ * Get the provider's default model ID, ignoring any configured model selection.
+ * Used as a fallback while provider models are still loading.
+ */
+export function getProviderDefaultModelId(provider: ProviderName, settings: ProviderSettings): string {
+	return providerDefinitions[provider]?.getDefaultModelId(settings) ?? anthropicDefaultModelId
 }
 
 /**

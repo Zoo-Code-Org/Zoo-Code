@@ -2,7 +2,12 @@ import { z } from "zod"
 
 import { type ModelInfo } from "../model.js"
 import { providerIdentifiers } from "../provider-identifiers.js"
-import { baseProviderSettingsShape, createModelIdAccessor, createProviderDefinition } from "./common.js"
+import {
+	baseProviderSettingsShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+	NO_DEFAULT_MODEL_ID,
+} from "./common.js"
 
 // Ollama
 // https://ollama.com/models
@@ -33,6 +38,8 @@ export const ollamaProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.ollama,
 	modelIdKey: OLLAMA_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(OLLAMA_MODEL_ID_FIELD),
+	// Ollama models are discovered from the local server, so there is no default.
+	getDefaultModelId: () => NO_DEFAULT_MODEL_ID,
 	schema: {
 		...baseProviderSettingsShape,
 		[OLLAMA_MODEL_ID_FIELD]: z.string().optional(),

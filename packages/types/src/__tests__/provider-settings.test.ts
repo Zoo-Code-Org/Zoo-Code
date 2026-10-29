@@ -18,6 +18,16 @@ describe("provider settings discriminated union", () => {
 		expect(new Set(registeredProviders).size).toBe(providerNames.length)
 	})
 
+	it.each(providerDefinitionList.map((definition) => definition.apiProvider))(
+		"exposes a default model accessor for %s",
+		(apiProvider) => {
+			const definition = providerDefinitionList.find((candidate) => candidate.apiProvider === apiProvider)
+
+			expect(typeof definition?.getDefaultModelId).toBe("function")
+			expect(typeof definition?.getDefaultModelId({})).toBe("string")
+		},
+	)
+
 	it.each(providerNames)("accepts the %s provider branch", (apiProvider) => {
 		expect(providerSettingsSchemaDiscriminated.safeParse({ apiProvider }).success).toBe(true)
 	})
