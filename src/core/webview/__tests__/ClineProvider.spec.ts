@@ -33,6 +33,7 @@ import { WorkspaceIndexingEnablementManager } from "../../../services/code-index
 import { Task, TaskOptions } from "../../task/Task"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
 
+import { t } from "../../../i18n"
 import { ClineProvider } from "../ClineProvider"
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import { Terminal } from "../../../integrations/terminal/Terminal"
@@ -4536,6 +4537,137 @@ describe("ClineProvider", () => {
 			mockContext.globalState.update = originalUpdate
 			await provider.dispose()
 		})
+	})
+
+	it("should persist known modes and reject unknown or non-string modes", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const logSpy = vi.spyOn(provider, "log")
+		// @ts-ignore - Replace customModesManager with a test double (no custom modes).
+		provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
+		// The file-level modes mock resolves every slug to a mode; narrow it to the slugs under test.
+		const modesModule = vi.mocked(await import("../../../shared/modes"))
+		const originalMode = modesModule.getModeBySlug("code")
+		modesModule.getModeBySlug.mockImplementation(((slug: string) =>
+			slug === "refactor" ? { slug } : undefined) as typeof modesModule.getModeBySlug)
+		try {
+			await provider.setValues({ mode: "refactor" })
+			expect(mockContext.globalState.get("mode")).toBe("refactor")
+			expect(provider["viewLocalState"].mode).toBe("refactor")
+			await provider.setValues({ mode: "bogus-mode" })
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid mode "bogus-mode"'))
+			expect(mockContext.globalState.get("mode")).toBe("refactor")
+			expect(provider["viewLocalState"].mode).toBe("refactor")
+			// A non-string mode must be rejected before persistence; Object.assign
+			// keeps this a single structural assertion, so it must not reach global
+			// state or the buffer.
+			await provider.setValues(Object.assign({} as RooCodeSettings, { mode: 42 }))
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid mode "42"'))
+			expect(mockContext.globalState.get("mode")).toBe("refactor")
+			expect(provider["viewLocalState"].mode).toBe("refactor")
+		} finally {
+			modesModule.getModeBySlug.mockReturnValue(originalMode)
+		}
+		await provider.dispose()
+	})
+
+	it("should build the buffered apiConfiguration from provider settings keys", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		provider["viewLocalState"] = { apiConfiguration: { openRouterApiKey: "key-1" } }
+		await provider.setValues({ apiProvider: providerIdentifiers.openrouter })
+		expect(provider["viewLocalState"].apiConfiguration).toStrictEqual({
+			apiProvider: providerIdentifiers.openrouter,
+		})
+		await provider.setValues({ openRouterModelId: "model-x" })
+		expect(provider["viewLocalState"].apiConfiguration).toEqual({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "model-x",
+		})
+		await provider.dispose()
+	})
+
+	it("should remove the buffered apiConfiguration when it is cleared", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const save = provider.saveViewState.bind(provider) as (key: string, value: unknown) => Promise<void>
+		await provider.saveViewState("apiConfiguration", { apiProvider: providerIdentifiers.openrouter })
+		await provider.saveViewState("apiConfiguration", undefined)
+		expect(provider["viewLocalState"]).not.toHaveProperty("apiConfiguration")
+		await provider.saveViewState("apiConfiguration", { apiProvider: providerIdentifiers.openrouter })
+		await save("apiConfiguration", null)
+		expect(provider["viewLocalState"]).not.toHaveProperty("apiConfiguration")
+		await provider.dispose()
+	})
+
+	it("should clear viewLocalState and the persisted entry when resetting state", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+		// @ts-ignore - Replace customModesManager with a test double (the real reset writes to disk).
+		provider.customModesManager = { resetCustomModes: vi.fn().mockResolvedValue(undefined), dispose: vi.fn() }
+		// The modal answer is a string label; the last-typed vscode overload expects a
+		// MessageItem. A double assertion is the last-resort cast here (AGENTS.md): the
+		// production path compares the answer against the string label directly, so the
+		// runtime value must stay a string and cannot be a structural MessageItem double.
+		vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(
+			t("common:answers.yes") as unknown as vscode.MessageItem,
+		)
+		await provider["setViewStateId"]("stable-sidebar-view")
+		await provider.saveViewState("mode", "architect")
+		await provider.resetState()
+		expect(provider["viewLocalState"]).toEqual({})
+		expect(mockContext.globalState.get("viewStates")).toEqual({})
+		await provider.dispose()
+	})
+
+	it("should roll back the shared writes when setValues per-view persistence fails", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		await provider.contextProxy.setValue("mode", "architect")
+		await provider.contextProxy.setValue("currentApiConfigName", "current-config")
+		const originalUpdate = mockContext.globalState.update
+		mockContext.globalState.update = vi.fn().mockImplementation((key: string) => {
+			if (key === "viewStates") {
+				return Promise.reject(new Error("storage unavailable"))
+			}
+			return Promise.resolve()
+		})
+
+		await expect(provider.setValues({ mode: "code", currentApiConfigName: "other-config" })).rejects.toThrow(
+			"storage unavailable",
+		)
+		expect(provider.getValue("mode")).toBe("architect")
+		expect(provider.getValue("currentApiConfigName")).toBe("current-config")
+		expect(provider["viewLocalState"].mode).toBeUndefined()
+
+		mockContext.globalState.update = originalUpdate
+		await provider.dispose()
 	})
 })
 
