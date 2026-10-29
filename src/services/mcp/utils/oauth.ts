@@ -169,23 +169,29 @@ async function probeResourceMetadataUrl(serverUrl: string): Promise<URL | undefi
 	return response.status === 401 ? extractResourceMetadataUrl(response.headers.get("WWW-Authenticate")) : undefined
 }
 
+/** An auth-param, optionally preceded by the auth-scheme that starts its challenge. */
+const AUTH_PARAM = /^\s*(?:([^\s="]+)\s+)?([^\s="]+)\s*=\s*(?:"([^"]*)"|([^\s"]*))\s*$/
+
 /**
  * Reads the `resource_metadata` parameter of a Bearer challenge. Unlike the SDK
- * helper, matches the parameter name case-insensitively (RFC 9110 §11.2) and
- * finds the Bearer challenge after other challenges in the same header.
+ * helper, matches names case-insensitively (RFC 9110 §11.2), finds the Bearer
+ * challenge after other challenges, and ignores parameters of other challenges.
  */
 function extractResourceMetadataUrl(header: string | null): URL | undefined {
-	// After "Bearer", skip only its own auth-params, so a later challenge's
-	// resource_metadata is never read as the Bearer one.
-	const match =
-		header &&
-		/(?:^|,)\s*bearer\s+(?:[\w!#$%&'*+.^`|~-]+\s*=\s*(?:"[^"]*"|[^\s,"]*)\s*,\s*)*resource_metadata\s*=\s*"([^"]*)"/i.exec(
-			header,
-		)
-	if (!match) return undefined
-	try {
-		return new URL(match[1])
-	} catch {
-		return undefined
+	if (!header) return undefined
+	let scheme: string | undefined
+	// Commas outside quoted strings separate challenges and their auth-params.
+	for (const item of header.match(/(?:[^,"]|"[^"]*")+/g) ?? []) {
+		const param = AUTH_PARAM.exec(item)
+		const itemScheme = param ? param[1] : item.trim().split(/\s+/)[0]
+		if (itemScheme) scheme = itemScheme.toLowerCase()
+		if (scheme === "bearer" && param?.[2].toLowerCase() === "resource_metadata") {
+			try {
+				return new URL(param[3] ?? param[4])
+			} catch {
+				return undefined
+			}
+		}
 	}
+	return undefined
 }
