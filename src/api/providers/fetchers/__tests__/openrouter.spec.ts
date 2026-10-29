@@ -6,6 +6,8 @@ import { back as nockBack } from "nock"
 
 import type { ModelInfo } from "@roo-code/types"
 
+import { MODEL_CATALOG_FETCH_TIMEOUT_MS } from "../modelCache"
+
 import {
 	applyOpenRouterMoonshotK3Profile,
 	getOpenRouterModelEndpoints,
@@ -314,6 +316,27 @@ describe("OpenRouter API", () => {
 
 			getSpy.mockRestore()
 		})
+
+		it("bounds the endpoints request with the model-catalog fetch timeout", async () => {
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({
+				data: { data: { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4", endpoints: [] } },
+			})
+
+			await getOpenRouterModelEndpoints("anthropic/claude-sonnet-4")
+
+			// This request bypasses getModels()' single-flight, so it must carry its own
+			// bound: without a timeout a stalled response keeps the caller's shared
+			// catalog load pending and later callers join it instead of retrying.
+			expect(getSpy).toHaveBeenCalledWith(
+				"https://openrouter.ai/api/v1/models/anthropic/claude-sonnet-4/endpoints",
+				{
+					timeout: MODEL_CATALOG_FETCH_TIMEOUT_MS,
+				},
+			)
+
+			getSpy.mockRestore()
+		})
 	})
 
 	describe("parseOpenRouterModel", () => {
@@ -499,6 +522,34 @@ describe("OpenRouter API", () => {
 				inputModality: ["text", "image"],
 				outputModality: ["text"],
 				maxTokens: 128000,
+				supportedParameters: ["reasoning", "include_reasoning"],
+			})
+
+			expect(result.maxTokens).toBe(128000)
+			expect(result.contextWindow).toBe(1000000)
+			expect(result.supportsTemperature).toBe(false)
+			expect(result.supportsReasoningBudget).toBe(true)
+			expect(result.supportsReasoningBinary).toBe(true)
+		})
+
+		it("sets claude-haiku-5-5 model to Anthropic max tokens and omits temperature", () => {
+			const mockModel = {
+				name: "Claude Haiku 5.5",
+				description: "Test model",
+				context_length: 1000000,
+				max_completion_tokens: 64000,
+				pricing: {
+					prompt: "0.0000001",
+					completion: "0.0000005",
+				},
+			}
+
+			const result = parseOpenRouterModel({
+				id: "anthropic/claude-haiku-5.5",
+				model: mockModel,
+				inputModality: ["text", "image"],
+				outputModality: ["text"],
+				maxTokens: 64000,
 				supportedParameters: ["reasoning", "include_reasoning"],
 			})
 

@@ -6,7 +6,14 @@ import { ApiStream } from "../transform/stream"
 import { BaseProvider } from "./base-provider"
 import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { getOllamaModels, isSecureOllamaEndpoint } from "./fetchers/ollama"
-import { createAbortError, mergeAbortSignalAndTimeout, rejectOnAbort } from "./utils/abort-signal"
+import { MODEL_CATALOG_FETCH_TIMEOUT_MS } from "./fetchers/modelCache"
+import {
+	createAbortError,
+	hasUsableTimeout,
+	mergeAbortSignalAndTimeout,
+	rejectOnAbort,
+	toSdkTimeoutMs,
+} from "./utils/abort-signal"
 import { getLoggableOrigin } from "./utils/endpoint-origin"
 import { TagMatcher } from "../../utils/tag-matcher"
 import { isProxyEnabled } from "../../utils/networkProxy"
@@ -660,6 +667,18 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		return this.getModel()
 	}
 
+	async ensureModelFetched(signal?: AbortSignal): Promise<void> {
+		await this.ensureCatalogLoaded(async () => {
+			// This path bypasses getModels()'s single-flight, so it carries its own
+			// bound: a hung Ollama endpoint would otherwise leave the shared
+			// catalogFetch pending forever and block every later retry. The timeout
+			// is fetch-local so the caller's signal stays independent of it.
+			await this.fetchModel(AbortSignal.timeout(MODEL_CATALOG_FETCH_TIMEOUT_MS))
+			// An empty catalog must stay retryable instead of being memoized.
+			return Object.keys(this.models).length > 0
+		}, signal)
+	}
+
 	override getModel(): { id: string; info: ModelInfo } {
 		const modelId = this.options.ollamaModelId || ""
 		return {
@@ -688,19 +707,13 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			// Handle timeoutMs if provided (the client exists, so the timer can
 			// abort both the per-request transport and the client)
 			const timeoutMs = options?.timeoutMs
-			if (timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0) {
-				// Node clamps delays above 2^31-1 ms to 1 ms (and coerces
-				// Infinity the same way), which would abort almost immediately,
-				// and truncates fractional delays; round up and cap so the
-				// semantics match mergeAbortSignalAndTimeout, and treat
-				// non-finite values as "no timeout".
-				timeoutId = setTimeout(
-					() => {
-						requestController.abort()
-						client.abort()
-					},
-					Math.min(Math.ceil(timeoutMs), 2_147_483_647),
-				)
+			if (hasUsableTimeout(timeoutMs)) {
+				// toSdkTimeoutMs rounds up and caps the delay (Node clamps larger
+				// values to 1 ms), matching mergeAbortSignalAndTimeout.
+				timeoutId = setTimeout(() => {
+					requestController.abort()
+					client.abort()
+				}, toSdkTimeoutMs(timeoutMs))
 			}
 
 			// Propagate abortSignal into the per-request client via client.abort()

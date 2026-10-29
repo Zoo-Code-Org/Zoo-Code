@@ -510,6 +510,7 @@ export interface WebviewMessage {
 		| "deleteTaskWithId"
 		| "abandonSubtaskWithId"
 		| "exportTaskWithId"
+		| "renameTaskWithId"
 		| "importSettings"
 		| "exportSettings"
 		| "resetState"

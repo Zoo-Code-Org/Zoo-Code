@@ -29,6 +29,7 @@ import {
 	handleModelChangeSideEffects,
 	toBedrockModelId,
 } from "./utils/providerModelConfig"
+import { isTemperatureControlSupported } from "./utils/temperatureSupport"
 
 import { vscode } from "@src/utils/vscode"
 import { validateApiConfigurationExcludingModelErrors, getModelValidationError } from "@src/utils/validate"
@@ -836,7 +837,12 @@ const ApiOptions = ({
 									todoListEnabled={apiConfiguration.todoListEnabled}
 									onChange={(field, value) => setApiConfigurationField(field, value)}
 								/>
-								{selectedModelInfo?.supportsTemperature !== false && (
+								{isTemperatureControlSupported({
+									provider: activeSelectedProvider,
+									modelId: selectedModelId,
+									modelInfo: selectedModelInfo,
+									apiConfiguration,
+								}) && (
 									<TemperatureControl
 										value={apiConfiguration.modelTemperature}
 										onChange={handleInputChange("modelTemperature", noTransform)}

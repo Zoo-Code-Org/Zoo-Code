@@ -4,7 +4,9 @@ import { retiredProviderIdentifiers, providerIdentifiers } from "@roo-code/types
 import { renderWithExtensionState, screen, fireEvent, within } from "@/utils/test-utils"
 
 import { type ModelInfo, type ProviderSettings, openAiModelInfoSaneDefaults } from "@roo-code/types"
-import { openAiCodexDefaultModelId, zooGatewayDefaultModelId } from "@roo-code/types"
+import { openAiCodexDefaultModelId, opencodeGoModels, zooGatewayDefaultModelId } from "@roo-code/types"
+
+import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 
 import ApiOptions, { ApiOptionsProps } from "../ApiOptions"
 
@@ -367,6 +369,71 @@ describe("ApiOptions", () => {
 		renderApiOptions({ fromWelcomeView: true })
 		expect(screen.queryByTestId("temperature-control")).not.toBeInTheDocument()
 		expect(screen.queryByTestId("rate-limit-seconds-control")).not.toBeInTheDocument()
+	})
+
+	describe("OpenCode Go Responses temperature (Zoo-Code-Org/Zoo-Code#2055)", () => {
+		const selectOpencodeGoModel = (modelId: string) => {
+			vi.mocked(useSelectedModel).mockImplementation(() => ({
+				provider: providerIdentifiers.opencodeGo,
+				id: modelId,
+				info: opencodeGoModels[modelId],
+				isLoading: false,
+				isError: false,
+			}))
+		}
+
+		const opencodeGoConfig = (modelId: string, settings: ProviderSettings = {}): ProviderSettings => ({
+			apiProvider: providerIdentifiers.opencodeGo,
+			opencodeGoModelId: modelId,
+			modelTemperature: 0.42,
+			...settings,
+		})
+
+		afterEach(() => {
+			vi.mocked(useSelectedModel).mockReset()
+		})
+
+		it("shows the control for a model that always supports temperature", () => {
+			selectOpencodeGoModel("grok-4.6")
+			renderApiOptions({ apiConfiguration: opencodeGoConfig("grok-4.6") })
+
+			expect(screen.getByTestId("temperature-control")).toBeInTheDocument()
+		})
+
+		it("hides the control for a GPT Luna model on its default reasoning effort", () => {
+			selectOpencodeGoModel("gpt-6-luna")
+			renderApiOptions({ apiConfiguration: opencodeGoConfig("gpt-6-luna") })
+
+			expect(screen.queryByTestId("temperature-control")).not.toBeInTheDocument()
+		})
+
+		it("updates visibility when the reasoning effort changes without clearing the saved value", () => {
+			const setApiConfigurationField = vi.fn()
+			selectOpencodeGoModel("gpt-5.6-luna")
+			const renderWithEffort = (reasoningEffort: ProviderSettings["reasoningEffort"]) => (
+				<ApiOptions
+					errorMessage={undefined}
+					setErrorMessage={() => {}}
+					uriScheme={undefined}
+					apiConfiguration={opencodeGoConfig("gpt-5.6-luna", { reasoningEffort })}
+					setApiConfigurationField={setApiConfigurationField}
+				/>
+			)
+			const view = renderWithExtensionState(renderWithEffort("none"))
+			expect(screen.getByTestId("temperature-control")).toBeInTheDocument()
+
+			view.rerender(renderWithEffort("high"))
+			expect(screen.queryByTestId("temperature-control")).not.toBeInTheDocument()
+
+			// Returning to "none" shows the control again with the saved value.
+			view.rerender(renderWithEffort("none"))
+			expect(within(screen.getByTestId("temperature-control")).getByRole("slider")).toHaveValue("0.42")
+
+			const temperatureWrites = setApiConfigurationField.mock.calls.filter(
+				([field]) => field === "modelTemperature",
+			)
+			expect(temperatureWrites).toEqual([])
+		})
 	})
 
 	describe("thinking functionality", () => {

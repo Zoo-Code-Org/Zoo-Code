@@ -251,7 +251,7 @@ export const TOOL_ALIASES: Record<string, ToolName> = {
 } as const
 
 export type DiffResult =
-	| { success: true; content: string; failParts?: DiffResult[] }
+	| { success: true; content: string; failParts?: DiffResult[]; blockCount?: number }
 	| ({
 			success: false
 			error?: string
