@@ -4,12 +4,14 @@ import { defineConfig } from "@playwright/test"
 
 export default defineConfig({
 	testDir: "./src/visual",
-	testMatch: "electron.visual.ts",
 	outputDir: path.resolve(__dirname, "test-results-electron"),
 	snapshotPathTemplate: "{testDir}/__screenshots__/{arg}{ext}",
 	fullyParallel: false,
 	workers: 1,
-	repeatEach: process.env.CI ? 3 : 1,
+	projects: [
+		{ name: "visual", testMatch: "electron.visual.ts", repeatEach: process.env.CI ? 3 : 1 },
+		{ name: "heartbeat", testMatch: "heartbeat.electron.ts", repeatEach: 1 },
+	],
 	timeout: 3 * 60 * 1_000,
 	expect: {
 		timeout: 60_000,

@@ -1097,6 +1097,19 @@ describe("ClineProvider", () => {
 		let visibilityCallback: () => void
 		let disposeCallback: () => void
 
+		function trackHtmlAssignments() {
+			let html = mockWebviewView.webview.html
+			const assignHtml = vi.fn((value: string) => {
+				html = value
+			})
+			Object.defineProperty(mockWebviewView.webview, "html", {
+				configurable: true,
+				get: () => html,
+				set: assignHtml,
+			})
+			return assignHtml
+		}
+
 		beforeEach(() => {
 			// Fake timers must be active before resolveWebviewView so the
 			// watchdog interval is registered on the fake clock.
@@ -1142,16 +1155,80 @@ describe("ClineProvider", () => {
 			expect(mockWebviewView.webview.html).toContain("<title>Zoo Code</title>")
 		})
 
+		test.each([
+			{ age: 89_999, reloads: 0 },
+			{ age: 90_000, reloads: 0 },
+			{ age: 90_001, reloads: 1 },
+		])("at heartbeat age $age ms performs $reloads reloads", async ({ age, reloads }) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const assignHtml = trackHtmlAssignments()
+			// Keep the next tick ordinary while placing heartbeat age exactly on
+			// either side of the stale threshold at that tick.
+			provider["lastWebviewHeartbeatAt"] = Date.now() + 60_000 - age
+
+			await vi.advanceTimersByTimeAsync(60_000)
+
+			expect(assignHtml).toHaveBeenCalledTimes(reloads)
+		})
+
+		test.each([
+			{ gap: 89_999, reloads: 1 },
+			{ gap: 90_000, reloads: 1 },
+			{ gap: 90_001, reloads: 0 },
+		])("at watchdog tick gap $gap ms performs $reloads reloads", async ({ gap, reloads }) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const assignHtml = trackHtmlAssignments()
+			// The heartbeat is stale in every row; only the suspend-gap guard
+			// can suppress recovery. No wall-clock jumps or extra ticks mask it.
+			provider["lastWebviewHeartbeatAt"] = Date.now() - 120_000
+			provider["lastWebviewWatchdogTickAt"] = Date.now() + 60_000 - gap
+
+			await vi.advanceTimersByTimeAsync(60_000)
+
+			expect(assignHtml).toHaveBeenCalledTimes(reloads)
+		})
+
+		test.each(["none", "disposed", "epoch"] as const)(
+			"checks only the %s post-await recovery guard",
+			async (guard) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				const assignHtml = trackHtmlAssignments()
+				let finishReload: (html: string) => void = () => {
+					throw new Error("Recovery HTML generation has not started")
+				}
+				provider["getWebviewHtml"] = vi.fn(
+					() =>
+						new Promise<string>((resolve) => {
+							finishReload = resolve
+						}),
+				)
+				const recovery = provider["reloadWebviewForRecovery"]()
+				// Change one field only: real dispose/re-resolve paths change
+				// multiple fields and would let other guards mask this one.
+				if (guard === "disposed") provider["_disposed"] = true
+				if (guard === "epoch") provider["webviewRecoveryEpoch"]++
+				try {
+					finishReload("recovered-html")
+					await recovery
+					expect(assignHtml).toHaveBeenCalledTimes(guard === "none" ? 1 : 0)
+					if (guard === "none") expect(mockWebviewView.webview.html).toBe("recovered-html")
+				} finally {
+					// Allow the regular afterEach to dispose the provider's resources.
+					provider["_disposed"] = false
+				}
+			},
+		)
+
 		test("grants a new grace window after recovery and caps reloads until an actual heartbeat", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
-			const generateHtml = vi.spyOn(provider, "getState")
+			const assignHtml = trackHtmlAssignments()
 
 			await vi.advanceTimersByTimeAsync(120_000)
-			expect(generateHtml).toHaveBeenCalledTimes(1)
+			expect(assignHtml).toHaveBeenCalledTimes(1)
 			await vi.advanceTimersByTimeAsync(60_000)
-			expect(generateHtml).toHaveBeenCalledTimes(1)
+			expect(assignHtml).toHaveBeenCalledTimes(1)
 			await vi.advanceTimersByTimeAsync(180_000)
-			expect(generateHtml).toHaveBeenCalledTimes(3)
+			expect(assignHtml).toHaveBeenCalledTimes(3)
 
 			const log = vi.spyOn(provider, "log")
 
@@ -1160,12 +1237,12 @@ describe("ClineProvider", () => {
 			visibilityCallback()
 			vi.setSystemTime(Date.now() + 120_000)
 			await vi.advanceTimersByTimeAsync(600_000)
-			expect(generateHtml).toHaveBeenCalledTimes(3)
+			expect(assignHtml).toHaveBeenCalledTimes(3)
 			expect(log).not.toHaveBeenCalledWith(expect.stringContaining("Webview heartbeat stale"))
 
 			await webviewMessageHandler(provider, { type: "webviewHeartbeat" })
 			await vi.advanceTimersByTimeAsync(120_000)
-			expect(generateHtml).toHaveBeenCalledTimes(4)
+			expect(assignHtml).toHaveBeenCalledTimes(4)
 		})
 
 		test("gives a replacement view a fresh recovery budget after exhausting attempts", async () => {

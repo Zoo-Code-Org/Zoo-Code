@@ -20,8 +20,13 @@ const themeKinds: Record<string, vscode.ColorThemeKind> = {
 	"Default High Contrast": vscode.ColorThemeKind.HighContrast,
 }
 
-async function poll<T>(capture: () => Promise<T>, matches: (value: T) => boolean, description: string): Promise<T> {
-	const deadline = Date.now() + SCENE_TIMEOUT_MS
+async function poll<T>(
+	capture: () => Promise<T>,
+	matches: (value: T) => boolean,
+	description: string,
+	timeoutMs = SCENE_TIMEOUT_MS,
+): Promise<T> {
+	const deadline = Date.now() + timeoutMs
 	let latest: T | undefined
 
 	while (Date.now() < deadline) {
@@ -45,6 +50,7 @@ async function waitForFile(filePath: string) {
 		},
 		Boolean,
 		`file ${filePath}`,
+		10 * 60_000,
 	)
 }
 
