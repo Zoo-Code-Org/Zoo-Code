@@ -230,12 +230,15 @@ describe("persisted subtask links", () => {
 		},
 	)
 
-	it("appends the result after a non-result message with the same text", async () => {
+	it.each<ClineMessage>([
+		{ ts: 1, type: "say", say: "text", text: "Done" },
+		{ ts: 1, type: "say", say: "subtask_result", text: "Earlier result", childTaskId: "child" },
+	])("appends the result after a non-duplicate last message: %j", async (previous) => {
 		const { provider, records } = makeLinkProvider()
 		const parent = records.get("parent")!
 		records.set("parent", { ...parent, status: "delegated", awaitingChildId: "child", childIds: ["child"] })
 		records.set("child", { ...parent, id: "child", parentTaskId: "parent" })
-		vi.mocked(readTaskMessages).mockResolvedValue([{ ts: 1, type: "say", say: "text", text: "Done" }])
+		vi.mocked(readTaskMessages).mockResolvedValue([previous])
 
 		await ClineProvider.prototype.reopenParentFromDelegation.call(provider, {
 			parentTaskId: "parent",

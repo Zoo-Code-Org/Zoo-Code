@@ -114,6 +114,7 @@ function getPreviousTodos(messages: ClineMessage[], currentMessageTs: number): a
 
 function isNewTaskMessage(message: ClineMessage): boolean {
 	return (
+		// Stryker disable next-line ConditionalExpression: equivalent mutant, only ask messages carry an ask field, so the ask check alone rejects say rows
 		message.type === "ask" &&
 		message.ask === "tool" &&
 		safeJsonParse<ClineSayTool>(message.text)?.tool === "newTask"
