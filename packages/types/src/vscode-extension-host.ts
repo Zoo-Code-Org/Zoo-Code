@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import type { GlobalSettings, RooCodeSettings } from "./global-settings.js"
-import type { ProviderSettings, ProviderSettingsEntry } from "./provider-settings.js"
+import type { ProviderSettings, ProviderSettingsEntry, ResolvedProviderSettings } from "./provider-settings.js"
 import type { HistoryItem } from "./history.js"
 import type { ModeConfig, PromptComponent } from "./mode.js"
 import type { Experiments } from "./experiment.js"
@@ -353,7 +353,7 @@ export type ExtensionState = Pick<
 	currentTaskId?: string
 	currentTaskItem?: HistoryItem
 	currentTaskTodos?: TodoItem[] // Initial todos for the current task
-	apiConfiguration: ProviderSettings
+	apiConfiguration: ResolvedProviderSettings
 	uriScheme?: string
 	shouldShowAnnouncement: boolean
 

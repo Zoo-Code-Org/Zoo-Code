@@ -6,7 +6,7 @@ import { NativeToolCallParser } from "../../assistant-message/NativeToolCallPars
 import { ClineProvider } from "../../webview/ClineProvider"
 import { WebviewFocusTracker } from "../../webview/WebviewFocusTracker"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
-import type { ProviderSettings } from "@roo-code/types"
+import type { ResolvedProviderSettings } from "@roo-code/types"
 import { ApiStreamChunk } from "../../../api/transform/stream"
 import { ContextProxy } from "../../config/ContextProxy"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -175,7 +175,7 @@ vi.mock("../../../utils/fs", () => ({
 
 describe("Task - Streaming Tool Call Handling", () => {
 	let mockProvider: ClineProvider
-	let mockApiConfig: ProviderSettings
+	let mockApiConfig: ResolvedProviderSettings
 	let mockOutputChannel: vscode.OutputChannel
 	let scope: object
 	let mockExtensionContext: vscode.ExtensionContext
