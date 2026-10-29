@@ -4,7 +4,7 @@ import { renderWithExtensionState, screen, fireEvent, within, waitFor } from "@/
 import { act } from "@testing-library/react"
 
 import { vscode } from "@/utils/vscode"
-import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, type ProviderSettings } from "@roo-code/types"
+import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, resolveProviderSettings, type ProviderSettings } from "@roo-code/types"
 import type { ApiOptionsProps } from "../ApiOptions"
 
 import SettingsView from "../SettingsView"
@@ -985,10 +985,10 @@ describe("SettingsView - openAiStrictToolSchemas save round trip", () => {
 		vi.clearAllMocks()
 	})
 
-	const renderWithConfig = (apiConfiguration: ProviderSettings) => {
+	const renderWithConfig = (apiConfiguration: Partial<ProviderSettings>) => {
 		const onDone = vi.fn()
 		renderWithExtensionState(<SettingsView onDone={onDone} targetSection={"providers"} />, {
-			state: { currentApiConfigName: "test-config", apiConfiguration },
+			state: { currentApiConfigName: "test-config", apiConfiguration: resolveProviderSettings(apiConfiguration) },
 		})
 	}
 

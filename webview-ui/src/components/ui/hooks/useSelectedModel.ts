@@ -44,6 +44,7 @@ import {
 	providerIdentifiers,
 	githubCopilotLanguageModel,
 	vscodeLlmBaselineModelInfo,
+	DEFAULT_API_PROVIDER,
 } from "@roo-code/types"
 
 import { useRouterModels } from "./useRouterModels"
@@ -98,7 +99,7 @@ function getStaticCatalogModel(
  * renamed deployment).
  */
 export const useSelectedModel = (apiConfiguration: ProviderSettings) => {
-	const provider = apiConfiguration.apiProvider || providerIdentifiers.openrouter
+	const provider = apiConfiguration.apiProvider ?? DEFAULT_API_PROVIDER
 	const activeProvider: ProviderName | undefined = isRetiredProvider(provider) ? undefined : provider
 	const dynamicProvider = activeProvider && isDynamicProvider(activeProvider) ? activeProvider : undefined
 	const openRouterModelId =

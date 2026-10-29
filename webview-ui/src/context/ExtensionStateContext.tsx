@@ -25,6 +25,8 @@ import {
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
 	DEFAULT_WRITE_DELAY_MS,
+	DEFAULT_API_PROVIDER,
+	resolveProviderSettings,
 } from "@roo-code/types"
 
 import { findLastIndex } from "@roo/array"
@@ -66,7 +68,7 @@ export interface ExtensionStateContextType extends ExtensionState {
 	marketplaceInstalledMetadata?: MarketplaceInstalledMetadata
 	profileThresholds: Record<string, number>
 	setProfileThresholds: (value: Record<string, number>) => void
-	setApiConfiguration: (config: ProviderSettings) => void
+	setApiConfiguration: (config: Partial<ProviderSettings>) => void
 	setCustomInstructions: (value?: string) => void
 	setAlwaysAllowReadOnly: (value: boolean) => void
 	setAlwaysAllowReadOnlyOutsideWorkspace: (value: boolean) => void
@@ -232,7 +234,9 @@ export const mergeExtensionState = (prevState: ExtensionState, newState: Partial
 }
 
 export const createInitialExtensionState = (): ExtensionState => ({
-	apiConfiguration: {},
+	// Never rendered: App waits for `didHydrateState`, and the first state message
+	// replaces this object. It exists so the type contract holds from the start.
+	apiConfiguration: { apiProvider: DEFAULT_API_PROVIDER },
 	version: "",
 	clineMessages: [],
 	taskHistory: [],
@@ -377,13 +381,13 @@ export const ExtensionStateContextProvider: React.FC<{
 		[],
 	)
 
-	const setApiConfiguration = useCallback((value: ProviderSettings) => {
+	const setApiConfiguration = useCallback((value: Partial<ProviderSettings>) => {
 		setState((prevState) => ({
 			...prevState,
-			apiConfiguration: {
+			apiConfiguration: resolveProviderSettings({
 				...prevState.apiConfiguration,
 				...value,
-			},
+			}),
 		}))
 	}, [])
 

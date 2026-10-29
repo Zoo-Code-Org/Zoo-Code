@@ -3,7 +3,6 @@ import { render, screen, act } from "@/utils/test-utils"
 import React from "react"
 
 import {
-	type ProviderSettings,
 	type ExperimentId,
 	type ExtensionState,
 	type ClineMessage,
@@ -14,6 +13,7 @@ import {
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
 	DEFAULT_WRITE_DELAY_MS,
+	DEFAULT_API_PROVIDER,
 } from "@roo-code/types"
 
 import {
@@ -107,6 +107,9 @@ const ApiConfigTestComponent = () => {
 			</button>
 			<button data-testid="partial-update-button" onClick={() => setApiConfiguration({ modelTemperature: 0.7 })}>
 				Partial Update
+			</button>
+			<button data-testid="clear-provider-button" onClick={() => setApiConfiguration({ apiProvider: undefined })}>
+				Clear Provider
 			</button>
 		</div>
 	)
@@ -699,6 +702,32 @@ describe("ExtensionStateContext", () => {
 		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
 	})
 
+	it("initializes apiConfiguration with the shared default provider", () => {
+		// The pre-hydration placeholder must satisfy the resolved-state contract so
+		// consumers never have to handle an undefined provider.
+		expect(createInitialExtensionState().apiConfiguration.apiProvider).toBe(DEFAULT_API_PROVIDER)
+	})
+
+	it("keeps a defined provider when setApiConfiguration receives an undefined provider", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<ApiConfigTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			screen.getByTestId("update-api-config-button").click()
+		})
+
+		act(() => {
+			screen.getByTestId("clear-provider-button").click()
+		})
+
+		const config = JSON.parse(screen.getByTestId("api-configuration").textContent || "{}")
+
+		expect(config.apiProvider).toBe(DEFAULT_API_PROVIDER)
+	})
+
 	it("initializes shadowed context fields from initialState", () => {
 		const routerModels = {} as RouterModels
 		const marketplaceItems: MarketplaceItem[] = [
@@ -902,7 +931,7 @@ describe("mergeExtensionState", () => {
 			customModes: [],
 			maxOpenTabsContext: 20,
 			maxWorkspaceFiles: 100,
-			apiConfiguration: { providerId: providerIdentifiers.openrouter } as ProviderSettings,
+			apiConfiguration: { apiProvider: providerIdentifiers.openrouter },
 			telemetrySetting: "unset",
 			showRooIgnoredFiles: true,
 			enableSubfolderRules: false,
@@ -926,14 +955,22 @@ describe("mergeExtensionState", () => {
 
 		const prevState: ExtensionState = {
 			...baseState,
-			apiConfiguration: { modelMaxTokens: 1234, modelMaxThinkingTokens: 123 },
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.anthropic,
+				modelMaxTokens: 1234,
+				modelMaxThinkingTokens: 123,
+			},
 			experiments: {} as Record<ExperimentId, boolean>,
 			checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS - 5,
 		}
 
 		const newState: ExtensionState = {
 			...baseState,
-			apiConfiguration: { modelMaxThinkingTokens: 456, modelTemperature: 0.3 },
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.anthropic,
+				modelMaxThinkingTokens: 456,
+				modelTemperature: 0.3,
+			},
 			experiments: {
 				preventFocusDisruption: false,
 				imageGeneration: false,
@@ -946,6 +983,7 @@ describe("mergeExtensionState", () => {
 		const result = mergeExtensionState(prevState, newState)
 
 		expect(result.apiConfiguration).toEqual({
+			apiProvider: providerIdentifiers.anthropic,
 			modelMaxThinkingTokens: 456,
 			modelTemperature: 0.3,
 		})
@@ -974,7 +1012,7 @@ describe("mergeExtensionState", () => {
 			customModes: [],
 			maxOpenTabsContext: 20,
 			maxWorkspaceFiles: 100,
-			apiConfiguration: {},
+			apiConfiguration: { apiProvider: DEFAULT_API_PROVIDER },
 			telemetrySetting: "unset",
 			showRooIgnoredFiles: true,
 			enableSubfolderRules: false,

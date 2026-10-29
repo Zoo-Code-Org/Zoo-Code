@@ -1,7 +1,7 @@
 import React from "react"
 
 import type { EmbedderProvider, ExtensionState } from "@roo-code/types"
-import { providerIdentifiers } from "@roo-code/types"
+import { providerIdentifiers, resolveProviderSettings } from "@roo-code/types"
 
 import { fireEvent, renderWithExtensionState, screen } from "@/utils/test-utils"
 import { useOpenRouterModelProviders } from "@src/components/ui/hooks/useOpenRouterModelProviders"
@@ -119,7 +119,7 @@ describe("CodeIndexPopover OpenRouter provider lookup", () => {
 	const renderPopover = (
 		provider: EmbedderProvider,
 		modelId: string,
-		apiProvider?: ExtensionState["apiConfiguration"],
+		apiProvider: ExtensionState["apiConfiguration"] = resolveProviderSettings({}),
 	) =>
 		renderWithExtensionState(
 			<CodeIndexPopover indexingStatus={indexingStatus}>
@@ -204,8 +204,8 @@ describe("CodeIndexPopover OpenRouter provider lookup", () => {
 			expectedProfile: "",
 		},
 		{
-			name: "unset API provider",
-			apiConfiguration: {},
+			name: "default API provider",
+			apiConfiguration: resolveProviderSettings({}),
 			expectedRegion: "",
 			expectedProfile: "",
 		},

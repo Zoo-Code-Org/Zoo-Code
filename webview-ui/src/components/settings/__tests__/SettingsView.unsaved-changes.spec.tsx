@@ -1,4 +1,4 @@
-import { providerIdentifiers, openAiModelInfoSaneDefaults, type ProviderSettings } from "@roo-code/types"
+import { providerIdentifiers, openAiModelInfoSaneDefaults, type ResolvedProviderSettings } from "@roo-code/types"
 import { screen, fireEvent, waitFor } from "@testing-library/react"
 
 import { renderWithExtensionState } from "@/utils/test-utils"
@@ -679,7 +679,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 	})
 
 	it("keeps OpenAI-compatible reasoning edits cached until Save despite a live state refresh", async () => {
-		const configuration: ProviderSettings = {
+		const configuration: ResolvedProviderSettings = {
 			apiProvider: providerIdentifiers.openai,
 			openAiModelId: "custom-model",
 			enableReasoningEffort: false,
