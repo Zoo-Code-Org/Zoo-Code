@@ -1,4 +1,4 @@
-﻿// pnpm --filter roo-cline test core/webview/__tests__/ClineProvider.spec.ts
+// pnpm --filter roo-cline test core/webview/__tests__/ClineProvider.spec.ts
 
 import fs from "fs"
 import * as path from "path"
@@ -14,7 +14,6 @@ import {
 	type ClineMessage,
 	type ExtensionMessage,
 	type ExtensionState,
-	type RooCodeSettings,
 	type WebviewMessage,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
