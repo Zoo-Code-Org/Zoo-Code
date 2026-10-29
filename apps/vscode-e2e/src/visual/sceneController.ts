@@ -159,14 +159,22 @@ export async function run(): Promise<void> {
 		} catch {
 			return
 		}
-		let fixture: WebviewThemeFixture
+		const resultPath = `${request}.result`
+		const temporaryResultPath = `${resultPath}.tmp`
 		try {
-			fixture = await api.captureWebviewThemeFixture()
+			const fixture = await api.captureWebviewThemeFixture()
+			await fs.writeFile(
+				temporaryResultPath,
+				JSON.stringify({ fixture, taskIds: api.getCurrentTaskStack() }),
+				"utf8",
+			)
+			await fs.rename(temporaryResultPath, resultPath)
+			// Acknowledge only after publishing a complete result. Repeating this
+			// write after a failed acknowledgement is safe for this read-only probe.
+			await fs.unlink(request)
 		} catch (error) {
-			await log(`theme probe will retry: ${String(error)}`)
-			return
+			await fs.rm(temporaryResultPath, { force: true }).catch(() => undefined)
+			await log(`theme probe will retry: ${String(error)}`).catch(() => undefined)
 		}
-		await fs.unlink(request)
-		await fs.writeFile(`${request}.result`, JSON.stringify({ fixture, taskIds: api.getCurrentTaskStack() }), "utf8")
 	})
 }

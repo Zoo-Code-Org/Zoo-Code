@@ -1409,6 +1409,33 @@ describe("ClineProvider", () => {
 			expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.reloadWindow")
 		})
 
+		test("offers a fresh actionable warning when one heartbeat is followed by another stall", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			vi.mocked(vscode.commands.getCommands).mockResolvedValue([])
+			let chooseOld: (value: string) => void = () => {
+				throw new Error("Notification not shown")
+			}
+			const oldChoice = new Promise<string>((resolve) => {
+				chooseOld = resolve
+			})
+			vi.mocked(vscode.window.showWarningMessage).mockImplementationOnce(vi.fn().mockReturnValue(oldChoice))
+			await vi.advanceTimersByTimeAsync(130_000)
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+
+			provider.updateWebviewHeartbeat()
+			expect(provider["webviewRecoveryAttempts"]).toBe(3)
+			chooseOld("Reload Window")
+			await vi.advanceTimersByTimeAsync(0)
+			expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.reloadWindow")
+
+			vi.mocked(vscode.window.showWarningMessage).mockImplementation(vi.fn().mockResolvedValue("Reload Window"))
+			await vi.advanceTimersByTimeAsync(170_000)
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(2)
+			expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow")
+			await vi.advanceTimersByTimeAsync(240_000)
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(2)
+		})
+
 		test("keeps the Reload Window action available after visibility grace resets", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			vi.mocked(vscode.commands.getCommands).mockResolvedValue([])
@@ -2304,7 +2331,7 @@ describe("ClineProvider", () => {
 			// Pin the health-check URL itself: the mock resolves for any URL, so only
 			// this assertion keeps the probe from silently drifting back to
 			// `localhost` (the IPv6 resolution failure this branch fixes).
-			expect(axios.get).toHaveBeenCalledWith("http://127.0.0.1:5173")
+			expect(axios.get).toHaveBeenCalledWith("http://127.0.0.1:5173", { timeout: 5_000 })
 
 			const html = mockWebviewView.webview.html
 			// The dev server URL must be baked into the module script tag and CSP directives.

@@ -1638,7 +1638,7 @@ export class ClineProvider
 
 		// Check if local dev server is running.
 		try {
-			await axios.get(`http://${localServerUrl}`)
+			await axios.get(`http://${localServerUrl}`, { timeout: 5_000 })
 		} catch {
 			vscode.window.showErrorMessage(t("common:errors.hmr_not_running"))
 			return this.getHtmlContent(webview)
@@ -3572,6 +3572,9 @@ export class ClineProvider
 		}
 		this.lastReceivedWebviewHeartbeatAt = now
 		this.webviewHeartbeatCount++
+		// A new heartbeat invalidates the old warning action. Allow a fresh warning
+		// if this renderer stalls again, without replenishing its retry budget.
+		this.webviewRecoveryFailureReported = false
 		if (this.webviewRecoveryConfirmation) {
 			this.log("[Zoo Code] Webview heartbeat returned after recovery")
 		}
