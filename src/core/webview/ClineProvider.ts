@@ -1897,13 +1897,24 @@ export class ClineProvider
 			this.webviewDisposables.push(visibilityDisposable)
 		}
 
+		// Listen for when the view is disposed
+		// This happens when the user closes the view or when the view is closed programmatically
+		webviewView.onDidDispose(
+			async () => {
+				if (inTabMode) {
+					this.log("Disposing ClineProvider instance for tab view")
+					await this.dispose()
+				} else {
+					this.log("Clearing webview resources for sidebar view")
+					this.clearWebviewResources()
+				}
+			},
+			null,
+			this.webviewDisposables,
+		)
+
 		// Listen for when color changes
 		const configDisposable = vscode.workspace.onDidChangeConfiguration(async (e) => {
-			// Ignore configuration refreshes scoped to a view that is no longer current.
-			if (webviewView !== this.view) {
-				return
-			}
-
 			if (e && e.affectsConfiguration("workbench.colorTheme")) {
 				// Sends latest theme name to webview
 				await this.postMessageToWebview({ type: "theme", text: JSON.stringify(await getTheme()) })
@@ -2027,6 +2038,7 @@ export class ClineProvider
 		)
 		return run
 	}
+
 	private async createTaskWithHistoryItemUnlocked(
 		historyItem: HistoryItem & { rootTask?: Task; parentTask?: Task },
 		options?: { startTask?: boolean },
@@ -2059,7 +2071,10 @@ export class ClineProvider
 				historyItem.mode = defaultModeSlug
 			}
 
-			await this.updateGlobalState("mode", historyItem.mode)
+			// Persist the restored mode through this view's per-view pin rather than the
+			// shared global: a global write would leak the restored mode into other views
+			// in parallel mode, and a buffer-only write would be lost after a reload.
+			await this.saveViewState("mode", historyItem.mode)
 
 			// Load the saved API config for the restored mode if it exists.
 			// Skip mode-based profile activation if historyItem.apiConfigName exists,
@@ -2087,6 +2102,15 @@ export class ClineProvider
 							const hasActualSettings = !!fullProfile.apiProvider
 
 							if (hasActualSettings) {
+								// The restored mode lives only in this view's buffer, so the shared
+								// mode slot must not be written: activateProviderProfile reads mode
+								// through getState(), which does not see the view-local overlay, and
+								// would bind this profile to whichever mode the shared store still
+								// reports. The profile was read from the mode slot, so re-persisting
+								// it here is redundant as well as wrong.
+								// The task id guard is upstream's: restoring a history item must not rebuild
+								// or sticky-write a task that another view swapped in while this restoration
+								// was still in flight.
 								await this.activateProviderProfile(
 									{ name: profile.name },
 									{ persistModeConfig: false, expectedCurrentTaskId: historyItem.id },
@@ -2272,6 +2296,7 @@ export class ClineProvider
 
 		return task
 	}
+
 	public async postMessageToWebview(message: ExtensionMessage) {
 		const startedAt = Date.now()
 		const taskId = this.getCurrentTask()?.taskId
@@ -2295,18 +2320,44 @@ export class ClineProvider
 			return
 		}
 
+		const webview = this.view?.webview
+		if (!webview) {
+			return
+		}
+
+		// Dispatch without awaiting the renderer ack: VS Code settles postMessage only when the
+		// webview page acknowledges the message, and a page reload or view dispose in flight
+		// orphans that promise forever. Awaiting it could wedge every caller on the task critical
+		// path (e.g. the trailing postStateToWebview in handleModeSwitchUnlocked gates the next
+		// turn after a mode switch). Message ordering is enforced by the message seq, not the ack.
+		// Promise.resolve() normalizes non-promise returns (e.g. test doubles) before the catch.
+		// A disposed webview can also throw synchronously from postMessage itself, before
+		// any promise exists to attach the catch to: route that path through the same
+		// log so fire-and-forget callers never surface an unhandled rejection.
+		const logDropped = (error: unknown) => {
+			// Swallow: postMessage rejects (or throws) when the webview is disposed.
+			// Log the dropped message type so a wedged webview channel is diagnosable
+			// instead of silently losing state updates.
+			this.log(
+				`[postMessageToWebview] dropped message type=${message.type}: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
 		try {
-			const delivered = await this.view?.webview.postMessage(omitOriginalContentFromExtensionMessage(message))
-			this.diagnosticsRecorder.record({
-				boundary: "webview-out",
-				phase: delivered ? "success" : "failure",
-				type: message.type,
-				action: message.action,
-				elapsedMs: Date.now() - startedAt,
-				stateSequence: message.type === "state" ? message.state?.clineMessagesSeq : undefined,
-				taskId,
-			})
-		} catch {
+		try {
+			void Promise.resolve(webview.postMessage(omitOriginalContentFromExtensionMessage(message)))
+				.then((delivered) => {
+					this.diagnosticsRecorder.record({
+						boundary: "webview-out",
+						phase: delivered ? "success" : "failure",
+						type: message.type,
+						action: message.action,
+						elapsedMs: Date.now() - startedAt,
+						stateSequence: message.type === "state" ? message.state?.clineMessagesSeq : undefined,
+						taskId,
+					})
+				})
+				.catch(logDropped)
+		} catch (error) {
 			this.diagnosticsRecorder.record({
 				boundary: "webview-out",
 				phase: "failure",
@@ -2315,7 +2366,8 @@ export class ClineProvider
 				elapsedMs: Date.now() - startedAt,
 				taskId,
 			})
-			// View disposed, drop message silently
+			logDropped(error)
+		}
 		}
 	}
 
@@ -2572,14 +2624,11 @@ export class ClineProvider
 	 * Sets up an event listener to listen for messages passed from the webview context and
 	 * executes code based on the message that is received.
 	 *
-	 * @param webviewView The view whose webview messages are listened to
+	 * @param webview A reference to the extension webview
 	 */
-	private setWebviewMessageListener(webviewView: vscode.WebviewView | vscode.WebviewPanel) {
-		const onReceiveMessage = async (message: WebviewMessage) => {
-			// Ignore messages from a view that is no longer the current view.
-			if (webviewView !== this.view) {
-				return
-			}
+	private setWebviewMessageListener(webview: vscode.Webview) {
+		const onReceiveMessage = async (message: WebviewMessage) =>
+			webviewMessageHandler(this, message, this.marketplaceManager)
 
 			const startedAt = Date.now()
 			this.diagnosticsRecorder.record({ boundary: "webview-in", phase: "start", type: message.type })
@@ -2621,6 +2670,7 @@ export class ClineProvider
 			this.handleModeSwitchUnlocked(newMode, targetTask, signal),
 		)
 	}
+
 	private async handleModeSwitchUnlocked(
 		newMode: Mode,
 		targetTask: Task | null | undefined,
@@ -2630,7 +2680,6 @@ export class ClineProvider
 
 		if (task) {
 			TelemetryService.instance.captureModeSwitch(task.taskId, newMode)
-			task.emit(RooCodeEventName.TaskModeSwitched, task.taskId, newMode)
 
 			try {
 				// Update the task history with the new mode first.
@@ -2639,6 +2688,8 @@ export class ClineProvider
 				if (taskHistoryItem) {
 					await this.updateTaskHistory({ ...taskHistoryItem, mode: newMode })
 				}
+
+				task.emit(RooCodeEventName.TaskModeSwitched, task.taskId, newMode)
 
 				// Only update the task's mode after successful persistence.
 				;(task as any)._taskMode = newMode
@@ -2654,7 +2705,30 @@ export class ClineProvider
 			}
 		}
 
-		await this.updateGlobalState("mode", newMode)
+		// setValue (not the deprecated updateGlobalState) so the in-memory viewLocalState
+		// buffer stays in sync with the durable global write: getValues() merges
+		// viewLocalState on top of the ContextProxy values, so an unsynced stale
+		// restored mode would otherwise shadow the fresh switch for consumers.
+		// If the durable write fails, roll the shared write back so getValues()
+		// cannot mix a fresh shared mode with the stale pre-switch buffer.
+		const previousMode = this.getValue("mode")
+		try {
+			await this.setValue("mode", newMode)
+		} catch (error) {
+			try {
+				await this.contextProxy.setValue("mode", previousMode)
+			} catch (rollbackError) {
+				this.log(
+					`[handleModeSwitch] Failed to roll back shared mode after persistence failure: ${
+						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+					}`,
+				)
+			}
+			this.log(
+				`[handleModeSwitch] Failed to persist mode "${newMode}": ${error instanceof Error ? error.message : String(error)}`,
+			)
+			throw error
+		}
 
 		this.emit(RooCodeEventName.ModeChanged, newMode)
 
@@ -2667,13 +2741,9 @@ export class ClineProvider
 			return
 		}
 
-		if (signal?.aborted) return
-
 		// Load the saved API config for the new mode if it exists.
 		const savedConfigId = await this.getModeConfigId(newMode)
 		const listApiConfig = await this.providerSettingsManager.listConfig()
-
-		if (signal?.aborted) return
 
 		// Update listApiConfigMeta first to ensure UI has latest data.
 		await this.updateGlobalState("listApiConfigMeta", listApiConfig)
@@ -3004,6 +3074,7 @@ export class ClineProvider
 		await this.postStateToWebview()
 		return id
 	}
+
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
 		const globalSettings = this.contextProxy.getValues()
 		let profileToActivate: string | undefined = globalSettings.currentApiConfigName
@@ -3016,13 +3087,87 @@ export class ClineProvider
 			throw new Error("You cannot delete the last profile")
 		}
 
+		// Remove the profile from the settings store (context.secrets) so it cannot be
+		// resurrected by a later listApiConfigMeta sync. A not-found rejection means
+		// the secret was already gone (e.g. pruned by an earlier run): branch on the
+		// typed ProviderSettingsNotFoundError so the stale list entry below is still
+		// pruned as an idempotent success, while any other failure (e.g. refusing to
+		// delete the last remaining configuration) propagates. Matching message text
+		// instead would let a profile whose name contains "not found" swallow an
+		// unrelated failure.
+		try {
+			await this.providerSettingsManager.deleteConfig(profileToDelete.name)
+		} catch (error) {
+			if (!(error instanceof ProviderSettingsNotFoundError)) {
+				throw error
+			}
+			this.log(
+				`deleteProviderProfile: settings for '${profileToDelete.name}' were not found; pruning the stale list entry only`,
+			)
+		}
+
 		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
-		await this.contextProxy.setValues({
-			...globalSettings,
-			currentApiConfigName: profileToActivate,
-			listApiConfigMeta: entries,
-		})
+		// Write only the profile list back: replaying the full settings snapshot
+		// captured above would also rewrite unrelated keys (including viewStates,
+		// which ClineProvider mutates directly in storage for concurrent views)
+		// with this view's stale cached copy.
+		await this.contextProxy.setValue("listApiConfigMeta", entries)
+
+		// Resolve the surviving profile's settings so this view and any other
+		// live view still pinned to the deleted profile can be re-pinned with
+		// a matching configuration.
+		let survivingSettings: ProviderSettings | undefined
+		try {
+			const { name: _survivingName, ...settings } = await this.providerSettingsManager.getProfile({
+				name: profileToActivate,
+			})
+			survivingSettings = settings as ProviderSettings
+		} catch (error) {
+			this.log(
+				`[deleteProviderProfile] Unable to resolve API profile '${profileToActivate}': ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
+
+		// Capture this view's pin before any rewrite: a view pinned to the
+		// deleted profile while the global selection points elsewhere must still be
+		// reconfigured, or getState() would keep the deleted profile's settings under
+		// the surviving profile's name.
+		const viewWasPinnedToDeleted = this.viewLocalState.currentApiConfigName === profileToDelete.name
+		const deletedWasGlobal = profileToDelete.name === globalSettings.currentApiConfigName
+
+		if (viewWasPinnedToDeleted) {
+			// This view's pin now dangles: re-point it. setValue also persists the
+			// survivor to the shared store, which covers the deleted-was-global case
+			// for every other view as well as this one.
+			await this.setValue("currentApiConfigName", profileToActivate)
+		} else if (deletedWasGlobal) {
+			// The shared selection changed, but this view's own pin still names a
+			// surviving profile: update the shared store only, leaving the
+			// view-local pin untouched.
+			await this.contextProxy.setValue("currentApiConfigName", profileToActivate)
+		}
+
+		if ((deletedWasGlobal || viewWasPinnedToDeleted) && survivingSettings) {
+			// The deleted profile was the active one (globally, or for this view), so
+			// the shared provider keys still carry its settings; replace them so
+			// getState() reports the surviving profile's configuration.
+			await this.contextProxy.setProviderSettings(survivingSettings)
+
+			if (viewWasPinnedToDeleted) {
+				// This view's nested overlay (viewLocalState.apiConfiguration, seeded
+				// by loadViewState) still serves the deleted profile's configuration:
+				// replace it with the survivor's so the re-pointed pin serves matching
+				// settings. A view pinned to another profile keeps its own overlay.
+				await this._saveViewLocalStateFromMutation({ apiConfiguration: survivingSettings })
+			}
+		}
+
+		// Re-pin other live views still buffered on the deleted profile: their
+		// buffer and durable viewStates entry would otherwise keep serving the
+		// deleted profile's name and configuration.
 
 		await this.postStateToWebview()
 	}
@@ -3071,6 +3216,7 @@ export class ClineProvider
 			this.activateProviderProfileUnlocked(args, options, signal),
 		)
 	}
+
 	private async activateProviderProfileUnlocked(
 		args: { name: string } | { id: string },
 		options?: {
@@ -3093,9 +3239,21 @@ export class ClineProvider
 			// See `upsertProviderProfile` for a description of what this is doing.
 			await Promise.all([
 				this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
-				this.contextProxy.setValue("currentApiConfigName", name),
+				// Route through setValue so the in-memory viewLocalState buffer tracks the
+				// activated profile: a plain ContextProxy write would leave a stale loaded
+				// currentApiConfigName shadowing the new value in getValues().
+				this.setValue("currentApiConfigName", name),
 				this.contextProxy.setProviderSettings(providerSettings),
+				// setProviderSettings writes the shared store directly, bypassing the
+				// view-local mutation path: also refresh this view's buffer so a stale
+				// loaded apiConfiguration cannot keep shadowing the new settings in
+				// getState().
+				this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings }),
 			])
+
+			// Other live views may have buffered this profile's settings earlier;
+			// refresh them so their getState() cannot report the activated profile's
+			// name with stale settings.
 		}
 
 		const { mode } = await this.getState()
@@ -3202,6 +3360,9 @@ export class ClineProvider
 
 		await this.upsertProviderProfile(currentApiConfigName, newConfiguration)
 	}
+
+	// Zoo Code Auth
+
 	async handleZooCodeCallback(token: string) {
 		// Auth mutation (token storage, subscription check, success toast) was already
 		// performed by handleAuthCallback() in handleUri.ts before this method was called.
@@ -3262,8 +3423,10 @@ export class ClineProvider
 						// picks up the new token immediately for the current task.
 						await this.upsertProviderProfile(entry.name, updated, true)
 					} else {
-						// Non-active profiles just need the token saved to disk.
-						await this.providerSettingsManager.saveConfig(entry.name, updated)
+						// Non-active profiles need the token saved to disk and the views pinned
+						// to them refreshed: a direct saveConfig leaves a pinned view serving the
+						// old token until it reloads.
+						await this.upsertProviderProfile(entry.name, updated, false)
 					}
 				}
 			}
@@ -4299,7 +4462,7 @@ export class ClineProvider
 		// Broadcast the updated history to the webview if requested.
 		// Prefer per-item updates to avoid repeatedly cloning/sending the full history.
 		if (broadcast && this.isViewLaunched) {
-			const updatedItem = this.taskHistoryStore.get(item.id) ?? itemWithoutTitle
+			const updatedItem = this.taskHistoryStore.get(item.id) ?? item
 			await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
 		}
 

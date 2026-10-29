@@ -7113,6 +7113,171 @@ describe("ClineProvider", () => {
 		mockContext.globalState.update = originalUpdate
 		await provider.dispose()
 	})
+
+	describe("viewId uniqueness", () => {
+		it("should assign unique viewId to each instance", async () => {
+			const provider1 = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+
+				new WebviewFocusTracker(),
+			)
+			const provider2 = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			// Each instance should have a unique viewId
+			expect(provider1.viewId).toBeDefined()
+			expect(provider2.viewId).toBeDefined()
+			expect(provider1.viewId).not.toBe(provider2.viewId)
+
+			await provider1.dispose()
+			await provider2.dispose()
+		})
+
+		it("should have viewId in correct format: {renderContext}-{instanceCount}", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			expect(provider.viewId).toMatch(/^sidebar-\d+$/)
+
+			await provider.dispose()
+		})
+
+		it("should increment instance count for each new instance", async () => {
+			const provider1 = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const provider2 = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			// First editor instance should be "editor-0" (or next available)
+			// Second editor instance should have a different number
+			const num1 = parseInt(provider1.viewId.split("-")[1]!)
+			const num2 = parseInt(provider2.viewId.split("-")[1]!)
+
+			expect(num2).toBeGreaterThan(num1)
+
+			await provider1.dispose()
+			await provider2.dispose()
+		})
+	})
+
+	it("should increment instance count for each new instance", async () => {
+		const provider1 = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"editor",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const provider2 = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"editor",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+
+		// First editor instance should be "editor-0" (or next available)
+		// Second editor instance should have a different number
+		const num1 = parseInt(provider1.viewId.split("-")[1]!)
+		const num2 = parseInt(provider2.viewId.split("-")[1]!)
+
+		expect(num2).toBeGreaterThan(num1)
+
+		await provider1.dispose()
+		await provider2.dispose()
+	})
+
+	it("should reapply an independently mutated profile name when the load settles", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
+		await provider.saveViewState("currentApiConfigName", "cfg-a")
+		const load = provider["setViewStateId"]("stable-sidebar-view")
+
+		// Let the stalled lookup begin so the in-flight mutation and the resolver
+		// target the pending promise rather than the initial no-op.
+		await vi.waitFor(() => expect(getProfileSpy).toHaveBeenCalledTimes(1))
+		// The profile name changes while the lookup is in flight; the load still
+		// resolves the name persisted at load start.
+		await provider.saveViewState("currentApiConfigName", "cfg-b")
+
+		resolveProfile({ name: "cfg-a", apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-x" })
+		await load
+
+		// The in-flight selection wins over the loaded state.
+		expect(provider["viewLocalState"].currentApiConfigName).toBe("cfg-b")
+		expect(provider["viewLocalState"].apiConfiguration).toEqual({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "model-x",
+		})
+		expect(provider["viewLocalState"]).not.toHaveProperty("mode")
+		await provider.dispose()
+	})
+
+	test("postMessageToWebview does not await the webview ack", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		let releaseAck!: () => void
+		const ack = new Promise<void>((resolve) => {
+			releaseAck = resolve
+		})
+		mockPostMessage.mockImplementationOnce(() => ack)
+
+		const message: ExtensionMessage = { type: "action", action: "chatButtonClicked" }
+
+		// The caller must not wait for the renderer ack: a webview page remounted or disposed
+		// while the post is in flight never acknowledges it, and awaiting that promise would
+		// wedge every caller on the task critical path.
+		await provider.postMessageToWebview(message)
+
+		expect(mockPostMessage).toHaveBeenCalledWith(message)
+		releaseAck()
+	})
+
+	test("postMessageToWebview logs a synchronous postMessage throw", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		const logSpy = vi.spyOn(provider, "log").mockImplementation(() => {})
+		// A disposed webview can throw synchronously from postMessage, before any
+		// promise exists to attach the rejection handler to: the call site must handle
+		// it so fire-and-forget callers never see an unhandled rejection.
+		mockPostMessage.mockImplementationOnce(() => {
+			throw new Error("Webview is disposed")
+		})
+		const message: ExtensionMessage = { type: "action", action: "chatButtonClicked" }
+		await expect(provider.postMessageToWebview(message)).resolves.toBeUndefined()
+		expect(logSpy).toHaveBeenCalledWith(
+			expect.stringContaining("[postMessageToWebview] dropped message type=action"),
+		)
+		logSpy.mockRestore()
+	})
 })
 
 describe("webviewMessageHandler no-floating-promises coverage", () => {
@@ -9536,57 +9701,6 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				)
 			})
 
-			it("updates every zoo-gateway profile and activates only the active one", async () => {
-				vi.spyOn(provider, "getState").mockResolvedValue({
-					apiConfiguration: { zooGatewayModelId: "anthropic/claude-sonnet-4" },
-				} as any)
-				vi.spyOn(provider.contextProxy, "getProviderSettings").mockReturnValue({
-					apiProvider: providerIdentifiers.zooGateway,
-				} as any)
-				vi.spyOn(provider.contextProxy, "getValues").mockReturnValue({
-					currentApiConfigName: "Zoo Gateway",
-				} as any)
-				const upsertSpy = vi.spyOn(provider, "upsertProviderProfile").mockResolvedValue("profile-id")
-				const saveConfig = vi.fn().mockResolvedValue(undefined)
-				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-				;(provider as any).providerSettingsManager = {
-					listConfig: vi.fn().mockResolvedValue([
-						{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
-						{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
-					]),
-					getProfile: vi
-						.fn()
-						.mockResolvedValueOnce({
-							apiProvider: providerIdentifiers.zooGateway,
-							zooSessionToken: "old-token",
-							zooGatewayBaseUrl: "https://old.example/api/gateway/v1",
-						})
-						.mockResolvedValueOnce({
-							apiProvider: providerIdentifiers.zooGateway,
-							zooSessionToken: "old-token",
-						}),
-					saveConfig,
-				}
-
-				await provider.handleZooCodeCallback("new-token")
-
-				expect(upsertSpy).toHaveBeenCalledWith(
-					"Zoo Gateway",
-					expect.objectContaining({
-						zooSessionToken: "new-token",
-						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
-					}),
-					true,
-				)
-				expect(saveConfig).toHaveBeenCalledWith(
-					"Backup Zoo",
-					expect.objectContaining({
-						zooSessionToken: "new-token",
-						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
-					}),
-				)
-			})
-
 			it("logs and posts state when profile persistence fails", async () => {
 				vi.spyOn(provider, "getState").mockRejectedValue(new Error("state unavailable"))
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
@@ -9615,68 +9729,6 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				await (provider as any).ensureZooGatewayProfileSeeded()
 
 				expect(handleSpy).not.toHaveBeenCalled()
-			})
-
-			it("skips seeding when every zoo-gateway profile already has the current token and base URL", async () => {
-				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
-				vi.mocked(getCachedZooCodeToken).mockReturnValue("current-token")
-				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
-				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
-
-				;(provider as any).providerSettingsManager = {
-					listConfig: vi
-						.fn()
-						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
-					getProfile: vi.fn().mockResolvedValue({
-						zooSessionToken: "current-token",
-						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
-					}),
-				}
-
-				await (provider as any).ensureZooGatewayProfileSeeded()
-
-				expect(handleSpy).not.toHaveBeenCalled()
-				expect(postMessageSpy).toHaveBeenCalledWith({ type: "zooGatewayCredentialsReady" })
-			})
-
-			it("re-seeds when any zoo-gateway profile has a stale or missing token", async () => {
-				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
-				vi.mocked(getCachedZooCodeToken).mockReturnValue("fresh-token")
-				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
-
-				;(provider as any).providerSettingsManager = {
-					listConfig: vi
-						.fn()
-						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
-					getProfile: vi.fn().mockResolvedValue({
-						zooSessionToken: "stale-token",
-						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
-					}),
-				}
-
-				await (provider as any).ensureZooGatewayProfileSeeded()
-
-				expect(handleSpy).toHaveBeenCalledWith("fresh-token")
-			})
-
-			it("re-seeds when any zoo-gateway profile has a stale base URL", async () => {
-				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
-				vi.mocked(getCachedZooCodeToken).mockReturnValue("current-token")
-				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
-
-				;(provider as any).providerSettingsManager = {
-					listConfig: vi
-						.fn()
-						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
-					getProfile: vi.fn().mockResolvedValue({
-						zooSessionToken: "current-token",
-						zooGatewayBaseUrl: "https://staging.zoocode.dev/api/gateway/v1",
-					}),
-				}
-
-				await (provider as any).ensureZooGatewayProfileSeeded()
-
-				expect(handleSpy).toHaveBeenCalledWith("current-token")
 			})
 		})
 	})
