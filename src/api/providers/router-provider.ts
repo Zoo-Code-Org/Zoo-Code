@@ -6,6 +6,7 @@ import { ApiHandlerOptions, RouterName } from "../../shared/api"
 
 import { BaseProvider } from "./base-provider"
 import { getModels, getModelsFromCache, refreshModels } from "./fetchers/modelCache"
+import { detachOnAbort } from "./utils/abort-signal"
 
 import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 
@@ -123,20 +124,7 @@ export abstract class RouterProvider extends BaseProvider {
 
 		// Detach this waiter as soon as the signal aborts; the shared in-flight
 		// fetch continues for any other waiter and still populates the cache.
-		await new Promise<void>((resolve, reject) => {
-			const onAbort = () => reject(signal.reason)
-			signal.addEventListener("abort", onAbort, { once: true })
-			fetch.then(
-				() => {
-					signal.removeEventListener("abort", onAbort)
-					resolve()
-				},
-				(error: unknown) => {
-					signal.removeEventListener("abort", onAbort)
-					reject(error)
-				},
-			)
-		})
+		await detachOnAbort(fetch, signal)
 	}
 
 	override getModel(): { id: string; info: ModelInfo } {
