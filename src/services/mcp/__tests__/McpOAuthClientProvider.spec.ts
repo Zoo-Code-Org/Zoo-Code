@@ -231,16 +231,39 @@ describe("McpOAuthClientProvider", () => {
 				await provider.openBrowser()
 				const openedUri = vi.mocked(vscode.env.openExternal).mock.calls[0][0].toString()
 				expect(new URL(openedUri).searchParams.get("scope")).toBe("openid profile offline_access")
-				expect(startCallbackServer).toHaveBeenCalledWith(33418, expect.any(String), callbackHost)
+				expect(startCallbackServer).toHaveBeenCalledWith(33418, expect.any(String), callbackHost, "/callback")
 				await provider.close()
 			},
 		)
+
+		it("should listen on the configured callback path for a static client", async () => {
+			setupCallbackServerMock()
+			const redirectUri = "http://127.0.0.1:19876/mcp/oauth/callback"
+			const provider = await McpOAuthClientProvider.create(
+				"https://example.com/mcp",
+				createMockSecretStorage(),
+				undefined,
+				{ clientId: "registered-client", redirectUri },
+			)
+
+			expect(provider.redirectUrl).toBe(redirectUri)
+			expect(await provider.clientInformation()).toMatchObject({ redirect_uris: [redirectUri] })
+
+			await provider.redirectToAuthorization(new URL("https://auth.example.com/authorize"))
+			expect(startCallbackServer).toHaveBeenCalledWith(
+				19876,
+				expect.any(String),
+				"127.0.0.1",
+				"/mcp/oauth/callback",
+			)
+			await provider.close()
+		})
 
 		it.each([
 			["https://example.com:33418/callback", "must use a loopback host"],
 			["http://example.com:33418/callback", "must use a loopback host"],
 			["https://localhost:33418/callback", "must use HTTP on a loopback host"],
-			["http://localhost:33418/wrong", "path must be /callback"],
+			["http://localhost:33418/", "must specify a callback path"],
 			["http://localhost:33418/callback?x=1", "must not contain credentials, a query, or a fragment"],
 			["http://localhost:33418/callback#fragment", "must not contain credentials, a query, or a fragment"],
 			["http://u:p@localhost:33418/callback", "must not contain credentials, a query, or a fragment"],
@@ -563,7 +586,7 @@ describe("McpOAuthClientProvider", () => {
 			const secretStorage = createMockSecretStorage()
 			const serverUrl = "https://example.com/mcp"
 			const clientId = "registered-client"
-			const discoveredResource = "https://discovered.example.com/"
+			const discoveredResource = "https://example.com/mcp"
 			await secretStorage.saveOAuthData(
 				serverUrl,
 				{
@@ -614,7 +637,7 @@ describe("McpOAuthClientProvider", () => {
 				},
 				clientId,
 			)
-			mockOAuthDiscovery("https://discovered.example.com/")
+			mockOAuthDiscovery("https://example.com/mcp")
 			const provider = await McpOAuthClientProvider.create(serverUrl, secretStorage, undefined, {
 				clientId,
 				resource: explicitResource,
@@ -1398,7 +1421,7 @@ describe("McpOAuthClientProvider", () => {
 			// reads redirect_uris, so the advertised URI carries the real port and never :0.
 			expect(startCallbackServer).toHaveBeenCalledTimes(1)
 			// Port 0 asks the OS for an ephemeral port; the mock binds it to 12345.
-			expect(startCallbackServer).toHaveBeenCalledWith(0, expect.any(String), "127.0.0.1")
+			expect(startCallbackServer).toHaveBeenCalledWith(0, expect.any(String), "127.0.0.1", "/callback")
 			expect(provider.redirectUrl).toBe("http://127.0.0.1:12345/callback")
 			expect(provider.redirectUrl).not.toContain(":0/")
 			expect(provider.clientMetadata.redirect_uris).toEqual(["http://127.0.0.1:12345/callback"])

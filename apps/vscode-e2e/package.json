@@ -15,7 +15,10 @@
 		"themes:test": "pnpm --filter @roo-code/types build && rimraf out && tsc -p tsconfig.json && node --test ./out/theme-fixtures/fixtures.test.js",
 		"visual:build": "pnpm themes:build",
 		"test:visual:electron": "pnpm visual:build && playwright test -c playwright-electron.config.ts",
-		"clean": "rimraf out .turbo"
+		"clean": "rimraf out .turbo",
+		"heap:build": "pnpm -w bundle && tsc -p tsconfig.json && node out/heap/prepare.js",
+		"test:heap": "playwright test -c playwright-heap.config.ts",
+		"heap:summarize": "node out/heap/summarize.js"
 	},
 	"devDependencies": {
 		"@playwright/test": "1.62.1",

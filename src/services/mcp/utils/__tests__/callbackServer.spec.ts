@@ -84,6 +84,23 @@ describe("startCallbackServer", () => {
 		await cancellation
 	})
 
+	it("should resolve only on the configured callback path", async () => {
+		const mockServer = createMockServer()
+
+		vi.mocked(http.createServer).mockReturnValue(mockServer as unknown as http.Server)
+
+		const { result } = await startCallbackServer(19876, undefined, "127.0.0.1", "/mcp/oauth/callback")
+		const requestCall = mockServer.on.mock.calls.find((call) => call[0] === "request")
+		const requestHandler = requestCall ? requestCall[1] : vi.fn()
+
+		const defaultPathRes = createMockResponse()
+		requestHandler({ url: "/callback?code=wrong-path", method: "GET" }, defaultPathRes)
+		expect(defaultPathRes.writeHead).toHaveBeenCalledWith(404)
+
+		requestHandler({ url: "/mcp/oauth/callback?code=test-code", method: "GET" }, createMockResponse())
+		expect((await result).code).toBe("test-code")
+	})
+
 	it("should reject invalid state", async () => {
 		const mockServer = createMockServer()
 

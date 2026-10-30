@@ -243,11 +243,12 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 
 	private async _doStartCallbackServer(): Promise<void> {
 		this._closed = false
-		const { port: configuredPort, host } = getCallbackAddress(this._configuredRedirectUri)
+		const { port: configuredPort, host, path } = getCallbackAddress(this._configuredRedirectUri)
 		const { server, port, result, cancel } = await startCallbackServer(
 			configuredPort ?? this._port,
 			this._state,
 			host,
+			path,
 		)
 		this._server = server
 		this._port = port
@@ -670,8 +671,12 @@ function resolveResourceIndicator(configured: McpOAuthResource | undefined, disc
 	return discovered ?? null
 }
 
-function getCallbackAddress(redirectUri?: string): { port?: number; host: "localhost" | "127.0.0.1" } {
-	if (!redirectUri) return { host: "127.0.0.1" }
+function getCallbackAddress(redirectUri?: string): {
+	port?: number
+	host: "localhost" | "127.0.0.1"
+	path: string
+} {
+	if (!redirectUri) return { host: "127.0.0.1", path: "/callback" }
 	const url = new URL(redirectUri)
 	if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
 		throw new Error("MCP OAuth redirectUri must use a loopback host")
@@ -679,8 +684,9 @@ function getCallbackAddress(redirectUri?: string): { port?: number; host: "local
 	if (url.protocol !== "http:") {
 		throw new Error("MCP OAuth redirectUri must use HTTP on a loopback host")
 	}
-	if (url.pathname !== "/callback") {
-		throw new Error("MCP OAuth redirectUri path must be /callback")
+	// Authorization servers with pre-registered clients may require a specific path.
+	if (url.pathname === "/") {
+		throw new Error("MCP OAuth redirectUri must specify a callback path")
 	}
 	if (url.username || url.password || url.search || url.hash) {
 		throw new Error("MCP OAuth redirectUri must not contain credentials, a query, or a fragment")
@@ -689,5 +695,5 @@ function getCallbackAddress(redirectUri?: string): { port?: number; host: "local
 	if (!Number.isInteger(port) || port < 1 || port > 65535) {
 		throw new Error("MCP OAuth redirectUri must specify a valid port")
 	}
-	return { port, host: url.hostname }
+	return { port, host: url.hostname, path: url.pathname }
 }

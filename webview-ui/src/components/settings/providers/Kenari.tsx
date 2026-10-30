@@ -48,7 +48,7 @@ export const Kenari = ({
 	return (
 		<>
 			<VSCodeTextField
-				value={apiConfiguration?.kenariApiKey || ""}
+				value={apiConfiguration.kenariApiKey || ""}
 				type="password"
 				onInput={handleInputChange("kenariApiKey")}
 				placeholder={t("settings:placeholders.apiKey")}
@@ -58,7 +58,7 @@ export const Kenari = ({
 			<div className="text-sm text-vscode-descriptionForeground -mt-2">
 				{t("settings:providers.apiKeyStorageNotice")}
 			</div>
-			{!apiConfiguration?.kenariApiKey && (
+			{!apiConfiguration.kenariApiKey && (
 				<VSCodeButtonLink
 					href="https://kenari.id/login?next=/keys"
 					appearance="primary"

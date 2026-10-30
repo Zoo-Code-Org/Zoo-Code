@@ -1,6 +1,6 @@
 import { HTMLAttributes } from "react"
 
-import type { Experiments, ImageGenerationProvider } from "@roo-code/types"
+import type { Experiments, ImageGenerationProvider, ProviderSettings } from "@roo-code/types"
 
 import { EXPERIMENT_IDS, experimentConfigsMap } from "@roo/experiments"
 
@@ -18,7 +18,7 @@ import { CustomToolsSettings } from "./CustomToolsSettings"
 type ExperimentalSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	experiments: Experiments
 	setExperimentEnabled: SetExperimentEnabled
-	apiConfiguration?: any
+	apiConfiguration: ProviderSettings
 	setApiConfigurationField?: any
 	imageGenerationProvider?: ImageGenerationProvider
 	openRouterImageApiKey?: string
