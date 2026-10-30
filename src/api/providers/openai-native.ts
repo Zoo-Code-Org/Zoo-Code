@@ -132,6 +132,13 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		const writesFromDetails =
 			typeof inputDetails?.cache_write_tokens === "number" ? inputDetails.cache_write_tokens : 0
 
+		// The Responses API splits cache writes by TTL class under
+		// `input_tokens_details.cache_write_tokens_details`. The installed SDK types
+		// (openai@5.23.2) do not declare it yet, so it is read defensively; the
+		// fields are a decomposition of `cache_write_tokens`, not an addition.
+		const writeDetails = inputDetails?.cache_write_tokens_details
+		const writes12hFromDetails = typeof writeDetails?.ttl_12h_tokens === "number" ? writeDetails.ttl_12h_tokens : 0
+
 		// If total input tokens are missing but we have details, derive from them
 		let totalInputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0
 		if (
@@ -152,6 +159,10 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		const cacheReadTokens =
 			usage.cache_read_input_tokens ?? usage.cache_read_tokens ?? usage.cached_tokens ?? cachedFromDetails ?? 0
 
+		// Clamp the 12h subset to the write total so a malformed response cannot bill
+		// more 12h tokens than were written at all.
+		const cacheWrite12hTokens = Math.min(writes12hFromDetails, cacheWriteTokens)
+
 		// Resolve effective tier: prefer actual tier from response; otherwise requested tier
 		const effectiveTier =
 			this.lastServiceTier || (this.options.openAiNativeServiceTier as ServiceTier | undefined) || undefined
@@ -166,6 +177,8 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			cacheWriteTokens,
 			cacheReadTokens,
 			effectiveTier,
+			undefined,
+			cacheWrite12hTokens,
 		)
 
 		const reasoningTokens =
@@ -179,6 +192,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			inputTokens: totalInputTokens,
 			outputTokens: totalOutputTokens,
 			cacheWriteTokens,
+			cacheWrite12hTokens: cacheWrite12hTokens || undefined,
 			cacheReadTokens,
 			...(typeof reasoningTokens === "number" ? { reasoningTokens } : {}),
 			totalCost,

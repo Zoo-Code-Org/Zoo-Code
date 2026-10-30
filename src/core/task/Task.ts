@@ -4021,6 +4021,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			try {
 				let cacheWriteTokens = 0
+				let cacheWrite1hTokens = 0
+				let cacheWrite12hTokens = 0
 				let cacheReadTokens = 0
 				let inputTokens = 0
 				let outputTokens = 0
@@ -4056,6 +4058,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									outputTokens,
 									cacheWriteTokens,
 									cacheReadTokens,
+									cacheWrite1hTokens,
+									cacheWrite12hTokens,
 								)
 							: calculateApiCostOpenAI(
 									streamModelInfo,
@@ -4063,6 +4067,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									outputTokens,
 									cacheWriteTokens,
 									cacheReadTokens,
+									undefined,
+									cacheWrite1hTokens,
+									cacheWrite12hTokens,
 								)
 
 					this.clineMessages[lastApiReqIndex].text = JSON.stringify({
@@ -4210,6 +4217,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								inputTokens += chunk.inputTokens
 								outputTokens += chunk.outputTokens
 								cacheWriteTokens += chunk.cacheWriteTokens ?? 0
+								cacheWrite1hTokens += chunk.cacheWrite1hTokens ?? 0
+								cacheWrite12hTokens += chunk.cacheWrite12hTokens ?? 0
 								cacheReadTokens += chunk.cacheReadTokens ?? 0
 								totalCost = chunk.totalCost
 								break
@@ -4450,6 +4459,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						input: inputTokens,
 						output: outputTokens,
 						cacheWrite: cacheWriteTokens,
+						cacheWrite1h: cacheWrite1hTokens,
+						cacheWrite12h: cacheWrite12hTokens,
 						cacheRead: cacheReadTokens,
 						total: totalCost,
 					}
@@ -4466,6 +4477,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						let bgInputTokens = currentTokens.input
 						let bgOutputTokens = currentTokens.output
 						let bgCacheWriteTokens = currentTokens.cacheWrite
+						let bgCacheWrite1hTokens = currentTokens.cacheWrite1h
+						let bgCacheWrite12hTokens = currentTokens.cacheWrite12h
 						let bgCacheReadTokens = currentTokens.cacheRead
 						let bgTotalCost = currentTokens.total
 
@@ -4475,6 +4488,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								input: number
 								output: number
 								cacheWrite: number
+								cacheWrite1h: number
+								cacheWrite12h: number
 								cacheRead: number
 								total?: number
 							},
@@ -4491,6 +4506,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								inputTokens = tokens.input
 								outputTokens = tokens.output
 								cacheWriteTokens = tokens.cacheWrite
+								cacheWrite1hTokens = tokens.cacheWrite1h
+								cacheWrite12hTokens = tokens.cacheWrite12h
 								cacheReadTokens = tokens.cacheRead
 								totalCost = tokens.total
 
@@ -4568,6 +4585,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									bgInputTokens += chunk.inputTokens
 									bgOutputTokens += chunk.outputTokens
 									bgCacheWriteTokens += chunk.cacheWriteTokens ?? 0
+									bgCacheWrite1hTokens += chunk.cacheWrite1hTokens ?? 0
+									bgCacheWrite12hTokens += chunk.cacheWrite12hTokens ?? 0
 									bgCacheReadTokens += chunk.cacheReadTokens ?? 0
 									bgTotalCost = chunk.totalCost
 								}
@@ -4586,6 +4605,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										input: bgInputTokens,
 										output: bgOutputTokens,
 										cacheWrite: bgCacheWriteTokens,
+										cacheWrite1h: bgCacheWrite1hTokens,
+										cacheWrite12h: bgCacheWrite12hTokens,
 										cacheRead: bgCacheReadTokens,
 										total: bgTotalCost,
 									},
@@ -4611,6 +4632,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										input: bgInputTokens,
 										output: bgOutputTokens,
 										cacheWrite: bgCacheWriteTokens,
+										cacheWrite1h: bgCacheWrite1hTokens,
+										cacheWrite12h: bgCacheWrite12hTokens,
 										cacheRead: bgCacheReadTokens,
 										total: bgTotalCost,
 									},

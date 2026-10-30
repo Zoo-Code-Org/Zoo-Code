@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import { OpenAiNativeHandler } from "../openai-native"
-import { OpenAiServiceTier, openAiNativeModels } from "@roo-code/types"
+import { OpenAiServiceTier, openAiNativeModels, type ModelInfo } from "@roo-code/types"
+import type { ApiStreamUsageChunk } from "../../transform/stream"
 
 describe("OpenAiNativeHandler - normalizeUsage", () => {
 	let handler: OpenAiNativeHandler
@@ -613,6 +614,123 @@ describe("OpenAiNativeHandler - normalizeUsage", () => {
 				cacheReadTokens: 100_000,
 			})
 			expect(result.totalCost).toBeCloseTo(1.08, 6)
+		})
+	})
+
+	describe("cache-write TTL split (Responses API)", () => {
+		// `normalizeUsage` is private. A narrow structural cast keeps the call typed
+		// without widening the handler to `any`; the return is asserted non-null because
+		// every call site below passes a usage object that yields a chunk.
+		const normalizeUsage = (
+			h: OpenAiNativeHandler,
+			usage: unknown,
+			model: { id: string; info: ModelInfo },
+		): ApiStreamUsageChunk => {
+			const result = (
+				h as unknown as {
+					normalizeUsage(u: unknown, m: { id: string; info: ModelInfo }): ApiStreamUsageChunk | undefined
+				}
+			).normalizeUsage(usage, model)
+			expect(result).toBeDefined()
+			return result as ApiStreamUsageChunk
+		}
+
+		it("should read ttl_12h_tokens and bill it at the 12h rate", () => {
+			// gpt-5.6-sol: input 4.0, cacheWritesPrice 5.0 (30m class), cacheWritesPrice12h 10.0.
+			const model = getGpt6AstraModel()
+			const usage = {
+				input_tokens: 100_000,
+				output_tokens: 0,
+				input_tokens_details: {
+					cache_write_tokens: 100_000,
+					cache_write_tokens_details: {
+						ttl_30m_tokens: 0,
+						ttl_12h_tokens: 100_000,
+					},
+				},
+			}
+
+			const result = normalizeUsage(handler, usage, model)
+
+			expect(result).toMatchObject({
+				type: "usage",
+				cacheWriteTokens: 100_000,
+				cacheWrite12hTokens: 100_000,
+			})
+
+			// gpt-6-astra: input 10.0, 12h rate 25.0.
+			// Base input: (10.0 / 1_000_000) * (100_000 - 100_000) = 0
+			// 12h writes: (25.0 / 1_000_000) * 100_000 = 2.5
+			// The pre-split behaviour charged the 30m rate: 12.5 * 0.1 = 1.25 (50% low).
+			expect(result.totalCost).toBeCloseTo(2.5, 6)
+			expect(result.totalCost).not.toBeCloseTo(1.25, 6)
+		})
+
+		it("should split a mixed 30m/12h write total without double counting", () => {
+			const model = getGpt6AstraModel()
+			const usage = {
+				input_tokens: 100_000,
+				output_tokens: 0,
+				input_tokens_details: {
+					cache_write_tokens: 100_000,
+					cache_write_tokens_details: {
+						ttl_30m_tokens: 60_000,
+						ttl_12h_tokens: 40_000,
+					},
+				},
+			}
+
+			const result = normalizeUsage(handler, usage, model)
+
+			expect(result).toMatchObject({
+				cacheWriteTokens: 100_000,
+				cacheWrite12hTokens: 40_000,
+			})
+
+			// 30m remainder: 60_000 at 12.5 => 0.75
+			// 12h: 40_000 at 25.0 => 1.0
+			// Total: 1.75
+			expect(result.totalCost).toBeCloseTo(1.75, 6)
+		})
+
+		it("should leave the split undefined when the response omits it", () => {
+			const model = getGpt6AstraModel()
+			const usage = {
+				input_tokens: 100_000,
+				output_tokens: 0,
+				input_tokens_details: {
+					cache_write_tokens: 100_000,
+				},
+			}
+
+			const result = normalizeUsage(handler, usage, model)
+
+			expect(result.cacheWrite12hTokens).toBeUndefined()
+			// All writes bill at the 30m rate: (12.5 / 1_000_000) * 100_000 = 1.25
+			expect(result.totalCost).toBeCloseTo(1.25, 6)
+		})
+
+		it("should clamp a 12h split that exceeds the write total", () => {
+			const model = getGpt6AstraModel()
+			const usage = {
+				input_tokens: 100_000,
+				output_tokens: 0,
+				input_tokens_details: {
+					cache_write_tokens: 50_000,
+					cache_write_tokens_details: {
+						ttl_12h_tokens: 80_000,
+					},
+				},
+			}
+
+			const result = normalizeUsage(handler, usage, model)
+
+			// Clamped to the write total so no more 12h tokens are billed than written.
+			expect(result.cacheWrite12hTokens).toBe(50_000)
+			// Base input: (10.0 / 1_000_000) * (100_000 - 50_000) = 0.5
+			// 12h writes: (25.0 / 1_000_000) * 50_000 = 1.25
+			// Total: 0.5 + 1.25 = 1.75
+			expect(result.totalCost).toBeCloseTo(1.75, 6)
 		})
 	})
 })

@@ -31,6 +31,7 @@ export const openAiNativeModels = {
 		inputPrice: 2.0,
 		outputPrice: 10.0,
 		cacheWritesPrice: 2.5,
+		cacheWritesPrice12h: 5, // $5.00 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 0.1,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -75,6 +76,7 @@ export const openAiNativeModels = {
 		inputPrice: 10.0,
 		outputPrice: 50.0,
 		cacheWritesPrice: 12.5,
+		cacheWritesPrice12h: 25, // $25.00 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 1.0,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -117,6 +119,7 @@ export const openAiNativeModels = {
 		inputPrice: 2.0,
 		outputPrice: 10.0,
 		cacheWritesPrice: 2.5,
+		cacheWritesPrice12h: 5, // $5.00 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 0.2,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -160,6 +163,7 @@ export const openAiNativeModels = {
 		inputPrice: 0.1,
 		outputPrice: 0.5,
 		cacheWritesPrice: 0.125,
+		cacheWritesPrice12h: 0.25, // $0.25 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 0.01,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -203,6 +207,7 @@ export const openAiNativeModels = {
 		inputPrice: 4.0,
 		outputPrice: 20.0,
 		cacheWritesPrice: 5.0,
+		cacheWritesPrice12h: 10, // $10.00 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 0.4,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -246,6 +251,7 @@ export const openAiNativeModels = {
 		inputPrice: 2.0,
 		outputPrice: 12.0,
 		cacheWritesPrice: 2.5,
+		cacheWritesPrice12h: 5, // $5.00 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 0.2,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -289,6 +295,7 @@ export const openAiNativeModels = {
 		inputPrice: 0.2,
 		outputPrice: 1.2,
 		cacheWritesPrice: 0.25,
+		cacheWritesPrice12h: 0.5, // $0.50 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 0.02,
 		longContextPricing: {
 			thresholdTokens: 272_000,

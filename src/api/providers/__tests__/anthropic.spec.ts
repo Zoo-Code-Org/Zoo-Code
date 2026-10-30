@@ -5,7 +5,7 @@ import { MAX_TIMEOUT_MS } from "../utils/abort-signal"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
-import type { ApiStreamChunk } from "../../../api/transform/stream"
+import type { ApiStreamChunk, ApiStreamUsageChunk } from "../../../api/transform/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 
 // Mock TelemetryService
@@ -1044,6 +1044,103 @@ describe("AnthropicHandler", () => {
 			expect(requestOptions?.headers?.["anthropic-beta"]).toBe(
 				"fine-grained-tool-streaming-2025-05-14,prompt-caching-2024-07-31",
 			)
+		})
+
+		it("should surface the 1h cache-write split from cache_creation", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 10,
+								output_tokens: 0,
+								cache_creation_input_tokens: 100_000,
+								cache_creation: {
+									ephemeral_5m_input_tokens: 40_000,
+									ephemeral_1h_input_tokens: 60_000,
+								},
+								cache_read_input_tokens: 0,
+							},
+						},
+					},
+				]),
+			)
+
+			const stream = handler.createMessage(systemPrompt, [{ role: "user", content: "Hello" }])
+			const chunks: ApiStreamChunk[] = await collectStream(stream)
+
+			const usageChunk = chunks.find(
+				(chunk): chunk is ApiStreamUsageChunk => chunk.type === "usage" && chunk.cacheWriteTokens !== undefined,
+			)
+			expect(usageChunk?.cacheWriteTokens).toBe(100_000)
+			expect(usageChunk?.cacheWrite1hTokens).toBe(60_000)
+		})
+
+		it("should leave the 1h split undefined when cache_creation is absent", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 10,
+								output_tokens: 0,
+								cache_creation_input_tokens: 20,
+								cache_read_input_tokens: 0,
+							},
+						},
+					},
+				]),
+			)
+
+			const stream = handler.createMessage(systemPrompt, [{ role: "user", content: "Hello" }])
+			const chunks: ApiStreamChunk[] = await collectStream(stream)
+
+			const usageChunk = chunks.find(
+				(chunk): chunk is ApiStreamUsageChunk => chunk.type === "usage" && chunk.cacheWriteTokens !== undefined,
+			)
+			expect(usageChunk?.cacheWriteTokens).toBe(20)
+			expect(usageChunk?.cacheWrite1hTokens).toBeUndefined()
+		})
+
+		it("should price a 1h write at the 1h rate in the final cost chunk", async () => {
+			// claude-sonnet-4-5: input 3.0, cacheWritesPrice 3.75, cacheWritesPrice1h 6.0.
+			const sonnetHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-sonnet-4-5",
+			})
+
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 0,
+								output_tokens: 0,
+								cache_creation_input_tokens: 100_000,
+								cache_creation: {
+									ephemeral_5m_input_tokens: 0,
+									ephemeral_1h_input_tokens: 100_000,
+								},
+								cache_read_input_tokens: 0,
+							},
+						},
+					},
+				]),
+			)
+
+			const stream = sonnetHandler.createMessage(systemPrompt, [{ role: "user", content: "Hello" }])
+			const chunks: ApiStreamChunk[] = await collectStream(stream)
+
+			const costChunk = chunks.find(
+				(chunk): chunk is ApiStreamUsageChunk => chunk.type === "usage" && chunk.totalCost !== undefined,
+			)
+			// 1h writes: (6.0 / 1_000_000) * 100_000 = 0.6
+			// The pre-split behaviour charged the 5m rate: 0.375 (37.5% low).
+			expect(costChunk?.totalCost).toBeCloseTo(0.6, 9)
+			expect(costChunk?.totalCost).not.toBeCloseTo(0.375, 9)
 		})
 	})
 

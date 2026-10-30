@@ -256,6 +256,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		let inputTokens = 0
 		let outputTokens = 0
 		let cacheWriteTokens = 0
+		let cacheWrite1hTokens = 0
 		let cacheReadTokens = 0
 
 		for await (const chunk of withFinallyCleanup(stream, removeExternalAbortListener)) {
@@ -266,8 +267,13 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 						input_tokens = 0,
 						output_tokens = 0,
 						cache_creation_input_tokens,
+						cache_creation,
 						cache_read_input_tokens,
 					} = chunk.message.usage
+
+					// The per-TTL breakdown decomposes `cache_creation_input_tokens`; it is
+					// absent for providers that do not report it, which leaves the split at 0.
+					const startCacheWrite1hTokens = cache_creation?.ephemeral_1h_input_tokens
 
 					// `output_tokens_details.thinking_tokens` decomposes the billed
 					// output into internal reasoning tokens (0 ⇒ the model skipped
@@ -280,6 +286,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 						inputTokens: input_tokens,
 						outputTokens: output_tokens,
 						cacheWriteTokens: cache_creation_input_tokens || undefined,
+						cacheWrite1hTokens: startCacheWrite1hTokens || undefined,
 						cacheReadTokens: cache_read_input_tokens || undefined,
 						...(typeof startThinkingTokens === "number" ? { reasoningTokens: startThinkingTokens } : {}),
 					}
@@ -287,6 +294,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 					inputTokens += input_tokens
 					outputTokens += output_tokens
 					cacheWriteTokens += cache_creation_input_tokens || 0
+					cacheWrite1hTokens += startCacheWrite1hTokens || 0
 					cacheReadTokens += cache_read_input_tokens || 0
 
 					break
@@ -381,6 +389,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 				outputTokens,
 				cacheWriteTokens,
 				cacheReadTokens,
+				cacheWrite1hTokens,
 			)
 
 			yield {
