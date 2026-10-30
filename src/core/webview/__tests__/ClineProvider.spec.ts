@@ -5156,6 +5156,7 @@ describe("ClineProvider", () => {
 			}
 
 			// Spy on log method to verify warning was logged
+			const logSpy = vi.spyOn(provider, "log")
 			// Create history item with non-existent mode
 			const historyItem = {
 				id: "test-id",
@@ -5648,6 +5649,7 @@ describe("ClineProvider", () => {
 
 			// Registration is what loads a view's own selections.
 			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("cfg-a")
 
 			await provider.dispose()
 		})
