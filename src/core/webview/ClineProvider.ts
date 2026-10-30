@@ -377,12 +377,8 @@ export class ClineProvider
 	public readonly viewId: string
 
 	/**
-	 * Stable identifier for persisted per-view state keys.
-	 * Defaults to viewId until the webview reports its VS Code-persisted id.
-	 * A durable entry under this id is bound to the webview that wrote it by a host-minted
-	 * claim token (see setViewStateId), so the entry - and the profile its pin brings back
-	 * into the state post - can outlive this instance without becoming adoptable by any
-	 * other webview.
+	 * Stable identifier for persisted per-view state keys; binds a durable entry to the
+	 * webview that wrote it through the host-minted claim token.
 	 */
 	private viewStateId: string
 
@@ -602,13 +598,8 @@ export class ClineProvider
 	}
 
 	/**
-	 * Persists this view's non-secret selections through the serialized write queue.
-	 * The write re-reads the map fresh and merges into the existing entry, removing the
-	 * entry entirely when nothing persistable remains, so concurrent views cannot clobber it.
-	 * The entry is keyed by the view id active when the change was made. Writes captured
-	 * while the provider still holds its temporary (pre-launch) id persist under that id
-	 * and are re-keyed to the stable view id when the webview registers one, so a change
-	 * that lands before the launch message stays durable instead of being lost.
+	 * Persist the non-secret selections through the serialized write queue, re-keying a
+	 * pre-launch write to the stable id once the webview registers one.
 	 */
 	private async savePersistedViewState(values: Partial<PersistedViewState>): Promise<void> {
 		// Capture the id at change time: a write belongs to the view that was active
@@ -696,11 +687,8 @@ export class ClineProvider
 	}
 
 	/**
-	 * Re-binds a claim-less viewStates entry to this webview with a freshly minted claim.
-	 * Entries written before claims existed cannot be attributed to any webview, so their
-	 * selections are dropped instead of being carried over: keeping them would let the new
-	 * token re-expose them on a later launch, which is exactly the disclosure this binding
-	 * exists to prevent. Runs through the serialized write queue like every other mutation.
+	 * Re-bind a claim-less viewStates entry with a freshly minted claim; its unowned
+	 * selections are dropped so the new token cannot re-expose them.
 	 */
 	private async rebindUnboundViewStateEntry(viewStateId: string): Promise<string | undefined> {
 		const claimToken = crypto.randomUUID()
@@ -746,18 +734,7 @@ export class ClineProvider
 		)
 	}
 
-	/**
-	 * Re-keys this provider's temporary pre-launch viewStates entry to the newly
-	 * registered stable id so pre-launch writes become durable under the stable key
-	 * instead of orphaning under a session-local temporary id. Only the provider's own
-	 * temporary id is eligible: an entry under a previously registered stable id belongs
-	 * to that webview's storage and is left alone. When the stable entry already exists
-	 * it wins and the temporary entry is dropped, because temporary ids are session
-	 * counters that can collide across window reloads. Runs through the serialized write
-	 * queue like every other viewStates mutation. An entry this instance never wrote is
-	 * left alone, so a stale entry that happens to carry the same session-local name is
-	 * not adopted.
-	 */
+	/** Re-key this instance's authored pre-launch entry to the stable id. */
 	private async rekeyPersistedViewStateEntry(nextViewStateId: string): Promise<void> {
 		const previousViewStateId = this.viewId
 
@@ -805,14 +782,8 @@ export class ClineProvider
 	}
 
 	/**
-	 * Registers this provider's stable view identifier and loads any persisted selections it owns.
-	 * The identifier is sanitized so it remains a safe object key in the shared viewStates map.
-	 *
-	 * `presentedClaim` is the host-minted token this webview was given for that id. It is the
-	 * only proof of ownership: an entry that carries a claim is loaded only when the presented
-	 * token matches it, so a webview cannot adopt another (e.g. disposed, still durable) view's
-	 * id and read that view's pinned profile - and the profile secrets copied into the state
-	 * post - back out of it. The check runs before any re-keying or loading.
+	 * Register the stable view id and load its persisted selections. An entry that carries a
+	 * claim is loaded only when the presented host-minted token matches it.
 	 */
 	public async setViewStateId(viewStateId: string | undefined, presentedClaim?: string): Promise<void> {
 		// The webview generates this id on purpose - it has to survive a webview reload,
@@ -5239,12 +5210,7 @@ export class ClineProvider
 		void this.loadViewState()
 	}
 
-	/**
-	 * Loads non-secret persisted selections from the registered viewStates map.
-	 * Missing entries are intentionally left unset so getState() falls back to shared ContextProxy values.
-	 * Fields mutated while the async profile lookup is in flight are reapplied on top of the
-	 * loaded state, field by field, so in-flight user selections are not clobbered by the load.
-	 */
+	/** Load non-secret persisted selections; in-flight buffer edits are reapplied on top. */
 	private async loadViewState(): Promise<void> {
 		// Capture the id this load is for: a newer id registered while an async
 		// profile lookup is in flight must not be overwritten by this stale load.
@@ -5298,13 +5264,8 @@ export class ClineProvider
 				return
 			}
 
-			// Reapply the buffer fields that changed while the load was in flight,
-			// tracking the change instead of testing against undefined: a field cleared
-			// during the load window must stay cleared (the loaded value must not
-			// resurrect it), and a field written to a new value must win over it.
-			// Untouched fields keep the persisted values authoritative, and the
-			// pre-load buffer is never merged wholesale so stale temporary-id state
-			// cannot override the stable persisted state.
+			// Diff each field so in-flight edits win over the loaded values (including clears)
+			// while untouched fields keep the persisted values authoritative.
 			const postLoadBuffer = this.viewLocalState
 			const mergedState: Partial<ExtensionState> = { ...loadedState }
 
