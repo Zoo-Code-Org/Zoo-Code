@@ -1,5 +1,6 @@
 // npx vitest run core/task/__tests__/ToolExecutionContext.spec.ts
 
+import { DispatchState } from "../dispatchState"
 import type { Anthropic } from "@anthropic-ai/sdk"
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { presentAssistantMessage } from "../../assistant-message/presentAssistantMessage"
@@ -44,8 +45,8 @@ function buildMockTask() {
 		taskId: "test-task-id",
 		instanceId: "test-instance",
 		abort: false,
-		presentAssistantMessageLocked: false,
-		presentAssistantMessageHasPendingUpdates: false,
+		dispatchState: DispatchState.IDLE,
+		pendingWork: null,
 		currentStreamingContentIndex: 0,
 		assistantMessageContent: [] as unknown[],
 		userMessageContent: [] as Anthropic.ToolResultBlockParam[],
@@ -158,7 +159,7 @@ describe("ToolExecutionContext", () => {
 		mockTask.ask.mockResolvedValueOnce({ response: "noButtonClicked" })
 
 		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
-		mockTask.presentAssistantMessageLocked = false
+		mockTask.dispatchState = DispatchState.IDLE
 		mockTask.currentStreamingContentIndex = 1
 		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
