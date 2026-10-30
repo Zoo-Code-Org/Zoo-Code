@@ -730,10 +730,10 @@ export const webviewMessageHandler = async (
 
 		case "askResponse":
 			{
+				// Same pre-await binding as `queueMessage`.
+				const targetTask = provider.getCurrentTask()
 				const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
-				provider
-					.getCurrentTask()
-					?.handleWebviewAskResponse(message.askResponse!, resolved.text, resolved.images)
+				targetTask?.handleWebviewAskResponse(message.askResponse!, resolved.text, resolved.images)
 			}
 			break
 
@@ -3962,8 +3962,12 @@ export const webviewMessageHandler = async (
 		 */
 
 		case "queueMessage": {
+			// Bind before the await: a task switch during image resolution would
+			// route this message into the new task's queue, where its text can
+			// answer that task's command ask.
+			const targetTask = provider.getCurrentTask()
 			const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
-			provider.getCurrentTask()?.messageQueueService.addMessage(resolved.text, resolved.images)
+			targetTask?.messageQueueService.addMessage(resolved.text, resolved.images)
 			break
 		}
 		case "removeQueuedMessage": {

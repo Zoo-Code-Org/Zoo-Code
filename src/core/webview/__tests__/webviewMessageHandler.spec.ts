@@ -966,6 +966,49 @@ describe("webviewMessageHandler - image mentions", () => {
 			"data:image/png;base64,from-mention",
 		])
 	})
+
+	// A task switch can land while the image mentions resolve. The message was
+	// addressed to the task that was current when the webview sent it, so the
+	// post-await re-read would hand it to whichever task is current afterwards:
+	// a queued message would land in B's queue and B's command ask could consume
+	// it as approval, and an ask response would answer B's pending prompt.
+	it.each([
+		["queueMessage", "queueMessage"],
+		["askResponse", "askResponse"],
+	] as const)("delivers %s to the task that was current before the await", async (_label, type) => {
+		const taskA = {
+			cwd: "/mock/workspace",
+			rooIgnoreController: undefined,
+			messageQueueService: { addMessage: vi.fn() },
+			handleWebviewAskResponse: vi.fn(),
+		}
+		const taskB = {
+			cwd: "/mock/workspace",
+			rooIgnoreController: undefined,
+			messageQueueService: { addMessage: vi.fn() },
+			handleWebviewAskResponse: vi.fn(),
+		}
+
+		// The switch happens while the handler is suspended at the await.
+		let currentTask = taskA
+		vi.mocked(mockClineProvider.getCurrentTask).mockImplementation(() => currentTask as never)
+		vi.mocked(resolveImageMentions).mockImplementationOnce(async ({ text, images }) => {
+			currentTask = taskB
+			return { text, images: images ?? [] }
+		})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type,
+			askResponse: "messageResponse",
+			text: "for task A",
+			images: [],
+		})
+
+		expect(taskA.messageQueueService.addMessage).toHaveBeenCalledTimes(type === "queueMessage" ? 1 : 0)
+		expect(taskB.messageQueueService.addMessage).not.toHaveBeenCalled()
+		expect(taskA.handleWebviewAskResponse).toHaveBeenCalledTimes(type === "askResponse" ? 1 : 0)
+		expect(taskB.handleWebviewAskResponse).not.toHaveBeenCalled()
+	})
 })
 
 describe("webviewMessageHandler - requestOllamaModels", () => {

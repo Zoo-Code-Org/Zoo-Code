@@ -326,14 +326,12 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			// Convert agent-specified timeout from seconds to milliseconds
 			const agentTimeout = resolveAgentTimeoutMs(timeoutSeconds)
 
-			// The background-completion drain inside executeCommandInTerminal
-			// must not run before this command's tool result is published: a
-			// background command can finish during the settle delay while the
-			// result is still pending. Every site publishes through
-			// `publishToolResult`, which settles the signal with the publication
-			// outcome so the drain waits on a structural signal and skips
-			// draining after a failed publication (handleError reports first;
-			// the queued message waits for a later turn).
+			// The background-completion drain must not run before this command's
+			// tool result is published: a background command can finish during the
+			// settle delay while the result is still pending. Every site publishes
+			// through `publishToolResult`, which settles the signal with the
+			// publication outcome, so the drain waits on a structural signal and
+			// skips after a failed publication.
 			let settleToolResultPublished: ((published: boolean) => void) | undefined
 			const toolResultPublished = new Promise<boolean>((resolve) => {
 				settleToolResultPublished = resolve
@@ -434,11 +432,8 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				}
 			}
 
-			// The drain runs outside the execution catch above and is awaited so a
-			// failed queued-message submission is observable. A drain failure is
-			// logged and the message stays claimed-released for a later drain, so
-			// it must never be misattributed as a shell-integration error after
-			// the tool result was already published.
+			// Awaited so a failed submission is observable, and never misattributed
+			// as a shell-integration error after the result was already published.
 			if (shouldDrainQueuedMessages) {
 				try {
 					await task.processQueuedMessages()
@@ -468,11 +463,9 @@ export type ExecuteCommandOptions = {
 	commandExecutionTimeout?: number
 	agentTimeout?: number
 	/**
-	 * Resolves once the tool result for this command has been published.
-	 * Resolves true on successful publication and false when publication
-	 * failed; the background-completion drain awaits this before processing
-	 * queued messages so they are never submitted ahead of the current tool
-	 * result, and skips draining entirely after a failed publication.
+	 * Resolves true on successful publication and false when it failed. The
+	 * background-completion drain awaits this so queued messages are never
+	 * submitted ahead of the current tool result, and skips after a failure.
 	 */
 	toolResultPublished?: Promise<boolean>
 	toolCallId: string
@@ -517,9 +510,8 @@ export async function executeCommandInTerminal(
 	let shellIntegrationError: ShellIntegrationError | undefined
 	// Whether the command text actually reached the terminal. `shell_execution_started`
 	// fires only after `TerminalProcess.run()` called `sendText`/`executeCommand`,
-	// so it is the structural proof that a timeout did not beat submission.
+	// so it proves a timeout did not beat submission.
 	let commandSubmitted = false
-
 	const { terminalProvider, isCmdExeFallback } = getTerminalProviderForExecution(terminalShellIntegrationDisabled)
 	const provider = await task.providerRef.deref()
 
@@ -562,10 +554,9 @@ export async function executeCommandInTerminal(
 	let pendingCommandOutputEmitTimer: NodeJS.Timeout | undefined
 	let commandOutputSayChain: Promise<void> = Promise.resolve()
 	// Outcome of the most recent `command_output` publication. The final forced
-	// publication is the last one queued before the background drain, so after
-	// it settles this reports whether the final output reached the webview. A
-	// later successful publish clears an earlier partial failure, because the
-	// drain only needs the final output to be visible.
+	// publication is the last one queued before the background drain, so after it
+	// settles this reports whether that output reached the webview. A later
+	// success clears an earlier partial failure: only the final output matters.
 	let commandOutputPublishFailed = false
 
 	const queueCommandOutputMessage = (text: string, partial: boolean, force = false): Promise<void> => {
@@ -672,10 +663,9 @@ export async function executeCommandInTerminal(
 					// The tool returned a "still running" result and drained when the
 					// agent timeout moved the command to the background; process
 					// messages queued since then so they are not held until an
-					// unrelated path drains them. The tool result for this command
-					// must be published first: completion can land inside the
-					// settle delay while the result is still pending, so wait on
-					// the per-invocation signal instead of timer ordering.
+					// unrelated path drains them. Wait on the per-invocation
+					// publication signal: completion can land inside the settle
+					// delay while the tool result is still pending.
 					if (!runInBackground) {
 						return
 					}

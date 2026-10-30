@@ -382,6 +382,60 @@ describe("Task.ask queued message drain", () => {
 		}
 	})
 
+	it("keeps failed durable feedback out of the next command ask", async () => {
+		const task = await createTask()
+		// A drain submitted this message, so it is retained while it waits for a
+		// conversational ask to consume it.
+		task["drainRetainedQueuedMessageIds"].add(task.messageQueueService.addMessage("ship it")!.id)
+		const result = await task.ask("tool", JSON.stringify({ tool: "finishTask" }), false)
+		const access = getQueueTaskTestAccess(task)
+		access.say = vi.fn().mockResolvedValue(undefined)
+		access.saveClineMessages = vi.fn().mockResolvedValue(false)
+
+		vi.useFakeTimers()
+		try {
+			const persistence = task.persistQueuedFeedbackAndAcknowledge(
+				result.queuedMessageId!,
+				result.text,
+				result.images,
+			)
+			await vi.runAllTimersAsync()
+			await expect(persistence).resolves.toBe(false)
+		} finally {
+			vi.useRealTimers()
+		}
+
+		// The consume was undone, so the message must stay retained: a command
+		// ask that claimed it would skip checkAutoApproval and execute on text
+		// never answered to that command.
+		expect(task["drainRetainedQueuedMessageIds"].has(result.queuedMessageId!)).toBe(true)
+		expect(task.messageQueueService.claimNextMessage(task["drainRetainedQueuedMessageIds"])).toBeUndefined()
+
+		// A command ask gets a real prompt and leaves the message queued.
+		const commandAsk = task.ask("command", "rm -rf build", false)
+		setTimeout(() => task.denyAsk(), 0)
+		const denied = await commandAsk
+		expect(denied).toMatchObject({ response: "noButtonClicked" })
+		expect(denied.queuedMessageId).toBeUndefined()
+		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["ship it"])
+	})
+
+	it("reports success when the durable save lands but the queue entry is gone", async () => {
+		const task = await createTask()
+		task.messageQueueService.addMessage("Deleted mid-ack")
+		const result = await task.ask("completion_result", "Done", false)
+		const access = getQueueTaskTestAccess(task)
+		access.say = vi.fn().mockResolvedValue(undefined)
+		access.saveClineMessages = vi.fn().mockResolvedValue(true)
+		// The user removed the entry from the webview while the ack was in flight.
+		task.messageQueueService.removeMessage(result.queuedMessageId!)
+
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).resolves.toBe(true)
+		expect(task["drainRetainedQueuedMessageIds"].size).toBe(0)
+	})
+
 	it("releases durable queued feedback when the task aborts during retry backoff", async () => {
 		vi.useFakeTimers()
 		try {

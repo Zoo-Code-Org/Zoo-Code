@@ -509,23 +509,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Message Queue Service
 	public readonly messageQueueService: MessageQueueService
 	private messageQueueStateChangedHandler: (() => void) | undefined
-	// Serializes queued-message drains: a drain claims and submits only after
-	// the previous drain's submission handoff finished, so two concurrent
-	// drains cannot submit different messages into the single ask-response
-	// slot (which would drop the earlier response after both messages were
-	// already removed from the queue).
+	// Serializes drains so two of them cannot submit into the single ask-response
+	// slot and drop the earlier response.
 	private queuedMessageDrainChain: Promise<unknown> = Promise.resolve()
-	// IDs of queued messages a drain submitted into the ask-response slot but
-	// no ask has consumed yet. They stay queued on purpose, so two consumers
-	// must read this set: a later drain, so it never re-posts the same message
-	// into the slot, and an execution-gating ask (`queuedResponseForAsk` would
-	// answer it with `yesButtonClicked`), which must never let between-turn
-	// feedback stand in for an approval. Cleared only on consumption.
+	// IDs a drain submitted into the ask-response slot that no ask has consumed
+	// yet. They stay queued on purpose: a later drain must not re-post them, and
+	// an execution-gating ask must not let between-turn feedback stand in for an
+	// approval. Cleared only when a consume settles.
 	private drainRetainedQueuedMessageIds = new Set<string>()
-	// Number of `ask()` calls in flight. A drain must not submit while one is
-	// pending: a background completion can land during any prompt, and its
-	// submission would answer that ask with text written for another turn while
-	// the retained message stayed queued for a second delivery.
+	// `ask()` calls in flight. A drain must not submit while one is pending: the
+	// submission would answer that ask with text written for another turn.
 	private pendingAskCount = 0
 
 	// Streaming
@@ -1125,11 +1118,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		await this.say("user_feedback", text ?? "", images)
 		for (let attempt = 0; attempt <= QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length; attempt++) {
 			if (this.abort) {
-				this.messageQueueService.releaseMessage(messageId)
+				this.releaseUnconsumedQueuedMessage(messageId)
 				return false
 			}
 			if (await this.saveClineMessages()) {
-				return this.messageQueueService.removeMessage(messageId)
+				// Durable, so the consume happened: report success even when the queue
+				// entry is already gone (deleted mid-ack), or a saved row would be
+				// reported as a failure.
+				this.consumeQueuedMessage(messageId)
+				return true
 			}
 			if (attempt < QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length) {
 				await delay(QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS[attempt])
@@ -1138,7 +1135,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		console.error(
 			`[Task#persistQueuedFeedbackAndAcknowledge] Failed to durably save queued feedback ${messageId} after ${QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length + 1} attempts`,
 		)
-		this.messageQueueService.releaseMessage(messageId)
+		this.releaseUnconsumedQueuedMessage(messageId)
 		return false
 	}
 
@@ -1251,15 +1248,36 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private handleQueuedAskResponse(message: QueuedMessage, resolution: QueuedAskResolution): string | undefined {
 		this.handleWebviewAskResponse(resolution.response, message.text, message.images)
-		// This ask consumed the message, so a later drain may submit the next
-		// one instead of treating it as still pending. The retention record is
-		// cleared on the same edge: a consumed message is no longer retained.
-		this.drainRetainedQueuedMessageIds.delete(message.id)
 		if (resolution.requiresDurableAck) {
+			// The consume is not settled yet: the caller's persistence write can
+			// still fail, and the retention record must survive that unwind.
 			return message.id
 		}
-		this.messageQueueService.removeMessage(message.id)
+		this.consumeQueuedMessage(message.id)
 		return undefined
+	}
+
+	/**
+	 * Settle a consumed queued message: drop it from the queue and clear its
+	 * retention record on this one edge, so the record can never outlive the
+	 * message. A consume whose persistence fails never reaches here.
+	 */
+	private consumeQueuedMessage(messageId: string): void {
+		this.messageQueueService.removeMessage(messageId)
+		this.drainRetainedQueuedMessageIds.delete(messageId)
+	}
+
+	/**
+	 * Undo a claim whose consume did not happen.
+	 *
+	 * A drain submitted this message and no ask has delivered it to the model
+	 * yet, so the claim is released for a later consumer and the retention record
+	 * keeps it out of every `yesButtonClicked`-mapped ask. Releasing without that
+	 * record would re-arm it as fresh input for the next command ask to approve.
+	 */
+	private releaseUnconsumedQueuedMessage(messageId: string): void {
+		this.drainRetainedQueuedMessageIds.add(messageId)
+		this.messageQueueService.releaseMessage(messageId)
 	}
 
 	/**
@@ -1386,8 +1404,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * flipping those would re-enable interactive prompt timers whenever a claim
 	 * is outstanding.
 	 *
-	 * `excludeIds` carries the messages this ask may not consume at all; see
-	 * `queuedClaimExclusionsForAsk`.
+	 * `excludeIds` carries the messages this ask may not consume at all.
 	 */
 	private mayDrainQueuedMessageForAsk(excludeIds?: ReadonlySet<string>): boolean {
 		return !this.blanketDeniedCommandThisTurn && this.messageQueueService.hasUnclaimed(excludeIds)
@@ -1395,17 +1412,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	/**
 	 * Queued messages this ask must not claim. `queuedResponseForAsk` answers a
-	 * command, tool, or use_mcp_server ask with `yesButtonClicked`, so letting one
-	 * of those claim a drain-retained message would turn between-turn feedback
-	 * into an approval: the ask skips `checkAutoApproval`, and a stale "ship it"
-	 * would run the next command with no prompt even with auto-approval off. Such
-	 * asks exclude every retained ID and get a real prompt; the message stays
-	 * queued for a conversational ask, the only consumer that carries its text
-	 * into the model as feedback.
+	 * command, tool, or use_mcp_server ask with `yesButtonClicked`, so claiming a
+	 * drain-retained message there would turn between-turn feedback into an
+	 * approval with `checkAutoApproval` skipped.
 	 */
 	private queuedClaimExclusionsForAsk(type: ClineAsk, text?: string): ReadonlySet<string> | undefined {
-		// Drop IDs the queue no longer holds (deleted from the webview or the API,
-		// or cleared by dispose) so the record cannot outlive its message.
+		// Drop IDs the queue no longer holds (deleted from the webview or the API)
+		// so the record cannot outlive its message.
 		const queuedIds = new Set(this.messageQueueService.messages.map((message) => message.id))
 		for (const id of this.drainRetainedQueuedMessageIds) {
 			if (!queuedIds.has(id)) {
@@ -1895,14 +1908,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		queuedMessageId?: string
 		/**
 		 * Present when the ask was resolved by an automatic (policy) denial
-		 * rather than a user click. Consumers must not treat this as a user
-		 * rejection: the denial is scoped to its own tool call.
+		 * rather than a user click: not a user rejection, and scoped to its own
+		 * tool call.
 		 */
 		autoDenyDetail?: AutoDenyDetail
 	}> {
-		// Bracket the whole ask, not just the wait: the counter is the drain's
-		// "a prompt is in flight" signal, and a submission landing during any
-		// await below would answer this ask with text written for another turn.
+		// Bracket the whole ask, not just the wait: a submission during any await
+		// below would answer this ask with text written for another turn.
 		this.pendingAskCount++
 		try {
 			return await this.askWithPendingCount(type, text, partial, progressStatus, isProtected, autoApprovalContext)
@@ -1923,11 +1935,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		text?: string
 		images?: string[]
 		queuedMessageId?: string
-		/**
-		 * Present when the ask was resolved by an automatic (policy) denial
-		 * rather than a user click. Consumers must not treat this as a user
-		 * rejection: the denial is scoped to its own tool call.
-		 */
 		autoDenyDetail?: AutoDenyDetail
 	}> {
 		// If this Cline instance was aborted by the provider, then the only
@@ -2430,7 +2437,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
 			if (this.abort) {
 				if (queuedMessageId) {
-					this.messageQueueService.releaseMessage(queuedMessageId)
+					this.releaseUnconsumedQueuedMessage(queuedMessageId)
 				}
 				throw new Error(`[ZooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
 			}
@@ -2440,7 +2447,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// command_output. It's important that when we know an ask could
 				// fail, it is handled gracefully.
 				if (queuedMessageId) {
-					this.messageQueueService.releaseMessage(queuedMessageId)
+					this.releaseUnconsumedQueuedMessage(queuedMessageId)
 				}
 				throw new AskIgnoredError("superseded")
 			}
@@ -2485,9 +2492,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.askResponseText = text
 		this.askResponseImages = images
 		// No retention bookkeeping here: a direct response overwrites the slot a
-		// drain submitted into, which means that submission was NOT consumed, so
-		// the message stays queued and stays excluded from approval asks. Only
-		// `handleQueuedAskResponse` clears retention, on the consume edge.
+		// drain submitted into, so that submission was NOT consumed and the
+		// message stays queued and excluded from approval asks.
 
 		// Create a checkpoint whenever the user sends a message.
 		// Use allowEmpty=true to ensure a checkpoint is recorded even if there are no file changes.
@@ -2626,9 +2632,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/**
 	 * Submit a user message through the ask-response channel.
 	 *
-	 * @returns true when the message was handed to the ask-response channel;
-	 * false when there was nothing to submit, the task is stopping, or the
-	 * provider reference was lost. Callers draining the queue must check this.
+	 * @returns false when there was nothing to submit, the task is stopping, or
+	 * the provider reference was lost. Callers draining the queue must check it.
 	 */
 	public async submitUserMessage(
 		text: string,
@@ -2664,10 +2669,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					}
 				}
 
-				// Cancellation guard immediately before the slot write: abort and
-				// dispose both set this flag, and the emit/checkpoint side effects
-				// below must never run on a cancelled task. The check is adjacent
-				// to the write so no cancellation can interleave (single-threaded).
+				// Cancellation guard adjacent to the slot write: abort and dispose
+				// both set this flag, and the side effects below must never run on
+				// a cancelled task. Single-threaded, so nothing interleaves.
 				if (this.abort || this.abandoned) {
 					console.error("[Task#submitUserMessage] Task aborted, dropping user message submission")
 					return false
@@ -2852,9 +2856,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			contextCondense,
 		)
 
-		// Process any queued messages after condensing completes. Awaited so a
-		// failed submission rejects this call instead of vanishing; the caller
-		// (ClineProvider.condenseTaskContext) surfaces it.
+		// Awaited so a failed submission rejects this call instead of vanishing;
+		// the caller (ClineProvider.condenseTaskContext) surfaces it.
 		await this.processQueuedMessages()
 	}
 
@@ -6542,37 +6545,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/**
 	 * Process the next queued message by claiming and submitting it.
 	 *
-	 * The message is claimed — not dequeued — before submission, and the claim
-	 * is released after the submission handoff succeeds so the message STAYS
-	 * queued: removal is tied to ask-consumption (Task.ask claims queued
-	 * messages and removes them via handleQueuedAskResponse, or hands them to
-	 * persistQueuedFeedbackAndAcknowledge), not to submit-return. A message
-	 * submitted between command completion and the next conversational ask is
-	 * therefore retained until an ask actually consumes it, instead of being
-	 * dropped if the turn fails or restarts first. When submission throws, the
-	 * claim is released so the message stays queued for a later drain and the
-	 * error propagates to the caller; when the handoff reports nothing
-	 * delivered (task stopping, provider gone), the claim is released and the
-	 * run resolves false.
+	 * The message is claimed, not dequeued, and the claim is released after the
+	 * submission handoff so the message STAYS queued: removal is tied to
+	 * ask-consumption, not to submit-return, so a message submitted between turns
+	 * survives a failed turn or restart. When submission throws, the claim is
+	 * released and the error propagates; when the handoff reports nothing
+	 * delivered, the claim is released and the run resolves false.
 	 *
-	 * Retention is restricted to conversational consumption. A retained message
-	 * is recorded in `drainRetainedQueuedMessageIds`, and every ask whose
-	 * `queuedResponseForAsk` mapping would answer with `yesButtonClicked`
-	 * (command, tool, use_mcp_server) excludes those IDs from its claim. Without
-	 * that exclusion the retained text would silently approve a later execution
-	 * ask with no prompt, even with auto-approval off.
+	 * Retention is restricted to conversational consumption: a retained ID is
+	 * recorded in `drainRetainedQueuedMessageIds`, and every ask whose
+	 * `queuedResponseForAsk` mapping answers `yesButtonClicked` excludes those
+	 * IDs, so the retained text cannot silently approve a later execution ask.
 	 *
 	 * A drain also never submits while an `ask()` is pending: the submission
-	 * would answer that ask with text written for another turn, bypassing the
-	 * ask's own latch and denial authority, and the retained message would then
-	 * be delivered a second time.
+	 * would answer that ask with text written for another turn. Drains are
+	 * serialized per task, so two of them cannot interleave into the single slot.
 	 *
-	 * Drains are serialized per task, so a background-completion drain and a
-	 * post-result drain cannot interleave two messages into the single slot.
-	 *
-	 * @returns Promise resolving to true when a queued message was submitted
-	 * (and remains queued until consumed); false when the queue was empty, an
-	 * ask was pending, or the task is stopping.
+	 * @returns true only when this call submitted a message. A retained queue
+	 * head reports false: it was already submitted, and the single ask-response
+	 * slot cannot take a second message without losing the first.
 	 */
 	public processQueuedMessages(): Promise<boolean> {
 		const run = this.queuedMessageDrainChain.then(() => this.claimAndSubmitNextQueuedMessage())
@@ -6588,16 +6579,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async claimAndSubmitNextQueuedMessage(): Promise<boolean> {
 		// A cancelled task must not submit: abortTask sets this flag before its
 		// awaited webview flush, and dispose clears the queue afterwards, so this
-		// guard closes the window where a drain could otherwise post into a
-		// dying task.
+		// guard closes the window where a drain could post into a dying task.
 		if (this.abort || this.abandoned) {
 			return false
 		}
 		// An ask is waiting for its response. Submitting now would resolve that
-		// prompt with text written for another turn — the ask's own claim gate,
-		// blanket-deny latch, and protected-ask exemption never run — and the
-		// message would stay queued for a second delivery. Defer: the message
-		// keeps its place and the next post-ask drain submits it.
+		// prompt with text written for another turn, bypassing the ask's claim gate,
+		// blanket-deny latch, and protected-ask exemption. Defer it instead.
 		if (this.pendingAskCount > 0) {
 			return false
 		}
@@ -6605,20 +6593,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (!queued) {
 			return false
 		}
-		// An earlier drain already submitted this message and no ask has
-		// consumed it yet: re-posting would overwrite a distinct pending
-		// response and lose it, so release the claim and keep the message
-		// queued for the ask.
+		// An earlier drain already submitted this message and no ask has consumed
+		// it yet: re-posting would overwrite a distinct pending response and lose
+		// it, so release the claim and keep the message queued. Nothing was
+		// submitted, so this reports false.
 		if (this.drainRetainedQueuedMessageIds.has(queued.id)) {
 			this.messageQueueService.releaseMessage(queued.id)
-			return true
+			return false
 		}
 		try {
 			const submitted = await this.submitUserMessage(queued.text, queued.images)
 			if (!submitted) {
-				// Cancelled mid-handoff: the guard in submitUserMessage dropped
-				// the write, so release quietly instead of failing the drain on
-				// a task that is already stopping.
+				// Cancelled mid-handoff: the guard in submitUserMessage dropped the
+				// write, so release quietly instead of failing a stopping task.
 				this.messageQueueService.releaseMessage(queued.id)
 				return false
 			}
@@ -6627,11 +6614,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.messageQueueService.releaseMessage(queued.id)
 			throw error
 		}
-		// Submission succeeded, but the message is only removed once an ask
-		// consumes it. Record the ID so a later drain can tell "already
-		// submitted, still pending" from "not submitted yet" and so an
-		// execution-gating ask refuses to claim it, then release the claim so a
-		// conversational ask can take it.
+		// Record the ID before releasing the claim: a later drain must tell
+		// "already submitted, still pending" from "not submitted yet", and an
+		// execution-gating ask must refuse to claim it.
 		this.drainRetainedQueuedMessageIds.add(queued.id)
 		this.messageQueueService.releaseMessage(queued.id)
 		return true

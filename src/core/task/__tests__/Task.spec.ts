@@ -8095,7 +8095,9 @@ describe("Queued message processing after condense", () => {
 
 			releaseFirstSubmission()
 			await expect(firstDrain).resolves.toBe(true)
-			await expect(secondDrain).resolves.toBe(true)
+			// The second drain saw "first" still pending consumption, so it
+			// submitted nothing and reports that honestly.
+			await expect(secondDrain).resolves.toBe(false)
 
 			// The second drain saw "first" still pending consumption and did not
 			// re-post it (a re-post could overwrite a distinct pending response);
@@ -8120,9 +8122,11 @@ describe("Queued message processing after condense", () => {
 			await expect(task.processQueuedMessages()).rejects.toThrow("emit failed")
 			// The failed claim is released; the next drain retries it in order.
 			await expect(task.processQueuedMessages()).resolves.toBe(true)
-			await expect(task.processQueuedMessages()).resolves.toBe(true)
+			// "retry me" is now retained, so this drain submits nothing.
+			await expect(task.processQueuedMessages()).resolves.toBe(false)
 
-			// The retried submissions stay queued until asks consume them in order.
+			// The retried submission stays queued until an ask consumes it; the
+			// head blocks the drain, so "still deliverable" waits for its turn.
 			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual([
 				"retry me",
 				"still deliverable",
@@ -8196,8 +8200,9 @@ describe("Queued message processing after condense", () => {
 			task.messageQueueService.addMessage("exactly once")
 
 			await expect(task.processQueuedMessages()).resolves.toBe(true)
-			// A second drain must not re-post the same message into the slot.
-			await expect(task.processQueuedMessages()).resolves.toBe(true)
+			// A second drain must not re-post the same message into the slot, so
+			// it submits nothing and reports that.
+			await expect(task.processQueuedMessages()).resolves.toBe(false)
 			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["exactly once"])
 
 			const consumed = await task.ask("followup", "Anything else?", false)
@@ -8209,6 +8214,25 @@ describe("Queued message processing after condense", () => {
 
 			// A consumed message is not resubmitted by a later drain.
 			await expect(task.processQueuedMessages()).resolves.toBe(false)
+		})
+
+		it("keeps a direct user response when a drain re-posts a retained message", async () => {
+			const task = createQueueTask()
+			vi.spyOn(getTaskTestAccess(task), "checkpointSave").mockResolvedValue(undefined)
+			task.messageQueueService.addMessage("retained feedback")
+
+			await expect(task.processQueuedMessages()).resolves.toBe(true)
+
+			// The user answers the pending prompt directly, overwriting the slot
+			// the drain submitted into. The message was NOT consumed, so it stays
+			// retained and a later drain must not re-post over the direct answer.
+			task.handleWebviewAskResponse("noButtonClicked", "typed by the user")
+			await expect(task.processQueuedMessages()).resolves.toBe(false)
+
+			expect(task["askResponse"]).toBe("noButtonClicked")
+			expect(task["askResponseText"]).toBe("typed by the user")
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["retained feedback"])
+			expect(getTaskTestAccess(task).drainRetainedQueuedMessageIds.size).toBe(1)
 		})
 	})
 })
