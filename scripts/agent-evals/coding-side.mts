@@ -142,8 +142,9 @@ const interrupt = createInterruptFlag()
 const prepGuard = createSideProcessGuard(SIDE_KILL_GRACE_MS)
 let prepSettled: Promise<unknown> = Promise.resolve()
 const onSideInterrupt = (signal: NodeJS.Signals): void => {
+	const first = !interrupt.isInterrupted()
 	interrupt.signal(signal)
-	prepSettled = prepGuard.interrupt()
+	if (first) prepSettled = prepGuard.interrupt()
 }
 process.on("SIGINT", () => onSideInterrupt("SIGINT"))
 process.on("SIGTERM", () => onSideInterrupt("SIGTERM"))
