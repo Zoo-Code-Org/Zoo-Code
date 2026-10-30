@@ -273,18 +273,35 @@ export class ClineProvider
 	}
 
 	/**
-	 * With `runToCompletion`, a timeout only rejects the caller: the mutation is not aborted and the
-	 * queue advances once it settles. Use it for multi-write mutations that must not stop halfway
-	 * (storage saved but not activated) or overlap with the next mutation. Add `abortOnTimeout` when
-	 * the remaining writes must not land after the caller was told the mutation failed: the body is
-	 * aborted, but the queue still waits for it (and its rollback) to settle.
+	 * With `runToCompletion`, a timeout only rejects the caller: the queue advances once the body
+	 * settles. Use it for multi-write mutations that must not stop halfway (storage saved but not
+	 * activated) or overlap with the next mutation. Add `abortOnTimeout` when the remaining writes
+	 * must not land after the caller was told the mutation failed: the body is aborted, and the
+	 * queue may advance on the timeout instead of waiting for it.
+	 *
+	 * A `runToCompletion` body without `abortOnTimeout` keeps the queue until it settles, because
+	 * nothing would stop its remaining writes from landing after the next mutation started. With
+	 * `abortOnTimeout` the queue advances on the timeout-bounded result, so a body hung on storage
+	 * (e.g. a never-settling SecretStorage write behind the manager lock) cannot pin the queue:
+	 * every write in such a body re-checks its AbortSignal, which the timeout fires.
 	 */
 	private enqueueProviderProfileMutation<T>(
 		fn: (signal: AbortSignal) => Promise<T>,
 		options: { runToCompletion?: boolean; abortOnTimeout?: boolean } = {},
 	): Promise<T> {
+		return this.enqueueProviderProfileMutationWithBody(fn, options).callerResult
+	}
+
+	/**
+	 * The queue primitive behind `enqueueProviderProfileMutation`. It also returns the raw body
+	 * promise so a caller can wait for an abandoned body to settle (e.g. before running its
+	 * rollback) without being subject to the mutation timeout.
+	 */
+	private enqueueProviderProfileMutationWithBody<T>(
+		fn: (signal: AbortSignal) => Promise<T>,
+		options: { runToCompletion?: boolean; abortOnTimeout?: boolean } = {},
+	): { callerResult: Promise<T>; body: Promise<T> } {
 		const controller = new AbortController()
-		// Run fn after either outcome so a rejected mutation never poisons the queue.
 		const run = this.providerProfileMutationQueue.then(
 			() => fn(controller.signal),
 			() => fn(controller.signal),
@@ -318,13 +335,16 @@ export class ClineProvider
 			},
 		)
 
-		// Advance from the timeout-bounded result. Each fn checks its AbortSignal before
-		// writing state, so advancing the queue on timeout cannot produce stale overwrites.
-		this.providerProfileMutationQueue = (options.runToCompletion ? run : callerResult).then(
+		// Advance from the raw body unless the timeout aborted it: an aborted body's remaining
+		// writes are fenced by its own signal checks, so the queue can move on without waiting for
+		// a hung storage call. A body that was never aborted still holds the queue, or its late
+		// writes would land after the next mutation.
+		const queueTail = options.runToCompletion && !options.abortOnTimeout ? run : callerResult
+		this.providerProfileMutationQueue = queueTail.then(
 			() => undefined,
 			() => undefined,
 		)
-		return callerResult
+		return { callerResult, body: run }
 	}
 
 	private withProviderProfileMutationTimeout<T>(operation: Promise<T>, onTimeout: () => void): Promise<T> {
@@ -341,6 +361,39 @@ export class ClineProvider
 				clearTimeout(timeoutId)
 			}
 		})
+	}
+
+	/**
+	 * Wait for an abandoned mutation body to settle, but never longer than one mutation window.
+	 *
+	 * A rollback must not run while the body it compensates can still write, so it waits for that
+	 * body first. That wait has to be bounded: a body hung on a never-settling SecretStorage write
+	 * holds the manager lock, and an unbounded wait would pin the rollback (and the whole mutation
+	 * queue behind it) forever. After the bound the body's own abort fences are what keep its late
+	 * writes out, so the rollback proceeds instead of waiting indefinitely.
+	 */
+	private async settleProviderProfileMutationBody(body: Promise<unknown>): Promise<void> {
+		let timeoutId: ReturnType<typeof setTimeout> | undefined
+		const bound = new Promise<void>((resolve) => {
+			timeoutId = setTimeout(() => {
+				this.log("Abandoned provider profile mutation still running; rolling back without it")
+				resolve()
+			}, ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+		})
+
+		try {
+			await Promise.race([
+				body.then(
+					() => undefined,
+					() => undefined,
+				),
+				bound,
+			])
+		} finally {
+			if (timeoutId) {
+				clearTimeout(timeoutId)
+			}
+		}
 	}
 
 	private readonly pendingEditOperations: PendingEditOperationStore
@@ -2133,9 +2186,13 @@ export class ClineProvider
 		//
 		// The body keeps the default timeout semantics (abort, then let the queue advance): holding
 		// the queue here would deadlock the rollback below, which is itself queued, whenever the
-		// activation hangs. The rollback is what gets the hold-and-abort treatment.
+		// activation hangs. The rollback is what gets the hold-and-abort treatment, and it waits for
+		// this body to settle first so its writes can never race the abandoned body's late writes.
+		// The body promise is tracked separately because the queue enqueuer returns the
+		// timeout-bounded caller result, not the raw body.
+		let deleteBodySettled: Promise<unknown> = Promise.resolve()
 		try {
-			await this.enqueueProviderProfileMutation(async (signal) => {
+			const enqueued = this.enqueueProviderProfileMutationWithBody(async (signal) => {
 				// Read the settings inside the queue: a queued activation may have changed the
 				// active profile since this call was made.
 				const globalSettings = this.contextProxy.getValues()
@@ -2148,14 +2205,43 @@ export class ClineProvider
 				}
 
 				if (!deletedActiveProfile) {
+					// A timeout may have already fired while this body was queued or while an
+					// earlier manager call held the lock. Purging now would delete the profile
+					// after the caller was told the deletion failed.
+					if (signal.aborted) {
+						return
+					}
+
+					// Captured before the purge so a timeout that fires while the manager lock is
+					// held can undo a purge that already committed. Without it the manager would
+					// drop the profile while the caller was told the deletion failed, and the
+					// inactive branch never activates a replacement to converge the two stores.
+					// Best-effort: a manager that cannot produce the profile leaves nothing to undo.
+					let undoConfig: (ProviderSettingsWithId & { name: string }) | undefined
+					try {
+						undoConfig = await this.providerSettingsManager.getProfile({ name: profileToDelete.name })
+					} catch {
+						undoConfig = undefined
+					}
+
+					if (signal.aborted) {
+						return
+					}
+
 					// Purge first so a failing purge fails fast before any ContextProxy write,
 					// matching the ordering the webview delete path established.
 					removedModeConfigs = (await this.providerSettingsManager.deleteConfig(profileToDelete.name))
 						.removedModeConfigs
 
-					// A timeout may have already fired while the manager lock was held. Writing
-					// the snapshot now would clobber whatever a newer mutation has since stored.
+					// A timeout may have fired while the manager lock was held. The purge committed,
+					// so the caller must not be left with a deleted profile it was told survived:
+					// undo it instead of returning with the two stores disagreeing.
 					if (signal.aborted) {
+						await this.undoCommittedProviderProfilePurge(
+							profileToDelete.name,
+							undoConfig,
+							removedModeConfigs,
+						)
 						return
 					}
 
@@ -2206,6 +2292,13 @@ export class ClineProvider
 				// variant is used because this already runs inside the mutation queue.
 				await this.activateProviderProfileUnlocked({ name: profileToActivate }, undefined, signal)
 
+				// A timeout may have fired while the activation was in flight. The queued
+				// rollback is restoring the pre-delete state, so these tail writes must not
+				// land after it.
+				if (signal.aborted) {
+					return
+				}
+
 				// The activation above only rebinds the *current* mode, so every other mode that
 				// pointed at the deleted profile would keep a dangling id and silently no-op on the
 				// next switch. The manager dropped those bindings with the purge; mirror its map into
@@ -2219,10 +2312,15 @@ export class ClineProvider
 				// must not keep a map that names a mode bound to a profile the manager no longer has.
 				await this.postStateToWebview()
 			})
+			deleteBodySettled = enqueued.body
+			await enqueued.callerResult
 		} catch (error) {
 			// Either the manager or ContextProxy can be left naming the deleted profile, so both
 			// are rolled back to their pre-delete state. The rollback is queued too, so no other
-			// mutation can interleave with its writes.
+			// mutation can interleave with its writes, and it first waits (bounded) for the
+			// abandoned delete body to settle so no late write of that body can land after the
+			// restoration.
+			await this.settleProviderProfileMutationBody(deleteBodySettled)
 			await this.restoreDeletedProviderProfile(
 				profileToDelete.name,
 				deletedProfileConfig,
@@ -2277,14 +2375,51 @@ export class ClineProvider
 					}
 
 					// The restore did not finish, so both stores may still name a profile the manager
-					// no longer has.
-					await this.reconcileActiveProfileAfterFailedRestore()
+					// no longer has. The reconcile also re-applies the purge's dropped mode bindings
+					// and mirrors the mode map, so an aborted restore cannot silently lose them.
+					await this.reconcileActiveProfileAfterFailedRestore(removedModeConfigs)
 				},
 				{ runToCompletion: true, abortOnTimeout: true },
 			)
 		} catch (error) {
 			this.log(
 				`Provider profile restore for '${name}' did not complete: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
+	}
+
+	/**
+	 * Undo a purge that committed after the caller was already told the deletion timed out.
+	 *
+	 * The inactive branch has no replacement activation, so nothing else would converge the two
+	 * stores: the manager would be missing the profile while `listApiConfigMeta` still lists it.
+	 * Re-saving the captured config restores the profile under its original `id`, which makes the
+	 * mode bindings the purge dropped name a live profile again. Best-effort: a failure here is
+	 * logged rather than replacing the timeout the caller already received.
+	 */
+	private async undoCommittedProviderProfilePurge(
+		name: string,
+		config: (ProviderSettingsWithId & { name: string }) | undefined,
+		removedModeConfigs: Record<string, string>,
+	): Promise<void> {
+		if (!config) {
+			return
+		}
+
+		try {
+			const { name: _name, ...providerSettings } = config
+			await this.providerSettingsManager.saveConfig(name, providerSettings)
+
+			for (const [mode, configId] of Object.entries(removedModeConfigs)) {
+				await this.providerSettingsManager.setModeConfig(mode as Mode, configId)
+			}
+
+			this.log(`Undid a provider profile purge for '${name}' that committed after the caller timed out`)
+		} catch (error) {
+			this.log(
+				`Failed to undo the provider profile purge for '${name}' after a timeout: ${
 					error instanceof Error ? error.message : String(error)
 				}`,
 			)
@@ -2321,11 +2456,14 @@ export class ClineProvider
 			const { id: _id, ...settings } = providerSettings
 			await this.contextProxy.setProviderSettings(settings)
 
+			if (signal.aborted) return false
+
 			// `saveConfig` above reused the profile's `id`, so the mode bindings the purge dropped
-			// name a profile that exists again. Re-apply them in the manager, then mirror the
-			// pre-delete map into ContextProxy: the snapshot below restores every mode, including
-			// the ones the purge never touched.
+			// name a profile that exists again. Re-apply them in the manager with a per-write abort
+			// check, then mirror the pre-delete map into ContextProxy: the snapshot below restores
+			// every mode, including the ones the purge never touched.
 			for (const [mode, configId] of Object.entries(removedModeConfigs)) {
+				if (signal.aborted) return false
 				await this.providerSettingsManager.setModeConfig(mode as Mode, configId)
 			}
 
@@ -2341,8 +2479,15 @@ export class ClineProvider
 	 * proceed and the webview cannot show a name with the wrong settings. The manager is activated
 	 * too: reconciling ContextProxy alone would leave the manager's own `currentApiConfigName`
 	 * naming the deleted profile.
+	 *
+	 * The fallback's provider slice is written through `setProviderSettings` so the stale-clear
+	 * semantics apply: a raw `setValues` merge would leave the restored profile's differently-named
+	 * secrets behind under the fallback name. The mode map is reconciled too, so ContextProxy cannot
+	 * keep pointing a mode at the deleted profile after the purge dropped the binding in the manager.
 	 */
-	private async reconcileActiveProfileAfterFailedRestore(): Promise<void> {
+	private async reconcileActiveProfileAfterFailedRestore(
+		removedModeConfigs: Record<string, string> = {},
+	): Promise<void> {
 		try {
 			const remainingProfiles = await this.providerSettingsManager.listConfig()
 			const fallback = remainingProfiles[0]?.name
@@ -2357,11 +2502,18 @@ export class ClineProvider
 				...fallbackSettings
 			} = await this.providerSettingsManager.activateProfile({ name: fallback })
 
+			await this.contextProxy.setProviderSettings(fallbackSettings)
 			await this.contextProxy.setValues({
-				...fallbackSettings,
 				currentApiConfigName: fallback,
 				listApiConfigMeta: remainingProfiles,
 			})
+			// The purge may have dropped mode bindings the restore could not re-apply; re-apply
+			// them now so the manager's map matches the pre-delete state again. The mirror below
+			// runs after the re-apply, so ContextProxy never holds a map the manager disagrees with.
+			for (const [mode, configId] of Object.entries(removedModeConfigs)) {
+				await this.providerSettingsManager.setModeConfig(mode as Mode, configId)
+			}
+			await this.contextProxy.setValue("modeApiConfigs", await this.providerSettingsManager.getModeApiConfigs())
 		} catch (reconcileError) {
 			this.log(
 				`Failed to reconcile the active profile after a failed restore: ${
@@ -2440,11 +2592,19 @@ export class ClineProvider
 			])
 		}
 
+		// A timeout may have fired while the writes above were in flight. Every later write is
+		// skipped so an abandoned activation body cannot clobber a queued rollback's restoration.
+		if (signal?.aborted) return
+
 		const { mode } = await this.getState()
+
+		if (signal?.aborted) return
 
 		if (id && persistModeConfig) {
 			await this.providerSettingsManager.setModeConfig(mode, id)
 		}
+
+		if (signal?.aborted) return
 
 		// Change the provider for the current task.
 		this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true, skipCurrentTaskRebuild })
@@ -2454,6 +2614,8 @@ export class ClineProvider
 		if (persistTaskHistory) {
 			await this.persistStickyProviderProfileToCurrentTask(name, { skipCurrentTaskRebuild })
 		}
+
+		if (signal?.aborted) return
 
 		if (!skipCurrentTaskRebuild) {
 			await this.postStateToWebview()

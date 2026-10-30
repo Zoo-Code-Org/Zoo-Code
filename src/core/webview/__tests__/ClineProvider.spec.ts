@@ -3855,7 +3855,10 @@ describe("ClineProvider", () => {
 			vi.useFakeTimers()
 
 			try {
-				const { profiles, managerState } = mockProviderSettingsManager()
+				const { profiles, managerState, modeApiConfigs } = mockProviderSettingsManager()
+				modeApiConfigs.code = currentProfile.id
+				modeApiConfigs.architect = currentProfile.id
+				await provider.contextProxy.setValue("modeApiConfigs", { ...modeApiConfigs })
 				let resolveActivation!: () => void
 				const pendingActivation = new Promise<void>((resolve) => {
 					resolveActivation = resolve
@@ -3873,6 +3876,7 @@ describe("ClineProvider", () => {
 				const deletion = provider.deleteProviderProfile(currentProfile)
 				const deletionResult = expect(deletion).rejects.toThrow("Provider profile mutation timed out")
 				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				resolveActivation()
 				await deletionResult
 
 				// The timeout path restores the purged profile instead of leaving ContextProxy
@@ -3893,6 +3897,55 @@ describe("ClineProvider", () => {
 				// profile.
 				resolveActivation()
 				await vi.advanceTimersByTimeAsync(0)
+				expect(provider.contextProxy.getValues().currentApiConfigName).toBe("current-config")
+				expect(managerState.currentApiConfigName).toBe("current-config")
+
+				// The rollback also re-applies the mode bindings the purge dropped, in both stores,
+				// and the abandoned body's tail mirror/postState never lands after the abort.
+				expect(modeApiConfigs).toEqual({ code: currentProfile.id, architect: currentProfile.id })
+				expect(provider.contextProxy.getValues().modeApiConfigs).toEqual(modeApiConfigs)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		test("rollback waits for the abandoned delete body before restoring", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const { profiles, managerState } = mockProviderSettingsManager()
+				let resolveActivation!: () => void
+				const pendingActivation = new Promise<void>((resolve) => {
+					resolveActivation = resolve
+				})
+				// Hang the replacement activation past the timeout, then let it complete late.
+				// The rollback must not start until this body has fully settled, so the body's
+				// late writes cannot land after the restoration.
+				vi.mocked(provider.providerSettingsManager.activateProfile).mockImplementationOnce(async () => {
+					managerState.currentApiConfigName = otherProfile.name
+					await pendingActivation
+					return { ...otherProfile, openRouterModelId: "other-model" }
+				})
+
+				const deletion = provider.deleteProviderProfile(currentProfile)
+				const deletionResult = expect(deletion).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+
+				// The rollback is gated on the abandoned body's settlement: while the body is
+				// still hung past the timeout, no restore write may be observable yet.
+				await vi.advanceTimersByTimeAsync(0)
+				expect(provider.providerSettingsManager.saveConfig).not.toHaveBeenCalled()
+
+				resolveActivation()
+				await deletionResult
+				await vi.advanceTimersByTimeAsync(0)
+
+				// Only after the body settled does the rollback restore the purged profile.
+				expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith(
+					"current-config",
+					expect.objectContaining({ id: "current-id" }),
+				)
+				expect(profiles.map(({ name }) => name).sort()).toEqual(["current-config", "other-config"])
 				expect(provider.contextProxy.getValues().currentApiConfigName).toBe("current-config")
 				expect(managerState.currentApiConfigName).toBe("current-config")
 			} finally {
@@ -3928,11 +3981,28 @@ describe("ClineProvider", () => {
 		})
 
 		test("reconciles the manager's active pointer when the restore fails", async () => {
-			const { managerState } = mockProviderSettingsManager()
+			const { managerState, modeApiConfigs } = mockProviderSettingsManager()
+			modeApiConfigs.code = currentProfile.id
+			modeApiConfigs.architect = currentProfile.id
+			await provider.contextProxy.setValue("modeApiConfigs", { ...modeApiConfigs })
+			// Seed the deleted profile's secret so the test can prove the fallback's write
+			// replaces the provider slice instead of merging over the restored one. The
+			// replacement (OpenRouter) profile carries `openRouterApiKey`, so a differently-named
+			// stale `apiKey` cannot be overwritten by a same-key merge.
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "current-key",
+			})
 			// The replacement activation fails, and so does the restore, so the fallback runs.
+			// The fallback profile is OpenRouter, so its activation carries `openRouterApiKey`.
 			vi.mocked(provider.providerSettingsManager.activateProfile)
 				.mockRejectedValueOnce(new Error("Failed to activate profile: storage error"))
 				.mockRejectedValueOnce(new Error("Failed to restore profile: storage error"))
+				.mockImplementationOnce(async (params: { name: string } | { id: string }) => {
+					const resolvedName = "name" in params ? params.name : otherProfile.name
+					managerState.currentApiConfigName = resolvedName
+					return { ...otherProfile, openRouterModelId: "other-model", openRouterApiKey: "other-key" }
+				})
 
 			await expect(provider.deleteProviderProfile(currentProfile)).rejects.toThrow(
 				"Failed to activate profile: storage error",
@@ -3946,52 +4016,69 @@ describe("ClineProvider", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "other-model",
 			})
+			// The fallback REPLACES the provider slice through setProviderSettings: the restored
+			// Anthropic profile's differently-named secret must not survive under the fallback name.
+			expect(provider.contextProxy.getSecret("apiKey")).toBeUndefined()
+			expect(provider.contextProxy.getValues().apiKey).toBeUndefined()
+			// The fallback also re-applies the purge's dropped mode bindings and mirrors the map,
+			// so both stores agree again.
+			expect(modeApiConfigs).toEqual({ code: currentProfile.id, architect: currentProfile.id })
+			expect(provider.contextProxy.getValues().modeApiConfigs).toEqual(modeApiConfigs)
 		})
 
 		test("keeps a queued activation's write when the rollback settles late", async () => {
-			const { managerState } = mockProviderSettingsManager()
-			let resolveRestore!: () => void
-			const pendingRestore = new Promise<void>((resolve) => {
-				resolveRestore = resolve
-			})
+			vi.useFakeTimers()
 
-			// Fail the replacement activation, then hang the restore's own `saveConfig` so the
-			// rollback is still in flight while the next mutation is queued behind it.
-			vi.mocked(provider.providerSettingsManager.activateProfile).mockRejectedValueOnce(
-				new Error("Failed to activate profile: storage error"),
-			)
-			vi.mocked(provider.providerSettingsManager.saveConfig).mockImplementationOnce(async () => {
-				await pendingRestore
-				return "current-id"
-			})
+			try {
+				const { managerState } = mockProviderSettingsManager()
+				let resolveRestore!: () => void
+				const pendingRestore = new Promise<void>((resolve) => {
+					resolveRestore = resolve
+				})
 
-			const deletion = provider.deleteProviderProfile(currentProfile)
-			const deletionResult = expect(deletion).rejects.toThrow("Failed to activate profile: storage error")
-			await vi.waitFor(() => expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalled())
+				// Fail the replacement activation, then hang the restore's own `saveConfig` past the
+				// mutation timeout, so the rollback's caller result rejects while its body is still
+				// in flight and the next mutation is already queued behind it.
+				vi.mocked(provider.providerSettingsManager.activateProfile).mockRejectedValueOnce(
+					new Error("Failed to activate profile: storage error"),
+				)
+				vi.mocked(provider.providerSettingsManager.saveConfig).mockImplementationOnce(async () => {
+					await pendingRestore
+					return "current-id"
+				})
 
-			// Queue a newer mutation while the rollback is still pending.
-			const queued = provider.activateProviderProfile({ name: "other-config" })
+				const deletion = provider.deleteProviderProfile(currentProfile)
+				const deletionResult = expect(deletion).rejects.toThrow("Failed to activate profile: storage error")
+				await vi.waitFor(() => expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalled())
 
-			// The rollback must still hold the queue, so the newer activation cannot write yet.
-			// Without the queued rollback this activation runs immediately and the late rollback
-			// then overwrites it.
-			await vi.waitFor(async () => {
-				expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledTimes(1)
-			})
-			expect(managerState.currentApiConfigName).toBe("current-config")
+				// Queue a newer mutation while the rollback is still pending.
+				const queued = provider.activateProviderProfile({ name: "other-config" })
 
-			// Let the rollback finish late; only then may the queued activation write.
-			resolveRestore()
-			await deletionResult
-			await queued
+				// The rollback's timeout fires while its body is hung: the queue advances (bounded
+				// hold), so the newer activation starts instead of waiting forever on the hung
+				// storage write.
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+				await vi.waitFor(async () => {
+					expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledTimes(2)
+				})
+				expect(managerState.currentApiConfigName).toBe("other-config")
 
-			// The rollback's late completion must not undo the queued activation's selection.
-			expect(managerState.currentApiConfigName).toBe("other-config")
-			expect(provider.contextProxy.getValues().currentApiConfigName).toBe("other-config")
-			expect(provider.contextProxy.getProviderSettings()).toMatchObject({
-				apiProvider: providerIdentifiers.openrouter,
-				openRouterModelId: "other-model",
-			})
+				// Let the rollback's hung save settle late; the queued activation has already run
+				// and the rollback's aborted signal stops its remaining writes.
+				resolveRestore()
+				await deletionResult
+				await queued
+
+				// The rollback's late completion must not undo the queued activation's selection.
+				expect(managerState.currentApiConfigName).toBe("other-config")
+				expect(provider.contextProxy.getValues().currentApiConfigName).toBe("other-config")
+				expect(provider.contextProxy.getProviderSettings()).toMatchObject({
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "other-model",
+				})
+			} finally {
+				vi.useRealTimers()
+			}
 		})
 
 		test("restores the deleted profile's full settings when activation fails after its settings write", async () => {
@@ -4057,6 +4144,42 @@ describe("ClineProvider", () => {
 			expect(postedStates.length).toBeGreaterThanOrEqual(2)
 		})
 
+		test("does not pin the mutation queue on a rollback body that never settles", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const { managerState } = mockProviderSettingsManager()
+				// Fail the replacement activation so the rollback starts, then hang the rollback's
+				// own `saveConfig` forever: this is the manager lock held by a never-settling
+				// SecretStorage write, the one case a queue-level escape hatch has to cover.
+				vi.mocked(provider.providerSettingsManager.activateProfile).mockRejectedValueOnce(
+					new Error("Failed to activate profile: storage error"),
+				)
+				vi.mocked(provider.providerSettingsManager.saveConfig).mockImplementationOnce(
+					() => new Promise<string>(() => {}),
+				)
+
+				const deletion = provider.deleteProviderProfile(currentProfile)
+				const deletionResult = expect(deletion).rejects.toThrow("Failed to activate profile: storage error")
+				await vi.advanceTimersByTimeAsync(0)
+				await vi.waitFor(() => expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalled())
+
+				// Queue a newer mutation behind the hung rollback.
+				const queued = provider.activateProviderProfile({ name: "other-config" })
+
+				// The rollback's timeout fires and aborts it, so the queue advances instead of
+				// waiting on the hung storage call forever.
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+				await vi.waitFor(() => expect(managerState.currentApiConfigName).toBe("other-config"))
+
+				await deletionResult
+				await queued
+				expect(managerState.currentApiConfigName).toBe("other-config")
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
 		test("re-applies the mode bindings when the deletion rolls back", async () => {
 			const { modeApiConfigs } = mockProviderSettingsManager()
 			modeApiConfigs.code = currentProfile.id
@@ -4078,42 +4201,127 @@ describe("ClineProvider", () => {
 			expect(provider.contextProxy.getValues().modeApiConfigs).toEqual(modeApiConfigs)
 		})
 
-		test("does not purge an inactive profile after the caller already timed out", async () => {
+		test("restore abort at the mode re-apply still reconciles the mode map in both stores", async () => {
 			vi.useFakeTimers()
 
 			try {
-				const { profiles } = mockProviderSettingsManager()
-				let resolvePurge!: () => void
-				const pendingPurge = new Promise<void>((resolve) => {
-					resolvePurge = resolve
+				const { modeApiConfigs } = mockProviderSettingsManager()
+				modeApiConfigs.code = currentProfile.id
+				modeApiConfigs.architect = currentProfile.id
+				await provider.contextProxy.setValue("modeApiConfigs", { ...modeApiConfigs })
+
+				// The replacement activation fails fast so the rollback starts. The restore's
+				// first `setModeConfig` re-apply is then hung past the restore timeout, so the
+				// abort fires while the loop is in flight and the per-write fence drops the
+				// remaining re-apply.
+				vi.mocked(provider.providerSettingsManager.activateProfile).mockRejectedValueOnce(
+					new Error("Failed to activate profile: storage error"),
+				)
+				let releaseModeWrite!: () => void
+				const pendingModeWrite = new Promise<void>((resolve) => {
+					releaseModeWrite = resolve
 				})
-				// Stall the inactive purge past the mutation timeout, then let it complete.
-				vi.mocked(provider.providerSettingsManager.deleteConfig).mockImplementationOnce(async () => {
-					await pendingPurge
-					const index = profiles.findIndex((profile) => profile.name === otherProfile.name)
-					profiles.splice(index, 1)
-					return { removedModeConfigs: {} }
+				vi.mocked(provider.providerSettingsManager.setModeConfig).mockImplementationOnce(async () => {
+					await pendingModeWrite
 				})
 
-				const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
-				const setValuesSpy = vi.spyOn(provider.contextProxy, "setValues")
+				const deletion = provider.deleteProviderProfile(currentProfile)
+				const deletionResult = expect(deletion).rejects.toThrow("Failed to activate profile: storage error")
+				await vi.waitFor(() => expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalled())
+
+				// Fire the restore's timeout while the re-apply is hung: the abort flag is set.
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+				releaseModeWrite()
+				await deletionResult
+				await vi.advanceTimersByTimeAsync(0)
+
+				// The restore was aborted at the re-apply fence, so the fallback reconcile ran: it
+				// points both stores at the remaining profile and re-applies the purge's dropped
+				// bindings atomically, so the mode map agrees in both stores.
+				expect(provider.contextProxy.getValues().currentApiConfigName).toBe("other-config")
+				expect(provider.contextProxy.getProviderSettings()).toMatchObject({
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "other-model",
+				})
+				expect(modeApiConfigs).toEqual({ code: currentProfile.id, architect: currentProfile.id })
+				expect(provider.contextProxy.getValues().modeApiConfigs).toEqual(modeApiConfigs)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		test("undoes an inactive purge that committed after the caller already timed out", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const { profiles, modeApiConfigs } = mockProviderSettingsManager()
+				modeApiConfigs.code = otherProfile.id
+				await provider.contextProxy.setValue("modeApiConfigs", { ...modeApiConfigs })
+
+				// The purge splices for real, so "the profile survived" is asserted against the
+				// manager's own profile list rather than against a spy.
+				const deleteConfigCalls: string[] = []
+				vi.mocked(provider.providerSettingsManager.deleteConfig).mockImplementation(async (name) => {
+					deleteConfigCalls.push(name)
+					const deletedId = profiles.find((profile) => profile.name === name)?.id
+					const index = profiles.findIndex((profile) => profile.name === name)
+					if (index !== -1) {
+						profiles.splice(index, 1)
+					}
+
+					const removedModeConfigs: Record<string, string> = {}
+					for (const [mode, configId] of Object.entries(modeApiConfigs)) {
+						if (configId === deletedId) {
+							removedModeConfigs[mode] = configId
+							delete modeApiConfigs[mode]
+						}
+					}
+
+					return { removedModeConfigs }
+				})
+
+				// Hold the purge past the mutation window: the caller is told the deletion timed out
+				// while the manager lock is still held, which is exactly the ordering that lets a
+				// purge commit after the failure was reported.
+				let releasePurge!: () => void
+				const purgeGate = new Promise<void>((resolve) => {
+					releasePurge = resolve
+				})
+				const realDeleteConfig = provider.providerSettingsManager.deleteConfig
+				vi.mocked(provider.providerSettingsManager.deleteConfig).mockImplementationOnce(async (name) => {
+					await purgeGate
+					return realDeleteConfig(name)
+				})
 
 				const deletion = provider.deleteProviderProfile(otherProfile)
+				// Attach the rejection expectation before the timeout fires: the promise rejects with
+				// the timeout error, and an unattached handler would surface as an unhandled rejection.
 				const deletionResult = expect(deletion).rejects.toThrow("Provider profile mutation timed out")
 
-				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				// Cross the mutation window: the caller result is rejected and the abort fires while
+				// the purge is still holding the manager lock.
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+				expect(deleteConfigCalls).toEqual([])
+
+				// The purge now commits, after the caller was already told the deletion timed out.
+				// The delete body sees the aborted signal and compensates instead of returning with
+				// the profile gone.
+				releasePurge()
+				for (let i = 0; i < 50; i++) {
+					await Promise.resolve()
+					await vi.advanceTimersByTimeAsync(0)
+				}
+
 				await deletionResult
 
-				// The caller was told the deletion failed, so the stale snapshot must not be written
-				// over whatever a newer mutation has since stored. Clear the earlier calls (setup and
-				// the purge attempt itself) so only the post-abort writes are observed; this branch's
-				// only write is `listApiConfigMeta`.
-				setValueSpy.mockClear()
-				setValuesSpy.mockClear()
-				resolvePurge()
-				await vi.advanceTimersByTimeAsync(0)
-				expect(setValueSpy).not.toHaveBeenCalled()
-				expect(setValuesSpy).not.toHaveBeenCalled()
+				// The purge ran, and the compensation restored the profile under its original id,
+				// with the mode binding the purge dropped back in the manager's map.
+				expect(deleteConfigCalls).toEqual(["other-config"])
+				expect(profiles.map(({ name }) => name).sort()).toEqual(["current-config", "other-config"])
+				expect(profiles.find(({ name }) => name === "other-config")?.id).toBe(otherProfile.id)
+				expect(modeApiConfigs).toEqual({ code: otherProfile.id })
+				// ContextProxy still lists both profiles, so the two stores agree.
+				expect(provider.getProviderProfileEntries()).toEqual([currentProfile, otherProfile])
 			} finally {
 				vi.useRealTimers()
 			}

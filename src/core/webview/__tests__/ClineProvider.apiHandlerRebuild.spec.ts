@@ -745,6 +745,8 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				await update
 
 				const next = provider.activateProviderProfile({ name: "other-profile" })
+				// The model update was not aborted on timeout, so its remaining writes still hold the
+				// queue: letting the next mutation start would let those writes land after it.
 				await vi.advanceTimersByTimeAsync(0)
 				expect(manager.activateProfile).not.toHaveBeenCalled()
 

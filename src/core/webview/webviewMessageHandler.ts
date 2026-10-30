@@ -2524,20 +2524,29 @@ export const webviewMessageHandler = async (
 				try {
 					await provider.providerSettingsManager.deleteConfig(oldName)
 					await provider.activateProviderProfile({ name: newName })
-
-					// The purge drops the mode bindings that pointed at the deleted profile, and the
-					// activation only rebinds the current mode. Mirror the manager's map so the
-					// webview state cannot keep pointing a mode at a profile that no longer exists.
-					await provider.contextProxy.setValue(
-						"modeApiConfigs",
-						await provider.providerSettingsManager.getModeApiConfigs(),
-					)
 				} catch (error) {
 					provider.log(
 						`Error delete api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 					)
 
 					vscode.window.showErrorMessage(t("common:errors.delete_api_config"))
+				} finally {
+					// The purge drops the mode bindings that pointed at the deleted profile, and the
+					// activation only rebinds the current mode. Mirror the manager's map in a finally
+					// so the webview state cannot keep pointing a mode at a profile that no longer
+					// exists, even when the activation above failed after the purge.
+					try {
+						await provider.contextProxy.setValue(
+							"modeApiConfigs",
+							await provider.providerSettingsManager.getModeApiConfigs(),
+						)
+					} catch (mirrorError) {
+						provider.log(
+							`Error mirroring mode configs after delete api configuration: ${
+								mirrorError instanceof Error ? mirrorError.message : String(mirrorError)
+							}`,
+						)
+					}
 				}
 			}
 			break
