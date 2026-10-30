@@ -428,4 +428,83 @@ describe("OpenAiHandler with usage tracking fix", () => {
 			])
 		},
 	)
+
+	describe.each([true, false])("cache-write shape coverage with streaming=%s", (openAiStreamingEnabled) => {
+		const usageChunksFor = async (usage: Record<string, unknown>) => {
+			const cacheHandler = new OpenAiHandler({ ...mockOptions, openAiStreamingEnabled })
+			mockCreate.mockResolvedValueOnce(
+				openAiStreamingEnabled
+					? asyncStreamFrom([{ choices: [], usage }])
+					: { choices: [{ message: { content: "Response" } }], usage },
+			)
+
+			const chunks = await collectStream(cacheHandler.createMessage("system prompt", []))
+
+			return chunks.filter((chunk) => chunk.type === "usage")
+		}
+
+		it("reads the nested cache_write_tokens shape it previously ignored", async () => {
+			// This is the OpenAiHandler write gap K7 names: the handler read only
+			// the top-level Anthropic-style counter, so a proxy reporting writes
+			// under prompt_tokens_details billed them as zero.
+			expect(
+				await usageChunksFor({
+					prompt_tokens: 100,
+					completion_tokens: 5,
+					prompt_tokens_details: { cached_tokens: 20, cache_write_tokens: 30 },
+				}),
+			).toEqual([{ type: "usage", inputTokens: 100, outputTokens: 5, cacheWriteTokens: 30, cacheReadTokens: 20 }])
+		})
+
+		it("still reads the top-level cache_creation_input_tokens shape", async () => {
+			expect(
+				await usageChunksFor({
+					prompt_tokens: 100,
+					completion_tokens: 5,
+					cache_creation_input_tokens: 7,
+				}),
+			).toEqual([{ type: "usage", inputTokens: 100, outputTokens: 5, cacheWriteTokens: 7 }])
+		})
+
+		it("reads the top-level prompt_cache_miss_tokens shape", async () => {
+			expect(
+				await usageChunksFor({
+					prompt_tokens: 100,
+					completion_tokens: 5,
+					prompt_cache_miss_tokens: 12,
+				}),
+			).toEqual([{ type: "usage", inputTokens: 100, outputTokens: 5, cacheWriteTokens: 12 }])
+		})
+
+		it("never sums two write shapes that report the same quantity", async () => {
+			// Every shape below describes the same 30 written tokens. Summing
+			// would bill 90 and is the additive-usage trap the wave forbids.
+			const chunks = await usageChunksFor({
+				prompt_tokens: 100,
+				completion_tokens: 5,
+				prompt_cache_miss_tokens: 30,
+				cache_creation_input_tokens: 30,
+				prompt_tokens_details: { cache_miss_tokens: 30, cache_write_tokens: 30 },
+			})
+
+			expect(chunks).toEqual([{ type: "usage", inputTokens: 100, outputTokens: 5, cacheWriteTokens: 30 }])
+		})
+
+		it("keeps the documented DeepSeek write counter ahead of the Anthropic-style one", async () => {
+			expect(
+				await usageChunksFor({
+					prompt_tokens: 100,
+					completion_tokens: 5,
+					prompt_cache_miss_tokens: 30,
+					cache_creation_input_tokens: 99,
+				}),
+			).toEqual([{ type: "usage", inputTokens: 100, outputTokens: 5, cacheWriteTokens: 30 }])
+		})
+
+		it("reports no write counter when the provider reports none", async () => {
+			expect(await usageChunksFor({ prompt_tokens: 100, completion_tokens: 5 })).toEqual([
+				{ type: "usage", inputTokens: 100, outputTokens: 5 },
+			])
+		})
+	})
 })

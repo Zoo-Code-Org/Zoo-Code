@@ -297,6 +297,114 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			expect(firstChunk.done).toBe(false)
 			expect(firstChunk.value).toMatchObject({ type: "usage", inputTokens: 100, outputTokens: 50 })
 		})
+
+		describe("cache accounting", () => {
+			const usageChunksFor = async (usage: Record<string, unknown>) => {
+				mockCreate.mockImplementationOnce(() => asyncStreamFrom([{ choices: [{ delta: {} }], usage }]))
+
+				const chunks = await collectStream(handler.createMessage("system prompt", []))
+
+				return chunks.filter((chunk) => chunk.type === "usage")
+			}
+
+			it("reads the nested shape it already understood", async () => {
+				expect(
+					await usageChunksFor({
+						prompt_tokens: 100,
+						completion_tokens: 50,
+						prompt_tokens_details: { cached_tokens: 20, cache_write_tokens: 30 },
+					}),
+				).toEqual([
+					expect.objectContaining({
+						type: "usage",
+						inputTokens: 100,
+						outputTokens: 50,
+						cacheReadTokens: 20,
+						cacheWriteTokens: 30,
+					}),
+				])
+			})
+
+			it("reads the top-level cache_creation_input_tokens write shape", async () => {
+				expect(
+					await usageChunksFor({
+						prompt_tokens: 100,
+						completion_tokens: 50,
+						cache_creation_input_tokens: 30,
+					}),
+				).toEqual([
+					expect.objectContaining({
+						type: "usage",
+						inputTokens: 100,
+						outputTokens: 50,
+						cacheWriteTokens: 30,
+					}),
+				])
+			})
+
+			it("reads the top-level cache_read_input_tokens read shape", async () => {
+				expect(
+					await usageChunksFor({
+						prompt_tokens: 100,
+						completion_tokens: 50,
+						cache_read_input_tokens: 20,
+					}),
+				).toEqual([
+					expect.objectContaining({ type: "usage", inputTokens: 100, outputTokens: 50, cacheReadTokens: 20 }),
+				])
+			})
+
+			it("reads the DeepSeek top-level hit and miss counters", async () => {
+				expect(
+					await usageChunksFor({
+						prompt_tokens: 100,
+						completion_tokens: 50,
+						prompt_cache_hit_tokens: 20,
+						prompt_cache_miss_tokens: 30,
+					}),
+				).toEqual([
+					expect.objectContaining({
+						type: "usage",
+						inputTokens: 100,
+						outputTokens: 50,
+						cacheReadTokens: 20,
+						cacheWriteTokens: 30,
+					}),
+				])
+			})
+
+			it("never sums two shapes that report the same quantity", async () => {
+				// All shapes below describe the same 20 reads and 30 writes. An
+				// additive reader would bill 60 reads and 90 writes.
+				expect(
+					await usageChunksFor({
+						prompt_tokens: 100,
+						completion_tokens: 50,
+						prompt_tokens_details: { cached_tokens: 20, cache_write_tokens: 30 },
+						prompt_cache_hit_tokens: 20,
+						prompt_cache_miss_tokens: 30,
+						cache_read_input_tokens: 20,
+						cache_creation_input_tokens: 30,
+					}),
+				).toEqual([
+					expect.objectContaining({
+						type: "usage",
+						inputTokens: 100,
+						outputTokens: 50,
+						cacheReadTokens: 20,
+						cacheWriteTokens: 30,
+					}),
+				])
+			})
+
+			it("reports no cache counters when the provider reports none", async () => {
+				const [chunk] = await usageChunksFor({ prompt_tokens: 100, completion_tokens: 50 })
+
+				expect(chunk).toMatchObject({ type: "usage", inputTokens: 100, outputTokens: 50 })
+				expect(chunk.cacheReadTokens).toBeUndefined()
+				expect(chunk.cacheWriteTokens).toBeUndefined()
+			})
+		})
 	})
 
 	describe("getModel", () => {
