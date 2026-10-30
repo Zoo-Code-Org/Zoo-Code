@@ -153,12 +153,15 @@ describe("useScrollLifecycle debounced scroll command", () => {
 
 		unmount()
 
+		// Checked before advancing: expired timers stop counting, so a removed
+		// clear() would still pass the assertion at the end of this test.
+		expect(vi.getTimerCount()).toBe(0)
+
 		act(() => {
 			vi.advanceTimersByTime(SMOOTH_WINDOW_MS * 100)
 		})
 
 		expect(smoothCalls(scrollToIndex)).toHaveLength(1)
-		expect(vi.getTimerCount()).toBe(0)
 	})
 
 	test("no smooth scroll is issued while the user browses history", () => {

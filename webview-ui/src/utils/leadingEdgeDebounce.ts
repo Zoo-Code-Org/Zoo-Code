@@ -9,6 +9,9 @@
  *
  * `.clear()` cancels the pending window; the next call after `.clear()` runs
  * immediately, matching the `debounce` package's `{ immediate: true }` mode.
+ *
+ * The return type is `undefined` on suppressed trailing calls: only the leading
+ * call forwards `fn`'s result, so callers must not depend on a value there.
  */
 export type LeadingEdgeDebounced<F extends (...args: never[]) => unknown> = F & {
 	clear: () => void
