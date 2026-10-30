@@ -50,6 +50,26 @@ type MistralTool = {
 	}
 }
 
+// The pinned @mistralai/mistralai (1.15.1) has no typed field for
+// `prompt_tokens_details`; its `UsageInfo$inboundSchema` collects unknown keys
+// into `additionalProperties`, so the documented cache-read count survives the
+// SDK parse but only there. Mistral bills these tokens at 10% of the input
+// price, and `prompt_tokens` already includes them, so the count is reported as
+// `cacheReadTokens` and never added to `inputTokens`.
+function readCachedPromptTokens(usage: { additionalProperties?: { [key: string]: unknown } }): number | undefined {
+	const details = usage.additionalProperties?.["prompt_tokens_details"]
+	if (typeof details !== "object" || details === null) {
+		return undefined
+	}
+
+	const cachedTokens = (details as { cached_tokens?: unknown }).cached_tokens
+	if (typeof cachedTokens !== "number" || !Number.isInteger(cachedTokens) || cachedTokens <= 0) {
+		return undefined
+	}
+
+	return cachedTokens
+}
+
 export class MistralHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 	private client: Mistral
@@ -183,6 +203,7 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 						type: "usage",
 						inputTokens: event.data.usage.promptTokens || 0,
 						outputTokens: event.data.usage.completionTokens || 0,
+						cacheReadTokens: readCachedPromptTokens(event.data.usage),
 					}
 				}
 			}
