@@ -132,7 +132,6 @@ describe("ContextProxy", () => {
 
 			const firstWrite = proxy.updateGlobalState("apiProvider", "anthropic")
 			await proxy.updateGlobalState("apiProvider", "openai")
-
 			rejectFirst(new Error("disk full"))
 			await expect(firstWrite).rejects.toThrow("disk full")
 
@@ -147,11 +146,9 @@ describe("ContextProxy", () => {
 					rejectPending = reject
 				}),
 			)
-
 			const pending = proxy.updateGlobalState("apiProvider", "anthropic")
 			await proxy.resetAllState()
 			rejectPending(new Error("disk full"))
-
 			await expect(pending).rejects.toThrow("disk full")
 			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
 		})

@@ -895,7 +895,6 @@ export class ClineProvider
 
 	/** Load non-secret persisted selections; in-flight buffer edits are reapplied on top. */
 	private async loadViewState(): Promise<void> {
-		// A newer id registered while this load is in flight must win.
 		const loadedForViewId = this.viewStateId
 
 		// Before registration the key is the session-local name, which can be a stale entry
