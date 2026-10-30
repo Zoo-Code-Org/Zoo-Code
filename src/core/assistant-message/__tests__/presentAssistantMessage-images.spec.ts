@@ -1,5 +1,6 @@
 // npx vitest src/core/assistant-message/__tests__/presentAssistantMessage-images.spec.ts
 
+import { DispatchState } from "../../task/dispatchState"
 import { describe, it, expect, beforeEach, beforeAll, vi } from "vitest"
 import type { Anthropic } from "@anthropic-ai/sdk"
 import { presentAssistantMessage } from "../presentAssistantMessage"
@@ -58,8 +59,8 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			taskId: "test-task-id",
 			instanceId: "test-instance",
 			abort: false,
-			presentAssistantMessageLocked: false,
-			presentAssistantMessageHasPendingUpdates: false,
+			dispatchState: DispatchState.IDLE,
+			pendingWork: null,
 			currentStreamingContentIndex: 0,
 			assistantMessageContent: [],
 			userMessageContent: [],
