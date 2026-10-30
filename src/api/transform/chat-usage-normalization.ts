@@ -11,7 +11,7 @@
  * tokens twice, so adding them would double-count.
  */
 
-import { logger } from "../../utils/logging"
+import { CompactLogger } from "../../utils/logging/CompactLogger"
 
 /**
  * A usage object as it arrives off the wire, before any provider-specific
@@ -102,6 +102,30 @@ const isTokenCount = (value: unknown): value is number =>
 	typeof value === "number" && Number.isInteger(value) && value >= 0
 
 /**
+ * Diagnostics sink for malformed counters.
+ *
+ * The shared `logger` export in `utils/logging` is a no-op outside tests
+ * (`utils/logging/index.ts:25` selects `CompactLogger` only when
+ * `NODE_ENV === "test"`), so routing a production diagnostic through it would
+ * discard the message in every real install. This module owns its own
+ * `CompactLogger` instead, which is active regardless of `NODE_ENV`.
+ *
+ * `CompactLogger`'s constructor only assigns fields, so constructing it at
+ * module scope has no side effects. Its `write()` can throw while creating the
+ * log file, and this runs inside live usage accounting, so emission is
+ * guarded: a logging failure must never break billing or abort a stream.
+ */
+const usageLogger = new CompactLogger()
+
+const emitMalformedCountWarning = (path: string, value: unknown): void => {
+	try {
+		usageLogger.warn("Discarded a malformed token counter while normalizing chat usage", { path, value })
+	} catch {
+		// Diagnostics are best-effort; never let a sink failure escape into usage accounting.
+	}
+}
+
+/**
  * A counter that is absent or null was simply not reported, which is a normal
  * shape and resolves to `undefined` silently. A counter that is present but
  * unusable is a provider or proxy defect: it is still discarded, but it is
@@ -113,7 +137,7 @@ const isTokenCount = (value: unknown): value is number =>
 const warnMalformedCount = (path: string, value: unknown): void => {
 	if (warnedMalformedCounters.has(path)) return
 	warnedMalformedCounters.add(path)
-	logger.warn("Discarded a malformed token counter while normalizing chat usage", { path, value })
+	emitMalformedCountWarning(path, value)
 }
 
 const warnedMalformedCounters = new Set<string>()

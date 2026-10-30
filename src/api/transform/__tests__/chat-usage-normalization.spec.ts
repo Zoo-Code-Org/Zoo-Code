@@ -1,6 +1,6 @@
 // npx vitest run api/transform/__tests__/chat-usage-normalization.spec.ts
 
-import { logger } from "../../../utils/logging"
+import { CompactLogger } from "../../../utils/logging/CompactLogger"
 
 import { normalizeChatUsage } from "../chat-usage-normalization"
 
@@ -180,9 +180,9 @@ describe("normalizeChatUsage", () => {
 			// A fresh module instance keeps this case independent of the dedupe
 			// state that earlier cases in this file have already populated.
 			vi.resetModules()
-			const { logger: freshLogger } = await import("../../../utils/logging")
+			const { CompactLogger: FreshCompactLogger } = await import("../../../utils/logging/CompactLogger")
 			const { normalizeChatUsage: freshNormalize } = await import("../chat-usage-normalization")
-			const warn = vi.spyOn(freshLogger, "warn").mockImplementation(() => {})
+			const warn = vi.spyOn(FreshCompactLogger.prototype, "warn").mockImplementation(() => {})
 
 			try {
 				freshNormalize({ prompt_tokens: 120, prompt_cache_miss_tokens: "30" })
@@ -196,11 +196,60 @@ describe("normalizeChatUsage", () => {
 			}
 		})
 
+		it("emits through a sink that is active outside tests", async () => {
+			// The shared `logger` export is a no-op unless NODE_ENV is "test", so a
+			// diagnostic routed through it is discarded in every real install. This
+			// case simulates the production branch and asserts the warning still
+			// reaches a real logger.
+			const originalNodeEnv = process.env.NODE_ENV
+			process.env.NODE_ENV = "production"
+			vi.resetModules()
+			const { CompactLogger: FreshCompactLogger } = await import("../../../utils/logging/CompactLogger")
+			const warn = vi.spyOn(FreshCompactLogger.prototype, "warn").mockImplementation(() => {})
+
+			try {
+				const { normalizeChatUsage: freshNormalize } = await import("../chat-usage-normalization")
+
+				freshNormalize({ prompt_tokens: 120, prompt_cache_miss_tokens: "30" })
+
+				expect(warn).toHaveBeenCalledWith(expect.stringContaining("malformed token counter"), {
+					path: "prompt_cache_miss_tokens",
+					value: "30",
+				})
+			} finally {
+				warn.mockRestore()
+				process.env.NODE_ENV = originalNodeEnv
+			}
+		})
+
+		it("does not abort usage accounting when the sink itself fails", async () => {
+			vi.resetModules()
+			const { CompactLogger: FreshCompactLogger } = await import("../../../utils/logging/CompactLogger")
+			const { normalizeChatUsage: freshNormalize } = await import("../chat-usage-normalization")
+			const warn = vi.spyOn(FreshCompactLogger.prototype, "warn").mockImplementation(() => {
+				throw new Error("log file unwritable")
+			})
+
+			try {
+				// The malformed counter is still discarded and the valid alias still
+				// resolves; a broken log sink must not surface as a usage failure.
+				expect(
+					freshNormalize({
+						prompt_tokens: 120,
+						prompt_cache_miss_tokens: "30",
+						prompt_tokens_details: { cache_miss_tokens: 20 },
+					})?.cacheWriteTokens,
+				).toBe(20)
+			} finally {
+				warn.mockRestore()
+			}
+		})
+
 		it("reports a malformed counter once per alias rather than on every chunk", async () => {
 			vi.resetModules()
-			const { logger: freshLogger } = await import("../../../utils/logging")
+			const { CompactLogger: FreshCompactLogger } = await import("../../../utils/logging/CompactLogger")
 			const { normalizeChatUsage: freshNormalize } = await import("../chat-usage-normalization")
-			const warn = vi.spyOn(freshLogger, "warn").mockImplementation(() => {})
+			const warn = vi.spyOn(FreshCompactLogger.prototype, "warn").mockImplementation(() => {})
 
 			try {
 				freshNormalize({ prompt_tokens: 120, prompt_cache_miss_tokens: "30" })
@@ -215,9 +264,9 @@ describe("normalizeChatUsage", () => {
 
 		it("names the exact field that was discarded", async () => {
 			vi.resetModules()
-			const { logger: freshLogger } = await import("../../../utils/logging")
+			const { CompactLogger: FreshCompactLogger } = await import("../../../utils/logging/CompactLogger")
 			const { normalizeChatUsage: freshNormalize } = await import("../chat-usage-normalization")
-			const warn = vi.spyOn(freshLogger, "warn").mockImplementation(() => {})
+			const warn = vi.spyOn(FreshCompactLogger.prototype, "warn").mockImplementation(() => {})
 
 			try {
 				freshNormalize({ prompt_tokens: "100", completion_tokens: -1 })
@@ -236,7 +285,7 @@ describe("normalizeChatUsage", () => {
 		})
 
 		it("stays silent for counters the provider simply did not report", () => {
-			const warn = vi.spyOn(logger, "warn").mockImplementation(() => {})
+			const warn = vi.spyOn(CompactLogger.prototype, "warn").mockImplementation(() => {})
 
 			try {
 				normalizeChatUsage({ prompt_tokens: 100, completion_tokens: 50 })
