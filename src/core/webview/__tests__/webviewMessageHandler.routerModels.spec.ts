@@ -1125,6 +1125,80 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		})
 	})
 
+	// Regression (mixed state + refresh): the same valid-unsaved / off-list-stored
+	// pair, but through the filtered-flush path. With `refresh: true` and a provider
+	// filter, the handler flushes the cache before the aggregate fetch, and that
+	// flush builds its handler eagerly at the call site. The existing mixed-state
+	// test above only reaches the fetch path, so it would still pass if the flush
+	// site kept spreading the raw stored config.
+	it("flushes the MiMo cache from the resolved base URL when refresh is set and the stored one is off-list", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+				mimoBaseUrl: "https://attacker.example/v1",
+			},
+		})
+		getModelsMock.mockImplementation(async (options: { provider?: string }) =>
+			options?.provider === providerIdentifiers.mimo
+				? { "mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false } }
+				: {},
+		)
+
+		await expect(
+			webviewMessageHandler(mockProvider, {
+				type: RouterModelsMessageType.requestRouterModels,
+				values: {
+					provider: providerIdentifiers.mimo,
+					mimoApiKey: "stored-mimo-key",
+					mimoBaseUrl: "https://token-plan-ams.xiaomimimo.com/v1",
+					refresh: true,
+				},
+			}),
+		).resolves.toBeUndefined()
+
+		// Two flushes: the unsaved-values flush in the MiMo block and the filtered
+		// flush at the shared refresh site. Both must receive the guard-validated
+		// resolved URL and the MiMo handler built from it; spreading the raw stored
+		// config at the shared site throws MIMO_HANDLER_REJECTION out of the whole
+		// requestRouterModels case.
+		const mimoOptions = {
+			provider: providerIdentifiers.mimo,
+			apiKey: "stored-mimo-key",
+			baseUrl: "https://token-plan-ams.xiaomimimo.com/v1",
+		}
+		const mimoFlushCalls = flushModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoFlushCalls).toHaveLength(2)
+		for (const [options, handler, refresh] of mimoFlushCalls) {
+			expect(options).toEqual(mimoOptions)
+			expect(handler).toBe(handlerForProvider(providerIdentifiers.mimo))
+			expect(refresh).toBe(true)
+		}
+
+		// The fetches use the same resolved options and handler.
+		const mimoFetchCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoFetchCalls).toHaveLength(1)
+		expect(mimoFetchCalls[0][0]).toEqual(mimoOptions)
+		expect(mimoFetchCalls[0][1]).toBe(handlerForProvider(providerIdentifiers.mimo))
+
+		// The request completed: no failure response, and the aggregate response
+		// carries the refreshed catalog instead of hanging the Refresh button.
+		const errorCall = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) =>
+				call[0]?.type === RouterModelsMessageType.singleRouterModelFetchResponse &&
+				call[0]?.values?.provider === providerIdentifiers.mimo,
+		)
+		expect(errorCall).toBeUndefined()
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.mimo).toEqual({
+			"mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false },
+		})
+	})
+
 	it("treats an unsaved empty mimoBaseUrl as unset and keeps using the stored cluster", async () => {
 		mockProvider.getState.mockResolvedValue({
 			apiConfiguration: {
