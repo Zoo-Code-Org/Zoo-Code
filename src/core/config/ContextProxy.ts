@@ -46,6 +46,9 @@ export class ContextProxy {
 
 	private stateCache: GlobalState
 	private secretCache: SecretState
+	// Per-key write generations: a rejected write may only restore the cache while it is
+	// still the newest write for that key, so a newer write is never clobbered.
+	private stateWriteGenerations = new Map<GlobalStateKey, number>()
 	private _isInitialized = false
 
 	constructor(context: vscode.ExtensionContext) {
@@ -368,8 +371,19 @@ export class ContextProxy {
 			return this.originalContext.globalState.update(key, value)
 		}
 
+		const previousCachedValue = this.stateCache[key]
+		const generation = (this.stateWriteGenerations.get(key) ?? 0) + 1
+		this.stateWriteGenerations.set(key, generation)
 		this.stateCache[key] = value
-		return this.originalContext.globalState.update(key, value)
+
+		return Promise.resolve(this.originalContext.globalState.update(key, value)).catch((error: unknown) => {
+			// Restore only while this write still owns the cache: a newer write may have
+			// replaced the value (even with the same value) before this rejection surfaced.
+			if (this.stateWriteGenerations.get(key) === generation) {
+				this.stateCache[key] = previousCachedValue
+			}
+			throw error
+		})
 	}
 
 	private getAllGlobalState(): GlobalState {

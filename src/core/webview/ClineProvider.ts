@@ -3659,8 +3659,14 @@ export class ClineProvider
 						const { mode } = await this.getState()
 						await this.providerSettingsManager.setModeConfig(mode, survivingId)
 					}
-					this.updateTaskApiHandlerIfNeeded(activatedSettings, { forceRebuild: true })
-					await this.persistStickyProviderProfileToCurrentTask(profileToActivate)
+					// A task following another surviving profile must keep its credentials and its
+					// persisted history name: only rebuild/persist when the task followed the
+					// deleted profile, or has no sticky pin yet (undefined).
+					const taskApiConfigName = this.getCurrentTask()?.taskApiConfigName
+					if (taskApiConfigName === undefined || taskApiConfigName === profileToDelete.name) {
+						this.updateTaskApiHandlerIfNeeded(activatedSettings, { forceRebuild: true })
+						await this.persistStickyProviderProfileToCurrentTask(profileToActivate)
+					}
 					if (activatedSettings.apiProvider) {
 						this.emit(RooCodeEventName.ProviderProfileChanged, {
 							name: profileToActivate,
@@ -4038,11 +4044,17 @@ export class ClineProvider
 		// Snapshot every affected view BEFORE any write starts: a failure in one sibling
 		// has to roll back the siblings that already landed too, otherwise the deletion
 		// leaves some views pinned to a profile that no longer exists.
-		const snapshots = affected.map((instance) => ({
-			instance,
-			previousPin: instance.viewLocalState.currentApiConfigName,
-			previousOverlay: instance.viewLocalState.apiConfiguration,
-		}))
+		const snapshots = affected.map((instance) => {
+			const task = instance.getCurrentTask()
+			return {
+				instance,
+				previousPin: instance.viewLocalState.currentApiConfigName,
+				previousOverlay: instance.viewLocalState.apiConfiguration,
+				task,
+				taskApiConfiguration: task?.apiConfiguration,
+				taskApiConfigName: task?.taskApiConfigName,
+			}
+		})
 
 		const results = await Promise.allSettled(
 			snapshots.map(async (snapshot) => {
@@ -4122,19 +4134,44 @@ export class ClineProvider
 		// with the replacement's settings and re-point the sticky name, or the running
 		// conversation keeps sending the deleted profile's configuration even though the view's
 		// buffer was re-pointed (the posted state prefers the task's own apiConfiguration).
-		for (const snapshot of snapshots) {
-			// Only re-point when the task actually runs under the deleted profile:
-			// a view pinned to it can hold a task that follows a different sticky
-			// profile, and forcing the replacement would silently switch that
-			// conversation and rewrite its persisted profile name without the user
-			// asking.
-			if (snapshot.instance.getCurrentTask()?.taskApiConfigName === deletedProfileName) {
-				if (replacementSettings) {
-					snapshot.instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
+		try {
+			for (const snapshot of snapshots) {
+				// Only re-point when the task actually runs under the deleted profile:
+				// a view pinned to it can hold a task that follows a different sticky
+				// profile, and forcing the replacement would silently switch that
+				// conversation and rewrite its persisted profile name without the user
+				// asking.
+				if (snapshot.task?.taskApiConfigName === deletedProfileName) {
+					if (replacementSettings) {
+						snapshot.instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
+					}
+					await snapshot.instance.persistStickyProviderProfileToCurrentTask(replacementName)
 				}
-				await snapshot.instance.persistStickyProviderProfileToCurrentTask(replacementName)
+				await snapshot.instance.postStateToWebview()
 			}
-			await snapshot.instance.postStateToWebview()
+		} catch (taskRebuildError) {
+			// A failure here happens after the durable re-pin landed, so the handler rebuild is
+			// not covered by the rollback above: restore every rebuilt task handler and sticky
+			// name from the snapshot before surfacing the failure, or a sibling keeps the
+			// replacement's handler while its pin returns to the deleted profile.
+			for (const snapshot of snapshots) {
+				if (!snapshot.task || snapshot.taskApiConfiguration === undefined) {
+					continue
+				}
+				try {
+					snapshot.task.updateApiConfiguration(snapshot.taskApiConfiguration)
+					if (snapshot.taskApiConfigName !== undefined) {
+						snapshot.task.setTaskApiConfigName(snapshot.taskApiConfigName)
+					}
+				} catch (restoreError) {
+					snapshot.instance.log(
+						`[rePinViewLocalStateForDeletedProfile] Could not restore the task handler for view ${snapshot.instance.viewId}: ${
+							restoreError instanceof Error ? restoreError.message : String(restoreError)
+						}`,
+					)
+				}
+			}
+			throw taskRebuildError
 		}
 	}
 
