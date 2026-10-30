@@ -3,10 +3,12 @@ import { Checkbox } from "vscrui"
 import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
 import type { ProviderSettings } from "@roo-code/types"
+import { DEFAULT_PROMPT_CACHE_TTL } from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
 import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@src/components/ui"
 
 import { inputEventTransform, noTransform } from "../transforms"
 
@@ -28,6 +30,16 @@ export const Anthropic = ({ apiConfiguration, setApiConfigurationField }: Anthro
 		selectedModel?.id === "claude-sonnet-4-5" ||
 		selectedModel?.id === "claude-sonnet-4-6" ||
 		selectedModel?.id === "claude-opus-4-6"
+
+	// The 1h cache TTL is only offered where the catalog advertises it, so the
+	// control cannot produce a value the provider would reject. Absent capability
+	// metadata means 5m only (ADR-0006 I2).
+	const supportsPromptCacheTtl1h = selectedModel?.info?.promptCacheTtlSupport?.includes("1h") ?? false
+
+	// Unset must stay absent so the request carries no ttl key at all (ADR-0006 I3),
+	// which is exactly what the shared default says. The control still needs a
+	// visible selection, so an unset knob renders as the vendor's own 5m default.
+	const promptCacheTtl = apiConfiguration.promptCacheTtl ?? "5m"
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(
@@ -100,6 +112,32 @@ export const Anthropic = ({ apiConfiguration, setApiConfigurationField }: Anthro
 					</Checkbox>
 					<div className="text-sm text-vscode-descriptionForeground mt-1 ml-6">
 						{t("settings:providers.anthropic1MContextBetaDescription")}
+					</div>
+				</div>
+			)}
+			{supportsPromptCacheTtl1h && (
+				<div data-testid="prompt-cache-ttl">
+					<label className="block font-medium mb-1">{t("settings:providers.promptCacheTtlLabel")}</label>
+					<Select
+						value={promptCacheTtl}
+						onValueChange={(value) =>
+							setApiConfigurationField(
+								"promptCacheTtl",
+								value === "5m"
+									? DEFAULT_PROMPT_CACHE_TTL
+									: (value as ProviderSettings["promptCacheTtl"]),
+							)
+						}>
+						<SelectTrigger className="w-full" aria-label={t("settings:providers.promptCacheTtlLabel")}>
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="5m">{t("settings:providers.promptCacheTtl5m")}</SelectItem>
+							<SelectItem value="1h">{t("settings:providers.promptCacheTtl1h")}</SelectItem>
+						</SelectContent>
+					</Select>
+					<div className="text-sm text-vscode-descriptionForeground mt-1">
+						{t("settings:providers.promptCacheTtlDescription")}
 					</div>
 				</div>
 			)}
