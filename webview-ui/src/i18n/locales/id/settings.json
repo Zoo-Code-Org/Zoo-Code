@@ -411,6 +411,12 @@
 		"getOpencodeGoApiKey": "Dapatkan Opencode Go API Key",
 		"kenariApiKey": "Kenari API Key",
 		"getKenariApiKey": "Dapatkan Kenari API Key",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "Kunci API IO Intelligence",
+			"getApiKey": "Dapatkan Kunci API IO Intelligence",
+			"model": "Model"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API Key",
@@ -579,6 +585,16 @@
 		"enablePromptCaching": "Aktifkan prompt caching",
 		"enablePromptCachingTitle": "Aktifkan prompt caching untuk meningkatkan performa dan mengurangi biaya untuk model yang didukung.",
 		"cacheUsageNote": "Catatan: Jika kamu tidak melihat penggunaan cache, coba pilih model yang berbeda lalu pilih model yang kamu inginkan lagi.",
+		"githubCopilot": {
+			"accountActions": "Tindakan akun GitHub Copilot",
+			"signIn": "Masuk ke GitHub",
+			"reconnect": "Hubungkan ulang GitHub",
+			"signedIn": "Masuk sebagai {{account}}",
+			"connecting": "Menghubungkan...",
+			"noModels": "Tidak ada model Copilot yang tersedia. Instal atau aktifkan GitHub Copilot Chat, masuk dengan akun GitHub yang memenuhi syarat, lalu segarkan. Masuk tidak mengonfirmasi langganan Copilot. Batas paket GitHub, permintaan premium, dan laju permintaan berlaku.",
+			"manageAccount": "Kelola akun GitHub",
+			"manageAccountDescription": "Membuka menu akun VS Code, tempat Anda dapat keluar dari GitHub. Keluar memengaruhi Copilot dan ekstensi lain yang menggunakan akun ini."
+		},
 		"vscodeLmModel": "Model Bahasa",
 		"vscodeLmWarning": "Catatan: Model yang diakses melalui VS Code Language Model API dapat dibungkus atau disetel‑halus oleh penyedia, sehingga perilakunya dapat berbeda dibandingkan menggunakan model yang sama secara langsung dari penyedia atau router tipikal. Untuk menggunakan model dari menu tarik‑turun «Language Model», pertama beralihlah ke model tersebut lalu klik «Terima» pada prompt Copilot Chat; jika tidak, Anda mungkin melihat kesalahan seperti 400 «The requested model is not supported».",
 		"googleCloudSetup": {
@@ -606,7 +622,7 @@
 			"baseUrl": "Base URL (opsional)",
 			"modelId": "Model ID",
 			"apiKey": "Ollama API Key",
-			"apiKeyHelp": "API key opsional untuk instance Ollama yang terautentikasi atau layanan cloud. Biarkan kosong untuk instalasi lokal.",
+			"apiKeyHelp": "API key opsional untuk instance Ollama yang memerlukan autentikasi, atau untuk layanan cloud. Zoo Code mengirim key hanya ke endpoint HTTPS atau loopback. Endpoint HTTP jarak jauh tidak mendapat key, karena key akan dikirim sebagai teks biasa. Gunakan HTTPS untuk instance jarak jauh yang memerlukan key. Biarkan kosong untuk instalasi lokal.",
 			"numCtx": "Ukuran Jendela Konteks (num_ctx)",
 			"numCtxHelp": "Ganti ukuran jendela konteks default model. Biarkan kosong untuk menggunakan konfigurasi Modelfile model. Nilai minimum adalah 128.",
 			"thinking": "Aktifkan Thinking",
@@ -672,6 +688,10 @@
 			"description": "Jumlah kesalahan berturut-turut atau tindakan berulang sebelum menampilkan dialog 'Zoo mengalami masalah'. Atur ke 0 untuk menonaktifkan mekanisme keamanan ini (tidak akan pernah terpicu).",
 			"unlimitedDescription": "Percobaan ulang tak terbatas diaktifkan (lanjut otomatis). Dialog tidak akan pernah muncul.",
 			"warning": "⚠️ Mengatur ke 0 memungkinkan percobaan ulang tak terbatas yang dapat menghabiskan penggunaan API yang signifikan"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "Ambang Peringatan Lunak Pengulangan",
+			"description": "Setelah sekian banyak panggilan alat identik berturut-turut, alat diblokir dan AI diminta untuk menjelaskan alasan mencoba lagi, tanpa melibatkanmu. Atur ke 0 untuk menonaktifkan peringatan lunak."
 		},
 		"reasoningEffort": {
 			"label": "Upaya Reasoning Model",
@@ -831,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Ciutkan keluaran perintah secara default",
+			"description": "Tampilkan keluaran perintah dalam keadaan diciutkan, termasuk terminal inline. Perluas secara manual bila diperlukan. Cara perintah dijalankan tidak berubah."
+		},
 		"basic": {
 			"label": "Pengaturan Terminal: Dasar",
 			"description": "Pengaturan terminal dasar"
@@ -998,8 +1022,14 @@
 		"rangeDescription": "Nilai yang lebih tinggi membuat output lebih acak, nilai yang lebih rendah membuatnya lebih deterministik."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Dukungan gambar tidak dilaporkan",
+		"toolSupportUnknown": "Dukungan alat tidak dilaporkan",
+		"promptCacheManagedByCopilot": "Prompt caching dikelola oleh GitHub Copilot",
+		"promptCacheCopilotDetails": "Caching bergantung pada model dan backend GitHub Copilot. Zoo Code tidak dapat mengonfigurasi retensi cache atau mengamati cache hit melalui API VS Code.",
 		"supportsImages": "Mendukung gambar",
 		"noImages": "Tidak mendukung gambar",
+		"supportsTools": "Mendukung alat",
+		"noTools": "Tidak mendukung alat",
 		"supportsPromptCache": "Mendukung prompt caching",
 		"noPromptCache": "Tidak mendukung prompt caching",
 		"contextWindow": "Jendela Konteks:",
