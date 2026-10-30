@@ -1947,40 +1947,54 @@ export class ClineProvider
 	}
 
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
-		const globalSettings = this.contextProxy.getValues()
-		const deletedActiveProfile = profileToDelete.name === globalSettings.currentApiConfigName
-
-		if (!deletedActiveProfile) {
-			// Purge first so a failing purge fails fast before any ContextProxy write,
-			// matching the ordering the webview delete path established.
-			await this.providerSettingsManager.deleteConfig(profileToDelete.name)
-
-			await this.contextProxy.setValues({
-				...globalSettings,
-				listApiConfigMeta: this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name),
-			})
-
-			await this.postStateToWebview()
-			return
-		}
-
 		// Captured inside the queued mutation so the rollback below can restore them even when the
 		// mutation times out (the timeout rejects the outer wrapper, so an inner catch never runs).
 		let deletedProfileConfig: (ProviderSettingsWithId & { name: string }) | undefined
-		const previousContextValues: Pick<RooCodeSettings, "currentApiConfigName" | "listApiConfigMeta"> = {
-			currentApiConfigName: globalSettings.currentApiConfigName,
-			listApiConfigMeta: globalSettings.listApiConfigMeta,
-		}
+		let previousContextValues: Pick<RooCodeSettings, "currentApiConfigName" | "listApiConfigMeta" | "apiProvider"> =
+			{}
 
-		// The purge and the replacement switch run as one queued mutation: otherwise a queued
+		// The purge and any replacement switch run as one queued mutation: otherwise a queued
 		// `upsertProviderProfile` for the same name can save the profile back after the purge and
 		// make it reappear in `listApiConfigMeta` after this call has already resolved.
 		try {
 			await this.enqueueProviderProfileMutation(async (signal) => {
+				// Read the settings inside the queue: a queued activation may have changed the
+				// active profile since this call was made.
+				const globalSettings = this.contextProxy.getValues()
+				const deletedActiveProfile = profileToDelete.name === globalSettings.currentApiConfigName
+
+				previousContextValues = {
+					currentApiConfigName: globalSettings.currentApiConfigName,
+					listApiConfigMeta: globalSettings.listApiConfigMeta,
+					apiProvider: globalSettings.apiProvider,
+				}
+
+				if (!deletedActiveProfile) {
+					// Purge first so a failing purge fails fast before any ContextProxy write,
+					// matching the ordering the webview delete path established.
+					await this.providerSettingsManager.deleteConfig(profileToDelete.name)
+
+					await this.contextProxy.setValues({
+						...globalSettings,
+						listApiConfigMeta: this.getProviderProfileEntries().filter(
+							({ name }) => name !== profileToDelete.name,
+						),
+					})
+
+					await this.postStateToWebview()
+					return
+				}
+
 				// Pick the replacement from the manager, not from ContextProxy metadata: the chosen
 				// name must exist in the manager or the activation below rejects with "not found".
-				const profileToActivate = (await this.providerSettingsManager.listConfig()).find(
+				const remainingProfiles = (await this.providerSettingsManager.listConfig()).filter(
 					({ name }) => name !== profileToDelete.name,
+				)
+
+				// Prefer a configured profile, mirroring the mode-switch path which skips entries
+				// with no `apiProvider`. Fall back to any remaining entry so deletion still works.
+				const profileToActivate = (
+					remainingProfiles.find(({ apiProvider }) => !!apiProvider) ?? remainingProfiles[0]
 				)?.name
 
 				if (!profileToActivate) {
@@ -1991,6 +2005,12 @@ export class ClineProvider
 				deletedProfileConfig = await this.providerSettingsManager.getProfile({
 					name: profileToDelete.name,
 				})
+
+				// A timeout may have already fired while the manager lock was held. Purging now
+				// would delete the profile after the caller was told the deletion failed.
+				if (signal.aborted) {
+					return
+				}
 
 				await this.providerSettingsManager.deleteConfig(profileToDelete.name)
 
@@ -2016,7 +2036,7 @@ export class ClineProvider
 	private async restoreDeletedProviderProfile(
 		name: string,
 		config: (ProviderSettingsWithId & { name: string }) | undefined,
-		previousContextValues: Pick<RooCodeSettings, "currentApiConfigName" | "listApiConfigMeta">,
+		previousContextValues: Pick<RooCodeSettings, "currentApiConfigName" | "listApiConfigMeta" | "apiProvider">,
 	): Promise<void> {
 		// Bound the rollback independently: the failed activation may still be holding the
 		// manager lock, and the caller must not wait on it indefinitely.
@@ -2029,6 +2049,8 @@ export class ClineProvider
 						await this.providerSettingsManager.activateProfile({ name })
 					}
 
+					// Restore the settings too, not just the name pointers: a partial activation
+					// may have left the replacement's provider settings under the deleted name.
 					await this.contextProxy.setValues(previousContextValues)
 				})(),
 				() => this.log(`Provider profile restore for '${name}' timed out`),
@@ -2042,14 +2064,20 @@ export class ClineProvider
 			)
 
 			// The restore failed, so ContextProxy may still name a profile the manager no longer
-			// has. Point it at a profile that does exist so a retry can proceed.
+			// has. Point it at a profile that does exist, including that profile's settings, so a
+			// retry can proceed and the webview cannot show a name with the wrong settings.
 			try {
-				const fallback = (await this.providerSettingsManager.listConfig())[0]?.name
+				const remainingProfiles = await this.providerSettingsManager.listConfig()
+				const fallback = remainingProfiles[0]?.name
 
 				if (fallback) {
+					const fallbackProfile = await this.providerSettingsManager.getProfile({ name: fallback })
+					const { name: _fallbackName, ...fallbackSettings } = fallbackProfile
+
 					await this.contextProxy.setValues({
+						...fallbackSettings,
 						currentApiConfigName: fallback,
-						listApiConfigMeta: await this.providerSettingsManager.listConfig(),
+						listApiConfigMeta: remainingProfiles,
 					})
 				}
 			} catch (reconcileError) {

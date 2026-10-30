@@ -87,6 +87,7 @@ vi.mock("../../../utils/storage", () => ({
 	getSettingsDirectoryPath: vi.fn().mockResolvedValue("/test/settings/path"),
 	getTaskDirectoryPath: vi.fn().mockResolvedValue("/test/task/path"),
 	getGlobalStoragePath: vi.fn().mockResolvedValue("/test/storage/path"),
+	getStorageBasePath: vi.fn().mockReturnValue("/test/storage/path"),
 }))
 
 vi.mock("@modelcontextprotocol/sdk/types.js", () => ({
@@ -3061,6 +3062,21 @@ describe("ClineProvider", () => {
 			mockTask.updateApiConfiguration = vi.fn()
 			await provider.addClineToStack(mockTask)
 
+			// Seed the legacy global-state history so `persistStickyProviderProfileToCurrentTask`
+			// finds a history item and performs the write.
+			await provider.contextProxy.setValue("taskHistory", [
+				{
+					id: mockTask.taskId,
+					ts: Date.now(),
+					task: "Test task",
+					number: 1,
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+				},
+			])
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+
 			await provider.deleteProviderProfile(currentProfile)
 
 			// The deletion path must not skip the task rebuild: the running task receives the
@@ -3073,6 +3089,13 @@ describe("ClineProvider", () => {
 			)
 			// The sticky profile name is persisted too, so removing that update fails the test.
 			expect(mockTask.setTaskApiConfigName).toHaveBeenCalledWith("other-config")
+			// And the history write happens, so removing it from the deletion path also fails.
+			expect(updateTaskHistorySpy).toHaveBeenCalledWith(
+				expect.objectContaining({
+					id: mockTask.taskId,
+					apiConfigName: "other-config",
+				}),
+			)
 		})
 
 		test("fails fast without writing ContextProxy state when the config purge rejects", async () => {
@@ -3084,15 +3107,22 @@ describe("ClineProvider", () => {
 			})
 
 			const setValuesSpy = vi.spyOn(provider.contextProxy, "setValues")
-			const updateCallsBefore = vi.mocked(mockContext.globalState.update).mock.calls.length
 
 			await expect(provider.deleteProviderProfile(otherProfile)).rejects.toThrow(
 				"Config 'other-config' not found",
 			)
 
 			expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("other-config")
-			expect(setValuesSpy).not.toHaveBeenCalled()
-			expect(vi.mocked(mockContext.globalState.update).mock.calls.length).toBe(updateCallsBefore)
+			// The purge failed, so no successful-path state write may run. The only `setValues`
+			// allowed is the rollback, which restores the pre-delete values verbatim.
+			for (const [values] of setValuesSpy.mock.calls) {
+				expect(values).toEqual(
+					expect.objectContaining({
+						currentApiConfigName: "current-config",
+						listApiConfigMeta: [currentProfile, otherProfile],
+					}),
+				)
+			}
 		})
 
 		test("restores the deleted profile when replacement activation rejects", async () => {
