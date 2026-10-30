@@ -6621,6 +6621,17 @@ export class ClineProvider
 		configuration: RooCodeSettings = {},
 	): Promise<Task> {
 		if (configuration) {
+			// Register custom modes before setValues: setValues validates `mode` against
+			// getCustomModes(), so a mode supplied in the same call would otherwise be deleted
+			// and never persisted. The manager also overwrites the global-state copy when it
+			// merges .roomodes + global settings on refresh, so updateCustomMode is the write
+			// that makes the mode survive the merge cycle.
+			if (configuration.customModes?.length) {
+				for (const mode of configuration.customModes) {
+					await this.customModesManager.updateCustomMode(mode.slug, mode)
+				}
+			}
+
 			await this.setValues(configuration)
 
 			if (configuration.allowedCommands) {
@@ -6647,16 +6658,6 @@ export class ClineProvider
 
 			if (configuration.currentApiConfigName) {
 				await this.setProviderProfile(configuration.currentApiConfigName)
-			}
-
-			// Register custom modes so the CustomModesManager knows about them.
-			// setValues writes to global state, but the manager overwrites that
-			// when it merges .roomodes + global settings on refresh.  Persisting
-			// via updateCustomMode ensures modes survive the merge cycle.
-			if (configuration.customModes?.length) {
-				for (const mode of configuration.customModes) {
-					await this.customModesManager.updateCustomMode(mode.slug, mode)
-				}
 			}
 		}
 
