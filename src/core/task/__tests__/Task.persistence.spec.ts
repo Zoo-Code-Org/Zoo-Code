@@ -20,7 +20,7 @@ import { ClineProvider } from "../../webview/ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import { attemptCompletionTool, type AttemptCompletionCallbacks } from "../../tools/AttemptCompletionTool"
-import type { AttemptCompletionToolUse } from "../../../shared/tools"
+import type { ToolUse } from "../../../shared/tools"
 
 type TaskPersistenceAccess = {
 	addToApiConversationHistory: (message: Anthropic.MessageParam) => Promise<void>
@@ -533,7 +533,7 @@ describe("Task persistence", () => {
 					completionEmitted = true
 				})
 
-				const block: AttemptCompletionToolUse = {
+				const block: ToolUse<"attempt_completion"> = {
 					type: "tool_use",
 					id: completionCallId,
 					name: "attempt_completion",
