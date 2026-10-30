@@ -386,6 +386,11 @@ export class ContextProxy {
 		}
 	}
 
+	/** Current per-key write generation, used by callers whose rollback must not clobber a newer write. */
+	public getStateWriteGeneration<K extends GlobalStateKey>(key: K): number {
+		return this.stateWriteGenerations.get(key) ?? 0
+	}
+
 	private getAllGlobalState(): GlobalState {
 		return Object.fromEntries(GLOBAL_STATE_KEYS.map((key) => [key, this.getGlobalState(key)]))
 	}

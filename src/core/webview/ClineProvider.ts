@@ -239,6 +239,8 @@ export class ClineProvider
 	private static readonly MAX_PERSISTED_VIEW_STATES = 50
 	private static readonly MAX_VIEW_STATE_ID_LENGTH = 64
 	private static persistedViewStateWriteQueue: Promise<void> = Promise.resolve()
+	// A durable view-state write that started before a reset must not persist after the clear.
+	private static viewStatesResetGeneration = 0
 	private webviewDisposables: vscode.Disposable[] = []
 	private pendingThemeFixtureProbes = new Map<
 		string,
@@ -599,12 +601,19 @@ export class ClineProvider
 
 	/** Persist the non-secret selections through the serialized write queue. */
 	private async savePersistedViewState(values: Partial<PersistedViewState>): Promise<void> {
+		const resetGeneration = ClineProvider.viewStatesResetGeneration
 		// Capture the id at change time: a write belongs to the view that was active
 		// when the change was made, even if a newer id is registered while it is queued.
 		const viewStateId = this.viewStateId
 		// Set by the queued write when it had to mint a claim, delivered after it lands.
 		let mintedClaimToken: string | undefined
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			// The reset cleared viewStates while this write was queued: storing the pre-reset
+			// value now would resurrect it on the next reload.
+			if (ClineProvider.viewStatesResetGeneration !== resetGeneration) {
+				return
+			}
+
 			const states = this.getPersistedViewStates({ fresh: true })
 			// The first write to an unowned temporary id claims the slot instead of merging
 			// into it: temporary names restart from 0 on every host start, so an entry under
@@ -2548,22 +2557,68 @@ export class ClineProvider
 			// We should probably switch to that and verify that it works.
 			// I left the original implementation in just to be safe.
 			// `allSettled` so a caller that rolls back after a failure never races a write still in flight.
+			// Capture every store the activation group rewrites: one member can reject after
+			// others landed, and restoring only the shared name would leave the old name next to
+			// the new settings and a mode binding pointing at the new profile.
+			const previousList = this.contextProxy.getValue("listApiConfigMeta")
+			const previousName = this.contextProxy.getValue("currentApiConfigName")
+			const previousProviderSettings = this.contextProxy.getProviderSettings()
+			// Test doubles and older managers may not implement the read: absence means "no previous
+			// binding to restore", not a failed activation.
+			const previousModeConfigId = this.providerSettingsManager.getModeConfigId
+				? await this.providerSettingsManager.getModeConfigId(mode)
+				: undefined
+
 			const activationResults = await Promise.allSettled([
 				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
 				// Route through setValue so the buffer tracks the activated profile.
 				this.setValue("currentApiConfigName", name),
 				this.providerSettingsManager.setModeConfig(mode, id),
 				this.contextProxy.setProviderSettings(providerSettings),
-				// setProviderSettings bypasses the buffer path: refresh this view's overlay.
-				this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings }),
 			])
 			const failedActivation = activationResults.find(
 				(result): result is PromiseRejectedResult => result.status === "rejected",
 			)
 
-			if (failedActivation) throw failedActivation.reason
+			if (failedActivation) {
+				const restoreFailures: string[] = []
+				const restore = async (label: string, action: () => Promise<unknown>) => {
+					try {
+						await action()
+					} catch (restoreError) {
+						restoreFailures.push(
+							`${label}: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+						)
+					}
+				}
+				await restore("profile list", () => this.contextProxy.setValue("listApiConfigMeta", previousList))
+				await restore("shared selection", () =>
+					this.contextProxy.setValue("currentApiConfigName", previousName ?? name),
+				)
+				await restore("mode binding", () =>
+					this.providerSettingsManager.setModeConfig(mode, previousModeConfigId as string),
+				)
+				await restore("shared provider settings", () =>
+					this.contextProxy.setProviderSettings(previousProviderSettings),
+				)
+
+				if (restoreFailures.length > 0) {
+					const original = failedActivation.reason
+					const prefix = original instanceof Error ? original.message : String(original)
+					throw new Error(`${prefix}; activation rollback also failed: ${restoreFailures.join("; ")}`, {
+						cause: original instanceof Error ? original : undefined,
+					})
+				}
+
+				throw failedActivation.reason
+			}
 
 			if (signal.aborted) return id
+
+			// setProviderSettings bypasses the buffer path: refresh this view's overlay only after
+			// every activation write landed, so a failed group cannot leave the overlay ahead of
+			// the restored shared state.
+			await this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
 
 			// Refresh other views pinned to this profile so their overlays cannot go stale.
 
@@ -3866,15 +3921,19 @@ export class ClineProvider
 
 	public async setValue<K extends keyof RooCodeSettings>(key: K, value: RooCodeSettings[K]) {
 		const previousSharedValues = { [key]: this.contextProxy.getValue(key) } as RooCodeSettings
+		// This write produces the next generation for the key: only restore while it is still newest.
+		const writeGeneration = this.contextProxy.getStateWriteGeneration(key as never) + 1
 		await this.contextProxy.setValue(key, value)
 		try {
 			await this._saveViewLocalStateFromMutation({ [key]: value })
 		} catch (error) {
 			// The per-view record did not land: restore the prior shared value so the two
 			// persistence layers cannot diverge, then surface the original failure.
-			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues, {
-				[key]: value,
-			} as RooCodeSettings)
+			await this._restoreSharedValuesAfterFailedViewWrite(
+				previousSharedValues,
+				{ [key]: value } as RooCodeSettings,
+				{ [key]: writeGeneration } as Record<string, number>,
+			)
 			throw error
 		}
 	}
@@ -3941,6 +4000,11 @@ export class ClineProvider
 			}
 		}
 
+		// A view-state write queued before the reset would otherwise read the cleared map and store
+		// its pre-reset entry after resetAllState(): drain the queue first, then bump the
+		// generation so a write that started before this point is rejected inside the queue.
+		await ClineProvider.persistedViewStateWriteQueue.catch(() => undefined)
+		ClineProvider.viewStatesResetGeneration += 1
 		await this.contextProxy.resetAllState()
 		await this.providerSettingsManager.resetAllConfigs()
 		await this.customModesManager.resetCustomModes()
@@ -5350,14 +5414,20 @@ export class ClineProvider
 	private async _restoreSharedValuesAfterFailedViewWrite(
 		previous: RooCodeSettings,
 		attempted: RooCodeSettings,
+		generations: Record<string, number> = {},
 	): Promise<void> {
 		// Roll back only the keys this attempt wrote and that still hold the value it wrote.
-		// A concurrent provider may have written a newer value in the meantime; restoring the
-		// captured previous value would then clobber it for every view that reads shared state.
+		// A concurrent provider may have written a newer value in the meantime - even the same
+		// value - so the per-key write generation must also still match; restoring otherwise
+		// would clobber that newer write for every view that reads shared state.
 		const rollback: RooCodeSettings = {} as RooCodeSettings
 
 		for (const key of Object.keys(attempted) as (keyof RooCodeSettings)[]) {
-			if (this.contextProxy.getValue(key) === attempted[key]) {
+			const generation = generations[key]
+			if (
+				this.contextProxy.getValue(key) === attempted[key] &&
+				(generation === undefined || this.contextProxy.getStateWriteGeneration(key as never) === generation)
+			) {
 				;(rollback as Record<string, unknown>)[key] = previous[key]
 			}
 		}
