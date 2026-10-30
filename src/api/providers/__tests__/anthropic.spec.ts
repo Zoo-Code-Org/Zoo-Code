@@ -7,6 +7,7 @@ import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import type { ApiStreamChunk, ApiStreamUsageChunk } from "../../../api/transform/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { calculateApiCostAnthropic } from "../../../shared/cost"
 
 // Mock TelemetryService
 vitest.mock("@roo-code/telemetry", () => ({
@@ -1536,6 +1537,38 @@ describe("AnthropicHandler", () => {
 			expect(model.info.contextWindow).toBe(1000000)
 			expect(model.info.inputPrice).toBe(6.0)
 			expect(model.info.outputPrice).toBe(22.5)
+		})
+
+		it("carries the tier's own cacheWritesPrice1h when the 1M context tier applies", () => {
+			// glm P2: the tier merge overrode inputPrice but not the TTL rate, so the
+			// entry-level 1h rate (derived from the 200K input price) survived and a
+			// 1M-context 1h write billed 6.0 instead of the tier's 12.0 (50% under).
+			const handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-sonnet-4-5",
+				anthropicBeta1MContext: true,
+			})
+			const model = handler.getModel()
+
+			// Tier input price 6.0 => 1h rate must be 2x that, not the 200K entry's 6.0.
+			expect(model.info.cacheWritesPrice1h).toBe(12.0)
+			expect(model.info.cacheWritesPrice1h).not.toBe(6.0)
+		})
+
+		it("bills a 1M-context 1h cache write at the tier rate, not the 200K rate", () => {
+			const handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-sonnet-4-5",
+				anthropicBeta1MContext: true,
+			})
+			const model = handler.getModel()
+
+			const { totalCost } = calculateApiCostAnthropic(model.info, 0, 0, 100_000, 0, 100_000)
+
+			// Tier 1h rate 12.0: (12.0 / 1_000_000) * 100_000 = 1.2
+			// The pre-fix behaviour billed the 200K 1h rate: 0.6 (50% under).
+			expect(totalCost).toBeCloseTo(1.2, 9)
+			expect(totalCost).not.toBeCloseTo(0.6, 9)
 		})
 
 		it("should honor a custom/unrecognized model ID instead of silently falling back to anthropicDefaultModelId", () => {

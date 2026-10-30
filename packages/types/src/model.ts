@@ -187,6 +187,11 @@ export const modelInfoSchema = z.object({
 				inputPrice: z.number().optional(),
 				outputPrice: z.number().optional(),
 				cacheWritesPrice: z.number().optional(),
+				// Per-TTL write rates for this tier. A tier that overrides inputPrice
+				// must also override these, otherwise a long-context or flex/priority
+				// write bills at the base tier's TTL rate.
+				cacheWritesPrice1h: z.number().optional(),
+				cacheWritesPrice12h: z.number().optional(),
 				cacheReadsPrice: z.number().optional(),
 			}),
 		)

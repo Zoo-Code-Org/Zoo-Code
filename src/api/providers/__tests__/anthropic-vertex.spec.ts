@@ -10,6 +10,7 @@ import { AnthropicVertexHandler } from "../anthropic-vertex"
 import { MAX_TIMEOUT_MS } from "../utils/abort-signal"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
+import type { ApiStreamChunk } from "../../../api/transform/stream"
 
 vitest.mock("../utils/timeout-config", () => ({
 	getApiRequestTimeout: vitest.fn().mockReturnValue(300_000),
@@ -451,6 +452,41 @@ describe("VertexHandler", () => {
 				}),
 				undefined,
 			)
+		})
+
+		it("should surface the 1h cache-write split from cache_creation", async () => {
+			const mockStream = [
+				{
+					type: "message_start",
+					message: {
+						usage: {
+							input_tokens: 10,
+							output_tokens: 0,
+							cache_creation_input_tokens: 100_000,
+							cache_creation: {
+								ephemeral_5m_input_tokens: 40_000,
+								ephemeral_1h_input_tokens: 60_000,
+							},
+							cache_read_input_tokens: 0,
+						},
+					},
+				},
+			]
+
+			const mockCreate = vitest.fn().mockResolvedValue(asyncStreamFrom(mockStream))
+			// Typed structural cast rather than `as any`: the client is a private field and
+			// this file already has 31 suppressed `any` uses, a budget this test must not grow.
+			;(handler["client"].messages as unknown as { create: typeof mockCreate }).create = mockCreate
+
+			const stream = handler.createMessage(systemPrompt, [{ role: "user", content: "Hello" }])
+			const chunks = await collectStream(stream)
+
+			const usageChunk = chunks.find(
+				(chunk): chunk is Extract<ApiStreamChunk, { type: "usage" }> =>
+					chunk.type === "usage" && chunk.cacheWriteTokens !== undefined,
+			)
+			expect(usageChunk?.cacheWriteTokens).toBe(100_000)
+			expect(usageChunk?.cacheWrite1hTokens).toBe(60_000)
 		})
 
 		it("should handle cache-related usage metrics for Claude", async () => {

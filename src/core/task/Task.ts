@@ -4529,7 +4529,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									modelId,
 								)
 
-								// Use the appropriate cost function based on the API protocol
+								// Use the appropriate cost function based on the API protocol.
+								// The per-TTL split must be passed here too: without it this
+								// telemetry recompute bills every write at the short-TTL rate,
+								// which is exactly the under-report this PR exists to fix.
 								const costResult =
 									apiProtocol === "anthropic"
 										? calculateApiCostAnthropic(
@@ -4538,6 +4541,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 												tokens.output,
 												tokens.cacheWrite,
 												tokens.cacheRead,
+												tokens.cacheWrite1h,
+												tokens.cacheWrite12h,
 											)
 										: calculateApiCostOpenAI(
 												streamModelInfo,
@@ -4545,6 +4550,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 												tokens.output,
 												tokens.cacheWrite,
 												tokens.cacheRead,
+												undefined,
+												tokens.cacheWrite1h,
+												tokens.cacheWrite12h,
 											)
 
 								TelemetryService.instance.captureLlmCompletion(this.taskId, {

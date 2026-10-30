@@ -275,6 +275,10 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 					inputPrice: tier.inputPrice,
 					outputPrice: tier.outputPrice,
 					cacheWritesPrice: tier.cacheWritesPrice,
+					// Carry the tier's own TTL rate; the entry-level one was derived from
+					// the 200K input price and would halve a 1M-context 1h write.
+					cacheWritesPrice1h: tier.cacheWritesPrice1h ?? info.cacheWritesPrice1h,
+					cacheWritesPrice12h: tier.cacheWritesPrice12h ?? info.cacheWritesPrice12h,
 					cacheReadsPrice: tier.cacheReadsPrice,
 				}
 			}

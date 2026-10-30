@@ -26,6 +26,7 @@ export const anthropicModels = {
 				inputPrice: 6.0, // $6 per million input tokens (>200K context)
 				outputPrice: 22.5, // $22.50 per million output tokens (>200K context)
 				cacheWritesPrice: 7.5, // $7.50 per million tokens (>200K context)
+				cacheWritesPrice1h: 12, // $12.00 per million tokens (2x tier input price, 1h cache writes)
 				cacheReadsPrice: 0.6, // $0.60 per million tokens (>200K context)
 			},
 		],
@@ -68,6 +69,7 @@ export const anthropicModels = {
 				inputPrice: 6.0, // $6 per million input tokens (>200K context)
 				outputPrice: 22.5, // $22.50 per million output tokens (>200K context)
 				cacheWritesPrice: 7.5, // $7.50 per million tokens (>200K context)
+				cacheWritesPrice1h: 12, // $12.00 per million tokens (2x tier input price, 1h cache writes)
 				cacheReadsPrice: 0.6, // $0.60 per million tokens (>200K context)
 			},
 		],
@@ -90,6 +92,7 @@ export const anthropicModels = {
 				inputPrice: 6.0, // $6 per million input tokens (>200K context)
 				outputPrice: 22.5, // $22.50 per million output tokens (>200K context)
 				cacheWritesPrice: 7.5, // $7.50 per million tokens (>200K context)
+				cacheWritesPrice1h: 12, // $12.00 per million tokens (2x tier input price, 1h cache writes)
 				cacheReadsPrice: 0.6, // $0.60 per million tokens (>200K context)
 			},
 		],
@@ -112,6 +115,7 @@ export const anthropicModels = {
 				inputPrice: 10.0, // $10 per million input tokens (>200K context)
 				outputPrice: 37.5, // $37.50 per million output tokens (>200K context)
 				cacheWritesPrice: 12.5, // $12.50 per million tokens (>200K context)
+				cacheWritesPrice1h: 20, // $20.00 per million tokens (2x tier input price, 1h cache writes)
 				cacheReadsPrice: 1.0, // $1.00 per million tokens (>200K context)
 			},
 		],

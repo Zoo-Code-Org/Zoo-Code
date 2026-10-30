@@ -16,6 +16,8 @@ import {
 	SERVICE_TIER_KEY,
 	type ServiceTier,
 	ApiProviderError,
+	CACHE_WRITE_MULTIPLIER_1H,
+	CACHE_WRITE_MULTIPLIER_12H,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -1490,6 +1492,17 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			outputPrice: tierInfo.outputPrice ?? info.outputPrice,
 			cacheReadsPrice: tierInfo.cacheReadsPrice ?? info.cacheReadsPrice,
 			cacheWritesPrice: tierInfo.cacheWritesPrice ?? info.cacheWritesPrice,
+			// A service tier that overrides the write rate must also override the TTL
+			// rate, otherwise a flex/priority 12h write bills at the standard-tier 12h
+			// rate. Derived from the tier's own input price so the 2.5x ratio holds.
+			cacheWritesPrice12h:
+				tierInfo.cacheWritesPrice12h ??
+				(tierInfo.inputPrice !== undefined ? tierInfo.inputPrice * CACHE_WRITE_MULTIPLIER_12H : undefined) ??
+				info.cacheWritesPrice12h,
+			cacheWritesPrice1h:
+				tierInfo.cacheWritesPrice1h ??
+				(tierInfo.inputPrice !== undefined ? tierInfo.inputPrice * CACHE_WRITE_MULTIPLIER_1H : undefined) ??
+				info.cacheWritesPrice1h,
 		}
 	}
 
