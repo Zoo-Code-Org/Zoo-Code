@@ -935,21 +935,13 @@ export class ClineProvider
 		}
 	}
 
-	/**
-	 * Loads non-secret persisted selections from the registered viewStates map.
-	 * Missing entries are intentionally left unset so getState() falls back to shared ContextProxy values.
-	 * Fields mutated while the async profile lookup is in flight are reapplied on top of the
-	 * loaded state, field by field, so in-flight user selections are not clobbered by the load.
-	 */
+	/** Load non-secret persisted selections; in-flight buffer edits are reapplied on top. */
 	private async loadViewState(): Promise<void> {
-		// Capture the id this load is for: a newer id registered while an async
-		// profile lookup is in flight must not be overwritten by this stale load.
+		// A newer id registered while this load is in flight must win.
 		const loadedForViewId = this.viewStateId
 
-		// While the stable id has not been registered yet, the key is this instance's
-		// session-local name. Temporary names restart from 0 on every host start, so an
-		// entry under the same name can belong to a different session. Load only entries
-		// this instance authored.
+		// Before registration the key is the session-local name, which can be a stale entry
+		// from another session: load only entries this instance authored.
 		if (loadedForViewId === this.viewId && !this.wroteUnderTemporaryViewStateId) {
 			return
 		}
@@ -957,15 +949,12 @@ export class ClineProvider
 			const persisted = this.getPersistedViewStates()[loadedForViewId]
 			const loadedState: Partial<ExtensionState> = {}
 
-			// Snapshot the in-memory buffer before the async profile lookup. The
-			// mutation paths update viewLocalState in place, so a shallow copy is
-			// what makes fields mutated during the load window observable below.
+			// The mutation paths update viewLocalState in place; a shallow snapshot makes
+			// in-flight edits observable below.
 			const preLoadBuffer = { ...this.viewLocalState }
 
 			if (persisted?.mode) {
-				// A persisted mode may reference a custom mode that was deleted after it was
-				// pinned: restore it only when the slug still resolves, so a stale slug cannot
-				// shadow the shared mode from getState().
+				// A stale custom-mode slug must not shadow the shared mode from getState().
 				const customModes = await this.customModesManager.getCustomModes()
 				if (getModeBySlug(persisted.mode, customModes)) {
 					loadedState.mode = persisted.mode as Mode
@@ -994,13 +983,8 @@ export class ClineProvider
 				return
 			}
 
-			// Reapply the buffer fields that changed while the load was in flight,
-			// tracking the change instead of testing against undefined: a field cleared
-			// during the load window must stay cleared (the loaded value must not
-			// resurrect it), and a field written to a new value must win over it.
-			// Untouched fields keep the persisted values authoritative, and the
-			// pre-load buffer is never merged wholesale so stale temporary-id state
-			// cannot override the stable persisted state.
+			// Diff each field so in-flight edits win over the loaded values (including clears)
+			// while untouched fields keep the persisted values authoritative.
 			const postLoadBuffer = this.viewLocalState
 			const mergedState: Partial<ExtensionState> = { ...loadedState }
 
@@ -1037,11 +1021,7 @@ export class ClineProvider
 		}
 	}
 
-	/**
-	 * Saves a single view-local state value. The in-memory buffer is always updated; the
-	 * non-secret subset (mode, currentApiConfigName) is persisted durably under the view
-	 * id active when the change was made, re-keyed to the stable id on registration.
-	 */
+	/** Save one view-local value; the durable subset is re-keyed to the stable id. */
 	public async saveViewState<K extends keyof PersistedViewStateValues>(
 		key: K,
 		value: PersistedViewStateValues[K] | undefined,
@@ -2611,16 +2591,11 @@ export class ClineProvider
 			// `allSettled` so a caller that rolls back after a failure never races a write still in flight.
 			const activationResults = await Promise.allSettled([
 				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
-				// Route through setValue so the in-memory viewLocalState buffer tracks the
-				// activated profile: a plain global write would leave a stale loaded
-				// currentApiConfigName shadowing the new value in getValues().
+				// Route through setValue so the buffer tracks the activated profile.
 				this.setValue("currentApiConfigName", name),
 				this.providerSettingsManager.setModeConfig(mode, id),
 				this.contextProxy.setProviderSettings(providerSettings),
-				// setProviderSettings writes the shared store directly, bypassing the
-				// view-local mutation path: also refresh this view's buffer so a stale
-				// loaded apiConfiguration cannot keep shadowing the new settings in
-				// getState().
+				// setProviderSettings bypasses the buffer path: refresh this view's overlay.
 				this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings }),
 			])
 			const failedActivation = activationResults.find(
@@ -2631,9 +2606,7 @@ export class ClineProvider
 
 			if (signal.aborted) return id
 
-			// Other live views may have buffered this profile's settings earlier;
-			// refresh them so their getState() cannot report the updated profile's
-			// name with stale settings.
+			// Refresh other views pinned to this profile so their overlays cannot go stale.
 
 			// Change the provider for the current task.
 			// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
@@ -2644,16 +2617,11 @@ export class ClineProvider
 		} else {
 			await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 
-			// A save that does not activate still changes the profile's settings, and
-			// every view pinned to it buffers a full copy of them. Refresh those views
-			// (and this one when it is the pinned view) or their getState() keeps
-			// serving the settings captured before the save under the same name.
+			// A non-activating save still changes the profile's settings: refresh the views
+			// that buffered a copy, or their getState() keeps the pre-save values.
 			if (this.pinnedProfileName === name) {
 				await this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
-				// Only rebuild when the task actually runs under the saved profile: a
-				// view pinned to this profile can hold a task that follows a different
-				// sticky profile, and the forced rebuild would silently switch that
-				// conversation to the saved profile's settings.
+				// Only rebuild a task that actually runs under the saved profile.
 				if (this.getCurrentTask()?.taskApiConfigName === name) {
 					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
 				}
@@ -3963,11 +3931,7 @@ export class ClineProvider
 		await this.contextProxy.setValues(values)
 	}
 
-	/**
-	 * Persists the view-local subset of a ContextProxy mutation, then updates the in-memory
-	 * viewLocalState buffer. Persistence is awaited first so a failed durable write cannot
-	 * leave the local cache ahead of the persisted state.
-	 */
+	/** Persist the durable subset first, then update the in-memory buffer. */
 	private async _saveViewLocalStateFromMutation(
 		values: Partial<RooCodeSettings> & Partial<ExtensionState>,
 	): Promise<void> {
@@ -3975,10 +3939,7 @@ export class ClineProvider
 		this._updateViewLocalStateFromMutation(values)
 	}
 
-	/**
-	 * Writes the durably persisted subset of a mutation (mode and currentApiConfigName)
-	 * into the registered viewStates map for this view.
-	 */
+	/** Write the durable subset of a mutation into this view's viewStates entry. */
 	private async _persistViewLocalStateFromMutation(
 		values: Partial<RooCodeSettings> & Partial<ExtensionState>,
 	): Promise<void> {
@@ -3997,9 +3958,7 @@ export class ClineProvider
 		}
 	}
 
-	/**
-	 * Clear view-local state cache so that getState() falls back to ContextProxy defaults.
-	 */
+	/** Clear the buffer so getState() falls back to the shared values. */
 	private _clearViewLocalState(): void {
 		this.viewLocalState = {}
 	}

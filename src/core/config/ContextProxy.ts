@@ -377,10 +377,8 @@ export class ContextProxy {
 		try {
 			return await this.originalContext.globalState.update(key, value)
 		} catch (error) {
-			// A rejected write must not leave the cache ahead of storage, but a *newer* write
-			// for the same key may already have replaced the cached value: restoring here would
-			// then roll the cache back behind storage. Only undo this write while it is still
-			// the newest one for the key.
+			// A newer write for the same key may already own the cache: only undo this write
+			// while it is still the newest one.
 			if (this.stateWriteGenerations.get(key) === generation) {
 				this.stateCache[key] = previousCachedValue
 			}
