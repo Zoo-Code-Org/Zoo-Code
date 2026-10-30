@@ -9,7 +9,7 @@ import {
 	requestyDefaultModelInfo,
 } from "@roo-code/types"
 
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { calculateApiCostOpenAI } from "../../shared/cost"
 
 import { convertToOpenAiMessages } from "../transform/openai-format"
@@ -19,8 +19,14 @@ import { AnthropicProviderReasoningParams, getAnthropicProviderReasoning } from 
 
 import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { getModels } from "./fetchers/modelCache"
+import { getRequestyModels } from "./fetchers/requesty"
 import { BaseProvider } from "./base-provider"
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import type {
+	SingleCompletionHandler,
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+} from "../index"
 import { toRequestyServiceUrl } from "../../shared/utils/requesty"
 import { handleOpenAIError } from "./utils/error-handler"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
@@ -79,9 +85,42 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 		})
 	}
 
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: true, keyScoped: true, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getRequestyModels(options.baseUrl, options.apiKey, ...fetchOpts)
+	}
+
 	public async fetchModel() {
-		this.models = await getModels({ provider: providerIdentifiers.requesty, baseUrl: this.baseURL })
+		// Pass the API key so the catalog request is authenticated and the cache entry is
+		// key-scoped. Requesty enforces per-key model allowlists, so a keyless (URL-only)
+		// entry would let one key's catalog be served to another key on the same server.
+		this.models = await getModels(
+			{
+				provider: providerIdentifiers.requesty,
+				apiKey: this.options.requestyApiKey,
+				baseUrl: this.baseURL,
+			},
+			this,
+		)
 		return this.getModel()
+	}
+
+	async ensureModelFetched(signal?: AbortSignal): Promise<void> {
+		await this.ensureCatalogLoaded(async () => {
+			// The caller's signal is deliberately not threaded into fetchModel(): this load
+			// is shared by every waiter on the handler, so binding it to one caller's signal
+			// would cancel the fetch for the others. The signal still detaches this caller's
+			// own wait (see ensureCatalogLoaded), and the shared fetch stays bounded by
+			// modelCache's single-flight timeout.
+			await this.fetchModel()
+			// fetchModel() returns model info, not the catalog, so report emptiness
+			// from the catalog it assigned: an empty response must stay retryable.
+			return Object.keys(this.models).length > 0
+		}, signal)
 	}
 
 	override getModel() {
@@ -210,7 +249,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 		}
 	}
 
-	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
 		const { id: model, maxTokens: max_tokens, temperature } = await this.fetchModel()
 
 		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: "system", content: prompt }]

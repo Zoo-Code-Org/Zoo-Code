@@ -2,7 +2,7 @@
 	"name": "roo-code",
 	"packageManager": "pnpm@10.8.1",
 	"engines": {
-		"node": "22.23.1"
+		"node": "22.23.4"
 	},
 	"scripts": {
 		"preinstall": "node scripts/bootstrap.mjs",
@@ -13,14 +13,22 @@
 		"check-types": "turbo check-types --log-order grouped --output-logs new-only",
 		"test": "turbo test --log-order grouped --output-logs new-only",
 		"test:code-qa-ci": "node --test scripts/code-qa-workflow.test.mjs",
+		"solheim:smoke": "node --import tsx scripts/solheim-smoke/driver.mts",
+		"test:solheim-smoke-ci": "node --test scripts/solheim-smoke-workflow.test.mjs",
+		"test:solheim-smoke:unit": "node --import tsx --test scripts/solheim-smoke/*.test.ts",
+		"solheim-smoke:check-types": "tsc -p scripts/solheim-smoke/tsconfig.json",
+		"test:agent-evals:unit": "node --import tsx --test scripts/agent-evals/*.test.ts",
+		"agent-evals:check-types": "tsc -p scripts/agent-evals/tsconfig.json",
 		"test:mutation-ci": "node --test scripts/stryker-diff.test.mjs",
-		"lifecycle:model-check": "tsx scripts/check-task-lifecycle.ts && tsx scripts/check-task-store-concurrency.ts && tsx scripts/check-provider-handoff-scheduler.ts && pnpm cleanup-protocol:model-check && pnpm parser-scope:model-check && tsx scripts/check-completion-persistence.ts && tsx scripts/check-delegated-mode-readers.ts",
+		"lifecycle:model-check": "tsx scripts/check-task-lifecycle.ts && tsx scripts/check-task-store-concurrency.ts && tsx scripts/check-provider-handoff-scheduler.ts && pnpm cleanup-protocol:model-check && pnpm parser-scope:model-check && tsx scripts/check-completion-persistence.ts && tsx scripts/check-delegated-mode-readers.ts && pnpm tool-turn:model-check",
 		"fanout-protocol:model-check": "tsx scripts/check-task-fanout-protocol.ts",
 		"cleanup-protocol:model-check": "tsx scripts/check-task-cleanup-protocol.ts",
+		"tool-turn:model-check": "tsx scripts/check-tool-turn-continuation.ts",
 		"parser-scope:model-check": "node scripts/run-native-tool-call-parser-scoping.mjs",
 		"mcp:integration-check": "tsx scripts/check-mcp-oauth-integration.ts",
 		"test:coverage": "turbo test:coverage --log-order grouped --output-logs new-only",
 		"format": "turbo format --log-order grouped --output-logs new-only",
+		"format:check": "prettier --check .",
 		"build": "turbo build --log-order grouped --output-logs new-only",
 		"bundle": "turbo bundle --log-order grouped --output-logs new-only",
 		"vsix": "turbo vsix --log-order grouped --output-logs new-only",
@@ -29,28 +37,67 @@
 		"code-server:install": "node scripts/code-server.js",
 		"changeset:version": "cp CHANGELOG.md src/CHANGELOG.md && changeset version && cp -vf src/CHANGELOG.md .",
 		"knip": "knip",
-		"npm:publish:types": "pnpm --filter @roo-code/types npm:publish"
+		"npm:publish:types": "pnpm --filter @roo-code/types npm:publish",
+		"knip:production": "knip --production",
+		"test:knip-policy": "node --test scripts/knip-policy.test.mjs"
 	},
 	"devDependencies": {
-		"@changesets/cli": "2.31.0",
+		"@changesets/cli": "2.31.1",
 		"@roo-code/config-typescript": "workspace:^",
+		"@roo-code/ipc": "workspace:^",
+		"@roo-code/types": "workspace:^",
+		"@vscode/test-electron": "2.5.2",
 		"@stryker-mutator/core": "10.0.0",
 		"@stryker-mutator/vitest-runner": "10.0.0",
-		"@types/node": "22.20.1",
+		"@types/node": "catalog:",
 		"@vscode/vsce": "3.9.2",
-		"esbuild": "0.28.1",
-		"eslint": "9.39.4",
+		"esbuild": "0.28.2",
+		"eslint": "9.39.5",
 		"husky": "9.1.7",
-		"knip": "5.60.2",
+		"knip": "5.88.1",
 		"lint-staged": "16.4.0",
 		"ovsx": "0.10.12",
-		"prettier": "3.8.4",
+		"prettier": "3.9.10",
 		"rimraf": "6.0.1",
-		"tsx": "4.22.4",
-		"turbo": "2.10.0",
-		"typescript": "5.9.3"
+		"tsx": "4.23.15",
+		"turbo": "catalog:",
+		"typescript": "5.9.3",
+		"yaml": "2.9.1"
 	},
 	"lint-staged": {
+		"src/**/*.ts": [
+			"pnpm --dir src exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"webview-ui/src/**/*.{ts,tsx}": [
+			"pnpm --dir webview-ui exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"apps/cli/src/**/*.ts": [
+			"pnpm --dir apps/cli exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"apps/vscode-e2e/src/**/*.ts": [
+			"pnpm --dir apps/vscode-e2e exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"packages/build/src/**/*.ts": [
+			"pnpm --dir packages/build exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"packages/cloud/src/**/*.ts": [
+			"pnpm --dir packages/cloud exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"packages/core/src/**/*.ts": [
+			"pnpm --dir packages/core exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"packages/ipc/src/**/*.ts": [
+			"pnpm --dir packages/ipc exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"packages/telemetry/src/**/*.ts": [
+			"pnpm --dir packages/telemetry exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"packages/types/src/**/*.ts": [
+			"pnpm --dir packages/types exec eslint --max-warnings=0 --no-warn-ignored"
+		],
+		"packages/vscode-shim/src/**/*.ts": [
+			"pnpm --dir packages/vscode-shim exec eslint --max-warnings=0 --no-warn-ignored"
+		],
 		"*.{js,jsx,ts,tsx,json,css,md}": [
 			"prettier --write"
 		]
@@ -61,10 +108,14 @@
 		],
 		"overrides": {
 			"tar-fs": ">=3.1.1",
-			"esbuild": "0.28.1",
+			"mocha>diff": "8.0.4",
+			"esbuild": "0.28.2",
 			"rollup": "4.60.4",
-			"vite": "8.1.0",
-			"undici": "6.28.0",
+			"vite": "catalog:",
+			"undici": "6.29.1",
+			"@ai-sdk/provider@3": "3.0.19",
+			"@ai-sdk/provider-utils@4": "4.0.62",
+			"@ai-sdk/openai-compatible@2": "2.0.87",
 			"form-data": ">=4.0.4",
 			"bluebird": ">=3.7.2",
 			"glob": "11.1.0",
@@ -72,7 +123,9 @@
 			"@types/react": "18.3.31",
 			"@types/react-dom": "18.3.7",
 			"csstype": "3.2.3",
-			"zod": "3.25.76"
+			"zod": "4.6.7",
+			"@lmstudio/sdk>zod": "3.25.76",
+			"katex": "0.18.2"
 		}
 	}
 }

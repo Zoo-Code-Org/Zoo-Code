@@ -371,6 +371,10 @@
 				"label": "啟用破壞性命令防護",
 				"description": "下載並使用適用於此平台的 Destructive Command Guard（DCG）。DCG 允許的命令會自動執行。被 DCG 阻擋的命令需要你核准後才能執行。啟用後，Zoo 的命令清單將停用。關閉此選項時，已下載的執行檔會保留。"
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "允許自動執行的命令",
 			"allowedCommandsDescription": "啟用「始終核准執行」時，可自動執行的命令前綴。新增 * 可允許所有命令（請謹慎使用）。",
 			"deniedCommands": "拒絕的命令",
@@ -421,6 +425,11 @@
 		"vscodeLmDescription": "VS Code 語言模型 API 可以讓您使用其他擴充功能（如 GitHub Copilot）提供的模型。最簡單的方式是從 VS Code Marketplace 安裝 Copilot 和 Copilot Chat 擴充套件。",
 		"awsCustomArnUse": "輸入您要使用的模型的有效 Amazon Bedrock ARN。格式範例：",
 		"awsCustomArnDesc": "確保 ARN 中的區域與您上面選擇的 AWS 區域相符。",
+		"awsCustomArnBaseModel": "底層模型",
+		"awsCustomArnBaseModelOther": "其他（未列出）",
+		"awsCustomArnBaseModelDesc": "此 ARN 指向的模型。Zoo Code 用它來決定思考、溫度、上下文視窗、最大輸出和定價。當 ARN 包含模型名稱時會自動偵測。",
+		"awsCustomArnContextWindow": "上下文視窗（tokens）",
+		"awsCustomArnMaxTokens": "最大輸出 tokens",
 		"openRouterApiKey": "OpenRouter API 金鑰",
 		"getOpenRouterApiKey": "取得 OpenRouter API 金鑰",
 		"vercelAiGatewayApiKey": "Vercel AI Gateway API 金鑰",
@@ -429,6 +438,12 @@
 		"getOpencodeGoApiKey": "取得 Opencode Go API 金鑰",
 		"kenariApiKey": "Kenari API 金鑰",
 		"getKenariApiKey": "取得 Kenari API 金鑰",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "IO Intelligence API 金鑰",
+			"getApiKey": "取得 IO Intelligence API 金鑰",
+			"model": "模型"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API 金鑰",
@@ -557,6 +572,8 @@
 		"openAiApiKey": "OpenAI API 金鑰",
 		"apiKey": "API 金鑰",
 		"openAiBaseUrl": "基礎 URL",
+		"openAiStrictToolSchemas": "嚴格工具 schema（strict: true）",
+		"openAiStrictToolSchemasDescription": "向工具 schema 一併傳送 strict: true 以啟用嚴格的 schema 遵循。停用以使用非嚴格工具呼叫。",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure 部署名稱",
 		"azureOpenAiDeploymentNameDescription": "請輸入 Azure AI Studio 中的部署名稱，而不是底層模型名稱。",
@@ -595,6 +612,16 @@
 		"enablePromptCaching": "啟用提示快取",
 		"enablePromptCachingTitle": "啟用提示快取以提升支援的模型效能並降低成本。",
 		"cacheUsageNote": "注意：如果您沒有看到快取使用情況，請嘗試選擇其他模型，然後重新選擇您想要的模型。",
+		"githubCopilot": {
+			"accountActions": "GitHub Copilot 帳戶動作",
+			"signIn": "登入 GitHub",
+			"reconnect": "重新連線 GitHub",
+			"signedIn": "已以 {{account}} 身分登入",
+			"connecting": "連線中...",
+			"noModels": "沒有可用的 Copilot 模型。請安裝或啟用 GitHub Copilot Chat，使用符合資格的 GitHub 帳戶登入，然後重新整理。登入並不能確認你擁有 Copilot 訂閱。GitHub 方案、進階要求與速率限制皆適用。",
+			"manageAccount": "管理 GitHub 帳戶",
+			"manageAccountDescription": "開啟 VS Code 的帳戶選單，你可以在其中登出 GitHub。登出會影響 Copilot 以及使用此帳戶的其他擴充功能。"
+		},
 		"vscodeLmModel": "語言模型",
 		"vscodeLmWarning": "注意：透過 VS Code Language Model API 存取的模型可能由供應商封裝或微調，因此其行為可能與直接從一般供應商或路由器使用相同模型時不同。要使用「Language Model」下拉式選單中的模型，請先切換到該模型，然後在 Copilot Chat 提示中點選「接受」；否則可能會出現 400「The requested model is not supported」等錯誤。",
 		"googleCloudSetup": {
@@ -622,7 +649,7 @@
 			"baseUrl": "基礎 URL（選用）",
 			"modelId": "模型 ID",
 			"apiKey": "Ollama API 金鑰",
-			"apiKeyHelp": "用於已驗證 Ollama 執行個體或雲端服務的選用 API 金鑰。本機安裝請留空。",
+			"apiKeyHelp": "選用的 API 金鑰,用於需要驗證的 Ollama 執行個體或雲端服務。Zoo Code 只把金鑰傳送到 HTTPS 或迴路端點。遠端 HTTP 端點不會收到金鑰,因為金鑰會以明文傳輸。需要金鑰的遠端執行個體請使用 HTTPS。本機安裝請留空。",
 			"numCtx": "上下文視窗大小（num_ctx）",
 			"numCtxHelp": "覆寫模型的預設上下文視窗大小。留空以使用模型的 Modelfile 設定。最小值為 128。",
 			"thinking": "啟用思考",
@@ -688,6 +715,10 @@
 			"description": "在顯示「Zoo 遇到問題」對話方塊前允許的連續錯誤或重複操作次數。設定為 0 可停用此安全機制（永不觸發）。",
 			"unlimitedDescription": "已啟用無限重試（自動繼續）。對話方塊將永遠不會出現。",
 			"warning": "⚠️ 設定為 0 允許無限重試，這可能會消耗大量 API 使用量"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "重複軟警告閾值",
+			"description": "在連續這麼多次相同的工具呼叫後，該工具將被封鎖，並要求 AI 說明重試理由——無需你參與。設定為 0 可停用軟警告。"
 		},
 		"reasoningEffort": {
 			"label": "模型推理強度",
@@ -847,6 +878,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "預設摺疊命令輸出",
+			"description": "預設摺疊命令輸出，包括內嵌終端機輸出。需要時可手動展開。此設定不會變更命令執行方式。"
+		},
 		"basic": {
 			"label": "終端機設定：基本",
 			"description": "基本終端機設定"
@@ -1014,8 +1049,14 @@
 		"rangeDescription": "較高值使輸出更隨機，較低值更確定"
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "未回報圖片支援情況",
+		"toolSupportUnknown": "未回報工具支援情況",
+		"promptCacheManagedByCopilot": "提示詞快取由 GitHub Copilot 管理",
+		"promptCacheCopilotDetails": "快取行為取決於模型與 GitHub Copilot 後端。Zoo Code 無法透過 VS Code API 設定快取保留時間，也無法觀察快取命中情況。",
 		"supportsImages": "支援影像",
 		"noImages": "不支援影像",
+		"supportsTools": "支援工具",
+		"noTools": "不支援工具",
 		"supportsPromptCache": "支援提示快取",
 		"noPromptCache": "不支援提示快取",
 		"contextWindow": "上下文視窗：",

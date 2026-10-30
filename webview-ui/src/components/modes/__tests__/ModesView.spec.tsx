@@ -43,6 +43,16 @@ describe("PromptsView", () => {
 		vitest.clearAllMocks()
 	})
 
+	it("shows the schema error when creating a mode without a name", async () => {
+		renderPromptsView()
+		fireEvent.click(screen.getByTestId("add-mode-button"))
+		fireEvent.click(screen.getByText("prompts:createModeDialog.buttons.create"))
+
+		await waitFor(() => {
+			expect(screen.getByText("Name is required")).toBeInTheDocument()
+		})
+	})
+
 	it("displays the current mode name in the select trigger", () => {
 		renderPromptsView({ mode: "code" })
 		const selectTrigger = screen.getByTestId("mode-select-trigger")

@@ -346,6 +346,10 @@
 				"label": "Ativar a proteção contra comandos destrutivos",
 				"description": "Baixa e usa o Destructive Command Guard (DCG) para esta plataforma. Comandos permitidos pelo DCG são executados automaticamente. Comandos bloqueados pelo DCG precisam da sua aprovação. As listas de comandos do Zoo ficam desativadas enquanto esta opção estiver ativa. O executável baixado é mantido se você desativá-la."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "Comandos de auto-execução permitidos",
 			"allowedCommandsDescription": "Prefixos de comando que podem ser auto-executados quando \"Aprovar sempre operações de execução\" está ativado. Adicione * para permitir todos os comandos (use com cautela).",
 			"deniedCommands": "Comandos negados",
@@ -394,6 +398,11 @@
 		"vscodeLmDescription": "A API do Modelo de Linguagem do VS Code permite executar modelos fornecidos por outras extensões do VS Code (incluindo, mas não se limitando, ao GitHub Copilot). A maneira mais fácil de começar é instalar as extensões Copilot e Copilot Chat no VS Code Marketplace.",
 		"awsCustomArnUse": "Insira um ARN Amazon Bedrock válido para o modelo que deseja usar. Exemplos de formato:",
 		"awsCustomArnDesc": "Certifique-se de que a região no ARN corresponde à região AWS selecionada acima.",
+		"awsCustomArnBaseModel": "Modelo subjacente",
+		"awsCustomArnBaseModelOther": "Outro (não listado)",
+		"awsCustomArnBaseModelDesc": "O modelo para o qual este ARN aponta. O Zoo Code o usa para raciocínio, temperatura, janela de contexto, saída máxima e preços. Detectado automaticamente quando o ARN indica o modelo.",
+		"awsCustomArnContextWindow": "Janela de contexto (tokens)",
+		"awsCustomArnMaxTokens": "Tokens máximos de saída",
 		"openRouterApiKey": "Chave de API OpenRouter",
 		"getOpenRouterApiKey": "Obter chave de API OpenRouter",
 		"vercelAiGatewayApiKey": "Chave API do Vercel AI Gateway",
@@ -402,6 +411,12 @@
 		"getOpencodeGoApiKey": "Obter chave API do Opencode Go",
 		"kenariApiKey": "Chave API do Kenari",
 		"getKenariApiKey": "Obter chave API do Kenari",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "Chave de API do IO Intelligence",
+			"getApiKey": "Obter chave de API do IO Intelligence",
+			"model": "Modelo"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Chave API do NanoGPT",
@@ -530,6 +545,8 @@
 		"apiKey": "Chave de API",
 		"openAiApiKey": "Chave de API OpenAI",
 		"openAiBaseUrl": "URL Base",
+		"openAiStrictToolSchemas": "Schemas de ferramentas estritos (strict: true)",
+		"openAiStrictToolSchemasDescription": "Envia strict: true com os schemas de ferramentas para ativar a aderência estrita ao schema. Desative para usar chamada de ferramentas não estrita.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nome da implantação do Azure",
 		"azureOpenAiDeploymentNameDescription": "Insira o nome da implantação configurado no Azure AI Studio, não o nome do modelo subjacente.",
@@ -568,6 +585,16 @@
 		"enablePromptCaching": "Ativar cache de prompts",
 		"enablePromptCachingTitle": "Ativar cache de prompts para melhorar o desempenho e reduzir custos para modelos suportados.",
 		"cacheUsageNote": "Nota: Se você não vir o uso do cache, tente selecionar um modelo diferente e depois selecionar novamente o modelo desejado.",
+		"githubCopilot": {
+			"accountActions": "Ações da conta do GitHub Copilot",
+			"signIn": "Entrar no GitHub",
+			"reconnect": "Reconectar ao GitHub",
+			"signedIn": "Conectado como {{account}}",
+			"connecting": "Conectando...",
+			"noModels": "Nenhum modelo do Copilot disponível. Instale ou ative o GitHub Copilot Chat, entre com uma conta do GitHub elegível e atualize. Entrar não confirma uma assinatura do Copilot. Aplicam-se os limites do seu plano do GitHub, de solicitações premium e de taxa.",
+			"manageAccount": "Gerenciar conta do GitHub",
+			"manageAccountDescription": "Abre o menu de contas do VS Code, onde você pode sair do GitHub. Sair afeta o Copilot e outras extensões que usam esta conta."
+		},
 		"vscodeLmModel": "Modelo de Linguagem",
 		"vscodeLmWarning": "Observação: Modelos acessados pela VS Code Language Model API podem ser encapsulados ou ajustados pelo provedor, portanto o comportamento pode diferir do uso direto do mesmo modelo em um provedor ou roteador típico. Para usar um modelo no menu suspenso «Language Model», primeiro altere para esse modelo e depois clique em «Aceitar» no prompt do Copilot Chat; caso contrário, você pode ver um erro como 400 «The requested model is not supported».",
 		"googleCloudSetup": {
@@ -595,7 +622,7 @@
 			"baseUrl": "URL Base (opcional)",
 			"modelId": "ID do Modelo",
 			"apiKey": "Chave API Ollama",
-			"apiKeyHelp": "Chave API opcional para instâncias Ollama autenticadas ou serviços em nuvem. Deixe vazio para instalações locais.",
+			"apiKeyHelp": "Chave API opcional para instâncias Ollama que precisam de autenticação ou para serviços em nuvem. O Zoo Code envia a chave somente para endpoints HTTPS ou loopback. Um endpoint HTTP remoto não recebe a chave, porque a chave seguiria em texto simples. Use HTTPS para uma instância remota que precisa de uma chave. Deixe vazio para uma instalação local.",
 			"numCtx": "Tamanho da janela de contexto (num_ctx)",
 			"numCtxHelp": "Substitui o tamanho da janela de contexto padrão do modelo. Deixe em branco para usar a configuração do Modelfile do modelo. O valor mínimo é 128.",
 			"thinking": "Ativar raciocínio",
@@ -661,6 +688,10 @@
 			"description": "Número de erros consecutivos ou ações repetidas antes de exibir o diálogo 'Zoo está com problemas'. Defina como 0 para desativar este mecanismo de segurança (ele nunca será acionado).",
 			"unlimitedDescription": "Tentativas ilimitadas ativadas (prosseguimento automático). O diálogo nunca aparecerá.",
 			"warning": "⚠️ Definir como 0 permite tentativas ilimitadas, o que pode consumir um uso significativo da API"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "Limite de aviso suave de repetição",
+			"description": "Após esse número de chamadas de ferramenta idênticas consecutivas, a ferramenta é bloqueada e a IA é solicitada a justificar a nova tentativa, sem envolver você. Defina como 0 para desativar os avisos suaves."
 		},
 		"reasoningEffort": {
 			"label": "Esforço de raciocínio do modelo",
@@ -820,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Recolher a saída dos comandos por padrão",
+			"description": "Mostra recolhida a saída dos comandos, incluindo a do terminal inline. Expanda manualmente quando necessário. Isso não altera a execução dos comandos."
+		},
 		"basic": {
 			"label": "Configurações do terminal: Básicas",
 			"description": "Configurações básicas do terminal"
@@ -987,8 +1022,14 @@
 		"rangeDescription": "Valores mais altos tornam a saída mais aleatória, valores mais baixos a tornam mais determinística."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Suporte a imagens não informado",
+		"toolSupportUnknown": "Suporte a ferramentas não informado",
+		"promptCacheManagedByCopilot": "O cache de prompts é gerenciado pelo GitHub Copilot",
+		"promptCacheCopilotDetails": "O cache depende do modelo e do backend do GitHub Copilot. O Zoo Code não pode configurar a retenção do cache nem observar acertos de cache pela API do VS Code.",
 		"supportsImages": "Suporta imagens",
 		"noImages": "Não suporta imagens",
+		"supportsTools": "Suporta ferramentas",
+		"noTools": "Não suporta ferramentas",
 		"supportsPromptCache": "Suporta cache de prompts",
 		"noPromptCache": "Não suporta cache de prompts",
 		"contextWindow": "Janela de Contexto:",

@@ -6,15 +6,16 @@ Zoo Code checks task lifecycle protocols through one umbrella command for indepe
 pnpm lifecycle:model-check
 ```
 
-The baseline command runs seven independent bounded checks in sequence:
+The baseline command runs eight independent bounded checks in sequence:
 
 1. the persisted task delegation lifecycle;
 2. shared-store concurrency across task-history hosts;
 3. production-backed handoff reducers with an abstract provider/scheduler protocol;
 4. the task cleanup protocol;
 5. request-stream parser scoping;
-6. completion persistence; and
-7. delegated-mode reader refinement.
+6. completion persistence;
+7. delegated-mode reader refinement; and
+8. tool-turn continuation.
 
 The planned two-sibling fan-out protocol is intentionally outside the baseline and CI umbrella. Run it explicitly with `pnpm fanout-protocol:model-check`; it describes optional future functionality, not current production coverage.
 
@@ -41,17 +42,20 @@ TLA+/PlusCal or Quint with TLC becomes a better fit when the lifecycle needs tem
 
 ## Production mapping
 
-| Model concept             | Production concept                                                                   |
-| ------------------------- | ------------------------------------------------------------------------------------ |
-| Task record and status    | `HistoryItem` persisted by `TaskHistoryStore`                                        |
-| `delegate(parent, child)` | `ClineProvider.delegateParentAndOpenChild`                                           |
-| `interrupt(child)`        | cancellation or eviction through `markDelegatedChildInterrupted`                     |
-| `complete(child)`         | `ClineProvider.reopenParentFromDelegation`                                           |
-| `abandon(child)`          | `ClineProvider.abandonSubtask`                                                       |
-| Atomic event step         | `atomicReadAndUpdate`, `atomicUpdatePair`, and per-parent delegation transition lock |
-| Event interleaving        | Competing completion, cancellation, abandonment, and new delegation calls            |
+| Model concept             | Production concept                                                                                                   |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Task record and status    | `HistoryItem` persisted by `TaskHistoryStore`                                                                        |
+| `delegate(parent, child)` | `ClineProvider.delegateParentAndOpenChild`                                                                           |
+| `interrupt(child)`        | cancellation or eviction through `markDelegatedChildInterrupted`                                                     |
+| `complete(child)`         | `ClineProvider.reopenParentFromDelegation`                                                                           |
+| `abandon(child)`          | `ClineProvider.abandonSubtask`                                                                                       |
+| Pending-action settlement | `TaskHistoryStore.clearPendingActionIfMatching` compare-and-clear in the rejected-delegation settlement path (#1714) |
+| Atomic event step         | `atomicReadAndUpdate`, `atomicUpdatePair`, and per-parent delegation transition lock                                 |
+| Event interleaving        | Competing completion, cancellation, abandonment, and new delegation calls                                            |
 
 The model has three fixed task slots, enough to cover competing siblings and a nested parent-child-grandchild chain. It explores every reachable interleaving through depth 12, deduplicating canonical states. Representative checks also exercise rejected operations that do not create a new state: a second concurrent delegation while the first child is active, stale completion after re-delegation, late completion after abandonment, completion after interruption, and nested completion. Named semantic landmarks require the graph to retain interrupted-child re-delegation and nested delegation even when the raw state total changes.
+
+Each task slot can also hold one of two pending `create_subtask` actions. A `stage` action mirrors `setPendingTaskAction` overwrite semantics, delegation clears the action its request carried, completion clears the child's action only when its event carries the matching action ID, and a `settle-rejected` action models the settlement that follows an authoritative delegation rejection (#1714). Production settles through the typed `LifecycleTransitionError` from the shared guards: the provider calls the disk-authoritative `TaskHistoryStore.clearPendingActionIfMatching` compare-and-clear under the per-file lock, then propagates the original rejection. Six named witnesses must remain reachable: settlement from an interrupted record after rejection, settlement through a successful active delegation, unrelated-action preservation during completion, stale-action protection where a settlement targeting one action ID leaves a replacement action intact, matching-ID completion clearing, and replacement-ID completion preservation. A mismatched pending-action request keeps its production behavior: the atomic update throws before any transition, and no settlement runs.
 
 Production completion also accepts a recovery-compatible `active` parent that still awaits the returning child, then clears the stale pointers. Normal model transitions never create that intermediate state, so it is covered by a focused reducer test rather than admitted as a generally valid reachable state.
 
@@ -63,6 +67,7 @@ The same `pnpm lifecycle:model-check` command also runs a second bounded explore
 - store read/update operations hold the host mutex, while live-task snapshots used by completion and message saves may outlive it;
 - a write delta is computed relative to that host's cache;
 - revalidation under the per-file disk lock checks only status-transition legality;
+- the rejected-delegation settlement compare-and-clear decides inside the disk merge callback, so a replacement action persisted by another host is never cleared;
 - fields absent from the delta preserve the current disk value, `childIds` are unioned, and other same-field conflicts are last-writer-wins;
 - `atomicUpdatePair` commits its files in order, with another host able to act between file commits;
 - successful pair-operation cache entries publish together after both file writes; if the second write fails, the cache publishes only the first committed record;
@@ -72,18 +77,54 @@ There is no production record version or compare-and-swap token today. The model
 
 Two desired properties are currently false and remain issue-keyed shortest-witness ratchets rather than silently allowed assertion failures:
 
-- [#1469](https://github.com/Zoo-Code-Org/Zoo-Code/issues/1469): an old completion can commit after a newer handoff and clear it because disk revalidation checks status legality, not exact-child ownership.
+- [#1469](https://github.com/Zoo-Code-Org/Zoo-Code/issues/1469): an old completion can commit after a newer handoff and clear it because disk revalidation checks status legality and has no lock-time ownership check.
 - [#1021](https://github.com/Zoo-Code-Org/Zoo-Code/issues/1021): after abandonment and cache refresh, a stale live-task save can preserve the new interrupted status while restoring old lineage fields.
+
+The lock-time ownership check required to promote the #1469 witness to a universal invariant, the production two-store test required for that promotion, and the lineage field-ownership contract and monotonic-detachment invariant behind #1021 are specified in the [persisted ownership and generation model](./task-lifecycle-persisted-ownership-model.md) (`LIFE-BLK-P1-001`, `LIFE-BLK-P1-002`).
 
 CI fails if either exact causal witness or violation class changes, a witness disappears without being promoted to a universal invariant, a named semantic landmark or modeled phase becomes unreachable, a new safety violation appears, or exploration truncates. Raw reachable-state totals are printed as diagnostics, not used as ratchets: harmless representation changes can alter them without weakening protocol coverage.
 
 The known-unsafe witnesses currently compare exact shortest action sequences. This is intentionally simple and reviewable, but brittle to harmless action renames or serialization refactors. A causal partial-order comparator would reduce that brittleness but would add a second trace-equivalence protocol to maintain. Until that complexity is justified, update an exact witness only after confirming the terminal violation class and required causal ordering are unchanged.
 
-`TaskHistoryStore.realConcurrency.spec.ts` complements the abstract interleavings with one synchronized integration smoke check through the real `proper-lockfile` and filesystem rename path; broader VS Code E2E remains reserved for restart and extension-host behavior.
+`TaskHistoryStore.realConcurrency.spec.ts` complements the abstract interleavings with real-filesystem checks through the real `proper-lockfile` and filesystem rename path, including stale-settlement compare-and-clear. History-file deletion holds the same per-file advisory lock as `safeWriteJson` around each unlink, and the real-filesystem suite covers a deletion that targets the settlement read-to-commit window plus schema and task-ID validation of the locked disk record before settlement (#1726). That lock serialization is best-effort: a lock acquisition or unlink failure is swallowed, so a deletion can proceed without the lock and the two sides serialize only when both acquire it. Restart recovery is covered by `Task.persistence.spec.ts`: it refreshes the persisted record first, treats a refreshed interrupted `create_subtask` action as rejected, settles that exact action before replay, adopts the authoritative pending action, blocks replay when an adopted action is missing from the loaded conversation, and stops replay on a failed refresh, lookup, or settlement rather than creating another child. Broader VS Code E2E remains reserved for other restart and extension-host behavior.
 
 ## Task cleanup protocol model
 
 The umbrella command also runs a separate bounded child model for in-memory abort, disposal, and provider-shutdown ordering. It models cleanup settlement and rejection as environment transitions and makes no filesystem, editor Promise, fairness, or timing-liveness claim. See [Task cleanup protocol model check](./task-cleanup-protocol-model.md).
+
+## Tool-turn continuation model
+
+`scripts/check-tool-turn-continuation.ts` is a separate bounded child model for the in-memory handoff between the presenter and the request loop. It also runs directly with `pnpm tool-turn:model-check`. It models one assistant turn with two tool blocks and one trailing text block. It makes no claim about tool handlers, approvals, or timing liveness.
+
+The model maps its state to production fields as follows:
+
+| Model state                | Production field                                                                                                                        |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `phase`, `index`           | `Task.assistantMessageContent` partial flags, matching `tool_result` blocks in `userMessageContent`, and `currentStreamingContentIndex` |
+| `stream`                   | `didCompleteReadingStream`                                                                                                              |
+| `lock`, `owner`, `pending` | `presentAssistantMessageLocked` and `presentAssistantMessageHasPendingUpdates`, owned by the `presentAssistantMessage` wrapper          |
+| `latch`                    | `userMessageContentReady`                                                                                                               |
+| `epoch`                    | the per-request reset in the request loop (`Task.ts`)                                                                                   |
+| `poll` and `post-wait`     | the `pWaitFor` condition and the abort check that follows it                                                                            |
+
+The checker enforces these invariants in every reachable state:
+
+1. The next request never starts while a tool block has no result.
+2. The next request never starts while a presenter pass is live.
+3. The presenter lock is never held without a live pass, including after a presenter failure.
+4. A released lock never hides a pending update, unless the task aborted or a pass failed.
+5. The next request never starts after abort.
+6. Every reachable state either can continue without abort or has started the request.
+7. A live pass always holds the lock.
+
+Five injected policies must each violate one named invariant: a latch-only wait (the #1883 hang), a readiness check with no lock gate, a check on the first tool result only, a presenter that keeps the lock after a failure, and a wait with no abort check. Six landmarks keep the intended paths reachable, including recovery from a lost latch, continuation after a presenter failure, a two-tool turn, abort on a ready turn, and a stale pass that unwinds after a retry.
+
+The model has two documented gaps. The checker asserts that both still reproduce, so a fix must update the model and this section:
+
+- A presenter failure on a tool block before it pushes a result releases the lock but leaves no result. The derived check stays false and the wait has no timeout. This hang existed before the derived check, when the lock stayed held. The change deliberately does not synthesize a tool result.
+- The wrapper `finally` clears the lock without an ownership check. After a mid-stream retry resets the turn, a stale pass that unwinds late can clear the lock of a newer pass and break invariant 7. A per-pass owner token removes this gap in the model. Invariants 1 to 7 hold for that policy.
+
+This model is not production-backed. The flags are fields on `Task`, not pure reducers. The real-presenter tests in `Task.spec.ts` and `presentAssistantMessage-custom-tool.spec.ts` tie it to production. A later change can extract the readiness check as a pure function so the checker and `Task` share it.
 
 ## Provider handoff and scheduler model
 
@@ -134,6 +175,8 @@ The task delegation checker currently enforces:
 5. Parent-child lineage is acyclic.
 6. Completed task records cannot be changed by later lifecycle events.
 7. Active-child re-delegation, stale completion after ownership moves to another child, duplicate/late completion, and abandonment of a live child are rejected by the shared production guards.
+8. A rejected delegation settles only the exact matching pending `create_subtask` action. Settlement preserves status, lineage, and accounting, never clears a replacement or different-kind action, and never mutates a completed record. The settlement compare-and-clear reads the persisted record under the per-file lock, so it never clears from a stale host cache.
+9. A completion clears the completing child's pending action only when the completion event carries the exact matching action ID. A completion with no action ID or a different ID preserves the pending action.
 
 The completion persistence checker additionally enforces:
 
@@ -143,19 +186,19 @@ The completion persistence checker additionally enforces:
 4. Delegated completion crosses the same durability boundary as standalone completion and requires successful parent reopen.
 5. A failed delegated parent reopen cannot emit the delegated completion event.
 
-These are safety claims within the documented bounds. The checks do not claim liveness, fairness, power-loss durability, filesystem-lock correctness, or exhaustive coverage of arbitrary task counts or retry counts. The completion explorer specifies the event contract rather than importing `Task` or `AttemptCompletionTool`; focused unit tests and the restart E2E verify that concrete production paths implement the modeled guards. Delegated reopen is abstracted as one success-or-failure event after durable child history; fallback from a failed reopen into the normal standalone completion flow remains production-test coverage rather than part of this model. The lifecycle checker also does not distinguish a delayed pre-interruption completion from a legitimate post-resume completion for the same child ID; that requires a persisted attempt/generation token before it can become a sound invariant.
+These are safety claims within the documented bounds. The checks do not claim liveness, fairness, power-loss durability, filesystem-lock correctness, or exhaustive coverage of arbitrary task counts or retry counts. The completion explorer specifies the event contract rather than importing `Task` or `AttemptCompletionTool`; focused unit tests and the restart E2E verify that concrete production paths implement the modeled guards. Delegated reopen is abstracted as one success-or-failure event after durable child history; fallback from a failed reopen into the normal standalone completion flow remains production-test coverage rather than part of this model. The lifecycle checker also does not distinguish a delayed pre-interruption completion from a legitimate post-resume completion for the same child ID; that requires a persisted attempt/generation token before it can become a sound invariant. The two-generation contract, acceptance/rejection landmarks, and bounded future checker shape are specified in the [persisted ownership and generation model](./task-lifecycle-persisted-ownership-model.md) (`LIFE-BLK-P1-012`).
 
 ## Coverage audit
 
-| Protocol area                  | Coverage status                                                              | Production/model relationship                                                                                                              | Explicit limits and open points                                                                                                                                                                                            |
-| ------------------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Delegation lifecycle           | Production-backed bounded universal                                          | The explorer calls the four production reducers for three task slots through depth 12.                                                     | Excludes provider instances, persistence failures, scheduler state, most live `Task` behavior, and generation identity for delayed pre-interruption completion. Recovery-compatible active-parent completion is test-only. |
-| Shared-store concurrency       | Production-backed bounded scenarios plus known-unsafe witnesses              | The explorer imports production delta/merge functions and reducers; a real-filesystem test is a smoke check.                               | Does not prove crash safety, filesystem/lock semantics, arbitrary processes, or loss-free same-field merging. #1469 and #1021 remain unsafe.                                                                               |
-| Provider handoff and scheduler | Mixed: production-backed reducers/selector plus abstract bounded protocol    | Commits use production reducers; provider ownership, publication, transition locks, and permits are model abstractions through depth 15.   | Selector correctness does not refine all downstream readers. Scheduler tests cover concrete permit behavior separately.                                                                                                    |
-| Optional fan-out scope         | Planned-only abstract bounded protocol outside baseline CI                   | The model has two sibling slots and two abstract permits and imports no production fan-out transition.                                     | Excluded from baseline closure; production fan-out remains separately scoped future functionality.                                                                                                                         |
-| Cleanup                        | Abstract bounded universal plus adapter tests                                | Abort, disposal, settlement, rejection, and provider shutdown are modeled as protocol/environment actions.                                 | No direct execution of all production cleanup methods, filesystem/editor promises, timing liveness, fairness, or arbitrary task counts.                                                                                    |
-| Parser request scope           | Production-backed bounded schedule replay                                    | The checker executes production parser APIs across 924 order-preserving schedules for two scopes.                                          | Assumes callers stop invoking a finalized scope; transport behavior, arbitrary request counts, indices, and malformed histories are outside the claim.                                                                     |
-| Completion persistence         | Abstract bounded universal plus production tests and one fresh-host E2E path | The model abstracts persistence as a durable phase with at most two write starts; production guards and retry paths are tested separately. | Production permits more retries; no power-loss/filesystem proof, fairness, arbitrary retry count, complete delegated fallback, provider status metadata, or downstream event-consumer model.                               |
+| Protocol area                  | Coverage status                                                              | Production/model relationship                                                                                                              | Explicit limits and open points                                                                                                                                                                                                                                                                                                 |
+| ------------------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Delegation lifecycle           | Production-backed bounded universal                                          | The explorer calls the production lifecycle and settlement reducers for three task slots through depth 12.                                 | Excludes provider instances, persistence failures, scheduler state, most live `Task` behavior, and generation identity for delayed pre-interruption completion. Recovery-compatible active-parent completion is test-only. Settlement models the matching-action request only; a mismatched action aborts the update unmodeled. |
+| Shared-store concurrency       | Production-backed bounded scenarios plus known-unsafe witnesses              | The explorer imports production delta/merge functions and reducers; a real-filesystem test is a smoke check.                               | Does not prove crash safety, filesystem/lock semantics, arbitrary processes, or loss-free same-field merging. #1469 and #1021 remain unsafe.                                                                                                                                                                                    |
+| Provider handoff and scheduler | Mixed: production-backed reducers/selector plus abstract bounded protocol    | Commits use production reducers; provider ownership, publication, transition locks, and permits are model abstractions through depth 15.   | Selector correctness does not refine all downstream readers. Scheduler tests cover concrete permit behavior separately.                                                                                                                                                                                                         |
+| Optional fan-out scope         | Planned-only abstract bounded protocol outside baseline CI                   | The model has two sibling slots and two abstract permits and imports no production fan-out transition.                                     | Excluded from baseline closure; production fan-out remains separately scoped future functionality.                                                                                                                                                                                                                              |
+| Cleanup                        | Abstract bounded universal plus adapter tests                                | Abort, disposal, settlement, rejection, and provider shutdown are modeled as protocol/environment actions.                                 | No direct execution of all production cleanup methods, filesystem/editor promises, timing liveness, fairness, or arbitrary task counts.                                                                                                                                                                                         |
+| Parser request scope           | Production-backed bounded schedule replay                                    | The checker executes production parser APIs across 924 order-preserving schedules for two scopes.                                          | Assumes callers stop invoking a finalized scope; transport behavior, arbitrary request counts, indices, and malformed histories are outside the claim.                                                                                                                                                                          |
+| Completion persistence         | Abstract bounded universal plus production tests and one fresh-host E2E path | The model abstracts persistence as a durable phase with at most two write starts; production guards and retry paths are tested separately. | Production permits more retries; no power-loss/filesystem proof, fairness, arbitrary retry count, complete delegated fallback, provider status metadata, or downstream event-consumer model.                                                                                                                                    |
 
 The production mapping above names primary lifecycle transitions, not every mutation or consumer. Generic store upserts, reconciliation, repair replay, migrations, tool entry points, webview/public API abandonment, provider status updates, and public `TaskCompleted` re-emission remain outside the persisted reducer graph unless explicitly named by a submodel or focused test. For task-local mode, the consumers named under #921/#1623 are a confirmed set, not an exhaustive repository-wide inventory; other mode-sensitive tools must be audited before claiming universal reader isolation.
 
@@ -197,6 +240,7 @@ The [Task lifecycle verification GAP report](./task-lifecycle-gap-report.md) is 
 - Shared status vocabulary: [#612](https://github.com/Zoo-Code-Org/Zoo-Code/issues/612).
 - Completion visibility history: [#1453](https://github.com/Zoo-Code-Org/Zoo-Code/issues/1453) and [#1279](https://github.com/Zoo-Code-Org/Zoo-Code/issues/1279).
 - Cross-instance history preservation: [#920](https://github.com/Zoo-Code-Org/Zoo-Code/issues/920).
+- Rejected-delegation pending-action settlement: [#1714](https://github.com/Zoo-Code-Org/Zoo-Code/issues/1714).
 - Parser request scoping: [#1468](https://github.com/Zoo-Code-Org/Zoo-Code/issues/1468).
 
 ## Extending the model

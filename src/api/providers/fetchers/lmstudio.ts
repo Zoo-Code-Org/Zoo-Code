@@ -3,13 +3,22 @@ import { LLM, LLMInfo, LLMInstanceInfo, LMStudioClient } from "@lmstudio/sdk"
 
 import { type ModelInfo, lMStudioDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
 
-import { flushModels, getModels } from "./modelCache"
+import { throwIfAborted } from "../utils/abort-signal"
+import { getLoggableOrigin } from "../utils/endpoint-origin"
+
+import type { ApiHandler } from "../../index"
+
+import { flushModels } from "./modelCache"
 
 const modelsWithLoadedDetails = new Set<string>()
 
 export const hasLoadedFullDetails = (modelId: string): boolean => modelsWithLoadedDetails.has(modelId)
 
-export const forceFullModelDetailsLoad = async (baseUrl: string, modelId: string): Promise<void> => {
+export const forceFullModelDetailsLoad = async (
+	baseUrl: string,
+	modelId: string,
+	handler: ApiHandler,
+): Promise<void> => {
 	try {
 		// Test the connection to LM Studio first
 		// Crrors will be caught further down.
@@ -19,13 +28,13 @@ export const forceFullModelDetailsLoad = async (baseUrl: string, modelId: string
 		const client = new LMStudioClient({ baseUrl: lmsUrl })
 		await client.llm.model(modelId)
 		// Flush and refresh cache to get updated model details
-		await flushModels({ provider: providerIdentifiers.lmstudio, baseUrl }, true)
+		await flushModels({ provider: providerIdentifiers.lmstudio, baseUrl }, handler, true)
 
 		// Mark this model as having full details loaded.
 		modelsWithLoadedDetails.add(modelId)
 	} catch (error) {
 		if (error.code === "ECONNREFUSED") {
-			console.warn(`Error connecting to LMStudio at ${baseUrl}`)
+			console.warn(`Error connecting to LMStudio at ${getLoggableOrigin(baseUrl)}`)
 		} else {
 			console.error(
 				`Error refreshing LMStudio model details: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
@@ -49,7 +58,10 @@ export const parseLMStudioModel = (rawModel: LLMInstanceInfo | LLMInfo): ModelIn
 	return modelInfo
 }
 
-export async function getLMStudioModels(baseUrl = "http://localhost:1234"): Promise<Record<string, ModelInfo>> {
+export async function getLMStudioModels(
+	baseUrl = "http://localhost:1234",
+	opts?: { signal?: AbortSignal },
+): Promise<Record<string, ModelInfo>> {
 	// clear the set of models that have full details loaded
 	modelsWithLoadedDetails.clear()
 	// clearing the input can leave an empty string; use the default in that case
@@ -66,8 +78,11 @@ export async function getLMStudioModels(baseUrl = "http://localhost:1234"): Prom
 
 		// test the connection to LM Studio first
 		// errors will be caught further down
-		await axios.get(`${baseUrl}/v1/models`)
+		await axios.get(`${baseUrl}/v1/models`, { signal: opts?.signal })
 
+		// The SDK's model-list calls expose no cancellation option, so an abort
+		// during them cannot reach the network; releasing the shared cache entry
+		// and stopping the waiters happens at the model-cache layer.
 		const client = new LMStudioClient({ baseUrl: lmsUrl })
 
 		// First, try to get all downloaded models
@@ -77,7 +92,7 @@ export async function getLMStudioModels(baseUrl = "http://localhost:1234"): Prom
 				// Use the model path as the key since that's what users select
 				models[model.path] = parseLMStudioModel(model)
 			}
-		} catch (error) {
+		} catch {
 			console.warn("Failed to list downloaded models, falling back to loaded models only")
 		}
 
@@ -116,8 +131,12 @@ export async function getLMStudioModels(baseUrl = "http://localhost:1234"): Prom
 			modelsWithLoadedDetails.add(lmstudioModel.modelKey)
 		}
 	} catch (error) {
+		// An aborted connection probe must reject instead of falling through to
+		// the empty-catalog handling below.
+		throwIfAborted(opts?.signal)
+
 		if (error.code === "ECONNREFUSED") {
-			console.warn(`Error connecting to LMStudio at ${baseUrl}`)
+			console.warn(`Error connecting to LMStudio at ${getLoggableOrigin(baseUrl)}`)
 		} else {
 			console.error(
 				`Error fetching LMStudio models: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,

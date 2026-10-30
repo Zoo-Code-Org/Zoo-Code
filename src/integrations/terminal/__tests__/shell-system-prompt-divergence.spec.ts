@@ -21,6 +21,7 @@ vi.mock("os", () => ({ userInfo: vi.fn(() => ({ shell: null })) }))
 
 const mockedExistsSync = existsSync as unknown as ReturnType<typeof vi.fn>
 
+const { BaseTerminal } = await import("../BaseTerminal")
 const { Terminal } = await import("../Terminal")
 const { getShell } = await import("../../../utils/shell")
 
@@ -31,6 +32,9 @@ describe("issue #634 — system prompt shell vs actual terminal shell divergence
 		originalPlatform = process.platform
 		Object.defineProperty(process, "platform", { value: "win32", configurable: true })
 		Terminal.setTerminalProfile(undefined)
+		// This suite exercises the VS Code profile report path; with inline terminal
+		// enabled, getShell() answers the execa default and ignores profiles entirely.
+		BaseTerminal.setShellIntegrationDisabled(false)
 		mockedExistsSync.mockReset()
 		// pwsh.exe exists — getShell() fallback path prefers PowerShell 7 over legacy
 		mockedExistsSync.mockImplementation((p: string) => p === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
@@ -39,6 +43,7 @@ describe("issue #634 — system prompt shell vs actual terminal shell divergence
 	afterEach(() => {
 		Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true })
 		Terminal.setTerminalProfile(undefined)
+		BaseTerminal.setShellIntegrationDisabled(false)
 		vi.restoreAllMocks()
 	})
 

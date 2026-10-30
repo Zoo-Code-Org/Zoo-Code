@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Выберите режим взаимодействия",
 	"selectApiConfig": "Выберите конфигурацию API",
+	"selectModel": "Выбрать модель",
+	"modelSelector": {
+		"title": "Модели",
+		"settings": "Настройки модели",
+		"description": "Выберите модель для этой конфигурации API.",
+		"searchPlaceholder": "Поиск моделей...",
+		"unsupportedTooltip": "Модель этого провайдера настраивается в Настройках",
+		"loading": "Загрузка моделей..."
+	},
 	"lockApiConfigAcrossModes": "Заблокировать конфигурацию API для всех режимов в этом рабочем пространстве",
 	"unlockApiConfigAcrossModes": "Конфигурация API заблокирована для всех режимов в этом рабочем пространстве (нажми, чтобы разблокировать)",
 	"enhancePrompt": "Улучшить запрос с дополнительным контекстом",
@@ -317,10 +326,10 @@
 		"title": "Выпущен Zoo Code {{version}}",
 		"support": "Поддержите Zoo Code, поставив нам звезду на <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Что нового:",
-			"highlight1": "🔑 Используйте свой API-ключ Zoo Gateway где угодно — подключите его к любому клиенту или workflow, совместимому с OpenAI: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 В течение ограниченного времени получите бесплатный доступ к MiniMax-M3 через Zoo Gateway.",
-			"highlight3": "✨ Уже доступны: совершенно новые модели GPT-6 Astra и Claude Fable 5.1."
+			"heading": "Что нового в Zoo Code v3.92.0",
+			"highlight1": "✨ Более быстрый выбор и улучшенная поддержка моделей: Переключай модели прямо в поле ввода чата. Используй Claude Haiku 5.5 в Amazon Bedrock, получай более точные возможности Kimi K3 в OpenRouter и применяй исправленные ограничения Gemini 4 Argon в Vercel AI Gateway.",
+			"highlight2": "🧭 Более надёжные рабочие процессы в терминале, редакторе, чате и удалённых средах: При желании сворачивай вывод команд по умолчанию, получай более понятные сообщения об ошибках редактирования, сохраняй строки рассуждений и API видимыми и избегай проблем с запуском и прокси в удалённых рабочих пространствах.",
+			"highlight3": "🔌 Расширенный маркетплейс MCP: Подключай Zoo Code к AnySearch, Mailtea и Tradehand через маркетплейс MCP."
 		},
 		"cloudAgents": {
 			"heading": "Новое в облаке:",
@@ -488,6 +497,10 @@
 		"serversPart_other": "{{count}} серверов MCP",
 		"messageTemplate": "У тебя включено {{tools}} через {{servers}}. Такое большое количество может сбить модель с толку и привести к ошибкам. Постарайся держать это ниже {{threshold}}.",
 		"openMcpSettings": "Открыть настройки MCP"
+	},
+	"ignoredDisabledTools": {
+		"title": "Отключённый инструмент проигнорирован",
+		"messageTemplate": "Следующие инструменты нельзя отключить, поэтому их записи в disabledTools были проигнорированы: {{tools}}."
 	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"
