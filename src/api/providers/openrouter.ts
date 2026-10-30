@@ -49,9 +49,15 @@ import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 type OpenRouterChatCompletionParams = OpenAI.Chat.ChatCompletionCreateParams & {
 	transforms?: string[]
 	include_reasoning?: boolean
+	// https://openrouter.ai/docs/guides/best-practices/prompt-caching#using-session_id-for-sticky-sessions
+	session_id?: string
 	// https://openrouter.ai/docs/use-cases/reasoning-tokens
 	reasoning?: OpenRouterReasoningParams
 }
+
+// OpenRouter rejects a `session_id` longer than this.
+// https://openrouter.ai/docs/guides/best-practices/prompt-caching#using-session_id-for-sticky-sessions
+const OPENROUTER_MAX_SESSION_ID_LENGTH = 256
 
 // Zod schema for OpenRouter error response structure (for caught exceptions)
 const OpenRouterErrorResponseSchema = z.object({
@@ -125,6 +131,8 @@ interface CompletionUsage {
 	prompt_tokens?: number
 	prompt_tokens_details?: {
 		cached_tokens?: number
+		// https://openrouter.ai/docs/guides/best-practices/prompt-caching#usage-object-fields
+		cache_write_tokens?: number
 	}
 	total_tokens?: number
 	cost?: number
@@ -219,6 +227,10 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 		let { id: modelId, maxTokens, temperature, topP, reasoning } = model
 
+		// OpenRouter caps `session_id` at 256 characters. Task IDs are UUIDs and
+		// far shorter, so this only guards against an over-long caller value.
+		const sessionId = metadata?.taskId?.slice(0, OPENROUTER_MAX_SESSION_ID_LENGTH)
+
 		// Reset reasoning_details accumulator for this request
 		this.currentReasoningDetails = []
 
@@ -302,9 +314,19 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			})
 		}
 
-		// https://openrouter.ai/docs/features/prompt-caching
-		// TODO: Add a `promptCacheStratey` field to `ModelInfo`.
-		if (OPEN_ROUTER_PROMPT_CACHING_MODELS.has(modelId)) {
+		// https://openrouter.ai/docs/guides/best-practices/prompt-caching
+		// TODO: Add a `promptCacheStrategy` field to `ModelInfo`.
+		// The allowlist is a static snapshot, so a Claude model released after it
+		// was last edited got no breakpoints even though OpenRouter advertises
+		// cache pricing for it. Trust the live capability flag for Claude and keep
+		// the allowlist as the fallback; Gemini and every other provider keep
+		// allowlist-only behavior because breakpoint placement is not
+		// interchangeable between them.
+		const supportsCacheBreakpoints =
+			OPEN_ROUTER_PROMPT_CACHING_MODELS.has(modelId) ||
+			(modelId.startsWith("anthropic/") && model.info.supportsPromptCache)
+
+		if (supportsCacheBreakpoints) {
 			if (modelId.startsWith("google")) {
 				addGeminiCacheBreakpoints(systemPrompt, openAiMessages)
 			} else {
@@ -315,6 +337,11 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		// https://openrouter.ai/docs/transforms
 		const completionParams: OpenRouterChatCompletionParams = {
 			model: modelId,
+			// OpenRouter derives its sticky-routing key from the opening messages
+			// unless `session_id` is sent, and without it stickiness only starts
+			// after a cache hit is observed. A task ID pins every turn of the task
+			// to the endpoint holding its warm cache from the first request.
+			...(sessionId ? { session_id: sessionId } : {}),
 			...(maxTokens && maxTokens > 0 && { max_tokens: maxTokens }),
 			temperature,
 			top_p: topP,
@@ -540,6 +567,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 				inputTokens: lastUsage.prompt_tokens || 0,
 				outputTokens: lastUsage.completion_tokens || 0,
 				cacheReadTokens: lastUsage.prompt_tokens_details?.cached_tokens,
+				cacheWriteTokens: lastUsage.prompt_tokens_details?.cache_write_tokens,
 				reasoningTokens: lastUsage.completion_tokens_details?.reasoning_tokens,
 				totalCost: (lastUsage.cost_details?.upstream_inference_cost || 0) + (lastUsage.cost || 0),
 			}
