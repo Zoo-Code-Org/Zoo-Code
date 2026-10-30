@@ -12,7 +12,7 @@ import type { ClineMessage } from "@roo-code/types"
 import ChatView, { ChatViewProps } from "../ChatView"
 
 // #257: `Task.resumeTaskFromHistory()` trims a streaming tail before hydrating the
-// resumed chat (src/core/task/Task.ts:3154-3184), and the webview derives its
+// resumed chat (src/core/task/Task.ts:3176-3240), and the webview derives its
 // streaming lock from the message list alone (ChatView.tsx:566-608). The host spec
 // (Task.persistence.spec.ts:2335-2441) pins the strip; this spec pins the other half
 // of the contract: the shape the strip guarantees must not read as streaming, and
@@ -66,9 +66,15 @@ const STREAMING_PARTIAL_SAY_TYPES = ["reasoning", "text"] as const
  * Applies the resume-time cleanup from `Task.resumeTaskFromHistory()` so the
  * post-strip assertions are derived from the pre-strip history the host reads off
  * disk instead of being hand-written twice.
+ *
+ * `assistantTexts` mirrors the API-history turns the host reads before deciding
+ * whether an interrupted text bubble can be restored: a partial `text` bubble whose
+ * complete text is already in API history comes back as a finalized row, everything
+ * else in the streaming tail is dropped.
  */
-const applyHostResumeStrip = (messages: ClineMessage[]): ClineMessage[] => {
+const applyHostResumeStrip = (messages: ClineMessage[], assistantTexts: string[] = []): ClineMessage[] => {
 	const stripped = [...messages]
+	const trailingPartialStreamBubbles: ClineMessage[] = []
 
 	while (stripped.length > 0) {
 		const lastMessage = stripped[stripped.length - 1]
@@ -81,7 +87,7 @@ const applyHostResumeStrip = (messages: ClineMessage[]): ClineMessage[] => {
 			break
 		}
 
-		stripped.pop()
+		trailingPartialStreamBubbles.unshift(stripped.pop()!)
 	}
 
 	const lastApiReqStartedIndex = stripped.findLastIndex(
@@ -94,6 +100,12 @@ const applyHostResumeStrip = (messages: ClineMessage[]): ClineMessage[] => {
 
 		if (cost === undefined && cancelReason === undefined) {
 			stripped.splice(lastApiReqStartedIndex, 1)
+		}
+	}
+
+	for (const bubble of trailingPartialStreamBubbles) {
+		if (bubble.say === "text" && assistantTexts.includes(bubble.text ?? "")) {
+			stripped.push({ ...bubble, partial: false })
 		}
 	}
 
@@ -272,6 +284,40 @@ describe("ChatView - resume strip leaves a non-streaming chat", () => {
 			{ type: "ask", ask: "command", ts: 2, text: "npm test", partial: false },
 			{ type: "say", say: "command_output", ts: 3, text: "npm test\n", partial: true },
 		])
+
+		await expectStreaming(false)
+	})
+
+	it("reads the restored finalized text shape as not streaming", async () => {
+		// The assistant turn is appended to API history before the presenter that
+		// clears `partial` runs, so an abort between them leaves a partial text bubble
+		// whose complete text is already persisted. The host restores it with
+		// `partial: false`; retaining the text must not reinstate the streaming lock.
+		const partialTail: ClineMessage = { type: "say", say: "text", ts: 2, text: "Half a sentence", partial: true }
+		const postStrip = applyHostResumeStrip([taskMessage, partialTail], ["Half a sentence"])
+
+		expect(postStrip).toEqual([taskMessage, { ...partialTail, partial: false }])
+		renderWithMessages(postStrip)
+
+		await expectStreaming(false)
+	})
+
+	it("still streams if a restored text row is left partial", async () => {
+		// Guards the `partial: false` half of the restore: keeping the row without
+		// clearing the flag would reintroduce exactly the #257 lock the strip removes.
+		renderWithMessages([taskMessage, { type: "say", say: "text", ts: 2, text: "Half a sentence", partial: true }])
+
+		await expectStreaming(true)
+	})
+
+	it("drops a partial text tail whose text is absent from API history", async () => {
+		// No matching turn means the text exists nowhere else, so the bubble stays
+		// orphaned and is removed rather than restored.
+		const partialTail: ClineMessage = { type: "say", say: "text", ts: 2, text: "Half a sentence", partial: true }
+		const postStrip = applyHostResumeStrip([taskMessage, partialTail], ["An older answer"])
+
+		expect(postStrip).toEqual([taskMessage])
+		renderWithMessages(postStrip)
 
 		await expectStreaming(false)
 	})

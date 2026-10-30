@@ -2440,6 +2440,227 @@ describe("Task persistence", () => {
 			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
 		})
 
+		// The assistant turn is appended to API history before the presenter that
+		// clears `partial` runs, so an abort between them leaves a partial text bubble
+		// whose complete text is already persisted. Dropping it would erase text the
+		// model can still see; keeping it partial would re-lock the resumed chat on
+		// ChatView's `partial === true` heuristic. Restore it as a finalized row.
+		it("restores a partial text bubble as finalized when the complete turn is in API history", async () => {
+			mockReadTaskMessages.mockResolvedValue([
+				{ ts: 1, type: "say", say: "text", text: "Original task" },
+				{ ts: 2, type: "say", say: "text", text: "Half a sentence", partial: true },
+			])
+			mockReadApiMessages.mockResolvedValue([
+				{ role: "user", content: [{ type: "text", text: "Original task" }] },
+				{ role: "assistant", content: [{ type: "text", text: "Half a sentence" }] },
+			])
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "issue-257-restore-partial-text",
+					number: 1,
+					ts: 1,
+					task: "Original task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			vi.spyOn(task, "ask").mockImplementation(async () => {
+				// Retained, but finalized: the text survives and the row no longer reads as
+				// streaming, so the resumed chat keeps its input enabled.
+				expect(task.clineMessages).toContainEqual(
+					expect.objectContaining({ say: "text", text: "Half a sentence", partial: false }),
+				)
+				expect(task.clineMessages).not.toContainEqual(expect.objectContaining({ partial: true }))
+				throw new Error("stop after hydration")
+			})
+
+			await expect(getTaskPersistenceAccess(task).resumeTaskFromHistory()).rejects.toThrow("stop after hydration")
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+		})
+
+		it("compares the partial text against API history after the streaming thinking-tag strip", async () => {
+			// presentAssistantMessage strips `<thinking>` from the bubble but the API turn is
+			// built from the raw accumulator, so the two texts differ by exactly that markup.
+			mockReadTaskMessages.mockResolvedValue([
+				{ ts: 1, type: "say", say: "text", text: "Original task" },
+				{ ts: 2, type: "say", say: "text", text: "Answer in progress", partial: true },
+			])
+			mockReadApiMessages.mockResolvedValue([
+				{ role: "user", content: [{ type: "text", text: "Original task" }] },
+				{ role: "assistant", content: [{ type: "text", text: "<thinking>\nAnswer in progress" }] },
+			])
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "issue-257-restore-thinking-strip",
+					number: 1,
+					ts: 1,
+					task: "Original task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			vi.spyOn(task, "ask").mockImplementation(async () => {
+				expect(task.clineMessages).toContainEqual(
+					expect.objectContaining({ say: "text", text: "Answer in progress", partial: false }),
+				)
+				throw new Error("stop after hydration")
+			})
+
+			await expect(getTaskPersistenceAccess(task).resumeTaskFromHistory()).rejects.toThrow("stop after hydration")
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+		})
+
+		it.each([
+			{
+				name: "the last assistant turn holds different text",
+				apiHistory: [
+					{ role: "assistant" as const, content: [{ type: "text" as const, text: "An older answer" }] },
+				],
+			},
+			{
+				name: "the last assistant turn has no text block",
+				apiHistory: [
+					{
+						role: "assistant" as const,
+						content: [{ type: "tool_use" as const, id: "toolu_1", name: "read_file", input: {} }],
+					},
+				],
+			},
+			{
+				name: "API history holds no assistant turn at all",
+				apiHistory: [] as Array<{ role: "assistant"; content: Array<{ type: "text"; text: string }> }>,
+			},
+			{
+				// Pins the comparison to the LAST assistant turn: an older turn that happens
+				// to match must not resurrect a bubble the newest turn does not account for.
+				name: "only an older assistant turn holds the text",
+				apiHistory: [
+					{ role: "assistant" as const, content: [{ type: "text" as const, text: "Half a sentence" }] },
+					{ role: "user" as const, content: [{ type: "text" as const, text: "Follow up" }] },
+					{ role: "assistant" as const, content: [{ type: "text" as const, text: "A newer answer" }] },
+				],
+			},
+		])("strips the partial text bubble when $name", async ({ apiHistory }) => {
+			// No matching turn means the text exists nowhere else, so the orphaned bubble is
+			// dropped exactly as before this change.
+			mockReadTaskMessages.mockResolvedValue([
+				{ ts: 1, type: "say", say: "text", text: "Original task" },
+				{ ts: 2, type: "say", say: "text", text: "Half a sentence", partial: true },
+			])
+			mockReadApiMessages.mockResolvedValue([
+				{ role: "user", content: [{ type: "text", text: "Original task" }] },
+				...apiHistory,
+			])
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "issue-257-orphaned-partial-text",
+					number: 1,
+					ts: 1,
+					task: "Original task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			vi.spyOn(task, "ask").mockImplementation(async () => {
+				expect(task.clineMessages).toContainEqual(
+					expect.objectContaining({ say: "text", text: "Original task" }),
+				)
+				expect(task.clineMessages).not.toContainEqual(expect.objectContaining({ text: "Half a sentence" }))
+				throw new Error("stop after hydration")
+			})
+
+			await expect(getTaskPersistenceAccess(task).resumeTaskFromHistory()).rejects.toThrow("stop after hydration")
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+		})
+
+		it("keeps dropping a partial reasoning bubble even when an assistant turn exists", async () => {
+			// Reasoning is never re-rendered from API history, so a matching assistant turn
+			// must not resurrect the bubble. This pins the CR-requested split.
+			mockReadTaskMessages.mockResolvedValue([
+				{ ts: 1, type: "say", say: "text", text: "Original task" },
+				{ ts: 2, type: "say", say: "reasoning", text: "Thinking about it", partial: true },
+			])
+			mockReadApiMessages.mockResolvedValue([
+				{ role: "user", content: [{ type: "text", text: "Original task" }] },
+				{ role: "assistant", content: [{ type: "text", text: "Thinking about it" }] },
+			])
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "issue-257-reasoning-still-dropped",
+					number: 1,
+					ts: 1,
+					task: "Original task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			vi.spyOn(task, "ask").mockImplementation(async () => {
+				expect(task.clineMessages).not.toContainEqual(expect.objectContaining({ say: "reasoning" }))
+				throw new Error("stop after hydration")
+			})
+
+			await expect(getTaskPersistenceAccess(task).resumeTaskFromHistory()).rejects.toThrow("stop after hydration")
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+		})
+
+		it("does not restore a partial text bubble when the task is evicted during the API read", async () => {
+			// The restore sits after the abort guard, so an evicted task must not resurrect
+			// the row into a history it is about to discard.
+			const apiMessagesDeferred =
+				createDeferred<Array<{ role: "assistant"; content: Array<{ type: "text"; text: string }> }>>()
+			mockReadTaskMessages.mockResolvedValue([
+				{ ts: 1, type: "say", say: "text", text: "Original task" },
+				{ ts: 2, type: "say", say: "text", text: "Half a sentence", partial: true },
+			])
+			mockReadApiMessages.mockReturnValue(apiMessagesDeferred.promise)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "issue-257-restore-evicted",
+					number: 1,
+					ts: 1,
+					task: "Original task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			const resumePromise = getTaskPersistenceAccess(task).resumeTaskFromHistory()
+			await vi.waitFor(() => expect(mockReadApiMessages).toHaveBeenCalled())
+
+			await task.abortTask(true)
+			mockSaveTaskMessages.mockClear()
+			vi.mocked(mockProvider.updateTaskHistory).mockClear()
+			apiMessagesDeferred.resolve([{ role: "assistant", content: [{ type: "text", text: "Half a sentence" }] }])
+			await resumePromise
+
+			expect(task.clineMessages).toHaveLength(0)
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+		})
+
 		it("stops before hydrating either history when the task is evicted during the API read", async () => {
 			const apiMessagesDeferred =
 				createDeferred<Array<{ role: "user"; content: Array<{ type: "text"; text: string }> }>>()

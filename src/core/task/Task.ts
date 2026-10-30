@@ -236,6 +236,35 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 	return { response: "messageResponse", requiresDurableAck: type === "completion_result" }
 }
 
+/**
+ * Whether an assistant API turn already carries the complete text of a streamed
+ * `say("text")` bubble that was interrupted before its UI finalize.
+ *
+ * `recursivelyMakeRooRequests` appends the assistant turn to API history before it
+ * releases the streaming presenter that clears the bubble's `partial` flag, so an
+ * abort landing between those two steps leaves a partial bubble and a complete
+ * turn coexisting. The bubble's text is then not orphaned and must not be
+ * discarded.
+ *
+ * The comparison re-applies the streaming-time `<thinking>` strip that
+ * `presentAssistantMessage` applies to the bubble but not to the raw accumulator
+ * the API turn is built from.
+ */
+function hasAssistantTextTurnFor(apiMessages: ApiMessage[], partialText: string): boolean {
+	const expected = partialText.replace(/<thinking>\s?/g, "").replace(/\s?<\/thinking>/g, "")
+	const lastAssistantTurn = findLast(apiMessages, (message) => message.role === "assistant")
+
+	if (!lastAssistantTurn || !Array.isArray(lastAssistantTurn.content)) {
+		return false
+	}
+
+	return lastAssistantTurn.content.some(
+		(block) =>
+			block.type === "text" &&
+			block.text.replace(/<thinking>\s?/g, "").replace(/\s?<\/thinking>/g, "") === expected,
+	)
+}
+
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
 
@@ -3145,12 +3174,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}
 			}
 
-			// Partial reasoning and text have no API-history entry, since the assistant
-			// message is only written once the stream completes, so an interrupted stream
-			// leaves them orphaned. A trailing partial bubble also keeps the webview in its
+			// A trailing partial `reasoning` or `text` bubble keeps the webview in its
 			// streaming state, which leaves the resumed chat stuck on "API Request..." with
 			// an input that only queues (see #257). Other partial say types (e.g. command
 			// output) record work that already ran, so they are kept.
+			//
+			// The two types are not equally orphaned, though. `recursivelyMakeRooRequests`
+			// appends the assistant turn to API history before it releases the streaming
+			// presenter that clears the bubble's `partial` flag, so an abort landing between
+			// those two steps leaves a partial text bubble whose complete text is already in
+			// API history. Those are restored below as finalized rows instead of being
+			// discarded; reasoning keeps the plain drop because it is never re-rendered
+			// from API history.
+			const trailingPartialStreamBubbles: ClineMessage[] = []
+
 			while (modifiedClineMessages.length > 0) {
 				const lastMessage = modifiedClineMessages[modifiedClineMessages.length - 1]
 				const isPartialStreamBubble =
@@ -3162,7 +3199,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					break
 				}
 
-				modifiedClineMessages.pop()
+				trailingPartialStreamBubbles.unshift(modifiedClineMessages.pop()!)
 			}
 
 			// Since we don't use `api_req_finished` anymore, we need to check if the
@@ -3189,6 +3226,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const savedApiConversationHistory = await this.getSavedApiConversationHistory()
 			if (this.abort || this.abandoned) {
 				return
+			}
+
+			// Restore the interrupted text bubbles whose complete text already reached API
+			// history, as finalized rows. Clearing `partial` is what keeps the retention from
+			// re-locking the chat: ChatView's streaming memo returns true for any trailing
+			// `partial === true` row (ChatView.tsx:583-587), so a retained partial would
+			// reintroduce exactly the #257 lock this cleanup exists to remove.
+			for (const bubble of trailingPartialStreamBubbles) {
+				if (bubble.say === "text" && hasAssistantTextTurnFor(savedApiConversationHistory, bubble.text ?? "")) {
+					modifiedClineMessages.push({ ...bubble, partial: false })
+				}
 			}
 
 			// Avoid a standalone write during hydration. The resume ask will persist only
