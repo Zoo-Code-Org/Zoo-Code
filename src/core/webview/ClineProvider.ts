@@ -359,6 +359,15 @@ export class ClineProvider
 	 * queue advances once it settles. Use it for multi-write mutations that must not stop halfway
 	 * (storage saved but not activated) or overlap with the next mutation.
 	 */
+	/**
+	 * Run a multi-write provider-profile mutation (e.g. a rename) as one atomic queue entry:
+	 * the check, the writes and the rollback cannot be split by another view's mutation, and a
+	 * timeout only rejects the caller instead of aborting the mutation halfway.
+	 */
+	async runProviderProfileMutation<T>(fn: () => Promise<T>): Promise<T> {
+		return this.enqueueProviderProfileMutation(() => fn(), { runToCompletion: true })
+	}
+
 	private enqueueProviderProfileMutation<T>(
 		fn: (signal: AbortSignal) => Promise<T>,
 		options: { runToCompletion?: boolean } = {},
@@ -3703,7 +3712,7 @@ export class ClineProvider
 		)
 	}
 
-	private async activateProviderProfileUnlocked(
+	async activateProviderProfileUnlocked(
 		args: { name: string } | { id: string },
 		options?: {
 			persistModeConfig?: boolean
