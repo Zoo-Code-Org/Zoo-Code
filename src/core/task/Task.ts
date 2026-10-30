@@ -515,7 +515,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// IDs a drain submitted into the ask-response slot that no ask has consumed
 	// yet. They stay queued on purpose: a later drain must not re-post them, and
 	// an execution-gating ask must not let between-turn feedback stand in for an
-	// approval. Cleared only when a consume settles.
+	// approval. Cleared when a consume settles, or when the queue no longer holds
+	// the id (see `queuedClaimExclusionsForAsk`).
 	private drainRetainedQueuedMessageIds = new Set<string>()
 	// `ask()` calls in flight. A drain must not submit while one is pending: the
 	// submission would answer that ask with text written for another turn.

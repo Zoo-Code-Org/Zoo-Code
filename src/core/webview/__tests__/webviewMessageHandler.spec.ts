@@ -1013,7 +1013,10 @@ describe("webviewMessageHandler - image mentions", () => {
 	// Mentions must resolve against the workspace of the task the message is
 	// delivered to. The cwd is read before the handler's own awaits, so a task
 	// switch during the state read cannot move resolution to another workspace.
-	it("resolves mentions against the workspace captured before the state await", async () => {
+	it.each([
+		["queueMessage", "queueMessage"],
+		["askResponse", "askResponse"],
+	] as const)("resolves %s mentions against the workspace captured before the state await", async (_label, type) => {
 		const taskA = {
 			cwd: "/workspace-a",
 			rooIgnoreController: undefined,
@@ -1037,7 +1040,8 @@ describe("webviewMessageHandler - image mentions", () => {
 		})
 
 		await webviewMessageHandler(mockClineProvider, {
-			type: "queueMessage",
+			type,
+			askResponse: "messageResponse",
 			text: "see @/img.png",
 			images: [],
 		})

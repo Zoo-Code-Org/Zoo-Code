@@ -566,6 +566,41 @@ describe("Task.ask queued message drain", () => {
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
+	it("keys the row record by message id, not by timestamp", async () => {
+		const task = await createTask()
+		task.messageQueueService.addMessage("Same millisecond")
+		const result = await task.ask("completion_result", "Done", false)
+		const access = getQueueTaskTestAccess(task)
+		access.saveClineMessages = vi.fn().mockResolvedValue(false)
+		const feedbackRows = () => task["clineMessages"].filter((message) => message.say === "user_feedback")
+
+		vi.useFakeTimers()
+		try {
+			const first = task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images)
+			await vi.runAllTimersAsync()
+			await expect(first).resolves.toBe(false)
+		} finally {
+			vi.useRealTimers()
+		}
+		expect(feedbackRows()).toHaveLength(1)
+
+		// A rewind drops the feedback row but leaves a different row carrying the
+		// same `ts`: `say` stamps `Date.now()`, so two rows written in the same
+		// millisecond collide. Keying the record by `ts` would read this survivor as
+		// the feedback row and skip the re-append, dropping the text entirely.
+		const feedbackTs = feedbackRows()[0]!.ts
+		task["clineMessages"] = task["clineMessages"].filter((message) => message.say !== "user_feedback")
+		task["clineMessages"].push({ ts: feedbackTs, type: "say", say: "text", text: "Unrelated row" })
+		expect(feedbackRows()).toHaveLength(0)
+
+		access.saveClineMessages = vi.fn().mockResolvedValue(true)
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).resolves.toBe(true)
+		expect(feedbackRows()).toHaveLength(1)
+		expect(feedbackRows()[0]!.text).toBe("Same millisecond")
+	})
+
 	it("does not double-append when say throws after the row landed", async () => {
 		const task = await createTask()
 		task.messageQueueService.addMessage("Row landed then threw")
