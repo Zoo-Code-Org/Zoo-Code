@@ -55,12 +55,7 @@ export const providerProfilesSchema = z.object({
 
 export type ProviderProfiles = z.infer<typeof providerProfilesSchema>
 
-/**
- * Signals that a profile's configuration no longer exists. Callers that treat an
- * already-deleted profile as an idempotent no-op branch on this type instead of
- * matching error message text, which a profile name containing the phrase could
- * otherwise spoof.
- */
+/** Already-deleted profile: callers branch on this type instead of matching message text. */
 export class ProviderSettingsNotFoundError extends Error {
 	constructor(message: string) {
 		super(message)

@@ -122,10 +122,8 @@ export const viewStateSchema = z.object({
 	currentApiConfigName: z.string().optional(),
 	updatedAt: z.number().optional(),
 	/**
-	 * Host-minted capability token binding this entry to the webview that wrote it.
-	 * Minted by the extension host (`crypto.randomUUID()`), delivered to that webview and
-	 * never accepted from webview input. An entry is only re-adopted for a webview that
-	 * presents this token, so a view cannot read another (e.g. closed) view's selections.
+	 * Host-minted capability token binding this entry to the webview that wrote it; never
+	 * accepted from webview input and only a matching token re-adopts the entry.
 	 */
 	claimToken: z.string().optional(),
 })
