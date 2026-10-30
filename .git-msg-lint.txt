@@ -1,5 +1,0 @@
-test: clear unused bindings exposed by re-enabled unused-variable lint
-
-Upstream main re-enabled @typescript-eslint/no-unused-vars for src; these
-bindings became dead weight in this branch's test files. Clearing them keeps
-the lint gate green on the merge ref.
