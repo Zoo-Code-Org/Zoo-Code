@@ -322,9 +322,18 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		// the allowlist as the fallback; Gemini and every other provider keep
 		// allowlist-only behavior because breakpoint placement is not
 		// interchangeable between them.
+		//
+		// Only the model-level catalog record carries a live flag, so read it from
+		// `this.models` instead of `model.info`. `model.info` is not a safe source:
+		// an empty catalog falls back to `openRouterDefaultModelInfo`, which
+		// hardcodes `supportsPromptCache: true`, and a pinned provider substitutes
+		// that endpoint's record, whose flag comes from one endpoint's pricing.
+		// Either would hand breakpoints to every `anthropic/*` id, so an id that
+		// did not resolve from the fetched catalog counts as no live evidence.
+		const catalogInfo = Object.hasOwn(this.models, modelId) ? this.models[modelId] : undefined
 		const supportsCacheBreakpoints =
 			OPEN_ROUTER_PROMPT_CACHING_MODELS.has(modelId) ||
-			(modelId.startsWith("anthropic/") && model.info.supportsPromptCache)
+			(modelId.startsWith("anthropic/") && catalogInfo?.supportsPromptCache === true)
 
 		if (supportsCacheBreakpoints) {
 			if (modelId.startsWith("google")) {
@@ -339,8 +348,11 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			model: modelId,
 			// OpenRouter derives its sticky-routing key from the opening messages
 			// unless `session_id` is sent, and without it stickiness only starts
-			// after a cache hit is observed. A task ID pins every turn of the task
-			// to the endpoint holding its warm cache from the first request.
+			// after a cache hit is observed. A task ID gives every turn of the task
+			// one routing key from the first request, so turns stay on the endpoint
+			// holding the warm cache. OpenRouter does not use sticky routing when a
+			// manual `provider.order` is set, so pinning a specific provider limits
+			// the benefit to that provider's own cache.
 			...(sessionId ? { session_id: sessionId } : {}),
 			...(maxTokens && maxTokens > 0 && { max_tokens: maxTokens }),
 			temperature,
