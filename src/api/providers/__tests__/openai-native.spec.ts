@@ -1507,6 +1507,42 @@ describe("OpenAiNativeHandler", () => {
 			}
 		})
 
+		it("keeps two over-long task ids distinct instead of truncating them to one bucket", async () => {
+			// Task ids are uuidv7 today (36 chars), so this guards the wire contract for
+			// any caller that sends a longer id: a 64-char slice drops the distinguishing
+			// tail, so two ids sharing a 64-char prefix would land in one routing bucket.
+			const mockFetch = vitest.fn().mockResolvedValue({
+				ok: true,
+				body: new ReadableStream({
+					start(controller) {
+						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+						controller.close()
+					},
+				}),
+			})
+			global.fetch = mockFetch as typeof fetch
+			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+
+			const cacheHandler = new OpenAiNativeHandler({ ...mockOptions, apiModelId: "gpt-5.1" })
+			// 70 characters: identical for the first 64, different in the tail.
+			const sharedPrefix = "a".repeat(64)
+			const longTaskIds = [`${sharedPrefix}-one`, `${sharedPrefix}-two`]
+
+			for (const taskId of longTaskIds) {
+				for await (const _chunk of cacheHandler.createMessage(systemPrompt, messages, { taskId })) {
+					// consume
+				}
+			}
+
+			const bodies = mockFetch.mock.calls.map(([, init]) => JSON.parse(init.body))
+			expect(bodies).toHaveLength(2)
+			// OpenAI rejects keys over 64 characters, so the key must still fit.
+			expect(bodies[0].prompt_cache_key.length).toBeLessThanOrEqual(64)
+			expect(bodies[1].prompt_cache_key.length).toBeLessThanOrEqual(64)
+			// ...but the two tasks must not collide on that shortened form.
+			expect(bodies[1].prompt_cache_key).not.toBe(bodies[0].prompt_cache_key)
+		})
+
 		it("sends the task-scoped prompt_cache_key through the SDK path", async () => {
 			mockResponsesCreate.mockResolvedValue(asyncStreamFrom([]))
 

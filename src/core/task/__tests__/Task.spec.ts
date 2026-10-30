@@ -567,8 +567,14 @@ describe("Cline", () => {
 
 			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
 
-			// Allow the fire-and-forget drain to settle.
-			await new Promise((resolve) => setTimeout(resolve, 50))
+			// The drain is fire-and-forget and reaches `captureLlmCompletion` after several
+			// awaits, some of which touch the filesystem. A fixed sleep races that work on a
+			// loaded worker, so poll for the captured call instead.
+			await vi.waitFor(() =>
+				expect(
+					captureLlmCompletion.mock.calls.some(([, payload]) => payload?.cacheWriteTokens === 100_000),
+				).toBe(true),
+			)
 
 			const call = captureLlmCompletion.mock.calls.find(([, payload]) => payload?.cacheWriteTokens === 100_000)
 			expect(call).toBeDefined()
