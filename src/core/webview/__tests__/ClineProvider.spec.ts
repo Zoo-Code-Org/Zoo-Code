@@ -3813,17 +3813,108 @@ describe("ClineProvider", () => {
 			expect(provider.getProviderProfileEntries()).toEqual([otherProfile])
 		})
 
-		test("purges the deleted profile's secret when the replacement is the same provider", async () => {
-			// Ownership deliberately preserves a secret the *writing* provider owns, so a
-			// same-provider succession (Anthropic -> Anthropic) keeps the deleted profile's `apiKey`
-			// alive under the replacement's name. A delete is explicit intent: the deleted profile's
-			// own keys go, whether or not the replacement shares its provider.
+		test("keeps the surviving profile's credential on an inactive same-provider delete", async () => {
+			// The exact e2e trio shape: both profiles are OpenRouter, so they share the single
+			// `openRouterApiKey` SecretStorage slot, and the surviving `default` profile's blob was
+			// written from an `api.getConfiguration()` snapshot, which strips secrets. The inactive
+			// branch activates no replacement, so nothing rewrites the slot: purging the deleted
+			// profile's key would delete the live credential and every rehydrated task would hang.
 			const { profiles } = mockProviderSettingsManager()
 
-			// The replacement is Anthropic too, and its blob is secret-less: the normal shape of a
-			// profile written from an `api.getConfiguration()` snapshot, which strips secrets. The
-			// ownership rule reads that omission as a partial write and preserves `apiKey`, so only
-			// an explicit purge removes the deleted profile's credential.
+			// Both profiles are OpenRouter with the same key name; the survivor's blob is secret-less.
+			vi.mocked(provider.providerSettingsManager.getProfile).mockImplementation(async (params) => {
+				const name = "name" in params ? params.name : ""
+
+				if (name === "other-config") {
+					return { ...otherProfile, name: "other-config", apiProvider: providerIdentifiers.openrouter }
+				}
+
+				return {
+					...currentProfile,
+					name: "current-config",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "live-key",
+				}
+			})
+
+			// The survivor is active, so deleting the other profile is an inactive deletion.
+			await provider.contextProxy.setValue("currentApiConfigName", "other-config")
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "live-key",
+			})
+			expect(provider.contextProxy.getSecret("openRouterApiKey")).toBe("live-key")
+
+			await provider.deleteProviderProfile(currentProfile)
+
+			// The slot is the surviving OpenRouter profile's credential, so it must survive.
+			expect(provider.contextProxy.getSecret("openRouterApiKey")).toBe("live-key")
+			expect(mockContext.secrets.delete).not.toHaveBeenCalledWith("openRouterApiKey")
+			expect(profiles.map(({ name }) => name)).toEqual(["other-config"])
+		})
+
+		test("still purges on an inactive cross-provider delete, which owns none of the deleted keys", async () => {
+			// The confidentiality case S-3 exists for: the survivor is OpenRouter, the deleted profile
+			// is Anthropic. The survivor owns none of the deleted profile's keys, so the keep-set is
+			// empty and the purge removes the orphaned credential.
+			mockProviderSettingsManager()
+
+			await provider.contextProxy.setValue("currentApiConfigName", "other-config")
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "orphaned-key",
+			})
+			expect(provider.contextProxy.getSecret("apiKey")).toBe("orphaned-key")
+
+			await provider.deleteProviderProfile(currentProfile)
+
+			expect(provider.contextProxy.getSecret("apiKey")).toBeUndefined()
+			expect(provider.contextProxy.getValues().apiKey).toBeUndefined()
+			expect(mockContext.secrets.delete).toHaveBeenCalledWith("apiKey")
+		})
+
+		test("purges on an inactive delete when the surviving profile cannot be read", async () => {
+			// Confidentiality-safe fallback: an unreadable survivor yields an empty keep-set, so the
+			// purge removes every key the deleted profile declared instead of silently retaining them.
+			mockProviderSettingsManager()
+
+			await provider.contextProxy.setValue("currentApiConfigName", "other-config")
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "orphaned-key",
+			})
+
+			vi.mocked(provider.providerSettingsManager.getProfile).mockImplementation(async (params) => {
+				const name = "name" in params ? params.name : ""
+
+				if (name === "other-config") {
+					throw new Error("Failed to read provider profiles from secrets: storage error")
+				}
+
+				return {
+					...currentProfile,
+					name: "current-config",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "orphaned-key",
+				}
+			})
+
+			await provider.deleteProviderProfile(currentProfile)
+
+			expect(provider.contextProxy.getSecret("openRouterApiKey")).toBeUndefined()
+			expect(mockContext.secrets.delete).toHaveBeenCalledWith("openRouterApiKey")
+		})
+
+		test("keeps the shared slot when the replacement is the same provider and declares no secret", async () => {
+			// A same-provider succession where the replacement's blob is secret-less: the normal
+			// shape of a profile written from an `api.getConfiguration()` snapshot, which strips
+			// secrets. Two profiles of one provider necessarily share the same SecretStorage slot
+			// (each secret key has exactly one owning provider), so the slot holds the *replacement's*
+			// live credential. Purging it would delete the surviving profile's key, which is the
+			// round-4 data-loss shape and the deterministic e2e failure. Nothing is orphaned here, so
+			// keeping the slot is the correct semantics rather than a leak.
+			const { profiles } = mockProviderSettingsManager()
+
 			vi.mocked(provider.providerSettingsManager.activateProfile).mockImplementationOnce(async () => {
 				return { ...otherProfile, apiProvider: providerIdentifiers.anthropic }
 			})
@@ -3845,10 +3936,10 @@ describe("ClineProvider", () => {
 
 			await provider.deleteProviderProfile(currentProfile)
 
-			// The deleted profile's credential is gone rather than surviving under the replacement.
-			expect(provider.contextProxy.getSecret("apiKey")).toBeUndefined()
-			expect(provider.contextProxy.getValues().apiKey).toBeUndefined()
-			expect(mockContext.secrets.delete).toHaveBeenCalledWith("apiKey")
+			// The slot survives because the surviving Anthropic profile owns `apiKey`: it is that
+			// profile's credential, not the deleted profile's orphan.
+			expect(provider.contextProxy.getSecret("apiKey")).toBe("deleted-key")
+			expect(mockContext.secrets.delete).not.toHaveBeenCalledWith("apiKey")
 			expect(profiles.map(({ name }) => name)).toEqual(["other-config"])
 		})
 

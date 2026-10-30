@@ -112,7 +112,7 @@ import { t } from "../../i18n"
 import { buildApiHandler } from "../../api"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/providers/fetchers/lmstudio"
 
-import { ContextProxy, getProfileSecretKeys } from "../config/ContextProxy"
+import { ContextProxy, getProfileSecretKeys, providerOwnsSecretKey } from "../config/ContextProxy"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
 import { PendingActionSettlementError, Task } from "../task/Task"
@@ -2261,7 +2261,18 @@ export class ClineProvider
 					// clear-out: without an explicit purge the deleted profile's secrets stay in the
 					// cache and in SecretStorage until some unrelated future write happens to name a
 					// provider that does not own them, which may never happen.
-					await this.purgeDeletedProfileSecrets(undoConfig)
+					//
+					// The keep-set comes from the *surviving* profile's provider, not from its blob.
+					// A blob-derived set is empty exactly when the live credential needs protecting:
+					// the `api.getConfiguration()` round-trip rewrites a profile without its secret
+					// fields while keeping `apiProvider`, so a surviving OpenRouter profile's blob
+					// declares no `openRouterApiKey` even though that SecretStorage slot holds its
+					// live value. When the deleted profile and the survivor share a provider and a key
+					// name, the slot they would purge *is* the survivor's credential.
+					await this.purgeDeletedProfileSecrets(
+						undoConfig,
+						await this.getSurvivingProviderSecretKeys(globalSettings.currentApiConfigName, undoConfig),
+					)
 
 					await this.contextProxy.setValues({
 						listApiConfigMeta: this.getProviderProfileEntries().filter(
@@ -2323,12 +2334,13 @@ export class ClineProvider
 				// the replacement's name. The delete is explicit intent, so the deleted profile's own
 				// keys are removed here, after the activation has written the replacement's slice.
 				//
-				// A key the replacement's own blob declares is excluded: the replacement wrote its
-				// value through the activation above, and purging by name would delete the live
-				// profile's credential, which is the round-4 data-loss shape.
+				// The keep-set is ownership-derived for the same reason as the inactive branch: a
+				// blob-derived set is empty when the replacement's blob was written from an
+				// `api.getConfiguration()` snapshot (secrets stripped), and purging then deletes the
+				// replacement's live credential from the shared SecretStorage slot.
 				await this.purgeDeletedProfileSecrets(
 					deletedProfileConfig,
-					await this.getReplacementSecretKeys(profileToActivate),
+					await this.getSurvivingProviderSecretKeys(profileToActivate, deletedProfileConfig),
 				)
 
 				// The activation above only rebinds the *current* mode, so every other mode that
@@ -2364,20 +2376,44 @@ export class ClineProvider
 	}
 
 	/**
-	 * The secret keys the profile that replaced a deleted one declares.
+	 * The deleted profile's secret keys that the *surviving* profile's provider also owns.
 	 *
-	 * Used to keep the delete purge from removing a credential the replacement wrote itself. A
-	 * manager that cannot produce the profile (it was just activated, so it should exist) yields an
-	 * empty set: the purge then falls back to removing every key the deleted profile declared, which
-	 * is the confidentiality-safe direction.
+	 * Both delete branches purge the deleted profile's credentials explicitly, and both need the
+	 * same answer: is a key about to be deleted still in use by the profile that survives? That
+	 * cannot be answered from the surviving profile's blob. The `api.getConfiguration()` round-trip
+	 * rewrites a profile without its secret fields while keeping `apiProvider`, so a surviving
+	 * OpenRouter profile's blob declares no `openRouterApiKey` even though that SecretStorage slot
+	 * holds its live value. Provider ownership answers it from the schema instead, which no
+	 * round-trip can strip.
+	 *
+	 * A same-provider succession (the deleted profile and the survivor both OpenRouter) shares one
+	 * SecretStorage slot per key name, so "the deleted profile's key" *is* the survivor's credential:
+	 * keeping it is the correct semantics, not a leak, because nothing is orphaned to purge. A
+	 * cross-provider delete keeps nothing, because the survivor owns none of the deleted keys.
+	 *
+	 * An unreadable survivor yields an empty set, so the purge removes every key the deleted profile
+	 * declared. That is the confidentiality-safe direction.
 	 */
-	private async getReplacementSecretKeys(name: string): Promise<Set<string>> {
+	private async getSurvivingProviderSecretKeys(
+		survivingProfileName: string | undefined,
+		deletedConfig: (ProviderSettingsWithId & { name: string }) | undefined,
+	): Promise<Set<string>> {
+		if (!survivingProfileName || !deletedConfig) {
+			return new Set()
+		}
+
+		let survivingProvider: unknown
+
 		try {
-			const { name: _name, ...config } = await this.providerSettingsManager.getProfile({ name })
-			return new Set(getProfileSecretKeys(config))
+			const { apiProvider } = await this.providerSettingsManager.getProfile({ name: survivingProfileName })
+			survivingProvider = apiProvider
 		} catch {
 			return new Set()
 		}
+
+		return new Set(
+			getProfileSecretKeys(deletedConfig).filter((key) => providerOwnsSecretKey(survivingProvider, key) === true),
+		)
 	}
 
 	/**
@@ -2388,8 +2424,9 @@ export class ClineProvider
 	 * same-provider succession is exactly the case ownership preserves. A delete is explicit
 	 * intent, so the deleted profile's keys are removed by name here instead of being inferred.
 	 *
-	 * `keep` names the keys the replacement profile declares: those carry the replacement's own
-	 * value, so removing them would delete a live credential.
+	 * `keep` names the keys the surviving profile's provider still owns: those carry a live
+	 * credential (a same-provider succession shares one SecretStorage slot per key name), so
+	 * removing them would delete the surviving profile's own key.
 	 *
 	 * Best-effort: the profile is already gone from the manager, so a failure here must not turn
 	 * a successful delete into an error. The keys are logged by name only, never by value.

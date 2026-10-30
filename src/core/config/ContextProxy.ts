@@ -84,7 +84,7 @@ for (const branch of providerSettingsSchemaDiscriminated.options) {
  * provider, whose branch is not in the union), so callers keep the old
  * presence-based semantics instead of guessing.
  */
-const providerOwnsSecretKey = (apiProvider: unknown, key: string): boolean | undefined => {
+export const providerOwnsSecretKey = (apiProvider: unknown, key: string): boolean | undefined => {
 	if (typeof apiProvider !== "string" || !isProviderName(apiProvider)) {
 		return undefined
 	}
