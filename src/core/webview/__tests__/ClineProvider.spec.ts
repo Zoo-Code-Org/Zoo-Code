@@ -4486,6 +4486,70 @@ describe("ClineProvider", () => {
 		await provider.dispose()
 	})
 
+	it("should discard a load that finishes after reset cleared the buffer", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		await provider["setViewStateId"]("stable-sidebar-view")
+		await provider.contextProxy.setValue("viewStates", {
+			"stable-sidebar-view": { mode: "architect", updatedAt: 1 },
+		})
+
+		let releaseModes: () => void = () => {}
+		vi.spyOn(provider.customModesManager, "getCustomModes").mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					releaseModes = () => resolve([])
+				}),
+		)
+
+		const load = provider["loadViewState"]()
+		// The reset clears the buffer while the load awaits the mode lookup.
+		provider["_clearViewLocalState"]()
+		releaseModes()
+		await load
+
+		expect(provider["viewLocalState"]).toEqual({})
+		await provider.dispose()
+	})
+
+	it("should refresh the buffered overlay of another view pinned to the saved profile", async () => {
+		const saver = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const pinned = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"editor",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		await pinned.setValue("currentApiConfigName", "shared-profile")
+		// @ts-ignore - The double only backs the profile-store calls of the save path.
+		saver.providerSettingsManager = {
+			saveConfig: vi.fn().mockResolvedValue("shared-id"),
+			listConfig: vi.fn().mockResolvedValue([{ name: "shared-profile", id: "shared-id" }]),
+			setModeConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		const providerSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "fresh-key" }
+
+		await saver.upsertProviderProfile("shared-profile", providerSettings, true)
+
+		// The pinned view buffered a copy of the profile's settings; a non-activating save must
+		// refresh it, or its getState() keeps serving the pre-save configuration.
+		expect(pinned["viewLocalState"].apiConfiguration).toEqual(providerSettings)
+		await saver.dispose()
+		await pinned.dispose()
+	})
+
 	it("should roll back the shared writes when setValues per-view persistence fails", async () => {
 		const provider = new ClineProvider(
 			mockContext,

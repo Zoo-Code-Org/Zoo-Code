@@ -396,6 +396,10 @@ export class ClineProvider
 	 */
 	private viewLocalState: Partial<ExtensionState> = {}
 
+	// Bumped whenever the buffer is cleared (reset/import), so an in-flight load can tell
+	// that its captured state was invalidated while it awaited the profile lookup.
+	private viewLocalStateGeneration = 0
+
 	/**
 	 * This view's pinned profile name from the view-local buffer. Exposed for
 	 * sibling-instance inspection (getAllInstances() filtering): `viewLocalState`
@@ -917,6 +921,7 @@ export class ClineProvider
 
 	/** Load non-secret persisted selections; in-flight buffer edits are reapplied on top. */
 	private async loadViewState(): Promise<void> {
+		const loadedGeneration = this.viewLocalStateGeneration
 		// A newer id registered while this load is in flight must win.
 		const loadedForViewId = this.viewStateId
 
@@ -990,6 +995,13 @@ export class ClineProvider
 				} else {
 					mergedState.apiConfiguration = postLoadBuffer.apiConfiguration
 				}
+			}
+
+			// A reset/import may have cleared the buffer while the lookup was in flight:
+			// republishing here would restore the pre-reset selection over the cleared state.
+			if (this.viewLocalStateGeneration !== loadedGeneration) {
+				this.log(`[loadViewState] Discarding state loaded before a reset for viewId ${this.viewId}`)
+				return
 			}
 
 			this.viewLocalState = mergedState
@@ -2639,7 +2651,15 @@ export class ClineProvider
 
 			if (signal.aborted) return id
 
-			// Refresh other views pinned to this profile so their overlays cannot go stale.
+			// Refresh other live views pinned to this profile so their buffered overlay cannot
+			// keep serving the pre-save settings under the same profile name.
+			for (const instance of ClineProvider.getAllInstances()) {
+				if (instance === this || instance._disposed || instance.pinnedProfileName !== name) {
+					continue
+				}
+				// Direct private access: compile-time safe across sibling instances.
+				await instance._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+			}
 
 			// Change the provider for the current task.
 			// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
@@ -4128,6 +4148,7 @@ export class ClineProvider
 
 	/** Clear the buffer so getState() falls back to the shared values. */
 	private _clearViewLocalState(): void {
+		this.viewLocalStateGeneration += 1
 		this.viewLocalState = {}
 	}
 
