@@ -76,7 +76,7 @@ function fuzzySearch(lines: string[], searchChunk: string, startIndex: number, e
 
 // A caller only needs to tell 0 / 1 / >=2 apart, but the error message reports the exact count while it
 // is cheap, so the scan stops at the fourth hit. Two and three hits are reported exactly ("2", "3");
-// beyond that the count is a lower bound and is shown as "2+" instead of a wrong number. Scanning
+// beyond that the count is a lower bound and is shown as "at least 2" instead of a wrong number. Scanning
 // further costs a full-file Levenshtein sweep for a number the message cannot use.
 const MAX_MATCHES = 4
 
@@ -399,7 +399,9 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 	 * Recovers from a stale `:start_line:` hint. The buffered search only covers a window around the
 	 * hint, so a file that grew since the line number was read fails even when the SEARCH text is
 	 * still present verbatim. Retries over the whole file and accepts the match only when exactly one
-	 * position qualifies, so a stale hint can never silently edit a different occurrence.
+	 * position qualifies, so a stale hint can never silently edit a different occurrence. If the
+	 * literal SEARCH text is itself ambiguous, every candidate is refused and the largest count found
+	 * is reported.
 	 */
 	private resolveStaleHint(
 		resultLines: string[],
@@ -419,6 +421,10 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 
 		let matchCount = 0
 		let matchCountTruncated = false
+		// The plain candidate is the literal text the model wrote. Once it appears in several places
+		// the block is ambiguous, and a lone hit in a later stripped candidate is no evidence of a
+		// unique target: accepting it would edit a line the model never pointed at.
+		let ambiguous = false
 
 		for (const candidate of candidates) {
 			const { matches, truncated } = findAllMatches(resultLines, candidate.searchContent, this.fuzzyThreshold)
@@ -426,7 +432,7 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 				continue
 			}
 
-			if (matches.length === 1) {
+			if (matches.length === 1 && !ambiguous) {
 				const [match] = matches
 				return {
 					match: {
@@ -439,6 +445,8 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 					matchCountTruncated: false,
 				}
 			}
+
+			ambiguous = ambiguous || matches.length > 1
 
 			// Report the most ambiguous candidate, not whichever ran last: the stripped variant can
 			// match fewer places than the plain one, and under-reporting hides the real ambiguity.
@@ -548,7 +556,8 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 				replaceContent = stripLineNumbers(replaceContent)
 			}
 
-			// Validate that search and replace content are not identical
+			// Validate that search and replace content are not identical. Stripping below can collapse
+			// a pair that differed raw, so the same check runs again before the replacement is built.
 			if (searchContent === replaceContent) {
 				diffResults.push({
 					success: false,
@@ -714,6 +723,20 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 					})
 					continue
 				}
+			}
+
+			// Stripping above can make SEARCH and REPLACE identical even though they differed raw, and
+			// applying that pair would report success while writing the file back unchanged.
+			if (searchContent === replaceContent) {
+				diffResults.push({
+					success: false,
+					error:
+						`Search and replace content are identical - no changes would be made\n\n` +
+						`Debug Info:\n` +
+						`- Search and replace must be different to make changes\n` +
+						`- Use read_file to verify the content you want to change`,
+				})
+				continue
 			}
 
 			// Get the matched lines from the original content

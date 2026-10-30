@@ -1761,6 +1761,100 @@ function sum(a, b) {
 			expect(error).toContain("LIKELY CAUSE: the SEARCH text matches 3 separate places in the file")
 		})
 
+		it("refuses the stripped candidate when the literal SEARCH text is already ambiguous", async () => {
+			// The literal numbered line appears twice, so the block is ambiguous. The stripped form
+			// matches the single bare line, and accepting it would edit a line the model never pointed
+			// at: the file line is "7 | ## Section B" and the replacement would rewrite "## Section B".
+			const duplicatedFile = [
+				"# Doc",
+				"a",
+				"b",
+				"c",
+				"d",
+				...Array.from({ length: 90 }, (_, index) => `filler ${index + 1}`),
+				"7 | ## Section B",
+				"x",
+				...Array.from({ length: 50 }, (_, index) => `mid ${index + 1}`),
+				"7 | ## Section B",
+				"y",
+				...Array.from({ length: 50 }, (_, index) => `late ${index + 1}`),
+				"## Section B",
+				"body b",
+			].join("\n")
+			const diff =
+				"<<<<<<< SEARCH\n" +
+				":start_line:5\n" +
+				"-------\n" +
+				"7 | ## Section B\n" +
+				"=======\n" +
+				"## Section B renamed\n" +
+				">>>>>>> REPLACE"
+
+			const result = await strategy.applyDiff(duplicatedFile, diff)
+
+			expect(result.success).toBe(false)
+			const error = firstFailureError(result)
+			expect(error).toContain("LIKELY CAUSE: the SEARCH text matches 2 separate places in the file")
+		})
+
+		it("still accepts the stripped candidate when the literal SEARCH text is absent", async () => {
+			// The numbered form does not appear in the file at all, so the stripped candidate is the
+			// only one that can match. Refusing it would break the line-number recovery path.
+			const bareFile = [
+				"# Doc",
+				...Array.from({ length: 90 }, (_, index) => `filler ${index + 1}`),
+				"## Section B",
+				"body b",
+			].join("\n")
+			const diff =
+				"<<<<<<< SEARCH\n" +
+				":start_line:5\n" +
+				"-------\n" +
+				"7 | ## Section B\n" +
+				"=======\n" +
+				"## Section B renamed\n" +
+				">>>>>>> REPLACE"
+
+			const result = await strategy.applyDiff(bareFile, diff)
+
+			expect(result.success).toBe(true)
+			if (!result.success) {
+				throw new Error("Expected the stripped candidate to resolve the block")
+			}
+			expect(result.content).toContain("## Section B renamed\nbody b")
+		})
+
+		it("reports failure when stripping makes SEARCH and REPLACE identical", async () => {
+			// Raw SEARCH "| foo" and REPLACE "foo" differ, so the pre-strip equality check passes. The
+			// aggressive strip turns both into "foo": applying that pair would report success while
+			// writing the file back unchanged, so it must be reported as a failed part instead.
+			const original = ["# Doc", "foo", "bar"].join("\n")
+			const diff =
+				"<<<<<<< SEARCH\n" +
+				":start_line:2\n" +
+				"-------\n" +
+				"| foo\n" +
+				"=======\n" +
+				"foo\n" +
+				">>>>>>> REPLACE"
+
+			const result = await strategy.applyDiff(original, diff)
+
+			expect(result.success).toBe(false)
+			expect(firstFailureError(result)).toContain("Search and replace content are identical")
+		})
+
+		it("reports failure when stripping collapses a multi-line block to identical content", async () => {
+			const original = ["# Doc", "alpha", "beta", "gamma"].join("\n")
+			const diff =
+				"<<<<<<< SEARCH\n" + "| alpha\n" + "| beta\n" + "=======\n" + "alpha\n" + "beta\n" + ">>>>>>> REPLACE"
+
+			const result = await strategy.applyDiff(original, diff)
+
+			expect(result.success).toBe(false)
+			expect(firstFailureError(result)).toContain("Search and replace content are identical")
+		})
+
 		it("keeps later hinted blocks aligned when an earlier block grows the file", async () => {
 			// This pins the pre-existing delta arithmetic, not the fallback: the adjusted hint lands
 			// exactly on its target, so the block matches in-window and the fallback gate stays closed.
@@ -1805,10 +1899,10 @@ function sum(a, b) {
 		})
 
 		it("resolves a later block through the fallback when delta drift pushes its hint out of the window", async () => {
-			// Two blocks, both hinted. The first grows the file by 200 lines, so the second block's
-			// hint is 200 lines short of its target. Its target is also 120 lines below where the
-			// adjusted hint points, which is outside the ±40-line buffer: the in-window search fails
-			// and only the full-file fallback can find it. Both edits must land.
+			// Two blocks, both hinted. The first replaces 2 lines with 201, so the file grows by 199
+			// lines and the second block's hint is 199 lines short of its target. Its target is also
+			// 119 lines below where the adjusted hint points, which is outside the ±40-line buffer: the
+			// in-window search fails and only the full-file fallback can find it. Both edits must land.
 			const original = [
 				"# Doc",
 				"## Section A",
@@ -1851,7 +1945,7 @@ function sum(a, b) {
 			expect(lines[2]).toBe("inserted 1")
 			expect(lines[201]).toBe("inserted 200")
 			expect(lines[202]).toBe("middle 1")
-			// The second block's hint (5 + 199 = 204) points into the filler, 120 lines above the target.
+			// The second block's hint (5 + 199 = 204) points into the filler, 119 lines above the target.
 			expect(lines[322]).toBe("## Section B")
 			expect(lines[323]).toBe("updated b")
 			expect(result.content).not.toContain("body b")
@@ -1894,6 +1988,39 @@ function sum(a, b) {
 				throw new Error("Expected the relaxed threshold to accept the near match")
 			}
 			expect(result.content).toContain("## Section B\nupdated b")
+		})
+
+		it("reports the exact count at the scan cap and a lower bound one past it", async () => {
+			// Pins the MAX_MATCHES boundary from both sides: exactly four duplicates fill the cap and
+			// must be truncated (reported as a lower bound), while three duplicates stay exact. The
+			// off-by-one that lets a fourth hit through would report "4" for an unbounded list.
+			const filler = (count: number) => Array.from({ length: count }, (_, index) => `filler ${index + 1}`)
+			const fileWithDuplicates = (duplicates: number) =>
+				[
+					"# Doc",
+					...filler(200),
+					...Array.from({ length: duplicates }, () => ["## Section B", ...filler(10)]).flat(),
+				].join("\n")
+			const diff =
+				"<<<<<<< SEARCH\n" +
+				":start_line:5\n" +
+				"-------\n" +
+				"## Section B\n" +
+				"=======\n" +
+				"## Section B renamed\n" +
+				">>>>>>> REPLACE"
+
+			const atCap = await strategy.applyDiff(fileWithDuplicates(4), diff)
+			expect(atCap.success).toBe(false)
+			expect(firstFailureError(atCap)).toContain(
+				"LIKELY CAUSE: the SEARCH text matches at least 2 separate places in the file",
+			)
+
+			const belowCap = await strategy.applyDiff(fileWithDuplicates(3), diff)
+			expect(belowCap.success).toBe(false)
+			expect(firstFailureError(belowCap)).toContain(
+				"LIKELY CAUSE: the SEARCH text matches 3 separate places in the file",
+			)
 		})
 
 		it("keeps the verdict identical when the scan stops early on a long duplicate list", async () => {
