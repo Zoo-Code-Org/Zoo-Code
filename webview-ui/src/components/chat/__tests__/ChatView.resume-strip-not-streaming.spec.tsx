@@ -305,7 +305,15 @@ describe("ChatView - resume strip leaves a non-streaming chat", () => {
 	it("still streams if a restored text row is left partial", async () => {
 		// Guards the `partial: false` half of the restore: keeping the row without
 		// clearing the flag would reintroduce exactly the #257 lock the strip removes.
-		renderWithMessages([taskMessage, { type: "say", say: "text", ts: 2, text: "Half a sentence", partial: true }])
+		// The input is the restore's own output with the flag put back, so this case
+		// stays pinned to the restore path instead of repeating the `text` arm above.
+		const partialTail: ClineMessage = { type: "say", say: "text", ts: 2, text: "Half a sentence", partial: true }
+		const restored = applyHostResumeStrip([taskMessage, partialTail], ["Half a sentence"])
+		const leftPartial = restored.map((message) =>
+			message.say === "text" ? { ...message, partial: true } : message,
+		)
+
+		renderWithMessages(leftPartial)
 
 		await expectStreaming(true)
 	})
