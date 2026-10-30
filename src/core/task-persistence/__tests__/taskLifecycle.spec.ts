@@ -123,8 +123,20 @@ describe("isLivenessSignalFresh", () => {
 		expect(isLivenessSignalFresh(undefined, NOW, THRESHOLD)).toBe(false)
 	})
 
-	it("treats a future timestamp (clock skew, transient-stat sentinel) as fresh", () => {
-		expect(isLivenessSignalFresh(NOW + THRESHOLD, NOW, THRESHOLD)).toBe(true)
+	it("treats a near-future timestamp as fresh (clock skew and the transient-stat sentinel)", () => {
+		// The transient-stat sentinel is exactly `now + THRESHOLD`; keeping it
+		// inside the window is what makes a stat failure skip repair instead of
+		// cutting a possibly-live child out of its delegation link.
+		expect(isLivenessSignalFresh(NOW + THRESHOLD - 1, NOW, THRESHOLD)).toBe(true)
+		expect(isLivenessSignalFresh(NOW + 1_000, NOW, THRESHOLD)).toBe(true)
+	})
+
+	it("treats a far-future timestamp as stale (clock rollback or restored archive)", () => {
+		// A dead child stamped far ahead must not stay live forever: otherwise
+		// startup and every periodic tick keep the parent delegated to a record
+		// no session owns.
+		expect(isLivenessSignalFresh(NOW + THRESHOLD, NOW, THRESHOLD)).toBe(false)
+		expect(isLivenessSignalFresh(NOW + 365 * 24 * 60 * 60 * 1000, NOW, THRESHOLD)).toBe(false)
 	})
 })
 
@@ -152,6 +164,19 @@ describe("isDelegatedChildLive", () => {
 
 	it("is not live when both signals are absent", () => {
 		expect(isDelegatedChildLive({}, NOW, THRESHOLD, undefined)).toBe(false)
+	})
+
+	it("is not live when both signals are far in the future", () => {
+		// Far-future mtime AND far-future heartbeat: the record claims life from
+		// a clock that no longer matches, so repair must proceed.
+		const far = NOW + 365 * 24 * 60 * 60 * 1000
+		expect(isDelegatedChildLive({ lastActivityAt: far }, NOW, THRESHOLD, far)).toBe(false)
+	})
+
+	it("stays live when only the mtime is near-future (the transient-stat sentinel)", () => {
+		// The sentinel must keep working: a stat failure reports `now + THRESHOLD`,
+		// which is inside the bounded window, so repair is skipped and retried.
+		expect(isDelegatedChildLive({}, NOW, THRESHOLD, NOW + THRESHOLD - 1)).toBe(true)
 	})
 })
 

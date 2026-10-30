@@ -115,7 +115,7 @@ import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/provi
 import { ContextProxy } from "../config/ContextProxy"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
-import { PendingActionSettlementError, Task } from "../task/Task"
+import { Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
 import type { WebviewFocusTracker } from "./WebviewFocusTracker"
@@ -644,15 +644,19 @@ export class ClineProvider
 		}
 	}
 
+	/**
+	 * Tear down a task whose scheduled run failed before it started. Every
+	 * rejection is handled here, not only a settlement failure: the task was
+	 * already claimed locally and its liveness heartbeat already started, so
+	 * leaving it registered would keep a zombie `active` record beating and
+	 * hide the dead child from both local ticks and peer startup repair.
+	 */
 	private async cleanupFailedHistoryTask(task: Task, error: unknown): Promise<void> {
-		if (!(error instanceof PendingActionSettlementError)) {
-			return
-		}
-
 		if (this.taskRegistry.getById(task.taskId) !== task) {
 			return
 		}
 
+		this.log(`[cleanupFailedHistoryTask] tearing down ${task.taskId}.${task.instanceId}: ${String(error)}`)
 		this.taskRegistry.remove(task.taskId)
 		task.emit(RooCodeEventName.TaskUnfocused)
 

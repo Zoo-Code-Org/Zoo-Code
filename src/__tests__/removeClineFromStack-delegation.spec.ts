@@ -202,7 +202,11 @@ describe("ClineProvider failed history restoration cleanup", () => {
 		expect(task.dispose).toHaveBeenCalledOnce()
 	})
 
-	it("keeps the task active after an unrelated history resume failure", async () => {
+	it("tears down the task after an unrelated history resume failure too", async () => {
+		// Regression for the zombie-heartbeat cluster: a non-settlement rejection
+		// used to return early, leaving the task registered with its liveness
+		// heartbeat running. That kept the persisted record `active` and beating,
+		// so local ticks and peer startup repair never saw the dead child.
 		const cleanupListener = vi.fn()
 		const task = {
 			taskId: "failed-history-task",
@@ -213,19 +217,20 @@ describe("ClineProvider failed history restoration cleanup", () => {
 		const taskRegistry = new TaskRegistry()
 		taskRegistry.push(task)
 		const taskEventListeners = new Map([[task, [cleanupListener]]])
+		const log = vi.fn()
 		const provider = {
 			taskRegistry,
 			taskEventListeners,
-			log: vi.fn(),
+			log,
 		} as unknown as ClineProvider
 
 		await privateClineProvider.cleanupFailedHistoryTask.call(provider, task, new Error("history read failed"))
 
-		expect(taskRegistry.getById(task.taskId)).toBe(task)
-		expect(taskRegistry.current).toBe(task)
-		expect(cleanupListener).not.toHaveBeenCalled()
-		expect(taskEventListeners.has(task)).toBe(true)
-		expect(task.dispose).not.toHaveBeenCalled()
+		expect(taskRegistry.getById(task.taskId)).toBeUndefined()
+		expect(cleanupListener).toHaveBeenCalledOnce()
+		expect(taskEventListeners.has(task)).toBe(false)
+		expect(task.dispose).toHaveBeenCalledOnce()
+		expect(log).toHaveBeenCalledWith(expect.stringContaining("history read failed"))
 	})
 })
 

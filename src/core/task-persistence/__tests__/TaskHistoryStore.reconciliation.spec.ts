@@ -9,6 +9,7 @@ import type { HistoryItem } from "@roo-code/types"
 import { GlobalFileNames } from "../../../shared/globalFileNames"
 import { LOCK_STALE_MS } from "../../../utils/fileLock"
 import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
+import { isLivenessSignalFresh } from "../taskLifecycle"
 
 vi.mock("../../../utils/storage", () => ({
 	getStorageBasePath: vi.fn().mockImplementation((defaultPath: string) => defaultPath),
@@ -3601,7 +3602,7 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		// never evict the child while its path is poisoned. Date is frozen to a
 		// fixed instant in the past so the freshly seeded mtimes read as live at
 		// startup and the startup pass provably skips the repair.
-		const FIXED_NOW = 1_756_886_400_000 // 2025-09-03T08:00:00.000Z, before real seed mtimes
+		const FIXED_NOW = Date.now() // seeded mtimes land a few ms after this, i.e. fresh, not far-future
 		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
@@ -3611,7 +3612,7 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 
 			const s = (store = new TaskHistoryStore(tmpDir))
 			await s.initialize()
-			// Startup: fresh (future-relative-to-FIXED_NOW) mtimes → live → skipped.
+			// Startup: freshly seeded mtimes → live → skipped.
 			expect(s.get(child.id)?.status).toBe("active")
 			// Clear the startup skip-log so the assertion below only observes the
 			// TICK's decision after the stat failure is armed.
@@ -3662,7 +3663,7 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		// neighboring tests) and no disk write happens after the simulated
 		// deletion, so the fs watcher never fires. Lock dir cleanup rides the
 		// afterEach tmpDir rm.
-		const FIXED_NOW = 1_756_886_400_000 // 2025-09-03T08:00:00.000Z, before real seed mtimes
+		const FIXED_NOW = Date.now() // seeded mtimes land a few ms after this, i.e. fresh, not far-future
 		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
@@ -3672,7 +3673,7 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 
 			const s = (store = new TaskHistoryStore(tmpDir))
 			await s.initialize()
-			// Startup: fresh (future-relative-to-FIXED_NOW) mtimes → live → skipped.
+			// Startup: freshly seeded mtimes → live → skipped.
 			expect(s.get(child.id)?.status).toBe("active")
 			warnSpy.mockClear()
 
@@ -3693,6 +3694,352 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		} finally {
 			warnSpy.mockRestore()
 			errorSpy.mockRestore()
+			nowSpy.mockRestore()
+		}
+	})
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fix round 1 regressions (PR #1495 review threads 4419747306 / 4419747309)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("TaskHistoryStore under-lock repair guards and heartbeat release", () => {
+	let tmpDir: string
+	let store: TaskHistoryStore | undefined
+	let mtimeSpy: { mockRestore(): void } | undefined
+	let syncMtimeSpy: { mockRestore(): void } | undefined
+
+	function delegatedPair(parentId: string, childId: string): HistoryItem[] {
+		const child = makeItem({ id: childId, status: "active", parentTaskId: parentId, rootTaskId: parentId })
+		const parent = makeItem({
+			id: parentId,
+			status: "delegated",
+			awaitingChildId: childId,
+			delegatedToId: childId,
+			childIds: [childId],
+		})
+		return [parent, child]
+	}
+
+	/** Make the child look like a crash orphan to every liveness probe. */
+	function installStaleChildInjector(childId: string): void {
+		const probe = TaskHistoryStore.prototype as unknown as {
+			getChildFileMtimeMs: (id: string) => Promise<number | undefined>
+		}
+		const original = probe.getChildFileMtimeMs
+		mtimeSpy = vi
+			.spyOn(probe, "getChildFileMtimeMs")
+			.mockImplementation((id: string) =>
+				id === childId ? Promise.resolve(Date.now() - 10 * 60 * 1000) : original.call(store!, id),
+			)
+		const childFilePath = path.join(tmpDir, "tasks", childId, GlobalFileNames.historyItem)
+		spySyncMtimeProbe((fp, real) => (fp === childFilePath ? Date.now() - 10 * 60 * 1000 : real(fp)))
+	}
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "repair-guard-test-"))
+	})
+
+	afterEach(() => {
+		mtimeSpy?.mockRestore()
+		syncMtimeSpy?.mockRestore()
+		mtimeSpy = undefined
+		syncMtimeSpy = undefined
+		store?.dispose()
+		store = undefined
+	})
+
+	it("aborts the child repair when a peer deletes the record under the lock instead of resurrecting it", async () => {
+		// Regression for review thread 4419747309. The repair decision comes from
+		// an unlocked stat; a peer can delete the stale active child before this
+		// store takes the advisory lock. The old guard accepted an absent record,
+		// `mergeHistoryDelta` fell through to the cache copy, and the deleted
+		// child was recreated as `interrupted` — a ghost record the peer had
+		// already removed. The guard must abort instead, and the parent must keep
+		// its delegation link so the next pass can decide with fresh data.
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			const childId = "child-deleted-under-lock"
+			const parentId = "parent-deleted-under-lock"
+			const [parent, child] = delegatedPair(parentId, childId)
+			await seedItems(tmpDir, [parent, child])
+
+			const s = (store = new TaskHistoryStore(tmpDir))
+			await s.initialize()
+			installStaleChildInjector(childId)
+
+			// The peer removes the child's history file after this store's cache
+			// snapshot, so the cache still holds an `active` child while the disk
+			// record is gone — exactly the window the guard must detect.
+			const childFilePath = path.join(tmpDir, "tasks", childId, GlobalFileNames.historyItem)
+			await fs.rm(childFilePath)
+
+			const internals = TaskHistoryStore.prototype as unknown as {
+				runPeriodicDelegationReconciliation: () => Promise<void>
+			}
+			await internals.runPeriodicDelegationReconciliation.call(s)
+
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("child record deleted under lock"))
+			// The deleted child must NOT come back on disk — that resurrection was
+			// the bug. The stale cache entry is left for `reconcile()` to evict on
+			// its next pass; the repair itself writes nothing.
+			await expect(fs.access(childFilePath)).rejects.toThrow()
+			// The parent keeps awaiting it: nothing authoritative says the handoff
+			// ended, and the next tick retries with a fresh snapshot.
+			expect(s.get(parentId)?.status).toBe("delegated")
+			expect(s.get(parentId)?.awaitingChildId).toBe(childId)
+			expect(errorSpy).not.toHaveBeenCalled()
+
+			// A later reconcile pass evicts the stale entry, so the ghost does not
+			// linger in this window either.
+			await s.reconcile({ forceRefresh: true })
+			expect(s.get(childId)).toBeUndefined()
+		} finally {
+			warnSpy.mockRestore()
+			errorSpy.mockRestore()
+		}
+	})
+
+	it("releases a local ownership claim that lands under the repair lock so the interrupted child stays repairable", async () => {
+		// Regression for the K31PRO ownership-claim race in thread 4419747309.
+		// `markLocallyActive` does not take the store lock, so a provider can claim
+		// the child after the repair guard ran but before the commit lands. The
+		// repair then interrupts a child this window now believes it owns, and the
+		// claim would shield that interrupted record from every later pass. The
+		// commit must release the claim it observes after the write.
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			const childId = "child-claim-under-lock"
+			const parentId = "parent-claim-under-lock"
+			const [parent, child] = delegatedPair(parentId, childId)
+			await seedItems(tmpDir, [parent, child])
+
+			const s = (store = new TaskHistoryStore(tmpDir))
+			await s.initialize()
+			installStaleChildInjector(childId)
+
+			// Simulate the claim landing inside the locked window: the guard has
+			// already passed (no claim visible to it), then the provider claims the
+			// id before the merge commits.
+			const probe = TaskHistoryStore.prototype as unknown as {
+				assertChildRepairPreconditions: (existing: unknown, filePath: string, childId: string) => void
+			}
+			const originalGuard = probe.assertChildRepairPreconditions
+			const guardSpy = vi.spyOn(probe, "assertChildRepairPreconditions").mockImplementation(function (
+				this: TaskHistoryStore,
+				existing: unknown,
+				filePath: string,
+				id: string,
+			) {
+				originalGuard.call(this, existing, filePath, id)
+				s.markLocallyActive(id)
+			})
+
+			try {
+				const internals = TaskHistoryStore.prototype as unknown as {
+					runPeriodicDelegationReconciliation: () => Promise<void>
+				}
+				await internals.runPeriodicDelegationReconciliation.call(s)
+			} finally {
+				guardSpy.mockRestore()
+			}
+
+			expect(s.get(childId)?.status).toBe("interrupted")
+			// The claim that arrived after the guard must not survive the commit.
+			const owned = (s as unknown as { locallyActiveTaskIds: Set<string> }).locallyActiveTaskIds
+			expect(owned.has(childId)).toBe(false)
+			const released = (s as unknown as { releasedLocalOwnershipIds: Set<string> }).releasedLocalOwnershipIds
+			expect(released.has(childId)).toBe(true)
+			expect(errorSpy).not.toHaveBeenCalled()
+		} finally {
+			warnSpy.mockRestore()
+			errorSpy.mockRestore()
+		}
+	})
+
+	it("does not keep the child's claim when the repair guard itself aborts", async () => {
+		// Complement of the release path: an aborted repair writes nothing, so it
+		// must not release a claim it never observed under the lock. A live claim
+		// still shields the child, which is what keeps a genuinely owned child out
+		// of repair.
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			const childId = "child-claim-before-guard"
+			const parentId = "parent-claim-before-guard"
+			const [parent, child] = delegatedPair(parentId, childId)
+			await seedItems(tmpDir, [parent, child])
+
+			const s = (store = new TaskHistoryStore(tmpDir))
+			await s.initialize()
+			installStaleChildInjector(childId)
+			// Claim BEFORE the guard: the guard sees it and aborts the repair.
+			s.markLocallyActive(childId)
+
+			const internals = TaskHistoryStore.prototype as unknown as {
+				runPeriodicDelegationReconciliation: () => Promise<void>
+			}
+			await internals.runPeriodicDelegationReconciliation.call(s)
+
+			expect(s.get(childId)?.status).toBe("active")
+			expect(s.get(parentId)?.status).toBe("delegated")
+			const owned = (s as unknown as { locallyActiveTaskIds: Set<string> }).locallyActiveTaskIds
+			expect(owned.has(childId)).toBe(true)
+			expect(errorSpy).not.toHaveBeenCalled()
+		} finally {
+			warnSpy.mockRestore()
+			errorSpy.mockRestore()
+		}
+	})
+
+	it("skips a heartbeat whose ownership was released while the beat waited for the lock", async () => {
+		// Regression for review thread 4419747306. A beat queued before
+		// `Task.dispose` reaches the lock after `markLocallyInactive` ran. Writing
+		// it refreshes mtime and `lastActivityAt` for a session that is gone, so a
+		// peer reconciliation pass treats the disposed child as live and defers
+		// orphan repair by up to one interval. The release must win.
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		try {
+			const childId = "child-trailing-beat"
+			const child = makeItem({ id: childId, status: "active" })
+			await seedItems(tmpDir, [child])
+
+			const s = (store = new TaskHistoryStore(tmpDir))
+			await s.initialize()
+			// The record is active and cached, so the pre-lock status check passes.
+			expect(s.get(childId)?.status).toBe("active")
+
+			const before = JSON.parse(
+				await fs.readFile(path.join(tmpDir, "tasks", childId, GlobalFileNames.historyItem), "utf8"),
+			) as HistoryItem
+			// Dispose order: the session releases its claim, then the queued beat runs.
+			s.markLocallyInactive(childId)
+			await s.recordTaskActivity(childId, before.ts + 60_000)
+
+			const after = JSON.parse(
+				await fs.readFile(path.join(tmpDir, "tasks", childId, GlobalFileNames.historyItem), "utf8"),
+			) as HistoryItem
+			expect(after.lastActivityAt).toBeUndefined()
+			expect(after.lastActivityAt).toBe(before.lastActivityAt)
+		} finally {
+			warnSpy.mockRestore()
+		}
+	})
+
+	it("still writes a heartbeat for a task that holds its claim", async () => {
+		// Accept path for the release check: the guard must not block a live
+		// session's beat, otherwise a streaming child would look stale and be
+		// repaired out of its delegation link.
+		const childId = "child-live-beat"
+		const child = makeItem({ id: childId, status: "active" })
+		await seedItems(tmpDir, [child])
+
+		const s = (store = new TaskHistoryStore(tmpDir))
+		await s.initialize()
+		s.markLocallyActive(childId)
+		const at = Date.now() + 60_000
+		await s.recordTaskActivity(childId, at)
+
+		const after = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", childId, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		expect(after.lastActivityAt).toBe(at)
+		expect(s.get(childId)?.lastActivityAt).toBe(at)
+	})
+
+	it("repairs a crash orphan whose mtime and heartbeat are far in the future", async () => {
+		// Regression for the far-future liveness cluster. A dead child stamped far
+		// ahead (clock rollback, restored archive) used to satisfy every freshness
+		// check, so the parent stayed delegated forever across startup and every
+		// tick. With the bounded window both signals are stale and repair proceeds.
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			const childId = "child-far-future"
+			const parentId = "parent-far-future"
+			const farFuture = Date.now() + 365 * 24 * 60 * 60 * 1000
+			const [parent, child] = delegatedPair(parentId, childId)
+			await seedItems(tmpDir, [parent, { ...child, lastActivityAt: farFuture }])
+
+			const probe = TaskHistoryStore.prototype as unknown as {
+				getChildFileMtimeMs: (id: string) => Promise<number | undefined>
+			}
+			const original = probe.getChildFileMtimeMs
+			mtimeSpy = vi
+				.spyOn(probe, "getChildFileMtimeMs")
+				.mockImplementation((id: string) =>
+					id === childId ? Promise.resolve(farFuture) : original.call(store!, id),
+				)
+			const childFilePath = path.join(tmpDir, "tasks", childId, GlobalFileNames.historyItem)
+			spySyncMtimeProbe((fp, real) => (fp === childFilePath ? farFuture : real(fp)))
+
+			const s = (store = new TaskHistoryStore(tmpDir))
+			await s.initialize()
+
+			expect(s.get(childId)?.status).toBe("interrupted")
+			expect(s.get(parentId)?.status).toBe("active")
+			expect(s.get(parentId)?.awaitingChildId).toBeUndefined()
+			expect(errorSpy).not.toHaveBeenCalled()
+		} finally {
+			warnSpy.mockRestore()
+			errorSpy.mockRestore()
+		}
+	})
+
+	it("keeps a child live when only its mtime sits at the transient-stat sentinel", async () => {
+		// Accept path for the bounded window, driven through the store's REAL
+		// sentinel value: a transient stat failure reports `now + threshold - 1`,
+		// which must stay inside the window so the liveness guard skips repair and
+		// a later tick retries. Moving the sentinel onto `now + threshold` puts it
+		// outside the strict `<` bound and breaks this assertion.
+		const childId = "child-sentinel"
+		const child = makeItem({ id: childId, status: "active" })
+		await seedItems(tmpDir, [child])
+
+		const s = (store = new TaskHistoryStore(tmpDir))
+		await s.initialize()
+
+		// Force the real transient-failure branch: a NUL byte in the child's path
+		// makes `fs.stat` reject with ERR_INVALID_ARG_VALUE (never ENOENT), so
+		// `getChildFileMtimeMs` returns its own sentinel.
+		const tasksDir = path.join(tmpDir, "tasks")
+		const pathProbe = TaskHistoryStore.prototype as unknown as {
+			getTaskFilePath: (taskId: string) => Promise<string>
+		}
+		const originalGetTaskFilePath = pathProbe.getTaskFilePath
+		const pathSpy = vi
+			.spyOn(pathProbe, "getTaskFilePath")
+			.mockImplementation((taskId: string) =>
+				taskId === childId
+					? Promise.resolve(path.join(tasksDir, taskId, "his\0tory_item.json"))
+					: originalGetTaskFilePath.call(s, taskId),
+			)
+		// Freeze the clock across the probe and the assertion so the sentinel's
+		// exact offset from `now` is observable: elapsed test time would otherwise
+		// shift both sides by the same amount and hide a boundary sentinel.
+		const FIXED_NOW = 1_756_886_400_000
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
+		let probed: number | undefined
+		try {
+			const internals = TaskHistoryStore.prototype as unknown as {
+				getChildFileMtimeMs: (id: string) => Promise<number | undefined>
+			}
+			probed = await internals.getChildFileMtimeMs.call(s, childId)
+		} finally {
+			pathSpy.mockRestore()
+		}
+
+		try {
+			expect(typeof probed).toBe("number")
+			if (typeof probed !== "number") return
+			// The sentinel must sit strictly INSIDE the bounded window, so the shared
+			// freshness predicate the guards use accepts it. A sentinel placed on the
+			// boundary (`now + threshold`) is rejected by the strict `<` bound.
+			expect(probed - FIXED_NOW).toBe(LIVE_CHILD_MTIME_THRESHOLD_MS - 1)
+			expect(isLivenessSignalFresh(probed, FIXED_NOW, LIVE_CHILD_MTIME_THRESHOLD_MS)).toBe(true)
+		} finally {
 			nowSpy.mockRestore()
 		}
 	})

@@ -2574,5 +2574,146 @@ describe("Task persistence", () => {
 
 			expect(releaseSpy).toHaveBeenCalledWith(task.taskId)
 		})
+
+		it("stops the heartbeat when a delegated child's resume rejects for a non-abort reason", async () => {
+			// Regression for review thread 4419747311. The heartbeat starts before
+			// the first await of every start/resume entry point, and only `dispose`
+			// stopped it. A resume that rejects for a non-abort reason left the
+			// persisted record `active` AND beating, so local ticks and peer startup
+			// repair both read fresh liveness signals for a child that will never
+			// run again — the zombie that masks the dead child forever.
+			const recordSpy = vi.spyOn(mockProvider.taskHistoryStore, "recordTaskActivity").mockResolvedValue(undefined)
+			const parent = new Task({ provider: mockProvider, apiConfiguration: mockApiConfig, startTask: false })
+			const child = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				parentTask: parent,
+				historyItem: {
+					id: "child-resume-fails",
+					number: 1,
+					ts: 1,
+					task: "child task",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					status: "active",
+					parentTaskId: parent.taskId,
+					rootTaskId: parent.taskId,
+				},
+				startTask: false,
+			})
+			const access = child as unknown as {
+				getSavedClineMessages: () => Promise<unknown[]>
+				livenessHeartbeatInterval: ReturnType<typeof setInterval> | undefined
+			}
+			// A non-abort failure inside the resume prologue: the saved-message read
+			// throws before the loop starts, so the catch rethrows.
+			access.getSavedClineMessages = vi.fn().mockRejectedValue(new Error("history read failed"))
+			// Prove the heartbeat really started on this path, so the assertion
+			// below is about stopping it rather than about never starting it.
+			const startSpy = vi.spyOn(
+				Task.prototype as unknown as { startLivenessHeartbeat: () => void },
+				"startLivenessHeartbeat",
+			)
+
+			vi.useFakeTimers()
+			try {
+				await expect(child.run()).rejects.toThrow("history read failed")
+
+				expect(startSpy).toHaveBeenCalled()
+				// The interval must be gone, so no further beats are recorded.
+				expect(access.livenessHeartbeatInterval).toBeUndefined()
+				recordSpy.mockClear()
+				await vi.advanceTimersByTimeAsync(180_000)
+				expect(recordSpy).not.toHaveBeenCalled()
+			} finally {
+				startSpy.mockRestore()
+				vi.useRealTimers()
+			}
+		})
+
+		it("keeps the heartbeat running after an abort during resume (abort is not a failure)", async () => {
+			// Accept path for the same catch block: an expected abort/abandon return
+			// must NOT stop the heartbeat, because disposal owns that transition and
+			// the task may still be resumable.
+			const parent = new Task({ provider: mockProvider, apiConfiguration: mockApiConfig, startTask: false })
+			const child = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				parentTask: parent,
+				historyItem: {
+					id: "child-resume-aborted",
+					number: 1,
+					ts: 1,
+					task: "child task",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					status: "active",
+					parentTaskId: parent.taskId,
+					rootTaskId: parent.taskId,
+				},
+				startTask: false,
+			})
+			const access = child as unknown as {
+				getSavedClineMessages: () => Promise<unknown[]>
+				livenessHeartbeatInterval: ReturnType<typeof setInterval> | undefined
+			}
+			access.getSavedClineMessages = vi.fn().mockRejectedValue(new Error("history read failed"))
+
+			vi.useFakeTimers()
+			try {
+				child.start()
+				expect(access.livenessHeartbeatInterval).toBeDefined()
+				// The user cancelled: the catch returns without rethrowing.
+				child.abortReason = "user_cancelled"
+
+				await expect(child.run()).resolves.toBeUndefined()
+
+				expect(access.livenessHeartbeatInterval).toBeDefined()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("stops the heartbeat when a delegated child's startTask rejects for a non-abort reason", async () => {
+			// Same contract on the new-task entry point. `startTask` throws before
+			// the loop starts (here: the provider state read for the disabled-tools
+			// notice is swallowed, so the say() failure is what escapes), leaving the
+			// record `active`; without the stop its beats keep the dead child looking
+			// live to every reconciliation pass.
+			const recordSpy = vi.spyOn(mockProvider.taskHistoryStore, "recordTaskActivity").mockResolvedValue(undefined)
+			const parent = new Task({ provider: mockProvider, apiConfiguration: mockApiConfig, startTask: false })
+			const child = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				parentTask: parent,
+				task: "child task",
+				startTask: false,
+			})
+			const access = child as unknown as {
+				say: (...args: unknown[]) => Promise<void>
+				livenessHeartbeatInterval: ReturnType<typeof setInterval> | undefined
+			}
+			access.say = vi.fn().mockRejectedValue(new Error("say failed"))
+			const startSpy = vi.spyOn(
+				Task.prototype as unknown as { startLivenessHeartbeat: () => void },
+				"startLivenessHeartbeat",
+			)
+
+			vi.useFakeTimers()
+			try {
+				await expect(child.run()).rejects.toThrow("say failed")
+
+				expect(startSpy).toHaveBeenCalled()
+				expect(access.livenessHeartbeatInterval).toBeUndefined()
+				recordSpy.mockClear()
+				await vi.advanceTimersByTimeAsync(180_000)
+				expect(recordSpy).not.toHaveBeenCalled()
+			} finally {
+				startSpy.mockRestore()
+				vi.useRealTimers()
+			}
+		})
 	})
 })

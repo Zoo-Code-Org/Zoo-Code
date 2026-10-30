@@ -3196,6 +3196,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			if (this.abandoned === true || this.abort === true || this.abortReason === "user_cancelled") {
 				return
 			}
+			// This task will never run, so it must stop claiming liveness: the
+			// heartbeat started before the first await and a non-abort rejection
+			// leaves the record `active`, so zombie beats would hide the dead child
+			// from local ticks and peer startup repair indefinitely.
+			this.stopLivenessHeartbeat()
 			throw error
 		}
 	}
@@ -3471,6 +3476,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			if (this.abandoned === true || this.abort === true || this.abortReason === "user_cancelled") {
 				return
 			}
+			// Same liveness contract as `startTask`: a resume that rejects for a
+			// non-abort reason never runs, so its heartbeat must stop here.
+			this.stopLivenessHeartbeat()
 			throw error
 		}
 	}

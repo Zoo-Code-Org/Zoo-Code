@@ -23,12 +23,14 @@ type TaskMap = Record<TaskId, HistoryItem | undefined>
  *
  * - `liveElsewhere[id]` models the child's history-file mtime: true when the
  *   mtime is "recent" (the child is owned by another window that is actively
- *   persisting it), false when it is "stale" or the file is unreadable.
+ *   persisting it), false when it is "stale", far in the future, or the file
+ *   is unreadable.
  * - `heartbeatAlive[id]` models the persisted `lastActivityAt` heartbeat: true
  *   when the owning session heartbeated within the threshold (Task's throttled
  *   heartbeat runs across the child's whole active lifetime — long streaming
  *   turns, long tool calls, and ask-idle periods that write nothing else to
- *   the history file), false when the heartbeat is absent or stale.
+ *   the history file), false when the heartbeat is absent, stale, or far in
+ *   the future.
  *
  * The model never reads wall-clock time. Reconciliation treats the child as
  * live when EITHER signal is true and repairs it to interrupted only when
