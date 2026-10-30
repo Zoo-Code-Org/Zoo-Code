@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react"
 import React from "react"
 
-import i18next from "../setup"
+import i18next, { loadLanguage } from "../setup"
 import TranslationProvider, { useAppTranslation } from "../TranslationContext"
 
 // The provider reads the active language from extension state. Tests drive it
@@ -98,5 +98,24 @@ describe("TranslationProvider locale loading", () => {
 		await waitFor(() => {
 			expect(screen.getByTestId("error-title")).toHaveTextContent("Something went wrong")
 		})
+	})
+
+	it("skips the language switch when the provider unmounts before the fetch resolves", async () => {
+		const changeLanguage = vi.spyOn(i18next, "changeLanguage")
+
+		const { unmount } = renderProbe("vi")
+		// The locale chunk is still in flight here, so the effect cleanup runs
+		// before the fetch settles and `cancelled` decides the outcome.
+		unmount()
+
+		// `loadLanguage` memoizes the in-flight promise, so awaiting the same
+		// locale here waits for the exact resolution the guard is deciding on.
+		// The provider attached its `.then` first, so its callback has already run
+		// by the time this returns: the switch was suppressed, not left pending.
+		await loadLanguage("vi")
+
+		expect(i18next.hasResourceBundle("vi", "common")).toBe(true)
+		expect(changeLanguage).not.toHaveBeenCalledWith("vi")
+		expect(i18next.language).not.toBe("vi")
 	})
 })
