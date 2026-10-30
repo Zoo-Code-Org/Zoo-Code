@@ -2955,6 +2955,11 @@ describe("ClineProvider", () => {
 		const mockProviderSettingsManager = () => {
 			const profiles: ProviderSettingsEntry[] = [currentProfile, otherProfile]
 
+			// Full configs keyed by name, so `getProfile`/`saveConfig` behave like the real manager.
+			const configs = new Map<string, ProviderSettingsEntry & { openRouterModelId?: string }>(
+				profiles.map((profile) => [profile.name, { ...profile, openRouterModelId: "other-model" }]),
+			)
+
 			Object.assign(provider, {
 				providerSettingsManager: {
 					deleteConfig: vi.fn().mockImplementation(async (name: string) => {
@@ -2962,16 +2967,31 @@ describe("ClineProvider", () => {
 						if (index !== -1) {
 							profiles.splice(index, 1)
 						}
+						configs.delete(name)
 					}),
 					listConfig: vi.fn().mockImplementation(async () => profiles),
+					getProfile: vi.fn().mockImplementation(async ({ name }: { name: string }) => {
+						const config = configs.get(name)
+						if (!config) {
+							throw new Error(`Config with name '${name}' not found`)
+						}
+						return { ...config, name }
+					}),
+					saveConfig: vi.fn().mockImplementation(async (name: string, config: ProviderSettingsEntry) => {
+						configs.set(name, { ...config, name })
+						if (!profiles.some((profile) => profile.name === name)) {
+							profiles.push({ name, id: config.id, apiProvider: config.apiProvider })
+						}
+						return config.id
+					}),
 					activateProfile: vi.fn().mockImplementation(async ({ name }: { name: string }) => {
-						const profile = profiles.find((entry) => entry.name === name)
-						if (!profile) {
+						const config = configs.get(name)
+						if (!config) {
 							throw new Error(`Config '${name}' not found`)
 						}
 						// Include a distinguishing setting so tests can assert the
 						// effective provider settings, not just the name pointers.
-						return { ...profile, openRouterModelId: "other-model" }
+						return { ...config, name }
 					}),
 					setModeConfig: vi.fn(),
 				},
@@ -3037,6 +3057,66 @@ describe("ClineProvider", () => {
 			expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("other-config")
 			expect(setValuesSpy).not.toHaveBeenCalled()
 			expect(vi.mocked(mockContext.globalState.update).mock.calls.length).toBe(updateCallsBefore)
+		})
+
+		test("restores the deleted profile when replacement activation rejects", async () => {
+			const profiles = mockProviderSettingsManager()
+			// Reject only the replacement activation; the restore's own activation still succeeds.
+			vi.mocked(provider.providerSettingsManager.activateProfile).mockRejectedValueOnce(
+				new Error("Failed to activate profile: storage error"),
+			)
+
+			await expect(provider.deleteProviderProfile(currentProfile)).rejects.toThrow(
+				"Failed to activate profile: storage error",
+			)
+
+			// The purge is undone so the manager and ContextProxy still name the same profile.
+			expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith(
+				"current-config",
+				expect.objectContaining({ id: "current-id", apiProvider: providerIdentifiers.anthropic }),
+			)
+			expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith({ name: "current-config" })
+			expect(profiles.map(({ name }) => name).sort()).toEqual(["current-config", "other-config"])
+			// A retry is now possible: the profile exists again, so the purge no longer throws "not found".
+			await expect(provider.deleteProviderProfile(currentProfile)).resolves.toBeUndefined()
+		})
+
+		test("restores the deleted profile when the mutation timeout aborts the activation", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const profiles = mockProviderSettingsManager()
+				let resolveActivation!: () => void
+				const pendingActivation = new Promise<void>((resolve) => {
+					resolveActivation = resolve
+				})
+				// Hang only the replacement activation; the restore's own activation still succeeds.
+				vi.mocked(provider.providerSettingsManager.activateProfile).mockImplementationOnce(async () => {
+					await pendingActivation
+					// The abandoned activation still stores the replacement in the manager.
+					return { ...otherProfile, openRouterModelId: "other-model" }
+				})
+
+				const deletion = provider.deleteProviderProfile(currentProfile)
+				const deletionResult = expect(deletion).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await deletionResult
+
+				// The timeout path restores the purged profile instead of leaving ContextProxy
+				// naming a profile the manager no longer has.
+				expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith(
+					"current-config",
+					expect.objectContaining({ id: "current-id", apiProvider: providerIdentifiers.anthropic }),
+				)
+				expect(profiles.map(({ name }) => name).sort()).toEqual(["current-config", "other-config"])
+
+				// A late completion of the abandoned activation must not resurrect a second state.
+				resolveActivation()
+				await vi.advanceTimersByTimeAsync(0)
+				expect(provider.contextProxy.getValues().currentApiConfigName).toBe("current-config")
+			} finally {
+				vi.useRealTimers()
+			}
 		})
 	})
 })

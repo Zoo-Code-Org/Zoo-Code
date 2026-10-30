@@ -17,6 +17,7 @@ import {
 	type GlobalState,
 	type ProviderName,
 	type ProviderSettings,
+	type ProviderSettingsWithId,
 	type RooCodeSettings,
 	type ProviderSettingsEntry,
 	type StaticAppProperties,
@@ -1948,8 +1949,10 @@ export class ClineProvider
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
 		const globalSettings = this.contextProxy.getValues()
 		const deletedActiveProfile = profileToDelete.name === globalSettings.currentApiConfigName
+		// Pick the replacement from the manager, not from ContextProxy metadata: the chosen name
+		// must exist in the manager or the activation below rejects with "not found".
 		const profileToActivate = deletedActiveProfile
-			? this.getProviderProfileEntries().find(({ name }) => name !== profileToDelete.name)?.name
+			? (await this.providerSettingsManager.listConfig()).find(({ name }) => name !== profileToDelete.name)?.name
 			: globalSettings.currentApiConfigName
 
 		if (!profileToActivate) {
@@ -1958,15 +1961,28 @@ export class ClineProvider
 
 		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
+		// Capture the profile before purging so a failed active-profile switch can restore it.
+		const deletedProfileConfig = deletedActiveProfile
+			? await this.providerSettingsManager.getProfile({ name: profileToDelete.name })
+			: undefined
+
 		// Purge first so a failing purge fails fast before any ContextProxy write,
 		// matching the ordering the webview delete path established.
 		await this.providerSettingsManager.deleteConfig(profileToDelete.name)
 
 		if (deletedActiveProfile) {
-			// Route through the standard activation path so the effective provider
-			// settings, mode config, and current-task wiring all end up identical to
-			// a user activating the replacement profile from the webview.
-			await this.activateProviderProfile({ name: profileToActivate })
+			try {
+				// Route through the standard activation path so the effective provider
+				// settings, mode config, and current-task wiring all end up identical to
+				// a user activating the replacement profile from the webview.
+				await this.activateProviderProfile({ name: profileToActivate })
+			} catch (error) {
+				// Activation leaves ContextProxy naming the deleted profile, so the purge has to
+				// be undone: otherwise the manager no longer has the active profile and a retry
+				// fails in `deleteConfig` with "not found".
+				await this.restoreDeletedProviderProfile(profileToDelete.name, deletedProfileConfig)
+				throw error
+			}
 			return
 		}
 
@@ -1977,6 +1993,31 @@ export class ClineProvider
 		})
 
 		await this.postStateToWebview()
+	}
+
+	/**
+	 * Undo the purge of an active profile whose replacement activation failed, so the manager and
+	 * ContextProxy keep naming the same profile. Best-effort: a failed restore is logged rather
+	 * than replacing the original activation error.
+	 */
+	private async restoreDeletedProviderProfile(
+		name: string,
+		config: (ProviderSettingsWithId & { name: string }) | undefined,
+	): Promise<void> {
+		if (!config) return
+
+		try {
+			const { name: _name, ...providerSettings } = config
+			await this.providerSettingsManager.saveConfig(name, providerSettings)
+			await this.providerSettingsManager.activateProfile({ name })
+			this.log(`Restored provider profile '${name}' after a failed replacement activation`)
+		} catch (error) {
+			this.log(
+				`Failed to restore provider profile '${name}' after a failed replacement activation: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
 	}
 
 	private async persistStickyProviderProfileToCurrentTask(
