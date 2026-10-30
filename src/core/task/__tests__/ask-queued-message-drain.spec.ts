@@ -24,12 +24,13 @@ describe("Task.ask queued message drain", () => {
 		;(task as any).lastMessageTs = undefined
 		task["pendingAskCount"] = 0
 		task["drainRetainedQueuedMessageIds"] = new Set<string>()
-		task["queuedFeedbackRowWritten"] = new Set<string>()
+		task["queuedFeedbackRowWritten"] = new Map<string, string>()
 		return import("../../message-queue/MessageQueueService").then(({ MessageQueueService }) => {
 			;(task as any).messageQueueService = new MessageQueueService()
-			// Mirrors the real `addToClineMessages`, which pushes synchronously before
-			// its own awaits: the tests below depend on that ordering.
+			// Mirrors the real `addToClineMessages`: it stamps a messageId and pushes
+			// synchronously before its own awaits, and the tests here depend on both.
 			;(task as any).addToClineMessages = vi.fn(async (message: import("@roo-code/types").ClineMessage) => {
+				message.messageId ??= crypto.randomUUID()
 				task["clineMessages"].push(message)
 			})
 			;(task as any).saveClineMessages = vi.fn(async () => {})
@@ -476,8 +477,7 @@ describe("Task.ask queued message drain", () => {
 		task.messageQueueService.addMessage("Persist me twice")
 		const result = await task.ask("completion_result", "Done", false)
 		const access = getQueueTaskTestAccess(task)
-		const say = vi.fn().mockResolvedValue(undefined)
-		access.say = say
+		const rowsBefore = task["clineMessages"].length
 
 		// First attempt appends the row, then fails every save and releases the
 		// claim, so the message is reclaimed as fresh input for a later turn.
@@ -490,14 +490,14 @@ describe("Task.ask queued message drain", () => {
 		} finally {
 			vi.useRealTimers()
 		}
-		expect(say).toHaveBeenCalledTimes(1)
+		expect(task["clineMessages"]).toHaveLength(rowsBefore + 1)
 
 		// The retry succeeds, but the row it would append is already in history.
 		access.saveClineMessages = vi.fn().mockResolvedValue(true)
 		await expect(
 			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
 		).resolves.toBe(true)
-		expect(say).toHaveBeenCalledTimes(1)
+		expect(task["clineMessages"]).toHaveLength(rowsBefore + 1)
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
@@ -532,6 +532,40 @@ describe("Task.ask queued message drain", () => {
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
+	it("re-appends the row when a rewind removed it before the reclaim", async () => {
+		const task = await createTask()
+		task.messageQueueService.addMessage("Rewound row")
+		const result = await task.ask("completion_result", "Done", false)
+		const access = getQueueTaskTestAccess(task)
+		access.saveClineMessages = vi.fn().mockResolvedValue(false)
+		const feedbackRows = () => task["clineMessages"].filter((message) => message.say === "user_feedback")
+
+		// The row lands, then every save fails and the claim is released.
+		vi.useFakeTimers()
+		try {
+			const first = task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images)
+			await vi.runAllTimersAsync()
+			await expect(first).resolves.toBe(false)
+		} finally {
+			vi.useRealTimers()
+		}
+		expect(feedbackRows()).toHaveLength(1)
+
+		// A rewind truncates the conversation, so the recorded row is gone while
+		// the message is still queued and reclaimable.
+		task["clineMessages"] = task["clineMessages"].filter((message) => message.say !== "user_feedback")
+		expect(feedbackRows()).toHaveLength(0)
+
+		// The reclaim must re-append: consuming without the row would drop the
+		// feedback from the conversation entirely.
+		access.saveClineMessages = vi.fn().mockResolvedValue(true)
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).resolves.toBe(true)
+		expect(feedbackRows()).toHaveLength(1)
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
 	it("does not double-append when say throws after the row landed", async () => {
 		const task = await createTask()
 		task.messageQueueService.addMessage("Row landed then threw")
@@ -543,6 +577,7 @@ describe("Task.ask queued message drain", () => {
 		// before its own awaits), then the call rejects the way a throwing
 		// `Message` listener makes `say` reject.
 		access.addToClineMessages = vi.fn(async (message: import("@roo-code/types").ClineMessage) => {
+			message.messageId ??= crypto.randomUUID()
 			task["clineMessages"].push(message)
 			throw new Error("listener threw")
 		})

@@ -520,9 +520,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// `ask()` calls in flight. A drain must not submit while one is pending: the
 	// submission would answer that ask with text written for another turn.
 	private pendingAskCount = 0
-	// Queued feedback already appended to `clineMessages`, so a retry or reclaim
-	// re-saves that row instead of appending a duplicate.
-	private queuedFeedbackRowWritten = new Set<string>()
+	// Message id of the queued feedback row already in `clineMessages`, so a
+	// reclaim re-saves that row instead of appending a duplicate.
+	private queuedFeedbackRowWritten = new Map<string, string>()
 
 	// Streaming
 	isWaitingForFirstChunk = false
@@ -1118,23 +1118,27 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		text?: string,
 		images?: string[],
 	): Promise<boolean> {
-		// Append the row once, before the retry loop: a retry only re-attempts the
-		// durable save, and a reclaimed message already has its row. `say` can
-		// throw after `addToClineMessages` pushed the row (its `Message` emit runs
-		// post-push), so the record is dropped only when the row did not land.
-		if (!this.queuedFeedbackRowWritten.has(messageId)) {
+		// Append the row once, before the retry loop, so a retry only re-attempts the
+		// durable save. `say` can throw after `addToClineMessages` pushed the row
+		// (its `Message` emit runs post-push) and a rewind can remove it later, so
+		// the record is trusted only while that row is still present.
+		const writtenRowId = this.queuedFeedbackRowWritten.get(messageId)
+		if (writtenRowId === undefined || !this.clineMessages.some((message) => message.messageId === writtenRowId)) {
+			this.queuedFeedbackRowWritten.delete(messageId)
 			const appended = this.clineMessages.length
-			this.queuedFeedbackRowWritten.add(messageId)
 			try {
 				await this.say("user_feedback", text ?? "", images)
 			} catch (error) {
 				// Released like the exhausted-retry path: the row's durability is
 				// unknown, so the message stays reclaimable.
-				if (this.clineMessages.length === appended) {
-					this.queuedFeedbackRowWritten.delete(messageId)
-				}
 				this.releaseUnconsumedQueuedMessage(messageId)
 				throw error
+			} finally {
+				// Recorded whenever the row landed, including a throw after the push.
+				const row = this.clineMessages[appended]
+				if (row?.messageId) {
+					this.queuedFeedbackRowWritten.set(messageId, row.messageId)
+				}
 			}
 		}
 		for (let attempt = 0; attempt <= QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length; attempt++) {
@@ -1278,10 +1282,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return undefined
 	}
 
-	/**
-	 * Settle a consumed queued message on this one edge, so no record can outlive
-	 * its message. A consume whose persistence fails never reaches here.
-	 */
+	/** Settle a consumed queued message on this one edge, so no record outlives it. */
 	private consumeQueuedMessage(messageId: string): void {
 		this.messageQueueService.removeMessage(messageId)
 		this.drainRetainedQueuedMessageIds.delete(messageId)

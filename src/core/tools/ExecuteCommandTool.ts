@@ -330,9 +330,8 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			// tool result is published: a background command can finish during the
 			// settle delay while the result is still pending. Every site publishes
 			// through `publishToolResult`, which settles the signal with the
-			// publication outcome, so the drain waits on a structural signal and
-			// skips after a failed publication. Every throw path must settle it
-			// too, or the awaiting drain would hang and hold task references.
+			// publication outcome, so the drain skips after a failed publication.
+			// Every throw path must settle it too, or the awaiting drain hangs.
 			let settleToolResultPublished: ((published: boolean) => void) | undefined
 			const toolResultPublished = new Promise<boolean>((resolve) => {
 				settleToolResultPublished = resolve
