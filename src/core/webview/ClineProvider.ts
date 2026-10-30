@@ -1949,50 +1949,69 @@ export class ClineProvider
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
 		const globalSettings = this.contextProxy.getValues()
 		const deletedActiveProfile = profileToDelete.name === globalSettings.currentApiConfigName
-		// Pick the replacement from the manager, not from ContextProxy metadata: the chosen name
-		// must exist in the manager or the activation below rejects with "not found".
-		const profileToActivate = deletedActiveProfile
-			? (await this.providerSettingsManager.listConfig()).find(({ name }) => name !== profileToDelete.name)?.name
-			: globalSettings.currentApiConfigName
 
-		if (!profileToActivate) {
-			throw new Error("You cannot delete the last profile")
-		}
+		if (!deletedActiveProfile) {
+			// Purge first so a failing purge fails fast before any ContextProxy write,
+			// matching the ordering the webview delete path established.
+			await this.providerSettingsManager.deleteConfig(profileToDelete.name)
 
-		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
+			await this.contextProxy.setValues({
+				...globalSettings,
+				listApiConfigMeta: this.getProviderProfileEntries().filter(
+					({ name }) => name !== profileToDelete.name,
+				),
+			})
 
-		// Capture the profile before purging so a failed active-profile switch can restore it.
-		const deletedProfileConfig = deletedActiveProfile
-			? await this.providerSettingsManager.getProfile({ name: profileToDelete.name })
-			: undefined
-
-		// Purge first so a failing purge fails fast before any ContextProxy write,
-		// matching the ordering the webview delete path established.
-		await this.providerSettingsManager.deleteConfig(profileToDelete.name)
-
-		if (deletedActiveProfile) {
-			try {
-				// Route through the standard activation path so the effective provider
-				// settings, mode config, and current-task wiring all end up identical to
-				// a user activating the replacement profile from the webview.
-				await this.activateProviderProfile({ name: profileToActivate })
-			} catch (error) {
-				// Activation leaves ContextProxy naming the deleted profile, so the purge has to
-				// be undone: otherwise the manager no longer has the active profile and a retry
-				// fails in `deleteConfig` with "not found".
-				await this.restoreDeletedProviderProfile(profileToDelete.name, deletedProfileConfig)
-				throw error
-			}
+			await this.postStateToWebview()
 			return
 		}
 
-		await this.contextProxy.setValues({
-			...globalSettings,
-			currentApiConfigName: profileToActivate,
-			listApiConfigMeta: entries,
-		})
+		// Captured inside the queued mutation so the rollback below can restore them even when the
+		// mutation times out (the timeout rejects the outer wrapper, so an inner catch never runs).
+		let deletedProfileConfig: (ProviderSettingsWithId & { name: string }) | undefined
+		const previousContextValues: Pick<RooCodeSettings, "currentApiConfigName" | "listApiConfigMeta"> = {
+			currentApiConfigName: globalSettings.currentApiConfigName,
+			listApiConfigMeta: globalSettings.listApiConfigMeta,
+		}
 
-		await this.postStateToWebview()
+		// The purge and the replacement switch run as one queued mutation: otherwise a queued
+		// `upsertProviderProfile` for the same name can save the profile back after the purge and
+		// make it reappear in `listApiConfigMeta` after this call has already resolved.
+		try {
+			await this.enqueueProviderProfileMutation(async (signal) => {
+				// Pick the replacement from the manager, not from ContextProxy metadata: the chosen
+				// name must exist in the manager or the activation below rejects with "not found".
+				const profileToActivate = (await this.providerSettingsManager.listConfig()).find(
+					({ name }) => name !== profileToDelete.name,
+				)?.name
+
+				if (!profileToActivate) {
+					throw new Error("You cannot delete the last profile")
+				}
+
+				// Capture the profile before purging so a failed active-profile switch can restore it.
+				deletedProfileConfig = await this.providerSettingsManager.getProfile({
+					name: profileToDelete.name,
+				})
+
+				await this.providerSettingsManager.deleteConfig(profileToDelete.name)
+
+				// Route through the standard activation path so the effective provider
+				// settings, mode config, and current-task wiring all end up identical to
+				// a user activating the replacement profile from the webview. The unlocked
+				// variant is used because this already runs inside the mutation queue.
+				await this.activateProviderProfileUnlocked({ name: profileToActivate }, undefined, signal)
+			})
+		} catch (error) {
+			// Either the manager or ContextProxy can be left naming the deleted profile, so both
+			// are rolled back to their pre-delete state.
+			await this.restoreDeletedProviderProfile(
+				profileToDelete.name,
+				deletedProfileConfig,
+				previousContextValues,
+			)
+			throw error
+		}
 	}
 
 	/**
@@ -2003,13 +2022,23 @@ export class ClineProvider
 	private async restoreDeletedProviderProfile(
 		name: string,
 		config: (ProviderSettingsWithId & { name: string }) | undefined,
+		previousContextValues: Pick<RooCodeSettings, "currentApiConfigName" | "listApiConfigMeta">,
 	): Promise<void> {
-		if (!config) return
-
+		// Bound the rollback independently: the failed activation may still be holding the
+		// manager lock, and the caller must not wait on it indefinitely.
 		try {
-			const { name: _name, ...providerSettings } = config
-			await this.providerSettingsManager.saveConfig(name, providerSettings)
-			await this.providerSettingsManager.activateProfile({ name })
+			await this.withProviderProfileMutationTimeout(
+				(async () => {
+					if (config) {
+						const { name: _name, ...providerSettings } = config
+						await this.providerSettingsManager.saveConfig(name, providerSettings)
+						await this.providerSettingsManager.activateProfile({ name })
+					}
+
+					await this.contextProxy.setValues(previousContextValues)
+				})(),
+				() => this.log(`Provider profile restore for '${name}' timed out`),
+			)
 			this.log(`Restored provider profile '${name}' after a failed replacement activation`)
 		} catch (error) {
 			this.log(
@@ -2017,6 +2046,25 @@ export class ClineProvider
 					error instanceof Error ? error.message : String(error)
 				}`,
 			)
+
+			// The restore failed, so ContextProxy may still name a profile the manager no longer
+			// has. Point it at a profile that does exist so a retry can proceed.
+			try {
+				const fallback = (await this.providerSettingsManager.listConfig())[0]?.name
+
+				if (fallback) {
+					await this.contextProxy.setValues({
+						currentApiConfigName: fallback,
+						listApiConfigMeta: await this.providerSettingsManager.listConfig(),
+					})
+				}
+			} catch (reconcileError) {
+				this.log(
+					`Failed to reconcile the active profile after a failed restore: ${
+						reconcileError instanceof Error ? reconcileError.message : String(reconcileError)
+					}`,
+				)
+			}
 		}
 	}
 

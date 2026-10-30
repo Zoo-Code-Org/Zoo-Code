@@ -426,6 +426,8 @@ describe("ClineProvider", () => {
 				setTaskNumber: vi.fn(),
 				setParentTask: vi.fn(),
 				setRootTask: vi.fn(),
+				// Mirrors Task's sticky-profile setter so tests can assert the persisted name.
+				setTaskApiConfigName: vi.fn(),
 				taskId: options?.historyItem?.id || "test-task-id",
 				emit: vi.fn(),
 			}
@@ -2956,9 +2958,17 @@ describe("ClineProvider", () => {
 			const profiles: ProviderSettingsEntry[] = [currentProfile, otherProfile]
 
 			// Full configs keyed by name, so `getProfile`/`saveConfig` behave like the real manager.
-			const configs = new Map<string, ProviderSettingsEntry & { openRouterModelId?: string }>(
-				profiles.map((profile) => [profile.name, { ...profile, openRouterModelId: "other-model" }]),
+			// Each carries a distinct `apiKey` so a restore that drops credentials fails the test.
+			const configs = new Map<string, ProviderSettingsEntry & { openRouterModelId?: string; apiKey?: string }>(
+				[
+					[currentProfile.name, { ...currentProfile, apiKey: "current-key" }],
+					[otherProfile.name, { ...otherProfile, openRouterModelId: "other-model", apiKey: "other-key" }],
+				],
 			)
+
+			// Mirrors `ProviderSettingsManager.currentApiConfigName` so tests can assert the
+			// manager's own notion of the active profile, not just ContextProxy's.
+			const managerState = { currentApiConfigName: currentProfile.name }
 
 			Object.assign(provider, {
 				providerSettingsManager: {
@@ -2989,6 +2999,7 @@ describe("ClineProvider", () => {
 						if (!config) {
 							throw new Error(`Config '${name}' not found`)
 						}
+						managerState.currentApiConfigName = name
 						// Include a distinguishing setting so tests can assert the
 						// effective provider settings, not just the name pointers.
 						return { ...config, name }
@@ -2997,7 +3008,7 @@ describe("ClineProvider", () => {
 				},
 			})
 
-			return profiles
+			return { profiles, managerState }
 		}
 
 		beforeEach(async () => {
@@ -3062,6 +3073,8 @@ describe("ClineProvider", () => {
 					openRouterModelId: "other-model",
 				}),
 			)
+			// The sticky profile name is persisted too, so removing that update fails the test.
+			expect(mockTask.setTaskApiConfigName).toHaveBeenCalledWith("other-config")
 		})
 
 		test("fails fast without writing ContextProxy state when the config purge rejects", async () => {
@@ -3085,7 +3098,7 @@ describe("ClineProvider", () => {
 		})
 
 		test("restores the deleted profile when replacement activation rejects", async () => {
-			const profiles = mockProviderSettingsManager()
+			const { profiles, managerState } = mockProviderSettingsManager()
 			// Reject only the replacement activation; the restore's own activation still succeeds.
 			vi.mocked(provider.providerSettingsManager.activateProfile).mockRejectedValueOnce(
 				new Error("Failed to activate profile: storage error"),
@@ -3095,12 +3108,19 @@ describe("ClineProvider", () => {
 				"Failed to activate profile: storage error",
 			)
 
-			// The purge is undone so the manager and ContextProxy still name the same profile.
+			// The purge is undone so the manager and ContextProxy still name the same profile,
+			// including the credential: a restore that dropped `apiKey` fails here.
 			expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith(
 				"current-config",
-				expect.objectContaining({ id: "current-id", apiProvider: providerIdentifiers.anthropic }),
+				expect.objectContaining({
+					id: "current-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "current-key",
+				}),
 			)
 			expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith({ name: "current-config" })
+			expect(managerState.currentApiConfigName).toBe("current-config")
+			expect(provider.contextProxy.getValues().currentApiConfigName).toBe("current-config")
 			expect(profiles.map(({ name }) => name).sort()).toEqual(["current-config", "other-config"])
 			// A retry is now possible: the profile exists again, so the purge no longer throws "not found".
 			await expect(provider.deleteProviderProfile(currentProfile)).resolves.toBeUndefined()
@@ -3110,7 +3130,7 @@ describe("ClineProvider", () => {
 			vi.useFakeTimers()
 
 			try {
-				const profiles = mockProviderSettingsManager()
+				const { profiles } = mockProviderSettingsManager()
 				let resolveActivation!: () => void
 				const pendingActivation = new Promise<void>((resolve) => {
 					resolveActivation = resolve
@@ -3118,7 +3138,6 @@ describe("ClineProvider", () => {
 				// Hang only the replacement activation; the restore's own activation still succeeds.
 				vi.mocked(provider.providerSettingsManager.activateProfile).mockImplementationOnce(async () => {
 					await pendingActivation
-					// The abandoned activation still stores the replacement in the manager.
 					return { ...otherProfile, openRouterModelId: "other-model" }
 				})
 
@@ -3128,14 +3147,19 @@ describe("ClineProvider", () => {
 				await deletionResult
 
 				// The timeout path restores the purged profile instead of leaving ContextProxy
-				// naming a profile the manager no longer has.
+				// naming a profile the manager no longer has. The credential must survive too.
 				expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith(
 					"current-config",
-					expect.objectContaining({ id: "current-id", apiProvider: providerIdentifiers.anthropic }),
+					expect.objectContaining({
+						id: "current-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "current-key",
+					}),
 				)
 				expect(profiles.map(({ name }) => name).sort()).toEqual(["current-config", "other-config"])
 
-				// A late completion of the abandoned activation must not resurrect a second state.
+				// A late completion of the abandoned activation must not move ContextProxy: the
+				// aborted signal makes `activateProviderProfileUnlocked` return before writing.
 				resolveActivation()
 				await vi.advanceTimersByTimeAsync(0)
 				expect(provider.contextProxy.getValues().currentApiConfigName).toBe("current-config")
