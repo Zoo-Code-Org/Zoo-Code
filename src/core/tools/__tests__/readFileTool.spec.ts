@@ -1980,6 +1980,7 @@ describe("ReadFileTool", () => {
 					// Cast: the mock only implements the members the tool and versionToken read.
 				} as unknown as Stats
 				mockedFsStat
+					.mockResolvedValueOnce({ isDirectory: () => false } as unknown as Stats) // directory check
 					.mockResolvedValueOnce(stats) // pre-read
 					.mockImplementationOnce(async () => {
 						// The cancel lands while this await is pending.
@@ -2014,8 +2015,10 @@ describe("ReadFileTool", () => {
 					// Cast: the mock only implements the members the tool and versionToken read.
 				} as unknown as Stats
 				mockedFsStat
+					.mockResolvedValueOnce({ isDirectory: () => false } as unknown as Stats) // directory check
 					.mockResolvedValueOnce(stats) // pre-read
 					.mockImplementationOnce(async () => {
+						// The cancel lands while this await is pending.
 						mockTask.abort = true
 						return stats
 					}) // post-read
