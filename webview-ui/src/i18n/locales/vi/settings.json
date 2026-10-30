@@ -346,6 +346,10 @@
 				"label": "Bật bảo vệ khỏi lệnh phá hoại",
 				"description": "Tải xuống và sử dụng Destructive Command Guard (DCG) cho nền tảng này. Các lệnh được DCG cho phép sẽ tự động chạy. Các lệnh bị DCG chặn cần bạn phê duyệt. Danh sách lệnh của Zoo sẽ bị vô hiệu hóa khi tùy chọn này được bật. Tệp thực thi đã tải xuống vẫn được giữ lại nếu bạn tắt tùy chọn."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "Các lệnh tự động thực thi được phép",
 			"allowedCommandsDescription": "Tiền tố lệnh có thể được tự động thực thi khi \"Luôn phê duyệt các hoạt động thực thi\" được bật. Thêm * để cho phép tất cả các lệnh (sử dụng cẩn thận).",
 			"deniedCommands": "Lệnh bị từ chối",
@@ -394,6 +398,11 @@
 		"vscodeLmDescription": "API Mô hình Ngôn ngữ VS Code cho phép bạn chạy các mô hình được cung cấp bởi các tiện ích mở rộng khác của VS Code (bao gồm nhưng không giới hạn ở GitHub Copilot). Cách dễ nhất để bắt đầu là cài đặt các tiện ích mở rộng Copilot và Copilot Chat từ VS Code Marketplace.",
 		"awsCustomArnUse": "Nhập một ARN Amazon Bedrock hợp lệ cho mô hình bạn muốn sử dụng. Ví dụ về định dạng:",
 		"awsCustomArnDesc": "Đảm bảo rằng vùng trong ARN khớp với vùng AWS đã chọn ở trên.",
+		"awsCustomArnBaseModel": "Mô hình nền",
+		"awsCustomArnBaseModelOther": "Khác (không có trong danh sách)",
+		"awsCustomArnBaseModelDesc": "Mô hình mà ARN này trỏ tới. Zoo Code dùng nó cho suy nghĩ, nhiệt độ, cửa sổ ngữ cảnh, đầu ra tối đa và giá. Được tự động phát hiện khi ARN có tên mô hình.",
+		"awsCustomArnContextWindow": "Cửa sổ ngữ cảnh (token)",
+		"awsCustomArnMaxTokens": "Số token đầu ra tối đa",
 		"openRouterApiKey": "Khóa API OpenRouter",
 		"getOpenRouterApiKey": "Lấy khóa API OpenRouter",
 		"vercelAiGatewayApiKey": "Khóa API Vercel AI Gateway",
@@ -402,6 +411,12 @@
 		"getOpencodeGoApiKey": "Lấy khóa API Opencode Go",
 		"kenariApiKey": "Khóa API Kenari",
 		"getKenariApiKey": "Lấy khóa API Kenari",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "Khóa API IO Intelligence",
+			"getApiKey": "Lấy khóa API IO Intelligence",
+			"model": "Mô hình"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Khóa API NanoGPT",
@@ -530,6 +545,8 @@
 		"openAiApiKey": "Khóa API OpenAI",
 		"apiKey": "Khóa API",
 		"openAiBaseUrl": "URL cơ sở",
+		"openAiStrictToolSchemas": "Sơ đồ công cụ nghiêm ngặt (strict: true)",
+		"openAiStrictToolSchemasDescription": "Gửi strict: true cùng sơ đồ công cụ để bật sự tuân thủ sơ đồ nghiêm ngặt. Tắt để sử dụng gọi công cụ không nghiêm ngặt.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Tên triển khai Azure",
 		"azureOpenAiDeploymentNameDescription": "Nhập tên triển khai trong Azure AI Studio, không phải tên mô hình cơ sở.",
@@ -568,6 +585,16 @@
 		"enablePromptCaching": "Bật bộ nhớ đệm lời nhắc",
 		"enablePromptCachingTitle": "Bật bộ nhớ đệm lời nhắc để cải thiện hiệu suất và giảm chi phí cho các mô hình được hỗ trợ.",
 		"cacheUsageNote": "Lưu ý: Nếu bạn không thấy việc sử dụng bộ nhớ đệm, hãy thử chọn một mô hình khác và sau đó chọn lại mô hình mong muốn của bạn.",
+		"githubCopilot": {
+			"accountActions": "Thao tác tài khoản GitHub Copilot",
+			"signIn": "Đăng nhập GitHub",
+			"reconnect": "Kết nối lại GitHub",
+			"signedIn": "Đã đăng nhập với tên {{account}}",
+			"connecting": "Đang kết nối...",
+			"noModels": "Không có mô hình Copilot nào khả dụng. Hãy cài đặt hoặc bật GitHub Copilot Chat, đăng nhập bằng tài khoản GitHub đủ điều kiện, rồi làm mới. Đăng nhập không xác nhận bạn có gói đăng ký Copilot. Áp dụng giới hạn của gói GitHub, yêu cầu cao cấp và tần suất yêu cầu.",
+			"manageAccount": "Quản lý tài khoản GitHub",
+			"manageAccountDescription": "Mở menu tài khoản của VS Code, nơi bạn có thể đăng xuất khỏi GitHub. Đăng xuất ảnh hưởng đến Copilot và các tiện ích mở rộng khác dùng tài khoản này."
+		},
 		"vscodeLmModel": "Mô hình ngôn ngữ",
 		"vscodeLmWarning": "Lưu ý: Các mô hình truy cập qua VS Code Language Model API có thể được nhà cung cấp bao bọc hoặc tinh chỉnh, vì vậy hành vi có thể khác so với khi dùng trực tiếp cùng mô hình từ nhà cung cấp hoặc router thông thường. Để dùng một mô hình trong menu «Language Model», trước tiên hãy chuyển sang mô hình đó rồi nhấp «Chấp nhận» trong lời nhắc Copilot Chat; nếu không bạn có thể gặp lỗi như 400 «The requested model is not supported».",
 		"googleCloudSetup": {
@@ -595,7 +622,7 @@
 			"baseUrl": "URL cơ sở (tùy chọn)",
 			"modelId": "ID mô hình",
 			"apiKey": "Khóa API Ollama",
-			"apiKeyHelp": "Khóa API tùy chọn cho các phiên bản Ollama đã xác thực hoặc dịch vụ đám mây. Để trống cho cài đặt cục bộ.",
+			"apiKeyHelp": "Khóa API tùy chọn cho các phiên bản Ollama cần xác thực, hoặc cho dịch vụ đám mây. Zoo Code chỉ gửi khóa đến endpoint HTTPS hoặc loopback. Endpoint HTTP từ xa không nhận khóa, vì khóa sẽ đi dưới dạng văn bản thuần. Hãy dùng HTTPS cho phiên bản từ xa cần khóa. Để trống cho cài đặt cục bộ.",
 			"numCtx": "Kích thước cửa sổ ngữ cảnh (num_ctx)",
 			"numCtxHelp": "Ghi đè kích thước cửa sổ ngữ cảnh mặc định của mô hình. Để trống để sử dụng cấu hình Modelfile của mô hình. Giá trị tối thiểu là 128.",
 			"thinking": "Bật suy luận",
@@ -661,6 +688,10 @@
 			"description": "Số lỗi liên tiếp hoặc hành động lặp lại trước khi hiển thị hộp thoại 'Zoo đang gặp sự cố'. Đặt thành 0 để tắt cơ chế an toàn này (nó sẽ không bao giờ kích hoạt).",
 			"unlimitedDescription": "Đã bật thử lại không giới hạn (tự động tiếp tục). Hộp thoại sẽ không bao giờ xuất hiện.",
 			"warning": "⚠️ Đặt thành 0 cho phép thử lại không giới hạn, điều này có thể tiêu tốn mức sử dụng API đáng kể"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "Ngưỡng cảnh báo mềm khi lặp lại",
+			"description": "Sau số lần gọi công cụ giống hệt liên tiếp này, công cụ sẽ bị chặn và AI được yêu cầu giải thích lý do thử lại — mà không cần bạn tham gia. Đặt thành 0 để tắt cảnh báo mềm."
 		},
 		"reasoningEffort": {
 			"label": "Nỗ lực suy luận của mô hình",
@@ -820,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Thu gọn đầu ra lệnh theo mặc định",
+			"description": "Hiển thị đầu ra lệnh ở trạng thái thu gọn, kể cả terminal nội tuyến. Mở rộng thủ công khi cần. Cách chạy lệnh không thay đổi."
+		},
 		"basic": {
 			"label": "Cài đặt Terminal: Cơ bản",
 			"description": "Cài đặt cơ bản cho terminal"
@@ -987,8 +1022,14 @@
 		"rangeDescription": "Giá trị cao hơn làm cho đầu ra ngẫu nhiên hơn, giá trị thấp hơn làm cho nó xác định hơn."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Chưa báo cáo khả năng hỗ trợ hình ảnh",
+		"toolSupportUnknown": "Chưa báo cáo khả năng hỗ trợ công cụ",
+		"promptCacheManagedByCopilot": "Bộ nhớ đệm prompt do GitHub Copilot quản lý",
+		"promptCacheCopilotDetails": "Bộ nhớ đệm phụ thuộc vào mô hình và backend của GitHub Copilot. Zoo Code không thể cấu hình thời gian lưu bộ nhớ đệm hay quan sát lượt trúng bộ nhớ đệm qua API của VS Code.",
 		"supportsImages": "Hỗ trợ hình ảnh",
 		"noImages": "Không hỗ trợ hình ảnh",
+		"supportsTools": "Hỗ trợ công cụ",
+		"noTools": "Không hỗ trợ công cụ",
 		"supportsPromptCache": "Hỗ trợ bộ nhớ đệm lời nhắc",
 		"noPromptCache": "Không hỗ trợ bộ nhớ đệm lời nhắc",
 		"contextWindow": "Cửa sổ ngữ cảnh:",

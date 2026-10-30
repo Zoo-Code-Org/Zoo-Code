@@ -1,6 +1,8 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
+import { sanitizeIdentifierSurrogates, sanitizeSurrogates, sanitizeSurrogatesDeep } from "./sanitize-surrogates"
+
 type ContentPartText = OpenAI.Chat.ChatCompletionContentPartText
 type ContentPartImage = OpenAI.Chat.ChatCompletionContentPartImage
 type UserMessage = OpenAI.Chat.ChatCompletionUserMessageParam
@@ -45,10 +47,19 @@ export function convertToR1Format(
 ): Message[] {
 	const result: Message[] = []
 
+	// Compose any caller-provided id normalization with injective surrogate sanitization:
+	// a lone UTF-16 surrogate anywhere in the JSON body makes DeepSeek reject the whole
+	// request ("lone leading surrogate in hex escape"), and the injective variant keeps a
+	// tool_use id paired with its tool_result. See #461.
+	const normalizeId = (id: string) =>
+		sanitizeIdentifierSurrogates(options?.normalizeToolCallId ? options.normalizeToolCallId(id) : id)
+
 	for (const message of messages) {
 		// Check if the message has reasoning_content (for DeepSeek interleaved thinking)
 		const messageWithReasoning = message as AnthropicMessage & { reasoning_content?: string }
 		const reasoningContent = messageWithReasoning.reasoning_content
+			? sanitizeSurrogates(messageWithReasoning.reasoning_content)
+			: messageWithReasoning.reasoning_content
 
 		if (message.role === "user") {
 			// Handle user messages - may contain tool_result blocks
@@ -59,7 +70,7 @@ export function convertToR1Format(
 
 				for (const part of message.content) {
 					if (part.type === "text") {
-						textParts.push(part.text)
+						textParts.push(sanitizeSurrogates(part.text))
 					} else if (part.type === "image") {
 						if (part.source.type === "base64") {
 							imageParts.push({
@@ -71,12 +82,12 @@ export function convertToR1Format(
 						// Convert tool_result to OpenAI tool message format
 						let content: string
 						if (typeof part.content === "string") {
-							content = part.content
+							content = sanitizeSurrogates(part.content)
 						} else if (Array.isArray(part.content)) {
 							content =
 								part.content
 									?.map((c) => {
-										if (c.type === "text") return c.text
+										if (c.type === "text") return sanitizeSurrogates(c.text)
 										if (c.type === "image") return "(image)"
 										return ""
 									})
@@ -95,9 +106,7 @@ export function convertToR1Format(
 				for (const toolResult of toolResults) {
 					const toolMessage: ToolMessage = {
 						role: "tool",
-						tool_call_id: options?.normalizeToolCallId
-							? options.normalizeToolCallId(toolResult.tool_use_id)
-							: toolResult.tool_use_id,
+						tool_call_id: normalizeId(toolResult.tool_use_id),
 						content: toolResult.content,
 					}
 					result.push(toolMessage)
@@ -155,18 +164,19 @@ export function convertToR1Format(
 				}
 			} else {
 				// Simple string content
+				const safeContent = sanitizeSurrogates(message.content)
 				const lastMessage = result[result.length - 1]
 				if (lastMessage?.role === "user") {
 					if (typeof lastMessage.content === "string") {
-						lastMessage.content += `\n${message.content}`
+						lastMessage.content += `\n${safeContent}`
 					} else {
 						;(lastMessage.content as (ContentPartText | ContentPartImage)[]).push({
 							type: "text",
-							text: message.content,
+							text: safeContent,
 						})
 					}
 				} else {
-					result.push({ role: "user", content: message.content })
+					result.push({ role: "user", content: safeContent })
 				}
 			}
 		} else if (message.role === "assistant") {
@@ -178,19 +188,21 @@ export function convertToR1Format(
 
 				for (const part of message.content) {
 					if (part.type === "text") {
-						textParts.push(part.text)
+						textParts.push(sanitizeSurrogates(part.text))
 					} else if (part.type === "tool_use") {
 						toolCalls.push({
-							id: options?.normalizeToolCallId ? options.normalizeToolCallId(part.id) : part.id,
+							id: normalizeId(part.id),
 							type: "function",
 							function: {
-								name: part.name,
-								arguments: JSON.stringify(part.input),
+								name: sanitizeSurrogates(part.name),
+								// Deep-sanitized: a lone surrogate anywhere in the payload makes
+								// DeepSeek reject the whole request. See #461.
+								arguments: JSON.stringify(sanitizeSurrogatesDeep(part.input)),
 							},
 						})
 					} else if ((part as any).type === "reasoning" && (part as any).text) {
 						// Extract reasoning from content blocks (Task stores it this way)
-						extractedReasoning = (part as any).text
+						extractedReasoning = sanitizeSurrogates((part as any).text)
 					}
 				}
 
@@ -224,12 +236,13 @@ export function convertToR1Format(
 				}
 			} else {
 				// Simple string content
+				const safeContent = sanitizeSurrogates(message.content)
 				const lastMessage = result[result.length - 1]
 				if (lastMessage?.role === "assistant" && !(lastMessage as any).tool_calls) {
 					if (typeof lastMessage.content === "string") {
-						lastMessage.content += `\n${message.content}`
+						lastMessage.content += `\n${safeContent}`
 					} else {
-						lastMessage.content = message.content
+						lastMessage.content = safeContent
 					}
 					// Preserve reasoning_content from the new message if present
 					if (reasoningContent) {
@@ -238,7 +251,7 @@ export function convertToR1Format(
 				} else {
 					const assistantMessage: DeepSeekAssistantMessage = {
 						role: "assistant",
-						content: message.content,
+						content: safeContent,
 						...(reasoningContent && { reasoning_content: reasoningContent }),
 					}
 					result.push(assistantMessage)

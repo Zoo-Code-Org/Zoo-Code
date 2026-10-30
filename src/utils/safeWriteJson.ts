@@ -1,8 +1,9 @@
 import * as fs from "fs/promises"
 import * as fsSync from "fs"
 import * as path from "path"
-import * as lockfile from "proper-lockfile"
 import { JsonStreamStringify } from "json-stream-stringify"
+
+import { acquireFileLock } from "./fileLock"
 
 /**
  * Options for safeWriteJson function
@@ -61,32 +62,14 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		throw dirError
 	}
 
-	// Acquire the lock before any file operations
-	try {
-		releaseLock = await lockfile.lock(absoluteFilePath, {
-			stale: LOCK_STALE_MS,
-			update: 10000, // Update mtime every 10 seconds to prevent staleness if operation is long
-			realpath: false, // the file may not exist yet, which is acceptable
-			retries: {
-				// Configuration for retrying lock acquisition
-				retries: 5, // Number of retries after the initial attempt
-				factor: 2, // Exponential backoff factor (e.g., 100ms, 200ms, 400ms, ...)
-				minTimeout: 100, // Minimum time to wait before the first retry (in ms)
-				maxTimeout: 1000, // Maximum time to wait for any single retry (in ms)
-			},
-			onCompromised: (err) => {
-				console.error(`Lock at ${absoluteFilePath} was compromised:`, err)
-				throw err
-			},
-		})
-	} catch (lockError) {
-		// If lock acquisition fails, we throw immediately.
-		// The releaseLock remains a no-op, so the finally block in the main file operations
-		// try-catch-finally won't try to release an unacquired lock if this path is taken.
-		console.error(`Failed to acquire lock for ${absoluteFilePath}:`, lockError)
-		// Propagate the lock acquisition error
-		throw lockError
-	}
+	// Acquire the lock before any file operations. `acquireFileLock` owns the
+	// shared advisory lock protocol, so callers that lock the same path with
+	// it (for example task-history deletion) serialize with this write.
+	// If lock acquisition fails, it throws immediately. The releaseLock
+	// remains a no-op, so the finally block in the main file operations
+	// try-catch-finally won't try to release an unacquired lock if this
+	// path is taken.
+	releaseLock = await acquireFileLock(absoluteFilePath)
 
 	// Variables to hold the actual paths of temp files if they are created.
 	let actualTempNewFilePath: string | null = null
@@ -246,7 +229,5 @@ async function _streamDataToFile(targetPath: string, data: any, prettyPrint = fa
 		stringifyStream.pipe(fileWriteStream)
 	})
 }
-
-export const LOCK_STALE_MS = 31_000
 
 export { safeWriteJson }

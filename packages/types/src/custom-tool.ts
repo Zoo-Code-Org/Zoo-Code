@@ -68,8 +68,10 @@ export interface SerializedCustomToolDefinition {
  *
  * @template T - The Zod schema type for parameters
  */
-export interface TypedCustomToolDefinition<T extends CustomToolParametersSchema>
-	extends Omit<CustomToolDefinition, "execute" | "parameters"> {
+export interface TypedCustomToolDefinition<T extends CustomToolParametersSchema> extends Omit<
+	CustomToolDefinition,
+	"execute" | "parameters"
+> {
 	parameters?: T
 	execute: (args: z.infer<T>, context: CustomToolContext) => Promise<string>
 }

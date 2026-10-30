@@ -1,5 +1,4 @@
 import * as vscode from "vscode"
-import path from "path"
 
 import { Task } from "../task/Task"
 import { CodeIndexManagerRegistry } from "../../services/code-index/code-index-manager-registry"
@@ -57,10 +56,16 @@ export class CodebaseSearchTool extends BaseTool<"codebase_search"> {
 				throw new Error("Extension context is not available.")
 			}
 
-			const manager = CodeIndexManagerRegistry.getOrCreate(context)
+			const manager = CodeIndexManagerRegistry.getOrCreate(context, workspacePath)
 
 			if (!manager) {
 				throw new Error("CodeIndexManager is not available.")
+			}
+
+			// Settings defaults are not evidence that a fresh manager is explicitly disabled.
+			// Initialization belongs to the manager's owner, not the search tool.
+			if (!manager.isConfigurationLoaded) {
+				throw new Error("Code Indexing configuration has not been loaded for this workspace.")
 			}
 
 			if (!manager.isFeatureEnabled) {
@@ -68,6 +73,9 @@ export class CodebaseSearchTool extends BaseTool<"codebase_search"> {
 			}
 			if (!manager.isFeatureConfigured) {
 				throw new Error("Code Indexing is not configured (Missing OpenAI Key or Qdrant URL).")
+			}
+			if (!manager.isInitialized) {
+				throw new Error("Code Indexing is not initialized for this workspace.")
 			}
 
 			const searchResults: VectorStoreSearchResult[] = await manager.searchIndex(query, directoryPrefix)

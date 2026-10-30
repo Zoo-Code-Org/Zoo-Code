@@ -1,5 +1,7 @@
+import { WebviewFocusTracker } from "../../webview/WebviewFocusTracker"
 // npx vitest core/task/__tests__/Task.spec.ts
 
+import * as fsReal from "fs"
 import * as os from "os"
 import * as path from "path"
 
@@ -10,8 +12,10 @@ import type { Mock } from "vitest"
 import {
 	providerIdentifiers,
 	RooCodeEventName,
+	type ClineMessage,
 	type GlobalState,
 	type HistoryItem,
+	type ModeConfig,
 	type ProviderSettings,
 	type ModelInfo,
 	type TaskLike,
@@ -25,13 +29,17 @@ import { summarizeConversation } from "../../condense"
 import { getEnvironmentDetails } from "../../environment/getEnvironmentDetails"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ApiStreamChunk } from "../../../api/transform/stream"
+import { OutputTokenLimitError } from "../../../api/providers/utils/output-token-limit-error"
 import { ContextProxy } from "../../config/ContextProxy"
 import { processUserContentMentions } from "../../mentions/processUserContentMentions"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 import type { ApiMessage } from "../../task-persistence"
+import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
 import { asyncStreamFrom } from "../../../test-utils/stream"
 import { McpHub } from "../../../services/mcp/McpHub"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
+import { readFileTool } from "../../tools/ReadFileTool"
+import { writeToFileTool } from "../../tools/WriteToFileTool"
 
 type TaskTestAccess = {
 	getSystemPrompt: (requestState: ProviderState | undefined, requestModelInfo?: ModelInfo) => Promise<string>
@@ -41,10 +49,13 @@ type TaskTestAccess = {
 	startTask: (task?: string, images?: string[]) => Promise<void>
 	resumeTaskFromHistory: () => Promise<void>
 	presentAssistantMessageSafe: () => void
+	hasCompleteToolResultsForCurrentTurn: () => boolean
 	addToClineMessages: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	updateClineMessage: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
 	safeEnsureModelFetched: () => Promise<ModelInfo>
+	backoffAndAnnounce: (retryAttempt: number, error: unknown) => Promise<void>
+	requestPolicySnapshot?: RequestPolicySnapshot
 	getFilesReadByRooSafely: (context: string) => Promise<string[] | undefined>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
 	resetAssistantMessagePersistence: () => void
@@ -52,6 +63,9 @@ type TaskTestAccess = {
 		messages: ApiMessage[],
 		requestModelInfo: ModelInfo,
 	) => Array<{ role: string; content: unknown } | { type: "reasoning"; encrypted_content: string }>
+	attemptApiRequestWithActiveApi: () => AsyncGenerator<ApiStreamChunk>
+	condenseContextWithActiveApi: () => Promise<void>
+	retiredApis: Set<unknown>
 }
 
 type TaskAskResult = Awaited<ReturnType<Task["ask"]>>
@@ -83,6 +97,7 @@ vi.mock("delay", () => ({
 }))
 
 import delay from "delay"
+import pWaitFor from "p-wait-for"
 
 vi.mock("uuid", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("uuid")>()
@@ -394,6 +409,7 @@ describe("Cline", () => {
 			mockOutputChannel,
 			"sidebar",
 			new ContextProxy(mockExtensionContext),
+			new WebviewFocusTracker(),
 		)
 
 		// Setup mock API configuration
@@ -440,30 +456,30 @@ describe("Cline", () => {
 		baseProviderState = await mockProvider.getState()
 	})
 
+	function stream(chunks: ApiStreamChunk[]): AsyncGenerator<ApiStreamChunk> {
+		return (async function* () {
+			yield* chunks
+		})()
+	}
+
+	async function createTaskWithManualRetries() {
+		const task = new Task({
+			provider: mockProvider,
+			apiConfiguration: mockApiConfig,
+			task: "test task",
+			startTask: false,
+		})
+		const state = await mockProvider.getState()
+		vi.spyOn(mockProvider, "getState").mockResolvedValue({
+			...state,
+			apiConfiguration: mockApiConfig,
+			autoApprovalEnabled: false,
+		})
+		vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+		return task
+	}
+
 	describe("empty-response retries", () => {
-		function stream(chunks: ApiStreamChunk[]): AsyncGenerator<ApiStreamChunk> {
-			return (async function* () {
-				yield* chunks
-			})()
-		}
-
-		async function createTaskWithManualRetries() {
-			const task = new Task({
-				provider: mockProvider,
-				apiConfiguration: mockApiConfig,
-				task: "test task",
-				startTask: false,
-			})
-			const state = await mockProvider.getState()
-			vi.spyOn(mockProvider, "getState").mockResolvedValue({
-				...state,
-				apiConfiguration: mockApiConfig,
-				autoApprovalEnabled: false,
-			})
-			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
-			return task
-		}
-
 		it("restores the user message before a confirmed empty-response retry", async () => {
 			const task = await createTaskWithManualRetries()
 			let retryHistory: ApiMessage[] | undefined
@@ -517,7 +533,538 @@ describe("Cline", () => {
 		})
 	})
 
+	describe("request continuation", () => {
+		it("sends the no-tool-use reminder in a second request when the first response has no tool use", async () => {
+			const task = await createTaskWithManualRetries()
+			let secondRequestHistory: ApiMessage[] | undefined
+
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => stream([{ type: "text", text: "no tool here" }]))
+				.mockImplementationOnce(() => {
+					secondRequestHistory = structuredClone(task.apiConversationHistory)
+					throw new Error("stop after continuation request")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+			expect(secondRequestHistory).toMatchObject([
+				{
+					role: "user",
+					content: expect.arrayContaining([expect.objectContaining({ text: "original user request" })]),
+				},
+				{ role: "assistant", content: [{ type: "text", text: "no tool here" }] },
+				{
+					role: "user",
+					content: expect.arrayContaining([
+						expect.objectContaining({
+							text: expect.stringContaining("You did not use a tool in your previous response"),
+						}),
+					]),
+				},
+			])
+		})
+	})
+
+	describe("output token limit mid-stream", () => {
+		async function* truncatedStream(): AsyncGenerator<ApiStreamChunk> {
+			yield { type: "text", text: "partial answer" }
+			throw new OutputTokenLimitError()
+		}
+
+		async function createAutoApprovedTask() {
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(
+				providerStateWith({ autoApprovalEnabled: true, requestDelaySeconds: 0 }),
+			)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+			return task
+		}
+
+		it("asks once instead of auto-retrying, even with auto-approval", async () => {
+			const task = await createAutoApprovedTask()
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			const backoffSpy = vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce")
+			const attemptApiRequestSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => truncatedStream())
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+
+			expect(attemptApiRequestSpy).toHaveBeenCalledOnce()
+			expect(backoffSpy).not.toHaveBeenCalled()
+			expect(askSpy).toHaveBeenCalledWith("api_req_failed", expect.stringContaining("Output token limit reached"))
+		})
+
+		it("retries from a fresh attempt count when the user confirms", async () => {
+			const task = await createAutoApprovedTask()
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => truncatedStream())
+				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "done" }]))
+				.mockImplementation(() => {
+					throw new Error("stop after retry response")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+
+			expect(attemptApiRequestSpy.mock.calls.slice(0, 2).map(([retryAttempt]) => retryAttempt)).toEqual([0, 0])
+		})
+	})
+
 	describe("native tool-call request isolation", () => {
+		it("derives readiness only from a closed, idle, fully paired tool turn", () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "tool turn readiness test",
+				startTask: false,
+			})
+			const readiness = () => getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn()
+			task.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "call_ready",
+					name: "read_file",
+					params: {},
+					nativeArgs: { path: "README.md" },
+					partial: false,
+				},
+			]
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "call_ready", content: "finished" }]
+			task.currentStreamingContentIndex = task.assistantMessageContent.length
+
+			expect(readiness()).toBe(false)
+			task.didCompleteReadingStream = true
+			expect(readiness()).toBe(true)
+			task.presentAssistantMessageLocked = true
+			expect(readiness()).toBe(false)
+			task.presentAssistantMessageLocked = false
+			expect(readiness()).toBe(true)
+			task.assistantMessageContent[0].partial = true
+			expect(readiness()).toBe(false)
+			task.assistantMessageContent[0].partial = false
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "different_call", content: "finished" }]
+			expect(readiness()).toBe(false)
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "call_ready", content: "finished" }]
+			expect(readiness()).toBe(true)
+		})
+
+		it("requires a result for every tool call in the turn", () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "multi tool readiness test",
+				startTask: false,
+			})
+			const readiness = () => getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn()
+			task.didCompleteReadingStream = true
+			task.assistantMessageContent = [
+				{ type: "tool_use", id: "call_first", name: "read_file", params: {}, partial: false },
+				{ type: "tool_use", id: "call_middle", name: "read_file", params: {}, partial: false },
+				{ type: "tool_use", id: "call_last", name: "read_file", params: {}, partial: false },
+			]
+			const resultsFor = (...ids: string[]): Anthropic.ToolResultBlockParam[] =>
+				ids.map((id) => ({ type: "tool_result", tool_use_id: id, content: "finished" }))
+
+			task.userMessageContent = resultsFor("call_first")
+			expect(readiness()).toBe(false)
+			task.userMessageContent = resultsFor("call_last")
+			expect(readiness()).toBe(false)
+			task.userMessageContent = resultsFor("call_first", "call_last")
+			expect(readiness()).toBe(false)
+			task.userMessageContent = resultsFor("call_first", "call_middle", "call_last")
+			expect(readiness()).toBe(true)
+		})
+
+		it("does not strand a paired tool turn after a presenter failure", () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "presenter failure readiness test",
+				startTask: false,
+			})
+			task.didCompleteReadingStream = true
+			task.presentAssistantMessageLocked = false
+			task.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "call_ready",
+					name: "read_file",
+					params: {},
+					partial: false,
+				},
+				{ type: "text", content: "presenter failed here", partial: false },
+			]
+			task.currentStreamingContentIndex = 1
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "call_ready", content: "finished" }]
+
+			expect(getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn()).toBe(true)
+		})
+
+		it("requires an identifiable tool call and matches sanitized result IDs", () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "tool turn identity test",
+				startTask: false,
+			})
+			const readiness = () => getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn()
+			task.didCompleteReadingStream = true
+
+			task.assistantMessageContent = [{ type: "text", content: "finished", partial: false }]
+			expect(readiness()).toBe(false)
+
+			// An empty result ID must not satisfy a tool call that has no ID.
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "", content: "finished" }]
+			task.assistantMessageContent = [
+				{
+					type: "tool_use",
+					name: "read_file",
+					params: {},
+					partial: false,
+				},
+			]
+			expect(readiness()).toBe(false)
+
+			task.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "",
+					name: "mcp_server_tool",
+					serverName: "server",
+					toolName: "tool",
+					arguments: {},
+					partial: false,
+				},
+			]
+			expect(readiness()).toBe(false)
+
+			const mcpToolUse = task.assistantMessageContent[0]
+			if (mcpToolUse.type !== "mcp_tool_use") {
+				throw new Error("Expected MCP tool use fixture")
+			}
+			mcpToolUse.id = "functions.read_file:0"
+			task.userMessageContent = [
+				{ type: "tool_result", tool_use_id: "functions.read_file:0", content: "finished" },
+			]
+			expect(readiness()).toBe(false)
+
+			task.userMessageContent = [
+				{ type: "tool_result", tool_use_id: "functions_read_file_0", content: "finished" },
+			]
+			expect(readiness()).toBe(true)
+		})
+
+		it("continues after a complete read_file result when the readiness flag update is lost", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "read file continuation test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {
+				const completedRead = task.assistantMessageContent.find(
+					(block) => block.type === "tool_use" && block.name === "read_file" && !block.partial,
+				)
+				if (!completedRead || completedRead.type !== "tool_use" || !completedRead.id) return
+
+				task.pushToolResultToUserContent({
+					type: "tool_result",
+					tool_use_id: completedRead.id,
+					content: "File: README.md\nfinished",
+				})
+				// Reproduce the persisted field symptom: the tool result exists and
+				// presentation consumed the completed block, but the one-shot readiness
+				// latch never flips, so the old loop waits forever before the next request.
+				task.currentStreamingContentIndex = task.assistantMessageContent.length
+				task.userMessageContentReady = false
+			})
+
+			let continuationUserContent: Anthropic.Messages.ContentBlockParam[] | undefined
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([
+						{ type: "tool_call_partial", index: 0, id: "call_read", name: "read_file" },
+						{ type: "tool_call_partial", index: 0, arguments: '{"path":"README.md"}' },
+					]),
+				)
+				.mockImplementationOnce(() => {
+					const continuationMessage = task.apiConversationHistory.at(-1)
+					continuationUserContent =
+						continuationMessage?.role === "user" && Array.isArray(continuationMessage.content)
+							? continuationMessage.content
+							: undefined
+					throw new Error("continuation request reached")
+				})
+
+			vi.mocked(pWaitFor).mockImplementation(async (condition) => {
+				if (!(await condition())) {
+					throw new Error("read_file continuation would stall")
+				}
+			})
+
+			try {
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "read a file, then continue" }])
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+				expect(continuationUserContent?.filter((block) => block.type === "tool_result")).toEqual([
+					expect.objectContaining({
+						type: "tool_result",
+						tool_use_id: "call_read",
+						content: "File: README.md\nfinished",
+					}),
+				])
+			} finally {
+				vi.mocked(pWaitFor).mockImplementation(async () => {})
+			}
+		})
+
+		it("continues after the real presenter leaves a complete tool result behind a non-abort failure", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "real presenter continuation test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			const readFileHandleSpy = vi
+				.spyOn(readFileTool, "handle")
+				.mockImplementation(async (_task, block, callbacks) => {
+					if (!block.partial) callbacks.pushToolResult(`File: ${block.params.path}\nfinished`)
+				})
+			const say = task.say.bind(task)
+			const saySpy = vi.spyOn(task, "say").mockImplementation(async (...args) => {
+				const [type, _text, _images, partial] = args
+				if (type === "text" && partial === false) {
+					throw new Error("presenter text failed")
+				}
+				return say(...args)
+			})
+			const readiness = getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn.bind(task)
+			let sawCompleteToolTurn = false
+			const readinessSpy = vi
+				.spyOn(getTaskTestAccess(task), "hasCompleteToolResultsForCurrentTurn")
+				.mockImplementation(() => {
+					const ready = readiness()
+					if (ready) sawCompleteToolTurn = true
+					return ready
+				})
+
+			let continuationUserContent: Anthropic.Messages.ContentBlockParam[] | undefined
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => {
+					// The real generator publishes the request policy snapshot that
+					// presentAssistantMessage requires; with the generator replaced
+					// wholesale, the mock must publish one too or the presenter's
+					// entry guard throws before any block is processed.
+					getTaskTestAccess(task).requestPolicySnapshot = {
+						disabledTools: [],
+						customModes: [],
+						modelInfo: stubModelInfo,
+					}
+					return asyncStreamFrom<ApiStreamChunk>([
+						{ type: "tool_call_partial", index: 0, id: "call_read_first", name: "read_file" },
+						{ type: "tool_call_partial", index: 0, arguments: '{"path":"README.md"}' },
+						{ type: "tool_call_partial", index: 1, id: "call_read_second", name: "read_file" },
+						{ type: "tool_call_partial", index: 1, arguments: '{"path":"package.json"}' },
+						{ type: "text", text: "present this after the tool" },
+					])
+				})
+				.mockImplementationOnce(() => {
+					const continuationMessage = task.apiConversationHistory.at(-1)
+					continuationUserContent =
+						continuationMessage?.role === "user" && Array.isArray(continuationMessage.content)
+							? continuationMessage.content
+							: undefined
+					throw new Error("continuation request reached")
+				})
+
+			const { default: realPWaitFor } = await vi.importActual<typeof import("p-wait-for")>("p-wait-for")
+			vi.mocked(pWaitFor).mockImplementation((condition) =>
+				realPWaitFor(condition, { interval: 1, timeout: 1_000 }),
+			)
+			try {
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "read a file, then continue" }])
+
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+				expect(continuationUserContent?.filter((block) => block.type === "tool_result")).toEqual([
+					expect.objectContaining({
+						type: "tool_result",
+						tool_use_id: "call_read_first",
+						content: "File: README.md\nfinished",
+					}),
+					expect.objectContaining({
+						type: "tool_result",
+						tool_use_id: "call_read_second",
+						content: "File: package.json\nfinished",
+					}),
+				])
+				expect(task.presentAssistantMessageLocked).toBe(false)
+				expect(sawCompleteToolTurn).toBe(true)
+			} finally {
+				vi.mocked(pWaitFor).mockImplementation(async () => {})
+				readinessSpy.mockRestore()
+				readFileHandleSpy.mockRestore()
+				saySpy.mockRestore()
+			}
+		})
+
+		it("waits for a running tool handler even when its result is already pushed", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "running handler continuation test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			let releaseHandler: (() => void) | undefined
+			const handlerGate = new Promise<void>((resolve) => {
+				releaseHandler = resolve
+			})
+			let handlerPushedResult: (() => void) | undefined
+			const resultPushed = new Promise<void>((resolve) => {
+				handlerPushedResult = resolve
+			})
+			const readFileHandleSpy = vi
+				.spyOn(readFileTool, "handle")
+				.mockImplementation(async (_task, block, callbacks) => {
+					if (block.partial) return
+					callbacks.pushToolResult("File: README.md\nfinished")
+					handlerPushedResult?.()
+					// The handler keeps running after it pushes the result, for example while it waits for approval.
+					await handlerGate
+				})
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => {
+					// The real generator publishes the request policy snapshot that
+					// presentAssistantMessage requires; with the generator replaced
+					// wholesale, the mock must publish one too or the presenter's
+					// entry guard throws before any block is processed.
+					getTaskTestAccess(task).requestPolicySnapshot = {
+						disabledTools: [],
+						customModes: [],
+						modelInfo: stubModelInfo,
+					}
+					return asyncStreamFrom<ApiStreamChunk>([
+						{ type: "tool_call_partial", index: 0, id: "call_read", name: "read_file" },
+						{ type: "tool_call_partial", index: 0, arguments: '{"path":"README.md"}' },
+					])
+				})
+				.mockImplementationOnce(() => {
+					throw new Error("continuation request reached")
+				})
+
+			const { default: realPWaitFor } = await vi.importActual<typeof import("p-wait-for")>("p-wait-for")
+			vi.mocked(pWaitFor).mockImplementation((condition) =>
+				realPWaitFor(condition, { interval: 1, timeout: 1_000 }),
+			)
+			try {
+				const run = task.recursivelyMakeClineRequests([{ type: "text", text: "read a file, then wait" }])
+				await resultPushed
+				// Give the request loop several poll intervals to continue early.
+				await new Promise((resolve) => setTimeout(resolve, 50))
+				expect(task.presentAssistantMessageLocked).toBe(true)
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(1)
+
+				releaseHandler?.()
+				await run
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+				expect(task.presentAssistantMessageLocked).toBe(false)
+			} finally {
+				releaseHandler?.()
+				vi.mocked(pWaitFor).mockImplementation(async () => {})
+				readFileHandleSpy.mockRestore()
+			}
+		})
+
+		it("lets abort win when the real presenter leaves a complete tool result", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "real presenter abort test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			const readFileHandleSpy = vi
+				.spyOn(readFileTool, "handle")
+				.mockImplementation(async (_task, block, callbacks) => {
+					if (!block.partial) callbacks.pushToolResult("File: README.md\nfinished")
+				})
+			const say = task.say.bind(task)
+			const saySpy = vi.spyOn(task, "say").mockImplementation(async (...args) => {
+				const [type, _text, _images, partial] = args
+				if (type === "text" && partial === false) {
+					task.abort = true
+					throw new Error("presenter text failed while aborting")
+				}
+				return say(...args)
+			})
+
+			const readiness = getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn.bind(task)
+			let sawReadyWhileAborted = false
+			const readinessSpy = vi
+				.spyOn(getTaskTestAccess(task), "hasCompleteToolResultsForCurrentTurn")
+				.mockImplementation(() => {
+					const ready = readiness()
+					if (ready && task.abort) sawReadyWhileAborted = true
+					return ready
+				})
+			const attemptApiRequestSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+				// The real generator publishes the request policy snapshot that
+				// presentAssistantMessage requires; with the generator replaced
+				// wholesale, the mock must publish one too or the presenter's
+				// entry guard throws before any block is processed.
+				getTaskTestAccess(task).requestPolicySnapshot = {
+					disabledTools: [],
+					customModes: [],
+					modelInfo: stubModelInfo,
+				}
+				return asyncStreamFrom<ApiStreamChunk>([
+					{ type: "tool_call_partial", index: 0, id: "call_read", name: "read_file" },
+					{ type: "tool_call_partial", index: 0, arguments: '{"path":"README.md"}' },
+					{ type: "text", text: "present this after the tool" },
+				])
+			})
+
+			const { default: realPWaitFor } = await vi.importActual<typeof import("p-wait-for")>("p-wait-for")
+			vi.mocked(pWaitFor).mockImplementation((condition) =>
+				realPWaitFor(condition, { interval: 1, timeout: 1_000 }),
+			)
+			try {
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "read a file, then abort" }])
+
+				expect(attemptApiRequestSpy).toHaveBeenCalledOnce()
+				expect(sawReadyWhileAborted).toBe(true)
+				expect(task.presentAssistantMessageLocked).toBe(false)
+			} finally {
+				vi.mocked(pWaitFor).mockImplementation(async () => {})
+				readinessSpy.mockRestore()
+				readFileHandleSpy.mockRestore()
+				saySpy.mockRestore()
+			}
+		})
+
 		it("keeps overlapping Task parser state scoped to each request", async () => {
 			const firstTask = new Task({
 				provider: mockProvider,
@@ -656,6 +1203,98 @@ describe("Cline", () => {
 			])
 		})
 
+		it("clears didFinishAbortingStream on retry so cancelTask waits for the new stream (#1801)", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "abort flag reset test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+
+			const failingStream = async function* (): AsyncGenerator<ApiStreamChunk> {
+				yield { type: "text", text: "partial" }
+				throw new Error("simulated mid-stream failure")
+			}
+
+			let releaseRetryStream: (() => void) | undefined
+			let markRetryStreamPaused: (() => void) | undefined
+			const retryStreamRelease = new Promise<void>((resolve) => {
+				releaseRetryStream = resolve
+			})
+			const retryStreamPaused = new Promise<void>((resolve) => {
+				markRetryStreamPaused = resolve
+			})
+			const pausedRetryStream = async function* (): AsyncGenerator<ApiStreamChunk> {
+				yield { type: "text", text: "retry" }
+				markRetryStreamPaused?.()
+				await retryStreamRelease
+			}
+
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => failingStream())
+				.mockImplementationOnce(() => pausedRetryStream())
+				.mockImplementation(() => {
+					throw new Error("stop after retry response")
+				})
+
+			const { default: realPWaitFor } = await vi.importActual<typeof import("p-wait-for")>("p-wait-for")
+			vi.mocked(pWaitFor).mockImplementation(realPWaitFor)
+			let request: Promise<boolean> | undefined
+			let cancel: Promise<void> | undefined
+			try {
+				await mockProvider.addClineToStack(task)
+				request = task.recursivelyMakeClineRequests([{ type: "text", text: "abort flag reset test" }])
+				await Promise.race([
+					retryStreamPaused,
+					request.then(() => {
+						throw new Error("request settled before the retry stream paused")
+					}),
+				])
+
+				const firstApiReq = task.clineMessages.find((message) => message.say === "api_req_started")
+				expect(JSON.parse(firstApiReq?.text ?? "{}")).toMatchObject({ cancelReason: "streaming_failed" })
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+
+				let markCancelWaiting: (() => void) | undefined
+				const cancelWaiting = new Promise<void>((resolve) => {
+					markCancelWaiting = resolve
+				})
+				vi.mocked(pWaitFor).mockImplementation((condition, options) =>
+					realPWaitFor(async () => {
+						const done = await condition()
+						if (!done) markCancelWaiting?.()
+						return done
+					}, options),
+				)
+
+				vi.spyOn(mockProvider, "createTaskWithHistoryItem").mockImplementation((historyItem) =>
+					ClineProvider.prototype.createTaskWithHistoryItem.call(mockProvider, historyItem, {
+						startTask: false,
+					}),
+				)
+
+				let cancelSettled = false
+				cancel = mockProvider.cancelTask().then(() => {
+					cancelSettled = true
+				})
+				await Promise.race([cancelWaiting, cancel])
+				expect(cancelSettled, "cancelTask must wait while the retry stream is live").toBe(false)
+
+				releaseRetryStream?.()
+				await cancel
+				await expect(request).resolves.toBe(true)
+			} finally {
+				releaseRetryStream?.()
+				await Promise.allSettled([request, cancel])
+				vi.mocked(pWaitFor).mockImplementation(async () => {})
+			}
+		})
+
 		it("finalizes MCP tool call using the request-scoped parser state", async () => {
 			const task = new Task({
 				provider: mockProvider,
@@ -693,6 +1332,140 @@ describe("Cline", () => {
 					input: { param: "value" },
 				},
 			])
+		})
+
+		it("blocks a truncated write_to_file call instead of executing it (issue #1221)", async () => {
+			// Regression test for #1221: if the model's stream is cut off mid-way
+			// through a write_to_file tool call's `content` argument (e.g. it hits
+			// max_tokens), finalizeStreamingToolCall() can't parse the incomplete
+			// JSON and returns null. Task.ts must not let the truncated content
+			// reach writeToFileTool's execution path - it must clear nativeArgs so
+			// presentAssistantMessage's fail-closed guard emits a structured
+			// tool_result error instead.
+			//
+			// Unlike the simulation-based tests in truncated-native-tool-args.spec.ts,
+			// this drives the real streaming + presentAssistantMessage flow through
+			// Task, and spies on the actual tool handler to prove it is never invoked.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "truncated tool call test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			// presentAssistantMessageSafe is intentionally left un-mocked here (unlike
+			// the other tests in this block) - the whole point is to exercise the real
+			// dispatch/guard logic, not just tool_use finalization.
+
+			const writeToFileHandleSpy = vi.spyOn(writeToFileTool, "handle")
+			// Spy directly on the guard's own push, rather than inspecting
+			// userMessageContent/apiConversationHistory afterwards - the task
+			// recurses into a follow-up request once the tool_result is ready
+			// (see the second mocked stream below), which resets those arrays
+			// for the new turn before this function returns.
+			const pushToolResultSpy = vi.spyOn(task, "pushToolResultToUserContent")
+
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => {
+					// The real generator publishes the request policy snapshot that
+					// presentAssistantMessage requires; with the generator replaced
+					// wholesale, the mock must publish one too or the presenter's
+					// entry guard throws before any block is processed.
+					getTaskTestAccess(task).requestPolicySnapshot = {
+						disabledTools: [],
+						customModes: [],
+						modelInfo: stubModelInfo,
+					}
+					return asyncStreamFrom<ApiStreamChunk>([
+						{
+							type: "tool_call_partial",
+							index: 0,
+							id: "call_truncated",
+							name: "write_to_file",
+						},
+						{
+							type: "tool_call_partial",
+							index: 0,
+							// Cut off mid-string: no closing quote/brace, and the stream
+							// ends here with no explicit tool_call_end - exactly what
+							// happens when the model hits max_tokens mid-argument.
+							// .md path deliberately used so the only thing that can block
+							// execution is the nativeArgs guard under test - an arbitrary
+							// extension could also get caught by unrelated mode-based file
+							// restrictions (e.g. Architect mode's markdown-only rule),
+							// which would produce a false pass/fail unrelated to this bug.
+							arguments: '{"path":"docs/config.md","content":"sk-live-abc123',
+						},
+					])
+				})
+				// The task recurses once the error tool_result makes the turn
+				// "ready" - this bounds that follow-up to a single harmless text
+				// reply instead of an unmocked second call.
+				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "" }]))
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "truncated tool call test" }])
+
+			// handle() legitimately gets called with partial: true while the call is
+			// still streaming (BaseTool.handle short-circuits to a no-op preview hook
+			// in that case) - that's expected and safe. What must never happen is a
+			// call with partial: false, which is what actually reaches execute() and
+			// writes to disk.
+			const nonPartialCalls = writeToFileHandleSpy.mock.calls.filter(
+				([, block]) => (block as { partial?: boolean }).partial === false,
+			)
+			expect(nonPartialCalls).toHaveLength(0)
+
+			// Neither nativeArgs nor params should leak the truncated content into
+			// the recorded assistant turn - Task.ts builds that entry's `input` via
+			// `toolUse.nativeArgs || toolUse.params`, so clearing nativeArgs alone
+			// would just have shifted the leak to params instead of closing it.
+			const assistantEntry = task.apiConversationHistory.find(
+				(m) => m.role === "assistant" && Array.isArray(m.content) && m.content[0]?.type === "tool_use",
+			)
+			expect(JSON.stringify(assistantEntry)).not.toContain("sk-live-abc123")
+
+			// A structured, matching tool_result error must have been pushed for
+			// the truncated call's ID instead of letting it execute.
+			const truncatedCallResult = pushToolResultSpy.mock.calls.find(
+				([result]) => result.tool_use_id === "call_truncated",
+			)?.[0]
+			expect(truncatedCallResult).toMatchObject({
+				type: "tool_result",
+				tool_use_id: "call_truncated",
+				is_error: true,
+			})
+			expect(JSON.stringify(truncatedCallResult)).toContain("missing nativeArgs")
+		})
+	})
+
+	describe("create", () => {
+		it("rejects missing task inputs before constructing the task", () => {
+			const onCreated = vi.fn()
+
+			expect(() => Task.create({ provider: mockProvider, apiConfiguration: mockApiConfig, onCreated })).toThrow(
+				"Either historyItem or task/images must be provided",
+			)
+			expect(onCreated).not.toHaveBeenCalled()
+		})
+
+		it("returns the cached run promise", async () => {
+			const startTaskSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "startTask").mockResolvedValue(undefined)
+
+			try {
+				const [task, promise] = Task.create({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "x",
+				})
+
+				expect(task.run()).toBe(promise)
+				expect(startTaskSpy).toHaveBeenCalledExactlyOnceWith("x", undefined)
+				await promise
+			} finally {
+				startTaskSpy.mockRestore()
+			}
 		})
 	})
 
@@ -831,10 +1604,525 @@ describe("Cline", () => {
 			expect(cline.consecutiveMistakeLimit).toBe(5)
 		})
 
+		it("should disable the tool repetition soft limit when consecutiveMistakeLimit is 0", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				consecutiveMistakeLimit: 0,
+				toolRepetitionSoftLimit: 2,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(cline.toolRepetitionSoftLimit).toBe(0)
+
+			const identicalToolCall = {
+				type: "tool_use" as const,
+				name: "execute_command" as const,
+				params: { command: "ls" },
+				partial: false,
+			}
+			for (let call = 0; call < 6; call++) {
+				expect(cline.toolRepetitionDetector.check(identicalToolCall).action).toBe("allow")
+			}
+		})
+
+		it("should default tool repetition soft limit when not provided", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(cline.toolRepetitionSoftLimit).toBe(2)
+		})
+
+		it("should respect provided tool repetition soft limit", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				consecutiveMistakeLimit: 7,
+				toolRepetitionSoftLimit: 3,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(cline.toolRepetitionSoftLimit).toBe(3)
+
+			// Verify the constructor actually wires the soft limit into the
+			// detector (soft=3 differs from the default of 2).
+			const identicalToolCall = {
+				type: "tool_use" as const,
+				name: "execute_command" as const,
+				params: { command: "ls" },
+				partial: false,
+			}
+			const actions = Array.from(
+				{ length: 4 },
+				() => cline.toolRepetitionDetector.check(identicalToolCall).action,
+			)
+			expect(actions).toEqual(["allow", "allow", "allow", "soft_block"])
+		})
+
+		it("should derive the tool repetition hard stop from consecutiveMistakeLimit", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				consecutiveMistakeLimit: 7,
+				toolRepetitionSoftLimit: 2,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(cline.consecutiveMistakeLimit).toBe(7)
+			expect(cline.toolRepetitionSoftLimit).toBe(2)
+			expect(cline.toolRepetitionDetector).toBeDefined()
+
+			// The detector's counter increments from the second identical call
+			// onward (the first call establishes the baseline at count 0), so the
+			// count reaches the hard limit of 7 on the 8th identical call.
+			const identicalToolCall = {
+				type: "tool_use" as const,
+				name: "execute_command" as const,
+				params: { command: "ls" },
+				partial: false,
+			}
+
+			// Calls 1-7: count stays below the hard limit, so the hard stop must not fire.
+			for (let call = 1; call <= 7; call++) {
+				const result = cline.toolRepetitionDetector.check(identicalToolCall)
+				expect(result.action).not.toBe("hard_block")
+			}
+
+			// Call 8: count reaches the hard limit of 7, so the hard stop fires.
+			const hardBlockingCall = cline.toolRepetitionDetector.check(identicalToolCall)
+			expect(hardBlockingCall.action).toBe("hard_block")
+		})
+
 		it("should require either task or historyItem", () => {
 			expect(() => {
 				new Task({ provider: mockProvider, apiConfiguration: mockApiConfig })
 			}).toThrow("Either historyItem or task/images must be provided")
+		})
+	})
+
+	describe("updateApiConfiguration", () => {
+		it("refreshes the soft limit but preserves the task-level hard limit when the provider profile changes", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: { ...mockApiConfig, consecutiveMistakeLimit: 5, toolRepetitionSoftLimit: 2 },
+				consecutiveMistakeLimit: 5,
+				toolRepetitionSoftLimit: 2,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(cline.consecutiveMistakeLimit).toBe(5)
+			expect(cline.toolRepetitionSoftLimit).toBe(2)
+
+			// Switching provider profile mid-task applies the new soft limit to
+			// the live detector, but keeps the hard limit captured at creation.
+			cline.updateApiConfiguration({
+				...mockApiConfig,
+				consecutiveMistakeLimit: 2,
+				toolRepetitionSoftLimit: 1,
+			})
+
+			expect(cline.consecutiveMistakeLimit).toBe(5)
+			expect(cline.toolRepetitionSoftLimit).toBe(1)
+
+			const identicalToolCall = {
+				type: "tool_use" as const,
+				name: "execute_command" as const,
+				params: { command: "ls" },
+				partial: false,
+			}
+
+			// Call 1 (count = 0) -> allow
+			expect(cline.toolRepetitionDetector.check(identicalToolCall).action).toBe("allow")
+			// Calls 2-5 (count = 1..4) -> soft_block (new soft limit 1, hard limit still 5)
+			for (let call = 2; call <= 5; call++) {
+				expect(cline.toolRepetitionDetector.check(identicalToolCall).action).toBe("soft_block")
+			}
+			// Call 6 (count = 5) -> hard_block (preserved hard limit 5)
+			expect(cline.toolRepetitionDetector.check(identicalToolCall).action).toBe("hard_block")
+		})
+
+		it("does not override an explicit task-level consecutiveMistakeLimit (e.g. extension API tasks)", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: { ...mockApiConfig, consecutiveMistakeLimit: 3 },
+				consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
+				task: "test task",
+				startTask: false,
+			})
+
+			cline.updateApiConfiguration({ ...mockApiConfig, consecutiveMistakeLimit: 3 })
+
+			expect(cline.consecutiveMistakeLimit).toBe(Number.MAX_SAFE_INTEGER)
+		})
+
+		it("disables the soft tier for an unreachable hard limit, even after a profile switch", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: { ...mockApiConfig, toolRepetitionSoftLimit: 2 },
+				consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
+				toolRepetitionSoftLimit: 2,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(cline.toolRepetitionSoftLimit).toBe(0)
+
+			// A profile switch re-derives the soft limit from the new profile;
+			// it must stay disabled because the hard stop is still unreachable.
+			cline.updateApiConfiguration({ ...mockApiConfig, toolRepetitionSoftLimit: 2 })
+			expect(cline.toolRepetitionSoftLimit).toBe(0)
+
+			const identicalToolCall = {
+				type: "tool_use" as const,
+				name: "execute_command" as const,
+				params: { command: "ls" },
+				partial: false,
+			}
+			for (let call = 0; call < 10; call++) {
+				expect(cline.toolRepetitionDetector.check(identicalToolCall).action).toBe("allow")
+			}
+		})
+
+		it("falls back to the default soft limit when the new profile omits it", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: { ...mockApiConfig, consecutiveMistakeLimit: 7, toolRepetitionSoftLimit: 4 },
+				consecutiveMistakeLimit: 7,
+				toolRepetitionSoftLimit: 4,
+				task: "test task",
+				startTask: false,
+			})
+
+			cline.updateApiConfiguration({ ...mockApiConfig })
+
+			// The default soft limit is 2; the task-level hard limit is preserved.
+			expect(cline.consecutiveMistakeLimit).toBe(7)
+			expect(cline.toolRepetitionSoftLimit).toBe(2)
+		})
+	})
+
+	describe("API handler disposal", () => {
+		const disposableApi = (task: Task) => {
+			const dispose = vi.fn()
+			task.api = Object.assign(Object.create(task.api), { dispose })
+			return dispose
+		}
+
+		it("disposes the replaced handler when the configuration changes while idle", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "t",
+				startTask: false,
+			})
+			const dispose = disposableApi(task)
+
+			task.updateApiConfiguration({ ...mockApiConfig })
+			expect(dispose).toHaveBeenCalledOnce()
+
+			await task.dispose()
+			expect(dispose).toHaveBeenCalledOnce()
+		})
+
+		/**
+		 * Replaces the request body behind `attemptApiRequest` with a stream the test
+		 * drives, so the lifecycle wrapper runs for real without prompt/tool setup.
+		 * `gate` holds the request in setup (before its first chunk) until opened.
+		 */
+		const controllableRequest = (task: Task) => {
+			let openGate!: () => void
+			const gate = new Promise<void>((resolve) => (openGate = resolve))
+			let finish!: () => void
+			const finished = new Promise<void>((resolve) => (finish = resolve))
+			vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(async function* () {
+				await gate
+				yield { type: "text", text: "a" }
+				await finished
+				yield { type: "text", text: "b" }
+			})
+			return { openGate, finish }
+		}
+
+		const newTask = () =>
+			new Task({ provider: mockProvider, apiConfiguration: mockApiConfig, task: "t", startTask: false })
+
+		it("keeps a handler replaced during request setup alive until that request settles", async () => {
+			const task = newTask()
+			const { openGate, finish } = controllableRequest(task)
+			const oldDispose = disposableApi(task)
+
+			const request = task.attemptApiRequest()
+			const first = request.next() // enters setup and blocks on the gate, isStreaming still false
+			await Promise.resolve()
+			expect(task.isStreaming).toBe(false)
+
+			task.updateApiConfiguration({ ...mockApiConfig })
+			expect(oldDispose).not.toHaveBeenCalled()
+
+			openGate()
+			await first
+			expect(oldDispose).not.toHaveBeenCalled()
+
+			finish()
+			for await (const _ of request) {
+				// drain
+			}
+			expect(oldDispose).toHaveBeenCalledOnce()
+
+			await task.dispose()
+			expect(oldDispose).toHaveBeenCalledOnce()
+		})
+
+		it("releases a handler replaced mid-stream when the stream is closed early, not at task disposal", async () => {
+			const task = newTask()
+			const { openGate } = controllableRequest(task)
+			const oldDispose = disposableApi(task)
+
+			openGate()
+			const request = task.attemptApiRequest()
+			await request.next()
+			task.updateApiConfiguration({ ...mockApiConfig })
+			expect(oldDispose).not.toHaveBeenCalled()
+
+			await request.return(undefined)
+			expect(oldDispose).toHaveBeenCalledOnce()
+		})
+
+		it("does not accumulate handlers across repeated mid-stream profile switches", async () => {
+			const task = newTask()
+			const disposals: Array<ReturnType<typeof vi.fn>> = []
+
+			for (let i = 0; i < 3; i++) {
+				const { openGate, finish } = controllableRequest(task)
+				disposals.push(disposableApi(task))
+				openGate()
+				const request = task.attemptApiRequest()
+				await request.next()
+				task.updateApiConfiguration({ ...mockApiConfig })
+				finish()
+				for await (const _ of request) {
+					// drain
+				}
+				expect(disposals[i]).toHaveBeenCalledOnce()
+			}
+
+			expect(getTaskTestAccess(task).retiredApis.size).toBe(0)
+		})
+
+		it("waits for every overlapping unit of work before disposing a replaced handler", async () => {
+			const task = newTask()
+			const first = controllableRequest(task)
+			const oldDispose = disposableApi(task)
+			first.openGate()
+			const requestA = task.attemptApiRequest()
+			await requestA.next()
+
+			const second = controllableRequest(task)
+			second.openGate()
+			const requestB = task.attemptApiRequest()
+			await requestB.next()
+
+			task.updateApiConfiguration({ ...mockApiConfig })
+			await requestA.return(undefined)
+			expect(oldDispose).not.toHaveBeenCalled()
+
+			await requestB.return(undefined)
+			expect(oldDispose).toHaveBeenCalledOnce()
+		})
+
+		it("disposes a handler retired by work that never settles when the task is disposed", async () => {
+			const task = newTask()
+			const { openGate } = controllableRequest(task)
+			const oldDispose = disposableApi(task)
+			openGate()
+			const request = task.attemptApiRequest()
+			await request.next()
+
+			task.updateApiConfiguration({ ...mockApiConfig })
+			const newDispose = disposableApi(task)
+			await task.dispose()
+			expect(oldDispose).toHaveBeenCalledOnce()
+			expect(newDispose).toHaveBeenCalledOnce()
+
+			// The request settling later must not dispose anything a second time.
+			await request.return(undefined)
+			expect(oldDispose).toHaveBeenCalledOnce()
+		})
+
+		it("keeps the handler alive for a manual condense started before the switch", async () => {
+			const task = newTask()
+			const oldDispose = disposableApi(task)
+			let release!: () => void
+			vi.spyOn(getTaskTestAccess(task), "condenseContextWithActiveApi").mockImplementation(
+				() => new Promise<void>((resolve) => (release = resolve)),
+			)
+
+			const condensing = task.condenseContext()
+			task.updateApiConfiguration({ ...mockApiConfig })
+			expect(oldDispose).not.toHaveBeenCalled()
+
+			release()
+			await condensing
+			expect(oldDispose).toHaveBeenCalledOnce()
+		})
+
+		it("logs and continues when a replaced handler's dispose throws", async () => {
+			const task = newTask()
+			const error = new Error("dispose failed")
+			task.api = Object.assign(Object.create(task.api), {
+				dispose: vi.fn(() => {
+					throw error
+				}),
+			})
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			expect(() => task.updateApiConfiguration({ ...mockApiConfig })).not.toThrow()
+			expect(consoleError).toHaveBeenCalledWith("Error disposing API handler:", error)
+			consoleError.mockRestore()
+		})
+
+		describe("through the real request lease", () => {
+			/** Lets the first `count` requests run the real lifecycle wrapper, then stops the loop. */
+			const realRequestsThenStop = (task: Task, count = 1) => {
+				const real = task.attemptApiRequest.bind(task)
+				let calls = 0
+				return vi.spyOn(task, "attemptApiRequest").mockImplementation((...args) => {
+					if (++calls <= count) return real(...args)
+					throw new Error("stop after the request under test")
+				})
+			}
+
+			it("closes a stream whose read failed, releasing the replaced handler (stream.return())", async () => {
+				const task = await createTaskWithManualRetries()
+				const oldDispose = disposableApi(task)
+				let releaseAfterAbort!: () => void
+				const afterAbort = new Promise<void>((resolve) => (releaseAfterAbort = resolve))
+				let firstChunkSent!: () => void
+				const firstChunk = new Promise<void>((resolve) => (firstChunkSent = resolve))
+				vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+					async function* () {
+						task.currentRequestAbortController = new AbortController()
+						yield { type: "text", text: "a" }
+						firstChunkSent()
+						// A host that ignores cancellation and keeps producing after the
+						// consumer gave up: only `return()` can end this generator.
+						await afterAbort
+						yield { type: "text", text: "late" }
+						yield { type: "text", text: "later" }
+					},
+				)
+				realRequestsThenStop(task)
+				vi.spyOn(console, "error").mockImplementation(() => {})
+
+				const loop = task.recursivelyMakeClineRequests([{ type: "text", text: "go" }])
+				await firstChunk
+				task.updateApiConfiguration({ ...mockApiConfig })
+				expect(oldDispose).not.toHaveBeenCalled()
+
+				// The read in flight is abandoned by the consumer (not failed by the stream).
+				task.currentRequestAbortController?.abort()
+				releaseAfterAbort()
+				await loop
+
+				await vi.waitFor(() => expect(oldDispose).toHaveBeenCalledOnce())
+				expect(getTaskTestAccess(task).retiredApis.size).toBe(0)
+			})
+
+			it("keeps a replaced handler alive through a retry until the retry's stream settles", async () => {
+				const task = newTask()
+				const oldDispose = disposableApi(task)
+				let startRetry!: () => void
+				const retryGate = new Promise<void>((resolve) => (startRetry = resolve))
+				let finishRetry!: () => void
+				const retryDone = new Promise<void>((resolve) => (finishRetry = resolve))
+				let attempt = 0
+				vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+					async function* () {
+						if (++attempt === 1) {
+							// The first attempt fails and retries through the public method,
+							// as the real first-chunk and context-window paths do.
+							await retryGate
+							yield* task.attemptApiRequest(1)
+							return
+						}
+						yield { type: "text", text: "retried" }
+						await retryDone
+					},
+				)
+
+				const request = task.attemptApiRequest()
+				const first = request.next()
+				await Promise.resolve()
+				task.updateApiConfiguration({ ...mockApiConfig })
+				expect(oldDispose).not.toHaveBeenCalled()
+
+				startRetry()
+				await first
+				expect(attempt).toBe(2)
+				expect(oldDispose).not.toHaveBeenCalled()
+
+				finishRetry()
+				for await (const _ of request) {
+					// drain
+				}
+				expect(oldDispose).toHaveBeenCalledOnce()
+			})
+
+			it("keeps a replaced handler alive until the background usage drain finishes", async () => {
+				const task = await createTaskWithManualRetries()
+				const oldDispose = disposableApi(task)
+				let finishDrain!: () => void
+				const drainGate = new Promise<void>((resolve) => (finishDrain = resolve))
+				let drainStarted!: () => void
+				const draining = new Promise<void>((resolve) => (drainStarted = resolve))
+				vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+					async function* () {
+						yield { type: "text", text: "a" }
+						// The main loop stops reading here and hands the rest of the stream to
+						// the background usage drain.
+						task.didRejectTool = true
+						yield { type: "text", text: "b" }
+						drainStarted()
+						await drainGate
+						yield { type: "usage", inputTokens: 1, outputTokens: 1 }
+					},
+				)
+				realRequestsThenStop(task)
+				vi.spyOn(console, "error").mockImplementation(() => {})
+
+				const loop = task.recursivelyMakeClineRequests([{ type: "text", text: "go" }])
+				// Reached only when the background drain reads past the main loop's last chunk.
+				await draining
+				task.updateApiConfiguration({ ...mockApiConfig })
+				// Give any premature release a chance to run before checking it did not.
+				await new Promise((resolve) => setTimeout(resolve, 0))
+				expect(oldDispose).not.toHaveBeenCalled()
+
+				finishDrain()
+				await loop
+				await vi.waitFor(() => expect(oldDispose).toHaveBeenCalledOnce())
+			})
+		})
+
+		it("disposes the current handler exactly once even when dispose is called twice", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "t",
+				startTask: false,
+			})
+			const dispose = disposableApi(task)
+
+			await Promise.all([task.dispose(), task.dispose()])
+			expect(dispose).toHaveBeenCalledOnce()
 		})
 	})
 
@@ -1348,6 +2636,249 @@ describe("Cline", () => {
 			const snapshot = await providerRef.deref()?.getState()
 
 			await expect(getTaskTestAccess(task).getSystemPrompt(snapshot)).rejects.toThrow("Provider not available")
+		})
+	})
+
+	describe("request policy snapshot publication", () => {
+		// The wrapper is fire-and-forget; this is how the wrapper's own specs
+		// settle its catch microtask before asserting.
+		const flushMicrotasks = () => new Promise<void>((resolve) => setImmediate(resolve))
+
+		// Custom mode only present on the request-time read: the live double
+		// below disagrees on every policy field, so a snapshot re-derived from
+		// live state fails these tests instead of passing vacuously.
+		const requestTimeCustomMode: ModeConfig = {
+			slug: "snapshot-mode",
+			name: "Snapshot Mode",
+			roleDefinition: "Frozen at request build time.",
+			groups: ["read"],
+		}
+
+		// Common seams so attemptApiRequest runs its capture and streams a first
+		// chunk without touching prompt building, context management, or UX.
+		function armRequestSeams(task: Task) {
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 0,
+			})
+			vi.spyOn(task, "say").mockResolvedValue(undefined)
+		}
+
+		afterEach(() => {
+			vi.restoreAllMocks()
+		})
+
+		it("delivers the exact request-time snapshot to the presenter, immune to later provider-state changes", async () => {
+			const requestTimeState = providerStateWith({
+				autoApprovalEnabled: false,
+				disabledTools: ["read_file"],
+				experiments: { customTools: true },
+				customModes: [requestTimeCustomMode],
+			})
+			const laterState = providerStateWith({
+				autoApprovalEnabled: false,
+				disabledTools: [],
+				experiments: { customTools: false },
+				customModes: [],
+			})
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(mockProvider, "getState")
+				// First read: the one attemptApiRequest captures at request build.
+				.mockResolvedValueOnce(requestTimeState)
+				// Every later read returns divergent settings: any surviving
+				// live re-read (in publication or consumption) would pick these
+				// up and contradict the request's prompt.
+				.mockResolvedValue(laterState)
+			armRequestSeams(task)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			// The published snapshot disables read_file, so validation must
+			// reject the tool call before any approval ask is reached.
+			const askSpy = vi.spyOn(task, "ask").mockRejectedValue(new Error("approval path must not be reached"))
+			vi.spyOn(task.api, "createMessage").mockReturnValue(
+				asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]),
+			)
+
+			// A completed non-partial native tool block: when the wrapper fires,
+			// the real presenter validates it against the published snapshot.
+			task.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "tool_call_snapshot_1",
+					name: "read_file",
+					params: { path: "test.txt" },
+					nativeArgs: { path: "test.txt" },
+					partial: false,
+				},
+			]
+
+			await expect(task.attemptApiRequest(0).next()).resolves.toMatchObject({
+				done: false,
+				value: { type: "text", text: "ok" },
+			})
+
+			// Spied through to the original: this records the exact second
+			// argument while the real presenter's consumption below still runs.
+			const assistantMessageModule = await import("../../assistant-message")
+			const presentSpy = vi.spyOn(assistantMessageModule, "presentAssistantMessage")
+
+			getTaskTestAccess(task).presentAssistantMessageSafe()
+			await flushMicrotasks()
+
+			expect(presentSpy).toHaveBeenCalledTimes(1)
+			const delivered = requireDefined(presentSpy.mock.calls[0]?.[1])
+			// Exact four-field content — nothing more, nothing less — and each
+			// field is the very reference read at request time, not the
+			// divergent live values.
+			expect(delivered).toEqual({
+				disabledTools: ["read_file"],
+				experiments: { customTools: true },
+				customModes: [requestTimeCustomMode],
+				modelInfo: stubModelInfo,
+			})
+			expect(delivered.disabledTools).toBe(requestTimeState.disabledTools)
+			expect(delivered.experiments).toBe(requestTimeState.experiments)
+			expect(delivered.customModes).toBe(requestTimeState.customModes)
+			expect(delivered.modelInfo).toBe(stubModelInfo)
+
+			// End-to-end consumption: the rejection can only originate from the
+			// snapshot's disabledTools; live state no longer disables read_file.
+			const errorResults = task.userMessageContent.filter(
+				(block): block is Anthropic.ToolResultBlockParam =>
+					block.type === "tool_result" && block.is_error === true,
+			)
+			expect(errorResults).toHaveLength(1)
+			// The wrapped validation error is exactly the snapshot's restriction
+			// message; the divergent live list (no disabled tools) could not
+			// produce it.
+			expect(errorResults[0]?.content).toEqual(expect.stringContaining("not allowed"))
+			expect(askSpy).not.toHaveBeenCalled()
+		})
+
+		it("re-captures policy state for the retry attempt while the first attempt's snapshot stays frozen", async () => {
+			const firstAttemptState = providerStateWith({
+				autoApprovalEnabled: false,
+				disabledTools: ["read_file"],
+				experiments: { customTools: true },
+				customModes: [requestTimeCustomMode],
+			})
+			const retryAttemptState = providerStateWith({
+				autoApprovalEnabled: false,
+				disabledTools: ["execute_command"],
+				experiments: { customTools: false },
+				customModes: [],
+			})
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(mockProvider, "getState")
+				.mockResolvedValueOnce(firstAttemptState)
+				// Settings change lands after attempt 1 was built: attempt 2's
+				// generator re-entry must re-read, attempt 1 must not be rewritten.
+				.mockResolvedValue(retryAttemptState)
+			armRequestSeams(task)
+			const safeEnsureModelFetchedSpy = vi
+				.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched")
+				.mockResolvedValue(stubModelInfo)
+
+			// Seam between attempt 1's first-chunk failure and the retry
+			// recursion: whatever the field holds here is exactly what attempt
+			// 1's in-flight validation was bound to.
+			let firstAttemptSnapshot: RequestPolicySnapshot | undefined
+			vi.spyOn(getTaskTestAccess(task), "handleContextWindowExceededError").mockImplementation(async () => {
+				firstAttemptSnapshot = getTaskTestAccess(task).requestPolicySnapshot
+			})
+			const contextWindowFailure: AsyncGenerator<ApiStreamChunk> = (async function* () {
+				yield* []
+				throw { status: 400, message: "context length exceeded" }
+			})()
+			vi.spyOn(task.api, "createMessage")
+				.mockImplementationOnce(() => contextWindowFailure)
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "retry response" }]),
+				)
+
+			await expect(task.attemptApiRequest(0).next()).resolves.toMatchObject({
+				done: false,
+				value: { type: "text", text: "retry response" },
+			})
+
+			// What attempt 1's validation saw in flight: the request-time list.
+			const attemptOne = requireDefined(firstAttemptSnapshot)
+			expect(attemptOne.disabledTools).toEqual(["read_file"])
+
+			const retrySnapshot = requireDefined(getTaskTestAccess(task).requestPolicySnapshot)
+			// The retry re-executed the generator-body capture and picked up the
+			// settings that landed between attempts.
+			expect(retrySnapshot.disabledTools).toEqual(["execute_command"])
+			expect(retrySnapshot.experiments).toEqual(retryAttemptState.experiments)
+			expect(retrySnapshot.customModes).toEqual(retryAttemptState.customModes)
+			// Re-capture replaces the snapshot object; it never mutates the one
+			// the first attempt's in-flight validation already consumed.
+			expect(retrySnapshot).not.toBe(attemptOne)
+			expect(attemptOne.disabledTools).toEqual(["read_file"])
+			expect(attemptOne.experiments).toEqual(firstAttemptState.experiments)
+			expect(attemptOne.customModes).toEqual(firstAttemptState.customModes)
+			// modelInfo carries the request-scoped resolution on every attempt:
+			// retries forward the once-resolved metadata instead of re-resolving,
+			// so model-specific tool policy cannot move mid-request.
+			expect(retrySnapshot.modelInfo).toBe(stubModelInfo)
+			expect(safeEnsureModelFetchedSpy).toHaveBeenCalledTimes(1)
+
+			// The retry request's presenter receives the re-captured snapshot.
+			const assistantMessageModule = await import("../../assistant-message")
+			const presentSpy = vi.spyOn(assistantMessageModule, "presentAssistantMessage").mockResolvedValue(undefined)
+			getTaskTestAccess(task).presentAssistantMessageSafe()
+			await flushMicrotasks()
+			expect(presentSpy).toHaveBeenCalledTimes(1)
+			expect(presentSpy.mock.calls[0]?.[1].disabledTools).toEqual(["execute_command"])
+		})
+
+		it("surfaces the presenter's missing-snapshot throw as a real failure without aborting the run", async () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			// Drain constructor noise so only the wrapper's own log is asserted.
+			await flushMicrotasks()
+			consoleErrorSpy.mockClear()
+
+			// No attemptApiRequest ran, so nothing published a snapshot: the
+			// wrapper passes undefined and the real presenter's guard throws.
+			getTaskTestAccess(task).presentAssistantMessageSafe()
+			await flushMicrotasks()
+
+			const presentErrors = consoleErrorSpy.mock.calls.filter(
+				(call: unknown[]) => typeof call[0] === "string" && call[0].includes("[Task#presentAssistantMessage]"),
+			)
+			// The guard's message deliberately lacks the "aborted" suffix, so the
+			// wrapper must log it as a real failure rather than treat the run as
+			// cancelled.
+			expect(presentErrors).toHaveLength(1)
+			const loggedError = presentErrors[0]?.[1]
+			if (loggedError instanceof Error) {
+				expect(loggedError.message).toMatch(/missing request policy snapshot/)
+			} else {
+				throw new Error("Expected the missing-snapshot throw to be logged as a real Error")
+			}
+			expect(task.abort).toBeFalsy()
 		})
 	})
 
@@ -1909,6 +3440,52 @@ describe("Cline", () => {
 			})
 		})
 
+		describe("slash command mode switch", () => {
+			it("passes null as targetTask so handleModeSwitch does not overwrite the orchestrator task", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+				const ensureModelFetched = vi.fn().mockResolvedValue(undefined)
+				Object.assign(task.api, { ensureModelFetched })
+				vi.spyOn(task.api, "getModel").mockReturnValue({
+					id: mockApiConfig.apiModelId!,
+					info: {
+						supportsImages: false,
+						supportsPromptCache: true,
+						contextWindow: 200_000,
+						maxTokens: 4096,
+					} as ModelInfo,
+				})
+				vi.mocked(processUserContentMentions).mockResolvedValueOnce({
+					content: [{ type: "text", text: "run /commit" }],
+					mode: "code",
+				})
+				vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined as never)
+				vi.spyOn(getTaskTestAccess(task), "addToApiConversationHistory").mockResolvedValue(undefined)
+				task.clineMessages = [{ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" }]
+				vi.spyOn(task, "say").mockImplementation(async (type) => {
+					if (type === "api_req_started") {
+						task.clineMessages.push({ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" })
+					}
+					return undefined as never
+				})
+				vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+					throw new Error("stop after mode switch")
+				})
+
+				const handleModeSwitchSpy = vi.spyOn(mockProvider, "handleModeSwitch").mockResolvedValue(undefined)
+
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "run /commit" }]).catch(() => {})
+
+				expect(handleModeSwitchSpy).toHaveBeenCalledWith("code", null)
+			})
+		})
+
 		describe("Subtask Rate Limiting", () => {
 			let mockProvider: MockedClineProvider
 			let mockApiConfig: RateLimitedProviderSettings
@@ -1953,9 +3530,6 @@ describe("Cline", () => {
 			})
 
 			it("should enforce rate limiting across parent and subtask", async () => {
-				// Add a spy to track getState calls
-				const getStateSpy = vi.spyOn(mockProvider, "getState")
-
 				// Shared clock so parent and child see each other's timestamps
 				const sharedClock = createRateLimitClock()
 
@@ -2419,7 +3993,7 @@ describe("Cline", () => {
 						apiProvider: providerIdentifiers.openai,
 						openAiModelId: modelId,
 					}
-					const task = new Task({
+					new Task({
 						provider: mockProvider,
 						apiConfiguration: config,
 						task: "test task",
@@ -2756,7 +4330,7 @@ describe("Cline", () => {
 			expect(mockProvider.flushPostStateToWebviewThrottled).not.toHaveBeenCalled()
 		})
 
-		it("waits for a new partial message flush before a following message update", async () => {
+		it("keeps a new partial message on the throttled path without flushing", async () => {
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -2765,11 +4339,6 @@ describe("Cline", () => {
 			})
 			const taskAccess = getTaskTestAccess(task)
 			vi.spyOn(taskAccess, "saveClineMessages").mockResolvedValue(true)
-			let releaseFlush!: () => void
-			const pendingFlush = new Promise<void>((resolve) => {
-				releaseFlush = resolve
-			})
-			const flushSpy = vi.mocked(mockProvider.flushPostStateToWebviewThrottled).mockReturnValueOnce(pendingFlush)
 			const updatePostSpy = vi.mocked(mockProvider.postMessageToWebview)
 			const partialMessage = {
 				ts: 1,
@@ -2778,22 +4347,15 @@ describe("Cline", () => {
 				text: "partial message",
 				partial: true,
 			}
-			let partialAddSettled = false
-			const addThenUpdate = taskAccess.addToClineMessages(partialMessage).then(async () => {
-				partialAddSettled = true
-				await taskAccess.updateClineMessage({ ...partialMessage, text: "updated partial" })
-			})
 
-			await Promise.resolve()
+			await taskAccess.addToClineMessages(partialMessage)
+			await taskAccess.updateClineMessage({ ...partialMessage, text: "updated partial" })
+
+			// Flushing here would cancel the debounce's trailing timer and send the *next*
+			// message straight through the leading edge, collapsing the throttle back to one
+			// full-state post per message.
 			expect(mockProvider.postStateToWebviewThrottled).toHaveBeenCalledWith()
-			expect(flushSpy).toHaveBeenCalledWith()
-			expect(partialAddSettled).toBe(false)
-			expect(updatePostSpy).not.toHaveBeenCalled()
-
-			releaseFlush()
-			await addThenUpdate
-
-			expect(flushSpy.mock.invocationCallOrder[0]).toBeLessThan(updatePostSpy.mock.invocationCallOrder[0])
+			expect(mockProvider.flushPostStateToWebviewThrottled).not.toHaveBeenCalled()
 			expect(updatePostSpy).toHaveBeenCalledWith({
 				type: "messageUpdated",
 				clineMessage: {
@@ -3371,7 +4933,7 @@ describe("Cline", () => {
 										value: { type: "text", text: "first chunk" },
 									})
 								}
-								return new Promise<IteratorResult<ApiStreamChunk>>((resolve, reject) => {
+								return new Promise<IteratorResult<ApiStreamChunk>>((_resolve, reject) => {
 									if (metadata?.abortSignal?.aborted) {
 										return reject(new Error("Request cancelled by user"))
 									}
@@ -5642,6 +7204,423 @@ describe("Cline", () => {
 			saveSpy.mockRestore()
 		})
 
+		it("finalizePartialToolAsk persists and updates a non-last partial tool ask", async () => {
+			let updateSnapshot: Record<string, unknown> | undefined
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockImplementation(async (message) => {
+					updateSnapshot = { ...message }
+				})
+			// Capture the message as it is when the save runs: this is the payload that
+			// reaches disk, so the flags must already be set before the save.
+			let savedSnapshot: Record<string, unknown> | undefined
+			const saveSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages")
+				.mockImplementation(async () => {
+					savedSnapshot = structuredClone(task.clineMessages[0])
+					return true
+				})
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const partialToolAsk = {
+				ts: Date.now() - 2,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: true,
+				progressStatus: { text: "Generating…", icon: "sync" },
+			}
+
+			task.clineMessages.push(partialToolAsk)
+			task.clineMessages.push({
+				ts: Date.now() - 1,
+				type: "say",
+				say: "error",
+				text: "intervening async message",
+			})
+
+			await task.finalizePartialToolAsk("partial tool message")
+			await flushMicrotasks()
+
+			expect(partialToolAsk.partial).toBe(false)
+			expect(partialToolAsk.progressStatus).toBeUndefined()
+			// The ask is resolved by the system, not the user: stamp isAnswered so ChatView
+			// does not keep Save/Reject armed for a write that already failed.
+			expect(task.clineMessages[0].isAnswered).toBe(true)
+			expect(saveSpy).toHaveBeenCalledTimes(1)
+			expect(savedSnapshot?.partial).toBe(false)
+			expect(savedSnapshot?.progressStatus).toBeUndefined()
+			expect(savedSnapshot?.isAnswered).toBe(true)
+			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
+			expect(updateSnapshot?.partial).toBe(false)
+			expect(updateSnapshot?.progressStatus).toBeUndefined()
+			expect(updateSnapshot?.isAnswered).toBe(true)
+
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
+		})
+
+		it("finalizePartialToolAsk ignores non-matching partial tool asks when text is provided", async () => {
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(true)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			task.clineMessages.push({
+				ts: Date.now() - 1,
+				type: "ask",
+				ask: "tool",
+				text: "other partial tool message",
+				partial: true,
+			})
+
+			await task.finalizePartialToolAsk("target partial tool message")
+			await flushMicrotasks()
+
+			expect(task.clineMessages[0].partial).toBe(true)
+			expect(task.clineMessages[0].isAnswered).toBeUndefined()
+			expect(saveSpy).not.toHaveBeenCalled()
+			expect(updateSpy).not.toHaveBeenCalled()
+
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
+		})
+
+		it("finalizePartialToolAsk updates the latest partial tool ask when no text is provided", async () => {
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(true)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const olderPartialToolAsk = {
+				ts: Date.now() - 2,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "older partial tool message",
+				partial: true,
+			}
+			const latestPartialToolAsk = {
+				ts: Date.now() - 1,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "latest partial tool message",
+				partial: true,
+			}
+
+			task.clineMessages.push(olderPartialToolAsk)
+			task.clineMessages.push(latestPartialToolAsk)
+
+			await task.finalizePartialToolAsk()
+			await flushMicrotasks()
+
+			expect(olderPartialToolAsk.partial).toBe(true)
+			expect(task.clineMessages[0].isAnswered).toBeUndefined()
+			expect(latestPartialToolAsk.partial).toBe(false)
+			// Only the finalized ask is stamped answered; the untouched one is not.
+			expect(task.clineMessages[1].isAnswered).toBe(true)
+			expect(saveSpy).toHaveBeenCalled()
+			expect(updateSpy).toHaveBeenCalledWith(latestPartialToolAsk)
+
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
+		})
+
+		it("finalizePartialToolAsk logs (instead of rejecting) when updateClineMessage rejects", async () => {
+			// Pins the .catch arm on updateClineMessage in finalizePartialToolAsk: the
+			// partial flag must already be persisted (saveClineMessages ran first), the
+			// failure must only be logged, and finalize must still resolve so callers'
+			// error-path cleanup (diff-view reset, resetTaskPartialState) always completes.
+			const boom = new Error("updateClineMessage boom")
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockImplementation(async () => {
+					throw boom
+				})
+			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(true)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const partialToolAsk = {
+				ts: Date.now() - 1,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: true,
+			}
+
+			task.clineMessages.push(partialToolAsk)
+
+			await expect(task.finalizePartialToolAsk("partial tool message")).resolves.toBeUndefined()
+			await flushMicrotasks()
+
+			expect(partialToolAsk.partial).toBe(false)
+			expect(task.clineMessages[0].isAnswered).toBe(true)
+			expect(saveSpy).toHaveBeenCalled()
+			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[Task#finalizePartialToolAsk] updateClineMessage failed:",
+				boom,
+			)
+
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
+		})
+
+		it("finalizePartialToolAsk logs and skips the webview update when persistence fails", async () => {
+			// Pins the saveClineMessages-failure guard in finalizePartialToolAsk: while the
+			// on-disk record still carries partial: true, a webview-only update would diverge
+			// the two views (a later state resync or restart reload would flip the spinner
+			// back on). finalize must log, skip updateClineMessage, and still resolve so
+			// callers' error-path cleanup completes.
+			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(false)
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const partialToolAsk = {
+				ts: Date.now() - 1,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: true,
+			}
+
+			task.clineMessages.push(partialToolAsk)
+
+			await expect(task.finalizePartialToolAsk("partial tool message")).resolves.toBeUndefined()
+			await flushMicrotasks()
+
+			// The in-memory message is still finalized so the ask is resolved by the system...
+			expect(partialToolAsk.partial).toBe(false)
+			expect(task.clineMessages[0].isAnswered).toBe(true)
+			// ...and the persistence failure is observed instead of silently swallowed.
+			expect(saveSpy).toHaveBeenCalled()
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[Task#finalizePartialToolAsk] saveClineMessages failed; skipping webview update",
+			)
+			// ...but the webview update is skipped so disk (still partial: true) and
+			// webview do not diverge until the next save repairs the record.
+			expect(updateSpy).not.toHaveBeenCalled()
+
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
+		})
+
+		it("finalizePartialToolAsk still updates the webview when a later save stage fails", async () => {
+			// saveClineMessages() reports the message write separately from the metadata /
+			// task-history stages: the message array persisted while a later stage failed
+			// must still count as a successful save, so the finalized ask reaches the
+			// webview. A stale metadata entry is recomputed and re-emitted by the next
+			// saveClineMessages() call.
+			// saveTaskMessages() persists through safeWriteJson, which only mocks the
+			// fs/promises write helpers: its real fs.access gate and lockfile need the
+			// task directory to exist (uuid v7 is mocked to the fixed id below).
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.mkdirSync(taskDir, { recursive: true })
+			// Declared outside the try so the finally block can restore them.
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+			const historySpy = vi.spyOn(mockProvider, "updateTaskHistory")
+			try {
+				historySpy.mockRejectedValueOnce(new Error("task history stage failed"))
+
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+				const partialToolAsk = {
+					ts: Date.now() - 1,
+					type: "ask" as const,
+					ask: "tool" as const,
+					text: "partial tool message",
+					partial: true,
+				}
+
+				task.clineMessages.push(partialToolAsk)
+
+				await expect(task.finalizePartialToolAsk("partial tool message")).resolves.toBeUndefined()
+				await flushMicrotasks()
+
+				expect(partialToolAsk.partial).toBe(false)
+				expect(task.clineMessages[0].isAnswered).toBe(true)
+				// The message array persisted, so the webview update must run even though a
+				// later save stage failed...
+				expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
+				// ...and the later-stage failure is observed instead of silently swallowed.
+				expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to save task metadata:", expect.any(Error))
+			} finally {
+				// The task uuid is mocked to a fixed value, so the record this save writes outlives
+				// the test. Later saves run with merge = true and would fold a stale
+				// ui_messages.json into their own message arrays, so drop it here instead of
+				// leaving it for whichever test cleans up next.
+				fsReal.rmSync(path.join(taskDir, "ui_messages.json"), { force: true })
+				updateSpy.mockRestore()
+				historySpy.mockRestore()
+			}
+		})
+
+		it("finalizePartialToolAsk skips the webview update when the message write itself fails", async () => {
+			// Complements the later-stage-failure test above by failing the first save
+			// stage: with the real task directory removed, safeWriteJson's fs.access
+			// throws before anything is persisted, saveClineMessages() reports the
+			// failed message write, and the skip guard keeps the webview update off.
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+			try {
+				fsReal.rmSync(taskDir, { recursive: true, force: true })
+
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				const partialToolAsk = {
+					ts: Date.now() - 1,
+					type: "ask" as const,
+					ask: "tool" as const,
+					text: "partial tool message",
+					partial: true,
+				}
+
+				task.clineMessages.push(partialToolAsk)
+
+				await expect(task.finalizePartialToolAsk("partial tool message")).resolves.toBeUndefined()
+				await flushMicrotasks()
+
+				// The in-memory ask is still finalized... (the flags are set before saving)
+				expect(partialToolAsk.partial).toBe(false)
+				expect(task.clineMessages[0].isAnswered).toBe(true)
+				// ...but the failed message write skips the webview update and surfaces
+				// both failure logs instead of updating on an unpersisted save.
+				expect(updateSpy).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to save Roo messages:", expect.any(Error))
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"[Task#finalizePartialToolAsk] saveClineMessages failed; skipping webview update",
+				)
+			} finally {
+				// Restore the shared directory for sibling tests that persist through the
+				// real fs, even when the operation rejects or an assertion fails.
+				fsReal.mkdirSync(taskDir, { recursive: true })
+				updateSpy.mockRestore()
+			}
+		})
+
+		it("finalizePartialToolAsk ignores partial asks that match only some predicate clauses", async () => {
+			// Each distractor below satisfies a strict subset of the findLast predicate
+			// clauses, so no single clause (or a wrong combination of clauses) may select
+			// it: partial, type, ask kind, and text must all hold together.
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(true)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const partialToolAsk: ClineMessage = {
+				ts: Date.now() - 4,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: true,
+			}
+			// Completed (non-partial) tool ask with the same text.
+			const completedToolAsk: ClineMessage = {
+				ts: Date.now() - 3,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: false,
+			}
+			// Partial ask of a different kind.
+			const nonToolAsk: ClineMessage = {
+				ts: Date.now() - 2,
+				type: "ask" as const,
+				ask: "completion_result" as const,
+				text: "partial tool message",
+				partial: true,
+			}
+			// Deliberately malformed: a "say" message that still carries the tool ask
+			// fields. The ClineMessage schema allows both fields, and the predicate under
+			// test reads message.ask on any message, so this is exactly the distractor
+			// the type clause exists to filter out.
+			const sayWithToolAsk: ClineMessage = {
+				ts: Date.now() - 1,
+				type: "say" as const,
+				say: "error" as const,
+				text: "partial tool message",
+				partial: true,
+				ask: "tool" as const,
+			}
+
+			task.clineMessages.push(partialToolAsk)
+			task.clineMessages.push(completedToolAsk)
+			task.clineMessages.push(nonToolAsk)
+			task.clineMessages.push(sayWithToolAsk)
+
+			await task.finalizePartialToolAsk("partial tool message")
+			await flushMicrotasks()
+
+			expect(partialToolAsk.partial).toBe(false)
+			expect(partialToolAsk.isAnswered).toBe(true)
+			// Every distractor stays untouched: only the genuine partial tool ask is
+			// finalized.
+			expect(completedToolAsk.partial).toBe(false)
+			expect(completedToolAsk.isAnswered).toBeUndefined()
+			expect(nonToolAsk.partial).toBe(true)
+			expect(nonToolAsk.isAnswered).toBeUndefined()
+			expect(sayWithToolAsk.partial).toBe(true)
+			expect(saveSpy).toHaveBeenCalledTimes(1)
+			expect(updateSpy).toHaveBeenCalledTimes(1)
+			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
+
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
+		})
+
 		it("logs (instead of crashing) when updateClineMessage rejects from the ask() ignore-partial path", async () => {
 			// Pins the .catch arm on the fire-and-forget updateClineMessage call
 			// in ask() when a new partial ask arrives while the previous partial
@@ -5755,6 +7734,7 @@ describe("Queued message processing after condense", () => {
 			output as unknown as vscode.OutputChannel,
 			"sidebar",
 			new ContextProxy(ctx),
+			new WebviewFocusTracker(),
 		)
 		provider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
 		provider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
@@ -5892,6 +7872,7 @@ describe("Telemetry installments (idle/shutdown flush)", () => {
 			} as unknown as vscode.OutputChannel,
 			"sidebar",
 			new ContextProxy(mockExtensionContext),
+			new WebviewFocusTracker(),
 		)
 		mockProvider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
 		mockProvider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
@@ -6146,6 +8127,7 @@ describe("pushToolResultToUserContent", () => {
 			mockOutputChannel,
 			"sidebar",
 			new ContextProxy(mockExtensionContext),
+			new WebviewFocusTracker(),
 		)
 
 		mockProvider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)

@@ -60,6 +60,10 @@ import {
 	bedrockModels,
 	SERVICE_TIER_KEY,
 	ApiProviderError,
+	BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL,
+	BEDROCK_DEFAULT_CONTEXT,
+	BEDROCK_MAX_TOKENS,
+	type ProviderSettings,
 } from "@roo-code/types"
 
 import type { Anthropic } from "@anthropic-ai/sdk"
@@ -70,6 +74,9 @@ import { HttpsProxyAgent } from "https-proxy-agent"
 
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import type { ApiStreamChunk } from "../../transform/stream"
+import { OutputTokenLimitError } from "../utils/output-token-limit-error"
 
 // Get access to the mocked functions
 const mockConverseStreamCommand = vi.mocked(ConverseStreamCommand)
@@ -93,6 +100,87 @@ describe("AwsBedrockHandler", () => {
 			awsRegion: "us-east-1",
 		})
 	})
+
+	it.each(["max_tokens", "end_turn", "tool_use", "stop_sequence"])(
+		"reports truncation only for %s, after preserving usage",
+		async (stopReason) => {
+			handler["client"].send = vi.fn().mockResolvedValue({
+				stream: asyncStreamFrom([
+					{ contentBlockDelta: { delta: { reasoningContent: { text: "Still thinking" } } } },
+					{ messageStop: { stopReason } },
+					{ metadata: { usage: { inputTokens: 37, outputTokens: 16384 } } },
+				]),
+			})
+			const chunks: ApiStreamChunk[] = []
+			const consume = async () => {
+				for await (const chunk of handler.createMessage("system", [{ role: "user", content: "hello" }])) {
+					chunks.push(chunk)
+				}
+			}
+			if (stopReason === "max_tokens") {
+				const error = await consume().then(
+					() => undefined,
+					(e: unknown) => e,
+				)
+				expect(error).toBeInstanceOf(OutputTokenLimitError)
+				expect((error as Error).message).toContain(
+					"Output token limit reached. Consider increasing Max Output Tokens",
+				)
+			} else {
+				await expect(consume()).resolves.toBeUndefined()
+			}
+			expect(chunks).toEqual(
+				expect.arrayContaining([
+					{ type: "reasoning", text: "Still thinking" },
+					expect.objectContaining({ type: "usage", inputTokens: 37, outputTokens: 16384 }),
+				]),
+			)
+		},
+	)
+
+	it.each(
+		(
+			[
+				["anthropic.claude-sonnet-4-5-20250929-v1:0", 64_000],
+				["anthropic.claude-sonnet-4-6", 64_000],
+				["anthropic.claude-sonnet-5", 128_000],
+				["anthropic.claude-opus-4-7", 128_000],
+				["anthropic.claude-opus-4-8", 128_000],
+				["anthropic.claude-opus-5", 128_000],
+				["anthropic.claude-opus-5-5", 128_000],
+				["anthropic.claude-haiku-5-5", 128_000],
+			] as const
+		).flatMap(([apiModelId, ceiling]) =>
+			[true, false].flatMap((enableReasoningEffort) =>
+				[undefined, ceiling].map((modelMaxTokens) => ({
+					apiModelId,
+					ceiling,
+					enableReasoningEffort,
+					modelMaxTokens,
+				})),
+			),
+		),
+	)(
+		"exposes $apiModelId output ceiling without raising request defaults (reasoning effort: $enableReasoningEffort, modelMaxTokens: $modelMaxTokens)",
+		async ({ apiModelId, ceiling, enableReasoningEffort, modelMaxTokens }) => {
+			const provider = new AwsBedrockHandler({ apiModelId, enableReasoningEffort, modelMaxTokens })
+			const modelInfo = provider.getModel().info
+			expect(modelInfo.maxTokens).toBe(ceiling)
+			provider["client"].send = vi.fn().mockResolvedValue({ stream: asyncStreamFrom([]) })
+			await collectStream(provider.createMessage("system", [{ role: "user", content: "hello" }]))
+			const expected =
+				modelMaxTokens && (enableReasoningEffort || modelInfo.supportsMaxTokens)
+					? ceiling
+					: enableReasoningEffort
+						? 16_384
+						: 8192
+			expect(mockConverseStreamCommand).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					inferenceConfig: expect.objectContaining({ maxTokens: expected }),
+				}),
+			)
+		},
+	)
 
 	describe("getModel", () => {
 		it("should return the correct model info for a standard model", () => {
@@ -937,6 +1025,107 @@ describe("AwsBedrockHandler", () => {
 			const model = handler.getModel()
 			expect(model.id).toBe("global.anthropic.claude-opus-5")
 		})
+
+		it("should return Claude Opus 5.5 model info", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-5-5",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("anthropic.claude-opus-5-5")
+			expect(model.info.maxTokens).toBe(128_000)
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.inputPrice).toBe(4.0)
+			expect(model.info.outputPrice).toBe(20.0)
+			expect(model.info.minTokensPerCachePoint).toBe(512)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+			expect(model.maxTokens).toBe(8192)
+		})
+
+		it("should apply global inference prefix for Claude Opus 5.5 when awsUseGlobalInference is true", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-5-5",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+				awsUseGlobalInference: true,
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("global.anthropic.claude-opus-5-5")
+		})
+
+		it("should return Claude Haiku 5.5 model info", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-haiku-5-5",
+				awsAccessKey: "",
+				awsSecretKey: "",
+				awsRegion: "us-east-1",
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("anthropic.claude-haiku-5-5")
+			expect(model.info.maxTokens).toBe(128_000)
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.inputPrice).toBe(0.1)
+			expect(model.info.outputPrice).toBe(0.5)
+			expect(model.info.cacheWritesPrice).toBe(0.125)
+			expect(model.info.cacheReadsPrice).toBe(0.01)
+			expect(model.info.minTokensPerCachePoint).toBe(512)
+			expect(model.info.maxCachePoints).toBe(4)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+			expect(model.maxTokens).toBe(8192)
+		})
+
+		it.each([
+			{
+				label: "regional (us.)",
+				option: { awsUseCrossRegionInference: true },
+				expectedId: "us.anthropic.claude-haiku-5-5",
+			},
+			{
+				label: "global",
+				option: { awsUseGlobalInference: true },
+				expectedId: "global.anthropic.claude-haiku-5-5",
+			},
+		])("should apply the $label inference profile prefix for Claude Haiku 5.5", ({ option, expectedId }) => {
+			// The user-verified invocation path: regional and global prefixes
+			// must keep the known catalog entry's prompt-cache capability.
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-haiku-5-5",
+				awsAccessKey: "",
+				awsSecretKey: "",
+				awsRegion: "us-east-1",
+				...option,
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe(expectedId)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.minTokensPerCachePoint).toBe(512)
+		})
+
+		it("should resolve a stored us.-prefixed Claude Haiku 5.5 id to catalog info", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "us.anthropic.claude-haiku-5-5",
+				awsAccessKey: "",
+				awsSecretKey: "",
+				awsRegion: "us-east-1",
+			})
+
+			const model = handler.getModel()
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.inputPrice).toBe(0.1)
+		})
 	})
 
 	describe("1M context beta feature", () => {
@@ -1396,12 +1585,8 @@ describe("AwsBedrockHandler", () => {
 	})
 
 	describe("error telemetry", () => {
-		let mockSend: ReturnType<typeof vi.fn>
-
 		beforeEach(() => {
 			mockCaptureException.mockClear()
-			// Get access to the mock send function from the mocked client
-			mockSend = vi.mocked(BedrockRuntimeClient).mock.results[0]?.value?.send
 		})
 
 		it("should capture telemetry on createMessage error", async () => {
@@ -1699,24 +1884,83 @@ describe("AwsBedrockHandler", () => {
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
 
-		it("should omit thinking and temperature for Claude Opus 4.8 when reasoning is disabled", async () => {
-			const opus48Handler = new AwsBedrockHandler({
-				apiModelId: "anthropic.claude-opus-4-8",
+		it("should send adaptive thinking and omit temperature for Claude Haiku 5.5 when reasoning is enabled", async () => {
+			// Haiku 5.5 shares the Sonnet 5 / Opus 5 adaptive-thinking contract:
+			// budget_tokens causes a 400, so thinking.type must be "adaptive".
+			// effort and display are handler-internal defaults, not part of this
+			// scenario, so only the thinking type is pinned here.
+			const haiku55Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-haiku-5-5",
 				awsAccessKey: "test-access-key",
 				awsSecretKey: "test-secret-key",
 				awsRegion: "us-east-1",
-				enableReasoningEffort: false,
+				enableReasoningEffort: true,
 			})
 
-			const generator = opus48Handler.createMessage("System prompt", messages)
+			const generator = haiku55Handler.createMessage("System prompt", messages)
 			await generator.next()
 
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
 
-			// Without reasoning enabled, no adaptive thinking payload is sent.
-			expect(commandArg.additionalModelRequestFields?.thinking).toBeUndefined()
-			// Temperature is still omitted for 4.8 because the API rejects sampling params.
+			expect(commandArg.additionalModelRequestFields).toEqual(
+				expect.objectContaining({
+					thinking: expect.objectContaining({ type: "adaptive" }),
+				}),
+			)
+			// Haiku 5.5 rejects sampling parameters: temperature must be omitted.
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("should omit thinking and temperature for Claude Opus 4.8 when reasoning is disabled", async () => {
+			const provider = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-4-8",
+				enableReasoningEffort: false,
+			})
+			await collectStream(provider.createMessage("System prompt", messages))
+
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+			expect(commandArg.additionalModelRequestFields).not.toHaveProperty("thinking")
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it.each([
+			"anthropic.claude-sonnet-5",
+			"anthropic.claude-opus-5",
+			"us.anthropic.claude-opus-5",
+			"anthropic.claude-haiku-5-5",
+			"us.anthropic.claude-haiku-5-5",
+		])("explicitly disables thinking for %s when reasoning is disabled", async (apiModelId) => {
+			const provider = new AwsBedrockHandler({
+				apiModelId,
+				enableReasoningEffort: false,
+				modelMaxTokens: 32_000,
+			})
+			await collectStream(provider.createMessage("System prompt", messages))
+
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+			expect(commandArg.additionalModelRequestFields).toEqual(
+				expect.objectContaining({ thinking: { type: "disabled" } }),
+			)
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it.each([
+			"anthropic.claude-fable-5",
+			"anthropic.claude-fable-5-1",
+			"anthropic.claude-opus-5-5",
+			"global.anthropic.claude-opus-5-5",
+		])("omits thinking for adaptive-only %s when reasoning is disabled", async (apiModelId) => {
+			// These models reject thinking.type "disabled" with a 400.
+			const provider = new AwsBedrockHandler({
+				apiModelId,
+				enableReasoningEffort: false,
+				modelMaxTokens: 32_000,
+			})
+			await collectStream(provider.createMessage("System prompt", messages))
+
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+			expect(commandArg.additionalModelRequestFields ?? {}).not.toHaveProperty("thinking")
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
 
@@ -1793,6 +2037,28 @@ describe("AwsBedrockHandler", () => {
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
 
+		it("completePrompt should omit temperature for Claude Haiku 5.5 (non-stream path)", async () => {
+			// Regression guard for the non-stream path: completePrompt must guard
+			// temperature the same way createMessage does, otherwise adaptive-thinking
+			// models like Haiku 5.5 return a 400 from Bedrock.
+			const mockConverseCommand = vi.mocked(ConverseCommand)
+
+			const haiku55Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-haiku-5-5",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			await haiku55Handler.completePrompt("Test prompt")
+
+			expect(mockConverseCommand).toHaveBeenCalled()
+			const commandArg = mockConverseCommand.mock.calls[0][0]
+
+			// Haiku 5.5 must NOT receive temperature in the non-stream inferenceConfig.
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
 		it("completePrompt should still send temperature for older Claude Opus 4.6 (non-stream path)", async () => {
 			// 4.6 and earlier still accept sampling parameters, so completePrompt must
 			// continue to send temperature for them.
@@ -1814,6 +2080,173 @@ describe("AwsBedrockHandler", () => {
 			expect(commandArg.inferenceConfig?.temperature).toBeDefined()
 		})
 
+		describe("custom ARN base model", () => {
+			const appProfileArn = "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abcd1234efgh"
+			const createCustomArnHandler = (options: Partial<ProviderSettings> = {}) =>
+				new AwsBedrockHandler({
+					apiModelId: "custom-arn",
+					awsCustomArn: appProfileArn,
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-west-2",
+					...options,
+				})
+			const sendFirstRequest = async (handler: AwsBedrockHandler) => {
+				await handler.createMessage("System prompt", messages).next()
+				return mockConverseStreamCommand.mock.calls[0][0]
+			}
+
+			it("uses Opus 5.5 capabilities: native 1M context, adaptive thinking, no temperature", async () => {
+				const handler = createCustomArnHandler({
+					awsCustomArnBaseModelId: "anthropic.claude-opus-5-5",
+					enableReasoningEffort: true,
+				})
+
+				expect(handler.getModel().info.contextWindow).toBe(1_000_000)
+				expect(handler.getModel().info.maxTokens).toBe(bedrockModels["anthropic.claude-opus-5-5"].maxTokens)
+
+				const input = await sendFirstRequest(handler)
+				expect(input).toMatchObject({
+					modelId: appProfileArn,
+					additionalModelRequestFields: {
+						thinking: { type: "adaptive", display: "summarized" },
+						output_config: { effort: "xhigh" },
+					},
+				})
+				expect(input.additionalModelRequestFields).not.toMatchObject({
+					anthropic_beta: expect.arrayContaining(["context-1m-2025-08-07"]),
+				})
+				expect(input.inferenceConfig?.temperature).toBeUndefined()
+			})
+
+			it("sends the 1M context beta for an Opus 4.8 base model when enabled", async () => {
+				const handler = createCustomArnHandler({
+					awsCustomArnBaseModelId: "anthropic.claude-opus-4-8",
+					awsBedrock1MContext: true,
+				})
+
+				expect(handler.getModel().info.contextWindow).toBe(1_000_000)
+				const input = await sendFirstRequest(handler)
+				expect(input).toMatchObject({
+					modelId: appProfileArn,
+					additionalModelRequestFields: {
+						anthropic_beta: expect.arrayContaining(["context-1m-2025-08-07"]),
+					},
+				})
+			})
+
+			it("keeps budget thinking and temperature for a Sonnet 4.5 base model", async () => {
+				const input = await sendFirstRequest(
+					createCustomArnHandler({
+						awsCustomArnBaseModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0",
+						enableReasoningEffort: true,
+					}),
+				)
+
+				expect(input).toMatchObject({ additionalModelRequestFields: { thinking: { type: "enabled" } } })
+				expect(input.inferenceConfig?.temperature).toBeDefined()
+			})
+
+			it("sends no Anthropic fields for a non-Anthropic base model", async () => {
+				const handler = createCustomArnHandler({ awsCustomArnBaseModelId: "meta.llama3-3-70b-instruct-v1:0" })
+
+				const llama = bedrockModels["meta.llama3-3-70b-instruct-v1:0"]
+				expect(handler.getModel().info).toMatchObject({
+					contextWindow: llama.contextWindow,
+					maxTokens: llama.maxTokens,
+					inputPrice: llama.inputPrice,
+				})
+				const input = await sendFirstRequest(handler)
+				expect(input.modelId).toBe(appProfileArn)
+				expect(input.additionalModelRequestFields).toBeUndefined()
+				expect(input.inferenceConfig?.temperature).toBeDefined()
+			})
+
+			it("uses the generic fallback with user limits when the model is not listed", () => {
+				expect(createCustomArnHandler().getModel().info).toMatchObject({
+					contextWindow: BEDROCK_DEFAULT_CONTEXT,
+					maxTokens: BEDROCK_MAX_TOKENS,
+				})
+				expect(
+					createCustomArnHandler({ awsModelContextWindow: 32_000, modelMaxTokens: 2048 }).getModel().info,
+				).toMatchObject({ contextWindow: 32_000, maxTokens: 2048 })
+			})
+
+			it("applies capabilities of a model named in an inference profile ARN", async () => {
+				const input = await sendFirstRequest(
+					createCustomArnHandler({
+						awsCustomArn:
+							"arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-opus-4-8",
+						awsRegion: "us-east-1",
+						awsBedrock1MContext: true,
+					}),
+				)
+
+				expect(input).toMatchObject({
+					additionalModelRequestFields: { anthropic_beta: expect.arrayContaining(["context-1m-2025-08-07"]) },
+				})
+				expect(input.inferenceConfig?.temperature).toBeUndefined()
+			})
+
+			it("completePrompt omits temperature for an adaptive base model (non-stream path)", async () => {
+				const mockConverseCommand = vi.mocked(ConverseCommand)
+				mockConverseCommand.mockClear()
+
+				await createCustomArnHandler({ awsCustomArnBaseModelId: "anthropic.claude-opus-5-5" }).completePrompt(
+					"Test prompt",
+				)
+
+				const input = mockConverseCommand.mock.calls[0][0]
+				expect(input.modelId).toBe(appProfileArn)
+				expect(input.inferenceConfig?.temperature).toBeUndefined()
+			})
+
+			it("ignores the base model for foundation-model ARNs, which already name the invoked model", () => {
+				const handler = createCustomArnHandler({
+					awsCustomArn:
+						"arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsRegion: "us-east-1",
+					awsCustomArnBaseModelId: "anthropic.claude-opus-5-5",
+				})
+
+				expect(handler.getModel().id).toBe("anthropic.claude-3-5-sonnet-20241022-v2:0")
+			})
+
+			it("uses the generic fallback for an explicit Other choice even when the ARN names a model", async () => {
+				const profileArn =
+					"arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-opus-4-8"
+				const handler = createCustomArnHandler({
+					awsCustomArn: profileArn,
+					awsRegion: "us-east-1",
+					awsCustomArnBaseModelId: BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL,
+					awsBedrock1MContext: true,
+				})
+
+				expect(handler.getModel().info).toMatchObject({
+					contextWindow: BEDROCK_DEFAULT_CONTEXT,
+					maxTokens: BEDROCK_MAX_TOKENS,
+				})
+				const input = await sendFirstRequest(handler)
+				expect(input.modelId).toBe(profileArn)
+				expect(input.additionalModelRequestFields).toBeUndefined()
+				expect(input.inferenceConfig?.temperature).toBeDefined()
+			})
+
+			it("keeps the named model for a foundation-model ARN even with an explicit Other choice", () => {
+				const handler = createCustomArnHandler({
+					awsCustomArn:
+						"arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsRegion: "us-east-1",
+					awsCustomArnBaseModelId: BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL,
+				})
+
+				expect(handler.getModel()).toMatchObject({
+					id: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					info: { contextWindow: bedrockModels["anthropic.claude-3-5-sonnet-20241022-v2:0"].contextWindow },
+				})
+			})
+		})
+
 		describe("isAdaptiveThinkingModel detection", () => {
 			// Unit-cover the private guard directly (same pattern the suite uses for
 			// parseBaseModelId / getPrefixForRegion). This exercises all four model
@@ -1833,6 +2266,8 @@ describe("AwsBedrockHandler", () => {
 				expect(isAdaptiveThinkingModel("anthropic.claude-fable-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-opus-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("anthropic.claude-opus-5-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("anthropic.claude-haiku-5-5")).toBe(true)
 				// Future-proof Sonnet patterns — guarded even before a registry entry exists.
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-7")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-8")).toBe(true)
@@ -1843,6 +2278,8 @@ describe("AwsBedrockHandler", () => {
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-fable-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-sonnet-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-opus-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("global.anthropic.claude-opus-5-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("global.anthropic.claude-haiku-5-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("eu.anthropic.claude-sonnet-4-7")).toBe(true)
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-opus-4-8")).toBe(true)
 			})
@@ -1852,6 +2289,7 @@ describe("AwsBedrockHandler", () => {
 				expect(isAdaptiveThinkingModel("anthropic.claude-opus-4-5-20251101-v1:0")).toBe(false)
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-6")).toBe(false)
 				expect(isAdaptiveThinkingModel("anthropic.claude-3-5-sonnet-20241022-v2:0")).toBe(false)
+				expect(isAdaptiveThinkingModel("anthropic.claude-haiku-4-5-20251001-v1:0")).toBe(false)
 				expect(isAdaptiveThinkingModel("amazon.nova-lite-v1:0")).toBe(false)
 			})
 		})

@@ -46,11 +46,11 @@ Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memper
 - **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
 - **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
 
-## Yang Baru di v3.82.0
+## Yang Baru di v3.92.0
 
-- 🔑 **Gunakan kunci API Zoo Gateway milikmu di mana saja** — pakai di client atau workflow apa pun yang kompatibel dengan OpenAI: https://zoocode.dev/models
-- 🎁 **Akses model gratis untuk waktu terbatas** — dapatkan akses gratis ke MiniMax-M3 melalui Zoo Gateway.
-- ✨ **Model terbaru** — GPT-6 Astra dan Claude Fable 5.1 kini tersedia.
+- ✨ **Pilihan model lebih cepat dan dukungan model lebih kuat:** Ganti model dari kolom penulisan chat. Gunakan Claude Haiku 5.5 di Amazon Bedrock, dapatkan kapabilitas Kimi K3 yang lebih akurat di OpenRouter, dan gunakan batas Gemini 4 Argon yang telah diperbaiki di Vercel AI Gateway.
+- 🧭 **Alur kerja terminal, pengeditan, chat, dan remote yang lebih andal:** Atur output perintah agar diciutkan secara default jika kamu mau, dapatkan kegagalan pengeditan yang lebih jelas, pertahankan baris reasoning dan API tetap terlihat, serta hindari masalah startup dan proxy di workspace remote.
+- 🔌 **Marketplace MCP yang diperluas:** Hubungkan Zoo Code ke AnySearch, Mailtea, dan Tradehand melalui marketplace MCP.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 

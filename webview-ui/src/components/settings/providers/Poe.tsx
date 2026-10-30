@@ -119,7 +119,7 @@ export const Poe = ({
 	return (
 		<>
 			<VSCodeTextField
-				value={apiConfiguration?.poeApiKey || ""}
+				value={apiConfiguration.poeApiKey || ""}
 				type="password"
 				onInput={handleInputChange("poeApiKey")}
 				placeholder={t("settings:placeholders.apiKey")}
@@ -129,7 +129,7 @@ export const Poe = ({
 			<div className="text-sm text-vscode-descriptionForeground -mt-2">
 				{t("settings:providers.apiKeyStorageNotice")}
 			</div>
-			{!apiConfiguration?.poeApiKey && (
+			{!apiConfiguration.poeApiKey && (
 				<VSCodeButtonLink href="https://poe.com/api_key" appearance="secondary">
 					{t("settings:providers.getPoeApiKey")}
 				</VSCodeButtonLink>
