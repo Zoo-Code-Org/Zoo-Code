@@ -42,16 +42,51 @@ describe("formatRelativeTimestamp", () => {
 	it("throws on an invalid date", () => {
 		expect(() => formatRelativeTimestamp(new Date(Number.NaN), BASE)).toThrow(RangeError)
 	})
+
+	it("keeps two-digit years instead of remapping them to 1900s", () => {
+		// `new Date(99, 11, 31)` would mean 1999. These are real year-99 dates, and
+		// the day delta across the year-99/100 boundary must stay one day.
+		const year99 = new Date("0099-12-31T12:00:00")
+		const year100 = new Date("0100-01-01T12:00:00")
+
+		expect(year99.getFullYear()).toBe(99)
+		expect(formatRelativeTimestamp(year99, year100)).toBe("yesterday at 12:00 PM")
+		expect(formatRelativeTimestamp(year100, year99)).toBe("tomorrow at 12:00 PM")
+		expect(formatRelativeTimestamp(year100, year100)).toBe("today at 12:00 PM")
+	})
 })
 
 describe("McpErrorRow", () => {
+	// Freeze the clock at a stable midday instant. Without this the component
+	// formats against the live `new Date()` while the fixture is built from the
+	// live `Date.now()`; in the first five minutes after local midnight the two
+	// land on different calendar days and the "today at" assertion fails.
+	beforeEach(() => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(2026, 9, 29, 12, 0, 0))
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
 	it("renders the error message and a relative timestamp", () => {
 		const timestamp = Date.now() - 5 * 60 * 1000
 
 		render(<McpErrorRow error={{ message: "Connection refused", timestamp, level: "error" }} />)
 
 		expect(screen.getByText("Connection refused")).toBeInTheDocument()
-		expect(screen.getByText(/^today at \d{1,2}:\d{2} (AM|PM)$/)).toBeInTheDocument()
+		expect(screen.getByText("today at 11:55 AM")).toBeInTheDocument()
+	})
+
+	it("still renders a same-day timestamp just after local midnight", () => {
+		// The exact window the flake appeared in: 00:02 local, five minutes ago
+		// lands on the previous calendar day, so the phrasing must be "yesterday".
+		vi.setSystemTime(new Date(2026, 9, 29, 0, 2, 0))
+
+		render(<McpErrorRow error={{ message: "late", timestamp: Date.now() - 5 * 60 * 1000, level: "warn" }} />)
+
+		expect(screen.getByText("yesterday at 11:57 PM")).toBeInTheDocument()
 	})
 
 	it.each([

@@ -20,10 +20,18 @@ const MILLISECONDS_IN_DAY = 86_400_000
  * Calendar days, not elapsed milliseconds: 23:59 and 00:01 on consecutive days
  * are one day apart even though only two minutes elapsed. Local midnights are
  * compared directly, so DST shifts (23h or 25h days) still round to one day.
+ *
+ * The inputs are copied and zeroed with `setHours` rather than rebuilt through
+ * `new Date(year, month, day)`, because that constructor maps years 0-99 onto
+ * 1900-1999: a date in year 99 would be silently read as 1999 and produce a
+ * delta of centuries instead of a day.
  */
 const differenceInCalendarDays = (date: Date, baseDate: Date): number => {
-	const dateMidnight = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-	const baseMidnight = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate())
+	const dateMidnight = new Date(date)
+	dateMidnight.setHours(0, 0, 0, 0)
+
+	const baseMidnight = new Date(baseDate)
+	baseMidnight.setHours(0, 0, 0, 0)
 
 	return Math.round((dateMidnight.getTime() - baseMidnight.getTime()) / MILLISECONDS_IN_DAY)
 }
