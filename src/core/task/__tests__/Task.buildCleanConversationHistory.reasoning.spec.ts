@@ -43,12 +43,13 @@ function buildTask(modelOverrides: Partial<ModelInfo> = {}): Task {
 
 /**
  * `Task.buildCleanConversationHistory` resolves `preserveReasoning` from the
- * request's threaded model snapshot — the same `info` object this double
- * serves through `getModel()`, so passing it as the second argument preserves
- * the exact semantics these fixtures were built against.
+ * request's threaded model snapshot. The default keeps that snapshot identical
+ * to what `getModel()` serves, which is the production-common case; pass
+ * `requestModelInfo` to diverge the two so a spec can prove the threaded value
+ * is the one that decides (see the "request snapshot" suite below).
  */
-function buildHistory(task: Task, messages: ApiMessage[]) {
-	return task["buildCleanConversationHistory"](messages, task.api.getModel().info)
+function buildHistory(task: Task, messages: ApiMessage[], requestModelInfo?: ModelInfo) {
+	return task["buildCleanConversationHistory"](messages, requestModelInfo ?? task.api.getModel().info)
 }
 
 describe("Task.buildCleanConversationHistory: encrypted reasoning first block", () => {
@@ -181,6 +182,68 @@ describe("Task.buildCleanConversationHistory: plain-text reasoning first block",
 		const messages = [asApiMessage({ role: "assistant", content: [{ type: "reasoning", text: "solo" }] })]
 
 		expect(buildHistory(task, messages)).toEqual([{ role: "assistant", content: "" }])
+	})
+})
+
+/**
+ * The plain-text branch must read `preserveReasoning` from the threaded
+ * `requestModelInfo` snapshot, not from a fresh `getModel()` re-read. Every
+ * case above passes the same object to both sources, so a regression that
+ * swapped the read back to `getModel()` would still satisfy them. These cases
+ * diverge the two sources and pin the threaded one as decisive.
+ */
+describe("Task.buildCleanConversationHistory: request snapshot decides preserveReasoning", () => {
+	const plainFirstAssistant = (): ApiMessage[] => [
+		asApiMessage({
+			role: "assistant",
+			content: [
+				{ type: "reasoning", text: "visible reasoning" },
+				{ type: "text", text: "answer" },
+			],
+		}),
+	]
+
+	const preserved = [
+		{
+			role: "assistant",
+			content: [
+				{ type: "reasoning", text: "visible reasoning" },
+				{ type: "text", text: "answer" },
+			],
+		},
+	]
+	const stripped = [{ role: "assistant", content: "answer" }]
+
+	it("uses the threaded snapshot when it preserves reasoning and getModel() does not", () => {
+		const task = buildTask({ preserveReasoning: false })
+		const requestModelInfo: ModelInfo = { contextWindow: 16000, supportsPromptCache: true, preserveReasoning: true }
+
+		expect(buildHistory(task, plainFirstAssistant(), requestModelInfo)).toEqual(preserved)
+	})
+
+	it("uses the threaded snapshot when it strips reasoning and getModel() preserves it", () => {
+		const task = buildTask({ preserveReasoning: true })
+		const requestModelInfo: ModelInfo = {
+			contextWindow: 16000,
+			supportsPromptCache: true,
+			preserveReasoning: false,
+		}
+
+		expect(buildHistory(task, plainFirstAssistant(), requestModelInfo)).toEqual(stripped)
+	})
+
+	it("does not consult getModel() at all", () => {
+		const task = buildTask({ preserveReasoning: true })
+		const getModel = vi.fn(() => ({ id: "test-model", info: { contextWindow: 16000 } as ModelInfo }))
+		task.api = { getModel } as unknown as Task["api"]
+
+		buildHistory(task, plainFirstAssistant(), {
+			contextWindow: 16000,
+			supportsPromptCache: true,
+			preserveReasoning: false,
+		})
+
+		expect(getModel).not.toHaveBeenCalled()
 	})
 })
 

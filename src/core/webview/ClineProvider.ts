@@ -1472,6 +1472,17 @@ export class ClineProvider
 
 					// Replace in-place: preserves stack index and current pointer
 					this.taskRegistry.replace(oldTask.taskId, task)
+
+					// The old instance shares this id and released the ownership
+					// claim in its dispose (markLocallyInactive also records the id
+					// in releasedLocalOwnershipIds, which blocks the late
+					// trackLocalSessionOwnership re-claim from any straggling write
+					// of the dead session). Re-claim after the abort so the resumed
+					// session is not treated as a crash orphan by the periodic
+					// delegation pass while Task.run()'s first active write is
+					// still in flight. The release paths below still roll this back
+					// on a preparation or scheduler failure.
+					this.taskHistoryStore.markLocallyActive(task.taskId)
 				}
 
 				task.emit(RooCodeEventName.TaskFocused)
@@ -1484,7 +1495,10 @@ export class ClineProvider
 				)
 
 				if (options?.startTask !== false) {
-					scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, async (error) => { this.taskHistoryStore.markLocallyInactive(task.taskId); await this.cleanupFailedHistoryTask(task, error) })
+					scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, async (error) => {
+						this.taskHistoryStore.markLocallyInactive(task.taskId)
+						await this.cleanupFailedHistoryTask(task, error)
+					})
 				}
 			} else {
 				await this.addClineToStack(task)
@@ -1494,7 +1508,10 @@ export class ClineProvider
 				)
 
 				if (options?.startTask !== false) {
-					scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, async (error) => { this.taskHistoryStore.markLocallyInactive(task.taskId); await this.cleanupFailedHistoryTask(task, error) })
+					scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, async (error) => {
+						this.taskHistoryStore.markLocallyInactive(task.taskId)
+						await this.cleanupFailedHistoryTask(task, error)
+					})
 				}
 			}
 		} catch (error) {
@@ -3702,7 +3719,9 @@ export class ClineProvider
 		// write or dispose also drops the claim.
 		this.taskHistoryStore.markLocallyActive(task.taskId)
 		if (options.startTask !== false) {
-			scheduleTask(this.taskScheduler, task, "createTask", undefined, () => this.taskHistoryStore.markLocallyInactive(task.taskId))
+			scheduleTask(this.taskScheduler, task, "createTask", undefined, () =>
+				this.taskHistoryStore.markLocallyInactive(task.taskId),
+			)
 		}
 
 		this.log(
@@ -4357,7 +4376,9 @@ export class ClineProvider
 		// 6) Start the child task now that parent metadata is safely persisted.
 		//    The child's ownership claim was installed by createTask in step 4;
 		//    release it only if the scheduler rejects the run.
-		scheduleTask(this.taskScheduler, child, "delegateParentAndOpenChild", undefined, () => this.taskHistoryStore.markLocallyInactive(child.taskId))
+		scheduleTask(this.taskScheduler, child, "delegateParentAndOpenChild", undefined, () =>
+			this.taskHistoryStore.markLocallyInactive(child.taskId),
+		)
 
 		// 7) Emit TaskDelegated (provider-level)
 		try {

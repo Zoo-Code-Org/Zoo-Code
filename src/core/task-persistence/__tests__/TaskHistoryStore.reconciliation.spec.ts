@@ -167,9 +167,9 @@ function spySyncMtimeProbe(
 		statChildFileMtimeMsSync: (filePath: string) => number | undefined
 	}
 	const original = probe.statChildFileMtimeMsSync
-	syncMtimeSpy = vi.spyOn(probe, "statChildFileMtimeMsSync").mockImplementation((fp: string) =>
-		impl(fp, (realFp) => original.call(probe, realFp)),
-	)
+	syncMtimeSpy = vi
+		.spyOn(probe, "statChildFileMtimeMsSync")
+		.mockImplementation((fp: string) => impl(fp, (realFp) => original.call(probe, realFp)))
 }
 
 /**
@@ -552,17 +552,13 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		}
 		const original = probe.getChildFileMtimeMs
 		let calls = 0
-		mtimeSpy = vi
-			.spyOn(probe, "getChildFileMtimeMs")
-			.mockImplementation((childId: string) => {
-				if (childId !== "child-toctou") {
-					return original.call(store, childId)
-				}
-				calls += 1
-				return calls === 1
-					? Promise.resolve(Date.now() - 10 * 60 * 1000)
-					: Promise.resolve(Date.now())
-			})
+		mtimeSpy = vi.spyOn(probe, "getChildFileMtimeMs").mockImplementation((childId: string) => {
+			if (childId !== "child-toctou") {
+				return original.call(store, childId)
+			}
+			calls += 1
+			return calls === 1 ? Promise.resolve(Date.now() - 10 * 60 * 1000) : Promise.resolve(Date.now())
+		})
 
 		await store.initialize()
 
@@ -708,7 +704,9 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		) as HistoryItem
 		expect(persistedParent.status).toBe("delegated")
 		// The durable intent stays for a later pass; nothing was stomped.
-		await expect(fs.access(path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent))).resolves.toBeUndefined()
+		await expect(
+			fs.access(path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent)),
+		).resolves.toBeUndefined()
 		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Aborting repair for child child-lock-toctou"))
 		warnSpy.mockRestore()
 	})
@@ -731,7 +729,12 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		await fs.writeFile(
 			path.join(childDir, GlobalFileNames.historyItem),
 			JSON.stringify(
-				makeItem({ id: "child-mc-lock", status: "active", parentTaskId: "parent-mc-lock", rootTaskId: "parent-mc-lock" }),
+				makeItem({
+					id: "child-mc-lock",
+					status: "active",
+					parentTaskId: "parent-mc-lock",
+					rootTaskId: "parent-mc-lock",
+				}),
 				null,
 				"\t",
 			),
@@ -960,6 +963,103 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		warnSpy.mockRestore()
 	})
 
+	it("applies only the repair delta, preserving peer-written fields of both records", async () => {
+		// A peer window can write other fields of the same task between this
+		// store's repair decision (made from its cache) and the advisory lock.
+		// The repair owns only the lifecycle fields, so everything else the peer
+		// persisted must survive the write and stay visible in this store's cache.
+		// Writing the whole cache-derived record instead of a delta loses those
+		// peer fields permanently.
+		//
+		// The peer write is injected through the sync mtime probe: it runs inside
+		// the repair path, after initialize() has already refreshed the cache from
+		// disk, so the store's cached copies are stale by exactly one peer write
+		// when the repair commits. Seeding the peer fields before initialize()
+		// would not reproduce the bug, because the cache would read them in.
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const child = makeItem({
+			id: "child-peer",
+			status: "active",
+			parentTaskId: "parent-peer",
+			rootTaskId: "parent-peer",
+		})
+		const parent = makeItem({
+			id: "parent-peer",
+			status: "delegated",
+			awaitingChildId: "child-peer",
+			delegatedToId: "child-peer",
+			childIds: ["child-peer"],
+		})
+		await seedItems(tmpDir, [parent, child])
+
+		const childFilePath = path.join(tmpDir, "tasks", "child-peer", GlobalFileNames.historyItem)
+		const parentFilePath = path.join(tmpDir, "tasks", "parent-peer", GlobalFileNames.historyItem)
+		const sixMinutesAgo = new Date(Date.now() - 6 * 60 * 1000)
+		await fs.utimes(childFilePath, sixMinutesAgo, sixMinutesAgo)
+
+		// Peer-written fields: not part of the repair delta, and absent from the
+		// cache this store built at initialize(), so a whole-record write drops them.
+		const peerChildFields = {
+			tokensIn: 111,
+			tokensOut: 222,
+			totalCost: 0.75,
+			apiConfigName: "peer-child-profile",
+		}
+		const peerParentFields = {
+			tokensIn: 333,
+			tokensOut: 444,
+			totalCost: 1.25,
+			apiConfigName: "peer-parent-profile",
+			childIds: ["child-peer", "peer-only-child"],
+		}
+		let peerWriteInjected = false
+		// The async probe runs after initialize() refreshed the cache from disk and
+		// before the repair writes, which is exactly the gap a peer window can
+		// write in. Injecting here makes the store's cached copies stale by one
+		// peer write when the repair commits.
+		const internals = store as unknown as {
+			getChildFileMtimeMs: (childId: string) => Promise<number | undefined>
+		}
+		const originalGetChildFileMtimeMs = internals.getChildFileMtimeMs
+		const mtimeSpyLocal = vi.spyOn(internals, "getChildFileMtimeMs").mockImplementation(async (childId: string) => {
+			if (!peerWriteInjected && childId === "child-peer") {
+				peerWriteInjected = true
+				await fs.writeFile(childFilePath, JSON.stringify({ ...child, ...peerChildFields }), "utf8")
+				await fs.writeFile(parentFilePath, JSON.stringify({ ...parent, ...peerParentFields }), "utf8")
+				await fs.utimes(childFilePath, sixMinutesAgo, sixMinutesAgo)
+			}
+			return originalGetChildFileMtimeMs.call(store, childId)
+		})
+		// The under-lock sync probe must still see the crash-orphan age.
+		spySyncMtimeProbe((fp, real) => (fp === childFilePath ? sixMinutesAgo.getTime() : real(fp)))
+		try {
+			await store.initialize()
+		} finally {
+			mtimeSpyLocal.mockRestore()
+		}
+
+		expect(peerWriteInjected).toBe(true)
+
+		// The repair still landed...
+		expect(store.get("child-peer")?.status).toBe("interrupted")
+		expect(store.get("parent-peer")?.status).toBe("active")
+		expect(store.get("parent-peer")?.awaitingChildId).toBeUndefined()
+		expect(store.get("parent-peer")?.delegatedToId).toBeUndefined()
+
+		// ...and on disk the peer fields survived.
+		const persistedChild = JSON.parse(await fs.readFile(childFilePath, "utf8")) as HistoryItem
+		expect(persistedChild).toMatchObject({ status: "interrupted", ...peerChildFields })
+		const persistedParent = JSON.parse(await fs.readFile(parentFilePath, "utf8")) as HistoryItem
+		expect(persistedParent).toMatchObject({ status: "active", ...peerParentFields })
+
+		// The cache publishes the committed records, so this window's view also
+		// keeps the peer fields instead of reverting to its stale snapshot.
+		expect(store.get("child-peer")).toMatchObject(peerChildFields)
+		expect(store.get("parent-peer")).toMatchObject(peerParentFields)
+
+		warnSpy.mockRestore()
+	})
+
 	it("routes an undefined getChildFileMtimeMs through initialize() and still repairs the active child", async () => {
 		// End-to-end companion to the direct-helper probe test above ("returns
 		// the file mtime for an existing child and undefined for a missing
@@ -988,7 +1088,9 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		try {
 			// The under-lock guard's sync probe must see the same undefined signal.
 			spySyncMtimeProbe((fp, real) =>
-				fp === path.join(tmpDir, "tasks", "child-undef-mtime", GlobalFileNames.historyItem) ? undefined : real(fp),
+				fp === path.join(tmpDir, "tasks", "child-undef-mtime", GlobalFileNames.historyItem)
+					? undefined
+					: real(fp),
 			)
 			const child = makeItem({
 				id: "child-undef-mtime",

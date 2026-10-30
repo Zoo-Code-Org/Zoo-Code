@@ -48,6 +48,22 @@ class HeartbeatSkipError extends Error {}
 class RepairAbortedError extends Error {}
 
 /**
+ * Administrative repairs write a delta, never a whole record. The repair
+ * decision is made from this store's cache, but the disk record is shared: a
+ * peer window can write other fields of the same task (pending action, token
+ * and cost totals, `childIds`, `apiConfigName`) between that decision and the
+ * advisory lock. Only these lifecycle fields belong to the repair, so only
+ * these may overwrite what the peer persisted.
+ */
+const CHILD_REPAIR_DELTA: Partial<HistoryItem> = { status: "interrupted" }
+
+const PARENT_REPAIR_DELTA: Partial<HistoryItem> = {
+	status: "active",
+	awaitingChildId: undefined,
+	delegatedToId: undefined,
+}
+
+/**
  * Durable intent for the one repair that spans an active delegated child and
  * its parent. Task files remain authoritative; this file only records the
  * guarded target transition that must be completed after a crash.
@@ -553,7 +569,9 @@ export class TaskHistoryStore {
 						// quiet, so the next pass repairs it. An unreadable/absent
 						// parent mtime stays conservative and repairs immediately.
 						if (this.locallyActiveTaskIds.has(item.awaitingChildId)) {
-							console.warn(`[TaskHistoryStore] Skipping repair for delegation ${item.id}: child ${item.awaitingChildId} claimed by a live session in this window`)
+							console.warn(
+								`[TaskHistoryStore] Skipping repair for delegation ${item.id}: child ${item.awaitingChildId} claimed by a live session in this window`,
+							)
 							continue
 						}
 						const parentMtimeMs = await this.getChildFileMtimeMs(item.id)
@@ -565,32 +583,46 @@ export class TaskHistoryStore {
 								TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS,
 							)
 						) {
-							console.warn(`[TaskHistoryStore] Skipping repair for delegation ${item.id}: parent record freshly written (child ${item.awaitingChildId} may still be starting)`)
+							console.warn(
+								`[TaskHistoryStore] Skipping repair for delegation ${item.id}: parent record freshly written (child ${item.awaitingChildId} may still be starting)`,
+							)
 							continue
 						}
-						const repairedParent: HistoryItem = { ...item, status: "active", awaitingChildId: undefined, delegatedToId: undefined }
+						const repairedParent: HistoryItem = {
+							...item,
+							status: "active",
+							awaitingChildId: undefined,
+							delegatedToId: undefined,
+						}
 						// The repair write re-validates under the parent's advisory lock
 						// (same cross-process guard as the active-child repair): the parent
 						// must still be delegated to the same child, and the child's file
 						// must still be absent — a peer that landed the child record in the
 						// gap wins.
 						const childFilePath = await this.getTaskFilePath(item.awaitingChildId!)
+						let committedParent: HistoryItem
 						try {
-							await this.writeAdministrativeRepair(repairedParent, (existing) =>
-								this.assertMissingChildRepairPreconditions(existing, childFilePath, item),
+							committedParent = await this.writeAdministrativeRepair(
+								repairedParent,
+								PARENT_REPAIR_DELTA,
+								(existing) => this.assertMissingChildRepairPreconditions(existing, childFilePath, item),
 							)
 						} catch (error) {
 							if (!(error instanceof RepairAbortedError)) {
 								throw error
 							}
-							console.warn(`[TaskHistoryStore] Aborting repair for delegation ${item.id}: repair raced a peer write`)
+							console.warn(
+								`[TaskHistoryStore] Aborting repair for delegation ${item.id}: repair raced a peer write`,
+							)
 							continue
 						}
-						this.cache.set(repairedParent.id, repairedParent)
+						this.cache.set(committedParent.id, committedParent)
 						if (this.onWrite) {
 							await this.onWrite(this.getAll())
 						}
-						console.warn(`[TaskHistoryStore] Reconciled orphaned delegation: task ${item.id} → active (child ${item.awaitingChildId} not found)`)
+						console.warn(
+							`[TaskHistoryStore] Reconciled orphaned delegation: task ${item.id} → active (child ${item.awaitingChildId} not found)`,
+						)
 						repairsInThisPass++
 					} else if ((child.status ?? "active") === "active" && persistedActiveIds.has(child.id)) {
 						// Cross-instance liveness guard: a child whose history file was written
@@ -778,7 +810,9 @@ export class TaskHistoryStore {
 				} catch (error) {
 					if (error instanceof HeartbeatSkipError) {
 						if (error.message.includes("deleted by another host")) {
-							console.warn(`[TaskHistoryStore] Skipping liveness heartbeat for ${taskId}: ${error.message}`)
+							console.warn(
+								`[TaskHistoryStore] Skipping liveness heartbeat for ${taskId}: ${error.message}`,
+							)
 						}
 						return
 					}
@@ -868,19 +902,36 @@ export class TaskHistoryStore {
 			const repairedChild = childAtTarget ? child : { ...child, status: intent.target.childStatus }
 			const repairedParent = parentMatchesTargetState
 				? parent
-				: { ...parent, status: intent.target.parentStatus, awaitingChildId: undefined, delegatedToId: undefined }
+				: {
+						...parent,
+						status: intent.target.parentStatus,
+						awaitingChildId: undefined,
+						delegatedToId: undefined,
+					}
 
 			// Same cross-process guard as the in-pass repair: each write
 			// re-validates its preconditions under the target file's advisory
 			// lock, so a peer write that landed after the pre-write liveness
 			// check is observed and aborts the stale replay (the journal stays
 			// for a later pass, and replay skips sides already at target).
+			// Cache publication uses the committed records, not the cache-derived
+			// copies, so a side already at target keeps whatever a peer wrote.
+			let committedChild = repairedChild
+			let committedParent = repairedParent
 			try {
 				if (!childAtTarget) {
-					await this.writeAdministrativeRepair(repairedChild, (existing, filePath) => this.assertChildRepairPreconditions(existing, filePath, child.id))
+					committedChild = await this.writeAdministrativeRepair(
+						repairedChild,
+						CHILD_REPAIR_DELTA,
+						(existing, filePath) => this.assertChildRepairPreconditions(existing, filePath, child.id),
+					)
 				}
 				if (!parentMatchesTargetState) {
-					await this.writeAdministrativeRepair(repairedParent, (existing) => this.assertParentRepairPreconditions(existing, child.id))
+					committedParent = await this.writeAdministrativeRepair(
+						repairedParent,
+						PARENT_REPAIR_DELTA,
+						(existing) => this.assertParentRepairPreconditions(existing, child.id),
+					)
 				}
 			} catch (error) {
 				if (error instanceof RepairAbortedError) {
@@ -893,8 +944,8 @@ export class TaskHistoryStore {
 				throw error
 			}
 
-			this.cache.set(repairedChild.id, repairedChild)
-			this.cache.set(repairedParent.id, repairedParent)
+			this.cache.set(committedChild.id, committedChild)
+			this.cache.set(committedParent.id, committedParent)
 
 			// The journal is retained until the write-through callback succeeds.
 			if (this.onWrite) {
@@ -946,18 +997,27 @@ export class TaskHistoryStore {
 		// the child while the intent journal was being written.
 		if (this.locallyActiveTaskIds.has(child.id)) {
 			await this.removeDelegationRepairIntent()
-			console.warn(`[TaskHistoryStore] Aborting repair for child ${child.id}: claimed by a live session in this window`)
+			console.warn(
+				`[TaskHistoryStore] Aborting repair for child ${child.id}: claimed by a live session in this window`,
+			)
 			return false
 		}
 		const mtimeMs = await this.getChildFileMtimeMs(child.id)
 		if (isDelegatedChildLive(child, Date.now(), TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS, mtimeMs)) {
 			await this.removeDelegationRepairIntent()
-			console.warn(`[TaskHistoryStore] Aborting repair for live child ${child.id} (${this.describeLivenessSignal(child, mtimeMs)}) — owned by another window`)
+			console.warn(
+				`[TaskHistoryStore] Aborting repair for live child ${child.id} (${this.describeLivenessSignal(child, mtimeMs)}) — owned by another window`,
+			)
 			return false
 		}
 
 		const repairedChild = { ...child, status: intent.target.childStatus }
-		const repairedParent = { ...parent, status: intent.target.parentStatus, awaitingChildId: undefined, delegatedToId: undefined }
+		const repairedParent = {
+			...parent,
+			status: intent.target.parentStatus,
+			awaitingChildId: undefined,
+			delegatedToId: undefined,
+		}
 
 		// The authoritative writes carry an under-lock re-validation: the merge
 		// callback runs inside the target file's advisory lock (the same
@@ -966,24 +1026,32 @@ export class TaskHistoryStore {
 		// stale repair aborts instead of stomping it. An abort after the child
 		// write has landed keeps the durable intent: replay skips files already
 		// at target and completes only the missing side.
-		let childWritten = false
+		// Cache publication uses the committed records so peer-written fields
+		// merged under the lock stay visible in this window.
+		let committedChild: HistoryItem | undefined
+		let committedParent: HistoryItem | undefined
 		try {
-			await this.writeAdministrativeRepair(repairedChild, (existing, filePath) => this.assertChildRepairPreconditions(existing, filePath, child.id))
-			childWritten = true
-			await this.writeAdministrativeRepair(repairedParent, (existing) => this.assertParentRepairPreconditions(existing, child.id))
+			committedChild = await this.writeAdministrativeRepair(
+				repairedChild,
+				CHILD_REPAIR_DELTA,
+				(existing, filePath) => this.assertChildRepairPreconditions(existing, filePath, child.id),
+			)
+			committedParent = await this.writeAdministrativeRepair(repairedParent, PARENT_REPAIR_DELTA, (existing) =>
+				this.assertParentRepairPreconditions(existing, child.id),
+			)
 		} catch (error) {
 			if (error instanceof RepairAbortedError) {
 				console.warn(`[TaskHistoryStore] Aborting repair for child ${child.id}: ${error.message}`)
-				if (childWritten) {
-					this.cache.set(repairedChild.id, repairedChild)
+				if (committedChild) {
+					this.cache.set(committedChild.id, committedChild)
 				}
 				return false
 			}
 			throw error
 		}
 
-		this.cache.set(repairedChild.id, repairedChild)
-		this.cache.set(repairedParent.id, repairedParent)
+		this.cache.set(committedChild.id, committedChild)
+		this.cache.set(committedParent.id, committedParent)
 
 		if (this.onWrite) {
 			await this.onWrite(this.getAll())
@@ -997,22 +1065,36 @@ export class TaskHistoryStore {
 	 * UNDER the target file's advisory lock: the `guard` runs inside
 	 * safeWriteJson's merge callback, which reads the current disk record after
 	 * the lock is acquired. Throwing `RepairAbortedError` aborts the write
-	 * (nothing is committed); any other error propagates. Returns true when the
-	 * write committed.
+	 * (nothing is committed); any other error propagates.
+	 *
+	 * `delta` carries only the lifecycle fields the repair owns. It is applied
+	 * to the record read under the lock, so fields a peer wrote while this
+	 * store's cache was stale survive the repair. Returns the record actually
+	 * committed, which callers publish to the cache instead of their own
+	 * cache-derived copy; publishing the copy would re-introduce the stale
+	 * fields in this window even though the disk write merged them correctly.
 	 */
 	private async writeAdministrativeRepair(
 		target: HistoryItem,
+		delta: Partial<HistoryItem>,
 		guard: (existing: unknown, filePath: string) => void,
-	): Promise<void> {
+	): Promise<HistoryItem> {
 		const filePath = await this.getTaskFilePath(target.id)
+		// `existing` is null when the file is absent or unparseable, matching the
+		// documented safeWriteJson merge contract; fall back to the cache-derived
+		// record so the repair still commits a complete HistoryItem.
+		const merge = mergeWithDisk(delta)
+		let committed: HistoryItem = target
 		await safeWriteJson(filePath, target, {
-			merge: (existing) => {
+			merge: (existing, incoming) => {
 				guard(existing, filePath)
-				return target
+				committed = merge(existing, incoming) as HistoryItem
+				return committed
 			},
 		})
 		// No cache update here: multi-file repairs must publish cache state
 		// atomically after ALL writes commit (see applyDelegationRepairIntent).
+		return committed
 	}
 
 	/**
@@ -1033,7 +1115,10 @@ export class TaskHistoryStore {
 			}
 		}
 		const mtimeMs = this.statChildFileMtimeMsSync(filePath)
-		if (mtimeMs !== undefined && isLivenessSignalFresh(mtimeMs, Date.now(), TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS)) {
+		if (
+			mtimeMs !== undefined &&
+			isLivenessSignalFresh(mtimeMs, Date.now(), TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS)
+		) {
 			throw new RepairAbortedError("child mtime became fresh under lock (peer resumed)")
 		}
 		if (this.locallyActiveTaskIds.has(childId)) {
@@ -1773,7 +1858,10 @@ export class TaskHistoryStore {
 	 */
 	private describeLivenessSignal(child: HistoryItem, mtimeMs: number | undefined): string {
 		const now = Date.now()
-		if (mtimeMs !== undefined && isLivenessSignalFresh(mtimeMs, now, TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS)) {
+		if (
+			mtimeMs !== undefined &&
+			isLivenessSignalFresh(mtimeMs, now, TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS)
+		) {
 			return `mtime ${Math.round((now - mtimeMs) / 1000)}s ago`
 		}
 		return `heartbeat ${Math.round((now - (child.lastActivityAt ?? 0)) / 1000)}s ago`

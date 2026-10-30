@@ -152,7 +152,12 @@ type ProviderStubObject = {
 	// Wired after the literal in makeProvider because the wrapper must be bound to
 	// the stub object itself; optional so the literal typechecks before wiring.
 	createTaskWithHistoryItem?: (historyItem: HistoryItemLike, options?: { startTask?: boolean }) => Promise<Task>
-	createTask?: (text?: string, images?: string[], parentTask?: Task, options?: { startTask?: boolean }) => Promise<Task>
+	createTask?: (
+		text?: string,
+		images?: string[],
+		parentTask?: Task,
+		options?: { startTask?: boolean },
+	) => Promise<Task>
 	/** Satisfies the ClineProvider structural interface for `createTask` without being invoked by it. */
 	setValues?: MockFn
 	taskRegistry: TaskRegistry
@@ -192,7 +197,7 @@ function makeProvider(store: OwnershipStore, overrides: Partial<ProviderStubObje
 	const registry = new TaskRegistry()
 	const provider: ProviderStubObject = {
 		historyTaskCreationQueue: Promise.resolve(),
-		getCurrentTask: vi.fn((...args: unknown[]) => (registry.current as undefined | Task) && registry.current),
+		getCurrentTask: vi.fn(() => (registry.current as undefined | Task) && registry.current),
 		getTaskWithId: vi.fn((id: string) =>
 			Promise.resolve({
 				historyItem: {
@@ -453,13 +458,18 @@ describe("ClineProvider createTaskWithHistoryItem ownership claim/rollback", () 
 		)
 	})
 
-	it("failure paths claim the id exactly once and release it exactly once (no double-release)", async () => {
+	it("failure paths claim the id once per claim site and release it exactly once (no double-release)", async () => {
 		// CodeRabbit: with BOTH performPreparationTasks and taskScheduler.schedule
-		// configured to reject, the id must still be claimed exactly once and released
-		// exactly once. The two failure sources are mutually exclusive at runtime by
-		// control flow — a prep failure throws before scheduleTask is ever reached —
-		// so the schedule rejection cannot stack a second release on top of the
-		// catch-path release (asserted by schedule's zero calls below).
+		// configured to reject, the id must still be released exactly once. The two
+		// failure sources are mutually exclusive at runtime by control flow — a prep
+		// failure throws before scheduleTask is ever reached — so the schedule
+		// rejection cannot stack a second release on top of the catch-path release
+		// (asserted by schedule's zero calls below).
+		//
+		// This is the rehydrate branch, which claims twice on purpose: the eager
+		// pre-abort claim, then the post-abort re-claim that replaces the ownership
+		// the old instance released at dispose. Both claims carry the same id, and
+		// the rollback still runs exactly once.
 		{
 			const store = makeStore()
 			const provider = makeRehydrateProvider(store, "hist-once-prep", {
@@ -471,8 +481,9 @@ describe("ClineProvider createTaskWithHistoryItem ownership claim/rollback", () 
 				privateClineProvider.createTaskWithHistoryItem.call(provider, makeHistoryItem("hist-once-prep")),
 			).rejects.toThrow("prep exploded")
 
-			expect(store.markLocallyActive).toHaveBeenCalledTimes(1)
-			expect(store.markLocallyActive).toHaveBeenCalledWith("hist-once-prep")
+			expect(store.markLocallyActive).toHaveBeenCalledTimes(2)
+			expect(store.markLocallyActive).toHaveBeenNthCalledWith(1, "hist-once-prep")
+			expect(store.markLocallyActive).toHaveBeenNthCalledWith(2, "hist-once-prep")
 			expect(store.markLocallyInactive).toHaveBeenCalledTimes(1)
 			expect(store.markLocallyInactive).toHaveBeenCalledWith("hist-once-prep")
 			expect(provider.taskScheduler.schedule).not.toHaveBeenCalled()
@@ -557,6 +568,36 @@ describe("ClineProvider createTaskWithHistoryItem ownership claim/rollback", () 
 		expect(provider.log).toHaveBeenCalledWith(
 			"[createTaskWithHistoryItem] rehydrated task hist-reh-full.stub-inst in-place (flicker-free)",
 		)
+	})
+
+	it("re-claims ownership after aborting the old instance that shares the task id", async () => {
+		// The rehydrated task reuses the old task's id, and the old instance's
+		// dispose releases that id (markLocallyInactive also records it in
+		// releasedLocalOwnershipIds, which blocks any later re-claim from the dead
+		// session's straggling writes). Without an explicit re-claim after the
+		// abort, the resumed session is unowned for the whole async gap before
+		// Task.run() persists its first active record, so the periodic delegation
+		// pass can treat it as a crash orphan and repair it mid-resume.
+		const store = makeStore()
+		const provider = makeRehydrateProvider(store, "hist-reclaim")
+		const existing = asCallable(provider.getCurrentTask)() as { abortTask: MockFn }
+
+		await privateClineProvider.createTaskWithHistoryItem.call(provider, makeHistoryItem("hist-reclaim"))
+
+		// Two claims: the eager pre-abort claim and the post-abort re-claim.
+		expect(store.markLocallyActive).toHaveBeenCalledTimes(2)
+		expect(store.markLocallyActive).toHaveBeenNthCalledWith(1, "hist-reclaim")
+		expect(store.markLocallyActive).toHaveBeenNthCalledWith(2, "hist-reclaim")
+		// Ordering is the whole point: the re-claim must land after the abort that
+		// released the id, and before the scheduler handoff that starts the run.
+		expect(store.markLocallyActive.mock.invocationCallOrder[1]).toBeGreaterThan(
+			existing.abortTask.mock.invocationCallOrder[0],
+		)
+		expect(store.markLocallyActive.mock.invocationCallOrder[1]).toBeLessThan(
+			provider.taskScheduler.schedule.mock.invocationCallOrder[0],
+		)
+		await flushMicrotasks()
+		expect(store.markLocallyInactive).not.toHaveBeenCalled()
 	})
 
 	it("rehydrate teardown tolerates a getCurrentTask/registry mismatch: no registry entry means no old-task abort", async () => {
