@@ -3039,6 +3039,31 @@ describe("ClineProvider", () => {
 			expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("code", "other-id")
 		})
 
+		test("rewires the live task to the replacement settings when deleting the active profile", async () => {
+			mockProviderSettingsManager()
+
+			const mockTask = new Task({
+				...defaultTaskOptions,
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "current-key",
+				},
+			})
+			mockTask.updateApiConfiguration = vi.fn()
+			await provider.addClineToStack(mockTask)
+
+			await provider.deleteProviderProfile(currentProfile)
+
+			// The deletion path must not skip the task rebuild: the running task receives the
+			// replacement's effective settings, not the deleted profile's.
+			expect(mockTask.updateApiConfiguration).toHaveBeenCalledWith(
+				expect.objectContaining({
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "other-model",
+				}),
+			)
+		})
+
 		test("fails fast without writing ContextProxy state when the config purge rejects", async () => {
 			Object.assign(provider, {
 				providerSettingsManager: {
