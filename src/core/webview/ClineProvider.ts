@@ -742,10 +742,8 @@ export class ClineProvider
 	 * bounded by MAX_PERSISTED_VIEW_STATES so the global key cannot grow unboundedly.
 	 */
 	private prunePersistedViewStates(states: Record<string, PersistedViewState>): Record<string, PersistedViewState> {
-		// Entries of live views must never age out: a view that keeps its mode and profile
-		// does not refresh updatedAt, so 50 newer closed-view entries would otherwise evict
-		// the state a still-open view needs after its next reload. The cap applies to
-		// closed-view entries only.
+		// Entries of live views must never age out: a view that keeps its mode and profile does
+		// not refresh updatedAt. The cap applies to closed-view entries only.
 		const liveViewStateIds = new Set(
 			Array.from(ClineProvider.activeInstances, (instance) => instance.viewStateId).filter(
 				(viewStateId): viewStateId is string => Boolean(viewStateId),
@@ -2390,8 +2388,7 @@ export class ClineProvider
 		// viewLocalState on top of the ContextProxy values, so an unsynced stale
 		// restored mode would otherwise shadow the fresh switch for consumers.
 		// setValue already restores the shared value when the per-view write fails, and that
-		// restore is value-guarded; an unconditional rollback here would overwrite a mode
-		// another provider wrote while this write was in flight.
+		// restore is value-guarded: an unconditional rollback here would overwrite a newer mode.
 		try {
 			await this.setValue("mode", newMode)
 		} catch (error) {
