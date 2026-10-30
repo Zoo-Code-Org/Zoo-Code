@@ -9,7 +9,7 @@ import { useOpenRouterModelProviders } from "../useOpenRouterModelProviders"
 // assertion below is shared by both phases, so the unchanged green run is the
 // behavior-preservation proof.
 type TransportCall = { url: string; method: string; headers: Record<string, string> }
-type TransportResult = { status: number; body: unknown }
+type TransportResult = { status: number; body: unknown; jsonRejects?: Error }
 
 const stubTransport = (handler: (call: TransportCall) => TransportResult | Promise<TransportResult>) => {
 	const calls: TransportCall[] = []
@@ -26,7 +26,12 @@ const stubTransport = (handler: (call: TransportCall) => TransportResult | Promi
 		return {
 			ok: result.status >= 200 && result.status < 300,
 			status: result.status,
-			json: async () => result.body,
+			json: async () => {
+				if (result.jsonRejects) {
+					throw result.jsonRejects
+				}
+				return result.body
+			},
 		} as Response
 	}) as typeof fetch)
 
@@ -176,5 +181,17 @@ describe("useOpenRouterModelProviders", () => {
 		await waitFor(() => expect(result.current.isSuccess).toBe(true))
 		expect(result.current.data).toEqual({})
 		expect(consoleError).toHaveBeenCalledWith("Error fetching OpenRouter providers:", failure)
+	})
+
+	it("logs a fetch failure and returns no providers when a 2xx body is not valid JSON", async () => {
+		const parseFailure = new SyntaxError("Unexpected token '<', \"<html>\" is not valid JSON")
+		stubTransport(() => ({ status: 200, body: undefined, jsonRejects: parseFailure }))
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		const { result } = renderHook(() => useOpenRouterModelProviders("vendor/model"), { wrapper })
+
+		await waitFor(() => expect(result.current.isSuccess).toBe(true))
+		expect(result.current.data).toEqual({})
+		expect(consoleError).toHaveBeenCalledWith("Error fetching OpenRouter providers:", parseFailure)
 	})
 })
