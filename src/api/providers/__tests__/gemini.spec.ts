@@ -12,6 +12,8 @@ vitest.mock("@roo-code/telemetry", () => ({
 
 import { Anthropic } from "@anthropic-ai/sdk"
 
+import type { GenerateContentResponse } from "@google/genai"
+
 import { type ModelInfo, geminiDefaultModelId, ApiProviderError } from "@roo-code/types"
 
 import { t } from "i18next"
@@ -20,6 +22,11 @@ import { GeminiHandler } from "../gemini"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 const GEMINI_MODEL_NAME = geminiDefaultModelId
+
+// @google/genai's GenerateContentResponse exposes `text` via a getter backed by
+// `candidates`, so the stub only carries the field the provider reads; the double
+// cast is the least-friction way to satisfy the class type in mocks.
+const stubGenerateContentResponse = (text: string) => ({ text }) as unknown as GenerateContentResponse
 
 describe("GeminiHandler", () => {
 	let handler: GeminiHandler
@@ -332,6 +339,53 @@ describe("GeminiHandler", () => {
 			})
 		})
 
+		it("generates request-unique tool call IDs across requests (#1714)", async () => {
+			const metadata = {
+				taskId: "test-task",
+				tools: [{ type: "function", function: { name: "new_task", description: "", parameters: {} } }],
+			} satisfies ApiHandlerCreateMessageMetadata
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Delegate" }]
+
+			// Each request restarts the tool-call counter at zero, so the
+			// synthesized ID must carry a request-unique component to keep
+			// persisted pending-action IDs distinct across requests.
+			const firstCallIds: string[] = []
+			for (let request = 0; request < 2; request++) {
+				mockGenerateContentStream.mockResolvedValueOnce(
+					asyncStreamFrom([
+						{
+							candidates: [{ content: { parts: [{ functionCall: { name: "new_task", args: {} } }] } }],
+						},
+					]),
+				)
+				const chunks = await collectStream(handler.createMessage(systemPrompt, messages, metadata))
+				const partials = chunks
+					.filter((chunk) => chunk.type === "tool_call_partial")
+					.map((chunk) => chunk as { id: string; name?: string; arguments?: string })
+				// The handler emits one name partial and one arguments partial
+				// for the synthesized call. Assert both semantic halves so a
+				// duplicate name partial cannot satisfy the ID comparison.
+				expect(partials).toHaveLength(2)
+				expect(
+					partials.filter(({ name, arguments: args }) => name === "new_task" && args === undefined),
+				).toHaveLength(1)
+				expect(
+					partials.filter(({ name, arguments: args }) => name === undefined && args === "{}"),
+				).toHaveLength(1)
+
+				const partialIds = partials.map(({ id }) => id)
+				expect(new Set(partialIds).size).toBe(1)
+				firstCallIds.push(partialIds[0])
+			}
+
+			// The first call of each request must not collide.
+			expect(firstCallIds[0]).not.toBe(firstCallIds[1])
+			for (const id of firstCallIds) {
+				expect(id).toMatch(/^new_task-.+-0$/)
+				expect(id).not.toBe("new_task-0")
+			}
+		})
+
 		it("should handle API errors", async () => {
 			const mockError = new Error("Gemini API error")
 			;(handler["client"].models.generateContentStream as any).mockRejectedValue(mockError)
@@ -380,6 +434,575 @@ describe("GeminiHandler", () => {
 
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
+		})
+	})
+
+	describe("googleGeminiBaseUrl security (CWE-319)", () => {
+		it("should reject a non-HTTPS non-loopback googleGeminiBaseUrl in completePrompt", async () => {
+			const insecureHandler = new GeminiHandler({
+				apiKey: "test-key",
+
+				apiModelId: GEMINI_MODEL_NAME,
+
+				geminiApiKey: "test-key",
+
+				googleGeminiBaseUrl: "http://gemini.example.test",
+			})
+
+			insecureHandler["client"] = handler["client"]
+
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("Response"),
+			)
+
+			await expect(insecureHandler.completePrompt("Test prompt")).rejects.toThrow(
+				t("common:errors.gemini.generate_complete_prompt", {
+					error: "Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+				}),
+			)
+
+			expect(handler["client"].models.generateContent).not.toHaveBeenCalled()
+		})
+
+		it("should allow a loopback HTTP googleGeminiBaseUrl in completePrompt", async () => {
+			const loopbackHandler = new GeminiHandler({
+				apiKey: "test-key",
+
+				apiModelId: GEMINI_MODEL_NAME,
+
+				geminiApiKey: "test-key",
+
+				googleGeminiBaseUrl: "http://127.0.0.1:8080",
+			})
+
+			loopbackHandler["client"] = handler["client"]
+
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("Response"),
+			)
+
+			const result = await loopbackHandler.completePrompt("Test prompt")
+
+			expect(result).toBe("Response")
+
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith(
+				expect.objectContaining({
+					config: expect.objectContaining({
+						httpOptions: {
+							baseUrl: "http://127.0.0.1:8080",
+						},
+					}),
+				}),
+			)
+		})
+
+		it("should reject a non-HTTPS non-loopback googleGeminiBaseUrl in createMessage", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+
+					content: "Hello",
+				},
+			]
+
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+
+			const insecureHandler = new GeminiHandler({
+				apiKey: "test-key",
+
+				apiModelId: GEMINI_MODEL_NAME,
+
+				geminiApiKey: "test-key",
+
+				googleGeminiBaseUrl: "http://insecure.example.com",
+			})
+
+			insecureHandler["client"] = handler["client"]
+
+			handler["client"].models.generateContentStream = stub
+
+			const stream = insecureHandler.createMessage("You are a helpful assistant", messages)
+
+			const error = await collectStream(stream).catch((e: unknown) => e)
+
+			expect(error).toBeInstanceOf(ApiProviderError)
+
+			expect((error as ApiProviderError).message).toBe(
+				"Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+			)
+
+			expect((error as ApiProviderError).provider).toBe("Gemini")
+
+			expect((error as ApiProviderError).operation).toBe("createMessage")
+
+			expect(stub).not.toHaveBeenCalled()
+		})
+
+		it("should allow a loopback HTTP googleGeminiBaseUrl in createMessage", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+
+					content: "Hello",
+				},
+			]
+
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+
+			const loopbackHandler = new GeminiHandler({
+				apiKey: "test-key",
+
+				apiModelId: GEMINI_MODEL_NAME,
+
+				geminiApiKey: "test-key",
+
+				googleGeminiBaseUrl: "http://127.0.0.1:8080",
+			})
+
+			loopbackHandler["client"] = handler["client"]
+
+			handler["client"].models.generateContentStream = stub
+
+			await collectStream(loopbackHandler.createMessage("You are a helpful assistant", messages))
+
+			const config = stub.mock.calls[0][0].config
+
+			expect(config.httpOptions).toEqual({ baseUrl: "http://127.0.0.1:8080" })
+		})
+
+		it("should allow an http://localhost googleGeminiBaseUrl in createMessage", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+
+					content: "Hello",
+				},
+			]
+
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+
+			const localhostHandler = new GeminiHandler({
+				apiKey: "test-key",
+
+				apiModelId: GEMINI_MODEL_NAME,
+
+				geminiApiKey: "test-key",
+
+				googleGeminiBaseUrl: "http://localhost:8080",
+			})
+
+			localhostHandler["client"] = handler["client"]
+
+			handler["client"].models.generateContentStream = stub
+
+			await collectStream(localhostHandler.createMessage("You are a helpful assistant", messages))
+
+			expect(stub.mock.calls[0][0].config.httpOptions).toEqual({ baseUrl: "http://localhost:8080" })
+		})
+
+		it("should allow an http://[::1] googleGeminiBaseUrl (IPv6 loopback host)", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+
+					content: "Hello",
+				},
+			]
+
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+
+			const ipv6Handler = new GeminiHandler({
+				apiKey: "test-key",
+
+				apiModelId: GEMINI_MODEL_NAME,
+
+				geminiApiKey: "test-key",
+
+				googleGeminiBaseUrl: "http://[::1]:8080",
+			})
+
+			ipv6Handler["client"] = handler["client"]
+
+			handler["client"].models.generateContentStream = stub
+
+			await collectStream(ipv6Handler.createMessage("You are a helpful assistant", messages))
+
+			expect(stub.mock.calls[0][0].config.httpOptions).toEqual({ baseUrl: "http://[::1]:8080" })
+		})
+
+		it("should reject hostnames that only resemble the 127. range", async () => {
+			// "127a.b" is not a four-part 127.0.0.0/8 literal, so it must not
+
+			// pass the loopback check. A prefix-style "starts with 127." test
+
+			// would have matched it and wrongly allowed cleartext. (Hosts such
+
+			// as a127.0.0.1 are rejected by new URL() outright — its mixed
+
+			// digit-led/letter-led label rule — so they never reach the check.)
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+
+					content: "Hello",
+				},
+			]
+
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+
+			const restrictedHandler = new GeminiHandler({
+				apiKey: "test-key",
+
+				apiModelId: GEMINI_MODEL_NAME,
+
+				geminiApiKey: "test-key",
+
+				googleGeminiBaseUrl: "http://127a.b:8080",
+			})
+
+			restrictedHandler["client"] = handler["client"]
+
+			handler["client"].models.generateContentStream = stub
+
+			const error = await collectStream(
+				restrictedHandler.createMessage("You are a helpful assistant", messages),
+			).catch((e: unknown) => e)
+
+			expect(error).toBeInstanceOf(ApiProviderError)
+
+			expect((error as ApiProviderError).message).toBe(
+				"Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+			)
+
+			expect((error as ApiProviderError).provider).toBe("Gemini")
+
+			expect(stub).not.toHaveBeenCalled()
+		})
+
+		it("should reject a valid hostname containing the 127. substring that is not loopback", async () => {
+			// "foo127.bar" is accepted by new URL() (a syntactically valid
+
+			// hostname) and contains the "127." substring, yet is not a
+
+			// loopback address: its first label is "foo127", not the literal
+
+			// 127 octet, so the four-part 127.0.0.0/8 check rejects it.
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+
+					content: "Hello",
+				},
+			]
+
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+
+			const restrictedHandler = new GeminiHandler({
+				apiKey: "test-key",
+
+				apiModelId: GEMINI_MODEL_NAME,
+
+				geminiApiKey: "test-key",
+
+				googleGeminiBaseUrl: "http://foo127.bar:8080",
+			})
+
+			restrictedHandler["client"] = handler["client"]
+
+			handler["client"].models.generateContentStream = stub
+
+			const error = await collectStream(
+				restrictedHandler.createMessage("You are a helpful assistant", messages),
+			).catch((e: unknown) => e)
+
+			expect(error).toBeInstanceOf(ApiProviderError)
+
+			expect((error as ApiProviderError).message).toBe(
+				"Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+			)
+
+			expect((error as ApiProviderError).provider).toBe("Gemini")
+
+			expect(stub).not.toHaveBeenCalled()
+		})
+
+		const INSECURE_BASE_URL_CASES = [
+			// "127.example.test" is a syntactically valid hostname (a digit-led
+
+			// first label is legal DNS) that new URL() accepts, but it is a
+
+			// public domain — not a literal 127.0.0.0/8 address — so cleartext
+
+			// must be rejected. A "starts with 127." prefix check would wrongly
+
+			// allow it and leak the API key in cleartext.
+
+			["a public hostname whose first label is 127", "http://127.example.test:8080"],
+
+			// "127.0.0.a" is accepted by new URL() (a non-digit last label
+
+			// skips IPv4 validation), but the last label is not a decimal
+
+			// octet, so the host is not loopback and cleartext must be
+
+			// rejected.
+
+			["a four-part host with a non-numeric last octet", "http://127.0.0.a:8080"],
+
+			// "127.0.a.b" is accepted by new URL(), but its third label is
+
+			// not a decimal octet, so the host is not loopback and cleartext
+
+			// must be rejected even though the first and fourth labels are
+
+			// numeric.
+
+			["a four-part host with a non-numeric middle octet", "http://127.0.a.b:8080"],
+
+			// "127.0.0.1.a" is a hostname (not an IPv4 literal) that new
+
+			// URL() accepts: its five labels mean it must not pass the
+
+			// four-part 127.0.0.0/8 check, so cleartext must be rejected.
+
+			["a five-part host that starts with a loopback address", "http://127.0.0.1.a:8080"],
+
+			// "10.0.0.1" is a valid IPv4 literal that new URL() accepts, but its
+
+			// first octet is not 127, so it is not loopback and cleartext must
+
+			// be rejected. This pins the 127 label comparison itself.
+
+			["a four-part IPv4 host outside the 127.0.0.0/8 range", "http://10.0.0.1:8080"],
+
+			// The parsed hostname is evil.example.test: "127.0.0.1@" is userinfo.
+			["a loopback address used only as userinfo", "http://127.0.0.1@evil.example.test:8080"],
+
+			// new URL() normalizes this to [::ffff:7f00:1], which is not [::1].
+			["an IPv4-mapped IPv6 loopback address", "http://[::ffff:127.0.0.1]:8080"],
+		] as const
+
+		it.each(INSECURE_BASE_URL_CASES)("should reject %s in completePrompt", async (_name, googleGeminiBaseUrl) => {
+			const restrictedHandler = new GeminiHandler({
+				apiKey: "test-key",
+				apiModelId: GEMINI_MODEL_NAME,
+				geminiApiKey: "test-key",
+				googleGeminiBaseUrl,
+			})
+			restrictedHandler["client"] = handler["client"]
+
+			await expect(restrictedHandler.completePrompt("Test prompt")).rejects.toThrow(
+				t("common:errors.gemini.generate_complete_prompt", {
+					error: "Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+				}),
+			)
+
+			expect(handler["client"].models.generateContent).not.toHaveBeenCalled()
+		})
+
+		it("should allow an HTTPS googleGeminiBaseUrl in createMessage", async () => {
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+			const httpsHandler = new GeminiHandler({
+				apiKey: "test-key",
+				apiModelId: GEMINI_MODEL_NAME,
+				geminiApiKey: "test-key",
+				googleGeminiBaseUrl: "https://gemini.example.test",
+			})
+			httpsHandler["client"] = handler["client"]
+			handler["client"].models.generateContentStream = stub
+
+			await collectStream(
+				httpsHandler.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }]),
+			)
+
+			expect(stub.mock.calls[0][0].config.httpOptions).toEqual({ baseUrl: "https://gemini.example.test" })
+		})
+
+		it("should allow an HTTPS googleGeminiBaseUrl in completePrompt", async () => {
+			const httpsHandler = new GeminiHandler({
+				apiKey: "test-key",
+				apiModelId: GEMINI_MODEL_NAME,
+				geminiApiKey: "test-key",
+				googleGeminiBaseUrl: "https://gemini.example.test",
+			})
+			httpsHandler["client"] = handler["client"]
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("Response"),
+			)
+
+			await expect(httpsHandler.completePrompt("Test prompt")).resolves.toBe("Response")
+
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith(
+				expect.objectContaining({
+					config: expect.objectContaining({ httpOptions: { baseUrl: "https://gemini.example.test" } }),
+				}),
+			)
+		})
+
+		it.each(INSECURE_BASE_URL_CASES)("should reject %s", async (_name, googleGeminiBaseUrl) => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+
+					content: "Hello",
+				},
+			]
+
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+
+			const restrictedHandler = new GeminiHandler({
+				apiKey: "test-key",
+
+				apiModelId: GEMINI_MODEL_NAME,
+
+				geminiApiKey: "test-key",
+
+				googleGeminiBaseUrl,
+			})
+
+			restrictedHandler["client"] = handler["client"]
+
+			handler["client"].models.generateContentStream = stub
+
+			const error = await collectStream(
+				restrictedHandler.createMessage("You are a helpful assistant", messages),
+			).catch((e: unknown) => e)
+
+			expect(error).toBeInstanceOf(ApiProviderError)
+
+			expect((error as ApiProviderError).message).toBe(
+				"Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+			)
+
+			expect((error as ApiProviderError).provider).toBe("Gemini")
+
+			expect(stub).not.toHaveBeenCalled()
+		})
+
+		it("should allow the full 127.0.0.0/8 range including 127.255.255.255", async () => {
+			// The octet boundary is inclusive: 255 is the largest valid decimal
+
+			// octet and must be accepted as loopback. A < instead of <= (or a
+
+			// lowered boundary) would wrongly reject valid loopback endpoints.
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+
+					content: "Hello",
+				},
+			]
+
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+
+			const loopbackHandler = new GeminiHandler({
+				apiKey: "test-key",
+
+				apiModelId: GEMINI_MODEL_NAME,
+
+				geminiApiKey: "test-key",
+
+				googleGeminiBaseUrl: "http://127.255.255.255:8080",
+			})
+
+			loopbackHandler["client"] = handler["client"]
+
+			handler["client"].models.generateContentStream = stub
+
+			await collectStream(loopbackHandler.createMessage("You are a helpful assistant", messages))
+
+			const config = stub.mock.calls[0][0].config
+
+			expect(config.httpOptions).toEqual({ baseUrl: "http://127.255.255.255:8080" })
+		})
+
+		it("should reject a non-HTTP loopback scheme such as ftp://localhost", async () => {
+			// The protocol operand (left of the && in the loopback exception) must
+
+			// still be enforced: a non-HTTP scheme aimed at a loopback host is not
+
+			// a local test proxy and must be rejected like any other non-HTTPS URL.
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+
+					content: "Hello",
+				},
+			]
+
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+
+			const ftpHandler = new GeminiHandler({
+				apiKey: "test-key",
+
+				apiModelId: GEMINI_MODEL_NAME,
+
+				geminiApiKey: "test-key",
+
+				googleGeminiBaseUrl: "ftp://localhost:8080",
+			})
+
+			ftpHandler["client"] = handler["client"]
+
+			handler["client"].models.generateContentStream = stub
+
+			const error = await collectStream(ftpHandler.createMessage("You are a helpful assistant", messages)).catch(
+				(e: unknown) => e,
+			)
+
+			expect(error).toBeInstanceOf(ApiProviderError)
+
+			expect((error as ApiProviderError).message).toBe(
+				"Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+			)
+
+			expect((error as ApiProviderError).provider).toBe("Gemini")
+
+			expect(stub).not.toHaveBeenCalled()
+		})
+
+		it("should reject an invalid googleGeminiBaseUrl in createMessage", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+
+					content: "Hello",
+				},
+			]
+
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+
+			const invalidHandler = new GeminiHandler({
+				apiKey: "test-key",
+
+				apiModelId: GEMINI_MODEL_NAME,
+
+				geminiApiKey: "test-key",
+
+				googleGeminiBaseUrl: "not a valid url",
+			})
+
+			invalidHandler["client"] = handler["client"]
+
+			handler["client"].models.generateContentStream = stub
+
+			const error = await collectStream(
+				invalidHandler.createMessage("You are a helpful assistant", messages),
+			).catch((e: unknown) => e)
+
+			expect(error).toBeInstanceOf(ApiProviderError)
+
+			expect((error as ApiProviderError).message).toBe("Invalid Google Gemini base URL (not a valid URL)")
+
+			expect((error as ApiProviderError).provider).toBe("Gemini")
+
+			expect((error as ApiProviderError).operation).toBe("createMessage")
+
+			expect(stub).not.toHaveBeenCalled()
 		})
 	})
 

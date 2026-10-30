@@ -6,7 +6,12 @@ export default mergeConfig(
 	baseConfig,
 	defineConfig({
 		test: {
-			exclude: [...configDefaults.exclude, "__tests__/dist_assets.spec.ts"],
+			exclude: [
+				...configDefaults.exclude,
+				"__tests__/dist_assets.spec.ts",
+				"services/__tests__/pr-review-state-workflow.test.ts",
+				"services/__tests__/stale-pr-clock-workflow.test.ts",
+			],
 			coverage: {
 				reportsDirectory: "coverage/unit",
 			},

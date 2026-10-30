@@ -110,6 +110,28 @@ describe("getPoeModels", () => {
 		})
 	})
 
+	it("accepts an abort signal without changing results (SDK exposes no cancellation surface)", async () => {
+		mockFetchPoeModels.mockResolvedValue([])
+		mockGetModels.mockReturnValue([
+			{
+				id: "some-model",
+				rawId: "some-model",
+				contextWindow: 4096,
+				maxOutputTokens: 1024,
+				supportsImages: false,
+				supportsPromptCache: false,
+			},
+		])
+		const controller = new AbortController()
+
+		const models = await getPoeModels("key", undefined, { signal: controller.signal })
+
+		// The signal is accepted for interface parity; the Poe SDK call is
+		// issued unchanged because the client exposes no cancellation option.
+		expect(mockFetchPoeModels).toHaveBeenCalledWith({ apiKey: "key", baseURL: undefined })
+		expect(models["some-model"]).toBeDefined()
+	})
+
 	it("maps supportsReasoningEffort when present", async () => {
 		mockFetchPoeModels.mockResolvedValue([])
 		mockGetModels.mockReturnValue([
@@ -127,5 +149,56 @@ describe("getPoeModels", () => {
 		const models = await getPoeModels("key")
 
 		expect(models["openai/o3"].supportsReasoningEffort).toEqual(["low", "medium", "high"])
+	})
+
+	it("rejects with an AbortError and skips the SDK call when the signal is already aborted", async () => {
+		const controller = new AbortController()
+		controller.abort()
+
+		await expect(getPoeModels("key", undefined, { signal: controller.signal })).rejects.toMatchObject({
+			name: "AbortError",
+		})
+
+		expect(mockFetchPoeModels).not.toHaveBeenCalled()
+	})
+
+	it("rejects with an AbortError when the caller aborts while the SDK call is pending", async () => {
+		// The double cannot observe the signal itself (the Poe SDK exposes no
+		// cancellation surface), so the test settles it explicitly after the abort.
+		let settleSdk: () => void = () => {}
+		mockFetchPoeModels.mockImplementation(
+			() =>
+				new Promise<void>((resolve) => {
+					settleSdk = () => resolve()
+				}),
+		)
+
+		const controller = new AbortController()
+		const result = getPoeModels("key", undefined, { signal: controller.signal })
+		controller.abort()
+		settleSdk()
+
+		await expect(result).rejects.toMatchObject({ name: "AbortError" })
+		expect(mockGetModels).not.toHaveBeenCalled()
+	})
+
+	it("rejects with an AbortError instead of an empty catalog when the SDK fails after the caller aborts", async () => {
+		let failSdk: (error: Error) => void = () => {}
+		mockFetchPoeModels.mockImplementation(
+			() =>
+				new Promise<void>((_resolve, reject) => {
+					failSdk = (error) => reject(error)
+				}),
+		)
+
+		const controller = new AbortController()
+		const result = getPoeModels("key", undefined, { signal: controller.signal })
+		controller.abort()
+		failSdk(new Error("network failure"))
+
+		// A swallowed SDK failure would resolve to an empty catalog, presenting a
+		// cancelled fetch to callers as a successful one.
+		await expect(result).rejects.toMatchObject({ name: "AbortError" })
+		expect(mockGetModels).not.toHaveBeenCalled()
 	})
 })

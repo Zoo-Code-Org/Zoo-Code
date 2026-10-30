@@ -6,6 +6,7 @@ import {
 	mockVscodePostMessage,
 	renderWithExtensionState,
 	waitFor,
+	screen,
 	act,
 	fireEvent,
 } from "@/utils/test-utils"
@@ -49,6 +50,8 @@ vi.mock("use-sound", () => ({
 	}),
 }))
 
+let nextRowInstance = 0
+
 // Mock components that use ESM dependencies
 vi.mock("../ChatRow", () => ({
 	default: function MockChatRow({
@@ -60,6 +63,7 @@ vi.mock("../ChatRow", () => ({
 		onSuggestionClick?: (suggestion: SuggestionItem, event?: React.MouseEvent) => void
 		isFollowUpAnswered?: boolean
 	}) {
+		const [instance] = React.useState(() => ++nextRowInstance)
 		if (message.type === "ask" && message.ask === "followup" && message.text) {
 			try {
 				const followUp = JSON.parse(message.text) as { suggest?: SuggestionItem[] }
@@ -81,7 +85,11 @@ vi.mock("../ChatRow", () => ({
 			}
 		}
 
-		return <div data-testid="chat-row">{JSON.stringify(message)}</div>
+		return (
+			<div data-testid="chat-row" data-instance={instance}>
+				{JSON.stringify(message)}
+			</div>
+		)
 	},
 }))
 
@@ -463,6 +471,45 @@ describe("ChatView - Tool Batching Tests", () => {
 			expect(toolRow?.text).toContain('"path":"b.ts"')
 		})
 	})
+
+	it("shows a repeated assistant preamble once while batching readFile asks", async () => {
+		renderChatView()
+		const preamble = "I'll read the files now."
+
+		mockPostMessage({
+			clineMessages: [
+				{ type: "say", say: "task", ts: 1, text: "Read the relevant files." },
+				{ type: "say", say: "text", ts: 2, text: preamble },
+				{
+					type: "ask",
+					ask: "tool",
+					ts: 3,
+					text: JSON.stringify({ tool: "readFile", path: "a.ts" }),
+				},
+				{ type: "say", say: "text", ts: 4, text: preamble },
+				{
+					type: "ask",
+					ask: "tool",
+					ts: 5,
+					text: JSON.stringify({ tool: "readFile", path: "b.ts" }),
+				},
+			],
+		})
+
+		await waitFor(() => {
+			const textRows = mockVirtuosoState.lastData.filter(
+				(message) => message.type === "say" && message.say === "text" && message.text === preamble,
+			)
+			const toolRows = mockVirtuosoState.lastData.filter(
+				(message) => message.type === "ask" && message.ask === "tool",
+			)
+
+			expect(textRows).toHaveLength(1)
+			expect(toolRows).toHaveLength(1)
+			const toolPayload = JSON.parse(toolRows[0]?.text ?? "{}") as { batchFiles?: Array<{ path?: string }> }
+			expect(toolPayload.batchFiles?.map(({ path }) => path)).toEqual(["a.ts", "b.ts"])
+		})
+	})
 })
 
 describe("ChatView - Aggregated Costs Lifecycle", () => {
@@ -682,6 +729,22 @@ describe("ChatView - Virtualization Configuration", () => {
 		mockVirtuosoState.lastConfig = null
 	})
 
+	it("preserves the row instance when a partial message completes", async () => {
+		renderChatView()
+		const task: ClineMessage = { type: "say", say: "task", ts: 1, text: "Task" }
+		const partial: ClineMessage = { type: "say", say: "text", ts: 2, text: "Streaming", partial: true }
+		mockPostMessage({ clineMessages: [task, partial] })
+		const row = await screen.findByTestId("chat-row")
+		const instance = row.getAttribute("data-instance")
+		expect(instance).not.toBeNull()
+		await dispatchExtensionMessage({
+			type: "messageUpdated",
+			clineMessage: { ...partial, text: "Completed", partial: false },
+		})
+		await waitFor(() => expect(screen.getByTestId("chat-row")).toHaveTextContent("Completed"))
+		expect(screen.getByTestId("chat-row").getAttribute("data-instance")).toBe(instance)
+	})
+
 	it("keeps the off-screen render buffer tight for chat rows", async () => {
 		renderChatView()
 
@@ -712,11 +775,90 @@ describe("ChatView - Virtualization Configuration", () => {
 		expect(mockVirtuosoState.lastConfig?.defaultItemHeight).toBe(180)
 		expect(mockVirtuosoState.lastConfig?.increaseViewportBy).toEqual({ top: 600, bottom: 800 })
 		expect(mockVirtuosoState.lastConfig?.computeItemKey?.(1, { type: "say", ts: rowTs })).toBe(`${rowTs}-1`)
+		expect(mockVirtuosoState.lastConfig?.computeItemKey?.(1, { type: "say", ts: rowTs, partial: true })).toBe(
+			`${rowTs}-1`,
+		)
 	})
 })
 
 describe("ChatView - Focus Grabbing Tests", () => {
-	beforeEach(() => vi.clearAllMocks())
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.spyOn(document, "hasFocus").mockReturnValue(false)
+	})
+
+	afterEach(() => vi.mocked(document.hasFocus).mockRestore())
+
+	it("does not focus input when mounted or shown while this document is unfocused", async () => {
+		vi.useFakeTimers()
+		try {
+			const { rerender } = renderChatView()
+			await act(async () => vi.advanceTimersByTime(100))
+			expect(mockFocus).not.toHaveBeenCalled()
+			rerender(<ChatView {...defaultProps} isHidden={true} />)
+			rerender(<ChatView {...defaultProps} isHidden={false} />)
+			await act(async () => vi.advanceTimersByTime(100))
+			expect(mockFocus).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("does not focus input on passive visibility notifications but preserves explicit focus requests", async () => {
+		renderChatView()
+		mockFocus.mockClear()
+		await dispatchExtensionMessage({ type: "action", action: "didBecomeVisible" })
+		expect(mockFocus).not.toHaveBeenCalled()
+		await dispatchExtensionMessage({ type: "action", action: "focusInput" })
+		expect(mockFocus).toHaveBeenCalledTimes(1)
+	})
+
+	it("autofocuses input when the user opens a focused chat", async () => {
+		vi.mocked(document.hasFocus).mockReturnValue(true)
+		vi.useFakeTimers()
+		try {
+			renderChatView()
+			await act(async () => vi.advanceTimersByTime(100))
+			expect(mockFocus).toHaveBeenCalledTimes(1)
+			mockFocus.mockClear()
+			await dispatchExtensionMessage({ type: "action", action: "didBecomeVisible" })
+			expect(mockFocus).toHaveBeenCalledTimes(1)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("does not run delayed autofocus after focus moves back to the editor", async () => {
+		vi.mocked(document.hasFocus).mockReturnValue(true)
+		vi.useFakeTimers()
+		try {
+			renderChatView()
+			vi.mocked(document.hasFocus).mockReturnValue(false)
+			await act(async () => vi.advanceTimersByTime(100))
+			expect(mockFocus).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it.each([false, true])("only refocuses re-enabled input when this document has focus=%s", async (hasFocus) => {
+		vi.mocked(document.hasFocus).mockReturnValue(hasFocus)
+		vi.useFakeTimers()
+		try {
+			const { getByRole } = renderChatView()
+			await dispatchTaskState("background task", 1)
+			await dispatchExtensionMessage({ type: "invoke", invoke: "newChat" })
+			expect(getByRole("textbox")).toHaveAttribute("data-sending-disabled", "true")
+			await act(async () => vi.advanceTimersByTime(100))
+			mockFocus.mockClear()
+			await dispatchExtensionMessage({ type: "state", state: makeExtensionState({ clineMessages: [] }) })
+			expect(getByRole("textbox")).toHaveAttribute("data-sending-disabled", "false")
+			await act(async () => vi.advanceTimersByTime(100))
+			expect(mockFocus).toHaveBeenCalledTimes(hasFocus ? 1 : 0)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
 
 	it("does not grab focus when follow-up question presented", async () => {
 		const { getByTestId } = renderChatView()
@@ -736,11 +878,6 @@ describe("ChatView - Focus Grabbing Tests", () => {
 		// Wait for the component to fully render and settle before clearing mocks
 		await waitFor(() => {
 			expect(getByTestId("chat-textarea")).toBeInTheDocument()
-		})
-
-		// Wait for the debounced focus effect to fire (50ms debounce + buffer for CI variability)
-		await act(async () => {
-			await new Promise((resolve) => setTimeout(resolve, 100))
 		})
 
 		// Clear any initial calls after state has settled

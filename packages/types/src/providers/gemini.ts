@@ -6,6 +6,26 @@ export type GeminiModelId = keyof typeof geminiModels
 export const geminiDefaultModelId: GeminiModelId = "gemini-3.1-pro-preview"
 
 export const geminiModels = {
+	// https://cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-4-argon
+	"gemini-4-argon": {
+		maxTokens: 65_536, // Single-request streaming cap; long decodes up to 1M via continuation tokens.
+		contextWindow: 1_048_576, // Shared across input, thinking, and output tokens.
+		supportsImages: true,
+		// Implicit caching only (automatic for prompt prefixes >= 6,144 tokens);
+		// explicit context caching is not supported on this model.
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["low", "medium", "high"],
+		reasoningEffort: "medium",
+		// thinking_budget returns an HTTP 400 error on this model.
+		supportsReasoningBudget: false,
+		// The backend ignores temperature/top_p/top_k.
+		supportsTemperature: false,
+		// Promo pricing through Nov 30, 2026; from Dec 1, 2026: input $4.00,
+		// output $20.00, cached input $0.20 per 1M tokens.
+		inputPrice: 2.0,
+		outputPrice: 10.0, // Includes thinking tokens.
+		cacheReadsPrice: 0.1,
+	},
 	"gemini-3.7-flash": {
 		maxTokens: 65_536,
 		contextWindow: 1_048_576,

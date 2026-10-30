@@ -2,9 +2,12 @@
 
 import { type ApiStreamUsageChunk } from "../../../api/transform/stream"
 import { AnthropicHandler } from "../anthropic"
+import { MAX_TIMEOUT_MS } from "../utils/abort-signal"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { calculateApiCostAnthropic } from "../../../shared/cost"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
+import type { ApiStreamChunk } from "../../../api/transform/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 
 // Mock TelemetryService
@@ -298,7 +301,7 @@ describe("AnthropicHandler", () => {
 			await collectStream(stream)
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
-			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
 			expect(requestBody?.max_tokens).toBe(16384)
 		})
 
@@ -341,7 +344,7 @@ describe("AnthropicHandler", () => {
 			await collectStream(stream)
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
-			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
 			expect(requestBody?.max_tokens).toBe(32768)
 		})
 
@@ -385,7 +388,7 @@ describe("AnthropicHandler", () => {
 			await collectStream(stream)
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
-			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
 			expect(requestBody?.max_tokens).toBe(16384)
 		})
 
@@ -428,7 +431,7 @@ describe("AnthropicHandler", () => {
 			await collectStream(stream)
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
-			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
 			expect(requestBody?.max_tokens).toBe(32768)
 		})
 
@@ -451,7 +454,7 @@ describe("AnthropicHandler", () => {
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
 			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
-			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
 			expect(requestBody?.temperature).toBeUndefined()
 			expect(requestBody?.max_tokens).toBe(32768)
 			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
@@ -476,7 +479,7 @@ describe("AnthropicHandler", () => {
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
 			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
-			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
 			expect(requestBody?.temperature).toBeUndefined()
 			expect(requestBody?.max_tokens).toBe(32768)
 			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
@@ -501,7 +504,7 @@ describe("AnthropicHandler", () => {
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
 			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
-			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
 			expect(requestBody?.temperature).toBeUndefined()
 			expect(requestBody?.max_tokens).toBe(32768)
 			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
@@ -526,7 +529,57 @@ describe("AnthropicHandler", () => {
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
 			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
-			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
+			expect(requestBody?.temperature).toBeUndefined()
+			expect(requestBody?.max_tokens).toBe(32768)
+			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
+		})
+
+		it("should use adaptive thinking for Claude Opus 5.5 when reasoning is enabled", async () => {
+			const opusHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-5-5",
+				enableReasoningEffort: true,
+			})
+
+			const stream = opusHandler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			await collectStream(stream)
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
+			expect(requestBody?.temperature).toBeUndefined()
+			expect(requestBody?.max_tokens).toBe(128_000)
+			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
+		})
+
+		it("should use adaptive thinking for Claude Haiku 5.5 when reasoning is enabled", async () => {
+			const haikuHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-haiku-5-5",
+				enableReasoningEffort: true,
+				modelMaxTokens: 32768,
+			})
+
+			const stream = haikuHandler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			await collectStream(stream)
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
+			expect(requestBody?.thinking).not.toHaveProperty("budget_tokens")
 			expect(requestBody?.temperature).toBeUndefined()
 			expect(requestBody?.max_tokens).toBe(32768)
 			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
@@ -550,7 +603,498 @@ describe("AnthropicHandler", () => {
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
 			expect(requestBody?.model).toBe("claude-sonnet-5-bf")
-			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
+		})
+
+		it("should surface thinking_tokens from output_tokens_details in usage chunks", async () => {
+			// Adaptive models report reasoning tokens inside
+			// `output_tokens_details.thinking_tokens` (message_start snapshot is
+			// typically absent; message_delta carries the final decomposition).
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 100,
+								output_tokens: 50,
+							},
+						},
+					},
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: {
+							type: "text",
+							text: "Hello",
+						},
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: {
+							type: "text_delta",
+							text: " world",
+						},
+					},
+					{
+						type: "message_delta",
+						usage: {
+							output_tokens: 200,
+							output_tokens_details: {
+								thinking_tokens: 150,
+							},
+						},
+						delta: {
+							stop_reason: "end_turn",
+							stop_sequence: null,
+						},
+					},
+				]),
+			)
+
+			const adaptiveHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-4-7",
+				enableReasoningEffort: true,
+			})
+
+			const stream = adaptiveHandler.createMessage("prompt", [
+				{
+					role: "user",
+					content: [{ type: "text", text: "Hi" }],
+				},
+			])
+
+			const chunks: ApiStreamChunk[] = await collectStream(stream)
+
+			// message_start snapshot carries no thinking decomposition
+			const usageChunks = chunks.filter(
+				(chunk): chunk is Extract<ApiStreamChunk, { type: "usage" }> => chunk.type === "usage",
+			)
+			const startUsage = usageChunks.find((chunk) => chunk.inputTokens > 0)
+			expect(startUsage).toBeDefined()
+			// Property absence, not just undefined: toEqual ignores own properties
+			// whose value is undefined, so a regression that adds
+			// `reasoningTokens: undefined` must fail this assertion.
+			expect(startUsage).not.toHaveProperty("reasoningTokens")
+
+			// message_delta surfaces the final reasoning token count
+			const deltaUsage = usageChunks.find((chunk) => chunk.inputTokens === 0)
+			expect(deltaUsage).toBeDefined()
+			expect(deltaUsage?.outputTokens).toBe(200)
+			expect(deltaUsage?.reasoningTokens).toBe(150)
+		})
+
+		it("should surface numeric thinking_tokens from the message_start usage snapshot", async () => {
+			// Some surfaces report the thinking decomposition as early as the
+			// message_start snapshot; assert the snapshot usage chunk surfaces
+			// reasoningTokens, and that a message_delta without
+			// output_tokens_details omits it.
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 100,
+								output_tokens: 10,
+								output_tokens_details: {
+									thinking_tokens: 5,
+								},
+							},
+						},
+					},
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: {
+							type: "text",
+							text: "Hello",
+						},
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: {
+							type: "text_delta",
+							text: " world",
+						},
+					},
+					{
+						type: "message_delta",
+						usage: {
+							output_tokens: 200,
+						},
+						delta: {
+							stop_reason: "end_turn",
+							stop_sequence: null,
+						},
+					},
+				]),
+			)
+
+			const adaptiveHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-4-7",
+				enableReasoningEffort: true,
+			})
+
+			const stream = adaptiveHandler.createMessage("prompt", [
+				{
+					role: "user",
+					content: [{ type: "text", text: "Hi" }],
+				},
+			])
+
+			const chunks: ApiStreamChunk[] = await collectStream(stream)
+
+			const usageChunks = chunks.filter(
+				(chunk): chunk is Extract<ApiStreamChunk, { type: "usage" }> => chunk.type === "usage",
+			)
+
+			// message_start snapshot surfaces the reported thinking decomposition
+			const startUsage = usageChunks.find((chunk) => chunk.inputTokens > 0)
+			expect(startUsage).toBeDefined()
+			expect(startUsage?.reasoningTokens).toBe(5)
+
+			// message_delta without output_tokens_details omits reasoningTokens
+			const deltaUsage = usageChunks.find((chunk) => chunk.inputTokens === 0)
+			expect(deltaUsage).toBeDefined()
+			expect(deltaUsage?.outputTokens).toBe(200)
+			// Property absence, not just undefined (toEqual ignores undefined values).
+			expect(deltaUsage).not.toHaveProperty("reasoningTokens")
+		})
+
+		it("should preserve a zero-valued thinking_tokens in message_start and message_delta usage chunks", async () => {
+			// A zero-valued `thinking_tokens` is a valid numeric boundary (the
+			// model skipped thinking this turn); both usage chunks must preserve
+			// it as 0 rather than dropping it via a truthiness check.
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 100,
+								output_tokens: 10,
+								output_tokens_details: {
+									thinking_tokens: 0,
+								},
+							},
+						},
+					},
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: {
+							type: "text",
+							text: "Hello",
+						},
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: {
+							type: "text_delta",
+							text: " world",
+						},
+					},
+					{
+						type: "message_delta",
+						usage: {
+							output_tokens: 200,
+							output_tokens_details: {
+								thinking_tokens: 0,
+							},
+						},
+						delta: {
+							stop_reason: "end_turn",
+							stop_sequence: null,
+						},
+					},
+				]),
+			)
+
+			const adaptiveHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-4-7",
+				enableReasoningEffort: true,
+			})
+
+			const stream = adaptiveHandler.createMessage("prompt", [
+				{
+					role: "user",
+					content: [{ type: "text", text: "Hi" }],
+				},
+			])
+
+			const chunks: ApiStreamChunk[] = await collectStream(stream)
+
+			const usageChunks = chunks.filter(
+				(chunk): chunk is Extract<ApiStreamChunk, { type: "usage" }> => chunk.type === "usage",
+			)
+
+			// message_start snapshot preserves the zero-valued decomposition
+			const startUsage = usageChunks.find((chunk) => chunk.inputTokens > 0)
+			expect(startUsage).toBeDefined()
+			expect(startUsage?.reasoningTokens).toBe(0)
+
+			// message_delta preserves the zero-valued final decomposition
+			const deltaUsage = usageChunks.find((chunk) => chunk.inputTokens === 0)
+			expect(deltaUsage).toBeDefined()
+			expect(deltaUsage?.outputTokens).toBe(200)
+			expect(deltaUsage?.reasoningTokens).toBe(0)
+		})
+
+		it("should reject with AbortError when createMessage is called with an already-aborted signal", async () => {
+			const abortedController = new AbortController()
+			abortedController.abort()
+
+			mockCreate.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				if (options?.signal?.aborted) {
+					const error = new Error("The operation was aborted")
+					error.name = "AbortError"
+					throw error
+				}
+				return asyncStreamFrom([])
+			})
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: abortedController.signal }),
+			)
+
+			await expect(stream.next()).rejects.toMatchObject({ name: "AbortError" })
+		})
+
+		it("should abort the request when the external signal aborts mid-flight", async () => {
+			const controller = new AbortController()
+
+			mockCreate.mockImplementation((_params: unknown, options?: { signal?: AbortSignal }) => {
+				return new Promise<void>((_resolve, reject) => {
+					const signal = options?.signal
+					if (!signal) {
+						return
+					}
+					if (signal.aborted) {
+						const error = new Error("The operation was aborted")
+						error.name = "AbortError"
+						reject(error)
+						return
+					}
+					signal.addEventListener(
+						"abort",
+						() => {
+							const error = new Error("The operation was aborted")
+							error.name = "AbortError"
+							reject(error)
+						},
+						{ once: true },
+					)
+				})
+			})
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const promise = stream.next()
+			controller.abort()
+			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+		})
+
+		it("should not pre-abort the bridged signal for a pending external signal", async () => {
+			const controller = new AbortController()
+
+			mockCreate.mockImplementationOnce(async () => asyncStreamFrom([]))
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await collectStream(stream)
+
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestOptions?.signal?.aborted).toBe(false)
+		})
+
+		it("should register the external abort listener with the once option", async () => {
+			const controller = new AbortController()
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+
+			mockCreate.mockImplementationOnce(async () => asyncStreamFrom([]))
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await collectStream(stream)
+
+			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+			// The listener is registered once so it detaches itself when the signal aborts.
+			expect(addEventListenerSpy.mock.calls[0][2]).toEqual({ once: true })
+		})
+
+		it("should remove the external abort listener when the stream completes", async () => {
+			const controller = new AbortController()
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+			mockCreate.mockImplementationOnce(async () => asyncStreamFrom([]))
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await collectStream(stream)
+
+			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+			const [event, listener] = addEventListenerSpy.mock.calls[0]
+			expect(event).toBe("abort")
+			// The same retained callback must be detached once the stream is done.
+			expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)
+		})
+
+		it("should remove the external abort listener when message creation fails", async () => {
+			const controller = new AbortController()
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+			mockCreate.mockRejectedValueOnce(new Error("Anthropic createMessage error"))
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await expect(collectStream(stream)).rejects.toThrow("Anthropic createMessage error")
+
+			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+			const [event, listener] = addEventListenerSpy.mock.calls[0]
+			expect(event).toBe("abort")
+			// The same retained callback must be detached when creation fails.
+			expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)
+		})
+
+		it("should propagate the creation error when no external abort signal is provided", async () => {
+			mockCreate.mockRejectedValueOnce(new Error("Anthropic createMessage error"))
+
+			const stream = handler.createMessage(systemPrompt, [{ role: "user", content: "Hello" }])
+
+			await expect(collectStream(stream)).rejects.toThrow("Anthropic createMessage error")
+		})
+
+		it("should remove the external abort listener when message creation fails for a non-cached model", async () => {
+			const customHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-sonnet-5-bf",
+			})
+			const controller = new AbortController()
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+			mockCreate.mockRejectedValueOnce(new Error("Anthropic createMessage error"))
+
+			const stream = customHandler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await expect(collectStream(stream)).rejects.toThrow("Anthropic createMessage error")
+
+			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+			const [event, listener] = addEventListenerSpy.mock.calls[0]
+			expect(event).toBe("abort")
+			// The same retained callback must be detached when creation fails.
+			expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)
+		})
+
+		it("should reject with AbortError when the external signal aborts a non-cached model mid-flight", async () => {
+			const customHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-sonnet-5-bf",
+			})
+			const controller = new AbortController()
+
+			mockCreate.mockImplementation((_params: unknown, options?: { signal?: AbortSignal }) => {
+				return new Promise<void>((_resolve, reject) => {
+					const signal = options?.signal
+					if (!signal) {
+						return
+					}
+					if (signal.aborted) {
+						const error = new Error("The operation was aborted")
+						error.name = "AbortError"
+						reject(error)
+						return
+					}
+					signal.addEventListener(
+						"abort",
+						() => {
+							const error = new Error("The operation was aborted")
+							error.name = "AbortError"
+							reject(error)
+						},
+						{ once: true },
+					)
+				})
+			})
+
+			const stream = customHandler.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const promise = stream.next()
+			controller.abort()
+			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+
+			// The non-cached path must hand the bridged signal to the SDK.
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestOptions?.signal).toBeDefined()
+			expect(requestOptions?.signal?.aborted).toBe(true)
+		})
+
+		it("should propagate the creation error for a non-cached model when no external abort signal is provided", async () => {
+			const customHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-sonnet-5-bf",
+			})
+
+			mockCreate.mockRejectedValueOnce(new Error("Anthropic createMessage error"))
+
+			const stream = customHandler.createMessage(systemPrompt, [{ role: "user", content: "Hello" }])
+
+			await expect(collectStream(stream)).rejects.toThrow("Anthropic createMessage error")
+		})
+
+		it("should join beta headers with a comma for the default model", async () => {
+			mockCreate.mockImplementationOnce(async () => asyncStreamFrom([]))
+
+			const stream = handler.createMessage(systemPrompt, [{ role: "user", content: "Hello" }])
+
+			await collectStream(stream)
+
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestOptions?.headers?.["anthropic-beta"]).toBe(
+				"fine-grained-tool-streaming-2025-05-14,prompt-caching-2024-07-31",
+			)
 		})
 	})
 
@@ -558,14 +1102,17 @@ describe("AnthropicHandler", () => {
 		it("should complete prompt successfully", async () => {
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("Test response")
-			expect(mockCreate).toHaveBeenCalledWith({
-				model: mockOptions.apiModelId,
-				messages: [{ role: "user", content: "Test prompt" }],
-				max_tokens: 8192,
-				temperature: 0,
-				thinking: undefined,
-				stream: false,
-			})
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: mockOptions.apiModelId,
+					messages: [{ role: "user", content: "Test prompt" }],
+					max_tokens: 8192,
+					temperature: 0,
+					thinking: undefined,
+					stream: false,
+				},
+				undefined,
+			)
 		})
 
 		it("should handle API errors", async () => {
@@ -587,6 +1134,115 @@ describe("AnthropicHandler", () => {
 			}))
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
+		})
+
+		it("should pass abort signal through to client", async () => {
+			const controller = new AbortController()
+			mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: mockOptions.apiModelId,
+					messages: [{ role: "user", content: "test prompt" }],
+					max_tokens: 8192,
+					temperature: 0,
+					thinking: undefined,
+					stream: false,
+				},
+				{ signal: controller.signal },
+			)
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: mockOptions.apiModelId,
+					messages: [{ role: "user", content: "test prompt" }],
+					max_tokens: 8192,
+					temperature: 0,
+					thinking: undefined,
+					stream: false,
+				},
+				undefined,
+			)
+		})
+
+		it("should merge signal and timeout together", async () => {
+			const controller = new AbortController()
+			mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 10000 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: mockOptions.apiModelId,
+					messages: [{ role: "user", content: "test prompt" }],
+					max_tokens: 8192,
+					temperature: 0,
+					thinking: undefined,
+					stream: false,
+				},
+				expect.objectContaining({ signal: controller.signal, timeout: 10000 }),
+			)
+		})
+
+		it("should pass timeoutMs through to client alongside abortSignal", async () => {
+			const controller = new AbortController()
+			mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: mockOptions.apiModelId }),
+				expect.objectContaining({ signal: controller.signal, timeout: 5000 }),
+			)
+		})
+
+		it("should pass the same signal instance", async () => {
+			const controller = new AbortController()
+			mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.any(Object),
+				expect.objectContaining({ signal: controller.signal }),
+			)
+			// Verify it's the exact same instance, not just equal
+			const callOptions = mockCreate.mock.calls[0][1]
+			expect(callOptions?.signal).toBe(controller.signal)
+		})
+
+		it("should not include signal-related options when not provided", async () => {
+			mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
+			await handler.completePrompt("test prompt")
+			expect(mockCreate).toHaveBeenCalledWith(expect.any(Object), undefined)
+		})
+
+		// The Anthropic SDK turns timeout: 0 into an immediate abort and throws
+		// on negative/non-finite delays, so "no explicit timeout" must mean the
+		// option is absent rather than 0.
+		it.each([0, -5, Number.NaN, Number.POSITIVE_INFINITY])(
+			"should not forward an unusable timeoutMs (%s)",
+			async (timeoutMs) => {
+				mockCreate.mockClear()
+				mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
+				await handler.completePrompt("test prompt", { timeoutMs })
+				expect(mockCreate).toHaveBeenCalledWith(
+					expect.objectContaining({ model: mockOptions.apiModelId }),
+					undefined,
+				)
+			},
+		)
+
+		it.each([
+			// Only a call through toSdkTimeoutMs rounds this up.
+			{ label: "a fractional", input: 12.5, forwarded: 13 },
+			// Only a call through toSdkTimeoutMs caps at the Node timer maximum.
+			{ label: "an over-cap", input: MAX_TIMEOUT_MS + 1, forwarded: MAX_TIMEOUT_MS },
+		])("should forward $label timeoutMs as $forwarded", async ({ input, forwarded }) => {
+			mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
+			await handler.completePrompt("test prompt", { timeoutMs: input })
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: mockOptions.apiModelId }), {
+				timeout: forwarded,
+			})
 		})
 	})
 
@@ -768,6 +1424,50 @@ describe("AnthropicHandler", () => {
 			expect(model.reasoningBudget).toBeUndefined()
 		})
 
+		it("should handle Claude Opus 5.5 model correctly", () => {
+			const handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-5-5",
+			})
+			const model = handler.getModel()
+			expect(model.id).toBe("claude-opus-5-5")
+			expect(model.info.maxTokens).toBe(128000)
+			expect(model.info.contextWindow).toBe(1000000)
+			expect(model.info.inputPrice).toBe(4.0)
+			expect(model.info.outputPrice).toBe(20.0)
+			expect(model.info.cacheWritesPrice).toBe(5.0)
+			expect(model.info.cacheReadsPrice).toBe(0.2)
+			expect(model.maxTokens).toBe(128000)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBeUndefined()
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+			expect(model.reasoningBudget).toBeUndefined()
+		})
+
+		it("should handle Claude Haiku 5.5 model correctly", () => {
+			const handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-haiku-5-5",
+			})
+			const model = handler.getModel()
+			expect(model.id).toBe("claude-haiku-5-5")
+			expect(model.info.maxTokens).toBe(128000)
+			expect(model.info.contextWindow).toBe(1000000)
+			expect(model.info.inputPrice).toBe(0.1)
+			expect(model.info.outputPrice).toBe(0.5)
+			expect(model.info.cacheWritesPrice).toBe(0.125)
+			expect(model.info.cacheReadsPrice).toBe(0.01)
+			// Hybrid reasoning model with the reasoning toggle off: the request
+			// budget clamps to the Anthropic default, matching Sonnet 5 / Opus 5.
+			expect(model.maxTokens).toBe(8192)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+			expect(model.reasoningBudget).toBeUndefined()
+		})
+
 		it("should enable 1M context for Claude 4.5 Sonnet when beta flag is set", () => {
 			const handler = new AnthropicHandler({
 				apiKey: "test-api-key",
@@ -860,7 +1560,7 @@ describe("AnthropicHandler", () => {
 			]
 
 			const stream = handler.createMessage(systemPrompt, messagesWithReasoning)
-			const chunks: any[] = await collectStream(stream)
+			await collectStream(stream)
 
 			// Verify the API was called with filtered messages (no reasoning blocks)
 			const calledMessages = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0].messages
@@ -903,7 +1603,7 @@ describe("AnthropicHandler", () => {
 			]
 
 			const stream = handler.createMessage(systemPrompt, messagesWithOnlyReasoning)
-			const chunks: any[] = await collectStream(stream)
+			await collectStream(stream)
 
 			// Verify empty message was filtered out
 			const calledMessages = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0].messages

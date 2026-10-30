@@ -156,7 +156,7 @@ export abstract class BaseTerminal implements RooTerminal {
 
 	public static defaultShellIntegrationTimeout = 5_000
 	private static shellIntegrationTimeout: number = BaseTerminal.defaultShellIntegrationTimeout
-	private static shellIntegrationDisabled: boolean = false
+	private static shellIntegrationDisabled: boolean = true
 	private static commandDelay: number = 0
 	private static powershellCounter: boolean = false
 	private static terminalZshClearEolMark: boolean = true

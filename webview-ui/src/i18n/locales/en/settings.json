@@ -424,6 +424,10 @@
 				"label": "Enable destructive command guard",
 				"description": "Download and use Destructive Command Guard (DCG) for this platform. Commands allowed by DCG run automatically. Commands blocked by DCG require your approval. Zoo's command lists are disabled while this is enabled. The downloaded executable is retained if you turn this off."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "Allowed Auto-Execute Commands",
 			"allowedCommandsDescription": "Command prefixes that can be auto-executed when \"Always approve execute operations\" is enabled. Add * to allow all commands (use with caution).",
 			"deniedCommands": "Denied Commands",
@@ -474,6 +478,11 @@
 		"vscodeLmDescription": " The VS Code Language Model API allows you to run models provided by other VS Code extensions (including but not limited to GitHub Copilot). The easiest way to get started is to install the Copilot and Copilot Chat extensions from the VS Code Marketplace.",
 		"awsCustomArnUse": "Enter a valid Amazon Bedrock ARN for the model you want to use. Format examples:",
 		"awsCustomArnDesc": "Make sure the region in the ARN matches your selected AWS Region above.",
+		"awsCustomArnBaseModel": "Underlying model",
+		"awsCustomArnBaseModelOther": "Other (not listed)",
+		"awsCustomArnBaseModelDesc": "The model this ARN points to. Zoo Code uses it for thinking, temperature, context window, max output and pricing. Detected automatically when the ARN names its model.",
+		"awsCustomArnContextWindow": "Context window (tokens)",
+		"awsCustomArnMaxTokens": "Max output tokens",
 		"openRouterApiKey": "OpenRouter API Key",
 		"getOpenRouterApiKey": "Get OpenRouter API Key",
 		"vercelAiGatewayApiKey": "Vercel AI Gateway API Key",
@@ -482,6 +491,12 @@
 		"getOpencodeGoApiKey": "Get Opencode Go API Key",
 		"kenariApiKey": "Kenari API Key",
 		"getKenariApiKey": "Get Kenari API Key",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "IO Intelligence API Key",
+			"getApiKey": "Get IO Intelligence API Key",
+			"model": "Model"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API Key",
@@ -610,6 +625,8 @@
 		"openAiApiKey": "OpenAI API Key",
 		"apiKey": "API Key",
 		"openAiBaseUrl": "Base URL",
+		"openAiStrictToolSchemas": "Strict tool schemas (strict: true)",
+		"openAiStrictToolSchemasDescription": "Send strict: true with tool schemas to enable strict schema adherence. Disable to use non-strict tool calling.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure deployment name",
 		"azureOpenAiDeploymentNameDescription": "Enter the deployment name from Azure AI Studio, not the underlying model name.",
@@ -648,6 +665,16 @@
 		"enablePromptCaching": "Enable prompt caching",
 		"enablePromptCachingTitle": "Enable prompt caching to improve performance and reduce costs for supported models.",
 		"cacheUsageNote": "Note: If you don't see cache usage, try selecting a different model and then selecting your desired model again.",
+		"githubCopilot": {
+			"accountActions": "GitHub Copilot account actions",
+			"signIn": "Sign in to GitHub",
+			"reconnect": "Reconnect GitHub",
+			"signedIn": "Signed in as {{account}}",
+			"connecting": "Connecting...",
+			"noModels": "No Copilot models available. Install or enable GitHub Copilot Chat, sign in with an eligible GitHub account, then refresh. Signing in does not confirm a Copilot subscription. GitHub plan, premium-request, and rate limits apply.",
+			"manageAccount": "Manage GitHub account",
+			"manageAccountDescription": "Opens VS Code's account menu, where you can sign out of GitHub. Signing out affects Copilot and other extensions using this account."
+		},
 		"vscodeLmModel": "Language Model",
 		"vscodeLmWarning": "Note: Models accessed via the VS Code Language Model API may be wrapped or fine-tuned by the provider, so behavior can differ from using the same model directly from a typical provider or router. To use a model from the Language Model dropdown, first switch to that model and then click Accept in the Copilot Chat prompt; otherwise you may see an error such as 400 \"The requested model is not supported\".",
 		"googleCloudSetup": {
@@ -675,7 +702,7 @@
 			"baseUrl": "Base URL (optional)",
 			"modelId": "Model ID",
 			"apiKey": "Ollama API Key",
-			"apiKeyHelp": "Optional API key for authenticated Ollama instances or cloud services. Leave empty for local installations.",
+			"apiKeyHelp": "Optional API key for Ollama instances that need authentication, or for cloud services. Zoo Code sends the key only to HTTPS or loopback endpoints. A remote HTTP endpoint gets no key, because the key would travel in plain text. Use HTTPS for a remote instance that needs a key. Leave this empty for a local installation.",
 			"numCtx": "Context Window Size (num_ctx)",
 			"numCtxHelp": "Override the model's default context window size. Leave empty to use the model's Modelfile configuration. Minimum value is 128.",
 			"thinking": "Enable Thinking",
@@ -745,9 +772,13 @@
 		},
 		"consecutiveMistakeLimit": {
 			"label": "Error & Repetition Limit",
-			"description": "Number of consecutive errors or repeated actions before showing 'Zoo is having trouble' dialog. Set to 0 to disable this safety mechanism (it will never trigger).",
+			"description": "Number of consecutive errors or repeated identical tool calls before showing 'Zoo is having trouble' dialog. Set to 0 to disable this safety mechanism (it will never trigger).",
 			"unlimitedDescription": "Unlimited retries enabled (auto-proceed). The dialog will never appear.",
 			"warning": "⚠️ Setting to 0 allows unlimited retries which may consume significant API usage"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "Repetition Soft Warning Threshold",
+			"description": "After this many identical consecutive tool calls, the tool is blocked and the AI is asked to justify retrying — without involving you. Set to 0 to disable soft warnings."
 		},
 		"reasoningEffort": {
 			"label": "Model Reasoning Effort",
@@ -900,6 +931,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Collapse command output by default",
+			"description": "Start command output collapsed, including Inline Terminal output. Expand it manually when needed. This does not change how commands run."
+		},
 		"basic": {
 			"label": "Terminal Settings: Basic",
 			"description": "Basic terminal settings"
@@ -1067,8 +1102,14 @@
 		"rangeDescription": "Higher values make output more random, lower values make it more deterministic."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Image support not reported",
+		"toolSupportUnknown": "Tool support not reported",
+		"promptCacheManagedByCopilot": "Prompt caching managed by GitHub Copilot",
+		"promptCacheCopilotDetails": "Caching depends on the model and GitHub Copilot backend. Zoo Code cannot configure cache retention or observe cache hits through the VS Code API.",
 		"supportsImages": "Supports images",
 		"noImages": "Does not support images",
+		"supportsTools": "Supports tools",
+		"noTools": "Does not support tools",
 		"supportsPromptCache": "Supports prompt caching",
 		"noPromptCache": "Does not support prompt caching",
 		"contextWindow": "Context Window:",

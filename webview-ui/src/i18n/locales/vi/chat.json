@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Chọn chế độ tương tác",
 	"selectApiConfig": "Chọn cấu hình API",
+	"selectModel": "Chọn mô hình",
+	"modelSelector": {
+		"title": "Mô hình",
+		"settings": "Cài đặt mô hình",
+		"description": "Chọn mô hình được dùng cho cấu hình API này.",
+		"searchPlaceholder": "Tìm kiếm mô hình...",
+		"unsupportedTooltip": "Mô hình của nhà cung cấp này được cấu hình trong Cài đặt",
+		"loading": "Đang tải mô hình..."
+	},
 	"lockApiConfigAcrossModes": "Khóa cấu hình API cho tất cả chế độ trong workspace này",
 	"unlockApiConfigAcrossModes": "Cấu hình API đã bị khóa cho tất cả chế độ trong workspace này (nhấn để mở khóa)",
 	"enhancePrompt": "Nâng cao yêu cầu với ngữ cảnh bổ sung",
@@ -344,10 +353,10 @@
 		"title": "Zoo Code {{version}} đã phát hành",
 		"support": "Hãy ủng hộ Zoo Code bằng cách tặng sao cho chúng tôi trên <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Có gì mới:",
-			"highlight1": "🔑 Dùng khóa API Zoo Gateway ở bất cứ đâu—thêm khóa vào bất kỳ client hoặc workflow nào tương thích với OpenAI: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 Trong thời gian giới hạn, nhận quyền truy cập miễn phí vào MiniMax-M3 qua Zoo Gateway.",
-			"highlight3": "✨ Hiện đã có: các model GPT-6 Astra và Claude Fable 5.1 hoàn toàn mới."
+			"heading": "Có gì mới trong Zoo Code v3.92.0",
+			"highlight1": "✨ Lựa chọn model nhanh hơn và hỗ trợ model mạnh mẽ hơn: Chuyển model ngay trong ô soạn chat. Dùng Claude Haiku 5.5 trên Amazon Bedrock, tận dụng các khả năng Kimi K3 chính xác hơn trên OpenRouter và dùng giới hạn Gemini 4 Argon đã được chỉnh sửa trên Vercel AI Gateway.",
+			"highlight2": "🧭 Quy trình terminal, chỉnh sửa, chat và làm việc từ xa đáng tin cậy hơn: Tùy chọn thu gọn output lệnh theo mặc định, nhận thông báo lỗi chỉnh sửa rõ ràng hơn, giữ các hàng reasoning và API luôn hiển thị, đồng thời tránh sự cố khởi động và proxy trong workspace từ xa.",
+			"highlight3": "🔌 Mở rộng MCP marketplace: Kết nối Zoo Code với AnySearch, Mailtea và Tradehand thông qua MCP marketplace."
 		},
 		"cloudAgents": {
 			"heading": "Mới trên Cloud:",
@@ -488,6 +497,10 @@
 		"serversPart_other": "{{count}} máy chủ MCP",
 		"messageTemplate": "Bạn đã bật {{tools}} qua {{servers}}. Số lượng lớn như vậy có thể khiến mô hình bối rối và dẫn đến lỗi. Cố gắng giữ nó dưới {{threshold}}.",
 		"openMcpSettings": "Mở cài đặt MCP"
+	},
+	"ignoredDisabledTools": {
+		"title": "Đã bỏ qua công cụ bị tắt",
+		"messageTemplate": "Các công cụ sau không thể bị tắt, nên các mục disabledTools tương ứng đã được bỏ qua: {{tools}}."
 	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"
