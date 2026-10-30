@@ -235,6 +235,32 @@ describe("TelemetryClient", () => {
 			)
 		})
 
+		it("replays at most MAX_PENDING_EVENTS when more are captured during the chunk load", async () => {
+			const client = await loadFreshTelemetryClient()
+			const overflowCount = 51
+
+			// The enabling call suspends at `await loadPostHog()`, so every capture below
+			// runs while the chunk is still in flight. Asserting init has not run yet
+			// proves the window was genuinely open, which is what lets the client exist
+			// later and makes the replay assertion falsifiable.
+			const enabling = client.updateTelemetryState("enabled", "test-key", "test-user")
+			expect(posthog.init).not.toHaveBeenCalled()
+
+			for (let index = 0; index < overflowCount; index++) {
+				client.capture(`queued_event_${index}`)
+			}
+
+			expect(posthog.capture).not.toHaveBeenCalled()
+
+			await enabling
+
+			const replayed = vi.mocked(posthog.capture).mock.calls.map(([eventName]) => eventName)
+			expect(replayed).toHaveLength(50)
+			expect(replayed[0]).toBe("queued_event_0")
+			expect(replayed.at(-1)).toBe("queued_event_49")
+			expect(replayed).not.toContain("queued_event_50")
+		})
+
 		it("drops queued events when telemetry is disabled before the chunk resolves", async () => {
 			const client = await loadFreshTelemetryClient()
 
@@ -245,6 +271,22 @@ describe("TelemetryClient", () => {
 
 			expect(posthog.capture).not.toHaveBeenCalled()
 			expect(posthog.init).not.toHaveBeenCalled()
+		})
+
+		it("does not replay events queued before a disable once telemetry is re-enabled", async () => {
+			const client = await loadFreshTelemetryClient()
+
+			// Queue an event during the first load window, disable (which must empty the
+			// queue), then re-enable. Only the second load's events may be replayed.
+			const firstEnabling = client.updateTelemetryState("enabled", "test-key", "test-user")
+			client.capture("captured_before_disable")
+			await client.updateTelemetryState("disabled")
+			await firstEnabling
+
+			await client.updateTelemetryState("enabled", "test-key", "test-user")
+
+			const replayed = vi.mocked(posthog.capture).mock.calls.map(([eventName]) => eventName)
+			expect(replayed).not.toContain("captured_before_disable")
 		})
 
 		it("does not capture events while telemetry is disabled", async () => {

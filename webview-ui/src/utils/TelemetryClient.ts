@@ -15,6 +15,15 @@ let posthogLoadFailed = false
 // import was static, so a capture() that ran right after an enabling
 // updateTelemetryState() call reached PostHog synchronously; replaying the queue keeps
 // that ordering without dropping events that used to be sent.
+//
+// OVERFLOW POLICY: this queue is a best-effort ordering buffer, not a durable outbox.
+//   - Past MAX_PENDING_EVENTS the oldest entries are kept and new events are dropped
+//     silently. There is no error and no retry; the cap exists so a pathological
+//     startup cannot grow the queue without bound.
+//   - After a failed chunk load nothing is queued at all (posthogLoadFailed), because
+//     there is no client to replay to until a later opt-in retries the load.
+//   - Disabling telemetry empties the queue, so a re-enable cannot replay events that
+//     were captured under a state the user has since turned off.
 const MAX_PENDING_EVENTS = 50
 const pendingEvents: CapturedEvent[] = []
 
