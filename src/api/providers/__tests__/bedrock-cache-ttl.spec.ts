@@ -379,6 +379,66 @@ describe("Bedrock cache-point TTL emission", () => {
 			expect((usage as { cacheWrite1hTokens?: number }).cacheWrite1hTokens).toBeUndefined()
 		})
 
+		it.each([
+			["a 5m entry and no 1h entry", [{ ttl: "5m", inputTokens: 1000 }]],
+			["a negative 1h count", [{ ttl: "1h", inputTokens: -5 }]],
+			["a zero 1h count", [{ ttl: "1h", inputTokens: 0 }]],
+		])("omits the 1h share when the split carries %s", async (_label, cacheDetails) => {
+			// Each row is a distinct malformed shape the reader must absorb rather than
+			// bill: an absent 1h entry (optional chain), a negative count (the `<= 0`
+			// guard, which `!oneHour` alone does not cover), and a zero count.
+			const handler = createHandler({ apiModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0" })
+			handler["client"].send = vi.fn().mockResolvedValue({
+				stream: asyncStreamFrom([
+					{
+						metadata: {
+							usage: {
+								inputTokens: 10,
+								outputTokens: 5,
+								cacheWriteInputTokens: 3000,
+								cacheDetails,
+							},
+						},
+					},
+				]),
+			})
+
+			const chunks = await collectStream(handler.createMessage(longSystemPrompt, messages))
+			const usage = chunks.find((chunk) => chunk.type === "usage")
+
+			expect(usage).toMatchObject({ type: "usage", cacheWriteTokens: 3000 })
+			expect((usage as { cacheWrite1hTokens?: number }).cacheWrite1hTokens).toBeUndefined()
+		})
+
+		it("reads the 1h entry wherever it sits in the split, not just the first entry", async () => {
+			// Converse orders the split longest-TTL-first today, but the reader must match
+			// on the ttl value rather than trusting position: a 5m entry ahead of the 1h
+			// entry would otherwise report the 5m count as the 1h share.
+			const handler = createHandler({ apiModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0" })
+			handler["client"].send = vi.fn().mockResolvedValue({
+				stream: asyncStreamFrom([
+					{
+						metadata: {
+							usage: {
+								inputTokens: 10,
+								outputTokens: 5,
+								cacheWriteInputTokens: 3000,
+								cacheDetails: [
+									{ ttl: "5m", inputTokens: 1000 },
+									{ ttl: "1h", inputTokens: 2000 },
+								],
+							},
+						},
+					},
+				]),
+			})
+
+			const chunks = await collectStream(handler.createMessage(longSystemPrompt, messages))
+			const usage = chunks.find((chunk) => chunk.type === "usage")
+
+			expect(usage).toMatchObject({ type: "usage", cacheWriteTokens: 3000, cacheWrite1hTokens: 2000 })
+		})
+
 		it("clamps the 1h share to the reported aggregate so a malformed split cannot over-bill", async () => {
 			const handler = createHandler({ apiModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0" })
 			handler["client"].send = vi.fn().mockResolvedValue({
