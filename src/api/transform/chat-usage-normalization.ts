@@ -93,6 +93,10 @@ const readPath = (usage: ChatUsageLike, path: string): unknown => {
  * else (missing, null, a string, a float, a negative sentinel) is treated as
  * "not reported" so a malformed field falls through to the next alias instead
  * of poisoning the total.
+ *
+ * `typeof value === "number"` is redundant for the check itself, because
+ * `Number.isInteger` already rejects every non-number. It is kept so the type
+ * predicate narrows to `number` and callers can return the value typed.
  */
 const isTokenCount = (value: unknown): value is number =>
 	typeof value === "number" && Number.isInteger(value) && value >= 0
@@ -114,9 +118,9 @@ const warnMalformedCount = (path: string, value: unknown): void => {
 
 const warnedMalformedCounters = new Set<string>()
 
-const asTokenCount = (value: unknown, path?: string): number | undefined => {
+const asTokenCount = (value: unknown, path: string): number | undefined => {
 	if (isTokenCount(value)) return value
-	if (value !== undefined && value !== null) warnMalformedCount(path ?? "unknown", value)
+	if (value !== undefined && value !== null) warnMalformedCount(path, value)
 	return undefined
 }
 

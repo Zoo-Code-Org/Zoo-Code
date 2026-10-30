@@ -213,6 +213,28 @@ describe("normalizeChatUsage", () => {
 			}
 		})
 
+		it("names the exact field that was discarded", async () => {
+			vi.resetModules()
+			const { logger: freshLogger } = await import("../../../utils/logging")
+			const { normalizeChatUsage: freshNormalize } = await import("../chat-usage-normalization")
+			const warn = vi.spyOn(freshLogger, "warn").mockImplementation(() => {})
+
+			try {
+				freshNormalize({ prompt_tokens: "100", completion_tokens: -1 })
+
+				expect(warn).toHaveBeenCalledWith(expect.stringContaining("malformed token counter"), {
+					path: "prompt_tokens",
+					value: "100",
+				})
+				expect(warn).toHaveBeenCalledWith(expect.stringContaining("malformed token counter"), {
+					path: "completion_tokens",
+					value: -1,
+				})
+			} finally {
+				warn.mockRestore()
+			}
+		})
+
 		it("stays silent for counters the provider simply did not report", () => {
 			const warn = vi.spyOn(logger, "warn").mockImplementation(() => {})
 
