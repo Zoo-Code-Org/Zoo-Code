@@ -1,0 +1,191 @@
+import { EventEmitter } from "node:events"
+import net from "node:net"
+
+import {
+	IpcMessageType,
+	IpcOrigin,
+	ipcMessageSchema,
+	type Ack,
+	type IpcMessage,
+	type TaskCommand,
+} from "@roo-code/types"
+
+// The extension side frames IPC messages with node-ipc: a js-message envelope
+// terminated by a form feed. The launcher has to match that framing byte for
+// byte, so this client owns it instead of depending on @roo-code/ipc, whose
+// client half has no other consumer.
+const DELIMITER = "\f"
+
+const RETRY_MS = 500
+
+const envelope = (data: unknown): string => JSON.stringify({ type: "message", data }) + DELIMITER
+
+// node-ipc rewrites non-pipe socket paths on Windows before listening, so a
+// client must apply the same rewrite to reach the socket the server created.
+export const resolveSocketPath = (socketPath: string): string => {
+	if (process.platform !== "win32" || socketPath.startsWith("\\\\.\\pipe\\")) return socketPath
+	return `\\\\.\\pipe\\${socketPath.replace(/^\//, "").replace(/\//g, "-")}`
+}
+
+export interface EvalIpcClientEvents {
+	[IpcMessageType.Connect]: []
+	[IpcMessageType.Disconnect]: []
+	[IpcMessageType.Ack]: [data: Ack]
+	[IpcMessageType.TaskEvent]: [data: unknown]
+}
+
+export class EvalIpcClient extends EventEmitter<EvalIpcClientEvents> {
+	private readonly _socketPath: string
+	private readonly _log: (...args: unknown[]) => void
+	private _socket?: net.Socket
+	private _buffer = ""
+	private _retry?: NodeJS.Timeout
+	private _isConnected = false
+	private _clientId?: string
+	private _closed = false
+
+	constructor(socketPath: string, log: (...args: unknown[]) => void = console.log) {
+		super()
+
+		this._socketPath = socketPath
+		this._log = log
+
+		this.connect()
+	}
+
+	// The launcher connects immediately after spawning the host, before the
+	// extension has created the socket, so a refused connection is expected and
+	// must be retried until the host comes up.
+	private connect() {
+		if (this._closed) return
+
+		const socket = (this._socket = net.connect(resolveSocketPath(this._socketPath)))
+		socket.setEncoding("utf8")
+		socket.on("connect", () => this.onConnect())
+		socket.on("close", () => this.onClose())
+		socket.on("error", (error) => this.log(`[client#error] ${error.message}`))
+		socket.on("data", (chunk: string) => this.onData(chunk))
+	}
+
+	private onConnect() {
+		if (this._isConnected) return
+
+		this._isConnected = true
+		this.emit(IpcMessageType.Connect)
+	}
+
+	private onClose() {
+		// A close before the first connect is a refused attempt, not a lost
+		// session; only a connected client reports a disconnect.
+		if (this._isConnected) {
+			this._isConnected = false
+			this.emit(IpcMessageType.Disconnect)
+		}
+
+		if (this._closed) return
+
+		this._retry = setTimeout(() => this.connect(), RETRY_MS)
+		this._retry.unref?.()
+	}
+
+	private onData(chunk: string) {
+		this._buffer += chunk
+
+		// A frame is complete only once the delimiter arrives; a partial frame
+		// stays buffered so large task events are never truncated.
+		const frames = this._buffer.split(DELIMITER)
+		this._buffer = frames.pop() ?? ""
+
+		for (const frame of frames) {
+			if (frame.length > 0) this.onFrame(frame)
+		}
+	}
+
+	private onFrame(frame: string) {
+		let parsed: unknown
+
+		try {
+			parsed = JSON.parse(frame)
+		} catch {
+			this.log("[client#onFrame] unparseable frame")
+			return
+		}
+
+		const result = ipcMessageSchema.safeParse((parsed as { data?: unknown } | null)?.data)
+
+		if (!result.success) {
+			// Payload values may carry credentials, so only the count is logged.
+			this.log("[client#onFrame] invalid payload", { issueCount: result.error.issues.length })
+			return
+		}
+
+		const message = result.data
+
+		if (message.origin !== IpcOrigin.Server) return
+
+		switch (message.type) {
+			case IpcMessageType.Ack:
+				this._clientId = message.data.clientId
+				this.emit(IpcMessageType.Ack, message.data)
+				break
+			case IpcMessageType.TaskEvent:
+				this.emit(IpcMessageType.TaskEvent, message.data)
+				break
+		}
+	}
+
+	private log(...args: unknown[]) {
+		this._log(...args)
+	}
+
+	public sendCommand(command: TaskCommand) {
+		if (this._clientId === undefined) {
+			this.log("[client#sendCommand] no client id yet")
+			return
+		}
+
+		this.sendMessage({
+			type: IpcMessageType.TaskCommand,
+			origin: IpcOrigin.Client,
+			clientId: this._clientId,
+			data: command,
+		})
+	}
+
+	public sendMessage(message: IpcMessage) {
+		if (this._closed || !this._socket || this._socket.destroyed) return
+		this._socket.write(envelope(message))
+	}
+
+	public disconnect() {
+		this._closed = true
+
+		if (this._retry) {
+			clearTimeout(this._retry)
+			this._retry = undefined
+		}
+
+		try {
+			this._socket?.end()
+			this._socket?.destroy()
+		} catch (error) {
+			this.log(`[client#disconnect] ${error instanceof Error ? error.message : String(error)}`)
+		}
+	}
+
+	public get socketPath() {
+		return this._socketPath
+	}
+
+	public get clientId() {
+		return this._clientId
+	}
+
+	public get isConnected() {
+		return this._isConnected
+	}
+
+	public get isReady() {
+		return this._isConnected && this._clientId !== undefined
+	}
+}
