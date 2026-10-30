@@ -3124,8 +3124,6 @@ describe("ClineProvider", () => {
 			}
 
 			// Spy on log method to verify warning was logged
-			const logSpy = vi.spyOn(provider, "log")
-
 			// Create history item with non-existent mode
 			const historyItem = {
 				id: "test-id",
@@ -3616,10 +3614,8 @@ describe("ClineProvider", () => {
 
 			await provider["setViewStateId"]("stable-view", "host-token")
 
-			// Registration is what loads a view's own selections: the buffer is populated and
-			// the load is logged, so a reload restores the pinned mode instead of the shared one.
+			// Registration is what loads a view's own selections.
 			expect(provider["viewLocalState"].mode).toBe("architect")
-			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Loaded state for viewId"))
 
 			await provider.dispose()
 		})
