@@ -550,6 +550,57 @@ describe("MistralHandler", () => {
 			expect(results[0]).toEqual({ type: "usage", inputTokens: 1013, outputTokens: 30 })
 		})
 
+		it("drops cached_tokens that exceed prompt_tokens instead of billing an impossible read", async () => {
+			// Subset guard, mirroring the OpenAI sibling that reads the same nested
+			// field (openai.ts:304-313): a malformed upstream count larger than the
+			// prompt total must not bill reads at 0.1x or surface cacheReads > tokensIn.
+			mockCreate.mockImplementationOnce(async (_options) =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [],
+							usage: {
+								promptTokens: 100,
+								completionTokens: 30,
+								additionalProperties: { prompt_tokens_details: { cached_tokens: 1008 } },
+							},
+						},
+					},
+				]),
+			)
+
+			const results = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(results[0]).toEqual({ type: "usage", inputTokens: 100, outputTokens: 30 })
+		})
+
+		it("keeps a cached_tokens value equal to prompt_tokens (inclusive subset bound)", async () => {
+			// The sibling guard is `<=`, not `<`: a fully cached prompt is valid.
+			mockCreate.mockImplementationOnce(async (_options) =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [],
+							usage: {
+								promptTokens: 1008,
+								completionTokens: 30,
+								additionalProperties: { prompt_tokens_details: { cached_tokens: 1008 } },
+							},
+						},
+					},
+				]),
+			)
+
+			const results = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(results[0]).toEqual({
+				type: "usage",
+				inputTokens: 1008,
+				outputTokens: 30,
+				cacheReadTokens: 1008,
+			})
+		})
+
 		it("bills a cached read at 0.1x and the uncached remainder at full input price", async () => {
 			// End-to-end cost proof for the coupled change: the reported usage
 			// chunk from the handler feeds calculateApiCostOpenAI, which subtracts
