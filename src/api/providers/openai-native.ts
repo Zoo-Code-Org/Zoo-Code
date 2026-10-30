@@ -1,5 +1,4 @@
 import * as os from "os"
-import { v7 as uuidv7 } from "uuid"
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
@@ -44,8 +43,6 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	protected options: ApiHandlerOptions
 	private client: OpenAI
 	private readonly providerName = "OpenAI Native"
-	// Session ID for request tracking (persists for the lifetime of the handler)
-	private readonly sessionId: string
 	/**
 	 * Some Responses streams emit tool-call argument deltas without stable call id/name.
 	 * Track the last observed tool identity from output_item events so we can still
@@ -94,8 +91,6 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	constructor(options: ApiHandlerOptions) {
 		super()
 		this.options = options
-		// Generate a session ID for request tracking
-		this.sessionId = uuidv7()
 		// Default to including reasoning.summary: "auto" for models that support Responses API
 		// reasoning summaries unless explicitly disabled.
 		if (this.options.enableResponsesReasoningSummary === undefined) {
@@ -1436,7 +1431,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	}
 
 	/**
-	 * Returns the prompt cache routing key for this request, if the model caches prompts.
+	 * Returns the prompt cache routing key for this request, if one applies.
 	 *
 	 * OpenAI keys cache affinity off the `prompt_cache_key` body field; the `session_id`
 	 * request header is not part of the prompt-caching API. The key must stay identical
@@ -1444,8 +1439,12 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	 * machine) and differ between tasks (so unrelated prefixes do not compete for one
 	 * routing bucket). `metadata.taskId` is the longest-lived identifier the handler
 	 * receives: it is the persisted task id, stable across turns, restarts and
-	 * rehydration, whereas `this.sessionId` is regenerated per handler instance.
-	 * The handler session id is the fallback for callers that send no task id.
+	 * rehydration.
+	 *
+	 * The key is sent ONLY when a task-scoped identity exists. With no task id there is
+	 * no conversation whose prefix could accumulate, so a per-call random key would buy
+	 * no affinity while replacing whatever routing OpenAI applies by default. The
+	 * fail-safe is therefore to omit the field and leave default routing untouched.
 	 */
 	private getPromptCacheKey(
 		model: OpenAiNativeModel,
@@ -1453,10 +1452,10 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	): string | undefined {
 		if (!model.info.supportsPromptCache) return undefined
 
-		const key = metadata?.taskId || this.sessionId
-		if (!key) return undefined
+		const taskId = metadata?.taskId
+		if (!taskId) return undefined
 
-		return key.length > PROMPT_CACHE_KEY_MAX_LENGTH ? key.slice(0, PROMPT_CACHE_KEY_MAX_LENGTH) : key
+		return taskId.length > PROMPT_CACHE_KEY_MAX_LENGTH ? taskId.slice(0, PROMPT_CACHE_KEY_MAX_LENGTH) : taskId
 	}
 
 	/**
@@ -1570,12 +1569,11 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				requestBody[SERVICE_TIER_KEY] = serviceTier
 			}
 
-			// Cache routing affinity key. `completePrompt` has no task metadata, so the handler
-			// session id scopes the key: one bucket per handler instance, never shared across tasks.
-			const promptCacheKey = this.getPromptCacheKey(model)
-			if (promptCacheKey) {
-				requestBody.prompt_cache_key = promptCacheKey
-			}
+			// No prompt_cache_key here on purpose. `completePrompt` carries no task id
+			// (`CompletePromptOptions` has only abortSignal/timeoutMs) and its callers build a
+			// throwaway handler per call, so there is no conversation whose prefix could
+			// accumulate. A per-call random key would buy no affinity while overriding
+			// OpenAI's default routing, so the field is omitted.
 
 			// Add reasoning if supported
 			if (reasoningEffort) {

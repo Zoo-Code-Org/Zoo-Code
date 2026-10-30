@@ -476,10 +476,11 @@ describe("OpenAiNativeHandler - normalizeUsage", () => {
 			expect(first.prompt_cache_key).not.toBe(second.prompt_cache_key)
 		})
 
-		it("should fall back to the handler session id when no task id is supplied", () => {
+		it("should omit the key when no task id is supplied", () => {
+			// No task-scoped identity means no accumulating prefix, so the field is omitted
+			// rather than filled with a per-call random value that would override default routing.
 			const body = buildRequestBody("gpt-5.1")
-			expect(body.prompt_cache_key).toBe(handler["sessionId"])
-			expect(body.prompt_cache_key).toEqual(expect.any(String))
+			expect(body).not.toHaveProperty("prompt_cache_key")
 		})
 
 		it("should omit the key when the model does not support prompt caching", () => {

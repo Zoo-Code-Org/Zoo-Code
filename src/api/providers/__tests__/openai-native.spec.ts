@@ -535,14 +535,13 @@ describe("OpenAiNativeHandler", () => {
 			expect(result).toBe("")
 		})
 
-		it("should scope the prompt_cache_key to the handler session", async () => {
+		it("should omit the prompt_cache_key because no task-scoped identity exists", async () => {
 			mockResponsesCreate.mockResolvedValue({ output: [] })
 
 			await handler.completePrompt("Test prompt")
 
 			const [request] = mockResponsesCreate.mock.calls[0]
-			expect(request.prompt_cache_key).toBe(handler["sessionId"])
-			expect(request.prompt_cache_key).toEqual(expect.any(String))
+			expect(request).not.toHaveProperty("prompt_cache_key")
 		})
 
 		it("should omit the prompt_cache_key when the model does not support prompt caching", async () => {
