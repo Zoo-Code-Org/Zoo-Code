@@ -4225,7 +4225,7 @@ export class ClineProvider
 		return this.enqueueProviderProfileMutation(() => this.activateProviderProfileUnlocked(args, options))
 	}
 
-	private async activateProviderProfileUnlocked(
+	async activateProviderProfileUnlocked(
 		args: { name: string } | { id: string },
 		options?: {
 			persistModeConfig?: boolean
