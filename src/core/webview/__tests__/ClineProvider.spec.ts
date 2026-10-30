@@ -2055,6 +2055,59 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("rejects Object.prototype member names other than __proto__", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			for (const reserved of ["constructor", "toString", "__defineGetter__"]) {
+				await provider["setViewStateId"](reserved)
+			}
+
+			// A prototype name would read an inherited value instead of a persisted entry and
+			// silently drop the pre-launch selection, so none of them may become the view id.
+			expect(provider["viewStateId"]).toBe(provider.viewId)
+			expect(mockContext.globalState.get("viewStates")).toBeUndefined()
+
+			await provider.dispose()
+		})
+
+		it("does not republish captured state when the buffer is reset during the profile load", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-sidebar-view")
+			await provider.contextProxy.setValue("viewStates", {
+				"stable-sidebar-view": { mode: "architect", updatedAt: 1 },
+			})
+
+			let releaseCustomModes: () => void = () => {}
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						releaseCustomModes = () => resolve([])
+					}),
+			)
+
+			const load = provider["loadViewState"]()
+			// A reset clears the buffer while the load is awaiting the mode/profile lookups.
+			provider["_clearViewLocalState"]()
+			releaseCustomModes()
+			await load
+
+			expect(provider["viewLocalState"]).toEqual({})
+
+			await provider.dispose()
+		})
+
 		it("restores the previous view id when the registration write fails so a later launch retries", async () => {
 			const contextProxy = new ContextProxy(mockContext)
 			const provider = new ClineProvider(

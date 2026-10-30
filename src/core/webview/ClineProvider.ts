@@ -433,6 +433,12 @@ export class ClineProvider
 	private viewLocalState: Partial<ExtensionState> = {}
 
 	/**
+	 * Bumped whenever the buffer is cleared (reset/import), so an in-flight load can tell
+	 * that its captured state was invalidated while it awaited the profile lookup.
+	 */
+	private viewLocalStateGeneration = 0
+
+	/**
 	 * This view's pinned profile name from the view-local buffer. Exposed for
 	 * sibling-instance inspection (getAllInstances() filtering): `viewLocalState`
 	 * is private and must not be reached through bracket access.
@@ -862,9 +868,11 @@ export class ClineProvider
 		if (
 			!normalizedViewStateId ||
 			normalizedViewStateId === this.viewStateId ||
-			// Reject "__proto__": writing states["__proto__"] would go through the
-			// Object.prototype setter and be silently dropped by the later spread.
-			normalizedViewStateId === "__proto__"
+			// Reject every Object.prototype member name ("__proto__", "constructor", "toString", ...):
+			// states[normalizedViewStateId] would resolve to an inherited value instead of a
+			// persisted entry, so the stable entry would never be written while the pre-launch
+			// entry is deleted - losing the selection.
+			Object.prototype.hasOwnProperty.call(Object.prototype, normalizedViewStateId)
 		) {
 			return
 		}
@@ -919,6 +927,9 @@ export class ClineProvider
 	 * loaded state, field by field, so in-flight user selections are not clobbered by the load.
 	 */
 	private async loadViewState(): Promise<void> {
+		// Reset/import clears the buffer without changing the view id; a load that completes
+		// after such a clear must not republish the state it captured before the reset.
+		const loadedGeneration = this.viewLocalStateGeneration
 		// Capture the id this load is for: a newer id registered while an async
 		// profile lookup is in flight must not be overwritten by this stale load.
 		const loadedForViewId = this.viewStateId
@@ -995,6 +1006,13 @@ export class ClineProvider
 				} else {
 					mergedState.apiConfiguration = postLoadBuffer.apiConfiguration
 				}
+			}
+
+			// A reset/import may have cleared the buffer while the profile lookup was in flight:
+			// republishing here would restore the pre-reset profile over the cleared state.
+			if (this.viewLocalStateGeneration !== loadedGeneration) {
+				this.log(`[loadViewState] Discarding state loaded before a reset for viewId ${this.viewId}`)
+				return
 			}
 
 			this.viewLocalState = mergedState
@@ -3294,6 +3312,16 @@ export class ClineProvider
 							error instanceof Error ? error.message : String(error)
 						}`,
 					)
+					// Only fail the deletion when the survivor's settings are needed for the rewrite
+					// below: committing it without them would leave the restored profile name served
+					// by the deleted profile's configuration. Otherwise the typed not-found path
+					// still prunes the stale list entry.
+					if (
+						profileToDelete.name === globalSettings.currentApiConfigName ||
+						this.viewLocalState.currentApiConfigName === profileToDelete.name
+					) {
+						throw error
+					}
 				}
 
 				// Stopping here is still deliberate, but for a different reason than before the queue
@@ -3333,8 +3361,10 @@ export class ClineProvider
 					// The deleted profile was the active one (globally, or for this view), so
 					// the shared provider keys still carry its settings; replace them so
 					// getState() reports the surviving profile's configuration.
-					await this.contextProxy.setProviderSettings(survivingSettings)
+					// Mark the write before it fans out: setProviderSettings writes several keys and
+					// can reject after some landed, so compensation must restore the ones that did.
 					providerSettingsWriteLanded = true
+					await this.contextProxy.setProviderSettings(survivingSettings)
 
 					if (viewWasPinnedToDeleted) {
 						// This view's nested overlay (viewLocalState.apiConfiguration, seeded
@@ -3363,7 +3393,16 @@ export class ClineProvider
 				// (apiConfigName + task history). A deletion that fails after this point must put
 				// those back as well, or the rolled-back deletion leaves tasks pinned to the
 				// survivor.
+				// Limit this snapshot to the views the deletion actually re-pins: tasks in other
+				// views keep their own sticky name and may have newer history fields, and restoring
+				// the captured snapshot for them would write stale history over those fields.
 				taskStickinessBeforeRepin = ClineProvider.getAllInstances()
+					.filter(
+						(instance: ClineProvider) =>
+							instance !== this &&
+							!instance._disposed &&
+							instance.pinnedProfileName === profileToDelete.name,
+					)
 					.map((instance: ClineProvider) => {
 						const task = instance.getCurrentTask()
 						if (!task) {
@@ -5412,6 +5451,7 @@ export class ClineProvider
 	 * Clear view-local state cache so that getState() falls back to ContextProxy defaults.
 	 */
 	private _clearViewLocalState(): void {
+		this.viewLocalStateGeneration += 1
 		this.viewLocalState = {}
 	}
 
