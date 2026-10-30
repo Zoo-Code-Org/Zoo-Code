@@ -2524,6 +2524,14 @@ export const webviewMessageHandler = async (
 				try {
 					await provider.providerSettingsManager.deleteConfig(oldName)
 					await provider.activateProviderProfile({ name: newName })
+
+					// The purge drops the mode bindings that pointed at the deleted profile, and the
+					// activation only rebinds the current mode. Mirror the manager's map so the
+					// webview state cannot keep pointing a mode at a profile that no longer exists.
+					await provider.contextProxy.setValue(
+						"modeApiConfigs",
+						await provider.providerSettingsManager.getModeApiConfigs(),
+					)
 				} catch (error) {
 					provider.log(
 						`Error delete api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,

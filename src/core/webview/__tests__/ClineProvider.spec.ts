@@ -3581,6 +3581,44 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	describe("deleteApiConfiguration", () => {
+		test("mirrors the mode bindings the purge dropped into ContextProxy", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const messageHandler = mockWebviewView.webview.onDidReceiveMessage.mock.calls[0][0]
+
+			const survivingProfile: ProviderSettingsEntry = {
+				name: "other-config",
+				id: "other-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const modeApiConfigs: Record<string, string> = { code: "deleted-id", ask: "other-id" }
+
+			Object.assign(provider, {
+				providerSettingsManager: {
+					deleteConfig: vi.fn().mockImplementation(async () => {
+						const removedModeConfigs = { code: modeApiConfigs.code }
+						delete modeApiConfigs.code
+						return { removedModeConfigs }
+					}),
+					listConfig: vi.fn().mockResolvedValue([survivingProfile]),
+					getModeApiConfigs: vi.fn().mockImplementation(async () => ({ ...modeApiConfigs })),
+				},
+			})
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(
+				"answers.yes" as unknown as vscode.MessageItem,
+			)
+			vi.spyOn(provider, "activateProviderProfile").mockResolvedValue(undefined)
+
+			await provider.contextProxy.setValue("modeApiConfigs", { code: "deleted-id", ask: "other-id" })
+
+			await messageHandler({ type: "deleteApiConfiguration", text: "deleted-config" })
+
+			// The webview delete path shares the purge, so it shares the orphan: a mode left on the
+			// deleted id silently no-ops on the next switch instead of moving to a real profile.
+			expect(provider.contextProxy.getValues().modeApiConfigs).toEqual({ ask: "other-id" })
+		})
+	})
+
 	describe("deleteProviderProfile", () => {
 		const currentProfile: ProviderSettingsEntry = {
 			name: "current-config",
@@ -3609,14 +3647,29 @@ describe("ClineProvider", () => {
 			// manager's own notion of the active profile, not just ContextProxy's.
 			const managerState = { currentApiConfigName: currentProfile.name }
 
+			// Mirrors the manager's own `modeApiConfigs`, so a test can prove the purge drops the
+			// bindings that pointed at the deleted profile instead of leaving a dangling id.
+			const modeApiConfigs: Record<string, string> = {}
+
 			Object.assign(provider, {
 				providerSettingsManager: {
 					deleteConfig: vi.fn().mockImplementation(async (name: string) => {
+						const removedModeConfigs: Record<string, string> = {}
+						const deletedId = configs.get(name)?.id
 						const index = profiles.findIndex((profile) => profile.name === name)
 						if (index !== -1) {
 							profiles.splice(index, 1)
 						}
 						configs.delete(name)
+
+						for (const [mode, configId] of Object.entries(modeApiConfigs)) {
+							if (configId === deletedId) {
+								removedModeConfigs[mode] = configId
+								delete modeApiConfigs[mode]
+							}
+						}
+
+						return { removedModeConfigs }
 					}),
 					listConfig: vi.fn().mockImplementation(async () => profiles),
 					getProfile: vi.fn().mockImplementation(async ({ name }: { name: string }) => {
@@ -3643,11 +3696,15 @@ describe("ClineProvider", () => {
 						// effective provider settings, not just the name pointers.
 						return { ...config, name }
 					}),
-					setModeConfig: vi.fn(),
+					setModeConfig: vi.fn().mockImplementation(async (mode: string, configId: string) => {
+						modeApiConfigs[mode] = configId
+					}),
+					getModeConfigId: vi.fn().mockImplementation(async (mode: string) => modeApiConfigs[mode]),
+					getModeApiConfigs: vi.fn().mockImplementation(async () => ({ ...modeApiConfigs })),
 				},
 			})
 
-			return { profiles, managerState }
+			return { profiles, managerState, modeApiConfigs }
 		}
 
 		beforeEach(async () => {
@@ -3960,6 +4017,67 @@ describe("ClineProvider", () => {
 			expect(provider.contextProxy.getProviderSettings().openRouterModelId).toBeUndefined()
 		})
 
+		test("clears the mode bindings that pointed at a deleted inactive profile", async () => {
+			const { modeApiConfigs } = mockProviderSettingsManager()
+			// Two modes are bound to the profile being deleted; a third stays on the surviving one.
+			modeApiConfigs.code = otherProfile.id
+			modeApiConfigs.architect = otherProfile.id
+			modeApiConfigs.ask = currentProfile.id
+			await provider.contextProxy.setValue("modeApiConfigs", { ...modeApiConfigs })
+
+			await provider.deleteProviderProfile(otherProfile)
+
+			// A binding that survives the purge points a mode at a profile the manager no longer
+			// has, so the next switch to that mode resolves nothing and silently keeps the current
+			// profile. Both stores must drop it instead.
+			expect(provider.contextProxy.getValues().modeApiConfigs).toEqual({ ask: currentProfile.id })
+			expect(modeApiConfigs).toEqual({ ask: currentProfile.id })
+		})
+
+		test("rebinds the deleted active profile's other modes to the replacement", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const { modeApiConfigs } = mockProviderSettingsManager()
+			modeApiConfigs.code = currentProfile.id
+			modeApiConfigs.architect = currentProfile.id
+			modeApiConfigs.ask = otherProfile.id
+			await provider.contextProxy.setValue("modeApiConfigs", { ...modeApiConfigs })
+
+			await provider.deleteProviderProfile(currentProfile)
+
+			// The activation rebinds only the current mode (`code`); every other mode that pointed
+			// at the deleted profile must not keep a dangling id either.
+			expect(modeApiConfigs).toEqual({ code: otherProfile.id, ask: otherProfile.id })
+			expect(provider.contextProxy.getValues().modeApiConfigs).toEqual(modeApiConfigs)
+
+			// The activation posts state before this mirror lands, so the mirror needs its own post.
+			// Without it the webview keeps a mode bound to a profile the manager no longer has.
+			const postedStates = mockPostMessage.mock.calls.filter(
+				([message]: [ExtensionMessage]) => message.type === "state",
+			)
+			expect(postedStates.length).toBeGreaterThanOrEqual(2)
+		})
+
+		test("re-applies the mode bindings when the deletion rolls back", async () => {
+			const { modeApiConfigs } = mockProviderSettingsManager()
+			modeApiConfigs.code = currentProfile.id
+			modeApiConfigs.architect = currentProfile.id
+			await provider.contextProxy.setValue("modeApiConfigs", { ...modeApiConfigs })
+
+			// Fail the replacement activation so the purge is rolled back.
+			vi.mocked(provider.providerSettingsManager.activateProfile).mockRejectedValueOnce(
+				new Error("Failed to activate profile: storage error"),
+			)
+
+			await expect(provider.deleteProviderProfile(currentProfile)).rejects.toThrow(
+				"Failed to activate profile: storage error",
+			)
+
+			// The restore reuses the profile's `id`, so the bindings the purge dropped name a live
+			// profile again and must come back in both stores, not just ContextProxy.
+			expect(modeApiConfigs).toEqual({ code: currentProfile.id, architect: currentProfile.id })
+			expect(provider.contextProxy.getValues().modeApiConfigs).toEqual(modeApiConfigs)
+		})
+
 		test("does not purge an inactive profile after the caller already timed out", async () => {
 			vi.useFakeTimers()
 
@@ -3974,6 +4092,7 @@ describe("ClineProvider", () => {
 					await pendingPurge
 					const index = profiles.findIndex((profile) => profile.name === otherProfile.name)
 					profiles.splice(index, 1)
+					return { removedModeConfigs: {} }
 				})
 
 				const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")

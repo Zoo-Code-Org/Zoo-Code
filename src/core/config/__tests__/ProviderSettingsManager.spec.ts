@@ -994,6 +994,75 @@ describe("ProviderSettingsManager", () => {
 				"Failed to delete config: Error: Cannot delete the last remaining configuration",
 			)
 		})
+
+		it("should drop the mode bindings that pointed at the deleted config", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "default",
+				apiConfigs: {
+					default: {
+						id: "default",
+					},
+					test: {
+						apiProvider: providerIdentifiers.anthropic,
+						id: "test-id",
+					},
+				},
+				modeApiConfigs: {
+					code: "test-id",
+					architect: "default",
+					ask: "test-id",
+				},
+				migrations: {
+					rateLimitSecondsMigrated: false,
+				},
+			}
+
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+
+			const { removedModeConfigs } = await providerSettingsManager.deleteConfig("test")
+
+			// A surviving binding would make the next switch to that mode resolve a profile that no
+			// longer exists, so the mode silently keeps the current profile instead of switching.
+			const storedConfig = JSON.parse(mockSecrets.store.mock.calls[0][1])
+			expect(storedConfig.modeApiConfigs).toEqual({ architect: "default" })
+			// The dropped bindings come back so a rollback can re-apply them.
+			expect(removedModeConfigs).toEqual({ code: "test-id", ask: "test-id" })
+		})
+
+		it("should keep the mode bindings when the deleted config's id is reused by a rename", async () => {
+			// `renameApiConfiguration` saves the new name with the old `id` and then deletes the old
+			// name, so the id is still live and its mode bindings must survive the purge.
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "default",
+				apiConfigs: {
+					default: {
+						id: "default",
+					},
+					renamed: {
+						apiProvider: providerIdentifiers.anthropic,
+						id: "test-id",
+					},
+					test: {
+						apiProvider: providerIdentifiers.anthropic,
+						id: "test-id",
+					},
+				},
+				modeApiConfigs: {
+					code: "test-id",
+				},
+				migrations: {
+					rateLimitSecondsMigrated: false,
+				},
+			}
+
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+
+			const { removedModeConfigs } = await providerSettingsManager.deleteConfig("test")
+
+			const storedConfig = JSON.parse(mockSecrets.store.mock.calls[0][1])
+			expect(storedConfig.modeApiConfigs).toEqual({ code: "test-id" })
+			expect(removedModeConfigs).toEqual({})
+		})
 	})
 
 	describe("LoadConfig", () => {

@@ -503,9 +503,12 @@ export class ProviderSettingsManager {
 	}
 
 	/**
-	 * Delete a config by name.
+	 * Delete a config by name. The per-mode bindings that point at the deleted profile are dropped
+	 * with it: a surviving binding makes the next switch to that mode resolve no profile and
+	 * silently keep the current one. The dropped bindings are returned so a caller that rolls the
+	 * deletion back can re-apply them.
 	 */
-	public async deleteConfig(name: string) {
+	public async deleteConfig(name: string): Promise<{ removedModeConfigs: Record<string, string> }> {
 		try {
 			return await this.lock(async () => {
 				const providerProfiles = await this.load()
@@ -518,8 +521,26 @@ export class ProviderSettingsManager {
 					throw new Error(`Cannot delete the last remaining configuration`)
 				}
 
+				const deletedId = providerProfiles.apiConfigs[name].id
 				delete providerProfiles.apiConfigs[name]
+
+				const removedModeConfigs: Record<string, string> = {}
+				// A rename saves the profile under its new name with the same `id` before deleting
+				// the old one, so only an id no remaining profile carries is an orphan.
+				const idStillInUse =
+					!!deletedId && Object.values(providerProfiles.apiConfigs).some((config) => config.id === deletedId)
+
+				if (deletedId && !idStillInUse) {
+					for (const [mode, configId] of Object.entries(providerProfiles.modeApiConfigs ?? {})) {
+						if (configId === deletedId) {
+							removedModeConfigs[mode] = configId
+							delete providerProfiles.modeApiConfigs![mode]
+						}
+					}
+				}
+
 				await this.store(providerProfiles)
+				return { removedModeConfigs }
 			})
 		} catch (error) {
 			throw new Error(`Failed to delete config: ${error}`)
@@ -571,6 +592,21 @@ export class ProviderSettingsManager {
 			})
 		} catch (error) {
 			throw new Error(`Failed to get mode config: ${error}`)
+		}
+	}
+
+	/**
+	 * Get every per-mode config binding. Callers that mirror this map into `ContextProxy` read it
+	 * here rather than recomputing it, so the two stores cannot drift.
+	 */
+	public async getModeApiConfigs(): Promise<Record<string, string>> {
+		try {
+			return await this.lock(async () => {
+				const { modeApiConfigs } = await this.load()
+				return { ...modeApiConfigs }
+			})
+		} catch (error) {
+			throw new Error(`Failed to get mode configs: ${error}`)
 		}
 	}
 
