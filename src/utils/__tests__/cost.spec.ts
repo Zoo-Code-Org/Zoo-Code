@@ -337,7 +337,7 @@ describe("Cost Utility", () => {
 			expect(result.totalCost).not.toBeCloseTo(0.375, 9)
 		})
 
-		it("bills a mixed 5m/1h split per class (0.465 case)", () => {
+		it("bills a mixed 5m/1h split per class (60/40 split, 0.51)", () => {
 			// 60k of the 100k writes are 1h, 40k remain at the 5m rate.
 			const result = calculateApiCostAnthropic(anthropicModel, 0, 0, 100_000, 0, 60_000)
 
