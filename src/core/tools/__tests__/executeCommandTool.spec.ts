@@ -1,8 +1,9 @@
 // npx vitest run src/core/tools/__tests__/executeCommandTool.spec.ts
 
 import type { ToolUsage } from "@roo-code/types"
-import * as vscode from "vscode"
 import fs from "fs/promises"
+import { constants as fsConstants, type Stats } from "fs"
+import * as vscode from "vscode"
 
 import { Task } from "../../task/Task"
 import * as autoApprovalModule from "../../auto-approval"
@@ -21,6 +22,7 @@ vitest.mock("execa", () => ({
 vitest.mock("fs/promises", () => ({
 	default: {
 		access: vitest.fn().mockResolvedValue(undefined),
+		stat: vitest.fn().mockResolvedValue({ isDirectory: () => true }),
 	},
 }))
 
@@ -142,7 +144,8 @@ describe("executeCommandTool", () => {
 			recordToolUsage: vitest.fn().mockReturnValue({} as ToolUsage),
 			recordToolError: vitest.fn(),
 			supersedePendingAsk: vitest.fn(),
-			processQueuedMessages: vitest.fn(),
+			processQueuedMessages: vitest.fn().mockResolvedValue(true),
+			terminalProcesses: new Map(),
 			recordBlanketCommandDenial: vitest.fn(),
 			providerRef: {
 				deref: vitest.fn().mockResolvedValue({
@@ -169,7 +172,7 @@ describe("executeCommandTool", () => {
 
 		// Setup vscode config mock
 		const mockConfig = {
-			get: vitest.fn().mockImplementation((key: string, defaultValue: any) => {
+			get: vitest.fn().mockImplementation((_key: string, defaultValue: any) => {
 				return defaultValue
 			}),
 		}
@@ -236,6 +239,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Verify
@@ -257,6 +261,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Verify - command approved, result pushed, and custom cwd passed to terminal
@@ -278,6 +283,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
@@ -322,6 +328,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
@@ -365,6 +372,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockCline.say).toHaveBeenCalledWith(
@@ -388,6 +396,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// The DCG verdict is forwarded so checkAutoApproval auto-approves from
@@ -416,6 +425,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Blanket mode: not protected, so checkAutoApproval resolves the ask as
@@ -443,6 +453,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
@@ -466,6 +477,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
@@ -493,6 +505,7 @@ describe("executeCommandTool", () => {
 				handleError: mockHandleError as unknown as HandleError,
 				// vi.fn stands in for the PushToolResult signature; every test in this block uses this identical cast.
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
@@ -533,6 +546,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Position pin: the denial must arrive after an ask actually happened —
@@ -583,6 +597,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Same position pin as the sibling test: asked first, denied by the re-check.
@@ -638,6 +653,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// The prompt shown was the protected one — the blanket setting was off
@@ -670,6 +686,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(recheckSpy).toHaveBeenCalledTimes(1)
@@ -692,6 +709,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(TerminalRegistry.getOrCreateTerminal).not.toHaveBeenCalled()
@@ -729,6 +747,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// The re-check genuinely ran against the fresh state — without this
@@ -763,11 +782,132 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockEnsureDcgInstalled).toHaveBeenCalledWith("/test/storage")
 			expect(mockRunDcg).toHaveBeenCalledWith("/test/storage/dcg", "echo test", "/test/workspace")
 		})
+
+		it("rejects a missing working directory before starting DCG", async () => {
+			const provider = await mockCline.providerRef.deref()
+			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
+			mockToolUse.params.cwd = "/missing/remote/workspace"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "/missing/remote/workspace" }
+			vi.mocked(fs.stat).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			vi.mocked(formatResponse.toolError).mockReturnValueOnce("formatted missing-directory error")
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(formatResponse.toolError).toHaveBeenCalledExactlyOnceWith(
+				"Working directory '/missing/remote/workspace' does not exist.",
+			)
+			expect(mockPushToolResult).toHaveBeenCalledExactlyOnceWith("formatted missing-directory error")
+			expect(mockEnsureDcgInstalled).not.toHaveBeenCalled()
+			expect(mockRunDcg).not.toHaveBeenCalled()
+			expect(mockAskApproval).not.toHaveBeenCalled()
+			expect(mockCline.didToolFailInCurrentTurn).toBe(true)
+		})
+
+		it("rejects an existing file used as the working directory", async () => {
+			const provider = await mockCline.providerRef.deref()
+			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
+			mockToolUse.params.cwd = "/remote/workspace/file.txt"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "/remote/workspace/file.txt" }
+			vi.mocked(fs.stat).mockResolvedValueOnce({ isDirectory: () => false } as Stats)
+			vi.mocked(formatResponse.toolError).mockReturnValueOnce("formatted not-a-directory error")
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(fs.stat).toHaveBeenCalledWith("/remote/workspace/file.txt")
+			expect(fs.access).not.toHaveBeenCalled()
+			expect(formatResponse.toolError).toHaveBeenCalledExactlyOnceWith(
+				"Working directory '/remote/workspace/file.txt' is not a directory.",
+			)
+			expect(mockPushToolResult).toHaveBeenCalledExactlyOnceWith("formatted not-a-directory error")
+			expect(mockEnsureDcgInstalled).not.toHaveBeenCalled()
+			expect(mockRunDcg).not.toHaveBeenCalled()
+			expect(mockAskApproval).not.toHaveBeenCalled()
+			expect(mockCline.didToolFailInCurrentTurn).toBe(true)
+		})
+
+		it.each(["EACCES", "EPERM"])(
+			"rejects a working directory without search permission (%s) before starting DCG",
+			async (code) => {
+				const provider = await mockCline.providerRef.deref()
+				provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+				provider.contextProxy.getValue.mockReturnValue(true)
+				mockToolUse.params.cwd = "/remote/locked"
+				mockToolUse.nativeArgs = { command: "echo test", cwd: "/remote/locked" }
+				vi.mocked(fs.stat).mockResolvedValueOnce({ isDirectory: () => true } as Stats)
+				vi.mocked(fs.access).mockRejectedValueOnce(Object.assign(new Error(code), { code }))
+				vi.mocked(formatResponse.toolError).mockReturnValueOnce("formatted permission error")
+
+				await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+					askApproval: mockAskApproval as unknown as AskApproval,
+					handleError: mockHandleError as unknown as HandleError,
+					pushToolResult: mockPushToolResult as unknown as PushToolResult,
+					toolCallId: "test-tool-call-id",
+				})
+
+				expect(fs.access).toHaveBeenCalledWith("/remote/locked", fsConstants.X_OK)
+				expect(formatResponse.toolError).toHaveBeenCalledExactlyOnceWith(
+					"Working directory '/remote/locked' is not accessible (permission denied).",
+				)
+				expect(mockPushToolResult).toHaveBeenCalledExactlyOnceWith("formatted permission error")
+				// Neither DCG nor the terminal (which starts only after approval) may start.
+				expect(mockEnsureDcgInstalled).not.toHaveBeenCalled()
+				expect(mockRunDcg).not.toHaveBeenCalled()
+				expect(mockAskApproval).not.toHaveBeenCalled()
+				expect(mockCline.didToolFailInCurrentTurn).toBe(true)
+			},
+		)
+
+		it.each([
+			[true, "stat", "EIO"],
+			[true, "access", "ELOOP"],
+			[false, "stat", "ELOOP"],
+			[false, "access", "EIO"],
+		] as const)(
+			"preserves filesystem failures with DCG enabled=%s (%s, %s)",
+			async (dcgEnabled, operation, code) => {
+				const provider = await mockCline.providerRef.deref()
+				provider.contextProxy.getValue.mockReturnValue(dcgEnabled)
+				const message = `${code}: filesystem failure`
+				vi.mocked(fs[operation]).mockRejectedValueOnce(Object.assign(new Error(message), { code }))
+				const expected = `Unable to access working directory '/test/workspace': ${message}`
+				if (dcgEnabled) vi.mocked(formatResponse.toolError).mockReturnValueOnce(expected)
+
+				await executeCommandTool.handle(mockCline, mockToolUse, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					toolCallId: "test-tool-call-id",
+				})
+
+				if (dcgEnabled) {
+					expect(formatResponse.toolError).toHaveBeenCalledExactlyOnceWith(expected)
+				}
+				expect(mockPushToolResult).toHaveBeenCalledExactlyOnceWith(expected)
+				expect(mockAskApproval).toHaveBeenCalledTimes(dcgEnabled ? 0 : 1)
+				expect(mockEnsureDcgInstalled).not.toHaveBeenCalled()
+				expect(mockRunDcg).not.toHaveBeenCalled()
+				expect(TerminalRegistry.getOrCreateTerminal).not.toHaveBeenCalled()
+				expect(mockCline.say).not.toHaveBeenCalledWith("shell_integration_warning")
+				expect(mockHandleError).not.toHaveBeenCalled()
+			},
+		)
 
 		it("fails closed when the DCG install or update fails", async () => {
 			const provider = await mockCline.providerRef.deref()
@@ -783,6 +923,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockHandleError).toHaveBeenCalledWith(
@@ -808,6 +949,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockHandleError).toHaveBeenCalledWith(
@@ -830,6 +972,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Verify
@@ -851,6 +994,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Verify
@@ -877,6 +1021,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Verify
@@ -913,6 +1058,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// A generic terminal failure is an ordinary execution error, not a
@@ -945,6 +1091,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalled()
@@ -986,6 +1133,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalled()
@@ -1019,6 +1167,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith(
@@ -1056,6 +1205,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith(
@@ -1076,6 +1226,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).not.toHaveBeenCalled()
@@ -1092,10 +1243,11 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith(
-				"Working directory '/nonexistent/working/dir' does not exist.",
+				"Unable to access working directory '/nonexistent/working/dir': ENOENT",
 			)
 			expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
 		})
@@ -1124,6 +1276,7 @@ describe("executeCommandTool", () => {
 					askApproval: mockAskApproval as unknown as AskApproval,
 					handleError: mockHandleError as unknown as HandleError,
 					pushToolResult: mockPushToolResult as unknown as PushToolResult,
+					toolCallId: "test-tool-call-id",
 				})
 
 				// The successful result is published exactly once: the drain failure
@@ -1145,6 +1298,7 @@ describe("executeCommandTool", () => {
 					askApproval: mockAskApproval as unknown as AskApproval,
 					handleError: mockHandleError as unknown as HandleError,
 					pushToolResult: mockPushToolResult as unknown as PushToolResult,
+					toolCallId: "test-tool-call-id",
 				})
 
 				expect(mockCline.processQueuedMessages).toHaveBeenCalledTimes(2)
@@ -1189,6 +1343,7 @@ describe("executeCommandTool", () => {
 					askApproval: mockAskApproval as unknown as AskApproval,
 					handleError: mockHandleError as unknown as HandleError,
 					pushToolResult: mockPushToolResult as unknown as PushToolResult,
+					toolCallId: "test-tool-call-id",
 				})
 
 				expect(mockPushToolResult).toHaveBeenCalledTimes(1)
@@ -1225,10 +1380,11 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith(
-				"Working directory '/nonexistent/working/dir' does not exist.",
+				"Unable to access working directory '/nonexistent/working/dir': ENOENT",
 			)
 			expect(mockCline.processQueuedMessages).not.toHaveBeenCalled()
 		})
@@ -1264,6 +1420,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// The retry error is reported through the tool error path and no
@@ -1296,6 +1453,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockHandleError).toHaveBeenCalledWith("executing command", sayError)
@@ -1404,6 +1562,7 @@ describe("executeCommandTool", () => {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 		}
 

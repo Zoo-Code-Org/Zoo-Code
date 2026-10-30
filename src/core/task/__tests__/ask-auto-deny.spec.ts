@@ -37,8 +37,7 @@ function buildTask(provider: ProviderStub, taskCwd: string) {
 	task["askResponseText"] = undefined
 	task["askResponseImages"] = undefined
 	task["lastMessageTs"] = undefined
-	// Merged Task.addToClineMessages reports the save outcome (Promise<boolean>).
-	task["addToClineMessages"] = vi.fn(async () => true)
+	task["addToClineMessages"] = vi.fn(async () => {})
 	task["saveClineMessages"] = vi.fn(async () => true)
 	task["updateClineMessage"] = vi.fn(async () => {})
 	task["cancelAutoApprovalTimeout"] = vi.fn(() => {})
@@ -80,9 +79,9 @@ function attachTurnHarness(task: Task) {
 	Object.defineProperty(task, "rateLimitClock", { value: createRateLimitClock() })
 	Object.defineProperty(task, "diffViewProvider", { value: { isEditing: false, reset: async () => {} } })
 	Object.defineProperty(task, "streamingToolCallIndices", { value: new Map() })
+	Object.defineProperty(task, "activeToolContexts", { value: new Map() })
 	task["saveApiConversationHistory"] = vi.fn(async () => true)
-	// Merged Task.say reports the save outcome (Promise<boolean>).
-	task["say"] = vi.fn(async () => true)
+	task["say"] = vi.fn(async () => undefined)
 	// The loop rewrites the newest api_req_started row with cost data; the
 	// no-op `say` stub above never adds one itself.
 	task["clineMessages"].push({ type: "say", say: "api_req_started", text: "{}", ts: Date.now() })
@@ -103,7 +102,6 @@ const TASK_CWD = "/path/to/task-workspace"
 function recordClineMessages(task: Task) {
 	const addToClineMessages = vi.fn(async (message: ClineMessage) => {
 		task["clineMessages"].push(message)
-		return true
 	})
 	task["addToClineMessages"] = addToClineMessages
 	return addToClineMessages

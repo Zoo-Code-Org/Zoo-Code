@@ -118,6 +118,7 @@ describe("ApplyDiffTool.execute - queued message drain failures", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Flush the fire-and-forget drain promise so its rejection is logged.
@@ -144,6 +145,7 @@ describe("ApplyDiffTool.execute - queued message drain failures", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Flush the fire-and-forget drain promise so its rejection is logged.
@@ -174,6 +176,7 @@ describe("ApplyDiffTool.execute - queued message drain failures", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Flush the fire-and-forget drain promise so its rejection is logged.

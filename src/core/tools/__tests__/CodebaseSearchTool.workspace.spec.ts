@@ -79,13 +79,14 @@ describe("CodebaseSearchTool workspace selection", () => {
 			cwd: second.uri.fsPath,
 			providerRef: new WeakRef(provider),
 			consecutiveMistakeCount: 0,
-			say: vi.fn<Task["say"]>().mockResolvedValue(true),
+			say: vi.fn<Task["say"]>().mockResolvedValue(undefined),
 		}
 		task = taskStub as Task
 		callbacks = {
 			askApproval: vi.fn<ToolCallbacks["askApproval"]>().mockResolvedValue(true),
 			handleError: vi.fn<ToolCallbacks["handleError"]>().mockResolvedValue(undefined),
 			pushToolResult: vi.fn<ToolCallbacks["pushToolResult"]>(),
+			toolCallId: "test-tool-call-id",
 		}
 	})
 

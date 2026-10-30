@@ -14,18 +14,15 @@
 
 import path from "path"
 
+import type { ToolUse } from "../../../shared/tools"
+import type { Task, ToolExecutionContext } from "../../task/Task"
+
 import { isBinaryFile } from "isbinaryfile"
 
-import { readFileTool, ReadFileTool } from "../ReadFileTool"
+import { readFileTool } from "../ReadFileTool"
 import { formatResponse } from "../../prompts/responses"
-import type { Task } from "../../task/Task"
-import {
-	validateImageForProcessing,
-	processImageFile,
-	isSupportedImageFormat,
-	ImageMemoryTracker,
-} from "../helpers/imageHelpers"
-import { extractTextFromFile, addLineNumbers, getSupportedBinaryFormats } from "../../../integrations/misc/extract-text"
+import { validateImageForProcessing, processImageFile, isSupportedImageFormat } from "../helpers/imageHelpers"
+import { extractTextFromFile, getSupportedBinaryFormats } from "../../../integrations/misc/extract-text"
 import { readWithIndentation, readWithSlice } from "../../../integrations/misc/indentation-reader"
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -152,10 +149,9 @@ function createMockTask(options: MockTaskOptions = {}) {
 		consecutiveMistakeCount: 0,
 		didToolFailInCurrentTurn: false,
 		didRejectTool: false,
+		activeToolContexts: new Map<string, ToolExecutionContext>(),
 		ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined }),
 		say: vi.fn().mockResolvedValue(undefined),
-		sayUserFeedbackAndAckQueued: vi.fn().mockResolvedValue(undefined),
-		discardConsumedQueuedMessage: vi.fn(),
 		sayAndCreateMissingParamError: vi.fn().mockResolvedValue("Missing required parameter: path"),
 		recordToolError: vi.fn(),
 		rooIgnoreController: {
@@ -178,6 +174,7 @@ function createMockTask(options: MockTaskOptions = {}) {
 function createMockCallbacks() {
 	return {
 		pushToolResult: vi.fn(),
+		toolCallId: "test-tool-call-id",
 		askApproval: vi.fn(),
 		handleError: vi.fn(),
 	}
@@ -605,11 +602,14 @@ describe("ReadFileTool", () => {
 			const mockTask = createMockTask()
 			const callbacks = createMockCallbacks()
 
+			const context = { toolCallId: callbacks.toolCallId, didReject: false }
+			mockTask.activeToolContexts.set(callbacks.toolCallId, context)
 			mockTask.ask.mockResolvedValue({ response: "noButtonClicked", text: undefined, images: undefined })
 
 			await readFileTool.execute({ path: "test.ts" }, mockTask as any, callbacks)
 
 			expect(mockTask.didRejectTool).toBe(true)
+			expect(context.didReject).toBe(true)
 			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Denied by user"))
 		})
 
@@ -633,12 +633,7 @@ describe("ReadFileTool", () => {
 
 			await readFileTool.execute({ path: "test.ts" }, mockTask as any, callbacks)
 
-			expect(mockTask.sayUserFeedbackAndAckQueued).toHaveBeenCalledWith(
-				"Please be careful with this file",
-				undefined,
-				undefined,
-			)
-			expect(mockTask.say).not.toHaveBeenCalled()
+			expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "Please be careful with this file", undefined)
 			expect(formatResponse.toolApprovedWithFeedback).toHaveBeenCalledWith("Please be careful with this file")
 		})
 
@@ -654,121 +649,8 @@ describe("ReadFileTool", () => {
 
 			await readFileTool.execute({ path: "secrets.env" }, mockTask as any, callbacks)
 
-			expect(mockTask.sayUserFeedbackAndAckQueued).toHaveBeenCalledWith(
-				"This file contains secrets",
-				undefined,
-				undefined,
-			)
-			expect(mockTask.say).not.toHaveBeenCalled()
+			expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "This file contains secrets", undefined)
 			expect(formatResponse.toolDeniedWithFeedback).toHaveBeenCalledWith("This file contains secrets")
-		})
-
-		it("acks a queued message intercepted by the approval ask instead of leaving it queued", async () => {
-			const mockTask = createMockTask()
-			const callbacks = createMockCallbacks()
-
-			mockTask.ask.mockResolvedValue({
-				response: "noButtonClicked",
-				text: "Do not read it",
-				images: undefined,
-				queuedMessageId: "queued-1",
-			})
-
-			await readFileTool.execute(
-				{ path: "secrets.env" },
-				// Double assertion: the file's `as any` budget is capped by
-				// eslint-suppressions.json and must not grow.
-				mockTask as unknown as Task,
-				callbacks,
-			)
-
-			expect(mockTask.sayUserFeedbackAndAckQueued).toHaveBeenCalledExactlyOnceWith(
-				"Do not read it",
-				undefined,
-				"queued-1",
-			)
-			expect(mockTask.say).not.toHaveBeenCalled()
-			expect(mockTask.discardConsumedQueuedMessage).not.toHaveBeenCalled()
-		})
-
-		it("acks queued feedback on a batch approval", async () => {
-			const mockTask = createMockTask()
-			const callbacks = createMockCallbacks()
-
-			mockTask.ask.mockResolvedValue({
-				response: "yesButtonClicked",
-				text: "ok to proceed",
-				images: undefined,
-				queuedMessageId: "queued-batch-yes",
-			})
-
-			await readFileTool["requestApproval"](
-				mockTask as unknown as Task,
-				[
-					{ path: "a.ts", status: "pending", entry: { path: "a.ts", mode: "slice", offset: 1 } },
-					{ path: "b.ts", status: "pending", entry: { path: "b.ts", mode: "slice", offset: 1 } },
-				],
-				() => {},
-			)
-
-			expect(mockTask.sayUserFeedbackAndAckQueued).toHaveBeenCalledExactlyOnceWith(
-				"ok to proceed",
-				undefined,
-				"queued-batch-yes",
-			)
-			expect(mockTask.say).not.toHaveBeenCalled()
-		})
-
-		it("discards a queued message consumed by the batch permissions branch", async () => {
-			const mockTask = createMockTask()
-			const callbacks = createMockCallbacks()
-
-			mockTask.ask.mockResolvedValue({
-				response: "messageResponse",
-				text: "free-form note",
-				images: undefined,
-				queuedMessageId: "queued-batch",
-			})
-
-			await readFileTool["requestApproval"](
-				mockTask as unknown as Task,
-				[
-					{ path: "a.ts", status: "pending", entry: { path: "a.ts", mode: "slice", offset: 1 } },
-					{ path: "b.ts", status: "pending", entry: { path: "b.ts", mode: "slice", offset: 1 } },
-				],
-				() => {},
-			)
-
-			expect(mockTask.discardConsumedQueuedMessage).toHaveBeenCalledExactlyOnceWith("queued-batch")
-			expect(mockTask.sayUserFeedbackAndAckQueued).not.toHaveBeenCalled()
-			expect(mockTask.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
-			// Free text is not a permissions payload, so both files are denied.
-			expect(mockTask.didRejectTool).toBe(true)
-		})
-
-		it("acks queued feedback on a legacy per-file denial", async () => {
-			const mockTask = createMockTask()
-			const callbacks = createMockCallbacks()
-
-			mockTask.ask.mockResolvedValue({
-				response: "noButtonClicked",
-				text: "Do not read it",
-				images: undefined,
-				queuedMessageId: "queued-legacy",
-			})
-
-			await readFileTool.execute(
-				{ files: [{ path: "legacy-secret.ts" }] } as unknown as Parameters<typeof readFileTool.execute>[0],
-				mockTask as unknown as Task,
-				callbacks,
-			)
-
-			expect(mockTask.sayUserFeedbackAndAckQueued).toHaveBeenCalledExactlyOnceWith(
-				"Do not read it",
-				undefined,
-				"queued-legacy",
-			)
-			expect(mockTask.discardConsumedQueuedMessage).not.toHaveBeenCalled()
 		})
 	})
 
@@ -916,6 +798,73 @@ describe("ReadFileTool", () => {
 			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("file2 content"))
 		})
 
+		describe("batch approval denial", () => {
+			const requestBatchApproval = async (answer: {
+				response: string
+				text?: string
+				approvedIndexes?: number[]
+			}) => {
+				const mockTask = createMockTask()
+				const context = { toolCallId: "batch-call", didReject: false }
+				mockTask.activeToolContexts.set("batch-call", context)
+				mockTask.ask.mockImplementation(async (_type: string, message: string) => {
+					if (!answer.approvedIndexes) return { response: answer.response, text: answer.text }
+					const { batchFiles } = JSON.parse(message) as { batchFiles: { key: string }[] }
+					const permissions = Object.fromEntries(
+						batchFiles.map((file, index) => [file.key, answer.approvedIndexes!.includes(index)]),
+					)
+					return { response: answer.response, text: JSON.stringify(permissions) }
+				})
+				const updateFileResult = vi.fn()
+				const filesToApprove = ["file1.ts", "file2.ts"].map((path) => ({
+					path,
+					status: "pending" as const,
+					entry: { path },
+				}))
+
+				await readFileTool["requestApproval"](mockTask as never, "batch-call", filesToApprove, updateFileResult)
+
+				return { mockTask, context, updateFileResult }
+			}
+
+			it.each([
+				["the user clicks no", { response: "noButtonClicked" }],
+				["individual permissions deny every file", { response: "messageResponse", text: "{}" }],
+				["individual permissions are not valid JSON", { response: "messageResponse", text: "not json" }],
+			])("marks the tool call rejected and denies both files when %s", async (_name, askResult) => {
+				const { mockTask, context, updateFileResult } = await requestBatchApproval(askResult)
+
+				expect(mockTask.didRejectTool).toBe(true)
+				expect(context.didReject).toBe(true)
+				expect(updateFileResult).toHaveBeenCalledWith("file1.ts", expect.objectContaining({ status: "denied" }))
+				expect(updateFileResult).toHaveBeenCalledWith("file2.ts", expect.objectContaining({ status: "denied" }))
+			})
+
+			it("marks the tool call rejected when individual permissions approve one file and deny the other", async () => {
+				const { mockTask, context, updateFileResult } = await requestBatchApproval({
+					response: "messageResponse",
+					approvedIndexes: [0],
+				})
+
+				expect(mockTask.didRejectTool).toBe(true)
+				expect(context.didReject).toBe(true)
+				expect(updateFileResult).toHaveBeenCalledWith("file1.ts", { status: "approved" })
+				expect(updateFileResult).toHaveBeenCalledWith("file2.ts", expect.objectContaining({ status: "denied" }))
+			})
+
+			it("leaves the tool call unrejected when individual permissions approve every file", async () => {
+				const { mockTask, context, updateFileResult } = await requestBatchApproval({
+					response: "messageResponse",
+					approvedIndexes: [0, 1],
+				})
+
+				expect(mockTask.didRejectTool).toBe(false)
+				expect(context.didReject).toBe(false)
+				expect(updateFileResult).toHaveBeenCalledWith("file1.ts", { status: "approved" })
+				expect(updateFileResult).toHaveBeenCalledWith("file2.ts", { status: "approved" })
+			})
+		})
+
 		it("should block rooignore-protected files in legacy format", async () => {
 			const mockTask = createMockTask({ rooIgnoreAllowed: false })
 			const callbacks = createMockCallbacks()
@@ -1057,8 +1006,7 @@ describe("ReadFileTool", () => {
 
 			await readFileTool.execute({ files: [{ path: "test.ts" }] } as any, mockTask as any, callbacks)
 
-			expect(mockTask.sayUserFeedbackAndAckQueued).toHaveBeenCalledWith("Read carefully", undefined, undefined)
-			expect(mockTask.say).not.toHaveBeenCalled()
+			expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "Read carefully", undefined)
 		})
 
 		it("should handle user feedback on denial in legacy format", async () => {
@@ -1073,8 +1021,7 @@ describe("ReadFileTool", () => {
 
 			await readFileTool.execute({ files: [{ path: "secret.ts" }] } as any, mockTask as any, callbacks)
 
-			expect(mockTask.sayUserFeedbackAndAckQueued).toHaveBeenCalledWith("Not allowed", undefined, undefined)
-			expect(mockTask.say).not.toHaveBeenCalled()
+			expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "Not allowed", undefined)
 		})
 
 		it("should handle truncation in legacy format when no line ranges", async () => {
@@ -1110,19 +1057,82 @@ describe("ReadFileTool", () => {
 	})
 
 	describe("handlePartial", () => {
-		it("should handle partial display for new format", async () => {
-			const mockTask = createMockTask()
-			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+		it.each([{}, { path: "" }, undefined])(
+			"renders streamed native arguments before their path arrives: %j",
+			async (nativeArgs) => {
+				const mockTask = createMockTask()
+				mockTask.cwd = path.resolve(mockTask.cwd)
+				const streamedBlock = {
+					type: "tool_use",
+					name: "read_file",
+					params: {},
+					nativeArgs,
+					partial: true,
+				}
 
-			const block = {
-				nativeArgs: { path: "src/app.ts" },
+				// Streaming JSON is incomplete even though finalized native arguments require a path.
+				await Reflect.apply(readFileTool.handlePartial, readFileTool, [mockTask, streamedBlock])
+
+				expect(mockTask.ask).toHaveBeenCalledExactlyOnceWith(
+					"tool",
+					JSON.stringify({ tool: "readFile", path: "", isOutsideWorkspace: false }),
+					true,
+				)
+				expect(mockedFsReadFile).not.toHaveBeenCalled()
+				expect(mockedFsStat).not.toHaveBeenCalled()
+				expect(mockedExtractTextFromFile).not.toHaveBeenCalled()
+			},
+		)
+
+		it("renders incomplete legacy arguments without a file entry or outside-workspace warning", async () => {
+			const mockTask = createMockTask()
+			mockTask.cwd = path.resolve(mockTask.cwd)
+			const block: ToolUse<"read_file"> = {
+				type: "tool_use",
+				name: "read_file",
+				params: {},
+				nativeArgs: { files: [], _legacyFormat: true },
 				partial: true,
 			}
 
-			await readFileTool.handlePartial(mockTask as any, block as any)
+			// This reader-boundary double omits Task fields unrelated to file reading.
+			await readFileTool.handlePartial(mockTask as unknown as Task, block)
 
-			expect(mockTask.ask).toHaveBeenCalledWith("tool", expect.stringContaining("readFile"), true)
+			expect(mockTask.ask).toHaveBeenCalledExactlyOnceWith(
+				"tool",
+				JSON.stringify({ tool: "readFile", path: "", isOutsideWorkspace: false }),
+				true,
+			)
+			expect(mockedFsReadFile).not.toHaveBeenCalled()
+			expect(mockedFsStat).not.toHaveBeenCalled()
+			expect(mockedExtractTextFromFile).not.toHaveBeenCalled()
 		})
+
+		it.each(["src/app.ts", "src/файл.ts", "src/e\u0301-📚.ts"])(
+			"should preserve partial display for %s",
+			async (filePath) => {
+				const mockTask = createMockTask()
+				mockTask.cwd = path.resolve(mockTask.cwd)
+				mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+
+				const block: ToolUse<"read_file"> = {
+					type: "tool_use",
+					name: "read_file",
+					params: {},
+					nativeArgs: { path: filePath },
+					partial: true,
+				}
+
+				// This reader-boundary double omits Task fields unrelated to file reading.
+				await readFileTool.handlePartial(mockTask as unknown as Task, block)
+
+				expect(mockTask.ask).toHaveBeenCalledExactlyOnceWith(
+					"tool",
+					JSON.stringify({ tool: "readFile", path: filePath, isOutsideWorkspace: true }),
+					true,
+				)
+			},
+		)
 
 		it("should handle partial display for legacy format", async () => {
 			const mockTask = createMockTask()
@@ -1166,9 +1176,9 @@ describe("ReadFileTool", () => {
 			expect(mockTask.ask).toHaveBeenCalled()
 		})
 
-		it("should gracefully handle ask rejection in partial", async () => {
+		it.each(["Cancelled", "superseded"])("should gracefully handle %s ask rejection in partial", async (reason) => {
 			const mockTask = createMockTask()
-			mockTask.ask.mockRejectedValue(new Error("Cancelled"))
+			mockTask.ask.mockRejectedValue(new Error(reason))
 
 			const block = {
 				nativeArgs: { path: "test.ts" },

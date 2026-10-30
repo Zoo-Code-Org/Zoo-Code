@@ -70,18 +70,9 @@ export class AskFollowupQuestionTool extends BaseTool<"ask_followup_question"> {
 			}
 
 			task.consecutiveMistakeCount = 0
-			const { text, images, queuedMessageId } = await task.ask("followup", JSON.stringify(follow_up_json), false)
+			const { text, images } = await task.ask("followup", JSON.stringify(follow_up_json), false)
 			const safeText = text ?? ""
-			if (queuedMessageId) {
-				// The answer came from the durable queue: persist it and remove the
-				// queue entry only after the history write succeeds.
-				const persisted = await task.persistQueuedFeedbackAndAcknowledge(queuedMessageId, text, images)
-				if (!persisted) {
-					throw new Error(`Failed to persist queued follow-up feedback ${queuedMessageId}`)
-				}
-			} else {
-				await task.say("user_feedback", safeText, images)
-			}
+			await task.say("user_feedback", safeText, images)
 			pushToolResult(formatResponse.toolResult(`<user_message>\n${safeText}\n</user_message>`, images))
 		} catch (error) {
 			await handleError("asking question", error as Error)

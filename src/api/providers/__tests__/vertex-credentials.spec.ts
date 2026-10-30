@@ -39,9 +39,7 @@ const googleAuthCtor = vitest.fn()
 vitest.mock("google-auth-library", () => ({
 	GoogleAuth: vitest.fn().mockImplementation(function (args: unknown) {
 		googleAuthCtor(args)
-		return {
-			/* GoogleAuth instance shape is opaque to these tests */
-		}
+		return {/* GoogleAuth instance shape is opaque to these tests */}
 	}),
 }))
 

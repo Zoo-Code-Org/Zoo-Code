@@ -83,6 +83,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockAskApproval).toHaveBeenCalled()
@@ -196,6 +197,7 @@ describe("ApplyPatchTool.execute - queued message drain failures", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Flush the fire-and-forget drain promise so its rejection is logged.
@@ -227,6 +229,7 @@ describe("ApplyPatchTool.execute - queued message drain failures", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Flush the fire-and-forget drain promise so its rejection is logged.
@@ -260,6 +263,7 @@ describe("ApplyPatchTool.execute - queued message drain failures", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Flush the fire-and-forget drain promise so its rejection is logged.

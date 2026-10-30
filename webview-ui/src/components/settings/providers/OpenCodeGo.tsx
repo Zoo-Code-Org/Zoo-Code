@@ -103,7 +103,7 @@ export const OpenCodeGo = ({
 	return (
 		<>
 			<VSCodeTextField
-				value={apiConfiguration?.opencodeGoApiKey || ""}
+				value={apiConfiguration.opencodeGoApiKey || ""}
 				type="password"
 				onInput={handleInputChange("opencodeGoApiKey")}
 				placeholder={t("settings:placeholders.apiKey")}
@@ -113,7 +113,7 @@ export const OpenCodeGo = ({
 			<div className="text-sm text-vscode-descriptionForeground -mt-2">
 				{t("settings:providers.apiKeyStorageNotice")}
 			</div>
-			{!apiConfiguration?.opencodeGoApiKey && (
+			{!apiConfiguration.opencodeGoApiKey && (
 				<VSCodeButtonLink href="https://opencode.ai/docs/go/" appearance="primary" style={{ width: "100%" }}>
 					{t("settings:providers.getOpencodeGoApiKey")}
 				</VSCodeButtonLink>

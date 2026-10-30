@@ -167,10 +167,7 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 			}
 
 			// Finalize the existing partial tool ask row so the UI doesn't get stuck in a spinner state.
-			const result = await task.ask("tool", JSON.stringify(sharedMessageProps), false).catch(() => undefined)
-			// The result is only used to finalize the row; a consumed queued
-			// message is dropped without inventing a history write.
-			task.discardConsumedQueuedMessage(result?.queuedMessageId)
+			await task.ask("tool", JSON.stringify(sharedMessageProps), false).catch(() => {})
 		}
 
 		const recordFailureForPathAndMaybeEscalate = async (relPath: string, formattedError: string): Promise<void> => {

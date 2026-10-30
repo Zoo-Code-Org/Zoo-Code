@@ -15,7 +15,6 @@ import delay from "delay"
 import pWaitFor from "p-wait-for"
 import { serializeError } from "serialize-error"
 import { Package } from "../../shared/package"
-import { formatToolInvocation } from "../tools/helpers/toolResultFormatting"
 
 import {
 	type TaskLike,
@@ -50,10 +49,11 @@ import {
 	isResumableAsk,
 	QueuedMessage,
 	DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
+	DEFAULT_TOOL_REPETITION_SOFT_LIMIT,
+	normalizeToolRepetitionSoftLimit,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	MAX_CHECKPOINT_TIMEOUT_SECONDS,
 	MIN_CHECKPOINT_TIMEOUT_SECONDS,
-	ConsecutiveMistakeError,
 	MAX_MCP_TOOLS_THRESHOLD,
 	countEnabledMcpTools,
 	providerIdentifiers,
@@ -63,25 +63,20 @@ import { CloudService } from "@roo-code/cloud"
 
 // api
 import { ApiHandler, ApiHandlerCreateMessageMetadata, buildApiHandler } from "../../api"
+import { disposeApiHandler } from "../../api/dispose-api-handler"
 import { ApiStream, GroundingSource } from "../../api/transform/stream"
 import { maybeRemoveImageBlocks } from "../../api/transform/image-cleaning"
 import { OutputTokenLimitError } from "../../api/providers/utils/output-token-limit-error"
 
 // shared
-import { findLastIndex } from "../../shared/array"
+import { findLast, findLastIndex } from "../../shared/array"
 import { combineApiRequests } from "../../shared/combineApiRequests"
 import { combineCommandSequences } from "../../shared/combineCommandSequences"
 import { t } from "../../i18n"
 import { getApiMetrics, hasTokenUsageChanged, hasToolUsageChanged } from "../../shared/getApiMetrics"
 import { ClineAskResponse } from "../../shared/WebviewMessage"
 import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
-import {
-	DiffStrategy,
-	type AutoApprovalContext,
-	type ToolUse,
-	type ToolParamName,
-	toolParamNames,
-} from "../../shared/tools"
+import { DiffStrategy, type AutoApprovalContext, type ToolUse } from "../../shared/tools"
 import { getModelMaxOutputTokens } from "../../shared/api"
 
 // services
@@ -91,7 +86,6 @@ import { RepoPerTaskCheckpointService } from "../../services/checkpoints"
 
 // integrations
 import { DiffViewProvider } from "../../integrations/editor/DiffViewProvider"
-import { findToolName } from "../../integrations/misc/export-markdown"
 import { RooTerminalProcess } from "../../integrations/terminal/types"
 import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
 import { OutputInterceptor } from "../../integrations/terminal/OutputInterceptor"
@@ -105,6 +99,7 @@ import { getTaskDirectoryPath } from "../../utils/storage"
 // prompts
 import { formatResponse } from "../prompts/responses"
 import { SYSTEM_PROMPT } from "../prompts/system"
+import { partitionDisabledToolsForProtocol } from "../prompts/tools/effective-tool-policy"
 import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 
 // core modules
@@ -114,6 +109,7 @@ import { FileContextTracker } from "../context-tracking/FileContextTracker"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
+import { type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
 import { manageContext, willManageContext } from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
@@ -147,6 +143,14 @@ import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
+import { initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
+import { applyRunEvent, type RunRejection } from "./run-state/runStateShadow"
+import {
+	divergenceKey,
+	findDivergences,
+	isDivergenceCheckEnabled,
+	reportDivergence,
+} from "./run-state/runStateDivergence"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
@@ -162,19 +166,6 @@ const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
 // Task -> generateSystemPrompt -> ClineProvider -> Task circular import.
 export const MODEL_FETCH_TIMEOUT_MS = 5_000
 const QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const
-
-// Compares two queued-entry image lists by value. An edit replaces the entry's
-// array with a fresh one, so identity alone cannot tell "edited to equal
-// content" apart from "not edited".
-function queuedEntryImagesEqual(a: string[] | undefined, b: string[] | undefined): boolean {
-	if (a === b) {
-		return true
-	}
-	if (!a || !b || a.length !== b.length) {
-		return false
-	}
-	return a.every((image, index) => image === b[index])
-}
 
 type QueuedAskResolution = { response: ClineAskResponse; requiresDurableAck: boolean }
 
@@ -197,10 +188,7 @@ export const BLANKET_DENY_AUTO_DENY_KINDS: ReadonlySet<AutoDenyDetail["kind"]> =
  * decided against the auto-approval policy as it stands NOW.
  */
 type QueuedCommandPolicyAction =
-	| { action: "consume" }
-	| { action: "approve" }
-	| { action: "deny"; detail?: AutoDenyDetail }
-	| { action: "release" }
+	{ action: "consume" } | { action: "approve" } | { action: "deny"; detail?: AutoDenyDetail } | { action: "release" }
 
 /**
  * Whether blanket auto-deny currently engages. The three settings act as a
@@ -238,27 +226,10 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 			// Malformed tool asks retain the existing approve-with-feedback behavior.
 		}
 
-		// Approval by queued message is policy-gated downstream (blanket deny,
-		// drain-site re-check): the claim path may convert a queued message to
-		// yesButtonClicked, but a raw conversational submission can never be an
-		// approval on its own.
 		return { response: "yesButtonClicked", requiresDurableAck: false }
 	}
 	if (type === "command" || type === "use_mcp_server") {
-		// Approval by queued message is policy-gated downstream (blanket deny,
-		// drain-site re-check): the claim path may convert a queued message to
-		// yesButtonClicked, but a raw conversational submission can never be an
-		// approval on its own.
 		return { response: "yesButtonClicked", requiresDurableAck: false }
-	}
-
-	if (type === "api_req_failed" || type === "auto_approval_max_req_reached") {
-		// Failure-gate retry prompts: any non-yes answer aborts the task, so a
-		// queued conversational message must not be converted into an answer —
-		// its text and images would be destroyed with no history row and a
-		// surprise abort. The message stays queued for the next conversational
-		// ask, like the approval-gating asks above.
-		return undefined
 	}
 
 	return { response: "messageResponse", requiresDurableAck: type === "completion_result" }
@@ -266,6 +237,11 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
+
+export interface ToolExecutionContext {
+	toolCallId: string
+	didReject: boolean
+}
 
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
@@ -433,9 +409,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	abortReason?: ClineApiReqCancelReason
 	isInitialized = false
 
+	runState: RunState = initialRunState
+	readonly runRejections: RunRejection[] = []
+	private readonly divergenceCheckEnabled: boolean
+	private readonly reportedDivergences = new Set<string>()
+
 	// API
 	apiConfiguration: ProviderSettings
 	api: ApiHandler
+	/**
+	 * Units of in-flight API work: a request from setup through its retries and
+	 * background usage drain, or a manual condense. Work can hold any handler it
+	 * read from `this.api`, so replaced handlers wait for the count to reach zero.
+	 */
+	private activeApiWork = 0
+	/** Handlers replaced during in-flight work; disposed when that work settles, or with the task. */
+	private retiredApis = new Set<ApiHandler>()
 	private rateLimitClock: RateLimitClock
 	private autoApprovalHandler: AutoApprovalHandler
 
@@ -443,7 +432,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	rooIgnoreController?: RooIgnoreController
 	rooProtectedController?: RooProtectedController
 	fileContextTracker: FileContextTracker
-	terminalProcess?: RooTerminalProcess
+	terminalProcesses = new Map<string, RooTerminalProcess>()
+	activeToolContexts = new Map<string, ToolExecutionContext>()
 
 	// Editing
 	diffViewProvider: DiffViewProvider
@@ -458,11 +448,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private askResponse?: ClineAskResponse
 	private askResponseText?: string
 	private askResponseImages?: string[]
-	// ID of the queued message that produced the current ask-response slot
-	// value (set only when a queued-message drain submitted it). Direct
-	// responses clear it, so Task.ask can tie consumption to message identity
-	// instead of matching response text/images.
-	private askResponseQueuedMessageId?: string
 	/**
 	 * Structured detail of the automatic denial that resolved the current ask,
 	 * set when `checkAutoApproval` denies via policy (denylist, blanket
@@ -486,6 +471,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Tool Use
 	consecutiveMistakeCount: number = 0
 	consecutiveMistakeLimit: number
+	toolRepetitionSoftLimit: number
 	consecutiveMistakeCountForApplyDiff: Map<string, number> = new Map()
 	consecutiveMistakeCountForEditFile: Map<string, number> = new Map()
 	consecutiveNoToolUseCount: number = 0
@@ -530,49 +516,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// already removed from the queue).
 	private queuedMessageDrainChain: Promise<unknown> = Promise.resolve()
 	// ID of the last drain-submitted queued message. A successful submit only
-	// posts into the pending ask-response slot (which records this ID); the
-	// message stays queued until an ask consumes that response. The consuming
-	// ask matches the slot's recorded ID against this one to decide whether the
-	// submission was consumed (hand the ID to the caller for a durable ack) or
-	// overwritten unconsumed (retain for a later ask).
+	// posts into the pending ask-response slot; the message stays queued until
+	// an ask consumes that response. A later drain that claims this same ID
+	// must not re-post it, or it would overwrite a distinct pending response.
 	private pendingSubmittedQueuedMessageId: string | undefined
-	// The asks currently inside Task.ask, tracked per ask so an exiting ask
-	// (including a re-entrant one from a Message listener) can never clear
-	// another ask's gate. A background drain consults queuedResponseForAsk
-	// against these gates so a queued conversational message can never answer
-	// an approval-gating ask, exactly matching the claim path's resolution
-	// gate.
-	private inFlightAskGates: Set<{ type: ClineAsk; text?: string }> | undefined
-	/**
-	 * True while a raw queued submission must not be posted into the ask slot:
-	 * an ask is in flight AND either its slot already carries a direct response,
-	 * the ask type resolves to undefined (approval-gating failure gates), or the
-	 * ask is an approval ask (command/use_mcp_server/tool). Approval asks are
-	 * refused even though the claim path resolves them: a raw conversational
-	 * post can never be an approval — it would deny-with-feedback without user
-	 * intent — so only the policy-gated claim path (blanket deny, drain-site
-	 * re-check) may convert a queued message there. Outside an in-flight ask the
-	 * slot holds only stale residue the next ask clears, so between-turn
-	 * submissions proceed.
-	 */
-	private inFlightAskBlocksQueuedSubmission(): boolean {
-		for (const gate of this.inFlightAskGates ?? []) {
-			if (
-				this.askResponse !== undefined ||
-				queuedResponseForAsk(gate.type, gate.text) === undefined ||
-				gate.type === "command" ||
-				gate.type === "use_mcp_server" ||
-				gate.type === "tool"
-			) {
-				return true
-			}
-		}
-		return false
-	}
-	// Association between a queued message ID and the user_feedback row its ack
-	// persisted. A redelivery after a partial save failure reconciles the same
-	// row instead of appending a duplicate feedback row.
-	private queuedFeedbackRows = new Map<string, ClineMessage>()
 
 	// Streaming
 	isWaitingForFirstChunk = false
@@ -604,6 +551,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private completionPersistenceReadyPromise?: Promise<void>
 
 	/**
+	 * The tool-policy inputs captured for the API request currently being built
+	 * (see `attemptApiRequest`). The streaming presenter reads this field at call
+	 * time and binds it to `presentAssistantMessage`'s required parameter, so
+	 * every tool call of a request validates against the same frozen policy its
+	 * prompt was generated from. Re-assigned per API attempt — including retries,
+	 * whose generator-body re-execution re-captures before any new presentation
+	 * can fire.
+	 */
+	private requestPolicySnapshot?: RequestPolicySnapshot
+
+	/**
 	 * Fire-and-forget wrapper around `presentAssistantMessage` that swallows the
 	 * expected cancellation rejection (the presenter throws when `this.abort` is set)
 	 * and logs any other failure. Keeping it non-blocking preserves the streaming
@@ -611,7 +569,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * from crashing the extension host.
 	 */
 	private presentAssistantMessageSafe(): void {
-		void presentAssistantMessage(this).catch((error) => {
+		void presentAssistantMessage(this, this.requestPolicySnapshot!).catch((error) => {
 			// Discriminate on the error message rather than `this.abort` state,
 			// which can flip between the throw and the catch microtask running:
 			// a real failure followed by an abort flip would otherwise be
@@ -646,6 +604,48 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		this.userMessageContent.push(toolResult)
 		return true
+	}
+
+	/**
+	 * Derives terminal tool-turn readiness from the protocol state instead of
+	 * relying exclusively on the presenter's one-shot boolean latch.
+	 *
+	 * A re-entrant presenter can lose the latch update after every tool has
+	 * already completed. At that point the assistant turn is safe to continue
+	 * when the stream is closed, presentation is idle, every content block is
+	 * final, and every tool call has its matching result.
+	 */
+	private hasCompleteToolResultsForCurrentTurn(): boolean {
+		// Do not require currentStreamingContentIndex to reach the end here.
+		// A non-abort presenter rejection releases the lock and is logged, but
+		// nothing schedules another presentation pass. Gating on the index would
+		// strand this wait after exactly that failure.
+		if (!this.didCompleteReadingStream || this.presentAssistantMessageLocked) {
+			return false
+		}
+
+		const toolResultIds = new Set(
+			this.userMessageContent
+				.filter((block): block is Anthropic.ToolResultBlockParam => block.type === "tool_result")
+				.map((block) => block.tool_use_id),
+		)
+		let toolUseCount = 0
+
+		for (const block of this.assistantMessageContent) {
+			if (block.partial) {
+				return false
+			}
+			if (block.type !== "tool_use" && block.type !== "mcp_tool_use") {
+				continue
+			}
+
+			toolUseCount++
+			if (!block.id || !toolResultIds.has(sanitizeToolUseId(block.id))) {
+				return false
+			}
+		}
+
+		return toolUseCount > 0
 	}
 	didRejectTool = false
 	didAlreadyUseTool = false
@@ -691,11 +691,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		enableCheckpoints = true,
 		checkpointTimeout = DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 		consecutiveMistakeLimit = DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
+		toolRepetitionSoftLimit = DEFAULT_TOOL_REPETITION_SOFT_LIMIT,
 		taskId,
 		task,
 		images,
 		historyItem,
-		experiments: experimentsConfig,
+		experiments: _experimentsConfig,
 		startTask = true,
 		rootTask,
 		parentTask,
@@ -762,8 +763,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.autoApprovalHandler = new AutoApprovalHandler()
 
 		this.consecutiveMistakeLimit = consecutiveMistakeLimit ?? DEFAULT_CONSECUTIVE_MISTAKE_LIMIT
+		this.toolRepetitionSoftLimit = normalizeToolRepetitionSoftLimit(
+			toolRepetitionSoftLimit ?? DEFAULT_TOOL_REPETITION_SOFT_LIMIT,
+			this.consecutiveMistakeLimit,
+		)
 		this.providerRef = new WeakRef(provider)
 		this.globalStoragePath = provider.context.globalStorageUri.fsPath
+		this.divergenceCheckEnabled = isDivergenceCheckEnabled(Package.releaseChannel, provider.context.extensionMode)
 		this.diffViewProvider = new DiffViewProvider(this.cwd, this)
 		this.enableCheckpoints = enableCheckpoints
 		this.checkpointTimeout = checkpointTimeout
@@ -817,7 +823,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Set up diff strategy
 		this.diffStrategy = new MultiSearchReplaceDiffStrategy(diffFuzzyThreshold)
 
-		this.toolRepetitionDetector = new ToolRepetitionDetector(this.consecutiveMistakeLimit)
+		this.toolRepetitionDetector = new ToolRepetitionDetector(
+			this.toolRepetitionSoftLimit,
+			this.consecutiveMistakeLimit,
+		)
 
 		// Initialize todo list if provided
 		if (initialTodos && initialTodos.length > 0) {
@@ -1106,217 +1115,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		text?: string,
 		images?: string[],
 	): Promise<boolean> {
-		let row = this.queuedFeedbackRows.get(messageId)
-		// The drain-side tracker only guards a submitted message against
-		// re-submission while an ask has not consumed it yet. Once persistence
-		// settles — success (entry removed), failure (entry re-queued), abort,
-		// or a failed row write — a stale tracker would block every later
-		// drain from resubmitting this message (and starve the messages
-		// behind it), so release it on every exit path.
-		const releasePendingTracker = () => {
-			if (this.pendingSubmittedQueuedMessageId === messageId) {
-				this.pendingSubmittedQueuedMessageId = undefined
-			}
-		}
-		// The entry stays claimed (and editable in the queue UI) for the whole
-		// ack, so its content can drift from the submission copy while saves
-		// retry. Snapshot the entry now and reconcile the row against it before
-		// every save; comparing against this snapshot rather than the row keeps
-		// the trimmed submission text from reading as an edit next to the
-		// untrimmed entry text.
-		const entrySnapshot = (() => {
-			const entry = this.messageQueueService.messages.find((queued) => queued.id === messageId)
-			return entry ? { text: entry.text, images: entry.images } : undefined
-		})()
-		try {
-			try {
-				if (row) {
-					// Redelivery after a partial save failure (e.g. the message file
-					// was written but metadata persistence failed): reconcile the same
-					// row instead of appending a duplicate feedback row. Awaited so a
-					// failed webview update reaches the catch below, which releases
-					// the queued message instead of acking over a stale row.
-					row.text = text ?? ""
-					row.images = images
-					await this.updateClineMessage(row)
-				} else {
-					row = {
-						ts: Date.now(),
-						type: "say",
-						say: "user_feedback",
-						text: text ?? "",
-						images,
-					}
-					// Mirrors say()'s interactive user_feedback append: bump
-					// lastMessageTs and let the retry loop below own persistence.
-					// The association is registered before the append: the append's
-					// only uncaught throw is a synchronously throwing Message
-					// listener, which runs after the row is already pushed, so a
-					// redelivery can reconcile the same row instead of appending a
-					// duplicate feedback row.
-					this.lastMessageTs = row.ts
-					this.queuedFeedbackRows.set(messageId, row)
-					await this.addToClineMessages(row)
-				}
-				for (let attempt = 0; attempt <= QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length; attempt++) {
-					if (this.abort || this.abandoned) {
-						this.messageQueueService.releaseMessage(messageId)
-						return false
-					}
-					if (entrySnapshot) {
-						// An edit during a failed-save backoff changed only the queue
-						// entry: fold it into the row before this attempt's save so the
-						// ack persists the edit instead of the stale submission copy.
-						await this.reconcileQueuedFeedbackRowWithQueueEntry(row, messageId, entrySnapshot)
-					}
-					if (await this.saveClineMessages()) {
-						// The save clones history up front, so an edit that lands
-						// while it is in flight is missing from the persisted copy.
-						// Confirm the entry still matches the row and repeat the save
-						// when it does not; only then may the entry be removed.
-						let confirmed = !entrySnapshot
-						while (entrySnapshot && !this.abort && !this.abandoned) {
-							if (!(await this.reconcileQueuedFeedbackRowWithQueueEntry(row, messageId, entrySnapshot))) {
-								confirmed = true
-								break
-							}
-							if (!(await this.saveClineMessages())) {
-								break
-							}
-						}
-						if (confirmed) {
-							this.queuedFeedbackRows.delete(messageId)
-							// The row is durably saved. A missing entry means the
-							// user deleted it during the ack (the webview remove
-							// handler ignores claims); that is not a save failure.
-							this.messageQueueService.removeMessage(messageId)
-							return true
-						}
-					}
-					if (attempt < QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length) {
-						// Interruptible backoff: an abort or abandonment during the wait
-						// resolves promptly (releasing the claim at the loop-top check)
-						// instead of retaining the task through the full delay.
-						await this.waitForQueuedFeedbackBackoff(QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS[attempt])
-					}
-				}
-				console.error(
-					`[Task#persistQueuedFeedbackAndAcknowledge] Failed to durably save queued feedback ${messageId} after ${QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length + 1} attempts`,
-				)
+		await this.say("user_feedback", text ?? "", images)
+		for (let attempt = 0; attempt <= QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length; attempt++) {
+			if (this.abort) {
 				this.messageQueueService.releaseMessage(messageId)
 				return false
-			} catch (error) {
-				// A failed write must not leave the message claimed: release it so a
-				// later drain can redeliver it. (No-op when the drain path already
-				// released the claim.) The pending tracker is released here too:
-				// this catch rethrows past the finally below, which must not be
-				// the only place that clears it.
-				this.messageQueueService.releaseMessage(messageId)
-				releasePendingTracker()
-				throw error
 			}
-		} finally {
-			releasePendingTracker()
-		}
-	}
-
-	/**
-	 * Fold the latest content of a retained (claimed) queue entry into its
-	 * in-flight feedback row. The queue UI accepts edits while the entry is
-	 * claimed, so during a failed-save backoff an edit would otherwise change
-	 * only the entry and be lost when the ack removes it. The row receives the
-	 * trimmed text, mirroring what submitting the entry would have sent.
-	 * Returns true when an edit was folded in.
-	 */
-	private async reconcileQueuedFeedbackRowWithQueueEntry(
-		row: ClineMessage,
-		messageId: string,
-		snapshot: { text: string; images?: string[] },
-	): Promise<boolean> {
-		const latest = this.messageQueueService.messages.find((queued) => queued.id === messageId)
-		if (!latest) {
-			return false
-		}
-		if (latest.text === snapshot.text && queuedEntryImagesEqual(latest.images, snapshot.images)) {
-			return false
-		}
-		snapshot.text = latest.text
-		snapshot.images = latest.images
-		row.text = latest.text.trim()
-		row.images = latest.images
-		await this.updateClineMessage(row)
-		return true
-	}
-
-	private waitForQueuedFeedbackBackoff(ms: number): Promise<void> {
-		return new Promise<void>((resolve) => {
-			const finish = () => {
-				clearTimeout(timer)
-				clearInterval(poll)
-				resolve()
+			if (await this.saveClineMessages()) {
+				return this.messageQueueService.removeMessage(messageId)
 			}
-			const timer = setTimeout(finish, ms)
-			const poll = setInterval(() => {
-				if (this.abort === true || this.abandoned === true) {
-					finish()
-				}
-			}, 50)
-		})
-	}
-
-	/**
-	 * Persist the user feedback carried by an ask result. When the ask consumed
-	 * a queued message (intercepted its drain submission), the queue entry is
-	 * removed only after the feedback's history write succeeds; a failed write
-	 * re-queues it. Consumers that surface returned feedback as user_feedback
-	 * must call this instead of say("user_feedback", ...) so a consumed queued
-	 * message is acked exactly once instead of being redelivered by a later
-	 * drain or claim.
-	 */
-	public async sayUserFeedbackAndAckQueued(
-		text: string | undefined,
-		images: string[] | undefined,
-		queuedMessageId: string | undefined,
-	): Promise<void> {
-		if (queuedMessageId) {
-			const persisted = await this.persistQueuedFeedbackAndAcknowledge(queuedMessageId, text, images)
-			if (!persisted) {
-				throw new Error(`[Task] Failed to persist queued feedback ${queuedMessageId}`)
+			if (attempt < QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length) {
+				await delay(QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS[attempt])
 			}
-			return
 		}
-		if (text || images?.length) {
-			await this.say("user_feedback", text ?? "", images)
-		}
-	}
-
-	/**
-	 * Drop a queued message whose response this ask consumed without persisting
-	 * feedback (the consumer only inspected the button response, e.g. retry and
-	 * approval gates). Removes the entry without inventing a history write.
-	 */
-	public discardConsumedQueuedMessage(queuedMessageId: string | undefined): void {
-		if (queuedMessageId) {
-			this.messageQueueService.removeMessage(queuedMessageId)
-		}
-	}
-
-	/**
-	 * Apply a webview edit to a queued message. Besides updating the queue
-	 * entry, the task-owned pending submission is updated in place: while the
-	 * ask-response slot still carries that submission (no direct response has
-	 * overwritten it), the edited text/images replace the original copy so the
-	 * consuming ask returns the edited content instead of the stale one.
-	 */
-	public editQueuedMessage(queuedMessageId: string, text: string, images?: string[]): void {
-		this.messageQueueService.updateMessage(queuedMessageId, text, images)
-		if (
-			this.pendingSubmittedQueuedMessageId === queuedMessageId &&
-			this.askResponseQueuedMessageId === queuedMessageId
-		) {
-			this.askResponseText = text
-			this.askResponseImages = images
-		}
+		console.error(
+			`[Task#persistQueuedFeedbackAndAcknowledge] Failed to durably save queued feedback ${messageId} after ${QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length + 1} attempts`,
+		)
+		this.messageQueueService.releaseMessage(messageId)
+		return false
 	}
 
 	/**
@@ -1428,11 +1244,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private handleQueuedAskResponse(message: QueuedMessage, resolution: QueuedAskResolution): string | undefined {
 		this.handleWebviewAskResponse(resolution.response, message.text, message.images)
-		if (resolution.requiresDurableAck || (this.queuedFeedbackRows?.has(message.id) ?? false)) {
-			// A registered feedback row means an earlier delivery attempt left
-			// history behind: hand the ID back so the consumer reconciles that
-			// row through the durable ack instead of appending a duplicate via
-			// the say("user_feedback") fallback.
+		// This ask consumed the message, so a later drain may submit the next
+		// one instead of treating it as still pending.
+		if (this.pendingSubmittedQueuedMessageId === message.id) {
+			this.pendingSubmittedQueuedMessageId = undefined
+		}
+		if (resolution.requiresDurableAck) {
 			return message.id
 		}
 		this.messageQueueService.removeMessage(message.id)
@@ -1579,22 +1396,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.blanketDeniedCommandThisTurn = true
 	}
 
+	/** When provided, historyItem overrides task and images in the startup metadata. */
 	static create(options: TaskOptions): [Task, Promise<void>] {
-		const instance = new Task({ ...options, startTask: false })
-		const { images, task, historyItem } = options
-		let promise
-
-		instance.startIdleTelemetryCheck()
-
-		if (images || task) {
-			promise = instance.startTask(task, images)
-		} else if (historyItem) {
-			promise = instance.resumeTaskFromHistory()
-		} else {
+		if (!options.task && !options.images && !options.historyItem) {
 			throw new Error("Either historyItem or task/images must be provided")
 		}
 
-		return [instance, promise]
+		const instance = new Task({ ...options, startTask: false })
+
+		return [instance, instance.run()]
 	}
 
 	// API Messages
@@ -1862,8 +1672,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return readTaskMessages({ taskId: this.taskId, globalStoragePath: this.globalStoragePath })
 	}
 
-	/** Appends a message, posts it, and persists. @returns whether the history save succeeded. */
-	private async addToClineMessages(message: ClineMessage): Promise<boolean> {
+	private async addToClineMessages(message: ClineMessage) {
 		message.messageId ??= crypto.randomUUID()
 		this.clineMessages.push(message)
 		const provider = this.providerRef.deref()
@@ -1894,7 +1703,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 		}
 		this.emit(RooCodeEventName.Message, { action: "created", message })
-		const saved = await this.saveClineMessages()
+		await this.saveClineMessages()
 
 		const shouldCaptureMessage = message.partial !== true && CloudService.isEnabled()
 
@@ -1906,8 +1715,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Track that this message has been synced to cloud
 			this.cloudSyncedMessageTimestamps.add(message.ts)
 		}
-
-		return saved
 	}
 
 	/**
@@ -1962,7 +1769,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
-	/** Persists Cline messages and updates task metadata in the history store. Returns false on failure. */
+	/**
+	 * Persist the message array, then refresh the derived metadata / task-history entries.
+	 *
+	 * The returned boolean reflects the message write only: `saveTaskMessages` failure
+	 * leaves the on-disk record stale, so callers gating UI updates on durable state must
+	 * skip them. Metadata / task-history stage failures are logged and swallowed — the
+	 * message array is already persisted, and the next save recomputes and re-emits the
+	 * metadata.
+	 *
+	 * `merge` (default `true`) is passed through to `saveTaskMessages`: the in-memory
+	 * snapshot is merged with the on-disk record. `overwriteClineMessages` passes `false`
+	 * to replace the stored messages outright.
+	 */
 	private async saveClineMessages(merge = true): Promise<boolean> {
 		try {
 			await saveTaskMessages({
@@ -1971,7 +1790,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				globalStoragePath: this.globalStoragePath,
 				merge,
 			})
+		} catch (error) {
+			console.error("Failed to save Roo messages:", error)
+			return false
+		}
 
+		try {
 			if (this._taskApiConfigName === undefined) {
 				await this.taskApiConfigReady
 			}
@@ -1999,11 +1823,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const provider = this.providerRef.deref()
 			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
 			await provider?.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
-			return true
 		} catch (error) {
-			console.error("Failed to save Roo messages:", error)
-			return false
+			// The message array was persisted above; a metadata or task-history failure must
+			// not mask that write (see the method docs). The next saveClineMessages() call
+			// recomputes and re-emits the metadata update.
+			console.error("Failed to save task metadata:", error)
 		}
+
+		return true
 	}
 
 	private findMessageByTimestamp(ts: number): ClineMessage | undefined {
@@ -2020,46 +1847,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// false (completion of partial message), undefined (individual complete
 	// message).
 	async ask(
-		type: ClineAsk,
-		text?: string,
-		partial?: boolean,
-		progressStatus?: ToolProgressStatus,
-		isProtected?: boolean,
-		autoApprovalContext?: AutoApprovalContext,
-	): Promise<{
-		response: ClineAskResponse
-		text?: string
-		images?: string[]
-		queuedMessageId?: string
-		/**
-		 * Present when the ask was resolved by an automatic (policy) denial
-		 * rather than a user click. Consumers must not treat this as a user
-		 * rejection: the denial is scoped to its own tool call.
-		 */
-		autoDenyDetail?: AutoDenyDetail
-	}> {
-		// Arm the drain gate synchronously at ask() entry, before the first
-		// await, and hold it for the whole ask lifecycle: a queued submission
-		// landing anywhere in the ask prefix (auto-approval, partial handling)
-		// must hit the same queuedResponseForAsk gate as one landing in the
-		// response wait, so an approval-gating ask can never be answered by
-		// the queue. The thin-wrapper shape keeps the body at its long-standing
-		// indentation instead of re-indenting it under a wrapping try block,
-		// so whitespace-only changes do not count against the mutation-diff
-		// line budget.
-		const gate = { type, text }
-		// Lazily initialized: Object.create(Task.prototype)-based harnesses skip
-		// field initializers, and the gate must exist before the try's finally.
-		const gates = (this.inFlightAskGates ??= new Set<{ type: ClineAsk; text?: string }>())
-		gates.add(gate)
-		try {
-			return await this.askImpl(type, text, partial, progressStatus, isProtected, autoApprovalContext)
-		} finally {
-			gates.delete(gate)
-		}
-	}
-
-	private async askImpl(
 		type: ClineAsk,
 		text?: string,
 		partial?: boolean,
@@ -2115,22 +1902,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// has to see and stalling a hands-free session. Leaving the message
 		// unclaimed lets the policy decision stand and keeps the message queued.
 		const queueMayAnswerThisAsk = !(blanketDenyEngaged && type === "command")
-		// Resolve before claiming: approval-gating and failure-gate ask types
-		// never consume a queued conversational message, and claiming without a
-		// resolution would leak the claim. The resolution is only actionable
-		// when a message was actually claimed: otherwise it must not force a
-		// manual ask (that would bypass auto-approval for empty-queue lifecycle
-		// asks). The claim itself is deferred to the handoff branch below: it
-		// runs at the point of use with no prefix await in between, so a throw
-		// from the prefix (e.g. a synchronously throwing Message listener in
-		// addToClineMessages) can never strand the claim in claimedMessageIds.
-		const queuedAskResolution =
+		// A queued message must not short-circuit protected asks (e.g.
+		// DCG-blocked commands): claiming one here skips checkAutoApproval, and
+		// the drain below would auto-approve what protection intentionally
+		// leaves pending for explicit user approval.
+		const queuedMessage =
 			partial === true ||
 			type === "command_output" ||
+			isProtected ||
 			!queueMayAnswerThisAsk ||
 			!this.mayDrainQueuedMessageForAsk()
 				? undefined
-				: queuedResponseForAsk(type, text)
+				: this.messageQueueService.claimNextMessage()
+		const queuedAskResolution = queuedMessage ? queuedResponseForAsk(type, text) : undefined
 		// `this.cwd`, not `provider.cwd`:
 		// The path inside `text` was made relative to this task's workspace,
 		// which for a resumed or child task need not be the one the provider
@@ -2149,9 +1933,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined
 
 		// Re-check: an abort during the getState/checkAutoApproval awaits must not post an ask row.
-		// No queued claim exists yet at this point — claiming is deferred to the handoff
-		// branch below, which owns its release — so there is nothing to release here.
 		if (this.abort) {
+			if (queuedMessage) {
+				this.messageQueueService.releaseMessage(queuedMessage.id)
+			}
 			throw new Error(`[RooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
 		}
 
@@ -2197,7 +1982,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.askResponse = undefined
 					this.askResponseText = undefined
 					this.askResponseImages = undefined
-					this.askResponseQueuedMessageId = undefined
 
 					// Bug for the history books:
 					// In the webview we use the ts as the chatrow key for the
@@ -2231,7 +2015,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.askResponse = undefined
 					this.askResponseText = undefined
 					this.askResponseImages = undefined
-					this.askResponseQueuedMessageId = undefined
 					askTs = Date.now()
 					this.lastMessageTs = askTs
 					await this.addToClineMessages({
@@ -2250,7 +2033,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.askResponse = undefined
 			this.askResponseText = undefined
 			this.askResponseImages = undefined
-			this.askResponseQueuedMessageId = undefined
 			askTs = Date.now()
 			this.lastMessageTs = askTs
 			await this.addToClineMessages({
@@ -2396,72 +2178,65 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		if (isStatusMutable) {
 			armAskStatusTimers()
-		} else if (queuedAskResolution && this.mayDrainQueuedMessageForAsk()) {
-			// Claim at the point of handoff: for non-command asks the response is
-			// posted synchronously below (no await between claim and use), and the
-			// command re-check owns its own release in its finally — so a prefix
-			// throw can never strand this claim.
-			const queuedMessage = this.messageQueueService.claimNextMessage()
-			if (queuedMessage) {
-				if (type === "command") {
-					// The snapshot gate is frozen; blanket deny may have engaged since the
-					// ask began. Re-read policy before the message stands in for approval.
-					// Drain-site parity for cancellation and cleanup: the fresh policy
-					// read ends in an uncancellable provider read, so an abort poller
-					// aborts a signal the re-check itself awaits — settling it on the
-					// abort instead of leaving a pending promise that retains this task
-					// and runs policy post-abort — and one `finally` releases the claim
-					// on the abort, throw, supersession, and "release" outcomes alike.
-					const recheckAbort = new AbortController()
-					const checkAbort = () => {
-						if (this.abort) {
-							recheckAbort.abort()
-						}
+		} else if (queuedMessage && queuedAskResolution) {
+			if (type === "command") {
+				// The snapshot gate is frozen; blanket deny may have engaged since the
+				// ask began. Re-read policy before the message stands in for approval.
+				// Drain-site parity for cancellation and cleanup: the fresh policy
+				// read ends in an uncancellable provider read, so an abort poller
+				// aborts a signal the re-check itself awaits — settling it on the
+				// abort instead of leaving a pending promise that retains this task
+				// and runs policy post-abort — and one `finally` releases the claim
+				// on the abort, throw, supersession, and "release" outcomes alike.
+				const recheckAbort = new AbortController()
+				const checkAbort = () => {
+					if (this.abort) {
+						recheckAbort.abort()
 					}
-					checkAbort()
-					const abortWatcher = setInterval(checkAbort, 100)
-					try {
-						const action = await this.recheckQueuedCommandPolicy(
-							{
-								text,
-								isProtected,
-								dcgDecision: autoApprovalContext?.dcgDecision,
-							},
-							recheckAbort.signal,
-						)
-						if (!this.abort && this.askResponse === undefined && this.lastMessageTs === askTs) {
-							// Any outcome on a still-live ask — the user answered or the
-							// ask was superseded — leaves the message for the next
-							// consumer; the `finally` below releases the claim and the ask
-							// resolves with the user's own response via the pWaitFor.
-							queuedMessageId = this.applyQueuedCommandPolicyAction(
-								action,
-								queuedMessage,
-								queuedAskResolution,
-							)
-							// A "release" outcome leaves the ask pending; consume/deny/approve
-							// resolved it, and the arm's pending check declines to arm then.
-							armAskStatusTimers()
-						}
-					} catch (error) {
-						// Drain-site parity: a failed re-check must not reject ask() nor
-						// strand the claim; the prompt stays pending for the user.
-						console.error("[Task#ask] queued command policy re-check failed:", error)
-						armAskStatusTimers()
-					} finally {
-						clearInterval(abortWatcher)
-						// One release path for abort, throw, supersession, and "release".
-						// `releaseMessage` is idempotent, so it stays safe beside the
-						// helper-internal release. The durable consume is the one outcome
-						// that must keep its claim until persistence removes the message —
-						// it is the only path that assigned `queuedMessageId` here.
-						if (queuedMessageId !== queuedMessage.id) {
-							this.messageQueueService.releaseMessage(queuedMessage.id)
-						}
-					}
-				} else {
-					queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
 				}
+				checkAbort()
+				const abortWatcher = setInterval(checkAbort, 100)
+				try {
+					const action = await this.recheckQueuedCommandPolicy(
+						{
+							text,
+							isProtected,
+							dcgDecision: autoApprovalContext?.dcgDecision,
+						},
+						recheckAbort.signal,
+					)
+					if (!this.abort && this.askResponse === undefined && this.lastMessageTs === askTs) {
+						// Any outcome on a still-live ask — the user answered or the
+						// ask was superseded — leaves the message for the next
+						// consumer; the `finally` below releases the claim and the ask
+						// resolves with the user's own response via the pWaitFor.
+						queuedMessageId = this.applyQueuedCommandPolicyAction(
+							action,
+							queuedMessage,
+							queuedAskResolution,
+						)
+						// A "release" outcome leaves the ask pending; consume/deny/approve
+						// resolved it, and the arm's pending check declines to arm then.
+						armAskStatusTimers()
+					}
+				} catch (error) {
+					// Drain-site parity: a failed re-check must not reject ask() nor
+					// strand the claim; the prompt stays pending for the user.
+					console.error("[Task#ask] queued command policy re-check failed:", error)
+					armAskStatusTimers()
+				} finally {
+					clearInterval(abortWatcher)
+					// One release path for abort, throw, supersession, and "release".
+					// `releaseMessage` is idempotent, so it stays safe beside the
+					// helper-internal release. The durable consume is the one outcome
+					// that must keep its claim until persistence removes the message —
+					// it is the only path that assigned `queuedMessageId` here.
+					if (queuedMessageId !== queuedMessage.id) {
+						this.messageQueueService.releaseMessage(queuedMessage.id)
+					}
+				}
+			} else {
+				queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
 			}
 		} else if (shouldDrainQueuedMessageForAsk && isMessageQueued) {
 			// The claim gate (per-turn latch, or blanket deny engaged for a command
@@ -2523,9 +2298,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 		}
 
-		// Wait for askResponse to be set. The drain gate has been armed since
-		// ask() entry, so a drain landing anywhere in the lifecycle consults
-		// the same queuedResponseForAsk gate as the claim path.
+		// Wait for askResponse to be set
 		try {
 			await pWaitFor(
 				() => {
@@ -2537,18 +2310,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// suggestion click that was incorrectly queued due to UI state), consume it
 					// immediately so the task doesn't hang. Command asks under blanket deny are
 					// excluded (`queueMayAnswerThisAsk`): a queued message must never stand in
-					// for the explicit approval the policy withheld. The resolution gate runs
-					// BEFORE the claim: approval-gating and failure-gate ask types resolve to
-					// undefined, and claiming without a resolution would leak the claim and
-					// stall every later conversational ask on a message no one can consume.
+					// for the explicit approval the policy withheld. Protected asks are exempt
+					// too: like the pre-block drain above, they must wait for explicit user
+					// approval.
 					if (
 						queueMayAnswerThisAsk &&
 						shouldDrainQueuedMessageForAsk &&
+						!isProtected &&
 						!queuedCommandPolicyCheck &&
 						this.mayDrainQueuedMessageForAsk()
 					) {
-						const resolution = queuedResponseForAsk(type, text)
-						const message = resolution ? this.messageQueueService.claimNextMessage() : undefined
+						const message = this.messageQueueService.claimNextMessage()
+						const resolution = message ? queuedResponseForAsk(type, text) : undefined
 						if (message && resolution) {
 							if (type === "command") {
 								// Claim first, then verify the policy off-predicate: a
@@ -2604,47 +2377,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				throw new AskIgnoredError("superseded")
 			}
 
-			// Tie a drain-submitted queued message to actual consumption by identity:
-			// the ask consumed the submission only if the pending slot still carries
-			// that message's ID. A direct response clears the slot ID even when its
-			// text/images are identical, so it cannot consume the queue entry. The
-			// claim path is excluded (durable flows already carry queuedMessageId;
-			// non-durable flows removed the message inline).
-			if (this.pendingSubmittedQueuedMessageId) {
-				const consumedViaPendingSlot =
-					queuedMessageId === undefined &&
-					this.askResponseQueuedMessageId === this.pendingSubmittedQueuedMessageId
-				if (consumedViaPendingSlot) {
-					// Hand the ID to the caller instead of removing inline: the queue
-					// entry is deleted only after the feedback is durably saved
-					// (persistQueuedFeedbackAndAcknowledge), so a failed history write
-					// cannot lose a message that was already dequeued. The ID is
-					// handed only when the entry can also be reserved: the user may
-					// have deleted the queued message between submission and
-					// consumption, and acking an entry that no longer exists would
-					// fail at removeMessage — without a reservation the response is
-					// treated as direct feedback instead.
-					const submittedId = this.pendingSubmittedQueuedMessageId
-					this.pendingSubmittedQueuedMessageId = undefined
-					// Reserve the entry through the durable ack: while persistence
-					// retries (which can take seconds), neither a second ask nor a
-					// background drain may claim it again and persist the same
-					// message twice. Persistence settles the reservation itself —
-					// removeMessage on success, releaseMessage on failure/abort.
-					if (this.messageQueueService.claimMessage(submittedId)) {
-						queuedMessageId = submittedId
-					}
-				} else if (
-					!this.messageQueueService.messages.some(
-						(message) => message.id === this.pendingSubmittedQueuedMessageId,
-					)
-				) {
-					// The message was consumed via the ask claim path or discarded
-					// by an existing path; the tracker is stale, so clear it.
-					this.pendingSubmittedQueuedMessageId = undefined
-				}
-			}
-
 			const result = {
 				response: this.askResponse!,
 				text: this.askResponseText,
@@ -2655,7 +2387,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.askResponse = undefined
 			this.askResponseText = undefined
 			this.askResponseImages = undefined
-			this.askResponseQueuedMessageId = undefined
 			this.pendingAutoDenyDetail = undefined
 
 			// Switch back to an active state.
@@ -2678,19 +2409,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
-	handleWebviewAskResponse(
-		askResponse: ClineAskResponse,
-		text?: string,
-		images?: string[],
-		sourceQueuedMessageId?: string,
-	) {
+	handleWebviewAskResponse(askResponse: ClineAskResponse, text?: string, images?: string[]) {
 		// Clear any pending auto-approval timeout when user responds
 		this.cancelAutoApprovalTimeout()
 
 		this.askResponse = askResponse
 		this.askResponseText = text
 		this.askResponseImages = images
-		this.askResponseQueuedMessageId = sourceQueuedMessageId
+		// A direct response overwrites whatever a drain submitted into the slot,
+		// so that submission was not consumed and must not block a later drain.
+		// The drain's own submit lands here before it records the ID, so this
+		// cannot clear the tracker for the submission it just made.
+		this.pendingSubmittedQueuedMessageId = undefined
 
 		// Create a checkpoint whenever the user sends a message.
 		// Use allowEmpty=true to ensure a checkpoint is recorded even if there are no file changes.
@@ -2765,28 +2495,79 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * @param newApiConfiguration - The new API configuration to use
 	 */
 	public updateApiConfiguration(newApiConfiguration: ProviderSettings): void {
-		// Update the configuration and rebuild the API handler
+		// Update the configuration and rebuild the API handler. Handlers such as
+		// VS Code LM / GitHub Copilot own host listeners, so the old one is
+		// released — immediately when idle, or when the last request, retry,
+		// background drain, or condense that leased it settles.
+		const previousApi = this.api
 		this.apiConfiguration = newApiConfiguration
 		this.api = buildApiHandler(this.apiConfiguration)
+		this.retireApi(previousApi)
+
+		// Refresh only the soft tool-repetition limit from the new profile so an
+		// active task immediately enforces it. The task-level
+		// `consecutiveMistakeLimit` (the hard stop) is intentionally preserved:
+		// it may have been set explicitly at task creation (e.g. the extension
+		// API creates tasks with `Number.MAX_SAFE_INTEGER`), and a profile switch
+		// must not silently override it. The detector's in-progress counting
+		// state is preserved.
+		this.toolRepetitionSoftLimit = normalizeToolRepetitionSoftLimit(
+			newApiConfiguration.toolRepetitionSoftLimit ?? DEFAULT_TOOL_REPETITION_SOFT_LIMIT,
+			this.consecutiveMistakeLimit,
+		)
+		this.toolRepetitionDetector.updateLimits(this.toolRepetitionSoftLimit, this.consecutiveMistakeLimit)
+	}
+
+	/**
+	 * Marks the start of in-flight API work. The returned release is idempotent;
+	 * the last release disposes every handler replaced while work was running.
+	 */
+	private beginApiWork(): () => void {
+		this.activeApiWork++
+		let released = false
+		return () => {
+			if (released) return
+			released = true
+			this.activeApiWork--
+			if (this.activeApiWork > 0) return
+			const retired = [...this.retiredApis]
+			this.retiredApis.clear()
+			for (const api of retired) {
+				this.safeDisposeApi(api)
+			}
+		}
+	}
+
+	/** Disposes a replaced handler now, or once in-flight API work settles. */
+	private retireApi(api: ApiHandler): void {
+		if (api === this.api) return
+		if (this.activeApiWork > 0) {
+			this.retiredApis.add(api)
+		} else {
+			this.safeDisposeApi(api)
+		}
+	}
+
+	private safeDisposeApi(api: ApiHandler): void {
+		try {
+			disposeApiHandler(api)
+		} catch (error) {
+			console.error("Error disposing API handler:", error)
+		}
 	}
 
 	/**
 	 * Submit a user message through the ask-response channel.
 	 *
-	 * @param sourceQueuedMessageId - ID of the durable queue message being
-	 * submitted, when this submission drains the queue. Recorded on the
-	 * ask-response slot so the consuming ask can tie consumption to message
-	 * identity; direct (non-queue) submissions leave it undefined.
 	 * @returns true when the message was handed to the ask-response channel;
-	 * false when there was nothing to submit or the handoff failed (the failure
-	 * is logged either way). Callers draining a durable queue must check this.
+	 * false when there was nothing to submit, the task is stopping, or the
+	 * provider reference was lost. Callers draining the queue must check this.
 	 */
 	public async submitUserMessage(
 		text: string,
 		images?: string[],
 		mode?: string,
 		providerProfile?: string,
-		sourceQueuedMessageId?: string,
 	): Promise<boolean> {
 		try {
 			text = (text ?? "").trim()
@@ -2825,35 +2606,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					return false
 				}
 
-				// Never overwrite a response an ask is blocked waiting on: a
-				// direct response that already landed in the slot must not be
-				// replaced (an approval would become a conversational answer).
-				// A queued (drain) submission must additionally never answer an
-				// approval ask or a failure gate on its own — a raw conversational
-				// post carries no user intent for those — while a direct
-				// submission is exactly that intent and may answer an approval
-				// ask (deny-with-feedback), matching the pre-drain behavior.
-				// Queue drains treat the returned false as "leave the message
-				// queued".
-				const inFlightAskGates = this.inFlightAskGates
-				const directAskBlocksSubmission =
-					inFlightAskGates !== undefined &&
-					[...inFlightAskGates].some(({ type, text }) => queuedResponseForAsk(type, text) === undefined)
-				const inFlightAskHasResponse = (inFlightAskGates?.size ?? 0) > 0 && this.askResponse !== undefined
-				if (
-					inFlightAskHasResponse ||
-					(sourceQueuedMessageId === undefined && directAskBlocksSubmission) ||
-					(sourceQueuedMessageId !== undefined && this.inFlightAskBlocksQueuedSubmission())
-				) {
-					return false
-				}
-
 				this.emit(RooCodeEventName.TaskUserMessage, this.taskId)
 
 				// Handle the message directly instead of routing through the webview.
 				// This avoids a race condition where the webview's message state hasn't
 				// hydrated yet, causing it to interpret the message as a new task request.
-				this.handleWebviewAskResponse("messageResponse", text, images, sourceQueuedMessageId)
+				this.handleWebviewAskResponse("messageResponse", text, images)
 				return true
 			} else {
 				console.error("[Task#submitUserMessage] Provider reference lost")
@@ -2867,9 +2625,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	async handleTerminalOperation(terminalOperation: "continue" | "abort") {
 		if (terminalOperation === "continue") {
-			this.terminalProcess?.continue()
+			for (const process of this.terminalProcesses.values()) process.continue()
 		} else if (terminalOperation === "abort") {
-			this.terminalProcess?.abort()
+			for (const process of this.terminalProcesses.values()) process.abort()
 		}
 	}
 
@@ -2883,6 +2641,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	public async condenseContext(): Promise<void> {
+		const endApiWork = this.beginApiWork()
+		try {
+			await this.condenseContextWithActiveApi()
+		} finally {
+			endApiWork()
+		}
+	}
+
+	private async condenseContextWithActiveApi(): Promise<void> {
 		// CRITICAL: Flush any pending tool results before condensing
 		// to ensure tool_use/tool_result pairs are complete in history
 		await this.flushPendingToolResultsToHistory()
@@ -2967,7 +2734,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			cost,
 			newContextTokens = 0,
 			error,
-			errorDetails,
 			condenseId,
 		} = await summarizeConversation({
 			messages: this.apiConversationHistory,
@@ -3019,7 +2785,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			contextCondense,
 		)
 
-		// Process any queued messages after condensing completes
+		// Process any queued messages after condensing completes. Awaited so a
+		// failed submission rejects this call instead of vanishing; the caller
+		// (ClineProvider.condenseTaskContext) surfaces it.
 		await this.processQueuedMessages()
 	}
 
@@ -3035,7 +2803,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		} = {},
 		contextCondense?: ContextCondense,
 		contextTruncation?: ContextTruncation,
-	): Promise<boolean> {
+	): Promise<undefined> {
 		if (this.abort) {
 			throw new Error(`[RooCode#say] task ${this.taskId}.${this.instanceId} aborted`)
 		}
@@ -3060,7 +2828,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.updateClineMessage(lastMessage).catch((error) => {
 						console.error("[Task#say] updateClineMessage failed:", error)
 					})
-					return true
 				} else {
 					// This is a new partial message, so add it with partial state.
 					const sayTs = Date.now()
@@ -3069,7 +2836,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						this.lastMessageTs = sayTs
 					}
 
-					return this.addToClineMessages({
+					await this.addToClineMessages({
 						ts: sayTs,
 						type: "say",
 						say: type,
@@ -3096,7 +2863,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					// Instead of streaming partialMessage events, we do a save
 					// and post like normal to persist to disk.
-					const saved = await this.saveClineMessages()
+					await this.saveClineMessages()
 
 					// More performant than an entire `postStateToWebview`.
 					// Fire-and-forget: see updateClineMessage call above for the
@@ -3104,7 +2871,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.updateClineMessage(lastMessage).catch((error) => {
 						console.error("[Task#say] updateClineMessage failed:", error)
 					})
-					return saved
 				} else {
 					// This is a new and complete message, so add it like normal.
 					const sayTs = Date.now()
@@ -3113,7 +2879,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						this.lastMessageTs = sayTs
 					}
 
-					return this.addToClineMessages({
+					await this.addToClineMessages({
 						ts: sayTs,
 						type: "say",
 						say: type,
@@ -3136,7 +2902,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.lastMessageTs = sayTs
 			}
 
-			return this.addToClineMessages({
+			await this.addToClineMessages({
 				ts: sayTs,
 				type: "say",
 				say: type,
@@ -3161,6 +2927,56 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				: t("tools:missingToolParameter", { toolName, paramName }),
 		)
 		return formatResponse.toolError(formatResponse.missingToolParameterError(paramName))
+	}
+
+	/**
+	 * Finalize a partial "tool" ask message without blocking for user input.
+	 * Call this in error paths where a partial tool message was opened during streaming
+	 * but execution failed before the normal approval flow could close it, so the webview
+	 * spinner does not get stuck in a loading state.
+	 *
+	 * The matching partial message may no longer be the final entry if another asynchronous
+	 * message was inserted between the partial ask and the error handler, so search backward
+	 * instead of relying on clineMessages.at(-1).
+	 *
+	 * Any in-progress `progressStatus` on the message is cleared as well: the ask is being
+	 * finalized because it will NOT complete, so a stale "in progress" indicator would be
+	 * misleading (the normal completion path overwrites it with the final status instead).
+	 *
+	 * `isAnswered` is stamped true because the ask is resolved by the system rather than
+	 * by the user: ChatView only shows ask buttons for unanswered messages, so leaving it
+	 * unset would keep Save/Reject armed for a write that already failed.
+	 */
+	async finalizePartialToolAsk(text?: string): Promise<void> {
+		const partialToolAsk = findLast(
+			this.clineMessages,
+			(message) =>
+				message.partial === true &&
+				message.type === "ask" &&
+				message.ask === "tool" &&
+				(text === undefined || message.text === text),
+		)
+
+		if (!partialToolAsk) {
+			return
+		}
+
+		partialToolAsk.partial = false
+		partialToolAsk.progressStatus = undefined
+		partialToolAsk.isAnswered = true
+		const saved = await this.saveClineMessages()
+		if (!saved) {
+			// The persistence write failed: the on-disk record still carries `partial: true`
+			// while the in-memory message is finalized. Skip the webview-only update so the
+			// two views do not diverge (a later state resync or restart reload would flip the
+			// spinner back on from the stale disk record). The next saveClineMessages() call
+			// re-persists the full message array and repairs the disk record.
+			console.error("[Task#finalizePartialToolAsk] saveClineMessages failed; skipping webview update")
+			return
+		}
+		await this.updateClineMessage(partialToolAsk).catch((error) => {
+			console.error("[Task#finalizePartialToolAsk] updateClineMessage failed:", error)
+		})
 	}
 
 	// Lifecycle
@@ -3282,7 +3098,34 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					{ isNonInteractive: true },
 				)
 			}
-			this.isInitialized = true
+
+			// Surface once per new task which `disabledTools` entries carry no
+			// disabling weight (protocol tools are exempt from user disabling).
+			// Detection reads the raw list, so the notice also fires when a
+			// model-profile `excludedTools` entry suppresses the tool through a
+			// separate route. `startTask` runs exactly once per new task, which
+			// is what bounds this to a single notice. The block is guarded like
+			// `getEnabledMcpToolsCount` above: this is a telemetry-class notice,
+			// so a rejection from the state read or the say must never keep the
+			// task loop from starting.
+			try {
+				const disabledToolsState = await this.providerRef.deref()?.getState()
+				const { ignored } = partitionDisabledToolsForProtocol(disabledToolsState?.disabledTools)
+				if (ignored.length > 0) {
+					await this.say(
+						"ignored_disabled_tools_warning",
+						JSON.stringify({ ignoredTools: ignored }),
+						undefined,
+						undefined,
+						undefined,
+						undefined,
+						{ isNonInteractive: true },
+					)
+				}
+			} catch (error) {
+				console.error("[Task#startTask] ignored-disabled-tools notice failed:", error)
+			}
+			this.markInitialized()
 
 			const imageBlocks: Anthropic.ImageBlockParam[] = formatResponse.imageBlocks(images)
 
@@ -3408,7 +3251,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			if (this.pendingAction) {
-				this.isInitialized = true
+				this.markInitialized()
 				await this.resumePendingTaskAction(this.pendingAction)
 				return
 			}
@@ -3429,24 +3272,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				askType = "resume_task"
 			}
 
-			this.isInitialized = true
+			this.markInitialized()
 
-			const { response, text, images, queuedMessageId } = await this.ask(askType) // Calls `postStateToWebview`.
+			const { response, text, images } = await this.ask(askType) // Calls `postStateToWebview`.
 
 			let responseText: string | undefined
 			let responseImages: string[] | undefined
 
 			if (response === "messageResponse") {
-				if (queuedMessageId) {
-					const persisted = await this.persistQueuedFeedbackAndAcknowledge(queuedMessageId, text, images)
-					if (!persisted) {
-						throw new Error(
-							`[Task#resumeTaskFromHistory] Failed to persist queued feedback ${queuedMessageId}`,
-						)
-					}
-				} else {
-					await this.say("user_feedback", text, images)
-				}
+				await this.say("user_feedback", text, images)
 				responseText = text
 				responseImages = images
 			}
@@ -3560,26 +3394,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			const newUserContent: Anthropic.Messages.ContentBlockParam[] = [...modifiedOldUserContent]
-
-			const agoText = ((): string => {
-				const timestamp = lastClineMessage?.ts ?? Date.now()
-				const now = Date.now()
-				const diff = now - timestamp
-				const minutes = Math.floor(diff / 60000)
-				const hours = Math.floor(minutes / 60)
-				const days = Math.floor(hours / 24)
-
-				if (days > 0) {
-					return `${days} day${days > 1 ? "s" : ""} ago`
-				}
-				if (hours > 0) {
-					return `${hours} hour${hours > 1 ? "s" : ""} ago`
-				}
-				if (minutes > 0) {
-					return `${minutes} minute${minutes > 1 ? "s" : ""} ago`
-				}
-				return "just now"
-			})()
 
 			if (responseText) {
 				newUserContent.push({
@@ -3706,12 +3520,86 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.debouncedEmitTokenUsage.flush()
 	}
 
-	public abortTask(isAbandoned = false): Promise<void> {
+	markInitialized(): void {
+		this.isInitialized = true
+		this.driveRunEvent({ tag: "initialized" })
+	}
+
+	markStreamStarted(): void {
+		this.isStreaming = true
+		this.driveRunEvent({ tag: "streamStarted" })
+	}
+
+	markStreamCleanupFinished(): void {
+		this.didFinishAbortingStream = true
+		this.driveRunEvent({ tag: "streamCleanupFinished" })
+	}
+
+	markStreamEnded(): void {
+		this.isStreaming = false
+		this.driveRunEvent({ tag: "streamEnded" })
+	}
+
+	markAskStarted(ask: Exclude<Ask, { tag: "none" }>): void {
+		this.driveRunEvent({ tag: "askStarted", ask })
+	}
+
+	markAskSettled(askTs: number): void {
+		this.driveRunEvent({ tag: "askSettled", askTs })
+	}
+
+	markCompletionAccepted(askTs: number): void {
+		this.driveRunEvent({ tag: "completionAccepted", askTs })
+	}
+
+	setAbortReason(reason: ClineApiReqCancelReason): void {
+		this.abortReason ??= reason
+		this.driveRunEvent({ tag: "reasonSet", reason })
+	}
+
+	requestAbort(isAbandoned: boolean): void {
 		if (isAbandoned) {
 			this.abandoned = true
 		}
-
 		this.abort = true
+		this.driveRunEvent({ tag: "abortRequested", abandoned: isAbandoned })
+	}
+
+	requestAbandon(): void {
+		this.abandoned = true
+		this.driveRunEvent({ tag: "abandonRequested" })
+	}
+
+	requestDispose(): void {
+		this.abort = true
+		this.driveRunEvent({ tag: "disposeRequested" })
+	}
+
+	private driveRunEvent(event: RunEvent): void {
+		const { state, rejected } = applyRunEvent(this.runState, event, this.runRejections)
+		this.runState = state
+
+		if (this.divergenceCheckEnabled) {
+			const fields = {
+				abort: this.abort,
+				abandoned: this.abandoned,
+				abortReason: this.abortReason,
+				isInitialized: this.isInitialized,
+				isStreaming: this.isStreaming,
+				didFinishAbortingStream: this.didFinishAbortingStream,
+			}
+			for (const divergence of findDivergences({ event, state, fields, rejected })) {
+				if (this.reportedDivergences.has(divergenceKey(divergence))) {
+					continue
+				}
+				this.reportedDivergences.add(divergenceKey(divergence))
+				reportDivergence(this.taskId, divergence)
+			}
+		}
+	}
+
+	public abortTask(isAbandoned = false): Promise<void> {
+		this.requestAbort(isAbandoned)
 		this.cancelAssistantMessagePersistence()
 		this.abortPromise ??= this.abortTaskOnce()
 		return this.abortPromise
@@ -3778,6 +3666,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
 		this.cancelAssistantMessagePersistence()
 
+		// Release handler-owned host resources (e.g. VS Code configuration listeners).
+		// This is the fallback for leases that never settle; later lease releases
+		// find nothing retired and so cannot dispose twice.
+		const apis = new Set([...this.retiredApis, this.api])
+		this.retiredApis.clear()
+		for (const api of apis) {
+			this.safeDisposeApi(api)
+		}
+
 		// Stop the idle telemetry check and report any unflushed activity as a
 		// shutdown installment, so a task torn down mid-work (panel closed, task
 		// switched, extension deactivated) isn't invisible to telemetry.
@@ -3790,13 +3687,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		// A task being disposed is no longer serving requests: set the same
-		// cancellation state `abortTask()` sets, synchronously before the aborts
+		// abort latch `abortTask()` sets (disposal never sets abandoned), synchronously before the aborts
 		// below, so the request-construction guard (`abort || abandoned` in
 		// attemptApiRequest) and the outer loop's `abort` checks observe disposal
 		// even when it lands before any explicit cancel. Without this, only the
 		// signals below are cancelled and a request already past those checks
 		// could still build tools and call `createMessage()`.
-		this.abort = true
+		this.requestDispose()
 
 		// Cancel any in-progress HTTP request
 		try {
@@ -3896,7 +3793,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 *
 	 * This method:
 	 * - Clears any pending ask states
-	 * - Resets abort and streaming flags
+	 * - Resets streaming flags
 	 * - Ensures next API call includes full context
 	 * - Immediately continues task loop without user interaction
 	 */
@@ -3906,10 +3803,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.resumableAsk = undefined
 		this.interactiveAsk = undefined
 
-		// Reset abort and streaming state to ensure clean continuation
-		this.abort = false
-		this.abandoned = false
-		this.abortReason = undefined
+		// Reset streaming state to ensure clean continuation
 		this.didFinishAbortingStream = false
 		this.isStreaming = false
 		this.isWaitingForFirstChunk = false
@@ -3918,7 +3812,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.skipPrevResponseIdOnce = true
 
 		// Mark as initialized and active
-		this.isInitialized = true
+		this.markInitialized()
 		this.emit(RooCodeEventName.TaskActive, this.taskId)
 
 		// Load conversation history if not already loaded
@@ -4027,40 +3921,30 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			if (this.consecutiveMistakeLimit > 0 && this.consecutiveMistakeCount >= this.consecutiveMistakeLimit) {
-				// Track consecutive mistake errors in telemetry via event and PostHog exception tracking.
-				// The reason is "no_tools_used" because this limit is reached via initiateTaskLoop
-				// which increments consecutiveMistakeCount when the model doesn't use any tools.
-				TelemetryService.instance.captureConsecutiveMistakeError(this.taskId)
-				TelemetryService.instance.captureException(
-					new ConsecutiveMistakeError(
-						`Task reached consecutive mistake limit (${this.consecutiveMistakeLimit})`,
-						this.taskId,
-						this.consecutiveMistakeCount,
-						this.consecutiveMistakeLimit,
-						"no_tools_used",
-						this.apiConfiguration.apiProvider,
-						getModelId(this.apiConfiguration),
-					),
+				// Track consecutive mistake errors in telemetry via a named event.
+				// The reason is "unknown" because many paths increment consecutiveMistakeCount
+				// (no tool use, tool validation and tool execution failures) and none records its cause.
+				TelemetryService.instance.captureConsecutiveMistakeError(
+					this.taskId,
+					"unknown",
+					this.consecutiveMistakeCount,
+					this.consecutiveMistakeLimit,
 				)
 
-				const { response, text, images, queuedMessageId } = await this.ask(
+				const { response, text, images } = await this.ask(
 					"mistake_limit_reached",
 					t("common:errors.mistake_limit_guidance"),
 				)
 
 				if (response === "messageResponse") {
-					// Durable ack first: the feedback must reach history before
-					// the API turn. When the ack fails the entry is re-queued for
-					// redelivery, and the model must not already have seen the text
-					// (mirrors AttemptCompletionTool's ordering).
-					await this.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
-
 					currentUserContent.push(
 						...[
 							{ type: "text" as const, text: formatResponse.tooManyMistakes(text) },
 							...formatResponse.imageBlocks(images),
 						],
 					)
+
+					await this.say("user_feedback", text, images)
 				}
 
 				this.consecutiveMistakeCount = 0
@@ -4265,6 +4149,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.didCompleteReadingStream = false
 				this.userMessageContent = []
 				this.userMessageContentReady = false
+				this.activeToolContexts.clear()
 				this.didRejectTool = false
 				this.didAlreadyUseTool = false
 				this.assistantMessageSavedToHistory = false
@@ -4292,7 +4177,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// This is especially important for tools and background usage collection
 				this.cachedStreamingModel = this.api.getModel()
 				const streamModelInfo = this.cachedStreamingModel.info
-				const cachedModelId = this.cachedStreamingModel.id
 
 				// Yields only if the first chunk is successful, otherwise will
 				// allow the user to retry the request (most likely due to rate
@@ -4397,9 +4281,33 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// Without this check, duplicate tool_use blocks with the same ID would
 										// be added to assistantMessageContent, causing API 400 errors:
 										// "tool_use ids must be unique"
-										if (this.streamingToolCallIndices.has(event.id)) {
+										// Use compound key (id, name) to distinguish different tools with the same call ID.
+										const dedupKey = NativeToolCallParser.makeStreamingKey(event.id, event.name)
+										if (this.streamingToolCallIndices.has(dedupKey)) {
 											console.warn(
 												`[Task#${this.taskId}] Ignoring duplicate tool_call_start for ID: ${event.id} (tool: ${event.name})`,
+											)
+											continue
+										}
+
+										// A call ID that already appears in assistantMessageContent cannot be
+										// round-tripped: the API history builder dedupes tool_use blocks by ID and
+										// results are matched by tool_use_id, so a second entry with the same ID
+										// would be orphaned. The compound-key check above already rejects an
+										// identical (id, name) start in this stream, so reject any remaining start
+										// that reuses an ID, regardless of the entry's displayed name: alias
+										// resolution renames a streaming entry to its canonical tool (the streamed
+										// name is kept in originalName), which would otherwise let a same-ID start
+										// under the canonical name slip past a name comparison. The first call wins.
+										const idAlreadyUsed = this.assistantMessageContent.some(
+											(entry) =>
+												// Stryker disable next-line ConditionalExpression: equivalent mutant, only tool_use and mcp_tool_use entries carry an id, so the type check cannot change entry.id === event.id
+												(entry.type === "tool_use" || entry.type === "mcp_tool_use") &&
+												(entry as { id?: string }).id === event.id,
+										)
+										if (idAlreadyUsed) {
+											console.warn(
+												`[Task#${this.taskId}] Ignoring tool_call_start reusing call ID ${event.id} (tool: ${event.name})`,
 											)
 											continue
 										}
@@ -4421,7 +4329,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 										// Track the index where this tool will be stored
 										const toolUseIndex = this.assistantMessageContent.length
-										this.streamingToolCallIndices.set(event.id, toolUseIndex)
+										this.streamingToolCallIndices.set(dedupKey, toolUseIndex)
 
 										// Create initial partial tool use
 										const partialToolUse: ToolUse = {
@@ -4440,16 +4348,43 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
 										this.presentAssistantMessageSafe()
 									} else if (event.type === "tool_call_delta") {
-										// Process chunk using streaming JSON parser
-										const partialToolUse = NativeToolCallParser.processStreamingChunk(
-											event.id,
-											event.delta,
-											nativeToolCallParserScope,
-										)
+										// Deltas from the raw-chunk path carry the tracked name: build the
+										// compound key directly so same-ID calls cannot share an
+										// accumulator. Deltas without a name (legacy provider streams)
+										// keep the deprecated single-entry-per-ID lookup.
+										let streamingKey: string | undefined
 
-										if (partialToolUse) {
-											// Get the index for this tool call
-											const toolUseIndex = this.streamingToolCallIndices.get(event.id)
+										// Stryker disable next-line ConditionalExpression: equivalent mutant, event.name is always a string here, so the legacy nameless branch is unreachable
+										if (event.name !== undefined) {
+											streamingKey = NativeToolCallParser.makeStreamingKey(event.id, event.name)
+										} else {
+											const legacyEntry = NativeToolCallParser.getStreamingToolCallById(
+												event.id,
+												nativeToolCallParserScope,
+											)
+											streamingKey = legacyEntry
+												? NativeToolCallParser.makeStreamingKey(
+														legacyEntry.id,
+														legacyEntry.name,
+													)
+												: undefined
+										}
+
+										const partialToolUse =
+											// Stryker disable next-line ConditionalExpression: equivalent mutant, streamingKey is always a string here (makeStreamingKey), so the null side is unreachable
+											streamingKey === undefined
+												? null
+												: NativeToolCallParser.processStreamingChunk(
+														streamingKey,
+														event.delta,
+														nativeToolCallParserScope,
+													)
+
+										// Stryker disable next-line ConditionalExpression, EqualityOperator: equivalent mutants, streamingKey is always defined here, so both conditions reduce to the partialToolUse check
+										if (partialToolUse && streamingKey !== undefined) {
+											// Reuse the compound key built above: it is exactly the key the start event
+											// registered under, so the delta lookup needs no second encoding.
+											const toolUseIndex = this.streamingToolCallIndices.get(streamingKey)
 											if (toolUseIndex !== undefined) {
 												// Store the ID for native protocol
 												;(partialToolUse as any).id = event.id
@@ -4585,7 +4520,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								total?: number
 							},
 							messageIndex: number = apiReqIndex,
-							status: "completed" | "cancelled" = "completed",
+							_status: "completed" | "cancelled" = "completed",
 						) => {
 							if (
 								tokens.input > 0 ||
@@ -4736,6 +4671,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						console.error("Background usage collection failed:", error)
 					})
 				} catch (error) {
+					// Close the request generator so its `finally` releases the API
+					// work it holds (a replaced handler is disposed once nothing uses
+					// it). Async-generator `return()` queues behind a pending `next()`,
+					// so this settles as soon as the aborted stream does.
+					Promise.resolve(stream.return?.(undefined)).catch(() => {})
+
 					// Abandoned happens when extension is no longer waiting for the
 					// Cline instance to finish aborting (error is thrown here when
 					// any function in the for loop throws due to this.abort).
@@ -4752,18 +4693,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						await abortStream(cancelReason, streamingFailedMessage)
 
 						if (this.abort) {
-							// ??= keeps the first reason; a cancel can land during abortStream after cancelReason was already computed.
-							this.abortReason ??= "user_cancelled"
+							// A cancel can land during abortStream after cancelReason was computed; setAbortReason keeps the first reason.
+							this.setAbortReason("user_cancelled")
 							await this.abortTask()
 						} else if (error instanceof OutputTokenLimitError) {
 							// Truncation repeats on an identical request, so never auto-retry it
 							// (even with auto-approval); let the user decide once.
-							const { response, queuedMessageId } = await this.ask("api_req_failed", rawErrorMessage)
-							// Failure-gate asks refuse queued-message conversion
-							// (queuedResponseForAsk returns undefined), so queuedMessageId
-							// is always undefined here today; the discard stays as a
-							// defensive no-op should that seam ever change.
-							this.discardConsumedQueuedMessage(queuedMessageId)
+							const { response } = await this.ask("api_req_failed", rawErrorMessage)
 
 							if (response !== "yesButtonClicked") {
 								throw new Error("API request failed")
@@ -4793,7 +4729,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									console.log(
 										`[Task#${this.taskId}.${this.instanceId}] Task aborted during mid-stream retry backoff`,
 									)
-									this.abortReason ??= "user_cancelled"
+									this.setAbortReason("user_cancelled")
 									await this.abortTask()
 									break
 								}
@@ -4839,14 +4775,42 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				const finalizeEvents = NativeToolCallParser.finalizeRawChunks(nativeToolCallParserScope)
 				for (const event of finalizeEvents) {
 					if (event.type === "tool_call_end") {
+						// Create compound key for deduplication (same pattern as streaming handler).
+						// End events carry the tool name; fall back to the id for events that don't.
+						// Stryker disable next-line LogicalOperator: equivalent mutant, finalizeRawChunks emits end events with a string name, so the ?? event.id fallback is unreachable
+						let eventName = event.name ?? event.id
+						let dedupKey = NativeToolCallParser.makeStreamingKey(event.id, eventName)
+
 						// Finalize the streaming tool call
-						const finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
-							event.id,
+						let finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
+							dedupKey,
 							nativeToolCallParserScope,
 						)
 
-						// Get the index for this tool call
-						const toolUseIndex = this.streamingToolCallIndices.get(event.id)
+						// Get the index for this tool call using compound key
+						let toolUseIndex = this.streamingToolCallIndices.get(dedupKey)
+
+						// Defensive resolution: if the end event's name does not match the start
+						// name (provider quirk), the compound-key lookup above misses and both the
+						// parser entry and the dedup tracking would stay stale. Resolve the tracked
+						// entry by id and target the real compound key for finalization and cleanup.
+						// Stryker disable next-line ConditionalExpression, LogicalOperator, EqualityOperator: equivalent mutants, the both-miss case is unreachable via the raw-chunk pipeline
+						if (finalToolUse === null && toolUseIndex === undefined) {
+							const resolved = NativeToolCallParser.getStreamingToolCallById(
+								event.id,
+								nativeToolCallParserScope,
+							)
+							// Stryker disable next-line ConditionalExpression: unreachable defensive region — getStreamingToolCallById can only resolve when the both-miss case above is reachable, which the raw-chunk pipeline cannot produce (see the directive there).
+							if (resolved) {
+								eventName = resolved.name
+								dedupKey = NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name)
+								finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
+									dedupKey,
+									nativeToolCallParserScope,
+								)
+								toolUseIndex = this.streamingToolCallIndices.get(dedupKey)
+							}
+						}
 
 						if (finalToolUse) {
 							// Store the tool call ID
@@ -4857,8 +4821,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								this.assistantMessageContent[toolUseIndex] = finalToolUse
 							}
 
-							// Clean up tracking
-							this.streamingToolCallIndices.delete(event.id)
+							// Clean up tracking using compound key
+							this.streamingToolCallIndices.delete(dedupKey)
 
 							// Mark that we have new content to process
 							this.userMessageContentReady = false
@@ -4887,8 +4851,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								;(existingToolUse as any).id = event.id
 							}
 
-							// Clean up tracking
-							this.streamingToolCallIndices.delete(event.id)
+							// Clean up tracking using compound key
+							this.streamingToolCallIndices.delete(dedupKey)
 
 							// Mark that we have new content to process
 							this.userMessageContentReady = false
@@ -5114,7 +5078,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// 	this.userMessageContentReady = true
 					// }
 
-					await pWaitFor(() => this.userMessageContentReady || this.abort || this.abandoned)
+					await pWaitFor(
+						() =>
+							this.userMessageContentReady ||
+							this.hasCompleteToolResultsForCurrentTurn() ||
+							this.abort ||
+							this.abandoned,
+					)
 
 					if (this.abort || this.abandoned) {
 						throw new Error(
@@ -5226,13 +5196,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						continue
 					} else {
 						// Prompt the user for retry decision
-						const { response, queuedMessageId } = await this.ask(
+						const { response } = await this.ask(
 							"api_req_failed",
 							"The model returned no assistant messages. This may indicate an issue with the API or the model's output.",
 						)
-						// Only the button response is inspected; a consumed queued
-						// message is dropped without inventing a history write.
-						this.discardConsumedQueuedMessage(queuedMessageId)
 
 						if (response === "yesButtonClicked") {
 							await this.say("api_req_retried")
@@ -5278,7 +5245,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				// If we reach here without continuing, return false (will always be false for now)
 				return false
-			} catch (error) {
+			} catch {
 				// This should never happen since the only thing that can throw an
 				// error is the attemptApiRequest, which is wrapped in a try catch
 				// that sends an ask where if noButtonClicked, will clear current
@@ -5634,11 +5601,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		retryAttempt: number = 0,
 		options: { skipProviderRateLimit?: boolean; requestModelInfo?: ModelInfo } = {},
 	): ApiStream {
+		// Hold replaced handlers from request setup until the stream is fully
+		// consumed (including the background usage drain) or closed early.
+		// Retries recurse through this method and nest their own unit of work.
+		const endApiWork = this.beginApiWork()
+		try {
+			yield* this.attemptApiRequestWithActiveApi(retryAttempt, options)
+		} finally {
+			endApiWork()
+		}
+	}
+
+	private async *attemptApiRequestWithActiveApi(
+		retryAttempt: number,
+		options: { skipProviderRateLimit?: boolean; requestModelInfo?: ModelInfo },
+	): ApiStream {
 		const state = await this.providerRef.deref()?.getState()
 
 		const {
 			autoApprovalEnabled,
-			requestDelaySeconds,
 			autoCondenseContext = true,
 			autoCondenseContextPercent = 100,
 			profileThresholds = {},
@@ -5676,6 +5657,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// caller threaded a snapshot its options object is forwarded unchanged —
 		// same reference, and never mutated.
 		const retryOptions = options.requestModelInfo === undefined ? { ...options, requestModelInfo } : options
+		// Publish this attempt's tool-policy snapshot from the same `state` read
+		// the prompt is built from: the snapshot's fields are read off that held
+		// local at the store itself, with no await between those reads and the
+		// assignment, and no policy input is re-read from live state across the
+		// awaits above, so the streaming presenter of this request validates
+		// against exactly the policy its prompt advertised. The generator body
+		// re-executes per retry, so each attempt re-captures before its stream
+		// can present anything.
+		this.requestPolicySnapshot = {
+			disabledTools: state?.disabledTools,
+			experiments: state?.experiments,
+			customModes: state?.customModes,
+			modelInfo: requestModelInfo,
+		}
 		const systemPrompt = await this.getSystemPrompt(state, requestModelInfo)
 
 		// A cancellation landing during the rate-limit countdown, the bounded metadata
@@ -5888,13 +5883,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const approvalResult = await this.autoApprovalHandler.checkAutoApprovalLimits(
 			state,
 			this.combineMessages(this.clineMessages.slice(1)),
-			async (type, data) => {
-				const result = await this.ask(type, data)
-				// The handler only inspects the button response; a consumed
-				// queued message is dropped without inventing a history write.
-				this.discardConsumedQueuedMessage(result.queuedMessageId)
-				return result
-			},
+			async (type, data) => this.ask(type, data),
 		)
 
 		if (!approvalResult.shouldProceed) {
@@ -6049,13 +6038,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				return
 			} else {
-				const { response, queuedMessageId } = await this.ask(
+				const { response } = await this.ask(
 					"api_req_failed",
 					error.message ?? JSON.stringify(serializeError(error), null, 2),
 				)
-				// Only the button response is inspected; a consumed queued
-				// message is dropped without inventing a history write.
-				this.discardConsumedQueuedMessage(queuedMessageId)
 
 				if (response !== "yesButtonClicked") {
 					// This will never happen since if noButtonClicked, we will
@@ -6496,22 +6482,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * persistQueuedFeedbackAndAcknowledge), not to submit-return. A message
 	 * submitted between command completion and the next conversational ask is
 	 * therefore retained until an ask actually consumes it, instead of being
-	 * dropped if the turn fails or restarts first. When submission fails, the
-	 * claim is released so the message stays queued for a later drain, and the
-	 * failure propagates to the caller instead of being logged and dropped.
+	 * dropped if the turn fails or restarts first. When submission throws, the
+	 * claim is released so the message stays queued for a later drain and the
+	 * error propagates to the caller; when the handoff reports nothing
+	 * delivered (task stopping, provider gone), the claim is released and the
+	 * run resolves false.
 	 *
 	 * Drains are serialized per task: each run claims only after the previous
-	 * run's submission handoff completed, so the background-completion drain
-	 * and the post-result drain cannot interleave two different messages into
-	 * the single pending ask-response. A drain whose claimed message is still
-	 * pending consumption (already submitted, not yet observed by an ask) does
-	 * not re-post it; it releases the claim and resolves true, leaving the
-	 * message queued so a distinct pending response cannot be overwritten. A
-	 * rejected drain does not block later drains.
+	 * run's submission handoff completed, so a background-completion drain and
+	 * a post-result drain cannot interleave two different messages into the
+	 * single pending ask-response.
 	 *
 	 * @returns Promise resolving to true when a queued message was submitted
-	 * (and remains queued until consumed) or was already pending submission and
-	 * left queued; false when the queue was empty.
+	 * (and remains queued until consumed); false when the queue was empty or
+	 * the task is stopping.
 	 */
 	public processQueuedMessages(): Promise<boolean> {
 		const run = this.queuedMessageDrainChain.then(() => this.claimAndSubmitNextQueuedMessage())
@@ -6544,41 +6528,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.messageQueueService.releaseMessage(queued.id)
 			return true
 		}
-		// An approval-gating ask is blocked in its response wait. The claim path
-		// refuses to answer it with a queued conversational message; the drain
-		// must honor the same gate instead of posting messageResponse into the
-		// ask-response slot, so release the claim and leave the message queued
-		// for a conversational turn.
-		if (this.inFlightAskBlocksQueuedSubmission()) {
-			this.messageQueueService.releaseMessage(queued.id)
-			return true
-		}
 		try {
-			const submitted = await this.submitUserMessage(queued.text, queued.images, undefined, undefined, queued.id)
+			const submitted = await this.submitUserMessage(queued.text, queued.images)
 			if (!submitted) {
-				if (this.abort || this.abandoned) {
-					// Cancelled mid-handoff: the guard in submitUserMessage
-					// dropped the write, so release quietly instead of failing
-					// the drain on a task that is already stopping.
-					this.messageQueueService.releaseMessage(queued.id)
-					return false
-				}
-				if (this.inFlightAskBlocksQueuedSubmission()) {
-					// A direct response landed or an approval-gating ask is
-					// waiting: the submission was dropped to keep the slot
-					// intact, so leave the message queued instead of failing
-					// the drain.
-					this.messageQueueService.releaseMessage(queued.id)
-					return true
-				}
-				throw new Error(`[Task] Failed to submit queued message ${queued.id}`)
-			}
-			if (this.abort || this.abandoned) {
-				// The submission raced with cancellation: no consuming ask will
-				// run on a dying task, so do not track it as pending.
-				if (this.pendingSubmittedQueuedMessageId === queued.id) {
-					this.pendingSubmittedQueuedMessageId = undefined
-				}
+				// Cancelled mid-handoff: the guard in submitUserMessage dropped
+				// the write, so release quietly instead of failing the drain on
+				// a task that is already stopping.
 				this.messageQueueService.releaseMessage(queued.id)
 				return false
 			}
@@ -6588,9 +6543,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			throw error
 		}
 		// Submission succeeded, but the message is only removed once an ask
-		// consumes it. Track the ID so the consuming ask can tell interception
-		// (consumption → durable ack) from an unconsumed overwrite (retain),
-		// and release the claim so the ask path can claim it.
+		// consumes it. Track the ID so a later drain can tell "already
+		// submitted, still pending" from "not submitted yet", and release the
+		// claim so the ask path can claim it.
 		this.pendingSubmittedQueuedMessageId = queued.id
 		this.messageQueueService.releaseMessage(queued.id)
 		return true

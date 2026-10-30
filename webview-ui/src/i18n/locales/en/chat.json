@@ -140,6 +140,7 @@
 	},
 	"selectMode": "Select mode for interaction",
 	"selectApiConfig": "Select API configuration",
+	"selectModel": "Select model",
 	"lockApiConfigAcrossModes": "Lock API configuration across all modes in this workspace",
 	"unlockApiConfigAcrossModes": "API configuration is locked across all modes in this workspace (click to unlock)",
 	"enhancePrompt": "Enhance prompt with additional context",
@@ -150,6 +151,14 @@
 		"description": "Specialized personas that tailor Zoo's behavior.",
 		"searchPlaceholder": "Search modes...",
 		"noResults": "No results found"
+	},
+	"modelSelector": {
+		"title": "Models",
+		"settings": "Model Settings",
+		"description": "Choose the model used for this API configuration.",
+		"searchPlaceholder": "Search models...",
+		"unsupportedTooltip": "This provider's model is configured in Settings",
+		"loading": "Loading models..."
 	},
 	"enhancePromptDescription": "The 'Enhance Prompt' button helps improve your prompt by providing additional context, clarification, or rephrasing. Try typing a prompt in here and clicking the button again to see how it works.",
 	"addImages": "Add images to message",
@@ -362,10 +371,10 @@
 		"title": "Zoo Code {{version}} Released",
 		"support": "Please support Zoo Code by starring us on <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "What's New:",
-			"highlight1": "✨ New model support: Use GPT-6.1 Sol, get the corrected Claude Opus 5.5 output budget, and select DeepSeek V4.1 Flash on OpenCode Go.",
-			"highlight2": "🧭 Reliable task aborts and interruptions: Preserve the first abort reason, reset stream-abort state for each request, and stop interrupted tasks from replaying rejected subtasks.",
-			"highlight3": "🛠️ Dependable tools, prompts, and UI streaming: Keep streamed tool arguments intact, enforce MCP tool policy, prevent invented line numbers, and smooth chat updates."
+			"heading": "What is new in Zoo Code v3.92.0",
+			"highlight1": "✨ Faster model choice and stronger model support: Switch models from the chat composer. Use Claude Haiku 5.5 on Amazon Bedrock, get more accurate Kimi K3 capabilities on OpenRouter, and use corrected Gemini 4 Argon limits on Vercel AI Gateway.",
+			"highlight2": "🧭 More reliable terminal, editing, chat, and remote workflows: Collapse command output by default when you choose, get clearer editing failures, keep reasoning and API rows visible, and avoid startup and proxy issues in remote workspaces.",
+			"highlight3": "🔌 Expanded MCP marketplace: Connect Zoo Code to AnySearch, Mailtea, and Tradehand through the MCP marketplace."
 		},
 		"cloudAgents": {
 			"heading": "New in the Cloud:",
@@ -475,6 +484,10 @@
 		"serversPart_other": "{{count}} MCP servers",
 		"messageTemplate": "You have {{tools}} enabled via {{servers}}. Such a high number can confuse the model and lead to errors. Try to keep it below {{threshold}}.",
 		"openMcpSettings": "Open MCP Settings"
+	},
+	"ignoredDisabledTools": {
+		"title": "Disabled tool ignored",
+		"messageTemplate": "The following tools cannot be disabled, so their disabledTools entries were ignored: {{tools}}."
 	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"

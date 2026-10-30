@@ -59,7 +59,7 @@ describe("CodebaseSearchTool", () => {
 			sayAndCreateMissingParamError: vi
 				.fn<Task["sayAndCreateMissingParamError"]>()
 				.mockResolvedValue("missing query"),
-			say: vi.fn<Task["say"]>().mockResolvedValue(true),
+			say: vi.fn<Task["say"]>().mockResolvedValue(undefined),
 			ask: vi.fn<Task["ask"]>().mockResolvedValue({ response: "yesButtonClicked" }),
 		}
 		task = taskStub as Task
@@ -67,6 +67,7 @@ describe("CodebaseSearchTool", () => {
 			askApproval: vi.fn<ToolCallbacks["askApproval"]>().mockResolvedValue(true),
 			handleError: vi.fn<ToolCallbacks["handleError"]>().mockResolvedValue(undefined),
 			pushToolResult: vi.fn<ToolCallbacks["pushToolResult"]>(),
+			toolCallId: "test-tool-call-id",
 		}
 		manager = {
 			isConfigurationLoaded: true,

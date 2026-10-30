@@ -54,7 +54,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 	async execute(params: ApplyPatchParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
 		const { patch } = params
-		const { askApproval, handleError, pushToolResult } = callbacks
+		const { handleError, pushToolResult } = callbacks
 
 		try {
 			// Validate required parameters

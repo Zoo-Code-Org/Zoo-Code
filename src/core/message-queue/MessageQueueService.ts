@@ -4,12 +4,6 @@ import { v4 as uuidv4 } from "uuid"
 
 import { QueuedMessage } from "@roo-code/types"
 
-export interface MessageQueueState {
-	messages: QueuedMessage[]
-	isProcessing: boolean
-	isPaused: boolean
-}
-
 export interface QueueEvents {
 	stateChanged: [messages: QueuedMessage[]]
 }
@@ -111,23 +105,6 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 
 	public isEmpty(): boolean {
 		return this._messages.length === 0
-	}
-
-	/**
-	 * Reserve a specific queued message by ID when it is still present and
-	 * unclaimed. Lets a consumer hold a consumed entry through its durable ack
-	 * so neither another ask nor a background drain can claim it again
-	 * mid-persistence.
-	 */
-	public claimMessage(id: string): boolean {
-		if (this.claimedMessageIds.has(id)) {
-			return false
-		}
-		if (!this._messages.some((message) => message.id === id)) {
-			return false
-		}
-		this.claimedMessageIds.add(id)
-		return true
 	}
 
 	/**
