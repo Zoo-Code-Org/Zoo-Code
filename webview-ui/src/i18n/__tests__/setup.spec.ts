@@ -23,9 +23,19 @@ describe("i18n setup locale loading", () => {
 	})
 
 	it("shares one fetch across concurrent requests for the same locale", async () => {
-		const results = await Promise.all([loadLanguage("ja"), loadLanguage("ja"), loadLanguage("ja")])
+		const addResourceBundle = vi.spyOn(i18next, "addResourceBundle")
+
+		// `loadLanguage` memoizes the in-flight promise, so concurrent callers get
+		// the very same promise back: one fetch, one registration pass.
+		const inFlight = [loadLanguage("ja"), loadLanguage("ja"), loadLanguage("ja")]
+		expect(inFlight[1]).toBe(inFlight[0])
+		expect(inFlight[2]).toBe(inFlight[0])
+
+		const results = await Promise.all(inFlight)
 
 		expect(results).toHaveLength(3)
+		// 9 namespaces registered once each, not 27.
+		expect(addResourceBundle).toHaveBeenCalledTimes(9)
 		expect(i18next.t("common:errorBoundary.title", { lng: "ja" })).toBe("問題が発生しました")
 	})
 

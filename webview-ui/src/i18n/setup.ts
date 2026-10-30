@@ -113,25 +113,4 @@ i18next.use(initReactI18next).init({
 	},
 })
 
-/**
- * Re-register the eagerly bundled fallback locale. `init` above already has it,
- * so this is only needed by callers that reset the store (the Playwright
- * gallery mounts stories against a shared i18next instance).
- */
-export function loadTranslations() {
-	const resources = collectLocaleResources(eagerLocaleFiles)
-
-	Object.entries(resources).forEach(([language, namespaces]) => {
-		Object.entries(namespaces).forEach(([namespace, bundle]) => {
-			try {
-				i18next.addResourceBundle(language, namespace, bundle, true, true)
-			} catch (error) {
-				console.warn(`Could not load ${language} translations:`, error)
-			}
-		})
-	})
-
-	loadedLanguages.add(FALLBACK_LANGUAGE)
-}
-
 export default i18next
