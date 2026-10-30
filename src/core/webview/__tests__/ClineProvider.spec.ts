@@ -3590,9 +3590,7 @@ describe("ClineProvider", () => {
 
 			await provider["setViewStateId"]("__proto__")
 
-			// "__proto__" is rejected before assignment so a per-view entry can never be
-			// keyed through the Object.prototype setter: the temporary id stays active and
-			// nothing is persisted under the reserved name.
+			// "__proto__" is rejected before assignment, so nothing is persisted under it.
 			expect(provider["viewStateId"]).toBe(provider.viewId)
 			expect(mockContext.globalState.get("viewStates")).toBeUndefined()
 			expect(provider["viewLocalState"]).toEqual({})
@@ -3631,21 +3629,17 @@ describe("ClineProvider", () => {
 				contextProxy,
 				new WebviewFocusTracker(),
 			)
-			// Seed a pre-launch entry under the temporary id through the real write path,
-			// so the re-key has real work to do and records this instance as its author.
+			// Seed a pre-launch entry through the real write path so the re-key has work to do.
 			await provider["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
 
 			const setValueSpy = vi.spyOn(contextProxy, "setValue").mockRejectedValue(new Error("storage down"))
 
 			await expect(provider["setViewStateId"]("stable-sidebar-view")).rejects.toThrow("storage down")
 
-			// The failed id must not stick: the provider keeps its previous (temporary)
-			// id so a later launch retries registration and the load instead of the
-			// guard early-returning for an id that was never persisted.
+			// The failed id must not stick: the provider keeps its previous (temporary) id.
 			expect(provider["viewStateId"]).toBe(provider.viewId)
 
-			// A later retry succeeds once the storage write works again, and the
-			// pre-launch entry lands under the registered id.
+			// A later retry succeeds once the storage write works again.
 			setValueSpy.mockRestore()
 			await provider["setViewStateId"]("stable-sidebar-view")
 			expect(provider["viewStateId"]).toBe("stable-sidebar-view")
