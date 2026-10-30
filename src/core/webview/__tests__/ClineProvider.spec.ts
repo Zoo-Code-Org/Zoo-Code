@@ -428,7 +428,6 @@ type StalledProfile = {
 function stallProviderSettingsProfile(provider: ClineProvider) {
 	let resolveProfile: (value: StalledProfile) => void = () => {}
 	const getProfileSpy = vi.fn(() => {
-		// Only the first lookup is resolvable; fail loudly on a second.
 		if (getProfileSpy.mock.calls.length > 1) {
 			throw new Error(
 				"stallProviderSettingsProfile: getProfile called more than once; only one lookup is resolvable",
@@ -438,7 +437,6 @@ function stallProviderSettingsProfile(provider: ClineProvider) {
 	})
 	// @ts-ignore - Reassign the readonly providerSettingsManager for the test; the double only backs getProfile.
 	provider.providerSettingsManager = { getProfile: getProfileSpy }
-	// Wrapper keeps the reassigned resolver visible to the caller.
 	return { getProfile: getProfileSpy, resolveProfile: (value: StalledProfile) => resolveProfile(value) }
 }
 
@@ -3891,7 +3889,6 @@ describe("ClineProvider", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-			// A string in storage is corrupt: the fresh-read guard must not spread it.
 			await mockContext.globalState.update("viewStates", "corrupted-storage-value")
 			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({})
 			await provider.dispose()
@@ -3951,8 +3948,7 @@ describe("ClineProvider", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-			// Seed through the write path so this instance is the author of the entry under
-			// its temporary id; an entry authored by another session must not be adopted.
+			// Seed through the write path so this instance authors the entry under its temporary id; an entry authored by another session must not be adopted.
 			await provider["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
 			await provider["setViewStateId"]("stable-sidebar-view")
 			expect(mockContext.globalState.get("viewStates")).toEqual({

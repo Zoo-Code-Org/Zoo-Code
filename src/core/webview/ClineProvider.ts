@@ -452,7 +452,6 @@ export class ClineProvider
 			await this.postStateToWebviewWithoutClineMessages()
 		})
 
-		// Load initial state from global state into viewLocalState buffer after dependencies used by getState are ready.
 		void this.loadViewState()
 
 		// Initialize MCP Hub through the singleton manager
@@ -2564,8 +2563,6 @@ export class ClineProvider
 			if (failedActivation) throw failedActivation.reason
 
 			if (signal.aborted) return id
-
-			// Refresh other views pinned to this profile so their overlays cannot go stale.
 
 			// Change the provider for the current task.
 			// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).

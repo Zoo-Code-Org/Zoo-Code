@@ -133,7 +133,6 @@ describe("ContextProxy", () => {
 			const firstWrite = proxy.updateGlobalState("apiProvider", "anthropic")
 			await proxy.updateGlobalState("apiProvider", "openai")
 
-			// The older write rejects after a newer value reached the cache.
 			rejectFirst(new Error("disk full"))
 			await expect(firstWrite).rejects.toThrow("disk full")
 
@@ -154,7 +153,6 @@ describe("ContextProxy", () => {
 			rejectPending(new Error("disk full"))
 
 			await expect(pending).rejects.toThrow("disk full")
-			// The reset cleared the cache: the old value must not come back.
 			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
 		})
 
