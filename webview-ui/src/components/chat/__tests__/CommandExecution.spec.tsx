@@ -2,9 +2,11 @@
 
 import React from "react"
 import { render, screen, fireEvent, act } from "@testing-library/react"
+import i18next from "i18next"
 
 import { CommandExecution } from "../CommandExecution"
 import { ExtensionStateContext } from "../../../context/ExtensionStateContext"
+import enChat from "../../../i18n/locales/en/chat.json"
 
 // Mock dependencies
 vi.mock("react-use", () => ({
@@ -834,6 +836,40 @@ Output:
 			expect(fragments.some((f) => f.includes("EOF"))).toBe(false)
 			expect(fragments.some((f) => f.includes("echo"))).toBe(false)
 			expect(fragments.some((f) => f.includes("hello"))).toBe(false)
+		})
+	})
+
+	describe("exit status tooltip", () => {
+		// The tooltip key must be written in i18next's namespace form ("ns:path").
+		// A dot-form key ("chat.commandExecution.exitStatus") carries no namespace
+		// separator, so i18next looks for a "chat.commandExecution.exitStatus" key
+		// inside the default namespace, misses, and renders the raw key to the user.
+		it("resolves the exit-status copy instead of rendering the raw key", async () => {
+			const instance = i18next.createInstance()
+			await instance.init({
+				lng: "en",
+				fallbackLng: "en",
+				resources: { en: { chat: enChat } },
+				interpolation: { escapeValue: false },
+			})
+
+			const resolved = instance.t("chat:commandExecution.exitStatus", { exitCode: 0 })
+			expect(resolved).toBe("Exited with status 0")
+			expect(resolved).not.toContain("chat:commandExecution")
+		})
+
+		it("does not resolve the dot form, which is why the namespace separator matters", async () => {
+			const instance = i18next.createInstance()
+			await instance.init({
+				lng: "en",
+				fallbackLng: "en",
+				resources: { en: { chat: enChat } },
+				interpolation: { escapeValue: false },
+			})
+
+			expect(instance.t("chat.commandExecution.exitStatus", { exitCode: 0 })).toBe(
+				"chat.commandExecution.exitStatus",
+			)
 		})
 	})
 })
