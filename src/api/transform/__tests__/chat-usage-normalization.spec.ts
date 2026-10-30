@@ -189,7 +189,9 @@ describe("normalizeChatUsage", () => {
 
 				expect(warn).toHaveBeenCalledWith(expect.any(String), {
 					path: "prompt_cache_miss_tokens",
-					value: "30",
+					type: "string",
+					length: 2,
+					preview: "30",
 				})
 			} finally {
 				warn.mockRestore()
@@ -214,7 +216,9 @@ describe("normalizeChatUsage", () => {
 
 				expect(warn).toHaveBeenCalledWith(expect.stringContaining("malformed token counter"), {
 					path: "prompt_cache_miss_tokens",
-					value: "30",
+					type: "string",
+					length: 2,
+					preview: "30",
 				})
 			} finally {
 				warn.mockRestore()
@@ -273,12 +277,64 @@ describe("normalizeChatUsage", () => {
 
 				expect(warn).toHaveBeenCalledWith(expect.stringContaining("malformed token counter"), {
 					path: "prompt_tokens",
-					value: "100",
+					type: "string",
+					length: 3,
+					preview: "100",
 				})
 				expect(warn).toHaveBeenCalledWith(expect.stringContaining("malformed token counter"), {
 					path: "completion_tokens",
-					value: -1,
+					type: "number",
+					preview: -1,
 				})
+			} finally {
+				warn.mockRestore()
+			}
+		})
+
+		it("keeps the logged payload bounded for an arbitrarily large provider value", async () => {
+			vi.resetModules()
+			const { CompactLogger: FreshCompactLogger } = await import("../../../utils/logging/CompactLogger")
+			const { normalizeChatUsage: freshNormalize } = await import("../chat-usage-normalization")
+			const warn = vi.spyOn(FreshCompactLogger.prototype, "warn").mockImplementation(() => {})
+			const huge = "9".repeat(1_000_000)
+
+			try {
+				freshNormalize({ prompt_tokens: 120, prompt_cache_miss_tokens: huge })
+
+				const [, meta] = warn.mock.calls[0] as [string, Record<string, unknown>]
+
+				// The raw megabyte must not reach the transport, which stringifies
+				// and writes it synchronously to stdout and the log file.
+				expect(meta).not.toHaveProperty("value")
+				expect(meta.type).toBe("string")
+				expect(meta.length).toBe(1_000_000)
+				expect(typeof meta.preview).toBe("string")
+				expect((meta.preview as string).length).toBeLessThanOrEqual(65)
+				expect(JSON.stringify(meta).length).toBeLessThan(200)
+			} finally {
+				warn.mockRestore()
+			}
+		})
+
+		it.each([
+			["a boolean", true, { type: "boolean" }],
+			["an object", { tokens: 30 }, { type: "object" }],
+			["an array", [1, 2, 3], { type: "array" }],
+			["NaN", NaN, { type: "number", preview: NaN }],
+			["Infinity", Infinity, { type: "number", preview: Infinity }],
+			["a fractional number", 1.5, { type: "number", preview: 1.5 }],
+		])("describes %s without logging the raw value", async (_name, malformed, expected) => {
+			vi.resetModules()
+			const { CompactLogger: FreshCompactLogger } = await import("../../../utils/logging/CompactLogger")
+			const { normalizeChatUsage: freshNormalize } = await import("../chat-usage-normalization")
+			const warn = vi.spyOn(FreshCompactLogger.prototype, "warn").mockImplementation(() => {})
+
+			try {
+				freshNormalize({ prompt_tokens: 120, prompt_cache_miss_tokens: malformed })
+
+				const [, meta] = warn.mock.calls[0] as [string, Record<string, unknown>]
+
+				expect(meta).toEqual({ path: "prompt_cache_miss_tokens", ...expected })
 			} finally {
 				warn.mockRestore()
 			}

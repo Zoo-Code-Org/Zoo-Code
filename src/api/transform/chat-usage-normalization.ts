@@ -117,9 +117,46 @@ const isTokenCount = (value: unknown): value is number =>
  */
 const usageLogger = new CompactLogger()
 
+/**
+ * Longest string preview kept in a diagnostic. A provider can send an
+ * arbitrarily large value, and the transport stringifies it and writes it
+ * synchronously to stdout and to the log file, so the payload is capped.
+ */
+const MAX_PREVIEW_CHARS = 64
+
+/**
+ * Size-safe description of a discarded counter value.
+ *
+ * The raw value is never logged: it comes off the wire and is unbounded, while
+ * `CompactTransport.write` serializes and writes it synchronously. A number is
+ * at most a couple of dozen characters when stringified, so its value is both
+ * safe and the most diagnosable thing to keep. A string keeps its length plus a
+ * capped preview. Everything else keeps only its type.
+ */
+const describeMalformedCount = (value: unknown): { type: string; preview?: string | number; length?: number } => {
+	if (typeof value === "number") {
+		return { type: "number", preview: value }
+	}
+
+	if (typeof value === "string") {
+		return {
+			type: "string",
+			length: value.length,
+			preview: value.length > MAX_PREVIEW_CHARS ? `${value.slice(0, MAX_PREVIEW_CHARS)}…` : value,
+		}
+	}
+
+	if (Array.isArray(value)) return { type: "array" }
+
+	return { type: value === null ? "null" : typeof value }
+}
+
 const emitMalformedCountWarning = (path: string, value: unknown): void => {
 	try {
-		usageLogger.warn("Discarded a malformed token counter while normalizing chat usage", { path, value })
+		usageLogger.warn("Discarded a malformed token counter while normalizing chat usage", {
+			path,
+			...describeMalformedCount(value),
+		})
 	} catch {
 		// Diagnostics are best-effort; never let a sink failure escape into usage accounting.
 	}
