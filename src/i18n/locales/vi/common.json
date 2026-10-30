@@ -51,6 +51,7 @@
 		"list_api_config": "Không thể lấy danh sách cấu hình API",
 		"update_server_timeout": "Không thể cập nhật thời gian chờ máy chủ",
 		"hmr_not_running": "Máy chủ phát triển cục bộ không chạy, HMR sẽ không hoạt động. Vui lòng chạy 'npm run dev' trước khi khởi chạy tiện ích mở rộng để bật HMR.",
+		"hmr_probe_timeout": "Máy chủ phát triển cục bộ không phản hồi trong 5 giây. Sử dụng giao diện tiện ích mở rộng đã dựng mà không có HMR.",
 		"retrieve_current_mode": "Lỗi không thể truy xuất chế độ hiện tại từ trạng thái.",
 		"failed_delete_repo": "Không thể xóa kho lưu trữ hoặc nhánh liên quan: {{error}}",
 		"failed_remove_directory": "Không thể xóa thư mục nhiệm vụ: {{error}}",

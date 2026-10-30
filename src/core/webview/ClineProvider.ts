@@ -1639,8 +1639,11 @@ export class ClineProvider
 		// Check if local dev server is running.
 		try {
 			await axios.get(`http://${localServerUrl}`, { timeout: 5_000 })
-		} catch {
-			vscode.window.showErrorMessage(t("common:errors.hmr_not_running"))
+		} catch (error) {
+			const timedOut = axios.isAxiosError(error) && (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT")
+			void vscode.window.showErrorMessage(
+				t(timedOut ? "common:errors.hmr_probe_timeout" : "common:errors.hmr_not_running"),
+			)
 			return this.getHtmlContent(webview)
 		}
 

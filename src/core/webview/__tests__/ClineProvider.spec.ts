@@ -69,8 +69,9 @@ vi.mock("fs/promises", async (importOriginal) => {
 	}
 })
 
-vi.mock("axios", () => ({
+vi.mock("axios", async (importOriginal) => ({
 	default: {
+		isAxiosError: (await importOriginal<typeof import("axios")>()).default.isAxiosError,
 		get: vi.fn().mockResolvedValue({ data: { data: [] } }),
 		post: vi.fn(),
 	},
@@ -2298,6 +2299,21 @@ describe("ClineProvider", () => {
 		expect(scriptSrcMatch![0]).toContain("'nonce-")
 		// Verify wasm-unsafe-eval is present for Shiki syntax highlighting
 		expect(scriptSrcMatch![0]).toContain("'wasm-unsafe-eval'")
+	})
+
+	test.each([
+		["ECONNABORTED", "errors.hmr_probe_timeout"],
+		["ETIMEDOUT", "errors.hmr_probe_timeout"],
+		["ECONNREFUSED", "errors.hmr_not_running"],
+	])("reports dev-server probe failure %s accurately and falls back to built HTML", async (code, message) => {
+		const { AxiosError } = await vi.importActual<typeof import("axios")>("axios")
+		vi.mocked(axios.get).mockRejectedValueOnce(new AxiosError("probe failed", code))
+
+		const html = await provider["getHMRHtmlContent"](mockWebviewView.webview)
+
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(message)
+		expect(html).toContain("<!DOCTYPE html>")
+		expect(html).not.toContain("/@react-refresh")
 	})
 
 	test("resolveWebviewView builds HMR content against the local dev server when it is reachable", async () => {
