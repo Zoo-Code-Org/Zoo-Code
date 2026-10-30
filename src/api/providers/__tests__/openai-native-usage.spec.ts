@@ -440,6 +440,70 @@ describe("OpenAiNativeHandler - normalizeUsage", () => {
 		})
 	})
 
+	describe("OpenAiNativeHandler - prompt cache key", () => {
+		let handler: OpenAiNativeHandler
+
+		beforeEach(() => {
+			handler = new OpenAiNativeHandler({
+				openAiNativeApiKey: "test-key",
+			})
+		})
+
+		const buildRequestBody = (modelId: string, taskId?: string) => {
+			handler["options"].apiModelId = modelId
+			const model = handler.getModel()
+			const metadata = taskId === undefined ? undefined : { taskId }
+			return handler["buildRequestBody"](model, [], "", model.verbosity, undefined, metadata)
+		}
+
+		it("should send the task id as the body prompt_cache_key", () => {
+			const body = buildRequestBody("gpt-5.1", "task-abc")
+			expect(body.prompt_cache_key).toBe("task-abc")
+		})
+
+		it("should keep the key stable across turns of the same task", () => {
+			const firstTurn = buildRequestBody("gpt-5.1", "task-stable")
+			const secondTurn = buildRequestBody("gpt-5.1", "task-stable")
+			expect(firstTurn.prompt_cache_key).toBe("task-stable")
+			expect(secondTurn.prompt_cache_key).toBe(firstTurn.prompt_cache_key)
+		})
+
+		it("should give distinct keys to distinct tasks", () => {
+			const first = buildRequestBody("gpt-5.1", "task-one")
+			const second = buildRequestBody("gpt-5.1", "task-two")
+			expect(first.prompt_cache_key).toBe("task-one")
+			expect(second.prompt_cache_key).toBe("task-two")
+			expect(first.prompt_cache_key).not.toBe(second.prompt_cache_key)
+		})
+
+		it("should fall back to the handler session id when no task id is supplied", () => {
+			const body = buildRequestBody("gpt-5.1")
+			expect(body.prompt_cache_key).toBe(handler["sessionId"])
+			expect(body.prompt_cache_key).toEqual(expect.any(String))
+		})
+
+		it("should omit the key when the model does not support prompt caching", () => {
+			const modelId = "codex-mini-latest"
+			expect(openAiNativeModels[modelId as keyof typeof openAiNativeModels].supportsPromptCache).toBe(false)
+
+			const body = buildRequestBody(modelId, "task-abc")
+			expect(body.prompt_cache_key).toBeUndefined()
+		})
+
+		it("should clamp an over-length task id to OpenAI's 64-character limit", () => {
+			const longTaskId = "t".repeat(80)
+			const body = buildRequestBody("gpt-5.1", longTaskId)
+			expect(body.prompt_cache_key).toHaveLength(64)
+			expect(body.prompt_cache_key).toBe(longTaskId.slice(0, 64))
+		})
+
+		it("should keep prompt_cache_retention alongside the key for 24h models", () => {
+			const body = buildRequestBody("gpt-5.1", "task-abc")
+			expect(body.prompt_cache_key).toBe("task-abc")
+			expect(body.prompt_cache_retention).toBe("24h")
+		})
+	})
+
 	describe("cost calculation", () => {
 		it.each([
 			{ tier: OpenAiServiceTier.Default, expectedCost: 4.525 },

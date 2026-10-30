@@ -34,6 +34,12 @@ import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 
 export type OpenAiNativeModel = ReturnType<OpenAiNativeHandler["getModel"]>
 
+/**
+ * OpenAI caps `prompt_cache_key` at 64 characters; longer values are rejected with a 400.
+ * Task ids are uuidv7 today (36 chars), so this is a guard rather than a routine truncation.
+ */
+const PROMPT_CACHE_KEY_MAX_LENGTH = 64
+
 export class OpenAiNativeHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 	private client: OpenAI
@@ -96,14 +102,16 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			this.options.enableResponsesReasoningSummary = true
 		}
 		const apiKey = this.options.openAiNativeApiKey ?? NOT_PROVIDED
-		// Include originator, session_id, and User-Agent headers for API tracking and debugging
+		// Include originator and User-Agent headers for API tracking and debugging.
+		// Cache affinity rides on the body `prompt_cache_key`, not on a header: OpenAI documents
+		// the `session_id` header as ignored on the public Responses API, and underscore header
+		// names are rejected outright by hardened gateways (Envoy/nginx `underscores_in_headers`).
 		const userAgent = `zoo-code/${Package.version} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`
 		this.client = new OpenAI({
 			baseURL: this.options.openAiNativeBaseUrl || undefined,
 			apiKey,
 			defaultHeaders: {
 				originator: "zoo-code",
-				session_id: this.sessionId,
 				"User-Agent": userAgent,
 			},
 			timeout: this.timeoutMs,
@@ -330,6 +338,11 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			include?: string[]
 			/** Prompt cache retention policy: "in_memory" (default) or "24h" for extended caching */
 			prompt_cache_retention?: "in_memory" | "24h"
+			/**
+			 * Cache routing affinity key. OpenAI documents this body field as the routing lever;
+			 * the `session_id` request header is not part of the prompt-caching API.
+			 */
+			prompt_cache_key?: string
 			tools?: Array<{
 				type: "function"
 				name: string
@@ -346,6 +359,10 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 		// Decide whether to enable extended prompt cache retention for this request
 		const promptCacheRetention = this.getPromptCacheRetention(model)
+
+		// Cache routing affinity: a stable, task-scoped key lets OpenAI route every turn of the
+		// same task to the machine holding its cached prefix.
+		const promptCacheKey = this.getPromptCacheKey(model, metadata)
 
 		const body: ResponsesRequestBody = {
 			model: model.id,
@@ -379,6 +396,8 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			// Enable extended prompt cache retention for models that support it.
 			// This uses the OpenAI Responses API `prompt_cache_retention` parameter.
 			...(promptCacheRetention ? { prompt_cache_retention: promptCacheRetention } : {}),
+			// Cache routing affinity key (body field, not the inert `session_id` header).
+			...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
 			tools: (metadata?.tools ?? [])
 				.filter((tool) => tool.type === "function")
 				.map((tool) => {
@@ -418,12 +437,10 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		// Create AbortController for cancellation
 		this.abortController = new AbortController()
 
-		// Build per-request headers using taskId when available, falling back to sessionId
-		const taskId = metadata?.taskId
+		// Build per-request headers for API tracking and debugging
 		const userAgent = `zoo-code/${Package.version} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`
 		const requestHeaders: Record<string, string> = {
 			originator: "zoo-code",
-			session_id: taskId || this.sessionId,
 			"User-Agent": userAgent,
 		}
 
@@ -557,7 +574,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	private async *makeResponsesApiRequest(
 		requestBody: any,
 		model: OpenAiNativeModel,
-		metadata?: ApiHandlerCreateMessageMetadata,
+		_metadata?: ApiHandlerCreateMessageMetadata,
 		_systemPrompt?: string,
 		_messages?: Anthropic.Messages.MessageParam[],
 	): ApiStream {
@@ -568,8 +585,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		// Create AbortController for cancellation
 		this.abortController = new AbortController()
 
-		// Build per-request headers using taskId when available, falling back to sessionId
-		const taskId = metadata?.taskId
+		// Build per-request headers for API tracking and debugging
 		const userAgent = `zoo-code/${Package.version} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`
 
 		try {
@@ -579,7 +595,6 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 					"Content-Type": "application/json",
 					Authorization: `Bearer ${apiKey}`,
 					originator: "zoo-code",
-					session_id: taskId || this.sessionId,
 					"User-Agent": userAgent,
 				},
 				body: JSON.stringify(requestBody),
@@ -1421,6 +1436,30 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	}
 
 	/**
+	 * Returns the prompt cache routing key for this request, if the model caches prompts.
+	 *
+	 * OpenAI keys cache affinity off the `prompt_cache_key` body field; the `session_id`
+	 * request header is not part of the prompt-caching API. The key must stay identical
+	 * across every turn of one task (so its growing prefix keeps landing on the same
+	 * machine) and differ between tasks (so unrelated prefixes do not compete for one
+	 * routing bucket). `metadata.taskId` is the longest-lived identifier the handler
+	 * receives: it is the persisted task id, stable across turns, restarts and
+	 * rehydration, whereas `this.sessionId` is regenerated per handler instance.
+	 * The handler session id is the fallback for callers that send no task id.
+	 */
+	private getPromptCacheKey(
+		model: OpenAiNativeModel,
+		metadata?: ApiHandlerCreateMessageMetadata,
+	): string | undefined {
+		if (!model.info.supportsPromptCache) return undefined
+
+		const key = metadata?.taskId || this.sessionId
+		if (!key) return undefined
+
+		return key.length > PROMPT_CACHE_KEY_MAX_LENGTH ? key.slice(0, PROMPT_CACHE_KEY_MAX_LENGTH) : key
+	}
+
+	/**
 	 * Returns a shallow-cloned ModelInfo with pricing overridden for the given tier, if available.
 	 * If no tier or no overrides exist, the original ModelInfo is returned.
 	 */
@@ -1529,6 +1568,13 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			const serviceTier = this.getAllowedServiceTier(model)
 			if (serviceTier) {
 				requestBody[SERVICE_TIER_KEY] = serviceTier
+			}
+
+			// Cache routing affinity key. `completePrompt` has no task metadata, so the handler
+			// session id scopes the key: one bucket per handler instance, never shared across tasks.
+			const promptCacheKey = this.getPromptCacheKey(model)
+			if (promptCacheKey) {
+				requestBody.prompt_cache_key = promptCacheKey
 			}
 
 			// Add reasoning if supported
