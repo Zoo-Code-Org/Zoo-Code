@@ -305,7 +305,9 @@ function asEncryptedReasoningContentBlockParam(
 		return undefined
 	}
 	const candidate = block as ReasoningContentBlockParam
-	return typeof candidate.encrypted_content === "string" ? (candidate as EncryptedReasoningContentBlockParam) : undefined
+	return typeof candidate.encrypted_content === "string"
+		? (candidate as EncryptedReasoningContentBlockParam)
+		: undefined
 }
 
 function asPlainTextReasoningContentBlockParam(
@@ -332,9 +334,7 @@ type MessageParamWithReasoningDetails = Anthropic.Messages.MessageParam & {
 
 /** Entry shape produced by `buildCleanConversationHistory`: regular messages plus the two reasoning variants. */
 type CleanConversationHistoryEntry =
-	| Anthropic.Messages.MessageParam
-	| ReasoningItemForRequest
-	| MessageParamWithReasoningDetails
+	Anthropic.Messages.MessageParam | ReasoningItemForRequest | MessageParamWithReasoningDetails
 
 /**
  * Error shape providers surface during retries: an optional HTTP status plus an optional

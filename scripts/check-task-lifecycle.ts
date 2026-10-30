@@ -112,9 +112,7 @@ const semanticLandmarks = {
 		}
 		const childId = parent.awaitingChildId as TaskId
 		return (
-			state.tasks[childId]?.status === "active" &&
-			!state.liveElsewhere[childId] &&
-			state.heartbeatAlive[childId]
+			state.tasks[childId]?.status === "active" && !state.liveElsewhere[childId] && state.heartbeatAlive[childId]
 		)
 	},
 	// Proves the repair half of the same reconciliation outcome still works: a
@@ -239,9 +237,7 @@ function transitions(state: ModelState): Transition[] {
 		// delegation from it would race that window's own lifecycle operations.
 		if (state.liveElsewhere[parentId]) continue
 
-		const awaitedStatus = parent.awaitingChildId
-			? state.tasks[parent.awaitingChildId as TaskId]?.status
-			: undefined
+		const awaitedStatus = parent.awaitingChildId ? state.tasks[parent.awaitingChildId as TaskId]?.status : undefined
 		const delegationValid =
 			parent.status === "active" || (parent.status === "delegated" && awaitedStatus === "interrupted")
 
@@ -384,12 +380,20 @@ function transitions(state: ModelState): Transition[] {
 		if (!state.liveElsewhere[id2]) {
 			result.push({
 				name: `markLiveElsewhere(${id2})`,
-				next: { tasks: state.tasks, liveElsewhere: { ...state.liveElsewhere, [id2]: true }, heartbeatAlive: state.heartbeatAlive },
+				next: {
+					tasks: state.tasks,
+					liveElsewhere: { ...state.liveElsewhere, [id2]: true },
+					heartbeatAlive: state.heartbeatAlive,
+				},
 			})
 		} else {
 			result.push({
 				name: `expireLiveElsewhere(${id2})`,
-				next: { tasks: state.tasks, liveElsewhere: { ...state.liveElsewhere, [id2]: false }, heartbeatAlive: state.heartbeatAlive },
+				next: {
+					tasks: state.tasks,
+					liveElsewhere: { ...state.liveElsewhere, [id2]: false },
+					heartbeatAlive: state.heartbeatAlive,
+				},
 			})
 		}
 	}
@@ -409,12 +413,20 @@ function transitions(state: ModelState): Transition[] {
 		if (!state.heartbeatAlive[id2]) {
 			result.push({
 				name: `heartbeat(${id2})`,
-				next: { tasks: state.tasks, liveElsewhere: state.liveElsewhere, heartbeatAlive: { ...state.heartbeatAlive, [id2]: true } },
+				next: {
+					tasks: state.tasks,
+					liveElsewhere: state.liveElsewhere,
+					heartbeatAlive: { ...state.heartbeatAlive, [id2]: true },
+				},
 			})
 		} else {
 			result.push({
 				name: `expireHeartbeat(${id2})`,
-				next: { tasks: state.tasks, liveElsewhere: state.liveElsewhere, heartbeatAlive: { ...state.heartbeatAlive, [id2]: false } },
+				next: {
+					tasks: state.tasks,
+					liveElsewhere: state.liveElsewhere,
+					heartbeatAlive: { ...state.heartbeatAlive, [id2]: false },
+				},
 			})
 		}
 	}
@@ -509,7 +521,10 @@ function checkTransitionInvariants(previous: ModelState, transition: Transition)
 		if (before?.status === "delegated" && before.awaitingChildId) {
 			const childId = before.awaitingChildId as TaskId
 			const childBefore = previous.tasks[childId]
-			if (childBefore?.status === "active" && (previous.liveElsewhere[childId] || previous.heartbeatAlive[childId])) {
+			if (
+				childBefore?.status === "active" &&
+				(previous.liveElsewhere[childId] || previous.heartbeatAlive[childId])
+			) {
 				if (after?.status !== "delegated" || after.awaitingChildId !== childId) {
 					violations.push(`${id}: ${transition.name} cleared delegation to active live child ${childId}`)
 				}

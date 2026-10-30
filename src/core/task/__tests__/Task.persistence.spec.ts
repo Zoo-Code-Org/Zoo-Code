@@ -2474,9 +2474,7 @@ describe("Task persistence", () => {
 
 	describe("delegated-child liveness heartbeat and dispose ownership release", () => {
 		it("beats for the whole active lifetime, including while NOT streaming (ask-idle or long tool call)", async () => {
-			const recordSpy = vi
-				.spyOn(mockProvider.taskHistoryStore, "recordTaskActivity")
-				.mockResolvedValue(undefined)
+			const recordSpy = vi.spyOn(mockProvider.taskHistoryStore, "recordTaskActivity").mockResolvedValue(undefined)
 			// No task/images on either construction: start() then only starts the
 			// liveness machinery, never the (heavy) task loop — the narrow surface
 			// this test needs.
@@ -2511,9 +2509,7 @@ describe("Task persistence", () => {
 		})
 
 		it("never starts a heartbeat for standalone tasks", async () => {
-			const recordSpy = vi
-				.spyOn(mockProvider.taskHistoryStore, "recordTaskActivity")
-				.mockResolvedValue(undefined)
+			const recordSpy = vi.spyOn(mockProvider.taskHistoryStore, "recordTaskActivity").mockResolvedValue(undefined)
 			const standalone = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
