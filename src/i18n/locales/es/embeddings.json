@@ -1,5 +1,4 @@
 {
-	"unknownError": "Error desconocido",
 	"authenticationFailed": "No se pudieron crear las incrustaciones: Error de autenticación. Comprueba tu clave de API.",
 	"failedWithStatus": "No se pudieron crear las incrustaciones después de {{attempts}} intentos: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "No se pudieron crear las incrustaciones después de {{attempts}} intentos: {{errorMessage}}",
@@ -39,10 +38,6 @@
 		"configurationError": "Configuración de embedder no válida. Revisa tus ajustes.",
 		"serviceUnavailable": "El servicio de embedder no está disponible. Asegúrate de que esté funcionando y sea accesible.",
 		"invalidEndpoint": "Punto de conexión de API no válido. Comprueba la configuración de tu URL.",
-		"invalidEmbedderConfig": "Configuración de embedder no válida. Comprueba tus ajustes.",
-		"invalidApiKey": "Clave de API no válida. Comprueba la configuración de tu clave de API.",
-		"invalidBaseUrl": "URL base no válida. Comprueba la configuración de tu URL.",
-		"invalidModel": "Modelo no válido. Comprueba la configuración de tu modelo.",
 		"invalidResponse": "Respuesta no válida del servicio de embedder. Comprueba tu configuración.",
 		"apiKeyRequired": "Se requiere una clave de API para este embedder",
 		"baseUrlRequired": "Se requiere una URL base para este embedder"
@@ -50,7 +45,6 @@
 	"serviceFactory": {
 		"openAiConfigMissing": "Falta la configuración de OpenAI para crear el incrustador",
 		"ollamaConfigMissing": "Falta la configuración de Ollama para crear el incrustador",
-		"openAiCompatibleConfigMissing": "Falta la configuración compatible con OpenAI para crear el incrustador",
 		"geminiConfigMissing": "Falta la configuración de Gemini para crear el incrustador",
 		"mistralConfigMissing": "Falta la configuración de Mistral para la creación del incrustador",
 		"openRouterConfigMissing": "Falta la configuración de OpenRouter para la creación del incrustador",
@@ -64,7 +58,6 @@
 	},
 	"orchestrator": {
 		"indexingFailedNoBlocks": "Indexación fallida: No se indexaron exitosamente bloques de código. Esto usualmente indica un problema de configuración del incrustador.",
-		"indexingFailedCritical": "Indexación fallida: No se indexaron exitosamente bloques de código a pesar de encontrar archivos para procesar. Esto indica una falla crítica del incrustador.",
 		"fileWatcherStarted": "Monitor de archivos iniciado.",
 		"fileWatcherStopped": "Monitor de archivos detenido.",
 		"failedDuringInitialScan": "Falló durante el escaneo inicial: {{errorMessage}}",

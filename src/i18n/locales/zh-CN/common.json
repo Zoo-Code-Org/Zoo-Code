@@ -1,23 +1,12 @@
 {
-	"extension": {
-		"name": "Zoo Code",
-		"description": "您编辑器中的完整AI开发团队。"
-	},
 	"number_format": {
 		"thousand_suffix": "k",
 		"million_suffix": "m",
 		"billion_suffix": "b"
 	},
-	"welcome": "欢迎，{{name}}！您有 {{count}} 条通知。",
-	"items": {
-		"zero": "没有项目",
-		"one": "1个项目",
-		"other": "{{count}}个项目"
-	},
 	"confirmation": {
 		"reset_state": "您确定要重置扩展中的所有状态和密钥存储吗？此操作无法撤消。",
-		"delete_config_profile": "您确定要删除此配置文件吗？",
-		"delete_custom_mode_with_rules": "您确定要删除此 {scope} 模式吗？\n\n这也将删除位于以下位置的关联规则文件夹：\n{rulesFolderPath}"
+		"delete_config_profile": "您确定要删除此配置文件吗？"
 	},
 	"errors": {
 		"invalid_mcp_config": "项目MCP配置格式无效",
@@ -42,8 +31,6 @@
 		"checkpoint_diff_to_current": "对当前工作区的更改",
 		"nested_git_repos_warning": "存档点已禁用，因为在 {{path}} 检测到嵌套的 git 仓库。要使用存档点，请移除或重新定位此嵌套的 git 仓库。",
 		"no_workspace": "请先打开项目文件夹",
-		"update_support_prompt": "更新支持消息失败",
-		"reset_support_prompt": "重置支持消息失败",
 		"enhance_prompt": "增强消息失败",
 		"get_system_prompt": "获取系统消息失败",
 		"search_commits": "搜索提交失败",
@@ -57,8 +44,6 @@
 		"update_server_timeout": "更新服务器超时设置失败",
 		"hmr_not_running": "本地开发服务器未运行，HMR将不起作用。请在启动扩展前运行'npm run dev'以启用HMR。",
 		"retrieve_current_mode": "从状态中检索当前模式失败。",
-		"failed_delete_repo": "删除关联的影子仓库或分支失败：{{error}}",
-		"failed_remove_directory": "删除任务目录失败：{{error}}",
 		"custom_storage_path_unusable": "自定义存储路径 \"{{path}}\" 不可用，将使用默认路径",
 		"cannot_access_path": "无法访问路径 {{path}}：{{error}}",
 		"path_outside_workspace": "路径位于工作区之外",
@@ -70,24 +55,13 @@
 		"condensed_recently": "上下文最近已压缩；跳过此次尝试",
 		"condense_handler_invalid": "压缩上下文的API处理程序无效",
 		"condense_api_failed": "压缩 API 调用失败：{{message}}",
-		"url_timeout": "网站加载超时。这可能是由于网络连接缓慢、网站负载过重或暂时不可用。你可以稍后重试或检查 URL 是否正确。",
-		"url_not_found": "找不到网站地址。请检查 URL 是否正确并重试。",
-		"no_internet": "无网络连接。请检查网络连接并重试。",
-		"url_forbidden": "访问此网站被禁止。该网站可能阻止自动访问或需要身份验证。",
-		"url_page_not_found": "页面未找到。请检查 URL 是否正确。",
-		"url_request_aborted": "获取 URL 的请求被中止。如果网站阻止自动访问、需要身份验证或存在网络问题，就可能发生这种情况。请重试或检查 URL 是否可以在普通浏览器中访问。",
-		"url_fetch_failed": "获取 URL 内容失败：{{error}}",
-		"url_fetch_error_with_url": "获取 {{url}} 内容时出错：{{error}}",
 		"command_timeout": "命令执行超时，{{seconds}} 秒后",
 		"destructiveCommandGuard": {
 			"unavailable": "Destructive Command Guard 已启用，但不适用于此平台",
 			"enableFailed": "无法启用 Destructive Command Guard：{{error}}"
 		},
-		"share_task_failed": "分享任务失败。请重试。",
 		"share_no_active_task": "没有活跃任务可分享",
-		"share_auth_required": "需要身份验证。请登录以分享任务。",
 		"share_not_enabled": "此组织未启用任务分享功能。",
-		"share_task_not_found": "未找到任务或访问被拒绝。",
 		"mode_import_failed": "导入模式失败：{{error}}",
 		"delete_rules_folder_failed": "删除规则文件夹失败：{{rulesFolderPath}}。错误：{{error}}",
 		"command_not_found": "未找到命令 '{{name}}'",
@@ -97,13 +71,6 @@
 		"command_already_exists": "命令 \"{{commandName}}\" 已存在",
 		"create_command_failed": "创建命令失败",
 		"command_template_content": "---\ndescription: \"此命令功能的简要描述\"\n---\n\n这是一个新的斜杠命令。编辑此文件以自定义命令行为。",
-		"claudeCode": {
-			"processExited": "Claude Code 进程退出，退出码：{{exitCode}}。",
-			"errorOutput": "错误输出：{{output}}",
-			"processExitedWithError": "Claude Code 进程退出，退出码：{{exitCode}}。错误输出：{{output}}",
-			"stoppedWithReason": "Claude Code 停止，原因：{{reason}}",
-			"apiKeyModelPlanMismatch": "API keys and subscription plans allow different models. Make sure the selected model is included in your plan."
-		},
 		"message": {
 			"no_active_task_to_delete": "没有可删除消息的活跃任务",
 			"invalid_timestamp_for_deletion": "删除操作的消息时间戳无效",
@@ -116,14 +83,9 @@
 		"gemini": {
 			"generate_stream": "Gemini 生成上下文流错误：{{error}}",
 			"generate_complete_prompt": "Gemini 完成错误：{{error}}",
-			"sources": "来源：",
-			"thinking_complete_no_output": "（思考完成，但未生成输出。）",
-			"thinking_complete_truncated": "（思考完成，但由于 Token 限制输出被截断。）",
-			"thinking_complete_safety": "（思考完成，但由于安全设置输出被阻止。）",
-			"thinking_complete_recitation": "（思考完成，但由于引用检查输出被阻止。）"
+			"sources": "来源："
 		},
 		"roo": {
-			"authenticationRequired": "Roo 提供商需要云认证。请登录 Roo Code Cloud。",
 			"routerRemoved": "Roo Code Router 已被移除。请选择并配置其他提供商。"
 		},
 		"api": {
@@ -157,7 +119,6 @@
 	},
 	"warnings": {
 		"no_terminal_content": "没有选择终端内容",
-		"missing_task_files": "此任务的文件丢失。您想从任务列表中删除它吗？",
 		"auto_import_failed": "自动导入 ZooCode 设置失败：{{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "未找到可从 {{domain}} 导入的 Roo Code 任务历史记录。",
@@ -166,18 +127,13 @@
 		}
 	},
 	"info": {
-		"no_changes": "未找到更改。",
 		"clipboard_copy": "系统消息已成功复制到剪贴板",
-		"history_cleanup": "已从历史记录中清理{{count}}个缺少文件的任务。",
 		"custom_storage_path_set": "自定义存储路径已设置：{{path}}",
 		"default_storage_path": "已恢复使用默认存储路径",
 		"settings_imported": "设置已成功导入。",
 		"auto_import_success": "已自动导入 ZooCode 设置：{{filename}}",
-		"share_link_copied": "分享链接已复制到剪贴板",
 		"image_copied_to_clipboard": "图片数据 URI 已复制到剪贴板",
 		"image_saved": "图片已保存到 {{path}}",
-		"organization_share_link_copied": "组织分享链接已复制到剪贴板！",
-		"public_share_link_copied": "公开分享链接已复制到剪贴板！",
 		"mode_exported": "模式 '{{mode}}' 已成功导出",
 		"mode_imported": "模式已成功导入",
 		"roo": {
@@ -189,25 +145,16 @@
 		}
 	},
 	"answers": {
-		"yes": "是",
-		"no": "否",
-		"remove": "删除",
-		"keep": "保留"
+		"yes": "是"
 	},
 	"buttons": {
-		"save": "保存",
-		"edit": "编辑",
 		"learn_more": "了解更多"
 	},
 	"tasks": {
-		"canceled": "任务错误：它已被用户停止并取消。",
-		"deleted": "任务失败：它已被用户停止并删除。",
 		"incomplete": "任务 #{{taskNumber}} (未完成)",
 		"no_messages": "任务 #{{taskNumber}} (无消息)"
 	},
 	"interruption": {
-		"responseInterruptedByUser": "响应被用户中断",
-		"responseInterruptedByApiError": "响应被 API 错误中断",
 		"streamTerminatedByProvider": "提供方终止了请求"
 	},
 	"storage": {
@@ -220,9 +167,6 @@
 		"task_prompt": "让Zoo做什么？",
 		"task_placeholder": "在这里输入任务"
 	},
-	"settings": {
-		"providers": {}
-	},
 	"customModes": {
 		"errors": {
 			"yamlParseError": ".roomodes 文件第 {{line}} 行 YAML 格式无效。请检查：\n• 正确的缩进（使用空格，不要使用制表符）\n• 匹配的引号和括号\n• 有效的 YAML 语法",
@@ -234,10 +178,6 @@
 			"modeNotFound": "写入错误：未找到模式",
 			"noWorkspaceForProject": "未找到项目特定模式的工作区文件夹",
 			"rulesCleanupFailed": "模式删除成功，但无法删除位于 {{rulesFolderPath}} 的规则文件夹。您可能需要手动删除。"
-		},
-		"scope": {
-			"project": "项目",
-			"global": "全局"
 		}
 	},
 	"marketplace": {
@@ -260,22 +200,8 @@
 			"organization_requires_auth": "您的组织需要身份验证。"
 		}
 	},
-	"prompts": {
-		"deleteMode": {
-			"title": "删除自定义模式",
-			"description": "您确定要删除此 {{scope}} 模式吗？这也将删除位于 {{rulesFolderPath}} 的关联规则文件夹",
-			"descriptionNoRules": "您确定要删除此自定义模式吗？",
-			"confirm": "删除"
-		}
-	},
-	"commands": {
-		"preventCompletionWithOpenTodos": {
-			"description": "当待办事项列表中有未完成的待办事项时阻止任务完成"
-		}
-	},
 	"docsLink": {
-		"label": "Docs",
-		"url": "https://docs.zoocode.dev"
+		"label": "Docs"
 	},
 	"zooAuth": {
 		"errors": {

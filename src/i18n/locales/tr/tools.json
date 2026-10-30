@@ -1,8 +1,5 @@
 {
 	"readFile": {
-		"linesRange": " (satır {{start}}-{{end}})",
-		"definitionsOnly": " (sadece tanımlar)",
-		"maxLines": " (maks. {{max}} satır)",
 		"imageTooLarge": "Görüntü dosyası çok büyük ({{size}} MB). İzin verilen maksimum boyut {{max}} MB.",
 		"imageWithSize": "Görüntü dosyası ({{size}} KB)"
 	},
@@ -11,20 +8,12 @@
 	"unknownToolError": "Zoo bilinmeyen bir araç kullanmaya çalıştı: \"{{toolName}}\". Yeniden deneniyor...",
 	"missingToolParameter": "Zoo, gerekli '{{paramName}}' parametresi için değer olmadan {{toolName}} kullanmaya çalıştı. Yeniden deneniyor...",
 	"missingToolParameterWithPath": "Zoo, '{{relPath}}' için gerekli '{{paramName}}' parametresi için değer olmadan {{toolName}} kullanmaya çalıştı. Yeniden deneniyor...",
-	"codebaseSearch": {
-		"approval": "Kod tabanında '{{query}}' aranıyor..."
-	},
 	"executeCommand": {
 		"destructiveCommandGuard": {
 			"blocked": "Destructive Command Guard bu komutu engelledi.",
 			"blockedWithReason": "Destructive Command Guard bu komutu engelledi. DCG mesajı: {{reason}}",
 			"blockedWithRule": "Destructive Command Guard bu komutu engelledi. (Kural: {{ruleId}})",
 			"blockedWithReasonAndRule": "Destructive Command Guard bu komutu engelledi. DCG mesajı: {{reason}} (Kural: {{ruleId}})"
-		}
-	},
-	"newTask": {
-		"errors": {
-			"policy_restriction": "Politika kısıtlamaları nedeniyle yeni görev oluşturulamadı."
 		}
 	},
 	"generateImage": {
@@ -34,9 +23,6 @@
 		"noImageGenerated": "Yanıtta görüntü oluşturulmadı",
 		"invalidImageData": "Yanıtta geçersiz görüntü verisi",
 		"invalidImageFormat": "Geçersiz görüntü formatı alındı",
-		"unknownError": "Bilinmeyen bir hata oluştu",
-		"roo": {
-			"authRequired": "Görüntü oluşturma için Zoo Code Cloud kimlik doğrulaması gereklidir. Lütfen Zoo Code Cloud'da oturum açın."
-		}
+		"unknownError": "Bilinmeyen bir hata oluştu"
 	}
 }

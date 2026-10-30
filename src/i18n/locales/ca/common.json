@@ -3,25 +3,14 @@
 		"task_prompt": "Què vols que faci Zoo?",
 		"task_placeholder": "Escriu la teva tasca aquí"
 	},
-	"extension": {
-		"name": "Zoo Code",
-		"description": "Tot un equip de desenvolupadors d'IA al teu editor."
-	},
 	"number_format": {
 		"thousand_suffix": "k",
 		"million_suffix": "m",
 		"billion_suffix": "b"
 	},
-	"welcome": "Benvingut/da, {{name}}! Tens {{count}} notificacions.",
-	"items": {
-		"zero": "Cap element",
-		"one": "Un element",
-		"other": "{{count}} elements"
-	},
 	"confirmation": {
 		"reset_state": "Estàs segur que vols restablir tots els estats i emmagatzematge secret a l'extensió? Això no es pot desfer.",
-		"delete_config_profile": "Estàs segur que vols eliminar aquest perfil de configuració?",
-		"delete_custom_mode_with_rules": "Esteu segur que voleu suprimir aquest mode {scope}?\n\nAixò també suprimirà la carpeta de regles associada a:\n{rulesFolderPath}"
+		"delete_config_profile": "Estàs segur que vols eliminar aquest perfil de configuració?"
 	},
 	"errors": {
 		"invalid_data_uri": "Format d'URI de dades no vàlid",
@@ -41,8 +30,6 @@
 		"checkpoint_diff_to_current": "Canvis a l'espai de treball actual",
 		"nested_git_repos_warning": "Els punts de control estan deshabilitats perquè s'ha detectat un repositori git niat a: {{path}}. Per utilitzar punts de control, si us plau elimina o reubica aquest repositori git niat.",
 		"no_workspace": "Si us plau, obre primer una carpeta de projecte",
-		"update_support_prompt": "Ha fallat l'actualització del missatge de suport",
-		"reset_support_prompt": "Ha fallat el restabliment del missatge de suport",
 		"enhance_prompt": "Ha fallat la millora del missatge",
 		"get_system_prompt": "Ha fallat l'obtenció del missatge del sistema",
 		"search_commits": "Ha fallat la cerca de commits",
@@ -56,8 +43,6 @@
 		"update_server_timeout": "Ha fallat l'actualització del temps d'espera del servidor",
 		"hmr_not_running": "El servidor de desenvolupament local no està executant-se, l'HMR no funcionarà. Si us plau, executa 'npm run dev' abans de llançar l'extensió per habilitar l'HMR.",
 		"retrieve_current_mode": "Error en recuperar el mode actual de l'estat.",
-		"failed_delete_repo": "Ha fallat l'eliminació del repositori o branca associada: {{error}}",
-		"failed_remove_directory": "Ha fallat l'eliminació del directori de tasques: {{error}}",
 		"custom_storage_path_unusable": "La ruta d'emmagatzematge personalitzada \"{{path}}\" no és utilitzable, s'utilitzarà la ruta predeterminada",
 		"cannot_access_path": "No es pot accedir a la ruta {{path}}: {{error}}",
 		"path_outside_workspace": "La ruta és fora de l'espai de treball",
@@ -69,24 +54,13 @@
 		"condensed_recently": "El context s'ha condensat recentment; s'omet aquest intent",
 		"condense_handler_invalid": "El gestor de l'API per condensar el context no és vàlid",
 		"condense_api_failed": "La crida a l'API de condensació ha fallat: {{message}}",
-		"url_timeout": "El lloc web ha trigat massa a carregar (timeout). Això pot ser degut a una connexió lenta, un lloc web pesat o temporalment no disponible. Pots tornar-ho a provar més tard o comprovar si la URL és correcta.",
-		"url_not_found": "No s'ha pogut trobar l'adreça del lloc web. Comprova si la URL és correcta i torna-ho a provar.",
-		"no_internet": "No hi ha connexió a internet. Comprova la teva connexió de xarxa i torna-ho a provar.",
-		"url_forbidden": "L'accés a aquest lloc web està prohibit. El lloc pot bloquejar l'accés automatitzat o requerir autenticació.",
-		"url_page_not_found": "No s'ha trobat la pàgina. Comprova si la URL és correcta.",
-		"url_request_aborted": "La sol·licitud per obtenir la URL s'ha cancel·lat. Això pot passar si el lloc bloqueja l'accés automatitzat, requereix autenticació o si hi ha un problema de xarxa. Torna-ho a provar o comprova si la URL és accessible en un navegador normal.",
-		"url_fetch_failed": "Error en obtenir el contingut de la URL: {{error}}",
-		"url_fetch_error_with_url": "Error en obtenir contingut per {{url}}: {{error}}",
 		"command_timeout": "L'execució de la comanda ha superat el temps d'espera de {{seconds}} segons",
 		"destructiveCommandGuard": {
 			"unavailable": "Destructive Command Guard està activat, però no està disponible per a aquesta plataforma",
 			"enableFailed": "No s'ha pogut activar Destructive Command Guard: {{error}}"
 		},
-		"share_task_failed": "Ha fallat compartir la tasca. Si us plau, torna-ho a provar.",
 		"share_no_active_task": "No hi ha cap tasca activa per compartir",
-		"share_auth_required": "Es requereix autenticació. Si us plau, inicia sessió per compartir tasques.",
 		"share_not_enabled": "La compartició de tasques no està habilitada per a aquesta organització.",
-		"share_task_not_found": "Tasca no trobada o accés denegat.",
 		"delete_rules_folder_failed": "Error en eliminar la carpeta de regles: {{rulesFolderPath}}. Error: {{error}}",
 		"command_not_found": "Ordre '{{name}}' no trobada",
 		"open_command_file": "Error en obrir el fitxer d'ordres",
@@ -95,13 +69,6 @@
 		"command_already_exists": "L'ordre \"{{commandName}}\" ja existeix",
 		"create_command_failed": "Error en crear l'ordre",
 		"command_template_content": "---\ndescription: \"Breu descripció del que fa aquesta ordre\"\n---\n\nAquesta és una nova ordre slash. Edita aquest fitxer per personalitzar el comportament de l'ordre.",
-		"claudeCode": {
-			"processExited": "El procés Claude Code ha sortit amb codi {{exitCode}}.",
-			"errorOutput": "Sortida d'error: {{output}}",
-			"processExitedWithError": "El procés Claude Code ha sortit amb codi {{exitCode}}. Sortida d'error: {{output}}",
-			"stoppedWithReason": "Claude Code s'ha aturat per la raó: {{reason}}",
-			"apiKeyModelPlanMismatch": "Les claus API i els plans de subscripció permeten models diferents. Assegura't que el model seleccionat estigui inclòs al teu pla."
-		},
 		"message": {
 			"no_active_task_to_delete": "No hi ha cap tasca activa de la qual eliminar missatges",
 			"invalid_timestamp_for_deletion": "Marca de temps del missatge no vàlida per a l'eliminació",
@@ -114,14 +81,9 @@
 		"gemini": {
 			"generate_stream": "Error del flux de context de generació de Gemini: {{error}}",
 			"generate_complete_prompt": "Error de finalització de Gemini: {{error}}",
-			"sources": "Fonts:",
-			"thinking_complete_no_output": "(Pensament completat, però no s'ha generat cap sortida.)",
-			"thinking_complete_truncated": "(Pensament completat, però la sortida s'ha truncat a causa del límit de fitxes.)",
-			"thinking_complete_safety": "(Pensament completat, però la sortida s'ha bloquejat a causa de la configuració de seguretat.)",
-			"thinking_complete_recitation": "(Pensament completat, però la sortida s'ha bloquejat a causa de la comprovació de recitació.)"
+			"sources": "Fonts:"
 		},
 		"roo": {
-			"authenticationRequired": "El proveïdor Roo requereix autenticació al núvol. Si us plau, inicieu sessió a Roo Code Cloud.",
 			"routerRemoved": "S'ha eliminat Roo Code Router. Selecciona i configura un proveïdor diferent."
 		},
 		"openAiCodex": {
@@ -156,7 +118,6 @@
 	},
 	"warnings": {
 		"no_terminal_content": "No s'ha seleccionat contingut de terminal",
-		"missing_task_files": "Els fitxers d'aquesta tasca falten. Vols eliminar-la de la llista de tasques?",
 		"auto_import_failed": "Ha fallat la importació automàtica de la configuració de ZooCode: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "No s'ha trobat historial de tasques de Roo Code per importar de {{domain}}.",
@@ -165,18 +126,13 @@
 		}
 	},
 	"info": {
-		"no_changes": "No s'han trobat canvis.",
 		"clipboard_copy": "Missatge del sistema copiat correctament al portapapers",
-		"history_cleanup": "S'han netejat {{count}} tasques amb fitxers que falten de l'historial.",
 		"custom_storage_path_set": "Ruta d'emmagatzematge personalitzada establerta: {{path}}",
 		"default_storage_path": "S'ha reprès l'ús de la ruta d'emmagatzematge predeterminada",
 		"settings_imported": "Configuració importada correctament.",
 		"auto_import_success": "Configuració de ZooCode importada automàticament des de {{filename}}",
-		"share_link_copied": "Enllaç de compartició copiat al portapapers",
 		"image_copied_to_clipboard": "URI de dades de la imatge copiada al portapapers",
 		"image_saved": "Imatge desada a {{path}}",
-		"organization_share_link_copied": "Enllaç de compartició d'organització copiat al porta-retalls!",
-		"public_share_link_copied": "Enllaç de compartició pública copiat al porta-retalls!",
 		"mode_exported": "Mode '{{mode}}' exportat correctament",
 		"mode_imported": "Mode importat correctament",
 		"roo": {
@@ -188,25 +144,16 @@
 		}
 	},
 	"answers": {
-		"yes": "Sí",
-		"no": "No",
-		"remove": "Eliminar",
-		"keep": "Mantenir"
+		"yes": "Sí"
 	},
 	"buttons": {
-		"save": "Desar",
-		"edit": "Editar",
 		"learn_more": "Més informació"
 	},
 	"tasks": {
-		"canceled": "Error de tasca: Ha estat aturada i cancel·lada per l'usuari.",
-		"deleted": "Fallada de tasca: Ha estat aturada i eliminada per l'usuari.",
 		"incomplete": "Tasca #{{taskNumber}} (Incompleta)",
 		"no_messages": "Tasca #{{taskNumber}} (Sense missatges)"
 	},
 	"interruption": {
-		"responseInterruptedByUser": "Resposta interrompuda per l'usuari",
-		"responseInterruptedByApiError": "Resposta interrompuda per error d'API",
 		"streamTerminatedByProvider": "El proveïdor ha finalitzat la sol·licitud"
 	},
 	"storage": {
@@ -214,9 +161,6 @@
 		"path_placeholder": "D:\\ZooCodeStorage",
 		"enter_absolute_path": "Introdueix una ruta completa (p. ex. D:\\ZooCodeStorage o /home/user/storage)",
 		"enter_valid_path": "Introdueix una ruta vàlida"
-	},
-	"settings": {
-		"providers": {}
 	},
 	"customModes": {
 		"errors": {
@@ -229,10 +173,6 @@
 			"modeNotFound": "Error d'escriptura: Mode no trobat",
 			"noWorkspaceForProject": "No s'ha trobat cap carpeta d'espai de treball per al mode específic del projecte",
 			"rulesCleanupFailed": "El mode s'ha suprimit correctament, però no s'ha pogut suprimir la carpeta de regles a {{rulesFolderPath}}. És possible que l'hagis de suprimir manualment."
-		},
-		"scope": {
-			"project": "projecte",
-			"global": "global"
 		}
 	},
 	"marketplace": {
@@ -255,22 +195,8 @@
 			"organization_requires_auth": "La teva organització requereix autenticació."
 		}
 	},
-	"prompts": {
-		"deleteMode": {
-			"title": "Suprimeix el mode personalitzat",
-			"description": "Esteu segur que voleu suprimir aquest mode {{scope}}? Això també suprimirà la carpeta de regles associada a: {{rulesFolderPath}}",
-			"descriptionNoRules": "Esteu segur que voleu suprimir aquest mode personalitzat?",
-			"confirm": "Suprimeix"
-		}
-	},
-	"commands": {
-		"preventCompletionWithOpenTodos": {
-			"description": "Evitar la finalització de tasques quan hi ha todos incomplets a la llista de todos"
-		}
-	},
 	"docsLink": {
-		"label": "Docs",
-		"url": "https://docs.zoocode.dev"
+		"label": "Docs"
 	},
 	"zooAuth": {
 		"errors": {

@@ -1,5 +1,4 @@
 {
-	"unknownError": "Lỗi không xác định",
 	"authenticationFailed": "Không thể tạo nhúng: Xác thực không thành công. Vui lòng kiểm tra khóa API của bạn.",
 	"failedWithStatus": "Không thể tạo nhúng sau {{attempts}} lần thử: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "Không thể tạo nhúng sau {{attempts}} lần thử: {{errorMessage}}",
@@ -39,10 +38,6 @@
 		"configurationError": "Cấu hình nhúng không hợp lệ. Vui lòng xem lại cài đặt của bạn.",
 		"serviceUnavailable": "Dịch vụ nhúng không có sẵn. Vui lòng đảm bảo nó đang chạy và có thể truy cập được.",
 		"invalidEndpoint": "Điểm cuối API không hợp lệ. Vui lòng kiểm tra cấu hình URL của bạn.",
-		"invalidEmbedderConfig": "Cấu hình nhúng không hợp lệ. Vui lòng kiểm tra cài đặt của bạn.",
-		"invalidApiKey": "Khóa API không hợp lệ. Vui lòng kiểm tra cấu hình khóa API của bạn.",
-		"invalidBaseUrl": "URL cơ sở không hợp lệ. Vui lòng kiểm tra cấu hình URL của bạn.",
-		"invalidModel": "Mô hình không hợp lệ. Vui lòng kiểm tra cấu hình mô hình của bạn.",
 		"invalidResponse": "Phản hồi không hợp lệ từ dịch vụ embedder. Vui lòng kiểm tra cấu hình của bạn.",
 		"apiKeyRequired": "Cần có khóa API cho trình nhúng này",
 		"baseUrlRequired": "Cần có URL cơ sở cho trình nhúng này"
@@ -50,7 +45,6 @@
 	"serviceFactory": {
 		"openAiConfigMissing": "Thiếu cấu hình OpenAI để tạo embedder",
 		"ollamaConfigMissing": "Thiếu cấu hình Ollama để tạo embedder",
-		"openAiCompatibleConfigMissing": "Thiếu cấu hình tương thích OpenAI để tạo embedder",
 		"geminiConfigMissing": "Thiếu cấu hình Gemini để tạo embedder",
 		"mistralConfigMissing": "Thiếu cấu hình Mistral để tạo trình nhúng",
 		"openRouterConfigMissing": "Thiếu cấu hình OpenRouter để tạo trình nhúng",
@@ -64,7 +58,6 @@
 	},
 	"orchestrator": {
 		"indexingFailedNoBlocks": "Lập chỉ mục thất bại: Không có khối mã nào được lập chỉ mục thành công. Điều này thường cho thấy vấn đề cấu hình embedder.",
-		"indexingFailedCritical": "Lập chỉ mục thất bại: Không có khối mã nào được lập chỉ mục thành công mặc dù đã tìm thấy tệp để xử lý. Điều này cho thấy lỗi nghiêm trọng của embedder.",
 		"fileWatcherStarted": "Trình theo dõi tệp đã khởi động.",
 		"fileWatcherStopped": "Trình theo dõi tệp đã dừng.",
 		"failedDuringInitialScan": "Thất bại trong quá trình quét ban đầu: {{errorMessage}}",
