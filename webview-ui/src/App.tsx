@@ -194,7 +194,7 @@ const App = () => {
 			// yet (e.g. an old extension build during a mixed rollout), matching VS Code's own
 			// default -- it must never silently disable telemetry just because the field is
 			// momentarily undefined during hydration.
-			telemetryClient.updateTelemetryState(
+			void telemetryClient.updateTelemetryState(
 				telemetrySetting,
 				telemetryKey,
 				machineId,

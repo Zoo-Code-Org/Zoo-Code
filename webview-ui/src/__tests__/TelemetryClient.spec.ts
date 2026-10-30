@@ -2,14 +2,14 @@ import posthog from "posthog-js"
 
 import { telemetryClient } from "@src/utils/TelemetryClient"
 
-vi.mock("posthog-js", () => ({
-	default: {
-		init: vi.fn(),
-		reset: vi.fn(),
-		identify: vi.fn(),
-		capture: vi.fn(),
-	},
+const posthogMocks = vi.hoisted(() => ({
+	init: vi.fn(),
+	reset: vi.fn(),
+	identify: vi.fn(),
+	capture: vi.fn(),
 }))
+
+vi.mock("posthog-js", () => ({ default: posthogMocks }))
 
 describe("TelemetryClient", () => {
 	beforeEach(() => {
@@ -35,21 +35,23 @@ describe("TelemetryClient", () => {
 	 * Tests for the updateTelemetryState method
 	 */
 	describe("updateTelemetryState", () => {
-		it("resets PostHog when called", () => {
+		it("does not load PostHog when the update cannot enable telemetry", async () => {
 			// Act
-			telemetryClient.updateTelemetryState("enabled")
+			await telemetryClient.updateTelemetryState("enabled")
 
-			// Assert
-			expect(posthog.reset).toHaveBeenCalled()
+			// Assert - no credentials means no opt-in, so the PostHog chunk must stay
+			// unloaded and reset() must not run against an uninitialized client.
+			expect(posthog.reset).not.toHaveBeenCalled()
+			expect(posthog.init).not.toHaveBeenCalled()
 		})
 
-		it("initializes PostHog when telemetry is enabled with API key and distinctId", () => {
+		it("initializes PostHog when telemetry is enabled with API key and distinctId", async () => {
 			// Arrange
 			const API_KEY = "test-api-key"
 			const DISTINCT_ID = "test-user-id"
 
 			// Act
-			telemetryClient.updateTelemetryState("enabled", API_KEY, DISTINCT_ID)
+			await telemetryClient.updateTelemetryState("enabled", API_KEY, DISTINCT_ID)
 
 			// Assert
 			expect(posthog.init).toHaveBeenCalledWith(
@@ -69,21 +71,21 @@ describe("TelemetryClient", () => {
 			expect(posthog.identify).toHaveBeenCalled()
 		})
 
-		it("doesn't initialize PostHog when telemetry is disabled", () => {
+		it("doesn't initialize PostHog when telemetry is disabled", async () => {
 			// Act
-			telemetryClient.updateTelemetryState("disabled")
+			await telemetryClient.updateTelemetryState("disabled")
 
 			// Assert
 			expect(posthog.init).not.toHaveBeenCalled()
 		})
 
-		it("initializes PostHog when telemetry is unset and credentials are present (disclosed opt-out default)", () => {
+		it("initializes PostHog when telemetry is unset and credentials are present (disclosed opt-out default)", async () => {
 			// Arrange
 			const API_KEY = "test-api-key"
 			const DISTINCT_ID = "test-user-id"
 
 			// Act
-			telemetryClient.updateTelemetryState("unset", API_KEY, DISTINCT_ID)
+			await telemetryClient.updateTelemetryState("unset", API_KEY, DISTINCT_ID)
 
 			// Assert
 			expect(posthog.init).toHaveBeenCalledWith(
@@ -96,15 +98,15 @@ describe("TelemetryClient", () => {
 			)
 		})
 
-		it("doesn't initialize PostHog when telemetry is unset but credentials are missing", () => {
+		it("doesn't initialize PostHog when telemetry is unset but credentials are missing", async () => {
 			// Act
-			telemetryClient.updateTelemetryState("unset")
+			await telemetryClient.updateTelemetryState("unset")
 
 			// Assert
 			expect(posthog.init).not.toHaveBeenCalled()
 		})
 
-		it("doesn't initialize PostHog when vscode.env.isTelemetryEnabled is false, even with an explicit Accept", () => {
+		it("doesn't initialize PostHog when vscode.env.isTelemetryEnabled is false, even with an explicit Accept", async () => {
 			// Regression test: the webview's own PostHog client must respect the live VS
 			// Code global telemetry toggle the same way the extension-side gate does --
 			// otherwise a user's explicit Accept can still send events while VS Code's
@@ -112,16 +114,16 @@ describe("TelemetryClient", () => {
 			const API_KEY = "test-api-key"
 			const DISTINCT_ID = "test-user-id"
 
-			telemetryClient.updateTelemetryState("enabled", API_KEY, DISTINCT_ID, false)
+			await telemetryClient.updateTelemetryState("enabled", API_KEY, DISTINCT_ID, false)
 
 			expect(posthog.init).not.toHaveBeenCalled()
 		})
 
-		it("initializes PostHog when vscode.env.isTelemetryEnabled is true and the user opted in", () => {
+		it("initializes PostHog when vscode.env.isTelemetryEnabled is true and the user opted in", async () => {
 			const API_KEY = "test-api-key"
 			const DISTINCT_ID = "test-user-id"
 
-			telemetryClient.updateTelemetryState("enabled", API_KEY, DISTINCT_ID, true)
+			await telemetryClient.updateTelemetryState("enabled", API_KEY, DISTINCT_ID, true)
 
 			expect(posthog.init).toHaveBeenCalledWith(
 				API_KEY,
@@ -133,13 +135,13 @@ describe("TelemetryClient", () => {
 			)
 		})
 
-		it("defaults vscodeTelemetryEnabled to true when the argument is omitted", () => {
+		it("defaults vscodeTelemetryEnabled to true when the argument is omitted", async () => {
 			// Callers on an old build (or during a state-hydration race) that don't yet
 			// pass this argument must not have telemetry silently disabled as a side effect.
 			const API_KEY = "test-api-key"
 			const DISTINCT_ID = "test-user-id"
 
-			telemetryClient.updateTelemetryState("enabled", API_KEY, DISTINCT_ID)
+			await telemetryClient.updateTelemetryState("enabled", API_KEY, DISTINCT_ID)
 
 			expect(posthog.init).toHaveBeenCalled()
 		})
@@ -149,9 +151,9 @@ describe("TelemetryClient", () => {
 	 * Tests for the capture method
 	 */
 	describe("capture", () => {
-		it("captures events when telemetry is enabled", () => {
+		it("captures events when telemetry is enabled", async () => {
 			// Arrange - set telemetry to enabled
-			telemetryClient.updateTelemetryState("enabled", "test-key", "test-user")
+			await telemetryClient.updateTelemetryState("enabled", "test-key", "test-user")
 			vi.clearAllMocks() // Clear previous calls
 
 			// Act
@@ -167,9 +169,9 @@ describe("TelemetryClient", () => {
 			)
 		})
 
-		it("doesn't capture events when telemetry is disabled", () => {
+		it("doesn't capture events when telemetry is disabled", async () => {
 			// Arrange - set telemetry to disabled
-			telemetryClient.updateTelemetryState("disabled")
+			await telemetryClient.updateTelemetryState("disabled")
 			vi.clearAllMocks() // Clear previous calls
 
 			// Act
@@ -183,9 +185,9 @@ describe("TelemetryClient", () => {
 		 * This test verifies that no telemetry events are captured when
 		 * the telemetry setting is unset, further documenting the expected behavior
 		 */
-		it("doesn't capture events when telemetry is unset", () => {
+		it("doesn't capture events when telemetry is unset", async () => {
 			// Arrange - set telemetry to unset
-			telemetryClient.updateTelemetryState("unset")
+			await telemetryClient.updateTelemetryState("unset")
 			vi.clearAllMocks() // Clear previous calls
 
 			// Act
@@ -193,6 +195,90 @@ describe("TelemetryClient", () => {
 
 			// Assert
 			expect(posthog.capture).not.toHaveBeenCalled()
+		})
+	})
+
+	/**
+	 * The PostHog chunk is now loaded on demand, so events captured between the
+	 * enabling updateTelemetryState() call and the chunk resolving must be replayed
+	 * once the client is ready. These tests reload the module to get fresh
+	 * module-level state (the loaded client and the pending queue).
+	 */
+	describe("deferred PostHog loading", () => {
+		async function loadFreshTelemetryClient() {
+			vi.resetModules()
+			const module = await import("@src/utils/TelemetryClient")
+			return module.telemetryClient
+		}
+
+		it("does not load PostHog until telemetry is actually enabled", async () => {
+			const client = await loadFreshTelemetryClient()
+
+			await client.updateTelemetryState("disabled", "test-key", "test-user")
+
+			expect(posthog.init).not.toHaveBeenCalled()
+			expect(posthog.reset).not.toHaveBeenCalled()
+		})
+
+		it("replays events captured while the PostHog chunk was loading", async () => {
+			const client = await loadFreshTelemetryClient()
+
+			// Capture happens before the enabling update resolves, which is the window
+			// that did not exist when posthog-js was a static import.
+			const enabling = client.updateTelemetryState("enabled", "test-key", "test-user")
+			client.capture("early_event", { property: "queued" })
+			await enabling
+
+			expect(posthog.capture).toHaveBeenCalledWith(
+				"early_event",
+				expect.objectContaining({ property: "queued", releaseChannel: "stable" }),
+			)
+		})
+
+		it("drops queued events when telemetry is disabled before the chunk resolves", async () => {
+			const client = await loadFreshTelemetryClient()
+
+			const enabling = client.updateTelemetryState("enabled", "test-key", "test-user")
+			client.capture("early_event")
+			await client.updateTelemetryState("disabled")
+			await enabling
+
+			expect(posthog.capture).not.toHaveBeenCalled()
+			expect(posthog.init).not.toHaveBeenCalled()
+		})
+
+		it("does not capture events while telemetry is disabled", async () => {
+			const client = await loadFreshTelemetryClient()
+
+			await client.updateTelemetryState("disabled", "test-key", "test-user")
+			client.capture("dropped_event")
+
+			expect(posthog.capture).not.toHaveBeenCalled()
+		})
+
+		it("identifies the user through the PostHog loaded callback", async () => {
+			const client = await loadFreshTelemetryClient()
+
+			await client.updateTelemetryState("enabled", "test-key", "test-user")
+
+			const initOptions = vi.mocked(posthog.init).mock.calls.at(-1)?.[1]
+			expect(typeof initOptions?.loaded).toBe("function")
+
+			initOptions?.loaded?.(posthog)
+
+			expect(posthog.identify).toHaveBeenCalledWith("test-user")
+		})
+
+		it("skips init when the pending enable resolves after telemetry was disabled", async () => {
+			const client = await loadFreshTelemetryClient()
+
+			// Start an enable whose chunk load is still in flight, then disable before it
+			// resolves. The stale enable must not initialize PostHog afterwards.
+			const enabling = client.updateTelemetryState("enabled", "test-key", "test-user")
+			await client.updateTelemetryState("disabled")
+			await enabling
+
+			expect(posthog.init).not.toHaveBeenCalled()
 		})
 	})
 })
