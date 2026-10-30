@@ -92,7 +92,7 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 
 			service = await klass.create({ taskId, shadowDir, workspaceDir, log: () => {} })
 			await service.initShadowGit()
-		})
+		}, 60_000) // 60 second timeout for Windows git setup: repo init plus the shadow-git init can exceed 20s on CI
 
 		afterEach(async () => {
 			vitest.restoreAllMocks()
