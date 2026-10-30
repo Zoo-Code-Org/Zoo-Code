@@ -937,12 +937,13 @@ export class ClineProvider
 			}
 
 			if (persisted?.currentApiConfigName) {
-				loadedState.currentApiConfigName = persisted.currentApiConfigName
-
 				try {
 					const { name: _name, ...apiConfiguration } = await this.providerSettingsManager.getProfile({
 						name: persisted.currentApiConfigName,
 					})
+					// Pin the name only together with the configuration it resolves to: a name
+					// without its overlay would pair with whatever shared settings sit under it.
+					loadedState.currentApiConfigName = persisted.currentApiConfigName
 					loadedState.apiConfiguration = apiConfiguration as ProviderSettings
 				} catch (error) {
 					this.log(
@@ -2647,6 +2648,17 @@ export class ClineProvider
 				}
 				// Direct private access: compile-time safe across sibling instances.
 				await instance._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+
+				// A sibling task running under this profile holds a handler built from the old
+				// settings: rebuild it so the conversation does not keep sending the old token.
+				if (instance.getCurrentTask()?.taskApiConfigName === name) {
+					const {
+						name: _recordName,
+						id: _recordId,
+						...taskSettings
+					} = providerSettings as ProviderSettings & { name?: string; id?: string }
+					instance.updateTaskApiHandlerIfNeeded(taskSettings, { forceRebuild: true })
+				}
 			}
 
 			// Change the provider for the current task.
@@ -4057,15 +4069,20 @@ export class ClineProvider
 
 	public async setValue<K extends keyof RooCodeSettings>(key: K, value: RooCodeSettings[K]) {
 		const previousSharedValues = { [key]: this.contextProxy.getValue(key) } as RooCodeSettings
+		const writeGeneration = this.contextProxy.getStateWriteGeneration(key as never)
 		await this.contextProxy.setValue(key, value)
 		try {
 			await this._saveViewLocalStateFromMutation({ [key]: value })
 		} catch (error) {
 			// The per-view record did not land: restore the prior shared value so the two
 			// persistence layers cannot diverge, then surface the original failure.
-			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues, {
-				[key]: value,
-			} as RooCodeSettings)
+			await this._restoreSharedValuesAfterFailedViewWrite(
+				previousSharedValues,
+				{ [key]: value } as RooCodeSettings,
+				// This write is the generation after the one captured before it: only the write
+				// that is still the newest for the key may be rolled back.
+				{ [key]: writeGeneration + 1 } as Record<string, number>,
+			)
 			throw error
 		}
 	}
@@ -4096,13 +4113,35 @@ export class ClineProvider
 		const previousSharedValues = Object.fromEntries(
 			Object.keys(sanitizedValues).map((key) => [key, this.contextProxy.getValue(key as keyof RooCodeSettings)]),
 		) as RooCodeSettings
-		await this.contextProxy.setValues(sanitizedValues)
+		const writeGenerations = Object.fromEntries(
+			Object.keys(sanitizedValues).map((key) => [
+				key,
+				// This write produces the next generation for the key.
+				this.contextProxy.getStateWriteGeneration(key as never) + 1,
+			]),
+		) as Record<string, number>
+		try {
+			await this.contextProxy.setValues(sanitizedValues)
+		} catch (error) {
+			// A multi-key write can commit some keys before another rejects: put the captured
+			// previous values back so shared state does not stay half-applied.
+			try {
+				await this.contextProxy.setValues(previousSharedValues)
+			} catch (rollbackError) {
+				this.log(
+					`[ClineProvider#setValues] Failed to roll back a partially applied write: ${
+						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+					}`,
+				)
+			}
+			throw error
+		}
 		try {
 			await this._saveViewLocalStateFromMutation(sanitizedValues)
 		} catch (error) {
 			// The per-view record did not land: restore the prior shared values so the two
 			// persistence layers cannot diverge, then surface the original failure.
-			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues, sanitizedValues)
+			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues, sanitizedValues, writeGenerations)
 			throw error
 		}
 	}
@@ -4111,7 +4150,13 @@ export class ClineProvider
 	private async _saveViewLocalStateFromMutation(
 		values: Partial<RooCodeSettings> & Partial<ExtensionState>,
 	): Promise<void> {
+		const generation = this.viewLocalStateGeneration
 		await this._persistViewLocalStateFromMutation(values)
+		// A reset that ran while the durable write was pending cleared the buffer: applying
+		// the pre-reset value now would resurrect it.
+		if (this.viewLocalStateGeneration !== generation) {
+			return
+		}
 		this._updateViewLocalStateFromMutation(values)
 	}
 
@@ -4314,6 +4359,14 @@ export class ClineProvider
 		configuration: RooCodeSettings = {},
 	): Promise<Task> {
 		if (configuration) {
+			// Register custom modes before setValues: setValues validates `mode` against
+			// getCustomModes(), so a mode supplied in the same call would otherwise be dropped.
+			if (configuration.customModes?.length) {
+				for (const mode of configuration.customModes) {
+					await this.customModesManager.updateCustomMode(mode.slug, mode)
+				}
+			}
+
 			await this.setValues(configuration)
 
 			if (configuration.allowedCommands) {
@@ -4340,16 +4393,6 @@ export class ClineProvider
 
 			if (configuration.currentApiConfigName) {
 				await this.setProviderProfile(configuration.currentApiConfigName)
-			}
-
-			// Register custom modes so the CustomModesManager knows about them.
-			// setValues writes to global state, but the manager overwrites that
-			// when it merges .roomodes + global settings on refresh.  Persisting
-			// via updateCustomMode ensures modes survive the merge cycle.
-			if (configuration.customModes?.length) {
-				for (const mode of configuration.customModes) {
-					await this.customModesManager.updateCustomMode(mode.slug, mode)
-				}
 			}
 		}
 
@@ -5582,14 +5625,20 @@ export class ClineProvider
 	private async _restoreSharedValuesAfterFailedViewWrite(
 		previous: RooCodeSettings,
 		attempted: RooCodeSettings,
+		generations: Record<string, number> = {},
 	): Promise<void> {
 		// Roll back only the keys this attempt wrote and that still hold the value it wrote.
-		// A concurrent provider may have written a newer value in the meantime; restoring the
-		// captured previous value would then clobber it for every view that reads shared state.
+		// A concurrent provider may have written a newer value in the meantime - even the same
+		// value - so the per-key write generation must also still match; restoring otherwise
+		// would clobber that newer write for every view that reads shared state.
 		const rollback: RooCodeSettings = {} as RooCodeSettings
 
 		for (const key of Object.keys(attempted) as (keyof RooCodeSettings)[]) {
-			if (this.contextProxy.getValue(key) === attempted[key]) {
+			const generation = generations[key]
+			if (
+				this.contextProxy.getValue(key) === attempted[key] &&
+				(generation === undefined || this.contextProxy.getStateWriteGeneration(key as never) === generation)
+			) {
 				;(rollback as Record<string, unknown>)[key] = previous[key]
 			}
 		}
