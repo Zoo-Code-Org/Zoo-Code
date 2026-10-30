@@ -260,6 +260,7 @@ describe("writeToFileTool", () => {
 
 		await writeToFileTool.handle(mockCline, toolUse as ToolUse<"write_to_file">, {
 			askApproval: mockAskApproval,
+			toolCallId: "test-tool-call-id",
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
 			toolCallId: "test-tool-call-id",
@@ -578,6 +579,7 @@ describe("writeToFileTool", () => {
 				}
 				await writeToFileTool.handle(mockCline, toolUse as ToolUse<"write_to_file">, {
 					askApproval: mockAskApproval,
+					toolCallId: "test-tool-call-id",
 					handleError: mockHandleError,
 					pushToolResult: vi.fn(),
 				})
@@ -644,6 +646,7 @@ describe("writeToFileTool", () => {
 				}
 				await writeToFileTool.handle(mockCline, toolUse as ToolUse<"write_to_file">, {
 					askApproval: mockAskApproval,
+					toolCallId: "test-tool-call-id",
 					handleError: mockHandleError,
 					pushToolResult: vi.fn(),
 				})
@@ -824,6 +827,7 @@ describe("writeToFileTool", () => {
 
 			await writeToFileTool.execute({ path: "", content: "mock content" }, mockCline, {
 				askApproval: mockAskApproval,
+				toolCallId: "test-tool-call-id",
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
 			})
@@ -993,6 +997,7 @@ describe("writeToFileTool", () => {
 			const pushToolResult = vi.fn()
 			await writeToFileTool.handle(mockCline, toolUse, {
 				askApproval: mockAskApproval,
+				toolCallId: "test-tool-call-id",
 				handleError: mockHandleError,
 				pushToolResult,
 			})
@@ -1357,6 +1362,7 @@ describe("writeToFileTool", () => {
 			}
 			await writeToFileTool.handle(mockCline, toolUse as ToolUse<"write_to_file">, {
 				askApproval: mockAskApproval,
+				toolCallId: "test-tool-call-id",
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
 			})
@@ -1391,6 +1397,7 @@ describe("writeToFileTool", () => {
 				}
 				await writeToFileTool.handle(mockCline, toolUse as ToolUse<"write_to_file">, {
 					askApproval: mockAskApproval,
+					toolCallId: "test-tool-call-id",
 					handleError: mockHandleError,
 					pushToolResult: vi.fn(),
 				})
