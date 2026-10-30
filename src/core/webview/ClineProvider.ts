@@ -3764,6 +3764,24 @@ export class ClineProvider
 		}
 	}
 
+	/**
+	 * Post state after a deletion has already committed. A posting failure must be
+	 * logged, never routed through the deletion's compensation path: the deletion is
+	 * durable by then, and the compensation would restore a record whose deletion
+	 * already landed.
+	 */
+	private async postStateToWebviewAfterCommittedDeletion(): Promise<void> {
+		try {
+			await this.postStateToWebview()
+		} catch (error) {
+			this.log(
+				`deleteProviderProfile: deletion committed, but posting state failed: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
+	}
+
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
 		const globalSettings = this.contextProxy.getValues()
 		let profileToActivate: string | undefined = globalSettings.currentApiConfigName
@@ -4050,6 +4068,53 @@ export class ClineProvider
 				)
 			}
 			throw error
+		}
+
+		// The old deleteApiConfiguration path ended with activateProviderProfile, which
+		// updated the manager's own current-profile record and the current mode's profile
+		// mapping, rebuilt the current task's API handler, refreshed the current task's
+		// sticky profile, and emitted ProviderProfileChanged. The storage rewrites above
+		// cover the durable stores; when the deleted profile was the active one (globally
+		// or for this view), complete the activation-side effects here so the deletion
+		// leaves the same live state as activating the survivor. They run after the
+		// try/catch because the deletion has already landed: a failure here must not roll
+		// it back, the same placement activateProviderProfileUnlocked gives its rebuild.
+		if (deletedWasGlobal || viewWasPinnedToDeleted) {
+			let activationFailed = false
+			let activationError: unknown
+			try {
+				const {
+					id: survivingId,
+					name: _activatedName,
+					...activatedSettings
+				} = await this.providerSettingsManager.activateProfile({ name: profileToActivate })
+				if (survivingId) {
+					const { mode } = await this.getState()
+					await this.providerSettingsManager.setModeConfig(mode, survivingId)
+				}
+				if (activatedSettings.apiProvider) {
+					this.emit(RooCodeEventName.ProviderProfileChanged, {
+						name: profileToActivate,
+						provider: activatedSettings.apiProvider,
+					})
+				}
+			} catch (error: unknown) {
+				// The deletion is already committed: post the committed state first, then surface a
+				// distinct error so the caller cannot report a successful deletion as a failed one.
+				activationFailed = true
+				activationError = error
+				this.log(
+					`deleteProviderProfile: deletion committed but activation of '${profileToActivate}' failed: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+			}
+
+			await this.postStateToWebviewAfterCommittedDeletion()
+			if (activationFailed) {
+				throw new ProfileDeletionActivationError(profileToActivate, activationError)
+			}
+			return
 		}
 	}
 
