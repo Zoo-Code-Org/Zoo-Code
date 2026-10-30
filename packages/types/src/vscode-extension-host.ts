@@ -679,10 +679,7 @@ export interface WebviewMessage {
 		| "themeFixtureProbeResponse"
 	text?: string
 	viewStateId?: string
-	/**
-	 * For `webviewDidLaunch`: the host-minted claim previously delivered for `viewStateId`.
-	 * Enforced by `ClineProvider.setViewStateId`; launch forwarding ships in the wiring unit.
-	 */
+	/** For `webviewDidLaunch`: the claim delivered for `viewStateId`, enforced by setViewStateId. */
 	viewStateClaim?: string
 	taskId?: string
 	editedMessageContent?: string
