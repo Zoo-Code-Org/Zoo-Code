@@ -3145,15 +3145,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}
 			}
 
-			// Incomplete reasoning has no matching API-history entry and would become
-			// an orphaned bubble when the resumed request starts fresh reasoning.
+			// Partial reasoning and text have no API-history entry, since the assistant
+			// message is only written once the stream completes, so an interrupted stream
+			// leaves them orphaned. A trailing partial bubble also keeps the webview in its
+			// streaming state, which leaves the resumed chat stuck on "API Request..." with
+			// an input that only queues (see #257). Other partial say types (e.g. command
+			// output) record work that already ran, so they are kept.
 			while (modifiedClineMessages.length > 0) {
 				const lastMessage = modifiedClineMessages[modifiedClineMessages.length - 1]
-				if (lastMessage.type === "say" && lastMessage.say === "reasoning" && lastMessage.partial === true) {
-					modifiedClineMessages.pop()
-				} else {
+				const isPartialStreamBubble =
+					lastMessage.type === "say" &&
+					(lastMessage.say === "reasoning" || lastMessage.say === "text") &&
+					lastMessage.partial === true
+
+				if (!isPartialStreamBubble) {
 					break
 				}
+
+				modifiedClineMessages.pop()
 			}
 
 			// Since we don't use `api_req_finished` anymore, we need to check if the

@@ -2332,6 +2332,114 @@ describe("Task persistence", () => {
 			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
 		})
 
+		// #257: the webview derives `isStreaming` from the message list, so a trailing
+		// `partial` bubble or a cost-less `api_req_started` keeps the resumed chat on
+		// "API Request..." with the send button replaced by Stop. Resume must trim it.
+		it.each([
+			{
+				name: "partial text",
+				tail: [{ ts: 2, type: "say" as const, say: "text" as const, text: "Half a sentence", partial: true }],
+			},
+			{
+				name: "partial text behind a dangling api_req_started",
+				tail: [
+					{
+						ts: 2,
+						type: "say" as const,
+						say: "api_req_started" as const,
+						text: '{"apiProtocol":"anthropic"}',
+					},
+					{ ts: 3, type: "say" as const, say: "text" as const, text: "Half a sentence", partial: true },
+				],
+			},
+			{
+				name: "a dangling api_req_started alone",
+				tail: [
+					{
+						ts: 2,
+						type: "say" as const,
+						say: "api_req_started" as const,
+						text: '{"apiProtocol":"anthropic"}',
+					},
+				],
+			},
+		])("strips a $name streaming tail before prompting to resume", async ({ tail }) => {
+			mockReadTaskMessages.mockResolvedValue([
+				{ ts: 1, type: "say", say: "text", text: "Original task" },
+				...tail,
+			])
+			mockReadApiMessages.mockResolvedValue([
+				{ role: "user", content: [{ type: "text", text: "Original task" }] },
+			])
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "issue-257-streaming-tail",
+					number: 1,
+					ts: 1,
+					task: "Original task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			vi.spyOn(task, "ask").mockImplementation(async () => {
+				// The resumed chat must not end on anything the webview reads as streaming.
+				expect(task.clineMessages.at(-1)).toEqual(
+					expect.objectContaining({ say: "text", text: "Original task" }),
+				)
+				expect(task.clineMessages).not.toContainEqual(expect.objectContaining({ partial: true }))
+				expect(task.clineMessages).not.toContainEqual(expect.objectContaining({ say: "api_req_started" }))
+				throw new Error("stop after hydration")
+			})
+
+			await expect(getTaskPersistenceAccess(task).resumeTaskFromHistory()).rejects.toThrow("stop after hydration")
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+		})
+
+		it("keeps partial command output and finalized text when resuming", async () => {
+			mockReadTaskMessages.mockResolvedValue([
+				{ ts: 1, type: "say", say: "text", text: "Original task" },
+				{ ts: 2, type: "say", say: "text", text: "Finalized answer", partial: false },
+				{ ts: 3, type: "say", say: "command_output", text: "npm test\n", partial: true },
+			])
+			mockReadApiMessages.mockResolvedValue([
+				{ role: "user", content: [{ type: "text", text: "Original task" }] },
+			])
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "issue-257-preserve-non-stream-tail",
+					number: 1,
+					ts: 1,
+					task: "Original task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			vi.spyOn(task, "ask").mockImplementation(async () => {
+				// Partial command output records work that already ran; dropping it would
+				// erase evidence of the interrupted command from the transcript.
+				expect(task.clineMessages).toContainEqual(
+					expect.objectContaining({ say: "command_output", text: "npm test\n", partial: true }),
+				)
+				expect(task.clineMessages).toContainEqual(
+					expect.objectContaining({ say: "text", text: "Finalized answer", partial: false }),
+				)
+				throw new Error("stop after hydration")
+			})
+
+			await expect(getTaskPersistenceAccess(task).resumeTaskFromHistory()).rejects.toThrow("stop after hydration")
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+		})
+
 		it("stops before hydrating either history when the task is evicted during the API read", async () => {
 			const apiMessagesDeferred =
 				createDeferred<Array<{ role: "user"; content: Array<{ type: "text"; text: string }> }>>()
