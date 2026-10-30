@@ -3847,7 +3847,20 @@ export class ClineProvider
 			return
 		}
 
-		await Promise.all(
+		// Snapshot every affected view before the refresh writes: a member can reject after
+		// earlier members already re-pointed their overlay and rebuilt their task handler, so
+		// the rollback needs the pre-refresh values to put back for ALL of them.
+		const snapshots = affected.map((instance) => {
+			const task = instance.getCurrentTask()
+			return {
+				instance,
+				overlay: instance.viewLocalState.apiConfiguration,
+				task,
+				taskConfiguration: task?.apiConfiguration,
+			}
+		})
+
+		const results = await Promise.allSettled(
 			affected.map(async (instance) => {
 				const pinned = instance.pinnedProfileName
 
@@ -3903,6 +3916,46 @@ export class ClineProvider
 				await instance.postStateToWebview()
 			}),
 		)
+
+		const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected")
+		if (!failed) {
+			return
+		}
+
+		// Every member has settled by now (allSettled): restore each view's overlay and the
+		// task handler it rebuilt, so the caller's rollback is not left with a sibling that
+		// still serves the attempted settings.
+		for (const snapshot of snapshots) {
+			try {
+				await snapshot.instance._saveViewLocalStateFromMutation({ apiConfiguration: snapshot.overlay })
+			} catch (rollbackError) {
+				this.log(
+					`[refreshViewLocalStateForUpdatedProfile] failed to restore a sibling overlay: ${
+						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+					}`,
+				)
+			}
+			if (snapshot.task && snapshot.taskConfiguration) {
+				try {
+					snapshot.task.updateApiConfiguration(snapshot.taskConfiguration)
+				} catch (rollbackError) {
+					this.log(
+						`[refreshViewLocalStateForUpdatedProfile] failed to restore a sibling task handler: ${
+							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+						}`,
+					)
+				}
+			}
+			await snapshot.instance.postStateToWebview().catch((postError: unknown) => {
+				this.log(
+					`[refreshViewLocalStateForUpdatedProfile] failed to post a restored sibling state: ${
+						postError instanceof Error ? postError.message : String(postError)
+					}`,
+				)
+			})
+		}
+
+		throw failed.reason
 	}
 
 	/**
