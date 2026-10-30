@@ -3713,60 +3713,110 @@ describe("ClineProvider", () => {
 			// bindings that pointed at the deleted profile instead of leaving a dangling id.
 			const modeApiConfigs: Record<string, string> = {}
 
+			// The real manager serializes every read/write through one promise chain, and the
+			// timed-out-purge races are all about who holds that lock. Without it the harness cannot
+			// express the ordering: a `saveConfig` issued while a purge is in flight would land
+			// before the purge instead of behind it.
+			let managerLock = Promise.resolve()
+			const withLock = <T>(step: () => Promise<T>): Promise<T> => {
+				const next = managerLock.then(step)
+				managerLock = next.then(
+					() => undefined,
+					() => undefined,
+				)
+				return next
+			}
+
+			// The purge's body, without the lock: a test that needs to hold the manager lock across
+			// a gate wraps this in `withLock` itself, so a concurrent `saveConfig` queues behind the
+			// purge instead of landing before it.
+			const deleteConfigUnlocked = async (name: string) => {
+				const removedModeConfigs: Record<string, string> = {}
+				const deletedId = configs.get(name)?.id
+				const index = profiles.findIndex((profile) => profile.name === name)
+				if (index !== -1) {
+					profiles.splice(index, 1)
+				}
+				configs.delete(name)
+
+				for (const [mode, configId] of Object.entries(modeApiConfigs)) {
+					if (configId === deletedId) {
+						removedModeConfigs[mode] = configId
+						delete modeApiConfigs[mode]
+					}
+				}
+
+				return { removedModeConfigs }
+			}
+
+			const writeConfig = (name: string, config: ProviderSettingsEntry) => {
+				configs.set(name, { ...config, name })
+				if (!profiles.some((profile) => profile.name === name)) {
+					profiles.push({ name, id: config.id, apiProvider: config.apiProvider })
+				}
+				return config.id
+			}
+
 			Object.assign(provider, {
 				providerSettingsManager: {
-					deleteConfig: vi.fn().mockImplementation(async (name: string) => {
-						const removedModeConfigs: Record<string, string> = {}
-						const deletedId = configs.get(name)?.id
-						const index = profiles.findIndex((profile) => profile.name === name)
-						if (index !== -1) {
-							profiles.splice(index, 1)
-						}
-						configs.delete(name)
-
-						for (const [mode, configId] of Object.entries(modeApiConfigs)) {
-							if (configId === deletedId) {
-								removedModeConfigs[mode] = configId
-								delete modeApiConfigs[mode]
+					deleteConfig: vi
+						.fn()
+						.mockImplementation((name: string) => withLock(() => deleteConfigUnlocked(name))),
+					listConfig: vi.fn().mockImplementation(() => withLock(async () => profiles)),
+					getProfile: vi.fn().mockImplementation(({ name }: { name: string }) =>
+						withLock(async () => {
+							const config = configs.get(name)
+							if (!config) {
+								throw new Error(`Config with name '${name}' not found`)
 							}
-						}
-
-						return { removedModeConfigs }
-					}),
-					listConfig: vi.fn().mockImplementation(async () => profiles),
-					getProfile: vi.fn().mockImplementation(async ({ name }: { name: string }) => {
-						const config = configs.get(name)
-						if (!config) {
-							throw new Error(`Config with name '${name}' not found`)
-						}
-						return { ...config, name }
-					}),
-					saveConfig: vi.fn().mockImplementation(async (name: string, config: ProviderSettingsEntry) => {
-						configs.set(name, { ...config, name })
-						if (!profiles.some((profile) => profile.name === name)) {
-							profiles.push({ name, id: config.id, apiProvider: config.apiProvider })
-						}
-						return config.id
-					}),
-					activateProfile: vi.fn().mockImplementation(async ({ name }: { name: string }) => {
-						const config = configs.get(name)
-						if (!config) {
-							throw new Error(`Config '${name}' not found`)
-						}
-						managerState.currentApiConfigName = name
-						// Include a distinguishing setting so tests can assert the
-						// effective provider settings, not just the name pointers.
-						return { ...config, name }
-					}),
-					setModeConfig: vi.fn().mockImplementation(async (mode: string, configId: string) => {
-						modeApiConfigs[mode] = configId
-					}),
-					getModeConfigId: vi.fn().mockImplementation(async (mode: string) => modeApiConfigs[mode]),
-					getModeApiConfigs: vi.fn().mockImplementation(async () => ({ ...modeApiConfigs })),
+							return { ...config, name }
+						}),
+					),
+					saveConfig: vi
+						.fn()
+						.mockImplementation((name: string, config: ProviderSettingsEntry) =>
+							withLock(async () => writeConfig(name, config)),
+						),
+					// Mirrors the real manager's single-lock check-and-write: the existence check and
+					// the write share one step, so a concurrent `saveConfig` cannot slip between them.
+					saveConfigIfAbsent: vi
+						.fn()
+						.mockImplementation((name: string, config: ProviderSettingsEntry) =>
+							withLock(async () => (configs.has(name) ? undefined : writeConfig(name, config))),
+						),
+					hasConfigById: vi
+						.fn()
+						.mockImplementation((id: string) =>
+							withLock(async () =>
+								Object.values(Object.fromEntries(configs)).some((config) => config.id === id),
+							),
+						),
+					hasConfig: vi.fn().mockImplementation((name: string) => withLock(async () => configs.has(name))),
+					activateProfile: vi.fn().mockImplementation(({ name }: { name: string }) =>
+						withLock(async () => {
+							const config = configs.get(name)
+							if (!config) {
+								throw new Error(`Config '${name}' not found`)
+							}
+							managerState.currentApiConfigName = name
+							// Include a distinguishing setting so tests can assert the
+							// effective provider settings, not just the name pointers.
+							return { ...config, name }
+						}),
+					),
+					setModeConfig: vi.fn().mockImplementation((mode: string, configId: string) =>
+						withLock(async () => {
+							modeApiConfigs[mode] = configId
+						}),
+					),
+					getModeConfigId: vi
+						.fn()
+						.mockImplementation((mode: string) => withLock(async () => modeApiConfigs[mode])),
+					getModeApiConfigs: vi.fn().mockImplementation(() => withLock(async () => ({ ...modeApiConfigs }))),
 				},
 			})
 
-			return { profiles, managerState, modeApiConfigs }
+			return { profiles, managerState, modeApiConfigs, withLock, deleteConfigUnlocked }
 		}
 
 		beforeEach(async () => {
@@ -4514,26 +4564,20 @@ describe("ClineProvider", () => {
 				await provider.contextProxy.setValue("modeApiConfigs", { ...modeApiConfigs })
 
 				// The purge splices for real, so "the profile survived" is asserted against the
-				// manager's own profile list rather than against a spy.
+				// manager's own profile list rather than against a spy. The recorder delegates to the
+				// harness implementation instead of re-implementing the splice: the harness keeps its
+				// profiles in a private `configs` map too, and a recorder that only spliced the array
+				// left that map holding the purged name, so `saveConfigIfAbsent` saw it present and
+				// the undo silently skipped.
 				const deleteConfigCalls: string[] = []
-				vi.mocked(provider.providerSettingsManager.deleteConfig).mockImplementation(async (name) => {
+				const harnessDeleteConfig = vi
+					.mocked(provider.providerSettingsManager.deleteConfig)
+					.getMockImplementation()!
+				const recordingDeleteConfig = async (name: string) => {
 					deleteConfigCalls.push(name)
-					const deletedId = profiles.find((profile) => profile.name === name)?.id
-					const index = profiles.findIndex((profile) => profile.name === name)
-					if (index !== -1) {
-						profiles.splice(index, 1)
-					}
-
-					const removedModeConfigs: Record<string, string> = {}
-					for (const [mode, configId] of Object.entries(modeApiConfigs)) {
-						if (configId === deletedId) {
-							removedModeConfigs[mode] = configId
-							delete modeApiConfigs[mode]
-						}
-					}
-
-					return { removedModeConfigs }
-				})
+					return harnessDeleteConfig(name)
+				}
+				vi.mocked(provider.providerSettingsManager.deleteConfig).mockImplementation(recordingDeleteConfig)
 
 				// Hold the purge past the mutation window: the caller is told the deletion timed out
 				// while the manager lock is still held, which is exactly the ordering that lets a
@@ -4542,10 +4586,9 @@ describe("ClineProvider", () => {
 				const purgeGate = new Promise<void>((resolve) => {
 					releasePurge = resolve
 				})
-				const realDeleteConfig = provider.providerSettingsManager.deleteConfig
 				vi.mocked(provider.providerSettingsManager.deleteConfig).mockImplementationOnce(async (name) => {
 					await purgeGate
-					return realDeleteConfig(name)
+					return recordingDeleteConfig(name)
 				})
 
 				const deletion = provider.deleteProviderProfile(otherProfile)
@@ -4575,8 +4618,156 @@ describe("ClineProvider", () => {
 				expect(profiles.map(({ name }) => name).sort()).toEqual(["current-config", "other-config"])
 				expect(profiles.find(({ name }) => name === "other-config")?.id).toBe(otherProfile.id)
 				expect(modeApiConfigs).toEqual({ code: otherProfile.id })
-				// ContextProxy still lists both profiles, so the two stores agree.
+				// The list comes from the manager's view, so the two stores agree.
 				expect(provider.getProviderProfileEntries()).toEqual([currentProfile, otherProfile])
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		// --- Round-7 per-thread regressions (CodeRabbit #1735 T1-T7) ---
+
+		test("T1: skips the undo when a same-name profile was saved while the timed-out purge held the lock", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const { profiles, modeApiConfigs, withLock, deleteConfigUnlocked } = mockProviderSettingsManager()
+				modeApiConfigs.code = otherProfile.id
+				await provider.contextProxy.setValue("modeApiConfigs", { ...modeApiConfigs })
+
+				// Hold the purge *inside* the manager lock past the mutation window, so the caller is
+				// told the deletion timed out while the purge still holds the lock (probe-A shape).
+				// A `saveConfig` issued after this gate queues behind the purge, exactly like the real
+				// manager's FIFO chain.
+				let releasePurge!: () => void
+				const purgeGate = new Promise<void>((resolve) => {
+					releasePurge = resolve
+				})
+				vi.mocked(provider.providerSettingsManager.deleteConfig).mockImplementationOnce((name: string) =>
+					withLock(async () => {
+						await purgeGate
+						return deleteConfigUnlocked(name)
+					}),
+				)
+
+				const deletion = provider.deleteProviderProfile(otherProfile)
+				const deletionResult = expect(deletion).rejects.toThrow("Provider profile mutation timed out")
+
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+
+				// The user re-creates the same name while the abandoned purge still holds the lock.
+				// A raw `saveConfig` (not `upsertProviderProfile`, which pins the queue with
+				// `runToCompletion` and would never land before the undo's existence check).
+				const recreated = provider.providerSettingsManager.saveConfig("other-config", {
+					id: "recreated-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "brand-new-user-key",
+					openRouterModelId: "brand-new-model",
+				})
+
+				releasePurge()
+				for (let i = 0; i < 50; i++) {
+					await Promise.resolve()
+					await vi.advanceTimersByTimeAsync(0)
+				}
+
+				await recreated
+				await deletionResult
+
+				// The undo must not re-save the pre-delete snapshot over the newer profile.
+				expect(await provider.providerSettingsManager.getProfile({ name: "other-config" })).toMatchObject({
+					id: "recreated-id",
+					openRouterApiKey: "brand-new-user-key",
+					openRouterModelId: "brand-new-model",
+				})
+				expect(profiles.map(({ name }) => name).sort()).toEqual(["current-config", "other-config"])
+				// The skipped undo is why the mode binding stays dropped: the re-created profile has a
+				// different id, so re-applying the old binding would leave a dangling id.
+				expect(modeApiConfigs).toEqual({})
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		test("T4: failed-restore reconcile does not re-apply bindings whose profile no longer exists", async () => {
+			const { modeApiConfigs } = mockProviderSettingsManager()
+			modeApiConfigs.code = currentProfile.id
+			modeApiConfigs.architect = currentProfile.id
+			await provider.contextProxy.setValue("modeApiConfigs", { ...modeApiConfigs })
+
+			// The replacement activation fails, and the restore's own `saveConfig` rejects, so the
+			// deleted profile never comes back (probe-C shape).
+			vi.mocked(provider.providerSettingsManager.activateProfile).mockRejectedValueOnce(
+				new Error("Failed to activate profile: storage error"),
+			)
+			vi.mocked(provider.providerSettingsManager.saveConfig).mockRejectedValueOnce(
+				new Error("Failed to save config: storage error"),
+			)
+
+			await expect(provider.deleteProviderProfile(currentProfile)).rejects.toThrow(
+				"Failed to activate profile: storage error",
+			)
+
+			// The deleted profile is gone, so its id is dangling: re-applying it would make the next
+			// switch to that mode resolve nothing and silently keep the current profile.
+			expect(await provider.providerSettingsManager.hasConfigById(currentProfile.id)).toBe(false)
+			expect(modeApiConfigs).toEqual({})
+			expect(provider.contextProxy.getValues().modeApiConfigs).toEqual({})
+		})
+
+		test("T5: timed-out inactive rollback cannot drop a profile saved during the window from listApiConfigMeta", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const { profiles, withLock, deleteConfigUnlocked } = mockProviderSettingsManager()
+
+				// Hold the purge *inside* the manager lock past the mutation window (probe-D shape).
+				let releasePurge!: () => void
+				const purgeGate = new Promise<void>((resolve) => {
+					releasePurge = resolve
+				})
+				vi.mocked(provider.providerSettingsManager.deleteConfig).mockImplementationOnce((name: string) =>
+					withLock(async () => {
+						await purgeGate
+						return deleteConfigUnlocked(name)
+					}),
+				)
+
+				const deletion = provider.deleteProviderProfile(otherProfile)
+				const deletionResult = expect(deletion).rejects.toThrow("Provider profile mutation timed out")
+
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+
+				// A different-name profile is created during the window. The `listApiConfigMeta`
+				// cache never observes it, so a cache-derived or snapshot-derived write drops it.
+				const created = provider.providerSettingsManager.saveConfig("third-config", {
+					id: "third-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "third-key",
+				})
+
+				releasePurge()
+				for (let i = 0; i < 50; i++) {
+					await Promise.resolve()
+					await vi.advanceTimersByTimeAsync(0)
+				}
+
+				await created
+				await deletionResult
+
+				// The abandoned body's compensation must converge to the manager's view, so the
+				// mid-window profile stays listed in both stores.
+				expect(profiles.map(({ name }) => name).sort()).toEqual([
+					"current-config",
+					"other-config",
+					"third-config",
+				])
+				expect(
+					provider
+						.getProviderProfileEntries()
+						.map(({ name }) => name)
+						.sort(),
+				).toEqual(["current-config", "other-config", "third-config"])
 			} finally {
 				vi.useRealTimers()
 			}
