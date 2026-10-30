@@ -18,11 +18,12 @@ const DELIMITER = "\f"
 
 const RETRY_MS = 500
 
-// Defensive ceiling on pre-delimiter accumulation. A legitimate task event is
-// orders of magnitude smaller than this, and the node-ipc client this replaces
-// had no ceiling at all, so the bound is pure hardening: it cannot truncate a
-// real frame in practice. Measured with String#length, which under-counts
-// multi-byte UTF-8 by at most 2x; that slack is irrelevant at this size.
+// Defensive ceiling on pre-delimiter accumulation, enforced in UTF-8 bytes of
+// the pending frame rather than UTF-16 code units, so the wire size a peer can
+// force the client to hold is bounded regardless of the character mix. A
+// legitimate task event is orders of magnitude smaller than this, and the
+// node-ipc client this replaces had no ceiling at all, so the bound is pure
+// hardening: it cannot truncate a real frame in practice.
 export const MAX_FRAME_BYTES = 64 * 1024 * 1024
 
 const envelope = (data: unknown): string => JSON.stringify({ type: "message", data }) + DELIMITER
@@ -52,6 +53,9 @@ export class EvalIpcClient extends EventEmitter<EvalIpcClientEvents> {
 	private readonly _maxFrameBytes: number
 	private _socket?: net.Socket
 	private _buffer = ""
+	// UTF-8 size of _buffer, maintained incrementally so the ceiling check stays
+	// O(chunk) instead of re-measuring the whole pending frame on every event.
+	private _bufferBytes = 0
 	private _retry?: NodeJS.Timeout
 	private _isConnected = false
 	private _clientId?: string
@@ -103,6 +107,7 @@ export class EvalIpcClient extends EventEmitter<EvalIpcClientEvents> {
 		// The rest of a partial frame can never arrive on a new socket, so
 		// keeping it would corrupt the first frame of the next session.
 		this._buffer = ""
+		this._bufferBytes = 0
 
 		if (this._closed) return
 
@@ -111,24 +116,36 @@ export class EvalIpcClient extends EventEmitter<EvalIpcClientEvents> {
 	}
 
 	private onData(chunk: string) {
-		this._buffer += chunk
-
 		// A frame is complete only once the delimiter arrives; a partial frame
-		// stays buffered so large task events are never truncated.
-		const frames = this._buffer.split(DELIMITER)
-		this._buffer = frames.pop() ?? ""
+		// stays buffered so large task events are never truncated. Each chunk is
+		// scanned once and only its trailing partial segment is measured, so the
+		// byte accounting stays O(chunk) even on a delimiter-free flood.
+		let offset = 0
+		let index: number
 
-		for (const frame of frames) {
+		while ((index = chunk.indexOf(DELIMITER, offset)) !== -1) {
+			const frame = this._buffer + chunk.slice(offset, index)
+			this._buffer = ""
+			this._bufferBytes = 0
 			if (frame.length > 0) this.onFrame(frame)
+			offset = index + DELIMITER.length
 		}
 
-		if (this._buffer.length > this._maxFrameBytes) this.onOversizedFrame()
+		const tail = chunk.slice(offset)
+
+		if (tail.length > 0) {
+			this._buffer += tail
+			this._bufferBytes += Buffer.byteLength(tail, "utf8")
+		}
+
+		if (this._bufferBytes > this._maxFrameBytes) this.onOversizedFrame()
 	}
 
 	// Bounded log line only: the pending bytes may carry credentials, so neither
 	// their content nor their exact size is written out.
 	private onOversizedFrame() {
 		this._buffer = ""
+		this._bufferBytes = 0
 		this._closed = true
 
 		if (this._retry) {

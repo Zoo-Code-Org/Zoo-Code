@@ -31,8 +31,15 @@ const startPeer = async (socketPath: string) => {
 		socket.setEncoding("utf8")
 		socket.on("close", () => sockets.delete(socket))
 		socket.on("error", () => {})
+		// The client frames with one write, but TCP does not preserve write
+		// boundaries, so a frame can arrive split. Buffer the tail of an
+		// incomplete frame and dispatch only delimiter-terminated segments.
+		let pending = ""
 		socket.on("data", (chunk: string) => {
-			for (const frame of chunk.split(DELIMITER)) {
+			pending += chunk
+			const frames = pending.split(DELIMITER)
+			pending = frames.pop() ?? ""
+			for (const frame of frames) {
 				if (frame.length === 0) continue
 				const message = JSON.parse(frame) as { data: { clientId: string } }
 				received.push(message.data)
@@ -121,6 +128,46 @@ describe("eval ipc client", () => {
 			assert.equal(events[0]?.eventName, RooCodeEventName.TaskStarted)
 		} finally {
 			client.disconnect()
+			await peer.close()
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("assembles a peer frame that arrives split across two chunks", async () => {
+		const dir = await socketDir()
+		const socketPath = socketPathIn(dir, "peer-split")
+		const peer = await startPeer(socketPath)
+		const raw = net.connect(resolveSocketPath(socketPath))
+		raw.setEncoding("utf8")
+		const frame =
+			JSON.stringify({
+				type: "message",
+				data: {
+					type: IpcMessageType.TaskCommand,
+					origin: IpcOrigin.Client,
+					clientId: "client-1",
+					data: { commandName: TaskCommandName.CloseTask },
+				},
+			}) + DELIMITER
+
+		try {
+			await new Promise<void>((resolve) => raw.once("connect", () => resolve()))
+			// Two separate writes with a pause, so the peer sees two data events.
+			const cut = Math.floor(frame.length / 2)
+			raw.write(frame.slice(0, cut))
+			await new Promise((resolve) => setTimeout(resolve, 60))
+			raw.write(frame.slice(cut))
+
+			await waitFor(() => peer.received.length > 0)
+			assert.equal(peer.received.length, 1, "the peer must assemble the frame from both chunks")
+			assert.deepEqual(peer.received[0], {
+				type: IpcMessageType.TaskCommand,
+				origin: IpcOrigin.Client,
+				clientId: "client-1",
+				data: { commandName: TaskCommandName.CloseTask },
+			})
+		} finally {
+			raw.destroy()
 			await peer.close()
 			await fs.rm(dir, { recursive: true, force: true })
 		}
@@ -264,6 +311,12 @@ describe("eval ipc client", () => {
 		const dir = await socketDir()
 		const socketPath = socketPathIn(dir, "split")
 		const events: TaskEvent[] = []
+		// The second half of the frame is held here until the test has asserted
+		// that the first half alone dispatches nothing.
+		let releaseSecondHalf = () => {}
+		const secondHalfGate = new Promise<void>((resolve) => {
+			releaseSecondHalf = resolve
+		})
 		const encoded =
 			JSON.stringify({
 				type: "message",
@@ -291,10 +344,13 @@ describe("eval ipc client", () => {
 				}) + DELIMITER,
 			)
 
-			// Split mid-frame, well before the delimiter, with a real pause.
+			// Split mid-frame, well before the delimiter. The second half waits on
+			// a gate the test releases after the zero-event assertion, so the
+			// assertion cannot race a timer: no amount of scheduling delay can
+			// complete the frame before the test allows it.
 			const cut = Math.floor(encoded.length / 2)
 			socket.write(encoded.slice(0, cut))
-			setTimeout(() => socket.write(encoded.slice(cut)), 120)
+			void secondHalfGate.then(() => socket.write(encoded.slice(cut)))
 		})
 
 		await new Promise<void>((resolve, reject) => {
@@ -311,10 +367,12 @@ describe("eval ipc client", () => {
 			await new Promise((resolve) => setTimeout(resolve, 60))
 			assert.equal(events.length, 0, "a frame without its delimiter must not be dispatched")
 
+			releaseSecondHalf()
 			await waitFor(() => events.length > 0)
 			assert.equal(events.length, 1)
 			assert.equal(events[0]?.eventName, RooCodeEventName.TaskStarted)
 		} finally {
+			releaseSecondHalf()
 			client.disconnect()
 			await new Promise<void>((resolve) => server.close(() => resolve()))
 			await fs.rm(dir, { recursive: true, force: true })
@@ -426,6 +484,53 @@ describe("eval ipc client", () => {
 			assert.equal(oversized[0]?.length, 1, "no payload or size detail accompanies the line")
 			assert.ok(!JSON.stringify(logs).includes(secret), "buffer content must never be logged")
 			assert.equal(events.length, 0)
+			assert.equal(client.isConnected, false, "the connection is dropped")
+		} finally {
+			client.disconnect()
+			await new Promise<void>((resolve) => server.close(() => resolve()))
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("measures the frame ceiling in UTF-8 bytes, not UTF-16 code units", async () => {
+		const dir = await socketDir()
+		const socketPath = socketPathIn(dir, "multibyte")
+		const logs: unknown[][] = []
+		const ceiling = 4096
+		// 3-byte UTF-8 characters: 2000 of them are 2000 code units (under the
+		// ceiling) but 6000 wire bytes (over it), so only a byte ceiling drops.
+		const frame = "가".repeat(2000)
+
+		const server = net.createServer((socket) => {
+			socket.on("error", () => {})
+			socket.write(
+				JSON.stringify({
+					type: "message",
+					data: {
+						type: IpcMessageType.Ack,
+						origin: IpcOrigin.Server,
+						data: { clientId: "client-1", pid: process.pid, ppid: process.ppid },
+					},
+				}) + DELIMITER,
+			)
+			socket.write(frame)
+		})
+
+		await new Promise<void>((resolve, reject) => {
+			server.once("error", reject)
+			server.listen(resolveSocketPath(socketPath), resolve)
+		})
+
+		const client = new EvalIpcClient(socketPath, (...args) => logs.push(args), { maxFrameBytes: ceiling })
+
+		try {
+			await waitFor(() => logs.some((entry) => String(entry[0]).includes("MAX_FRAME_BYTES")), 10_000)
+
+			assert.equal(
+				logs.filter((entry) => String(entry[0]).includes("MAX_FRAME_BYTES")).length,
+				1,
+				"the byte ceiling must drop a frame whose code-unit count is under the limit",
+			)
 			assert.equal(client.isConnected, false, "the connection is dropped")
 		} finally {
 			client.disconnect()
