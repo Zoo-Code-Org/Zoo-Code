@@ -3980,7 +3980,10 @@ describe("ClineProvider", () => {
 			await provider["setViewStateId"]("stable-sidebar-view")
 
 			provider["viewLocalState"] = { mode: "architect" }
-			vi.spyOn(provider.contextProxy, "getValue").mockImplementation(() => {
+			vi.spyOn(
+				provider as unknown as { getPersistedViewStates: () => unknown },
+				"getPersistedViewStates",
+			).mockImplementation(() => {
 				throw new Error("load failed")
 			})
 

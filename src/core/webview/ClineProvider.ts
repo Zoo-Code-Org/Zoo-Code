@@ -6106,7 +6106,18 @@ export class ClineProvider
 			await this.contextProxy.setValue("viewStates", undefined)
 		})
 		ClineProvider.persistedViewStateWriteQueue = clearWrite.catch(() => {})
-		await clearWrite
+
+		try {
+			await clearWrite
+		} catch (error) {
+			// The in-memory clears below must still run and reach every instance; a failed
+			// durable clear is logged and retried by the next mutation/reset.
+			this.log(
+				`[broadcastResetToAllInstances] failed to clear the durable view states: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
 
 		for (const instance of allInstances) {
 			instance._clearViewLocalState()
@@ -6167,8 +6178,17 @@ export class ClineProvider
 		this._clearViewLocalState()
 
 		// Clear this view's persisted entry too, so the reset selections are not
-		// re-applied from the durable viewStates pin after a reload.
-		await this.clearPersistedViewState()
+		// re-applied from the durable viewStates pin after a reload. A rejected storage
+		// write must not abort the profile/mode/stack reset below.
+		try {
+			await this.clearPersistedViewState()
+		} catch (error) {
+			this.log(
+				`[resetState] failed to clear this view's persisted state: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
 
 		// Other live webviews hold their own overlay and their own durable pin: a reset in
 		// one view would otherwise leave the others serving their pre-reset mode and profile
