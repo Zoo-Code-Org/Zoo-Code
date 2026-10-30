@@ -320,8 +320,9 @@ describe("normalizeChatUsage", () => {
 			["a boolean", true, { type: "boolean" }],
 			["an object", { tokens: 30 }, { type: "object" }],
 			["an array", [1, 2, 3], { type: "array" }],
-			["NaN", NaN, { type: "number", preview: NaN }],
-			["Infinity", Infinity, { type: "number", preview: Infinity }],
+			["NaN", NaN, { type: "number", preview: "NaN" }],
+			["Infinity", Infinity, { type: "number", preview: "Infinity" }],
+			["-Infinity", -Infinity, { type: "number", preview: "-Infinity" }],
 			["a fractional number", 1.5, { type: "number", preview: 1.5 }],
 		])("describes %s without logging the raw value", async (_name, malformed, expected) => {
 			vi.resetModules()
@@ -335,6 +336,39 @@ describe("normalizeChatUsage", () => {
 				const [, meta] = warn.mock.calls[0] as [string, Record<string, unknown>]
 
 				expect(meta).toEqual({ path: "prompt_cache_miss_tokens", ...expected })
+			} finally {
+				warn.mockRestore()
+			}
+		})
+
+		it("keeps non-finite previews distinguishable after JSON serialization", async () => {
+			vi.resetModules()
+			const { CompactLogger: FreshCompactLogger } = await import("../../../utils/logging/CompactLogger")
+			const { normalizeChatUsage: freshNormalize } = await import("../chat-usage-normalization")
+			const warn = vi.spyOn(FreshCompactLogger.prototype, "warn").mockImplementation(() => {})
+
+			try {
+				// Distinct aliases so the per-path dedupe does not swallow two of the
+				// three warnings.
+				const serialized = [
+					{ prompt_cache_miss_tokens: NaN },
+					{ prompt_tokens_details: { cache_miss_tokens: Infinity } },
+					{ cache_creation_input_tokens: -Infinity },
+				].map((malformed) => {
+					freshNormalize({ prompt_tokens: 120, ...malformed })
+					const [, meta] = warn.mock.calls[warn.mock.calls.length - 1] as [string, Record<string, unknown>]
+					return JSON.stringify(meta)
+				})
+
+				// The transport persists via JSON.stringify, which turns all three into
+				// `null`. They must stay tellable apart in the written log line.
+				expect(serialized).toEqual([
+					expect.stringContaining('"preview":"NaN"'),
+					expect.stringContaining('"preview":"Infinity"'),
+					expect.stringContaining('"preview":"-Infinity"'),
+				])
+				expect(new Set(serialized).size).toBe(3)
+				serialized.forEach((line) => expect(line).not.toContain('"preview":null'))
 			} finally {
 				warn.mockRestore()
 			}

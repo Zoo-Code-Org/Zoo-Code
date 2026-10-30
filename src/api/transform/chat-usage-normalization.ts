@@ -135,7 +135,10 @@ const MAX_PREVIEW_CHARS = 64
  */
 const describeMalformedCount = (value: unknown): { type: string; preview?: string | number; length?: number } => {
 	if (typeof value === "number") {
-		return { type: "number", preview: value }
+		// JSON.stringify writes `null` for NaN and both infinities, which would make
+		// the three indistinguishable in the persisted log. They are stringified so
+		// the name survives serialization; finite numbers stay numeric.
+		return { type: "number", preview: Number.isFinite(value) ? value : String(value) }
 	}
 
 	if (typeof value === "string") {
