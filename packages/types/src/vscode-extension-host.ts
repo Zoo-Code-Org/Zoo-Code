@@ -681,10 +681,7 @@ export interface WebviewMessage {
 	viewStateId?: string
 	/**
 	 * For `webviewDidLaunch`: the host-minted claim previously delivered for `viewStateId`.
-	 * The webview only echoes what it was given; the host enforces the match in
-	 * `ClineProvider.setViewStateId` when a view registers this id, so a view cannot adopt
-	 * another view's persisted selections. Forwarding these fields from the launch handler
-	 * is wired by the follow-up launch unit.
+	 * Enforced by `ClineProvider.setViewStateId`; launch forwarding ships in the wiring unit.
 	 */
 	viewStateClaim?: string
 	taskId?: string
