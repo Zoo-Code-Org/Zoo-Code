@@ -434,8 +434,10 @@ describe("executeCommand", () => {
 			expect(mockTask.terminalProcesses.size).toBe(0)
 		})
 
-		it("posts timeout status when command execution exceeds the user limit", async () => {
+		it("reports no submission when the user timeout fires before the command starts", async () => {
 			vitest.useFakeTimers()
+			// A never-starting process: `TerminalProcess.run()` never reached
+			// `sendText`/`executeCommand`, so no `shell_execution_started` fires.
 			const pendingProcess = Object.assign(new Promise<void>(() => {}), {
 				continue: vitest.fn(),
 				abort: vitest.fn(),
@@ -453,7 +455,8 @@ describe("executeCommand", () => {
 			const [rejected, result, commandSubmitted] = await executionPromise
 
 			expect(rejected).toBe(false)
-			expect(commandSubmitted).toBe(true)
+			// Nothing ran, so the caller must not drain queued feedback.
+			expect(commandSubmitted).toBe(false)
 			expect(result).toContain("terminated after exceeding")
 			expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -461,6 +464,35 @@ describe("executeCommand", () => {
 					text: expect.stringContaining('"status":"timeout"'),
 				}),
 			)
+			expect(pendingProcess.abort).toHaveBeenCalled()
+		})
+
+		it("reports submission when the user timeout fires after the command started", async () => {
+			vitest.useFakeTimers()
+			const pendingProcess = Object.assign(new Promise<void>(() => {}), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			mockTerminal.runCommand.mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
+				// The shell reported execution start, so the command really ran.
+				setTimeout(() => callbacks.onShellExecutionStarted(4242, mockProcess), 0)
+				return pendingProcess
+			})
+
+			const executionPromise = executeCommandInTerminal(mockTask, {
+				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
+				command: "sleep 10",
+				terminalShellIntegrationDisabled: false,
+				commandExecutionTimeout: 1_000,
+			})
+			await vitest.advanceTimersByTimeAsync(1_000)
+			const [rejected, result, commandSubmitted] = await executionPromise
+
+			expect(rejected).toBe(false)
+			// The command did run, so the drain is owed.
+			expect(commandSubmitted).toBe(true)
+			expect(result).toContain("terminated after exceeding")
 			expect(pendingProcess.abort).toHaveBeenCalled()
 		})
 

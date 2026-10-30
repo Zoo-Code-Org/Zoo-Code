@@ -22,6 +22,8 @@ describe("Task.ask queued message drain", () => {
 		;(task as any).askResponseText = undefined
 		;(task as any).askResponseImages = undefined
 		;(task as any).lastMessageTs = undefined
+		task["pendingAskCount"] = 0
+		task["drainRetainedQueuedMessageIds"] = new Set<string>()
 		return import("../../message-queue/MessageQueueService").then(({ MessageQueueService }) => {
 			;(task as any).messageQueueService = new MessageQueueService()
 			;(task as any).addToClineMessages = vi.fn(async () => {})

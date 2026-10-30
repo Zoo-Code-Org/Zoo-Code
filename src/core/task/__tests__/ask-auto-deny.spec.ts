@@ -37,6 +37,8 @@ function buildTask(provider: ProviderStub, taskCwd: string) {
 	task["askResponseText"] = undefined
 	task["askResponseImages"] = undefined
 	task["lastMessageTs"] = undefined
+	task["pendingAskCount"] = 0
+	task["drainRetainedQueuedMessageIds"] = new Set<string>()
 	task["addToClineMessages"] = vi.fn(async () => {})
 	task["saveClineMessages"] = vi.fn(async () => true)
 	task["updateClineMessage"] = vi.fn(async () => {})

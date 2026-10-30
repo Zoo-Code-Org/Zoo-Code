@@ -8,7 +8,7 @@ describe("MessageQueueService claims", () => {
 
 		expect(queue.claimNextMessage()).toEqual(first)
 		expect(queue.claimNextMessage()).toEqual(second)
-		expect(queue.dequeueMessage()).toBeUndefined()
+		expect(queue.claimNextMessage()).toBeUndefined()
 		expect(queue.messages).toEqual([first, second])
 	})
 
@@ -66,5 +66,33 @@ describe("MessageQueueService claims", () => {
 
 		queue.releaseMessage(message.id)
 		expect(queue.hasUnclaimed()).toBe(true)
+	})
+
+	it("skips excluded messages without claiming or removing them", () => {
+		const queue = new MessageQueueService()
+		const retained = queue.addMessage("retained by a drain")!
+		const fresh = queue.addMessage("fresh")!
+		const excluded = new Set([retained.id])
+
+		// Availability must agree with the claim: the excluded message is not
+		// available to this consumer even though the queue holds it.
+		expect(queue.hasUnclaimed(excluded)).toBe(true)
+		expect(queue.claimNextMessage(excluded)).toEqual(fresh)
+
+		// The excluded message stays queued and unclaimed, so a consumer allowed
+		// to take it (a conversational ask) still can.
+		expect(queue.messages).toEqual([retained, fresh])
+		expect(queue.hasUnclaimed(excluded)).toBe(false)
+		expect(queue.claimNextMessage()).toEqual(retained)
+	})
+
+	it("reports no availability when every message is excluded", () => {
+		const queue = new MessageQueueService()
+		const only = queue.addMessage("only")!
+		const excluded = new Set([only.id])
+
+		expect(queue.hasUnclaimed(excluded)).toBe(false)
+		expect(queue.claimNextMessage(excluded)).toBeUndefined()
+		expect(queue.messages).toEqual([only])
 	})
 })

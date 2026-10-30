@@ -53,6 +53,9 @@ type TaskTestAccess = {
 	addToClineMessages: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	updateClineMessage: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
+	lastMessageTs?: number
+	pendingAskCount: number
+	drainRetainedQueuedMessageIds: Set<string>
 	safeEnsureModelFetched: () => Promise<ModelInfo>
 	backoffAndAnnounce: (retryAttempt: number, error: unknown) => Promise<void>
 	requestPolicySnapshot?: RequestPolicySnapshot
@@ -7932,7 +7935,32 @@ describe("Queued message processing after condense", () => {
 				startTask: false,
 			})
 
-		it("submits the next queued message and retains it until an ask consumes it", async () => {
+		// This suite mocks `p-wait-for` to resolve immediately, which is fine for
+		// asks that a queued message or an explicit response answers. A test that
+		// must observe a genuinely pending ask needs the real wait, so it runs
+		// inside this bracket and the mock is restored afterwards.
+		const withRealPWaitFor = async <T>(run: () => Promise<T>): Promise<T> => {
+			const { default: realPWaitFor } = await vi.importActual<typeof import("p-wait-for")>("p-wait-for")
+			vi.mocked(pWaitFor).mockImplementation((condition) =>
+				realPWaitFor(condition, { interval: 1, timeout: 2_000 }),
+			)
+			try {
+				return await run()
+			} finally {
+				vi.mocked(pWaitFor).mockImplementation(async () => {})
+			}
+		}
+
+		// The ask row is appended after the ask clears its response slot and before
+		// it starts waiting, so its presence is the deterministic "this prompt is
+		// now pending" signal. Waiting on `pendingAskCount` alone would race the
+		// clear and let the response be discarded.
+		const waitForPendingAsk = (task: Task, ask: string) =>
+			vi.waitFor(() =>
+				expect(task.clineMessages.some((message) => message.type === "ask" && message.ask === ask)).toBe(true),
+			)
+
+		it("submits the next queued message and retains it until a conversational ask consumes it", async () => {
 			const task = createQueueTask()
 			vi.spyOn(getTaskTestAccess(task), "checkpointSave").mockResolvedValue(undefined)
 			task.messageQueueService.addMessage("queued text", ["img1.png"])
@@ -7943,12 +7971,52 @@ describe("Queued message processing after condense", () => {
 			// the message stays queued until an ask claims it.
 			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued text"])
 
-			// The retained message answers the approval ask through the
-			// policy-gated claim path (base + #1760 semantics): yesButtonClicked
-			// with the queued text as feedback, consumed inline (non-durable).
-			const approval = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
-			expect(approval).toMatchObject({ response: "yesButtonClicked", text: "queued text", images: ["img1.png"] })
+			// A retained drain submission must NOT answer an execution-gating ask.
+			// `queuedResponseForAsk` maps a tool ask to `yesButtonClicked`, so a
+			// claim here would run the tool with no prompt and with the stale
+			// queued text as "approval feedback". The ask excludes the retained
+			// ID and waits for a real response instead.
+			const { approval, retainedDuringAsk } = await withRealPWaitFor(async () => {
+				const approvalPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+				await waitForPendingAsk(task, "tool")
+				const retained = task.messageQueueService.messages.map((message) => message.text)
+				task.approveAsk()
+				return { approval: await approvalPromise, retainedDuringAsk: retained }
+			})
+
+			expect(retainedDuringAsk).toEqual(["queued text"])
+			expect(approval).toMatchObject({ response: "yesButtonClicked", text: undefined })
+			expect(approval.queuedMessageId).toBeUndefined()
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued text"])
+
+			// The retained message is still deliverable: the next conversational
+			// ask is the only consumer allowed to carry its text into the model.
+			const followup = await task.ask("followup", "Anything else?", false)
+			expect(followup).toMatchObject({ response: "messageResponse", text: "queued text", images: ["img1.png"] })
 			expect(task.messageQueueService.isEmpty()).toBe(true)
+		})
+
+		it("never lets a retained drain submission approve a command ask", async () => {
+			const task = createQueueTask()
+			vi.spyOn(getTaskTestAccess(task), "checkpointSave").mockResolvedValue(undefined)
+			task.messageQueueService.addMessage("ship it")
+
+			await expect(task.processQueuedMessages()).resolves.toBe(true)
+
+			// Stale between-turn feedback must not stand in for an approval: the
+			// command ask gets a real prompt even though the queue is non-empty.
+			const { denied, retainedDuringAsk } = await withRealPWaitFor(async () => {
+				const commandPromise = task.ask("command", "rm -rf build", false)
+				await waitForPendingAsk(task, "command")
+				const retained = task.messageQueueService.messages.map((message) => message.text)
+				task.denyAsk()
+				return { denied: await commandPromise, retainedDuringAsk: retained }
+			})
+
+			expect(retainedDuringAsk).toEqual(["ship it"])
+			expect(denied).toMatchObject({ response: "noButtonClicked" })
+			expect(denied.queuedMessageId).toBeUndefined()
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["ship it"])
 		})
 
 		it("delivers queued feedback through the next conversational ask instead of losing it", async () => {
@@ -8064,6 +8132,83 @@ describe("Queued message processing after condense", () => {
 			const secondResult = await task.ask("followup", "second question?", false)
 			expect(secondResult).toMatchObject({ response: "messageResponse", text: "still deliverable" })
 			expect(task.messageQueueService.isEmpty()).toBe(true)
+		})
+
+		it.each([
+			{ state: "aborted", apply: (task: Task) => (task.abort = true) },
+			{ state: "abandoned", apply: (task: Task) => (task.abandoned = true) },
+		])("does not submit a queued message when the task is $state", async ({ apply }) => {
+			const task = createQueueTask()
+			const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
+			task.messageQueueService.addMessage("must wait for a live task")
+
+			apply(task)
+
+			await expect(task.processQueuedMessages()).resolves.toBe(false)
+
+			// The guard must reject before the claim, so no submission happens and
+			// the message is still there for a task that is not stopping.
+			expect(submitSpy).not.toHaveBeenCalled()
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual([
+				"must wait for a live task",
+			])
+			expect(task.messageQueueService.hasUnclaimed()).toBe(true)
+		})
+
+		it("defers the drain while an ask is pending and submits after it settles", async () => {
+			const task = createQueueTask()
+			vi.spyOn(getTaskTestAccess(task), "checkpointSave").mockResolvedValue(undefined)
+
+			const { duringAsk, afterAsk } = await withRealPWaitFor(async () => {
+				// A protected ask blocks on explicit user approval and refuses to
+				// consume a queued message at either claim site, so it is the ask
+				// that stays pending while the queue fills. That is the F1711
+				// window: a background completion can land while the model's next
+				// approval prompt waits.
+				const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false, undefined, true)
+				await waitForPendingAsk(task, "tool")
+
+				// The message arrives while the prompt is pending.
+				task.messageQueueService.addMessage("written during the prompt")
+
+				// A background completion landing here must not answer the pending
+				// ask with text written for another turn.
+				const deferred = await task.processQueuedMessages()
+				const queued = task.messageQueueService.messages.map((message) => message.text)
+
+				task.approveAsk()
+				await askPromise
+				return { duringAsk: { deferred, queued }, afterAsk: await task.processQueuedMessages() }
+			})
+
+			expect(duringAsk.deferred).toBe(false)
+			expect(duringAsk.queued).toEqual(["written during the prompt"])
+			// The deferred message is not lost: the next drain submits it.
+			expect(afterAsk).toBe(true)
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual([
+				"written during the prompt",
+			])
+		})
+
+		it("consumes a retained drain submission exactly once", async () => {
+			const task = createQueueTask()
+			vi.spyOn(getTaskTestAccess(task), "checkpointSave").mockResolvedValue(undefined)
+			task.messageQueueService.addMessage("exactly once")
+
+			await expect(task.processQueuedMessages()).resolves.toBe(true)
+			// A second drain must not re-post the same message into the slot.
+			await expect(task.processQueuedMessages()).resolves.toBe(true)
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["exactly once"])
+
+			const consumed = await task.ask("followup", "Anything else?", false)
+			expect(consumed).toMatchObject({ response: "messageResponse", text: "exactly once" })
+			expect(task.messageQueueService.isEmpty()).toBe(true)
+			// Consumption clears the retention record, so the exclusion set no
+			// longer names a message the queue does not hold.
+			expect(getTaskTestAccess(task).drainRetainedQueuedMessageIds.size).toBe(0)
+
+			// A consumed message is not resubmitted by a later drain.
+			await expect(task.processQueuedMessages()).resolves.toBe(false)
 		})
 	})
 })
