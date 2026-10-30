@@ -3,7 +3,7 @@ import { Task } from "../Task"
 type QueueTaskTestAccess = {
 	say: Task["say"]
 	saveClineMessages: () => Promise<boolean>
-	addToClineMessages: () => Promise<void>
+	addToClineMessages: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	lastMessageTs?: number
 	abort: boolean
 }
@@ -27,7 +27,11 @@ describe("Task.ask queued message drain", () => {
 		task["queuedFeedbackRowWritten"] = new Set<string>()
 		return import("../../message-queue/MessageQueueService").then(({ MessageQueueService }) => {
 			;(task as any).messageQueueService = new MessageQueueService()
-			;(task as any).addToClineMessages = vi.fn(async () => {})
+			// Mirrors the real `addToClineMessages`, which pushes synchronously before
+			// its own awaits: the tests below depend on that ordering.
+			;(task as any).addToClineMessages = vi.fn(async (message: import("@roo-code/types").ClineMessage) => {
+				task["clineMessages"].push(message)
+			})
 			;(task as any).saveClineMessages = vi.fn(async () => {})
 			;(task as any).updateClineMessage = vi.fn(async () => {})
 			;(task as any).cancelAutoApprovalTimeout = vi.fn(() => {})
@@ -495,5 +499,67 @@ describe("Task.ask queued message drain", () => {
 		).resolves.toBe(true)
 		expect(say).toHaveBeenCalledTimes(1)
 		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("keeps a message reclaimable and appends once when say throws before the row lands", async () => {
+		const task = await createTask()
+		task.messageQueueService.addMessage("Row never landed")
+		const result = await task.ask("completion_result", "Done", false)
+		const access = getQueueTaskTestAccess(task)
+		access.saveClineMessages = vi.fn().mockResolvedValue(true)
+		// The ask above left its own row; only rows added from here count.
+		const rowsBefore = task["clineMessages"].length
+
+		// The real `say` guard rejects before `addToClineMessages` runs, so no row
+		// exists and the message must stay reclaimable.
+		access.abort = true
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).rejects.toThrow("aborted")
+		expect(task["clineMessages"]).toHaveLength(rowsBefore)
+		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["Row never landed"])
+		// Released, not left claimed: a later consumer can still claim it.
+		expect(task.messageQueueService.claimNextMessage()?.text).toBe("Row never landed")
+		task.messageQueueService.releaseMessage(result.queuedMessageId!)
+
+		// A later reclaim appends exactly one row, because the failed attempt left
+		// no record behind.
+		access.abort = false
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).resolves.toBe(true)
+		expect(task["clineMessages"]).toHaveLength(rowsBefore + 1)
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("does not double-append when say throws after the row landed", async () => {
+		const task = await createTask()
+		task.messageQueueService.addMessage("Row landed then threw")
+		const result = await task.ask("completion_result", "Done", false)
+		const access = getQueueTaskTestAccess(task)
+		access.saveClineMessages = vi.fn().mockResolvedValue(true)
+		const rowsBefore = task["clineMessages"].length
+		// The row is pushed the way `addToClineMessages` pushes it (synchronously,
+		// before its own awaits), then the call rejects the way a throwing
+		// `Message` listener makes `say` reject.
+		access.addToClineMessages = vi.fn(async (message: import("@roo-code/types").ClineMessage) => {
+			task["clineMessages"].push(message)
+			throw new Error("listener threw")
+		})
+
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).rejects.toThrow("listener threw")
+		expect(task["clineMessages"]).toHaveLength(rowsBefore + 1)
+
+		// The row is retained in history, so the reclaim must not append a second
+		// one, and the release must leave the message reclaimable rather than
+		// leaked as claimed.
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).resolves.toBe(true)
+		expect(task["clineMessages"]).toHaveLength(rowsBefore + 1)
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+		expect(task["drainRetainedQueuedMessageIds"].size).toBe(0)
 	})
 })

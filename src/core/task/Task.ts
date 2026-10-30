@@ -520,8 +520,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// `ask()` calls in flight. A drain must not submit while one is pending: the
 	// submission would answer that ask with text written for another turn.
 	private pendingAskCount = 0
-	// Queued feedback whose `user_feedback` row is already in `clineMessages`, so
-	// a retry or reclaim re-saves it instead of appending a duplicate row.
+	// Queued feedback already appended to `clineMessages`, so a retry or reclaim
+	// re-saves that row instead of appending a duplicate.
 	private queuedFeedbackRowWritten = new Set<string>()
 
 	// Streaming
@@ -1119,10 +1119,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		images?: string[],
 	): Promise<boolean> {
 		// Append the row once, before the retry loop: a retry only re-attempts the
-		// durable save, and a reclaimed message already has its row.
+		// durable save, and a reclaimed message already has its row. `say` can
+		// throw after `addToClineMessages` pushed the row (its `Message` emit runs
+		// post-push), so the record is dropped only when the row did not land.
 		if (!this.queuedFeedbackRowWritten.has(messageId)) {
-			await this.say("user_feedback", text ?? "", images)
+			const appended = this.clineMessages.length
 			this.queuedFeedbackRowWritten.add(messageId)
+			try {
+				await this.say("user_feedback", text ?? "", images)
+			} catch (error) {
+				// Released like the exhausted-retry path: the row's durability is
+				// unknown, so the message stays reclaimable.
+				if (this.clineMessages.length === appended) {
+					this.queuedFeedbackRowWritten.delete(messageId)
+				}
+				this.releaseUnconsumedQueuedMessage(messageId)
+				throw error
+			}
 		}
 		for (let attempt = 0; attempt <= QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length; attempt++) {
 			if (this.abort) {
@@ -1266,9 +1279,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
-	 * Settle a consumed queued message: drop it from the queue and clear its
-	 * retention record on this one edge, so the record can never outlive the
-	 * message. A consume whose persistence fails never reaches here.
+	 * Settle a consumed queued message on this one edge, so no record can outlive
+	 * its message. A consume whose persistence fails never reaches here.
 	 */
 	private consumeQueuedMessage(messageId: string): void {
 		this.messageQueueService.removeMessage(messageId)
@@ -1427,10 +1439,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// so neither record can outlive its message.
 		const queuedIds = new Set(this.messageQueueService.messages.map((message) => message.id))
 		for (const id of this.drainRetainedQueuedMessageIds) {
-			if (!queuedIds.has(id)) {
-				this.drainRetainedQueuedMessageIds.delete(id)
-				this.queuedFeedbackRowWritten.delete(id)
-			}
+			if (queuedIds.has(id)) continue
+			this.drainRetainedQueuedMessageIds.delete(id)
+			this.queuedFeedbackRowWritten.delete(id)
 		}
 
 		return this.drainRetainedQueuedMessageIds.size > 0 &&
@@ -2499,8 +2510,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.askResponseText = text
 		this.askResponseImages = images
 		// No retention bookkeeping here: a direct response overwrites the slot a
-		// drain submitted into, so that submission was NOT consumed and the
-		// message stays queued and excluded from approval asks.
+		// drain submitted into, so that submission was NOT consumed: the message
+		// stays queued and excluded from approval asks.
 
 		// Create a checkpoint whenever the user sends a message.
 		// Use allowEmpty=true to ensure a checkpoint is recorded even if there are no file changes.
@@ -2640,7 +2651,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Submit a user message through the ask-response channel.
 	 *
 	 * @returns false when there was nothing to submit, the task is stopping, or
-	 * the provider reference was lost. Callers draining the queue must check it.
+	 * the provider reference was lost. Draining callers must check it.
 	 */
 	public async submitUserMessage(
 		text: string,
@@ -6555,9 +6566,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * The message is claimed, not dequeued, and the claim is released after the
 	 * submission handoff so the message STAYS queued: removal is tied to
 	 * ask-consumption, not to submit-return, so a message submitted between turns
-	 * survives a failed turn or restart. When submission throws, the claim is
-	 * released and the error propagates; when the handoff reports nothing
-	 * delivered, the claim is released and the run resolves false.
+	 * survives a failed turn or restart. A throw releases the claim and
+	 * propagates; a handoff that delivered nothing releases it and resolves false.
 	 *
 	 * Retention is restricted to conversational consumption: a retained ID is
 	 * recorded in `drainRetainedQueuedMessageIds`, and every ask whose
@@ -6591,7 +6601,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		// An ask is waiting for its response. Submitting now would resolve that
 		// prompt with text written for another turn, bypassing the ask's claim gate,
-		// blanket-deny latch, and protected-ask exemption. Defer it instead.
+		// blanket-deny latch, and protected-ask exemption.
 		if (this.pendingAskCount > 0) {
 			return false
 		}
@@ -6601,8 +6611,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		// An earlier drain already submitted this message and no ask has consumed
 		// it yet: re-posting would overwrite a distinct pending response and lose
-		// it, so release the claim and keep the message queued. Nothing was
-		// submitted, so this reports false.
+		// it, so release the claim and report false with the message still queued.
 		if (this.drainRetainedQueuedMessageIds.has(queued.id)) {
 			this.messageQueueService.releaseMessage(queued.id)
 			return false
@@ -6621,8 +6630,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			throw error
 		}
 		// Record the ID before releasing the claim: a later drain must tell
-		// "already submitted, still pending" from "not submitted yet", and an
-		// execution-gating ask must refuse to claim it.
+		// "already submitted, still pending" from "not submitted yet".
 		this.drainRetainedQueuedMessageIds.add(queued.id)
 		this.messageQueueService.releaseMessage(queued.id)
 		return true

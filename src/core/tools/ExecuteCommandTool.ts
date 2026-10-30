@@ -332,8 +332,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			// through `publishToolResult`, which settles the signal with the
 			// publication outcome, so the drain waits on a structural signal and
 			// skips after a failed publication. Every throw path must settle it
-			// too: the drain awaits it, so an unsettled promise would hang that
-			// chain and hold task references forever. Settling is idempotent.
+			// too, or the awaiting drain would hang and hold task references.
 			let settleToolResultPublished: ((published: boolean) => void) | undefined
 			const toolResultPublished = new Promise<boolean>((resolve) => {
 				settleToolResultPublished = resolve
@@ -368,9 +367,8 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				}
 
 				publishToolResult(result)
-				// Only drain queued messages when the command actually ran
-				// (early validation failures end the turn without an execution,
-				// matching file tools' error-path behavior).
+				// Only drain when the command actually ran: early validation
+				// failures end the turn without an execution.
 				shouldDrainQueuedMessages = commandSubmitted
 			} catch (error: unknown) {
 				// Invalidate pending ask from first execution to prevent race condition
@@ -406,13 +404,11 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 							"Command was submitted in the VS Code terminal, but shell integration did not report its output or completion status. Do not run the command again automatically.",
 						)
 					} catch (warningError) {
-						// A throw before publishToolResult leaves the signal unsettled.
 						settleToolResultPublished?.(false)
 						throw warningError
 					}
-					// The command did run, so this arm owes the same drain the normal
-					// and fallback arms give. Set only after the warning result
-					// published, so a failed publication still skips the drain.
+					// This arm owes the same drain the normal and fallback arms give,
+					// set only after the warning result published.
 					shouldDrainQueuedMessages = error.commandSubmitted
 				} else {
 					// Ordinary execution error (e.g. the terminal failed to start) —
@@ -455,9 +451,9 @@ export type ExecuteCommandOptions = {
 	commandExecutionTimeout?: number
 	agentTimeout?: number
 	/**
-	 * Resolves true on successful publication and false when it failed. The
+	 * Resolves true on successful publication, false when it failed. The
 	 * background-completion drain awaits this so queued messages are never
-	 * submitted ahead of the current tool result, and skips after a failure.
+	 * submitted ahead of the tool result, and skips after a failure.
 	 */
 	toolResultPublished?: Promise<boolean>
 	toolCallId: string
@@ -653,27 +649,23 @@ export async function executeCommandInTerminal(
 				.then(async () => {
 					// The tool returned a "still running" result and drained when the
 					// agent timeout moved the command to the background; process
-					// messages queued since then so they are not held until an
-					// unrelated path drains them. Wait on the per-invocation
-					// publication signal: completion can land inside the settle
-					// delay while the tool result is still pending.
+					// messages queued since then. Wait on the per-invocation
+					// publication signal: completion can land inside the settle delay.
 					if (!runInBackground) {
 						return
 					}
 					const published = await toolResultPublished
-					// A task cancelled while the command finished in the background
-					// must not drain: the guards inside processQueuedMessages would
-					// no-op anyway, and skipping avoids error-log noise on the dying
-					// task. A failed publication must not drain either: handleError
-					// reports the command error first.
+					// A cancelled task must not drain (the guards inside
+					// processQueuedMessages would no-op anyway, and skipping avoids
+					// error-log noise on a dying task), and neither must a failed
+					// publication: handleError reports that error first.
 					if (task.abort || task.abandoned || !published) {
 						return
 					}
 					// The final `command_output` say is part of what the drain depends
-					// on: #937 requires queued feedback to be considered together
-					// with the finished command's output. A rejected say is swallowed
-					// by the chain's `.catch`, so read the recorded outcome instead
-					// of assuming the chain resolved.
+					// on: #937 requires queued feedback to be considered together with
+					// the finished command's output. A rejected say is swallowed by the
+					// chain's `.catch`, so read the recorded outcome instead.
 					if (commandOutputPublishFailed) {
 						return
 					}
