@@ -14,6 +14,8 @@ import { parseApiPrice } from "../../../shared/cost"
 
 import { throwIfAborted } from "../utils/abort-signal"
 
+import { MODEL_CATALOG_FETCH_TIMEOUT_MS } from "./modelCache"
+
 /**
  * OpenRouterBaseModel
  */
@@ -152,7 +154,12 @@ export async function getOpenRouterModelEndpoints(
 	const baseURL = options?.openRouterBaseUrl || "https://openrouter.ai/api/v1"
 
 	try {
-		const response = await axios.get<OpenRouterModelEndpointsResponse>(`${baseURL}/models/${modelId}/endpoints`)
+		// This request runs outside getModels()' single-flight, so it needs its own bound:
+		// a stalled endpoint response would otherwise keep the caller's catalog load pending
+		// forever, and later callers would join that pending promise instead of retrying.
+		const response = await axios.get<OpenRouterModelEndpointsResponse>(`${baseURL}/models/${modelId}/endpoints`, {
+			timeout: MODEL_CATALOG_FETCH_TIMEOUT_MS,
+		})
 		const result = openRouterModelEndpointsResponseSchema.safeParse(response.data)
 		const data = result.success ? result.data.data : response.data.data
 

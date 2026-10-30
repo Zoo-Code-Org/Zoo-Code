@@ -6,6 +6,8 @@ import { back as nockBack } from "nock"
 
 import type { ModelInfo } from "@roo-code/types"
 
+import { MODEL_CATALOG_FETCH_TIMEOUT_MS } from "../modelCache"
+
 import {
 	applyOpenRouterMoonshotK3Profile,
 	getOpenRouterModelEndpoints,
@@ -311,6 +313,27 @@ describe("OpenRouter API", () => {
 				supportsReasoningEffort: true,
 				supportedParameters: ["max_tokens", "temperature", "reasoning"],
 			})
+
+			getSpy.mockRestore()
+		})
+
+		it("bounds the endpoints request with the model-catalog fetch timeout", async () => {
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({
+				data: { data: { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4", endpoints: [] } },
+			})
+
+			await getOpenRouterModelEndpoints("anthropic/claude-sonnet-4")
+
+			// This request bypasses getModels()' single-flight, so it must carry its own
+			// bound: without a timeout a stalled response keeps the caller's shared
+			// catalog load pending and later callers join it instead of retrying.
+			expect(getSpy).toHaveBeenCalledWith(
+				"https://openrouter.ai/api/v1/models/anthropic/claude-sonnet-4/endpoints",
+				{
+					timeout: MODEL_CATALOG_FETCH_TIMEOUT_MS,
+				},
+			)
 
 			getSpy.mockRestore()
 		})

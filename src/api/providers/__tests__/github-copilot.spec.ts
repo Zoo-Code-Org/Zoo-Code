@@ -759,7 +759,7 @@ describe("GitHubCopilotHandler", () => {
 
 				controller.abort()
 
-				await expect(pendingRead).rejects.toThrow("Request cancelled by user")
+				await expect(pendingRead).rejects.toThrow("The VS Code LM request was aborted")
 				expect(source.cancel).toHaveBeenCalled()
 			} finally {
 				handler.dispose()
@@ -921,7 +921,7 @@ describe("GitHubCopilotHandler", () => {
 
 				controller.abort()
 
-				await expect(request).rejects.toThrow("Request cancelled by user")
+				await expect(request).rejects.toThrow("The VS Code LM request was aborted")
 				expect(source.cancel).toHaveBeenCalled()
 				expect(mockLanguageModelChat.sendRequest).not.toHaveBeenCalled()
 			} finally {
@@ -945,7 +945,7 @@ describe("GitHubCopilotHandler", () => {
 							abortSignal: controller.signal,
 						}),
 					),
-				).rejects.toThrow("Request cancelled by user")
+				).rejects.toThrow("The VS Code LM request was aborted")
 				const source = vi.mocked(vscode.CancellationTokenSource).mock.results.at(-1)?.value
 				expect(source.cancel).toHaveBeenCalled()
 				expect(mockLanguageModelChat.sendRequest).not.toHaveBeenCalled()
@@ -968,7 +968,7 @@ describe("GitHubCopilotHandler", () => {
 							abortSignal: controller.signal,
 						}),
 					),
-				).rejects.toThrow("Request cancelled by user")
+				).rejects.toThrow("The VS Code LM request was aborted")
 				expect(source.cancel).toHaveBeenCalled()
 				// Any count that did start saw an already-cancelled token.
 				for (const [, token] of mockLanguageModelChat.countTokens.mock.calls) {
@@ -1114,7 +1114,10 @@ describe("GitHubCopilotHandler", () => {
 				expect(source.cancel).toHaveBeenCalledOnce()
 
 				release()
-				await pending
+				// The unit's abort contract: content that raced the cancellation is
+				// not surfaced; the aborted completion rejects with the canonical
+				// abort error instead of resolving with late text.
+				await expect(pending).rejects.toThrow("The VS Code LM request was aborted")
 			} finally {
 				handler.dispose()
 			}
@@ -1192,7 +1195,7 @@ describe("GitHubCopilotHandler", () => {
 			const handler = new GitHubCopilotHandler(defaultOptions)
 			try {
 				await expect(handler.completePrompt("x", { abortSignal: controller.signal })).rejects.toThrow(
-					"Operation cancelled",
+					"The VS Code LM request was aborted",
 				)
 			} finally {
 				handler.dispose()

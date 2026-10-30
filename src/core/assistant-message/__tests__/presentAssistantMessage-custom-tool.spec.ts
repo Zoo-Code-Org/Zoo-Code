@@ -1,5 +1,6 @@
 // npx vitest src/core/assistant-message/__tests__/presentAssistantMessage-custom-tool.spec.ts
 
+import { DispatchState } from "../../task/dispatchState"
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { presentAssistantMessage } from "../presentAssistantMessage"
 import { validateToolUse } from "../../tools/validateToolUse"
@@ -67,8 +68,8 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 			taskId: "test-task-id",
 			instanceId: "test-instance",
 			abort: false,
-			presentAssistantMessageLocked: false,
-			presentAssistantMessageHasPendingUpdates: false,
+			dispatchState: DispatchState.IDLE,
+			pendingWork: null,
 			currentStreamingContentIndex: 0,
 			assistantMessageContent: [],
 			userMessageContent: [],
@@ -224,17 +225,17 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 		})
 	})
 
-	describe("Presentation lock ownership", () => {
+	describe("Dispatch state ownership", () => {
 		it("drains an update queued during the helper-to-wrapper handoff", async () => {
 			mockTask.assistantMessageContent = [{ type: "text", content: "initial", partial: true }]
 			let queuedCall: Promise<void> | undefined
-			let lockedDuringHandoff = false
+			let busyDuringHandoff = false
 			mockTask.say.mockImplementationOnce(async () => {
 				// The first microtask precedes the helper's await continuation.
 				// The second follows that continuation but precedes the wrapper's.
 				queueMicrotask(() => {
 					queueMicrotask(() => {
-						lockedDuringHandoff = mockTask.presentAssistantMessageLocked
+						busyDuringHandoff = mockTask.dispatchState !== DispatchState.IDLE
 						mockTask.assistantMessageContent[0] = { type: "text", content: "final", partial: false }
 						mockTask.didCompleteReadingStream = true
 						queuedCall = presentAssistantMessage(mockTask, baseSnapshot)
@@ -245,15 +246,15 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 			await presentAssistantMessage(mockTask, baseSnapshot)
 			await queuedCall
 
-			expect(lockedDuringHandoff).toBe(true)
+			expect(busyDuringHandoff).toBe(true)
 			expect(mockTask.say.mock.calls).toEqual([
 				["text", "initial", undefined, true],
 				["text", "final", undefined, false],
 			])
 			expect(mockTask.currentStreamingContentIndex).toBe(1)
 			expect(mockTask.userMessageContentReady).toBe(true)
-			expect(mockTask.presentAssistantMessageHasPendingUpdates).toBe(false)
-			expect(mockTask.presentAssistantMessageLocked).toBe(false)
+			expect(mockTask.pendingWork).toBeNull()
+			expect(mockTask.dispatchState).toBe(DispatchState.IDLE)
 		})
 
 		it("stops draining an update queued during the handoff once the task aborts", async () => {
@@ -279,7 +280,7 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 						mockTask.assistantMessageContent[0] = { type: "text", content: "final", partial: false }
 						mockTask.didCompleteReadingStream = true
 						queuedCall = presentAssistantMessage(mockTask, baseSnapshot)
-						pendingDuringHandoff = mockTask.presentAssistantMessageHasPendingUpdates
+						pendingDuringHandoff = mockTask.pendingWork !== null
 						aborted = true
 					})
 				})
@@ -291,30 +292,30 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 			expect(pendingDuringHandoff).toBe(true)
 			expect(mockTask.say).toHaveBeenCalledExactlyOnceWith("text", "initial", undefined, true)
 			expect(mockTask.currentStreamingContentIndex).toBe(0)
-			expect(mockTask.presentAssistantMessageLocked).toBe(false)
+			expect(mockTask.dispatchState).toBe(DispatchState.IDLE)
 		})
 
-		it("holds one lock across consecutive blocks and queues overlapping calls", async () => {
+		it("holds SERIAL across consecutive blocks and queues overlapping calls", async () => {
 			mockTask.assistantMessageContent = [
 				{ type: "text", content: "first", partial: false },
 				{ type: "text", content: "second", partial: false },
 			]
 			mockTask.didCompleteReadingStream = true
-			const lockChanges: boolean[] = []
-			let locked = false
-			Object.defineProperty(mockTask, "presentAssistantMessageLocked", {
+			const stateChanges: DispatchState[] = []
+			let state = DispatchState.IDLE
+			Object.defineProperty(mockTask, "dispatchState", {
 				configurable: true,
-				get: () => locked,
-				set: (value: boolean) => {
-					locked = value
-					lockChanges.push(value)
+				get: () => state,
+				set: (value: DispatchState) => {
+					state = value
+					stateChanges.push(value)
 				},
 			})
 			mockTask.say.mockImplementation(async (_type: string, content: string) => {
-				expect(mockTask.presentAssistantMessageLocked).toBe(true)
+				expect(mockTask.dispatchState).toBe(DispatchState.SERIAL)
 				if (content === "second") {
 					await presentAssistantMessage(mockTask, baseSnapshot)
-					expect(mockTask.presentAssistantMessageHasPendingUpdates).toBe(true)
+					expect(mockTask.pendingWork).toEqual({ mode: "serial" })
 				}
 			})
 
@@ -326,8 +327,8 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 			])
 			expect(mockTask.currentStreamingContentIndex).toBe(2)
 			expect(mockTask.userMessageContentReady).toBe(true)
-			expect(mockTask.presentAssistantMessageHasPendingUpdates).toBe(false)
-			expect(lockChanges).toEqual([true, false])
+			expect(mockTask.pendingWork).toBeNull()
+			expect(stateChanges).toEqual([DispatchState.SERIAL, DispatchState.IDLE])
 		})
 
 		it("consumes a pending update for a partial block without repeating it indefinitely", async () => {
@@ -336,11 +337,11 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 				.mockImplementationOnce(async () => {
 					mockTask.assistantMessageContent[0] = { type: "text", content: "updated", partial: true }
 					await presentAssistantMessage(mockTask, baseSnapshot)
-					expect(mockTask.presentAssistantMessageHasPendingUpdates).toBe(true)
+					expect(mockTask.pendingWork).toEqual({ mode: "serial" })
 				})
 				.mockImplementationOnce(async () => {
-					expect(mockTask.presentAssistantMessageLocked).toBe(true)
-					expect(mockTask.presentAssistantMessageHasPendingUpdates).toBe(false)
+					expect(mockTask.dispatchState).toBe(DispatchState.SERIAL)
+					expect(mockTask.pendingWork).toBeNull()
 				})
 
 			await presentAssistantMessage(mockTask, baseSnapshot)
@@ -350,8 +351,8 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 				["text", "updated", undefined, true],
 			])
 			expect(mockTask.currentStreamingContentIndex).toBe(0)
-			expect(mockTask.presentAssistantMessageHasPendingUpdates).toBe(false)
-			expect(mockTask.presentAssistantMessageLocked).toBe(false)
+			expect(mockTask.pendingWork).toBeNull()
+			expect(mockTask.dispatchState).toBe(DispatchState.IDLE)
 		})
 
 		it("stops internal continuation when the task aborts between blocks", async () => {
@@ -367,10 +368,10 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 
 			expect(mockTask.say).toHaveBeenCalledExactlyOnceWith("text", "first", undefined, false)
 			expect(mockTask.currentStreamingContentIndex).toBe(1)
-			expect(mockTask.presentAssistantMessageLocked).toBe(false)
+			expect(mockTask.dispatchState).toBe(DispatchState.IDLE)
 		})
 
-		it("releases the presentation lock when a later block throws", async () => {
+		it("returns to IDLE when a later block throws", async () => {
 			mockTask.assistantMessageContent = [
 				{ type: "text", content: "first", partial: false },
 				{ type: "text", content: "second", partial: false },
@@ -381,12 +382,12 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 
 			expect(mockTask.say).toHaveBeenCalledTimes(2)
 			expect(mockTask.currentStreamingContentIndex).toBe(1)
-			expect(mockTask.presentAssistantMessageLocked).toBe(false)
+			expect(mockTask.dispatchState).toBe(DispatchState.IDLE)
 		})
 	})
 
 	describe("Custom tool error recording", () => {
-		it("releases the presentation lock when dispatch throws", async () => {
+		it("returns to IDLE when dispatch throws", async () => {
 			mockTask.assistantMessageContent = [
 				{
 					type: "tool_use",
@@ -404,7 +405,7 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 
 			try {
 				await expect(presentAssistantMessage(mockTask, baseSnapshot)).rejects.toThrow("dispatch failed")
-				expect(mockTask.presentAssistantMessageLocked).toBe(false)
+				expect(mockTask.dispatchState).toBe(DispatchState.IDLE)
 			} finally {
 				handleSpy.mockRestore()
 			}

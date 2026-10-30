@@ -21,12 +21,12 @@ const DEFAULT_WELCOME_API_CONFIGURATION: ProviderSettings = {
 }
 
 const getWelcomeApiConfiguration = (
-	apiConfiguration?: ProviderSettings,
+	apiConfiguration: ProviderSettings,
 	zooCodeIsAuthenticated?: boolean,
 ): ProviderSettings => {
 	// validateApiConfiguration treats a missing apiProvider as valid (no switch case matches),
 	// so we explicitly fall back here before delegating to it for incomplete-but-set configs.
-	if (!apiConfiguration?.apiProvider) {
+	if (!apiConfiguration.apiProvider) {
 		return DEFAULT_WELCOME_API_CONFIGURATION
 	}
 
