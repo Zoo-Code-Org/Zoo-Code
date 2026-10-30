@@ -2683,7 +2683,19 @@ describe("ClineProvider", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
+			let releaseInitialProfile: (value: StalledProfile) => void = () => {}
+			const getProfileSpy = vi.fn((params: { name: string }) => {
+				if (params.name === "cfg-a") {
+					return new Promise<StalledProfile>((resolve) => (releaseInitialProfile = resolve))
+				}
+				return Promise.resolve({
+					name: params.name,
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "model-y",
+				})
+			})
+			// @ts-ignore - Reassign the readonly providerSettingsManager for the test; the double only backs getProfile.
+			provider.providerSettingsManager = { getProfile: getProfileSpy }
 			await provider.saveViewState("currentApiConfigName", "cfg-a")
 			const load = provider["setViewStateId"]("stable-sidebar-view")
 
@@ -2694,14 +2706,19 @@ describe("ClineProvider", () => {
 			// resolves the name persisted at load start.
 			await provider.saveViewState("currentApiConfigName", "cfg-b")
 
-			resolveProfile({ name: "cfg-a", apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-x" })
+			releaseInitialProfile({
+				name: "cfg-a",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-x",
+			})
 			await load
 
-			// The in-flight selection wins over the loaded state.
+			// The in-flight selection wins over the loaded state, and the overlay must match
+			// the new name: it is re-resolved for cfg-b instead of keeping cfg-a's settings.
 			expect(provider["viewLocalState"].currentApiConfigName).toBe("cfg-b")
 			expect(provider["viewLocalState"].apiConfiguration).toEqual({
 				apiProvider: providerIdentifiers.openrouter,
-				openRouterModelId: "model-x",
+				openRouterModelId: "model-y",
 			})
 			expect(provider["viewLocalState"]).not.toHaveProperty("mode")
 			await provider.dispose()
@@ -2829,6 +2846,60 @@ describe("ClineProvider", () => {
 			expect(provider["viewLocalState"]).not.toHaveProperty("mode")
 			await provider.setValue("currentApiConfigName", undefined)
 			expect(provider["viewLocalState"]).not.toHaveProperty("currentApiConfigName")
+			await provider.dispose()
+		})
+
+		it("should discard a load that finishes after reset cleared the buffer", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-sidebar-view")
+			await provider.contextProxy.setValue("viewStates", {
+				"stable-sidebar-view": { mode: "architect", updatedAt: 1 },
+			})
+
+			let releaseModes: () => void = () => {}
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						releaseModes = () => resolve([])
+					}),
+			)
+
+			const load = provider["loadViewState"]()
+			provider["_clearViewLocalState"]()
+			releaseModes()
+			await load
+
+			expect(provider["viewLocalState"]).toEqual({})
+			await provider.dispose()
+		})
+
+		it("should keep a live view's persisted entry outside the prune cutoff", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("live-view")
+			const states: Record<string, { mode: string; updatedAt: number }> = Object.fromEntries(
+				Array.from({ length: 55 }, (_, index) => [
+					`closed-${index}`,
+					{ mode: `mode-${index}`, updatedAt: index + 1 },
+				]),
+			)
+			states["live-view"] = { mode: "architect", updatedAt: 0 }
+
+			const pruned = provider["prunePersistedViewStates"](states)
+
+			expect(pruned["live-view"]).toEqual({ mode: "architect", updatedAt: 0 })
+			expect(Object.keys(pruned)).toHaveLength(51)
 			await provider.dispose()
 		})
 

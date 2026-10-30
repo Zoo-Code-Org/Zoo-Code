@@ -460,6 +460,10 @@ export class ClineProvider
 	 */
 	private viewLocalState: Partial<ExtensionState> = {}
 
+	// Bumped whenever the buffer is cleared (reset/import), so an in-flight load can tell
+	// that its captured state was invalidated while it awaited the profile lookup.
+	private viewLocalStateGeneration = 0
+
 	/**
 	 * This view's pinned profile name from the view-local buffer. Exposed for
 	 * sibling-instance inspection (getAllInstances() filtering): `viewLocalState`
@@ -827,11 +831,20 @@ export class ClineProvider
 	 * bounded by MAX_PERSISTED_VIEW_STATES so the global key cannot grow unboundedly.
 	 */
 	private prunePersistedViewStates(states: Record<string, PersistedViewState>): Record<string, PersistedViewState> {
-		return Object.fromEntries(
-			Object.entries(states)
-				.sort(([, a], [, b]) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-				.slice(0, ClineProvider.MAX_PERSISTED_VIEW_STATES),
+		// Entries of live views must never age out: a view that keeps its mode and profile does
+		// not refresh updatedAt. The cap applies to closed-view entries only.
+		const liveViewStateIds = new Set(
+			Array.from(ClineProvider.activeInstances, (instance) => instance.viewStateId).filter(
+				(viewStateId): viewStateId is string => Boolean(viewStateId),
+			),
 		)
+		const liveEntries = Object.entries(states).filter(([viewStateId]) => liveViewStateIds.has(viewStateId))
+		const closedEntries = Object.entries(states)
+			.filter(([viewStateId]) => !liveViewStateIds.has(viewStateId))
+			.sort(([, a], [, b]) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+			.slice(0, ClineProvider.MAX_PERSISTED_VIEW_STATES)
+
+		return Object.fromEntries([...liveEntries, ...closedEntries])
 	}
 
 	/**
@@ -957,6 +970,7 @@ export class ClineProvider
 	 * loaded state, field by field, so in-flight user selections are not clobbered by the load.
 	 */
 	private async loadViewState(): Promise<void> {
+		const loadedGeneration = this.viewLocalStateGeneration
 		// Capture the id this load is for: a newer id registered while an async
 		// profile lookup is in flight must not be overwritten by this stale load.
 		const loadedForViewId = this.viewStateId
@@ -1033,6 +1047,41 @@ export class ClineProvider
 				} else {
 					mergedState.apiConfiguration = postLoadBuffer.apiConfiguration
 				}
+			}
+
+			// Activation/upsert/deletion change the buffer's profile name before they replace its
+			// overlay, so a load that completes in that window must not publish the old profile's
+			// configuration under the new name: re-resolve it (or drop it) before publishing.
+			const nameChangedInFlight = !Object.is(
+				preLoadBuffer.currentApiConfigName,
+				postLoadBuffer.currentApiConfigName,
+			)
+			const overlayChangedInFlight = !Object.is(preLoadBuffer.apiConfiguration, postLoadBuffer.apiConfiguration)
+
+			if (nameChangedInFlight && !overlayChangedInFlight) {
+				if (postLoadBuffer.currentApiConfigName === undefined) {
+					delete mergedState.apiConfiguration
+				} else {
+					try {
+						const { name: _resolvedName, ...apiConfiguration } =
+							await this.providerSettingsManager.getProfile({
+								name: postLoadBuffer.currentApiConfigName,
+							})
+						mergedState.apiConfiguration = apiConfiguration as ProviderSettings
+					} catch (error) {
+						this.log(
+							`[loadViewState] Unable to resolve API profile '${postLoadBuffer.currentApiConfigName}' pinned during the load: ${error instanceof Error ? error.message : String(error)}`,
+						)
+						delete mergedState.apiConfiguration
+					}
+				}
+			}
+
+			// A reset/import may have cleared the buffer while the lookup was in flight:
+			// republishing here would restore the pre-reset selection over the cleared state.
+			if (this.viewLocalStateGeneration !== loadedGeneration) {
+				this.log(`[loadViewState] Discarding state loaded before a reset for viewId ${this.viewId}`)
+				return
 			}
 
 			this.viewLocalState = mergedState
@@ -3223,6 +3272,14 @@ export class ClineProvider
 							error instanceof Error ? error.message : String(error)
 						}`,
 					)
+					// Only fail the deletion when the survivor's settings are needed for the rewrite
+					// below: otherwise the typed not-found path still prunes the stale list entry.
+					if (
+						profileToDelete.name === globalSettings.currentApiConfigName ||
+						this.viewLocalState.currentApiConfigName === profileToDelete.name
+					) {
+						throw error
+					}
 				}
 
 				// The mutation timeout already released the caller with a timeout rejection, so the
@@ -5239,6 +5296,7 @@ export class ClineProvider
 	 * Clear view-local state cache so that getState() falls back to ContextProxy defaults.
 	 */
 	private _clearViewLocalState(): void {
+		this.viewLocalStateGeneration += 1
 		this.viewLocalState = {}
 	}
 
