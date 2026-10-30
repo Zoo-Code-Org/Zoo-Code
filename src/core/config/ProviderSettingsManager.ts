@@ -590,27 +590,26 @@ export class ProviderSettingsManager {
 	}
 
 	/**
-	 * Check if a config exists by its manager-assigned id.
-	 *
-	 * The mode bindings a purge dropped name a profile by `id`, and a rollback that failed to
-	 * restore the profile must not re-apply them: a binding whose id no profile carries makes the
-	 * next switch to that mode resolve nothing and silently keep the current profile. Checking
-	 * under the lock keeps the answer from straddling a concurrent purge or rename.
-	 */
-	public async hasConfigById(id: string) {
-		return await this.lock(async () => {
-			const providerProfiles = await this.load()
-			return Object.values(providerProfiles.apiConfigs).some((config) => config.id === id)
-		})
-	}
-
-	/**
 	 * Set the API config for a specific mode.
+	 *
+	 * `onlyIfUnbound` makes the write conditional, for the rollback that re-applies the bindings a
+	 * purge dropped. That rollback must not overwrite a mode a newer selection has already bound
+	 * (its queue advances at its timeout, so a newer binding can commit while the aborted rollback
+	 * still runs), and it must not re-apply a binding whose profile no longer exists (the restore's
+	 * `saveConfig` can reject, and a dangling id makes the next switch to that mode resolve nothing
+	 * and silently keep the current profile). Both checks and the write share this one lock, so
+	 * neither can straddle a concurrent purge or rename. Returns whether the write happened.
 	 */
-	public async setModeConfig(mode: Mode, configId: string) {
+	public async setModeConfig(mode: Mode, configId: string, { onlyIfUnbound = false } = {}): Promise<boolean> {
 		try {
 			return await this.lock(async () => {
 				const providerProfiles = await this.load()
+
+				if (onlyIfUnbound) {
+					const exists = Object.values(providerProfiles.apiConfigs).some((config) => config.id === configId)
+					if (!exists || providerProfiles.modeApiConfigs?.[mode] !== undefined) return false
+				}
+
 				// Ensure the per-mode config map exists
 				if (!providerProfiles.modeApiConfigs) {
 					providerProfiles.modeApiConfigs = {}
@@ -618,6 +617,7 @@ export class ProviderSettingsManager {
 				// Assign the chosen config ID to this mode
 				providerProfiles.modeApiConfigs[mode] = configId
 				await this.store(providerProfiles)
+				return true
 			})
 		} catch (error) {
 			throw new Error(`Failed to set mode config: ${error}`)

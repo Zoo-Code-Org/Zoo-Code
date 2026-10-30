@@ -1456,6 +1456,58 @@ describe("ProviderSettingsManager", () => {
 		})
 	})
 
+	describe("setModeConfig with onlyIfUnbound", () => {
+		// The reconcile's re-apply is the only caller. Both skips are the point of the option: a
+		// newer selection may have bound the mode while the rollback ran, and the binding's profile
+		// may no longer exist because the restore's `saveConfig` rejected.
+		const profilesWith = (modeApiConfigs?: Record<string, string>): ProviderProfiles => ({
+			currentApiConfigName: "default",
+			apiConfigs: {
+				default: { id: "default" },
+				test: { apiProvider: providerIdentifiers.anthropic, id: "test-id" },
+			},
+			modeApiConfigs,
+			migrations: { rateLimitSecondsMigrated: false },
+		})
+
+		const storedProfiles = () => JSON.parse(mockSecrets.store.mock.calls.at(-1)![1] as string) as ProviderProfiles
+
+		it("binds the mode when it is unbound and the profile exists", async () => {
+			mockSecrets.get.mockResolvedValue(JSON.stringify(profilesWith()))
+
+			await expect(
+				providerSettingsManager.setModeConfig("code" as never, "test-id", { onlyIfUnbound: true }),
+			).resolves.toBe(true)
+			expect(storedProfiles().modeApiConfigs).toEqual({ code: "test-id" })
+		})
+
+		it("leaves a newer selection's binding alone", async () => {
+			mockSecrets.get.mockResolvedValue(JSON.stringify(profilesWith({ code: "newer-id" })))
+
+			await expect(
+				providerSettingsManager.setModeConfig("code" as never, "test-id", { onlyIfUnbound: true }),
+			).resolves.toBe(false)
+			// Nothing was written, so the newer binding survives.
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
+		it("skips a binding whose profile no longer exists", async () => {
+			mockSecrets.get.mockResolvedValue(JSON.stringify(profilesWith()))
+
+			await expect(
+				providerSettingsManager.setModeConfig("code" as never, "gone-id", { onlyIfUnbound: true }),
+			).resolves.toBe(false)
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
+		it("still overwrites unconditionally without the option", async () => {
+			mockSecrets.get.mockResolvedValue(JSON.stringify(profilesWith({ code: "newer-id" })))
+
+			await expect(providerSettingsManager.setModeConfig("code" as never, "test-id")).resolves.toBe(true)
+			expect(storedProfiles().modeApiConfigs).toEqual({ code: "test-id" })
+		})
+	})
+
 	describe("syncCloudProfiles", () => {
 		it("should add new cloud profiles without secret keys", async () => {
 			const existingConfig: ProviderProfiles = {

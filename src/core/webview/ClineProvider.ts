@@ -210,6 +210,9 @@ type GetStateOptions = {
 	includeTaskHistory?: boolean
 }
 
+/** The ContextProxy snapshot a failed delete rolls back to. */
+type ProviderProfileSnapshot = Pick<RooCodeSettings, "currentApiConfigName" | "listApiConfigMeta" | "modeApiConfigs">
+
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
 	implements vscode.WebviewViewProvider, TelemetryPropertiesProvider, TaskProviderLike
@@ -2184,10 +2187,7 @@ export class ClineProvider
 		// Captured inside the queued mutation so the rollback below can restore them even when the
 		// mutation times out (the timeout rejects the outer wrapper, so an inner catch never runs).
 		let deletedProfileConfig: (ProviderSettingsWithId & { name: string }) | undefined
-		let previousContextValues: Pick<
-			RooCodeSettings,
-			"currentApiConfigName" | "listApiConfigMeta" | "modeApiConfigs"
-		> = {}
+		let previousContextValues: ProviderProfileSnapshot = {}
 		// The mode bindings the purge dropped from the manager, so the rollback can re-apply them.
 		let removedModeConfigs: Record<string, string> = {}
 
@@ -2248,18 +2248,18 @@ export class ClineProvider
 					// so the caller must not be left with a deleted profile it was told survived:
 					// undo it instead of returning with the two stores disagreeing.
 					if (signal.aborted) {
-						await this.undoCommittedProviderProfilePurge(
-							profileToDelete.name,
-							undoConfig,
-							removedModeConfigs,
-						)
+						await this.undoCommittedProviderProfilePurge(profileToDelete.name, undoConfig, removedModeConfigs)
 
-						// Fenced behind the abort, and read from the manager rather than the cache,
-						// which never observed a profile created while the purge held the lock.
-						await this.contextProxy.setValues({
-							listApiConfigMeta: await this.providerSettingsManager.listConfig(),
-							modeApiConfigs: await this.providerSettingsManager.getModeApiConfigs(),
-						})
+						// The undo restored the pre-delete profile, so the manager's view needs mirroring
+						// only when it holds a profile the cache never observed. An unconditional write
+						// would land a snapshot older than a newer mutation's write and replace it.
+						const listApiConfigMeta = await this.providerSettingsManager.listConfig()
+						if (listApiConfigMeta.length !== (this.contextProxy.getValues().listApiConfigMeta?.length ?? 0)) {
+							await this.contextProxy.setValues({
+								listApiConfigMeta,
+								modeApiConfigs: await this.providerSettingsManager.getModeApiConfigs(),
+							})
+						}
 						return
 					}
 
@@ -2286,11 +2286,10 @@ export class ClineProvider
 					}
 
 					// Read the list from the manager, not the cache: the cache only observes this
-					// provider's own writes.
+					// provider's own writes. `listConfig()` already excludes the deleted name, so a
+					// filter here would drop a same-name profile saved during the purge.
 					await this.contextProxy.setValues({
-						listApiConfigMeta: (await this.providerSettingsManager.listConfig()).filter(
-							({ name }) => name !== profileToDelete.name,
-						),
+						listApiConfigMeta: await this.providerSettingsManager.listConfig(),
 						modeApiConfigs: await this.providerSettingsManager.getModeApiConfigs(),
 					})
 
@@ -2498,7 +2497,7 @@ export class ClineProvider
 	private async restoreDeletedProviderProfile(
 		name: string,
 		config: (ProviderSettingsWithId & { name: string }) | undefined,
-		previousContextValues: Pick<RooCodeSettings, "currentApiConfigName" | "listApiConfigMeta" | "modeApiConfigs">,
+		previousContextValues: ProviderProfileSnapshot,
 		removedModeConfigs: Record<string, string>,
 	): Promise<void> {
 		// Run the rollback through the mutation queue: it used to race queued activations, and its
@@ -2534,7 +2533,7 @@ export class ClineProvider
 						// The restore did not finish, so both stores may still name a profile the manager
 						// no longer has. The reconcile also re-applies the purge's dropped mode bindings
 						// and mirrors the mode map, so an aborted restore cannot silently lose them.
-						await this.reconcileActiveProfileAfterFailedRestore(removedModeConfigs, previousContextValues)
+						await this.reconcileActiveProfileAfterFailedRestore(name, removedModeConfigs)
 					}
 
 					// The replacement activation posted state before this rollback landed, and the
@@ -2613,7 +2612,7 @@ export class ClineProvider
 	private async applyProviderProfileRestore(
 		name: string,
 		config: (ProviderSettingsWithId & { name: string }) | undefined,
-		previousContextValues: Pick<RooCodeSettings, "currentApiConfigName" | "listApiConfigMeta" | "modeApiConfigs">,
+		previousContextValues: ProviderProfileSnapshot,
 		removedModeConfigs: Record<string, string>,
 		signal: AbortSignal,
 	): Promise<boolean> {
@@ -2673,21 +2672,20 @@ export class ClineProvider
 	 * keep pointing a mode at the deleted profile after the purge dropped the binding in the manager.
 	 *
 	 * The fallback activation is the only write here that can *replace* a profile, so it is gated on
-	 * the selection being a newer one: a name the restore was not trying to restore, which the
-	 * manager still holds, was picked by someone else while the restore was pending and needs no
-	 * replacement. The `hasConfigById`-guarded re-applies and the mirror below are convergence
-	 * writes over ids that provably exist, so they stay ungated: an aborted restore must still
-	 * reconcile the mode bindings, which is the contract the head spec pins.
+	 * the deleted name: any other selection the manager still holds was never part of this delete,
+	 * or was picked by someone else while the restore was pending. The `onlyIfUnbound` re-applies
+	 * and the mirror below are convergence writes over ids that exist and modes no newer selection
+	 * has bound, so they stay ungated: an aborted restore must still reconcile the mode bindings.
 	 */
 	private async reconcileActiveProfileAfterFailedRestore(
+		deletedName: string,
 		removedModeConfigs: Record<string, string> = {},
-		previousContextValues: Pick<RooCodeSettings, "currentApiConfigName"> = {},
 	): Promise<void> {
 		try {
 			const selectedName = this.contextProxy.getValues().currentApiConfigName
 			const keepSelection =
 				!!selectedName &&
-				selectedName !== previousContextValues.currentApiConfigName &&
+				selectedName !== deletedName &&
 				(await this.providerSettingsManager.hasConfig(selectedName))
 
 			if (!keepSelection) {
@@ -2711,15 +2709,13 @@ export class ClineProvider
 				})
 			}
 			// The purge may have dropped mode bindings the restore could not re-apply; re-apply
-			// them now so the manager's map matches the pre-delete state again. A binding is only
-			// re-applied when its id still names a profile: the restore's `saveConfig` can reject,
-			// and a re-applied dangling id makes the next switch to that mode resolve nothing and
-			// silently keep the current profile. The mirror below runs after the re-apply, so
-			// ContextProxy never holds a map the manager disagrees with.
+			// them now so the manager's map matches the pre-delete state again. The check and the
+			// write share one manager lock: a newer selection can bind the mode while this
+			// rollback runs, and a binding whose profile no longer exists must not be re-applied.
+			// The mirror below runs after the re-apply, so ContextProxy never holds a map the
+			// manager disagrees with.
 			for (const [mode, configId] of Object.entries(removedModeConfigs)) {
-				if (await this.providerSettingsManager.hasConfigById(configId)) {
-					await this.providerSettingsManager.setModeConfig(mode as Mode, configId)
-				}
+				await this.providerSettingsManager.setModeConfig(mode as Mode, configId, { onlyIfUnbound: true })
 			}
 			await this.contextProxy.setValue("modeApiConfigs", await this.providerSettingsManager.getModeApiConfigs())
 		} catch (reconcileError) {
