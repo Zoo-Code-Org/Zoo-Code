@@ -1,54 +1,137 @@
 import i18next from "i18next"
 import { initReactI18next } from "react-i18next"
 
-// Build translations object
-const translations: Record<string, Record<string, any>> = {}
+/**
+ * The only locale bundled into the webview entry chunk. Every other locale is
+ * fetched on demand by `loadLanguage` so first paint does not pay for
+ * translations the user may never read.
+ */
+export const FALLBACK_LANGUAGE = "en"
 
-// Dynamically load locale files
-const localeFiles = import.meta.glob("./locales/**/*.json", { eager: true })
+type LocaleResources = Record<string, any>
+type LocaleModule = { default?: LocaleResources } & LocaleResources
 
-// Process all locale files
-Object.entries(localeFiles).forEach(([path, module]) => {
-	// Extract language and namespace from path
-	// Example path: './locales/en/common.json' -> language: 'en', namespace: 'common'
-	const match = path.match(/\.\/locales\/([^/]+)\/([^/]+)\.json/)
+// Example path: './locales/en/common.json' -> language: 'en', namespace: 'common'
+const LOCALE_PATH_PATTERN = /\.\/locales\/([^/]+)\/([^/]+)\.json$/
 
-	if (match) {
-		const [, language, namespace] = match
+const eagerLocaleFiles = import.meta.glob<LocaleModule>("./locales/en/*.json", { eager: true })
+const lazyLocaleFiles = import.meta.glob<LocaleModule>("./locales/**/*.json")
 
-		// Initialize language object if it doesn't exist
-		if (!translations[language]) {
-			translations[language] = {}
+const pendingLanguages = new Map<string, Promise<void>>()
+const loadedLanguages = new Set<string>([FALLBACK_LANGUAGE])
+
+function parseLocalePath(path: string) {
+	const match = path.match(LOCALE_PATH_PATTERN)
+
+	return match ? { language: match[1], namespace: match[2] } : undefined
+}
+
+function collectLocaleResources(files: Record<string, LocaleModule>) {
+	const resources: Record<string, Record<string, LocaleResources>> = {}
+
+	Object.entries(files).forEach(([path, module]) => {
+		const parsed = parseLocalePath(path)
+
+		if (!parsed) {
+			return
 		}
 
-		// Add namespace resources to language
-		translations[language][namespace] = (module as any).default || module
-	}
-})
+		const { language, namespace } = parsed
+		resources[language] = resources[language] || {}
+		resources[language][namespace] = module.default || module
+	})
 
-console.log("Dynamically loaded translations:", Object.keys(translations))
+	return resources
+}
+
+/**
+ * Register a locale's namespaces with i18next, fetching them on first use.
+ *
+ * Resolves even when the fetch fails so callers fall back to
+ * `FALLBACK_LANGUAGE` through i18next's `fallbackLng` instead of blocking the
+ * UI on a broken chunk. Concurrent calls for the same language share one fetch.
+ */
+export function loadLanguage(language: string): Promise<void> {
+	if (loadedLanguages.has(language)) {
+		return Promise.resolve()
+	}
+
+	const pending = pendingLanguages.get(language)
+
+	if (pending) {
+		return pending
+	}
+
+	const loaders = Object.entries(lazyLocaleFiles)
+		.filter(([path]) => parseLocalePath(path)?.language === language)
+		.map(([path, load]) => load().then((module) => ({ path, module })))
+
+	// Unknown language: leave the fallback bundles in place so i18next resolves
+	// every key through `fallbackLng`.
+	if (loaders.length === 0) {
+		loadedLanguages.add(language)
+		return Promise.resolve()
+	}
+
+	const promise = Promise.all(loaders)
+		.then((modules) => {
+			modules.forEach(({ path, module }) => {
+				const parsed = parseLocalePath(path)
+
+				if (!parsed) {
+					return
+				}
+
+				i18next.addResourceBundle(parsed.language, parsed.namespace, module.default || module, true, true)
+			})
+
+			loadedLanguages.add(language)
+		})
+		.catch((error) => {
+			console.warn(`Could not load ${language} translations:`, error)
+		})
+		.finally(() => {
+			pendingLanguages.delete(language)
+		})
+
+	pendingLanguages.set(language, promise)
+
+	return promise
+}
 
 // Initialize i18next for React
 // This will be initialized with the VSCode language in TranslationProvider
 i18next.use(initReactI18next).init({
-	lng: "en", // Default language (will be overridden)
-	fallbackLng: "en",
+	lng: FALLBACK_LANGUAGE, // Default language (will be overridden)
+	fallbackLng: FALLBACK_LANGUAGE,
 	debug: false,
+	// Handed to `init` rather than added afterwards so the first render already
+	// resolves keys; `addResourceBundle` before init settles would be dropped.
+	resources: collectLocaleResources(eagerLocaleFiles),
 	interpolation: {
 		escapeValue: false, // React already escapes by default
 	},
 })
 
+/**
+ * Re-register the eagerly bundled fallback locale. `init` above already has it,
+ * so this is only needed by callers that reset the store (the Playwright
+ * gallery mounts stories against a shared i18next instance).
+ */
 export function loadTranslations() {
-	Object.entries(translations).forEach(([lang, namespaces]) => {
-		try {
-			Object.entries(namespaces).forEach(([namespace, resources]) => {
-				i18next.addResourceBundle(lang, namespace, resources, true, true)
-			})
-		} catch (error) {
-			console.warn(`Could not load ${lang} translations:`, error)
-		}
+	const resources = collectLocaleResources(eagerLocaleFiles)
+
+	Object.entries(resources).forEach(([language, namespaces]) => {
+		Object.entries(namespaces).forEach(([namespace, bundle]) => {
+			try {
+				i18next.addResourceBundle(language, namespace, bundle, true, true)
+			} catch (error) {
+				console.warn(`Could not load ${language} translations:`, error)
+			}
+		})
 	})
+
+	loadedLanguages.add(FALLBACK_LANGUAGE)
 }
 
 export default i18next

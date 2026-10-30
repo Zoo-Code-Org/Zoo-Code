@@ -9,6 +9,9 @@ import i18next, { loadTranslations } from "@/i18n/setup"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { TranslationContext as PlaywrightTranslationContext } from "@src/i18n/TranslationContext"
 
+// The fallback locale registers itself when `setup` loads; this keeps the call
+// explicit so a gallery story that swaps `language` still starts from a
+// populated store.
 loadTranslations()
 
 type InitialState = NonNullable<React.ComponentProps<typeof ExtensionStateContextProvider>["initialState"]>
