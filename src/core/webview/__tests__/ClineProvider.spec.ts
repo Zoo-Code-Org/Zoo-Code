@@ -2108,6 +2108,52 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("resolves the configuration for a profile pinned while the load is in flight", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-sidebar-view")
+			await provider.contextProxy.setValue("viewStates", {
+				"stable-sidebar-view": { currentApiConfigName: "profile-a", updatedAt: 1 },
+			})
+			provider["viewLocalState"] = {}
+
+			let releaseProfile: () => void = () => {}
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(((params: { name: string }) => {
+				if (params.name === "profile-a") {
+					return new Promise((resolve) => {
+						releaseProfile = () =>
+							resolve({
+								name: "profile-a",
+								apiProvider: providerIdentifiers.anthropic,
+								apiKey: "old",
+							} as never)
+					})
+				}
+				return Promise.resolve({
+					name: "profile-b",
+					apiProvider: providerIdentifiers.openrouter,
+					apiKey: "new",
+				} as never)
+			}) as never)
+
+			const load = provider["loadViewState"]()
+			// Activation/upsert change the pin before they replace the overlay: the load completes
+			// in that window and must not publish the old configuration under the new profile name.
+			provider["viewLocalState"].currentApiConfigName = "profile-b"
+			releaseProfile()
+			await load
+
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("profile-b")
+			expect((provider["viewLocalState"].apiConfiguration as { apiKey?: string } | undefined)?.apiKey).toBe("new")
+
+			await provider.dispose()
+		})
+
 		it("restores the previous view id when the registration write fails so a later launch retries", async () => {
 			const contextProxy = new ContextProxy(mockContext)
 			const provider = new ClineProvider(
@@ -2650,7 +2696,19 @@ describe("ClineProvider", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
+			let releaseInitialProfile: (value: StalledProfile) => void = () => {}
+			const getProfileSpy = vi.fn((params: { name: string }) => {
+				if (params.name === "cfg-a") {
+					return new Promise<StalledProfile>((resolve) => (releaseInitialProfile = resolve))
+				}
+				return Promise.resolve({
+					name: params.name,
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "model-y",
+				})
+			})
+			// @ts-ignore - Reassign the readonly providerSettingsManager for the test; the double only backs getProfile.
+			provider.providerSettingsManager = { getProfile: getProfileSpy }
 			await provider.saveViewState("currentApiConfigName", "cfg-a")
 			const load = provider["setViewStateId"]("stable-sidebar-view")
 
@@ -2661,14 +2719,19 @@ describe("ClineProvider", () => {
 			// resolves the name persisted at load start.
 			await provider.saveViewState("currentApiConfigName", "cfg-b")
 
-			resolveProfile({ name: "cfg-a", apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-x" })
+			releaseInitialProfile({
+				name: "cfg-a",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-x",
+			})
 			await load
 
-			// The in-flight selection wins over the loaded state.
+			// The in-flight selection wins over the loaded state, and the overlay must match
+			// the new name: it is re-resolved for cfg-b instead of keeping cfg-a's settings.
 			expect(provider["viewLocalState"].currentApiConfigName).toBe("cfg-b")
 			expect(provider["viewLocalState"].apiConfiguration).toEqual({
 				apiProvider: providerIdentifiers.openrouter,
-				openRouterModelId: "model-x",
+				openRouterModelId: "model-y",
 			})
 			expect(provider["viewLocalState"]).not.toHaveProperty("mode")
 			await provider.dispose()

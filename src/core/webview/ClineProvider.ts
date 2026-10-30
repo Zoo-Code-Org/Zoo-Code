@@ -1015,6 +1015,42 @@ export class ClineProvider
 				return
 			}
 
+			// Activation/upsert/deletion change the buffer's profile name before they replace its
+			// overlay, so a load that completes in that window would publish the new name with the
+			// previously captured profile's configuration. Resolve the configuration for the final
+			// name before publishing, or drop the overlay so getState() cannot serve one profile's
+			// settings under another profile's name.
+			const nameChangedInFlight = !Object.is(
+				preLoadBuffer.currentApiConfigName,
+				postLoadBuffer.currentApiConfigName,
+			)
+			const overlayChangedInFlight = !Object.is(preLoadBuffer.apiConfiguration, postLoadBuffer.apiConfiguration)
+
+			if (nameChangedInFlight && !overlayChangedInFlight) {
+				if (postLoadBuffer.currentApiConfigName === undefined) {
+					delete mergedState.apiConfiguration
+				} else {
+					try {
+						const { name: _resolvedName, ...apiConfiguration } =
+							await this.providerSettingsManager.getProfile({
+								name: postLoadBuffer.currentApiConfigName,
+							})
+						mergedState.apiConfiguration = apiConfiguration as ProviderSettings
+					} catch (error) {
+						this.log(
+							`[loadViewState] Unable to resolve API profile '${postLoadBuffer.currentApiConfigName}' pinned during the load: ${error instanceof Error ? error.message : String(error)}`,
+						)
+						delete mergedState.apiConfiguration
+					}
+				}
+
+				// The re-resolution awaited: a reset during it invalidates this result too.
+				if (this.viewLocalStateGeneration !== loadedGeneration) {
+					this.log(`[loadViewState] Discarding state loaded before a reset for viewId ${this.viewId}`)
+					return
+				}
+			}
+
 			this.viewLocalState = mergedState
 			this.log(`[loadViewState] Loaded state for viewId ${this.viewId}`)
 		} catch (error) {
@@ -5675,6 +5711,17 @@ export class ClineProvider
 		configuration: RooCodeSettings = {},
 	): Promise<Task> {
 		if (configuration) {
+			// Register custom modes before setValues: setValues validates `mode` against
+			// getCustomModes(), so a mode supplied in the same call would otherwise be deleted
+			// and never persisted. The manager also overwrites the global-state copy when it
+			// merges .roomodes + global settings on refresh, so updateCustomMode is the write
+			// that makes the mode survive the merge cycle.
+			if (configuration.customModes?.length) {
+				for (const mode of configuration.customModes) {
+					await this.customModesManager.updateCustomMode(mode.slug, mode)
+				}
+			}
+
 			await this.setValues(configuration)
 
 			if (configuration.allowedCommands) {
@@ -5701,16 +5748,6 @@ export class ClineProvider
 
 			if (configuration.currentApiConfigName) {
 				await this.setProviderProfile(configuration.currentApiConfigName)
-			}
-
-			// Register custom modes so the CustomModesManager knows about them.
-			// setValues writes to global state, but the manager overwrites that
-			// when it merges .roomodes + global settings on refresh.  Persisting
-			// via updateCustomMode ensures modes survive the merge cycle.
-			if (configuration.customModes?.length) {
-				for (const mode of configuration.customModes) {
-					await this.customModesManager.updateCustomMode(mode.slug, mode)
-				}
 			}
 		}
 
