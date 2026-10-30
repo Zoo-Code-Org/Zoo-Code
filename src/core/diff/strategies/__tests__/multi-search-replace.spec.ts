@@ -1631,4 +1631,177 @@ function sum(a, b) {
 			expect(errorMsg).toContain("Search Range: start to end")
 		})
 	})
+
+	describe("stale :start_line: hint fallback (#985)", () => {
+		const strategy = new MultiSearchReplaceDiffStrategy()
+
+		const firstFailureError = (result: Awaited<ReturnType<typeof strategy.applyDiff>>) => {
+			if (result.success || !result.failParts?.[0]) {
+				throw new Error("Expected a failed part")
+			}
+
+			const failedPart = result.failParts[0]
+			return "error" in failedPart ? failedPart.error : ""
+		}
+
+		// A file that grew by 200 lines after the hint was read: the target sits far outside
+		// the ±40-line buffer around the stale hint.
+		const grownFile = [
+			"# Doc",
+			...Array.from({ length: 200 }, (_, index) => `filler ${index + 1}`),
+			"## Section B",
+			"body b",
+			"## Section C",
+			"body c",
+		].join("\n")
+
+		it("applies the block at its real position when the SEARCH text is unique elsewhere in the file", async () => {
+			const diff =
+				"<<<<<<< SEARCH\n" +
+				":start_line:5\n" +
+				"-------\n" +
+				"## Section B\n" +
+				"body b\n" +
+				"=======\n" +
+				"## Section B\n" +
+				"updated b\n" +
+				">>>>>>> REPLACE"
+
+			const result = await strategy.applyDiff(grownFile, diff)
+
+			expect(result.success).toBe(true)
+			if (!result.success) {
+				throw new Error("Expected the stale hint to fall back to a full-file match")
+			}
+			expect(result.content).toContain("## Section B\nupdated b")
+			expect(result.content).not.toContain("body b")
+			// The 200 filler lines are untouched: the fallback moved the edit, it did not rewrite the file.
+			expect(result.content.split("\n")).toHaveLength(grownFile.split("\n").length)
+		})
+
+		it("still fails when the SEARCH text is absent from the whole file", async () => {
+			const diff =
+				"<<<<<<< SEARCH\n" +
+				":start_line:5\n" +
+				"-------\n" +
+				"## Section Z\n" +
+				"body z\n" +
+				"=======\n" +
+				"## Section Z\n" +
+				"updated z\n" +
+				">>>>>>> REPLACE"
+
+			const result = await strategy.applyDiff(grownFile, diff)
+
+			expect(result.success).toBe(false)
+			const error = firstFailureError(result)
+			expect(error).toContain("No sufficiently similar match found at line: 5")
+			expect(error).toContain("Search Range: starting at line 5")
+			expect(error).not.toContain("LIKELY CAUSE: the SEARCH text matches")
+		})
+
+		it("refuses to guess when the SEARCH text matches several places in the file", async () => {
+			const duplicatedFile = [
+				"# Doc",
+				...Array.from({ length: 200 }, (_, index) => `filler ${index + 1}`),
+				"## Section B",
+				"body b",
+				...Array.from({ length: 100 }, (_, index) => `more ${index + 1}`),
+				"## Section B",
+				"body b again",
+			].join("\n")
+			const diff =
+				"<<<<<<< SEARCH\n" +
+				":start_line:5\n" +
+				"-------\n" +
+				"## Section B\n" +
+				"=======\n" +
+				"## Section B renamed\n" +
+				">>>>>>> REPLACE"
+
+			const result = await strategy.applyDiff(duplicatedFile, diff)
+
+			expect(result.success).toBe(false)
+			const error = firstFailureError(result)
+			expect(error).toContain("No sufficiently similar match found at line: 5")
+			expect(error).toContain("LIKELY CAUSE: the SEARCH text matches 2 separate places in the file")
+		})
+
+		it("keeps later hinted blocks aligned when an earlier block grows the file", async () => {
+			const original = ["# Doc", "## Section A", "body a", "## Section B", "body b"].join("\n")
+			const inserted = Array.from({ length: 60 }, (_, index) => `inserted ${index + 1}`)
+			const diff =
+				"<<<<<<< SEARCH\n" +
+				":start_line:2\n" +
+				"-------\n" +
+				"## Section A\n" +
+				"body a\n" +
+				"=======\n" +
+				"## Section A\n" +
+				inserted.map((line) => `${line}\n`).join("") +
+				">>>>>>> REPLACE\n\n" +
+				"<<<<<<< SEARCH\n" +
+				":start_line:4\n" +
+				"-------\n" +
+				"## Section B\n" +
+				"body b\n" +
+				"=======\n" +
+				"## Section B\n" +
+				"updated b\n" +
+				">>>>>>> REPLACE"
+
+			const result = await strategy.applyDiff(original, diff)
+
+			expect(result.success).toBe(true)
+			if (!result.success) {
+				throw new Error("Expected both blocks to apply")
+			}
+			const lines = result.content.split("\n")
+			expect(lines[0]).toBe("# Doc")
+			expect(lines[1]).toBe("## Section A")
+			// The first block inserted 60 lines, so the second block's stale hint is 59 lines off.
+			expect(lines[61]).toBe("inserted 60")
+			expect(lines[62]).toBe("## Section B")
+			expect(lines[63]).toBe("updated b")
+			expect(result.content).not.toContain("body b")
+		})
+
+		it("does not fall back when no :start_line: hint was given", async () => {
+			// Without a hint the search already covers the whole file, so the outcome must be the
+			// pre-existing one and must not gain the duplicate-match diagnosis.
+			const original = ["## Section B", "body b", "## Section B", "body b again"].join("\n")
+			const diff =
+				"<<<<<<< SEARCH\n" + "## Section B\n" + "=======\n" + "## Section B renamed\n" + ">>>>>>> REPLACE"
+
+			const result = await strategy.applyDiff(original, diff)
+
+			expect(result.success).toBe(true)
+			if (!result.success) {
+				throw new Error("Expected the unhinted block to match")
+			}
+			expect(result.content).toBe(["## Section B", "body b", "## Section B renamed", "body b again"].join("\n"))
+		})
+
+		it("honours a relaxed fuzzyThreshold in the full-file retry", async () => {
+			const relaxed = new MultiSearchReplaceDiffStrategy(0.9)
+			const diff =
+				"<<<<<<< SEARCH\n" +
+				":start_line:5\n" +
+				"-------\n" +
+				"## Section B\n" +
+				"body B\n" +
+				"=======\n" +
+				"## Section B\n" +
+				"updated b\n" +
+				">>>>>>> REPLACE"
+
+			const result = await relaxed.applyDiff(grownFile, diff)
+
+			expect(result.success).toBe(true)
+			if (!result.success) {
+				throw new Error("Expected the relaxed threshold to accept the near match")
+			}
+			expect(result.content).toContain("## Section B\nupdated b")
+		})
+	})
 })

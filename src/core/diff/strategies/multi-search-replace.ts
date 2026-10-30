@@ -74,6 +74,37 @@ function fuzzySearch(lines: string[], searchChunk: string, startIndex: number, e
 	return { bestScore, bestMatchIndex, bestMatchContent }
 }
 
+/**
+ * Returns every position in `lines` whose slice scores at least `threshold` against
+ * `searchChunk`, so a full-file retry can tell a unique match from a duplicated one.
+ */
+function findAllMatches(lines: string[], searchChunk: string, threshold: number) {
+	const searchLen = searchChunk.split(/\r?\n/).length
+	const matches: { index: number; score: number; content: string }[] = []
+
+	for (let index = 0; index + searchLen <= lines.length; index++) {
+		const content = lines.slice(index, index + searchLen).join("\n")
+		const score = getSimilarity(content, searchChunk)
+		if (score >= threshold) {
+			matches.push({ index, score, content })
+		}
+	}
+
+	return matches
+}
+
+interface StaleHintCandidate {
+	searchContent: string
+	replaceContent: string
+}
+
+interface StaleHintResolution {
+	/** Set only when exactly one position qualifies, so the hint can be overridden safely. */
+	match?: StaleHintCandidate & { matchIndex: number; bestMatchScore: number; bestMatchContent: string }
+	/** Number of qualifying positions found by the best candidate; 0 means absent. */
+	matchCount: number
+}
+
 export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 	private fuzzyThreshold: number
 	private bufferLines: number
@@ -347,6 +378,55 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 		return repaired || diffContent
 	}
 
+	/**
+	 * Recovers from a stale `:start_line:` hint. The buffered search only covers a window around the
+	 * hint, so a file that grew since the line number was read fails even when the SEARCH text is
+	 * still present verbatim. Retries over the whole file and accepts the match only when exactly one
+	 * position qualifies, so a stale hint can never silently edit a different occurrence.
+	 */
+	private resolveStaleHint(
+		resultLines: string[],
+		searchContent: string,
+		replaceContent: string,
+	): StaleHintResolution {
+		const candidates: StaleHintCandidate[] = [{ searchContent, replaceContent }]
+
+		// Mirror the in-window fallback: retry with line numbers stripped when the plain form fails.
+		const aggressiveSearchContent = stripLineNumbers(searchContent, true)
+		if (aggressiveSearchContent !== searchContent) {
+			candidates.push({
+				searchContent: aggressiveSearchContent,
+				replaceContent: stripLineNumbers(replaceContent, true),
+			})
+		}
+
+		let matchCount = 0
+
+		for (const candidate of candidates) {
+			const matches = findAllMatches(resultLines, candidate.searchContent, this.fuzzyThreshold)
+			if (matches.length === 0) {
+				continue
+			}
+
+			if (matches.length === 1) {
+				const [match] = matches
+				return {
+					match: {
+						...candidate,
+						matchIndex: match.index,
+						bestMatchScore: match.score,
+						bestMatchContent: match.content,
+					},
+					matchCount: 1,
+				}
+			}
+
+			matchCount = matches.length
+		}
+
+		return { matchCount }
+	}
+
 	async applyDiff(
 		originalContent: string,
 		diffContent: string,
@@ -513,6 +593,25 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 				bestMatchContent = midContent
 			}
 
+			// A stale :start_line: hint bounds the search to a window around it, so a file that grew
+			// since the hint was read can miss a unique match. Retry over the whole file first.
+			let staleHintDuplicateCount = 0
+
+			if ((matchIndex === -1 || bestMatchScore < this.fuzzyThreshold) && startLine) {
+				const staleHint = this.resolveStaleHint(resultLines, searchContent, replaceContent)
+				staleHintDuplicateCount = staleHint.matchCount
+
+				if (staleHint.match) {
+					matchIndex = staleHint.match.matchIndex
+					bestMatchScore = staleHint.match.bestMatchScore
+					bestMatchContent = staleHint.match.bestMatchContent
+					searchContent = staleHint.match.searchContent
+					replaceContent = staleHint.match.replaceContent
+					searchLines = searchContent.split(/\r?\n/)
+					replaceLines = replaceContent ? replaceContent.split(/\r?\n/) : []
+				}
+			}
+
 			// Try aggressive line number stripping as a fallback if regular matching fails
 			if (matchIndex === -1 || bestMatchScore < this.fuzzyThreshold) {
 				// Strip both search and replace content once (simultaneously)
@@ -560,6 +659,11 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 					const malformedMarkerHint = looksLikeMalformedMarker
 						? `\n- LIKELY CAUSE: the first line of your search content looks like a malformed start-line marker and was therefore searched for as literal file text${separatorSwallowed ? ', together with the "-------" line after it' : ""}. The only recognized form is ":start_line:<number>" on the line immediately after "<<<<<<< SEARCH", optionally followed by a "-------" line. Remove or correct that line and retry.`
 						: ""
+					// A duplicated match is refused rather than guessed between, so say so instead of implying absence.
+					const duplicateHint =
+						staleHintDuplicateCount > 1
+							? `\n- LIKELY CAUSE: the SEARCH text matches ${staleHintDuplicateCount} separate places in the file, so the stale :start_line: hint cannot pick one. Include more surrounding lines to make the match unique.`
+							: ""
 
 					diffResults.push({
 						success: false,
@@ -574,7 +678,7 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 							`- Search Length: ${searchChunk.length} characters\n` +
 							`- Best Match Location: ${bestMatchLocation}\n` +
 							`- Best Match Length: ${bestMatchContent ? bestMatchContent.length : 0} characters\n` +
-							`- Tried both standard and aggressive line number stripping${malformedMarkerHint}\n` +
+							`- Tried both standard and aggressive line number stripping${malformedMarkerHint}${duplicateHint}\n` +
 							`- Tip: Use the read_file tool to get the latest content of the file before attempting ` +
 							`to use the apply_diff tool again, as the file content may have changed\n` +
 							`- Tip: The SEARCH block must contain complete, whole lines — partial-line (substring) matching is not supported. ` +
