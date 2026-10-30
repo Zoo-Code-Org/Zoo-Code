@@ -425,6 +425,36 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			// Should not call buildApiHandler when there's no task
 			expect(buildApiHandlerMock).not.toHaveBeenCalled()
 		})
+
+		test("discriminates secret ownership by the stored provider, not the slice's own field", async () => {
+			// The slice claims OpenRouter while the manager stores Anthropic for this name. The
+			// ownership rule decides which cached secrets survive the write, so reading the provider
+			// off the caller's slice would let a crafted partial write preserve a foreign credential.
+			// A cached OpenRouter secret must be purged even though the slice names OpenRouter.
+			provider["providerSettingsManager"].listConfig = vi.fn().mockResolvedValue([
+				{
+					name: "test-config",
+					id: "test-id",
+					apiProvider: providerIdentifiers.anthropic,
+				},
+			])
+			await provider.contextProxy.storeSecret("openRouterApiKey", "foreign-secret")
+			await provider.contextProxy.storeSecret("apiKey", "stored-secret")
+
+			await provider.upsertProviderProfile(
+				"test-config",
+				{
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4",
+				},
+				true,
+			)
+
+			// The stored provider is Anthropic, so its own `apiKey` survives the partial write and
+			// the OpenRouter key does not.
+			expect(provider.contextProxy.getSecret("apiKey")).toBe("stored-secret")
+			expect(provider.contextProxy.getSecret("openRouterApiKey")).toBeUndefined()
+		})
 	})
 
 	describe("updateProfileModel", () => {

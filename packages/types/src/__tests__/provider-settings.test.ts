@@ -1,4 +1,6 @@
 import { ANTHROPIC_API_PROTOCOL, OPENAI_API_PROTOCOL, providerIdentifiers, providerNames } from "../index.js"
+import { codebaseIndexProviderSchema } from "../codebase-index.js"
+import { isSecretStateKey } from "../global-settings.js"
 import {
 	getApiProtocol,
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
@@ -20,6 +22,56 @@ describe("provider settings discriminated union", () => {
 
 	it.each(providerNames)("accepts the %s provider branch", (apiProvider) => {
 		expect(providerSettingsSchemaDiscriminated.safeParse({ apiProvider }).success).toBe(true)
+	})
+
+	it("assigns every provider-owned secret key to exactly one provider", () => {
+		// Secret-key ownership is derived from this union and decides which credentials survive a
+		// profile write, so a key declared by two branches would make that decision ambiguous: a
+		// write naming either provider would preserve the other's secret. The invariant is one
+		// owner per key, and it has to hold for the whole union, not just today's branches.
+		const owners = new Map<string, string[]>()
+
+		for (const branch of providerSettingsSchemaDiscriminated.options) {
+			const literal = branch.shape.apiProvider
+
+			// The union's last branch is the `apiProvider: undefined` default, which owns nothing.
+			if (!("value" in literal) || typeof literal.value !== "string") continue
+
+			for (const key of Object.keys(branch.shape)) {
+				if (!isSecretStateKey(key)) continue
+
+				owners.set(key, [...(owners.get(key) ?? []), literal.value])
+			}
+		}
+
+		const shared = [...owners].filter(([, providers]) => providers.length > 1)
+
+		expect(shared).toEqual([])
+		// Guard against the map silently going empty (e.g. a renamed `apiProvider` field), which
+		// would make the assertion above pass while proving nothing.
+		expect(owners.size).toBeGreaterThan(0)
+	})
+
+	it("leaves the flat codebase-index credentials owned by no provider", () => {
+		// The index credentials are part of `ProviderSettings` but belong to no profile: they are
+		// written flat and every profile's discriminated parse strips them. A provider branch that
+		// started declaring one would make a profile switch delete the user's index credentials.
+		const ownedByProvider = new Set<string>()
+
+		for (const branch of providerSettingsSchemaDiscriminated.options) {
+			const literal = branch.shape.apiProvider
+
+			if (!("value" in literal) || typeof literal.value !== "string") continue
+
+			for (const key of Object.keys(branch.shape)) {
+				ownedByProvider.add(key)
+			}
+		}
+
+		const indexSecretKeys = Object.keys(codebaseIndexProviderSchema.shape).filter((key) => isSecretStateKey(key))
+
+		expect(indexSecretKeys.length).toBeGreaterThan(0)
+		expect(indexSecretKeys.filter((key) => ownedByProvider.has(key))).toEqual([])
 	})
 })
 

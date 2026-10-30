@@ -509,6 +509,71 @@ describe("ContextProxy", () => {
 			expect(mockSecrets.delete).toHaveBeenCalledWith("apiKey")
 			expect(mockSecrets.delete).not.toHaveBeenCalledWith("openRouterApiKey")
 		})
+
+		it("resolves ownership from the provider the caller resolved, not the slice's own field", async () => {
+			// The slice names OpenRouter, which owns `openRouterApiKey`, but the profile actually
+			// being written is Anthropic. Trusting the slice would let a crafted partial write name
+			// the owner of a secret it wants preserved and keep a credential that belongs to a
+			// different profile; the caller-resolved provider is the authority.
+			await proxy.storeSecret("openRouterApiKey", "foreign-secret")
+			await proxy.storeSecret("apiKey", "anthropic-secret")
+
+			await proxy.setProviderSettings(
+				{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4.1" },
+				providerIdentifiers.anthropic,
+			)
+
+			// Anthropic owns `apiKey`, so it survives the partial write; OpenRouter's key does not,
+			// even though the slice named OpenRouter.
+			expect(proxy.getSecret("apiKey")).toBe("anthropic-secret")
+			expect(proxy.getSecret("openRouterApiKey")).toBeUndefined()
+			expect(mockSecrets.delete).toHaveBeenCalledWith("openRouterApiKey")
+			expect(mockSecrets.delete).not.toHaveBeenCalledWith("apiKey")
+		})
+
+		it("purges exactly the named secrets, leaving global and flat-only keys alone", async () => {
+			// The explicit purge is the delete path's tool: a profile's own keys go, but the global
+			// image-generation secret and the flat codebase-index credentials belong to no profile.
+			await proxy.storeSecret("apiKey", "anthropic-secret")
+			await proxy.storeSecret("openRouterImageApiKey", "image-secret")
+			await proxy.storeSecret("codeIndexOpenAiKey", "index-secret")
+
+			await proxy.purgeProviderSecrets(["apiKey", "openRouterImageApiKey", "codeIndexOpenAiKey"])
+
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+			expect(mockSecrets.delete).toHaveBeenCalledWith("apiKey")
+			expect(proxy.getSecret("openRouterImageApiKey")).toBe("image-secret")
+			expect(proxy.getSecret("codeIndexOpenAiKey")).toBe("index-secret")
+			expect(mockSecrets.delete).not.toHaveBeenCalledWith("openRouterImageApiKey")
+			expect(mockSecrets.delete).not.toHaveBeenCalledWith("codeIndexOpenAiKey")
+		})
+
+		it("falls back to presence-based clearing for a retired provider", async () => {
+			// A retired provider has no branch in the discriminated union, so ownership is unknown.
+			// The fallback must stay the pre-ownership behavior: an omitted secret is stale and is
+			// cleared. Guessing "owned" here would leak a retired profile's credential forever.
+			await proxy.storeSecret("apiKey", "retired-secret")
+			await proxy.storeSecret("openRouterApiKey", "stale-secret")
+
+			await proxy.setProviderSettings({ apiProvider: retiredProviderIdentifiers.groq })
+
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+			expect(proxy.getSecret("openRouterApiKey")).toBeUndefined()
+			expect(mockSecrets.delete).toHaveBeenCalledWith("apiKey")
+			expect(mockSecrets.delete).toHaveBeenCalledWith("openRouterApiKey")
+		})
+
+		it("falls back to presence-based clearing for an unknown provider string", async () => {
+			// Same fallback for a provider name that is neither active nor retired (a removed
+			// provider still in storage): ownership is unknown, so the conservative clear-out runs
+			// rather than preserving a credential no live provider claims.
+			await proxy.storeSecret("apiKey", "unknown-provider-secret")
+
+			await proxy.setProviderSettings({ apiProvider: "not-a-real-provider" as never })
+
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+			expect(mockSecrets.delete).toHaveBeenCalledWith("apiKey")
+		})
 	})
 
 	describe("resetAllState", () => {

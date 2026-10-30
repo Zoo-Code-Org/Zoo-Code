@@ -3609,6 +3609,12 @@ describe("ClineProvider", () => {
 			)
 			vi.spyOn(provider, "activateProviderProfile").mockResolvedValue(undefined)
 
+			// The handler resolves the profile from ContextProxy metadata before deleting, so the
+			// entry it deletes has to be listed there, exactly as the webview saw it.
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ name: "deleted-config", id: "deleted-id", apiProvider: providerIdentifiers.anthropic },
+				survivingProfile,
+			])
 			await provider.contextProxy.setValue("modeApiConfigs", { code: "deleted-id", ask: "other-id" })
 
 			await messageHandler({ type: "deleteApiConfiguration", text: "deleted-config" })
@@ -3616,6 +3622,62 @@ describe("ClineProvider", () => {
 			// The webview delete path shares the purge, so it shares the orphan: a mode left on the
 			// deleted id silently no-ops on the next switch instead of moving to a real profile.
 			expect(provider.contextProxy.getValues().modeApiConfigs).toEqual({ ask: "other-id" })
+		})
+
+		test("routes the delete through the queued provider-profile policy", async () => {
+			// The twin used to call `deleteConfig` + `activateProviderProfile` itself, outside the
+			// mutation queue and without a rollback. Routing it through `deleteProviderProfile` is
+			// what gives the webview path the purge, the queue, and the compensation the API path
+			// already had.
+			await provider.resolveWebviewView(mockWebviewView)
+			const messageHandler = mockWebviewView.webview.onDidReceiveMessage.mock.calls[0][0]
+
+			const deletedProfile: ProviderSettingsEntry = {
+				name: "deleted-config",
+				id: "deleted-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+
+			await provider.contextProxy.setValue("listApiConfigMeta", [deletedProfile])
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(
+				"answers.yes" as unknown as vscode.MessageItem,
+			)
+
+			const deleteProviderProfile = vi.spyOn(provider, "deleteProviderProfile").mockResolvedValue(undefined)
+			const rawDelete = vi.fn()
+			Object.assign(provider.providerSettingsManager, { deleteConfig: rawDelete })
+			const activate = vi.spyOn(provider, "activateProviderProfile").mockResolvedValue(undefined)
+
+			await messageHandler({ type: "deleteApiConfiguration", text: "deleted-config" })
+
+			// The entry handed to the policy method is the one the webview named, so the queued body
+			// reads the profile from the manager instead of trusting a webview-supplied snapshot.
+			expect(deleteProviderProfile).toHaveBeenCalledWith(deletedProfile)
+			// Neither raw step runs: they are the unqueued, un-rollback-able shape being replaced.
+			expect(rawDelete).not.toHaveBeenCalled()
+			expect(activate).not.toHaveBeenCalled()
+		})
+
+		test("does not delete anything when the named profile is not listed", async () => {
+			// `deleteProviderProfile` takes an entry, so the handler must resolve one first. A name the
+			// webview no longer has must not reach the manager as a raw name-based purge.
+			await provider.resolveWebviewView(mockWebviewView)
+			const messageHandler = mockWebviewView.webview.onDidReceiveMessage.mock.calls[0][0]
+
+			await provider.contextProxy.setValue("listApiConfigMeta", [])
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(
+				"answers.yes" as unknown as vscode.MessageItem,
+			)
+
+			const deleteProviderProfile = vi.spyOn(provider, "deleteProviderProfile").mockResolvedValue(undefined)
+			const rawDelete = vi.fn()
+			Object.assign(provider.providerSettingsManager, { deleteConfig: rawDelete })
+
+			await messageHandler({ type: "deleteApiConfiguration", text: "ghost-config" })
+
+			expect(deleteProviderProfile).not.toHaveBeenCalled()
+			expect(rawDelete).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.delete_api_config")
 		})
 	})
 
@@ -3724,6 +3786,108 @@ describe("ClineProvider", () => {
 			// Deleting a non-active profile must not trigger activation side effects.
 			expect(provider.providerSettingsManager.activateProfile).not.toHaveBeenCalled()
 			expect(provider.providerSettingsManager.setModeConfig).not.toHaveBeenCalled()
+		})
+
+		test("purges an inactive profile's own secrets, which no replacement write would clear", async () => {
+			// The inactive branch activates no replacement, so the ownership clear-out in
+			// `setProviderSettings` never runs. Without an explicit purge the deleted profile's
+			// differently-named secret (`apiKey` here, while the active profile is OpenRouter) stays
+			// in the cache and in SecretStorage, and `getValues` keeps merging it back.
+			mockProviderSettingsManager()
+
+			// The active profile is the OpenRouter one, so the Anthropic profile being deleted is
+			// inactive and carries the secret that must go.
+			await provider.contextProxy.setValue("currentApiConfigName", "other-config")
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "inactive-key",
+			})
+			expect(provider.contextProxy.getSecret("apiKey")).toBe("inactive-key")
+
+			await provider.deleteProviderProfile(currentProfile)
+
+			expect(provider.contextProxy.getSecret("apiKey")).toBeUndefined()
+			expect(provider.contextProxy.getValues().apiKey).toBeUndefined()
+			expect(mockContext.secrets.delete).toHaveBeenCalledWith("apiKey")
+			// The surviving profile is untouched: this is a targeted purge of one profile's keys.
+			expect(provider.getProviderProfileEntries()).toEqual([otherProfile])
+		})
+
+		test("purges the deleted profile's secret when the replacement is the same provider", async () => {
+			// Ownership deliberately preserves a secret the *writing* provider owns, so a
+			// same-provider succession (Anthropic -> Anthropic) keeps the deleted profile's `apiKey`
+			// alive under the replacement's name. A delete is explicit intent: the deleted profile's
+			// own keys go, whether or not the replacement shares its provider.
+			const { profiles } = mockProviderSettingsManager()
+
+			// The replacement is Anthropic too, and its blob is secret-less: the normal shape of a
+			// profile written from an `api.getConfiguration()` snapshot, which strips secrets. The
+			// ownership rule reads that omission as a partial write and preserves `apiKey`, so only
+			// an explicit purge removes the deleted profile's credential.
+			vi.mocked(provider.providerSettingsManager.activateProfile).mockImplementationOnce(async () => {
+				return { ...otherProfile, apiProvider: providerIdentifiers.anthropic }
+			})
+			vi.mocked(provider.providerSettingsManager.getProfile).mockImplementation(async (params) => {
+				const name = "name" in params ? params.name : ""
+
+				if (name === "other-config") {
+					return { ...otherProfile, name: "other-config", apiProvider: providerIdentifiers.anthropic }
+				}
+
+				return { ...currentProfile, name: "current-config", apiKey: "deleted-key" }
+			})
+
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "deleted-key",
+			})
+			expect(provider.contextProxy.getSecret("apiKey")).toBe("deleted-key")
+
+			await provider.deleteProviderProfile(currentProfile)
+
+			// The deleted profile's credential is gone rather than surviving under the replacement.
+			expect(provider.contextProxy.getSecret("apiKey")).toBeUndefined()
+			expect(provider.contextProxy.getValues().apiKey).toBeUndefined()
+			expect(mockContext.secrets.delete).toHaveBeenCalledWith("apiKey")
+			expect(profiles.map(({ name }) => name)).toEqual(["other-config"])
+		})
+
+		test("keeps the replacement's own secret when it declares the same key", async () => {
+			// Same-provider succession where the replacement carries its own credential. The
+			// activation writes the replacement's value, so purging the shared key by name would
+			// delete the live profile's credential: the round-4 data-loss shape. Only the deleted
+			// profile's keys the replacement does not declare may be purged.
+			const { profiles } = mockProviderSettingsManager()
+
+			vi.mocked(provider.providerSettingsManager.activateProfile).mockImplementationOnce(async () => {
+				return { ...otherProfile, apiProvider: providerIdentifiers.anthropic, apiKey: "replacement-key" }
+			})
+			vi.mocked(provider.providerSettingsManager.getProfile).mockImplementation(async (params) => {
+				const name = "name" in params ? params.name : ""
+
+				if (name === "other-config") {
+					return {
+						...otherProfile,
+						name: "other-config",
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "replacement-key",
+					}
+				}
+
+				return { ...currentProfile, name: "current-config", apiKey: "deleted-key" }
+			})
+
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "deleted-key",
+			})
+
+			await provider.deleteProviderProfile(currentProfile)
+
+			// The replacement's credential survives; the deleted profile's did not.
+			expect(provider.contextProxy.getSecret("apiKey")).toBe("replacement-key")
+			expect(mockContext.secrets.delete).not.toHaveBeenCalledWith("apiKey")
+			expect(profiles.map(({ name }) => name)).toEqual(["other-config"])
 		})
 
 		test("switches the active profile when deleting it and purges it from ProviderSettingsManager", async () => {

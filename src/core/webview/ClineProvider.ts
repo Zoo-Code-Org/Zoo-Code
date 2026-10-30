@@ -112,7 +112,7 @@ import { t } from "../../i18n"
 import { buildApiHandler } from "../../api"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/providers/fetchers/lmstudio"
 
-import { ContextProxy } from "../config/ContextProxy"
+import { ContextProxy, getProfileSecretKeys } from "../config/ContextProxy"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
 import { PendingActionSettlementError, Task } from "../task/Task"
@@ -2128,6 +2128,17 @@ export class ClineProvider
 
 			if (signal.aborted) return id
 
+			// Read the stored entries once: they are the manager's authoritative view of each
+			// profile, including the provider `saveConfig` pinned into the blob. The ownership
+			// discriminator below must not be taken from `providerSettings.apiProvider`, which is
+			// the caller's own field and can disagree with what was stored (a legacy router config
+			// is downgraded to no provider at all).
+			const storedProfiles = await this.providerSettingsManager.listConfig()
+
+			if (signal.aborted) return id
+
+			const storedProvider = storedProfiles.find((profile) => profile.name === name)?.apiProvider
+
 			// These promises do the following:
 			// 1. Adds or updates the list of provider profiles.
 			// 2. Sets the current provider profile.
@@ -2140,10 +2151,10 @@ export class ClineProvider
 			// I left the original implementation in just to be safe.
 			// `allSettled` so a caller that rolls back after a failure never races a write still in flight.
 			const activationResults = await Promise.allSettled([
-				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+				this.updateGlobalState("listApiConfigMeta", storedProfiles),
 				this.updateGlobalState("currentApiConfigName", name),
 				this.providerSettingsManager.setModeConfig(mode, id),
-				this.contextProxy.setProviderSettings(providerSettings),
+				this.contextProxy.setProviderSettings(providerSettings, storedProvider),
 			])
 			const failedActivation = activationResults.find(
 				(result): result is PromiseRejectedResult => result.status === "rejected",
@@ -2245,6 +2256,13 @@ export class ClineProvider
 						return
 					}
 
+					// The delete is committed, so the profile's credentials go with it. This branch
+					// activates no replacement, so no `setProviderSettings` write runs the ownership
+					// clear-out: without an explicit purge the deleted profile's secrets stay in the
+					// cache and in SecretStorage until some unrelated future write happens to name a
+					// provider that does not own them, which may never happen.
+					await this.purgeDeletedProfileSecrets(undoConfig)
+
 					await this.contextProxy.setValues({
 						listApiConfigMeta: this.getProviderProfileEntries().filter(
 							({ name }) => name !== profileToDelete.name,
@@ -2299,6 +2317,20 @@ export class ClineProvider
 					return
 				}
 
+				// The activation's clear-out is ownership-based, which deliberately preserves a
+				// secret the replacement provider owns. When the replacement is the same provider as
+				// the deleted profile, that rule keeps the deleted profile's credential alive under
+				// the replacement's name. The delete is explicit intent, so the deleted profile's own
+				// keys are removed here, after the activation has written the replacement's slice.
+				//
+				// A key the replacement's own blob declares is excluded: the replacement wrote its
+				// value through the activation above, and purging by name would delete the live
+				// profile's credential, which is the round-4 data-loss shape.
+				await this.purgeDeletedProfileSecrets(
+					deletedProfileConfig,
+					await this.getReplacementSecretKeys(profileToActivate),
+				)
+
 				// The activation above only rebinds the *current* mode, so every other mode that
 				// pointed at the deleted profile would keep a dangling id and silently no-op on the
 				// next switch. The manager dropped those bindings with the purge; mirror its map into
@@ -2328,6 +2360,63 @@ export class ClineProvider
 				removedModeConfigs,
 			)
 			throw error
+		}
+	}
+
+	/**
+	 * The secret keys the profile that replaced a deleted one declares.
+	 *
+	 * Used to keep the delete purge from removing a credential the replacement wrote itself. A
+	 * manager that cannot produce the profile (it was just activated, so it should exist) yields an
+	 * empty set: the purge then falls back to removing every key the deleted profile declared, which
+	 * is the confidentiality-safe direction.
+	 */
+	private async getReplacementSecretKeys(name: string): Promise<Set<string>> {
+		try {
+			const { name: _name, ...config } = await this.providerSettingsManager.getProfile({ name })
+			return new Set(getProfileSecretKeys(config))
+		} catch {
+			return new Set()
+		}
+	}
+
+	/**
+	 * Delete the credentials a purged profile's own blob declared.
+	 *
+	 * The ownership clear-out in `setProviderSettings` infers staleness from a *later* write, so
+	 * it cannot cover two cases: the inactive branch runs no replacement write at all, and a
+	 * same-provider succession is exactly the case ownership preserves. A delete is explicit
+	 * intent, so the deleted profile's keys are removed by name here instead of being inferred.
+	 *
+	 * `keep` names the keys the replacement profile declares: those carry the replacement's own
+	 * value, so removing them would delete a live credential.
+	 *
+	 * Best-effort: the profile is already gone from the manager, so a failure here must not turn
+	 * a successful delete into an error. The keys are logged by name only, never by value.
+	 */
+	private async purgeDeletedProfileSecrets(
+		config: (ProviderSettingsWithId & { name: string }) | undefined,
+		keep: Set<string> = new Set(),
+	): Promise<void> {
+		if (!config) {
+			return
+		}
+
+		const secretKeys = getProfileSecretKeys(config).filter((key) => !keep.has(key))
+
+		if (secretKeys.length === 0) {
+			return
+		}
+
+		try {
+			await this.contextProxy.purgeProviderSecrets(secretKeys)
+			this.log(`Purged ${secretKeys.length} secret(s) of the deleted profile '${config.name}'`)
+		} catch (error) {
+			this.log(
+				`Failed to purge the secrets of the deleted profile '${config.name}': ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
 		}
 	}
 
@@ -2452,9 +2541,11 @@ export class ClineProvider
 			// have left the replacement's provider settings under the deleted name. `id` is manager
 			// metadata, not a setting, so it must not reach `ContextProxy`. `apiProvider` belongs to
 			// this slice, so the snapshot below deliberately does not carry it: writing it again
-			// would overwrite the restored provider with the pre-delete pointer.
+			// would overwrite the restored provider with the pre-delete pointer. It is still passed
+			// as the ownership discriminator, because the profile being restored is the one whose
+			// own secrets must survive this write.
 			const { id: _id, ...settings } = providerSettings
-			await this.contextProxy.setProviderSettings(settings)
+			await this.contextProxy.setProviderSettings(settings, config.apiProvider)
 
 			if (signal.aborted) return false
 
@@ -2502,7 +2593,7 @@ export class ClineProvider
 				...fallbackSettings
 			} = await this.providerSettingsManager.activateProfile({ name: fallback })
 
-			await this.contextProxy.setProviderSettings(fallbackSettings)
+			await this.contextProxy.setProviderSettings(fallbackSettings, fallbackSettings.apiProvider)
 			await this.contextProxy.setValues({
 				currentApiConfigName: fallback,
 				listApiConfigMeta: remainingProfiles,
@@ -2584,11 +2675,14 @@ export class ClineProvider
 		const skipCurrentTaskRebuild = options?.skipCurrentTaskRebuild ?? false
 
 		if (!skipCurrentTaskRebuild) {
-			// See `upsertProviderProfile` for a description of what this is doing.
+			// See `upsertProviderProfile` for a description of what this is doing. The slice comes
+			// from the manager's own blob, so its `apiProvider` is the stored provider rather than a
+			// caller-supplied field; passing it explicitly keeps the ownership discriminator pinned
+			// to the profile being activated.
 			await Promise.all([
 				this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
 				this.contextProxy.setValue("currentApiConfigName", name),
-				this.contextProxy.setProviderSettings(providerSettings),
+				this.contextProxy.setProviderSettings(providerSettings, providerSettings.apiProvider),
 			])
 		}
 
