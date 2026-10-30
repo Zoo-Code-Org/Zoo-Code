@@ -6103,7 +6103,6 @@ export class ClineProvider
 			// Snapshot the in-memory buffer before the async profile lookup. The
 			// mutation paths update viewLocalState in place, so a shallow copy is
 			// what makes fields mutated during the load window observable below.
-			const preLoadBuffer = { ...this.viewLocalState }
 			const preLoadVersions = { ...this.viewLocalStateWriteVersions }
 
 			if (persisted?.mode) {
