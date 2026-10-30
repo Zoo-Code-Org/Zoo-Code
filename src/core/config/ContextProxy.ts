@@ -45,6 +45,7 @@ export class ContextProxy {
 	private readonly originalContext: vscode.ExtensionContext
 
 	private stateCache: GlobalState
+	private stateWriteGenerations = new Map<GlobalStateKey, number>()
 	private secretCache: SecretState
 	private _isInitialized = false
 
@@ -369,15 +370,20 @@ export class ContextProxy {
 		}
 
 		const previousCachedValue = this.stateCache[key]
+		const generation = (this.stateWriteGenerations.get(key) ?? 0) + 1
+		this.stateWriteGenerations.set(key, generation)
 		this.stateCache[key] = value
 
 		try {
 			return await this.originalContext.globalState.update(key, value)
 		} catch (error) {
-			// A rejected write must not leave the cache ahead of storage: callers that then
-			// read the cached value (e.g. the view-state load path) would act on a selection
-			// that was never persisted.
-			this.stateCache[key] = previousCachedValue
+			// A rejected write must not leave the cache ahead of storage, but a *newer* write
+			// for the same key may already have replaced the cached value: restoring here would
+			// then roll the cache back behind storage. Only undo this write while it is still
+			// the newest one for the key.
+			if (this.stateWriteGenerations.get(key) === generation) {
+				this.stateCache[key] = previousCachedValue
+			}
 			throw error
 		}
 	}
