@@ -275,6 +275,9 @@ export class ClineProvider
 	private static readonly MAX_PERSISTED_VIEW_STATES = 50
 	private static readonly MAX_VIEW_STATE_ID_LENGTH = 64
 	private static persistedViewStateWriteQueue: Promise<void> = Promise.resolve()
+	// Incremented when a reset clears the durable map; a queued write that started before the
+	// reset must not persist its entry after the clear.
+	private static viewStatesResetGeneration = 0
 	private webviewDisposables: vscode.Disposable[] = []
 	private pendingThemeFixtureProbes = new Map<
 		string,
@@ -649,10 +652,17 @@ export class ClineProvider
 	 * that lands before the launch message stays durable instead of being lost.
 	 */
 	private async savePersistedViewState(values: Partial<PersistedViewState>): Promise<void> {
+		const resetGeneration = ClineProvider.viewStatesResetGeneration
 		// Capture the id at change time: a write belongs to the view that was active
 		// when the change was made, even if a newer id is registered while it is queued.
 		const viewStateId = this.viewStateId
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			// A reset that ran while this write was queued cleared the durable map: persisting
+			// the pre-reset pin now would resurrect it on the next reload.
+			if (ClineProvider.viewStatesResetGeneration !== resetGeneration) {
+				return
+			}
+
 			const states = this.getPersistedViewStates({ fresh: true })
 			const current = states[viewStateId] ?? {}
 			const next: PersistedViewState = { ...current }
@@ -790,11 +800,20 @@ export class ClineProvider
 	 * bounded by MAX_PERSISTED_VIEW_STATES so the global key cannot grow unboundedly.
 	 */
 	private prunePersistedViewStates(states: Record<string, PersistedViewState>): Record<string, PersistedViewState> {
-		return Object.fromEntries(
-			Object.entries(states)
-				.sort(([, a], [, b]) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-				.slice(0, ClineProvider.MAX_PERSISTED_VIEW_STATES),
+		// Entries of live views must never age out: a view that keeps its mode and profile does
+		// not refresh updatedAt. The cap applies to closed-view entries only.
+		const liveViewStateIds = new Set(
+			Array.from(ClineProvider.activeInstances, (instance) => instance.viewStateId).filter(
+				(viewStateId): viewStateId is string => Boolean(viewStateId),
+			),
 		)
+		const liveEntries = Object.entries(states).filter(([viewStateId]) => liveViewStateIds.has(viewStateId))
+		const closedEntries = Object.entries(states)
+			.filter(([viewStateId]) => !liveViewStateIds.has(viewStateId))
+			.sort(([, a], [, b]) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+			.slice(0, ClineProvider.MAX_PERSISTED_VIEW_STATES)
+
+		return Object.fromEntries([...liveEntries, ...closedEntries])
 	}
 
 	/**
@@ -1044,9 +1063,24 @@ export class ClineProvider
 					}
 				}
 
-				// The re-resolution awaited: a reset during it invalidates this result too.
+				// The re-resolution awaited: a reset, a newer id, or another buffer mutation during
+				// it invalidates this result too.
 				if (this.viewLocalStateGeneration !== loadedGeneration) {
 					this.log(`[loadViewState] Discarding state loaded before a reset for viewId ${this.viewId}`)
+					return
+				}
+				if (this.viewStateId !== loadedForViewId) {
+					this.log(`[loadViewState] Discarding stale state for superseded view id ${loadedForViewId}`)
+					return
+				}
+				const bufferAfterResolution = this.viewLocalState
+				if (
+					!Object.is(bufferAfterResolution.currentApiConfigName, postLoadBuffer.currentApiConfigName) ||
+					!Object.is(bufferAfterResolution.apiConfiguration, postLoadBuffer.apiConfiguration)
+				) {
+					this.log(
+						`[loadViewState] Discarding state loaded before a newer buffer mutation for viewId ${this.viewId}`,
+					)
 					return
 				}
 			}
@@ -2385,12 +2419,11 @@ export class ClineProvider
 	 * current task. Pass null to apply only global mode/profile effects for a pending child.
 	 */
 	public async handleModeSwitch(newMode: Mode, targetTask: Task | null | undefined = this.getCurrentTask()) {
-		return this.enqueueProviderProfileMutation(
-			(signal) => this.handleModeSwitchUnlocked(newMode, targetTask, signal),
-			// The switch and its nested activation must own the queue until every
-			// write - including compensation - settles: a timeout must not let the
-			// next queued mutation overlap writes that are still in flight.
-			{ runToCompletion: true },
+		// Default abort semantics: a timeout must abort the mutation so the switch's abort
+		// checkpoints run their compensation, instead of a caller receiving a timeout while
+		// the mode write and ModeChanged still land afterwards.
+		return this.enqueueProviderProfileMutation((signal) =>
+			this.handleModeSwitchUnlocked(newMode, targetTask, signal),
 		)
 	}
 
@@ -3144,6 +3177,10 @@ export class ClineProvider
 				// (and this one when it is the pinned view) or their getState() keeps
 				// serving the settings captured before the save under the same name.
 				if (this.pinnedProfileName === name) {
+					// Marked before the await: a rejection from the sibling refresh later must
+					// still restore this overlay, or it keeps serving settings the rolled-back
+					// save never committed.
+					landed.viewOverlay = true
 					await this._saveViewLocalStateFromMutation({ apiConfiguration: normalizedSettings })
 					// Only rebuild when the task actually runs under the saved profile: a
 					// view pinned to this profile can hold a task that follows a different
@@ -5504,6 +5541,9 @@ export class ClineProvider
 		// write queue (and run it before the in-memory clears): a per-instance clear
 		// outside the queue could interleave with a queued view-state write and
 		// either clobber that write or leave a re-created entry behind.
+		// Bump before the clear: a save queued from here on belongs after the reset and must be
+		// rejected (its pre-reset values are what the reset is discarding).
+		ClineProvider.viewStatesResetGeneration += 1
 		const clearWrite = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 			await this.contextProxy.setValue("viewStates", undefined)
 		})

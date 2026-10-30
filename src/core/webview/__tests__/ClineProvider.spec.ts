@@ -6917,9 +6917,12 @@ describe("ClineProvider", () => {
 			await provider["setViewStateId"]("view-a")
 			const firstSave = provider.saveViewState("mode", "architect")
 			await firstWriteStarted
-			await provider["setViewStateId"]("view-b")
+			// The switch waits on the same persisted-write queue as the pending save: start it,
+			// release the save, then await both, or the test deadlocks on the queue.
+			const switchToViewB = provider["setViewStateId"]("view-b")
 			releaseFirstWrite()
 			await firstSave
+			await switchToViewB
 
 			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
 				"view-a": { mode: "architect" },
