@@ -1523,6 +1523,19 @@ describe("OpenAiNativeHandler", () => {
 			expect(mockResponsesCreate.mock.calls[0][1].headers).not.toHaveProperty("session_id")
 		})
 
+		it("omits the prompt_cache_key through createMessage when no metadata is supplied", async () => {
+			mockResponsesCreate.mockResolvedValue(asyncStreamFrom([]))
+
+			const cacheHandler = new OpenAiNativeHandler({ ...mockOptions, apiModelId: "gpt-5.1" })
+
+			// No metadata at all: the streaming entry point must not synthesize a fallback
+			// task id, or the field would replace OpenAI's default routing for no affinity.
+			await collectStream(cacheHandler.createMessage(systemPrompt, messages))
+
+			const [body] = mockResponsesCreate.mock.calls[0]
+			expect(body).not.toHaveProperty("prompt_cache_key")
+		})
+
 		it("should provide helpful error messages for different error codes", async () => {
 			const testCases = [
 				{ status: 400, expectedMessage: "Invalid request to Responses API" },
