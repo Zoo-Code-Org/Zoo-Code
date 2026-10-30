@@ -1957,9 +1957,7 @@ export class ClineProvider
 
 			await this.contextProxy.setValues({
 				...globalSettings,
-				listApiConfigMeta: this.getProviderProfileEntries().filter(
-					({ name }) => name !== profileToDelete.name,
-				),
+				listApiConfigMeta: this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name),
 			})
 
 			await this.postStateToWebview()
@@ -2005,11 +2003,7 @@ export class ClineProvider
 		} catch (error) {
 			// Either the manager or ContextProxy can be left naming the deleted profile, so both
 			// are rolled back to their pre-delete state.
-			await this.restoreDeletedProviderProfile(
-				profileToDelete.name,
-				deletedProfileConfig,
-				previousContextValues,
-			)
+			await this.restoreDeletedProviderProfile(profileToDelete.name, deletedProfileConfig, previousContextValues)
 			throw error
 		}
 	}

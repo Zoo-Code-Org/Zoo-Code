@@ -2959,12 +2959,10 @@ describe("ClineProvider", () => {
 
 			// Full configs keyed by name, so `getProfile`/`saveConfig` behave like the real manager.
 			// Each carries a distinct `apiKey` so a restore that drops credentials fails the test.
-			const configs = new Map<string, ProviderSettingsEntry & { openRouterModelId?: string; apiKey?: string }>(
-				[
-					[currentProfile.name, { ...currentProfile, apiKey: "current-key" }],
-					[otherProfile.name, { ...otherProfile, openRouterModelId: "other-model", apiKey: "other-key" }],
-				],
-			)
+			const configs = new Map<string, ProviderSettingsEntry & { openRouterModelId?: string; apiKey?: string }>([
+				[currentProfile.name, { ...currentProfile, apiKey: "current-key" }],
+				[otherProfile.name, { ...otherProfile, openRouterModelId: "other-model", apiKey: "other-key" }],
+			])
 
 			// Mirrors `ProviderSettingsManager.currentApiConfigName` so tests can assert the
 			// manager's own notion of the active profile, not just ContextProxy's.
