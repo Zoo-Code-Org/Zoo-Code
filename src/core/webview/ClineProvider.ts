@@ -376,10 +376,7 @@ export class ClineProvider
 	 */
 	public readonly viewId: string
 
-	/**
-	 * Stable identifier for persisted per-view state keys; binds a durable entry to the
-	 * webview that wrote it through the host-minted claim token.
-	 */
+	/** Stable id for persisted per-view state keys, bound by the host-minted claim. */
 	private viewStateId: string
 
 	/**
@@ -604,10 +601,7 @@ export class ClineProvider
 		return Object.assign(Object.create(null), viewStates)
 	}
 
-	/**
-	 * Persist the non-secret selections through the serialized write queue, re-keying a
-	 * pre-launch write to the stable id once the webview registers one.
-	 */
+	/** Persist the non-secret selections through the serialized write queue. */
 	private async savePersistedViewState(values: Partial<PersistedViewState>): Promise<void> {
 		// Capture the id at change time: a write belongs to the view that was active
 		// when the change was made, even if a newer id is registered while it is queued.
@@ -693,10 +687,7 @@ export class ClineProvider
 		await write
 	}
 
-	/**
-	 * Re-bind a claim-less viewStates entry with a freshly minted claim; its unowned
-	 * selections are dropped so the new token cannot re-expose them.
-	 */
+	/** Re-bind a claim-less entry with a fresh claim; unowned selections are dropped. */
 	private async rebindUnboundViewStateEntry(viewStateId: string): Promise<string | undefined> {
 		const claimToken = crypto.randomUUID()
 		let rebound = false
@@ -788,10 +779,7 @@ export class ClineProvider
 		await write
 	}
 
-	/**
-	 * Register the stable view id and load its persisted selections. An entry that carries a
-	 * claim is loaded only when the presented host-minted token matches it.
-	 */
+	/** Register the stable view id and load its persisted selections; a claim must match. */
 	public async setViewStateId(viewStateId: string | undefined, presentedClaim?: string): Promise<void> {
 		// The webview generates this id on purpose - it has to survive a webview reload,
 		// which recreates the view on both sides - so the host cannot mint it instead.
