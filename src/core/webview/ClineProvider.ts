@@ -891,6 +891,10 @@ export class ClineProvider
 			if (adoptedClaim) {
 				this.postViewStateClaimToWebview(this.viewStateId, adoptedClaim)
 			}
+
+			// Registration is only complete once the view's own persisted selections are in the
+			// buffer; nothing else loads them now that reset/import handling lives downstream.
+			await this.loadViewState()
 		} catch (error) {
 			// A persistence failure must not leave the provider holding an id that was
 			// never registered: restore the previous id so a later launch retries the
@@ -5241,15 +5245,6 @@ export class ClineProvider
 		if ("mode" in persistedValues || "currentApiConfigName" in persistedValues) {
 			await this.savePersistedViewState(persistedValues)
 		}
-	}
-
-	/**
-	 * Clear view-local state cache so that getState() falls back to ContextProxy defaults.
-	 */
-	private _clearViewLocalState(): void {
-		this.viewLocalState = {}
-		// Load initial state from global state into viewLocalState buffer after dependencies used by getState are ready.
-		void this.loadViewState()
 	}
 
 	/** Load non-secret persisted selections; in-flight buffer edits are reapplied on top. */

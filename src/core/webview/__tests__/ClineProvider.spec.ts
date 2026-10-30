@@ -3601,6 +3601,29 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("loads the persisted selections of the registered view", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider.contextProxy.setValue("viewStates", {
+				"stable-view": { claimToken: "host-token", mode: "architect", currentApiConfigName: "cfg-a" },
+			})
+			const logSpy = vi.spyOn(provider, "log")
+
+			await provider["setViewStateId"]("stable-view", "host-token")
+
+			// Registration is what loads a view's own selections: the buffer is populated and
+			// the load is logged, so a reload restores the pinned mode instead of the shared one.
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Loaded state for viewId"))
+
+			await provider.dispose()
+		})
+
 		it("restores the previous view id when the registration write fails so a later launch retries", async () => {
 			const contextProxy = new ContextProxy(mockContext)
 			const provider = new ClineProvider(
