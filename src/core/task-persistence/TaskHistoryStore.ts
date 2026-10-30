@@ -48,12 +48,10 @@ class HeartbeatSkipError extends Error {}
 class RepairAbortedError extends Error {}
 
 /**
- * Administrative repairs write a delta, never a whole record. The repair
- * decision is made from this store's cache, but the disk record is shared: a
+ * Administrative repairs write a delta, never a whole record: the repair
+ * decision comes from this store's cache, but the disk record is shared, so a
  * peer window can write other fields of the same task (pending action, token
- * and cost totals, `childIds`, `apiConfigName`) between that decision and the
- * advisory lock. Only these lifecycle fields belong to the repair, so only
- * these may overwrite what the peer persisted.
+ * and cost totals, `childIds`, `apiConfigName`) before the advisory lock.
  */
 const CHILD_REPAIR_DELTA: Partial<HistoryItem> = { status: "interrupted" }
 
@@ -588,22 +586,17 @@ export class TaskHistoryStore {
 							)
 							continue
 						}
-						const repairedParent: HistoryItem = {
-							...item,
-							status: "active",
-							awaitingChildId: undefined,
-							delegatedToId: undefined,
-						}
 						// The repair write re-validates under the parent's advisory lock
 						// (same cross-process guard as the active-child repair): the parent
 						// must still be delegated to the same child, and the child's file
 						// must still be absent — a peer that landed the child record in the
-						// gap wins.
+						// gap wins. `item` is the cache-derived base; PARENT_REPAIR_DELTA
+						// supplies the lifecycle fields under the lock.
 						const childFilePath = await this.getTaskFilePath(item.awaitingChildId!)
 						let committedParent: HistoryItem
 						try {
 							committedParent = await this.writeAdministrativeRepair(
-								repairedParent,
+								{ ...item, ...PARENT_REPAIR_DELTA },
 								PARENT_REPAIR_DELTA,
 								(existing) => this.assertMissingChildRepairPreconditions(existing, childFilePath, item),
 							)
@@ -899,36 +892,29 @@ export class TaskHistoryStore {
 				}
 			}
 
-			const repairedChild = childAtTarget ? child : { ...child, status: intent.target.childStatus }
-			const repairedParent = parentMatchesTargetState
-				? parent
-				: {
-						...parent,
-						status: intent.target.parentStatus,
-						awaitingChildId: undefined,
-						delegatedToId: undefined,
-					}
-
 			// Same cross-process guard as the in-pass repair: each write
 			// re-validates its preconditions under the target file's advisory
 			// lock, so a peer write that landed after the pre-write liveness
 			// check is observed and aborts the stale replay (the journal stays
 			// for a later pass, and replay skips sides already at target).
-			// Cache publication uses the committed records, not the cache-derived
-			// copies, so a side already at target keeps whatever a peer wrote.
-			let committedChild = repairedChild
-			let committedParent = repairedParent
+			// Cache publication uses the committed records, so a side already at
+			// target keeps whatever a peer wrote. The repaired record is also the
+			// write payload (so a write path that bypasses the merge callback still
+			// lands the target state) while the delta is applied on top of the
+			// locked disk record (so peer-written fields survive).
+			let committedChild: HistoryItem = childAtTarget ? child : { ...child, ...CHILD_REPAIR_DELTA }
+			let committedParent: HistoryItem = parentMatchesTargetState ? parent : { ...parent, ...PARENT_REPAIR_DELTA }
 			try {
 				if (!childAtTarget) {
 					committedChild = await this.writeAdministrativeRepair(
-						repairedChild,
+						committedChild,
 						CHILD_REPAIR_DELTA,
 						(existing, filePath) => this.assertChildRepairPreconditions(existing, filePath, child.id),
 					)
 				}
 				if (!parentMatchesTargetState) {
 					committedParent = await this.writeAdministrativeRepair(
-						repairedParent,
+						committedParent,
 						PARENT_REPAIR_DELTA,
 						(existing) => this.assertParentRepairPreconditions(existing, child.id),
 					)
@@ -1011,14 +997,6 @@ export class TaskHistoryStore {
 			return false
 		}
 
-		const repairedChild = { ...child, status: intent.target.childStatus }
-		const repairedParent = {
-			...parent,
-			status: intent.target.parentStatus,
-			awaitingChildId: undefined,
-			delegatedToId: undefined,
-		}
-
 		// The authoritative writes carry an under-lock re-validation: the merge
 		// callback runs inside the target file's advisory lock (the same
 		// cross-process guard pattern as clearPendingActionIfMatching), so a
@@ -1026,18 +1004,21 @@ export class TaskHistoryStore {
 		// stale repair aborts instead of stomping it. An abort after the child
 		// write has landed keeps the durable intent: replay skips files already
 		// at target and completes only the missing side.
-		// Cache publication uses the committed records so peer-written fields
-		// merged under the lock stay visible in this window.
+		// The repair deltas supply the lifecycle fields under the lock; cache
+		// publication uses the committed records so peer-written fields merged
+		// there stay visible in this window.
 		let committedChild: HistoryItem | undefined
 		let committedParent: HistoryItem | undefined
 		try {
 			committedChild = await this.writeAdministrativeRepair(
-				repairedChild,
+				{ ...child, ...CHILD_REPAIR_DELTA },
 				CHILD_REPAIR_DELTA,
 				(existing, filePath) => this.assertChildRepairPreconditions(existing, filePath, child.id),
 			)
-			committedParent = await this.writeAdministrativeRepair(repairedParent, PARENT_REPAIR_DELTA, (existing) =>
-				this.assertParentRepairPreconditions(existing, child.id),
+			committedParent = await this.writeAdministrativeRepair(
+				{ ...parent, ...PARENT_REPAIR_DELTA },
+				PARENT_REPAIR_DELTA,
+				(existing) => this.assertParentRepairPreconditions(existing, child.id),
 			)
 		} catch (error) {
 			if (error instanceof RepairAbortedError) {
@@ -1080,16 +1061,12 @@ export class TaskHistoryStore {
 		guard: (existing: unknown, filePath: string) => void,
 	): Promise<HistoryItem> {
 		const filePath = await this.getTaskFilePath(target.id)
-		// `existing` is null when the file is absent or unparseable, matching the
-		// documented safeWriteJson merge contract; fall back to the cache-derived
-		// record so the repair still commits a complete HistoryItem.
 		const merge = mergeWithDisk(delta)
 		let committed: HistoryItem = target
 		await safeWriteJson(filePath, target, {
 			merge: (existing, incoming) => {
 				guard(existing, filePath)
-				committed = merge(existing, incoming) as HistoryItem
-				return committed
+				return (committed = merge(existing, incoming) as HistoryItem)
 			},
 		})
 		// No cache update here: multi-file repairs must publish cache state

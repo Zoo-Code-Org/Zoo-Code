@@ -1473,15 +1473,12 @@ export class ClineProvider
 					// Replace in-place: preserves stack index and current pointer
 					this.taskRegistry.replace(oldTask.taskId, task)
 
-					// The old instance shares this id and released the ownership
-					// claim in its dispose (markLocallyInactive also records the id
-					// in releasedLocalOwnershipIds, which blocks the late
-					// trackLocalSessionOwnership re-claim from any straggling write
-					// of the dead session). Re-claim after the abort so the resumed
-					// session is not treated as a crash orphan by the periodic
-					// delegation pass while Task.run()'s first active write is
-					// still in flight. The release paths below still roll this back
-					// on a preparation or scheduler failure.
+					// The old instance shares this id and released the claim in its
+					// dispose (markLocallyInactive also records the id in
+					// releasedLocalOwnershipIds, which blocks the new task's own
+					// active-status write from re-claiming it). Re-claim after the
+					// abort so the resumed session is not treated as a crash orphan
+					// while Task.run()'s first active write is still in flight.
 					this.taskHistoryStore.markLocallyActive(task.taskId)
 				}
 
