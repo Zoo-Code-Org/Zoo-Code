@@ -209,6 +209,24 @@ describe("VsCodeLmHandler", () => {
 		)
 
 		it.each(
+			["grok-4.7", "gpt-6.1-sol", "claude-fable-5"].flatMap((family) =>
+				[true, false, undefined].map((supportsImages) => ({ family, supportsImages })),
+			),
+		)("uses the host's image capability $supportsImages for $family", async ({ family, supportsImages }) => {
+			await handler.initializeClient()
+			const client = {
+				...mockLanguageModelChat,
+				family,
+				capabilities: { supportsImageToText: supportsImages },
+			}
+			handler["client"] = client
+			vi.mocked(vscode.lm.selectChatModels).mockResolvedValue([client])
+
+			expect(handler.getModel().info.supportsImages).toBe(supportsImages)
+			expect((await getVsCodeLmModels())[0].modelInfo.supportsImages).toBe(supportsImages)
+		})
+
+		it.each(
 			(["message", "tool_result"] as const).flatMap((path) =>
 				[true, false, undefined].map((supportsImages) => ({ path, supportsImages })),
 			),
@@ -4056,6 +4074,53 @@ describe("VsCodeLmHandler", () => {
 	})
 
 	describe("getCondenseContextWindow", () => {
+		it.each([
+			["claude-opus-5.5", 677108],
+			["gpt-6-astra", 266789],
+			["claude-sonnet-5.5", 680552],
+			["claude-haiku-5.5", 99784],
+			["grok-4.7", 199751],
+			["gemini-4-argon", 953064],
+			["vscModelF", 921736],
+			["oswe-vscode-modelD", 127783],
+			["gpt-6.1-sol", 269903],
+			["gpt-5.6-sol-fast", 269903],
+			["gpt-6.1-terra", 269123],
+			["gpt-6-luna", 269122],
+			["gpt-6-sol", 269122],
+			["claude-fable-5.1", 660686],
+			["claude-fable-5", 658785],
+			["claude-fable-5.5", 660686],
+			["grok-4.5", 199783],
+			["grok-4.6", 199784],
+			["gemini-3.7-flash", 935783],
+			["gemini-3.8-flash", 955113],
+			["claude-opus-5", 680456],
+			["gemini-3.6-flash", 935785],
+		] as const)("uses %s's assigned budget rather than its advertised window", async (family, expected) => {
+			await handler.initializeClient()
+			handler["client"] = { ...mockLanguageModelChat, family, maxInputTokens: 2_000_000 }
+
+			expect(handler.getCondenseContextWindow()).toBe(expected)
+			expect(handler.getModel().info.contextWindow).toBe(2_000_000)
+			expect(handler.getModel().info.supportsImages).toBeUndefined()
+
+			handler["client"] = { ...mockLanguageModelChat, family, maxInputTokens: 123456 }
+			expect(handler.getModel().info.contextWindow).toBe(123456)
+			expect(handler.getCondenseContextWindow()).toBe(expected)
+		})
+
+		it.each(["copilot", "some-other-vendor"])("resolves Astra's selector budget for vendor %s", (vendor) => {
+			const selectedHandler = new VsCodeLmHandler({
+				vsCodeLmModelSelector: { vendor, family: "gpt-6-astra" },
+			})
+			try {
+				expect(selectedHandler.getCondenseContextWindow()).toBe(266789)
+			} finally {
+				selectedHandler.dispose()
+			}
+		})
+
 		it("uses the static-table maxInputTokens for a known VS Code LM family", () => {
 			const opusHandler = new VsCodeLmHandler({
 				vsCodeLmModelSelector: { vendor: "copilot", family: "claude-opus-4.8" },
