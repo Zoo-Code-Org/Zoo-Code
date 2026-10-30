@@ -74,23 +74,38 @@ function fuzzySearch(lines: string[], searchChunk: string, startIndex: number, e
 	return { bestScore, bestMatchIndex, bestMatchContent }
 }
 
+// A caller only needs to tell 0 / 1 / >=2 apart, but the error message reports the exact count while it
+// is cheap, so the scan stops at the fourth hit. Two and three hits are reported exactly ("2", "3");
+// beyond that the count is a lower bound and is shown as "2+" instead of a wrong number. Scanning
+// further costs a full-file Levenshtein sweep for a number the message cannot use.
+const MAX_MATCHES = 4
+
+interface MatchScan {
+	matches: { index: number; score: number; content: string }[]
+	/** True when the scan stopped at the cap, so `matches.length` is a lower bound. */
+	truncated: boolean
+}
+
 /**
- * Returns every position in `lines` whose slice scores at least `threshold` against
+ * Returns up to `MAX_MATCHES` positions in `lines` whose slice scores at least `threshold` against
  * `searchChunk`, so a full-file retry can tell a unique match from a duplicated one.
  */
-function findAllMatches(lines: string[], searchChunk: string, threshold: number) {
+function findAllMatches(lines: string[], searchChunk: string, threshold: number): MatchScan {
 	const searchLen = searchChunk.split(/\r?\n/).length
-	const matches: { index: number; score: number; content: string }[] = []
+	const matches: MatchScan["matches"] = []
 
 	for (let index = 0; index + searchLen <= lines.length; index++) {
 		const content = lines.slice(index, index + searchLen).join("\n")
 		const score = getSimilarity(content, searchChunk)
 		if (score >= threshold) {
 			matches.push({ index, score, content })
+			if (matches.length === MAX_MATCHES) {
+				return { matches, truncated: true }
+			}
 		}
 	}
 
-	return matches
+	return { matches, truncated: false }
 }
 
 interface StaleHintCandidate {
@@ -101,8 +116,10 @@ interface StaleHintCandidate {
 interface StaleHintResolution {
 	/** Set only when exactly one position qualifies, so the hint can be overridden safely. */
 	match?: StaleHintCandidate & { matchIndex: number; bestMatchScore: number; bestMatchContent: string }
-	/** Number of qualifying positions found by the best candidate; 0 means absent. */
+	/** Number of qualifying positions found by the most ambiguous candidate; 0 means absent. */
 	matchCount: number
+	/** True when `matchCount` is a lower bound because the scan stopped at its cap. */
+	matchCountTruncated: boolean
 }
 
 export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
@@ -401,9 +418,10 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 		}
 
 		let matchCount = 0
+		let matchCountTruncated = false
 
 		for (const candidate of candidates) {
-			const matches = findAllMatches(resultLines, candidate.searchContent, this.fuzzyThreshold)
+			const { matches, truncated } = findAllMatches(resultLines, candidate.searchContent, this.fuzzyThreshold)
 			if (matches.length === 0) {
 				continue
 			}
@@ -418,13 +436,19 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 						bestMatchContent: match.content,
 					},
 					matchCount: 1,
+					matchCountTruncated: false,
 				}
 			}
 
-			matchCount = matches.length
+			// Report the most ambiguous candidate, not whichever ran last: the stripped variant can
+			// match fewer places than the plain one, and under-reporting hides the real ambiguity.
+			if (matches.length > matchCount) {
+				matchCount = matches.length
+				matchCountTruncated = truncated
+			}
 		}
 
-		return { matchCount }
+		return { matchCount, matchCountTruncated }
 	}
 
 	async applyDiff(
@@ -596,10 +620,12 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 			// A stale :start_line: hint bounds the search to a window around it, so a file that grew
 			// since the hint was read can miss a unique match. Retry over the whole file first.
 			let staleHintDuplicateCount = 0
+			let staleHintCountTruncated = false
 
 			if ((matchIndex === -1 || bestMatchScore < this.fuzzyThreshold) && startLine) {
 				const staleHint = this.resolveStaleHint(resultLines, searchContent, replaceContent)
 				staleHintDuplicateCount = staleHint.matchCount
+				staleHintCountTruncated = staleHint.matchCountTruncated
 
 				if (staleHint.match) {
 					matchIndex = staleHint.match.matchIndex
@@ -660,9 +686,11 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 						? `\n- LIKELY CAUSE: the first line of your search content looks like a malformed start-line marker and was therefore searched for as literal file text${separatorSwallowed ? ', together with the "-------" line after it' : ""}. The only recognized form is ":start_line:<number>" on the line immediately after "<<<<<<< SEARCH", optionally followed by a "-------" line. Remove or correct that line and retry.`
 						: ""
 					// A duplicated match is refused rather than guessed between, so say so instead of implying absence.
+					// The scan stops at its cap, so a truncated count is reported as "at least 2" rather than a wrong number.
+					const duplicateCount = staleHintCountTruncated ? "at least 2" : `${staleHintDuplicateCount}`
 					const duplicateHint =
 						staleHintDuplicateCount > 1
-							? `\n- LIKELY CAUSE: the SEARCH text matches ${staleHintDuplicateCount} separate places in the file, so the stale :start_line: hint cannot pick one. Include more surrounding lines to make the match unique.`
+							? `\n- LIKELY CAUSE: the SEARCH text matches ${duplicateCount} separate places in the file, so the stale :start_line: hint cannot pick one. Include more surrounding lines to make the match unique.`
 							: ""
 
 					diffResults.push({
