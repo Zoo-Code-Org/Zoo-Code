@@ -377,12 +377,29 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 		}
 	}
 
+	// MUST run before workspace-mutating Git commands: discovering a missing commit
+	// after git clean would leave untracked user files permanently deleted.
+	private async commitExists(commitHash: string): Promise<boolean> {
+		try {
+			await this.git!.raw(["cat-file", "-e", `${commitHash}^{commit}`])
+			return true
+		} catch {
+			return false
+		}
+	}
+
 	public async restoreCheckpoint(commitHash: string) {
 		try {
 			this.log(`[${this.constructor.name}#restoreCheckpoint] starting checkpoint restore`)
 
 			if (!this.git) {
 				throw new Error("Shadow git repo not initialized")
+			}
+
+			if (!(await this.commitExists(commitHash))) {
+				throw new Error(
+					`Cannot restore checkpoint ${commitHash}: this checkpoint no longer exists in the checkpoint repository. No files were changed.`,
+				)
 			}
 
 			const start = Date.now()
