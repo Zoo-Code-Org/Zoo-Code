@@ -379,12 +379,17 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 
 	// MUST run before workspace-mutating Git commands: discovering a missing commit
 	// after git clean would leave untracked user files permanently deleted.
+	// Other Git failures are rethrown so callers don't mistake them for a deleted checkpoint.
 	private async commitExists(commitHash: string): Promise<boolean> {
 		try {
 			await this.git!.raw(["cat-file", "-e", `${commitHash}^{commit}`])
 			return true
-		} catch {
-			return false
+		} catch (e) {
+			const message = e instanceof Error ? e.message : String(e)
+			if (/not a valid object name|bad object|not a commit/i.test(message)) {
+				return false
+			}
+			throw e
 		}
 	}
 
