@@ -301,9 +301,7 @@ type EncryptedReasoningContentBlockParam = ReasoningContentBlockParam & { encryp
 function asEncryptedReasoningContentBlockParam(
 	block: { type?: string } | undefined,
 ): EncryptedReasoningContentBlockParam | undefined {
-	if (!block || block.type !== "reasoning") {
-		return undefined
-	}
+	if (block?.type !== "reasoning") return undefined
 	const candidate = block as ReasoningContentBlockParam
 	return typeof candidate.encrypted_content === "string"
 		? (candidate as EncryptedReasoningContentBlockParam)
@@ -313,9 +311,7 @@ function asEncryptedReasoningContentBlockParam(
 function asPlainTextReasoningContentBlockParam(
 	block: { type?: string } | undefined,
 ): (ReasoningContentBlockParam & { text: string }) | undefined {
-	if (!block || block.type !== "reasoning") {
-		return undefined
-	}
+	if (block?.type !== "reasoning") return undefined
 	const candidate = block as ReasoningContentBlockParam
 	return typeof candidate.text === "string" ? (candidate as ReasoningContentBlockParam & { text: string }) : undefined
 }

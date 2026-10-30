@@ -574,7 +574,6 @@ export class TaskHistoryStore {
 						}
 						const parentMtimeMs = await this.getChildFileMtimeMs(item.id)
 						if (
-							parentMtimeMs !== undefined &&
 							isLivenessSignalFresh(
 								parentMtimeMs,
 								Date.now(),
@@ -601,9 +600,7 @@ export class TaskHistoryStore {
 								(existing) => this.assertMissingChildRepairPreconditions(existing, childFilePath, item),
 							)
 						} catch (error) {
-							if (!(error instanceof RepairAbortedError)) {
-								throw error
-							}
+							if (!(error instanceof RepairAbortedError)) throw error
 							console.warn(
 								`[TaskHistoryStore] Aborting repair for delegation ${item.id}: repair raced a peer write`,
 							)
@@ -703,16 +700,15 @@ export class TaskHistoryStore {
 	 * status write ends that ownership.
 	 */
 	private trackLocalSessionOwnership(written: HistoryItem): void {
-		if ((written.status ?? "active") === "active") {
-			// A released id must not be re-claimed by late teardown writes from
-			// its disposed session; only an explicit markLocallyActive clears
-			// the release (see releasedLocalOwnershipIds).
-			if (!this.releasedLocalOwnershipIds.has(written.id)) {
-				this.locallyActiveTaskIds.add(written.id)
-			}
-		} else {
+		if ((written.status ?? "active") !== "active") {
 			this.locallyActiveTaskIds.delete(written.id)
 			this.releasedLocalOwnershipIds.delete(written.id)
+			return
+		}
+		// A released id must not be re-claimed by late teardown writes from its disposed
+		// session; only an explicit markLocallyActive clears the release.
+		if (!this.releasedLocalOwnershipIds.has(written.id)) {
+			this.locallyActiveTaskIds.add(written.id)
 		}
 	}
 
@@ -767,9 +763,7 @@ export class TaskHistoryStore {
 	public async recordTaskActivity(taskId: string, at: number = Date.now()): Promise<void> {
 		try {
 			const cached = this.cache.get(taskId)
-			if (!cached || (cached.status ?? "active") !== "active") {
-				return
-			}
+			if (!cached || (cached.status ?? "active") !== "active") return
 			await this.withLock(async () => {
 				const filePath = await this.getTaskFilePath(taskId)
 				let written: HistoryItem | undefined
@@ -801,21 +795,16 @@ export class TaskHistoryStore {
 						},
 					})
 				} catch (error) {
-					if (error instanceof HeartbeatSkipError) {
-						if (error.message.includes("deleted by another host")) {
-							console.warn(
-								`[TaskHistoryStore] Skipping liveness heartbeat for ${taskId}: ${error.message}`,
-							)
-						}
-						return
+					if (!(error instanceof HeartbeatSkipError)) throw error
+					// Only the deleted-record case is worth a log line; the other skips are expected.
+					if (error.message.includes("deleted by another host")) {
+						console.warn(`[TaskHistoryStore] Skipping liveness heartbeat for ${taskId}: ${error.message}`)
 					}
-					throw error
+					return
 				}
 				if (written) {
 					this.cache.set(taskId, written)
-					if (this.onWrite) {
-						await this.onWrite(this.getAll())
-					}
+					if (this.onWrite) await this.onWrite(this.getAll())
 				}
 			})
 		} catch (error) {
@@ -978,9 +967,9 @@ export class TaskHistoryStore {
 		child: HistoryItem,
 		parent: HistoryItem,
 	): Promise<boolean> {
-		// Pre-write liveness re-check (cheap early-out): the repair decision at
-		// the call site came from an unlocked stat, and a peer window can resume
-		// the child while the intent journal was being written.
+		// Pre-write liveness re-check (cheap early-out): the repair decision at the call
+		// site came from an unlocked stat, and a peer window can resume the child while
+		// the intent journal was being written.
 		if (this.locallyActiveTaskIds.has(child.id)) {
 			await this.removeDelegationRepairIntent()
 			console.warn(
@@ -1021,14 +1010,10 @@ export class TaskHistoryStore {
 				(existing) => this.assertParentRepairPreconditions(existing, child.id),
 			)
 		} catch (error) {
-			if (error instanceof RepairAbortedError) {
-				console.warn(`[TaskHistoryStore] Aborting repair for child ${child.id}: ${error.message}`)
-				if (committedChild) {
-					this.cache.set(committedChild.id, committedChild)
-				}
-				return false
-			}
-			throw error
+			if (!(error instanceof RepairAbortedError)) throw error
+			console.warn(`[TaskHistoryStore] Aborting repair for child ${child.id}: ${error.message}`)
+			if (committedChild) this.cache.set(committedChild.id, committedChild)
+			return false
 		}
 
 		this.cache.set(committedChild.id, committedChild)
@@ -1123,10 +1108,10 @@ export class TaskHistoryStore {
 	 * may have completed, abandoned, or re-delegated it in the gap).
 	 */
 	private assertParentRepairPreconditions(existing: unknown, childId: string): void {
-		if (!existing || typeof existing !== "object" || !("id" in existing)) {
+		const disk = existing as HistoryItem | undefined
+		if (!disk || typeof disk !== "object" || !("id" in disk)) {
 			throw new RepairAbortedError("parent record deleted under lock")
 		}
-		const disk = existing as HistoryItem
 		if (disk.status !== "delegated" || disk.awaitingChildId !== childId) {
 			throw new RepairAbortedError(`parent no longer delegated to child (status ${disk.status ?? "active"})`)
 		}
@@ -1143,7 +1128,6 @@ export class TaskHistoryStore {
 		if (this.statChildFileMtimeMsSync(childFilePath) !== undefined) {
 			throw new RepairAbortedError("child record appeared under lock (peer landed it)")
 		}
-		// Still absent — proceed.
 	}
 
 	private matchesDelegationRepairParentPreconditions(intent: DelegationRepairIntent, parent: HistoryItem): boolean {
@@ -1287,29 +1271,25 @@ export class TaskHistoryStore {
 			try {
 				raw = await fs.readFile(await this.getTaskFilePath(taskId), "utf8")
 			} catch (error) {
+				// Only confirmed absence (ENOENT) proves the record is gone, so only that
+				// drops the cache entry and the ownership claim; a transient read error
+				// keeps both and the next access retries.
 				if (this.isFileNotFoundError(error)) {
-					// Confirmed absent: the record no longer exists, so the
-					// cache entry and any local ownership claim are stale.
 					this.cache.delete(taskId)
 					this.taskFileMtimes.delete(taskId)
 					this.locallyActiveTaskIds.delete(taskId)
 					this.releasedLocalOwnershipIds.delete(taskId)
 				}
-				// Any other read error keeps everything: the next access retries.
 				return
 			}
-			let item: HistoryItem | null = null
 			try {
 				const parsed: unknown = JSON.parse(raw)
 				if (parsed && typeof parsed === "object" && "id" in parsed && (parsed as HistoryItem).id) {
-					item = parsed as HistoryItem
+					this.cache.set(taskId, parsed as HistoryItem)
+					this.taskFileMtimes.delete(taskId)
 				}
 			} catch {
 				// Malformed content: keep the cache entry and the claim (see above).
-			}
-			if (item) {
-				this.cache.set(taskId, item)
-				this.taskFileMtimes.delete(taskId)
 			}
 		})
 	}
@@ -1536,14 +1516,12 @@ export class TaskHistoryStore {
 	 * (rather than queues) a tick whose previous pass is still in flight.
 	 */
 	private async runPeriodicDelegationReconciliation(): Promise<void> {
-		if (this.disposed || this.delegationTickRunning) {
-			return
-		}
+		if (this.disposed || this.delegationTickRunning) return
 		this.delegationTickRunning = true
+		const persistedActiveIds = new Set(
+			Array.from(this.getPersistedActiveIds()).filter((id) => !this.locallyActiveTaskIds.has(id)),
+		)
 		try {
-			const persistedActiveIds = new Set(
-				Array.from(this.getPersistedActiveIds()).filter((id) => !this.locallyActiveTaskIds.has(id)),
-			)
 			await this.reconcileDelegationState(persistedActiveIds)
 		} finally {
 			this.delegationTickRunning = false
@@ -1796,33 +1774,24 @@ export class TaskHistoryStore {
 	 * retries instead.
 	 */
 	private async getChildFileMtimeMs(childId: string): Promise<number | undefined> {
+		const liveMarker = Date.now() + TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS
 		try {
-			const filePath = await this.getTaskFilePath(childId)
-			const stat = await fs.stat(filePath)
-			return stat.mtimeMs
+			return (await fs.stat(await this.getTaskFilePath(childId))).mtimeMs
 		} catch (error) {
-			// ENOENT: no window is persisting it UNLESS the absence falls inside
-			// safeWriteJson's rename window — see the lock check below. Any other
-			// stat failure is treated as evidence of life via a threshold-shifted
-			// future timestamp.
-			if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
-				// The write path (safeWriteJson) renames history_item.json to a backup
-				// and back while holding the advisory lock, so a missing file during
-				// that window does NOT mean no window is writing it. Same convention
-				// as reconcile(): a fresh .lock file means a write is in progress —
-				// treat the child as live and let a later tick retry.
-				try {
-					const lockPath = (await this.getTaskFilePath(childId)) + ".lock"
-					const lockStat = await fs.stat(lockPath)
-					if (Date.now() - lockStat.mtimeMs < LOCK_STALE_MS) {
-						return Date.now() + TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS
-					}
-				} catch {
-					// No lock file — the file is genuinely absent.
-				}
-				return undefined
+			// Any stat failure other than ENOENT is not evidence of absence: report a
+			// threshold-shifted future mtime so every liveness guard holds and a later
+			// tick retries.
+			if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") return liveMarker
+			// ENOENT can still fall inside safeWriteJson's rename window, which holds the
+			// advisory lock: a fresh .lock file means a write is in progress, so treat the
+			// child as live (same convention as reconcile()).
+			try {
+				const lockStat = await fs.stat((await this.getTaskFilePath(childId)) + ".lock")
+				if (Date.now() - lockStat.mtimeMs < LOCK_STALE_MS) return liveMarker
+			} catch {
+				// No lock file — the record is genuinely absent.
 			}
-			return Date.now() + TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS
+			return undefined
 		}
 	}
 

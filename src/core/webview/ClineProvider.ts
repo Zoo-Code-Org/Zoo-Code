@@ -1425,29 +1425,19 @@ export class ClineProvider
 			diffFuzzyThreshold,
 		})
 
-		// Eagerly claim local session ownership so the store's periodic delegation
-		// reconciliation cannot treat this resumed task as a crash orphan while
-		// Task.run()'s first active-status write is still in flight (resumeTaskFromHistory
-		// starts with an async disk read and scheduleTask may queue the run). Every Task
-		// built here passes historyItem without task/images, so Task's own
-		// `_isHistoryTask = !!historyItem && !task && !images` discriminator
-		// (src/core/task/Task.ts) is always true for this method — the unconditional
-		// claim below mirrors it exactly. Ownership stays self-correcting via
-		// trackLocalSessionOwnership: the task's next non-active status write releases it.
+		// Eagerly claim local session ownership so periodic delegation reconciliation
+		// cannot treat this resumed task as a crash orphan while Task.run()'s first
+		// active-status write is still in flight. Every Task built here passes
+		// historyItem without task/images, so Task's own `_isHistoryTask`
+		// discriminator is always true for this method. Ownership stays
+		// self-correcting: the next non-active status write releases it.
 		this.taskHistoryStore.markLocallyActive(task.taskId)
 
-		// Roll the eager claim back on every path that never reaches a scheduled run:
-		// a preparation/stack failure throws before scheduling (catch below), and a
-		// scheduler rejection is reported through scheduleTask's onError
-		// hook (which also runs the failed-task cleanup for settlement
-		// rejections). Without the release, an id whose task never started would be excluded
-		// from orphan reconciliation for the lifetime of this window. startTask:false
-		// is intentionally NOT released: its only production caller
-		// (reopenParentFromDelegation) persists the task's `active` history item
-		// through the delegation transition — which re-registers ownership via
-		// trackLocalSessionOwnership — and immediately runs it via
-		// Task.resumeAfterDelegation(), so releasing here would reopen the exact
-		// crash-orphan window this claim closes.
+		// Roll the eager claim back on every path that never reaches a scheduled run: a
+		// preparation/stack failure throws before scheduling, and a scheduler rejection
+		// arrives through scheduleTask's onError hook. startTask:false is intentionally NOT
+		// released: reopenParentFromDelegation persists the task's `active` item and
+		// immediately resumes it, so releasing would reopen the crash-orphan window.
 		try {
 			if (isRehydratingCurrentTask) {
 				// Replace the current task in-place to avoid UI flicker
@@ -1473,12 +1463,11 @@ export class ClineProvider
 					// Replace in-place: preserves stack index and current pointer
 					this.taskRegistry.replace(oldTask.taskId, task)
 
-					// The old instance shares this id and released the claim in its
-					// dispose (markLocallyInactive also records the id in
-					// releasedLocalOwnershipIds, which blocks the new task's own
-					// active-status write from re-claiming it). Re-claim after the
-					// abort so the resumed session is not treated as a crash orphan
-					// while Task.run()'s first active write is still in flight.
+					// The old instance shares this id and released the claim in its dispose
+					// (markLocallyInactive also records the id in releasedLocalOwnershipIds,
+					// which blocks the new task's own active-status write from re-claiming
+					// it). Re-claim after the abort so the resumed session is not treated as
+					// a crash orphan while Task.run()'s first active write is in flight.
 					this.taskHistoryStore.markLocallyActive(task.taskId)
 				}
 
@@ -1490,32 +1479,25 @@ export class ClineProvider
 				this.log(
 					`[createTaskWithHistoryItem] rehydrated task ${task.taskId}.${task.instanceId} in-place (flicker-free)`,
 				)
-
-				if (options?.startTask !== false) {
-					scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, async (error) => {
-						this.taskHistoryStore.markLocallyInactive(task.taskId)
-						await this.cleanupFailedHistoryTask(task, error)
-					})
-				}
 			} else {
 				await this.addClineToStack(task)
 
 				this.log(
 					`[createTaskWithHistoryItem] ${task.parentTask ? "child" : "parent"} task ${task.taskId}.${task.instanceId} instantiated`,
 				)
-
-				if (options?.startTask !== false) {
-					scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, async (error) => {
-						this.taskHistoryStore.markLocallyInactive(task.taskId)
-						await this.cleanupFailedHistoryTask(task, error)
-					})
-				}
 			}
 		} catch (error) {
 			// Preparation/stack failure: the task never started, so release the claim
 			// and let the caller handle the rethrown error.
 			this.taskHistoryStore.markLocallyInactive(task.taskId)
 			throw error
+		}
+
+		if (options?.startTask !== false) {
+			scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, async (error) => {
+				this.taskHistoryStore.markLocallyInactive(task.taskId)
+				await this.cleanupFailedHistoryTask(task, error)
+			})
 		}
 
 		// Check if there's a pending edit after checkpoint restoration
@@ -4248,18 +4230,13 @@ export class ClineProvider
 				}
 			}
 		} catch (err) {
-			// The child will never start: release the ownership claim createTask
-			// installed for it (the rollback delete also drops it, but that path
-			// is best-effort). Best-effort like every cleanup in this catch: a
-			// minimal store must not mask the original rollback error.
+			// The child will never start: release the ownership claim createTask installed
+			// for it. Best-effort like every cleanup in this catch, so a minimal store
+			// cannot mask the original rollback error.
 			try {
 				this.taskHistoryStore.markLocallyInactive(child.taskId)
-			} catch (releaseError) {
-				this.log(
-					`[delegateParentAndOpenChild] Failed to release child ${child.taskId} ownership claim during rollback: ${
-						(releaseError as Error)?.message ?? String(releaseError)
-					}`,
-				)
+			} catch {
+				// ignore: the rollback below is the error that matters
 			}
 			this.log(
 				`[delegateParentAndOpenChild] Failed to persist parent metadata for ${parentTaskId} -> ${child.taskId}: ${
@@ -4694,12 +4671,9 @@ export class ClineProvider
 						admitContinuation()
 						const { runPromise } = await continuation
 						if (!runPromise) {
-							// Admitted, but the continuation declined to resume (the
-							// parent was cancelled/abandoned or its persisted state
-							// changed while queued). The eager claim from
-							// createTaskWithHistoryItem would otherwise linger on a
-							// task that never runs, excluding the id from orphan
-							// reconciliation for the life of this window.
+							// Admitted, but the continuation declined to resume (parent
+							// cancelled/abandoned or its persisted state changed while
+							// queued), so no run will release the eager claim.
 							this.taskHistoryStore.markLocallyInactive(parentTaskId)
 							return
 						}
@@ -4720,23 +4694,15 @@ export class ClineProvider
 					.then(
 						() => {
 							admitContinuation()
-							if (!schedulerAdmitted) {
-								// schedule() resolved without ever invoking the callback
-								// (the parent was aborted/abandoned while waiting for the
-								// permit): no resume will run, so release the eager claim.
-								this.taskHistoryStore.markLocallyInactive(parentTaskId)
-							}
+							// schedule() resolved without invoking the callback (the parent was
+							// aborted/abandoned while waiting for the permit): no resume runs.
+							if (!schedulerAdmitted) this.taskHistoryStore.markLocallyInactive(parentTaskId)
 						},
 						(error) => {
 							admitContinuation()
-							if (!schedulerAdmitted) {
-								// schedule() rejected before the callback ever ran (the
-								// permit wait was cancelled): no resume will run, so
-								// release the eager claim. An admitted resume that later
-								// fails keeps its claim — its session still lives in this
-								// window — and that error still reaches this handler.
-								this.taskHistoryStore.markLocallyInactive(parentTaskId)
-							}
+							// Rejected before the callback ran: no resume runs either. An admitted
+							// resume that later fails keeps its claim (its session still lives here).
+							if (!schedulerAdmitted) this.taskHistoryStore.markLocallyInactive(parentTaskId)
 							console.error(
 								`[${ClineProvider.prototype.reopenParentFromDelegation.name}] taskScheduler.schedule failed:`,
 								error,
