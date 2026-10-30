@@ -62,8 +62,20 @@ vi.mock("openai", () => {
 
 import type { Anthropic } from "@anthropic-ai/sdk"
 
+import { providerIdentifiers } from "@roo-code/types"
+
 import { LmStudioHandler } from "../lm-studio"
 import type { ApiHandlerOptions } from "../../../shared/api"
+
+const { mockGetModels, mockGetModelsFromCache } = vi.hoisted(() => ({
+	mockGetModels: vi.fn(),
+	mockGetModelsFromCache: vi.fn(),
+}))
+
+vi.mock("../fetchers/modelCache", () => ({
+	getModels: mockGetModels,
+	getModelsFromCache: mockGetModelsFromCache,
+}))
 
 describe("LmStudioHandler", () => {
 	let handler: LmStudioHandler
@@ -77,6 +89,9 @@ describe("LmStudioHandler", () => {
 		}
 		handler = new LmStudioHandler(mockOptions)
 		mockCreate.mockClear()
+		mockGetModels.mockReset()
+		mockGetModelsFromCache.mockReset()
+		mockGetModelsFromCache.mockReturnValue(undefined)
 	})
 
 	describe("constructor", () => {
@@ -256,6 +271,33 @@ describe("LmStudioHandler", () => {
 			expect(modelInfo.info).toBeDefined()
 			expect(modelInfo.info.maxTokens).toBeUndefined()
 			expect(modelInfo.info.contextWindow).toBe(128_000)
+		})
+	})
+
+	describe("ensureModelFetched", () => {
+		it("returns default info before the pre-warm and cached info after", async () => {
+			// The pre-warm populates the shared cache that getModel() reads, so the
+			// cache starts empty and is filled by the mocked getModels() call.
+			let cacheContents: Record<string, { maxTokens: number; contextWindow: number }> | undefined
+			mockGetModelsFromCache.mockImplementation(() => cacheContents)
+			mockGetModels.mockImplementation(async () => {
+				cacheContents = { "local-model": { maxTokens: 4096, contextWindow: 32_768 } }
+				return cacheContents
+			})
+
+			expect(handler.getModel().info.contextWindow).toBe(128_000)
+
+			await handler.ensureModelFetched()
+
+			expect(mockGetModels).toHaveBeenCalledWith(
+				{
+					provider: providerIdentifiers.lmstudio,
+					baseUrl: "http://localhost:1234",
+				},
+				handler,
+			)
+			expect(handler.getModel().info.contextWindow).toBe(32_768)
+			expect(handler.getModel().info.maxTokens).toBe(4096)
 		})
 	})
 })

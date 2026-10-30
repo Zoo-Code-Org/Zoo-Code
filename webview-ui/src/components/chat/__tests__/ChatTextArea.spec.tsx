@@ -521,6 +521,66 @@ describe("ChatTextArea", () => {
 			expect(setInputValue).not.toHaveBeenCalled()
 		})
 
+		describe("dragover acceptance", () => {
+			// jsdom has no DragEvent constructor, so build a plain cancelable
+			// Event and attach the drag payload the React handler expects.
+			const fireDragOver = (element: Element, types: string[], shiftKey = false) => {
+				const event = new Event("dragover", { bubbles: true, cancelable: true })
+				const dataTransfer = { types, files: [], dropEffect: "none" }
+				Object.defineProperty(event, "dataTransfer", { value: dataTransfer })
+				Object.defineProperty(event, "shiftKey", { value: shiftKey })
+				fireEvent(element, event)
+				return { event, dataTransfer }
+			}
+
+			it.each([
+				"Files",
+				"resourceurls",
+				"codeeditors",
+				"codefiles",
+				"application/vnd.code.uri-list",
+				"RESOURCEURLS",
+			])("accepts %s drags without Shift", (type) => {
+				const { container } = render(<ChatTextArea {...defaultProps} />)
+
+				const { event, dataTransfer } = fireDragOver(container.querySelector(".chat-text-area")!, [type])
+
+				expect(event.defaultPrevented).toBe(true)
+				expect(dataTransfer.dropEffect).toBe("copy")
+				expect(container.querySelector(".border-dashed")).not.toBeNull()
+			})
+
+			it.each([["text/plain"], ["text/uri-list"], ["text/plain", "text/uri-list"]])(
+				"keeps native behavior and clears the highlight for drag types %j without Shift",
+				(...types) => {
+					const { container } = render(<ChatTextArea {...defaultProps} />)
+					const target = container.querySelector(".chat-text-area")!
+					fireDragOver(target, ["Files"])
+					expect(container.querySelector(".border-dashed")).not.toBeNull()
+
+					const { event, dataTransfer } = fireDragOver(target, types)
+
+					expect(event.defaultPrevented).toBe(false)
+					expect(dataTransfer.dropEffect).toBe("none")
+					expect(container.querySelector(".border-dashed")).toBeNull()
+				},
+			)
+
+			it("still accepts plain text drags when Shift is held", () => {
+				const { container } = render(<ChatTextArea {...defaultProps} />)
+
+				const { event, dataTransfer } = fireDragOver(
+					container.querySelector(".chat-text-area")!,
+					["text/plain"],
+					true,
+				)
+
+				expect(event.defaultPrevented).toBe(true)
+				expect(dataTransfer.dropEffect).toBe("copy")
+				expect(container.querySelector(".border-dashed")).not.toBeNull()
+			})
+		})
+
 		describe("prompt history navigation", () => {
 			const mockClineMessages = [
 				{ type: "say", say: "user_feedback", text: "First prompt", ts: 1000 },

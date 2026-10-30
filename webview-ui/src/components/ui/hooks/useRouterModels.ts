@@ -23,6 +23,19 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 		// query. The extension host echoes the ID in the routerModels response.
 		const requestId = crypto.randomUUID()
 
+		const cleanup = () => {
+			clearTimeout(timeout)
+			signal?.removeEventListener("abort", onAbort)
+			if (typeof window !== "undefined") {
+				window.removeEventListener("message", handler)
+			}
+		}
+
+		const onAbort = () => {
+			cleanup()
+			reject(new DOMException("Router models request aborted", "AbortError"))
+		}
+
 		const timeout = setTimeout(() => {
 			cleanup()
 			reject(new Error("Router models request timed out"))
@@ -49,31 +62,16 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 			}
 		}
 
-		const cleanup = () => {
-			clearTimeout(timeout)
-			if (typeof window !== "undefined") {
-				window.removeEventListener("message", handler)
-			}
-			signal?.removeEventListener("abort", onAbort)
-		}
-
-		const onAbort = () => {
-			cleanup()
-			reject(new DOMException("Router models request aborted", "AbortError"))
-		}
-
 		// React Query cancels the queryFn when the consuming component unmounts or
 		// the query is removed. Honour that signal so the window listener and the
 		// timeout do not outlive the request (and a stale response can never
 		// resolve a disposed query).
-		if (signal) {
-			if (signal.aborted) {
-				onAbort()
-				return
-			}
-			signal.addEventListener("abort", onAbort, { once: true })
+		if (signal?.aborted) {
+			onAbort()
+			return
 		}
 
+		signal?.addEventListener("abort", onAbort, { once: true })
 		window.addEventListener("message", handler)
 		vscode.postMessage({
 			type: RouterModelsMessageType.requestRouterModels,

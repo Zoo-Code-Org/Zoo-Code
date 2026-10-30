@@ -26,6 +26,7 @@ describe("ProfileValidator", () => {
 			["ollama", { ollamaModelId: "model" }],
 			["requesty", { requestyModelId: "model" }],
 			["unbound", { unboundModelId: "model" }],
+			["ioIntelligence", { ioIntelligenceModelId: "model" }],
 		])("resolves %s model fields through canonical identifiers", (identifierKey, profileSettings) => {
 			const canonicalIdentifier = providerIdentifiers[identifierKey as keyof typeof providerIdentifiers]
 			const modelId = "model"
@@ -281,6 +282,25 @@ describe("ProfileValidator", () => {
 			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
 		})
 
+		// Test for io-intelligence provider which uses ioIntelligenceModelId
+		it(`should extract ioIntelligenceModelId for io-intelligence provider`, () => {
+			const allowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.ioIntelligence]: { allowAll: false, models: ["test-model"] },
+				},
+			}
+			const profile: ProviderSettings = {
+				apiProvider: providerIdentifiers.ioIntelligence,
+				ioIntelligenceModelId: "test-model",
+			}
+
+			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
+			expect(
+				ProfileValidator.isProfileAllowed({ ...profile, ioIntelligenceModelId: "other-model" }, allowList),
+			).toBe(false)
+		})
+
 		it("should extract vsCodeLmModelSelector.id for vscode-lm provider", () => {
 			const allowList: OrganizationAllowList = {
 				allowAll: false,
@@ -294,6 +314,21 @@ describe("ProfileValidator", () => {
 			}
 
 			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
+		})
+
+		it.each([
+			["allows an allow-listed model", "copilot-gpt-3.5", true],
+			["blocks a model outside the allow-list", "copilot-other", false],
+		])("enforces the organization allow-list for the GitHub Copilot provider: %s", (_label, id, allowed) => {
+			const allowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: { [providerIdentifiers.githubCopilot]: { allowAll: false, models: ["copilot-gpt-3.5"] } },
+			}
+			const profile: ProviderSettings = {
+				apiProvider: providerIdentifiers.githubCopilot,
+				vsCodeLmModelSelector: { vendor: "copilot", id },
+			}
+			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(allowed)
 		})
 
 		it("should extract lmStudioModelId for lmstudio provider", () => {

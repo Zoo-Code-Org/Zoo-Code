@@ -4,7 +4,7 @@ import { bedrockProviderDefinition } from "./bedrock.js"
 import { vertexProviderDefinition } from "./vertex.js"
 import { openAiProviderDefinition } from "./openai.js"
 import { ollamaProviderDefinition } from "./ollama.js"
-import { vsCodeLmProviderDefinition } from "./vscode-lm.js"
+import { githubCopilotProviderDefinition, vsCodeLmProviderDefinition } from "./vscode-lm.js"
 import { lmStudioProviderDefinition } from "./lm-studio.js"
 import { geminiProviderDefinition } from "./gemini.js"
 import { geminiCliProviderDefinition } from "./gemini-cli.js"
@@ -30,6 +30,7 @@ import { qwenCodeProviderDefinition } from "./qwen-code.js"
 import { vercelAiGatewayProviderDefinition } from "./vercel-ai-gateway.js"
 import { opencodeGoProviderDefinition } from "./opencode-go.js"
 import { kenariProviderDefinition } from "./kenari.js"
+import { ioIntelligenceProviderDefinition } from "./io-intelligence.js"
 import { nanoGptProviderDefinition } from "./nanogpt.js"
 import { zooGatewayProviderDefinition } from "./zoo-gateway.js"
 import { basetenProviderDefinition } from "./baseten.js"
@@ -56,6 +57,7 @@ export const providerDefinitionList = [
 	openAiProviderDefinition,
 	ollamaProviderDefinition,
 	vsCodeLmProviderDefinition,
+	githubCopilotProviderDefinition,
 	lmStudioProviderDefinition,
 	geminiProviderDefinition,
 	geminiCliProviderDefinition,
@@ -82,6 +84,7 @@ export const providerDefinitionList = [
 	opencodeGoProviderDefinition,
 	kenariProviderDefinition,
 	nanoGptProviderDefinition,
+	ioIntelligenceProviderDefinition,
 	zooGatewayProviderDefinition,
 	basetenProviderDefinition,
 ] as const satisfies readonly ProviderDefinition[]

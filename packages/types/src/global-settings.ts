@@ -49,6 +49,9 @@ export const DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES = false
  */
 export const DEFAULT_DIFF_FUZZY_THRESHOLD = 1.0
 
+// Preserve the existing terminal-dependent output display until users opt in.
+export const DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT = false
+
 export const DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED = false
 
 /**
@@ -236,6 +239,7 @@ export const globalSettingsSchema = z.object({
 	terminalOutputPreviewSize: z.enum(["small", "medium", "large"]).optional(),
 	terminalShellIntegrationTimeout: z.number().optional(),
 	terminalShellIntegrationDisabled: z.boolean().optional(),
+	collapseCommandOutputByDefault: z.boolean().optional(),
 	terminalCommandDelay: z.number().optional(),
 	terminalPowershellCounter: z.boolean().optional(),
 	terminalZshClearEolMark: z.boolean().optional(),
@@ -304,7 +308,10 @@ export const globalSettingsSchema = z.object({
 
 	/**
 	 * List of native tool names to globally disable.
-	 * Tools in this list will be excluded from prompt generation and rejected at execution time.
+	 * Tools in this list are excluded from prompt generation and rejected at
+	 * execution time. The tool the task loop completes through
+	 * (attempt_completion) cannot be disabled this way: an entry naming it is
+	 * ignored at policy resolution.
 	 */
 	disabledTools: z.array(toolNamesSchema).optional(),
 })
@@ -359,6 +366,7 @@ export const SECRET_STATE_KEYS = [
 	"vercelAiGatewayApiKey",
 	"opencodeGoApiKey",
 	"kenariApiKey",
+	"ioIntelligenceApiKey",
 	"nanoGptApiKey",
 	"basetenApiKey",
 ] as const

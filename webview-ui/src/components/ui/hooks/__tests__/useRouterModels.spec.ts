@@ -37,6 +37,11 @@ describe("fetchRouterModels", () => {
 		vi.clearAllMocks()
 	})
 
+	afterEach(() => {
+		vi.restoreAllMocks()
+		vi.useRealTimers()
+	})
+
 	it("posts a provider-filtered request with a request ID and resolves on the matching response", async () => {
 		const { promise, requestId } = startRequest(providerIdentifiers.mimo)
 
