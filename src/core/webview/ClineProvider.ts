@@ -393,6 +393,10 @@ export class ClineProvider
 	 */
 	private viewLocalState: Partial<ExtensionState> = {}
 
+	// Per-field write counters: a same-value save leaves the buffer value unchanged, so the
+	// load merge cannot detect it by comparing values alone.
+	private viewLocalStateWriteVersions = { mode: 0, currentApiConfigName: 0, apiConfiguration: 0 }
+
 	/**
 	 * This view's pinned profile name from the view-local buffer. Exposed for
 	 * sibling-instance inspection (getAllInstances() filtering): `viewLocalState`
@@ -5167,7 +5171,14 @@ export class ClineProvider
 	 * profile upsert/activation/deletion, or resetState. This ensures the local cache stays in
 	 * sync with global state changes that would otherwise be invisible behind mergedStateValues.
 	 */
+	private bumpViewLocalStateWriteVersions(values: Partial<RooCodeSettings> & Partial<ExtensionState>): void {
+		if ("mode" in values) this.viewLocalStateWriteVersions.mode += 1
+		if ("currentApiConfigName" in values) this.viewLocalStateWriteVersions.currentApiConfigName += 1
+		if ("apiConfiguration" in values) this.viewLocalStateWriteVersions.apiConfiguration += 1
+	}
+
 	private _updateViewLocalStateFromMutation(values: Partial<RooCodeSettings> & Partial<ExtensionState>): void {
+		this.bumpViewLocalStateWriteVersions(values)
 		if ("mode" in values) {
 			const val = values.mode
 			if (val === undefined || val === null) {
@@ -5255,6 +5266,7 @@ export class ClineProvider
 			// mutation paths update viewLocalState in place, so a shallow copy is
 			// what makes fields mutated during the load window observable below.
 			const preLoadBuffer = { ...this.viewLocalState }
+			const preLoadVersions = { ...this.viewLocalStateWriteVersions }
 
 			if (persisted?.mode) {
 				// A persisted mode may reference a custom mode that was deleted after it was
@@ -5293,7 +5305,7 @@ export class ClineProvider
 			const postLoadBuffer = this.viewLocalState
 			const mergedState: Partial<ExtensionState> = { ...loadedState }
 
-			if (!Object.is(preLoadBuffer.mode, postLoadBuffer.mode)) {
+			if (preLoadVersions.mode !== this.viewLocalStateWriteVersions.mode) {
 				if (postLoadBuffer.mode === undefined) {
 					delete mergedState.mode
 				} else {
@@ -5301,7 +5313,7 @@ export class ClineProvider
 				}
 			}
 
-			if (!Object.is(preLoadBuffer.currentApiConfigName, postLoadBuffer.currentApiConfigName)) {
+			if (preLoadVersions.currentApiConfigName !== this.viewLocalStateWriteVersions.currentApiConfigName) {
 				if (postLoadBuffer.currentApiConfigName === undefined) {
 					delete mergedState.currentApiConfigName
 				} else {
@@ -5309,7 +5321,7 @@ export class ClineProvider
 				}
 			}
 
-			if (!Object.is(preLoadBuffer.apiConfiguration, postLoadBuffer.apiConfiguration)) {
+			if (preLoadVersions.apiConfiguration !== this.viewLocalStateWriteVersions.apiConfiguration) {
 				if (postLoadBuffer.apiConfiguration === undefined) {
 					delete mergedState.apiConfiguration
 				} else {
