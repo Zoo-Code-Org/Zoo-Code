@@ -3843,7 +3843,11 @@ export class ClineProvider
 		providerSettings: ProviderSettings,
 		includeSelf = false,
 	): Promise<void> {
-		const affected = ClineProvider.getAllInstances().filter((instance) => instance !== this || includeSelf)
+		// Disposed siblings own orphaned state and their webview is already torn down: refreshing
+		// them can only throw (their stores may be mocked away) after earlier members landed.
+		const affected = ClineProvider.getAllInstances().filter(
+			(instance) => (instance !== this || includeSelf) && !instance._disposed,
+		)
 
 		if (affected.length === 0) {
 			return

@@ -764,6 +764,11 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		beforeEach(() => {
 			viewB["viewLocalState"] = {}
 			getProfile = vi.spyOn(viewA.providerSettingsManager, "getProfile").mockResolvedValue(pinnedElsewhere)
+			// The ContextProxy double installs getProviderSettings as a vi.fn; spying over it and
+			// restoring leaves the mock without the default implementation, so reinstall it.
+			;(
+				viewB.contextProxy as unknown as { getProviderSettings: ReturnType<typeof vi.fn> }
+			).getProviderSettings.mockReturnValue({ apiProvider: providerIdentifiers.anthropic })
 		})
 
 		afterEach(() => {

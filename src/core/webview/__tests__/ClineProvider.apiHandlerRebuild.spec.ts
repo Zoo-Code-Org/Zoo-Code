@@ -296,6 +296,13 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		await provider.resolveWebviewView(mockWebviewView)
 	})
 
+	afterEach(() => {
+		// Spies installed by one test (notably a gated getState) must not leak into the next:
+		// the activation snapshot now reads getState before activateProfile.
+		vi.restoreAllMocks()
+		vi.useRealTimers()
+	})
+
 	describe("upsertProviderProfile", () => {
 		test("calls updateApiConfiguration when provider/model unchanged but profile settings changed (explicit save)", async () => {
 			// Create a task with the current config
@@ -883,8 +890,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			const first = provider.activateProviderProfile({ name: "first-profile" })
 			const second = provider.activateProviderProfile({ name: "second-profile" })
 
-			await Promise.resolve()
-			expect(events).toEqual(["first:start"])
+			await vi.waitFor(() => expect(events).toEqual(["first:start"]))
 
 			resolveFirst()
 			await first
@@ -946,8 +952,11 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 				// Queue advanced immediately on timeout — second enqueues now.
 				const second = provider.activateProviderProfile({ name: "second-profile" })
-				// activateProfile not yet called for second (it runs in the next microtask).
-				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(1)
+				// activateProfile is not called for the second profile while the first mutation owns
+				// the queue; the first call itself runs after the snapshot microtasks.
+				await vi.waitFor(() =>
+					expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(1),
+				)
 
 				// Resolve the first activation's inner promise so its in-flight mock can return.
 				// The aborted signal prevents it from writing any state.

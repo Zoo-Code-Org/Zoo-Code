@@ -1059,6 +1059,8 @@ describe("ClineProvider - Sticky Mode", () => {
 						}),
 				)
 				.mockRejectedValueOnce(new Error("rollback write failed"))
+				// The rollback retries once; the retry fails too so the log path is exercised.
+				.mockRejectedValueOnce(new Error("rollback retry failed"))
 			await provider.addClineToStack(mockTask)
 
 			const controller = new AbortController()
@@ -1071,7 +1073,8 @@ describe("ClineProvider - Sticky Mode", () => {
 			releaseUpdate([])
 			await expect(switchPromise).resolves.toBeUndefined()
 
-			expect(updateTaskHistorySpy).toHaveBeenCalledTimes(2)
+			// The original write plus the rollback's two attempts (the retry also fails).
+			expect(updateTaskHistorySpy).toHaveBeenCalledTimes(3)
 			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
 				expect.stringContaining("Failed to roll back mode switch"),
 			)
