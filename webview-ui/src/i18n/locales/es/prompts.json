@@ -1,6 +1,4 @@
 {
-	"title": "Modos",
-	"done": "Listo",
 	"modes": {
 		"title": "Modos",
 		"createNewMode": "Crear nuevo modo",
@@ -53,9 +51,7 @@
 	},
 	"exportMode": {
 		"title": "Exportar modo",
-		"description": "Exporta este modo a un archivo YAML con todas las reglas incluidas para compartir fácilmente con otros.",
-		"export": "Exportar modo",
-		"exporting": "Exportando..."
+		"export": "Exportar modo"
 	},
 	"importMode": {
 		"selectLevel": "Elige dónde importar este modo:",
@@ -81,7 +77,6 @@
 		"title": "Solicitud del sistema (modo {{modeName}})"
 	},
 	"supportPrompts": {
-		"title": "Solicitudes de soporte",
 		"resetPrompt": "Restablecer la solicitud {{promptType}} a valores predeterminados",
 		"prompt": "Solicitud",
 		"enhance": {
@@ -93,11 +88,6 @@
 			"testEnhancement": "Probar mejora",
 			"includeTaskHistory": "Incluir historial de tareas como contexto",
 			"includeTaskHistoryDescription": "Cuando está habilitado, los últimos 10 mensajes de la conversación actual se incluirán como contexto al mejorar solicitudes, ayudando a generar sugerencias más relevantes y conscientes del contexto."
-		},
-		"condense": {
-			"apiConfiguration": "Configuración de API para la condensación de contexto",
-			"apiConfigDescription": "Selecciona qué configuración de API usar para las operaciones de condensación de contexto. Deja sin seleccionar para usar la configuración activa actual.",
-			"useCurrentConfig": "Usar la configuración de API actualmente seleccionada"
 		},
 		"types": {
 			"ENHANCE": {
@@ -196,7 +186,6 @@
 		"title": "Eliminar modo",
 		"message": "¿Estás seguro de que quieres eliminar el modo \"{{modeName}}\"?",
 		"rulesFolder": "Este modo tiene una carpeta de reglas en {{folderPath}} que también se eliminará.",
-		"descriptionNoRules": "¿Estás seguro de que quieres eliminar este modo personalizado?",
 		"confirm": "Eliminar",
 		"cancel": "Cancelar"
 	}

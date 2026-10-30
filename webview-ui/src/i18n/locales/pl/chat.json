@@ -1,25 +1,21 @@
 {
-	"greeting": "Witamy w Zoo Code!",
 	"task": {
 		"title": "Zadanie",
 		"expand": "Rozwiń zadanie",
 		"collapse": "Zwiń zadanie",
 		"seeMore": "Zobacz więcej",
-		"seeLess": "Zobacz mniej",
 		"tokens": "Tokeny",
 		"cache": "Pamięć podręczna",
 		"apiCost": "Koszt API",
 		"size": "Rozmiar",
 		"contextWindow": "Okno kontekstu",
-		"closeAndStart": "Zamknij zadanie i rozpocznij nowe",
 		"export": "Eksportuj historię zadań",
 		"delete": "Usuń zadanie (Shift + Kliknięcie, aby pominąć potwierdzenie)",
 		"condenseContext": "Inteligentnie skondensuj kontekst",
 		"openApiHistory": "Otwórz historię API",
 		"openUiHistory": "Otwórz historię UI",
 		"backToParentTask": "Zadanie nadrzędne",
-		"waitingOnSubtask": "Oczekuje na podzadanie",
-		"goToSubtask": "Przejdź do podzadania"
+		"waitingOnSubtask": "Oczekuje na podzadanie"
 	},
 	"unpin": "Odepnij",
 	"pin": "Przypnij",
@@ -88,19 +84,16 @@
 		"tooltip": "Zakończ bieżące zadanie"
 	},
 	"stop": {
-		"title": "Zatrzymaj",
-		"tooltip": "Zatrzymaj bieżące zadanie"
+		"title": "Zatrzymaj"
 	},
 	"cancel": {
-		"title": "Anuluj",
-		"tooltip": "Anuluj bieżącą operację"
+		"title": "Anuluj"
 	},
 	"enqueueMessage": "Dodaj wiadomość do kolejki (zostanie wysłana po zakończeniu bieżącego zadania)",
 	"scrollToBottom": "Przewiń do dołu czatu",
 	"scrollToLatestCheckpoint": "Przewiń do poprzedniego punktu kontrolnego",
 	"about": "Zoo Code to cały zespół deweloperów AI w Twoim edytorze.",
 	"docs": "Sprawdź naszą <DocsLink>dokumentację</DocsLink>, aby dowiedzieć się więcej.",
-	"onboarding": "Twoja lista zadań w tym obszarze roboczym jest pusta.",
 	"rooTips": {
 		"customizableModes": {
 			"title": "Konfigurowalne tryby",
@@ -126,7 +119,6 @@
 	"unlockApiConfigAcrossModes": "Konfiguracja API jest zablokowana dla wszystkich trybów w tym obszarze roboczym (kliknij, aby odblokować)",
 	"enhancePrompt": "Ulepsz podpowiedź dodatkowym kontekstem",
 	"addImages": "Dodaj obrazy do wiadomości",
-	"sendMessage": "Wyślij wiadomość",
 	"pressToSend": "Naciśnij {{keyCombination}}, aby wysłać",
 	"stopTts": "Zatrzymaj syntezę mowy",
 	"typeMessage": "Wpisz wiadomość...",
@@ -145,7 +137,6 @@
 	},
 	"errorReadingFile": "Błąd odczytu pliku",
 	"noValidImages": "Nie przetworzono żadnych prawidłowych obrazów",
-	"separator": "Separator",
 	"edit": "Edytuj...",
 	"forNextMode": "dla następnego trybu",
 	"forPreviousMode": "dla poprzedniego trybu",
@@ -178,7 +169,6 @@
 	},
 	"checkpoint": {
 		"regular": "Punkt kontrolny",
-		"initializingWarning": "Trwa inicjalizacja punktu kontrolnego... Jeśli to trwa zbyt długo, możesz wyłączyć punkty kontrolne w <settingsLink>ustawieniach</settingsLink> i uruchomić zadanie ponownie.",
 		"menu": {
 			"viewDiff": "Zobacz różnice",
 			"more": "Więcej opcji",
@@ -205,10 +195,8 @@
 		"wantsToEdit": "Zoo chce edytować ten plik",
 		"wantsToEditOutsideWorkspace": "Zoo chce edytować ten plik poza obszarem roboczym",
 		"wantsToEditProtected": "Zoo chce edytować chroniony plik konfiguracyjny",
-		"wantsToCreate": "Zoo chce utworzyć nowy plik",
 		"wantsToSearchReplace": "Zoo chce wykonać wyszukiwanie i zamianę w tym pliku",
 		"didSearchReplace": "Zoo wykonał wyszukiwanie i zamianę w tym pliku",
-		"wantsToInsert": "Zoo chce wstawić zawartość do tego pliku",
 		"wantsToInsertWithLineNumber": "Zoo chce wstawić zawartość do tego pliku w linii {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo chce dodać zawartość na końcu tego pliku",
 		"wantsToReadAndXMore": "Zoo chce przeczytać ten plik i {{count}} więcej",
@@ -231,14 +219,11 @@
 		"wantsToViewTopLevelOutsideWorkspace": "Zoo chce zobaczyć pliki najwyższego poziomu w tym katalogu (poza obszarem roboczym)",
 		"didViewTopLevelOutsideWorkspace": "Zoo zobaczył pliki najwyższego poziomu w tym katalogu (poza obszarem roboczym)",
 		"wantsToViewRecursiveOutsideWorkspace": "Zoo chce rekurencyjnie zobaczyć wszystkie pliki w tym katalogu (poza obszarem roboczym)",
-		"didViewRecursiveOutsideWorkspace": "Zoo rekurencyjnie zobaczył wszystkie pliki w tym katalogu (poza obszarem roboczym)",
-		"wantsToViewMultipleDirectories": "Zoo chce wyświetlić wiele katalogów"
+		"didViewRecursiveOutsideWorkspace": "Zoo rekurencyjnie zobaczył wszystkie pliki w tym katalogu (poza obszarem roboczym)"
 	},
-	"commandOutput": "Wyjście polecenia",
 	"commandExecution": {
 		"running": "Wykonywanie",
 		"abort": "Przerwij",
-		"pid": "PID: {{pid}}",
 		"exitStatus": "Zakończono ze statusem {{exitCode}}",
 		"malformedCommand": "Nieprawidlowe polecenie: blad skladni shell",
 		"manageCommands": "Polecenia zatwierdzone automatycznie",
@@ -246,15 +231,8 @@
 		"addToAllowed": "Dodaj do listy dozwolonych",
 		"removeFromAllowed": "Usuń z listy dozwolonych",
 		"addToDenied": "Dodaj do listy odrzuconych",
-		"removeFromDenied": "Usuń z listy odrzuconych",
-		"abortCommand": "Przerwij wykonywanie polecenia",
-		"expandOutput": "Rozwiń wyjście",
-		"collapseOutput": "Zwiń wyjście",
-		"expandManagement": "Rozwiń sekcję zarządzania poleceniami",
-		"collapseManagement": "Zwiń sekcję zarządzania poleceniami"
+		"removeFromDenied": "Usuń z listy odrzuconych"
 	},
-	"response": "Odpowiedź",
-	"arguments": "Argumenty",
 	"text": {
 		"rooSaid": "Zoo powiedział"
 	},
@@ -274,10 +252,8 @@
 	"subtasks": {
 		"wantsToCreate": "Zoo chce utworzyć nowe podzadanie w trybie <code>{{mode}}</code>",
 		"wantsToFinish": "Zoo chce zakończyć to podzadanie",
-		"newTaskContent": "Instrukcje podzadania",
 		"completionContent": "Podzadanie zakończone",
 		"resultContent": "Wyniki podzadania",
-		"defaultResult": "Proszę kontynuować następne zadanie.",
 		"completionInstructions": "Podzadanie zakończone! Możesz przejrzeć wyniki i zasugerować poprawki lub następne kroki. Jeśli wszystko wygląda dobrze, potwierdź, aby zwrócić wynik do zadania nadrzędnego.",
 		"goToSubtask": "Wyświetl zadanie"
 	},
@@ -300,9 +276,6 @@
 		"diagnostics": "Uzyskaj szczegółowe informacje o błędzie",
 		"proxyProvider": "Wygląda na to, że używasz dostawcy opartego na proxy. Pamiętaj, aby sprawdzić jego dzienniki i upewnić się, że nie przepisuje żądań Zoo."
 	},
-	"powershell": {
-		"issues": "Wygląda na to, że masz problemy z Windows PowerShell, proszę zapoznaj się z tym"
-	},
 	"autoApprove": {
 		"tooltipManage": "Zarządzaj ustawieniami automatycznego zatwierdzania",
 		"tooltipStatus": "Automatyczne zatwierdzanie włączone dla: {{toggles}}",
@@ -311,9 +284,6 @@
 		"all": "Wszystkie",
 		"none": "Żadne",
 		"description": "Wykonuj te działania bez pytania o zgodę. Włącz tę opcję tylko dla działań, którym w pełni ufasz.",
-		"selectOptionsFirst": "Wybierz co najmniej jedną opcję poniżej, aby włączyć automatyczne zatwierdzanie",
-		"toggleAriaLabel": "Przełącz automatyczne zatwierdzanie",
-		"disabledAriaLabel": "Automatyczne zatwierdzanie wyłączone - najpierw wybierz opcje",
 		"triggerLabelOff": "Automatyczne zatwierdzanie wyłączone",
 		"triggerLabelOffShort": "Wyłączone",
 		"triggerLabel_zero": "0 automatycznie zatwierdzone",
@@ -356,12 +326,6 @@
 			"highlight1": "✨ Szybszy wybór modeli i lepsza obsługa modeli: Przełączaj modele w polu tworzenia wiadomości na czacie. Korzystaj z Claude Haiku 5.5 w Amazon Bedrock, uzyskaj dokładniejsze możliwości Kimi K3 w OpenRouter i używaj poprawionych limitów Gemini 4 Argon w Vercel AI Gateway.",
 			"highlight2": "🧭 Bardziej niezawodne przepływy pracy w terminalu, edycji, czacie i środowiskach zdalnych: Jeśli chcesz, domyślnie zwijaj dane wyjściowe poleceń, otrzymuj wyraźniejsze informacje o błędach edycji, zachowaj widoczne wiersze rozumowania i API oraz unikaj problemów z uruchamianiem i proxy w zdalnych obszarach roboczych.",
 			"highlight3": "🔌 Rozszerzony marketplace MCP: Połącz Zoo Code z AnySearch, Mailtea i Tradehand przez marketplace MCP."
-		},
-		"cloudAgents": {
-			"heading": "Nowości w chmurze:",
-			"specialized": "Przedstawiamy <bold>Explainer</bold>, <bold>Planner</bold> i <bold>Coder</bold> - trzech wyspecjalizowanych agentów chmurowych, aby ulepszyć Twoje przepływy pracy.",
-			"description": "Agenci pracują razem w chmurze i mogą być uruchamiani z sieci lub przez Slack.",
-			"tryButton": "Wypróbuj agentów chmurowych"
 		}
 	},
 	"costs": {
@@ -444,28 +408,8 @@
 	"editMessage": {
 		"placeholder": "Edytuj swoją wiadomość..."
 	},
-	"command": {
-		"triggerDescription": "Uruchom polecenie {{name}}"
-	},
 	"slashCommands": {
-		"tooltip": "Zarządzaj poleceniami slash",
-		"title": "Polecenia Slash",
-		"description": "Używaj wbudowanych poleceń slash lub twórz niestandardowe dla szybkiego dostępu do często używanych promptów i przepływów pracy. <DocsLink>Dokumentacja</DocsLink>",
-		"manageCommands": "Zarządzaj poleceniami slash w ustawieniach",
-		"builtInCommands": "Polecenia Wbudowane",
-		"globalCommands": "Polecenia Globalne",
-		"workspaceCommands": "Polecenia Obszaru Roboczego",
-		"globalCommand": "Polecenie globalne",
-		"editCommand": "Edytuj polecenie",
-		"deleteCommand": "Usuń polecenie",
-		"newGlobalCommandPlaceholder": "Nowe polecenie globalne...",
-		"newWorkspaceCommandPlaceholder": "Nowe polecenie obszaru roboczego...",
-		"deleteDialog": {
-			"title": "Usuń Polecenie",
-			"description": "Czy na pewno chcesz usunąć polecenie \"{{name}}\"? Tej akcji nie można cofnąć.",
-			"cancel": "Anuluj",
-			"confirm": "Usuń"
-		}
+		"manageCommands": "Zarządzaj poleceniami slash w ustawieniach"
 	},
 	"contextMenu": {
 		"noResults": "Brak wyników",
@@ -484,9 +428,7 @@
 	"todo": {
 		"partial": "Ukończono {{completed}} z {{total}} zadań do wykonania",
 		"complete": "Ukończono {{total}} zadań do wykonania",
-		"updated": "Zaktualizowano listę zadań do wykonania",
-		"completed": "Ukończono",
-		"started": "Rozpoczęto"
+		"updated": "Zaktualizowano listę zadań do wykonania"
 	},
 	"tooManyTools": {
 		"title": "Włączono zbyt wiele narzędzi",

@@ -1,25 +1,21 @@
 {
-	"greeting": "Zoo Code へようこそ！",
 	"task": {
 		"title": "タスク",
 		"expand": "タスクを展開",
 		"collapse": "タスクを折りたたむ",
 		"seeMore": "もっと見る",
-		"seeLess": "表示を減らす",
 		"tokens": "トークン",
 		"cache": "キャッシュ",
 		"apiCost": "APIコスト",
 		"size": "サイズ",
 		"contextWindow": "コンテキストウィンドウ",
-		"closeAndStart": "タスクを閉じて新しいタスクを開始",
 		"export": "タスク履歴をエクスポート",
 		"delete": "タスクを削除（Shift + クリックで確認をスキップ）",
 		"condenseContext": "コンテキストをインテリジェントに圧縮",
 		"openApiHistory": "API履歴を開く",
 		"openUiHistory": "UI履歴を開く",
 		"backToParentTask": "親タスク",
-		"waitingOnSubtask": "サブタスク待ち",
-		"goToSubtask": "サブタスクへ"
+		"waitingOnSubtask": "サブタスク待ち"
 	},
 	"unpin": "ピン留めを解除",
 	"pin": "ピン留め",
@@ -88,19 +84,16 @@
 		"tooltip": "現在のタスクを終了"
 	},
 	"stop": {
-		"title": "停止",
-		"tooltip": "現在のタスクを停止"
+		"title": "停止"
 	},
 	"cancel": {
-		"title": "キャンセル",
-		"tooltip": "現在の操作をキャンセル"
+		"title": "キャンセル"
 	},
 	"enqueueMessage": "メッセージをキューに追加（現在のタスク完了後に送信されます）",
 	"scrollToBottom": "チャットの最下部にスクロール",
 	"scrollToLatestCheckpoint": "前のチェックポイントまでスクロール",
 	"about": "Zoo Codeは、エディタに常駐するAI開発チームです。",
 	"docs": "詳細については、<DocsLink>ドキュメント</DocsLink>をご確認ください。",
-	"onboarding": "このワークスペースのタスクリストは空です。",
 	"rooTips": {
 		"customizableModes": {
 			"title": "カスタマイズ可能なモード",
@@ -126,7 +119,6 @@
 	"unlockApiConfigAcrossModes": "このワークスペースのすべてのモードでAPI構成がロックされています（クリックで解除）",
 	"enhancePrompt": "追加コンテキストでプロンプトを強化",
 	"addImages": "メッセージに画像を追加",
-	"sendMessage": "メッセージを送信",
 	"pressToSend": "{{keyCombination}}を押して送信",
 	"stopTts": "テキスト読み上げを停止",
 	"typeMessage": "メッセージを入力...",
@@ -145,7 +137,6 @@
 	},
 	"errorReadingFile": "ファイル読み込みエラー",
 	"noValidImages": "有効な画像が処理されませんでした",
-	"separator": "区切り",
 	"edit": "編集...",
 	"forNextMode": "次のモード用",
 	"forPreviousMode": "前のモード用",
@@ -178,7 +169,6 @@
 	},
 	"checkpoint": {
 		"regular": "チェックポイント",
-		"initializingWarning": "チェックポイントの初期化中... 時間がかかりすぎる場合は、<settingsLink>設定</settingsLink>でチェックポイントを無効にしてタスクを再開できます。",
 		"menu": {
 			"viewDiff": "差分を表示",
 			"more": "その他のオプション",
@@ -205,10 +195,8 @@
 		"wantsToEdit": "Zooはこのファイルを編集したい",
 		"wantsToEditOutsideWorkspace": "Zooはワークスペース外のこのファイルを編集したい",
 		"wantsToEditProtected": "Zooは保護された設定ファイルを編集したい",
-		"wantsToCreate": "Zooは新しいファイルを作成したい",
 		"wantsToSearchReplace": "Zooはこのファイルで検索と置換を行う",
 		"didSearchReplace": "Zooはこのファイルで検索と置換を実行しました",
-		"wantsToInsert": "Zooはこのファイルにコンテンツを挿入したい",
 		"wantsToInsertWithLineNumber": "Zooはこのファイルの{{lineNumber}}行目にコンテンツを挿入したい",
 		"wantsToInsertAtEnd": "Zooはこのファイルの末尾にコンテンツを追加したい",
 		"wantsToReadAndXMore": "Zoo はこのファイルと他に {{count}} 個のファイルを読み込もうとしています",
@@ -231,14 +219,11 @@
 		"wantsToViewTopLevelOutsideWorkspace": "Zooはこのディレクトリ（ワークスペース外）のトップレベルファイルを表示したい",
 		"didViewTopLevelOutsideWorkspace": "Zooはこのディレクトリ（ワークスペース外）のトップレベルファイルを表示しました",
 		"wantsToViewRecursiveOutsideWorkspace": "Zooはこのディレクトリ（ワークスペース外）のすべてのファイルを再帰的に表示したい",
-		"didViewRecursiveOutsideWorkspace": "Zooはこのディレクトリ（ワークスペース外）のすべてのファイルを再帰的に表示しました",
-		"wantsToViewMultipleDirectories": "Zoo は複数のディレクトリを表示したい"
+		"didViewRecursiveOutsideWorkspace": "Zooはこのディレクトリ（ワークスペース外）のすべてのファイルを再帰的に表示しました"
 	},
-	"commandOutput": "コマンド出力",
 	"commandExecution": {
 		"abort": "中止",
 		"running": "実行中",
-		"pid": "PID: {{pid}}",
 		"exitStatus": "ステータス {{exitCode}} で終了しました",
 		"malformedCommand": "不正なコマンド: シェル構文エラー",
 		"manageCommands": "自動承認されたコマンド",
@@ -246,15 +231,8 @@
 		"addToAllowed": "許可リストに追加",
 		"removeFromAllowed": "許可リストから削除",
 		"addToDenied": "拒否リストに追加",
-		"removeFromDenied": "拒否リストから削除",
-		"abortCommand": "コマンドの実行を中止",
-		"expandOutput": "出力を展開",
-		"collapseOutput": "出力を折りたたむ",
-		"expandManagement": "コマンド管理セクションを展開",
-		"collapseManagement": "コマンド管理セクションを折りたたむ"
+		"removeFromDenied": "拒否リストから削除"
 	},
-	"response": "応答",
-	"arguments": "引数",
 	"text": {
 		"rooSaid": "Zooの発言"
 	},
@@ -274,10 +252,8 @@
 	"subtasks": {
 		"wantsToCreate": "Zooは<code>{{mode}}</code>モードで新しいサブタスクを作成したい",
 		"wantsToFinish": "Zooはこのサブタスクを終了したい",
-		"newTaskContent": "サブタスク指示",
 		"completionContent": "サブタスク完了",
 		"resultContent": "サブタスク結果",
-		"defaultResult": "次のタスクに進んでください。",
 		"completionInstructions": "サブタスク完了！結果を確認し、修正や次のステップを提案できます。問題なければ、親タスクに結果を返すために確認してください。",
 		"goToSubtask": "タスクを表示"
 	},
@@ -300,9 +276,6 @@
 		"diagnostics": "詳細なエラー情報を取得",
 		"proxyProvider": "プロキシベースのプロバイダーを使用しているようです。ログを確認し、Zooのリクエストを書き換えていないことを確認してください。"
 	},
-	"powershell": {
-		"issues": "Windows PowerShellに問題があるようです。こちらを参照してください"
-	},
 	"autoApprove": {
 		"tooltipManage": "自動承認設定を管理する",
 		"tooltipStatus": "自動承認が有効です: {{toggles}}",
@@ -311,9 +284,6 @@
 		"all": "すべて",
 		"none": "なし",
 		"description": "許可を求めずにこれらのアクションを実行します。完全に信頼するアクションに対してのみ有効にしてください。",
-		"selectOptionsFirst": "自動承認を有効にするには、以下のオプションを少なくとも1つ選択してください",
-		"toggleAriaLabel": "自動承認を切り替える",
-		"disabledAriaLabel": "自動承認が無効です - 最初にオプションを選択してください",
 		"triggerLabelOff": "自動承認オフ",
 		"triggerLabelOffShort": "オフ",
 		"triggerLabel_zero": "0個の自動承認",
@@ -356,12 +326,6 @@
 			"highlight1": "✨ より速いモデル選択と強化されたモデルサポート: チャット入力欄からモデルを切り替えられます。Amazon Bedrock で Claude Haiku 5.5 を使用し、OpenRouter でより正確な Kimi K3 の機能を利用し、Vercel AI Gateway で修正された Gemini 4 Argon の制限を適用できます。",
 			"highlight2": "🧭 より信頼性の高いターミナル、編集、チャット、リモートワークフロー: 必要に応じてコマンド出力をデフォルトで折りたたみ、編集エラーをより明確に確認し、推論行と API 行を表示したままにして、リモートワークスペースでの起動とプロキシの問題を回避できます。",
 			"highlight3": "🔌 MCP Marketplace の拡充: MCP Marketplace から Zoo Code を AnySearch、Mailtea、Tradehand に接続できます。"
-		},
-		"cloudAgents": {
-			"heading": "クラウドの新機能:",
-			"specialized": "<bold>Explainer</bold>、<bold>Planner</bold>、<bold>Coder</bold> の 3 つの専門クラウドエージェントを紹介します。ワークフローを強化します。",
-			"description": "エージェントはクラウドで連携して動作し、Web または Slack からトリガーできます。",
-			"tryButton": "クラウドエージェントを試す"
 		}
 	},
 	"costs": {
@@ -444,28 +408,8 @@
 	"editMessage": {
 		"placeholder": "メッセージを編集..."
 	},
-	"command": {
-		"triggerDescription": "{{name}}コマンドをトリガー"
-	},
 	"slashCommands": {
-		"tooltip": "スラッシュコマンドを管理",
-		"title": "スラッシュコマンド",
-		"description": "組み込みスラッシュコマンドを使用するか、よく使用するプロンプトやワークフローに素早くアクセスするためのカスタムスラッシュコマンドを作成します。<DocsLink>ドキュメント</DocsLink>",
-		"manageCommands": "設定でスラッシュコマンドを管理",
-		"builtInCommands": "組み込みコマンド",
-		"globalCommands": "グローバルコマンド",
-		"workspaceCommands": "ワークスペースコマンド",
-		"globalCommand": "グローバルコマンド",
-		"editCommand": "コマンドを編集",
-		"deleteCommand": "コマンドを削除",
-		"newGlobalCommandPlaceholder": "新しいグローバルコマンド...",
-		"newWorkspaceCommandPlaceholder": "新しいワークスペースコマンド...",
-		"deleteDialog": {
-			"title": "コマンドを削除",
-			"description": "\"{{name}}\" コマンドを削除してもよろしいですか？この操作は元に戻せません。",
-			"cancel": "キャンセル",
-			"confirm": "削除"
-		}
+		"manageCommands": "設定でスラッシュコマンドを管理"
 	},
 	"contextMenu": {
 		"noResults": "結果なし",
@@ -484,9 +428,7 @@
 	"todo": {
 		"partial": "{{total}}件中{{completed}}件のTo-Doが完了",
 		"complete": "{{total}}件のTo-Doが完了",
-		"updated": "To-Doリストを更新しました",
-		"completed": "完了",
-		"started": "開始"
+		"updated": "To-Doリストを更新しました"
 	},
 	"tooManyTools": {
 		"title": "有効になっているツールが多すぎます",

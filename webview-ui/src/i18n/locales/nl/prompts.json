@@ -1,6 +1,4 @@
 {
-	"title": "Modi",
-	"done": "Gereed",
 	"modes": {
 		"title": "Modi",
 		"createNewMode": "Nieuwe modus aanmaken",
@@ -53,9 +51,7 @@
 	},
 	"exportMode": {
 		"title": "Modus exporteren",
-		"description": "Exporteer deze modus naar een YAML-bestand met alle regels inbegrepen voor eenvoudig delen met anderen.",
-		"export": "Modus exporteren",
-		"exporting": "Exporteren..."
+		"export": "Modus exporteren"
 	},
 	"importMode": {
 		"selectLevel": "Kies waar je deze modus wilt importeren:",
@@ -81,7 +77,6 @@
 		"title": "Systeemprompt ({{modeName}} modus)"
 	},
 	"supportPrompts": {
-		"title": "Ondersteuningsprompts",
 		"resetPrompt": "Reset {{promptType}} prompt naar standaard",
 		"prompt": "Prompt",
 		"enhance": {
@@ -93,11 +88,6 @@
 			"testEnhancement": "Test verbetering",
 			"includeTaskHistory": "Taakgeschiedenis als context opnemen",
 			"includeTaskHistoryDescription": "Wanneer ingeschakeld, worden de laatste 10 berichten van het huidige gesprek opgenomen als context bij het verbeteren van prompts, wat helpt bij het genereren van meer relevante en contextbewuste suggesties."
-		},
-		"condense": {
-			"apiConfiguration": "API-configuratie voor contextcondensatie",
-			"apiConfigDescription": "Selecteer welke API-configuratie moet worden gebruikt voor contextcondensatiebewerkingen. Laat leeg om de huidige actieve configuratie te gebruiken.",
-			"useCurrentConfig": "Gebruik de momenteel geselecteerde API-configuratie"
 		},
 		"types": {
 			"ENHANCE": {
@@ -196,7 +186,6 @@
 		"title": "Modus verwijderen",
 		"message": "Weet je zeker dat je de modus \"{{modeName}}\" wilt verwijderen?",
 		"rulesFolder": "Deze modus heeft een regelmap op {{folderPath}} die ook wordt verwijderd.",
-		"descriptionNoRules": "Weet je zeker dat je deze aangepaste modus wilt verwijderen?",
 		"confirm": "Verwijderen",
 		"cancel": "Annuleren"
 	}

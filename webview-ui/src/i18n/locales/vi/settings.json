@@ -4,7 +4,6 @@
 		"save": "Lưu",
 		"done": "Hoàn thành",
 		"cancel": "Hủy",
-		"reset": "Đặt lại",
 		"select": "Chọn",
 		"add": "Thêm tiêu đề",
 		"remove": "Xóa"
@@ -171,8 +170,6 @@
 		"title": "Lập chỉ mục mã nguồn",
 		"enableLabel": "Bật lập chỉ mục mã nguồn",
 		"enableDescription": "Bật lập chỉ mục mã để cải thiện tìm kiếm và sự hiểu biết về ngữ cảnh",
-		"providerLabel": "Nhà cung cấp nhúng",
-		"selectProviderPlaceholder": "Chọn nhà cung cấp",
 		"openaiProvider": "OpenAI",
 		"ollamaProvider": "Ollama",
 		"geminiProvider": "Gemini",
@@ -201,18 +198,11 @@
 		"openAiCompatibleBaseUrlLabel": "URL cơ sở",
 		"openAiCompatibleApiKeyLabel": "Khóa API",
 		"openAiCompatibleApiKeyPlaceholder": "Nhập khóa API của bạn",
-		"openAiCompatibleModelDimensionLabel": "Kích thước Embedding:",
 		"modelDimensionLabel": "Kích thước mô hình",
-		"openAiCompatibleModelDimensionPlaceholder": "vd., 1536",
-		"openAiCompatibleModelDimensionDescription": "Kích thước embedding (kích thước đầu ra) cho mô hình của bạn. Kiểm tra tài liệu của nhà cung cấp để biết giá trị này. Giá trị phổ biến: 384, 768, 1536, 3072.",
 		"modelLabel": "Mô hình",
-		"selectModelPlaceholder": "Chọn mô hình",
-		"ollamaUrlLabel": "URL Ollama:",
 		"qdrantUrlLabel": "URL Qdrant",
-		"qdrantKeyLabel": "Khóa Qdrant:",
 		"startIndexingButton": "Bắt đầu",
 		"clearIndexDataButton": "Xóa chỉ mục",
-		"unsavedSettingsMessage": "Vui lòng lưu cài đặt của bạn trước khi bắt đầu quá trình lập chỉ mục.",
 		"clearDataDialog": {
 			"title": "Bạn có chắc không?",
 			"description": "Hành động này không thể hoàn tác. Điều này sẽ xóa vĩnh viễn dữ liệu chỉ mục mã nguồn của bạn.",
@@ -221,8 +211,6 @@
 		},
 		"description": "Cấu hình cài đặt lập chỉ mục mã nguồn để kích hoạt tìm kiếm ngữ nghĩa cho dự án của bạn. <0>Tìm hiểu thêm</0>",
 		"statusTitle": "Trạng thái",
-		"settingsTitle": "Cài đặt lập chỉ mục",
-		"disabledMessage": "Lập chỉ mục mã nguồn hiện đang bị tắt. Bật nó trong cài đặt chung để cấu hình các tùy chọn lập chỉ mục.",
 		"embedderProviderLabel": "Nhà cung cấp Embedder",
 		"modelPlaceholder": "Nhập tên mô hình",
 		"selectModel": "Chọn một mô hình",
@@ -236,7 +224,6 @@
 		"qdrantUrlPlaceholder": "http://localhost:6333",
 		"saveError": "Không thể lưu cài đặt",
 		"modelDimensions": "({{dimension}} chiều)",
-		"saveSuccess": "Cài đặt đã được lưu thành công",
 		"saving": "Đang lưu...",
 		"saveSettings": "Lưu",
 		"indexingStatuses": {
@@ -245,7 +232,6 @@
 			"indexed": "Đã lập chỉ mục",
 			"error": "Lỗi"
 		},
-		"close": "Đóng",
 		"validation": {
 			"invalidQdrantUrl": "URL Qdrant không hợp lệ",
 			"invalidOllamaUrl": "URL Ollama không hợp lệ",
@@ -260,17 +246,14 @@
 			"mistralApiKeyRequired": "Cần có khóa API của Mistral",
 			"vercelAiGatewayApiKeyRequired": "Cần có khóa API Vercel AI Gateway",
 			"bedrockRegionRequired": "Vùng AWS là bắt buộc",
-			"bedrockProfileRequired": "Hồ sơ AWS là bắt buộc",
 			"ollamaBaseUrlRequired": "Yêu cầu URL cơ sở Ollama",
 			"baseUrlRequired": "Yêu cầu URL cơ sở",
-			"modelDimensionMinValue": "Kích thước mô hình phải lớn hơn 0",
 			"openRouterApiKeyRequired": "Yêu cầu khóa API OpenRouter"
 		},
 		"optional": "tùy chọn",
 		"advancedConfigLabel": "Cấu hình nâng cao",
 		"searchMinScoreLabel": "Ngưỡng điểm tìm kiếm",
 		"searchMinScoreDescription": "Điểm tương đồng tối thiểu (0.0-1.0) cần thiết cho kết quả tìm kiếm. Giá trị thấp hơn trả về nhiều kết quả hơn nhưng có thể kém liên quan hơn. Giá trị cao hơn trả về ít kết quả hơn nhưng có liên quan hơn.",
-		"searchMinScoreResetTooltip": "Đặt lại về giá trị mặc định (0.4)",
 		"searchMaxResultsLabel": "Số Kết Quả Tìm Kiếm Tối Đa",
 		"searchMaxResultsDescription": "Số lượng kết quả tìm kiếm tối đa được trả về khi truy vấn chỉ mục cơ sở mã. Giá trị cao hơn cung cấp nhiều ngữ cảnh hơn nhưng có thể bao gồm các kết quả ít liên quan hơn.",
 		"resetToDefault": "Đặt lại về mặc định",
@@ -286,7 +269,6 @@
 		"description": "Cho phép Zoo tự động thực hiện các hoạt động mà không cần phê duyệt. Chỉ bật những cài đặt này nếu bạn hoàn toàn tin tưởng AI và hiểu rõ các rủi ro bảo mật liên quan.",
 		"enabled": "Phê duyệt tự động đã bật",
 		"toggleAriaLabel": "Chuyển đổi tự động phê duyệt",
-		"disabledAriaLabel": "Tự động phê duyệt bị vô hiệu hóa - hãy chọn các tùy chọn trước",
 		"readOnly": {
 			"label": "Đọc",
 			"description": "Khi được bật, Zoo sẽ tự động xem nội dung thư mục và đọc tệp mà không yêu cầu bạn nhấp vào nút Phê duyệt.",
@@ -298,7 +280,6 @@
 		"write": {
 			"label": "Ghi",
 			"description": "Tự động tạo và chỉnh sửa tệp mà không cần phê duyệt",
-			"delayLabel": "Trì hoãn sau khi ghi để cho phép chẩn đoán phát hiện các vấn đề tiềm ẩn",
 			"outsideWorkspace": {
 				"label": "Bao gồm các tệp ngoài không gian làm việc",
 				"description": "Cho phép Zoo tạo và chỉnh sửa các tệp bên ngoài không gian làm việc hiện tại mà không yêu cầu phê duyệt."
@@ -356,14 +337,12 @@
 			"deniedCommandsDescription": "Tiền tố lệnh sẽ được tự động từ chối mà không yêu cầu phê duyệt. Trong trường hợp xung đột với lệnh được phép, khớp tiền tố dài nhất sẽ được ưu tiên. Thêm * để từ chối tất cả lệnh.",
 			"commandPlaceholder": "Nhập tiền tố lệnh (ví dụ: 'git ')",
 			"deniedCommandPlaceholder": "Nhập tiền tố lệnh để từ chối (ví dụ: 'rm -rf')",
-			"addButton": "Thêm",
-			"autoDenied": "Các lệnh có tiền tố `{{prefix}}` đã bị người dùng cấm. Đừng vượt qua hạn chế này bằng cách chạy lệnh khác."
+			"addButton": "Thêm"
 		},
 		"apiRequestLimit": {
 			"title": "Số lượng yêu cầu tối đa",
 			"unlimited": "Không giới hạn"
 		},
-		"selectOptionsFirst": "Chọn ít nhất một tùy chọn bên dưới để bật tự động phê duyệt",
 		"apiCostLimit": {
 			"title": "Chi phí tối đa",
 			"unlimited": "Không giới hạn"
@@ -373,12 +352,10 @@
 		}
 	},
 	"providers": {
-		"providerDocumentation": "Tài liệu {{provider}}",
 		"configProfile": "Hồ sơ cấu hình",
 		"description": "Lưu các cấu hình API khác nhau để nhanh chóng chuyển đổi giữa các nhà cung cấp và cài đặt.",
 		"apiProvider": "Nhà cung cấp API",
 		"apiProviderDocs": "Tài liệu Nhà cung cấp",
-		"model": "Mẫu",
 		"nameEmpty": "Tên không được để trống",
 		"nameExists": "Đã tồn tại một hồ sơ với tên này",
 		"deleteProfile": "Xóa hồ sơ",
@@ -470,7 +447,6 @@
 		},
 		"useCustomBaseUrl": "Sử dụng URL cơ sở tùy chỉnh",
 		"useReasoning": "Bật lý luận",
-		"useHostHeader": "Sử dụng tiêu đề Host tùy chỉnh",
 		"customHeaders": "Tiêu đề tùy chỉnh",
 		"headerName": "Tên tiêu đề",
 		"headerValue": "Giá trị tiêu đề",
@@ -482,7 +458,6 @@
 		"requestyApiKey": "Khóa API Requesty",
 		"refreshModels": {
 			"label": "Làm mới mô hình",
-			"hint": "Vui lòng mở lại cài đặt để xem các mô hình mới nhất.",
 			"loading": "Đang làm mới danh sách mô hình...",
 			"success": "Danh sách mô hình đã được làm mới thành công!",
 			"error": "Không thể làm mới danh sách mô hình. Vui lòng thử lại."
@@ -571,11 +546,8 @@
 		"awsGlobalInference": "Sử dụng suy luận toàn cầu (tự động chọn Khu vực AWS tối ưu)",
 		"awsServiceTier": "Cấp độ dịch vụ",
 		"awsServiceTierStandard": "Tiêu chuẩn",
-		"awsServiceTierStandardDesc": "Hiệu suất và chi phí cân bằng",
 		"awsServiceTierFlex": "Linh hoạt (giảm giá 50%)",
-		"awsServiceTierFlexDesc": "Chi phí thấp hơn, độ trễ cao hơn cho các tác vụ không quan trọng",
 		"awsServiceTierPriority": "Ưu tiên (Phí thêm 75%)",
-		"awsServiceTierPriorityDesc": "Hiệu suất nhanh nhất cho các ứng dụng quan trọng",
 		"awsServiceTierNote": "Các cấp độ dịch vụ ảnh hưởng đến giá và hiệu suất. Linh hoạt cung cấp giảm giá 50% với độ trễ cao hơn, Ưu tiên cung cấp hiệu suất tốt hơn 25% với phí thêm 75%.",
 		"awsBedrockVpc": {
 			"useCustomVpcEndpoint": "Sử dụng điểm cuối VPC tùy chỉnh",
@@ -610,17 +582,13 @@
 		"googleCloudRegion": "Vùng Google Cloud",
 		"lmStudio": {
 			"baseUrl": "URL cơ sở (tùy chọn)",
-			"modelId": "ID mô hình",
 			"speculativeDecoding": "Bật giải mã suy đoán",
 			"draftModelId": "ID mô hình nháp",
 			"draftModelDesc": "Mô hình nháp phải từ cùng một họ mô hình để giải mã suy đoán hoạt động chính xác.",
-			"selectDraftModel": "Chọn mô hình nháp",
-			"noModelsFound": "Không tìm thấy mô hình nháp nào. Vui lòng đảm bảo LM Studio đang chạy với chế độ máy chủ được bật.",
 			"description": "LM Studio cho phép bạn chạy các mô hình cục bộ trên máy tính của bạn. Để biết hướng dẫn về cách bắt đầu, xem <a>hướng dẫn nhanh</a> của họ. Bạn cũng sẽ cần khởi động tính năng <b>máy chủ cục bộ</b> của LM Studio để sử dụng nó với tiện ích mở rộng này. <span>Lưu ý:</span> Zoo Code sử dụng các lời nhắc phức tạp và hoạt động tốt nhất với các mô hình Claude. Các mô hình kém mạnh hơn có thể không hoạt động như mong đợi."
 		},
 		"ollama": {
 			"baseUrl": "URL cơ sở (tùy chọn)",
-			"modelId": "ID mô hình",
 			"apiKey": "Khóa API Ollama",
 			"apiKeyHelp": "Khóa API tùy chọn cho các phiên bản Ollama cần xác thực, hoặc cho dịch vụ đám mây. Zoo Code chỉ gửi khóa đến endpoint HTTPS hoặc loopback. Endpoint HTTP từ xa không nhận khóa, vì khóa sẽ đi dưới dạng văn bản thuần. Hãy dùng HTTPS cho phiên bản từ xa cần khóa. Để trống cho cài đặt cục bộ.",
 			"numCtx": "Kích thước cửa sổ ngữ cảnh (num_ctx)",
@@ -650,10 +618,6 @@
 			"imageSupport": {
 				"label": "Hỗ trợ hình ảnh",
 				"description": "Mô hình này có khả năng xử lý và hiểu hình ảnh không?"
-			},
-			"computerUse": {
-				"label": "Sử dụng máy tính",
-				"description": "Mô hình này có khả năng tương tác với trình duyệt không?"
 			},
 			"promptCache": {
 				"label": "Bộ nhớ đệm lời nhắc",
@@ -711,13 +675,6 @@
 			"description": "Kiểm soát mức độ chi tiết của các câu trả lời của mô hình. Mức độ chi tiết thấp tạo ra các câu trả lời ngắn gọn, trong khi mức độ chi tiết cao cung cấp giải thích kỹ lưỡng."
 		},
 		"setReasoningLevel": "Kích hoạt nỗ lực suy luận",
-		"claudeCode": {
-			"pathLabel": "Đường dẫn Claude Code",
-			"description": "Đường dẫn tùy chọn đến Claude Code CLI của bạn. Mặc định là 'claude' nếu không được đặt.",
-			"placeholder": "Mặc định: claude",
-			"maxTokensLabel": "Số token đầu ra tối đa",
-			"maxTokensDescription": "Số lượng token đầu ra tối đa cho các phản hồi của Claude Code. Mặc định là 8000."
-		},
 		"zooGateway": {
 			"account": "Tài khoản Zoo Code",
 			"signInButton": "Đăng nhập vào Zoo Code",
@@ -750,25 +707,8 @@
 	},
 	"contextManagement": {
 		"description": "Kiểm soát thông tin nào được đưa vào cửa sổ ngữ cảnh của AI, ảnh hưởng đến việc sử dụng token và chất lượng phản hồi",
-		"autoCondenseContextPercent": {
-			"label": "Ngưỡng kích hoạt nén ngữ cảnh thông minh",
-			"description": "Khi cửa sổ ngữ cảnh đạt đến ngưỡng này, Zoo sẽ tự động nén nó."
-		},
-		"condensingApiConfiguration": {
-			"label": "Cấu hình API cho Tóm tắt Ngữ cảnh",
-			"description": "Chọn cấu hình API để sử dụng cho các thao tác tóm tắt ngữ cảnh. Để trống để sử dụng cấu hình đang hoạt động hiện tại.",
-			"useCurrentConfig": "Mặc định"
-		},
-		"customCondensingPrompt": {
-			"label": "Lời nhắc nén ngữ cảnh tùy chỉnh",
-			"description": "Lời nhắc hệ thống tùy chỉnh cho việc nén ngữ cảnh. Để trống để sử dụng lời nhắc mặc định.",
-			"placeholder": "Nhập prompt tóm tắt tùy chỉnh của bạn tại đây...\n\nBạn có thể sử dụng cùng cấu trúc như prompt mặc định:\n- Cuộc hội thoại trước\n- Công việc hiện tại\n- Khái niệm kỹ thuật chính\n- Tệp và mã liên quan\n- Giải quyết vấn đề\n- Công việc đang chờ và các bước tiếp theo",
-			"reset": "Khôi phục mặc định",
-			"hint": "Để trống = sử dụng prompt mặc định"
-		},
 		"autoCondenseContext": {
-			"name": "Tự động kích hoạt nén ngữ cảnh thông minh",
-			"description": "Khi được bật, Zoo sẽ tự động nén ngữ cảnh khi đạt đến ngưỡng. Khi bị tắt, bạn vẫn có thể kích hoạt nén ngữ cảnh thủ công."
+			"name": "Tự động kích hoạt nén ngữ cảnh thông minh"
 		},
 		"openTabs": {
 			"label": "Giới hạn ngữ cảnh tab đang mở",
@@ -781,16 +721,6 @@
 		"rooignore": {
 			"label": "Hiển thị tệp .rooignore trong danh sách và tìm kiếm",
 			"description": "Khi được bật, các tệp khớp với mẫu trong .rooignore sẽ được hiển thị trong danh sách với biểu tượng khóa. Khi bị tắt, các tệp này sẽ hoàn toàn bị ẩn khỏi danh sách tệp và tìm kiếm."
-		},
-		"maxReadFile": {
-			"label": "Ngưỡng tự động cắt ngắn khi đọc tệp",
-			"description": "Zoo đọc số dòng này khi mô hình không chỉ định giá trị bắt đầu/kết thúc. Nếu số này nhỏ hơn tổng số dòng của tệp, Zoo sẽ tạo một chỉ mục số dòng của các định nghĩa mã. Trường hợp đặc biệt: -1 chỉ thị Zoo đọc toàn bộ tệp (không tạo chỉ mục), và 0 chỉ thị không đọc dòng nào và chỉ cung cấp chỉ mục dòng cho ngữ cảnh tối thiểu. Giá trị thấp hơn giảm thiểu việc sử dụng ngữ cảnh ban đầu, cho phép đọc chính xác các phạm vi dòng sau này. Các yêu cầu có chỉ định bắt đầu/kết thúc rõ ràng không bị giới hạn bởi cài đặt này.",
-			"lines": "dòng",
-			"always_full_read": "Luôn đọc toàn bộ tệp"
-		},
-		"maxConcurrentFileReads": {
-			"label": "Giới hạn đọc file đồng thời",
-			"description": "Số lượng file tối đa mà công cụ 'read_file' có thể xử lý cùng lúc. Giá trị cao hơn có thể tăng tốc độ đọc nhiều file nhỏ nhưng sẽ tăng mức sử dụng bộ nhớ."
 		},
 		"diagnostics": {
 			"includeMessages": {
@@ -820,7 +750,6 @@
 			"defaultProfile": "Mặc định toàn cục (tất cả hồ sơ)",
 			"defaultDescription": "Khi ngữ cảnh đạt đến tỷ lệ phần trăm này, nó sẽ được tự động nén cho tất cả hồ sơ trừ khi chúng có cài đặt tùy chỉnh",
 			"profileDescription": "Ngưỡng tùy chỉnh chỉ cho hồ sơ này (ghi đè mặc định toàn cục)",
-			"inheritDescription": "Hồ sơ này kế thừa ngưỡng mặc định toàn cục ({{threshold}}%)",
 			"usesGlobal": "(sử dụng toàn cục {{threshold}}%)"
 		},
 		"maxImageFileSize": {
@@ -856,20 +785,11 @@
 			"description": "Hiển thị đầu ra lệnh ở trạng thái thu gọn, kể cả terminal nội tuyến. Mở rộng thủ công khi cần. Cách chạy lệnh không thay đổi."
 		},
 		"basic": {
-			"label": "Cài đặt Terminal: Cơ bản",
-			"description": "Cài đặt cơ bản cho terminal"
+			"label": "Cài đặt Terminal: Cơ bản"
 		},
 		"advanced": {
 			"label": "Cài đặt Terminal: Nâng cao",
 			"description": "Các cài đặt này chỉ áp dụng khi 'Sử dụng Terminal nội tuyến' bị tắt. Chỉ ảnh hưởng đến terminal VS Code và có thể yêu cầu khởi động lại IDE."
-		},
-		"outputLineLimit": {
-			"label": "Giới hạn đầu ra của terminal",
-			"description": "Giữ lại các dòng đầu tiên và cuối cùng và loại bỏ các dòng ở giữa để ở dưới giới hạn. Giảm xuống để tiết kiệm token; tăng lên để cung cấp cho Zoo thêm chi tiết ở giữa. Zoo thấy một trình giữ chỗ nơi nội dung bị bỏ qua.<0>Tìm hiểu thêm</0>"
-		},
-		"outputCharacterLimit": {
-			"label": "Giới hạn ký tự terminal",
-			"description": "Ghi đè giới hạn dòng để tránh vấn đề bộ nhớ bằng cách áp đặt giới hạn cứng cho kích thước đầu ra. Nếu vượt quá, giữ đầu và cuối, hiển thị placeholder cho Zoo nơi nội dung bị bỏ qua. <0>Tìm hiểu thêm</0>"
 		},
 		"outputPreviewSize": {
 			"label": "Kích thước xem trước đầu ra lệnh",
@@ -928,23 +848,6 @@
 		"title": "Cài đặt nâng cao"
 	},
 	"advanced": {
-		"diff": {
-			"label": "Bật chỉnh sửa qua diff",
-			"description": "Khi được bật, Zoo sẽ có thể chỉnh sửa tệp nhanh hơn và sẽ tự động từ chối ghi toàn bộ tệp bị cắt ngắn",
-			"strategy": {
-				"label": "Chiến lược diff",
-				"options": {
-					"standard": "Tiêu chuẩn (khối đơn)",
-					"multiBlock": "Thử nghiệm: Diff đa khối",
-					"unified": "Thử nghiệm: Diff thống nhất"
-				},
-				"descriptions": {
-					"standard": "Chiến lược diff tiêu chuẩn áp dụng thay đổi cho một khối mã tại một thời điểm.",
-					"unified": "Chiến lược diff thống nhất thực hiện nhiều cách tiếp cận để áp dụng diff và chọn cách tiếp cận tốt nhất.",
-					"multiBlock": "Chiến lược diff đa khối cho phép cập nhật nhiều khối mã trong một tệp trong một yêu cầu."
-				}
-			}
-		},
 		"todoList": {
 			"label": "Bật công cụ danh sách việc cần làm",
 			"description": "Khi được bật, Zoo có thể tạo và quản lý danh sách việc cần làm để theo dõi tiến độ công việc. Điều này giúp tổ chức các tác vụ phức tạp thành các bước có thể quản lý được."
@@ -1011,10 +914,6 @@
 			"refreshError": "Không thể làm mới công cụ",
 			"toolParameters": "Thông số"
 		}
-	},
-	"promptCaching": {
-		"label": "Tắt bộ nhớ đệm prompt",
-		"description": "Khi được chọn, Zoo sẽ không sử dụng bộ nhớ đệm prompt cho mô hình này."
 	},
 	"temperature": {
 		"useCustom": "Sử dụng nhiệt độ tùy chỉnh",
@@ -1085,7 +984,6 @@
 			"reservedKeys": "Nội dung bổ sung không thể ghi đè các trường do Zoo Code quản lý: {{keys}}."
 		},
 		"arn": {
-			"invalidFormat": "Định dạng ARN không hợp lệ. Vui lòng kiểm tra yêu cầu về định dạng.",
 			"regionMismatch": "Cảnh báo: Vùng trong ARN của bạn ({{arnRegion}}) không khớp với vùng bạn đã chọn ({{region}}). Điều này có thể gây ra vấn đề truy cập. Nhà cung cấp sẽ sử dụng vùng từ ARN."
 		},
 		"modelAvailability": "ID mô hình ({{modelId}}) bạn đã cung cấp không khả dụng. Vui lòng chọn một mô hình khác.",
@@ -1107,11 +1005,6 @@
 		"projectId": "Nhập ID dự án...",
 		"customArn": "Nhập ARN (vd: arn:aws:bedrock:us-east-1:123456789012:foundation-model/my-model)",
 		"baseUrl": "Nhập URL cơ sở...",
-		"modelId": {
-			"lmStudio": "vd: meta-llama-3.1-8b-instruct",
-			"lmStudioDraft": "vd: lmstudio-community/llama-3.2-1b-instruct",
-			"ollama": "vd: llama3.1"
-		},
 		"numbers": {
 			"maxTokens": "vd: 4096",
 			"contextWindow": "vd: 128000",
@@ -1131,9 +1024,6 @@
 	},
 	"includeMaxOutputTokens": "Bao gồm token đầu ra tối đa",
 	"includeMaxOutputTokensDescription": "Gửi tham số token đầu ra tối đa trong các yêu cầu API. Một số nhà cung cấp có thể không hỗ trợ điều này.",
-	"limitMaxTokensDescription": "Giới hạn số lượng token tối đa trong phản hồi",
-	"maxOutputTokensLabel": "Token đầu ra tối đa",
-	"maxTokensGenerateDescription": "Token tối đa để tạo trong phản hồi",
 	"openAiCodexSpeed": {
 		"label": "Tốc độ",
 		"tooltip": "Chế độ Nhanh sử dụng xử lý ưu tiên của Codex để đạt tốc độ nhanh hơn khoảng 1,5 lần và tiêu tốn nhiều hạn mức đăng ký hơn.",
@@ -1141,8 +1031,6 @@
 		"fast": "Nhanh (tốc độ 1,5 lần, mức sử dụng cao hơn)"
 	},
 	"serviceTier": {
-		"label": "Cấp độ dịch vụ",
-		"tooltip": "Để xử lý các yêu cầu API nhanh hơn, hãy thử cấp độ dịch vụ xử lý ưu tiên. Để có giá thấp hơn với độ trễ cao hơn, hãy thử cấp độ xử lý linh hoạt.",
 		"standard": "Tiêu chuẩn",
 		"flex": "Linh hoạt",
 		"priority": "Ưu tiên",
@@ -1191,8 +1079,6 @@
 		"editSkill": "Chỉnh sửa skill",
 		"deleteSkill": "Xóa skill",
 		"configureModes": "Tính khả dụng của chế độ",
-		"modeAny": "Bất kỳ chế độ nào",
-		"modeCount": "{{count}} chế độ",
 		"deleteDialog": {
 			"title": "Xóa Skill",
 			"description": "Bạn có chắc chắn muốn xóa skill \"{{name}}\" không? Hành động này không thể hoàn tác.",
@@ -1201,7 +1087,6 @@
 		},
 		"modeDialog": {
 			"title": "Cấu hình chế độ Skill",
-			"description": "Chọn chế độ nào có thể sử dụng skill này",
 			"intro": "Để giữ bối cảnh của bạn nhẹ, chúng tôi khuyên bạn nên chỉ cung cấp các kỹ năng cho các chế độ cần chúng.",
 			"anyMode": "Bất kỳ chế độ nào (có sẵn ở mọi nơi)",
 			"save": "Lưu",
@@ -1211,13 +1096,9 @@
 			"title": "Tạo Skill Mới",
 			"nameLabel": "Tên",
 			"namePlaceholder": "ten-skill-cua-toi",
-			"descriptionLabel": "Mô tả",
 			"descriptionPlaceholder": "Mô tả khi nào nên sử dụng skill này...",
 			"sourceLabel": "Vị trí",
 			"modeLabel": "Chế độ (tùy chọn)",
-			"modePlaceholder": "Bất kỳ chế độ nào",
-			"modeHint": "Hạn chế skill này cho một chế độ cụ thể",
-			"modeAny": "Bất kỳ chế độ nào",
 			"create": "Tạo",
 			"cancel": "Hủy"
 		},

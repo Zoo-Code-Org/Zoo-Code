@@ -1,25 +1,21 @@
 {
-	"greeting": "Chào mừng đến với Zoo Code!",
 	"task": {
 		"title": "Nhiệm vụ",
 		"expand": "Mở rộng nhiệm vụ",
 		"collapse": "Thu gọn nhiệm vụ",
 		"seeMore": "Xem thêm",
-		"seeLess": "Thu gọn",
 		"tokens": "Tokens",
 		"cache": "Bộ nhớ đệm",
 		"apiCost": "Chi phí API",
 		"size": "Kích thước",
 		"contextWindow": "Chiều dài bối cảnh",
-		"closeAndStart": "Đóng nhiệm vụ và bắt đầu nhiệm vụ mới",
 		"export": "Xuất lịch sử nhiệm vụ",
 		"delete": "Xóa nhiệm vụ (Shift + Click để bỏ qua xác nhận)",
 		"condenseContext": "Cô đọng ngữ cảnh thông minh",
 		"openApiHistory": "Mở lịch sử API",
 		"openUiHistory": "Mở lịch sử UI",
 		"backToParentTask": "Nhiệm vụ cha",
-		"waitingOnSubtask": "Đang chờ nhiệm vụ con",
-		"goToSubtask": "Đến nhiệm vụ con"
+		"waitingOnSubtask": "Đang chờ nhiệm vụ con"
 	},
 	"unpin": "Bỏ ghim khỏi đầu",
 	"pin": "Ghim lên đầu",
@@ -88,19 +84,16 @@
 		"tooltip": "Kết thúc nhiệm vụ hiện tại"
 	},
 	"stop": {
-		"title": "Dừng",
-		"tooltip": "Dừng nhiệm vụ hiện tại"
+		"title": "Dừng"
 	},
 	"cancel": {
-		"title": "Hủy",
-		"tooltip": "Hủy thao tác hiện tại"
+		"title": "Hủy"
 	},
 	"enqueueMessage": "Thêm tin nhắn vào hàng đợi (sẽ gửi sau khi nhiệm vụ hiện tại hoàn tất)",
 	"scrollToBottom": "Cuộn xuống cuối cuộc trò chuyện",
 	"scrollToLatestCheckpoint": "Cuộn đến checkpoint trước đó",
 	"about": "Zoo Code là một đội ngũ phát triển AI đầy đủ trong trình chỉnh sửa của bạn.",
 	"docs": "Kiểm tra <DocsLink>tài liệu</DocsLink> của chúng tôi để tìm hiểu thêm.",
-	"onboarding": "Danh sách nhiệm vụ của bạn trong không gian làm việc này đang trống.",
 	"rooTips": {
 		"customizableModes": {
 			"title": "Chế độ có thể tùy chỉnh",
@@ -126,7 +119,6 @@
 	"unlockApiConfigAcrossModes": "Cấu hình API đã bị khóa cho tất cả chế độ trong workspace này (nhấn để mở khóa)",
 	"enhancePrompt": "Nâng cao yêu cầu với ngữ cảnh bổ sung",
 	"addImages": "Thêm hình ảnh vào tin nhắn",
-	"sendMessage": "Gửi tin nhắn",
 	"pressToSend": "Nhấn {{keyCombination}} để gửi",
 	"stopTts": "Dừng chuyển văn bản thành giọng nói",
 	"typeMessage": "Nhập tin nhắn...",
@@ -145,7 +137,6 @@
 	},
 	"errorReadingFile": "Lỗi khi đọc tệp",
 	"noValidImages": "Không có hình ảnh hợp lệ nào được xử lý",
-	"separator": "Dấu phân cách",
 	"edit": "Chỉnh sửa...",
 	"forNextMode": "cho chế độ tiếp theo",
 	"forPreviousMode": "cho chế độ trước đó",
@@ -178,7 +169,6 @@
 	},
 	"checkpoint": {
 		"regular": "Điểm kiểm tra",
-		"initializingWarning": "Đang khởi tạo điểm kiểm tra... Nếu quá trình này mất quá nhiều thời gian, bạn có thể vô hiệu hóa điểm kiểm tra trong <settingsLink>cài đặt</settingsLink> và khởi động lại tác vụ của bạn.",
 		"menu": {
 			"viewDiff": "Xem khác biệt",
 			"more": "Thêm tùy chọn",
@@ -205,10 +195,8 @@
 		"wantsToEdit": "Zoo muốn chỉnh sửa tệp này",
 		"wantsToEditOutsideWorkspace": "Zoo muốn chỉnh sửa tệp này bên ngoài không gian làm việc",
 		"wantsToEditProtected": "Zoo muốn chỉnh sửa tệp cấu hình được bảo vệ",
-		"wantsToCreate": "Zoo muốn tạo một tệp mới",
 		"wantsToSearchReplace": "Zoo muốn thực hiện tìm kiếm và thay thế trong tệp này",
 		"didSearchReplace": "Zoo đã thực hiện tìm kiếm và thay thế trong tệp này",
-		"wantsToInsert": "Zoo muốn chèn nội dung vào tệp này",
 		"wantsToInsertWithLineNumber": "Zoo muốn chèn nội dung vào dòng {{lineNumber}} của tệp này",
 		"wantsToInsertAtEnd": "Zoo muốn thêm nội dung vào cuối tệp này",
 		"wantsToReadAndXMore": "Zoo muốn đọc tệp này và {{count}} tệp khác",
@@ -231,14 +219,11 @@
 		"wantsToViewTopLevelOutsideWorkspace": "Zoo muốn xem các tệp cấp cao nhất trong thư mục này (ngoài không gian làm việc)",
 		"didViewTopLevelOutsideWorkspace": "Zoo đã xem các tệp cấp cao nhất trong thư mục này (ngoài không gian làm việc)",
 		"wantsToViewRecursiveOutsideWorkspace": "Zoo muốn xem đệ quy tất cả các tệp trong thư mục này (ngoài không gian làm việc)",
-		"didViewRecursiveOutsideWorkspace": "Zoo đã xem đệ quy tất cả các tệp trong thư mục này (ngoài không gian làm việc)",
-		"wantsToViewMultipleDirectories": "Zoo muốn xem nhiều thư mục"
+		"didViewRecursiveOutsideWorkspace": "Zoo đã xem đệ quy tất cả các tệp trong thư mục này (ngoài không gian làm việc)"
 	},
-	"commandOutput": "Kết quả lệnh",
 	"commandExecution": {
 		"running": "Đang chạy",
 		"abort": "Hủy bỏ",
-		"pid": "PID: {{pid}}",
 		"exitStatus": "Đã thoát với trạng thái {{exitCode}}",
 		"malformedCommand": "Lệnh không hợp lệ: lỗi cú pháp shell",
 		"manageCommands": "Quản lý quyền lệnh",
@@ -247,15 +232,8 @@
 		"addToAllowed": "Thêm vào danh sách cho phép",
 		"removeFromAllowed": "Xóa khỏi danh sách cho phép",
 		"addToDenied": "Thêm vào danh sách từ chối",
-		"removeFromDenied": "Xóa khỏi danh sách từ chối",
-		"abortCommand": "Hủy bỏ thực thi lệnh",
-		"expandOutput": "Mở rộng kết quả",
-		"collapseOutput": "Thu gọn kết quả",
-		"expandManagement": "Mở rộng phần quản lý lệnh",
-		"collapseManagement": "Thu gọn phần quản lý lệnh"
+		"removeFromDenied": "Xóa khỏi danh sách từ chối"
 	},
-	"response": "Phản hồi",
-	"arguments": "Tham số",
 	"text": {
 		"rooSaid": "Zoo đã nói"
 	},
@@ -275,10 +253,8 @@
 	"subtasks": {
 		"wantsToCreate": "Zoo muốn tạo một nhiệm vụ phụ mới trong chế độ <code>{{mode}}</code>",
 		"wantsToFinish": "Zoo muốn hoàn thành nhiệm vụ phụ này",
-		"newTaskContent": "Hướng dẫn nhiệm vụ phụ",
 		"completionContent": "Nhiệm vụ phụ đã hoàn thành",
 		"resultContent": "Kết quả nhiệm vụ phụ",
-		"defaultResult": "Vui lòng tiếp tục với nhiệm vụ tiếp theo.",
 		"completionInstructions": "Nhiệm vụ phụ đã hoàn thành! Bạn có thể xem lại kết quả và đề xuất các sửa đổi hoặc bước tiếp theo. Nếu mọi thứ có vẻ tốt, hãy xác nhận để trả kết quả về nhiệm vụ chính.",
 		"goToSubtask": "Xem nhiệm vụ"
 	},
@@ -301,9 +277,6 @@
 		"diagnostics": "Nhận thông tin lỗi chi tiết",
 		"proxyProvider": "Có vẻ bạn đang sử dụng nhà cung cấp dựa trên proxy. Hãy chắc chắn kiểm tra các nhật ký của nó và đảm bảo nó không viết lại các yêu cầu của Zoo."
 	},
-	"powershell": {
-		"issues": "Có vẻ như bạn đang gặp vấn đề với Windows PowerShell, vui lòng xem"
-	},
 	"autoApprove": {
 		"tooltipManage": "Quản lý cài đặt tự động phê duyệt",
 		"tooltipStatus": "Tự động phê duyệt được bật cho: {{toggles}}",
@@ -312,9 +285,6 @@
 		"all": "Tất cả",
 		"none": "Không có",
 		"description": "Thực hiện các hành động này mà không cần xin phép. Chỉ bật tính năng này cho các hành động bạn hoàn toàn tin tưởng.",
-		"selectOptionsFirst": "Chọn ít nhất một tùy chọn bên dưới để bật tính năng tự động phê duyệt",
-		"toggleAriaLabel": "Bật/tắt tự động phê duyệt",
-		"disabledAriaLabel": "Tự động phê duyệt đã tắt - trước tiên hãy chọn các tùy chọn",
 		"triggerLabelOff": "Tự động phê duyệt tắt",
 		"triggerLabelOffShort": "Tắt",
 		"triggerLabel_zero": "0 được tự động phê duyệt",
@@ -357,12 +327,6 @@
 			"highlight1": "✨ Lựa chọn model nhanh hơn và hỗ trợ model mạnh mẽ hơn: Chuyển model ngay trong ô soạn chat. Dùng Claude Haiku 5.5 trên Amazon Bedrock, tận dụng các khả năng Kimi K3 chính xác hơn trên OpenRouter và dùng giới hạn Gemini 4 Argon đã được chỉnh sửa trên Vercel AI Gateway.",
 			"highlight2": "🧭 Quy trình terminal, chỉnh sửa, chat và làm việc từ xa đáng tin cậy hơn: Tùy chọn thu gọn output lệnh theo mặc định, nhận thông báo lỗi chỉnh sửa rõ ràng hơn, giữ các hàng reasoning và API luôn hiển thị, đồng thời tránh sự cố khởi động và proxy trong workspace từ xa.",
 			"highlight3": "🔌 Mở rộng MCP marketplace: Kết nối Zoo Code với AnySearch, Mailtea và Tradehand thông qua MCP marketplace."
-		},
-		"cloudAgents": {
-			"heading": "Mới trên Cloud:",
-			"specialized": "Giới thiệu <bold>Explainer</bold>, <bold>Planner</bold> và <bold>Coder</bold> - ba agent đám mây chuyên biệt để nâng cao quy trình làm việc của bạn.",
-			"description": "Các agent làm việc cùng nhau trên đám mây và có thể được kích hoạt từ web hoặc qua Slack.",
-			"tryButton": "Dùng thử Agents trên Cloud"
 		}
 	},
 	"costs": {
@@ -445,28 +409,8 @@
 	"editMessage": {
 		"placeholder": "Chỉnh sửa tin nhắn của bạn..."
 	},
-	"command": {
-		"triggerDescription": "Kích hoạt lệnh {{name}}"
-	},
 	"slashCommands": {
-		"tooltip": "Quản lý lệnh gạch chéo",
-		"title": "Lệnh Gạch Chéo",
-		"description": "Sử dụng lệnh gạch chéo tích hợp sẵn hoặc tạo tùy chỉnh để truy cập nhanh vào các lời nhắc và quy trình làm việc thường dùng. <DocsLink>Tài liệu</DocsLink>",
-		"manageCommands": "Quản lý các lệnh slash trong cài đặt",
-		"builtInCommands": "Lệnh Tích Hợp",
-		"globalCommands": "Lệnh Toàn Cục",
-		"workspaceCommands": "Lệnh Không Gian Làm Việc",
-		"globalCommand": "Lệnh toàn cục",
-		"editCommand": "Chỉnh sửa lệnh",
-		"deleteCommand": "Xóa lệnh",
-		"newGlobalCommandPlaceholder": "Lệnh toàn cục mới...",
-		"newWorkspaceCommandPlaceholder": "Lệnh không gian làm việc mới...",
-		"deleteDialog": {
-			"title": "Xóa Lệnh",
-			"description": "Bạn có chắc chắn muốn xóa lệnh \"{{name}}\" không? Hành động này không thể hoàn tác.",
-			"cancel": "Hủy",
-			"confirm": "Xóa"
-		}
+		"manageCommands": "Quản lý các lệnh slash trong cài đặt"
 	},
 	"contextMenu": {
 		"noResults": "Không có kết quả",
@@ -485,9 +429,7 @@
 	"todo": {
 		"partial": "{{completed}} trong tổng số {{total}} công việc đã hoàn thành",
 		"complete": "{{total}} công việc đã hoàn thành",
-		"updated": "Đã cập nhật danh sách công việc",
-		"completed": "Đã hoàn thành",
-		"started": "Đã bắt đầu"
+		"updated": "Đã cập nhật danh sách công việc"
 	},
 	"tooManyTools": {
 		"title": "Đã bật quá nhiều công cụ",

@@ -1,25 +1,21 @@
 {
-	"greeting": "Zoo Code에 오신 것을 환영합니다!",
 	"task": {
 		"title": "작업",
 		"expand": "작업 펼치기",
 		"collapse": "작업 접기",
 		"seeMore": "더 보기",
-		"seeLess": "줄여보기",
 		"tokens": "토큰",
 		"cache": "캐시",
 		"apiCost": "API 비용",
 		"size": "크기",
 		"contextWindow": "컨텍스트 창",
-		"closeAndStart": "작업 닫고 새 작업 시작",
 		"export": "작업 기록 내보내기",
 		"delete": "작업 삭제 (Shift + 클릭으로 확인 생략)",
 		"condenseContext": "컨텍스트 지능적으로 압축",
 		"openApiHistory": "API 기록 열기",
 		"openUiHistory": "UI 기록 열기",
 		"backToParentTask": "상위 작업",
-		"waitingOnSubtask": "하위 작업 대기 중",
-		"goToSubtask": "하위 작업으로 이동"
+		"waitingOnSubtask": "하위 작업 대기 중"
 	},
 	"unpin": "고정 해제하기",
 	"pin": "고정하기",
@@ -88,19 +84,16 @@
 		"tooltip": "현재 작업 종료"
 	},
 	"stop": {
-		"title": "정지",
-		"tooltip": "현재 작업 정지"
+		"title": "정지"
 	},
 	"cancel": {
-		"title": "취소",
-		"tooltip": "현재 작업 취소"
+		"title": "취소"
 	},
 	"enqueueMessage": "메시지를 대기열에 추가 (현재 작업 완료 후 전송)",
 	"scrollToBottom": "채팅 하단으로 스크롤",
 	"scrollToLatestCheckpoint": "이전 체크포인트로 스크롤",
 	"about": "Zoo Code는 편집기 안에 있는 전체 AI 개발팀입니다.",
 	"docs": "더 알아보려면 <DocsLink>문서</DocsLink>를 확인하세요.",
-	"onboarding": "이 작업 공간의 작업 목록이 비어 있습니다.",
 	"rooTips": {
 		"customizableModes": {
 			"title": "사용자 정의 가능한 모드",
@@ -118,7 +111,6 @@
 	"unlockApiConfigAcrossModes": "이 워크스페이스의 모든 모드에서 API 구성이 잠겨 있습니다 (클릭하여 해제)",
 	"enhancePrompt": "추가 컨텍스트로 프롬프트 향상",
 	"addImages": "메시지에 이미지 추가",
-	"sendMessage": "메시지 보내기",
 	"pressToSend": "{{keyCombination}}를 눌러 전송",
 	"stopTts": "텍스트 음성 변환 중지",
 	"typeMessage": "메시지 입력...",
@@ -145,7 +137,6 @@
 	},
 	"errorReadingFile": "파일 읽기 오류",
 	"noValidImages": "처리된 유효한 이미지가 없습니다",
-	"separator": "구분자",
 	"edit": "편집...",
 	"forNextMode": "다음 모드용",
 	"forPreviousMode": "이전 모드용",
@@ -178,7 +169,6 @@
 	},
 	"checkpoint": {
 		"regular": "체크포인트",
-		"initializingWarning": "체크포인트 초기화 중... 시간이 너무 오래 걸리면 <settingsLink>설정</settingsLink>에서 체크포인트를 비활성화하고 작업을 다시 시작할 수 있습니다.",
 		"menu": {
 			"viewDiff": "차이점 보기",
 			"more": "더 많은 옵션",
@@ -205,10 +195,8 @@
 		"wantsToEdit": "Zoo가 이 파일을 편집하고 싶어합니다",
 		"wantsToEditOutsideWorkspace": "Zoo가 워크스페이스 외부의 이 파일을 편집하고 싶어합니다",
 		"wantsToEditProtected": "Zoo가 보호된 설정 파일을 편집하고 싶어합니다",
-		"wantsToCreate": "Zoo가 새 파일을 만들고 싶어합니다",
 		"wantsToSearchReplace": "Zoo가 이 파일에서 검색 및 바꾸기를 수행하고 싶어합니다",
 		"didSearchReplace": "Zoo가 이 파일에서 검색 및 바꾸기를 수행했습니다",
-		"wantsToInsert": "Zoo가 이 파일에 내용을 삽입하고 싶어합니다",
 		"wantsToInsertWithLineNumber": "Zoo가 이 파일의 {{lineNumber}}번 줄에 내용을 삽입하고 싶어합니다",
 		"wantsToInsertAtEnd": "Zoo가 이 파일의 끝에 내용을 추가하고 싶어합니다",
 		"wantsToReadAndXMore": "Zoo가 이 파일과 {{count}}개의 파일을 더 읽으려고 합니다",
@@ -231,14 +219,11 @@
 		"wantsToViewTopLevelOutsideWorkspace": "Zoo가 이 디렉토리(워크스페이스 외부)의 최상위 파일을 보고 싶어합니다",
 		"didViewTopLevelOutsideWorkspace": "Zoo가 이 디렉토리(워크스페이스 외부)의 최상위 파일을 보았습니다",
 		"wantsToViewRecursiveOutsideWorkspace": "Zoo가 이 디렉토리(워크스페이스 외부)의 모든 파일을 재귀적으로 보고 싶어합니다",
-		"didViewRecursiveOutsideWorkspace": "Zoo가 이 디렉토리(워크스페이스 외부)의 모든 파일을 재귀적으로 보았습니다",
-		"wantsToViewMultipleDirectories": "Zoo가 여러 디렉토리를 보려고 합니다"
+		"didViewRecursiveOutsideWorkspace": "Zoo가 이 디렉토리(워크스페이스 외부)의 모든 파일을 재귀적으로 보았습니다"
 	},
-	"commandOutput": "명령 출력",
 	"commandExecution": {
 		"abort": "중단",
 		"running": "실행 중",
-		"pid": "PID: {{pid}}",
 		"exitStatus": "상태 {{exitCode}}(으)로 종료됨",
 		"malformedCommand": "잘못된 명령: shell 구문 오류",
 		"manageCommands": "자동 승인된 명령",
@@ -246,15 +231,8 @@
 		"addToAllowed": "허용 목록에 추가",
 		"removeFromAllowed": "허용 목록에서 제거",
 		"addToDenied": "거부 목록에 추가",
-		"removeFromDenied": "거부 목록에서 제거",
-		"abortCommand": "명령 실행 중단",
-		"expandOutput": "출력 확장",
-		"collapseOutput": "출력 축소",
-		"expandManagement": "명령 관리 섹션 확장",
-		"collapseManagement": "명령 관리 섹션 축소"
+		"removeFromDenied": "거부 목록에서 제거"
 	},
-	"response": "응답",
-	"arguments": "인수",
 	"text": {
 		"rooSaid": "루가 말했다"
 	},
@@ -274,10 +252,8 @@
 	"subtasks": {
 		"wantsToCreate": "Zoo가 <code>{{mode}}</code> 모드에서 새 하위 작업을 만들고 싶어합니다",
 		"wantsToFinish": "Zoo가 이 하위 작업을 완료하고 싶어합니다",
-		"newTaskContent": "하위 작업 지침",
 		"completionContent": "하위 작업 완료",
 		"resultContent": "하위 작업 결과",
-		"defaultResult": "다음 작업을 계속 진행해주세요.",
 		"completionInstructions": "하위 작업 완료! 결과를 검토하고 수정 사항이나 다음 단계를 제안할 수 있습니다. 모든 것이 괜찮아 보이면, 부모 작업에 결과를 반환하기 위해 확인해주세요.",
 		"goToSubtask": "작업 보기"
 	},
@@ -300,9 +276,6 @@
 		"diagnostics": "상세한 오류 정보 가져오기",
 		"proxyProvider": "프록시 기반 제공자를 사용하는 것 같습니다. 로그를 확인하고 Zoo의 요청을 다시 작성하지 않는지 확인하세요."
 	},
-	"powershell": {
-		"issues": "Windows PowerShell에 문제가 있는 것 같습니다. 다음을 참조하세요"
-	},
 	"autoApprove": {
 		"tooltipManage": "자동 승인 설정 관리",
 		"tooltipStatus": "자동 승인 활성화됨: {{toggles}}",
@@ -311,9 +284,6 @@
 		"all": "모두",
 		"none": "없음",
 		"description": "허가 없이 이러한 작업을 실행합니다. 전적으로 신뢰하는 작업에 대해서만 활성화하십시오.",
-		"selectOptionsFirst": "자동 승인을 활성화하려면 아래에서 하나 이상의 옵션을 선택하십시오",
-		"toggleAriaLabel": "자동 승인 전환",
-		"disabledAriaLabel": "자동 승인 비활성화됨 - 먼저 옵션을 선택하십시오",
 		"triggerLabelOff": "자동 승인 꺼짐",
 		"triggerLabelOffShort": "꺼짐",
 		"triggerLabel_zero": "0개 자동 승인됨",
@@ -356,12 +326,6 @@
 			"highlight1": "✨ 더 빠른 모델 선택과 강화된 모델 지원: 채팅 작성창에서 모델을 전환하세요. Amazon Bedrock에서 Claude Haiku 5.5를 사용하고, OpenRouter에서 더 정확한 Kimi K3 기능을 이용하며, Vercel AI Gateway에서 수정된 Gemini 4 Argon 한도를 적용하세요.",
 			"highlight2": "🧭 더 안정적인 터미널, 편집, 채팅 및 원격 워크플로: 원할 때 명령 출력을 기본적으로 접고, 편집 실패 원인을 더 명확히 확인하며, 추론 및 API 행을 계속 표시하고, 원격 워크스페이스의 시작 및 프록시 문제를 방지하세요.",
 			"highlight3": "🔌 확장된 MCP 마켓플레이스: MCP 마켓플레이스를 통해 Zoo Code를 AnySearch, Mailtea, Tradehand에 연결하세요."
-		},
-		"cloudAgents": {
-			"heading": "클라우드의 새로운 기능:",
-			"specialized": "<bold>Explainer</bold>, <bold>Planner</bold>, <bold>Coder</bold> 세 가지 전문 클라우드 에이전트를 소개합니다. 워크플로우를 향상시킵니다.",
-			"description": "에이전트는 클라우드에서 함께 작동하며 웹 또는 Slack을 통해 트리거할 수 있습니다.",
-			"tryButton": "클라우드 에이전트 사용해보기"
 		}
 	},
 	"costs": {
@@ -444,28 +408,8 @@
 	"editMessage": {
 		"placeholder": "메시지 편집..."
 	},
-	"command": {
-		"triggerDescription": "{{name}} 명령 트리거"
-	},
 	"slashCommands": {
-		"tooltip": "슬래시 명령 관리",
-		"title": "슬래시 명령",
-		"description": "내장 슬래시 명령을 사용하거나 자주 사용하는 프롬프트와 워크플로우에 빠르게 액세스할 수 있는 사용자 정의 슬래시 명령을 만듭니다. <DocsLink>문서</DocsLink>",
-		"manageCommands": "설정에서 슬래시 명령 관리",
-		"builtInCommands": "내장 명령",
-		"globalCommands": "전역 명령",
-		"workspaceCommands": "작업 공간 명령",
-		"globalCommand": "전역 명령",
-		"editCommand": "명령 편집",
-		"deleteCommand": "명령 삭제",
-		"newGlobalCommandPlaceholder": "새 전역 명령...",
-		"newWorkspaceCommandPlaceholder": "새 작업 공간 명령...",
-		"deleteDialog": {
-			"title": "명령 삭제",
-			"description": "\"{{name}}\" 명령을 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
-			"cancel": "취소",
-			"confirm": "삭제"
-		}
+		"manageCommands": "설정에서 슬래시 명령 관리"
 	},
 	"contextMenu": {
 		"noResults": "결과 없음",
@@ -484,9 +428,7 @@
 	"todo": {
 		"partial": "{{total}}개의 할 일 중 {{completed}}개 완료",
 		"complete": "{{total}}개의 할 일 완료",
-		"updated": "할 일 목록을 업데이트했습니다",
-		"completed": "완료됨",
-		"started": "시작됨"
+		"updated": "할 일 목록을 업데이트했습니다"
 	},
 	"tooManyTools": {
 		"title": "활성화된 도구가 너무 많습니다",

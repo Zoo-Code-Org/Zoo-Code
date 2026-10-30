@@ -9,10 +9,7 @@
 	},
 	"answers": {
 		"yes": "Sì",
-		"no": "No",
-		"cancel": "Annulla",
-		"remove": "Rimuovi",
-		"keep": "Mantieni"
+		"cancel": "Annulla"
 	},
 	"number_format": {
 		"thousand_suffix": "k",
@@ -33,19 +30,11 @@
 			"copy": "Copia",
 			"save": "Salva immagine",
 			"viewCode": "Visualizza codice",
-			"viewDiagram": "Visualizza diagramma",
 			"close": "Chiudi"
-		},
-		"modal": {
-			"codeTitle": "Codice Mermaid"
 		},
 		"tabs": {
 			"diagram": "Diagramma",
 			"code": "Codice"
-		},
-		"feedback": {
-			"imageCopied": "Immagine copiata negli appunti",
-			"copyError": "Errore nella copia dell'immagine"
 		}
 	},
 	"image": {
@@ -53,19 +42,6 @@
 			"view": "Immagine"
 		},
 		"noData": "Nessun dato immagine"
-	},
-	"file": {
-		"errors": {
-			"invalidDataUri": "Formato URI dati non valido",
-			"copyingImage": "Errore nella copia dell'immagine: {{error}}",
-			"openingImage": "Errore nell'apertura dell'immagine: {{error}}",
-			"pathNotExists": "Il percorso non esiste: {{path}}",
-			"couldNotOpen": "Impossibile aprire il file: {{error}}",
-			"couldNotOpenGeneric": "Impossibile aprire il file!"
-		},
-		"success": {
-			"imageDataUriCopied": "URI dati immagine copiato negli appunti"
-		}
 	},
 	"confirmation": {
 		"deleteMessage": "Elimina Messaggio",
@@ -77,8 +53,7 @@
 		"editOnly": "No, modifica solo il messaggio",
 		"deleteOnly": "No, elimina solo il messaggio",
 		"restoreToCheckpoint": "Sì, ripristina il checkpoint",
-		"proceed": "Procedi",
-		"dontShowAgain": "Non mostrare più"
+		"proceed": "Procedi"
 	},
 	"time_ago": {
 		"just_now": "proprio ora",
@@ -100,12 +75,6 @@
 		"wait_checkpoint_long_time": "Hai aspettato {{timeout}} secondi per l'inizializzazione del checkpoint. Se non ti serve questa funzione, disattivala nelle <settingsLink>impostazioni del checkpoint</settingsLink>.",
 		"init_checkpoint_fail_long_time": "L'inizializzazione del checkpoint ha impiegato più di {{timeout}} secondi, quindi i checkpoint sono disabilitati per questa attività. Puoi disattivare i checkpoint o aumentare il tempo di attesa nelle <settingsLink>impostazioni del checkpoint</settingsLink>.",
 		"attempt_completion_tool_failed": "Non puoi eseguire attempt_completion perché una chiamata di strumento precedente è fallita in questo turno. Risolvi il problema dello strumento prima di tentare di completare."
-	},
-	"tasks": {
-		"delegated": "Delegato a sottoattività",
-		"delegated_to": "Delegato all'attività {{childId}}",
-		"delegation_completed": "Sottoattività completata, ripresa attività padre",
-		"awaiting_child": "In attesa dell'attività figlia {{childId}}"
 	},
 	"costs": {
 		"own": "Proprio",

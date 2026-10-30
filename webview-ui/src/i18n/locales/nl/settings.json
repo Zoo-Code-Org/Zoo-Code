@@ -4,7 +4,6 @@
 		"save": "Opslaan",
 		"done": "Gereed",
 		"cancel": "Annuleren",
-		"reset": "Resetten",
 		"select": "Selecteren",
 		"add": "Header toevoegen",
 		"remove": "Verwijderen"
@@ -171,8 +170,6 @@
 		"title": "Codebase indexering",
 		"enableLabel": "Codebase indexering inschakelen",
 		"enableDescription": "Code-indexering inschakelen voor verbeterde zoekresultaten en contextbegrip",
-		"providerLabel": "Embeddings provider",
-		"selectProviderPlaceholder": "Selecteer provider",
 		"openaiProvider": "OpenAI",
 		"ollamaProvider": "Ollama",
 		"geminiProvider": "Gemini",
@@ -201,18 +198,11 @@
 		"openAiCompatibleBaseUrlLabel": "Basis-URL",
 		"openAiCompatibleApiKeyLabel": "API-sleutel",
 		"openAiCompatibleApiKeyPlaceholder": "Voer uw API-sleutel in",
-		"openAiCompatibleModelDimensionLabel": "Embedding Dimensie:",
 		"modelDimensionLabel": "Model Dimensie",
-		"openAiCompatibleModelDimensionPlaceholder": "bijv., 1536",
-		"openAiCompatibleModelDimensionDescription": "De embedding dimensie (uitvoergrootte) voor uw model. Controleer de documentatie van uw provider voor deze waarde. Veelvoorkomende waarden: 384, 768, 1536, 3072.",
 		"modelLabel": "Model",
-		"selectModelPlaceholder": "Selecteer model",
-		"ollamaUrlLabel": "Ollama URL:",
 		"qdrantUrlLabel": "Qdrant URL",
-		"qdrantKeyLabel": "Qdrant-sleutel:",
 		"startIndexingButton": "Start",
 		"clearIndexDataButton": "Index wissen",
-		"unsavedSettingsMessage": "Sla je instellingen op voordat je het indexeringsproces start.",
 		"clearDataDialog": {
 			"title": "Weet je het zeker?",
 			"description": "Deze actie kan niet ongedaan worden gemaakt. Dit zal je codebase-indexgegevens permanent verwijderen.",
@@ -221,8 +211,6 @@
 		},
 		"description": "Configureer codebase-indexeringsinstellingen om semantisch zoeken voor je project in te schakelen. <0>Meer informatie</0>",
 		"statusTitle": "Status",
-		"settingsTitle": "Indexeringsinstellingen",
-		"disabledMessage": "Codebase-indexering is momenteel uitgeschakeld. Schakel het in de algemene instellingen in om indexeringsopties te configureren.",
 		"embedderProviderLabel": "Embedder Provider",
 		"modelPlaceholder": "Voer modelnaam in",
 		"selectModel": "Selecteer een model",
@@ -236,7 +224,6 @@
 		"qdrantUrlPlaceholder": "http://localhost:6333",
 		"saveError": "Kan instellingen niet opslaan",
 		"modelDimensions": "({{dimension}} dimensies)",
-		"saveSuccess": "Instellingen succesvol opgeslagen",
 		"saving": "Opslaan...",
 		"saveSettings": "Opslaan",
 		"indexingStatuses": {
@@ -245,7 +232,6 @@
 			"indexed": "Geïndexeerd",
 			"error": "Fout"
 		},
-		"close": "Sluiten",
 		"validation": {
 			"invalidQdrantUrl": "Ongeldige Qdrant URL",
 			"invalidOllamaUrl": "Ongeldige Ollama URL",
@@ -260,17 +246,14 @@
 			"mistralApiKeyRequired": "Mistral API-sleutel is vereist",
 			"vercelAiGatewayApiKeyRequired": "Vercel AI Gateway API-sleutel is vereist",
 			"bedrockRegionRequired": "AWS-regio is vereist",
-			"bedrockProfileRequired": "AWS-profiel is vereist",
 			"ollamaBaseUrlRequired": "Ollama basis-URL is vereist",
 			"baseUrlRequired": "Basis-URL is vereist",
-			"modelDimensionMinValue": "Modelafmeting moet groter zijn dan 0",
 			"openRouterApiKeyRequired": "OpenRouter API-sleutel is vereist"
 		},
 		"optional": "optioneel",
 		"advancedConfigLabel": "Geavanceerde configuratie",
 		"searchMinScoreLabel": "Zoekscore drempel",
 		"searchMinScoreDescription": "Minimale overeenkomstscore (0.0-1.0) vereist voor zoekresultaten. Lagere waarden leveren meer resultaten op, maar zijn mogelijk minder relevant. Hogere waarden leveren minder, maar relevantere resultaten op.",
-		"searchMinScoreResetTooltip": "Reset naar standaardwaarde (0.4)",
 		"searchMaxResultsLabel": "Maximum Zoekresultaten",
 		"searchMaxResultsDescription": "Maximum aantal zoekresultaten dat wordt geretourneerd bij het doorzoeken van de codebase-index. Hogere waarden bieden meer context maar kunnen minder relevante resultaten bevatten.",
 		"resetToDefault": "Reset naar standaard",
@@ -286,7 +269,6 @@
 		"description": "Sta Zoo toe om automatisch handelingen uit te voeren zonder goedkeuring. Schakel deze instellingen alleen in als je de AI volledig vertrouwt en de bijbehorende beveiligingsrisico's begrijpt.",
 		"enabled": "Auto-goedkeuren ingeschakeld",
 		"toggleAriaLabel": "Automatisch goedkeuren in-/uitschakelen",
-		"disabledAriaLabel": "Automatisch goedkeuren uitgeschakeld - selecteer eerst opties",
 		"readOnly": {
 			"label": "Lezen",
 			"description": "Indien ingeschakeld, bekijkt Zoo automatisch de inhoud van mappen en leest bestanden zonder dat je op de Goedkeuren-knop hoeft te klikken.",
@@ -298,7 +280,6 @@
 		"write": {
 			"label": "Schrijven",
 			"description": "Automatisch bestanden aanmaken en bewerken zonder goedkeuring",
-			"delayLabel": "Vertraging na schrijven om diagnostiek de kans te geven mogelijke problemen te detecteren",
 			"outsideWorkspace": {
 				"label": "Inclusief bestanden buiten werkruimte",
 				"description": "Sta Zoo toe om bestanden buiten de huidige werkruimte aan te maken en te bewerken zonder goedkeuring."
@@ -356,14 +337,12 @@
 			"deniedCommandsDescription": "Commando-prefixen die automatisch worden geweigerd zonder om goedkeuring te vragen. Bij conflicten met toegestane commando's heeft de langste prefixovereenkomst voorrang. Voeg * toe om alle commando's te weigeren.",
 			"commandPlaceholder": "Voer commando-prefix in (bijv. 'git ')",
 			"deniedCommandPlaceholder": "Voer te weigeren commando-prefix in (bijv. 'rm -rf')",
-			"addButton": "Toevoegen",
-			"autoDenied": "Commando's met het prefix `{{prefix}}` zijn verboden door de gebruiker. Omzeil deze beperking niet door een ander commando uit te voeren."
+			"addButton": "Toevoegen"
 		},
 		"apiRequestLimit": {
 			"title": "Maximale verzoeken",
 			"unlimited": "Onbeperkt"
 		},
-		"selectOptionsFirst": "Selecteer ten minste één optie hieronder om automatische goedkeuring in te schakelen",
 		"apiCostLimit": {
 			"title": "Max kosten",
 			"unlimited": "Onbeperkt"
@@ -373,12 +352,10 @@
 		}
 	},
 	"providers": {
-		"providerDocumentation": "{{provider}} documentatie",
 		"configProfile": "Configuratieprofiel",
 		"description": "Sla verschillende API-configuraties op om snel te wisselen tussen providers en instellingen.",
 		"apiProvider": "API-provider",
 		"apiProviderDocs": "Providerdocumentatie",
-		"model": "Model",
 		"nameEmpty": "Naam mag niet leeg zijn",
 		"nameExists": "Er bestaat al een profiel met deze naam",
 		"deleteProfile": "Profiel verwijderen",
@@ -470,7 +447,6 @@
 		},
 		"useCustomBaseUrl": "Aangepaste basis-URL gebruiken",
 		"useReasoning": "Redenering inschakelen",
-		"useHostHeader": "Aangepaste Host-header gebruiken",
 		"customHeaders": "Aangepaste headers",
 		"headerName": "Headernaam",
 		"headerValue": "Headerwaarde",
@@ -482,7 +458,6 @@
 		"requestyApiKey": "Requesty API-sleutel",
 		"refreshModels": {
 			"label": "Modellen verversen",
-			"hint": "Open de instellingen opnieuw om de nieuwste modellen te zien.",
 			"loading": "Modellenlijst wordt vernieuwd...",
 			"success": "Modellenlijst succesvol vernieuwd!",
 			"error": "Kan modellenlijst niet vernieuwen. Probeer het opnieuw."
@@ -571,11 +546,8 @@
 		"awsGlobalInference": "Gebruik wereldwijde inferentie (automatische selectie van optimale AWS-regio)",
 		"awsServiceTier": "Servicelaag",
 		"awsServiceTierStandard": "Standard",
-		"awsServiceTierStandardDesc": "Gebalanceerde prestaties en kosten",
 		"awsServiceTierFlex": "Flex (50% korting)",
-		"awsServiceTierFlexDesc": "Lagere kosten, hogere latency voor niet-kritieke taken",
 		"awsServiceTierPriority": "Priority (75% premie)",
-		"awsServiceTierPriorityDesc": "Snelste prestaties voor kritieke toepassingen",
 		"awsServiceTierNote": "Servicelagen beïnvloeden prijzen en prestaties. Flex biedt 50% korting met hogere latency, Priority biedt 25% betere prestaties met 75% premie.",
 		"awsBedrockVpc": {
 			"useCustomVpcEndpoint": "Aangepast VPC-eindpunt gebruiken",
@@ -610,17 +582,13 @@
 		"googleCloudRegion": "Google Cloud-regio",
 		"lmStudio": {
 			"baseUrl": "Basis-URL (optioneel)",
-			"modelId": "Model-ID",
 			"speculativeDecoding": "Speculatieve decodering inschakelen",
 			"draftModelId": "Draft Model-ID",
 			"draftModelDesc": "Draft-model moet uit dezelfde modelfamilie komen voor correcte speculatieve decodering.",
-			"selectDraftModel": "Selecteer draft-model",
-			"noModelsFound": "Geen draft-modellen gevonden. Zorg dat LM Studio draait met Server Mode ingeschakeld.",
 			"description": "LM Studio laat je modellen lokaal op je computer draaien. Zie hun <a>quickstart-gids</a> voor instructies. Je moet ook de <b>lokale server</b>-functie van LM Studio starten om het met deze extensie te gebruiken. <span>Let op:</span> Zoo Code gebruikt complexe prompts en werkt het beste met Claude-modellen. Minder krachtige modellen werken mogelijk niet zoals verwacht."
 		},
 		"ollama": {
 			"baseUrl": "Basis-URL (optioneel)",
-			"modelId": "Model-ID",
 			"apiKey": "Ollama API-sleutel",
 			"apiKeyHelp": "Optionele API-sleutel voor Ollama-instanties die authenticatie nodig hebben, of voor cloudservices. Zoo Code stuurt de sleutel alleen naar HTTPS- of loopback-eindpunten. Een extern HTTP-eindpunt krijgt geen sleutel, omdat de sleutel als leesbare tekst zou reizen. Gebruik HTTPS voor een externe instantie die een sleutel nodig heeft. Laat dit leeg voor een lokale installatie.",
 			"numCtx": "Contextvenstergrootte (num_ctx)",
@@ -650,10 +618,6 @@
 			"imageSupport": {
 				"label": "Ondersteuning voor afbeeldingen",
 				"description": "Kan dit model afbeeldingen verwerken en begrijpen?"
-			},
-			"computerUse": {
-				"label": "Computergebruik",
-				"description": "Kan dit model met een browser werken?"
 			},
 			"promptCache": {
 				"label": "Prompt caching",
@@ -711,13 +675,6 @@
 			"description": "Bepaalt hoe gedetailleerd de reacties van het model zijn. Lage uitvoerbaarheid levert beknopte antwoorden op, terwijl hoge uitvoerbaarheid uitgebreide uitleg geeft."
 		},
 		"setReasoningLevel": "Redeneervermogen inschakelen",
-		"claudeCode": {
-			"pathLabel": "Claude Code Pad",
-			"description": "Optioneel pad naar uw Claude Code CLI. Standaard 'claude' als niet ingesteld.",
-			"placeholder": "Standaard: claude",
-			"maxTokensLabel": "Max Output Tokens",
-			"maxTokensDescription": "Maximaal aantal output-tokens voor Claude Code-reacties. Standaard is 8000."
-		},
 		"zooGateway": {
 			"account": "Zoo Code Account",
 			"signInButton": "Inloggen bij Zoo Code",
@@ -750,25 +707,8 @@
 	},
 	"contextManagement": {
 		"description": "Bepaal welke informatie wordt opgenomen in het contextvenster van de AI, wat invloed heeft op tokengebruik en antwoordkwaliteit",
-		"autoCondenseContextPercent": {
-			"label": "Drempelwaarde om intelligente contextcompressie te activeren",
-			"description": "Wanneer het contextvenster deze drempelwaarde bereikt, zal Zoo het automatisch comprimeren."
-		},
-		"condensingApiConfiguration": {
-			"label": "API-configuratie voor contextcondensatie",
-			"description": "Selecteer welke API-configuratie gebruikt moet worden voor contextcondensatie. Laat leeg om de huidige actieve configuratie te gebruiken.",
-			"useCurrentConfig": "Standaard"
-		},
-		"customCondensingPrompt": {
-			"label": "Aangepaste contextcondensatieprompt",
-			"description": "Aangepaste systeemprompt voor contextcondensatie. Laat leeg om de standaardprompt te gebruiken.",
-			"placeholder": "Voer hier je aangepaste condensatieprompt in...\n\nJe kunt dezelfde structuur gebruiken als de standaardprompt:\n- Vorig gesprek\n- Huidig werk\n- Belangrijke technische concepten\n- Relevante bestanden en code\n- Probleemoplossing\n- Openstaande taken en volgende stappen",
-			"reset": "Herstellen naar standaard",
-			"hint": "Leeg = gebruik standaardprompt"
-		},
 		"autoCondenseContext": {
-			"name": "Automatisch intelligente contextcompressie activeren",
-			"description": "Wanneer ingeschakeld, zal Zoo automatisch de context comprimeren wanneer de drempel wordt bereikt. Wanneer uitgeschakeld, kun je nog steeds handmatig contextcompressie activeren."
+			"name": "Automatisch intelligente contextcompressie activeren"
 		},
 		"openTabs": {
 			"label": "Limiet geopende tabbladen in context",
@@ -781,16 +721,6 @@
 		"rooignore": {
 			"label": ".rooignore-bestanden tonen in lijsten en zoekopdrachten",
 			"description": "Indien ingeschakeld, worden bestanden die overeenkomen met patronen in .rooignore getoond in lijsten met een slotje. Indien uitgeschakeld, worden deze bestanden volledig verborgen in lijsten en zoekopdrachten."
-		},
-		"maxReadFile": {
-			"label": "Automatisch afkappen bij bestandslezen",
-			"description": "Zoo leest dit aantal regels wanneer het model geen begin/eindwaarden opgeeft. Als dit aantal lager is dan het totaal, genereert Zoo een index van codelijnen. Speciale gevallen: -1 laat Zoo het hele bestand lezen (zonder indexering), 0 leest geen regels en geeft alleen een minimale index. Lagere waarden minimaliseren het initiële contextgebruik en maken precieze vervolg-leesopdrachten mogelijk. Expliciete begin/eind-aanvragen worden niet door deze instelling beperkt.",
-			"lines": "regels",
-			"always_full_read": "Altijd volledig bestand lezen"
-		},
-		"maxConcurrentFileReads": {
-			"label": "Limiet gelijktijdige bestandslezingen",
-			"description": "Maximum aantal bestanden dat de 'read_file' tool tegelijkertijd kan verwerken. Hogere waarden kunnen het lezen van meerdere kleine bestanden versnellen maar verhogen het geheugengebruik."
 		},
 		"maxImageFileSize": {
 			"label": "Maximum afbeeldingsbestandsgrootte",
@@ -830,7 +760,6 @@
 			"defaultProfile": "Globale standaard (alle profielen)",
 			"defaultDescription": "Wanneer de context dit percentage bereikt, wordt het automatisch gecomprimeerd voor alle profielen tenzij ze aangepaste instellingen hebben",
 			"profileDescription": "Aangepaste drempelwaarde alleen voor dit profiel (overschrijft globale standaard)",
-			"inheritDescription": "Dit profiel erft de globale standaard drempelwaarde ({{threshold}}%)",
 			"usesGlobal": "(gebruikt globaal {{threshold}}%)"
 		},
 		"includeCurrentTime": {
@@ -856,20 +785,11 @@
 			"description": "Toon opdrachtuitvoer ingeklapt, ook van de inline-terminal. Klap deze indien nodig handmatig uit. Dit verandert de uitvoering van opdrachten niet."
 		},
 		"basic": {
-			"label": "Terminalinstellingen: Basis",
-			"description": "Basis terminalinstellingen"
+			"label": "Terminalinstellingen: Basis"
 		},
 		"advanced": {
 			"label": "Terminalinstellingen: Geavanceerd",
 			"description": "Deze instellingen gelden alleen wanneer 'Inline Terminal gebruiken' is uitgeschakeld. Ze beïnvloeden alleen de VS Code-terminal en kunnen een IDE-herstart vereisen."
-		},
-		"outputLineLimit": {
-			"label": "Terminaluitvoerlimiet",
-			"description": "Behoudt eerste en laatste regels en verwijdert middelste om onder de limiet te blijven. Verlaag om tokens te besparen; verhoog om Zoo meer tussendetails te geven. Zoo ziet een placeholder waar inhoud wordt overgeslagen.<0>Meer informatie</0>"
-		},
-		"outputCharacterLimit": {
-			"label": "Terminal-tekenlimiet",
-			"description": "Overschrijft de regellimiet om geheugenproblemen te voorkomen door een harde limiet op uitvoergrootte af te dwingen. Bij overschrijding behoudt het begin en einde en toont een placeholder aan Zoo waar inhoud wordt overgeslagen. <0>Meer informatie</0>"
 		},
 		"outputPreviewSize": {
 			"label": "Grootte opdrachtuitvoer voorvertoning",
@@ -928,23 +848,6 @@
 		"title": "Geavanceerde instellingen"
 	},
 	"advanced": {
-		"diff": {
-			"label": "Bewerken via diffs inschakelen",
-			"description": "Indien ingeschakeld kan Zoo sneller bestanden bewerken en worden afgekorte volledige-bestandswijzigingen automatisch geweigerd",
-			"strategy": {
-				"label": "Diff-strategie",
-				"options": {
-					"standard": "Standaard (één blok)",
-					"multiBlock": "Experimenteel: Multi-block diff",
-					"unified": "Experimenteel: Unified diff"
-				},
-				"descriptions": {
-					"standard": "Standaard diff-strategie past wijzigingen toe op één codeblok tegelijk.",
-					"unified": "Unified diff-strategie gebruikt meerdere methoden om diffs toe te passen en kiest de beste aanpak.",
-					"multiBlock": "Multi-block diff-strategie laat toe om meerdere codeblokken in één verzoek bij te werken."
-				}
-			}
-		},
 		"todoList": {
 			"label": "Takenlijst-tool inschakelen",
 			"description": "Wanneer ingeschakeld, kan Zoo takenlijsten maken en beheren om de voortgang van taken bij te houden. Dit helpt complexe taken te organiseren in beheersbare stappen."
@@ -1011,10 +914,6 @@
 			"refreshError": "Fout bij vernieuwen van tools",
 			"toolParameters": "Parameters"
 		}
-	},
-	"promptCaching": {
-		"label": "Prompt caching inschakelen",
-		"description": "Indien ingeschakeld, gebruikt Zoo dit model met prompt caching om kosten te verlagen."
 	},
 	"temperature": {
 		"useCustom": "Aangepaste temperatuur gebruiken",
@@ -1085,7 +984,6 @@
 			"reservedKeys": "De extra body kan door Zoo Code beheerde velden niet overschrijven: {{keys}}."
 		},
 		"arn": {
-			"invalidFormat": "Ongeldig ARN-formaat. Controleer de formaatvereisten.",
 			"regionMismatch": "Waarschuwing: De regio in je ARN ({{arnRegion}}) komt niet overeen met je geselecteerde regio ({{region}}). Dit kan toegangsfouten veroorzaken. De provider gebruikt de regio uit de ARN."
 		},
 		"modelAvailability": "Het opgegeven model-ID ({{modelId}}) is niet beschikbaar. Kies een ander model.",
@@ -1107,11 +1005,6 @@
 		"projectId": "Voer project-ID in...",
 		"customArn": "Voer ARN in (bijv. arn:aws:bedrock:us-east-1:123456789012:foundation-model/my-model)",
 		"baseUrl": "Voer basis-URL in...",
-		"modelId": {
-			"lmStudio": "bijv. meta-llama-3.1-8b-instruct",
-			"lmStudioDraft": "bijv. lmstudio-community/llama-3.2-1b-instruct",
-			"ollama": "bijv. llama3.1"
-		},
 		"numbers": {
 			"maxTokens": "bijv. 4096",
 			"contextWindow": "bijv. 128000",
@@ -1131,9 +1024,6 @@
 	},
 	"includeMaxOutputTokens": "Maximale output tokens opnemen",
 	"includeMaxOutputTokensDescription": "Stuur maximale output tokens parameter in API-verzoeken. Sommige providers ondersteunen dit mogelijk niet.",
-	"limitMaxTokensDescription": "Beperk het maximale aantal tokens in het antwoord",
-	"maxOutputTokensLabel": "Maximale output tokens",
-	"maxTokensGenerateDescription": "Maximale tokens om te genereren in het antwoord",
 	"openAiCodexSpeed": {
 		"label": "Snelheid",
 		"tooltip": "De snelle modus gebruikt prioriteitsverwerking van Codex voor ongeveer 1,5 keer hogere snelheid en verbruikt meer abonnementquotum.",
@@ -1141,8 +1031,6 @@
 		"fast": "Snel (1,5 keer hogere snelheid, meer verbruik)"
 	},
 	"serviceTier": {
-		"label": "Serviceniveau",
-		"tooltip": "Voor snellere verwerking van API-verzoeken, probeer het prioriteitsverwerkingsniveau. Voor lagere prijzen met hogere latentie, probeer het flexverwerkingsniveau.",
 		"standard": "Standaard",
 		"flex": "Flex",
 		"priority": "Prioriteit",
@@ -1191,8 +1079,6 @@
 		"editSkill": "Skill bewerken",
 		"deleteSkill": "Skill verwijderen",
 		"configureModes": "Modebeschikbaarheid",
-		"modeAny": "Elke modus",
-		"modeCount": "{{count}} modus",
 		"deleteDialog": {
 			"title": "Skill verwijderen",
 			"description": "Weet u zeker dat u de skill \"{{name}}\" wilt verwijderen? Deze actie kan niet ongedaan worden gemaakt.",
@@ -1201,7 +1087,6 @@
 		},
 		"modeDialog": {
 			"title": "Skillmodi configureren",
-			"description": "Kies welke modi deze skill kunnen gebruiken",
 			"intro": "Om je context licht te houden, raden we aan skills alleen beschikbaar te maken voor de modi die ze nodig hebben.",
 			"anyMode": "Elke modus (overal beschikbaar)",
 			"save": "Opslaan",
@@ -1211,13 +1096,9 @@
 			"title": "Nieuwe Skill maken",
 			"nameLabel": "Naam",
 			"namePlaceholder": "mijn-skill-naam",
-			"descriptionLabel": "Beschrijving",
 			"descriptionPlaceholder": "Beschrijf wanneer deze skill moet worden gebruikt...",
 			"sourceLabel": "Locatie",
 			"modeLabel": "Modus (optioneel)",
-			"modePlaceholder": "Elke modus",
-			"modeHint": "Beperk deze skill tot een specifieke modus",
-			"modeAny": "Elke modus",
 			"create": "Maken",
 			"cancel": "Annuleren"
 		},

@@ -1,25 +1,21 @@
 {
-	"greeting": "Zoo Code'a hoş geldin!",
 	"task": {
 		"title": "Görev",
 		"expand": "Görevi genişlet",
 		"collapse": "Görevi daralt",
 		"seeMore": "Daha fazla gör",
-		"seeLess": "Daha az gör",
 		"tokens": "Tokenlar",
 		"cache": "Önbellek",
 		"apiCost": "API Maliyeti",
 		"size": "Boyut",
 		"contextWindow": "Bağlam Uzunluğu",
-		"closeAndStart": "Görevi kapat ve yeni bir görev başlat",
 		"export": "Görev geçmişini dışa aktar",
 		"delete": "Görevi sil (Onayı atlamak için Shift + Tıkla)",
 		"condenseContext": "Bağlamı akıllıca yoğunlaştır",
 		"openApiHistory": "API Geçmişini Aç",
 		"openUiHistory": "UI Geçmişini Aç",
 		"backToParentTask": "Üst görev",
-		"waitingOnSubtask": "Alt görev bekleniyor",
-		"goToSubtask": "Alt göreve git"
+		"waitingOnSubtask": "Alt görev bekleniyor"
 	},
 	"unpin": "Sabitlemeyi iptal et",
 	"pin": "Sabitle",
@@ -88,19 +84,16 @@
 		"tooltip": "Mevcut görevi sonlandır"
 	},
 	"stop": {
-		"title": "Durdur",
-		"tooltip": "Mevcut görevi durdur"
+		"title": "Durdur"
 	},
 	"cancel": {
-		"title": "İptal",
-		"tooltip": "Mevcut işlemi iptal et"
+		"title": "İptal"
 	},
 	"enqueueMessage": "Mesajı kuyruğa ekle (mevcut görev tamamlandıktan sonra gönderilecek)",
 	"scrollToBottom": "Sohbetin altına kaydır",
 	"scrollToLatestCheckpoint": "Önceki checkpoint'e kaydır",
 	"about": "Zoo Code, düzenleyicinizdeki bütün bir yapay zeka geliştirme ekibidir.",
 	"docs": "Daha fazla bilgi için <DocsLink>belgelerimize</DocsLink> göz atın.",
-	"onboarding": "Bu çalışma alanındaki görev listeniz boş.",
 	"rooTips": {
 		"customizableModes": {
 			"title": "Özelleştirilebilir modlar",
@@ -126,7 +119,6 @@
 	"unlockApiConfigAcrossModes": "Bu çalışma alanındaki tüm modlarda API yapılandırması kilitli (kilidi açmak için tıkla)",
 	"enhancePrompt": "Ek bağlamla istemi geliştir",
 	"addImages": "Mesaja resim ekle",
-	"sendMessage": "Mesaj gönder",
 	"pressToSend": "Göndermek için {{keyCombination}} tuşuna bas",
 	"stopTts": "Metin okumayı durdur",
 	"typeMessage": "Bir mesaj yazın...",
@@ -145,7 +137,6 @@
 	},
 	"errorReadingFile": "Dosya okuma hatası",
 	"noValidImages": "Hiçbir geçerli resim işlenmedi",
-	"separator": "Ayırıcı",
 	"edit": "Düzenle...",
 	"forNextMode": "sonraki mod için",
 	"forPreviousMode": "önceki mod için",
@@ -178,7 +169,6 @@
 	},
 	"checkpoint": {
 		"regular": "Kontrol Noktası",
-		"initializingWarning": "Kontrol noktası hala başlatılıyor... Bu çok uzun sürerse, <settingsLink>ayarlar</settingsLink> bölümünden kontrol noktalarını devre dışı bırakabilir ve görevinizi yeniden başlatabilirsiniz.",
 		"menu": {
 			"viewDiff": "Farkları Görüntüle",
 			"more": "Daha fazla seçenek",
@@ -205,10 +195,8 @@
 		"wantsToEdit": "Zoo bu dosyayı düzenlemek istiyor",
 		"wantsToEditOutsideWorkspace": "Zoo çalışma alanı dışındaki bu dosyayı düzenlemek istiyor",
 		"wantsToEditProtected": "Zoo korumalı bir yapılandırma dosyasını düzenlemek istiyor",
-		"wantsToCreate": "Zoo yeni bir dosya oluşturmak istiyor",
 		"wantsToSearchReplace": "Zoo bu dosyada arama ve değiştirme yapmak istiyor",
 		"didSearchReplace": "Zoo bu dosyada arama ve değiştirme yaptı",
-		"wantsToInsert": "Zoo bu dosyaya içerik eklemek istiyor",
 		"wantsToInsertWithLineNumber": "Zoo bu dosyanın {{lineNumber}}. satırına içerik eklemek istiyor",
 		"wantsToInsertAtEnd": "Zoo bu dosyanın sonuna içerik eklemek istiyor",
 		"wantsToReadAndXMore": "Zoo bu dosyayı ve {{count}} tane daha okumak istiyor",
@@ -231,14 +219,11 @@
 		"wantsToViewTopLevelOutsideWorkspace": "Zoo bu dizindeki (çalışma alanı dışında) üst düzey dosyaları görüntülemek istiyor",
 		"didViewTopLevelOutsideWorkspace": "Zoo bu dizindeki (çalışma alanı dışında) üst düzey dosyaları görüntüledi",
 		"wantsToViewRecursiveOutsideWorkspace": "Zoo bu dizindeki (çalışma alanı dışında) tüm dosyaları özyinelemeli olarak görüntülemek istiyor",
-		"didViewRecursiveOutsideWorkspace": "Zoo bu dizindeki (çalışma alanı dışında) tüm dosyaları özyinelemeli olarak görüntüledi",
-		"wantsToViewMultipleDirectories": "Zoo birden fazla dizini görüntülemek istiyor"
+		"didViewRecursiveOutsideWorkspace": "Zoo bu dizindeki (çalışma alanı dışında) tüm dosyaları özyinelemeli olarak görüntüledi"
 	},
-	"commandOutput": "Komut Çıktısı",
 	"commandExecution": {
 		"running": "Çalışıyor",
 		"abort": "İptal Et",
-		"pid": "PID: {{pid}}",
 		"exitStatus": "{{exitCode}} durumuyla çıkıldı",
 		"malformedCommand": "Hatalı komut: shell sozdizimi hatasi",
 		"manageCommands": "Komut İzinlerini Yönet",
@@ -247,15 +232,8 @@
 		"addToAllowed": "İzin verilenler listesine ekle",
 		"removeFromAllowed": "İzin verilenler listesinden kaldır",
 		"addToDenied": "Reddedilenler listesine ekle",
-		"removeFromDenied": "Reddedilenler listesinden kaldır",
-		"abortCommand": "Komut yürütmeyi iptal et",
-		"expandOutput": "Çıktıyı genişlet",
-		"collapseOutput": "Çıktıyı daralt",
-		"expandManagement": "Komut yönetimi bölümünü genişlet",
-		"collapseManagement": "Komut yönetimi bölümünü daralt"
+		"removeFromDenied": "Reddedilenler listesinden kaldır"
 	},
-	"response": "Yanıt",
-	"arguments": "Argümanlar",
 	"text": {
 		"rooSaid": "Zoo dedi"
 	},
@@ -275,10 +253,8 @@
 	"subtasks": {
 		"wantsToCreate": "Zoo <code>{{mode}}</code> modunda yeni bir alt görev oluşturmak istiyor",
 		"wantsToFinish": "Zoo bu alt görevi bitirmek istiyor",
-		"newTaskContent": "Alt Görev Talimatları",
 		"completionContent": "Alt Görev Tamamlandı",
 		"resultContent": "Alt Görev Sonuçları",
-		"defaultResult": "Lütfen sonraki göreve devam edin.",
 		"completionInstructions": "Alt görev tamamlandı! Sonuçları inceleyebilir ve düzeltmeler veya sonraki adımlar önerebilirsiniz. Her şey iyi görünüyorsa, sonucu üst göreve döndürmek için onaylayın.",
 		"goToSubtask": "Görevi görüntüle"
 	},
@@ -301,9 +277,6 @@
 		"diagnostics": "Ayrıntılı hata bilgisi al",
 		"proxyProvider": "Proxy tabanlı bir sağlayıcı kullanıyor gibi görünüyorsun. Günlüklerini kontrol ettiğinden ve Zoo'nun isteklerini yeniden yazmadığından emin ol."
 	},
-	"powershell": {
-		"issues": "Windows PowerShell ile ilgili sorunlar yaşıyor gibi görünüyorsunuz, lütfen şu konuya bakın"
-	},
 	"autoApprove": {
 		"tooltipManage": "Otomatik onay ayarlarını yönet",
 		"tooltipStatus": "Otomatik onay şunlar için etkinleştirildi: {{toggles}}",
@@ -312,9 +285,6 @@
 		"all": "Tümü",
 		"none": "Hiçbiri",
 		"description": "İzin istemeden bu eylemleri gerçekleştirin. Bunu yalnızca tamamen güvendiğiniz eylemler için etkinleştirin.",
-		"selectOptionsFirst": "Otomatik onayı etkinleştirmek için aşağıdan en az bir seçenek seçin",
-		"toggleAriaLabel": "Otomatik onayı aç/kapat",
-		"disabledAriaLabel": "Otomatik onay devre dışı - önce seçenekleri seçin",
 		"triggerLabelOff": "Otomatik onay kapalı",
 		"triggerLabelOffShort": "Kapalı",
 		"triggerLabel_zero": "0 otomatik onaylandı",
@@ -357,12 +327,6 @@
 			"highlight1": "✨ Daha hızlı model seçimi ve daha güçlü model desteği: Modelleri sohbet yazma alanından değiştir. Amazon Bedrock'ta Claude Haiku 5.5 kullan, OpenRouter'da Kimi K3'ün daha doğru özelliklerinden yararlan ve Vercel AI Gateway'deki düzeltilmiş Gemini 4 Argon sınırlarını kullan.",
 			"highlight2": "🧭 Daha güvenilir terminal, düzenleme, sohbet ve uzak çalışma akışları: İstediğinde komut çıktısını varsayılan olarak daralt, düzenleme hatalarını daha net gör, akıl yürütme ve API satırlarını görünür tut ve uzak çalışma alanlarındaki başlangıç ve proxy sorunlarından kaçın.",
 			"highlight3": "🔌 Genişletilmiş MCP marketplace: Zoo Code'u MCP marketplace üzerinden AnySearch, Mailtea ve Tradehand'e bağla."
-		},
-		"cloudAgents": {
-			"heading": "Cloud'daki yenilikler:",
-			"specialized": "<bold>Explainer</bold>, <bold>Planner</bold> ve <bold>Coder</bold> tanıtımı - iş akışlarını geliştirmek için üç özel bulut ajanı.",
-			"description": "Ajanlar bulutta birlikte çalışır ve web'den veya Slack üzerinden tetiklenebilir.",
-			"tryButton": "Bulut Ajanlarını Dene"
 		}
 	},
 	"costs": {
@@ -445,28 +409,8 @@
 	"editMessage": {
 		"placeholder": "Mesajını düzenle..."
 	},
-	"command": {
-		"triggerDescription": "{{name}} komutunu tetikle"
-	},
 	"slashCommands": {
-		"tooltip": "Eğik çizgi komutlarını yönet",
-		"title": "Eğik Çizgi Komutları",
-		"description": "Yerleşik eğik çizgi komutlarını kullanın veya sık kullanılan komut istemleri ve iş akışlarına hızlı erişim için özel komutlar oluşturun. <DocsLink>Belgeler</DocsLink>",
-		"manageCommands": "Ayarlarda eğik çizgi komutlarını yönet",
-		"builtInCommands": "Yerleşik Komutlar",
-		"globalCommands": "Genel Komutlar",
-		"workspaceCommands": "Çalışma Alanı Komutları",
-		"globalCommand": "Genel komut",
-		"editCommand": "Komutu düzenle",
-		"deleteCommand": "Komutu sil",
-		"newGlobalCommandPlaceholder": "Yeni genel komut...",
-		"newWorkspaceCommandPlaceholder": "Yeni çalışma alanı komutu...",
-		"deleteDialog": {
-			"title": "Komutu Sil",
-			"description": "\"{{name}}\" komutunu silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.",
-			"cancel": "İptal",
-			"confirm": "Sil"
-		}
+		"manageCommands": "Ayarlarda eğik çizgi komutlarını yönet"
 	},
 	"contextMenu": {
 		"noResults": "Sonuç yok",
@@ -485,9 +429,7 @@
 	"todo": {
 		"partial": "{{total}} yapılacaklar listesinden {{completed}} tanesi tamamlandı",
 		"complete": "{{total}} yapılacaklar listesi tamamlandı",
-		"updated": "Yapılacaklar listesi güncellendi",
-		"completed": "Tamamlandı",
-		"started": "Başladı"
+		"updated": "Yapılacaklar listesi güncellendi"
 	},
 	"tooManyTools": {
 		"title": "Çok fazla araç etkinleştirildi",

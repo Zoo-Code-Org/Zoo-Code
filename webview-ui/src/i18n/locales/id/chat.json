@@ -1,25 +1,21 @@
 {
-	"greeting": "Selamat datang di Zoo Code!",
 	"task": {
 		"title": "Tugas",
 		"expand": "Perluas tugas",
 		"collapse": "Ciutkan tugas",
 		"seeMore": "Lihat lebih banyak",
-		"seeLess": "Lihat lebih sedikit",
 		"tokens": "Token",
 		"cache": "Cache",
 		"apiCost": "Biaya API",
 		"size": "Ukuran",
 		"condenseContext": "Kondensasi konteks secara cerdas",
 		"contextWindow": "Panjang Konteks",
-		"closeAndStart": "Tutup tugas dan mulai yang baru",
 		"export": "Ekspor riwayat tugas",
 		"delete": "Hapus Tugas (Shift + Klik untuk lewati konfirmasi)",
 		"openApiHistory": "Buka Riwayat API",
 		"openUiHistory": "Buka Riwayat UI",
 		"backToParentTask": "Tugas Induk",
-		"waitingOnSubtask": "Menunggu subtugas",
-		"goToSubtask": "Pergi ke subtugas"
+		"waitingOnSubtask": "Menunggu subtugas"
 	},
 	"history": {
 		"title": "Riwayat"
@@ -118,19 +114,16 @@
 		"tooltip": "Akhiri tugas saat ini"
 	},
 	"stop": {
-		"title": "Stop",
-		"tooltip": "Hentikan tugas saat ini"
+		"title": "Stop"
 	},
 	"cancel": {
-		"title": "Batal",
-		"tooltip": "Batalkan operasi saat ini"
+		"title": "Batal"
 	},
 	"enqueueMessage": "Tambahkan pesan ke antrean (akan dikirim setelah tugas saat ini selesai)",
 	"scrollToBottom": "Gulir ke bawah chat",
 	"scrollToLatestCheckpoint": "Gulir ke checkpoint sebelumnya",
 	"about": "Zoo Code adalah seluruh tim pengembang AI di editor Anda.",
 	"docs": "Lihat <DocsLink>dokumentasi</DocsLink> kami untuk mempelajari lebih lanjut.",
-	"onboarding": "Daftar tugas Anda di ruang kerja ini kosong.",
 	"rooTips": {
 		"customizableModes": {
 			"title": "Mode yang dapat disesuaikan",
@@ -165,7 +158,6 @@
 		"noResults": "Tidak ada hasil yang ditemukan"
 	},
 	"addImages": "Tambahkan gambar ke pesan",
-	"sendMessage": "Kirim pesan",
 	"pressToSend": "Tekan {{keyCombination}} untuk mengirim",
 	"stopTts": "Hentikan text-to-speech",
 	"typeMessage": "Ketik pesan...",
@@ -175,7 +167,6 @@
 	"dragFilesImages": "tahan shift untuk drag file/gambar",
 	"errorReadingFile": "Error membaca file",
 	"noValidImages": "Tidak ada gambar valid yang diproses",
-	"separator": "Pemisah",
 	"edit": "Edit...",
 	"forNextMode": "untuk mode selanjutnya",
 	"forPreviousMode": "untuk mode sebelumnya",
@@ -203,7 +194,6 @@
 	},
 	"checkpoint": {
 		"regular": "Checkpoint",
-		"initializingWarning": "Masih menginisialisasi checkpoint... Jika ini terlalu lama, kamu bisa menonaktifkan checkpoint di <settingsLink>pengaturan</settingsLink> dan restart tugas.",
 		"menu": {
 			"viewDiff": "Lihat Diff",
 			"more": "Opsi lainnya",
@@ -256,10 +246,8 @@
 		"wantsToGenerateImageOutsideWorkspace": "Zoo ingin menghasilkan gambar di luar workspace",
 		"wantsToGenerateImageProtected": "Zoo ingin menghasilkan gambar di lokasi yang dilindungi",
 		"didGenerateImage": "Zoo telah menghasilkan gambar",
-		"wantsToCreate": "Zoo ingin membuat file baru",
 		"wantsToSearchReplace": "Zoo ingin mencari dan mengganti di file ini",
 		"didSearchReplace": "Zoo melakukan pencarian dan penggantian pada file ini",
-		"wantsToInsert": "Zoo ingin menyisipkan konten ke file ini",
 		"wantsToInsertWithLineNumber": "Zoo ingin menyisipkan konten ke file ini di baris {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo ingin menambahkan konten ke akhir file ini"
 	},
@@ -275,8 +263,7 @@
 		"wantsToViewTopLevelOutsideWorkspace": "Zoo ingin melihat file tingkat atas di direktori ini (di luar workspace)",
 		"didViewTopLevelOutsideWorkspace": "Zoo melihat file tingkat atas di direktori ini (di luar workspace)",
 		"wantsToViewRecursiveOutsideWorkspace": "Zoo ingin melihat semua file secara rekursif di direktori ini (di luar workspace)",
-		"didViewRecursiveOutsideWorkspace": "Zoo melihat semua file secara rekursif di direktori ini (di luar workspace)",
-		"wantsToViewMultipleDirectories": "Zoo ingin melihat beberapa direktori"
+		"didViewRecursiveOutsideWorkspace": "Zoo melihat semua file secara rekursif di direktori ini (di luar workspace)"
 	},
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo ingin mencari codebase untuk <code>{{query}}</code>",
@@ -285,11 +272,9 @@
 		"didSearch_other": "Ditemukan {{count}} hasil",
 		"resultTooltip": "Skor kemiripan: {{score}} (klik untuk membuka file)"
 	},
-	"commandOutput": "Keluaran Perintah",
 	"commandExecution": {
 		"abort": "Batalkan",
 		"running": "Menjalankan",
-		"pid": "PID: {{pid}}",
 		"exitStatus": "Keluar dengan status {{exitCode}}",
 		"malformedCommand": "Perintah tidak valid: kesalahan sintaks shell",
 		"manageCommands": "Perintah yang disetujui secara otomatis",
@@ -297,15 +282,8 @@
 		"addToAllowed": "Tambahkan ke daftar yang diizinkan",
 		"removeFromAllowed": "Hapus dari daftar yang diizinkan",
 		"addToDenied": "Tambahkan ke daftar yang ditolak",
-		"removeFromDenied": "Hapus dari daftar yang ditolak",
-		"abortCommand": "Batalkan eksekusi perintah",
-		"expandOutput": "Perluas keluaran",
-		"collapseOutput": "Ciutkan keluaran",
-		"expandManagement": "Perluas bagian manajemen perintah",
-		"collapseManagement": "Ciutkan bagian manajemen perintah"
+		"removeFromDenied": "Hapus dari daftar yang ditolak"
 	},
-	"response": "Respons",
-	"arguments": "Argumen",
 	"text": {
 		"rooSaid": "Zoo berkata"
 	},
@@ -325,10 +303,8 @@
 	"subtasks": {
 		"wantsToCreate": "Zoo ingin membuat subtugas baru dalam mode {{mode}}",
 		"wantsToFinish": "Zoo ingin menyelesaikan subtugas ini",
-		"newTaskContent": "Instruksi Subtugas",
 		"completionContent": "Subtugas Selesai",
 		"resultContent": "Hasil Subtugas",
-		"defaultResult": "Silakan lanjutkan ke tugas berikutnya.",
 		"completionInstructions": "Subtugas selesai! Kamu bisa meninjau hasilnya dan menyarankan koreksi atau langkah selanjutnya. Jika semuanya terlihat baik, konfirmasi untuk mengembalikan hasil ke tugas induk.",
 		"goToSubtask": "Lihat tugas"
 	},
@@ -356,9 +332,6 @@
 		"diagnostics": "Dapatkan informasi kesalahan terperinci",
 		"proxyProvider": "Tampaknya kamu menggunakan penyedia berbasis proxy. Pastikan untuk memeriksa log-nya dan memastikan tidak menulis ulang permintaan Zoo."
 	},
-	"powershell": {
-		"issues": "Sepertinya kamu mengalami masalah Windows PowerShell, silakan lihat ini"
-	},
 	"autoApprove": {
 		"tooltipManage": "Kelola pengaturan persetujuan otomatis",
 		"tooltipStatus": "Persetujuan otomatis diaktifkan untuk: {{toggles}}",
@@ -367,9 +340,6 @@
 		"all": "Semua",
 		"none": "Tidak ada",
 		"description": "Jalankan tindakan ini tanpa meminta izin. Hanya aktifkan untuk tindakan yang Anda percayai sepenuhnya.",
-		"selectOptionsFirst": "Pilih setidaknya satu opsi di bawah ini untuk mengaktifkan persetujuan otomatis",
-		"toggleAriaLabel": "Beralih persetujuan otomatis",
-		"disabledAriaLabel": "Persetujuan otomatis dinonaktifkan - pilih opsi terlebih dahulu",
 		"triggerLabelOff": "Persetujuan otomatis mati",
 		"triggerLabelOffShort": "Mati",
 		"triggerLabel_zero": "0 disetujui otomatis",
@@ -385,12 +355,6 @@
 			"highlight1": "✨ Pilihan model lebih cepat dan dukungan model lebih kuat: Ganti model dari kolom penulisan chat. Gunakan Claude Haiku 5.5 di Amazon Bedrock, dapatkan kapabilitas Kimi K3 yang lebih akurat di OpenRouter, dan gunakan batas Gemini 4 Argon yang telah diperbaiki di Vercel AI Gateway.",
 			"highlight2": "🧭 Alur kerja terminal, pengeditan, chat, dan remote yang lebih andal: Atur output perintah agar diciutkan secara default jika kamu mau, dapatkan kegagalan pengeditan yang lebih jelas, pertahankan baris reasoning dan API tetap terlihat, serta hindari masalah startup dan proxy di workspace remote.",
 			"highlight3": "🔌 Marketplace MCP yang diperluas: Hubungkan Zoo Code ke AnySearch, Mailtea, dan Tradehand melalui marketplace MCP."
-		},
-		"cloudAgents": {
-			"heading": "Baru di Cloud:",
-			"specialized": "Memperkenalkan <bold>Explainer</bold>, <bold>Planner</bold>, dan <bold>Coder</bold> - tiga agen cloud khusus untuk meningkatkan alur kerja Anda.",
-			"description": "Agen bekerja bersama di cloud dan dapat dipicu dari web atau melalui Slack.",
-			"tryButton": "Coba Agen Cloud"
 		}
 	},
 	"reasoning": {
@@ -450,28 +414,8 @@
 	"editMessage": {
 		"placeholder": "Edit pesan Anda..."
 	},
-	"command": {
-		"triggerDescription": "Jalankan perintah {{name}}"
-	},
 	"slashCommands": {
-		"tooltip": "Kelola perintah slash",
-		"title": "Perintah Slash",
-		"description": "Gunakan perintah slash bawaan atau buat kustom untuk akses cepat ke prompt dan alur kerja yang sering digunakan. <DocsLink>Dokumentasi</DocsLink>",
-		"manageCommands": "Kelola perintah slash di pengaturan",
-		"builtInCommands": "Perintah Bawaan",
-		"globalCommands": "Perintah Global",
-		"workspaceCommands": "Perintah Workspace",
-		"globalCommand": "Perintah global",
-		"editCommand": "Edit perintah",
-		"deleteCommand": "Hapus perintah",
-		"newGlobalCommandPlaceholder": "Perintah global baru...",
-		"newWorkspaceCommandPlaceholder": "Perintah workspace baru...",
-		"deleteDialog": {
-			"title": "Hapus Perintah",
-			"description": "Apakah Anda yakin ingin menghapus perintah \"{{name}}\"? Tindakan ini tidak dapat dibatalkan.",
-			"cancel": "Batal",
-			"confirm": "Hapus"
-		}
+		"manageCommands": "Kelola perintah slash di pengaturan"
 	},
 	"contextMenu": {
 		"noResults": "Tidak ada hasil",
@@ -490,9 +434,7 @@
 	"todo": {
 		"partial": "{{completed}} dari {{total}} to-do selesai",
 		"complete": "{{total}} to-do selesai",
-		"updated": "Memperbarui daftar to-do",
-		"completed": "Selesai",
-		"started": "Dimulai"
+		"updated": "Memperbarui daftar to-do"
 	},
 	"tooManyTools": {
 		"title": "Terlalu banyak alat diaktifkan",
