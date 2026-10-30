@@ -13,6 +13,7 @@ import {
 	type GlobalState,
 	type RooCodeSettings,
 	providerSettingsSchema,
+	providerSettingsSchemaDiscriminated,
 	globalSettingsSchema,
 	codebaseIndexProviderSchema,
 	isSecretStateKey,
@@ -38,6 +39,51 @@ export const isPassThroughStateKey = (key: string) => PASS_THROUGH_STATE_KEYS.in
 // discriminated parse strips them from every profile blob. Clearing them here would
 // delete the user's index credentials on every profile switch.
 const FLAT_ONLY_PROVIDER_SECRET_KEYS = new Set<string>(Object.keys(codebaseIndexProviderSchema.shape))
+
+// Which provider owns each secret key, read from the same discriminated union that
+// `saveConfig` parses profiles with: a provider branch declares the keys its own
+// profile blob carries, so ownership is exactly "this key appears in this branch".
+// Every provider-owned secret key has exactly one owner (verified across all 37
+// branches); the codebase-index credentials have none, which is why they are the
+// FLAT_ONLY carve-out above.
+const PROVIDER_SECRET_KEY_OWNERS = new Map<string, Set<string>>()
+
+for (const branch of providerSettingsSchemaDiscriminated.options) {
+	const literal = branch.shape.apiProvider
+
+	// The union's last branch is the `apiProvider: undefined` default, which owns nothing.
+	if (!("value" in literal) || typeof literal.value !== "string") continue
+
+	for (const key of Object.keys(branch.shape)) {
+		if (!isSecretStateKey(key)) continue
+
+		const owners = PROVIDER_SECRET_KEY_OWNERS.get(key) ?? new Set<string>()
+		owners.add(literal.value)
+		PROVIDER_SECRET_KEY_OWNERS.set(key, owners)
+	}
+}
+
+/**
+ * Whether the provider named by a write is the one that owns `key`.
+ *
+ * A partial write can legitimately omit a secret the writing provider still uses:
+ * `api.getConfiguration()` strips secrets (`src/extension/api.ts`), so a
+ * save-then-reactivate round trip rewrites a profile from a snapshot that has no
+ * secret in it. Treating that omission as "this profile uses none of these" deleted
+ * the live profile's credentials from SecretStorage and broke every task rehydrated
+ * afterwards. Ownership answers the question the omission cannot.
+ *
+ * Returns `undefined` when ownership is unknown (no provider named, or a retired
+ * provider, whose branch is not in the union), so callers keep the old
+ * presence-based semantics instead of guessing.
+ */
+const providerOwnsSecretKey = (apiProvider: unknown, key: string): boolean | undefined => {
+	if (typeof apiProvider !== "string" || !isProviderName(apiProvider)) {
+		return undefined
+	}
+
+	return PROVIDER_SECRET_KEY_OWNERS.get(key)?.has(apiProvider) ?? false
+}
 
 const globalSettingsExportSchema = globalSettingsSchema.omit({
 	taskHistory: true,
@@ -534,8 +580,23 @@ export class ContextProxy {
 		// presence check. Without this a deleted profile's differently-named secrets
 		// (`openRouterApiKey` when the replacement uses `apiKey`) survive the switch and
 		// keep being merged back by `getValues`.
-		const isStale = (key: string) =>
-			isSecretStateKey(key) ? !!this.secretCache[key as SecretStateKey] : !!this.stateCache[key as GlobalStateKey]
+		//
+		// A secret the writing provider still owns is not stale, even when the write omits
+		// it: partial writes are normal (`api.getConfiguration()` strips secrets, so a
+		// save-then-reactivate round trip rewrites a profile from a secret-less snapshot).
+		// Purging on omission alone deleted the live profile's credentials, and every task
+		// rehydrated afterwards ran without an API key.
+		const isStale = (key: string) => {
+			if (!isSecretStateKey(key)) {
+				return !!this.stateCache[key as GlobalStateKey]
+			}
+
+			if (!this.secretCache[key as SecretStateKey]) {
+				return false
+			}
+
+			return providerOwnsSecretKey(values.apiProvider, key) !== true
+		}
 
 		await this.setValues({
 			...PROVIDER_SETTINGS_KEYS.filter((key) => !FLAT_ONLY_PROVIDER_SECRET_KEYS.has(key))
