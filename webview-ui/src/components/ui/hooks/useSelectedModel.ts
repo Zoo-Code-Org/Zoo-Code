@@ -97,15 +97,15 @@ function getStaticCatalogModel(
  * router payload has no LiteLLM entry (partial listing, failed fetch, or
  * renamed deployment).
  */
-export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
-	const provider = apiConfiguration?.apiProvider || providerIdentifiers.openrouter
+export const useSelectedModel = (apiConfiguration: ProviderSettings) => {
+	const provider = apiConfiguration.apiProvider || providerIdentifiers.openrouter
 	const activeProvider: ProviderName | undefined = isRetiredProvider(provider) ? undefined : provider
 	const dynamicProvider = activeProvider && isDynamicProvider(activeProvider) ? activeProvider : undefined
 	const openRouterModelId =
-		activeProvider === providerIdentifiers.openrouter ? apiConfiguration?.openRouterModelId : undefined
+		activeProvider === providerIdentifiers.openrouter ? apiConfiguration.openRouterModelId : undefined
 	const lmStudioModelId =
-		activeProvider === providerIdentifiers.lmstudio ? apiConfiguration?.lmStudioModelId : undefined
-	const ollamaModelId = activeProvider === providerIdentifiers.ollama ? apiConfiguration?.ollamaModelId : undefined
+		activeProvider === providerIdentifiers.lmstudio ? apiConfiguration.lmStudioModelId : undefined
+	const ollamaModelId = activeProvider === providerIdentifiers.ollama ? apiConfiguration.ollamaModelId : undefined
 
 	// Only fetch router models for dynamic providers
 	const shouldFetchRouterModels = !!dynamicProvider
@@ -414,7 +414,7 @@ function getSelectedModel({
 		}
 		case providerIdentifiers.openai: {
 			const id = apiConfiguration.openAiModelId ?? ""
-			const customInfo = apiConfiguration?.openAiCustomModelInfo
+			const customInfo = apiConfiguration.openAiCustomModelInfo
 			const info = customInfo ?? openAiModelInfoSaneDefaults
 			return { id, info }
 		}
@@ -424,7 +424,7 @@ function getSelectedModel({
 
 			const adjustedInfo =
 				info?.contextWindow &&
-				apiConfiguration?.ollamaNumCtx &&
+				apiConfiguration.ollamaNumCtx &&
 				apiConfiguration.ollamaNumCtx < info.contextWindow
 					? { ...info, contextWindow: apiConfiguration.ollamaNumCtx }
 					: info
@@ -482,10 +482,10 @@ function getSelectedModel({
 			)
 			// The host selects its first match; a separate listing cannot establish that order.
 			const reported = matches?.length === 1 ? matches[0] : undefined
-			const id = apiConfiguration?.vsCodeLmModelSelector
+			const id = apiConfiguration.vsCodeLmModelSelector
 				? `${apiConfiguration.vsCodeLmModelSelector.vendor}/${apiConfiguration.vsCodeLmModelSelector.family}`
 				: vscodeLlmDefaultModelId
-			const modelFamily = apiConfiguration?.vsCodeLmModelSelector?.family ?? vscodeLlmDefaultModelId
+			const modelFamily = apiConfiguration.vsCodeLmModelSelector?.family ?? vscodeLlmDefaultModelId
 			// On a family miss, fall back to the default model entry, not openAiModelInfoSaneDefaults
 			// (whose 128K contextWindow would diverge from the gate and skew the bar).
 			const listedModel =

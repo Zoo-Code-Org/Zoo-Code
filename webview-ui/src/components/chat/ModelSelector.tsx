@@ -47,7 +47,7 @@ function getModelIdField(provider: ProviderName): string | undefined {
 	return getProviderModelConfig(provider)?.field
 }
 
-function useModelListForProvider(provider: ProviderName | undefined, apiConfiguration?: ProviderSettings) {
+function useModelListForProvider(provider: ProviderName | undefined, apiConfiguration: ProviderSettings) {
 	const isStatic = provider ? isStaticModelProvider(provider) : false
 	const field = provider ? getModelIdField(provider) : undefined
 	const isUnsupported = !provider || !field || UNSUPPORTED_QUICK_PICK_PROVIDERS.includes(provider)
@@ -71,7 +71,7 @@ function useModelListForProvider(provider: ProviderName | undefined, apiConfigur
 }
 
 interface ModelSelectorProps {
-	apiConfiguration?: ProviderSettings
+	apiConfiguration: ProviderSettings
 	disabled?: boolean
 	title: string
 	triggerClassName?: string
@@ -90,7 +90,7 @@ export const ModelSelector = ({
 	const { t } = useAppTranslation()
 	const { organizationAllowList, currentApiConfigName } = useExtensionState()
 
-	const providerRaw = apiConfiguration?.apiProvider || providerIdentifiers.openrouter
+	const providerRaw = apiConfiguration.apiProvider || providerIdentifiers.openrouter
 	const provider: ProviderName | undefined = isRetiredProvider(providerRaw) ? undefined : providerRaw
 
 	const { id: selectedModelId, info: selectedModelInfo } = useSelectedModel(apiConfiguration)

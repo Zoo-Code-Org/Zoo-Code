@@ -15,7 +15,7 @@ import { ContextProxy } from "../../../core/config/ContextProxy"
 import { getCacheDirectoryPath } from "../../../utils/storage"
 import type { RouterName } from "../../../shared/api"
 
-import { mergeAbortSignals, throwIfAborted } from "../utils/abort-signal"
+import { createAbortError, mergeAbortSignals, throwIfAborted } from "../utils/abort-signal"
 
 import { GetModelsOptions } from "../../../shared/api"
 
@@ -35,7 +35,10 @@ const inFlightRefresh = new Map<string, FlightRecord>()
 // an in-flight entry pending indefinitely. The value is the maximum of the 5–15 s bounds the
 // individual fetchers it subsumes used to apply, relaxing rather than tightening endpoints that
 // already had a bound.
-const MODEL_CATALOG_FETCH_TIMEOUT_MS = 15_000
+//
+// Exported so providers that call a fetcher outside getModels() (e.g. the native Ollama
+// pre-warm, which bypasses the single-flight) can apply the same bound.
+export const MODEL_CATALOG_FETCH_TIMEOUT_MS = 15_000
 
 /**
  * State of one shared (single-flight) provider fetch.
@@ -386,9 +389,7 @@ function joinFlight(cacheKey: string, record: FlightRecord, callerSignal?: Abort
 			// abort must release the entry synchronously, so a caller issuing a new fetch right
 			// after abort() provably observes a fresh flight, not the doomed one.
 			detach()
-			const abortError = new Error("This operation was aborted")
-			abortError.name = "AbortError"
-			reject(abortError)
+			reject(createAbortError("model catalog"))
 		}
 		if (view.aborted) {
 			rejectAbort()

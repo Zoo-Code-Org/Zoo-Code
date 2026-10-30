@@ -1,4 +1,5 @@
 import { markToolRejected } from "../task/toolExecutionContext"
+import { DispatchState, transitionDispatch } from "../task/dispatchState"
 import { serializeError } from "serialize-error"
 import { Anthropic } from "@anthropic-ai/sdk"
 
@@ -102,12 +103,12 @@ export async function presentAssistantMessage(cline: Task, policySnapshot: Reque
 		)
 	}
 
-	if (cline.presentAssistantMessageLocked) {
-		cline.presentAssistantMessageHasPendingUpdates = true
+	if (cline.dispatchState !== DispatchState.IDLE) {
+		cline.pendingWork = { mode: "serial" }
 		return
 	}
 
-	cline.presentAssistantMessageLocked = true
+	cline.dispatchState = transitionDispatch(cline.dispatchState, DispatchState.SERIAL)
 	try {
 		// Drain updates queued while the lock was held, including one that
 		// arrives after the helper's final check but before this continuation.
@@ -115,11 +116,11 @@ export async function presentAssistantMessage(cline: Task, policySnapshot: Reque
 		// synchronous step, so no update can be stranded behind the lock.
 		do {
 			await presentAssistantMessageBlock(cline, policySnapshot)
-		} while (!cline.abort && cline.presentAssistantMessageHasPendingUpdates)
+		} while (!cline.abort && cline.pendingWork)
 	} finally {
 		// Tool handlers and provider-state reads can reject. Never strand the
 		// task behind a dispatch lock after the presenter has unwound.
-		cline.presentAssistantMessageLocked = false
+		cline.dispatchState = DispatchState.IDLE
 	}
 }
 
@@ -130,7 +131,7 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 
 	// Each internal pass consumes the pending update. New updates arriving
 	// during an awaited operation can request another pass.
-	cline.presentAssistantMessageHasPendingUpdates = false
+	cline.pendingWork = null
 
 	if (cline.currentStreamingContentIndex >= cline.assistantMessageContent.length) {
 		// This may happen if the last content block was completed before

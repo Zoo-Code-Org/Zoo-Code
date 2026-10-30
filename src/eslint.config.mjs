@@ -1,5 +1,9 @@
 import { config } from "@roo-code/config-eslint/base"
-import { apiProviderHygieneConfig, apiProviderTestSelectors } from "@roo-code/config-eslint/api-provider-hygiene"
+import {
+	apiProviderHygieneConfig,
+	apiProviderTestSelectors,
+	apiSpecTsIgnoreConfig,
+} from "@roo-code/config-eslint/api-provider-hygiene"
 import { createProviderIdentifierConfig } from "@roo-code/config-eslint/provider-identifiers"
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
@@ -38,6 +42,7 @@ export default [
 			"@typescript-eslint/ban-ts-comment": "off",
 		},
 	},
+	apiSpecTsIgnoreConfig,
 	{
 		// A Stryker directive gives a short reason. Put longer rationale in the test or a code comment.
 		// ignorePattern skips every line that does not contain "Stryker", so only directives are measured.
