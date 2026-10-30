@@ -155,7 +155,12 @@ describe("useOpenRouterModelProviders", () => {
 
 		await waitFor(() => expect(result.current.isSuccess).toBe(true))
 		expect(result.current.data).toEqual({})
-		expect(consoleError).toHaveBeenCalledWith("OpenRouter API response validation failed:", expect.anything())
+		expect(consoleError).toHaveBeenCalledWith(
+			"OpenRouter API response validation failed:",
+			expect.objectContaining({
+				issues: expect.arrayContaining([expect.objectContaining({ path: ["data", "endpoints"] })]),
+			}),
+		)
 	})
 
 	it("logs a fetch failure and returns no providers when the response is not 2xx", async () => {
@@ -166,7 +171,10 @@ describe("useOpenRouterModelProviders", () => {
 
 		await waitFor(() => expect(result.current.isSuccess).toBe(true))
 		expect(result.current.data).toEqual({})
-		expect(consoleError).toHaveBeenCalledWith("Error fetching OpenRouter providers:", expect.anything())
+		expect(consoleError).toHaveBeenCalledWith(
+			"Error fetching OpenRouter providers:",
+			expect.objectContaining({ message: "Request failed with status code 500" }),
+		)
 	})
 
 	it("logs a fetch failure and returns no providers when the request rejects", async () => {

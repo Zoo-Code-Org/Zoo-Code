@@ -106,7 +106,12 @@ describe("useOpenRouterKeyInfo", () => {
 
 		await waitFor(() => expect(result.current.isSuccess).toBe(true))
 		expect(result.current.data).toBeNull()
-		expect(consoleError).toHaveBeenCalledWith("OpenRouter API key info validation failed:", expect.anything())
+		expect(consoleError).toHaveBeenCalledWith(
+			"OpenRouter API key info validation failed:",
+			expect.objectContaining({
+				issues: expect.arrayContaining([expect.objectContaining({ path: ["data", "usage"] })]),
+			}),
+		)
 	})
 
 	it("returns null and logs a fetch failure when the response is not 2xx", async () => {
@@ -117,7 +122,10 @@ describe("useOpenRouterKeyInfo", () => {
 
 		await waitFor(() => expect(result.current.isSuccess).toBe(true))
 		expect(result.current.data).toBeNull()
-		expect(consoleError).toHaveBeenCalledWith("Error fetching OpenRouter key info:", expect.anything())
+		expect(consoleError).toHaveBeenCalledWith(
+			"Error fetching OpenRouter key info:",
+			expect.objectContaining({ message: "Request failed with status code 401" }),
+		)
 	})
 
 	it("returns null and logs a fetch failure when the request rejects", async () => {
