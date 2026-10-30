@@ -981,6 +981,11 @@ export const webviewMessageHandler = async (
 		case "exportTaskWithId":
 			await provider.exportTaskWithId(message.text!)
 			break
+		case "renameTaskWithId":
+			if (message.taskId) {
+				await provider.renameTaskWithId(message.taskId, message.text)
+			}
+			break
 		case "getTaskWithAggregatedCosts": {
 			try {
 				const taskId = message.text

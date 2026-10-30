@@ -526,6 +526,23 @@ export const vertexModels = {
 		description:
 			"Claude Opus 5.5 is Anthropic's most capable model for complex agentic coding and enterprise work.",
 	},
+	"claude-haiku-5-5": {
+		maxTokens: 128_000,
+		contextWindow: 1_000_000, // 1M context window native (no beta header required)
+		supportsImages: true,
+		supportsPromptCache: true,
+		// Standard pricing (prompts of 100,000 tokens or fewer). Prompts over
+		// 100,000 tokens bill at higher tiered rates per Anthropic's pricing page.
+		inputPrice: 0.1, // $0.10 per million input tokens
+		outputPrice: 0.5, // $0.50 per million output tokens
+		cacheWritesPrice: 0.125, // $0.125 per million tokens (5m cache writes)
+		cacheReadsPrice: 0.01, // $0.01 per million tokens (cache hits / refreshes)
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		description:
+			"Claude Haiku 5.5 is the fastest, most efficient Claude 5.5 model, built for high-volume, latency-sensitive coding and agent work.",
+	},
 	"claude-fable-5-1": {
 		maxTokens: 128_000,
 		contextWindow: 1_000_000,
