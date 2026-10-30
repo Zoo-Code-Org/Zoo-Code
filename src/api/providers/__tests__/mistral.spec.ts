@@ -922,8 +922,13 @@ describe("MistralHandler", () => {
 				// the request. Both signals are already aborted when completePrompt's catch runs,
 				// so the test really pins the first-cause classification.
 				mockComplete.mockImplementation(
-					() =>
+					(_options: unknown, requestOptions?: { fetchOptions?: { signal?: AbortSignal } }) =>
 						new Promise<never>((_resolve, reject) => {
+							// Attach a listener the way a real fetch does: Node's composite
+							// AbortSignal.any materializes its first-cause reason at abort time
+							// only when something is listening, and reads the live source
+							// signals otherwise.
+							requestOptions?.fetchOptions?.signal?.addEventListener("abort", () => {}, { once: true })
 							rejectRequest = reject
 						}),
 				)
