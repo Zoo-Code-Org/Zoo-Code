@@ -18,6 +18,13 @@ const DELIMITER = "\f"
 
 const RETRY_MS = 500
 
+// Defensive ceiling on pre-delimiter accumulation. A legitimate task event is
+// orders of magnitude smaller than this, and the node-ipc client this replaces
+// had no ceiling at all, so the bound is pure hardening: it cannot truncate a
+// real frame in practice. Measured with String#length, which under-counts
+// multi-byte UTF-8 by at most 2x; that slack is irrelevant at this size.
+export const MAX_FRAME_BYTES = 64 * 1024 * 1024
+
 const envelope = (data: unknown): string => JSON.stringify({ type: "message", data }) + DELIMITER
 
 // node-ipc rewrites non-pipe socket paths on Windows before listening, so a
@@ -34,9 +41,15 @@ export interface EvalIpcClientEvents {
 	[IpcMessageType.TaskEvent]: [data: unknown]
 }
 
+export interface EvalIpcClientOptions {
+	// Test seam only; production always uses MAX_FRAME_BYTES.
+	maxFrameBytes?: number
+}
+
 export class EvalIpcClient extends EventEmitter<EvalIpcClientEvents> {
 	private readonly _socketPath: string
 	private readonly _log: (...args: unknown[]) => void
+	private readonly _maxFrameBytes: number
 	private _socket?: net.Socket
 	private _buffer = ""
 	private _retry?: NodeJS.Timeout
@@ -44,11 +57,16 @@ export class EvalIpcClient extends EventEmitter<EvalIpcClientEvents> {
 	private _clientId?: string
 	private _closed = false
 
-	constructor(socketPath: string, log: (...args: unknown[]) => void = console.log) {
+	constructor(
+		socketPath: string,
+		log: (...args: unknown[]) => void = console.log,
+		options: EvalIpcClientOptions = {},
+	) {
 		super()
 
 		this._socketPath = socketPath
 		this._log = log
+		this._maxFrameBytes = options.maxFrameBytes ?? MAX_FRAME_BYTES
 
 		this.connect()
 	}
@@ -82,6 +100,10 @@ export class EvalIpcClient extends EventEmitter<EvalIpcClientEvents> {
 			this.emit(IpcMessageType.Disconnect)
 		}
 
+		// The rest of a partial frame can never arrive on a new socket, so
+		// keeping it would corrupt the first frame of the next session.
+		this._buffer = ""
+
 		if (this._closed) return
 
 		this._retry = setTimeout(() => this.connect(), RETRY_MS)
@@ -99,6 +121,24 @@ export class EvalIpcClient extends EventEmitter<EvalIpcClientEvents> {
 		for (const frame of frames) {
 			if (frame.length > 0) this.onFrame(frame)
 		}
+
+		if (this._buffer.length > this._maxFrameBytes) this.onOversizedFrame()
+	}
+
+	// Bounded log line only: the pending bytes may carry credentials, so neither
+	// their content nor their exact size is written out.
+	private onOversizedFrame() {
+		this._buffer = ""
+		this._closed = true
+
+		if (this._retry) {
+			clearTimeout(this._retry)
+			this._retry = undefined
+		}
+
+		this.log("[client#onData] frame exceeded MAX_FRAME_BYTES, dropping connection")
+
+		this._socket?.destroy()
 	}
 
 	private onFrame(frame: string) {

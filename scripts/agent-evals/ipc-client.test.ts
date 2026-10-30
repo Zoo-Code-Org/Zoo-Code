@@ -6,7 +6,7 @@ import path from "node:path"
 import { describe, it } from "node:test"
 
 import { IpcMessageType, IpcOrigin, RooCodeEventName, TaskCommandName, type TaskEvent } from "@roo-code/types"
-import { EvalIpcClient, resolveSocketPath } from "./ipc-client.ts"
+import { EvalIpcClient, MAX_FRAME_BYTES, resolveSocketPath } from "./ipc-client.ts"
 
 const DELIMITER = "\f"
 
@@ -201,5 +201,240 @@ describe("eval ipc client", () => {
 		} else {
 			assert.equal(mapped, "/tmp/agent-evals/ipc.sock")
 		}
+	})
+
+	it("drops a partial frame when the socket closes so it cannot corrupt the next session", async () => {
+		const dir = await socketDir()
+		const socketPath = socketPathIn(dir, "carryover")
+		const events: TaskEvent[] = []
+		const encoder = (data: unknown) => JSON.stringify({ type: "message", data }) + DELIMITER
+		const ack = encoder({
+			type: IpcMessageType.Ack,
+			origin: IpcOrigin.Server,
+			data: { clientId: "client-1", pid: process.pid, ppid: process.ppid },
+		})
+		const taskEvent = encoder({
+			type: IpcMessageType.TaskEvent,
+			origin: IpcOrigin.Server,
+			data: { eventName: RooCodeEventName.TaskStarted, payload: ["task-1"], taskId: 1 } satisfies TaskEvent,
+		})
+
+		let connections = 0
+		const server = net.createServer((socket) => {
+			socket.on("error", () => {})
+			connections++
+
+			if (connections === 1) {
+				// Only half a frame, no ack, then the peer dies. The rest can
+				// never arrive, so these bytes are unrecoverable garbage.
+				socket.write(taskEvent.slice(0, 34))
+				socket.destroy()
+				return
+			}
+
+			// A clean session. If the stale 34 bytes survived, they prepend to
+			// this ack, the ack frame fails to parse, no clientId is ever set,
+			// and the client can never become ready.
+			socket.write(ack + taskEvent)
+		})
+
+		await new Promise<void>((resolve, reject) => {
+			server.once("error", reject)
+			server.listen(resolveSocketPath(socketPath), resolve)
+		})
+
+		const client = new EvalIpcClient(socketPath, () => {})
+		client.on(IpcMessageType.TaskEvent, (event) => events.push(event as TaskEvent))
+
+		try {
+			await waitFor(() => connections >= 2 && client.isReady, 10_000)
+			assert.equal(connections, 2, "client must reconnect after the peer closes")
+			assert.equal(client.isReady, true, "the ack of the new session must parse")
+			assert.equal(client.clientId, "client-1")
+			assert.equal(events.length, 1, "the task event of the new session must parse")
+			assert.equal(events[0]?.eventName, RooCodeEventName.TaskStarted)
+		} finally {
+			client.disconnect()
+			await new Promise<void>((resolve) => server.close(() => resolve()))
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("waits for the delimiter when one frame arrives split across chunks", async () => {
+		const dir = await socketDir()
+		const socketPath = socketPathIn(dir, "split")
+		const events: TaskEvent[] = []
+		const encoded =
+			JSON.stringify({
+				type: "message",
+				data: {
+					type: IpcMessageType.TaskEvent,
+					origin: IpcOrigin.Server,
+					data: {
+						eventName: RooCodeEventName.TaskStarted,
+						payload: ["task-1"],
+						taskId: 1,
+					} satisfies TaskEvent,
+				},
+			}) + DELIMITER
+
+		const server = net.createServer((socket) => {
+			socket.on("error", () => {})
+			socket.write(
+				JSON.stringify({
+					type: "message",
+					data: {
+						type: IpcMessageType.Ack,
+						origin: IpcOrigin.Server,
+						data: { clientId: "client-1", pid: process.pid, ppid: process.ppid },
+					},
+				}) + DELIMITER,
+			)
+
+			// Split mid-frame, well before the delimiter, with a real pause.
+			const cut = Math.floor(encoded.length / 2)
+			socket.write(encoded.slice(0, cut))
+			setTimeout(() => socket.write(encoded.slice(cut)), 120)
+		})
+
+		await new Promise<void>((resolve, reject) => {
+			server.once("error", reject)
+			server.listen(resolveSocketPath(socketPath), resolve)
+		})
+
+		const client = new EvalIpcClient(socketPath, () => {})
+		client.on(IpcMessageType.TaskEvent, (event) => events.push(event as TaskEvent))
+
+		try {
+			await waitFor(() => client.isReady)
+			// The first half alone must not produce a frame.
+			await new Promise((resolve) => setTimeout(resolve, 60))
+			assert.equal(events.length, 0, "a frame without its delimiter must not be dispatched")
+
+			await waitFor(() => events.length > 0)
+			assert.equal(events.length, 1)
+			assert.equal(events[0]?.eventName, RooCodeEventName.TaskStarted)
+		} finally {
+			client.disconnect()
+			await new Promise<void>((resolve) => server.close(() => resolve()))
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("stays alive through a delimiter-free flood and still parses the frame that follows", async () => {
+		const dir = await socketDir()
+		const socketPath = socketPathIn(dir, "flood")
+		const events: TaskEvent[] = []
+		const logs: unknown[][] = []
+		const encoded =
+			JSON.stringify({
+				type: "message",
+				data: {
+					type: IpcMessageType.TaskEvent,
+					origin: IpcOrigin.Server,
+					data: {
+						eventName: RooCodeEventName.TaskStarted,
+						payload: ["task-1"],
+						taskId: 1,
+					} satisfies TaskEvent,
+				},
+			}) + DELIMITER
+
+		const server = net.createServer((socket) => {
+			socket.on("error", () => {})
+			socket.write(
+				JSON.stringify({
+					type: "message",
+					data: {
+						type: IpcMessageType.Ack,
+						origin: IpcOrigin.Server,
+						data: { clientId: "client-1", pid: process.pid, ppid: process.ppid },
+					},
+				}) + DELIMITER,
+			)
+			// 4 MB of garbage terminated as its own frame, then a valid frame.
+			// The garbage frame is dropped; the client must stay alive and parse
+			// the frame that follows.
+			socket.write("A".repeat(4 * 1024 * 1024) + DELIMITER)
+			socket.write(encoded)
+		})
+
+		await new Promise<void>((resolve, reject) => {
+			server.once("error", reject)
+			server.listen(resolveSocketPath(socketPath), resolve)
+		})
+
+		const client = new EvalIpcClient(socketPath, (...args) => logs.push(args))
+		client.on(IpcMessageType.TaskEvent, (event) => events.push(event as TaskEvent))
+
+		try {
+			await waitFor(() => events.length > 0, 10_000)
+			assert.equal(events.length, 1, "the process must survive the flood and parse the next frame")
+			assert.equal(events[0]?.eventName, RooCodeEventName.TaskStarted)
+			// The flood is below the ceiling, so the connection is not dropped.
+			assert.equal(
+				logs.some((entry) => String(entry[0]).includes("MAX_FRAME_BYTES")),
+				false,
+			)
+			assert.equal(client.isConnected, true)
+		} finally {
+			client.disconnect()
+			await new Promise<void>((resolve) => server.close(() => resolve()))
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("drops the connection with one bounded log line past the frame ceiling", async () => {
+		const dir = await socketDir()
+		const socketPath = socketPathIn(dir, "oversized")
+		const logs: unknown[][] = []
+		const events: TaskEvent[] = []
+		const secret = "sk-should-never-be-logged"
+		const ceiling = 4096
+
+		const server = net.createServer((socket) => {
+			socket.on("error", () => {})
+			socket.write(
+				JSON.stringify({
+					type: "message",
+					data: {
+						type: IpcMessageType.Ack,
+						origin: IpcOrigin.Server,
+						data: { clientId: "client-1", pid: process.pid, ppid: process.ppid },
+					},
+				}) + DELIMITER,
+			)
+			// Past the ceiling with no delimiter, credential-shaped content included.
+			socket.write(secret + "A".repeat(ceiling + 1024))
+		})
+
+		await new Promise<void>((resolve, reject) => {
+			server.once("error", reject)
+			server.listen(resolveSocketPath(socketPath), resolve)
+		})
+
+		// A small ceiling keeps this test fast; the production default is pinned
+		// by the assertion below and by the constant's own test.
+		const client = new EvalIpcClient(socketPath, (...args) => logs.push(args), { maxFrameBytes: ceiling })
+		client.on(IpcMessageType.TaskEvent, (event) => events.push(event as TaskEvent))
+
+		try {
+			await waitFor(() => logs.some((entry) => String(entry[0]).includes("MAX_FRAME_BYTES")), 10_000)
+
+			const oversized = logs.filter((entry) => String(entry[0]).includes("MAX_FRAME_BYTES"))
+			assert.equal(oversized.length, 1, "exactly one bounded log line")
+			assert.equal(oversized[0]?.length, 1, "no payload or size detail accompanies the line")
+			assert.ok(!JSON.stringify(logs).includes(secret), "buffer content must never be logged")
+			assert.equal(events.length, 0)
+			assert.equal(client.isConnected, false, "the connection is dropped")
+		} finally {
+			client.disconnect()
+			await new Promise<void>((resolve) => server.close(() => resolve()))
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("keeps the production frame ceiling far above any legitimate task event", () => {
+		assert.equal(MAX_FRAME_BYTES, 64 * 1024 * 1024)
 	})
 })
