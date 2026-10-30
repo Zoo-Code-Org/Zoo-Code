@@ -3917,9 +3917,6 @@ export class ClineProvider
 	}
 
 	/** Clear the buffer so getState() falls back to the shared values. */
-	private _clearViewLocalState(): void {
-		this.viewLocalState = {}
-	}
 	async resetState() {
 		const answer = await vscode.window.showInformationMessage(
 			t("common:confirmation.reset_state"),
