@@ -196,7 +196,11 @@ export abstract class BaseTool<TName extends ToolName> {
 	 * @returns true when the override already reported the failure to the user,
 	 *   so handle() suppresses the generic parse error
 	 */
-	protected async onParameterParseFailure(task: Task, callbacks: ToolCallbacks, parseError: Error): Promise<boolean> {
+	protected async onParameterParseFailure(
+		_task: Task,
+		_callbacks: ToolCallbacks,
+		_parseError: Error,
+	): Promise<boolean> {
 		return false
 	}
 }
