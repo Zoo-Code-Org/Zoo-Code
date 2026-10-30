@@ -223,16 +223,20 @@ export const webviewMessageHandler = async (
 	/**
 	 * Resolves image file mentions in incoming messages.
 	 * Matches read_file behavior: respects size limits and model capabilities.
+	 *
+	 * The cwd is read before the awaits below: it must be the workspace of the
+	 * task this message belongs to, which callers capture before their own await.
 	 */
 	const resolveIncomingImages = async (payload: { text?: string; images?: string[] }) => {
 		const text = payload.text ?? ""
 		const images = payload.images
 		const currentTask = provider.getCurrentTask()
+		const cwd = getCurrentCwd()
 		const state = await provider.getState()
 		const resolved = await resolveImageMentions({
 			text,
 			images,
-			cwd: getCurrentCwd(),
+			cwd,
 			rooIgnoreController: currentTask?.rooIgnoreController,
 			maxImageFileSize: state.maxImageFileSize,
 			maxTotalImageSize: state.maxTotalImageSize,

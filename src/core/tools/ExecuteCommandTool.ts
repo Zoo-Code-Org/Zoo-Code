@@ -331,7 +331,9 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			// settle delay while the result is still pending. Every site publishes
 			// through `publishToolResult`, which settles the signal with the
 			// publication outcome, so the drain waits on a structural signal and
-			// skips after a failed publication.
+			// skips after a failed publication. Every throw path must settle it
+			// too: the drain awaits it, so an unsettled promise would hang that
+			// chain and hold task references forever. Settling is idempotent.
 			let settleToolResultPublished: ((published: boolean) => void) | undefined
 			const toolResultPublished = new Promise<boolean>((resolve) => {
 				settleToolResultPublished = resolve
@@ -392,10 +394,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 						publishToolResult(result)
 						shouldDrainQueuedMessages = commandSubmitted
 					} catch (fallbackError) {
-						// The retry never published: settle the signal (and
-						// rethrow) so the background-completion drain chain
-						// awaiting toolResultPublished cannot hang forever and
-						// hold task references. Settling is idempotent.
+						// The retry never published: settle before rethrowing.
 						settleToolResultPublished?.(false)
 						throw fallbackError
 					}
@@ -407,8 +406,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 							"Command was submitted in the VS Code terminal, but shell integration did not report its output or completion status. Do not run the command again automatically.",
 						)
 					} catch (warningError) {
-						// Same hang hazard as the fallback arm: a throw before
-						// publishToolResult leaves the signal unsettled.
+						// A throw before publishToolResult leaves the signal unsettled.
 						settleToolResultPublished?.(false)
 						throw warningError
 					}
@@ -419,14 +417,8 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				} else {
 					// Ordinary execution error (e.g. the terminal failed to start) —
 					// not a shell-integration failure, so it must not emit the
-					// shell-integration warning; surface it through the tool's
-					// error path instead.
-					// Settle the publication signal before the error bubbles: the
-					// background-completion drain chain captured toolResultPublished
-					// and awaits it, so an unresolved promise would hang that chain
-					// (and hold task references) forever. The outcome is false, so
-					// the chain never drains after a failed publication. Settling
-					// is idempotent.
+					// shell-integration warning; surface it through the tool's error
+					// path instead. Settle first: false skips the drain.
 					settleToolResultPublished?.(false)
 					throw error
 				}
@@ -553,10 +545,9 @@ export async function executeCommandInTerminal(
 	let lastCommandOutputEmitAt = 0
 	let pendingCommandOutputEmitTimer: NodeJS.Timeout | undefined
 	let commandOutputSayChain: Promise<void> = Promise.resolve()
-	// Outcome of the most recent `command_output` publication. The final forced
-	// publication is the last one queued before the background drain, so after it
-	// settles this reports whether that output reached the webview. A later
-	// success clears an earlier partial failure: only the final output matters.
+	// Outcome of the most recent `command_output` publication: the final forced
+	// one is the last queued before the background drain, so it reports whether
+	// that output reached the webview. A later success clears an earlier failure.
 	let commandOutputPublishFailed = false
 
 	const queueCommandOutputMessage = (text: string, partial: boolean, force = false): Promise<void> => {
@@ -670,17 +661,12 @@ export async function executeCommandInTerminal(
 						return
 					}
 					const published = await toolResultPublished
-					// A task cancelled while the command finished in the
-					// background must not drain: the guards inside
-					// processQueuedMessages would no-op anyway, and skipping here
-					// avoids pointless work plus error-log noise on the dying task.
-					if (task.abort || task.abandoned) {
-						return
-					}
-					// A failed publication must not drain either: handleError
-					// reports the command error first, and the queued message
-					// waits for a later turn.
-					if (!published) {
+					// A task cancelled while the command finished in the background
+					// must not drain: the guards inside processQueuedMessages would
+					// no-op anyway, and skipping avoids error-log noise on the dying
+					// task. A failed publication must not drain either: handleError
+					// reports the command error first.
+					if (task.abort || task.abandoned || !published) {
 						return
 					}
 					// The final `command_output` say is part of what the drain depends

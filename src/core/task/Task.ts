@@ -520,6 +520,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// `ask()` calls in flight. A drain must not submit while one is pending: the
 	// submission would answer that ask with text written for another turn.
 	private pendingAskCount = 0
+	// Queued feedback whose `user_feedback` row is already in `clineMessages`, so
+	// a retry or reclaim re-saves it instead of appending a duplicate row.
+	private queuedFeedbackRowWritten = new Set<string>()
 
 	// Streaming
 	isWaitingForFirstChunk = false
@@ -1115,7 +1118,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		text?: string,
 		images?: string[],
 	): Promise<boolean> {
-		await this.say("user_feedback", text ?? "", images)
+		// Append the row once, before the retry loop: a retry only re-attempts the
+		// durable save, and a reclaimed message already has its row.
+		if (!this.queuedFeedbackRowWritten.has(messageId)) {
+			await this.say("user_feedback", text ?? "", images)
+			this.queuedFeedbackRowWritten.add(messageId)
+		}
 		for (let attempt = 0; attempt <= QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length; attempt++) {
 			if (this.abort) {
 				this.releaseUnconsumedQueuedMessage(messageId)
@@ -1265,15 +1273,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private consumeQueuedMessage(messageId: string): void {
 		this.messageQueueService.removeMessage(messageId)
 		this.drainRetainedQueuedMessageIds.delete(messageId)
+		this.queuedFeedbackRowWritten.delete(messageId)
 	}
 
 	/**
-	 * Undo a claim whose consume did not happen.
-	 *
-	 * A drain submitted this message and no ask has delivered it to the model
-	 * yet, so the claim is released for a later consumer and the retention record
-	 * keeps it out of every `yesButtonClicked`-mapped ask. Releasing without that
-	 * record would re-arm it as fresh input for the next command ask to approve.
+	 * Undo a claim whose consume did not happen: release it for a later consumer
+	 * and re-arm the retention record, so it cannot look like fresh input for the
+	 * next command ask to approve.
 	 */
 	private releaseUnconsumedQueuedMessage(messageId: string): void {
 		this.drainRetainedQueuedMessageIds.add(messageId)
@@ -1411,18 +1417,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
-	 * Queued messages this ask must not claim. `queuedResponseForAsk` answers a
+	 * Queued messages this ask must not claim: `queuedResponseForAsk` answers a
 	 * command, tool, or use_mcp_server ask with `yesButtonClicked`, so claiming a
-	 * drain-retained message there would turn between-turn feedback into an
-	 * approval with `checkAutoApproval` skipped.
+	 * drain-retained message would turn between-turn feedback into an approval
+	 * with `checkAutoApproval` skipped.
 	 */
 	private queuedClaimExclusionsForAsk(type: ClineAsk, text?: string): ReadonlySet<string> | undefined {
 		// Drop IDs the queue no longer holds (deleted from the webview or the API)
-		// so the record cannot outlive its message.
+		// so neither record can outlive its message.
 		const queuedIds = new Set(this.messageQueueService.messages.map((message) => message.id))
 		for (const id of this.drainRetainedQueuedMessageIds) {
 			if (!queuedIds.has(id)) {
 				this.drainRetainedQueuedMessageIds.delete(id)
+				this.queuedFeedbackRowWritten.delete(id)
 			}
 		}
 
@@ -6557,9 +6564,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * `queuedResponseForAsk` mapping answers `yesButtonClicked` excludes those
 	 * IDs, so the retained text cannot silently approve a later execution ask.
 	 *
-	 * A drain also never submits while an `ask()` is pending: the submission
-	 * would answer that ask with text written for another turn. Drains are
-	 * serialized per task, so two of them cannot interleave into the single slot.
+	 * A drain never submits while an `ask()` is pending, and drains are
+	 * serialized per task, so two of them cannot interleave into the slot.
 	 *
 	 * @returns true only when this call submitted a message. A retained queue
 	 * head reports false: it was already submitted, and the single ask-response

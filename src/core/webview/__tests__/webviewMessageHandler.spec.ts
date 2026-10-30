@@ -1009,6 +1009,41 @@ describe("webviewMessageHandler - image mentions", () => {
 		expect(taskA.handleWebviewAskResponse).toHaveBeenCalledTimes(type === "askResponse" ? 1 : 0)
 		expect(taskB.handleWebviewAskResponse).not.toHaveBeenCalled()
 	})
+
+	// Mentions must resolve against the workspace of the task the message is
+	// delivered to. The cwd is read before the handler's own awaits, so a task
+	// switch during the state read cannot move resolution to another workspace.
+	it("resolves mentions against the workspace captured before the state await", async () => {
+		const taskA = {
+			cwd: "/workspace-a",
+			rooIgnoreController: undefined,
+			messageQueueService: { addMessage: vi.fn() },
+			handleWebviewAskResponse: vi.fn(),
+		}
+		const taskB = {
+			cwd: "/workspace-b",
+			rooIgnoreController: undefined,
+			messageQueueService: { addMessage: vi.fn() },
+			handleWebviewAskResponse: vi.fn(),
+		}
+
+		let currentTask = taskA
+		vi.mocked(mockClineProvider.getCurrentTask).mockImplementation(() => currentTask as never)
+		// The switch lands while the handler is suspended on the state read, before
+		// mention resolution starts.
+		mockClineProvider.getState = vi.fn().mockImplementation(async () => {
+			currentTask = taskB
+			return { maxImageFileSize: 5, maxTotalImageSize: 20 }
+		})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "queueMessage",
+			text: "see @/img.png",
+			images: [],
+		})
+
+		expect(vi.mocked(resolveImageMentions)).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/workspace-a" }))
+	})
 })
 
 describe("webviewMessageHandler - requestOllamaModels", () => {

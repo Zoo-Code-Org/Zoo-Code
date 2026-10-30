@@ -24,6 +24,7 @@ describe("Task.ask queued message drain", () => {
 		;(task as any).lastMessageTs = undefined
 		task["pendingAskCount"] = 0
 		task["drainRetainedQueuedMessageIds"] = new Set<string>()
+		task["queuedFeedbackRowWritten"] = new Set<string>()
 		return import("../../message-queue/MessageQueueService").then(({ MessageQueueService }) => {
 			;(task as any).messageQueueService = new MessageQueueService()
 			;(task as any).addToClineMessages = vi.fn(async () => {})
@@ -464,5 +465,35 @@ describe("Task.ask queued message drain", () => {
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+
+	it("does not append a second user_feedback row when a reclaimed message is persisted again", async () => {
+		const task = await createTask()
+		task.messageQueueService.addMessage("Persist me twice")
+		const result = await task.ask("completion_result", "Done", false)
+		const access = getQueueTaskTestAccess(task)
+		const say = vi.fn().mockResolvedValue(undefined)
+		access.say = say
+
+		// First attempt appends the row, then fails every save and releases the
+		// claim, so the message is reclaimed as fresh input for a later turn.
+		access.saveClineMessages = vi.fn().mockResolvedValue(false)
+		vi.useFakeTimers()
+		try {
+			const first = task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images)
+			await vi.runAllTimersAsync()
+			await expect(first).resolves.toBe(false)
+		} finally {
+			vi.useRealTimers()
+		}
+		expect(say).toHaveBeenCalledTimes(1)
+
+		// The retry succeeds, but the row it would append is already in history.
+		access.saveClineMessages = vi.fn().mockResolvedValue(true)
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).resolves.toBe(true)
+		expect(say).toHaveBeenCalledTimes(1)
+		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 })
