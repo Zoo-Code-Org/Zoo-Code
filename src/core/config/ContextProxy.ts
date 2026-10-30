@@ -76,6 +76,7 @@ export class ContextProxy {
 	private readonly originalContext: vscode.ExtensionContext
 
 	private stateCache: GlobalState
+
 	private secretCache: SecretState
 	private _isInitialized = false
 
