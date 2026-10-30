@@ -1,5 +1,7 @@
 // npx vitest run api/transform/__tests__/chat-usage-normalization.spec.ts
 
+import { logger } from "../../../utils/logging"
+
 import { normalizeChatUsage } from "../chat-usage-normalization"
 
 // Documented DeepSeek usage block, copied from the vendor's OpenAPI example.
@@ -98,6 +100,132 @@ describe("normalizeChatUsage", () => {
 				prompt_tokens_details: { cache_miss_tokens: 20 },
 			})?.cacheWriteTokens,
 		).toBe(20)
+	})
+
+	describe("cache_creation_input_tokens (LiteLLM write shape)", () => {
+		it("reads the LiteLLM top-level write counter when no DeepSeek write alias is present", () => {
+			expect(
+				normalizeChatUsage({
+					prompt_tokens: 100,
+					completion_tokens: 50,
+					cache_creation_input_tokens: 20,
+					cache_read_input_tokens: 30,
+				}),
+			).toEqual({ inputTokens: 100, outputTokens: 50, cacheReadTokens: 30, cacheWriteTokens: 20 })
+		})
+
+		it("keeps the documented DeepSeek top-level miss counter ahead of it", () => {
+			// Both describe the same writes. DeepSeek's documented shape wins and
+			// the two are never added together.
+			expect(
+				normalizeChatUsage({
+					prompt_tokens: 120,
+					prompt_cache_miss_tokens: 20,
+					cache_creation_input_tokens: 20,
+				})?.cacheWriteTokens,
+			).toBe(20)
+		})
+
+		it("keeps every DeepSeek write alias ahead of it", () => {
+			expect(
+				normalizeChatUsage({
+					prompt_tokens: 120,
+					prompt_tokens_details: { cache_miss_tokens: 20 },
+					cache_creation_input_tokens: 99,
+				})?.cacheWriteTokens,
+			).toBe(20)
+
+			expect(
+				normalizeChatUsage({
+					prompt_tokens: 120,
+					prompt_tokens_details: { cache_write_tokens: 20 },
+					cache_creation_input_tokens: 99,
+				})?.cacheWriteTokens,
+			).toBe(20)
+		})
+
+		it("does not sum it with a DeepSeek write alias reporting the same quantity", () => {
+			const normalized = normalizeChatUsage({
+				prompt_tokens: 120,
+				completion_tokens: 30,
+				prompt_cache_miss_tokens: 20,
+				prompt_tokens_details: { cache_miss_tokens: 20, cache_write_tokens: 20 },
+				cache_creation_input_tokens: 20,
+			})
+
+			expect(normalized?.cacheWriteTokens).toBe(20)
+		})
+	})
+
+	describe("malformed counter hardening", () => {
+		it.each([
+			["a numeric string", "30"],
+			["a fractional number", 1.5],
+			["a negative number", -1],
+			["NaN", NaN],
+			["Infinity", Infinity],
+			["an object", { tokens: 30 }],
+			["a boolean", true],
+		])("discards %s and falls through to the next alias", (_name, malformed) => {
+			expect(
+				normalizeChatUsage({
+					prompt_tokens: 120,
+					prompt_cache_miss_tokens: malformed,
+					prompt_tokens_details: { cache_miss_tokens: 20 },
+				})?.cacheWriteTokens,
+			).toBe(20)
+		})
+
+		it("reports a present-but-malformed counter instead of discarding it silently", async () => {
+			// A fresh module instance keeps this case independent of the dedupe
+			// state that earlier cases in this file have already populated.
+			vi.resetModules()
+			const { logger: freshLogger } = await import("../../../utils/logging")
+			const { normalizeChatUsage: freshNormalize } = await import("../chat-usage-normalization")
+			const warn = vi.spyOn(freshLogger, "warn").mockImplementation(() => {})
+
+			try {
+				freshNormalize({ prompt_tokens: 120, prompt_cache_miss_tokens: "30" })
+
+				expect(warn).toHaveBeenCalledWith(expect.any(String), {
+					path: "prompt_cache_miss_tokens",
+					value: "30",
+				})
+			} finally {
+				warn.mockRestore()
+			}
+		})
+
+		it("reports a malformed counter once per alias rather than on every chunk", async () => {
+			vi.resetModules()
+			const { logger: freshLogger } = await import("../../../utils/logging")
+			const { normalizeChatUsage: freshNormalize } = await import("../chat-usage-normalization")
+			const warn = vi.spyOn(freshLogger, "warn").mockImplementation(() => {})
+
+			try {
+				freshNormalize({ prompt_tokens: 120, prompt_cache_miss_tokens: "30" })
+				freshNormalize({ prompt_tokens: 120, prompt_cache_miss_tokens: "30" })
+				freshNormalize({ prompt_tokens: 120, prompt_cache_miss_tokens: "30" })
+
+				expect(warn).toHaveBeenCalledTimes(1)
+			} finally {
+				warn.mockRestore()
+			}
+		})
+
+		it("stays silent for counters the provider simply did not report", () => {
+			const warn = vi.spyOn(logger, "warn").mockImplementation(() => {})
+
+			try {
+				normalizeChatUsage({ prompt_tokens: 100, completion_tokens: 50 })
+				normalizeChatUsage({ prompt_tokens: 100, prompt_tokens_details: null })
+				normalizeChatUsage({ prompt_tokens: 100, prompt_cache_hit_tokens: null })
+
+				expect(warn).not.toHaveBeenCalled()
+			} finally {
+				warn.mockRestore()
+			}
+		})
 	})
 
 	it("leaves cache counters undefined when the provider reports none", () => {
