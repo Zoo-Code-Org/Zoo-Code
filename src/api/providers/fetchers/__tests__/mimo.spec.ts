@@ -2,7 +2,7 @@ import { z } from "zod"
 
 import { mimoModels, providerSettingsSchema } from "@roo-code/types"
 
-import { getMimoModels, ALLOWED_BASE_URLS } from "../mimo"
+import { getMimoModels, ALLOWED_BASE_URLS, MAX_MIMO_MODEL_ENTRIES, MAX_MIMO_MODEL_ID_LENGTH } from "../mimo"
 
 describe("getMimoModels", () => {
 	const originalFetch = globalThis.fetch
@@ -477,6 +477,62 @@ describe("getMimoModels", () => {
 			"https://token-plan-cn.xiaomimimo.com/v1/models",
 			expect.any(Object),
 		)
+	})
+
+	describe("response size caps", () => {
+		// The model list is remote input: without a ceiling a hostile or broken
+		// endpoint inflates the cached catalog and every picker that renders it.
+		const respondWith = (data: unknown[]) => {
+			globalThis.fetch = vi.fn().mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({ data }),
+			}) as unknown as typeof fetch
+		}
+
+		it("caps the catalog at the entry limit", async () => {
+			respondWith(
+				Array.from({ length: MAX_MIMO_MODEL_ENTRIES + 50 }, (_, index) => ({ id: `mimo-model-${index}` })),
+			)
+
+			const models = await getMimoModels("https://token-plan-sgp.xiaomimimo.com/v1", "mock-key")
+
+			expect(Object.keys(models)).toHaveLength(MAX_MIMO_MODEL_ENTRIES)
+			// The cap keeps the first entries in response order, so a truncated
+			// catalog is still a prefix of what the endpoint served.
+			expect(models["mimo-model-0"]).toBeDefined()
+			expect(models[`mimo-model-${MAX_MIMO_MODEL_ENTRIES - 1}`]).toBeDefined()
+			expect(models[`mimo-model-${MAX_MIMO_MODEL_ENTRIES}`]).toBeUndefined()
+		})
+
+		it("keeps every entry when the list is exactly at the cap", async () => {
+			respondWith(Array.from({ length: MAX_MIMO_MODEL_ENTRIES }, (_, index) => ({ id: `mimo-model-${index}` })))
+
+			const models = await getMimoModels("https://token-plan-sgp.xiaomimimo.com/v1", "mock-key")
+
+			expect(Object.keys(models)).toHaveLength(MAX_MIMO_MODEL_ENTRIES)
+		})
+
+		it("drops an over-long model ID instead of truncating it", async () => {
+			const longId = "m" + "x".repeat(MAX_MIMO_MODEL_ID_LENGTH)
+			respondWith([{ id: longId }, { id: "mimo-v2.6-pro" }])
+
+			const models = await getMimoModels("https://token-plan-sgp.xiaomimimo.com/v1", "mock-key")
+
+			expect(Object.keys(models)).toEqual(["mimo-v2.6-pro"])
+			// Truncating would invent an ID the provider does not serve, so no
+			// shortened variant may appear either.
+			expect(models[longId.slice(0, MAX_MIMO_MODEL_ID_LENGTH)]).toBeUndefined()
+		})
+
+		it("keeps an ID exactly at the length limit", async () => {
+			const maxLengthId = "m" + "x".repeat(MAX_MIMO_MODEL_ID_LENGTH - 1)
+			expect(maxLengthId).toHaveLength(MAX_MIMO_MODEL_ID_LENGTH)
+			respondWith([{ id: maxLengthId }])
+
+			const models = await getMimoModels("https://token-plan-sgp.xiaomimimo.com/v1", "mock-key")
+
+			expect(Object.keys(models)).toEqual([maxLengthId])
+		})
 	})
 
 	it("passes the caller's abort signal to the request", async () => {

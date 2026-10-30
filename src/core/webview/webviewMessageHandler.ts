@@ -131,6 +131,15 @@ import {
 const handlerFor = (apiConfiguration: ProviderSettings, provider: RouterName): ApiHandler =>
 	buildApiHandler({ ...apiConfiguration, apiProvider: provider })
 
+// True when a non-empty mimoBaseUrl is outside the four Xiaomi endpoints the
+// fetcher and MimoHandler both enforce. handlerFor() builds its handler eagerly
+// from stored config and MimoHandler's constructor throws on such a value, so
+// every router-models case that constructs a MiMo handler must consult this
+// first: the throw would otherwise escape webviewMessageHandler entirely
+// (onReceiveMessage has no catch) and take the whole response with it.
+const isOffListMimoBaseUrl = (mimoBaseUrl: string | undefined): boolean =>
+	mimoBaseUrl !== undefined && mimoBaseUrl !== "" && !ALLOWED_BASE_URLS.has(stripTrailingSlashes(mimoBaseUrl))
+
 export const webviewMessageHandler = async (
 	provider: ClineProvider,
 	message: WebviewMessage,
@@ -867,15 +876,19 @@ export const webviewMessageHandler = async (
 							continue
 						}
 					} else if (key === "mimoBaseUrl") {
-						// Persistence-boundary gate. The settings schema pins this key to
-						// the four allowed Xiaomi endpoints, but ContextProxy fails open on
-						// a schema rejection and returns raw stored values — so validate
-						// again here, at the only place an off-list value could newly enter
-						// storage. Empty string means "unset" (mirroring the handler and
-						// router fallbacks) and is normalized to undefined; an off-list
-						// non-empty value is dropped with a warning so it can never reach
-						// the chat-completion client via persisted state. Trailing slashes
-						// are tolerated for the check and canonicalized away on save.
+						// Persistence-boundary gate for the settings form. The settings
+						// schema pins this key to the four allowed Xiaomi endpoints, but
+						// ContextProxy fails open on a schema rejection and returns raw
+						// stored values, so validate again here rather than trusting
+						// storage. This is one of two write paths, not the only one: the
+						// exported ZooCodeAPI.setConfiguration applies the same allowlist
+						// in src/extension/api.ts, and every consumer re-checks anyway
+						// because a value can also predate this gate. Empty string means
+						// "unset" (mirroring the handler and router fallbacks) and is
+						// normalized to undefined; an off-list non-empty value is dropped
+						// with a warning so it can never reach the chat-completion client
+						// via persisted state. Trailing slashes are tolerated for the
+						// check and canonicalized away on save.
 						if (typeof value === "string" && value !== "") {
 							const normalized = stripTrailingSlashes(value)
 							if (!ALLOWED_BASE_URLS.has(normalized)) {
@@ -1143,6 +1156,20 @@ export const webviewMessageHandler = async (
 		case RouterModelsMessageType.flushRouterModels: {
 			const { apiConfiguration } = await provider.getState()
 			const routerNameFlush: RouterName = toRouterName(message.text)
+
+			// Same stored-value gate as requestRouterModels: an off-list mimoBaseUrl
+			// (written by a pre-allowlist build, or by a caller of the exported
+			// ZooCodeAPI.setConfiguration, since ContextProxy fails open on a schema
+			// rejection) makes MimoHandler's constructor throw here. This case has no
+			// surrounding catch, so the rejection would escape the message handler and
+			// break the flush for good; skip the dispatch instead.
+			if (routerNameFlush === providerIdentifiers.mimo && isOffListMimoBaseUrl(apiConfiguration.mimoBaseUrl)) {
+				console.warn(
+					"[flushRouterModels] Skipped MiMo model flush: the stored base URL is not an allowed Xiaomi MiMo endpoint.",
+				)
+				break
+			}
+
 			// Note: flushRouterModels is a generic flush without credentials
 			// For providers that need credentials, use their specific handlers
 			await flushModels(
@@ -1368,10 +1395,7 @@ export const webviewMessageHandler = async (
 			// MimoHandler's constructor rejects off-list endpoints, and that throw
 			// escapes the whole requestRouterModels case, skipping both the MiMo
 			// failure response and the aggregate routerModels response.
-			const mimoBaseUrlRejected =
-				mimoBaseUrl !== undefined &&
-				mimoBaseUrl !== "" &&
-				!ALLOWED_BASE_URLS.has(stripTrailingSlashes(mimoBaseUrl))
+			const mimoBaseUrlRejected = isOffListMimoBaseUrl(mimoBaseUrl)
 
 			if (mimoApiKey) {
 				if (mimoBaseUrlRejected) {

@@ -58,6 +58,17 @@ export class MimoHandler extends OpenAiHandler {
 			openAiStreamingEnabled: true,
 			includeMaxTokens: false,
 		})
+
+		// The allowlist above pins the URL this client is BUILT with, not the URLs
+		// it can end up talking to: the SDK's default fetch follows 3xx, so an
+		// allowlisted origin answering with a redirect would replay the POST body
+		// (system prompt, conversation, tool output) to an origin the allowlist
+		// never vetted, and would re-scope the bearer key wherever the fetch
+		// implementation forwards it. Pin the same redirect:"error" policy the
+		// model fetcher uses (fetchers/mimo.ts) so both paths carry the key under
+		// one transport rule. Set on the client rather than by replacing `fetch`
+		// so proxy agents and any other transport configuration still apply.
+		this.client.fetchOptions = { redirect: "error" }
 	}
 
 	/**

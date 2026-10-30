@@ -967,6 +967,91 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		})
 	})
 
+	describe("flushRouterModels", () => {
+		// flushRouterModels builds its handler eagerly from stored config and has no
+		// surrounding catch, so an off-list stored mimoBaseUrl made MimoHandler's
+		// constructor throw and escape webviewMessageHandler entirely. The mock
+		// buildApiHandler above enforces the real constructor contract, so these
+		// tests fail if the guard is ever removed.
+		it("skips the flush for an off-list stored MiMo base URL instead of letting the constructor throw", async () => {
+			mockProvider.getState.mockResolvedValue({
+				apiConfiguration: {
+					mimoApiKey: "stored-mimo-key",
+					mimoBaseUrl: "https://attacker.example/v1",
+				},
+			})
+
+			await expect(
+				webviewMessageHandler(mockProvider, {
+					type: RouterModelsMessageType.flushRouterModels,
+					text: providerIdentifiers.mimo,
+				}),
+			).resolves.toBeUndefined()
+
+			expect(flushModelsMock).not.toHaveBeenCalled()
+			expect(handlersByProvider.has(providerIdentifiers.mimo)).toBe(false)
+		})
+
+		it("flushes MiMo from a stored allowlisted base URL", async () => {
+			mockProvider.getState.mockResolvedValue({
+				apiConfiguration: {
+					mimoApiKey: "stored-mimo-key",
+					mimoBaseUrl: "https://token-plan-ams.xiaomimimo.com/v1",
+				},
+			})
+
+			await webviewMessageHandler(mockProvider, {
+				type: RouterModelsMessageType.flushRouterModels,
+				text: providerIdentifiers.mimo,
+			})
+
+			expect(flushModelsMock).toHaveBeenCalledWith(
+				{ provider: providerIdentifiers.mimo },
+				handlerForProvider(providerIdentifiers.mimo),
+				true,
+			)
+		})
+
+		it("flushes MiMo from the default cluster when no stored base URL is set", async () => {
+			mockProvider.getState.mockResolvedValue({
+				apiConfiguration: { mimoApiKey: "stored-mimo-key" },
+			})
+
+			await webviewMessageHandler(mockProvider, {
+				type: RouterModelsMessageType.flushRouterModels,
+				text: providerIdentifiers.mimo,
+			})
+
+			expect(flushModelsMock).toHaveBeenCalledWith(
+				{ provider: providerIdentifiers.mimo },
+				handlerForProvider(providerIdentifiers.mimo),
+				true,
+			)
+		})
+
+		it("still flushes other providers when the stored MiMo base URL is off-list", async () => {
+			// The guard is MiMo-specific: an off-list MiMo value must not disable the
+			// generic flush for every other router.
+			mockProvider.getState.mockResolvedValue({
+				apiConfiguration: {
+					mimoApiKey: "stored-mimo-key",
+					mimoBaseUrl: "https://attacker.example/v1",
+				},
+			})
+
+			await webviewMessageHandler(mockProvider, {
+				type: RouterModelsMessageType.flushRouterModels,
+				text: providerIdentifiers.openrouter,
+			})
+
+			expect(flushModelsMock).toHaveBeenCalledWith(
+				{ provider: providerIdentifiers.openrouter },
+				handlerForProvider(providerIdentifiers.openrouter),
+				true,
+			)
+		})
+	})
+
 	it("rejects an unsaved MiMo base URL outside the Xiaomi allowlist without dispatching a fetch", async () => {
 		mockProvider.getState.mockResolvedValue({
 			apiConfiguration: {

@@ -36,6 +36,7 @@ import { readTaskMessages } from "../core/task-persistence/taskMessages"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
 import { getCommands } from "../services/command/commands"
+import { ALLOWED_BASE_URLS, stripTrailingSlashes } from "../api/providers/fetchers/mimo"
 
 export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly outputChannel: vscode.OutputChannel
@@ -629,8 +630,21 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	public async setConfiguration(values: RooCodeSettings) {
-		await this.sidebarProvider.contextProxy.setValues(values)
-		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
+		// The allowlist normally lives at the two boundaries that consume this
+		// value (the updateSettings persistence gate and MimoHandler's
+		// constructor), but this public API writes straight to ContextProxy and
+		// ContextProxy fails open on a schema rejection, so a caller could park
+		// an off-list mimoBaseUrl in storage and every consumer would then have to
+		// defend against it. Drop it here instead of persisting it. The value is
+		// removed rather than overwritten so "unset" keeps its existing meaning
+		// (fall back to the default cluster) instead of pinning a cluster.
+		const sanitizedValues = this.withoutOffListMimoBaseUrl(values)
+
+		await this.sidebarProvider.contextProxy.setValues(sanitizedValues)
+		await this.sidebarProvider.providerSettingsManager.saveConfig(
+			sanitizedValues.currentApiConfigName || "default",
+			sanitizedValues,
+		)
 		if (values.modeApiConfigs) {
 			await Promise.all(
 				Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
@@ -639,6 +653,33 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			)
 		}
 		await this.sidebarProvider.postStateToWebview()
+	}
+
+	/**
+	 * Returns `values` unchanged unless it carries a non-empty mimoBaseUrl outside
+	 * the four allowed Xiaomi endpoints, in which case that one key is omitted.
+	 * Empty string means "unset" and passes through untouched.
+	 */
+	private withoutOffListMimoBaseUrl(values: RooCodeSettings): RooCodeSettings {
+		// Declared as the four-literal union, but this API is a public entry point
+		// for other extensions and automation: the runtime value is whatever the
+		// caller passed, and the schema is exactly what it never went through.
+		const mimoBaseUrl: string | undefined = values.mimoBaseUrl
+
+		if (
+			mimoBaseUrl === undefined ||
+			mimoBaseUrl === "" ||
+			ALLOWED_BASE_URLS.has(stripTrailingSlashes(mimoBaseUrl))
+		) {
+			return values
+		}
+
+		console.warn(
+			"[API] Rejected mimoBaseUrl outside the allowed Xiaomi MiMo endpoints; the value was not persisted.",
+		)
+
+		const { mimoBaseUrl: _rejected, ...rest } = values
+		return rest
 	}
 
 	public setTerminalProfile(name: string | undefined): void {

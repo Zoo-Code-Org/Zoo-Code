@@ -8,6 +8,13 @@ import { DEFAULT_HEADERS } from "../constants"
 // builds, so discovery excludes them from the catalog.
 const NON_TEXT_MODEL_ID = /-(asr|tts)(-|$)/i
 
+// Ceilings on what a provider response can add to the catalog. The response is
+// remote input: without a cap, a hostile or broken endpoint could inflate the
+// cached catalog (and every webview model picker that renders it) without
+// bound. Both limits are far above any plausible MiMo catalog size.
+export const MAX_MIMO_MODEL_ENTRIES = 1000
+export const MAX_MIMO_MODEL_ID_LENGTH = 256
+
 // Default cluster (Singapore), used whenever the caller leaves mimoBaseUrl
 // unset or empty. Exported so the chat-completion handler resolves the exact
 // same fallback instead of drifting a second literal.
@@ -135,14 +142,30 @@ export async function getMimoModels(
 
 	// Use null-prototype object to prevent prototype pollution
 	const models: ModelRecord = Object.create(null)
+	let entryCount = 0
 
 	for (const model of data.data) {
+		// Stop at the entry ceiling rather than truncating silently at the end:
+		// a response this large is not a catalog, so the excess is dropped here
+		// with one log line instead of growing the cache past the bound.
+		if (entryCount >= MAX_MIMO_MODEL_ENTRIES) {
+			console.error("[getMimoModels] Model list exceeded the entry cap; the remainder was dropped:", {
+				cap: MAX_MIMO_MODEL_ENTRIES,
+			})
+			break
+		}
+
 		// Skip non-record elements so a single malformed entry cannot abort
 		// the whole catalog.
 		if (typeof model !== "object" || model === null) continue
 
 		const modelId = typeof model.id === "string" && model.id ? model.id : null
 		if (!modelId || NON_TEXT_MODEL_ID.test(modelId)) continue
+
+		// An over-long ID is dropped instead of truncated: a truncated ID would
+		// name a model the provider does not serve, and the length cap keeps the
+		// cached catalog and the pickers that render it bounded.
+		if (modelId.length > MAX_MIMO_MODEL_ID_LENGTH) continue
 
 		// Prototype-safe: IDs come straight from the provider's response, so an ID
 		// such as `constructor` must fall through to the family defaults below
@@ -152,6 +175,11 @@ export async function getMimoModels(
 		if (knownSpecs) {
 			models[modelId] = { ...knownSpecs }
 		} else {
+			// Unknown IDs get MiMo-family defaults on purpose: the /models response
+			// carries no pricing or limits, the static map is the only price source
+			// (so a remote entry can never set a cost), and a model Xiaomi adds
+			// ahead of a static-map update stays usable instead of resolving to an
+			// empty spec. Known IDs above keep their static spec untouched.
 			models[modelId] = {
 				maxTokens: 16_000,
 				contextWindow: 262_144,
@@ -161,6 +189,8 @@ export async function getMimoModels(
 				description: `MiMo model: ${modelId}`,
 			}
 		}
+
+		entryCount++
 	}
 
 	return models
