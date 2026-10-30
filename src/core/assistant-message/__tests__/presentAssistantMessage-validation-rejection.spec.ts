@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 import { presentAssistantMessage } from "../presentAssistantMessage"
+import { DispatchState } from "../../task/dispatchState"
 import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
 import type { Task } from "../../task/Task"
 
@@ -121,7 +122,11 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 		}
 		// Added by the tool-context bookkeeping in presentAssistantMessageBlock; assigned after
 		// the literal so the mock stays assignable when the structural type lags the runtime.
-		Object.assign(mockTask, { activeToolContexts: new Map() })
+		Object.assign(mockTask, {
+			activeToolContexts: new Map(),
+			dispatchState: DispatchState.IDLE,
+			pendingWork: null,
+		})
 	})
 
 	const writeBlock = () => [

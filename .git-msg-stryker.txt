@@ -1,0 +1,5 @@
+chore(tools): drop Stryker suppression comment per maintainer directive
+
+The mutation-diff gate treats surviving mutants as advisory and suppression
+comments are no longer accepted; the equivalence rationale is recorded in the
+PR description instead.
