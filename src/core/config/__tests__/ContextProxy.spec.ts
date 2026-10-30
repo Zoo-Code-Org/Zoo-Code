@@ -141,6 +141,25 @@ describe("ContextProxy", () => {
 			expect(proxy.getGlobalState("apiProvider")).toBe("openai")
 		})
 
+		it("should not restore a pre-reset value when a pending write rejects after reset", async () => {
+			let rejectPending: (error: Error) => void = () => {}
+			mockGlobalState.update.mockReset()
+			mockGlobalState.update.mockReturnValueOnce(
+				new Promise<void>((_, reject) => {
+					rejectPending = reject
+				}),
+			)
+
+			const pending = proxy.updateGlobalState("apiProvider", "anthropic")
+			await proxy.resetAllState()
+			rejectPending(new Error("disk full"))
+
+			await expect(pending).rejects.toThrow("disk full")
+			// The reset cleared the cache: restoring the pre-reset value would resurrect state
+			// that storage no longer holds.
+			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
+		})
+
 		it("should bypass cache for pass-through state keys", async () => {
 			// Setup mock return value
 			mockGlobalState.get.mockReturnValue("pass-through-value")
