@@ -253,6 +253,8 @@ class ModeSwitchInconsistentError extends Error {
  * undefined when the profile did not exist yet - the creation case the compensation must
  * delete rather than restore.
  */
+type TaskModeCarrier = { _taskMode?: Mode }
+
 interface ProfileActivationSnapshot {
 	profileName: string
 	mode: Mode | undefined
@@ -2467,7 +2469,7 @@ export class ClineProvider
 					this.cancelledModeSwitchSnapshot = {
 						task,
 						previousHistoryMode: taskHistoryItem.mode,
-						previousTaskMode: (task as any)._taskMode,
+						previousTaskMode: (task as unknown as TaskModeCarrier)._taskMode,
 					}
 
 					// An abort that lands while the history write is in flight has
@@ -2693,7 +2695,7 @@ export class ClineProvider
 				if (latestHistoryItem) {
 					await this.updateTaskHistory({ ...latestHistoryItem, mode: taskSnapshot.previousHistoryMode })
 				}
-				;(taskSnapshot.task as any)._taskMode = taskSnapshot.previousTaskMode
+				;(taskSnapshot.task as unknown as TaskModeCarrier)._taskMode = taskSnapshot.previousTaskMode
 			}
 		} catch (compensationError) {
 			throw new ModeSwitchInconsistentError(
