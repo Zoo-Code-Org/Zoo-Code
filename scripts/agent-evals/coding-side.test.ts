@@ -220,7 +220,7 @@ describe("coding side isolation gate", () => {
 // The install behavior of the shimmed toolchain: "succeed" runs the benign
 // build, "fail" exits nonzero after the install starts, and "hang" blocks so
 // the test can interrupt the side mid-preparation.
-type InstallBehavior = "succeed" | "fail" | "hang"
+type InstallBehavior = "succeed" | "fail" | "hang" | "ignore-term"
 
 // A pnpm shim that records each invocation, its working directory, and its
 // environment, so a test can prove the side prepared and built a fresh tree
@@ -238,6 +238,19 @@ const writePnpmShim = async (dir: string, install: InstallBehavior): Promise<str
 		`    pwd > ${log("pnpm-install-cwd.log")}`,
 		`    env > ${log("pnpm-env.log")}`,
 	] as string[]
+	if (install === "ignore-term") {
+		const script = path.join(dir, "stubborn-install.cjs")
+		await fs.writeFile(
+			script,
+			[
+				'const fs = require("node:fs")',
+				`process.on("SIGTERM", () => fs.writeFileSync(${log("install-term")}, "received"))`,
+				`fs.writeFileSync(${log("install-pid")}, String(process.pid))`,
+				"setInterval(() => {}, 1000)",
+			].join("\n"),
+		)
+		lines.push(`    exec ${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`)
+	}
 	if (install === "hang") lines.push("    sleep 30")
 	if (install === "fail") lines.push("    exit 1")
 	lines.push(
@@ -434,53 +447,79 @@ describe("coding side evaluated tree preparation", () => {
 		}
 	})
 
-	it(
-		"removes its worktree when interrupted during preparation and exits with the signal code",
-		{ timeout: 240_000 },
-		async () => {
-			const dir = await fs.mkdtemp(path.join(os.tmpdir(), "coding-side-test-"))
-			try {
-				const { repo, commit } = await makeFixtureCommit(dir, { ".gitignore": "src/dist\nnode_modules\n" })
-				const trustFile = await writePolicy(dir, [commit])
-				const shimDir = await writePnpmShim(dir, "hang")
-				let stderr = ""
-				const child = spawn(
-					process.execPath,
-					[
-						"--import",
-						"tsx",
-						path.join(repoRoot, "scripts/agent-evals/coding-side.mts"),
-						...preparedArgs(dir, repo, trustFile),
-					],
-					{
-						cwd: repoRoot,
-						env: preparedEnv(dir, shimDir),
-						stdio: ["ignore", "ignore", "pipe"],
-					},
-				)
-				child.stderr?.on("data", (chunk: Buffer) => {
-					stderr += chunk.toString()
-				})
-				const exitCode = new Promise<number>((resolve, reject) => {
-					child.once("error", reject)
-					child.once("exit", (code) => resolve(code ?? 1))
-				})
-				// The install is in flight when the signal arrives. A SIGINT that
-				// reaches only the side must stop the preparation group, remove
-				// the worktree, and exit with the conventional code.
-				await waitForFile(path.join(dir, "pnpm-install-cwd.log"), 60_000)
-				child.kill("SIGINT")
-				assert.equal(await exitCode, 130)
-				assert.match(stderr, /interrupted during preparation/)
-				const worktree = (await fs.readFile(path.join(dir, "pnpm-install-cwd.log"), "utf8")).trim()
-				await assert.rejects(fs.access(worktree))
-				await assert.rejects(fs.access(path.dirname(worktree)))
-				await assertSingleWorktree(repo)
-				// An interrupted side never publishes the completion marker.
-				await assert.rejects(fs.access(path.join(dir, "out", "side-results.json")))
-			} finally {
-				await fs.rm(dir, { recursive: true, force: true })
-			}
-		},
-	)
+	for (const repeated of [false, true])
+		it(
+			`removes its worktree after ${repeated ? "repeated interrupts" : "an interrupt"} during preparation`,
+			{ timeout: 240_000 },
+			async () => {
+				const dir = await fs.mkdtemp(path.join(os.tmpdir(), "coding-side-test-"))
+				let stopChild: (() => Promise<void>) | undefined
+				try {
+					const { repo, commit } = await makeFixtureCommit(dir, { ".gitignore": "src/dist\nnode_modules\n" })
+					const trustFile = await writePolicy(dir, [commit])
+					const shimDir = await writePnpmShim(dir, repeated ? "ignore-term" : "hang")
+					let stderr = ""
+					const child = spawn(
+						process.execPath,
+						[
+							"--import",
+							"tsx",
+							path.join(repoRoot, "scripts/agent-evals/coding-side.mts"),
+							...preparedArgs(dir, repo, trustFile),
+						],
+						{
+							cwd: repoRoot,
+							env: preparedEnv(dir, shimDir),
+							stdio: ["ignore", "ignore", "pipe"],
+						},
+					)
+					child.stderr?.on("data", (chunk: Buffer) => {
+						stderr += chunk.toString()
+					})
+					const exitCode = new Promise<number>((resolve, reject) => {
+						child.once("error", reject)
+						child.once("exit", (code) => resolve(code ?? 1))
+					})
+					stopChild = async () => {
+						const pid = Number(await fs.readFile(path.join(dir, "install-pid"), "utf8").catch(() => ""))
+						if (Number.isInteger(pid) && pid > 0) {
+							try {
+								process.kill(-pid, "SIGKILL")
+							} catch {
+								// The preparation group already exited.
+							}
+						}
+						child.kill("SIGKILL")
+						await exitCode.catch(() => {})
+					}
+					// The install is in flight when the signal arrives. A SIGINT that
+					// reaches only the side must stop the preparation group, remove
+					// the worktree, and exit with the conventional code.
+					await waitForFile(path.join(dir, "pnpm-install-cwd.log"), 60_000)
+					if (repeated) await waitForFile(path.join(dir, "install-pid"), 60_000)
+					child.kill("SIGINT")
+					if (repeated) {
+						// Wait for the first escalation to reach the child before
+						// delivering another signal during its grace period.
+						await waitForFile(path.join(dir, "install-term"), 60_000)
+						child.kill("SIGINT")
+					}
+					assert.equal(await exitCode, 130)
+					if (repeated) {
+						const pid = Number(await fs.readFile(path.join(dir, "install-pid"), "utf8"))
+						assert.throws(() => process.kill(-pid, 0), { code: "ESRCH" })
+					}
+					assert.match(stderr, /interrupted during preparation/)
+					const worktree = (await fs.readFile(path.join(dir, "pnpm-install-cwd.log"), "utf8")).trim()
+					await assert.rejects(fs.access(worktree))
+					await assert.rejects(fs.access(path.dirname(worktree)))
+					await assertSingleWorktree(repo)
+					// An interrupted side never publishes the completion marker.
+					await assert.rejects(fs.access(path.join(dir, "out", "side-results.json")))
+				} finally {
+					await stopChild?.()
+					await fs.rm(dir, { recursive: true, force: true })
+				}
+			},
+		)
 })
