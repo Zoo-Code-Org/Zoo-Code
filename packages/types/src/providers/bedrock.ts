@@ -277,6 +277,35 @@ export const bedrockModels = {
 		description:
 			"Claude Opus 5.5 is Anthropic's most capable model for complex agentic coding and enterprise work.",
 	},
+	"anthropic.claude-haiku-5-5": {
+		// 128K max output tokens, 1M native context window, 512-token minimum per
+		// cache checkpoint, and 4 max cache checkpoints per the AWS Bedrock model card:
+		// https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-haiku-5-5.html
+		maxTokens: 128_000,
+		supportsMaxTokens: true,
+		contextWindow: 1_000_000, // 1M context window native (no beta header required)
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		// Standard pricing (prompts of 100,000 tokens or fewer) from Anthropic's
+		// pricing page, which lists the same Claude list prices billed on Bedrock:
+		// https://platform.claude.com/docs/en/about-claude/pricing
+		// These fields price the standard tier only. This entry does not model
+		// the tiered long-context rates that prompts over 100,000 tokens bill at.
+		inputPrice: 0.1, // $0.10 per million input tokens
+		outputPrice: 0.5, // $0.50 per million output tokens
+		cacheWritesPrice: 0.125, // $0.125 per million tokens (5m cache writes)
+		cacheReadsPrice: 0.01, // $0.01 per million tokens (cache hits / refreshes)
+		// The same Bedrock model card lists 512 as the minimum tokens per cache
+		// checkpoint for Haiku 5.5 (matching the Opus 5.5 entry above).
+		minTokensPerCachePoint: 512,
+		maxCachePoints: 4,
+		cachableFields: ["system", "messages", "tools"],
+		description:
+			"Claude Haiku 5.5 is the fastest, most efficient Claude 5.5 model, built for high-volume, latency-sensitive coding and agent work.",
+	},
 	"anthropic.claude-fable-5-1": {
 		maxTokens: 128_000,
 		contextWindow: 1_000_000,
@@ -681,7 +710,16 @@ export const BEDROCK_1M_CONTEXT_MODEL_IDS = [
 // intentionally absent.
 // https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-5.html
 // https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-opus-5.html
-export const BEDROCK_THINKING_DISABLE_MODEL_IDS = ["anthropic.claude-sonnet-5", "anthropic.claude-opus-5"] as const
+// https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-haiku-5-5.html
+export const BEDROCK_THINKING_DISABLE_MODEL_IDS = [
+	"anthropic.claude-sonnet-5",
+	"anthropic.claude-opus-5",
+	// Unlike adaptive-only Opus 5.5, Haiku 5.5 accepts an explicit
+	// `thinking: { type: "disabled" }` and turns its default adaptive thinking
+	// off. AWS caps effort at "high" while thinking is disabled.
+	// https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html
+	"anthropic.claude-haiku-5-5",
+] as const
 
 // Amazon Bedrock models that support Global Inference profiles
 // As of Nov 2025, AWS supports Global Inference for:
@@ -695,6 +733,7 @@ export const BEDROCK_THINKING_DISABLE_MODEL_IDS = ["anthropic.claude-sonnet-5", 
 // - Claude Opus 4.7
 // - Claude Opus 5
 // - Claude Opus 5.5
+// - Claude Haiku 5.5
 // - Claude Fable 5 and 5.1 (cross-region inference only — can only be used through an inference profile)
 export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"anthropic.claude-sonnet-4-20250514-v1:0",
@@ -708,6 +747,7 @@ export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"anthropic.claude-opus-4-8",
 	"anthropic.claude-opus-5",
 	"anthropic.claude-opus-5-5",
+	"anthropic.claude-haiku-5-5",
 	"anthropic.claude-fable-5-1",
 	"anthropic.claude-fable-5",
 ] as const
@@ -739,3 +779,40 @@ export const BEDROCK_SERVICE_TIER_PRICING = {
 	FLEX: 0.5, // 50% discount from standard
 	PRIORITY: 1.75, // 75% premium over standard
 } as const
+
+const isBedrockModelId = (id: string): id is BedrockModelId => Object.prototype.hasOwnProperty.call(bedrockModels, id)
+
+/** Stored in `awsCustomArnBaseModelId` when the user explicitly chooses "Other" for a custom ARN. */
+export const BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL = "other"
+
+export const isBedrockFoundationModelArn = (arn: string | undefined): boolean =>
+	!!arn && /^arn:[^:]+:bedrock:[^:]+:[^:]*:foundation-model\//.test(arn)
+
+/**
+ * Resolves the registry model a custom ARN points to:
+ * - a foundation-model ARN always resolves to the model it names, because that model is invoked;
+ * - an explicit "Other" choice resolves to undefined, even when the ARN names a model;
+ * - otherwise the user's choice when it is a known model, then a model named at the end of the ARN
+ *   (e.g. `inference-profile/us.anthropic.claude-opus-4-8`).
+ * Returns undefined when the model is unknown (e.g. application inference profiles).
+ */
+export const resolveBedrockCustomArnBaseModelId = (
+	customArn: string | undefined,
+	baseModelId: string | undefined,
+): BedrockModelId | undefined => {
+	const namedModelId = customArn
+		? (Object.keys(bedrockModels) as BedrockModelId[]).find(
+				(id) => customArn.endsWith(`/${id}`) || customArn.endsWith(`.${id}`),
+			)
+		: undefined
+
+	if (isBedrockFoundationModelArn(customArn)) {
+		return namedModelId
+	}
+
+	if (baseModelId === BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL) {
+		return undefined
+	}
+
+	return baseModelId && isBedrockModelId(baseModelId) ? baseModelId : namedModelId
+}

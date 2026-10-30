@@ -6,7 +6,6 @@ import {
 	readWithSlice,
 	computeEffectiveIndents,
 	type LineRecord,
-	type IndentationReadResult,
 } from "../indentation-reader"
 
 // ─── Test Fixtures ────────────────────────────────────────────────────────────

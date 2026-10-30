@@ -11,80 +11,72 @@
 </sub>
 </div>
 
-# Código de Conduta do Pacto de Colaboradores
+<a id="contributor-covenant-code-of-conduct"></a>
 
-## Nosso Compromisso
+# Código de conduta Contributor Covenant
 
-No interesse de promover um ambiente aberto e acolhedor, nós, como
-colaboradores e mantenedores, nos comprometemos a tornar a participação em nosso projeto e
-nossa comunidade uma experiência livre de assédio para todos, independentemente de idade, tamanho
-corporal, deficiência, etnia, características sexuais, identidade e expressão de gênero,
-nível de experiência, educação, status socioeconômico, nacionalidade, aparência
-pessoal, raça, religião ou identidade e orientação sexual.
+<a id="our-pledge"></a>
 
-## Nossos Padrões
+## Nosso compromisso
 
-Exemplos de comportamento que contribuem para criar um ambiente positivo
-incluem:
+Somos pessoas que contribuem e mantêm o projeto. Queremos um ambiente aberto e acolhedor. Nos comprometemos a permitir que todas as pessoas participem do projeto e da comunidade sem assédio. Isso vale independentemente de idade, tamanho do corpo, deficiência, etnia, características sexuais, identidade e expressão de gênero, experiência, escolaridade, condição socioeconômica, nacionalidade, aparência, raça, religião ou identidade e orientação sexual.
 
-- Usar linguagem acolhedora e inclusiva
-- Respeitar diferentes pontos de vista e experiências
-- Aceitar graciosamente críticas construtivas
-- Focar no que é melhor para a comunidade
-- Mostrar empatia para com outros membros da comunidade
+<a id="our-standards"></a>
 
-Exemplos de comportamento inaceitável por parte dos participantes incluem:
+## Nossos padrões
 
-- O uso de linguagem ou imagens sexualizadas e atenção ou
-  avanços sexuais indesejados
-- Trolling, comentários insultuosos/depreciativos e ataques pessoais ou políticos
-- Assédio público ou privado
-- Publicar informações privadas de outros, como endereço físico ou eletrônico,
-  sem permissão explícita
-- Outra conduta que poderia razoavelmente ser considerada inadequada em um
-  ambiente profissional
+Estes comportamentos ajudam a criar um ambiente positivo:
 
-## Nossas Responsabilidades
+- Use uma linguagem acolhedora e inclusiva.
+- Respeite diferentes pontos de vista e experiências.
+- Aceite críticas construtivas com abertura.
+- Foque no que é melhor para a comunidade.
+- Mostre empatia por outras pessoas da comunidade.
 
-Os mantenedores do projeto são responsáveis por esclarecer os padrões de comportamento
-aceitável e espera-se que tomem ações corretivas apropriadas e justas em
-resposta a quaisquer instâncias de comportamento inaceitável.
+Estes comportamentos de participantes não são aceitáveis:
 
-Os mantenedores do projeto têm o direito e a responsabilidade de remover, editar ou
-rejeitar comentários, commits, código, edições wiki, issues e outras contribuições
-que não estejam alinhadas a este Código de Conduta, ou banir temporária ou
-permanentemente qualquer colaborador por outros comportamentos que considerem inapropriados,
-ameaçadores, ofensivos ou prejudiciais.
+- Uso de linguagem ou imagens de teor sexual.
+- Atenção ou avanços sexuais indesejados.
+- Trolling, comentários insultantes ou depreciativos e ataques pessoais ou políticos.
+- Assédio público ou privado.
+- Publicação de informações privadas de outras pessoas sem sua permissão explícita. Exemplos são um endereço físico ou eletrônico.
+- Outros comportamentos que as pessoas possam considerar, de forma razoável, inadequados em um ambiente profissional.
 
-## Escopo
+<a id="our-responsibilities"></a>
 
-Este Código de Conduta se aplica tanto em espaços do projeto quanto em espaços públicos
-quando um indivíduo está representando o projeto ou sua comunidade. Exemplos de
-representação de um projeto ou comunidade incluem o uso de um endereço de e-mail oficial do projeto,
-postagem por meio de uma conta oficial de mídia social ou atuação como representante designado
-em um evento online ou offline. A representação de um projeto pode ser
-definida e esclarecida posteriormente pelos mantenedores do projeto.
+## Nossas responsabilidades
 
-## Aplicação
+Os mantenedores do projeto precisam esclarecer os padrões de comportamento aceitável. Precisam tomar medidas corretivas adequadas e justas quando um participante mostra comportamento inaceitável.
 
-Instâncias de comportamento abusivo, de assédio ou de outra forma inaceitável podem ser
-relatadas entrando em contato com a equipe do projeto em support@zoocode.dev. Todas as reclamações
-serão revisadas e investigadas e resultarão em uma resposta que
-é considerada necessária e apropriada às circunstâncias. A equipe do projeto é
-obrigada a manter confidencialidade em relação ao relator de um incidente.
-Mais detalhes de políticas específicas de aplicação podem ser publicados separadamente.
+Os mantenedores têm o direito e a responsabilidade de agir sobre contribuições que não seguem este código de conduta. Podem remover, editar ou rejeitar comentários, commits, código, edições da wiki, issues e outras contribuições. Também podem banir uma pessoa temporária ou permanentemente por outros comportamentos que considerem inadequados, ameaçadores, ofensivos ou prejudiciais.
 
-Mantenedores do projeto que não seguem ou aplicam o Código de Conduta de boa
-fé podem enfrentar repercussões temporárias ou permanentes determinadas por outros
-membros da liderança do projeto.
+<a id="scope"></a>
+
+## Abrangência
+
+Este código de conduta se aplica nos espaços do projeto. Também se aplica em espaços públicos quando alguém representa o projeto ou sua comunidade. Exemplos de representação são:
+
+- Usar um endereço de e-mail oficial do projeto.
+- Publicar com uma conta oficial de rede social.
+- Atuar como representante designado em um evento online ou presencial.
+
+Os mantenedores podem definir e esclarecer o que significa representar o projeto.
+
+<a id="enforcement"></a>
+
+## Aplicação das regras
+
+Para relatar abuso, assédio ou outro comportamento inaceitável, entre em contato com a equipe do projeto em support@zoocode.dev. A equipe analisa e investiga todas as reclamações. Responde da forma que considera necessária e adequada às circunstâncias. A equipe precisa manter em sigilo a identidade de quem relata um incidente. Pode publicar separadamente mais detalhes sobre políticas específicas de aplicação das regras.
+
+Os mantenedores precisam seguir e aplicar o código de conduta de boa-fé. Se não fizerem isso, podem sofrer consequências temporárias ou permanentes. Outros membros da liderança do projeto decidem as consequências.
+
+<a id="attribution"></a>
 
 ## Atribuição
 
-Este Código de Conduta é adaptado da [versão do Cline][cline_coc] do [Pacto de Colaboradores][homepage], versão 1.4,
-disponível em https://www.contributor-covenant.org/version/1/4/code-of-conduct.html
+This Code of Conduct is adapted from [Cline's version][cline_coc] of the [Contributor Covenant][homepage], version 1.4. It is available at https://www.contributor-covenant.org/version/1/4/code-of-conduct.html
 
 [cline_coc]: https://github.com/cline/cline/blob/main/CODE_OF_CONDUCT.md
 [homepage]: https://www.contributor-covenant.org
 
-Para respostas a perguntas comuns sobre este código de conduta, veja
-https://www.contributor-covenant.org/faq
+For answers to common questions about this code of conduct, see https://www.contributor-covenant.org/faq

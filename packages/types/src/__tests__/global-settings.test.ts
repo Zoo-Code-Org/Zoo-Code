@@ -38,3 +38,16 @@ describe("alwaysDenyUnapprovedCommands global setting", () => {
 		expect(() => globalSettingsSchema.parse({ alwaysDenyUnapprovedCommands: "true" })).toThrow()
 	})
 })
+
+describe("collapseCommandOutputByDefault global setting", () => {
+	it.each([true, false, undefined])("round-trips %s through the export/import schema", (value) => {
+		const settings = globalSettingsSchema.parse({ collapseCommandOutputByDefault: value })
+		expect(globalSettingsSchema.parse(JSON.parse(JSON.stringify(settings))).collapseCommandOutputByDefault).toBe(
+			value,
+		)
+		expect(GLOBAL_SETTINGS_KEYS).toContain("collapseCommandOutputByDefault")
+	})
+	it("rejects non-boolean values", () => {
+		expect(globalSettingsSchema.safeParse({ collapseCommandOutputByDefault: "true" }).success).toBe(false)
+	})
+})
