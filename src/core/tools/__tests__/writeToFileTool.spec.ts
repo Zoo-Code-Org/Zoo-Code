@@ -259,6 +259,7 @@ describe("writeToFileTool", () => {
 
 		await writeToFileTool.handle(mockCline, toolUse as ToolUse<"write_to_file">, {
 			askApproval: mockAskApproval,
+			toolCallId: "test-tool-call-id",
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
 			toolCallId: "test-tool-call-id",
@@ -659,6 +660,7 @@ describe("writeToFileTool", () => {
 			} as ToolUse<"write_to_file">
 			await writeToFileTool.handle(mockCline, block, {
 				askApproval: mockAskApproval,
+				toolCallId: "test-tool-call-id",
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
 			})
@@ -688,6 +690,7 @@ describe("writeToFileTool", () => {
 			} as ToolUse<"write_to_file">
 			await writeToFileTool.handle(mockCline, block, {
 				askApproval: mockAskApproval,
+				toolCallId: "test-tool-call-id",
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
 			})
@@ -766,6 +769,7 @@ describe("writeToFileTool", () => {
 			} as ToolUse<"write_to_file">
 			await writeToFileTool.handle(mockCline, block, {
 				askApproval: mockAskApproval,
+				toolCallId: "test-tool-call-id",
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
 			})
@@ -793,6 +797,7 @@ describe("writeToFileTool", () => {
 			} as unknown as ToolUse<"write_to_file">
 			await writeToFileTool.handle(mockCline, toolUse, {
 				askApproval: mockAskApproval,
+				toolCallId: "test-tool-call-id",
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
 			})
@@ -821,6 +826,7 @@ describe("writeToFileTool", () => {
 			} as unknown as ToolUse<"write_to_file">
 			await writeToFileTool.handle(mockCline, toolUse, {
 				askApproval: mockAskApproval,
+				toolCallId: "test-tool-call-id",
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
 			})
@@ -896,6 +902,7 @@ describe("writeToFileTool", () => {
 			} as ToolUse<"write_to_file">
 			await writeToFileTool.handle(mockCline, block, {
 				askApproval: mockAskApproval,
+				toolCallId: "test-tool-call-id",
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
 			})
@@ -935,6 +942,7 @@ describe("writeToFileTool", () => {
 					} as ToolUse<"write_to_file">,
 					{
 						askApproval: mockAskApproval,
+						toolCallId: "test-tool-call-id",
 						handleError: mockHandleError,
 						pushToolResult: mockPushToolResult,
 					},
@@ -1238,6 +1246,7 @@ describe("writeToFileTool", () => {
 			} as ToolUse<"write_to_file">
 			await writeToFileTool.handle(mockCline, block, {
 				askApproval: mockAskApproval,
+				toolCallId: "test-tool-call-id",
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
 			})
@@ -1275,6 +1284,7 @@ describe("writeToFileTool", () => {
 			} as ToolUse<"write_to_file">
 			await writeToFileTool.handle(mockCline, block, {
 				askApproval: mockAskApproval,
+				toolCallId: "test-tool-call-id",
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
 			})
@@ -1304,6 +1314,7 @@ describe("writeToFileTool", () => {
 			} as ToolUse<"write_to_file">
 			await writeToFileTool.handle(mockCline, block, {
 				askApproval: mockAskApproval,
+				toolCallId: "test-tool-call-id",
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
 			})

@@ -73,6 +73,7 @@ interface PresenterTask {
 	userMessageContent: PushedToolResult[]
 	didCompleteReadingStream: boolean
 	userMessageContentReady: boolean
+	activeToolContexts: Map<string, unknown>
 	didRejectTool: boolean
 	didAlreadyUseTool: boolean
 	consecutiveMistakeCount: number
