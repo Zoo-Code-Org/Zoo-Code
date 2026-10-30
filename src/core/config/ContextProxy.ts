@@ -46,6 +46,10 @@ export class ContextProxy {
 
 	private stateCache: GlobalState
 	private stateWriteGenerations = new Map<GlobalStateKey, number>()
+
+	// The value storage last accepted per key: a failed write must roll the cache back to
+	// what is actually persisted, not to another pending write's unpersisted value.
+	private statePersistedCache = new Map<GlobalStateKey, unknown>()
 	private secretCache: SecretState
 	private _isInitialized = false
 
@@ -375,12 +379,16 @@ export class ContextProxy {
 		this.stateCache[key] = value
 
 		try {
-			return await this.originalContext.globalState.update(key, value)
+			const result = await this.originalContext.globalState.update(key, value)
+			this.statePersistedCache.set(key, value)
+			return result
 		} catch (error) {
 			// A newer write for the same key may already own the cache: only undo this write
-			// while it is still the newest one.
+			// while it is still the newest one, and only to the last value storage accepted.
 			if (this.stateWriteGenerations.get(key) === generation) {
-				this.stateCache[key] = previousCachedValue
+				this.stateCache[key] = this.statePersistedCache.has(key)
+					? (this.statePersistedCache.get(key) as GlobalState[K])
+					: previousCachedValue
 			}
 			throw error
 		}

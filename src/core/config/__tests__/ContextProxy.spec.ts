@@ -160,6 +160,35 @@ describe("ContextProxy", () => {
 			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
 		})
 
+		it("should restore the last persisted value when two overlapping writes both reject", async () => {
+			await proxy.updateGlobalState("apiProvider", "anthropic")
+			mockGlobalState.update.mockReset()
+			let rejectFirst: (error: Error) => void = () => {}
+			let rejectSecond: (error: Error) => void = () => {}
+			mockGlobalState.update
+				.mockReturnValueOnce(
+					new Promise<void>((_, reject) => {
+						rejectFirst = reject
+					}),
+				)
+				.mockReturnValueOnce(
+					new Promise<void>((_, reject) => {
+						rejectSecond = reject
+					}),
+				)
+
+			const firstWrite = proxy.updateGlobalState("apiProvider", "openrouter")
+			const secondWrite = proxy.updateGlobalState("apiProvider", "deepseek")
+			rejectSecond(new Error("second failed"))
+			await expect(secondWrite).rejects.toThrow("second failed")
+			rejectFirst(new Error("first failed"))
+			await expect(firstWrite).rejects.toThrow("first failed")
+
+			// Neither attempt reached storage: the cache must hold the last persisted value,
+			// not the first attempt's unpersisted value.
+			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
+		})
+
 		it("should bypass cache for pass-through state keys", async () => {
 			// Setup mock return value
 			mockGlobalState.get.mockReturnValue("pass-through-value")

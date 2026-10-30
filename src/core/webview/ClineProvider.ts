@@ -2754,15 +2754,28 @@ export class ClineProvider
 		// currentApiConfigName naming it, so a later export would write a selection the
 		// profile list no longer contains (and import would silently pick another profile).
 		// Point the manager at the survivor too.
+		let managerNameUpdateFailure: Error | undefined
 		if (deletedWasGlobal) {
 			try {
 				await this.providerSettingsManager.activateProfile({ name: profileToActivate })
-			} catch (error) {
-				this.log(
-					`[deleteProviderProfile] Failed to update the settings manager's current profile to '${profileToActivate}': ${
-						error instanceof Error ? error.message : String(error)
-					}`,
-				)
+			} catch (firstError) {
+				try {
+					// Retry once: a stale manager name would be exported as a selection the
+					// profile list no longer contains.
+					await this.providerSettingsManager.activateProfile({ name: profileToActivate })
+				} catch (retryError) {
+					this.log(
+						`[deleteProviderProfile] Failed to update the settings manager's current profile to '${profileToActivate}' after retry: ${
+							retryError instanceof Error ? retryError.message : String(retryError)
+						} (first attempt: ${firstError instanceof Error ? firstError.message : String(firstError)})`,
+					)
+					// The deletion has committed: finish the shared-state repair and post it, then
+					// surface the incomplete manager update to the caller.
+					managerNameUpdateFailure = new Error(
+						`Profile '${profileToDelete.name}' was deleted but the settings manager still names it as current.`,
+						{ cause: retryError },
+					)
+				}
 			}
 		}
 
@@ -2793,11 +2806,34 @@ export class ClineProvider
 			}
 		}
 
-		// Re-pin other live views still buffered on the deleted profile: their
-		// buffer and durable viewStates entry would otherwise keep serving the
-		// deleted profile's name and configuration.
+		// Re-pin other live views still buffered on the deleted profile: their buffer and
+		// durable viewStates entry would otherwise keep serving the deleted profile's name
+		// and configuration.
+		for (const instance of ClineProvider.getAllInstances()) {
+			if (instance === this || instance._disposed || instance.pinnedProfileName !== profileToDelete.name) {
+				continue
+			}
+			const values: Partial<RooCodeSettings> & Partial<ExtensionState> = {
+				currentApiConfigName: profileToActivate,
+			}
+			if (survivingSettings) {
+				values.apiConfiguration = survivingSettings
+			}
+			// Direct private access: compile-time safe across sibling instances.
+			await instance._saveViewLocalStateFromMutation(values)
+			await instance.postStateToWebview().catch((postError: unknown) => {
+				this.log(
+					`[deleteProviderProfile] failed to post re-pinned state to a sibling view: ${
+						postError instanceof Error ? postError.message : String(postError)
+					}`,
+				)
+			})
+		}
 
 		await this.postStateToWebview()
+		if (managerNameUpdateFailure) {
+			throw managerNameUpdateFailure
+		}
 	}
 
 	private async persistStickyProviderProfileToCurrentTask(
