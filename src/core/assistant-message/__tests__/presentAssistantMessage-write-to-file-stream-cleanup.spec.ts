@@ -74,6 +74,8 @@ interface PresenterTask {
 	didCompleteReadingStream: boolean
 	userMessageContentReady: boolean
 	activeToolContexts: Map<string, unknown>
+	dispatchState: DispatchState
+	pendingWork: null
 	didRejectTool: boolean
 	didAlreadyUseTool: boolean
 	consecutiveMistakeCount: number

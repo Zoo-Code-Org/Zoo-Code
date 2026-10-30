@@ -259,7 +259,6 @@ describe("writeToFileTool", () => {
 
 		await writeToFileTool.handle(mockCline, toolUse as ToolUse<"write_to_file">, {
 			askApproval: mockAskApproval,
-			toolCallId: "test-tool-call-id",
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
 			toolCallId: "test-tool-call-id",
