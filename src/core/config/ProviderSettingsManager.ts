@@ -443,6 +443,34 @@ export class ProviderSettingsManager {
 		}
 	}
 
+	/**
+	 * Save a config only when no config with that name exists, as one locked step.
+	 *
+	 * A caller that has to restore a profile it is not sure still belongs there (the undo of a
+	 * purge that committed after the caller timed out) cannot check-then-write: a save for the
+	 * same name can land between the check and the write, and the restore would then overwrite
+	 * it with a stale snapshot. The existence check and the write share one lock here, so a
+	 * concurrent `saveConfig` either lands before the check (and this call skips) or after the
+	 * write (and wins). Returns the written id, or `undefined` when the name was taken.
+	 *
+	 * The blob is stored verbatim: the caller restores a config this manager produced, so
+	 * re-parsing it would only strip fields (a retired provider's legacy keys) it already holds.
+	 */
+	public async saveConfigIfAbsent(name: string, config: ProviderSettingsWithId): Promise<string | undefined> {
+		return await this.lock(async () => {
+			const providerProfiles = await this.load()
+
+			if (providerProfiles.apiConfigs[name]) {
+				return undefined
+			}
+
+			const id = config.id || this.generateId()
+			providerProfiles.apiConfigs[name] = { ...config, id }
+			await this.store(providerProfiles)
+			return id
+		})
+	}
+
 	public async getProfile(
 		params: { name: string } | { id: string },
 	): Promise<ProviderSettingsWithId & { name: string }> {
@@ -559,6 +587,21 @@ export class ProviderSettingsManager {
 		} catch (error) {
 			throw new Error(`Failed to check config existence: ${error}`)
 		}
+	}
+
+	/**
+	 * Check if a config exists by its manager-assigned id.
+	 *
+	 * The mode bindings a purge dropped name a profile by `id`, and a rollback that failed to
+	 * restore the profile must not re-apply them: a binding whose id no profile carries makes the
+	 * next switch to that mode resolve nothing and silently keep the current profile. Checking
+	 * under the lock keeps the answer from straddling a concurrent purge or rename.
+	 */
+	public async hasConfigById(id: string) {
+		return await this.lock(async () => {
+			const providerProfiles = await this.load()
+			return Object.values(providerProfiles.apiConfigs).some((config) => config.id === id)
+		})
 	}
 
 	/**
