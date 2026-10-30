@@ -99,9 +99,7 @@ function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
 	for (const [key, rawValue] of Object.entries(rawGlobalSettings)) {
 		const path = `globalSettings.${key}`
 
-		// Per-view selection state is machine-local: it round-trips through the
-		// normal runtime and pruning paths, but importing it would pin selections
-		// from another machine's views on this one.
+		// Per-view selections are machine-local: they must not import across machines.
 		if (key === "viewStates") {
 			continue
 		}

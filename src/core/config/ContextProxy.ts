@@ -377,8 +377,7 @@ export class ContextProxy {
 		try {
 			return await this.originalContext.globalState.update(key, value)
 		} catch (error) {
-			// A newer write for the same key may already own the cache: only undo this write
-			// while it is still the newest one.
+			// Only undo this write while it is still the newest for the key.
 			if (this.stateWriteGenerations.get(key) === generation) {
 				this.stateCache[key] = previousCachedValue
 			}
@@ -607,8 +606,7 @@ export class ContextProxy {
 		// Clear in-memory caches
 		this.stateCache = {}
 		this.secretCache = {}
-		// A write that started before this reset must not restore its pre-reset value when it
-		// rejects afterwards, so advance every generation the pending writes still hold.
+		// Advance every tracked generation so a pending write cannot restore pre-reset state.
 		for (const key of this.stateWriteGenerations.keys()) {
 			this.stateWriteGenerations.set(key, (this.stateWriteGenerations.get(key) ?? 0) + 1)
 		}
