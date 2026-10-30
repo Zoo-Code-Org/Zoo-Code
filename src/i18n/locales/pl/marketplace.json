@@ -1,30 +1,4 @@
 {
-	"filters": {
-		"search": {
-			"placeholder": "Przeszukaj marketplace..."
-		},
-		"type": {
-			"mode": "Tryb",
-			"mcpServer": "Serwer MCP"
-		},
-		"tags": {
-			"label": "Tagi",
-			"clear": "Wyczyść tagi",
-			"placeholder": "Szukaj tagów...",
-			"noResults": "Nie znaleziono tagów.",
-			"selected": "Pokazywanie elementów z dowolnym z wybranych tagów"
-		},
-		"installed": {
-			"all": "Wszystkie elementy",
-			"installed": "Zainstalowane",
-			"notInstalled": "Niezainstalowane"
-		}
-	},
-	"items": {
-		"empty": {
-			"noItems": "Nie znaleziono elementów marketplace."
-		}
-	},
 	"installation": {
 		"installing": "Instalowanie elementu: \"{{itemName}}\"",
 		"installSuccess": "\"{{itemName}}\" zainstalowano pomyślnie",

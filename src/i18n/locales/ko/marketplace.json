@@ -1,30 +1,4 @@
 {
-	"filters": {
-		"search": {
-			"placeholder": "마켓플레이스 검색..."
-		},
-		"type": {
-			"mode": "모드",
-			"mcpServer": "MCP 서버"
-		},
-		"tags": {
-			"label": "태그",
-			"clear": "태그 지우기",
-			"placeholder": "태그 검색...",
-			"noResults": "태그를 찾을 수 없습니다.",
-			"selected": "선택된 태그 중 하나를 가진 항목 표시"
-		},
-		"installed": {
-			"all": "모든 항목",
-			"installed": "설치됨",
-			"notInstalled": "설치되지 않음"
-		}
-	},
-	"items": {
-		"empty": {
-			"noItems": "마켓플레이스 항목을 찾을 수 없습니다."
-		}
-	},
 	"installation": {
 		"installing": "항목 설치 중: \"{{itemName}}\"",
 		"installSuccess": "\"{{itemName}}\" 설치 완료",

@@ -1,30 +1,4 @@
 {
-	"filters": {
-		"search": {
-			"placeholder": "搜索 Marketplace..."
-		},
-		"type": {
-			"mode": "模式",
-			"mcpServer": "MCP 服务"
-		},
-		"tags": {
-			"label": "标签",
-			"clear": "清除标签",
-			"placeholder": "搜索标签...",
-			"noResults": "未找到标签。",
-			"selected": "显示包含任一选中标签的项目"
-		},
-		"installed": {
-			"all": "所有项目",
-			"installed": "已安装",
-			"notInstalled": "未安装"
-		}
-	},
-	"items": {
-		"empty": {
-			"noItems": "未找到 Marketplace 项目。"
-		}
-	},
 	"installation": {
 		"installing": "正在安装项目：\"{{itemName}}\"",
 		"installSuccess": "\"{{itemName}}\" 安装成功",

@@ -1,30 +1,4 @@
 {
-	"filters": {
-		"search": {
-			"placeholder": "搜尋 Marketplace..."
-		},
-		"type": {
-			"mode": "模式",
-			"mcpServer": "MCP 伺服器"
-		},
-		"tags": {
-			"label": "標籤",
-			"clear": "清除標籤",
-			"placeholder": "搜尋標籤...",
-			"noResults": "找不到標籤。",
-			"selected": "顯示包含任一選取標籤的項目"
-		},
-		"installed": {
-			"all": "所有項目",
-			"installed": "已安裝",
-			"notInstalled": "未安裝"
-		}
-	},
-	"items": {
-		"empty": {
-			"noItems": "找不到 Marketplace 項目。"
-		}
-	},
 	"installation": {
 		"installing": "正在安裝項目：「{{itemName}}」",
 		"installSuccess": "「{{itemName}}」安裝成功",

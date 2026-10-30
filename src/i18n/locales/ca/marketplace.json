@@ -1,30 +1,4 @@
 {
-	"filters": {
-		"search": {
-			"placeholder": "Cercar al marketplace..."
-		},
-		"type": {
-			"mode": "Mode",
-			"mcpServer": "Servidor MCP"
-		},
-		"tags": {
-			"label": "Etiquetes",
-			"clear": "Netejar etiquetes",
-			"placeholder": "Cercar etiquetes...",
-			"noResults": "No s'han trobat etiquetes.",
-			"selected": "Mostrant elements amb qualsevol de les etiquetes seleccionades"
-		},
-		"installed": {
-			"all": "Tots els articles",
-			"installed": "Instal·lats",
-			"notInstalled": "No instal·lats"
-		}
-	},
-	"items": {
-		"empty": {
-			"noItems": "No s'han trobat elements del marketplace."
-		}
-	},
 	"installation": {
 		"installing": "Instal·lant element: \"{{itemName}}\"",
 		"installSuccess": "\"{{itemName}}\" instal·lat correctament",

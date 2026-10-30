@@ -1,30 +1,4 @@
 {
-	"filters": {
-		"search": {
-			"placeholder": "Cari marketplace..."
-		},
-		"type": {
-			"mode": "Mode",
-			"mcpServer": "Server MCP"
-		},
-		"tags": {
-			"label": "Tag",
-			"clear": "Hapus tag",
-			"placeholder": "Cari tag...",
-			"noResults": "Tidak ada tag ditemukan.",
-			"selected": "Menampilkan item dengan salah satu tag yang dipilih"
-		},
-		"installed": {
-			"all": "Semua Item",
-			"installed": "Terpasang",
-			"notInstalled": "Tidak Terpasang"
-		}
-	},
-	"items": {
-		"empty": {
-			"noItems": "Tidak ada item marketplace ditemukan."
-		}
-	},
 	"installation": {
 		"installing": "Menginstal item: \"{{itemName}}\"",
 		"installSuccess": "\"{{itemName}}\" berhasil diinstal",

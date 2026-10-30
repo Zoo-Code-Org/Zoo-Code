@@ -1,30 +1,4 @@
 {
-	"filters": {
-		"search": {
-			"placeholder": "Tìm kiếm marketplace..."
-		},
-		"type": {
-			"mode": "Chế độ",
-			"mcpServer": "Máy chủ MCP"
-		},
-		"tags": {
-			"label": "Thẻ",
-			"clear": "Xóa thẻ",
-			"placeholder": "Tìm thẻ...",
-			"noResults": "Không tìm thấy thẻ nào.",
-			"selected": "Hiển thị các mục có bất kỳ thẻ nào được chọn"
-		},
-		"installed": {
-			"all": "Tất cả các mục",
-			"installed": "Đã cài đặt",
-			"notInstalled": "Chưa cài đặt"
-		}
-	},
-	"items": {
-		"empty": {
-			"noItems": "Không tìm thấy mục marketplace nào."
-		}
-	},
 	"installation": {
 		"installing": "Đang cài đặt mục: \"{{itemName}}\"",
 		"installSuccess": "\"{{itemName}}\" đã được cài đặt thành công",

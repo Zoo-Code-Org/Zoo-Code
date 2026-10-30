@@ -1,30 +1,4 @@
 {
-	"filters": {
-		"search": {
-			"placeholder": "Buscar en marketplace..."
-		},
-		"type": {
-			"mode": "Modo",
-			"mcpServer": "Servidor MCP"
-		},
-		"tags": {
-			"label": "Etiquetas",
-			"clear": "Limpiar etiquetas",
-			"placeholder": "Buscar etiquetas...",
-			"noResults": "No se encontraron etiquetas.",
-			"selected": "Mostrando elementos con cualquiera de las etiquetas seleccionadas"
-		},
-		"installed": {
-			"all": "Todos los artículos",
-			"installed": "Instalados",
-			"notInstalled": "No instalados"
-		}
-	},
-	"items": {
-		"empty": {
-			"noItems": "No se encontraron elementos del marketplace."
-		}
-	},
 	"installation": {
 		"installing": "Instalando elemento: \"{{itemName}}\"",
 		"installSuccess": "\"{{itemName}}\" instalado correctamente",
