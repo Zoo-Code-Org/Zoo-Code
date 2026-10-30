@@ -1342,8 +1342,18 @@ export const webviewMessageHandler = async (
 			// modelCache. The exact match subsumes credential-bearing URLs (no
 			// allowlisted literal contains userinfo), and the raw value is never
 			// echoed since an unsaved one may embed credentials.
+			//
+			// The resolved value is gated too, not just the unsaved one: a stored
+			// value can be off-list (ContextProxy fails open on a schema rejection,
+			// so one written by a pre-allowlist build survives), and flushModels()
+			// now takes a handler that is built eagerly at this call site --
+			// MimoHandler's constructor rejects off-list endpoints, and that throw
+			// escapes the whole requestRouterModels case, skipping both the MiMo
+			// failure response and the aggregate routerModels response.
 			const mimoBaseUrlRejected =
-				unsavedMimoBaseUrl !== undefined && !ALLOWED_BASE_URLS.has(stripTrailingSlashes(unsavedMimoBaseUrl))
+				mimoBaseUrl !== undefined &&
+				mimoBaseUrl !== "" &&
+				!ALLOWED_BASE_URLS.has(stripTrailingSlashes(mimoBaseUrl))
 
 			if (mimoApiKey) {
 				if (mimoBaseUrlRejected) {

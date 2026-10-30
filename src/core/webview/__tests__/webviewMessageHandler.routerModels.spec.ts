@@ -993,6 +993,59 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(response[0].routerModels.mimo).toEqual({})
 	})
 
+	// Regression: flushModels() gained an eagerly-built handler argument, so an
+	// off-list STORED mimoBaseUrl made MimoHandler's constructor throw from inside
+	// this case. That throw escaped requestRouterModels entirely, so the webview got
+	// neither the MiMo failure response nor the aggregate routerModels response (the
+	// refresh button just hung until its 10s timeout). A stored value can be off-list
+	// because ContextProxy.getProviderSettings() fails open on a schema rejection.
+	it("rejects an off-list STORED MiMo base URL without letting the handler constructor throw", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+				mimoBaseUrl: "https://attacker.example/v1",
+			},
+		})
+
+		// Mirrors Mimo.tsx handleRefreshModels: provider + key, no refresh flag.
+		await expect(
+			webviewMessageHandler(mockProvider, {
+				type: RouterModelsMessageType.requestRouterModels,
+				values: { provider: providerIdentifiers.mimo, mimoApiKey: "stored-mimo-key" },
+			}),
+		).resolves.toBeUndefined()
+
+		// The off-list stored URL must never reach modelCache: no flush (which would
+		// build the throwing handler) and no fetch.
+		const mimoFlushCalls = flushModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoFlushCalls.length).toBe(0)
+		const mimoCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoCalls.length).toBe(0)
+
+		const errorCall = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) =>
+				call[0]?.type === RouterModelsMessageType.singleRouterModelFetchResponse &&
+				call[0]?.values?.provider === providerIdentifiers.mimo,
+		)
+		expect(errorCall).toBeDefined()
+		if (!errorCall) throw new Error("Expected MiMo failure response")
+		expect(errorCall[0].success).toBe(false)
+		expect(errorCall[0].error).toBe(
+			"MIMO/requestRouterModels/001: MiMo model fetch rejected: the provided base URL is not an allowed Xiaomi MiMo endpoint.",
+		)
+
+		// The aggregate response still reaches the webview, so the refresh resolves.
+		// A filtered response only carries entries for dispatched candidates, so the
+		// skipped provider is absent rather than empty; the webview then falls back
+		// to the static catalog instead of hanging.
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.mimo).toBeUndefined()
+	})
+
 	it("treats an unsaved empty mimoBaseUrl as unset and keeps using the stored cluster", async () => {
 		mockProvider.getState.mockResolvedValue({
 			apiConfiguration: {
