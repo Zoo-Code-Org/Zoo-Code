@@ -358,15 +358,32 @@ describe("Cost Utility", () => {
 			expect(result.totalCost).toBeCloseTo(0.5175, 9)
 		})
 
-		it("clamps the 5m remainder at zero when the split exceeds the total", () => {
+		it("caps each TTL class at the aggregate write total", () => {
 			// A malformed response claiming more 1h tokens than the write total must
-			// not produce negative 5m writes (which would refund cost).
+			// not bill the excess. The 5m remainder already clamps at zero, but the 1h
+			// and 12h classes were billed at their full reported count.
 			const result = calculateApiCostAnthropic(anthropicModel, 0, 0, 100_000, 0, 150_000)
 
-			// 5m remainder clamps to 0; 1h is capped by the clamp on the remainder only,
-			// so the 1h class still bills its reported 150k at 6.0 => 0.9
-			expect(result.totalCost).toBeCloseTo(0.9, 9)
+			// 1h writes cap at the 100k aggregate; the 5m remainder clamps to 0.
+			// 100k at 6.0 => 0.6
+			expect(result.totalCost).toBeCloseTo(0.6, 9)
 			expect(result.totalCost).toBeGreaterThan(0)
+			// The pre-fix behaviour billed all 150k at 6.0 => 0.9.
+			expect(result.totalCost).not.toBeCloseTo(0.9, 9)
+		})
+
+		it("caps the 12h class at the remainder left after the 1h class", () => {
+			// 1h and 12h are a decomposition of one aggregate, so they cannot both
+			// claim the whole total. 1h wins the ordering; 12h gets what is left.
+			const model: ModelInfo = { ...anthropicModel, cacheWritesPrice12h: 7.5 }
+			const result = calculateApiCostAnthropic(model, 0, 0, 100_000, 0, 60_000, 80_000)
+
+			// 1h: 60k at 6.0 => 0.36
+			// 12h: capped at 100k - 60k = 40k at 7.5 => 0.3
+			// 5m: 100k - 60k - 40k = 0
+			// Total: 0.66 (the pre-fix behaviour billed 80k 12h => 0.36 + 0.6 = 0.96)
+			expect(result.totalCost).toBeCloseTo(0.66, 9)
+			expect(result.totalCost).not.toBeCloseTo(0.96, 9)
 		})
 
 		it("is byte-identical to the pre-split cost when no split is reported", () => {

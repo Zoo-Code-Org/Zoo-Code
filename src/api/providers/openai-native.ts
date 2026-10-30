@@ -1,4 +1,5 @@
 import * as os from "os"
+import { createHash } from "crypto"
 import { v7 as uuidv7 } from "uuid"
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
@@ -162,8 +163,10 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			usage.cache_read_input_tokens ?? usage.cache_read_tokens ?? usage.cached_tokens ?? cachedFromDetails ?? 0
 
 		// Clamp the 12h subset to the write total so a malformed response cannot bill
-		// more 12h tokens than were written at all.
-		const cacheWrite12hTokens = Math.min(writes12hFromDetails, cacheWriteTokens)
+		// more 12h tokens than were written at all. The lower clamp matters too: a
+		// negative `ttl_12h_tokens` from a misbehaving gateway would otherwise reach the
+		// Task accumulator and the webview as a negative count.
+		const cacheWrite12hTokens = Math.max(0, Math.min(writes12hFromDetails, cacheWriteTokens))
 
 		// Resolve effective tier: prefer actual tier from response; otherwise requested tier
 		const effectiveTier =
@@ -1472,7 +1475,10 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		const key = metadata?.taskId || this.sessionId
 		if (!key) return undefined
 
-		return key.length > PROMPT_CACHE_KEY_MAX_LENGTH ? key.slice(0, PROMPT_CACHE_KEY_MAX_LENGTH) : key
+		// Hash rather than slice: a 64-char prefix drops the distinguishing tail, so two
+		// distinct task ids that share a long prefix would land in one routing bucket.
+		// sha256 hex is 64 characters, so the result fits the cap without truncation.
+		return key.length > PROMPT_CACHE_KEY_MAX_LENGTH ? createHash("sha256").update(key).digest("hex") : key
 	}
 
 	/**
