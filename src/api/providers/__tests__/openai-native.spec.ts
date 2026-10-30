@@ -1560,6 +1560,36 @@ describe("OpenAiNativeHandler", () => {
 			expect(mockResponsesCreate.mock.calls[0][1].headers).not.toHaveProperty("session_id")
 		})
 
+		it("keys completePrompt off the task id when the caller supplies one", async () => {
+			// Prompt enhancement builds a fresh handler per request, so a session-scoped key
+			// would start a new cache bucket every time. The task id keeps repeated
+			// enhancements of one task on the same bucket.
+			mockResponsesCreate.mockResolvedValue({ output: [] })
+
+			const first = new OpenAiNativeHandler({ ...mockOptions, apiModelId: "gpt-5.1" })
+			const second = new OpenAiNativeHandler({ ...mockOptions, apiModelId: "gpt-5.1" })
+
+			await first.completePrompt("enhance me", { taskId: "task-enhance" })
+			await second.completePrompt("enhance me", { taskId: "task-enhance" })
+
+			const bodies = mockResponsesCreate.mock.calls.map(([body]) => body)
+			expect(bodies).toHaveLength(2)
+			expect(bodies[0].prompt_cache_key).toBe("task-enhance")
+			// Different handler instances, same task: the key must not drift.
+			expect(bodies[1].prompt_cache_key).toBe(bodies[0].prompt_cache_key)
+		})
+
+		it("falls back to the handler session id when completePrompt gets no task id", async () => {
+			mockResponsesCreate.mockResolvedValue({ output: [] })
+
+			const cacheHandler = new OpenAiNativeHandler({ ...mockOptions, apiModelId: "gpt-5.1" })
+
+			await cacheHandler.completePrompt("enhance me")
+
+			const [body] = mockResponsesCreate.mock.calls[0]
+			expect(body.prompt_cache_key).toBe(cacheHandler["sessionId"])
+		})
+
 		it("should provide helpful error messages for different error codes", async () => {
 			const testCases = [
 				{ status: 400, expectedMessage: "Invalid request to Responses API" },

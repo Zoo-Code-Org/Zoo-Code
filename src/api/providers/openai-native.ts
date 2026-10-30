@@ -1572,7 +1572,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	getResponseId(): string | undefined {
 		return this.lastResponseId
 	}
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		try {
 			this.abortController = new AbortController()
 
@@ -1603,9 +1603,13 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				requestBody[SERVICE_TIER_KEY] = serviceTier
 			}
 
-			// Cache routing affinity key. `completePrompt` has no task metadata, so the handler
-			// session id scopes the key: one bucket per handler instance, never shared across tasks.
-			const promptCacheKey = this.getPromptCacheKey(model)
+			// Cache routing affinity key. A caller that knows the task passes it, so repeated
+			// completions for one task share a bucket across handler instances; otherwise the
+			// handler session id scopes the key to this instance.
+			const promptCacheKey = this.getPromptCacheKey(
+				model,
+				options?.taskId ? { taskId: options.taskId } : undefined,
+			)
 			if (promptCacheKey) {
 				requestBody.prompt_cache_key = promptCacheKey
 			}
