@@ -607,6 +607,11 @@ export class ContextProxy {
 		// Clear in-memory caches
 		this.stateCache = {}
 		this.secretCache = {}
+		// A write that started before this reset must not restore its pre-reset value when it
+		// rejects afterwards, so advance every generation the pending writes still hold.
+		for (const key of this.stateWriteGenerations.keys()) {
+			this.stateWriteGenerations.set(key, (this.stateWriteGenerations.get(key) ?? 0) + 1)
+		}
 
 		await Promise.all([
 			...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
