@@ -8329,4 +8329,40 @@ describe("pushToolResultToUserContent", () => {
 		expect(task.userMessageContent[2]).toEqual(image1)
 		expect(task.userMessageContent[3]).toEqual(image2)
 	})
+
+	it("moves text as well as images behind the tool_results, preserving order within each group", () => {
+		const task = new Task({
+			provider: mockProvider,
+			apiConfiguration: mockApiConfig,
+			task: "test task",
+			startTask: false,
+		})
+
+		const toolResult1: Anthropic.ToolResultBlockParam = {
+			type: "tool_result",
+			tool_use_id: "id-1",
+			content: "Result 1",
+		}
+		const toolResult2: Anthropic.ToolResultBlockParam = {
+			type: "tool_result",
+			tool_use_id: "id-2",
+			content: "Result 2",
+		}
+		const image: Anthropic.ImageBlockParam = {
+			type: "image",
+			source: { type: "base64", media_type: "image/png", data: "img1" },
+		}
+		const text1: Anthropic.TextBlockParam = { type: "text", text: "text one" }
+		const text2: Anthropic.TextBlockParam = { type: "text", text: "text two" }
+
+		// Interleaved arrival: image, text, r1, more text, r2. Grouping only
+		// images would leave text1 ahead of r1, which Anthropic rejects; every
+		// non-tool_result block must move behind the contiguous result run.
+		task.userMessageContent.push(image, text1)
+		task.pushToolResultToUserContent(toolResult1)
+		task.userMessageContent.push(text2)
+		task.pushToolResultToUserContent(toolResult2)
+
+		expect(task.userMessageContent).toEqual([toolResult1, toolResult2, image, text1, text2])
+	})
 })

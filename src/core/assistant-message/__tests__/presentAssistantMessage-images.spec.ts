@@ -1,6 +1,7 @@
 // npx vitest src/core/assistant-message/__tests__/presentAssistantMessage-images.spec.ts
 
-import { describe, it, expect, beforeEach, vi } from "vitest"
+import { describe, it, expect, beforeEach, beforeAll, vi } from "vitest"
+import type { Anthropic } from "@anthropic-ai/sdk"
 import { presentAssistantMessage } from "../presentAssistantMessage"
 import { validateToolUse } from "../../tools/validateToolUse"
 import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
@@ -32,6 +33,21 @@ const baseSnapshot: RequestPolicySnapshot = {
 	disabledTools: [],
 	customModes: [],
 }
+
+// The real Task.prototype.pushToolResultToUserContent, imported past the
+// module-level automock. Binding the real implementation (rather than a copy of
+// its partition logic) is what makes the #1307 tests non-tautological: deleting
+// the grouping from Task.ts makes these tests fail.
+type RealPushToolResult = (
+	this: { userMessageContent: UserContentBlock[] },
+	toolResult: Anthropic.ToolResultBlockParam,
+) => boolean
+let realPushToolResultToUserContent: RealPushToolResult
+
+beforeAll(async () => {
+	const actual = await vi.importActual<typeof import("../../task/Task")>("../../task/Task")
+	realPushToolResultToUserContent = actual.Task.prototype.pushToolResultToUserContent
+})
 
 describe("presentAssistantMessage - Image Handling in Native Tool Calling", () => {
 	let mockTask: any
@@ -76,27 +92,11 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked" }),
 		}
 
-		// Mirrors Task.pushToolResultToUserContent: duplicate guard plus keeping
-		// tool_result blocks contiguous by moving image blocks after the new result.
-		mockTask.pushToolResultToUserContent = vi.fn().mockImplementation((toolResult: any) => {
-			const existingResult = mockTask.userMessageContent.find(
-				(block: any) => block.type === "tool_result" && block.tool_use_id === toolResult.tool_use_id,
-			)
-			if (existingResult) {
-				return false
-			}
-			mockTask.userMessageContent.push(toolResult)
-			const results = mockTask.userMessageContent.filter(
-				(block: UserContentBlock) => block.type === "tool_result",
-			)
-			if (results.length !== mockTask.userMessageContent.length) {
-				const others = mockTask.userMessageContent.filter(
-					(block: UserContentBlock) => block.type !== "tool_result",
-				)
-				mockTask.userMessageContent.splice(0, mockTask.userMessageContent.length, ...results, ...others)
-			}
-			return true
-		})
+		// Bind the REAL Task.prototype method to this structural double: it only
+		// reads and rewrites `userMessageContent`, which the double provides.
+		mockTask.pushToolResultToUserContent = vi.fn((toolResult: Anthropic.ToolResultBlockParam) =>
+			realPushToolResultToUserContent.call(mockTask, toolResult),
+		)
 	})
 
 	it("should preserve images in tool_result for native tool calling", async () => {
@@ -378,7 +378,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 				})
 			})
 
-			await presentAssistantMessage(mockTask)
+			await presentAssistantMessage(mockTask, baseSnapshot)
 
 			// Anthropic rejects user messages where image blocks sit between
 			// tool_result blocks, so images from both tools must be grouped
@@ -439,7 +439,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 				return Promise.resolve({ response: "yesButtonClicked", text: "answer b", images: undefined })
 			})
 
-			await presentAssistantMessage(mockTask)
+			await presentAssistantMessage(mockTask, baseSnapshot)
 
 			expect(mockTask.userMessageContent.map((block: UserContentBlock) => block.type)).toEqual([
 				"tool_result",
