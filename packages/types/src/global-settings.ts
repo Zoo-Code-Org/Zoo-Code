@@ -121,10 +121,7 @@ export const viewStateSchema = z.object({
 	mode: z.string().optional(),
 	currentApiConfigName: z.string().optional(),
 	updatedAt: z.number().optional(),
-	/**
-	 * Host-minted capability token binding this entry to the webview that wrote it; never
-	 * accepted from webview input and only a matching token re-adopts the entry.
-	 */
+	/** Host-minted token binding this entry to the webview that wrote it. */
 	claimToken: z.string().optional(),
 })
 
