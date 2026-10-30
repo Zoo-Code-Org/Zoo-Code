@@ -163,6 +163,37 @@ describe("Opencode Go Fetchers", () => {
 			})
 		})
 
+		it("resolves MiMo V2.6 Flash and Pro from an ID-only catalog response", async () => {
+			mockedAxios.get.mockResolvedValue({
+				data: { data: [{ id: "mimo-v2.6-flash" }, { id: "mimo-v2.6-pro" }] },
+			})
+
+			const models = await getOpencodeGoModels("k")
+
+			// The generic fallback would report 200_000 context / 32_768 output and
+			// no pricing, so these values prove the native registry was used.
+			expect(models["mimo-v2.6-flash"]).toMatchObject({
+				contextWindow: 1_048_576,
+				maxTokens: 131_072,
+				supportsImages: true,
+				supportsPromptCache: false,
+				preserveReasoning: true,
+				inputPrice: 0.14,
+				outputPrice: 0.28,
+				cacheReadsPrice: 0.0028,
+			})
+			expect(models["mimo-v2.6-pro"]).toMatchObject({
+				contextWindow: 1_048_576,
+				maxTokens: 131_072,
+				supportsImages: true,
+				supportsPromptCache: false,
+				preserveReasoning: true,
+				inputPrice: 0.435,
+				outputPrice: 0.87,
+				cacheReadsPrice: 0.003625,
+			})
+		})
+
 		it("returns an empty map on network error", async () => {
 			mockedAxios.get.mockRejectedValue(new Error("network"))
 			expect(await getOpencodeGoModels("k")).toEqual({})
@@ -253,6 +284,8 @@ describe("Opencode Go Fetchers", () => {
 				"mimo-v2-omni",
 				"mimo-v2.5-pro",
 				"mimo-v2.5",
+				"mimo-v2.6-flash",
+				"mimo-v2.6-pro",
 				"hy4-preview",
 				"hy3",
 				"hy3-preview",
@@ -328,6 +361,28 @@ describe("Opencode Go Fetchers", () => {
 			expect(info.inputPrice).toBe(0.3)
 			expect(info.outputPrice).toBe(1.2)
 			expect(info.cacheReadsPrice).toBe(0.006)
+		})
+
+		it("resolves MiMo V2.6 Flash and Pro to their 1M context when live metadata is absent", () => {
+			const flash = parseOpencodeGoModel({ id: "mimo-v2.6-flash" })
+			expect(flash.contextWindow).toBe(1_048_576)
+			expect(flash.maxTokens).toBe(131_072)
+			expect(flash.supportsImages).toBe(true)
+			expect(flash.supportsPromptCache).toBe(false)
+			expect(flash.preserveReasoning).toBe(true)
+			expect(flash.inputPrice).toBe(0.14)
+			expect(flash.outputPrice).toBe(0.28)
+			expect(flash.cacheReadsPrice).toBe(0.0028)
+
+			const pro = parseOpencodeGoModel({ id: "mimo-v2.6-pro" })
+			expect(pro.contextWindow).toBe(1_048_576)
+			expect(pro.maxTokens).toBe(131_072)
+			expect(pro.supportsImages).toBe(true)
+			expect(pro.supportsPromptCache).toBe(false)
+			expect(pro.preserveReasoning).toBe(true)
+			expect(pro.inputPrice).toBe(0.435)
+			expect(pro.outputPrice).toBe(0.87)
+			expect(pro.cacheReadsPrice).toBe(0.003625)
 		})
 
 		it("resolves GLM-5.2 with its 1M context and High/Max reasoning effort", () => {
