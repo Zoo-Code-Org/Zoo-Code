@@ -2457,7 +2457,7 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
-		it("should keep the persisted profile name and log when the profile lookup fails", async () => {
+		it("should not pin the persisted profile name when the profile lookup fails", async () => {
 			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
@@ -2470,7 +2470,9 @@ describe("ClineProvider", () => {
 			provider.providerSettingsManager = { getProfile: vi.fn().mockRejectedValue(new Error("profile missing")) }
 			await provider.saveViewState("currentApiConfigName", "my-profile")
 			await provider["setViewStateId"]("stable-sidebar-view")
-			expect(provider["viewLocalState"].currentApiConfigName).toBe("my-profile")
+			// The name is pinned only together with the configuration it resolves to: without
+			// the overlay, getState() would pair the name with the shared settings instead.
+			expect(provider["viewLocalState"]).not.toHaveProperty("currentApiConfigName")
 			expect(provider["viewLocalState"]).not.toHaveProperty("apiConfiguration")
 			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Unable to resolve API profile 'my-profile'"))
 			await provider.dispose()

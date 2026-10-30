@@ -345,6 +345,11 @@ export class ClineProvider
 	// operation that still owns the latest mode mutation may write the mode again.
 	private modeMutationGeneration = 0
 
+	// What a cancelled switch must put back in the task stores it already wrote: the history
+	// mode and `_taskMode` the switch replaced. Cleared once the switch commits or compensates.
+	private cancelledModeSwitchSnapshot:
+		{ task: Task; previousHistoryMode: string | undefined; previousTaskMode: Mode | undefined } | undefined
+
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
 		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
 	}
@@ -998,12 +1003,14 @@ export class ClineProvider
 			}
 
 			if (persisted?.currentApiConfigName) {
-				loadedState.currentApiConfigName = persisted.currentApiConfigName
-
 				try {
 					const { name: _name, ...apiConfiguration } = await this.providerSettingsManager.getProfile({
 						name: persisted.currentApiConfigName,
 					})
+					// Pin the name only together with the configuration it resolves to: a name
+					// without its overlay would make getState() pair it with whatever shared
+					// settings currently sit under that name.
+					loadedState.currentApiConfigName = persisted.currentApiConfigName
 					loadedState.apiConfiguration = apiConfiguration as ProviderSettings
 				} catch (error) {
 					this.log(
@@ -2448,6 +2455,11 @@ export class ClineProvider
 
 				if (taskHistoryItem) {
 					await this.updateTaskHistory({ ...taskHistoryItem, mode: newMode })
+					this.cancelledModeSwitchSnapshot = {
+						task,
+						previousHistoryMode: taskHistoryItem.mode,
+						previousTaskMode: (task as any)._taskMode,
+					}
 
 					// An abort that lands while the history write is in flight has
 					// already persisted the new mode: restore the pre-switch item and
@@ -2626,6 +2638,9 @@ export class ClineProvider
 		if (targetTask !== null) {
 			await this.postStateToWebview()
 		}
+
+		// The switch committed: no later checkpoint can compensate it any more.
+		this.cancelledModeSwitchSnapshot = undefined
 	}
 
 	/**
@@ -2658,6 +2673,19 @@ export class ClineProvider
 			// elsewhere (or pinning one that had no pin at all).
 			await this.contextProxy.setValue("mode", previousMode)
 			await this._saveViewLocalStateFromMutation({ mode: previousViewMode })
+
+			// The history write and the in-memory task mode were applied before the cancellation
+			// arrived: restore them too, or the task resumes in the cancelled mode while the
+			// provider and every view show the previous one.
+			const taskSnapshot = this.cancelledModeSwitchSnapshot
+			this.cancelledModeSwitchSnapshot = undefined
+			if (taskSnapshot) {
+				const latestHistoryItem = this.getTaskHistoryItem(taskSnapshot.task.taskId)
+				if (latestHistoryItem) {
+					await this.updateTaskHistory({ ...latestHistoryItem, mode: taskSnapshot.previousHistoryMode })
+				}
+				;(taskSnapshot.task as any)._taskMode = taskSnapshot.previousTaskMode
+			}
 		} catch (compensationError) {
 			throw new ModeSwitchInconsistentError(
 				`[ClineProvider] A cancelled switch to mode "${newMode}" could not restore the previous mode "${String(
@@ -3396,7 +3424,21 @@ export class ClineProvider
 								if (entry?.currentApiConfigName !== profileToDelete.name) {
 									continue
 								}
-								merged[viewId] = entry
+								merged[viewId] = { ...entry }
+								const currentEntry = this.getPersistedViewStates({ fresh: true })[viewId]
+								if (currentEntry) {
+									// The pin reverts; the view's own mode may be newer than the snapshot
+									// (or deliberately cleared), so carry the current field forward instead
+									// of reviving the older value on reload.
+									if (currentEntry.mode === undefined) {
+										delete merged[viewId].mode
+									} else {
+										merged[viewId].mode = currentEntry.mode
+									}
+									if (currentEntry.updatedAt !== undefined) {
+										merged[viewId].updatedAt = currentEntry.updatedAt
+									}
+								}
 								changed = true
 							}
 							if (changed) {
@@ -3670,6 +3712,15 @@ export class ClineProvider
 		},
 		signal?: AbortSignal,
 	): Promise<void> {
+		// Snapshot the stores before activateProfile() rewrites the manager's own current-profile
+		// record: a snapshot that fails after that write would leave the name changed with no
+		// compensation (its getProfile/getModeConfigId reads reject outside the try below).
+		const profileName = "name" in args ? args.name : (await this.providerSettingsManager.getProfile(args)).name
+		// The mode is read before the first write because the per-mode mapping is one of the
+		// durable stores the snapshot captures.
+		const { mode } = await this.getState()
+		const snapshot = await this.snapshotProfileActivationStores(profileName, mode)
+
 		const { name, id, ...providerSettings } = await this.providerSettingsManager.activateProfile(args)
 
 		if (signal?.aborted) return
@@ -3677,11 +3728,6 @@ export class ClineProvider
 		const persistModeConfig = options?.persistModeConfig ?? true
 		const persistTaskHistory = options?.persistTaskHistory ?? true
 		const skipCurrentTaskRebuild = options?.skipCurrentTaskRebuild ?? false
-
-		// The mode is read before the first write because the per-mode mapping is one of the
-		// durable stores the snapshot below captures.
-		const { mode } = await this.getState()
-		const snapshot = await this.snapshotProfileActivationStores(name, mode)
 		const landed: ProfileActivationLanded = {
 			profileRecord: false,
 			profileList: false,
