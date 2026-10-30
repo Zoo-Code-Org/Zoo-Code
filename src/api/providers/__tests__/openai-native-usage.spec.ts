@@ -528,6 +528,35 @@ describe("OpenAiNativeHandler - normalizeUsage", () => {
 			expect(result.totalCost).toBeCloseTo(expectedCost, 6)
 		})
 
+		it.each([
+			// gpt-6-astra: default input 10.0 / 12h 25.0; flex input 5.0; priority input 20.0.
+			// The 12h rate must follow the tier's own input price (2.5x), not the
+			// standard-tier 12h rate, or a flex/priority 12h write is mis-billed.
+			{ tier: OpenAiServiceTier.Default, expectedCost: 2.5 },
+			{ tier: OpenAiServiceTier.Flex, expectedCost: 1.25 },
+			{ tier: OpenAiServiceTier.Priority, expectedCost: 5.0 },
+		])("derives the 12h rate from the $tier tier's own input price", ({ tier, expectedCost }) => {
+			handler = new OpenAiNativeHandler({
+				openAiNativeApiKey: "test-key",
+				openAiNativeServiceTier: tier,
+			})
+			const result = handler["normalizeUsage"](
+				{
+					input_tokens: 100_000,
+					output_tokens: 0,
+					input_tokens_details: {
+						cache_write_tokens: 100_000,
+						cache_write_tokens_details: { ttl_12h_tokens: 100_000 },
+					},
+				},
+				getGpt6AstraModel(),
+			)
+
+			if (!result) throw new Error("Expected usage")
+			// All input is consumed by the write, so the whole cost is the 12h class.
+			expect(result.totalCost).toBeCloseTo(expectedCost, 6)
+		})
+
 		it("should pass total input tokens to calculateApiCostOpenAI", () => {
 			const usage = {
 				input_tokens: 100,
