@@ -1,11 +1,13 @@
 // pnpm --filter @roo-code/vscode-webview test src/components/chat/__tests__/CommandExecution.spec.tsx
 
 import React from "react"
-import { render, screen, fireEvent, act } from "@testing-library/react"
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import i18next from "i18next"
 
 import { CommandExecution } from "../CommandExecution"
 import { ExtensionStateContext } from "../../../context/ExtensionStateContext"
+import { TooltipProvider } from "@src/components/ui/tooltip"
 import enChat from "../../../i18n/locales/en/chat.json"
 
 // Mock dependencies
@@ -61,6 +63,19 @@ describe("CommandExecution", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 	})
+
+	// Since useEvent is mocked as a no-op vi.fn(), the component's onMessage
+	// handler is recorded in mock.calls[last][1]. We invoke it directly to
+	// simulate an incoming extension message. event.data must be an
+	// ExtensionMessage with type "commandExecutionStatus" and text holding
+	// the JSON-serialised CommandExecutionStatus payload.
+	const sendStatusMessage = (executionId: string, payload: Record<string, unknown>) => {
+		const mockedUseEvent = useEvent as unknown as ReturnType<typeof vi.fn>
+		const lastCall = mockedUseEvent.mock.calls[mockedUseEvent.mock.calls.length - 1]
+		const handler = lastCall?.[1] as ((e: MessageEvent) => void) | undefined
+		const data = { type: "commandExecutionStatus", text: JSON.stringify({ executionId, ...payload }) }
+		handler?.(new MessageEvent("message", { data }))
+	}
 
 	it("should render command without output", () => {
 		render(
@@ -638,19 +653,6 @@ Output:
 	})
 
 	describe("running status indicator", () => {
-		// Since useEvent is mocked as a no-op vi.fn(), the component's onMessage
-		// handler is recorded in mock.calls[last][1]. We invoke it directly to
-		// simulate an incoming extension message. event.data must be an
-		// ExtensionMessage with type "commandExecutionStatus" and text holding
-		// the JSON-serialised CommandExecutionStatus payload.
-		const sendStatusMessage = (executionId: string, payload: Record<string, unknown>) => {
-			const mockedUseEvent = useEvent as unknown as ReturnType<typeof vi.fn>
-			const lastCall = mockedUseEvent.mock.calls[mockedUseEvent.mock.calls.length - 1]
-			const handler = lastCall?.[1] as ((e: MessageEvent) => void) | undefined
-			const data = { type: "commandExecutionStatus", text: JSON.stringify({ executionId, ...payload }) }
-			handler?.(new MessageEvent("message", { data }))
-		}
-
 		it("should show the pulsing dot when status is started", async () => {
 			render(
 				<ExtensionStateWrapper>
@@ -870,6 +872,43 @@ Output:
 			expect(instance.t("chat.commandExecution.exitStatus", { exitCode: 0 })).toBe(
 				"chat.commandExecution.exitStatus",
 			)
+		})
+
+		// The two tests above only exercise a standalone i18next instance, so they
+		// would keep passing if CommandExecution used the wrong key or dropped the
+		// exitCode interpolation. This one renders the real exited branch and reads
+		// the tooltip the user actually sees.
+		it("renders the interpolated exit-status tooltip for an exited command", async () => {
+			const user = userEvent.setup()
+
+			await i18next.init({
+				lng: "en",
+				fallbackLng: "en",
+				resources: { en: { chat: enChat } },
+				interpolation: { escapeValue: false },
+			})
+
+			render(
+				<TooltipProvider delayDuration={0}>
+					<ExtensionStateWrapper>
+						<CommandExecution executionId="exec-tooltip-exited" text="npm start" />
+					</ExtensionStateWrapper>
+				</TooltipProvider>,
+			)
+
+			await act(async () => {
+				sendStatusMessage("exec-tooltip-exited", { status: "exited", exitCode: 7 })
+			})
+
+			// The exited branch renders the status dot as the tooltip trigger.
+			const statusDot = document.querySelector(".rounded-full.size-2")
+			expect(statusDot).toBeInTheDocument()
+
+			await user.hover(statusDot as Element)
+
+			await waitFor(() => {
+				expect(screen.getByRole("tooltip")).toHaveTextContent("Exited with status 7")
+			})
 		})
 	})
 })
