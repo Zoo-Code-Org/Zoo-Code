@@ -27,8 +27,9 @@ import { isMcpTool } from "../../utils/mcp-name"
 
 const XAI_DEFAULT_TEMPERATURE = 0
 
-// xAI caps `prompt_cache_key` at 64 characters, the same bound the OpenAI Responses
-// API enforces on the field. Task ids are uuid v7 (36 chars), so this is a guard.
+// Conservative length guard for `prompt_cache_key`: OpenAI's documented cap is 64
+// chars; xAI does not document a bound for this field, so we apply the same cap.
+// Task ids are uuid v7 (36 chars), so this never truncates in practice.
 const XAI_MAX_PROMPT_CACHE_KEY_LENGTH = 64
 
 export class XAIHandler extends BaseProvider implements SingleCompletionHandler {
