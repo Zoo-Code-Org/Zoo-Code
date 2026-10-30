@@ -3807,20 +3807,26 @@ describe("ClineProvider", () => {
 					// The single-lock form the reconcile uses: the unbound check, the existence check
 					// and the write are one step, so neither a newer binding nor a purge can land
 					// between them.
-					setModeConfig: vi.fn().mockImplementation((mode: string, configId: string, options?: { onlyIfUnbound?: boolean }) =>
-						withLock(async () => {
-							if (options?.onlyIfUnbound) {
-								if (modeApiConfigs[mode] !== undefined) {
-									return false
+					setModeConfig: vi
+						.fn()
+						.mockImplementation((mode: string, configId: string, options?: { onlyIfUnbound?: boolean }) =>
+							withLock(async () => {
+								if (options?.onlyIfUnbound) {
+									if (modeApiConfigs[mode] !== undefined) {
+										return false
+									}
+									if (
+										!Object.values(Object.fromEntries(configs)).some(
+											(config) => config.id === configId,
+										)
+									) {
+										return false
+									}
 								}
-								if (!Object.values(Object.fromEntries(configs)).some((config) => config.id === configId)) {
-									return false
-								}
-							}
-							modeApiConfigs[mode] = configId
-							return true
-						}),
-					),
+								modeApiConfigs[mode] = configId
+								return true
+							}),
+						),
 					getModeConfigId: vi
 						.fn()
 						.mockImplementation((mode: string) => withLock(async () => modeApiConfigs[mode])),

@@ -2204,8 +2204,7 @@ export class ClineProvider
 		let deleteBodySettled: Promise<unknown> = Promise.resolve()
 		try {
 			const enqueued = this.enqueueProviderProfileMutationWithBody(async (signal) => {
-				// Read the settings inside the queue: a queued activation may have changed the
-				// active profile since this call was made.
+				// Read inside the queue: a queued activation may have changed the active profile.
 				const globalSettings = this.contextProxy.getValues()
 				const deletedActiveProfile = profileToDelete.name === globalSettings.currentApiConfigName
 
@@ -2216,18 +2215,15 @@ export class ClineProvider
 				}
 
 				if (!deletedActiveProfile) {
-					// A timeout may have already fired while this body was queued or while an
-					// earlier manager call held the lock. Purging now would delete the profile
-					// after the caller was told the deletion failed.
+					// A timeout may have fired while queued or while an earlier manager call held
+					// the lock. Purging now would delete the profile after the caller was told it failed.
 					if (signal.aborted) {
 						return
 					}
 
-					// Captured before the purge so a timeout that fires while the manager lock is
-					// held can undo a purge that already committed. Without it the manager would
-					// drop the profile while the caller was told the deletion failed, and the
-					// inactive branch never activates a replacement to converge the two stores.
-					// Best-effort: a manager that cannot produce the profile leaves nothing to undo.
+					// Captured before the purge so a timeout firing under the manager lock can undo a
+					// committed purge; the inactive branch activates no replacement to converge the
+					// two stores. Best-effort: a manager that cannot produce it leaves nothing to undo.
 					let undoConfig: (ProviderSettingsWithId & { name: string }) | undefined
 					try {
 						undoConfig = await this.providerSettingsManager.getProfile({ name: profileToDelete.name })
@@ -2239,22 +2235,27 @@ export class ClineProvider
 						return
 					}
 
-					// Purge first so a failing purge fails fast before any ContextProxy write,
-					// matching the ordering the webview delete path established.
+					// Purge first so a failing purge fails fast before any ContextProxy write, matching
+					// the ordering the webview delete path established.
 					removedModeConfigs = (await this.providerSettingsManager.deleteConfig(profileToDelete.name))
 						.removedModeConfigs
 
-					// A timeout may have fired while the manager lock was held. The purge committed,
-					// so the caller must not be left with a deleted profile it was told survived:
-					// undo it instead of returning with the two stores disagreeing.
+					// A timeout may have fired under the manager lock. The purge committed, so the
+					// caller must not be left with a deleted profile it was told survived: undo it.
 					if (signal.aborted) {
-						await this.undoCommittedProviderProfilePurge(profileToDelete.name, undoConfig, removedModeConfigs)
+						await this.undoCommittedProviderProfilePurge(
+							profileToDelete.name,
+							undoConfig,
+							removedModeConfigs,
+						)
 
 						// The undo restored the pre-delete profile, so the manager's view needs mirroring
 						// only when it holds a profile the cache never observed. An unconditional write
 						// would land a snapshot older than a newer mutation's write and replace it.
 						const listApiConfigMeta = await this.providerSettingsManager.listConfig()
-						if (listApiConfigMeta.length !== (this.contextProxy.getValues().listApiConfigMeta?.length ?? 0)) {
+						if (
+							listApiConfigMeta.length !== (this.contextProxy.getValues().listApiConfigMeta?.length ?? 0)
+						) {
 							await this.contextProxy.setValues({
 								listApiConfigMeta,
 								modeApiConfigs: await this.providerSettingsManager.getModeApiConfigs(),
@@ -2328,9 +2329,8 @@ export class ClineProvider
 					.removedModeConfigs
 
 				// Route through the standard activation path so the effective provider settings, mode
-				// config, and current-task wiring all end up identical to a user activating the
-				// replacement profile from the webview. The unlocked variant is used because this
-				// already runs inside the mutation queue.
+				// config, and current-task wiring match a user activating the replacement from the
+				// webview. The unlocked variant is used because this already runs in the mutation queue.
 				await this.activateProviderProfileUnlocked({ name: profileToActivate }, undefined, signal)
 
 				// A timeout may have fired while the activation was in flight. The queued rollback is
