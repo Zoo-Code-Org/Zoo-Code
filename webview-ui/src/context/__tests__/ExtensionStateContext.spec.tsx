@@ -16,6 +16,10 @@ import {
 	DEFAULT_WRITE_DELAY_MS,
 } from "@roo-code/types"
 
+// State messages carrying `language` call i18next.changeLanguage, which throws on an uninitialized
+// instance. App imports this setup in production, so the provider expects it to have run.
+import "@src/i18n/setup"
+
 import {
 	ExtensionStateContextProvider,
 	useExtensionState,
