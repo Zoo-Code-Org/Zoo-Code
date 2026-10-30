@@ -2663,13 +2663,15 @@ describe("Task persistence", () => {
 
 			vi.useFakeTimers()
 			try {
-				child.start()
-				expect(access.livenessHeartbeatInterval).toBeDefined()
 				// The user cancelled: the catch returns without rethrowing.
 				child.abortReason = "user_cancelled"
 
 				await expect(child.run()).resolves.toBeUndefined()
 
+				// `run()` must have reached the resume prologue and taken the abort
+				// path inside it: calling `start()` first would set `_started`, make
+				// `run()` resolve early, and leave the assertions below vacuous.
+				expect(access.getSavedClineMessages).toHaveBeenCalled()
 				expect(access.livenessHeartbeatInterval).toBeDefined()
 			} finally {
 				vi.useRealTimers()

@@ -435,8 +435,8 @@ describe("safeWriteJson", () => {
 	})
 
 	// Test for rollback failure scenario
-	test("should log error and re-throw original if rollback fails", async () => {
-		const initialData = { message: "Initial, should be lost if rollback fails" }
+	test("should keep the backup and re-throw the original error if rollback fails", async () => {
+		const initialData = { message: "Initial, must survive in the kept backup" }
 		const newData = { message: "New content" }
 
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
@@ -465,6 +465,13 @@ describe("safeWriteJson", () => {
 			expect.stringContaining("Failed to restore backup"),
 			expect.objectContaining({ message: "Rollback rename failed" }),
 		)
+
+		// The failed rollback left the original only in the backup: cleanup must
+		// not unlink it, or the caller's data is gone with no copy anywhere.
+		const backups = (await fs.readdir(tempDir)).filter((name) => name.includes(".bak_"))
+		expect(backups).toHaveLength(1)
+		expect(JSON.parse(await fs.readFile(path.join(tempDir, backups[0]), "utf8"))).toEqual(initialData)
+		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Keeping backup"))
 
 		consoleErrorSpy.mockRestore()
 	})
