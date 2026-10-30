@@ -29,7 +29,7 @@ export const LMStudio = ({ apiConfiguration, setApiConfigurationField }: LMStudi
 
 	const [lmStudioModels, setLmStudioModels] = useState<ModelRecord>({})
 	const routerModels = useRouterModels({ provider: providerIdentifiers.lmstudio })
-	const initialBaseUrlRef = useRef(apiConfiguration?.lmStudioBaseUrl)
+	const initialBaseUrlRef = useRef(apiConfiguration.lmStudioBaseUrl)
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(
@@ -65,7 +65,7 @@ export const LMStudio = ({ apiConfiguration, setApiConfigurationField }: LMStudi
 
 	// Check if the selected model exists in the fetched models
 	const modelNotAvailableError = useMemo(() => {
-		const selectedModel = apiConfiguration?.lmStudioModelId
+		const selectedModel = apiConfiguration.lmStudioModelId
 		if (!selectedModel) return undefined
 
 		// Check if model exists in local LM Studio models
@@ -84,11 +84,11 @@ export const LMStudio = ({ apiConfiguration, setApiConfigurationField }: LMStudi
 
 		// If neither source has loaded yet, don't show warning
 		return undefined
-	}, [apiConfiguration?.lmStudioModelId, routerModels.data, lmStudioModels, t])
+	}, [apiConfiguration.lmStudioModelId, routerModels.data, lmStudioModels, t])
 
 	// Check if the draft model exists
 	const draftModelNotAvailableError = useMemo(() => {
-		const draftModel = apiConfiguration?.lmStudioDraftModelId
+		const draftModel = apiConfiguration.lmStudioDraftModelId
 		if (!draftModel) return undefined
 
 		// Check if model exists in local LM Studio models
@@ -107,12 +107,12 @@ export const LMStudio = ({ apiConfiguration, setApiConfigurationField }: LMStudi
 
 		// If neither source has loaded yet, don't show warning
 		return undefined
-	}, [apiConfiguration?.lmStudioDraftModelId, routerModels.data, lmStudioModels, t])
+	}, [apiConfiguration.lmStudioDraftModelId, routerModels.data, lmStudioModels, t])
 
 	return (
 		<>
 			<VSCodeTextField
-				value={apiConfiguration?.lmStudioBaseUrl || ""}
+				value={apiConfiguration.lmStudioBaseUrl || ""}
 				type="url"
 				onInput={handleInputChange("lmStudioBaseUrl")}
 				placeholder={t("settings:defaults.lmStudioUrl")}
@@ -131,13 +131,13 @@ export const LMStudio = ({ apiConfiguration, setApiConfigurationField }: LMStudi
 				hidePricing
 			/>
 			<Checkbox
-				checked={apiConfiguration?.lmStudioSpeculativeDecodingEnabled === true}
+				checked={apiConfiguration.lmStudioSpeculativeDecodingEnabled === true}
 				onChange={(checked) => {
 					setApiConfigurationField("lmStudioSpeculativeDecodingEnabled", checked)
 				}}>
 				{t("settings:providers.lmStudio.speculativeDecoding")}
 			</Checkbox>
-			{apiConfiguration?.lmStudioSpeculativeDecodingEnabled && (
+			{apiConfiguration.lmStudioSpeculativeDecodingEnabled && (
 				<>
 					<ModelPicker
 						apiConfiguration={apiConfiguration}

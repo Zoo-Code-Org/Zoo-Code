@@ -398,7 +398,7 @@ describe("Single-open-task invariant", () => {
 			createTask,
 			getValues: vi.fn(() => ({})),
 			providerSettingsManager: { saveConfig: vi.fn() },
-			on: vi.fn((ev: unknown, cb: unknown) => {
+			on: vi.fn((ev: unknown, _cb: unknown) => {
 				if (ev === "taskCreated") {
 					// no-op for this test
 				}
@@ -419,5 +419,14 @@ describe("Single-open-task invariant", () => {
 		expect(taskId).toBe("ipc-1")
 		expect(removeClineFromStack).toHaveBeenCalledTimes(1)
 		expect(createTask).toHaveBeenCalled()
+		// API tasks have no reachable hard stop, so the soft repetition tier
+		// must be disabled rather than soft-blocking forever.
+		expect(createTask).toHaveBeenCalledWith(
+			"hello",
+			undefined,
+			undefined,
+			expect.objectContaining({ consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER, toolRepetitionSoftLimit: 0 }),
+			{},
+		)
 	})
 })

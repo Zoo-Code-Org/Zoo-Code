@@ -52,7 +52,7 @@ export const Mimo = ({ apiConfiguration, setApiConfigurationField }: MimoProps) 
 			</div>
 			<div>
 				<VSCodeTextField
-					value={apiConfiguration?.mimoApiKey || ""}
+					value={apiConfiguration.mimoApiKey || ""}
 					type="password"
 					onInput={handleInputChange("mimoApiKey")}
 					placeholder={t("settings:placeholders.apiKey")}
@@ -62,7 +62,7 @@ export const Mimo = ({ apiConfiguration, setApiConfigurationField }: MimoProps) 
 				<div className="text-sm text-vscode-descriptionForeground">
 					{t("settings:providers.apiKeyStorageNotice")}
 				</div>
-				{!apiConfiguration?.mimoApiKey && (
+				{!apiConfiguration.mimoApiKey && (
 					<VSCodeButtonLink href="https://platform.xiaomimimo.com" appearance="secondary">
 						{t("settings:providers.getMimoApiKey")}
 					</VSCodeButtonLink>

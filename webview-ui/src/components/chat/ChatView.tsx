@@ -107,7 +107,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	const [showRetiredProviderWarning, setShowRetiredProviderWarning] = useState(false)
 
 	// When the provider changes, clear the retired-provider warning.
-	const providerName = apiConfiguration?.apiProvider
+	const providerName = apiConfiguration.apiProvider
 	useEffect(() => {
 		setShowRetiredProviderWarning(false)
 	}, [providerName])
@@ -646,7 +646,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			if (text || images.length > 0) {
 				// Intercept when the active provider is retired — show a
 				// WarningRow instead of sending anything to the backend.
-				if (apiConfiguration?.apiProvider && isRetiredProvider(apiConfiguration.apiProvider)) {
+				if (apiConfiguration.apiProvider && isRetiredProvider(apiConfiguration.apiProvider)) {
 					setShowRetiredProviderWarning(true)
 					return
 				}
@@ -721,7 +721,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			sendingDisabled,
 			isStreaming,
 			messageQueue.length,
-			apiConfiguration?.apiProvider,
+			apiConfiguration.apiProvider,
 		], // messagesRef and clineAskRef are stable
 	)
 

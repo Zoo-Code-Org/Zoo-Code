@@ -20,9 +20,9 @@ interface ModelState {
 	phase: Phase[] // Task.assistantMessageContent partial flag plus tool_result presence
 	stream: "open" | "complete" // Task.didCompleteReadingStream
 	index: number // Task.currentStreamingContentIndex
-	lock: boolean // Task.presentAssistantMessageLocked
+	lock: boolean // Task.dispatchState !== DispatchState.IDLE
 	owner: number
-	pending: boolean // Task.presentAssistantMessageHasPendingUpdates
+	pending: boolean // Task.pendingWork !== null
 	latch: boolean // Task.userMessageContentReady
 	abort: boolean
 	threw: boolean
@@ -245,7 +245,11 @@ function transitions(state: ModelState, policy: Policy): Step[] {
 	for (const pass of state.passes) {
 		if (pass.epoch < state.epoch && pass.step !== "done") {
 			const next = clone(state)
-			release(next, next.passes.find((candidate) => candidate.id === pass.id)!, policy)
+			release(
+				next,
+				next.passes.find((candidate) => candidate.id === pass.id)!,
+				policy,
+			)
 			result.push({ action: `stale-unwind(${pass.id})`, state: next })
 		}
 	}

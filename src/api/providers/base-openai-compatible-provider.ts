@@ -212,7 +212,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		}
 	}
 
-	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
 		const { id: modelId, info: modelInfo } = this.getModel()
 
 		const params: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
