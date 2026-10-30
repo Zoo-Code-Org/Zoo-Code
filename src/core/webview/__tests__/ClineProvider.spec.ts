@@ -5641,7 +5641,6 @@ describe("ClineProvider", () => {
 			await provider.contextProxy.setValue("viewStates", {
 				"stable-view": { claimToken: "host-token", mode: "architect", currentApiConfigName: "cfg-a" },
 			})
-			const logSpy = vi.spyOn(provider, "log")
 
 			await provider["setViewStateId"]("stable-view", "host-token")
 
