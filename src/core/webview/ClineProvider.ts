@@ -2658,29 +2658,42 @@ export class ClineProvider
 	 * secrets behind under the fallback name. The mode map is reconciled too, so ContextProxy cannot
 	 * keep pointing a mode at the deleted profile after the purge dropped the binding in the manager.
 	 *
+	 * The fallback activation is the only write here that can *replace* a profile, so it is gated on
+	 * the selection being a newer one: a name the restore was not trying to restore, which the
+	 * manager still holds, was picked by someone else while the restore was pending and needs no
+	 * replacement. The `hasConfigById`-guarded re-applies and the mirror below are convergence
+	 * writes over ids that provably exist, so they stay ungated: an aborted restore must still
+	 * reconcile the mode bindings, which is the contract the head spec pins.
 	 */
 	private async reconcileActiveProfileAfterFailedRestore(
 		removedModeConfigs: Record<string, string> = {},
+		previousContextValues: Pick<RooCodeSettings, "currentApiConfigName"> = {},
 	): Promise<void> {
 		try {
-			const remainingProfiles = await this.providerSettingsManager.listConfig()
-			const fallback = remainingProfiles[0]?.name
+			const selectedName = this.contextProxy.getValues().currentApiConfigName
+			const selectionIsNewer = !!selectedName && selectedName !== previousContextValues.currentApiConfigName
+			const selectionSurvives = selectionIsNewer && (await this.providerSettingsManager.hasConfig(selectedName))
 
-			if (!fallback) {
-				return
+			if (!selectionSurvives) {
+				const remainingProfiles = await this.providerSettingsManager.listConfig()
+				const fallback = remainingProfiles[0]?.name
+
+				if (!fallback) {
+					return
+				}
+
+				const {
+					name: _fallbackName,
+					id: _fallbackId,
+					...fallbackSettings
+				} = await this.providerSettingsManager.activateProfile({ name: fallback })
+
+				await this.contextProxy.setProviderSettings(fallbackSettings, fallbackSettings.apiProvider)
+				await this.contextProxy.setValues({
+					currentApiConfigName: fallback,
+					listApiConfigMeta: remainingProfiles,
+				})
 			}
-
-			const {
-				name: _fallbackName,
-				id: _fallbackId,
-				...fallbackSettings
-			} = await this.providerSettingsManager.activateProfile({ name: fallback })
-
-			await this.contextProxy.setProviderSettings(fallbackSettings, fallbackSettings.apiProvider)
-			await this.contextProxy.setValues({
-				currentApiConfigName: fallback,
-				listApiConfigMeta: remainingProfiles,
-			})
 			// The purge may have dropped mode bindings the restore could not re-apply; re-apply
 			// them now so the manager's map matches the pre-delete state again. A binding is only
 			// re-applied when its id still names a profile: the restore's `saveConfig` can reject,
