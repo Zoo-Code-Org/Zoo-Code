@@ -20,14 +20,19 @@ let posthogLoadFailed = false
 //   - Past MAX_PENDING_EVENTS the oldest entries are kept and new events are dropped
 //     silently. There is no error and no retry; the cap exists so a pathological
 //     startup cannot grow the queue without bound.
-//   - After a failed chunk load nothing is queued at all (posthogLoadFailed), because
-//     there is no client to replay to until a later opt-in retries the load.
+//   - After a failed chunk load nothing is queued (posthogLoadFailed), because there is
+//     no client to replay to. The flag is cleared when a later opt-in starts a retry, so
+//     events captured while that retry is in flight queue again and flush on success.
 //   - Disabling telemetry empties the queue, so a re-enable cannot replay events that
 //     were captured under a state the user has since turned off.
 const MAX_PENDING_EVENTS = 50
 const pendingEvents: CapturedEvent[] = []
 
 function loadPostHog(): Promise<PostHogClient> {
+	// Clear the failure flag for the retry window: while this attempt is in flight there
+	// is no client yet, so capture() must queue instead of dropping events.
+	posthogLoadFailed = false
+
 	posthogModulePromise ??= import("posthog-js").then(
 		(module) => {
 			posthogClient = module.default

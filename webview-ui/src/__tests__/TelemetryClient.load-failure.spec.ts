@@ -54,8 +54,12 @@ describe("TelemetryClient after a failed PostHog chunk load", () => {
 	 * The assertion is falsifiable because the retry makes a client observable: if the
 	 * flag were removed, the post-failure captures would still be in the queue when the
 	 * retry succeeds and would be replayed by flushPendingEvents.
+	 *
+	 * The same retry also pins the opposite edge: the flag is cleared when a load attempt
+	 * starts, so events captured while the retry is in flight queue up and flush on
+	 * success. Without that reset they would be dropped for the whole retry window.
 	 */
-	it("does not queue events captured after a failed load, even when a later load succeeds", async () => {
+	it("drops events captured after a failed load but queues those captured during the retry", async () => {
 		const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {})
 		vi.resetModules()
 		const { telemetryClient } = await import("@src/utils/TelemetryClient")
@@ -72,13 +76,22 @@ describe("TelemetryClient after a failed PostHog chunk load", () => {
 		// would sit in the queue for the retry below to replay.
 		telemetryClient.capture("captured_after_failure")
 
-		// Second enable: the factory now succeeds, so a client exists and the queue is
-		// flushed. Only the pre-failure event may be gone already (it was cleared), and
-		// the post-failure event must never reach PostHog.
-		await telemetryClient.updateTelemetryState("enabled", "test-key", "test-user")
+		// Second enable: the factory now succeeds. The capture below runs before this
+		// promise resolves, which is the retry window the flag reset opens; init not
+		// having run yet proves the window was genuinely open.
+		const retrying = telemetryClient.updateTelemetryState("enabled", "test-key", "test-user")
+		expect(posthogMocks.init).not.toHaveBeenCalled()
+		telemetryClient.capture("captured_during_retry")
+		await retrying
 
+		// Only the in-flight retry event may reach PostHog: the pre-failure event was
+		// cleared with the failed load, and the post-failure one was dropped by the flag.
 		expect(posthogMocks.init).toHaveBeenCalledTimes(1)
-		expect(posthogMocks.capture).not.toHaveBeenCalled()
+		expect(posthogMocks.capture).toHaveBeenCalledTimes(1)
+		expect(posthogMocks.capture).toHaveBeenCalledWith(
+			"captured_during_retry",
+			expect.objectContaining({ releaseChannel: "stable" }),
+		)
 
 		consoleWarn.mockRestore()
 	})
