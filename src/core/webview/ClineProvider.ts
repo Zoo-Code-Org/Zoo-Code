@@ -445,6 +445,11 @@ export class ClineProvider
 	// operation that still owns the latest mode mutation may write the mode again.
 	private modeMutationGeneration = 0
 
+	// What a cancelled switch must put back in the task stores it already wrote: the history
+	// mode and `_taskMode` the switch replaced. Cleared once the switch commits or compensates.
+	private cancelledModeSwitchSnapshot:
+		{ task: Task; previousHistoryMode: string | undefined; previousTaskMode: Mode | undefined } | undefined
+
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
 		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
 	}
@@ -1297,12 +1302,14 @@ export class ClineProvider
 			}
 
 			if (persisted?.currentApiConfigName) {
-				loadedState.currentApiConfigName = persisted.currentApiConfigName
-
 				try {
 					const { name: _name, ...apiConfiguration } = await this.providerSettingsManager.getProfile({
 						name: persisted.currentApiConfigName,
 					})
+					// Pin the name only together with the configuration it resolves to: a name
+					// without its overlay would make getState() pair it with whatever shared
+					// settings currently sit under that name.
+					loadedState.currentApiConfigName = persisted.currentApiConfigName
 					loadedState.apiConfiguration = apiConfiguration as ProviderSettings
 				} catch (error) {
 					this.log(
@@ -3055,6 +3062,9 @@ export class ClineProvider
 		if (targetTask !== null) {
 			await this.postStateToWebview()
 		}
+
+		// The switch committed: no later checkpoint can compensate it any more.
+		this.cancelledModeSwitchSnapshot = undefined
 	}
 
 	// Provider Profile Management
