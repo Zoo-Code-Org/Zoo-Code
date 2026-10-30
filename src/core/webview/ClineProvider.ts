@@ -2493,7 +2493,7 @@ export class ClineProvider
 								await this.updateTaskHistory({ ...latestRetry, mode: taskHistoryItem.mode })
 							} catch (retryError) {
 								this.log(
-									`Failed to roll back mode switch ${task.taskId} after retry: ${String(retryError)}`,
+									`Failed to roll back mode switch ${task.taskId} after retry: ${String(retryError)} (first attempt: ${String(rollbackError)})`,
 								)
 							}
 						}
