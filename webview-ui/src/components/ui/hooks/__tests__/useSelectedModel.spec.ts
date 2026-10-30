@@ -617,7 +617,7 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const wrapper = createWrapper()
-			const { result } = renderHook(() => useSelectedModel(), { wrapper })
+			const { result } = renderHook(() => useSelectedModel({}), { wrapper })
 
 			expect(result.current.isLoading).toBe(true)
 		})
@@ -636,7 +636,7 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const wrapper = createWrapper()
-			const { result } = renderHook(() => useSelectedModel(), { wrapper })
+			const { result } = renderHook(() => useSelectedModel({}), { wrapper })
 
 			expect(result.current.isLoading).toBe(true)
 		})
@@ -655,7 +655,7 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const wrapper = createWrapper()
-			const { result } = renderHook(() => useSelectedModel(), { wrapper })
+			const { result } = renderHook(() => useSelectedModel({}), { wrapper })
 
 			expect(result.current.isError).toBe(true)
 		})
@@ -676,7 +676,7 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const wrapper = createWrapper()
-			const { result } = renderHook(() => useSelectedModel(), { wrapper })
+			const { result } = renderHook(() => useSelectedModel({}), { wrapper })
 
 			expect(result.current.provider).toBe(providerIdentifiers.openrouter)
 			expect(result.current.id).toBe(openRouterDefaultModelId)

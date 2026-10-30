@@ -20,6 +20,7 @@ import { t } from "i18next"
 import type { ApiHandlerCreateMessageMetadata } from "../../index"
 import { GeminiHandler } from "../gemini"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 
 const GEMINI_MODEL_NAME = geminiDefaultModelId
 
@@ -434,6 +435,226 @@ describe("GeminiHandler", () => {
 
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
+		})
+
+		it("should pass abort signal through to client via config.abortSignal", async () => {
+			const controller = new AbortController()
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("response"),
+			)
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith({
+				model: GEMINI_MODEL_NAME,
+				contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
+				config: {
+					abortSignal: controller.signal,
+					httpOptions: undefined,
+					temperature: 1,
+				},
+			})
+		})
+
+		it("should reject immediately with AbortError when the external signal is pre-aborted, before the request is built", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			const error = await handler
+				.completePrompt("Test prompt", { abortSignal: controller.signal })
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("This operation was aborted")
+			// The fast-fail must run before the client is touched.
+			expect(handler["client"].models.generateContent).not.toHaveBeenCalled()
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("response"),
+			)
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith({
+				model: GEMINI_MODEL_NAME,
+				contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
+				config: {
+					httpOptions: undefined,
+					temperature: 1,
+				},
+			})
+		})
+
+		it("should pass timeoutMs through to client via httpOptions with abortSignal on config", async () => {
+			const controller = new AbortController()
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("response"),
+			)
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 10000 })
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith({
+				model: GEMINI_MODEL_NAME,
+				contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
+				config: {
+					abortSignal: controller.signal,
+					httpOptions: { timeout: 10000 },
+					temperature: 1,
+				},
+			})
+		})
+
+		it("should pass only timeoutMs when no signal is provided", async () => {
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("response"),
+			)
+			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith({
+				model: GEMINI_MODEL_NAME,
+				contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
+				config: {
+					httpOptions: { timeout: 5000 },
+					temperature: 1,
+				},
+			})
+		})
+
+		it("should omit httpOptions entirely for timeoutMs=0 (0 disables the timeout)", async () => {
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("response"),
+			)
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith({
+				model: GEMINI_MODEL_NAME,
+				contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
+				config: {
+					httpOptions: undefined,
+					temperature: 1,
+				},
+			})
+		})
+
+		it("should surface a standard AbortError when the signal is aborted while the request is in flight", async () => {
+			const controller = new AbortController()
+			// The request stays pending until the external signal aborts it; the
+			// mock rejects with a plain (non-abort) error once the signal has
+			// aborted, so the catch block must classify it via signal.aborted.
+			vi.mocked(handler["client"].models.generateContent).mockImplementationOnce(() => {
+				return new Promise<GenerateContentResponse>((_resolve, reject) => {
+					const fail = () => reject(new Error("Gemini API error"))
+					if (controller.signal.aborted) {
+						fail()
+						return
+					}
+					controller.signal.addEventListener("abort", fail, { once: true })
+				})
+			})
+			const promise = handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+			// Abort after entry — the pre-abort fast-fail must not apply, and the
+			// catch block handles the failure.
+			controller.abort()
+			const error = await promise.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Gemini request was aborted")
+		})
+
+		it("rethrows non-Error completion failures as-is after capturing telemetry", async () => {
+			// The instanceof branch only covers Error instances; a non-Error rejection
+			// must be rethrown untouched (wrapping it would lose the original value).
+			vi.mocked(handler["client"].models.generateContent).mockRejectedValueOnce("Gemini: not an error object")
+
+			const error = await handler.completePrompt("Test prompt").catch((e: unknown) => e)
+			expect(error).toBe("Gemini: not an error object")
+			expect(error).not.toBeInstanceOf(Error)
+		})
+
+		it("wraps completion failures in a new error before rethrowing", async () => {
+			// The consumer-facing error must be the provider's wrap (a NEW Error
+			// built from the localized template), not the raw SDK error instance:
+			// this is what the instanceof branch is for (and what makes the branch
+			// observable to the mutation gate). Unit tests cannot assert the i18n
+			// string itself (i18next is not initialized with resources here).
+			const mockError = new Error("Gemini completion failure")
+			vi.mocked(handler["client"].models.generateContent).mockRejectedValueOnce(mockError)
+
+			const error = await handler.completePrompt("Test prompt").catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect(error).not.toBe(mockError)
+		})
+
+		it("should surface a standard AbortError when the SDK throws an abort error before the signal flag propagates", async () => {
+			// The signal flag has not propagated yet, but the SDK rejects with its
+			// own abort error: isRequestAborted must catch the error-name branch.
+			const controller = new AbortController()
+			vi.mocked(handler["client"].models.generateContent).mockRejectedValue(
+				Object.assign(new Error("Request was aborted."), { name: "AbortError" }),
+			)
+
+			const error = await handler
+				.completePrompt("Test prompt", { abortSignal: controller.signal })
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Gemini request was aborted")
+		})
+
+		it("reports a configured request timeout as TimeoutError, not as caller cancellation", async () => {
+			// The SDK's HTTP timeout rejects with an abort-shaped error while the
+			// caller's signal stays live: that is a timeout, not a user stop. The
+			// LiteLLM unit in this PR sets the same contract.
+			const controller = new AbortController()
+			vi.mocked(handler["client"].models.generateContent).mockRejectedValue(
+				Object.assign(new Error("Request was aborted."), { name: "AbortError" }),
+			)
+
+			const error = await handler
+				.completePrompt("Test prompt", { abortSignal: controller.signal, timeoutMs: 50 })
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("TimeoutError")
+			expect((error as Error).message).toBe("The Gemini completion request timed out")
+		})
+
+		it("keeps AbortError when the caller cancels a request that also has a timeout", async () => {
+			const controller = new AbortController()
+			vi.mocked(handler["client"].models.generateContent).mockImplementationOnce(() => {
+				controller.abort()
+				return Promise.reject(Object.assign(new Error("Request was aborted."), { name: "AbortError" }))
+			})
+
+			const error = await handler
+				.completePrompt("Test prompt", { abortSignal: controller.signal, timeoutMs: 50 })
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Gemini request was aborted")
+		})
+
+		it("should surface the wrapped provider error when the request fails without options", async () => {
+			const mockError = new Error("Gemini API error")
+			vi.mocked(handler["client"].models.generateContent).mockRejectedValue(mockError)
+
+			const error = await handler.completePrompt("Test prompt").catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			// The catch must take the non-abort wrapping path (not a raw rethrow and
+			// not the abort path). i18next is not initialized with resources here, so
+			// pin the wrapping path by its observable shape: a NEW Error with a
+			// non-raw message and a non-AbortError name (same shape as the
+			// createMessage sibling tests below).
+			expect(error).not.toBe(mockError)
+			expect((error as Error).name).not.toBe("AbortError")
+			expect((error as Error).message).not.toBe("Gemini API error")
+		})
+
+		it("should surface the wrapped provider error when the request fails with options but no signal", async () => {
+			const mockError = new Error("Gemini API error")
+			vi.mocked(handler["client"].models.generateContent).mockRejectedValue(mockError)
+
+			const error = await handler.completePrompt("Test prompt", { timeoutMs: 0 }).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			// Options exist but no signal: `options?.abortSignal` yields undefined
+			// and the catch must still take the non-abort wrapping path.
+			expect(error).not.toBe(mockError)
+			expect((error as Error).name).not.toBe("AbortError")
+			expect((error as Error).message).not.toBe("Gemini API error")
 		})
 	})
 
@@ -1137,6 +1358,275 @@ describe("GeminiHandler", () => {
 		})
 	})
 
+	describe("completePrompt request options", () => {
+		it("applies the explicit model temperature when the model supports temperature", async () => {
+			const temperatureHandler = new GeminiHandler({
+				apiKey: "test-key",
+				apiModelId: GEMINI_MODEL_NAME,
+				geminiApiKey: "test-key",
+				modelTemperature: 0.5,
+			})
+			temperatureHandler["client"] = handler["client"]
+			const baseInfo = temperatureHandler.getModel()
+			// Explicit supportsTemperature: true makes the `!== false` check observable —
+			// with the default model info (undefined) the literal cannot be mutated.
+			vi.spyOn(temperatureHandler, "getModel").mockReturnValue({
+				...baseInfo,
+				info: {
+					...baseInfo.info,
+					supportsTemperature: true,
+					defaultTemperature: 1,
+				},
+			})
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("Response"),
+			)
+
+			await temperatureHandler.completePrompt("Test prompt")
+
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith(
+				expect.objectContaining({
+					config: expect.objectContaining({ temperature: 0.5 }),
+				}),
+			)
+		})
+
+		it("ignores the explicit model temperature when the model does not support temperature", async () => {
+			const noTemperatureHandler = new GeminiHandler({
+				apiKey: "test-key",
+				apiModelId: GEMINI_MODEL_NAME,
+				geminiApiKey: "test-key",
+				modelTemperature: 0.5,
+			})
+			noTemperatureHandler["client"] = handler["client"]
+			const baseInfo = noTemperatureHandler.getModel()
+			vi.spyOn(noTemperatureHandler, "getModel").mockReturnValue({
+				...baseInfo,
+				info: {
+					...baseInfo.info,
+					supportsTemperature: false,
+					defaultTemperature: 0.3,
+				},
+			})
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("Response"),
+			)
+
+			await noTemperatureHandler.completePrompt("Test prompt")
+
+			// supportsTemperature: false forces the fallback to the model default —
+			// the user's explicit modelTemperature must not be applied.
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith(
+				expect.objectContaining({
+					config: expect.objectContaining({ temperature: 0.3 }),
+				}),
+			)
+		})
+
+		it("should pass timeout and baseUrl through httpOptions", async () => {
+			const handlerWithBaseUrl = new GeminiHandler({
+				apiKey: "test-key",
+				apiModelId: GEMINI_MODEL_NAME,
+				geminiApiKey: "test-key",
+				googleGeminiBaseUrl: "https://gemini.example.test",
+			})
+			handlerWithBaseUrl["client"] = handler["client"]
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("Response"),
+			)
+
+			const result = await handlerWithBaseUrl.completePrompt("Test prompt", { timeoutMs: 1234 })
+
+			expect(result).toBe("Response")
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith(
+				expect.objectContaining({
+					config: expect.objectContaining({
+						httpOptions: {
+							timeout: 1234,
+							baseUrl: "https://gemini.example.test",
+						},
+					}),
+				}),
+			)
+		})
+
+		it("should pass abortSignal on config instead of httpOptions", async () => {
+			const controller = new AbortController()
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("Response"),
+			)
+
+			await handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith(
+				expect.objectContaining({
+					config: expect.objectContaining({
+						abortSignal: controller.signal,
+						httpOptions: undefined,
+					}),
+				}),
+			)
+		})
+
+		it("should omit httpOptions when timeoutMs and baseUrl are not provided", async () => {
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("Response"),
+			)
+
+			await handler.completePrompt("Test prompt")
+
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith(
+				expect.objectContaining({
+					config: expect.objectContaining({
+						httpOptions: undefined,
+					}),
+				}),
+			)
+		})
+	})
+
+	describe("createMessage abort signal (bridging)", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: "Hello",
+			},
+		]
+
+		it("should reject immediately with AbortError when the external signal is pre-aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			const stream = handler.createMessage(
+				"You are a helpful assistant",
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const error = await collectStream(stream).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("This operation was aborted")
+			expect(handler["client"].models.generateContentStream).not.toHaveBeenCalled()
+		})
+
+		it("should abort the in-flight request when the external signal is triggered", async () => {
+			const controller = new AbortController()
+			const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+			let capturedSignal: AbortSignal | undefined
+			const stub = vi.fn().mockImplementation(async (params: { config?: { abortSignal?: AbortSignal } }) => {
+				capturedSignal = params.config?.abortSignal
+				return (async function* () {
+					yield { text: "partial" }
+					if (capturedSignal?.aborted) {
+						throw new DOMException("aborted", "AbortError")
+					}
+					await new Promise((_resolve, reject) => {
+						capturedSignal?.addEventListener(
+							"abort",
+							() => reject(new DOMException("aborted", "AbortError")),
+							{ once: true },
+						)
+					})
+				})()
+			})
+			handler["client"].models.generateContentStream = stub
+
+			const stream = handler.createMessage(
+				"You are a helpful assistant",
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const collector = collectStream(stream).catch((e: unknown) => e)
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			controller.abort()
+
+			// Bound the wait so a broken abort bridge fails this test fast (and fails
+			// the Stryker mutant) instead of hanging until the runner timeout.
+			const error = await new Promise<unknown>((resolve) => {
+				const deadline = setTimeout(() => resolve(new Error("abort propagation deadline exceeded")), 3000)
+				collector.then((result) => {
+					clearTimeout(deadline)
+					resolve(result)
+				})
+			})
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Gemini request was aborted")
+			expect(capturedSignal).toBeDefined()
+			// The in-flight request must run against a request-local merged signal, not
+			// the external one forwarded by reference.
+			expect(capturedSignal).not.toBe(controller.signal)
+			expect(capturedSignal?.aborted).toBe(true)
+			// The bridge (RequestConfigBuilder.addMergedSignal) uses AbortSignal.any,
+			// so the external signal must never be managed with manual listeners.
+			expect(addEventListenerSpy).not.toHaveBeenCalled()
+			expect(removeEventListenerSpy).not.toHaveBeenCalled()
+		})
+
+		it("should set a live request-local config.abortSignal when no external signal is provided", async () => {
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+			handler["client"].models.generateContentStream = stub
+
+			await collectStream(handler.createMessage("You are a helpful assistant", messages))
+
+			const config = stub.mock.calls[0][0].config
+			// The request-local controller signal is always present so the provider
+			// keeps its own abort handle; with no external signal it never aborts.
+			expect(config.abortSignal).toBeInstanceOf(AbortSignal)
+			expect(config.abortSignal?.aborted).toBe(false)
+		})
+
+		it("should wrap a non-abort stream failure with the i18n message and capture telemetry", async () => {
+			const mockError = new Error("Gemini stream failure")
+			handler["client"].models.generateContentStream = vi.fn().mockRejectedValue(mockError)
+
+			const stream = handler.createMessage("You are a helpful assistant", messages, makeCreateMessageMetadata())
+
+			const error = await collectStream(stream).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			// The catch must take the non-abort wrapping path, not the abort path
+			// and not a raw rethrow. i18next is not initialized with resources in
+			// unit tests (see "wraps stream failures in a new error before
+			// rethrowing"), so the localized template string is not assertable
+			// here; pin the wrapping path by its observable shape instead: a NEW
+			// Error (not the raw SDK instance), a message that is not the raw
+			// message, and a name that is not "AbortError". A removed wrapper
+			// fails the instance/message checks; an abort-path misclassification
+			// fails the name check.
+			expect(error).not.toBe(mockError)
+			expect((error as Error).name).not.toBe("AbortError")
+			expect((error as Error).message).not.toBe("Gemini stream failure")
+			expect(mockCaptureException).toHaveBeenCalledTimes(1)
+			expect(mockCaptureException).toHaveBeenCalledWith(
+				expect.objectContaining({
+					message: "Gemini stream failure",
+					provider: "Gemini",
+					operation: "createMessage",
+				}),
+			)
+		})
+
+		it("should wrap a stream failure when no metadata is provided at all", async () => {
+			const mockError = new Error("Gemini stream failure")
+			handler["client"].models.generateContentStream = vi.fn().mockRejectedValue(mockError)
+
+			const stream = handler.createMessage("You are a helpful assistant", messages)
+
+			const error = await collectStream(stream).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			// No metadata at all: exercises the first optional-chain position,
+			// which would crash here if the `?.` were removed. Pin the wrapping
+			// path by its observable shape (see the sibling test above): a NEW
+			// Error with a non-raw message and a non-AbortError name.
+			expect(error).not.toBe(mockError)
+			expect((error as Error).name).not.toBe("AbortError")
+			expect((error as Error).message).not.toBe("Gemini stream failure")
+		})
+	})
+
 	describe("error telemetry", () => {
 		const mockMessages: Anthropic.Messages.MessageParam[] = [
 			{
@@ -1169,6 +1659,46 @@ describe("GeminiHandler", () => {
 			// Verify it's an ApiProviderError
 			const capturedError = mockCaptureException.mock.calls[0][0]
 			expect(capturedError).toBeInstanceOf(ApiProviderError)
+		})
+
+		it("rethrows non-Error stream failures as-is after capturing telemetry", async () => {
+			// The instanceof branch only covers Error instances; a non-Error throw
+			// must be rethrown untouched (wrapping it would lose the original value).
+			handler["client"].models.generateContentStream = vi.fn().mockReturnValue(
+				(async function* () {
+					yield { candidates: [] }
+					throw "Gemini stream: not an error object"
+				})(),
+			)
+
+			const error = await collectStream(handler.createMessage(systemPrompt, mockMessages)).catch(
+				(e: unknown) => e,
+			)
+			expect(error).toBe("Gemini stream: not an error object")
+			expect(error).not.toBeInstanceOf(Error)
+			// Telemetry still captures the stringified failure.
+			expect(mockCaptureException).toHaveBeenCalledWith(
+				expect.objectContaining({
+					message: "Gemini stream: not an error object",
+					operation: "createMessage",
+				}),
+			)
+		})
+
+		it("wraps stream failures in a new error before rethrowing", async () => {
+			// The consumer-facing error must be the provider's wrap (a NEW Error
+			// built from the localized template), not the raw SDK error instance:
+			// this is what the instanceof branch is for (and what makes the branch
+			// observable to the mutation gate). Unit tests cannot assert the i18n
+			// string itself (i18next is not initialized with resources here).
+			const mockError = new Error("Gemini stream failure")
+			handler["client"].models.generateContentStream = vi.fn().mockRejectedValue(mockError)
+
+			const error = await collectStream(handler.createMessage(systemPrompt, mockMessages)).catch(
+				(e: unknown) => e,
+			)
+			expect(error).toBeInstanceOf(Error)
+			expect(error).not.toBe(mockError)
 		})
 
 		it("should capture telemetry on completePrompt error", async () => {
@@ -1204,6 +1734,161 @@ describe("GeminiHandler", () => {
 
 			// Telemetry should have been captured before the error was thrown
 			expect(mockCaptureException).toHaveBeenCalled()
+		})
+	})
+
+	describe("createMessage responseId capture", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: "Hello",
+			},
+		]
+
+		it("captures the final response's responseId so api history can store it", async () => {
+			handler["client"].models.generateContentStream = vi.fn().mockReturnValue(
+				asyncStreamFrom([
+					{
+						candidates: [
+							{
+								content: { parts: [{ text: "final" }] },
+								finishReason: "STOP",
+							},
+						],
+						responseId: "resp-123",
+					},
+				]),
+			)
+
+			await collectStream(handler.createMessage("You are a helpful assistant", messages))
+
+			expect(handler["lastResponseId"]).toBe("resp-123")
+		})
+	})
+
+	describe("createMessage streaming loop abort defense", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: "Hello",
+			},
+		]
+
+		function makePartsChunk(parts: Array<Record<string, unknown>>) {
+			return {
+				candidates: [
+					{
+						content: { parts },
+					},
+				],
+			}
+		}
+
+		function startStream(signal: AbortSignal, generator: AsyncGenerator<unknown>) {
+			handler["client"].models.generateContentStream = vi.fn().mockReturnValue(generator)
+			return handler.createMessage(
+				"You are a helpful assistant",
+				messages,
+				makeCreateMessageMetadata({ abortSignal: signal }),
+			)
+		}
+
+		it("rejects with AbortError instead of yielding text content after a mid-chunk abort", async () => {
+			const controller = new AbortController()
+			const stream = startStream(
+				controller.signal,
+				asyncStreamFrom([makePartsChunk([{ thought: true, text: "reasoning" }, { text: "content" }])]),
+			)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("reasoning")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Gemini request was aborted")
+		})
+
+		it("rejects with AbortError instead of yielding reasoning after a mid-chunk abort (text-first chunk)", async () => {
+			const controller = new AbortController()
+			const stream = startStream(
+				controller.signal,
+				asyncStreamFrom([makePartsChunk([{ text: "content" }, { thought: true, text: "reasoning" }])]),
+			)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("text")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Gemini request was aborted")
+		})
+
+		it("rejects with AbortError instead of yielding a tool-call name after a mid-chunk abort", async () => {
+			const controller = new AbortController()
+			const stream = startStream(
+				controller.signal,
+				asyncStreamFrom([makePartsChunk([{ text: "content" }, { functionCall: { name: "f", args: {} } }])]),
+			)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("text")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Gemini request was aborted")
+		})
+
+		it("rejects with AbortError instead of yielding tool-call arguments after a mid-chunk abort", async () => {
+			const controller = new AbortController()
+			const stream = startStream(
+				controller.signal,
+				asyncStreamFrom([
+					makePartsChunk([
+						{ functionCall: { name: "f", args: {} } },
+						{ functionCall: { name: "g", args: {} } },
+					]),
+				]),
+			)
+			const name = await stream.next()
+			expect(name.value?.type).toBe("tool_call_partial")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Gemini request was aborted")
+		})
+
+		it("does not process or pull chunks beyond the aborted point and surfaces AbortError instead of completing the stream", async () => {
+			const controller = new AbortController()
+			let pulls = 0
+			const generator = (async function* () {
+				pulls++
+				yield makePartsChunk([{ text: "first chunk" }])
+				pulls++
+				// Fallback shape (no candidates): its text yield is the first yield
+				// of the iteration and carries no pre-yield guard, so only the
+				// top-of-loop break prevents it from leaking.
+				yield { text: "buffered chunk" }
+				pulls++
+				yield makePartsChunk([{ text: "third chunk" }])
+			})()
+			const stream = startStream(controller.signal, generator)
+			const first = await stream.next()
+			expect(first.value?.type).toBe("text")
+			controller.abort()
+
+			const error = await stream.next().catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The Gemini request was aborted")
+			// The for-await mechanism pulls the already-buffered chunk before the
+			// top-of-loop check runs; the break must ensure it is not processed and
+			// that no chunk beyond it is pulled.
+			expect(pulls).toBe(2)
 		})
 	})
 })

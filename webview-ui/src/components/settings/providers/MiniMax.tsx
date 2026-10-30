@@ -46,7 +46,7 @@ export const MiniMax = ({ apiConfiguration, setApiConfigurationField }: MiniMaxP
 			</div>
 			<div>
 				<VSCodeTextField
-					value={apiConfiguration?.minimaxApiKey || ""}
+					value={apiConfiguration.minimaxApiKey || ""}
 					type="password"
 					onInput={handleInputChange("minimaxApiKey")}
 					placeholder={t("settings:placeholders.apiKey")}
@@ -56,7 +56,7 @@ export const MiniMax = ({ apiConfiguration, setApiConfigurationField }: MiniMaxP
 				<div className="text-sm text-vscode-descriptionForeground">
 					{t("settings:providers.apiKeyStorageNotice")}
 				</div>
-				{!apiConfiguration?.minimaxApiKey && (
+				{!apiConfiguration.minimaxApiKey && (
 					<VSCodeButtonLink
 						href={
 							apiConfiguration.minimaxBaseUrl === "https://api.minimaxi.com/v1"

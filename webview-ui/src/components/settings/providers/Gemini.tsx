@@ -18,7 +18,7 @@ export const Gemini = ({ apiConfiguration, setApiConfigurationField }: GeminiPro
 	const { t } = useAppTranslation()
 
 	const [googleGeminiBaseUrlSelected, setGoogleGeminiBaseUrlSelected] = useState(
-		!!apiConfiguration?.googleGeminiBaseUrl,
+		!!apiConfiguration.googleGeminiBaseUrl,
 	)
 
 	const handleInputChange = useCallback(
@@ -35,7 +35,7 @@ export const Gemini = ({ apiConfiguration, setApiConfigurationField }: GeminiPro
 	return (
 		<>
 			<VSCodeTextField
-				value={apiConfiguration?.geminiApiKey || ""}
+				value={apiConfiguration.geminiApiKey || ""}
 				type="password"
 				onInput={handleInputChange("geminiApiKey")}
 				placeholder={t("settings:placeholders.apiKey")}
@@ -45,7 +45,7 @@ export const Gemini = ({ apiConfiguration, setApiConfigurationField }: GeminiPro
 			<div className="text-sm text-vscode-descriptionForeground -mt-2">
 				{t("settings:providers.apiKeyStorageNotice")}
 			</div>
-			{!apiConfiguration?.geminiApiKey && (
+			{!apiConfiguration.geminiApiKey && (
 				<VSCodeButtonLink href="https://ai.google.dev/" appearance="secondary">
 					{t("settings:providers.getGeminiApiKey")}
 				</VSCodeButtonLink>
@@ -65,7 +65,7 @@ export const Gemini = ({ apiConfiguration, setApiConfigurationField }: GeminiPro
 				</Checkbox>
 				{googleGeminiBaseUrlSelected && (
 					<VSCodeTextField
-						value={apiConfiguration?.googleGeminiBaseUrl || ""}
+						value={apiConfiguration.googleGeminiBaseUrl || ""}
 						type="url"
 						onInput={handleInputChange("googleGeminiBaseUrl")}
 						placeholder={t("settings:defaults.geminiUrl")}
