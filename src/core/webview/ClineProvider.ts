@@ -552,6 +552,12 @@ export class ClineProvider
 	private prunedViewIdsDuringActivation: string[] = []
 
 	/**
+	 * Bumped whenever the buffer is cleared (reset/import), so an in-flight load can tell
+	 * that its captured state was invalidated while it awaited the profile lookup.
+	 */
+	private viewLocalStateGeneration = 0
+
+	/**
 	 * This view's pinned profile name from the view-local buffer. Exposed for
 	 * sibling-instance inspection (getAllInstances() filtering): `viewLocalState`
 	 * is private and must not be reached through bracket access.
@@ -1112,9 +1118,11 @@ export class ClineProvider
 		if (
 			!normalizedViewStateId ||
 			normalizedViewStateId === this.viewStateId ||
-			// Reject "__proto__": writing states["__proto__"] would go through the
-			// Object.prototype setter and be silently dropped by the later spread.
-			normalizedViewStateId === "__proto__"
+			// Reject every Object.prototype member name ("__proto__", "constructor", "toString", ...):
+			// states[normalizedViewStateId] would resolve to an inherited value instead of a
+			// persisted entry, so the stable entry would never be written while the pre-launch
+			// entry is deleted - losing the selection.
+			Object.prototype.hasOwnProperty.call(Object.prototype, normalizedViewStateId)
 		) {
 			return
 		}
@@ -1169,6 +1177,9 @@ export class ClineProvider
 	 * loaded state, field by field, so in-flight user selections are not clobbered by the load.
 	 */
 	private async loadViewState(): Promise<void> {
+		// Reset/import clears the buffer without changing the view id; a load that completes
+		// after such a clear must not republish the state it captured before the reset.
+		const loadedGeneration = this.viewLocalStateGeneration
 		// Capture the id this load is for: a newer id registered while an async
 		// profile lookup is in flight must not be overwritten by this stale load.
 		const loadedForViewId = this.viewStateId
@@ -1266,6 +1277,13 @@ export class ClineProvider
 				} else {
 					mergedState.apiConfiguration = postLoadBuffer.apiConfiguration
 				}
+			}
+
+			// A reset/import may have cleared the buffer while the profile lookup was in flight:
+			// republishing here would restore the pre-reset profile over the cleared state.
+			if (this.viewLocalStateGeneration !== loadedGeneration) {
+				this.log(`[loadViewState] Discarding state loaded before a reset for viewId ${this.viewId}`)
+				return
 			}
 
 			this.viewLocalState = mergedState
@@ -5933,6 +5951,7 @@ export class ClineProvider
 	 * Clear view-local state cache so that getState() falls back to ContextProxy defaults.
 	 */
 	private _clearViewLocalState(): void {
+		this.viewLocalStateGeneration += 1
 		this.viewLocalState = {}
 	}
 
