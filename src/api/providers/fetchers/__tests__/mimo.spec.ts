@@ -1,3 +1,5 @@
+import { z } from "zod"
+
 import { mimoModels, providerSettingsSchema } from "@roo-code/types"
 
 import { getMimoModels, ALLOWED_BASE_URLS } from "../mimo"
@@ -64,6 +66,31 @@ describe("getMimoModels", () => {
 			description: "MiMo model: mimo-v3-future",
 		})
 	})
+
+	// Regression: IDs come straight from the provider's /models response, so an ID
+	// that names an Object.prototype member resolved the inherited member instead of
+	// a curated spec and emitted `{}` -- a model with no metadata at all. The family
+	// defaults are what an unknown ID must get.
+	it.each(["constructor", "toString", "valueOf", "__proto__"])(
+		"gives the prototype-key ID %s MiMo-family defaults instead of inherited metadata",
+		async (prototypeKey) => {
+			globalThis.fetch = vi.fn().mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({ data: [{ id: prototypeKey }] }),
+			}) as unknown as typeof fetch
+
+			const models = await getMimoModels("https://token-plan-sgp.xiaomimimo.com/v1", "mock-key")
+
+			expect(models[prototypeKey]).toEqual({
+				maxTokens: 16_000,
+				contextWindow: 262_144,
+				supportsImages: false,
+				supportsPromptCache: false,
+				preserveReasoning: true,
+				description: `MiMo model: ${prototypeKey}`,
+			})
+		},
+	)
 
 	it("keeps the static spec authoritative for known IDs while still surfacing API-only models", async () => {
 		// Negative precedence: the /models payload may carry fields that conflict
@@ -379,13 +406,30 @@ describe("getMimoModels", () => {
 	it("keeps the fetcher allowlist in sync with the persisted settings schema", () => {
 		// The fetcher mirrors the zod literal union from
 		// packages/types/src/provider-settings/mimo.ts because the definition is
-		// not re-exported publicly. If the schema ever rejects one of the fetcher's
-		// URLs, the two sources have drifted and this test must fail.
+		// not re-exported publicly. Enumerating the union's literals and asserting
+		// set equality in BOTH directions is what makes drift fail here: a
+		// one-directional "every allowlisted URL parses" check still passes when a
+		// fifth literal is added to the schema without an allowlist entry, and the
+		// fetcher would then reject a URL the settings form accepts.
 		const mimoBaseUrlField = providerSettingsSchema.shape.mimoBaseUrl
 
-		for (const allowedUrl of ALLOWED_BASE_URLS) {
-			expect(mimoBaseUrlField.safeParse(allowedUrl).success).toBe(true)
+		// The field is `.optional()`, so unwrap before reaching the union. Read the
+		// members off the runtime shape rather than the declared type: the declared
+		// type is already the literal union, so a narrowing check on it collapses to
+		// `never` and cannot guard a future change to a non-union schema.
+		const union = mimoBaseUrlField.unwrap() as unknown
+		if (!(union instanceof z.ZodUnion)) {
+			throw new Error("Expected mimoBaseUrl to be a zod union")
 		}
+
+		const schemaUrls = union.options.map((option) => {
+			if (!(option instanceof z.ZodLiteral)) {
+				throw new Error("Expected every mimoBaseUrl union member to be a zod literal")
+			}
+			return option.value as string
+		})
+
+		expect([...schemaUrls].sort()).toEqual([...ALLOWED_BASE_URLS].sort())
 		expect(mimoBaseUrlField.safeParse("https://attacker.example/v1").success).toBe(false)
 	})
 

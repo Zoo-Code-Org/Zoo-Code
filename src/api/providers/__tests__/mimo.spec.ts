@@ -197,6 +197,19 @@ describe("MimoHandler", () => {
 			expect(model.id).toBe("unknown-model")
 			expect(model.info).toBe(mimoModels[mimoDefaultModelId])
 		})
+
+		// Regression: `mimoModels[id]` resolved Object.prototype members, so a stored
+		// ID like `constructor` produced a function (or `{}` once spread) as the model
+		// spec instead of the family default.
+		it.each(["constructor", "toString", "valueOf", "__proto__"])(
+			"should fallback to the family default for the prototype-key ID %s",
+			(prototypeKey) => {
+				const h = new MimoHandler({ ...mockOptions, apiModelId: prototypeKey })
+				const model = h.getModel()
+				expect(model.id).toBe(prototypeKey)
+				expect(model.info).toBe(mimoModels[mimoDefaultModelId])
+			},
+		)
 	})
 
 	describe("convertMessagesForMiMo (via convertToR1Format)", () => {

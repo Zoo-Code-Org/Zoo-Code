@@ -64,24 +64,44 @@ vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 
 // Real handlers eagerly fetch models in their constructors, so use lightweight doubles.
 // One double per provider lets tests assert each call receives its own provider's handler.
-const { handlersByProvider } = vi.hoisted(() => ({
+//
+// The MiMo double enforces MimoHandler's real constructor contract: it throws unless the
+// base URL it is handed passes the same allowlist the real handler applies. A non-throwing
+// double would mask the mixed-state bug where the guard validated the resolved base URL but
+// the handler was built from the raw stored config.
+const { handlersByProvider, MIMO_HANDLER_REJECTION } = vi.hoisted(() => ({
 	handlersByProvider: new Map<string | undefined, { providerName: string | undefined }>(),
+	MIMO_HANDLER_REJECTION:
+		"MIMO/MimoHandler/001: MiMo chat completion rejected: base URL is not an allowed Xiaomi MiMo endpoint.",
 }))
 
-vi.mock("../../../api", () => ({
-	buildApiHandler: vi.fn((configuration: { apiProvider?: string }) => {
-		const providerName = configuration.apiProvider
-		let handler = handlersByProvider.get(providerName)
-		if (!handler) {
-			handler = {
-				providerName,
-				getModel: vi.fn().mockReturnValue({ id: "claude-3-sonnet" }),
-			} as { providerName: string | undefined }
-			handlersByProvider.set(providerName, handler)
-		}
-		return handler
-	}),
-}))
+vi.mock("../../../api", async () => {
+	const { ALLOWED_BASE_URLS, MIMO_DEFAULT_BASE_URL, stripTrailingSlashes } =
+		await import("../../../api/providers/fetchers/mimo")
+
+	return {
+		buildApiHandler: vi.fn((configuration: { apiProvider?: string; mimoBaseUrl?: string }) => {
+			const providerName = configuration.apiProvider
+
+			if (providerName === providerIdentifiers.mimo) {
+				const mimoBaseUrl = configuration.mimoBaseUrl || MIMO_DEFAULT_BASE_URL
+				if (!ALLOWED_BASE_URLS.has(stripTrailingSlashes(mimoBaseUrl))) {
+					throw new Error(MIMO_HANDLER_REJECTION)
+				}
+			}
+
+			let handler = handlersByProvider.get(providerName)
+			if (!handler) {
+				handler = {
+					providerName,
+					getModel: vi.fn().mockReturnValue({ id: "claude-3-sonnet" }),
+				} as { providerName: string | undefined }
+				handlersByProvider.set(providerName, handler)
+			}
+			return handler
+		}),
+	}
+})
 
 const handlerForProvider = (providerName: string) => {
 	const handler = handlersByProvider.get(providerName)
@@ -996,9 +1016,11 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 	// Regression: flushModels() gained an eagerly-built handler argument, so an
 	// off-list STORED mimoBaseUrl made MimoHandler's constructor throw from inside
 	// this case. That throw escaped requestRouterModels entirely, so the webview got
-	// neither the MiMo failure response nor the aggregate routerModels response (the
-	// refresh button just hung until its 10s timeout). A stored value can be off-list
-	// because ContextProxy.getProviderSettings() fails open on a schema rejection.
+	// neither the MiMo failure response nor the aggregate routerModels response, and
+	// the Refresh button stuck at Loading indefinitely (Mimo.tsx clears that state
+	// only on a routerModels response; the 10s timeout lives in fetchRouterModels,
+	// which this button does not use). A stored value can be off-list because
+	// ContextProxy.getProviderSettings() fails open on a schema rejection.
 	it("rejects an off-list STORED MiMo base URL without letting the handler constructor throw", async () => {
 		mockProvider.getState.mockResolvedValue({
 			apiConfiguration: {
@@ -1044,6 +1066,63 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(response).toBeDefined()
 		if (!response) throw new Error("Expected routerModels response")
 		expect(response[0].routerModels.mimo).toBeUndefined()
+	})
+
+	// Regression (mixed state): a VALID unsaved base URL alongside an INVALID stored
+	// one. The allowlist guard runs on the resolved value, so it accepts the request,
+	// but handlerFor() spreads the raw stored config -- so the handler was built from
+	// the off-list stored URL and MimoHandler's constructor threw, escaping the case.
+	// The mock above enforces the real constructor contract, so this fails if the
+	// handler is ever built from anything but the guard-validated resolved value.
+	it("builds the MiMo handler from the resolved base URL when the stored one is off-list", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+				mimoBaseUrl: "https://attacker.example/v1",
+			},
+		})
+		getModelsMock.mockImplementation(async (options: { provider?: string }) =>
+			options?.provider === providerIdentifiers.mimo
+				? { "mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false } }
+				: {},
+		)
+
+		await expect(
+			webviewMessageHandler(mockProvider, {
+				type: RouterModelsMessageType.requestRouterModels,
+				values: {
+					provider: providerIdentifiers.mimo,
+					mimoApiKey: "stored-mimo-key",
+					mimoBaseUrl: "https://token-plan-ams.xiaomimimo.com/v1",
+				},
+			}),
+		).resolves.toBeUndefined()
+
+		// The accepted unsaved URL is the one that reaches the cache and the fetch.
+		const mimoOptions = {
+			provider: providerIdentifiers.mimo,
+			apiKey: "stored-mimo-key",
+			baseUrl: "https://token-plan-ams.xiaomimimo.com/v1",
+		}
+		expect(flushModelsMock).toHaveBeenCalledWith(mimoOptions, handlerForProvider(providerIdentifiers.mimo), true)
+		expect(getModelsMock).toHaveBeenCalledWith(mimoOptions, handlerForProvider(providerIdentifiers.mimo))
+
+		// No failure notification: the guard accepted the request and the handler built.
+		const errorCall = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) =>
+				call[0]?.type === RouterModelsMessageType.singleRouterModelFetchResponse &&
+				call[0]?.values?.provider === providerIdentifiers.mimo,
+		)
+		expect(errorCall).toBeUndefined()
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.mimo).toEqual({
+			"mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false },
+		})
 	})
 
 	it("treats an unsaved empty mimoBaseUrl as unset and keeps using the stored cluster", async () => {

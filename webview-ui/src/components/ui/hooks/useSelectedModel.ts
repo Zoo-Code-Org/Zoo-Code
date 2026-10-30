@@ -13,6 +13,7 @@ import {
 	minimaxModels,
 	mimoModels,
 	mimoDefaultModelId,
+	getMimoModelInfo,
 	geminiModels,
 	mistralModels,
 	openAiModelInfoSaneDefaults,
@@ -59,13 +60,19 @@ import { useVsCodeLmModels, type VsCodeLmModels } from "./useVsCodeLmModels"
 /**
  * Helper to get a validated model ID for dynamic providers.
  * Returns the configured model ID if it exists in the available models, otherwise returns the default.
+ *
+ * Uses an own-property check rather than a truthy read: router catalogs carry model
+ * IDs straight from provider responses, so a configured ID such as `constructor`
+ * would otherwise be "found" via Object.prototype and kept as a valid selection.
  */
 function getValidatedModelId(
 	configuredId: string | undefined,
 	availableModels: ModelRecord | undefined,
 	defaultModelId: string,
 ): string {
-	return configuredId && availableModels?.[configuredId] ? configuredId : defaultModelId
+	return configuredId && availableModels && Object.hasOwn(availableModels, configuredId)
+		? configuredId
+		: defaultModelId
 }
 
 /**
@@ -115,7 +122,7 @@ function getStaticCatalogSelection(
 		}
 		case providerIdentifiers.mimo: {
 			const id = configuredId || mimoDefaultModelId
-			return { id, info: mimoModels[id as keyof typeof mimoModels] }
+			return { id, info: getMimoModelInfo(id) }
 		}
 	}
 }
@@ -447,13 +454,15 @@ function getSelectedModel({
 			return { id, info }
 		}
 		case providerIdentifiers.mimo: {
-			const availableModels = routerModels[providerIdentifiers.mimo]
-				? { ...mimoModels, ...routerModels[providerIdentifiers.mimo] }
-				: mimoModels
+			const routerCatalog = routerModels[providerIdentifiers.mimo]
+			const availableModels = routerCatalog ? { ...mimoModels, ...routerCatalog } : mimoModels
 			const id = getValidatedModelId(apiConfiguration.apiModelId, availableModels, defaultModelId)
-			const routerInfo = routerModels[providerIdentifiers.mimo]?.[id]
-			const staticInfo = mimoModels[id as keyof typeof mimoModels]
-			return { id, info: routerInfo ?? staticInfo }
+			// Prototype-safe on both sides: the router catalog carries IDs straight
+			// from the provider's /models response, so `catalog["constructor"]`
+			// would otherwise resolve to an inherited member and surface as a model
+			// with no metadata instead of falling back to the static spec.
+			const routerInfo = routerCatalog && Object.hasOwn(routerCatalog, id) ? routerCatalog[id] : undefined
+			return { id, info: routerInfo ?? getMimoModelInfo(id) }
 		}
 		case providerIdentifiers.zai: {
 			const apiLine = apiConfiguration.zaiApiLine ?? "international_coding"

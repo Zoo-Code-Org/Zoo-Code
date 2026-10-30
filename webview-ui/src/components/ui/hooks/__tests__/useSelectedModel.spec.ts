@@ -360,6 +360,29 @@ describe("useSelectedModel", () => {
 		expect(result.current.info).toEqual(routerModelInfo)
 	})
 
+	// Regression: both the ID validation and the metadata lookup used plain bracket
+	// reads, so an ID naming an Object.prototype member was "found" in the catalog and
+	// surfaced as a model with no metadata instead of falling back to the static spec.
+	it.each(["constructor", "toString", "valueOf", "__proto__"])(
+		"mimo: falls back to the static default for the prototype-key ID %s",
+		(prototypeKey) => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [providerIdentifiers.mimo]: {} }))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.mimo, apiModelId: prototypeKey }),
+				{ wrapper: createWrapper() },
+			)
+
+			// A settled-but-empty router catalog reaches the ready path, where the ID is
+			// validated against the merged catalog. The ID is not in it, so validation
+			// resets to the default and the metadata is the default's curated spec
+			// (never an inherited Object.prototype member).
+			expect(result.current.id).toBe(mimoDefaultModelId)
+			expect(result.current.info).toEqual(mimoModels[mimoDefaultModelId])
+		},
+	)
+
 	it("uses router data for Poe", () => {
 		const modelInfo: ModelInfo = { contextWindow: 42_000, supportsPromptCache: false }
 		mockUseRouterModels.mockReturnValue(

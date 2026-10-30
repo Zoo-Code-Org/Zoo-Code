@@ -1,5 +1,5 @@
 import type { ModelRecord } from "@roo-code/types"
-import { mimoModels } from "@roo-code/types"
+import { getMimoModelInfo } from "@roo-code/types"
 
 import { DEFAULT_HEADERS } from "../constants"
 
@@ -144,7 +144,10 @@ export async function getMimoModels(
 		const modelId = typeof model.id === "string" && model.id ? model.id : null
 		if (!modelId || NON_TEXT_MODEL_ID.test(modelId)) continue
 
-		const knownSpecs = mimoModels[modelId as keyof typeof mimoModels]
+		// Prototype-safe: IDs come straight from the provider's response, so an ID
+		// such as `constructor` must fall through to the family defaults below
+		// instead of resolving to an inherited Object.prototype member.
+		const knownSpecs = getMimoModelInfo(modelId)
 
 		if (knownSpecs) {
 			models[modelId] = { ...knownSpecs }

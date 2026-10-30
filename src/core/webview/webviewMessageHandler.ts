@@ -1336,6 +1336,24 @@ export const webviewMessageHandler = async (
 					: undefined
 			const mimoBaseUrl = unsavedMimoBaseUrl ?? apiConfiguration.mimoBaseUrl
 
+			// handlerFor() spreads the RAW stored config, so a handler built for MiMo
+			// would re-validate the stored base URL instead of the one this request
+			// actually uses. In mixed state (valid unsaved URL + off-list stored URL)
+			// the guard below accepts the resolved value while MimoHandler's
+			// constructor rejects the stored one, and that throw escapes this case --
+			// so every handler built here takes the resolved value. mimoBaseUrl is
+			// inert for the other providers.
+			//
+			// The cast is sound because the value only reaches MimoHandler after the
+			// allowlist guard below accepts it, and MimoHandler re-applies the same
+			// stripTrailingSlashes normalization before building its client. The
+			// declared type is the four-literal union, but an unsaved form value is a
+			// plain string that the guard (not the schema) is what vets.
+			const handlerConfiguration: ProviderSettings = {
+				...apiConfiguration,
+				mimoBaseUrl: mimoBaseUrl as ProviderSettings["mimoBaseUrl"],
+			}
+
 			// Unsaved form values bypass the settings-schema validation that pins
 			// stored mimoBaseUrl to the four allowed Xiaomi endpoints, so gate them
 			// on the fetcher's allowlist before they can carry the bearer key into
@@ -1380,7 +1398,7 @@ export const webviewMessageHandler = async (
 					if (message?.values?.mimoApiKey || unsavedMimoBaseUrl) {
 						// Unsaved form values win over stored config: flush refreshes the cache
 						// with them before the aggregate fetch (same pattern as DeepSeek/Moonshot).
-						await flushModels(mimoOptions, handlerFor(apiConfiguration, providerIdentifiers.mimo), true)
+						await flushModels(mimoOptions, handlerFor(handlerConfiguration, providerIdentifiers.mimo), true)
 					}
 
 					candidates.push({
@@ -1489,12 +1507,12 @@ export const webviewMessageHandler = async (
 			// If refresh flag is set and we have a specific provider, flush its cache first
 			if (shouldRefresh && providerFilter && modelFetchPromises.length > 0) {
 				const targetCandidate = modelFetchPromises[0]
-				await flushModels(targetCandidate.options, handlerFor(apiConfiguration, targetCandidate.key), true)
+				await flushModels(targetCandidate.options, handlerFor(handlerConfiguration, targetCandidate.key), true)
 			}
 
 			const results = await Promise.allSettled(
 				modelFetchPromises.map(async ({ key, options }) => {
-					const models = await safeGetModels(options, handlerFor(apiConfiguration, key))
+					const models = await safeGetModels(options, handlerFor(handlerConfiguration, key))
 					return { key, models } // The key is `ProviderName` here.
 				}),
 			)

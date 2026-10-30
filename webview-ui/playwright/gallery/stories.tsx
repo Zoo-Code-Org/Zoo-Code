@@ -269,6 +269,44 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	// The MiMo settings gained a Refresh Models affordance with idle/loading/success/
+	// error render states, so the surface needs a pixel receipt: the button sits in a
+	// vertical stack with the entrypoint dropdown and API key field, and the status
+	// line changes the block's height. Props stay serializable; the state lives here.
+	"mimo-settings": async ({ configured = false } = {}) => {
+		const [{ AppProviders }, { Mimo }, { providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/providers/Mimo"),
+			import("@roo-code/types"),
+		])
+		type ProviderSettings = React.ComponentProps<typeof Mimo>["apiConfiguration"]
+
+		function MimoSettingsStory() {
+			const [apiConfiguration, setApiConfiguration] = useState<ProviderSettings>({
+				apiProvider: providerIdentifiers.mimo,
+				mimoBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+				...(configured ? { mimoApiKey: "mimo-test-key" } : {}),
+			})
+			return (
+				<div className="w-full p-4 bg-vscode-editor-background" data-testid="mimo-settings-story">
+					<div className="flex flex-col gap-3">
+						<Mimo
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={(field, value) =>
+								setApiConfiguration((current) => ({ ...current, [field]: value }))
+							}
+						/>
+					</div>
+				</div>
+			)
+		}
+
+		return (
+			<AppProviders initialState={{ apiConfiguration: { apiProvider: providerIdentifiers.mimo } }}>
+				<MimoSettingsStory />
+			</AppProviders>
+		)
+	},
 	"layout-clipped-text": () => (
 		<div className="w-40">
 			<span data-testid="clipped-direct-text" className="block w-8 overflow-hidden whitespace-nowrap">

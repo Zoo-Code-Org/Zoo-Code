@@ -1,7 +1,8 @@
 import OpenAI from "openai"
 
 import {
-	mimoModels,
+	getMimoModelInfo,
+	mimoDefaultModelInfo,
 	mimoDefaultModelId,
 	MIMO_DEFAULT_TEMPERATURE,
 	type ModelInfo,
@@ -81,7 +82,10 @@ export class MimoHandler extends OpenAiHandler {
 	 */
 	override getModel() {
 		const id = this.options.apiModelId ?? mimoDefaultModelId
-		const info: ModelInfo = mimoModels[id as keyof typeof mimoModels] || mimoModels[mimoDefaultModelId]
+		// getMimoModelInfo is prototype-safe: a plain `mimoModels[id]` read would
+		// resolve an ID like `constructor` to an inherited member and hand
+		// getModelParams an empty spec instead of the family default.
+		const info: ModelInfo = getMimoModelInfo(id) ?? mimoDefaultModelInfo
 		const params = getModelParams({
 			format: "openai",
 			modelId: id,

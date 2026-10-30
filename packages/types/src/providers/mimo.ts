@@ -88,4 +88,17 @@ export const mimoModels = {
 
 export const mimoDefaultModelInfo: ModelInfo = mimoModels[mimoDefaultModelId]
 
+/**
+ * Looks up a curated spec by model ID, or `undefined` when the ID is not in the
+ * catalog. A plain `mimoModels[id]` read is not safe for untrusted IDs: the
+ * dynamic catalog feeds IDs straight from the provider's `/models` response, so
+ * an ID like `constructor` or `toString` resolves to an inherited
+ * `Object.prototype` member instead of a spec, and spreading it yields `{}` --
+ * a model with no metadata at all. Callers fall back to family defaults on
+ * `undefined`.
+ */
+export function getMimoModelInfo(modelId: string): ModelInfo | undefined {
+	return Object.hasOwn(mimoModels, modelId) ? mimoModels[modelId as MimoModelId] : undefined
+}
+
 export const MIMO_DEFAULT_TEMPERATURE = 1.0
