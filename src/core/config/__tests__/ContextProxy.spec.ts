@@ -405,6 +405,47 @@ describe("ContextProxy", () => {
 			expect(proxy.getGlobalState("apiModelId")).toBeUndefined()
 			expect(proxy.getGlobalState("openAiBaseUrl")).toBeUndefined()
 		})
+
+		it("clears a stale secret whose key the incoming configuration does not use", async () => {
+			// Anthropic -> OpenRouter: different secret key names, so the incoming configuration
+			// cannot overwrite the stale secret by name collision.
+			await proxy.setProviderSettings({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "anthropic-secret",
+			})
+			expect(proxy.getSecret("apiKey")).toBe("anthropic-secret")
+
+			await proxy.setProviderSettings({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "openrouter-secret",
+			})
+
+			// The stale secret must be deleted from both the cache and SecretStorage. A clear-out
+			// that only enumerates non-secret keys leaves it here and `getValues` keeps merging it.
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+			expect(proxy.getValues().apiKey).toBeUndefined()
+			expect(mockSecrets.delete).toHaveBeenCalledWith("apiKey")
+			// The incoming secret still lands, so this is a targeted purge, not a blanket wipe.
+			expect(proxy.getSecret("openRouterApiKey")).toBe("openrouter-secret")
+			expect(mockSecrets.store).toHaveBeenCalledWith("openRouterApiKey", "openrouter-secret")
+		})
+
+		it("keeps the global image-generation secret and codebase-index credentials", async () => {
+			// Neither is owned by a provider profile: the image key is a global secret, and the
+			// index credentials are written flat by the index settings handler.
+			await proxy.storeSecret("openRouterImageApiKey", "image-secret")
+			await proxy.storeSecret("codeIndexOpenAiKey", "index-secret")
+
+			await proxy.setProviderSettings({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "anthropic-secret",
+			})
+
+			expect(proxy.getSecret("openRouterImageApiKey")).toBe("image-secret")
+			expect(proxy.getSecret("codeIndexOpenAiKey")).toBe("index-secret")
+			expect(mockSecrets.delete).not.toHaveBeenCalledWith("openRouterImageApiKey")
+			expect(mockSecrets.delete).not.toHaveBeenCalledWith("codeIndexOpenAiKey")
+		})
 	})
 
 	describe("resetAllState", () => {

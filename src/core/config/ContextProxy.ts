@@ -14,6 +14,7 @@ import {
 	type RooCodeSettings,
 	providerSettingsSchema,
 	globalSettingsSchema,
+	codebaseIndexProviderSchema,
 	isSecretStateKey,
 	isProviderName,
 	isRetiredProvider,
@@ -31,6 +32,12 @@ type RooCodeSettingsKey = keyof RooCodeSettings
 const PASS_THROUGH_STATE_KEYS = ["taskHistory"]
 
 export const isPassThroughStateKey = (key: string) => PASS_THROUGH_STATE_KEYS.includes(key)
+
+// Codebase-index credentials are part of `ProviderSettings` but are not owned by a
+// provider profile: the index settings handler writes them flat and `saveConfig`'s
+// discriminated parse strips them from every profile blob. Clearing them here would
+// delete the user's index credentials on every profile switch.
+const FLAT_ONLY_PROVIDER_SECRET_KEYS = new Set<string>(Object.keys(codebaseIndexProviderSchema.shape))
 
 const globalSettingsExportSchema = globalSettingsSchema.omit({
 	taskHistory: true,
@@ -523,9 +530,16 @@ export class ContextProxy {
 			}
 		}
 
+		// Secret keys live in `secretCache`, not `stateCache`, so they need their own
+		// presence check. Without this a deleted profile's differently-named secrets
+		// (`openRouterApiKey` when the replacement uses `apiKey`) survive the switch and
+		// keep being merged back by `getValues`.
+		const isStale = (key: string) =>
+			isSecretStateKey(key) ? !!this.secretCache[key as SecretStateKey] : !!this.stateCache[key as GlobalStateKey]
+
 		await this.setValues({
-			...PROVIDER_SETTINGS_KEYS.filter((key) => !isSecretStateKey(key))
-				.filter((key) => !!this.stateCache[key])
+			...PROVIDER_SETTINGS_KEYS.filter((key) => !FLAT_ONLY_PROVIDER_SECRET_KEYS.has(key))
+				.filter(isStale)
 				.reduce((acc, key) => ({ ...acc, [key]: undefined }), {} as ProviderSettings),
 			...values,
 		})

@@ -3597,7 +3597,9 @@ describe("ClineProvider", () => {
 			const profiles: ProviderSettingsEntry[] = [currentProfile, otherProfile]
 
 			// Full configs keyed by name, so `getProfile`/`saveConfig` behave like the real manager.
-			// Each carries a distinct `apiKey` so a restore that drops credentials fails the test.
+			// The two profiles deliberately use *different* secret key names (`apiKey` for Anthropic,
+			// `openRouterApiKey` for OpenRouter): a same-named fixture lets a same-key overwrite hide
+			// a deleted profile's secret surviving the switch.
 			const configs = new Map<string, ProviderSettingsEntry & { openRouterModelId?: string; apiKey?: string }>([
 				[currentProfile.name, { ...currentProfile, apiKey: "current-key" }],
 				[otherProfile.name, { ...otherProfile, openRouterModelId: "other-model", apiKey: "other-key" }],
@@ -3796,13 +3798,17 @@ describe("ClineProvider", () => {
 			vi.useFakeTimers()
 
 			try {
-				const { profiles } = mockProviderSettingsManager()
+				const { profiles, managerState } = mockProviderSettingsManager()
 				let resolveActivation!: () => void
 				const pendingActivation = new Promise<void>((resolve) => {
 					resolveActivation = resolve
 				})
 				// Hang only the replacement activation; the restore's own activation still succeeds.
+				// The manager's pointer is written before the hang, which is where the real
+				// `activateProfile` sets it (inside the lock, before `store`): a rollback that only
+				// guards ContextProxy would leave the manager naming the replacement.
 				vi.mocked(provider.providerSettingsManager.activateProfile).mockImplementationOnce(async () => {
+					managerState.currentApiConfigName = otherProfile.name
 					await pendingActivation
 					return { ...otherProfile, openRouterModelId: "other-model" }
 				})
@@ -3824,11 +3830,171 @@ describe("ClineProvider", () => {
 				)
 				expect(profiles.map(({ name }) => name).sort()).toEqual(["current-config", "other-config"])
 
-				// A late completion of the abandoned activation must not move ContextProxy: the
-				// aborted signal makes `activateProviderProfileUnlocked` return before writing.
+				// A late completion of the abandoned activation must not move ContextProxy or the
+				// manager: the aborted signal makes `activateProviderProfileUnlocked` return before
+				// writing, and the rollback has already re-pointed the manager at the restored
+				// profile.
 				resolveActivation()
 				await vi.advanceTimersByTimeAsync(0)
 				expect(provider.contextProxy.getValues().currentApiConfigName).toBe("current-config")
+				expect(managerState.currentApiConfigName).toBe("current-config")
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		test("purges the deleted profile's differently-named secret on an active cross-provider delete", async () => {
+			// Anthropic -> OpenRouter: the two profiles carry different secret key names, so the
+			// replacement's write cannot overwrite the deleted profile's secret by name collision.
+			const { profiles } = mockProviderSettingsManager()
+			vi.mocked(provider.providerSettingsManager.activateProfile).mockImplementationOnce(async () => {
+				return { ...otherProfile, openRouterModelId: "other-model", openRouterApiKey: "other-key" }
+			})
+
+			// Seed the deleted profile's secret exactly as an earlier activation of it would have.
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "current-key",
+			})
+			expect(provider.contextProxy.getSecret("apiKey")).toBe("current-key")
+
+			await provider.deleteProviderProfile(currentProfile)
+
+			// The deleted profile's secret must be gone from the cache and from SecretStorage, not
+			// merely absent from the manager blob. Without the secret-aware clear-out it survives.
+			expect(provider.contextProxy.getSecret("apiKey")).toBeUndefined()
+			expect(mockContext.secrets.delete).toHaveBeenCalledWith("apiKey")
+			// The replacement's own secret is still stored, so the purge is not a blanket wipe.
+			expect(provider.contextProxy.getSecret("openRouterApiKey")).toBe("other-key")
+			expect(provider.contextProxy.getValues().apiKey).toBeUndefined()
+			expect(profiles.map(({ name }) => name)).toEqual(["other-config"])
+		})
+
+		test("reconciles the manager's active pointer when the restore fails", async () => {
+			const { managerState } = mockProviderSettingsManager()
+			// The replacement activation fails, and so does the restore, so the fallback runs.
+			vi.mocked(provider.providerSettingsManager.activateProfile)
+				.mockRejectedValueOnce(new Error("Failed to activate profile: storage error"))
+				.mockRejectedValueOnce(new Error("Failed to restore profile: storage error"))
+
+			await expect(provider.deleteProviderProfile(currentProfile)).rejects.toThrow(
+				"Failed to activate profile: storage error",
+			)
+
+			// ContextProxy alone is not enough: the manager would keep naming the deleted profile,
+			// so the next activation would disagree with what the webview shows.
+			expect(managerState.currentApiConfigName).toBe("other-config")
+			expect(provider.contextProxy.getValues().currentApiConfigName).toBe("other-config")
+			expect(provider.contextProxy.getProviderSettings()).toMatchObject({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "other-model",
+			})
+		})
+
+		test("keeps a queued activation's write when the rollback settles late", async () => {
+			const { managerState } = mockProviderSettingsManager()
+			let resolveRestore!: () => void
+			const pendingRestore = new Promise<void>((resolve) => {
+				resolveRestore = resolve
+			})
+
+			// Fail the replacement activation, then hang the restore's own `saveConfig` so the
+			// rollback is still in flight while the next mutation is queued behind it.
+			vi.mocked(provider.providerSettingsManager.activateProfile).mockRejectedValueOnce(
+				new Error("Failed to activate profile: storage error"),
+			)
+			vi.mocked(provider.providerSettingsManager.saveConfig).mockImplementationOnce(async () => {
+				await pendingRestore
+				return "current-id"
+			})
+
+			const deletion = provider.deleteProviderProfile(currentProfile)
+			const deletionResult = expect(deletion).rejects.toThrow("Failed to activate profile: storage error")
+			await vi.waitFor(() => expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalled())
+
+			// Queue a newer mutation while the rollback is still pending.
+			const queued = provider.activateProviderProfile({ name: "other-config" })
+
+			// The rollback must still hold the queue, so the newer activation cannot write yet.
+			// Without the queued rollback this activation runs immediately and the late rollback
+			// then overwrites it.
+			await vi.waitFor(async () => {
+				expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledTimes(1)
+			})
+			expect(managerState.currentApiConfigName).toBe("current-config")
+
+			// Let the rollback finish late; only then may the queued activation write.
+			resolveRestore()
+			await deletionResult
+			await queued
+
+			// The rollback's late completion must not undo the queued activation's selection.
+			expect(managerState.currentApiConfigName).toBe("other-config")
+			expect(provider.contextProxy.getValues().currentApiConfigName).toBe("other-config")
+			expect(provider.contextProxy.getProviderSettings()).toMatchObject({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "other-model",
+			})
+		})
+
+		test("restores the deleted profile's full settings when activation fails after its settings write", async () => {
+			mockProviderSettingsManager()
+
+			// Fail after the replacement's provider settings have been written, the way a
+			// `setModeConfig` rejection does: the name pointers and the settings then disagree.
+			vi.mocked(provider.providerSettingsManager.setModeConfig).mockRejectedValueOnce(
+				new Error("Failed to set mode config: storage error"),
+			)
+
+			await expect(provider.deleteProviderProfile(currentProfile)).rejects.toThrow(
+				"Failed to set mode config: storage error",
+			)
+
+			// Restoring only the name pointers would leave OpenRouter's `openRouterModelId` under
+			// the restored Anthropic name. The whole provider slice must come back.
+			expect(provider.contextProxy.getValues().currentApiConfigName).toBe("current-config")
+			expect(provider.contextProxy.getProviderSettings()).toMatchObject({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "current-key",
+			})
+			expect(provider.contextProxy.getProviderSettings().openRouterModelId).toBeUndefined()
+		})
+
+		test("does not purge an inactive profile after the caller already timed out", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const { profiles } = mockProviderSettingsManager()
+				let resolvePurge!: () => void
+				const pendingPurge = new Promise<void>((resolve) => {
+					resolvePurge = resolve
+				})
+				// Stall the inactive purge past the mutation timeout, then let it complete.
+				vi.mocked(provider.providerSettingsManager.deleteConfig).mockImplementationOnce(async () => {
+					await pendingPurge
+					const index = profiles.findIndex((profile) => profile.name === otherProfile.name)
+					profiles.splice(index, 1)
+				})
+
+				const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
+				const setValuesSpy = vi.spyOn(provider.contextProxy, "setValues")
+
+				const deletion = provider.deleteProviderProfile(otherProfile)
+				const deletionResult = expect(deletion).rejects.toThrow("Provider profile mutation timed out")
+
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await deletionResult
+
+				// The caller was told the deletion failed, so the stale snapshot must not be written
+				// over whatever a newer mutation has since stored. Clear the earlier calls (setup and
+				// the purge attempt itself) so only the post-abort writes are observed; this branch's
+				// only write is `listApiConfigMeta`.
+				setValueSpy.mockClear()
+				setValuesSpy.mockClear()
+				resolvePurge()
+				await vi.advanceTimersByTimeAsync(0)
+				expect(setValueSpy).not.toHaveBeenCalled()
+				expect(setValuesSpy).not.toHaveBeenCalled()
 			} finally {
 				vi.useRealTimers()
 			}
