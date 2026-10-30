@@ -3980,6 +3980,7 @@ describe("TaskHistoryStore under-lock repair guards and heartbeat release", () =
 			// The child half committed (the repair was already past its guard), but
 			// the parent half aborted: the link is intact and the parent's claim
 			// survives, so the resumed parent keeps its heartbeat and its shield.
+			expect(s.get(childId)?.status).toBe("interrupted")
 			expect(s.get(parentId)?.status).toBe("delegated")
 			expect(s.get(parentId)?.awaitingChildId).toBe(childId)
 			const owned = (s as unknown as { locallyActiveTaskIds: Set<string> }).locallyActiveTaskIds

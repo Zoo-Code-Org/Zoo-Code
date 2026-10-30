@@ -1033,9 +1033,14 @@ export class TaskHistoryStore {
 	 * again in safeWriteJson's `preCommit`, synchronously and immediately before
 	 * the commit rename. That window is the only one that can still change: the
 	 * merge above already ran under the target's advisory lock, so no peer can
-	 * write, and only an in-process claim can land. A claim observed there aborts
-	 * with NOTHING committed, so the parent half never runs and the live session
-	 * keeps its record, its claim, and its delegation link.
+	 * write, and only an in-process claim can land.
+	 *
+	 * What an abort leaves behind depends on the half. A claim on the child
+	 * aborts with NOTHING committed, so the parent half never runs and the live
+	 * session keeps its record, its claim, and its delegation link. A claim on
+	 * the parent aborts only the parent half, after the child half already
+	 * committed as `interrupted`: the delegation link survives, which is what
+	 * keeps the resumed parent's session recoverable.
 	 */
 	private async writeAdministrativeRepair(
 		target: HistoryItem,
