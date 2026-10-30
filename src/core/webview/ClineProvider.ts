@@ -2254,16 +2254,13 @@ export class ClineProvider
 							removedModeConfigs,
 						)
 
-						// The write below is fenced behind the abort, so this abandoned body cannot
-						// land a late `setValues` after a newer queued mutation has written. It still
-						// converges: the list is the manager's current view, not the `listApiConfigMeta`
-						// cache, which never observed a profile created while the purge held the lock
-						// and would drop it from the webview's list while the manager keeps it.
+						// Fenced behind the abort, and read from the manager rather than the
+						// `listApiConfigMeta` cache, which never observed a profile created while the
+						// purge held the lock.
 						await this.contextProxy.setValues({
 							listApiConfigMeta: await this.providerSettingsManager.listConfig(),
 							modeApiConfigs: await this.providerSettingsManager.getModeApiConfigs(),
 						})
-
 						return
 					}
 
@@ -2273,29 +2270,27 @@ export class ClineProvider
 					// cache and in SecretStorage until some unrelated future write happens to name a
 					// provider that does not own them, which may never happen.
 					//
-					// The keep-set comes from the *surviving* profile's provider, not from its blob.
-					// A blob-derived set is empty exactly when the live credential needs protecting:
-					// the `api.getConfiguration()` round-trip rewrites a profile without its secret
-					// fields while keeping `apiProvider`, so a surviving OpenRouter profile's blob
-					// declares no `openRouterApiKey` even though that SecretStorage slot holds its
-					// live value. When the deleted profile and the survivor share a provider and a key
-					// name, the slot they would purge *is* the survivor's credential.
+					// The keep-set comes from the providers of the profiles that remain, not from the
+					// active profile's blob. A blob-derived set is empty exactly when the live
+					// credential needs protecting: the `api.getConfiguration()` round-trip rewrites a
+					// profile without its secret fields while keeping `apiProvider`, so a surviving
+					// OpenRouter profile's blob declares no `openRouterApiKey` even though that
+					// SecretStorage slot holds its live value. When the deleted profile and a
+					// remaining profile share a provider and a key name, the slot they would purge
+					// *is* that profile's credential.
 					await this.purgeDeletedProfileSecrets(
 						undoConfig,
-						await this.getSurvivingProviderSecretKeys(globalSettings.currentApiConfigName, undoConfig),
+						await this.getSurvivingProviderSecretKeys(profileToDelete.name, undoConfig),
 					)
 
-					// The purge above can outlast the mutation timeout. Once the abort fired, this
-					// abandoned body must not land a late `setValues` after a newer queued mutation
-					// has written: a profile created during the window would be dropped from
-					// `listApiConfigMeta` while the manager still holds it.
+					// The purge above can outlast the mutation timeout: once the abort fired, this
+					// abandoned body must not land a late `setValues` after a newer queued mutation.
 					if (signal.aborted) {
 						return
 					}
 
-					// Read the list from the manager rather than filtering the `listApiConfigMeta`
-					// cache: the cache only observes writes this provider made, so a profile created
-					// by a concurrent mutation would be missing from the filtered result.
+					// Read the list from the manager rather than the `listApiConfigMeta` cache: the
+					// cache only observes writes this provider made.
 					await this.contextProxy.setValues({
 						listApiConfigMeta: (await this.providerSettingsManager.listConfig()).filter(
 							({ name }) => name !== profileToDelete.name,
@@ -2359,10 +2354,12 @@ export class ClineProvider
 				// The keep-set is ownership-derived for the same reason as the inactive branch: a
 				// blob-derived set is empty when the replacement's blob was written from an
 				// `api.getConfiguration()` snapshot (secrets stripped), and purging then deletes the
-				// replacement's live credential from the shared SecretStorage slot.
+				// replacement's live credential from the shared SecretStorage slot. It spans every
+				// remaining profile, so a same-provider profile that is not the replacement keeps its
+				// credential too.
 				await this.purgeDeletedProfileSecrets(
 					deletedProfileConfig,
-					await this.getSurvivingProviderSecretKeys(profileToActivate, deletedProfileConfig),
+					await this.getSurvivingProviderSecretKeys(profileToDelete.name, deletedProfileConfig),
 				)
 
 				// The activation above only rebinds the *current* mode, so every other mode that
@@ -2398,44 +2395,54 @@ export class ClineProvider
 	}
 
 	/**
-	 * The deleted profile's secret keys that the *surviving* profile's provider also owns.
+	 * The deleted profile's secret keys that any *remaining* profile's provider also owns.
 	 *
 	 * Both delete branches purge the deleted profile's credentials explicitly, and both need the
-	 * same answer: is a key about to be deleted still in use by the profile that survives? That
-	 * cannot be answered from the surviving profile's blob. The `api.getConfiguration()` round-trip
+	 * same answer: is a key about to be deleted still in use by a profile that survives? That
+	 * cannot be answered from a surviving profile's blob. The `api.getConfiguration()` round-trip
 	 * rewrites a profile without its secret fields while keeping `apiProvider`, so a surviving
 	 * OpenRouter profile's blob declares no `openRouterApiKey` even though that SecretStorage slot
 	 * holds its live value. Provider ownership answers it from the schema instead, which no
 	 * round-trip can strip.
 	 *
-	 * A same-provider succession (the deleted profile and the survivor both OpenRouter) shares one
-	 * SecretStorage slot per key name, so "the deleted profile's key" *is* the survivor's credential:
-	 * keeping it is the correct semantics, not a leak, because nothing is orphaned to purge. A
-	 * cross-provider delete keeps nothing, because the survivor owns none of the deleted keys.
+	 * The answer spans *every* remaining profile, not just the one that ends up active. A profile
+	 * shares one SecretStorage slot per key name with every profile of the same provider, so a
+	 * remaining OpenRouter profile that is not active still reads the slot an inactive delete would
+	 * otherwise purge. Keeping a key is the correct semantics, not a leak, because nothing is
+	 * orphaned: a key no remaining provider owns is still purged, so a cross-provider delete keeps
+	 * nothing.
 	 *
-	 * An unreadable survivor yields an empty set, so the purge removes every key the deleted profile
-	 * declared. That is the confidentiality-safe direction.
+	 * A remaining profile that cannot be read contributes nothing, so its keys are purged. That is
+	 * the confidentiality-safe direction, and it is also what an unresolvable survivor set does:
+	 * the keep-set is empty and every key the deleted profile declared is removed.
 	 */
 	private async getSurvivingProviderSecretKeys(
-		survivingProfileName: string | undefined,
+		deletedName: string,
 		deletedConfig: (ProviderSettingsWithId & { name: string }) | undefined,
 	): Promise<Set<string>> {
-		if (!survivingProfileName || !deletedConfig) {
-			return new Set()
-		}
-
-		let survivingProvider: unknown
+		const deletedKeys = deletedConfig ? getProfileSecretKeys(deletedConfig) : []
+		const keep = new Set<string>()
 
 		try {
-			const { apiProvider } = await this.providerSettingsManager.getProfile({ name: survivingProfileName })
-			survivingProvider = apiProvider
+			for (const { name } of await this.providerSettingsManager.listConfig()) {
+				if (name === deletedName || keep.size === deletedKeys.length) {
+					continue
+				}
+
+				try {
+					const { apiProvider } = await this.providerSettingsManager.getProfile({ name })
+					for (const key of deletedKeys) {
+						if (providerOwnsSecretKey(apiProvider, key) === true) keep.add(key)
+					}
+				} catch {
+					// An unreadable remaining profile contributes nothing, so its keys are purged.
+				}
+			}
 		} catch {
 			return new Set()
 		}
 
-		return new Set(
-			getProfileSecretKeys(deletedConfig).filter((key) => providerOwnsSecretKey(survivingProvider, key) === true),
-		)
+		return keep
 	}
 
 	/**
@@ -2446,12 +2453,16 @@ export class ClineProvider
 	 * same-provider succession is exactly the case ownership preserves. A delete is explicit
 	 * intent, so the deleted profile's keys are removed by name here instead of being inferred.
 	 *
-	 * `keep` names the keys the surviving profile's provider still owns: those carry a live
-	 * credential (a same-provider succession shares one SecretStorage slot per key name), so
-	 * removing them would delete the surviving profile's own key.
+	 * `keep` names the keys a remaining profile's provider still owns: those carry a live
+	 * credential (profiles of one provider share one SecretStorage slot per key name), so removing
+	 * them would delete a surviving profile's own key.
 	 *
-	 * Best-effort: the profile is already gone from the manager, so a failure here must not turn
-	 * a successful delete into an error. The keys are logged by name only, never by value.
+	 * The delete itself stays successful: the profile is already gone from the manager, so a purge
+	 * failure is retried once and then surfaced, never rethrown. A retry is needed because
+	 * `storeSecret` clears the cache before it awaits `secrets.delete`: a rejected delete leaves the
+	 * cache empty while SecretStorage still holds the value, and the ownership clear-out skips keys
+	 * absent from the cache, so nothing else retries them in this session. The keys are logged by
+	 * name only, never by value.
 	 */
 	private async purgeDeletedProfileSecrets(
 		config: (ProviderSettingsWithId & { name: string }) | undefined,
@@ -2468,14 +2479,22 @@ export class ClineProvider
 		}
 
 		try {
-			await this.contextProxy.purgeProviderSecrets(secretKeys)
+			try {
+				await this.contextProxy.purgeProviderSecrets(secretKeys)
+			} catch {
+				// The cache is already cleared for these keys, so a retry re-issues the storage delete
+				// that failed rather than relying on a later clear-out that would skip them.
+				await this.contextProxy.purgeProviderSecrets(secretKeys)
+			}
+
 			this.log(`Purged ${secretKeys.length} secret(s) of the deleted profile '${config.name}'`)
 		} catch (error) {
-			this.log(
-				`Failed to purge the secrets of the deleted profile '${config.name}': ${
-					error instanceof Error ? error.message : String(error)
-				}`,
-			)
+			const message = `Failed to purge the secrets of the deleted profile '${config.name}': ${error instanceof Error ? error.message : String(error)}`
+
+			this.log(message)
+			// The delete succeeded, so this must not reject it; the user still has to learn that a
+			// credential may remain in SecretStorage until the next successful purge or restart.
+			void vscode.window.showWarningMessage(message)
 		}
 	}
 
@@ -2519,13 +2538,19 @@ export class ClineProvider
 
 					if (restored) {
 						this.log(`Restored provider profile '${name}' after a failed replacement activation`)
-						return
+					} else {
+						// The restore did not finish, so both stores may still name a profile the
+						// manager no longer has. The reconcile also re-applies the purge's dropped mode
+						// bindings and mirrors the mode map, so an aborted restore cannot silently lose
+						// them.
+						await this.reconcileActiveProfileAfterFailedRestore(removedModeConfigs, previousContextValues)
 					}
 
-					// The restore did not finish, so both stores may still name a profile the manager
-					// no longer has. The reconcile also re-applies the purge's dropped mode bindings
-					// and mirrors the mode map, so an aborted restore cannot silently lose them.
-					await this.reconcileActiveProfileAfterFailedRestore(removedModeConfigs)
+					// The replacement activation posted state before this rollback landed, and the
+					// rollback's own writes (the restore slice or the reconcile's fallback) change what
+					// the webview must show. Without a post here the webview keeps naming the
+					// replacement while both stores name the restored or reconciled profile.
+					await this.postStateToWebview()
 				},
 				{ runToCompletion: true, abortOnTimeout: true },
 			)
@@ -2565,12 +2590,8 @@ export class ClineProvider
 			// The check and the write share one manager lock: a queued save for the same name can
 			// land while the purge holds that lock, and re-saving the pre-delete snapshot over it
 			// would silently revert the newer profile's credentials.
-			const restoredId = await this.providerSettingsManager.saveConfigIfAbsent(name, providerSettings)
-
-			if (restoredId === undefined) {
-				this.log(
-					`Skipped undoing the provider profile purge for '${name}': a profile with that name was saved after the timeout`,
-				)
+			if ((await this.providerSettingsManager.saveConfigIfAbsent(name, providerSettings)) === undefined) {
+				this.log(`Skipped undoing the purge for '${name}': a same-name profile was saved after the timeout`)
 				return false
 			}
 
@@ -2606,45 +2627,48 @@ export class ClineProvider
 		removedModeConfigs: Record<string, string>,
 		signal: AbortSignal,
 	): Promise<boolean> {
-		if (!config) {
-			return false
-		}
+		if (config) {
+			// Keep `id`: the manager reuses it for the mode associations that point at this profile.
+			const { name: _name, ...providerSettings } = config
+			await this.providerSettingsManager.saveConfig(name, providerSettings)
 
-		// Keep `id`: the manager reuses it for the mode associations that point at this profile.
-		const { name: _name, ...providerSettings } = config
-		await this.providerSettingsManager.saveConfig(name, providerSettings)
-
-		if (signal.aborted) return false
-
-		await this.providerSettingsManager.activateProfile({ name })
-
-		if (signal.aborted) return false
-
-		// Restore the whole provider slice, not just the name pointers: a partial activation may
-		// have left the replacement's provider settings under the deleted name. `id` is manager
-		// metadata, not a setting, so it must not reach `ContextProxy`. `apiProvider` belongs to
-		// this slice, so the snapshot below deliberately does not carry it: writing it again
-		// would overwrite the restored provider with the pre-delete pointer. It is still passed
-		// as the ownership discriminator, because the profile being restored is the one whose
-		// own secrets must survive this write.
-		const { id: _id, ...settings } = providerSettings
-		await this.contextProxy.setProviderSettings(settings, config.apiProvider)
-
-		if (signal.aborted) return false
-
-		// `saveConfig` above reused the profile's `id`, so the mode bindings the purge dropped
-		// name a profile that exists again. Re-apply them in the manager with a per-write abort
-		// check, then mirror the pre-delete map into ContextProxy: the snapshot below restores
-		// every mode, including the ones the purge never touched.
-		for (const [mode, configId] of Object.entries(removedModeConfigs)) {
 			if (signal.aborted) return false
-			await this.providerSettingsManager.setModeConfig(mode as Mode, configId)
+
+			await this.providerSettingsManager.activateProfile({ name })
+
+			if (signal.aborted) return false
+
+			// Restore the whole provider slice, not just the name pointers: a partial activation may
+			// have left the replacement's provider settings under the deleted name. `id` is manager
+			// metadata, not a setting, so it must not reach `ContextProxy`. `apiProvider` belongs to
+			// this slice, so the snapshot below deliberately does not carry it: writing it again
+			// would overwrite the restored provider with the pre-delete pointer. It is still passed
+			// as the ownership discriminator, because the profile being restored is the one whose
+			// own secrets must survive this write.
+			const { id: _id, ...settings } = providerSettings
+			await this.contextProxy.setProviderSettings(settings, config.apiProvider)
+
+			if (signal.aborted) return false
+
+			// `saveConfig` above reused the profile's `id`, so the mode bindings the purge dropped
+			// name a profile that exists again. Re-apply them in the manager with a per-write abort
+			// check, then mirror the pre-delete map into ContextProxy: the snapshot below restores
+			// every mode, including the ones the purge never touched.
+			for (const [mode, configId] of Object.entries(removedModeConfigs)) {
+				if (signal.aborted) return false
+				await this.providerSettingsManager.setModeConfig(mode as Mode, configId)
+			}
+
+			if (signal.aborted) return false
+
+			await this.contextProxy.setValues(previousContextValues)
+			return true
 		}
 
-		if (signal.aborted) return false
-
-		await this.contextProxy.setValues(previousContextValues)
-		return true
+		// The inactive branch never captures a config, so there is nothing to restore: writing the
+		// `previousContextValues` snapshot would re-mirror a list that predates any profile created
+		// while the purge held the lock.
+		return false
 	}
 
 	/**
@@ -2671,10 +2695,12 @@ export class ClineProvider
 	): Promise<void> {
 		try {
 			const selectedName = this.contextProxy.getValues().currentApiConfigName
-			const selectionIsNewer = !!selectedName && selectedName !== previousContextValues.currentApiConfigName
-			const selectionSurvives = selectionIsNewer && (await this.providerSettingsManager.hasConfig(selectedName))
+			const keepSelection =
+				!!selectedName &&
+				selectedName !== previousContextValues.currentApiConfigName &&
+				(await this.providerSettingsManager.hasConfig(selectedName))
 
-			if (!selectionSurvives) {
+			if (!keepSelection) {
 				const remainingProfiles = await this.providerSettingsManager.listConfig()
 				const fallback = remainingProfiles[0]?.name
 
