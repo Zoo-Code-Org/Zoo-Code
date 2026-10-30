@@ -2550,6 +2550,17 @@ describe("Task persistence", () => {
 					{ role: "assistant" as const, content: [{ type: "text" as const, text: "A newer answer" }] },
 				],
 			},
+			{
+				// The reachable shape when the abort lands before the assistant append: the
+				// post-stream abort guard throws first, so API history still ends on this
+				// request's user turn while the bubble stays partial. A matching older
+				// assistant turn (the model repeating itself) must not finalize it.
+				name: "a user turn follows the matching assistant turn",
+				apiHistory: [
+					{ role: "assistant" as const, content: [{ type: "text" as const, text: "Half a sentence" }] },
+					{ role: "user" as const, content: [{ type: "text" as const, text: "Original task" }] },
+				],
+			},
 		])("strips the partial text bubble when $name", async ({ apiHistory }) => {
 			// No matching turn means the text exists nowhere else, so the orphaned bubble is
 			// dropped exactly as before this change.

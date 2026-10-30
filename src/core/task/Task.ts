@@ -246,19 +246,25 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
  * turn coexisting. The bubble's text is then not orphaned and must not be
  * discarded.
  *
+ * The turn must be the LAST API message, not merely the last assistant one. An
+ * abort before the append throws at the post-stream guard, so API history keeps
+ * ending on that request's user turn while the bubble stays partial; matching an
+ * older assistant turn there would finalize text the model does not actually
+ * have, purely because the model happened to repeat itself.
+ *
  * The comparison re-applies the streaming-time `<thinking>` strip that
  * `presentAssistantMessage` applies to the bubble but not to the raw accumulator
  * the API turn is built from.
  */
 function hasAssistantTextTurnFor(apiMessages: ApiMessage[], partialText: string): boolean {
 	const expected = partialText.replace(/<thinking>\s?/g, "").replace(/\s?<\/thinking>/g, "")
-	const lastAssistantTurn = findLast(apiMessages, (message) => message.role === "assistant")
+	const lastTurn = apiMessages.at(-1)
 
-	if (!lastAssistantTurn || !Array.isArray(lastAssistantTurn.content)) {
+	if (lastTurn?.role !== "assistant" || !Array.isArray(lastTurn.content)) {
 		return false
 	}
 
-	return lastAssistantTurn.content.some(
+	return lastTurn.content.some(
 		(block) =>
 			block.type === "text" &&
 			block.text.replace(/<thinking>\s?/g, "").replace(/\s?<\/thinking>/g, "") === expected,
