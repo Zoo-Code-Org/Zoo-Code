@@ -742,11 +742,22 @@ export class ClineProvider
 	 * bounded by MAX_PERSISTED_VIEW_STATES so the global key cannot grow unboundedly.
 	 */
 	private prunePersistedViewStates(states: Record<string, PersistedViewState>): Record<string, PersistedViewState> {
-		return Object.fromEntries(
-			Object.entries(states)
-				.sort(([, a], [, b]) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-				.slice(0, ClineProvider.MAX_PERSISTED_VIEW_STATES),
+		// Entries of live views must never age out: a view that keeps its mode and profile
+		// does not refresh updatedAt, so 50 newer closed-view entries would otherwise evict
+		// the state a still-open view needs after its next reload. The cap applies to
+		// closed-view entries only.
+		const liveViewStateIds = new Set(
+			Array.from(ClineProvider.activeInstances, (instance) => instance.viewStateId).filter(
+				(viewStateId): viewStateId is string => Boolean(viewStateId),
+			),
 		)
+		const liveEntries = Object.entries(states).filter(([viewStateId]) => liveViewStateIds.has(viewStateId))
+		const closedEntries = Object.entries(states)
+			.filter(([viewStateId]) => !liveViewStateIds.has(viewStateId))
+			.sort(([, a], [, b]) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+			.slice(0, ClineProvider.MAX_PERSISTED_VIEW_STATES)
+
+		return Object.fromEntries([...liveEntries, ...closedEntries])
 	}
 
 	/**
@@ -2378,21 +2389,12 @@ export class ClineProvider
 		// buffer stays in sync with the durable global write: getValues() merges
 		// viewLocalState on top of the ContextProxy values, so an unsynced stale
 		// restored mode would otherwise shadow the fresh switch for consumers.
-		// If the durable write fails, roll the shared write back so getValues()
-		// cannot mix a fresh shared mode with the stale pre-switch buffer.
-		const previousMode = this.getValue("mode")
+		// setValue already restores the shared value when the per-view write fails, and that
+		// restore is value-guarded; an unconditional rollback here would overwrite a mode
+		// another provider wrote while this write was in flight.
 		try {
 			await this.setValue("mode", newMode)
 		} catch (error) {
-			try {
-				await this.contextProxy.setValue("mode", previousMode)
-			} catch (rollbackError) {
-				this.log(
-					`[handleModeSwitch] Failed to roll back shared mode after persistence failure: ${
-						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-					}`,
-				)
-			}
 			this.log(
 				`[handleModeSwitch] Failed to persist mode "${newMode}": ${error instanceof Error ? error.message : String(error)}`,
 			)
@@ -2410,9 +2412,16 @@ export class ClineProvider
 			return
 		}
 
+		// A provider-profile mutation timeout must stop this path instead of letting it
+		// persist a profile the running task no longer agrees with: guard before the reads
+		// and again after them, because an abort can land while they are in flight.
+		if (signal?.aborted) return
+
 		// Load the saved API config for the new mode if it exists.
 		const savedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
 		const listApiConfig = await this.providerSettingsManager.listConfig()
+
+		if (signal?.aborted) return
 
 		// Update listApiConfigMeta first to ensure UI has latest data.
 		await this.updateGlobalState("listApiConfigMeta", listApiConfig)
@@ -2784,6 +2793,22 @@ export class ClineProvider
 		// the surviving profile's name.
 		const viewWasPinnedToDeleted = this.viewLocalState.currentApiConfigName === profileToDelete.name
 		const deletedWasGlobal = profileToDelete.name === globalSettings.currentApiConfigName
+
+		// deleteConfig removed the profile but leaves the settings manager's stored
+		// currentApiConfigName naming it, so a later export would write a selection the
+		// profile list no longer contains (and import would silently pick another profile).
+		// Point the manager at the survivor too.
+		if (deletedWasGlobal) {
+			try {
+				await this.providerSettingsManager.activateProfile({ name: profileToActivate })
+			} catch (error) {
+				this.log(
+					`[deleteProviderProfile] Failed to update the settings manager's current profile to '${profileToActivate}': ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+			}
+		}
 
 		if (viewWasPinnedToDeleted) {
 			// This view's pin now dangles: re-point it. setValue also persists the

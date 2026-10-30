@@ -3119,6 +3119,92 @@ describe("ClineProvider", () => {
 			// Verify state was posted to webview
 			expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
 		})
+
+		it("does not read mode config or activate a profile when the mutation is already aborted", async () => {
+			const getModeConfigId = vi.fn().mockResolvedValue("saved-config-id")
+			const listConfig = vi.fn().mockResolvedValue([])
+			const activateProfile = vi.fn().mockResolvedValue({})
+
+			;(provider as any).providerSettingsManager = {
+				getModeConfigId,
+				listConfig,
+				activateProfile,
+				setModeConfig: vi.fn(),
+				getProfile: vi.fn(),
+			} as any
+
+			const controller = new AbortController()
+			controller.abort()
+
+			await provider["handleModeSwitchUnlocked"]("architect", undefined, controller.signal)
+
+			expect(getModeConfigId).not.toHaveBeenCalled()
+			expect(activateProfile).not.toHaveBeenCalled()
+		})
+
+		it("stops before activating a profile when the mutation aborts during the mode config reads", async () => {
+			const profile: ProviderSettingsEntry = {
+				name: "saved-config",
+				id: "saved-config-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const controller = new AbortController()
+			const getModeConfigId = vi.fn().mockResolvedValue("saved-config-id")
+			const listConfig = vi.fn().mockImplementation(async () => {
+				controller.abort()
+				return [profile]
+			})
+			const activateProfile = vi.fn().mockResolvedValue(profile)
+
+			;(provider as any).providerSettingsManager = {
+				getModeConfigId,
+				listConfig,
+				activateProfile,
+				setModeConfig: vi.fn(),
+				getProfile: vi.fn().mockResolvedValue(profile),
+			} as any
+
+			await provider["handleModeSwitchUnlocked"]("architect", undefined, controller.signal)
+
+			expect(activateProfile).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("deleteProviderProfile", () => {
+		it("moves the settings manager's current profile to the survivor when the active profile is deleted", async () => {
+			const contextProxy = new ContextProxy(mockContext)
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				contextProxy,
+				new WebviewFocusTracker(),
+			)
+			const profileToDelete: ProviderSettingsEntry = { name: "deleted", id: "deleted-id" }
+
+			await contextProxy.setValue("listApiConfigMeta", [
+				{ name: "deleted", id: "deleted-id" },
+				{ name: "survivor", id: "survivor-id" },
+			])
+			await contextProxy.setValue("currentApiConfigName", "deleted")
+
+			const activateProfile = vi.fn().mockResolvedValue({ name: "survivor" })
+
+			;(provider as any).providerSettingsManager = {
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				activateProfile,
+				getProfile: vi.fn().mockResolvedValue({
+					name: "survivor",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+			} as any
+
+			await provider.deleteProviderProfile(profileToDelete)
+
+			expect(activateProfile).toHaveBeenCalledWith({ name: "survivor" })
+
+			await provider.dispose()
+		})
 	})
 
 	describe("updateCustomMode", () => {
@@ -4114,6 +4200,33 @@ describe("ClineProvider", () => {
 			expect(pruned["view-54"]).toEqual({ mode: "mode-54", updatedAt: 54 })
 			expect(pruned["view-5"]).toEqual({ mode: "mode-5", updatedAt: 5 })
 			expect(pruned["view-4"]).toBeUndefined()
+
+			await provider.dispose()
+		})
+
+		it("keeps the entry of a live view outside the 50-entry cutoff", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("live-view")
+
+			const states: Record<string, { mode: string; updatedAt: number }> = Object.fromEntries(
+				Array.from({ length: 55 }, (_, index) => [
+					`closed-${index}`,
+					{ mode: `mode-${index}`, updatedAt: index + 1 },
+				]),
+			)
+			// The live view's entry is the oldest and would be evicted by the plain cutoff.
+			states["live-view"] = { mode: "architect", updatedAt: 0 }
+
+			const pruned = provider["prunePersistedViewStates"](states)
+
+			expect(pruned["live-view"]).toEqual({ mode: "architect", updatedAt: 0 })
+			expect(Object.keys(pruned)).toHaveLength(51)
 
 			await provider.dispose()
 		})
