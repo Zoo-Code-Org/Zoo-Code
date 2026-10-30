@@ -1,6 +1,7 @@
 import { WebviewFocusTracker } from "../../webview/WebviewFocusTracker"
 // npx vitest core/task/__tests__/Task.spec.ts
 
+import { DispatchState } from "../dispatchState"
 import * as fsReal from "fs"
 import * as os from "os"
 import * as path from "path"
@@ -646,9 +647,11 @@ describe("Cline", () => {
 			expect(readiness()).toBe(false)
 			task.didCompleteReadingStream = true
 			expect(readiness()).toBe(true)
-			task.presentAssistantMessageLocked = true
+			task.dispatchState = DispatchState.SERIAL
 			expect(readiness()).toBe(false)
-			task.presentAssistantMessageLocked = false
+			task.dispatchState = DispatchState.PARALLEL
+			expect(readiness()).toBe(false)
+			task.dispatchState = DispatchState.IDLE
 			expect(readiness()).toBe(true)
 			task.assistantMessageContent[0].partial = true
 			expect(readiness()).toBe(false)
@@ -694,7 +697,7 @@ describe("Cline", () => {
 				startTask: false,
 			})
 			task.didCompleteReadingStream = true
-			task.presentAssistantMessageLocked = false
+			task.dispatchState = DispatchState.IDLE
 			task.assistantMessageContent = [
 				{
 					type: "tool_use",
@@ -915,7 +918,7 @@ describe("Cline", () => {
 						content: "File: package.json\nfinished",
 					}),
 				])
-				expect(task.presentAssistantMessageLocked).toBe(false)
+				expect(task.dispatchState).toBe(DispatchState.IDLE)
 				expect(sawCompleteToolTurn).toBe(true)
 			} finally {
 				vi.mocked(pWaitFor).mockImplementation(async () => {})
@@ -982,13 +985,13 @@ describe("Cline", () => {
 				await resultPushed
 				// Give the request loop several poll intervals to continue early.
 				await new Promise((resolve) => setTimeout(resolve, 50))
-				expect(task.presentAssistantMessageLocked).toBe(true)
+				expect(task.dispatchState).toBe(DispatchState.SERIAL)
 				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(1)
 
 				releaseHandler?.()
 				await run
 				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
-				expect(task.presentAssistantMessageLocked).toBe(false)
+				expect(task.dispatchState).toBe(DispatchState.IDLE)
 			} finally {
 				releaseHandler?.()
 				vi.mocked(pWaitFor).mockImplementation(async () => {})
@@ -1056,7 +1059,7 @@ describe("Cline", () => {
 
 				expect(attemptApiRequestSpy).toHaveBeenCalledOnce()
 				expect(sawReadyWhileAborted).toBe(true)
-				expect(task.presentAssistantMessageLocked).toBe(false)
+				expect(task.dispatchState).toBe(DispatchState.IDLE)
 			} finally {
 				vi.mocked(pWaitFor).mockImplementation(async () => {})
 				readinessSpy.mockRestore()

@@ -420,6 +420,19 @@ describe("abort-signal utilities", () => {
 			expect(mergeAbortSignalAndTimeout(controller.signal, Infinity)).toBe(controller.signal)
 		})
 
+		it("caps an overflowing timeoutMs instead of aborting immediately", async () => {
+			// Node clamps AbortSignal.timeout delays above 2^31-1 ms to 1 ms;
+			// the helper caps the delay so an overflowing timeout does not abort
+			// the request within the first millisecond.
+			const result = mergeAbortSignalAndTimeout(undefined, 2_147_483_648)
+
+			expect(result).toBeInstanceOf(AbortSignal)
+			expect(result?.aborted).toBe(false)
+
+			await new Promise((resolve) => setTimeout(resolve, 20))
+			expect(result?.aborted).toBe(false)
+		})
+
 		it("rounds a fractional timeoutMs up before scheduling", async () => {
 			// Node validates AbortSignal.timeout delays as uint32: 1.5 or 0.5
 			// would throw ERR_OUT_OF_RANGE. Pin the rounded delay that actually
@@ -445,19 +458,6 @@ describe("abort-signal utilities", () => {
 			expect(result?.aborted).toBe(false)
 			expect(tiny).toBeInstanceOf(AbortSignal)
 			await vi.waitFor(() => expect(result?.aborted).toBe(true))
-		})
-
-		it("caps an overflowing timeoutMs instead of aborting immediately", async () => {
-			// Node clamps AbortSignal.timeout delays above 2^31-1 ms to 1 ms;
-			// the helper caps the delay so an overflowing timeout does not abort
-			// the request within the first millisecond.
-			const result = mergeAbortSignalAndTimeout(undefined, 2_147_483_648)
-
-			expect(result).toBeInstanceOf(AbortSignal)
-			expect(result?.aborted).toBe(false)
-
-			await new Promise((resolve) => setTimeout(resolve, 20))
-			expect(result?.aborted).toBe(false)
 		})
 	})
 
