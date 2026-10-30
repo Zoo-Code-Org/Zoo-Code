@@ -143,6 +143,15 @@
 	},
 	"selectMode": "Pilih mode untuk interaksi",
 	"selectApiConfig": "Pilih konfigurasi API",
+	"selectModel": "Pilih model",
+	"modelSelector": {
+		"title": "Model",
+		"settings": "Pengaturan Model",
+		"description": "Pilih model yang digunakan untuk konfigurasi API ini.",
+		"searchPlaceholder": "Cari model...",
+		"unsupportedTooltip": "Model penyedia ini dikonfigurasi di Pengaturan",
+		"loading": "Memuat model..."
+	},
 	"lockApiConfigAcrossModes": "Kunci konfigurasi API di semua mode dalam workspace ini",
 	"unlockApiConfigAcrossModes": "Konfigurasi API terkunci di semua mode dalam workspace ini (klik untuk membuka kunci)",
 	"enhancePrompt": "Tingkatkan prompt dengan konteks tambahan",
@@ -372,10 +381,10 @@
 		"title": "Zoo Code {{version}} Dirilis",
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Yang Baru:",
-			"highlight1": "✨ Dukungan model baru: Gunakan GPT-6.1 Sol, manfaatkan batas output Claude Opus 5.5 yang telah diperbaiki, dan pilih DeepSeek V4.1 Flash di OpenCode Go.",
-			"highlight2": "🧭 Pembatalan dan interupsi task yang andal: Pertahankan alasan pembatalan pertama, reset status pembatalan stream pada setiap request, dan cegah task yang terinterupsi menjalankan ulang subtask yang ditolak.",
-			"highlight3": "🛠️ Tools, prompts, dan streaming UI yang andal: Jaga argumen tool yang diterima melalui stream tetap utuh, terapkan kebijakan tool MCP, cegah nomor baris rekaan, dan buat pembaruan chat lebih lancar."
+			"heading": "Yang baru di Zoo Code v3.92.0",
+			"highlight1": "✨ Pilihan model lebih cepat dan dukungan model lebih kuat: Ganti model dari kolom penulisan chat. Gunakan Claude Haiku 5.5 di Amazon Bedrock, dapatkan kapabilitas Kimi K3 yang lebih akurat di OpenRouter, dan gunakan batas Gemini 4 Argon yang telah diperbaiki di Vercel AI Gateway.",
+			"highlight2": "🧭 Alur kerja terminal, pengeditan, chat, dan remote yang lebih andal: Atur output perintah agar diciutkan secara default jika kamu mau, dapatkan kegagalan pengeditan yang lebih jelas, pertahankan baris reasoning dan API tetap terlihat, serta hindari masalah startup dan proxy di workspace remote.",
+			"highlight3": "🔌 Marketplace MCP yang diperluas: Hubungkan Zoo Code ke AnySearch, Mailtea, dan Tradehand melalui marketplace MCP."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",
@@ -493,6 +502,10 @@
 		"serversPart_other": "{{count}} server MCP",
 		"messageTemplate": "Anda memiliki {{tools}} diaktifkan melalui {{servers}}. Jumlah yang begitu besar dapat membingungkan model dan menyebabkan kesalahan. Cobalah untuk menjaganya di bawah {{threshold}}.",
 		"openMcpSettings": "Buka Pengaturan MCP"
+	},
+	"ignoredDisabledTools": {
+		"title": "Tool nonaktif diabaikan",
+		"messageTemplate": "Tool berikut tidak dapat dinonaktifkan, sehingga entri disabledTools-nya diabaikan: {{tools}}."
 	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"

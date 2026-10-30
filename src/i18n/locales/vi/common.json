@@ -44,6 +44,7 @@
 		"search_commits": "Không thể tìm kiếm các commit",
 		"save_api_config": "Không thể lưu cấu hình API",
 		"create_api_config": "Không thể tạo cấu hình API",
+		"update_profile_model_partial": "Không thể cập nhật mô hình và không thể khôi phục cấu hình API trước đó. Hãy kiểm tra cấu hình API trong Cài đặt.",
 		"rename_api_config": "Không thể đổi tên cấu hình API",
 		"load_api_config": "Không thể tải cấu hình API",
 		"delete_api_config": "Không thể xóa cấu hình API",

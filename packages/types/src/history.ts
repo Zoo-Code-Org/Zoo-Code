@@ -33,6 +33,7 @@ export const historyItemSchema = z.object({
 	number: z.number(),
 	ts: z.number(),
 	task: z.string(),
+	title: z.string().optional(), // User-assigned display name; `task` keeps the original prompt
 	tokensIn: z.number(),
 	tokensOut: z.number(),
 	cacheWrites: z.number().optional(),

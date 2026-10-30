@@ -1,4 +1,3 @@
-import OpenAI from "openai"
 import { Anthropic } from "@anthropic-ai/sdk"
 
 import { LiteLLMHandler } from "../lite-llm"
@@ -68,9 +67,9 @@ vi.mock("../fetchers/modelCache", () => ({
 			"vertex_ai/gemini-3-pro": { ...litellmDefaultModelInfo, maxTokens: 8192 },
 		})
 	}),
-	refreshModels: vi.fn(async (options) => {
+	refreshModels: vi.fn(async (options, handler) => {
 		const { getModels } = await import("../fetchers/modelCache")
-		return getModels(options)
+		return getModels(options, handler)
 	}),
 	getModelsFromCache: vi.fn().mockReturnValue(undefined),
 }))
@@ -212,7 +211,7 @@ describe("LiteLLMHandler", () => {
 			})
 
 			const generator = handler.createMessage(systemPrompt, messages)
-			const results = await collectStream(generator)
+			await collectStream(generator)
 
 			// Verify that create was called with max_completion_tokens instead of max_tokens
 			const createCall = mockCreate.mock.calls[0][0]
@@ -1378,6 +1377,13 @@ describe("LiteLLMHandler", () => {
 
 			const requestHeaders = mockCreate.mock.calls[0][1]?.headers
 			expect(requestHeaders).not.toHaveProperty("X-Zoo-Session-ID")
+		})
+	})
+
+	describe("model catalog", () => {
+		it("reports its cache scope", () => {
+			const handler = new LiteLLMHandler(mockOptions)
+			expect(handler.getModelCacheScope()).toEqual({ urlScoped: true, keyScoped: true, authScoped: false })
 		})
 	})
 })
