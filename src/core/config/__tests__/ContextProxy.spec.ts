@@ -120,6 +120,27 @@ describe("ContextProxy", () => {
 			expect(result).toBe("deepseek")
 		})
 
+		it("should not let an older rejected write clobber a newer cached value", async () => {
+			let rejectFirst: (error: Error) => void = () => {}
+			const firstWriteResult = new Promise<void>((_, reject) => {
+				rejectFirst = reject
+			})
+
+			mockGlobalState.update.mockReset()
+			mockGlobalState.update.mockReturnValueOnce(firstWriteResult)
+			mockGlobalState.update.mockResolvedValueOnce(undefined)
+
+			const firstWrite = proxy.updateGlobalState("apiProvider", "anthropic")
+			await proxy.updateGlobalState("apiProvider", "openai")
+
+			// The older write rejects after a newer value already reached the cache: rolling
+			// the cache back to the pre-first-write value would diverge from storage.
+			rejectFirst(new Error("disk full"))
+			await expect(firstWrite).rejects.toThrow("disk full")
+
+			expect(proxy.getGlobalState("apiProvider")).toBe("openai")
+		})
+
 		it("should bypass cache for pass-through state keys", async () => {
 			// Setup mock return value
 			mockGlobalState.get.mockReturnValue("pass-through-value")
