@@ -28,8 +28,14 @@ export const MIMO_DEFAULT_BASE_URL = "https://token-plan-sgp.xiaomimimo.com/v1"
 // against providerSettingsSchema so the two sources cannot silently drift. The
 // fetcher also receives unsaved webview values that bypass the schema entirely,
 // and MimoHandler (src/api/providers/mimo.ts) re-enforces this same set before
-// it builds its OpenAI chat-completion client, so this exact-match gate is what
-// guarantees the bearer key never leaves a Xiaomi origin on any path.
+// it builds its OpenAI chat-completion client.
+//
+// The gate alone only pins the URL each path is BUILT with, so both paths also
+// pin redirect:"error" on their requests: the fetcher below, and the SDK client
+// in MimoHandler. Without that, an allowlisted origin answering a 3xx would
+// re-scope the bearer key and the request body to an origin this set never
+// vetted. Together the allowlist plus the redirect policy are what keep the key
+// on a Xiaomi origin on every path.
 export const ALLOWED_BASE_URLS: ReadonlySet<string> = new Set([
 	"https://api.xiaomimimo.com/v1",
 	"https://token-plan-cn.xiaomimimo.com/v1",
