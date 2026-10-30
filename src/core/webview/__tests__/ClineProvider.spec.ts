@@ -428,9 +428,7 @@ type StalledProfile = {
 function stallProviderSettingsProfile(provider: ClineProvider) {
 	let resolveProfile: (value: StalledProfile) => void = () => {}
 	const getProfileSpy = vi.fn(() => {
-		// Only one lookup is resolvable: resolveProfile is bound to the first
-		// promise's resolver, so a second getProfile would strand its promise.
-		// Fail loudly instead of hanging.
+		// Only the first lookup is resolvable; fail loudly on a second.
 		if (getProfileSpy.mock.calls.length > 1) {
 			throw new Error(
 				"stallProviderSettingsProfile: getProfile called more than once; only one lookup is resolvable",
@@ -440,9 +438,7 @@ function stallProviderSettingsProfile(provider: ClineProvider) {
 	})
 	// @ts-ignore - Reassign the readonly providerSettingsManager for the test; the double only backs getProfile.
 	provider.providerSettingsManager = { getProfile: getProfileSpy }
-	// Return a stable wrapper around the closure binding: resolveProfile is
-	// reassigned to the pending promise's resolver once getProfile is called,
-	// so returning the variable directly would hand the test the initial no-op.
+	// Wrapper keeps the reassigned resolver visible to the caller.
 	return { getProfile: getProfileSpy, resolveProfile: (value: StalledProfile) => resolveProfile(value) }
 }
 
@@ -4316,10 +4312,7 @@ describe("ClineProvider", () => {
 			})
 
 			const state = await provider.getState()
-			// No per-view entry exists and the proxy's global-state cache is empty
-			// (initialize() is never called in this fixture; only "taskHistory" passes
-			// through to the context store), so getState() falls back to the shared
-			// defaults: mode "code" (defaultModeSlug) and currentApiConfigName "default".
+			// No per-view entry: getState() falls back to the shared defaults.
 			expect(state.mode).toBe("code")
 			expect(state.currentApiConfigName).toBe("default")
 
