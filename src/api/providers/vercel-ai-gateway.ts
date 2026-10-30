@@ -17,6 +17,7 @@ import { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { ApiStream } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { addCacheBreakpoints } from "../transform/caching/vercel-ai-gateway"
+import { resolveCacheTtl } from "../transform/caching/ttl"
 
 import type {
 	SingleCompletionHandler,
@@ -82,7 +83,7 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 		]
 
 		if (VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS.has(modelId) && info.supportsPromptCache) {
-			addCacheBreakpoints(systemPrompt, openAiMessages)
+			addCacheBreakpoints(systemPrompt, openAiMessages, resolveCacheTtl(this.options, info))
 		}
 
 		const supportsTemperature = info.supportsTemperature !== false && this.supportsTemperature(modelId)

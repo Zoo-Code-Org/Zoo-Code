@@ -191,6 +191,78 @@ describe("AnthropicHandler", () => {
 			expect(mockCreate).toHaveBeenCalled()
 		})
 
+		describe("prompt cache TTL", () => {
+			const threeTurnMessages = () => [
+				{ role: "user" as const, content: [{ type: "text" as const, text: "First message" }] },
+				{ role: "assistant" as const, content: [{ type: "text" as const, text: "Response" }] },
+				{ role: "user" as const, content: [{ type: "text" as const, text: "Second message" }] },
+			]
+
+			/** Every cache_control object in the serialized request body. */
+			const requestCacheControls = () => {
+				const body = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+				const serialized = JSON.parse(JSON.stringify(body))
+				const found: Array<Record<string, unknown>> = []
+
+				const walk = (node: unknown) => {
+					if (Array.isArray(node)) {
+						node.forEach(walk)
+						return
+					}
+					if (node && typeof node === "object") {
+						for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+							if (key === "cache_control" && child && typeof child === "object") {
+								found.push(child as Record<string, unknown>)
+							}
+							walk(child)
+						}
+					}
+				}
+
+				walk(serialized)
+				return found
+			}
+
+			it("emits no ttl key when the knob is unset", async () => {
+				await collectStream(handler.createMessage(systemPrompt, threeTurnMessages()))
+
+				const body = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+				expect(JSON.stringify(body)).not.toContain("ttl")
+
+				const controls = requestCacheControls()
+				expect(controls).toHaveLength(3)
+				expect(controls.every((control) => control.ttl === undefined)).toBe(true)
+			})
+
+			it("carries ttl 1h on all three marker sites when the knob is 1h", async () => {
+				const ttlHandler = new AnthropicHandler({
+					...mockOptions,
+					promptCacheTtl: "1h",
+				})
+
+				await collectStream(ttlHandler.createMessage(systemPrompt, threeTurnMessages()))
+
+				// System + last two user messages: a single missed site would show up
+				// here as a mixed-TTL request (ADR-0006 I4).
+				const controls = requestCacheControls()
+				expect(controls).toHaveLength(3)
+				expect(controls.every((control) => control.ttl === "1h")).toBe(true)
+				expect(new Set(controls.map((control) => control.ttl))).toEqual(new Set(["1h"]))
+			})
+
+			it("emits no ttl key for an explicit 5m knob", async () => {
+				const fiveMinuteHandler = new AnthropicHandler({
+					...mockOptions,
+					promptCacheTtl: "5m",
+				})
+
+				await collectStream(fiveMinuteHandler.createMessage(systemPrompt, threeTurnMessages()))
+
+				const body = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+				expect(JSON.stringify(body)).not.toContain("ttl")
+			})
+		})
+
 		it("should include 1M context beta header for Claude Sonnet 4.6 when enabled", async () => {
 			const sonnet46Handler = new AnthropicHandler({
 				apiKey: "test-api-key",

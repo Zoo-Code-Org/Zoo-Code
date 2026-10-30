@@ -449,6 +449,23 @@ describe("VercelAiGatewayHandler", () => {
 			expect(addCacheBreakpoints).toHaveBeenCalled()
 		})
 
+		it("does not emit a ttl for a gateway model with no TTL capability", async () => {
+			// The gateway catalog is fetched at runtime and carries no TTL capability,
+			// so a 1h knob must fail closed (ADR-0006 I2).
+			const handler = new VercelAiGatewayHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					vercelAiGatewayModelId: "anthropic/claude-3.5-haiku",
+					promptCacheTtl: "1h",
+				}),
+			)
+
+			await handler.createMessage("You are a helpful assistant.", [{ role: "user", content: "Hello" }]).next()
+
+			const call = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+			expect(JSON.stringify(call)).not.toContain("ttl")
+		})
+
 		it("sets correct max_completion_tokens", async () => {
 			const handler = new VercelAiGatewayHandler(mockOptions)
 

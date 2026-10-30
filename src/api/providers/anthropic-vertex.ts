@@ -15,6 +15,7 @@ import { ApiHandlerOptions } from "../../shared/api"
 
 import { ApiStream } from "../transform/stream"
 import { addCacheBreakpoints } from "../transform/caching/vertex"
+import { cacheControl, resolveCacheTtl } from "../transform/caching/ttl"
 import { getModelParams } from "../transform/model-params"
 import { filterNonAnthropicBlocks } from "../transform/anthropic-filter"
 import { getAnthropicProviderReasoning } from "../transform/reasoning"
@@ -79,6 +80,9 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 
 		const { supportsPromptCache } = info
 
+		// One TTL for the whole request (ADR-0006 I4).
+		const cacheTtl = resolveCacheTtl(this.options, info)
+
 		// Filter out non-Anthropic blocks (reasoning, thoughtSignature, etc.) before sending to the API
 		const sanitizedMessages = filterNonAnthropicBlocks(messages)
 
@@ -116,9 +120,9 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 			thinking,
 			// Cache the system prompt if caching is enabled.
 			system: supportsPromptCache
-				? [{ text: systemPrompt, type: "text" as const, cache_control: { type: "ephemeral" } }]
+				? [{ text: systemPrompt, type: "text" as const, cache_control: cacheControl(cacheTtl) }]
 				: systemPrompt,
-			messages: supportsPromptCache ? addCacheBreakpoints(sanitizedMessages) : sanitizedMessages,
+			messages: supportsPromptCache ? addCacheBreakpoints(sanitizedMessages, cacheTtl) : sanitizedMessages,
 			stream: true,
 			...nativeToolParams,
 		} as Anthropic.Messages.MessageCreateParamsStreaming
@@ -322,11 +326,12 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 		try {
 			const {
 				id,
-				info: { supportsPromptCache },
+				info,
 				temperature,
 				maxTokens = ANTHROPIC_DEFAULT_MAX_TOKENS,
 				reasoning: thinking,
 			} = this.getModel()
+			const { supportsPromptCache } = info
 
 			const params = {
 				model: id,
@@ -337,7 +342,13 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 					{
 						role: "user",
 						content: supportsPromptCache
-							? [{ type: "text" as const, text: prompt, cache_control: { type: "ephemeral" } }]
+							? [
+									{
+										type: "text" as const,
+										text: prompt,
+										cache_control: cacheControl(resolveCacheTtl(this.options, info)),
+									},
+								]
 							: prompt,
 					},
 				],

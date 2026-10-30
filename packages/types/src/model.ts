@@ -96,6 +96,20 @@ export const isModelParameter = (value: string): value is ModelParameter =>
 	modelParameters.includes(value as ModelParameter)
 
 /**
+ * Prompt cache TTL classes a request-side cache marker can carry. `"5m"` is the
+ * vendor default and is never emitted explicitly, so only `"1h"` changes the wire
+ * shape and an unset knob stays byte-identical to a pre-knob build (ADR-0006 I3).
+ */
+export const promptCacheTtlValues = ["5m", "1h"] as const
+
+export const promptCacheTtlSchema = z.enum(promptCacheTtlValues)
+
+export type PromptCacheTtl = z.infer<typeof promptCacheTtlSchema>
+
+/** Deliberately `undefined`, not `"5m"`: emitting `ttl: "5m"` would change every request's bytes. */
+export const DEFAULT_PROMPT_CACHE_TTL: PromptCacheTtl | undefined = undefined
+
+/**
  * ModelInfo
  */
 
@@ -112,6 +126,8 @@ export const modelInfoSchema = z.object({
 	// When set to "24h", extended prompt caching will be requested; when omitted
 	// or set to "in_memory", the default in‑memory cache is used.
 	promptCacheRetention: z.enum(["in_memory", "24h"]).optional(),
+	// Cache TTLs this model accepts. Absent means "5m only" (ADR-0006 I2, fail closed).
+	promptCacheTtlSupport: z.array(promptCacheTtlSchema).optional(),
 	// Capability flag to indicate whether the model supports an output verbosity parameter
 	supportsVerbosity: z.boolean().optional(),
 	// Capability flag to indicate whether the model exposes a user-configurable max output
