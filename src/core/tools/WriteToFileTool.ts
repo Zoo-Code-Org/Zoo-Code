@@ -500,29 +500,38 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			if (pendingPartialAsk !== undefined) {
 				await this.finalizePartialToolAskAfterFailure(task, pendingPartialAsk)
 			}
-			await handleError("writing file", error as Error)
+			// handleError() reports through say(), which throws once the task is aborted: the
+			// rollback below must still run, or unapproved content stays in the diff view. Keep
+			// the report and the rollback in one try/finally so neither can skip the other.
+			try {
+				await handleError("writing file", error as Error)
+			} finally {
+				// A failed diff-open is not the end of the story: open() creates the parent directories
+				// and an empty placeholder BEFORE it awaits openDiffEditor(), so a rejection leaves that
+				// debris behind. Revert first - with no active editor the rollback still unlinks the
+				// placeholder and removes only the directories this operation created - then reset.
+				// A rollback that did not finish is a second, actionable failure: the placeholder and the
+				// created directories are still on disk, and the next execute() would treat that debris as
+				// an existing file. Report it the same way the parse-failure teardown and
+				// cleanupFailedPartialStream() do - after the reset, so the report is the last thing the
+				// failed write leaves behind.
+				// After the commit point the write is durable, so restoring the previous content
+				// (or unlinking a newly created file) would undo an approved write to clean up an
+				// unrelated failure. Treat the rollback as done rather than performing it.
+				const reverted = writeCommitted ? true : await this.revertDiffChangesBeforeReset(task)
+				// The resilient helper, as in the other two teardowns: a reset that rejects must not
+				// skip the report below, or the user sees only the write error while the editor still
+				// holds content nobody approved.
+				await this.resetDiffViewAfterWrite(task)
+				super.resetPartialState()
 
-			// A failed diff-open is not the end of the story: open() creates the parent directories
-			// and an empty placeholder BEFORE it awaits openDiffEditor(), so a rejection leaves that
-			// debris behind. Revert first - with no active editor the rollback still unlinks the
-			// placeholder and removes only the directories this operation created - then reset.
-			// A rollback that did not finish is a second, actionable failure: the placeholder and the
-			// created directories are still on disk, and the next execute() would treat that debris as
-			// an existing file. Report it the same way the parse-failure teardown and
-			// cleanupFailedPartialStream() do - after the reset, so the report is the last thing the
-			// failed write leaves behind.
-			// After the commit point the write is durable, so restoring the previous content
-			// (or unlinking a newly created file) would undo an approved write to clean up an
-			// unrelated failure. Treat the rollback as done rather than performing it.
-			const reverted = writeCommitted ? true : await this.revertDiffChangesBeforeReset(task)
-			// The resilient helper, as in the other two teardowns: a reset that rejects must not
-			// skip the report below, or the user sees only the write error while the editor still
-			// holds content nobody approved.
-			await this.resetDiffViewAfterWrite(task)
-			super.resetPartialState()
-
-			if (!reverted) {
-				await this.reportRevertFailure(task)
+				if (!reverted) {
+					// The abort flag makes say() throw on this path too: falling out of the finally
+					// must not mask the original write failure or skip the reset that already ran.
+					await this.reportRevertFailure(task).catch((reportError: unknown) => {
+						console.error("Error reporting the write_to_file rollback failure:", reportError)
+					})
+				}
 			}
 			return
 		} finally {

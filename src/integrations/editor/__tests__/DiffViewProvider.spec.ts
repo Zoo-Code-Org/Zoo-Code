@@ -1334,6 +1334,25 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(`${mockCwd}/mock-target-file.ts`)
 		})
 
+		it("revertChanges() stands down after saveChanges() recorded the commit", async () => {
+			// The commit point is recorded on the provider, not only in the tool's local flag:
+			// an abort-driven teardown that reaches revertChanges() after the diagnostics delay
+			// must not restore the old content over the approved write or unlink a new file.
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs: [],
+				writeCommitted: true,
+			})
+
+			await diffViewProvider.revertChanges()
+
+			expect(fs.unlink).not.toHaveBeenCalled()
+			expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
+		})
+
 		it("revertChanges() stops before the document work for an existing file when no editor exists", async () => {
 			// The modify branch used to dereference activeDiffEditor unconditionally. When open()
 			// never produced an editor there is no document to restore, and the old code threw a

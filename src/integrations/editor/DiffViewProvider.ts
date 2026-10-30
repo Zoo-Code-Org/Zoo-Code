@@ -50,6 +50,10 @@ export class DiffViewProvider {
 	userEdits?: string
 	editType?: "create" | "modify"
 	isEditing = false
+	// Set once saveChanges() has passed its commit point. revertChanges() must then stand
+	// down: the write is durable, and an abort-driven teardown must not restore the old
+	// content over it (or unlink a newly created file).
+	private writeCommitted = false
 	originalContent: string | undefined
 	private createdDirs: string[] = []
 	// Directories a caller (WriteToFileTool.execute) created before this transaction.
@@ -127,6 +131,7 @@ export class DiffViewProvider {
 		const fileExists = this.editType === "modify"
 		const absolutePath = path.resolve(this.cwd, relPath)
 		this.isEditing = true
+		this.writeCommitted = false
 
 		// Capture the current scroll position before we close the tab so we can
 		// restore it after saving/reverting.
@@ -175,12 +180,19 @@ export class DiffViewProvider {
 		const tabs = vscode.window.tabGroups.all
 			.map((tg) => tg.tabs)
 			.flat()
-			.filter(
-				(tab) =>
-					tab.input instanceof vscode.TabInputText &&
-					tab.input.uri.scheme === "file" &&
-					arePathsEqual(tab.input.uri.fsPath, absolutePath),
-			)
+			.filter((tab) => {
+				// A new-file diff session's tab is a TabInputTextDiff, not a plain TabInputText:
+				// matching only the latter left the dirty diff document open when the user had no
+				// plain tab for the file, one save away from persisting the unapproved content.
+				const input = tab.input
+				if (input instanceof vscode.TabInputText) {
+					return input.uri.scheme === "file" && arePathsEqual(input.uri.fsPath, absolutePath)
+				}
+				if (input instanceof vscode.TabInputTextDiff) {
+					return input.modified.scheme === "file" && arePathsEqual(input.modified.fsPath, absolutePath)
+				}
+				return false
+			})
 
 		for (const tab of tabs) {
 			// Remember the pin state so we can restore it after the diff closes;
@@ -388,6 +400,7 @@ export class DiffViewProvider {
 		// can still reject, and a caller that rolls the tool call back after this point would undo
 		// a write the user approved - so it is told, at the commit point rather than on return.
 		onCommit?.()
+		this.writeCommitted = true
 
 		// Stop tracking touches and cancel any pending scroll-to-diff before any
 		// programmatic editor activation below.
@@ -591,7 +604,7 @@ export class DiffViewProvider {
 		// existing user file - permanently. isEditing alone is not enough: open() sets it before the
 		// first await, and that is exactly the state a failed open() leaves behind, where the
 		// placeholder and the created directories still have to be rolled back.
-		if (!this.relPath || !this.isEditing) {
+		if (!this.relPath || !this.isEditing || this.writeCommitted) {
 			return
 		}
 
@@ -1341,6 +1354,7 @@ export class DiffViewProvider {
 		this.newContent = undefined
 		this.editType = undefined
 		this.isEditing = false
+		this.writeCommitted = false
 		this.originalContent = undefined
 		this.createdDirs = []
 		this.adoptedCreatedDirs = []

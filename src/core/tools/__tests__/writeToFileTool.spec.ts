@@ -1024,6 +1024,19 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 		})
 
+		it("still rolls back and resets when the error report throws because the task is aborted", async () => {
+			// say() throws once the task is aborted, and handleError reports through it. The
+			// rollback and reset still have to run, or the diff view keeps unapproved content.
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+			mockHandleError.mockRejectedValueOnce(new Error("aborted"))
+
+			await expect(executeWriteFileTool({})).rejects.toThrow("aborted")
+
+			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
 		it("releases the per-task stream state when the write itself fails", async () => {
 			// The catch path tears down too: a failed write must not leave the entry (and its
 			// streamFailed guard) attached to the task.
