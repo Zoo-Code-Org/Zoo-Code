@@ -223,7 +223,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		autoCloseZooOpenedNewFiles,
 	} = cachedState
 
-	const apiConfiguration = useMemo(() => cachedState.apiConfiguration ?? {}, [cachedState.apiConfiguration])
+	const apiConfiguration = cachedState.apiConfiguration
 
 	useEffect(() => {
 		// Update when currentApiConfigName or mode changes.
@@ -263,11 +263,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const setApiConfigurationField = useCallback(
 		<K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K], isUserAction: boolean = true) => {
 			setCachedState((prevState) => {
-				if (prevState.apiConfiguration?.[field] === value) {
+				if (prevState.apiConfiguration[field] === value) {
 					return prevState
 				}
 
-				const previousValue = prevState.apiConfiguration?.[field]
+				const previousValue = prevState.apiConfiguration[field]
 
 				// Helper to check if two values are semantically equal
 				const areValuesEqual = (a: any, b: any): boolean => {
