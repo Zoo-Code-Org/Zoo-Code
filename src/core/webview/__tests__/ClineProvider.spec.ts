@@ -1949,7 +1949,10 @@ describe("ClineProvider", () => {
 			const logSpy = vi.spyOn(provider, "log")
 
 			provider["viewLocalState"] = { mode: "architect" }
-			vi.spyOn(provider.contextProxy, "getValue").mockImplementation(() => {
+			vi.spyOn(
+				provider as unknown as { getPersistedViewStates: () => unknown },
+				"getPersistedViewStates",
+			).mockImplementation(() => {
 				throw new Error("load failed")
 			})
 

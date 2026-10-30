@@ -975,7 +975,9 @@ export class ClineProvider
 		// profile lookup is in flight must not be overwritten by this stale load.
 		const loadedForViewId = this.viewStateId
 		try {
-			const persisted = this.getPersistedViewStates()[loadedForViewId]
+			// Another host may have written this view's entry since startup: the write path
+			// reads fresh, so the load must too or it can restore an older mode/profile.
+			const persisted = this.getPersistedViewStates({ fresh: true })[loadedForViewId]
 			const loadedState: Partial<ExtensionState> = {}
 
 			// Snapshot the in-memory buffer before the async profile lookup. The
@@ -2461,7 +2463,16 @@ export class ClineProvider
 							const latest = this.getTaskHistoryItem(task.taskId) ?? taskHistoryItem
 							await this.updateTaskHistory({ ...latest, mode: taskHistoryItem.mode })
 						} catch (rollbackError) {
-							this.log(`Failed to roll back mode switch ${task.taskId}: ${String(rollbackError)}`)
+							// Retry once: a transient storage failure here would otherwise leave task
+							// history naming the cancelled mode while provider/task state do not.
+							try {
+								const latestRetry = this.getTaskHistoryItem(task.taskId) ?? taskHistoryItem
+								await this.updateTaskHistory({ ...latestRetry, mode: taskHistoryItem.mode })
+							} catch (retryError) {
+								this.log(
+									`Failed to roll back mode switch ${task.taskId} after retry: ${String(retryError)}`,
+								)
+							}
 						}
 						return
 					}
@@ -3064,6 +3075,12 @@ export class ClineProvider
 			// previous profile's name next to the new profile's settings.
 			await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 			landed.profileList = true
+			if (signal.aborted) {
+				// The timeout released the caller while the list write was in flight: stop before
+				// the mode mapping, selection and settings writes and let compensation roll back
+				// the stores this call already landed.
+				throw new Error("Profile upsert was cancelled after the profile-list write")
+			}
 
 			if (mode !== undefined) {
 				await this.providerSettingsManager.setModeConfig(mode, id)
@@ -3683,6 +3700,12 @@ export class ClineProvider
 				// previous profile still carries.
 				await this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 				landed.profileList = true
+				if (signal?.aborted) {
+					// The timeout released the caller while this write was in flight; stop before
+					// the activation side effects (mode mapping, shared settings, task/view updates)
+					// and let compensation roll the landed writes back.
+					throw new Error("Profile upsert was cancelled after the profile-list write")
+				}
 
 				// Route through setValue so the in-memory viewLocalState buffer tracks the
 				// activated profile: a plain ContextProxy write would leave a stale loaded
@@ -5317,7 +5340,18 @@ export class ClineProvider
 			await this.contextProxy.setValue("viewStates", undefined)
 		})
 		ClineProvider.persistedViewStateWriteQueue = clearWrite.catch(() => {})
-		await clearWrite
+
+		try {
+			await clearWrite
+		} catch (error) {
+			// The in-memory clears below must still run and reach every instance; a failed
+			// durable clear is logged and retried by the next mutation/reset.
+			this.log(
+				`[broadcastResetToAllInstances] failed to clear the durable view states: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
 
 		for (const instance of allInstances) {
 			instance._clearViewLocalState()
@@ -5373,8 +5407,17 @@ export class ClineProvider
 		this._clearViewLocalState()
 
 		// Clear this view's persisted entry too, so the reset selections are not
-		// re-applied from the durable viewStates pin after a reload.
-		await this.clearPersistedViewState()
+		// re-applied from the durable viewStates pin after a reload. A rejected storage
+		// write must not abort the profile/mode/stack reset below.
+		try {
+			await this.clearPersistedViewState()
+		} catch (error) {
+			this.log(
+				`[resetState] failed to clear this view's persisted state: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
 
 		await this.providerSettingsManager.resetAllConfigs()
 		await this.customModesManager.resetCustomModes()
