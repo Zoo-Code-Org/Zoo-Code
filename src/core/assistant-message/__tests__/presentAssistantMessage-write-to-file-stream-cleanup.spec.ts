@@ -9,6 +9,8 @@ import { RooCodeEventName } from "@roo-code/types"
 import { afterEach, beforeEach, describe, expect, it, vi, type MockedFunction } from "vitest"
 
 import { type Task } from "../../task/Task"
+import { DispatchState } from "../../task/dispatchState"
+import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
 import { isValidToolName } from "../../tools/validateToolUse"
 import { writeToFileTool } from "../../tools/WriteToFileTool"
 import { fileExistsAtPath } from "../../../utils/fs"
@@ -153,6 +155,9 @@ function buildTask(): PresenterTask {
 			return true
 		}),
 		diffViewProvider,
+		activeToolContexts: new Map(),
+		dispatchState: DispatchState.IDLE,
+		pendingWork: null,
 	}
 	return task
 }
@@ -160,10 +165,13 @@ function buildTask(): PresenterTask {
 // The double above is the documented shape of every presenter test in this directory.
 const asTask = (task: PresenterTask): Task => task as unknown as Task
 
+// The presenter validates against the request's frozen policy snapshot; the double has no policy.
+const baseSnapshot: RequestPolicySnapshot = { disabledTools: [], customModes: [], experiments: {} }
+
 async function present(task: PresenterTask, block: Record<string, unknown>): Promise<void> {
 	task.assistantMessageContent = [block]
 	task.currentStreamingContentIndex = 0
-	await presentAssistantMessage(asTask(task))
+	await presentAssistantMessage(asTask(task), baseSnapshot)
 }
 
 const partialDelta = (content: string): Record<string, unknown> => ({
