@@ -116,51 +116,20 @@ describe("caching transforms under a prompt cache TTL", () => {
 
 			const vertexMessages = addVertexBreakpoints(buildAnthropicMessages())
 
-			expect(serialize(anthropicMessages)).toEqual(
-				serialize([
-					{
-						role: "system",
-						content: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
-					},
-					{
-						role: "user",
-						content: [{ type: "text", text: "First message", cache_control: { type: "ephemeral" } }],
-					},
-					{ role: "assistant", content: "First response" },
-					{
-						role: "user",
-						content: [{ type: "text", text: "Second message", cache_control: { type: "ephemeral" } }],
-					},
-				]),
+			// Compare the raw serialized bytes, not parsed objects: `toEqual` ignores key
+			// insertion order, so a transform that reorders request keys would pass while
+			// the bytes on the wire changed. The expected strings are literals for the
+			// same reason: building them from the same helper would re-derive the order.
+			expect(JSON.stringify(anthropicMessages)).toBe(
+				'[{"role":"system","content":[{"type":"text","text":"You are a helpful assistant.","cache_control":{"type":"ephemeral"}}]},{"role":"user","content":[{"type":"text","text":"First message","cache_control":{"type":"ephemeral"}}]},{"role":"assistant","content":"First response"},{"role":"user","content":[{"type":"text","text":"Second message","cache_control":{"type":"ephemeral"}}]}]',
 			)
 
-			expect(serialize(gatewayMessages)).toEqual(
-				serialize([
-					{ role: "system", content: systemPrompt, cache_control: { type: "ephemeral" } },
-					{
-						role: "user",
-						content: [{ type: "text", text: "First message", cache_control: { type: "ephemeral" } }],
-					},
-					{ role: "assistant", content: "First response" },
-					{
-						role: "user",
-						content: [{ type: "text", text: "Second message", cache_control: { type: "ephemeral" } }],
-					},
-				]),
+			expect(JSON.stringify(gatewayMessages)).toBe(
+				'[{"role":"system","content":"You are a helpful assistant.","cache_control":{"type":"ephemeral"}},{"role":"user","content":[{"type":"text","text":"First message","cache_control":{"type":"ephemeral"}}]},{"role":"assistant","content":"First response"},{"role":"user","content":[{"type":"text","text":"Second message","cache_control":{"type":"ephemeral"}}]}]',
 			)
 
-			expect(serialize(vertexMessages)).toEqual(
-				serialize([
-					{
-						role: "user",
-						content: [{ type: "text", text: "First message", cache_control: { type: "ephemeral" } }],
-					},
-					{ role: "assistant", content: "First response" },
-					{
-						role: "user",
-						content: [{ type: "text", text: "Second message", cache_control: { type: "ephemeral" } }],
-					},
-				]),
+			expect(JSON.stringify(vertexMessages)).toBe(
+				'[{"role":"user","content":[{"type":"text","text":"First message","cache_control":{"type":"ephemeral"}}]},{"role":"assistant","content":"First response"},{"role":"user","content":[{"type":"text","text":"Second message","cache_control":{"type":"ephemeral"}}]}]',
 			)
 		})
 	})

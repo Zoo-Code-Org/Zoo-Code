@@ -452,6 +452,7 @@ describe("VercelAiGatewayHandler", () => {
 		it("does not emit a ttl for a gateway model with no TTL capability", async () => {
 			// The gateway catalog is fetched at runtime and carries no TTL capability,
 			// so a 1h knob must fail closed (ADR-0006 I2).
+			const { addCacheBreakpoints } = await import("../../transform/caching/vercel-ai-gateway")
 			const handler = new VercelAiGatewayHandler(
 				makeApiHandlerOptions({
 					...mockOptions,
@@ -462,8 +463,13 @@ describe("VercelAiGatewayHandler", () => {
 
 			await handler.createMessage("You are a helpful assistant.", [{ role: "user", content: "Hello" }]).next()
 
-			const call = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
-			expect(JSON.stringify(call)).not.toContain("ttl")
+			// `addCacheBreakpoints` is file-mocked, so the request body never receives
+			// `cache_control` and `JSON.stringify(mockCreate...)` cannot see the TTL.
+			// The TTL only exists as the third argument to the mocked call.
+			expect(addCacheBreakpoints).toHaveBeenCalled()
+			const lastCall = vitest.mocked(addCacheBreakpoints).mock.calls.at(-1)
+			expect(lastCall).toBeDefined()
+			expect(lastCall![2]).toBeUndefined()
 		})
 
 		it("sets correct max_completion_tokens", async () => {

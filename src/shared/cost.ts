@@ -86,9 +86,12 @@ function calculateApiCostInternal(
 	// The per-TTL counts are a decomposition of `cacheCreationInputTokens`, never
 	// an addition to it. Deriving the 5m remainder this way keeps the aggregate
 	// path byte-identical when a vendor reports no split (both terms are 0).
-	const writes1h = Math.max(0, cacheCreation1hInputTokens)
-	const writes12h = Math.max(0, cacheCreation12hInputTokens)
-	const writes5m = Math.max(0, cacheCreationInputTokens - writes1h - writes12h)
+	// Each subset also caps at what the aggregate has left, so a malformed split
+	// (1h + 12h > total) cannot bill more writes than the vendor reported.
+	const writesTotal = Math.max(0, cacheCreationInputTokens)
+	const writes1h = Math.min(Math.max(0, cacheCreation1hInputTokens), writesTotal)
+	const writes12h = Math.min(Math.max(0, cacheCreation12hInputTokens), writesTotal - writes1h)
+	const writes5m = Math.max(0, writesTotal - writes1h - writes12h)
 
 	const writes5mRate = modelInfo.cacheWritesPrice || 0
 	const writes1hRate = resolveCacheWriteRate(modelInfo, modelInfo.cacheWritesPrice1h, CACHE_WRITE_MULTIPLIER_1H) || 0
