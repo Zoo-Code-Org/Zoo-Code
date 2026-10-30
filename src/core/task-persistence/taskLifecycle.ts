@@ -138,13 +138,14 @@ export function abandonDelegatedChild(
  *
  * The bounded future window is the threat model. A timestamp a little ahead of
  * `now` is ordinary clock skew between windows, or the future-shifted sentinel
- * `getChildFileMtimeMs` returns for a transient stat failure (it must stay
- * fresh so repair is skipped and a later tick retries). A timestamp far ahead
- * is not evidence of life: it is a dead record whose clock rolled back, or one
- * restored from an archive, and treating it as live would keep the parent
- * delegated forever across startup and every periodic tick. Both directions
- * therefore share one bound, so the sentinel's `now + thresholdMs` stays fresh
- * while anything further ahead does not. An absent timestamp is never fresh —
+ * `getChildFileMtimeMs` returns for a transient stat failure (`now + threshold
+ * - 1`, one millisecond inside the bound so the strict `<` below keeps it
+ * fresh, and repair is skipped for a later tick to retry). A timestamp far
+ * ahead is not evidence of life: it is a dead record whose clock rolled back,
+ * or one restored from an archive, and treating it as live would keep the
+ * parent delegated forever across startup and every periodic tick. Both
+ * directions therefore share one bound, so anything inside it stays fresh
+ * while anything at or beyond it does not. An absent timestamp is never fresh —
  * callers must treat "no signal" as "not evidence of life".
  */
 export function isLivenessSignalFresh(timestamp: number | undefined, now: number, thresholdMs: number): boolean {

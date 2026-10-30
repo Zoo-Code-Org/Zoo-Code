@@ -18,7 +18,10 @@ vi.mock("../../../utils/storage", () => ({
 const writeJson = async (
 	filePath: string,
 	data: unknown,
-	options?: { merge?: (existing: unknown, incoming: unknown) => unknown },
+	options?: {
+		merge?: (existing: unknown, incoming: unknown) => unknown
+		preCommit?: () => void
+	},
 ): Promise<void> => {
 	await fs.mkdir(path.dirname(filePath), { recursive: true })
 	let outgoing = data
@@ -34,6 +37,9 @@ const writeJson = async (
 		}
 		outgoing = options.merge(existing, data)
 	}
+	// Same contract as the real writer: the last-moment check runs immediately
+	// before the write and a throw aborts it with nothing committed.
+	options?.preCommit?.()
 	await fs.writeFile(filePath, JSON.stringify(outgoing, null, "\t"), "utf8")
 }
 
@@ -3269,8 +3275,10 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 				// Later calls = the startup reconcile guard (line 506): recent -> child stays live.
 				return Promise.resolve(probeCalls === 1 ? FIXED_NOW - LIVE_CHILD_MTIME_THRESHOLD_MS : FIXED_NOW - 1_000)
 			})
-			// The under-lock guard's sync probe must mirror the same sequencing:
-			// the replay's child write re-checks exactly-threshold (NOT live ->
+			// The under-lock guard's sync probe must mirror the same sequencing.
+			// The replay's child write evaluates the guard twice: once in the
+			// merge callback and once in `preCommit` immediately before the
+			// commit rename. Both must see exactly-threshold (NOT live ->
 			// proceed); any later sync read (startup reconcile) sees recent.
 			let syncCalls = 0
 			spySyncMtimeProbe((fp, real) => {
@@ -3278,7 +3286,7 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 					return real(fp)
 				}
 				syncCalls++
-				return syncCalls === 1 ? FIXED_NOW - LIVE_CHILD_MTIME_THRESHOLD_MS : FIXED_NOW - 1_000
+				return syncCalls <= 2 ? FIXED_NOW - LIVE_CHILD_MTIME_THRESHOLD_MS : FIXED_NOW - 1_000
 			})
 
 			const s = (store = new TaskHistoryStore(tmpDir))
@@ -3801,13 +3809,16 @@ describe("TaskHistoryStore under-lock repair guards and heartbeat release", () =
 		}
 	})
 
-	it("releases a local ownership claim that lands under the repair lock so the interrupted child stays repairable", async () => {
-		// Regression for the K31PRO ownership-claim race in thread 4419747309.
-		// `markLocallyActive` does not take the store lock, so a provider can claim
-		// the child after the repair guard ran but before the commit lands. The
-		// repair then interrupts a child this window now believes it owns, and the
-		// claim would shield that interrupted record from every later pass. The
-		// commit must release the claim it observes after the write.
+	it("aborts the repair when a local ownership claim lands after the guard but before the commit", async () => {
+		// Regression for the K31PRO ownership-claim race (threads 4419747309 and
+		// 4420013366). `markLocallyActive` is synchronous and takes no lock, so a
+		// provider can claim the child after the repair guard ran and before the
+		// commit. A merge-time-only check cannot see that claim, and releasing the
+		// claim after the commit undoes nothing: the live child is already
+		// interrupted and its parent already severed. The claim must instead be
+		// mutually exclusive with the complete repair commit, so the repair aborts
+		// with NOTHING written and the live session keeps its record, its claim,
+		// and its delegation link.
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 		try {
@@ -3822,7 +3833,7 @@ describe("TaskHistoryStore under-lock repair guards and heartbeat release", () =
 
 			// Simulate the claim landing inside the locked window: the guard has
 			// already passed (no claim visible to it), then the provider claims the
-			// id before the merge commits.
+			// id before the commit rename. `preCommit` must observe it and abort.
 			const probe = TaskHistoryStore.prototype as unknown as {
 				assertChildRepairPreconditions: (existing: unknown, filePath: string, childId: string) => void
 			}
@@ -3846,12 +3857,133 @@ describe("TaskHistoryStore under-lock repair guards and heartbeat release", () =
 				guardSpy.mockRestore()
 			}
 
-			expect(s.get(childId)?.status).toBe("interrupted")
-			// The claim that arrived after the guard must not survive the commit.
+			// Nothing was committed: the child is still active and the parent still
+			// awaits it, with both delegation pointers intact.
+			expect(s.get(childId)?.status).toBe("active")
+			expect(s.get(parentId)?.status).toBe("delegated")
+			expect(s.get(parentId)?.awaitingChildId).toBe(childId)
+			expect(s.get(parentId)?.delegatedToId).toBe(childId)
+			const childOnDisk = JSON.parse(
+				await fs.readFile(path.join(tmpDir, "tasks", childId, GlobalFileNames.historyItem), "utf8"),
+			) as HistoryItem
+			expect(childOnDisk.status).toBe("active")
+			// The claim the provider made mid-repair survives, so the session that
+			// owns the child keeps its heartbeat and its shield from later passes.
 			const owned = (s as unknown as { locallyActiveTaskIds: Set<string> }).locallyActiveTaskIds
-			expect(owned.has(childId)).toBe(false)
+			expect(owned.has(childId)).toBe(true)
 			const released = (s as unknown as { releasedLocalOwnershipIds: Set<string> }).releasedLocalOwnershipIds
-			expect(released.has(childId)).toBe(true)
+			expect(released.has(childId)).toBe(false)
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("claimed by this window during repair"))
+			expect(errorSpy).not.toHaveBeenCalled()
+		} finally {
+			warnSpy.mockRestore()
+			errorSpy.mockRestore()
+		}
+	})
+
+	it("aborts a replayed repair when a local ownership claim lands before its commit", async () => {
+		// The replay path writes through the same `writeAdministrativeRepair`, so
+		// it needs the same claim/commit protocol: a claim landing between the
+		// replay's liveness check and the child commit must abort the replay
+		// instead of interrupting the session that just claimed the child.
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			const childId = "child-claim-replay"
+			const parentId = "parent-claim-replay"
+			const [parent, child] = delegatedPair(parentId, childId)
+			await seedItems(tmpDir, [parent, child])
+			await fs.writeFile(
+				path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent),
+				JSON.stringify(makeRepairIntent(parent, child)),
+			)
+
+			const s = (store = new TaskHistoryStore(tmpDir))
+			await s.reconcile({ forceRefresh: true })
+			installStaleChildInjector(childId)
+
+			const probe = TaskHistoryStore.prototype as unknown as {
+				assertChildRepairPreconditions: (existing: unknown, filePath: string, childId: string) => void
+			}
+			const originalGuard = probe.assertChildRepairPreconditions
+			const guardSpy = vi.spyOn(probe, "assertChildRepairPreconditions").mockImplementation(function (
+				this: TaskHistoryStore,
+				existing: unknown,
+				filePath: string,
+				id: string,
+			) {
+				originalGuard.call(this, existing, filePath, id)
+				s.markLocallyActive(id)
+			})
+
+			try {
+				const internals = TaskHistoryStore.prototype as unknown as {
+					replayDelegationRepairIntent: () => Promise<void>
+				}
+				await internals.replayDelegationRepairIntent.call(s)
+			} finally {
+				guardSpy.mockRestore()
+			}
+
+			expect(s.get(childId)?.status).toBe("active")
+			expect(s.get(parentId)?.status).toBe("delegated")
+			expect(s.get(parentId)?.awaitingChildId).toBe(childId)
+			const owned = (s as unknown as { locallyActiveTaskIds: Set<string> }).locallyActiveTaskIds
+			expect(owned.has(childId)).toBe(true)
+			expect(errorSpy).not.toHaveBeenCalled()
+		} finally {
+			warnSpy.mockRestore()
+			errorSpy.mockRestore()
+		}
+	})
+
+	it("aborts the parent half when a claim for the parent lands before its commit", async () => {
+		// The parent half's guard checks only the parent record's delegation, never
+		// ownership, so the explicit claim check in `preCommit` is what keeps a
+		// freshly resumed parent from being severed while it runs. Without it the
+		// parent commits as active with the link cleared, and the resumed session
+		// is left claim-less and beat-skipped for the rest of its life.
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			const childId = "child-parent-claim"
+			const parentId = "parent-parent-claim"
+			const [parent, child] = delegatedPair(parentId, childId)
+			await seedItems(tmpDir, [parent, child])
+
+			const s = (store = new TaskHistoryStore(tmpDir))
+			await s.initialize()
+			installStaleChildInjector(childId)
+
+			const probe = TaskHistoryStore.prototype as unknown as {
+				assertParentRepairPreconditions: (existing: unknown, childId: string) => void
+			}
+			const originalGuard = probe.assertParentRepairPreconditions
+			const guardSpy = vi.spyOn(probe, "assertParentRepairPreconditions").mockImplementation(function (
+				this: TaskHistoryStore,
+				existing: unknown,
+				id: string,
+			) {
+				originalGuard.call(this, existing, id)
+				s.markLocallyActive(parentId)
+			})
+
+			try {
+				const internals = TaskHistoryStore.prototype as unknown as {
+					runPeriodicDelegationReconciliation: () => Promise<void>
+				}
+				await internals.runPeriodicDelegationReconciliation.call(s)
+			} finally {
+				guardSpy.mockRestore()
+			}
+
+			// The child half committed (the repair was already past its guard), but
+			// the parent half aborted: the link is intact and the parent's claim
+			// survives, so the resumed parent keeps its heartbeat and its shield.
+			expect(s.get(parentId)?.status).toBe("delegated")
+			expect(s.get(parentId)?.awaitingChildId).toBe(childId)
+			const owned = (s as unknown as { locallyActiveTaskIds: Set<string> }).locallyActiveTaskIds
+			expect(owned.has(parentId)).toBe(true)
 			expect(errorSpy).not.toHaveBeenCalled()
 		} finally {
 			warnSpy.mockRestore()

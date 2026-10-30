@@ -23,8 +23,10 @@ type TaskMap = Record<TaskId, HistoryItem | undefined>
  *
  * - `liveElsewhere[id]` models the child's history-file mtime: true when the
  *   mtime is "recent" (the child is owned by another window that is actively
- *   persisting it), false when it is "stale", far in the future, or the file
- *   is unreadable.
+ *   persisting it) or unreadable (production reports the transient-stat
+ *   sentinel, one millisecond inside the future bound, so a stat failure counts
+ *   as life and a later tick retries), false when it is "stale" or far in the
+ *   future.
  * - `heartbeatAlive[id]` models the persisted `lastActivityAt` heartbeat: true
  *   when the owning session heartbeated within the threshold (Task's throttled
  *   heartbeat runs across the child's whole active lifetime — long streaming

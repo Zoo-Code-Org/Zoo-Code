@@ -124,9 +124,10 @@ describe("isLivenessSignalFresh", () => {
 	})
 
 	it("treats a near-future timestamp as fresh (clock skew and the transient-stat sentinel)", () => {
-		// The transient-stat sentinel is exactly `now + THRESHOLD`; keeping it
-		// inside the window is what makes a stat failure skip repair instead of
-		// cutting a possibly-live child out of its delegation link.
+		// The transient-stat sentinel is `now + THRESHOLD - 1`, one millisecond
+		// inside the strict bound; keeping it inside the window is what makes a
+		// stat failure skip repair instead of cutting a possibly-live child out
+		// of its delegation link.
 		expect(isLivenessSignalFresh(NOW + THRESHOLD - 1, NOW, THRESHOLD)).toBe(true)
 		expect(isLivenessSignalFresh(NOW + 1_000, NOW, THRESHOLD)).toBe(true)
 	})
@@ -174,7 +175,7 @@ describe("isDelegatedChildLive", () => {
 	})
 
 	it("stays live when only the mtime is near-future (the transient-stat sentinel)", () => {
-		// The sentinel must keep working: a stat failure reports `now + THRESHOLD`,
+		// The sentinel must keep working: a stat failure reports `now + THRESHOLD - 1`,
 		// which is inside the bounded window, so repair is skipped and retried.
 		expect(isDelegatedChildLive({}, NOW, THRESHOLD, NOW + THRESHOLD - 1)).toBe(true)
 	})

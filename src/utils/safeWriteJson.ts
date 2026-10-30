@@ -26,6 +26,17 @@ export interface SafeWriteJsonOptions {
 	 * cannot be parsed.
 	 */
 	merge?: (existing: unknown, incoming: unknown) => unknown
+
+	/**
+	 * Synchronous last-moment re-validation, invoked immediately before the
+	 * commit rename with no `await` in between. A caller whose decision depends
+	 * on state another actor can change during the temp-file writes (an
+	 * in-process ownership claim, for example) re-checks it here: throwing
+	 * aborts the write with nothing committed and the previous file restored.
+	 * Must stay synchronous so nothing can interleave between the check and the
+	 * rename it guards.
+	 */
+	preCommit?: () => void
 }
 
 /**
@@ -121,7 +132,10 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		}
 
 		// Step 3: Rename the new temporary file to the target file path.
-		// This is the main "commit" step.
+		// This is the main "commit" step. `preCommit` runs immediately before it
+		// with no await in between, so a caller can abort with nothing committed
+		// (the backup restore in the catch below puts the original back).
+		options?.preCommit?.()
 		await fs.rename(actualTempNewFilePath, absoluteFilePath)
 
 		// If we reach here, the new file is successfully in place.

@@ -542,4 +542,48 @@ describe("safeWriteJson", () => {
 		const content = await readFileContent(currentTestFilePath)
 		expect(content).toEqual({ c: 3 })
 	})
+
+	test("should abort with nothing committed when preCommit throws", async () => {
+		// preCommit is the last-moment re-validation hook: a caller whose decision
+		// depends on state another actor can change during the temp-file writes
+		// throws here to abort. The original content must survive untouched, and
+		// the temp and backup files must be cleaned up.
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify({ original: true }))
+		const preCommit = vi.fn(() => {
+			throw new Error("claim landed before commit")
+		})
+
+		await expect(safeWriteJson(currentTestFilePath, { replacement: true }, { preCommit })).rejects.toThrow(
+			"claim landed before commit",
+		)
+
+		expect(preCommit).toHaveBeenCalledTimes(1)
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual({ original: true })
+		const leftovers = (await fs.readdir(tempDir)).filter((name) => name.includes(".tmp"))
+		expect(leftovers).toEqual([])
+	})
+
+	test("should run preCommit after the merge callback and before the commit rename", async () => {
+		// Ordering is the contract: the merge decides the payload, preCommit
+		// re-validates against the world as it is at commit time.
+		const order: string[] = []
+		await safeWriteJson(
+			currentTestFilePath,
+			{ value: 1 },
+			{
+				merge: (_existing, incoming) => {
+					order.push("merge")
+					return incoming
+				},
+				preCommit: () => {
+					order.push("preCommit")
+				},
+			},
+		)
+
+		expect(order).toEqual(["merge", "preCommit"])
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual({ value: 1 })
+	})
 })
