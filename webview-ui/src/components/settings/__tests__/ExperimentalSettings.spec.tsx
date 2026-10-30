@@ -13,6 +13,7 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 describe("ExperimentalSettings", () => {
 	const defaultProps = {
 		experiments: experimentDefault,
+		apiConfiguration: {},
 		setExperimentEnabled: vi.fn(),
 		setImageGenerationProvider: vi.fn(),
 		setOpenRouterImageApiKey: vi.fn(),

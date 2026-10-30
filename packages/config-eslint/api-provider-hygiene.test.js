@@ -4,7 +4,7 @@ import { describe, it } from "node:test"
 import { Linter } from "eslint"
 import typescriptEslint from "typescript-eslint"
 
-import { apiProviderHygieneConfig, apiProviderTestSelectors } from "./api-provider-hygiene.js"
+import { apiProviderHygieneConfig, apiProviderTestSelectors, apiSpecTsIgnoreConfig } from "./api-provider-hygiene.js"
 
 const linter = new Linter({ configType: "flat" })
 const config = [{ files: ["**/*.ts"], languageOptions: { parser: typescriptEslint.parser } }, apiProviderHygieneConfig]
@@ -173,4 +173,75 @@ describe("api provider hygiene: spec loops", () => {
 			assert.deepEqual(lintSpec(code), [])
 		})
 	}
+})
+
+describe("api provider hygiene: hand-built AbortError", () => {
+	for (const code of [
+		'const e = new Error("x"); e.name = "AbortError"',
+		'throw new DOMException("aborted", "AbortError")',
+		'Object.assign(new Error("x"), {}).name = "AbortError"',
+	]) {
+		it(`flags: ${code}`, () => {
+			assert.equal(lint(code).length, 1)
+		})
+	}
+
+	for (const code of [
+		'import { createAbortError } from "./utils/abort-signal"\nthrow createAbortError("X")',
+		'if (error.name === "AbortError") {}',
+		'const e = new Error("x"); e.name = "TimeoutError"',
+		'new DOMException("timed out", "TimeoutError")',
+	]) {
+		it(`allows: ${code}`, () => {
+			assert.deepEqual(lint(code), [])
+		})
+	}
+
+	it("does not apply to the helper module", () => {
+		assert.deepEqual(
+			lint('const e = new Error("x"); e.name = "AbortError"', "api/providers/utils/abort-signal.ts"),
+			[],
+		)
+	})
+
+	it("does not apply to tests", () => {
+		assert.deepEqual(lint('new DOMException("x", "AbortError")', "api/providers/__tests__/a.spec.ts"), [])
+	})
+})
+
+describe("api provider hygiene: @ts-ignore in specs", () => {
+	const specLinter = new Linter({ configType: "flat" })
+	const specConfig = [
+		{
+			files: ["**/*.ts"],
+			languageOptions: { parser: typescriptEslint.parser },
+			plugins: { "@typescript-eslint": typescriptEslint.plugin },
+		},
+		apiSpecTsIgnoreConfig,
+	]
+	const lintSpecFile = (code, filename = "api/providers/__tests__/example.spec.ts") =>
+		specLinter.verify(code, specConfig, { filename }).map((m) => m.message)
+
+	it("flags @ts-ignore in a spec", () => {
+		assert.equal(lintSpecFile("// @ts-ignore access private client\nhandler.client").length, 1)
+	})
+
+	it("allows @ts-expect-error with a description", () => {
+		assert.deepEqual(lintSpecFile("// @ts-expect-error private client\nhandler.client"), [])
+	})
+
+	it("allows bracket notation", () => {
+		assert.deepEqual(lintSpecFile('handler["client"]'), [])
+	})
+
+	it("skips files in the ratchet list", () => {
+		assert.deepEqual(
+			lintSpecFile("// @ts-ignore x\nhandler.client", "api/providers/__tests__/gemini-handler.spec.ts"),
+			[],
+		)
+	})
+
+	it("does not apply outside src/api", () => {
+		assert.deepEqual(lintSpecFile("// @ts-ignore x\nhandler.client", "services/__tests__/example.spec.ts"), [])
+	})
 })
