@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from "@/utils/test-utils"
 
-import { providerIdentifiers, type ProviderSettings } from "@roo-code/types"
+import { anthropicDefaultModelId, providerIdentifiers, type ProviderSettings } from "@roo-code/types"
 
 import { ModelSelector } from "../ModelSelector"
 
@@ -371,6 +371,12 @@ describe("ModelSelector", () => {
 			)
 			expect(screen.getByTestId("model-selector-unsupported-trigger")).toBeInTheDocument()
 		})
+	})
+
+	test("falls back to the shared default provider when the configuration has no provider", () => {
+		render(<ModelSelector apiConfiguration={{}} title="Select model" />)
+
+		expect(screen.getByTestId("model-selector-trigger")).toHaveTextContent(anthropicDefaultModelId)
 	})
 
 	test("falls back to a degraded trigger for providers without a simple model list, and jumps to Settings on click", () => {

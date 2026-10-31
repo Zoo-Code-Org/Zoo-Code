@@ -19,7 +19,9 @@ import {
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
 	DEFAULT_WRITE_DELAY_MS,
+	DEFAULT_API_PROVIDER,
 	providerIdentifiers,
+	retiredProviderIdentifiers,
 	openAiModelInfoSaneDefaults,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -2023,6 +2025,45 @@ describe("ClineProvider", () => {
 		expect(state).toHaveProperty("soundEnabled")
 		expect(state).toHaveProperty("ttsEnabled")
 		expect(state).toHaveProperty("writeDelayMs")
+	})
+
+	describe("resolved apiConfiguration", () => {
+		test("getState and getStateToPostToWebview resolve a missing provider to the shared default", async () => {
+			await provider.contextProxy.setProviderSettings({ apiModelId: "claude-sonnet-4-5" })
+
+			expect((await provider.getState()).apiConfiguration.apiProvider).toBe(DEFAULT_API_PROVIDER)
+			expect((await provider.getStateToPostToWebview()).apiConfiguration.apiProvider).toBe(DEFAULT_API_PROVIDER)
+		})
+
+		test("keeps a stored provider", async () => {
+			await provider.contextProxy.setProviderSettings({ apiProvider: providerIdentifiers.openrouter })
+
+			expect((await provider.getState()).apiConfiguration.apiProvider).toBe(providerIdentifiers.openrouter)
+			expect((await provider.getStateToPostToWebview()).apiConfiguration.apiProvider).toBe(
+				providerIdentifiers.openrouter,
+			)
+		})
+
+		test("passes a stored retired provider through so the webview can warn", async () => {
+			// `roo` is stripped by the legacy-router downgrade, so use another retired provider.
+			await provider.contextProxy.setProviderSettings({ apiProvider: retiredProviderIdentifiers.groq })
+
+			expect((await provider.getState()).apiConfiguration.apiProvider).toBe(retiredProviderIdentifiers.groq)
+			expect((await provider.getStateToPostToWebview()).apiConfiguration.apiProvider).toBe(
+				retiredProviderIdentifiers.groq,
+			)
+		})
+
+		test("resolves the task configuration when it has no provider", async () => {
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue({
+				apiConfiguration: { apiModelId: "task-local-model" },
+			} as unknown as Task)
+
+			const postedState = await provider.getStateToPostToWebview()
+
+			expect(postedState.apiConfiguration.apiProvider).toBe(DEFAULT_API_PROVIDER)
+			expect(postedState.apiConfiguration.apiModelId).toBe("task-local-model")
+		})
 	})
 
 	test("getState and getStateToPostToWebview return the complete NanoGPT configuration", async () => {

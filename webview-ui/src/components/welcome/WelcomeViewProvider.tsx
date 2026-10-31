@@ -4,6 +4,8 @@ import { ArrowLeft, Brain } from "lucide-react"
 
 import { openRouterDefaultModelId, providerIdentifiers, type ProviderSettings } from "@roo-code/types"
 
+import { checkExistKey } from "@roo/checkExistApiConfig"
+
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { validateApiConfiguration } from "@src/utils/validate"
 import { vscode } from "@src/utils/vscode"
@@ -24,9 +26,7 @@ const getWelcomeApiConfiguration = (
 	apiConfiguration: ProviderSettings,
 	zooCodeIsAuthenticated?: boolean,
 ): ProviderSettings => {
-	// validateApiConfiguration treats a missing apiProvider as valid (no switch case matches),
-	// so we explicitly fall back here before delegating to it for incomplete-but-set configs.
-	if (!apiConfiguration.apiProvider) {
+	if (!checkExistKey(apiConfiguration, zooCodeIsAuthenticated)) {
 		return DEFAULT_WELCOME_API_CONFIGURATION
 	}
 

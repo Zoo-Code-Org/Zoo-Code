@@ -282,6 +282,56 @@ export const providerSettingsSchema = z.object({
 
 export type ProviderSettings = z.infer<typeof providerSettingsSchema>
 
+/**
+ * The provider used when a configuration has no explicit `apiProvider`.
+ *
+ * This value is supplied at read time only: `resolveProviderSettings()` fills it
+ * in for a configuration (or profile) that has no stored `apiProvider`, so an
+ * unsaved profile follows whatever the default is at that moment.
+ *
+ * Resolution does not make the value permanent. Once the resolved configuration
+ * is saved (for example when the settings view persists the profile it was
+ * given), `apiProvider` is stored explicitly, and that profile keeps the value
+ * it was saved with. Later changes to this constant therefore do not affect
+ * already-saved profiles.
+ *
+ * Saves must keep writing `apiProvider` rather than omitting it to "stay on the
+ * default": the discriminated stored-profile schema requires a provider for
+ * active providers, and omitting it would silently re-open the profile to future
+ * default changes.
+ */
+export const DEFAULT_API_PROVIDER = providerIdentifiers.anthropic satisfies ProviderName
+
+/**
+ * A `ProviderSettings` whose `apiProvider` is guaranteed to be defined.
+ *
+ * The value may still be a retired provider name: resolution only fills in a
+ * *missing* provider, it does not filter retired ones, because the webview
+ * needs to see them to show the retired-provider warnings.
+ */
+export type ResolvedProviderSettings = ProviderSettings & {
+	apiProvider: NonNullable<ProviderSettings["apiProvider"]> // ProviderName | RetiredProviderName
+}
+
+/**
+ * Returns a new configuration with `apiProvider` filled in when missing.
+ *
+ * Does not mutate the input and passes retired provider names through
+ * unchanged. Consumers that need an *active* provider should narrow the
+ * result with `isRetiredProvider()` or use `getActiveProvider()`.
+ */
+export const resolveProviderSettings = (settings: ProviderSettings): ResolvedProviderSettings => ({
+	...settings,
+	apiProvider: settings.apiProvider ?? DEFAULT_API_PROVIDER,
+})
+
+/**
+ * Returns the provider when it is still active, or `undefined` for retired
+ * providers.
+ */
+export const getActiveProvider = (settings: ResolvedProviderSettings): ProviderName | undefined =>
+	isRetiredProvider(settings.apiProvider) ? undefined : settings.apiProvider
+
 export const providerSettingsWithIdSchema = providerSettingsSchema.extend({ id: z.string().optional() })
 
 export const discriminatedProviderSettingsWithIdSchema = providerSettingsSchemaDiscriminated.and(

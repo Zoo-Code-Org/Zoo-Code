@@ -1,6 +1,11 @@
 // npx vitest run src/shared/__tests__/checkExistApiConfig.spec.ts
 
-import { providerIdentifiers, retiredProviderIdentifiers, type ProviderSettings } from "@roo-code/types"
+import {
+	DEFAULT_API_PROVIDER,
+	providerIdentifiers,
+	retiredProviderIdentifiers,
+	type ProviderSettings,
+} from "@roo-code/types"
 
 import { checkExistKey } from "../checkExistApiConfig"
 
@@ -161,5 +166,11 @@ describe("checkExistKey", () => {
 			apiProvider: providerIdentifiers.openrouter,
 		}
 		expect(checkExistKey(config, true)).toBe(false)
+	})
+
+	it("should return false for a resolved but keyless default provider", () => {
+		// The host resolves `apiProvider` before posting state, so the welcome gate must
+		// decide from keys rather than from provider presence.
+		expect(checkExistKey({ apiProvider: DEFAULT_API_PROVIDER })).toBe(false)
 	})
 })

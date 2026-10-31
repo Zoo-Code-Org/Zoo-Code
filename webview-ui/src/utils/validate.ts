@@ -9,6 +9,7 @@ import {
 	parseOpenAiExtraBody,
 	providerIdentifiers,
 	githubCopilotLanguageModel,
+	DEFAULT_API_PROVIDER,
 } from "@roo-code/types"
 
 type OpenAiExtraBodyParseResult = ReturnType<typeof parseOpenAiExtraBody>
@@ -292,7 +293,7 @@ function validateDynamicProviderModelId(
 	apiConfiguration: ProviderSettings,
 	routerModels?: RouterModels,
 ): string | undefined {
-	const provider = apiConfiguration.apiProvider ?? ""
+	const provider = apiConfiguration.apiProvider ?? DEFAULT_API_PROVIDER
 
 	// We only validate model ids from dynamic providers.
 	if (!isDynamicProvider(provider)) {

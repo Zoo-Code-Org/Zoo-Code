@@ -15,7 +15,6 @@ import {
 	type TaskProviderLike,
 	type TaskProviderEvents,
 	type GlobalState,
-	type ProviderName,
 	type ProviderSettings,
 	type RooCodeSettings,
 	type ProviderSettingsEntry,
@@ -55,10 +54,11 @@ import {
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_MODES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
+	getActiveProvider,
 	getModelId,
-	isRetiredProvider,
 	modelIdKeys,
 	providerIdentifiers,
+	resolveProviderSettings,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
@@ -1963,8 +1963,9 @@ export class ClineProvider
 				async (signal) => {
 					const { name: _name, ...stored } = await this.providerSettingsManager.getProfile({ name })
 
-					// Unset provider (e.g. the seeded default profile) resolves to anthropic, matching getState().
-					const storedProvider = stored.apiProvider ?? providerIdentifiers.anthropic
+					// Unset provider (e.g. the seeded default profile) resolves to the shared default,
+					// matching getState().
+					const storedProvider = resolveProviderSettings(stored).apiProvider
 
 					if (storedProvider !== expectedProvider) {
 						throw new Error(
@@ -2960,7 +2961,11 @@ export class ClineProvider
 
 		return {
 			version: this.context.extension?.packageJSON?.version ?? "",
-			apiConfiguration: currentTaskApiConfiguration ?? apiConfiguration,
+			// The task configuration is a separate source and needs the same "provider is defined"
+			// guarantee as the persisted settings.
+			apiConfiguration: currentTaskApiConfiguration
+				? resolveProviderSettings(currentTaskApiConfiguration)
+				: apiConfiguration,
 			customInstructions,
 			alwaysAllowReadOnly: alwaysAllowReadOnly ?? false,
 			alwaysAllowReadOnlyOutsideWorkspace: alwaysAllowReadOnlyOutsideWorkspace ?? false,
@@ -3135,19 +3140,9 @@ export class ClineProvider
 		const stateValues = this.contextProxy.getValues()
 		const customModes = await this.customModesManager.getCustomModes()
 
-		// Determine apiProvider with the same logic as before, while filtering retired providers.
-		const apiProvider: ProviderName =
-			stateValues.apiProvider && !isRetiredProvider(stateValues.apiProvider)
-				? stateValues.apiProvider
-				: providerIdentifiers.anthropic
-
-		// Build the apiConfiguration object combining state values and secrets.
-		const providerSettings = this.contextProxy.getProviderSettings()
-
-		// Ensure apiProvider is set properly if not already in state
-		if (!providerSettings.apiProvider) {
-			providerSettings.apiProvider = apiProvider
-		}
+		// Build the apiConfiguration object combining state values and secrets. The resolver only
+		// fills in a missing provider; retired provider names pass through so the webview can warn.
+		const apiConfiguration = resolveProviderSettings(this.contextProxy.getProviderSettings())
 
 		let organizationAllowList = ORGANIZATION_ALLOW_ALL
 
@@ -3200,7 +3195,7 @@ export class ClineProvider
 
 		// Return the same structure as before.
 		return {
-			apiConfiguration: providerSettings,
+			apiConfiguration,
 			lastShownAnnouncementId: stateValues.lastShownAnnouncementId,
 			customInstructions: stateValues.customInstructions,
 			apiModelId: stateValues.apiModelId,
@@ -3939,14 +3934,12 @@ export class ClineProvider
 			}
 		}
 
-		const apiProvider = apiConfiguration?.apiProvider
-
 		return {
 			language,
 			mode,
 			taskId: task?.taskId,
 			parentTaskId: task?.parentTaskId,
-			apiProvider: apiProvider && !isRetiredProvider(apiProvider) ? apiProvider : undefined,
+			apiProvider: getActiveProvider(apiConfiguration),
 			modelId: task?.api?.getModel().id,
 			diffStrategy: task?.diffStrategy?.getName(),
 			isSubtask: task ? !!task.parentTaskId : undefined,

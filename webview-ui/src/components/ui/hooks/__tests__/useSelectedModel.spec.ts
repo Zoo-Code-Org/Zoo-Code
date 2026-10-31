@@ -13,6 +13,8 @@ import {
 	type ModelRecord,
 	type RouterModels,
 	anthropicModels,
+	anthropicDefaultModelId,
+	DEFAULT_API_PROVIDER,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	BEDROCK_DEFAULT_CONTEXT,
 	BEDROCK_MAX_TOKENS,
@@ -599,7 +601,9 @@ describe("useSelectedModel", () => {
 	})
 
 	describe("loading and error states", () => {
-		it("should set loading when router models are loading for the default OpenRouter provider", () => {
+		const openRouterConfiguration = { apiProvider: providerIdentifiers.openrouter }
+
+		it("should set loading when router models are loading for OpenRouter", () => {
 			mockUseRouterModels.mockReturnValue({
 				data: undefined,
 				isLoading: true,
@@ -613,12 +617,12 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const wrapper = createWrapper()
-			const { result } = renderHook(() => useSelectedModel({}), { wrapper })
+			const { result } = renderHook(() => useSelectedModel(openRouterConfiguration), { wrapper })
 
 			expect(result.current.isLoading).toBe(true)
 		})
 
-		it("should set loading when OpenRouter provider metadata is loading for the default provider", () => {
+		it("should set loading when OpenRouter provider metadata is loading", () => {
 			mockUseRouterModels.mockReturnValue({
 				data: { openrouter: {}, requesty: {}, litellm: {} },
 				isLoading: false,
@@ -632,12 +636,12 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const wrapper = createWrapper()
-			const { result } = renderHook(() => useSelectedModel({}), { wrapper })
+			const { result } = renderHook(() => useSelectedModel(openRouterConfiguration), { wrapper })
 
 			expect(result.current.isLoading).toBe(true)
 		})
 
-		it("should set error when router models error for the default OpenRouter provider", () => {
+		it("should set error when router models error for OpenRouter", () => {
 			mockUseRouterModels.mockReturnValue({
 				data: undefined,
 				isLoading: false,
@@ -651,14 +655,14 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const wrapper = createWrapper()
-			const { result } = renderHook(() => useSelectedModel({}), { wrapper })
+			const { result } = renderHook(() => useSelectedModel(openRouterConfiguration), { wrapper })
 
 			expect(result.current.isError).toBe(true)
 		})
 	})
 
 	describe("default behavior", () => {
-		it("should return OpenRouter default when no configuration is provided", () => {
+		it("falls back to the shared default provider when no configuration is provided", () => {
 			mockUseRouterModels.mockReturnValue({
 				data: undefined,
 				isLoading: false,
@@ -674,9 +678,9 @@ describe("useSelectedModel", () => {
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel({}), { wrapper })
 
-			expect(result.current.provider).toBe(providerIdentifiers.openrouter)
-			expect(result.current.id).toBe(openRouterDefaultModelId)
-			expect(result.current.info).toBeUndefined()
+			expect(result.current.provider).toBe(DEFAULT_API_PROVIDER)
+			expect(result.current.id).toBe(anthropicDefaultModelId)
+			expect(result.current.info).toEqual(anthropicModels[anthropicDefaultModelId])
 		})
 	})
 

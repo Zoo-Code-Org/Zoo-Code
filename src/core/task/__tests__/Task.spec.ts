@@ -18,6 +18,7 @@ import {
 	type HistoryItem,
 	type ModeConfig,
 	type ProviderSettings,
+	type ResolvedProviderSettings,
 	type ModelInfo,
 	type TaskLike,
 } from "@roo-code/types"
@@ -76,7 +77,7 @@ type MockedClineProvider = ClineProvider & {
 		mockResolvedValue: (value: Partial<ProviderState>) => void
 	}
 }
-type RateLimitedProviderSettings = ProviderSettings & {
+type RateLimitedProviderSettings = ResolvedProviderSettings & {
 	rateLimitSeconds: number
 }
 
@@ -321,7 +322,7 @@ const stubModelInfo: ModelInfo = {
 
 describe("Cline", () => {
 	let mockProvider: ClineProvider
-	let mockApiConfig: ProviderSettings
+	let mockApiConfig: ResolvedProviderSettings
 	let mockOutputChannel: vscode.OutputChannel
 	let mockExtensionContext: vscode.ExtensionContext
 
@@ -3884,7 +3885,7 @@ describe("Cline", () => {
 
 		describe("Dynamic Strategy Selection", () => {
 			let mockProvider: MockedClineProvider
-			let mockApiConfig: ProviderSettings
+			let mockApiConfig: ResolvedProviderSettings
 
 			beforeEach(() => {
 				vi.clearAllMocks()
@@ -4093,7 +4094,7 @@ describe("Cline", () => {
 			})
 
 			it("stores a provider profile selected through submitUserMessage", async () => {
-				const selectedConfiguration: ProviderSettings = {
+				const selectedConfiguration: ResolvedProviderSettings = {
 					...mockApiConfig,
 					apiModelId: "selected-model",
 				}
@@ -4825,10 +4826,10 @@ describe("Cline", () => {
 				})
 
 				it("configures tool restrictions for Gemini requests", async () => {
-					const apiConfiguration = {
+					const apiConfiguration: ResolvedProviderSettings = {
 						...mockApiConfig,
 						apiProvider: providerIdentifiers.gemini,
-					} as ProviderSettings
+					}
 					const task = new Task({
 						provider: mockProvider,
 						apiConfiguration,

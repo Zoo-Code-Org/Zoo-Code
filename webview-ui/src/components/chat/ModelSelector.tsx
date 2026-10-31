@@ -8,6 +8,7 @@ import {
 	type ModelInfo,
 	providerIdentifiers,
 	isRetiredProvider,
+	DEFAULT_API_PROVIDER,
 } from "@roo-code/types"
 
 import { cn } from "@/lib/utils"
@@ -90,7 +91,7 @@ export const ModelSelector = ({
 	const { t } = useAppTranslation()
 	const { organizationAllowList, currentApiConfigName } = useExtensionState()
 
-	const providerRaw = apiConfiguration.apiProvider || providerIdentifiers.openrouter
+	const providerRaw = apiConfiguration.apiProvider ?? DEFAULT_API_PROVIDER
 	const provider: ProviderName | undefined = isRetiredProvider(providerRaw) ? undefined : providerRaw
 
 	const { id: selectedModelId, info: selectedModelInfo } = useSelectedModel(apiConfiguration)

@@ -1,5 +1,7 @@
 import React, { useState } from "react"
 
+import { resolveProviderSettings } from "@roo-code/types"
+
 type StoryProps = Record<string, unknown>
 type Story = (props: StoryProps) => React.ReactNode | Promise<React.ReactNode>
 
@@ -433,7 +435,7 @@ export const stories: Record<string, Story> = {
 			import("@/components/welcome/WelcomeLanding"),
 		])
 		return (
-			<AppProviders initialState={{ apiConfiguration: {} }}>
+			<AppProviders initialState={{ apiConfiguration: resolveProviderSettings({}) }}>
 				<WelcomeLanding onGetStarted={() => undefined} onImportSettings={() => undefined} />
 			</AppProviders>
 		)
