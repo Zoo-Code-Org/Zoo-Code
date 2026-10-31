@@ -14,6 +14,7 @@ import {
 } from "@roo-code/types"
 
 import { createDirectoriesForFile } from "../../utils/fs"
+import { writeFileAtomically } from "./atomicWrite"
 import { arePathsEqual, getReadablePath } from "../../utils/path"
 import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
@@ -1154,9 +1155,10 @@ export class DiffViewProvider {
 		// Get diagnostics before editing the file
 		this.preDiagnostics = vscode.languages.getDiagnostics()
 
-		// Write the content directly to the file
+		// Write the content directly to the file, atomically: a crash mid-write must
+		// not leave the destination truncated.
 		await createDirectoriesForFile(absolutePath)
-		await fs.writeFile(absolutePath, content, "utf-8")
+		await writeFileAtomically(absolutePath, content)
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
