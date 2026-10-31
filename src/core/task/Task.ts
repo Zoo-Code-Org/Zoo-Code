@@ -105,6 +105,7 @@ import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 // core modules
 import { ToolRepetitionDetector } from "../tools/ToolRepetitionDetector"
 import { restoreTodoListForTask } from "../tools/UpdateTodoListTool"
+import { writeToFileTool } from "../tools/WriteToFileTool"
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
@@ -4129,6 +4130,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				const nativeToolCallParserScope = NativeToolCallParser.createScope()
 
 				await this.diffViewProvider.reset()
+
+				// A new API request starts a new stream. Clear any per-task partial-stream failure
+				// state left by a previous stream that failed without aborting (streaming_failed):
+				// otherwise the retried write would keep skipping previews and fail on the stale
+				// rollback error before it ever writes.
+				writeToFileTool.clearTaskState(this)
 
 				await this.safeEnsureModelFetched()
 
