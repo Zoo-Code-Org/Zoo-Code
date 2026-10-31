@@ -773,7 +773,7 @@ describe("webviewMessageHandler - theme fixture probes", () => {
 	})
 })
 
-import { t } from "../../../i18n"
+import { changeLanguage, t } from "../../../i18n"
 
 vi.mock("vscode", () => {
 	const showInformationMessage = vi.fn()
@@ -802,6 +802,7 @@ vi.mock("vscode", () => {
 })
 
 vi.mock("../../../i18n", () => ({
+	changeLanguage: vi.fn(),
 	t: vi.fn((key: string, args?: Record<string, any>) => {
 		// For the delete confirmation with rules, we need to return the interpolated string
 		if (key === "common:confirmation.delete_custom_mode_with_rules" && args) {
@@ -1943,6 +1944,28 @@ describe("webviewMessageHandler - the display settings are saved all-or-nothing"
 		await save({ showRelativeTimes: false, dateFormat: "ymd" })
 
 		expect(stored.showRelativeTimes).toBeUndefined()
+	})
+
+	describe("the display language is validated before it is applied or stored", () => {
+		it.each([["xx-not-a-language"], ["en-US-garbage!"], [42], [""], [{}]])(
+			"refuses language = %j, and applies and stores nothing",
+			async (value) => {
+				await save({ language: value, soundEnabled: true })
+
+				expect(changeLanguage).not.toHaveBeenCalled()
+				expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+				expect(stored.soundEnabled).toBe(false)
+				expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.settings_save_failed")
+			},
+		)
+
+		it.each([["de"], ["ja"], ["zh-TW"], [undefined], [null]])("accepts language = %j", async (value) => {
+			await save({ language: value })
+
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+			expect(changeLanguage).toHaveBeenCalledWith(value ?? "en")
+			expect(stored.language).toBe(value ?? "en")
+		})
 	})
 
 	describe("the values are validated before anything is stored", () => {

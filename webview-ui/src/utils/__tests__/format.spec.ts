@@ -6,6 +6,7 @@ import {
 	formatTimeAgo,
 	formatTimeOnly,
 	hourCycleOptions,
+	resolveLocale,
 } from "../format"
 
 // Mock i18next
@@ -247,6 +248,56 @@ describe("formatMessageTime", () => {
 
 	it("honours the 24-hour setting", () => {
 		expect(fmt(at(2026, 9, 14, 14, 41), { timeFormat: "24h" })).toBe("Today 14:41")
+	})
+
+	describe("with a stored language that is not a usable locale", () => {
+		let original: string
+		const SENT = new Date(2024, 2, 7, 14, 41).getTime()
+
+		beforeEach(async () => {
+			const i18next = (await import("i18next")).default as unknown as { language: string }
+			original = i18next.language
+		})
+
+		afterEach(async () => {
+			const i18next = (await import("i18next")).default as unknown as { language: string }
+			i18next.language = original
+		})
+
+		it.each(["not a locale!!", "xx-ZZ-garbage", "xx-ZZ", "en_US", "---", "x"])(
+			"formats in English instead of throwing for %j",
+			async (bad) => {
+				const i18next = (await import("i18next")).default as unknown as { language: string }
+				i18next.language = bad
+
+				expect(() => formatTimeOnly(SENT)).not.toThrow()
+				expect(() => formatDateOnly(SENT)).not.toThrow()
+				expect(() => formatDateTime(SENT)).not.toThrow()
+				expect(() => formatMessageTime(SENT, { now: SENT })).not.toThrow()
+				expect(formatMessageTime(SENT, { now: SENT })).toContain("Today")
+				expect(formatDateOnly(SENT)).toBe(formatDateOnly(SENT, "auto", "en"))
+			},
+		)
+
+		it("formats in English when no language is set at all", async () => {
+			const i18next = (await import("i18next")).default as unknown as { language: string }
+			i18next.language = ""
+
+			expect(formatDateOnly(SENT)).toBe(formatDateOnly(SENT, "auto", "en"))
+			expect(formatTimeOnly(SENT)).toBe(formatTimeOnly(SENT, "auto", "en"))
+			expect(formatDateTime(SENT)).toBe(formatDateTime(SENT, "auto", "auto", "en"))
+		})
+
+		it("falls back for a locale passed in directly, too", () => {
+			expect(formatDateOnly(SENT, "auto", "not a locale!!")).toBe(formatDateOnly(SENT, "auto", "en"))
+			expect(formatTimeOnly(SENT, "auto", "not a locale!!")).toBe(formatTimeOnly(SENT, "auto", "en"))
+		})
+
+		it("resolves a supported locale to itself, and a missing one to English", () => {
+			expect(resolveLocale("de")).toBe("de")
+			expect(resolveLocale(undefined)).toBe("en")
+			expect(resolveLocale("")).toBe("en")
+		})
 	})
 
 	describe("in another display language (automatic date format)", () => {

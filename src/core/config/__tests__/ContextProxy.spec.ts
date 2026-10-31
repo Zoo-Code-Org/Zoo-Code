@@ -162,6 +162,7 @@ describe("ContextProxy", () => {
 			await proxy.setValue("timeFormat", "auto")
 			const write = beginSettingWrite("timeFormat", "auto", "24h")
 			await performSettingWrite(proxy, write)
+			mockGlobalState.get.mockReturnValue("24h") // storage holds the write's value
 			mockGlobalState.update.mockRejectedValueOnce(new Error("storage unavailable"))
 
 			await expect(proxy.setValue("timeFormat", "24h")).rejects.toThrow("storage unavailable")
@@ -172,7 +173,24 @@ describe("ContextProxy", () => {
 		})
 
 		describe("the cache after a rejected store of a tracked setting", () => {
-			it("goes back to what was stored, so the next save does not read a value storage does not have", async () => {
+			// Storage as the extension host has it: a store changes it, unless the test makes the store fail first.
+			let durable: Map<string, unknown>
+			let failAfterStoring: boolean
+
+			beforeEach(() => {
+				durable = new Map<string, unknown>()
+				failAfterStoring = false
+				mockGlobalState.get.mockImplementation((key: string) => durable.get(key))
+				mockGlobalState.update.mockImplementation(async (key: string, value: unknown) => {
+					if (failAfterStoring) {
+						durable.set(key, value)
+						throw new Error("storage unavailable")
+					}
+					durable.set(key, value)
+				})
+			})
+
+			it("shows what storage holds when the store failed before changing it, so the next save reads that", async () => {
 				await proxy.setValue("timeFormat", "24h")
 				mockGlobalState.update.mockRejectedValueOnce(new Error("storage unavailable"))
 
@@ -183,6 +201,21 @@ describe("ContextProxy", () => {
 				await performSettingWrite(proxy, write)
 				expect(write.previous).toBe("24h") // what is really stored, not the rejected 12h
 				finishSettingWrites([write])
+			})
+
+			it("shows the new value when the store failed after changing storage, so a rollback can put it back", async () => {
+				await proxy.setValue("timeFormat", "auto")
+				const write = beginSettingWrite("timeFormat", undefined, "12h")
+
+				failAfterStoring = true
+				await expect(performSettingWrite(proxy, write)).rejects.toThrow("storage unavailable")
+				failAfterStoring = false
+				expect(durable.get("timeFormat")).toBe("12h") // storage was changed by the failed store
+
+				await undoSettingWrite(proxy, write)
+
+				expect(durable.get("timeFormat")).toBe("auto")
+				expect(proxy.getValue("timeFormat")).toBe("auto")
 			})
 
 			it("keeps a newer store's value when the older one is rejected afterwards", async () => {

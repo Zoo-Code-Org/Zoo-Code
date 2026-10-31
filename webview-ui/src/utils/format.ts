@@ -34,6 +34,18 @@ export function hourCycleOptions(timeFormat: TimeFormat = "auto"): Intl.DateTime
 const pad = (n: number) => String(n).padStart(2, "0")
 
 /**
+ * A locale the runtime can format with. A stored language that is corrupted or not supported (a locale that is not
+ * well formed makes `toLocaleDateString` throw) falls back to English, so a bad value never breaks a message row.
+ */
+export const resolveLocale = (locale: string | undefined): string => {
+	try {
+		return Intl.DateTimeFormat.supportedLocalesOf(locale || "en")[0] ?? "en"
+	} catch {
+		return "en"
+	}
+}
+
+/**
  * Date only, in the chosen order. "auto" follows the display language; the
  * explicit orders use a fixed numeric form (e.g. 10/27/2026, 27/10/2026,
  * 2026-10-27) so the preview and the app agree regardless of locale.
@@ -44,6 +56,7 @@ export const formatDateOnly = (
 	locale: string = i18next.language || "en",
 ) => {
 	const date = new Date(timestamp)
+	const formatLocale = resolveLocale(locale)
 
 	switch (dateFormat) {
 		case "mdy":
@@ -53,7 +66,7 @@ export const formatDateOnly = (
 		case "ymd":
 			return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 		default:
-			return date.toLocaleDateString(locale, { dateStyle: "medium" })
+			return date.toLocaleDateString(formatLocale, { dateStyle: "medium" })
 	}
 }
 
@@ -66,7 +79,7 @@ export const formatTimeOnly = (
 	timeFormat: TimeFormat = "auto",
 	locale: string = i18next.language || "en",
 ) =>
-	new Date(timestamp).toLocaleTimeString(locale, {
+	new Date(timestamp).toLocaleTimeString(resolveLocale(locale), {
 		hour: "numeric",
 		minute: "2-digit",
 		...hourCycleOptions(timeFormat),
@@ -157,8 +170,8 @@ export const formatMessageTime = (
 		dateFormat = "auto",
 	}: { now?: number; timeFormat?: TimeFormat; dateFormat?: DateFormat } = {},
 ): string => {
-	const locale = i18next.language || "en"
-	const time = formatTimeOnly(timestamp, timeFormat)
+	const locale = resolveLocale(i18next.language)
+	const time = formatTimeOnly(timestamp, timeFormat, locale)
 	const daysAgo = Math.round((startOfDay(now) - startOfDay(timestamp)) / DAY_MS)
 
 	if (daysAgo === 0 || daysAgo === 1) {
@@ -175,7 +188,7 @@ export const formatMessageTime = (
 
 	if (dateFormat !== "auto") {
 		// Explicit numeric orders are always written in full so they stay unambiguous.
-		return `${formatDateOnly(timestamp, dateFormat)}, ${time}`
+		return `${formatDateOnly(timestamp, dateFormat, locale)}, ${time}`
 	}
 
 	const date = new Date(timestamp).toLocaleDateString(

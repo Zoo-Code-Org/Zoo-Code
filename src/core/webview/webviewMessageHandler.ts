@@ -140,13 +140,15 @@ const handlerFor = (apiConfiguration: ProviderSettings, provider: RouterName): A
 	buildApiHandler({ ...apiConfiguration, apiProvider: provider })
 
 /**
- * What the webview may send for each display value: the schema the setting is defined with. The webview is not
+ * What the webview may send for each display value (and the display language): the schema the setting is defined with. The webview is not
  * trusted, and its own controls do not bind a message that was written by hand.
  */
 const DISPLAY_VALUE_SCHEMAS = {
 	timeFormat: globalSettingsSchema.shape.timeFormat,
 	dateFormat: globalSettingsSchema.shape.dateFormat,
 	showRelativeTimes: globalSettingsSchema.shape.showRelativeTimes,
+	// The display language, which the formatters take their locale from. Null or unset means the default.
+	language: globalSettingsSchema.shape.language.nullish(),
 }
 
 export const webviewMessageHandler = async (
@@ -937,7 +939,7 @@ export const webviewMessageHandler = async (
 
 				provider.log(`[updateSettings] Save failed: ${failure}`)
 
-				if (failedKey !== undefined && isTrackedSetting(failedKey)) {
+				if (failedKey !== undefined && (isTrackedSetting(failedKey) || failedKey === "language")) {
 					vscode.window.showErrorMessage(t("common:errors.settings_save_failed", { error: failure }))
 				} else {
 					// Not a display setting: handled as it always was, once the webview has been refreshed.

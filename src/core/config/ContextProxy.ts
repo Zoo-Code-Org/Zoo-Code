@@ -368,19 +368,21 @@ export class ContextProxy {
 			return this.originalContext.globalState.update(key, value)
 		}
 
-		const cachedBefore = this.stateCache[key]
 		this.stateCache[key] = value
 		const updated = this.originalContext.globalState.update(key, value)
 		// Annotated, so it is a plain flag: the key is not narrowed to the tracked ones below.
 		const tracked: boolean = isTrackedSetting(key)
 		if (!tracked) return updated
 
-		// A rejected store never reached storage. A rollback must not treat it as someone else's store, and the
-		// cache must not keep a value that storage does not have, which the next save would read as what to restore.
+		// A rejected store may or may not have reached storage (it can fail after changing it). A rollback must not
+		// treat it as someone else's store, and the cache must show what storage really holds, so that the next save
+		// reads, and a rollback restores, the true value.
 		return Promise.resolve(updated).catch((error: unknown) => {
 			if (storeNumber !== undefined) forgetSettingStore(key, storeNumber)
 			// Unless a newer store has replaced the value meanwhile: that value stays.
-			if (this.stateCache[key] === value) this.stateCache[key] = cachedBefore
+			if (this.stateCache[key] === value) {
+				this.stateCache[key] = this.originalContext.globalState.get<GlobalState[K]>(key)
+			}
 			throw error
 		})
 	}
