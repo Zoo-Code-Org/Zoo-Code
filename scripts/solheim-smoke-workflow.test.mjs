@@ -34,6 +34,12 @@ describe("Solheim provider smoke workflow policy", () => {
 		assert.equal(checkouts[0].with["persist-credentials"], false)
 	})
 
+	it("bounds the display dependency install to five minutes", () => {
+		const apt = steps.find((step) => step.name === "Install display dependencies")
+		assert.ok(apt, "missing display dependency step")
+		assert.equal(apt["timeout-minutes"], 5)
+	})
+
 	it("exposes the provider credential only to the bounded provider step", () => {
 		const provider = steps.find((step) => step.id === "provider")
 		assert.ok(provider, "missing provider step")
