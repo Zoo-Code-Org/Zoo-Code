@@ -465,6 +465,224 @@ export function mutantCounts(report) {
 	return counts
 }
 
+export function loadEquivalences(repoRoot) {
+	const file = path.join(repoRoot, "scripts/stryker-equivalences.json")
+	if (!fs.existsSync(file)) return []
+	const parsed = JSON.parse(fs.readFileSync(file, "utf8"))
+	return parsed.equivalences ?? []
+}
+
+const MUTATOR_NODE_PREDICATES = new Map([
+	[
+		"ConditionalExpression",
+		(node) =>
+			ts.isConditionalExpression(node) ||
+			ts.isIfStatement(node) ||
+			// Stryker also emits ConditionalExpression mutants for logical expressions that gate
+			// execution (the same && can yield both ConditionalExpression and LogicalOperator).
+			(ts.isBinaryExpression(node) &&
+				[
+					ts.SyntaxKind.AmpersandAmpersandToken,
+					ts.SyntaxKind.BarBarToken,
+					ts.SyntaxKind.QuestionQuestionToken,
+				].includes(node.operatorToken.kind)),
+	],
+	[
+		"LogicalOperator",
+		(node) =>
+			ts.isBinaryExpression(node) &&
+			[
+				ts.SyntaxKind.AmpersandAmpersandToken,
+				ts.SyntaxKind.BarBarToken,
+				ts.SyntaxKind.QuestionQuestionToken,
+			].includes(node.operatorToken.kind),
+	],
+	[
+		"EqualityOperator",
+		(node) =>
+			ts.isBinaryExpression(node) &&
+			[
+				ts.SyntaxKind.EqualsEqualsToken,
+				ts.SyntaxKind.ExclamationEqualsToken,
+				ts.SyntaxKind.EqualsEqualsEqualsToken,
+				ts.SyntaxKind.ExclamationEqualsEqualsToken,
+				// Stryker's EqualityOperator also swaps relational operators.
+				ts.SyntaxKind.LessThanToken,
+				ts.SyntaxKind.GreaterThanToken,
+				ts.SyntaxKind.LessThanEqualsToken,
+				ts.SyntaxKind.GreaterThanEqualsToken,
+			].includes(node.operatorToken.kind),
+	],
+	["BooleanLiteral", (node) => node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword],
+	["ObjectLiteral", (node) => ts.isObjectLiteralExpression(node)],
+	["ArrayDeclaration", (node) => ts.isArrayLiteralExpression(node)],
+	["CallExpression", (node) => ts.isCallExpression(node)],
+	["StringLiteral", (node) => ts.isStringLiteral(node) || ts.isTemplateLiteral(node)],
+	["BlockStatement", (node) => ts.isBlock(node)],
+	[
+		"ArithmeticOperator",
+		(node) =>
+			ts.isBinaryExpression(node) &&
+			[
+				ts.SyntaxKind.PlusToken,
+				ts.SyntaxKind.MinusToken,
+				ts.SyntaxKind.AsteriskToken,
+				ts.SyntaxKind.SlashToken,
+				ts.SyntaxKind.PercentToken,
+			].includes(node.operatorToken.kind),
+	],
+])
+
+// Mutators whose Stryker start location can point at a sub-expression of the mutated node.
+const MUTATOR_SUBELEMENT_LOCATIONS = new Set(["ConditionalExpression", "LogicalOperator"])
+
+/** The AST node matched for one registry entry's line/column/mutator, or undefined. */
+function findMatchedMutatorNode(source, filePath, line, column, mutator) {
+	const predicate = MUTATOR_NODE_PREDICATES.get(mutator)
+	if (!predicate) return undefined
+	const scriptKind = filePath.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+	const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, scriptKind)
+	// Registry lines are Stryker report lines, which are 0-based: the editor shows the code at
+	// line + 1. Matching the editor line keeps the registry reviewable in a plain editor.
+	const editorLine = line + 1
+	// The registry stores Stryker's 0-based start line and column. Stryker's mutant location for
+	// condition-shaped mutators points at the mutated sub-expression (for an if statement, the
+	// test; for a logical expression, the operand), not always at the whole node, so collect the
+	// candidate roots for the mutator and then match the column against the root or any of its
+	// expression descendants on that line. Pinning the column stops a same-line edit from
+	// silently re-binding an accepted equivalence to a different mutant.
+	let matchedNode
+	// Stryker reports a condition-shaped mutant's location at the mutated sub-expression (for an
+	// if statement the test, for a logical expression the operand), so only those mutators may
+	// match a descendant at the recorded column. Every other mutator must have its own node start
+	// exactly at the column: an identifier that happens to sit at a removed call's former column
+	// must not validate a CallExpression entry.
+	const allowDescendantColumn = MUTATOR_SUBELEMENT_LOCATIONS.has(mutator)
+	function matchesColumn(node) {
+		const start = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile))
+		if (start.line + 1 !== editorLine) return false
+		if (start.character === column) return true
+		if (!allowDescendantColumn) return false
+		let childMatch = false
+		ts.forEachChild(node, (child) => {
+			if (childMatch) return
+			// Walk only expression-shaped children: a condition's operands are expressions, while
+			// the statement bodies a matched node contains are not, so this stays line-scoped.
+			if (!ts.isExpression(child) && !ts.isIfStatement(child) && !ts.isConditionalExpression(child)) return
+			if (matchesColumn(child)) childMatch = true
+		})
+		return childMatch
+	}
+	function visit(node) {
+		if (matchedNode) return
+		if (predicate(node) && matchesColumn(node)) {
+			matchedNode = node
+			return
+		}
+		ts.forEachChild(node, visit)
+	}
+	visit(sourceFile)
+	return matchedNode
+}
+
+/** Normalize source text for a stable node fingerprint across whitespace-only edits. */
+function normalizeNodeText(text) {
+	return text.replace(/\s+/g, " ").trim()
+}
+
+/**
+ * Check that every registry entry's line really holds code of the named mutator at the checked-in
+ * head. Entries are keyed by report line, so a refactor that shifts code silently disables the
+ * exclusion; this validator fails the gate instead of letting the entry drift.
+ */
+export function validateEquivalenceEntries(equivalences, readSource) {
+	const problems = []
+	for (const entry of equivalences) {
+		const source = readSource(entry.file)
+		if (source === undefined) {
+			problems.push(entry.file + ": file not found")
+			continue
+		}
+		if (!MUTATOR_NODE_PREDICATES.has(entry.mutator)) {
+			problems.push(entry.file + ":" + entry.line + ": unknown mutator " + entry.mutator)
+			continue
+		}
+		if (!Number.isInteger(entry.column) || entry.column < 0) {
+			problems.push(entry.file + ":" + entry.line + ": missing start column")
+			continue
+		}
+		const matchedNode = findMatchedMutatorNode(source, entry.file, entry.line, entry.column, entry.mutator)
+		if (!matchedNode) {
+			problems.push(
+				entry.file +
+					":" +
+					entry.line +
+					":" +
+					entry.column +
+					": expected " +
+					entry.mutator +
+					" code at line " +
+					(entry.line + 1),
+			)
+			continue
+		}
+		// The node fingerprint binds the entry to this exact AST node: a same-line/column refactor
+		// that leaves a different expression in place invalidates the entry instead of silently
+		// re-binding the accepted equivalence.
+		if (typeof entry.node === "string") {
+			if (normalizeNodeText(matchedNode.getText()) !== normalizeNodeText(entry.node)) {
+				problems.push(
+					entry.file +
+						":" +
+						entry.line +
+						":" +
+						entry.column +
+						": node fingerprint mismatch for " +
+						entry.mutator,
+				)
+			}
+		}
+	}
+	return problems
+}
+
+export function applyEquivalences(counts, equivalences, packageEntry, reportedFiles = new Set()) {
+	// The key includes the replacement: one condition yields both `=> true` and `=> false`
+	// ConditionalExpression mutants, and only the reviewed replacement may be accepted.
+	// Matching is count-limited: a compound condition emits several mutants that share the key
+	// (same line, mutator and replacement, different column), so one registry entry accepts
+	// exactly one mutant and any further mutant with that key stays blocking.
+	const entryKey = (entry) => `${entry.file}:${entry.line}:${entry.column}:${entry.mutator}:${entry.replacement}`
+	const remaining = new Map()
+	for (const entry of equivalences) {
+		const key = entryKey(entry)
+		remaining.set(key, (remaining.get(key) ?? 0) + 1)
+	}
+	const accepted = new Map()
+	const blocking = []
+	let equivalent = 0
+	for (const mutant of counts.blocking) {
+		const key = `${packageEntry.root}/${mutant.filePath}:${mutant.location?.start?.line}:${mutant.location?.start?.column}:${mutant.mutatorName}:${mutant.replacement}`
+		const left = remaining.get(key) ?? 0
+		if (left > 0) {
+			remaining.set(key, left - 1)
+			accepted.set(key, (accepted.get(key) ?? 0) + 1)
+			equivalent++
+		} else {
+			blocking.push(mutant)
+		}
+	}
+	const seen = new Map()
+	const unusedEquivalences = equivalences.filter((entry) => {
+		if (!entry.file.startsWith(packageEntry.sourceRoot) || !reportedFiles.has(entry.file)) return false
+		const key = entryKey(entry)
+		const ordinal = (seen.get(key) ?? 0) + 1
+		seen.set(key, ordinal)
+		return (accepted.get(key) ?? 0) < ordinal
+	})
+	return { ...counts, blocking, equivalent, unusedEquivalences }
+}
+
 function escapeWorkflowData(value) {
 	return String(value).replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A")
 }
@@ -569,15 +787,15 @@ export function formatSummary(rows, advisories, manifest = {}) {
 	const lines = [
 		"## Changed-code mutation testing",
 		"",
-		"| Package | Changed executable lines | Valid | Killed | Timeout | Survived | No coverage | Result |",
-		"| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+		"| Package | Changed executable lines | Valid | Killed | Timeout | Survived | No coverage | Equivalent | Result |",
+		"| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
 	]
 	for (const row of rows) {
 		lines.push(
-			`| ${row.id} | ${row.changedLines} | ${row.valid} | ${row.killed} | ${row.timeout} | ${row.survived} | ${row.noCoverage} | ${row.result} |`,
+			`| ${row.id} | ${row.changedLines} | ${row.valid} | ${row.killed} | ${row.timeout} | ${row.survived} | ${row.noCoverage} | ${row.equivalent ?? 0} | ${row.result} |`,
 		)
 	}
-	if (rows.length === 0) lines.push("| — | 0 | 0 | 0 | 0 | 0 | 0 | Not applicable |")
+	if (rows.length === 0) lines.push("| — | 0 | 0 | 0 | 0 | 0 | 0 | 0 | Not applicable |")
 
 	if (rows.length > 0) {
 		lines.push("", "### Focused tests")
@@ -670,9 +888,17 @@ export function appendSummary(rows, advisories, manifest) {
 	}
 }
 
-export function evaluateReport(report, packageEntry) {
-	const counts = mutantCounts(report)
+export function evaluateReport(report, packageEntry, equivalences = []) {
+	const reportedFiles = new Set(Object.keys(report.files ?? {}).map((filePath) => `${packageEntry.root}/${filePath}`))
+	const counts = applyEquivalences(mutantCounts(report), equivalences, packageEntry, reportedFiles)
 	const advisories = []
+	if (counts.unusedEquivalences.length > 0) {
+		advisories.push(
+			`${packageEntry.id} matched none of its accepted equivalence entries for files under test ` +
+				`(${counts.unusedEquivalences.map((entry) => `${entry.file}:${entry.line}:${entry.mutator}:${entry.replacement}`).join(", ")}). ` +
+				"The code shifted or the mutant is now killed; update or remove the stale entries.",
+		)
+	}
 	if (counts.valid > MAX_MUTANTS) {
 		advisories.push(
 			`${packageEntry.id} generated ${counts.valid} valid mutants (limit ${MAX_MUTANTS}). ` +
@@ -695,8 +921,10 @@ export function runManifest(
 	{
 		runMutation = runStryker,
 		readMutationReport = (reportPath) => JSON.parse(fs.readFileSync(reportPath, "utf8")),
+		readEquivalences = loadEquivalences,
 	} = {},
 ) {
+	const equivalences = readEquivalences(repoRoot)
 	const rows = []
 	const advisories = [...(manifest.advisories ?? [])]
 	const annotationState = { total: 0, perFile: new Map() }
@@ -737,6 +965,7 @@ export function runManifest(
 					timeout: 0,
 					survived: 0,
 					noCoverage: 0,
+					equivalent: 0,
 					result: "No mutants generated",
 				})
 				continue
@@ -746,7 +975,7 @@ export function runManifest(
 			const jsonReportPath = path.join(reportRoot, packageEntry.id, "mutation.json")
 			const report = readMutationReport(jsonReportPath)
 			packageEntry.testFiles = testsFromMutationReport(report, packageEntry.testFiles)
-			counts = evaluateReport(report, packageEntry)
+			counts = evaluateReport(report, packageEntry, equivalences)
 			for (const annotation of formatAnnotations(
 				counts.blocking,
 				packageEntry.runRoot ?? packageEntry.root,
@@ -781,6 +1010,7 @@ export function runManifest(
 				timeout: counts?.timeout ?? 0,
 				survived: counts?.survived ?? 0,
 				noCoverage: counts?.noCoverage ?? 0,
+				equivalent: counts?.equivalent ?? 0,
 				blocking: counts?.blocking ?? [],
 				result: "Advisory incomplete",
 			})
@@ -807,6 +1037,13 @@ function main() {
 	if (!baseSha || !headSha) throw new Error("--base and --head are required")
 
 	const reportRoot = path.resolve(repoRoot, argument("--reports") ?? "reports/mutation")
+	const registryProblems = validateEquivalenceEntries(loadEquivalences(repoRoot), (file) => {
+		const filePath = path.join(repoRoot, file)
+		return fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf8") : undefined
+	})
+	if (registryProblems.length > 0) {
+		throw new Error("Stryker equivalence registry is stale:\n" + registryProblems.join("\n"))
+	}
 	const manifest = selectFromGit(repoRoot, baseSha, headSha)
 	if (manifest.packages.length === 0) {
 		appendSummary([], manifest.advisories, manifest)
