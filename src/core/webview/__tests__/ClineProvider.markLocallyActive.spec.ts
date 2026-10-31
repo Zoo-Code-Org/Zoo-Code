@@ -94,6 +94,9 @@ const TaskStub = vi.hoisted(() => {
 		public overwriteClineMessages = vi.fn().mockResolvedValue(undefined)
 		public overwriteApiConversationHistory = vi.fn().mockResolvedValue(undefined)
 		public resumeAfterDelegation = vi.fn().mockResolvedValue(undefined)
+		// Private on the real Task; the provider reaches it through bracket notation
+		// on the failed-resume path, so the double must expose the same surface.
+		public stopLivenessHeartbeat = vi.fn()
 		public static instanceCount = 0
 	}
 	return TaskStub
@@ -1160,10 +1163,14 @@ describe("ClineProvider reopenParentFromDelegation continuation scheduling owner
 		expect(store.markLocallyInactive).not.toHaveBeenCalled()
 	})
 
-	it("keeps the claim and still reports the error when the admitted resume itself fails", async () => {
-		// CodeRabbit: rejection propagation from an ADMITTED resume must be preserved —
-		// the error reaches the tagged console.error handler, but the claim is NOT
-		// released because the parent session still exists in this window.
+	it("releases the claim and stops the liveness heartbeat when the admitted resume itself fails", async () => {
+		// CodeRabbit thread 4429868250: an ADMITTED resume that rejects for a non-abort
+		// reason leaves two resources behind — the eager local-ownership claim (which
+		// filters the parent out of in-window delegation repair) and the liveness
+		// heartbeat started by Task.resumeAfterDelegation (whose beats keep
+		// `lastActivityAt` fresh, masking the dead session cross-window). The provider
+		// catch arm owns both handles, so it must release both. Rejection propagation
+		// is unchanged: the error still reaches the tagged console.error handler.
 		const capture = makeCapturingSchedule()
 		const { ids, store, provider, getCreated } = makeReopenFixture(capture.schedule)
 
@@ -1179,7 +1186,10 @@ describe("ClineProvider reopenParentFromDelegation continuation scheduling owner
 		capture.rejectSchedule(new Error("resume blew up"))
 		await flushMicrotasks()
 
-		expect(store.markLocallyInactive).not.toHaveBeenCalled()
+		// The concrete parent id, not just "some release": a child-id swap must fail here.
+		expect(store.markLocallyInactive).toHaveBeenCalledTimes(1)
+		expect(store.markLocallyInactive).toHaveBeenCalledWith(ids.parentId)
+		expect(getCreated().stopLivenessHeartbeat).toHaveBeenCalledTimes(1)
 		expect(consoleErrorSpy).toHaveBeenCalledWith(
 			"[reopenParentFromDelegation] taskScheduler.schedule failed:",
 			expect.objectContaining({ message: "resume blew up" }),

@@ -4689,6 +4689,8 @@ export class ClineProvider
 								// non-fatal
 							}
 						} catch (error) {
+							this.taskHistoryStore.markLocallyInactive(parentTaskId)
+							parentInstance["stopLivenessHeartbeat"]()
 							const message = `Failed to resume parent task ${parentTaskId} after subtask ${childTaskId}: ${error instanceof Error ? error.message : String(error)}`
 							this.log(`[reopenParentFromDelegation] ${message}`)
 							await vscode.window.showErrorMessage(`${message}. Open the task from history to retry.`)
@@ -4705,7 +4707,7 @@ export class ClineProvider
 						(error) => {
 							admitContinuation()
 							// Rejected before the callback ran: no resume runs either. An admitted
-							// resume that later fails keeps its claim (its session still lives here).
+							// resume that later fails releases its claim in the catch arm above.
 							if (!schedulerAdmitted) this.taskHistoryStore.markLocallyInactive(parentTaskId)
 							console.error(
 								`[${ClineProvider.prototype.reopenParentFromDelegation.name}] taskScheduler.schedule failed:`,
