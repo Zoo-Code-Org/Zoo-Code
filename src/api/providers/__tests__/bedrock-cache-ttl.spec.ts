@@ -560,15 +560,17 @@ describe("Bedrock cache TTL capability catalog", () => {
 			for (const [index, tier] of (entry.tiers ?? []).entries()) {
 				// A tier that reprices input without repricing the 1h write is exactly the
 				// shadow this test exists to catch, so it must fail rather than be skipped.
-				if (tier.inputPrice === undefined) {
+				// The exemption is only for rows that price no 1h write at all: a 5m-only
+				// model's tier has no 1h rate to shadow.
+				if (tier.cacheWritesPrice1h === undefined) {
 					expect(
-						tier.cacheWritesPrice1h,
-						`${id} tier ${index} prices a 1h write without an input price`,
-					).toBeUndefined()
+						tier.inputPrice === undefined || entry.cacheWritesPrice1h === undefined,
+						`${id} tier ${index} reprices input but not the 1h write`,
+					).toBe(true)
 					continue
 				}
-				expect(tier.cacheWritesPrice1h, `${id} tier ${index} reprices input but not the 1h write`).toBeDefined()
-				expect(tier.cacheWritesPrice1h, `${id} tier ${index}`).toBeCloseTo(tier.inputPrice * 2, 9)
+				expect(tier.inputPrice, `${id} tier ${index}`).toBeDefined()
+				expect(tier.cacheWritesPrice1h, `${id} tier ${index}`).toBeCloseTo((tier.inputPrice as number) * 2, 9)
 			}
 		}
 	})
