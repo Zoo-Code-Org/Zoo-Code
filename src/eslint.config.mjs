@@ -1,5 +1,9 @@
 import { config } from "@roo-code/config-eslint/base"
-import { apiProviderHygieneConfig, apiProviderTestSelectors } from "@roo-code/config-eslint/api-provider-hygiene"
+import {
+	apiProviderHygieneConfig,
+	apiProviderTestSelectors,
+	apiSpecTsIgnoreConfig,
+} from "@roo-code/config-eslint/api-provider-hygiene"
 import { createProviderIdentifierConfig } from "@roo-code/config-eslint/provider-identifiers"
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
@@ -23,6 +27,15 @@ const testPathTraversalSelectors = [
 	},
 ]
 
+// Test-utils rollout guardrail: lanes converted to the shared reset helper
+// stay converted. Use clearAllMocks from test-utils/reset.
+const testResetHelperSelector = {
+	selector:
+		"CallExpression[callee.object.name='vi'][callee.property.name='clearAllMocks'], CallExpression[callee.object.name='vitest'][callee.property.name='clearAllMocks']",
+	message:
+		"Use the shared clearAllMocks() helper from src/test-utils/reset instead of calling vi.clearAllMocks() directly.",
+}
+
 /** @type {import("eslint").Linter.Config} */
 export default [
 	...config,
@@ -38,6 +51,7 @@ export default [
 			"@typescript-eslint/ban-ts-comment": "off",
 		},
 	},
+	apiSpecTsIgnoreConfig,
 	{
 		// A Stryker directive gives a short reason. Put longer rationale in the test or a code comment.
 		// ignorePattern skips every line that does not contain "Stryker", so only directives are measured.
@@ -81,9 +95,6 @@ export default [
 		},
 	},
 	{
-		ignores: [".stryker-tmp", "webview-ui", "out"],
-	},
-	{
 		// Tests inside __tests__/ directories must not traverse 3+ levels above
 		// the test file. That escapes the src/ package root and makes Turbo
 		// invisible to cache changes in those files.
@@ -106,5 +117,35 @@ export default [
 		rules: {
 			"no-restricted-syntax": ["error", ...testPathTraversalSelectors, ...apiProviderTestSelectors],
 		},
+	},
+	{
+		// Test-utils rollout guardrail: lanes converted to the shared reset
+		// helpers stay converted. Use clearAllMocks from test-utils/reset.
+		// no-restricted-syntax replaces earlier blocks for the same files, so
+		// repeat the traversal selectors here.
+		files: [
+			"core/config/__tests__/**/*.ts",
+			"services/code-index/**/__tests__/**/*.ts",
+			"integrations/terminal/**/__tests__/**/*.ts",
+		],
+		rules: {
+			"no-restricted-syntax": ["error", ...testPathTraversalSelectors, testResetHelperSelector],
+		},
+	},
+	{
+		// Same guardrail for the API provider lane; this block also replaces the
+		// API provider hygiene selectors, so repeat those too.
+		files: ["api/providers/__tests__/**/*.ts"],
+		rules: {
+			"no-restricted-syntax": [
+				"error",
+				...testPathTraversalSelectors,
+				...apiProviderTestSelectors,
+				testResetHelperSelector,
+			],
+		},
+	},
+	{
+		ignores: [".stryker-tmp", "webview-ui", "out"],
 	},
 ]

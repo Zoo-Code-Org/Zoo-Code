@@ -1,5 +1,6 @@
 import * as vscode from "vscode"
 import { makeExtensionContext, makeTextDocument, makeTextEditor, makeUri } from "../../../test-utils/vscode"
+import { clearAllMocks } from "../../../test-utils/reset"
 import { CodeIndexManager } from "../manager"
 import { CodeIndexManagerRegistry } from "../code-index-manager-registry"
 import { CodeIndexWorkspaceScope } from "../code-index-workspace-scope"
@@ -25,7 +26,7 @@ describe("CodeIndexManagerRegistry", () => {
 	let second: vscode.WorkspaceFolder
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		context = makeExtensionContext()
 		first = { uri: makeUri("/first"), name: "first", index: 0 }
 		second = { uri: makeUri("/second"), name: "second", index: 1 }

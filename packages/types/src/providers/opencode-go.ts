@@ -276,6 +276,30 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"MiMo V2 Omni is Xiaomi's multimodal reasoning model with a 256k context window. Available via the Opencode Go plan.",
 	},
+	"mimo-v2.6-flash": {
+		maxTokens: 131_072,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: false,
+		preserveReasoning: true,
+		inputPrice: 0.14,
+		outputPrice: 0.28,
+		cacheReadsPrice: 0.0028,
+		description:
+			"MiMo V2.6 Flash is Xiaomi's fast full-modal model (text, image, audio, video) with 1M context and deep thinking. Available via the Opencode Go plan.",
+	},
+	"mimo-v2.6-pro": {
+		maxTokens: 131_072,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: false,
+		preserveReasoning: true,
+		inputPrice: 0.435,
+		outputPrice: 0.87,
+		cacheReadsPrice: 0.003625,
+		description:
+			"MiMo V2.6 Pro is Xiaomi's stronger full-modal reasoning model with 1M context and deep thinking. Available via the Opencode Go plan.",
+	},
 
 	// --- MiniMax ---
 	"minimax-m2.5": {

@@ -21,7 +21,7 @@
 		"heap:summarize": "node out/heap/summarize.js"
 	},
 	"devDependencies": {
-		"@playwright/test": "1.62.1",
+		"@playwright/test": "1.64.1",
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
 		"@roo-code/types": "workspace:^",

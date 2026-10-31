@@ -109,6 +109,7 @@ import { FileContextTracker } from "../context-tracking/FileContextTracker"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
+import { DispatchState, type PendingWork } from "./dispatchState"
 import { type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
 import { manageContext, willManageContext } from "../context-management"
@@ -516,8 +517,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	currentStreamingContentIndex = 0
 	currentStreamingDidCheckpoint = false
 	assistantMessageContent: AssistantMessageContent[] = []
-	presentAssistantMessageLocked = false
-	presentAssistantMessageHasPendingUpdates = false
+	dispatchState: DispatchState = DispatchState.IDLE
+	pendingWork: PendingWork | null = null
 	userMessageContent: (Anthropic.TextBlockParam | Anthropic.ImageBlockParam | Anthropic.ToolResultBlockParam)[] = []
 	userMessageContentReady = false
 
@@ -609,7 +610,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// A non-abort presenter rejection releases the lock and is logged, but
 		// nothing schedules another presentation pass. Gating on the index would
 		// strand this wait after exactly that failure.
-		if (!this.didCompleteReadingStream || this.presentAssistantMessageLocked) {
+		if (!this.didCompleteReadingStream || this.dispatchState !== DispatchState.IDLE) {
 			return false
 		}
 
@@ -4121,8 +4122,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// for the turn that earned it: a message the user queues afterward
 				// (a new turn) is fair game for the next ask to answer.
 				this.blanketDeniedCommandThisTurn = false
-				this.presentAssistantMessageLocked = false
-				this.presentAssistantMessageHasPendingUpdates = false
+				this.dispatchState = DispatchState.IDLE
+				this.pendingWork = null
 				// No legacy text-stream tool parser.
 				this.streamingToolCallIndices.clear()
 				const nativeToolCallParserScope = NativeToolCallParser.createScope()
