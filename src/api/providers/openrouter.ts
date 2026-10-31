@@ -14,7 +14,7 @@ import {
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import {
 	convertToOpenAiMessages,
@@ -31,10 +31,16 @@ import { getModelParams } from "../transform/model-params"
 
 import { getModels } from "./fetchers/modelCache"
 import { getModelEndpoints } from "./fetchers/modelEndpointCache"
+import { applyOpenRouterMoonshotK3Profile, getOpenRouterModels } from "./fetchers/openrouter"
 
 import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
-import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions, SingleCompletionHandler } from "../index"
+import type {
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+	SingleCompletionHandler,
+} from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
 import { generateImageWithProvider, ImageGenerationResult } from "./utils/image-generation"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
@@ -61,16 +67,6 @@ const OpenRouterErrorResponseSchema = z.object({
 		})
 		.optional(),
 })
-
-// OpenRouter error structure that may include error.metadata.raw with actual upstream error
-// This is for caught exceptions which have the error wrapped in an "error" property
-interface OpenRouterErrorResponse {
-	error?: {
-		message?: string
-		code?: number
-		metadata?: { raw?: string }
-	}
-}
 
 // Direct error object structure (for streaming errors passed directly)
 interface OpenRouterError {
@@ -153,32 +149,41 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		const apiKey = this.options.openRouterApiKey ?? NOT_PROVIDED
 
 		this.client = new OpenAI({ baseURL, apiKey, defaultHeaders: DEFAULT_HEADERS, timeout: this.timeoutMs })
-
-		// Load models asynchronously to populate cache before getModel() is called
-		this.loadDynamicModels().catch((error) => {
-			console.error("[OpenRouterHandler] Failed to load dynamic models:", error)
-		})
 	}
 
-	private async loadDynamicModels(): Promise<void> {
-		try {
-			const [models, endpoints] = await Promise.all([
-				getModels({ provider: providerIdentifiers.openrouter }),
-				getModelEndpoints({
-					router: providerIdentifiers.openrouter,
-					modelId: this.options.openRouterModelId,
-					endpoint: this.options.openRouterSpecificProvider,
-				}),
-			])
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: false, keyScoped: false, authScoped: false }
+	}
 
-			this.models = models
-			this.endpoints = endpoints
-		} catch (error) {
-			console.error("[OpenRouterHandler] Error loading dynamic models:", {
-				error: error instanceof Error ? error.message : String(error),
-				stack: error instanceof Error ? error.stack : undefined,
-			})
-		}
+	async fetchModels(_options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getOpenRouterModels(undefined, ...fetchOpts)
+	}
+
+	/**
+	 * Whether the user pinned a concrete OpenRouter upstream provider. The
+	 * "[default]" sentinel means "let OpenRouter choose", so it behaves like no
+	 * selection at all.
+	 */
+	private get hasSpecificProvider(): boolean {
+		return (
+			Boolean(this.options.openRouterSpecificProvider) &&
+			this.options.openRouterSpecificProvider !== OPENROUTER_DEFAULT_PROVIDER_NAME
+		)
+	}
+
+	async ensureModelFetched(signal?: AbortSignal): Promise<void> {
+		await this.ensureCatalogLoaded(async () => {
+			await this.fetchModel()
+			// fetchModel() returns model info, not the catalog, so report emptiness
+			// from the catalogs it assigned: an empty response must stay retryable.
+			// With a specific provider selected, the endpoint catalog is what
+			// getModel() uses, so an empty endpoint response is a failed load even
+			// when the model-level catalog arrived.
+			const hasModels = Object.keys(this.models).length > 0
+			const hasEndpoints = Object.keys(this.endpoints).length > 0
+			return hasModels && (!this.hasSpecificProvider || hasEndpoints)
+		}, signal)
 	}
 
 	getReasoningDetails(): any[] | undefined {
@@ -543,12 +548,15 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 	public async fetchModel() {
 		const [models, endpoints] = await Promise.all([
-			getModels({ provider: providerIdentifiers.openrouter }),
-			getModelEndpoints({
-				router: providerIdentifiers.openrouter,
-				modelId: this.options.openRouterModelId,
-				endpoint: this.options.openRouterSpecificProvider,
-			}),
+			getModels({ provider: providerIdentifiers.openrouter }, this),
+			getModelEndpoints(
+				{
+					router: providerIdentifiers.openrouter,
+					modelId: this.options.openRouterModelId,
+					endpoint: this.options.openRouterSpecificProvider,
+				},
+				this,
+			),
 		])
 
 		this.models = models
@@ -566,6 +574,12 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			info = this.endpoints[this.options.openRouterSpecificProvider]
 		}
 
+		// Re-apply the Moonshot K3 profile at consumption time: model records are
+		// persisted in the model cache, so records cached before the profile existed
+		// still carry the fabricated max_tokens value and a boolean
+		// supportsReasoningEffort with no default effort.
+		info = applyOpenRouterMoonshotK3Profile(id, info)
+
 		// Apply tool preferences for models accessed through routers (OpenAI, Gemini)
 		info = applyRouterToolPreferences(id, info)
 
@@ -582,7 +596,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		return { id, info, topP: isDeepSeekR1 ? 0.95 : undefined, ...params }
 	}
 
-	async completePrompt(prompt: string, options?: CompletePromptOptions) {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions) {
 		const { id: modelId, maxTokens, temperature, reasoning } = await this.fetchModel()
 
 		const completionParams: OpenRouterChatCompletionParams = {

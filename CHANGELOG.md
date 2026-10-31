@@ -1,5 +1,330 @@
 # Zoo Code Changelog
 
+## [3.94.0]
+
+- ✨ **Broader model and provider support:** Use Claude Haiku 5.5 through Anthropic, send images to compatible VS Code LM models, tune temperature for OpenCode Go Responses models, and cancel requests cleanly across more providers.
+- 🔐 **More flexible MCP OAuth:** Configure static OAuth client settings, use custom callback paths, discover authentication details from `WWW-Authenticate`, and see callback failures before retrying.
+- 🧭 **Smoother chats and long sessions:** Rename tasks in history, drag files into chat without holding Shift, reduce memory retained during long sessions, and keep subtask links and replaced webviews stable.
+
+### Broader Model and Provider Support
+
+- Add Claude Haiku 5.5 to the Anthropic provider (#2208 by @app/zoomote2, PR #2212 by @app/zoomote2)
+- Add runtime image input support to VS Code language models (PR #2159 by @simurg79)
+- Add image input conversion and shim data parts for VS Code language models (PR #2196 by @simurg79)
+- Update VS Code language model metadata and regression tests (PR #2255 by @simurg79)
+- Add opt-in temperature support for OpenCode Go Responses models (#2055 by @AntzCode, PR #2160 by @AntzCode)
+- Add abort-signal support for Anthropic, Anthropic Vertex, xAI, and MiniMax (PR #1293 by @easonLiangWorldedtech)
+- Add abort-signal support for VS Code language models (PR #1300 by @easonLiangWorldedtech)
+- Add abort-signal support for Gemini, Mistral, and LiteLLM (PR #1303 by @easonLiangWorldedtech)
+- Add ensureModelFetched to the six catalog providers (PR #2191 by @p12tic)
+- Resolve the CLI model ID through provider definitions (PR #2192 by @p12tic)
+- Count compatible cache reads for OpenAI (#1591 by @GeenccMustafa, PR #1662 by @PierrunoYT)
+
+### More Flexible MCP OAuth
+
+- Add static OAuth client settings for MCP servers (#2096 by @SoccerField24x7, PR #2129 by @SoccerField24x7)
+- Support custom MCP OAuth callback paths and WWW-Authenticate discovery (#2218 by @sdbrother0, PR #2219 by @sdbrother0)
+- Report MCP OAuth callback failures before retrying (#2187 by @SoccerField24x7, PR #2238 by @SoccerField24x7)
+
+### Smoother Chats and Long Sessions
+
+- Rename tasks in history (#2112 by @designPrj, PR #2122 by @designPrj)
+- Allow dragging files into the chat input without holding Shift (#2139 by @juneleung, PR #2184 by @app/zoomote2)
+- Reduce chat memory retained during long sessions (PR #2217 by @app/zoomote2)
+- Preserve subtask link identities (PR #2228 by @simurg79)
+- Dispose view listeners and ignore stale views when the webview is replaced (#2205 by @edelauna, PR #2213 by @app/zoomote2)
+- Replace dispatch lock booleans with DispatchState (#374 by @edelauna, PR #2198 by @edelauna)
+- Treat apiConfiguration as always defined in the webview (PR #2234 by @p12tic)
+
+### Testing and Repository Automation
+
+- Use the real VS Code toolkit in Playwright visual baselines (#2105 by @edelauna, PR #2163 by @app/zoomote2)
+- Fix five webview visual tests that failed on every pull request (#2206 by @edelauna, PR #2209 by @app/zoomote2)
+- Link review gate Details to the workflow run (PR #2204 by @app/zoomote2)
+- Move the release kickoff to 12pm EST (PR #2190 by @app/zoomote2)
+
+### Dependencies and Maintenance
+
+- Update build, lint, and test tooling (PR #2101 by @app/renovate)
+- Update AI SDK core and providers (PR #2103 by @app/renovate)
+- Update @modelcontextprotocol/sdk to v1.32.0 [security] (PR #2131 by @app/renovate)
+- Update @next/eslint-plugin-next to v15.5.28 (PR #2132 by @app/renovate)
+- Update @types/node (PR #2135 by @app/renovate)
+- Update esbuild-wasm to v0.28.2 (PR #2137 by @app/renovate)
+- Update undici to v6.29.1 [security] (PR #2169 by @app/renovate)
+
+### Housekeeping
+
+- Merge the **previous v3.92.0 release preparation** after its publication; this is prior-release housekeeping, not a v3.94.0 feature (PR #2166 by @taltas)
+
+## [3.92.0]
+
+- ✨ **Faster model choice and stronger model support:** Switch models from the chat composer. Use Claude Haiku 5.5 on Amazon Bedrock, get more accurate Kimi K3 capabilities on OpenRouter, and use corrected Gemini 4 Argon limits on Vercel AI Gateway.
+- 🧭 **More reliable terminal, editing, chat, and remote workflows:** Collapse command output by default when you choose, get clearer editing failures, keep reasoning and API rows visible, and avoid startup and proxy issues in remote workspaces.
+- 🔌 **Expanded MCP marketplace:** Connect Zoo Code to AnySearch, Mailtea, and Tradehand through the MCP marketplace.
+
+### Faster Model Choice and Stronger Model Support
+
+- Add an inline model selector to the chat composer (#1502 by @daewoongoh, PR #2034 by @daewoongoh)
+- Add Claude Haiku 5.5 to the Amazon Bedrock model catalog (PR #2100 by @app/zoomote)
+- Correct Kimi K3 capabilities and reasoning effort on OpenRouter (#1316 by @CodeCruncher88, PR #1325 by @easonLiangWorldedtech)
+- Clamp Gemini 4 Argon to Google's limits on Vercel AI Gateway (PR #2073 by @taltas)
+
+### Terminal, Editing, Chat, and Remote Reliability
+
+- Add abort-signal support to the native Ollama provider (#404 by @Fuzzillogic, PR #1299 by @easonLiangWorldedtech)
+- Fix Destructive Command Guard startup errors in remote workspaces (#1603 by @atoomnetmarc, #1770 by @DaubnerF, PR #1639 by @PierrunoYT)
+- Route the Bedrock code-index embedder through the system proxy (#1772 by @LouisClt, PR #1773 by @LouisClt)
+- Require HTTPS for custom Google Gemini base URLs while allowing loopback HTTP (PR #2033 by @easonLiangWorldedtech)
+- Add a setting to collapse terminal command output by default (#605 by @AmitTzah, PR #2042 by @bigyao25)
+- Report all apply-diff failures with clearer diagnostics (PR #2053 by @simurg79)
+- Keep reasoning and API request rows visible after batched reads (#2061 by @danGO-79, PR #2126 by @PierrunoYT)
+
+### Expanded MCP Marketplace
+
+- Add AnySearch to the MCP marketplace (#1956 by @hieutran0413, PR #1955 by @hieutran0413)
+- Add Mailtea to the MCP marketplace (#2140 by @davepoon, PR #1869 by @davepoon)
+- Add Tradehand to the MCP marketplace (#2121 by @Blakefolgado, PR #2123 by @Blakefolgado)
+
+### Task Lifecycle Reliability
+
+- Add run-state divergence comparison and metrics (RSK-05) (#1795 by @edelauna, PR #2047 by @edelauna)
+- Add the run-state turn sub-machine (RSK-09) (#1800 by @edelauna, PR #2127 by @edelauna)
+- Route task latch and initialization writes through run-state events (RSK-06) (#1796 by @edelauna, PR #2128 by @edelauna)
+- Make Task.create share its startup path and promise with Task.run (#2145 by @edelauna, PR #2146 by @app/zoomote)
+
+### Testing, Performance, and Repository Automation
+
+- Enable Knip production analysis and remove dead code (#519 by @edelauna, PR #527 by @edelauna)
+- Add a trusted evaluation fixture runner and execution traces (#1896 by @edelauna, PR #1909 by @edelauna)
+- Keep the has-conflicts label while GitHub recomputes mergeability (#2045 by @edelauna, PR #2048 by @app/zoomote)
+- Refresh fork PR review-state labels after reviews (#2046 by @edelauna, PR #2049 by @app/zoomote)
+- Add weekly release kickoff automation with maintainer rotation (PR #2075 by @app/zoomote)
+- Base stale PR timing on author activity instead of bot activity (#2076 by @edelauna, PR #2077 by @app/zoomote)
+- Stabilize restart-persistence E2E coverage and improve task-message read errors (#2078 by @edelauna, PR #2080 by @app/zoomote)
+- Prevent the review-state label workflow from listening to itself (#2086 by @edelauna, PR #2088 by @app/zoomote)
+- Freeze review-state labels while GitHub computes mergeability (#2089 by @edelauna, PR #2091 by @app/zoomote)
+- Speed up lint and type checks with caching and staged-only pre-commit lint (#2090 by @edelauna, PR #2092 by @app/zoomote)
+- Keep conflict status separate from review-state turn labels (part of #2089 by @edelauna, PR #2102 by @app/zoomote)
+- Dispatch fork review follow-up using the correct repository metadata (#2133 by @edelauna, PR #2134 by @app/zoomote)
+
+### Dependencies and Maintenance
+
+- Update build, lint, and test tooling (PR #804 by @app/renovate)
+- Update KaTeX to v0.18 (PR #1975 by @app/renovate)
+- Update simple-git to v4 (PR #1976 by @app/renovate)
+- Update Zod to v4 (PR #2029 by @app/renovate)
+- Pin dependencies (PR #2035 by @app/renovate)
+- Update AI SDK core and providers (PR #2071 by @app/renovate)
+- Update @changesets/cli to v2.31.1 (PR #2081 by @app/renovate)
+- Pin dependencies after provider updates (PR #2087 by @app/renovate)
+- Update @eslint/js to v9.39.5 (PR #2094 by @app/renovate)
+- Refresh the lockfile (PR #2097 by @app/renovate)
+
+### Housekeeping
+
+- Merge the **previous v3.90.0 release preparation** after its publication; this is prior-release housekeeping, not a v3.92.0 feature (PR #2074 by @JamesRobert20)
+
+## [3.90.0]
+
+- ✨ **Providers and models:** GitHub Copilot is now a provider: sign in and Zoo Code loads your Copilot models. IO Intelligence is a provider with its own API key. Gemini 4 Argon is on Gemini and Vertex. GPT-6 Luna is on OpenCode Go. Gemini 4 Argon and GPT-6 Luna are on Zoo Gateway as well.
+- 🧭 **Tool execution:** Repeating the same tool call gets a warning, then Zoo Code stops that loop. Disabling `attempt_completion` no longer leaves a task unable to finish. Queued messages run the same command-protection checks as commands you send directly.
+- ⚡ **Reasoning and streaming:** Anthropic adaptive thinking shows in chat, and thinking tokens are counted. The R1 toggle keeps reasoning from llama.cpp, Ollama, and LM Studio. Codex keeps encrypted reasoning with the summary you see. VS Code language-model streams use guarded recovery when a stream fails.
+
+### Providers and Models
+
+- Add a GitHub Copilot provider with sign-in and live model capabilities (#1971 by @KarthickMahalingam, PR #1969 by @KarthickMahalingam)
+- Add the IO Intelligence provider (PR #1758 by @smiraldr)
+- Add Gemini 4 Argon to the Gemini and Vertex AI providers (PR #2043 by @app/zoomote)
+- Add GPT-6 Luna support for OpenCode Go (#1979 by @AntzCode, PR #2003 by @AntzCode)
+- Port six Copilot model entries to the VS Code language model provider (PR #2032 by @simurg79)
+- Complete the Copilot model port with safe input ceilings (PR #2052 by @simurg79)
+- Always send the OpenCode Go session header from a per-instance session id (#1511 by @404CN, PR #1710 by @myk1yt)
+- Show sane defaults for custom OpenAI-compatible models (#1866 by @p12tic, PR #1848 by @p12tic)
+- Fetch model lists through the ApiHandler interface (PR #1906 by @p12tic)
+
+### Safer Tool Execution
+
+- Add tiered tool-repetition detection with a soft warning and a hard stop (#771 by @p12tic, PR #1829 by @p12tic)
+- Validate tools against the request's policy snapshot instead of live settings (#1642 by @DaubnerF, PR #1749 by @DaubnerF)
+- Keep attempt completion available when it is listed in disabled tools (#1640 by @DaubnerF, PR #1751 by @DaubnerF)
+- Apply command protection checks when draining queued messages (#1170 by @edelauna, PR #1699 by @myk1yt)
+- Scope tool state to each tool call (#373 by @edelauna, PR #2015 by @edelauna)
+- Warn that apply_diff search blocks must be whole lines (#868 by @lowlight-ua, PR #1712 by @myk1yt)
+- Discover skills inside a symlinked container directory (#1842 by @p12tic, PR #1843 by @p12tic)
+
+### Reasoning and Streaming
+
+- Surface adaptive thinking display and thinking tokens for Anthropic models (#1326 by @easonLiangWorldedtech, PR #1327 by @easonLiangWorldedtech)
+- Preserve reasoning for local OpenAI-compatible models with the R1 toggle (#1118 by @ch405canova-sudo, PR #1119 by @ch405canova-sudo)
+- Preserve encrypted Codex reasoning alongside visible summaries (PR #1966 by @WebMad)
+- Integrate guarded recovery into VS Code language-model streaming (PR #1608 by @simurg79)
+- Abort in-flight OpenAI Codex requests (PR #1290 by @easonLiangWorldedtech)
+- Resolve shared AI SDK tool-call deduplication and error handling gaps (PR #799 by @easonLiangWorldedtech)
+
+### Task Lifecycle and Maintenance
+
+- Add the run-state field, write helpers, and projection (RSK-04) (#1794 by @edelauna, PR #1985 by @edelauna)
+- Decode documents from required buffers (PR #2002 by @WebMad)
+- Remove redundant captureException calls that double-count errors (PR #1702 by @myk1yt)
+- Write contributor docs and templates in Simplified Technical English (#1986 by @zoomote, PR #1987 by @app/zoomote)
+- Add a typed-test checklist to the ESLint suppressions guidance (#1419 by @coderabbitai, PR #1420 by @easonLiangWorldedtech)
+- Key the label-review workflow concurrency group per pull request (#1707 by @zoomote, PR #1739 by @app/zoomote)
+- Keep a pull request awaiting the author when a third party re-requests review (#2026 by @edelauna, PR #2027 by @app/zoomote)
+- Keep the has-conflicts label when mergeability is unknown (#2025 by @edelauna, PR #2028 by @app/zoomote)
+- Turn off unused-variable linting in src and remove dead code (PR #2038 by @app/zoomote)
+
+### Dependencies
+
+- Update undici to v6.28.1 (PR #1874 by @app/renovate)
+- Update axios to v1.20.0 (PR #1875 by @app/renovate)
+- Update shell-quote to v1.11.0 (PR #1973 by @app/renovate)
+- Update @modelcontextprotocol/sdk to v1.31.0 (PR #1974 by @app/renovate)
+- Update @ai-sdk/openai-compatible to v3 (PR #1899 by @app/renovate)
+- Update ai to v7 (PR #1907 by @app/renovate)
+- Update pretty-bytes to v7.2.0 (PR #1880 by @app/renovate)
+- Update react-i18next to v15.7.4 (PR #1887 by @app/renovate)
+
+### Housekeeping
+
+- Merge the **previous v3.88.0 release preparation** after its publication; this is prior-release housekeeping, not a v3.90.0 feature (PR #1980 by @edelauna)
+
+## [3.88.0]
+
+- ✨ **Provider and model support:** Use Grok Build and improved custom-model support. This release also fixes Bedrock model limits and sends the Codex verbosity setting.
+- 🧭 **Task reliability:** This release fixes cancellation handling, tool-turn continuation, and task-message saving.
+- ⚡ **Faster editing and chat:** File writes no longer use artificial delays by default. Chat messages carry less file data, and code actions reach the last active chat.
+
+### Provider and Model Support
+
+- Add Grok Build model metadata for xAI (#407 by @edelauna, PR #1687 by @myk1yt)
+- Honor custom model IDs for OpenAI-compatible providers (#1845 by @p12tic, PR #1846 by @p12tic)
+- Update OpenAI sane-default parameter values for custom models (#1845 by @p12tic, PR #1847 by @p12tic)
+- Add an `openAiStrictToolSchemas` setting for OpenAI-compatible gateways (#1827 by @easonLiangWorldedtech, PR #1828 by @easonLiangWorldedtech)
+- Send the Codex verbosity setting in requests (#1958 by @WebMad, PR #1977 by @tosinxt)
+- Expose the Opus 5.5 output token limit on Bedrock (PR #1903 by @PierrunoYT)
+- Resolve custom ARN capabilities from the underlying Bedrock model (#1968 by @kw-bivanov, PR #1970 by @kw-bivanov)
+
+### Task Reliability
+
+- Recover completed tool-turn continuation (#1883 by @jaszhix, PR #1884 by @jaszhix)
+- Make task-message saving stage-independent and finalize open partial tool asks (#1933 by @easonLiangWorldedtech, PR #1927 by @easonLiangWorldedtech)
+- Check abort before an ask row posts (#1803 by @edelauna, PR #1895 by @edelauna)
+- Add shared abort-signal cancellation-scope helpers (PR #1651 by @easonLiangWorldedtech)
+- Forward the task abort signal in OpenAI and LM Studio handlers (#1450 by @allo-, PR #1686 by @myk1yt)
+- Fix permanent DeepSeek and OpenAI request failures from lone UTF-16 surrogates in task history (#461 by @yoloseeyou, PR #1831 by @app/zoomote)
+- Reject unsupported MIME types in image blocks (PR #1961 by @WebMad)
+
+### Faster Editing and Chat
+
+- Remove artificial write delays by default (part of #1375) (PR #1381 by @easonLiangWorldedtech)
+- Omit `originalContent` from webview messages and fetch it on demand (#1885 by @daewoongoh, PR #1943 by @daewoongoh)
+- Route code actions to the last active chat (#1944 by @WebMad, PR #1946 by @WebMad)
+- Preserve Unicode when clipping file lines (PR #1960 by @WebMad)
+- Keep the streamed read path empty until content is available (PR #1962 by @WebMad)
+
+### Safety, Code Index, and Maintenance
+
+- Add blanket auto-deny for unapproved commands in hands-free mode (#1569 by @DaubnerF, PR #1760 by @DaubnerF)
+- Remove automatic startup embedder validation (PR #1879 by @WebMad)
+- Refresh code-index status routing on workspace-folder changes (#1857 by @WebMad, PR #1957 by @tosinxt)
+- Parse MCP tool names with double underscores in server names (#1731 by @myk1yt, PR #1737 by @myk1yt)
+- Add the pure run-state kernel module (RSK-01) (#1791 by @edelauna, PR #1942 by @edelauna)
+- Remove the dead Task.isPaused field (RSK-12) (#1793 by @edelauna, PR #1894 by @edelauna)
+- Disable extensions when launching the Extension Host for debugging (#1859 by @daewoongoh, PR #1860 by @daewoongoh)
+- Revert the `apply_diff` line-number prompt guidance (PR #1908 by @app/zoomote)
+- Add packages/types to changed-code mutation testing (#1892 by @edelauna, PR #1893 by @app/zoomote)
+- Wait for the resolved context window in the visual chat scenario (PR #1941 by @p12tic)
+- Remove the stray tab before the Tool Use Guidelines heading (#1415 by @daewoongoh, PR #1440 by @easonLiangWorldedtech)
+- Update posthog-js to v1.435.3 (PR #1586 by @app/renovate)
+- Update posthog-node to v5.55.0 (PR #1587 by @app/renovate)
+- Merge the **previous v3.86.0 release preparation** after its publication; this is prior-release housekeeping, not a v3.88.0 feature (PR #1897 by @taltas)
+
+## [3.86.0]
+
+- ✨ **New model support:** Use GPT-6.1 Sol, get the corrected Claude Opus 5.5 output budget, and select DeepSeek V4.1 Flash on OpenCode Go.
+- 🧭 **Reliable task aborts and interruptions:** Preserve the first abort reason, reset stream-abort state for each request, and stop interrupted tasks from replaying rejected subtasks.
+- 🛠️ **Dependable tools, prompts, and UI streaming:** Keep streamed tool arguments intact, enforce MCP tool policy, prevent invented line numbers, and smooth chat updates.
+
+### Model Support
+
+- Add GPT-6.1 Sol support for OpenAI (#1863 by @WebMad, PR #1864 by @WebMad)
+- Correct the Claude Opus 5.5 output budget (#1853 by @jaszhix, PR #1854 by @jaszhix)
+- Add DeepSeek V4.1 Flash metadata for OpenCode Go (#1648 by @carloslato, PR #1659 by @PierrunoYT)
+
+### Task Reliability
+
+- Preserve the first abort reason when a task stops (#1802 by @edelauna, PR #1811 by @edelauna)
+- Reset stream-abort state for each API request (#1801 by @edelauna, PR #1812 by @edelauna)
+- Prevent interrupted tasks from replaying rejected subtasks (#1714 by @huankimtran, PR #1726 by @edelauna)
+
+### Tools, Prompts, and Streaming
+
+- Preserve streamed native tool-call arguments across partial chunks (#695 by @awschmeder, PR #700 by @awschmeder)
+- Truncate VS Code LM tool results safely within the context window (PR #1606 by @simurg79)
+- Validate native MCP tool calls through the shared tool-policy layer (#1646 by @DaubnerF, PR #1724 by @DaubnerF)
+- Prevent invented line numbers in `apply_diff` prompts (PR #641 by @faitno)
+- Warn against including line numbers in `search_replace`, `edit_file`, and `read_file` inputs (#716 by @edelauna, PR #1685 by @myk1yt)
+- Batch repeated tool preambles in the chat UI (#1656 by @petersjostrom, PR #1658 by @PierrunoYT)
+- Avoid flushing throttled UI state for partial say messages (#1851 by @daewoongoh, PR #1852 by @daewoongoh)
+- Keep markdown-sourced open-file requests inside the workspace (PR #1762 by @easonLiangWorldedtech)
+- Use `127.0.0.1` for the development server to avoid IPv6 localhost resolution issues (#1588 by @hnbdr, PR #1589 by @hnbdr)
+
+### Code Index and Maintenance
+
+- Introduce workspace scopes behind the code-index registry (PR #1766 by @WebMad)
+- Add code-index feature scopes and centralize status subscriptions (PR #1768 by @WebMad)
+- Centralize code-index workspace scopes and enablement (PR #1778 by @WebMad)
+- Use immutable code-index configuration snapshots (#1788 by @WebMad, PR #1815 by @WebMad)
+- Separate code-index service factories and embedder validation (#1816 by @WebMad, PR #1818 by @WebMad)
+- Extract code-index scan execution without changing behavior (#1819 by @WebMad, PR #1834 by @WebMad)
+- Extract code-index single-file preparation (PR #1836 by @WebMad)
+- Update `lru-cache` to 11.5.3 (PR #1583 by @app/renovate)
+- Update Mocha to 11.8.0 (PR #1585 by @app/renovate)
+- Document P1 persisted ownership and the run-state kernel target architecture (PR #1706 by @app/zoomote)
+- Add a community-approved label for community code approvals (#1872 by @edelauna, PR #1873 by @app/zoomote)
+- Merge the **previous v3.84.0 release preparation** after its publication; this is prior-release housekeeping, not a v3.86.0 feature (PR #1810 by @taltas)
+
+## [3.84.0]
+
+- ✨ **New SOTA models added:** Use GPT-6 Sol, GPT-6 Luna, and Claude Opus 5.5 across supported providers.
+- 🧭 **More reliable tasks and subtasks:** Keep delegated modes isolated, preserve subtask links after repeated stops, and protect orchestrator settings when slash commands switch modes.
+- 🛠️ **More dependable terminal, provider, and code-search behavior:** Improve terminal behavior across Windows and non-English environments, strengthen provider responses and cancellation, and make code search use the correct workspace more consistently.
+
+### Minor Changes
+
+- Add GPT-6 Sol and GPT-6 Luna to OpenAI model catalogs (PR #1755 by @app/zoomote)
+- Add Claude Opus 5.5 across supported model providers (PR #1756 by @app/zoomote)
+- Correct the Vertex Claude Opus 5.5 maximum output limit to 128K tokens (PR #1777 by @wrsfmss)
+- Report Amazon Bedrock output truncation and expose model token limits (#1668 by @LouisClt, PR #1718 by @PierrunoYT)
+- Sanitize lone UTF-16 surrogates in VS Code LM text and tool input (PR #1605 by @simurg79)
+- Clear stale native tool-call arguments when finalization fails (#1221 by @canblmz1, PR #1634 by @canblmz1)
+- Preserve concurrent MCP settings when the settings file is first created (#1371 by @pajitosingh, PR #1380 by @easonLiangWorldedtech)
+- Use the canonical default model for the native OpenAI provider (#992 by @WebMad, PR #1627 by @JunyongParkDev)
+- Propagate caller cancellation into dynamic model-catalog fetches (#1615 by @DaubnerF, PR #1683 by @DaubnerF)
+- Inherit the host UTF-8 locale in terminals instead of forcing `en_US.UTF-8` (#1084 by @scottdk, PR #1713 by @hebulin)
+- Prevent Inline Terminal from falling back to `cmd.exe` incorrectly on Windows (#705 by @myk1yt, PR #1673 by @xcloudx01)
+- Report the shell that actually runs commands under Inline Terminal (#1568 by @DaubnerF, PR #1682 by @DaubnerF)
+- Search the task workspace instead of the active editor workspace in codebase search (PR #1629 by @WebMad)
+- Initialize external code-index task managers before search begins (#1722 by @WebMad, PR #1725 by @WebMad)
+- Align codebase-search readiness checks across mode filters (PR #1630 by @WebMad)
+- Keep delegated child modes isolated from their parent task (#1632 by @robert-shade, PR #1637 by @PierrunoYT)
+- Prevent slash-command mode frontmatter from overwriting the orchestrator task mode (#1776 by @edelauna, PR #1784 by @edelauna)
+- Preserve parent and child task links after repeated Stop actions (#1676 by @jaszhix, PR #1678 by @jaszhix)
+- Stop task-history updates from writing the entire history to global state (#1542 by @edelauna, PR #1664 by @PierrunoYT)
+- Add a guarded VS Code LM tool-call recovery parser and normalized schema conversion (PR #1188 by @simurg79)
+- Stabilize restart conversation-history E2E coverage with polling (#1641 by @DaubnerF, PR #1663 by @PierrunoYT)
+- Update Vitest to 4.1.11 for security fixes (PR #1582 by @app/renovate)
+- Reduce Windows CI cold-start time (PR #1654 by @app/zoomote)
+- Mask the context-token counter in Electron sidebar snapshots (#1679 by @edelauna, PR #1680 by @edelauna)
+- Add scope-boundary guidance to CodeRabbit global path instructions (PR #1757 by @app/zoomote)
+- Allow non-organization members to interact with CodeRabbit chat (PR #1775 by @app/zoomote)
+- Isolate workflow configuration tests from the Turbo cache (#1722 by @WebMad, PR #1782 by @edelauna)
+- Add the task-lifecycle verification gap report and remediation blocks (PR #1626 by @app/zoomote)
+- Add the stable release documentation PR step to the release workflow (PR #1786 by @taltas)
+- Update the weekly release-reminder rotation (#1698 by @app/zoomote, PR #1700 by @app/zoomote)
+- Merge the v3.82.2 release preparation state into `main` (PR #1677 by @edelauna)
+
 ## [3.82.2]
 
 ### Patch Changes

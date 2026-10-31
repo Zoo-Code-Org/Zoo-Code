@@ -113,6 +113,15 @@
 	},
 	"selectMode": "対話モードを選択",
 	"selectApiConfig": "API構成を選択",
+	"selectModel": "モデルを選択",
+	"modelSelector": {
+		"title": "モデル",
+		"settings": "モデル設定",
+		"description": "この API 設定で使用するモデルを選択します。",
+		"searchPlaceholder": "モデルを検索...",
+		"unsupportedTooltip": "このプロバイダーのモデルは設定で構成します",
+		"loading": "モデルを読み込み中..."
+	},
 	"lockApiConfigAcrossModes": "このワークスペースのすべてのモードでAPI構成をロック",
 	"unlockApiConfigAcrossModes": "このワークスペースのすべてのモードでAPI構成がロックされています（クリックで解除）",
 	"enhancePrompt": "追加コンテキストでプロンプトを強化",
@@ -343,10 +352,10 @@
 		"title": "Zoo Code {{version}} リリース",
 		"support": "<githubLink>GitHub</githubLink>でスターを付けて Zoo Code を応援してください。",
 		"release": {
-			"heading": "新機能:",
-			"highlight1": "🔑 Zoo Gateway API キーをどこでも使用できます。OpenAI 互換のクライアントやワークフローにそのまま追加できます: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 期間限定で、Zoo Gateway から MiniMax-M3 に無料でアクセスできます。",
-			"highlight3": "✨ 新登場: 最新モデル GPT-6 Astra と Claude Fable 5.1 が利用可能になりました。"
+			"heading": "Zoo Code v3.94.0 の新機能",
+			"highlight1": "✨ さらに広がるモデルとプロバイダーのサポート: Anthropic 経由で Claude Haiku 5.5 を使用し、対応する VS Code LM モデルに画像を送信し、OpenCode Go Responses モデルの temperature を調整し、より多くのプロバイダーでリクエストをクリーンにキャンセルできます。",
+			"highlight2": "🔐 より柔軟な MCP OAuth: 静的な OAuth クライアント設定を構成し、カスタムコールバックパスを使用し、WWW-Authenticate から認証の詳細を取得し、再試行前にコールバックの失敗を確認できます。",
+			"highlight3": "🧭 よりスムーズなチャットと長時間セッション: 履歴でタスク名を変更し、Shift を押さずにファイルをチャットにドラッグし、長時間セッション中に保持されるメモリを削減し、サブタスクのリンクと置き換えられた webview を安定して維持できます。"
 		},
 		"cloudAgents": {
 			"heading": "クラウドの新機能:",
@@ -487,6 +496,10 @@
 		"serversPart_other": "{{count}} MCP サーバー",
 		"messageTemplate": "{{servers}}経由で{{tools}}が有効になっています。このような高い数は、モデルを混乱させてエラーを引き起こす可能性があります。{{threshold}}以下に保つようにしてください。",
 		"openMcpSettings": "MCP 設定を開く"
+	},
+	"ignoredDisabledTools": {
+		"title": "無効化されたツールは無視されました",
+		"messageTemplate": "次のツールは無効化できないため、対応する disabledTools エントリは無視されました: {{tools}}。"
 	},
 	"readCommandOutput": {
 		"title": "Zooがコマンド出力を読み込みました"

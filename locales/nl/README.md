@@ -47,11 +47,11 @@ Zoo Code bouwt voort op het fundament van Roo Code en breidt dit verder uit met:
 - **Betrouwbaardere terminal- en bewerkingsworkflows** — oplossingen voor voortijdige terminalvoltooiing, race conditions in taakstatussen, contextbeheer, diff-bewerking en providerspecifiek toolgebruik.
 - **Meer controle over je workspace** — regelbeheer, MCP-beperkingen per modus, padbeheer voor multi-root-workspaces, reasoning-opties voor modellen en acties om wijzigingen bij voltooiing te beoordelen.
 
-## Nieuw in v3.82.0
+## Nieuw in v3.94.0
 
-- 🔑 **Gebruik je Zoo Gateway API-sleutel overal** — voeg hem toe aan elke OpenAI-compatibele client of workflow: https://zoocode.dev/models
-- 🎁 **Tijdelijk gratis modeltoegang** — krijg gratis toegang tot MiniMax-M3 via Zoo Gateway.
-- ✨ **Gloednieuwe modellen** — GPT-6 Astra en Claude Fable 5.1 zijn nu beschikbaar.
+- ✨ **Bredere model- en providerondersteuning:** Gebruik Claude Haiku 5.5 via Anthropic, stuur afbeeldingen naar compatibele VS Code LM-modellen, pas de temperatuur aan voor OpenCode Go Responses-modellen en annuleer verzoeken netjes bij meer providers.
+- 🔐 **Flexibeler MCP OAuth:** Configureer statische OAuth-clientinstellingen, gebruik aangepaste callback-paden, ontdek authenticatiedetails uit `WWW-Authenticate` en zie callback-fouten voordat je het opnieuw probeert.
+- 🧭 **Vloeiendere chats en lange sessies:** Hernoem taken in de geschiedenis, sleep bestanden in de chat zonder Shift ingedrukt te houden, verminder het geheugen dat tijdens lange sessies wordt vastgehouden en houd subtaaklinks en vervangen webviews stabiel.
 
 ## Wat kan Zoo Code voor JOU doen?
 

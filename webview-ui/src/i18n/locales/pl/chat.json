@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Wybierz tryb interakcji",
 	"selectApiConfig": "Wybierz konfigurację API",
+	"selectModel": "Wybierz model",
+	"modelSelector": {
+		"title": "Modele",
+		"settings": "Ustawienia modelu",
+		"description": "Wybierz model używany w tej konfiguracji API.",
+		"searchPlaceholder": "Szukaj modeli...",
+		"unsupportedTooltip": "Model tego dostawcy jest konfigurowany w Ustawieniach",
+		"loading": "Ładowanie modeli..."
+	},
 	"lockApiConfigAcrossModes": "Zablokuj konfigurację API dla wszystkich trybów w tym obszarze roboczym",
 	"unlockApiConfigAcrossModes": "Konfiguracja API jest zablokowana dla wszystkich trybów w tym obszarze roboczym (kliknij, aby odblokować)",
 	"enhancePrompt": "Ulepsz podpowiedź dodatkowym kontekstem",
@@ -343,10 +352,10 @@
 		"title": "Zoo Code {{version}} wydany",
 		"support": "Wesprzyj Zoo Code, dając nam gwiazdkę na <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Co nowego:",
-			"highlight1": "🔑 Używaj swojego klucza API Zoo Gateway wszędzie—dodaj go do dowolnego klienta lub workflow zgodnego z OpenAI: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 Przez ograniczony czas korzystaj bezpłatnie z MiniMax-M3 przez Zoo Gateway.",
-			"highlight3": "✨ Już dostępne: zupełnie nowe modele GPT-6 Astra i Claude Fable 5.1."
+			"heading": "Nowości w Zoo Code v3.94.0",
+			"highlight1": "✨ Szersza obsługa modeli i dostawców: Używaj Claude Haiku 5.5 przez Anthropic, wysyłaj obrazy do zgodnych modeli VS Code LM, dostrajaj temperaturę dla modeli OpenCode Go Responses i anuluj żądania w czysty sposób u większej liczby dostawców.",
+			"highlight2": "🔐 Bardziej elastyczne MCP OAuth: Skonfiguruj statyczne ustawienia klienta OAuth, użyj niestandardowych ścieżek callback, odkrywaj szczegóły uwierzytelniania z nagłówka WWW-Authenticate i zobacz błędy callback przed ponowną próbą.",
+			"highlight3": "🧭 Płynniejsze czaty i długie sesje: Zmieniaj nazwy zadań w historii, przeciągaj pliki do czatu bez przytrzymywania Shift, zmniejszaj ilość pamięci zachowywanej podczas długich sesji i utrzymuj stabilne linki podzadań oraz zastąpione widoki webview."
 		},
 		"cloudAgents": {
 			"heading": "Nowości w chmurze:",
@@ -487,6 +496,10 @@
 		"serversPart_other": "{{count}} serwerów MCP",
 		"messageTemplate": "Masz {{tools}} włączonych przez {{servers}}. Taka duża liczba może zamieszać model i prowadzić do błędów. Staraj się, aby była poniżej {{threshold}}.",
 		"openMcpSettings": "Otwórz ustawienia MCP"
+	},
+	"ignoredDisabledTools": {
+		"title": "Zignorowano wyłączane narzędzie",
+		"messageTemplate": "Następujących narzędzi nie można wyłączyć, dlatego ich wpisy w disabledTools zostały zignorowane: {{tools}}."
 	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"

@@ -20,14 +20,6 @@ export interface ModelInfo {
 }
 
 /**
- * Cache point definition
- */
-export interface CachePoint {
-	/** Type of cache point */
-	type: "default"
-}
-
-/**
  * Result of cache strategy application
  */
 export interface CacheResult {

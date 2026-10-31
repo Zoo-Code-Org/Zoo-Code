@@ -346,6 +346,10 @@
 				"label": "파괴적 명령어 보호 활성화",
 				"description": "이 플랫폼용 Destructive Command Guard(DCG)를 다운로드하여 사용합니다. DCG가 허용한 명령어는 자동으로 실행됩니다. DCG가 차단한 명령어는 실행 전 승인이 필요합니다. 이 옵션을 사용하는 동안 Zoo의 명령어 목록은 비활성화됩니다. 옵션을 꺼도 다운로드한 실행 파일은 유지됩니다."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "허용된 자동 실행 명령",
 			"allowedCommandsDescription": "\"실행 작업 항상 승인\"이 활성화되었을 때 자동 실행될 수 있는 명령 접두사. 모든 명령을 허용하려면 * 추가(주의해서 사용)",
 			"deniedCommands": "거부된 명령",
@@ -394,6 +398,11 @@
 		"vscodeLmDescription": "VS Code 언어 모델 API를 사용하면 GitHub Copilot을 포함한 기타 VS Code 확장 프로그램이 제공하는 모델을 실행할 수 있습니다. 시작하려면 VS Code 마켓플레이스에서 Copilot 및 Copilot Chat 확장 프로그램을 설치하는 것이 가장 쉽습니다.",
 		"awsCustomArnUse": "사용하려는 모델의 유효한 Amazon Bedrock ARN을 입력하세요. 형식 예시:",
 		"awsCustomArnDesc": "ARN의 리전이 위에서 선택한 AWS 리전과 일치하는지 확인하세요.",
+		"awsCustomArnBaseModel": "기본 모델",
+		"awsCustomArnBaseModelOther": "기타(목록에 없음)",
+		"awsCustomArnBaseModelDesc": "이 ARN이 가리키는 모델입니다. Zoo Code는 사고, temperature, 컨텍스트 창, 최대 출력 및 가격 책정에 이 모델을 사용합니다. ARN에 모델 이름이 있으면 자동으로 감지됩니다.",
+		"awsCustomArnContextWindow": "컨텍스트 창(토큰)",
+		"awsCustomArnMaxTokens": "최대 출력 토큰",
 		"openRouterApiKey": "OpenRouter API 키",
 		"getOpenRouterApiKey": "OpenRouter API 키 받기",
 		"vercelAiGatewayApiKey": "Vercel AI Gateway API 키",
@@ -402,6 +411,12 @@
 		"getOpencodeGoApiKey": "Opencode Go API 키 받기",
 		"kenariApiKey": "Kenari API 키",
 		"getKenariApiKey": "Kenari API 키 받기",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "IO Intelligence API 키",
+			"getApiKey": "IO Intelligence API 키 받기",
+			"model": "모델"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API 키",
@@ -530,6 +545,8 @@
 		"apiKey": "API 키",
 		"openAiApiKey": "OpenAI API 키",
 		"openAiBaseUrl": "기본 URL",
+		"openAiStrictToolSchemas": "엄격한 도구 스키마 (strict: true)",
+		"openAiStrictToolSchemasDescription": "스키마를 엄격하게 준수하도록 하려면 도구 스키마에 strict: true를 포함해 보냅니다. 비엄격 도구 호출을 사용하려면 비활성화하세요.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure 배포 이름",
 		"azureOpenAiDeploymentNameDescription": "기반 모델 이름이 아닌 Azure AI Studio의 배포 이름을 입력하세요.",
@@ -568,6 +585,16 @@
 		"enablePromptCaching": "프롬프트 캐시 활성화",
 		"enablePromptCachingTitle": "지원되는 모델의 성능을 향상시키고 비용을 절감하기 위해 프롬프트 캐시를 활성화합니다.",
 		"cacheUsageNote": "참고: 캐시 사용이 표시되지 않는 경우, 다른 모델을 선택한 다음 원하는 모델을 다시 선택해 보세요.",
+		"githubCopilot": {
+			"accountActions": "GitHub Copilot 계정 작업",
+			"signIn": "GitHub에 로그인",
+			"reconnect": "GitHub 다시 연결",
+			"signedIn": "{{account}}(으)로 로그인됨",
+			"connecting": "연결 중...",
+			"noModels": "사용 가능한 Copilot 모델이 없습니다. GitHub Copilot Chat을 설치하거나 활성화하고, 자격이 있는 GitHub 계정으로 로그인한 후 새로고침하세요. 로그인만으로는 Copilot 구독이 확인되지 않습니다. GitHub 요금제, 프리미엄 요청 및 속도 제한이 적용됩니다.",
+			"manageAccount": "GitHub 계정 관리",
+			"manageAccountDescription": "VS Code의 계정 메뉴를 엽니다. 여기에서 GitHub에서 로그아웃할 수 있습니다. 로그아웃하면 Copilot과 이 계정을 사용하는 다른 확장 프로그램에 영향을 줍니다."
+		},
 		"vscodeLmModel": "언어 모델",
 		"vscodeLmWarning": "참고: VS Code Language Model API를 통해 액세스되는 모델은 공급자가 래핑하거나 미세 조정했을 수 있어, 일반적인 공급자나 라우터에서 동일한 모델을 직접 사용할 때와 동작이 다를 수 있습니다. ‘Language Model’ 드롭다운의 모델을 사용하려면 먼저 해당 모델로 전환한 다음 Copilot Chat 프롬프트에서 ‘허용(수락)’을 클릭하세요. 그렇지 않으면 400 ‘The requested model is not supported’와 같은 오류가 발생할 수 있습니다.",
 		"googleCloudSetup": {
@@ -595,7 +622,7 @@
 			"baseUrl": "기본 URL (선택사항)",
 			"modelId": "모델 ID",
 			"apiKey": "Ollama API 키",
-			"apiKeyHelp": "인증된 Ollama 인스턴스나 클라우드 서비스용 선택적 API 키. 로컬 설치의 경우 비워두세요.",
+			"apiKeyHelp": "인증이 필요한 Ollama 인스턴스 또는 클라우드 서비스용 선택적 API 키. Zoo Code는 키를 HTTPS 또는 루프백 엔드포인트에만 보냅니다. 원격 HTTP 엔드포인트에는 키를 보내지 않습니다. 키가 평문으로 전달되기 때문입니다. 키가 필요한 원격 인스턴스에는 HTTPS를 사용하세요. 로컬 설치의 경우 비워두세요.",
 			"numCtx": "컨텍스트 창 크기(num_ctx)",
 			"numCtxHelp": "모델의 기본 컨텍스트 창 크기를 재정의합니다. 모델의 Modelfile 구성을 사용하려면 비워 둡니다. 최소값은 128입니다.",
 			"thinking": "추론 활성화",
@@ -661,6 +688,10 @@
 			"description": "'Zoo에 문제가 발생했습니다' 대화 상자를 표시하기 전의 연속 오류 또는 반복 작업 수. 이 안전 메커니즘을 비활성화하려면 0으로 설정하세요(절대 트리거되지 않음).",
 			"unlimitedDescription": "무제한 재시도 활성화 (자동 진행). 대화 상자가 나타나지 않습니다.",
 			"warning": "⚠️ 0으로 설정하면 무제한 재시도가 허용되어 상당한 API 사용량이 발생할 수 있습니다"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "반복 소프트 경고 임계값",
+			"description": "동일한 연속 도구 호출이 이 횟수에 도달하면 도구가 차단되고 사용자를 개입시키지 않고 AI에게 재시도 사유를 묻습니다. 0으로 설정하면 소프트 경고가 비활성화됩니다."
 		},
 		"reasoningEffort": {
 			"label": "모델 추론 노력",
@@ -820,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "명령 출력을 기본적으로 접기",
+			"description": "인라인 터미널을 포함한 명령 출력을 접어서 표시합니다. 필요할 때 수동으로 펼칠 수 있습니다. 명령 실행 방식은 변경되지 않습니다."
+		},
 		"basic": {
 			"label": "터미널 설정: 기본",
 			"description": "기본 터미널 설정"
@@ -987,8 +1022,14 @@
 		"rangeDescription": "높은 값은 출력을 더 무작위하게, 낮은 값은 더 결정적으로 만듭니다."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "이미지 지원 여부가 보고되지 않음",
+		"toolSupportUnknown": "도구 지원 여부가 보고되지 않음",
+		"promptCacheManagedByCopilot": "프롬프트 캐싱은 GitHub Copilot이 관리합니다",
+		"promptCacheCopilotDetails": "캐싱은 모델과 GitHub Copilot 백엔드에 따라 달라집니다. Zoo Code는 VS Code API를 통해 캐시 보존 기간을 설정하거나 캐시 적중 여부를 확인할 수 없습니다.",
 		"supportsImages": "이미지 지원",
 		"noImages": "이미지 지원 안 함",
+		"supportsTools": "도구 지원",
+		"noTools": "도구 지원 안 함",
 		"supportsPromptCache": "프롬프트 캐시 지원",
 		"noPromptCache": "프롬프트 캐시 지원 안 함",
 		"contextWindow": "컨텍스트 창:",

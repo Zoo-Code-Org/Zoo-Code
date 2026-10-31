@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Seleziona modalità di interazione",
 	"selectApiConfig": "Seleziona la configurazione API",
+	"selectModel": "Seleziona modello",
+	"modelSelector": {
+		"title": "Modelli",
+		"settings": "Impostazioni del modello",
+		"description": "Scegli il modello da usare per questa configurazione API.",
+		"searchPlaceholder": "Cerca modelli...",
+		"unsupportedTooltip": "Il modello di questo provider si configura nelle Impostazioni",
+		"loading": "Caricamento dei modelli..."
+	},
 	"lockApiConfigAcrossModes": "Blocca la configurazione API per tutte le modalità in questo workspace",
 	"unlockApiConfigAcrossModes": "La configurazione API è bloccata per tutte le modalità in questo workspace (clicca per sbloccare)",
 	"enhancePrompt": "Migliora prompt con contesto aggiuntivo",
@@ -343,10 +352,10 @@
 		"title": "Rilasciato Zoo Code {{version}}",
 		"support": "Sostieni Zoo Code lasciandoci una stella su <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Novità:",
-			"highlight1": "🔑 Usa la tua chiave API Zoo Gateway ovunque: portala in qualsiasi client o workflow compatibile con OpenAI: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 Per un periodo limitato, accedi gratuitamente a MiniMax-M3 tramite Zoo Gateway.",
-			"highlight3": "✨ Ora disponibili: i nuovissimi modelli GPT-6 Astra e Claude Fable 5.1."
+			"heading": "Novità di Zoo Code v3.94.0",
+			"highlight1": "✨ Supporto di modelli e provider più ampio: Usa Claude Haiku 5.5 tramite Anthropic, invia immagini ai modelli VS Code LM compatibili, regola la temperatura per i modelli OpenCode Go Responses e annulla le richieste in modo pulito su più provider.",
+			"highlight2": "🔐 OAuth MCP più flessibile: Configura impostazioni statiche del client OAuth, usa percorsi di callback personalizzati, scopri i dettagli di autenticazione da WWW-Authenticate e individua gli errori di callback prima di riprovare.",
+			"highlight3": "🧭 Chat più fluide e sessioni lunghe: Rinomina le attività nella cronologia, trascina i file nella chat senza tenere premuto Shift, riduci la memoria mantenuta durante le sessioni lunghe e mantieni stabili i link dei sottotask e i webview sostituiti."
 		},
 		"cloudAgents": {
 			"heading": "Novità nel Cloud:",
@@ -487,6 +496,10 @@
 		"serversPart_other": "{{count}} server MCP",
 		"messageTemplate": "Hai {{tools}} abilitate via {{servers}}. Un numero così alto può confondere il modello e portare a errori. Prova a mantenerlo sotto {{threshold}}.",
 		"openMcpSettings": "Apri impostazioni MCP"
+	},
+	"ignoredDisabledTools": {
+		"title": "Strumento disabilitato ignorato",
+		"messageTemplate": "I seguenti strumenti non possono essere disabilitati, quindi le relative voci di disabledTools sono state ignorate: {{tools}}."
 	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"

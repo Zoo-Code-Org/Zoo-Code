@@ -113,6 +113,7 @@
 	},
 	"selectMode": "상호작용 모드 선택",
 	"selectApiConfig": "API 구성 선택",
+	"selectModel": "모델 선택",
 	"lockApiConfigAcrossModes": "이 워크스페이스의 모든 모드에서 API 구성 잠금",
 	"unlockApiConfigAcrossModes": "이 워크스페이스의 모든 모드에서 API 구성이 잠겨 있습니다 (클릭하여 해제)",
 	"enhancePrompt": "추가 컨텍스트로 프롬프트 향상",
@@ -133,6 +134,14 @@
 		"description": "Zoo의 행동을 맞춤화하는 전문화된 페르소나.",
 		"searchPlaceholder": "모드 검색...",
 		"noResults": "결과를 찾을 수 없습니다"
+	},
+	"modelSelector": {
+		"title": "모델",
+		"settings": "모델 설정",
+		"description": "이 API 구성에서 사용할 모델을 선택하세요.",
+		"searchPlaceholder": "모델 검색...",
+		"unsupportedTooltip": "이 공급자의 모델은 설정에서 구성합니다",
+		"loading": "모델 로드 중..."
 	},
 	"errorReadingFile": "파일 읽기 오류",
 	"noValidImages": "처리된 유효한 이미지가 없습니다",
@@ -343,10 +352,10 @@
 		"title": "Zoo Code {{version}} 출시",
 		"support": "<githubLink>GitHub</githubLink>에서 별표를 눌러 Zoo Code를 응원해 주세요.",
 		"release": {
-			"heading": "새로운 기능:",
-			"highlight1": "🔑 Zoo Gateway API 키를 어디서나 사용하세요. OpenAI 호환 클라이언트나 워크플로에 그대로 연결할 수 있습니다: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 한정 기간 동안 Zoo Gateway를 통해 MiniMax-M3를 무료로 이용하세요.",
-			"highlight3": "✨ 새롭게 출시된 GPT-6 Astra와 Claude Fable 5.1 모델을 지금 이용할 수 있습니다."
+			"heading": "Zoo Code v3.94.0의 새로운 기능",
+			"highlight1": "✨ 더 넓어진 모델 및 공급자 지원: Anthropic을 통해 Claude Haiku 5.5를 사용하고, 호환되는 VS Code LM 모델에 이미지를 보내고, OpenCode Go Responses 모델의 temperature를 조정하고, 더 많은 공급자에서 요청을 깔끔하게 취소하세요.",
+			"highlight2": "🔐 더 유연한 MCP OAuth: 정적 OAuth 클라이언트 설정을 구성하고, 사용자 지정 콜백 경로를 사용하고, WWW-Authenticate에서 인증 세부 정보를 확인하고, 재시도 전에 콜백 실패를 확인하세요.",
+			"highlight3": "🧭 더 원활한 채팅과 긴 세션: 기록에서 작업 이름을 바꾸고, Shift를 누르지 않고도 파일을 채팅으로 드래그하고, 긴 세션 동안 유지되는 메모리를 줄이고, 하위 작업 링크와 교체된 웹뷰를 안정적으로 유지하세요."
 		},
 		"cloudAgents": {
 			"heading": "클라우드의 새로운 기능:",
@@ -487,6 +496,10 @@
 		"serversPart_other": "{{count}}개 MCP 서버",
 		"messageTemplate": "{{servers}}를 통해 {{tools}}가 활성화되어 있습니다. 이렇게 많은 수의 도구는 모델을 혼동시키고 오류를 유발할 수 있습니다. {{threshold}} 이하로 유지하도록 노력하세요.",
 		"openMcpSettings": "MCP 설정 열기"
+	},
+	"ignoredDisabledTools": {
+		"title": "비활성화된 도구 무시됨",
+		"messageTemplate": "다음 도구는 비활성화할 수 없으므로 해당 disabledTools 항목이 무시되었습니다: {{tools}}."
 	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"

@@ -347,6 +347,10 @@
 				"label": "Activer la protection contre les commandes destructrices",
 				"description": "Télécharge et utilise Destructive Command Guard (DCG) pour cette plateforme. Les commandes autorisées par DCG s'exécutent automatiquement. Les commandes bloquées par DCG nécessitent votre approbation. Les listes de commandes de Zoo sont désactivées tant que cette option est active. L'exécutable téléchargé est conservé si vous la désactivez."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "Commandes auto-exécutables autorisées",
 			"allowedCommandsDescription": "Préfixes de commandes qui peuvent être auto-exécutés lorsque \"Toujours approuver les opérations d'exécution\" est activé. Ajoutez * pour autoriser toutes les commandes (à utiliser avec précaution).",
 			"deniedCommands": "Commandes refusées",
@@ -394,6 +398,11 @@
 		"vscodeLmDescription": "L'API du modèle de langage VS Code vous permet d'exécuter des modèles fournis par d'autres extensions VS Code (y compris, mais sans s'y limiter, GitHub Copilot). Le moyen le plus simple de commencer est d'installer les extensions Copilot et Copilot Chat depuis le VS Code Marketplace.",
 		"awsCustomArnUse": "Entrez un ARN Amazon Bedrock valide pour le modèle que vous souhaitez utiliser. Exemples de format :",
 		"awsCustomArnDesc": "Assurez-vous que la région dans l'ARN correspond à la région AWS sélectionnée ci-dessus.",
+		"awsCustomArnBaseModel": "Modèle sous-jacent",
+		"awsCustomArnBaseModelOther": "Autre (non listé)",
+		"awsCustomArnBaseModelDesc": "Le modèle vers lequel pointe cet ARN. Zoo Code l'utilise pour la réflexion, la température, la fenêtre de contexte, la sortie maximale et la tarification. Détecté automatiquement lorsque l'ARN nomme le modèle.",
+		"awsCustomArnContextWindow": "Fenêtre de contexte (tokens)",
+		"awsCustomArnMaxTokens": "Tokens de sortie maximum",
 		"openRouterApiKey": "Clé API OpenRouter",
 		"getOpenRouterApiKey": "Obtenir la clé API OpenRouter",
 		"vercelAiGatewayApiKey": "Clé API Vercel AI Gateway",
@@ -402,6 +411,12 @@
 		"getOpencodeGoApiKey": "Obtenir la clé API Opencode Go",
 		"kenariApiKey": "Clé API Kenari",
 		"getKenariApiKey": "Obtenir la clé API Kenari",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "Clé API IO Intelligence",
+			"getApiKey": "Obtenir une clé API IO Intelligence",
+			"model": "Modèle"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Clé API NanoGPT",
@@ -530,6 +545,8 @@
 		"openAiApiKey": "Clé API OpenAI",
 		"apiKey": "Clé API",
 		"openAiBaseUrl": "URL de base",
+		"openAiStrictToolSchemas": "Schémas d'outils stricts (strict: true)",
+		"openAiStrictToolSchemasDescription": "Envoie strict: true avec les schémas d'outils pour activer le respect strict du schéma. Désactivez pour utiliser l'appel d'outils non strict.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nom du déploiement Azure",
 		"azureOpenAiDeploymentNameDescription": "Saisissez le nom du déploiement défini dans Azure AI Studio, et non le nom du modèle sous-jacent.",
@@ -568,6 +585,16 @@
 		"enablePromptCaching": "Activer la mise en cache des prompts",
 		"enablePromptCachingTitle": "Activer la mise en cache des prompts pour améliorer les performances et réduire les coûts pour les modèles pris en charge.",
 		"cacheUsageNote": "Remarque : Si vous ne voyez pas l'utilisation du cache, essayez de sélectionner un modèle différent puis de sélectionner à nouveau votre modèle souhaité.",
+		"githubCopilot": {
+			"accountActions": "Actions du compte GitHub Copilot",
+			"signIn": "Se connecter à GitHub",
+			"reconnect": "Reconnecter GitHub",
+			"signedIn": "Connecté en tant que {{account}}",
+			"connecting": "Connexion...",
+			"noModels": "Aucun modèle Copilot disponible. Installez ou activez GitHub Copilot Chat, connectez-vous avec un compte GitHub éligible, puis actualisez. La connexion ne confirme pas un abonnement Copilot. Les limites de votre forfait GitHub, des requêtes premium et de débit s'appliquent.",
+			"manageAccount": "Gérer le compte GitHub",
+			"manageAccountDescription": "Ouvre le menu des comptes de VS Code, où vous pouvez vous déconnecter de GitHub. La déconnexion affecte Copilot et les autres extensions qui utilisent ce compte."
+		},
 		"vscodeLmModel": "Modèle de langage",
 		"vscodeLmWarning": "Remarque : Les modèles accessibles via l’API VS Code Language Model peuvent être encapsulés ou ajustés par le fournisseur ; leur comportement peut donc différer de l’utilisation directe du même modèle auprès d’un fournisseur ou routeur classique. Pour utiliser un modèle depuis la liste « Language Model », bascule d’abord sur ce modèle puis clique sur « Accepter » dans l’invite de Copilot Chat ; sinon, une erreur telle que 400 « The requested model is not supported » peut apparaître.",
 		"googleCloudSetup": {
@@ -595,7 +622,7 @@
 			"baseUrl": "URL de base (optionnel)",
 			"modelId": "ID du modèle",
 			"apiKey": "Clé API Ollama",
-			"apiKeyHelp": "Clé API optionnelle pour les instances Ollama authentifiées ou les services cloud. Laissez vide pour les installations locales.",
+			"apiKeyHelp": "Clé API optionnelle pour les instances Ollama qui demandent une authentification, ou pour les services cloud. Zoo Code envoie la clé uniquement aux points de terminaison HTTPS ou loopback. Un point de terminaison HTTP distant ne reçoit pas la clé, car la clé circulerait en texte brut. Utilisez HTTPS pour une instance distante qui demande une clé. Laissez ce champ vide pour une installation locale.",
 			"numCtx": "Taille de la fenêtre de contexte (num_ctx)",
 			"numCtxHelp": "Remplace la taille de la fenêtre de contexte par défaut du modèle. Laissez vide pour utiliser la configuration du Modelfile du modèle. La valeur minimale est 128.",
 			"thinking": "Activer le raisonnement",
@@ -661,6 +688,10 @@
 			"description": "Nombre d'erreurs consécutives ou d'actions répétées avant d'afficher la boîte de dialogue 'Zoo a des difficultés'. Mettre à 0 pour désactiver ce mécanisme de sécurité (il ne se déclenchera jamais).",
 			"unlimitedDescription": "Réessais illimités activés (poursuite automatique). La boîte de dialogue n'apparaîtra jamais.",
 			"warning": "⚠️ Mettre à 0 autorise des réessais illimités, ce qui peut consommer une utilisation importante de l'API"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "Seuil d'avertissement de répétition (souple)",
+			"description": "Après ce nombre d'appels d'outil identiques consécutifs, l'outil est bloqué et il est demandé à l'IA de justifier la nouvelle tentative, sans t'impliquer. Mets à 0 pour désactiver les avertissements souples."
 		},
 		"reasoningEffort": {
 			"label": "Effort de raisonnement du modèle",
@@ -820,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Replier la sortie des commandes par défaut",
+			"description": "Replie la sortie des commandes, y compris celle du terminal intégré. Dépliez-la manuellement si nécessaire. Cela ne change pas leur exécution."
+		},
 		"basic": {
 			"label": "Paramètres du terminal : Base",
 			"description": "Paramètres de base du terminal"
@@ -987,8 +1022,14 @@
 		"rangeDescription": "Des valeurs plus élevées rendent la sortie plus aléatoire, des valeurs plus basses la rendent plus déterministe."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Prise en charge des images non signalée",
+		"toolSupportUnknown": "Prise en charge des outils non signalée",
+		"promptCacheManagedByCopilot": "Le cache des prompts est géré par GitHub Copilot",
+		"promptCacheCopilotDetails": "La mise en cache dépend du modèle et du backend de GitHub Copilot. Zoo Code ne peut ni configurer la rétention du cache ni observer les succès de cache via l'API de VS Code.",
 		"supportsImages": "Prend en charge les images",
 		"noImages": "Ne prend pas en charge les images",
+		"supportsTools": "Prend en charge les outils",
+		"noTools": "Ne prend pas en charge les outils",
 		"supportsPromptCache": "Prend en charge la mise en cache des prompts",
 		"noPromptCache": "Ne prend pas en charge la mise en cache des prompts",
 		"contextWindow": "Fenêtre de contexte :",

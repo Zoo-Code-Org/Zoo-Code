@@ -239,6 +239,13 @@ describe("mcp-name utilities", () => {
 			})
 		})
 
+		it("should handle server names containing double underscores", () => {
+			expect(parseMcpToolName("mcp--my__server--do_thing")).toEqual({
+				serverName: "my__server",
+				toolName: "do_thing",
+			})
+		})
+
 		it("should handle tool names with hyphens", () => {
 			expect(parseMcpToolName("mcp--onellm--atlassian-jira_search")).toEqual({
 				serverName: "onellm",
@@ -249,6 +256,13 @@ describe("mcp-name utilities", () => {
 		it("should return null for malformed names", () => {
 			expect(parseMcpToolName("mcp--")).toBeNull()
 			expect(parseMcpToolName("mcp--server")).toBeNull()
+		})
+
+		it("should return null for names with mixed separators", () => {
+			// normalizeMcpToolName picks a single separator for the whole split,
+			// so mixed-separator names are left unnormalized and cannot be parsed
+			expect(parseMcpToolName("mcp__server--tool")).toBeNull()
+			expect(parseMcpToolName("mcp--server__tool")).toBeNull()
 		})
 	})
 
@@ -277,6 +291,17 @@ describe("mcp-name utilities", () => {
 			// Model outputs: mcp__server__get_user_profile (hyphens converted to underscores)
 			// Normalized: mcp--server--get_user_profile
 			expect(normalizeMcpToolName("mcp__server__get_user_profile")).toBe("mcp--server--get_user_profile")
+		})
+
+		it("should preserve double underscores in server names", () => {
+			expect(normalizeMcpToolName("mcp--my__server--do_thing")).toBe("mcp--my__server--do_thing")
+		})
+
+		it("should return names with mixed separators unchanged (unsupported)", () => {
+			// A single separator style is chosen for the entire split, so names
+			// mixing "--" and "__" separators cannot be normalized
+			expect(normalizeMcpToolName("mcp__server--tool")).toBe("mcp__server--tool")
+			expect(normalizeMcpToolName("mcp--server__tool")).toBe("mcp--server__tool")
 		})
 	})
 
@@ -336,6 +361,17 @@ describe("mcp-name utilities", () => {
 			expect(parsed).toEqual({
 				serverName: "server",
 				toolName: "get-user-profile",
+			})
+		})
+
+		it("should roundtrip server names containing double underscores", () => {
+			const toolName = buildMcpToolName("my__server", "do_thing")
+			expect(toolName).toBe("mcp--my__server--do_thing")
+
+			const parsed = parseMcpToolName(toolName)
+			expect(parsed).toEqual({
+				serverName: "my__server",
+				toolName: "do_thing",
 			})
 		})
 	})

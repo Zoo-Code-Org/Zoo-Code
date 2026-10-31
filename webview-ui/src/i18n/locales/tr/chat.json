@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Etkileşim modunu seçin",
 	"selectApiConfig": "API yapılandırmasını seçin",
+	"selectModel": "Model seç",
+	"modelSelector": {
+		"title": "Modeller",
+		"settings": "Model Ayarları",
+		"description": "Bu API yapılandırması için kullanılacak modeli seçin.",
+		"searchPlaceholder": "Model ara...",
+		"unsupportedTooltip": "Bu sağlayıcının modeli Ayarlar'da yapılandırılır",
+		"loading": "Modeller yükleniyor..."
+	},
 	"lockApiConfigAcrossModes": "Bu çalışma alanındaki tüm modlarda API yapılandırmasını kilitle",
 	"unlockApiConfigAcrossModes": "Bu çalışma alanındaki tüm modlarda API yapılandırması kilitli (kilidi açmak için tıkla)",
 	"enhancePrompt": "Ek bağlamla istemi geliştir",
@@ -344,10 +353,10 @@
 		"title": "Zoo Code {{version}} yayınlandı",
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
-			"heading": "Yenilikler:",
-			"highlight1": "🔑 Zoo Gateway API anahtarını her yerde kullan—anahtarı OpenAI uyumlu herhangi bir istemciye veya iş akışına ekle: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 Sınırlı bir süre için Zoo Gateway üzerinden MiniMax-M3'e ücretsiz eriş.",
-			"highlight3": "✨ Şimdi kullanıma sunuldu: yepyeni GPT-6 Astra ve Claude Fable 5.1 modelleri."
+			"heading": "Zoo Code v3.94.0'daki yenilikler",
+			"highlight1": "✨ Daha geniş model ve sağlayıcı desteği: Claude Haiku 5.5'i Anthropic üzerinden kullan, uyumlu VS Code LM modellerine görsel gönder, OpenCode Go Responses modelleri için temperature değerini ayarla ve istekleri daha fazla sağlayıcıda temiz şekilde iptal et.",
+			"highlight2": "🔐 Daha esnek MCP OAuth: Statik OAuth istemci ayarlarını yapılandır, özel geri çağırma yolları kullan, kimlik doğrulama ayrıntılarını WWW-Authenticate üzerinden keşfet ve yeniden denemeden önce geri çağırma hatalarını gör.",
+			"highlight3": "🧭 Daha akıcı sohbetler ve uzun oturumlar: Geçmişteki görevleri yeniden adlandır, dosyaları Shift tuşuna basmadan sohbete sürükle, uzun oturumlarda tutulan belleği azalt ve alt görev bağlantılarını ve değiştirilen webview'ları stabil tut."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",
@@ -488,6 +497,10 @@
 		"serversPart_other": "{{count}} MCP sunucusu",
 		"messageTemplate": "{{servers}} üzerinden {{tools}} etkinleştirilmiş durumda. Bu kadar fazlası modeli kafası karışabilir ve hatalara neden olabilir. {{threshold}} altında tutmaya çalış.",
 		"openMcpSettings": "MCP Ayarlarını Aç"
+	},
+	"ignoredDisabledTools": {
+		"title": "Devre dışı bırakılan araç yok sayıldı",
+		"messageTemplate": "Aşağıdaki araçlar devre dışı bırakılamaz; bu nedenle ilgili disabledTools girdileri yok sayıldı: {{tools}}."
 	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"

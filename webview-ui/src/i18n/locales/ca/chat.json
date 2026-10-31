@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Selecciona el mode d'interacció",
 	"selectApiConfig": "Seleccioneu la configuració de l'API",
+	"selectModel": "Selecciona el model",
+	"modelSelector": {
+		"title": "Models",
+		"settings": "Configuració del model",
+		"description": "Tria el model que s'utilitzarà per a aquesta configuració d'API.",
+		"searchPlaceholder": "Cerca models...",
+		"unsupportedTooltip": "El model d'aquest proveïdor es configura a Configuració",
+		"loading": "Carregant models..."
+	},
 	"lockApiConfigAcrossModes": "Bloqueja la configuració de l'API a tots els modes en aquest espai de treball",
 	"unlockApiConfigAcrossModes": "La configuració de l'API està bloquejada a tots els modes en aquest espai de treball (fes clic per desbloquejar)",
 	"enhancePrompt": "Millora la sol·licitud amb context addicional",
@@ -343,10 +352,10 @@
 		"title": "S'ha publicat Zoo Code {{version}}",
 		"support": "Dona suport a Zoo Code fent-nos una estrella a <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Novetats:",
-			"highlight1": "🔑 Utilitza la teva clau API de Zoo Gateway a qualsevol lloc: porta-la a qualsevol client o flux de treball compatible amb OpenAI: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 Durant un temps limitat, obtén accés gratuït a MiniMax-M3 mitjançant Zoo Gateway.",
-			"highlight3": "✨ Ja disponibles: els nous models GPT-6 Astra i Claude Fable 5.1."
+			"heading": "Què hi ha de nou al Zoo Code v3.94.0",
+			"highlight1": "✨ Compatibilitat més àmplia amb models i proveïdors: Utilitza Claude Haiku 5.5 mitjançant Anthropic, envia imatges a models VS Code LM compatibles, ajusta la temperatura per als models OpenCode Go Responses i cancel·la sol·licituds de forma neta a més proveïdors.",
+			"highlight2": "🔐 MCP OAuth més flexible: Configura opcions estàtiques de client OAuth, usa rutes de callback personalitzades, descobreix detalls d'autenticació de WWW-Authenticate i veu els errors de callback abans de tornar-ho a provar.",
+			"highlight3": "🧭 Xats i sessions llargues més fluides: Reanomena tasques a l'historial, arrossega fitxers al xat sense mantenir premut Shift, redueix la memòria que es conserva durant les sessions llargues i mantén estables els enllaços de subtasques i els webviews substituïts."
 		},
 		"cloudAgents": {
 			"heading": "Novetats al núvol:",
@@ -487,6 +496,10 @@
 		"serversPart_other": "{{count}} servidors MCP",
 		"messageTemplate": "Tens {{tools}} habilitades via {{servers}}. Un nombre tant alt pot confondre el model i portar a errors. Intenta mantenir-lo per sota de {{threshold}}.",
 		"openMcpSettings": "Obrir configuració de MCP"
+	},
+	"ignoredDisabledTools": {
+		"title": "Eina desactivada ignorada",
+		"messageTemplate": "Les eines següents no es poden desactivar, per això les entrades de disabledTools s'han ignorat: {{tools}}."
 	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"

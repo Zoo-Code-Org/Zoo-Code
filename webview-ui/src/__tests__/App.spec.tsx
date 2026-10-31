@@ -4,6 +4,9 @@ import React from "react"
 import { render, screen, act, cleanup } from "@/utils/test-utils"
 
 import AppWithProviders from "../App"
+import { vscode } from "../utils/vscode"
+
+let nextChatViewInstance = 0
 
 vi.mock("@src/utils/vscode", () => ({
 	vscode: {
@@ -28,8 +31,9 @@ vi.mock("@src/utils/TelemetryClient", () => ({
 vi.mock("@src/components/chat/ChatView", () => ({
 	__esModule: true,
 	default: function ChatView({ isHidden }: { isHidden: boolean }) {
+		const [instance] = React.useState(() => ++nextChatViewInstance)
 		return (
-			<div data-testid="chat-view" data-hidden={isHidden}>
+			<div data-testid="chat-view" data-hidden={isHidden} data-instance={instance}>
 				Chat View
 			</div>
 		)
@@ -160,6 +164,7 @@ vi.mock("process.env", () => ({
 describe("App", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		nextChatViewInstance = 0
 		window.removeEventListener("message", () => {})
 
 		// Set up default mock return value
@@ -204,6 +209,94 @@ describe("App", () => {
 		expect(chatView).toBeInTheDocument()
 		expect(chatView.getAttribute("data-hidden")).toBe("false")
 	}, 10000)
+
+	it("preserves chat state across task and tab changes", async () => {
+		const state = {
+			didHydrateState: true,
+			showWelcome: false,
+			shouldShowAnnouncement: false,
+			experiments: {},
+			language: "en",
+			telemetrySetting: "enabled",
+			currentTaskId: "task-a" as string | undefined,
+		}
+		mockUseExtensionState.mockImplementation(() => state)
+
+		const { rerender } = render(<AppWithProviders />)
+		const firstInstance = screen.getByTestId("chat-view").getAttribute("data-instance")
+
+		act(() => triggerMessage("settingsButtonClicked"))
+		expect(await screen.findByTestId("settings-view")).toBeInTheDocument()
+		expect(screen.getByTestId("chat-view").getAttribute("data-instance")).toBe(firstInstance)
+
+		state.currentTaskId = "task-b"
+		rerender(<AppWithProviders />)
+		const secondInstance = screen.getByTestId("chat-view").getAttribute("data-instance")
+		expect(secondInstance).toBe(firstInstance)
+
+		state.currentTaskId = undefined
+		rerender(<AppWithProviders />)
+		expect(screen.getByTestId("chat-view").getAttribute("data-instance")).toBe(secondInstance)
+	})
+
+	it.each(["sidebar", "editor"])(
+		"reports direct pointer and keyboard interaction in the %s webview",
+		(renderContext) => {
+			mockUseExtensionState.mockReturnValue({
+				didHydrateState: true,
+				showWelcome: false,
+				renderContext,
+			})
+			const { unmount } = render(<AppWithProviders />)
+			vi.mocked(vscode.postMessage).mockClear()
+
+			document.dispatchEvent(new Event("pointerdown"))
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "a" }))
+			expect(vscode.postMessage).toHaveBeenCalledTimes(2)
+			expect(vscode.postMessage).toHaveBeenNthCalledWith(1, { type: "webviewDidFocus" })
+			expect(vscode.postMessage).toHaveBeenNthCalledWith(2, { type: "webviewDidFocus" })
+
+			window.dispatchEvent(new Event("blur"))
+			expect(vscode.postMessage).toHaveBeenCalledTimes(2)
+
+			unmount()
+			document.dispatchEvent(new Event("pointerdown"))
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "a" }))
+			expect(vscode.postMessage).toHaveBeenCalledTimes(2)
+		},
+	)
+
+	it("does not report chat interaction on initial focus, window activation, or programmatic focus", () => {
+		const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true)
+		try {
+			render(<AppWithProviders />)
+			expect(vscode.postMessage).not.toHaveBeenCalledWith({ type: "webviewDidFocus" })
+			window.dispatchEvent(new Event("focus"))
+			window.dispatchEvent(new Event("blur"))
+			window.dispatchEvent(new Event("focus"))
+			document.dispatchEvent(new Event("visibilitychange"))
+			document.dispatchEvent(new FocusEvent("focusin"))
+			const chat = screen.getByTestId("chat-view")
+			chat.tabIndex = 0
+			chat.focus()
+			expect(vscode.postMessage).not.toHaveBeenCalledWith({ type: "webviewDidFocus" })
+		} finally {
+			hasFocus.mockRestore()
+		}
+	})
+
+	it("reports direct interaction even when a child stops event propagation", () => {
+		render(<AppWithProviders />)
+		vi.mocked(vscode.postMessage).mockClear()
+		const chat = screen.getByTestId("chat-view")
+		const stopPropagation = (event: Event) => event.stopPropagation()
+		chat.addEventListener("pointerdown", stopPropagation)
+		chat.addEventListener("keydown", stopPropagation)
+		chat.dispatchEvent(new Event("pointerdown", { bubbles: true }))
+		chat.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }))
+		expect(vscode.postMessage).toHaveBeenCalledTimes(2)
+		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "webviewDidFocus" })
+	})
 
 	it("shows welcome view when setup is incomplete", () => {
 		mockUseExtensionState.mockReturnValue({

@@ -346,6 +346,10 @@
 				"label": "Включить защиту от разрушительных команд",
 				"description": "Скачивает и использует Destructive Command Guard (DCG) для этой платформы. Разрешённые DCG команды выполняются автоматически. Команды, заблокированные DCG, требуют твоего подтверждения. Пока эта настройка включена, списки команд Zoo отключены. Скачанный исполняемый файл сохраняется после отключения настройки."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "Разрешённые авто-выполняемые команды",
 			"allowedCommandsDescription": "Префиксы команд, которые могут быть автоматически выполнены при включённом параметре \"Всегда одобрять выполнение операций\". Добавьте * для разрешения всех команд (используйте с осторожностью).",
 			"deniedCommands": "Запрещенные команды",
@@ -394,6 +398,11 @@
 		"vscodeLmDescription": "API языковой модели VS Code позволяет запускать модели, предоставляемые другими расширениями VS Code (включая, но не ограничиваясь GitHub Copilot). Для начала установите расширения Copilot и Copilot Chat из VS Code Marketplace.",
 		"awsCustomArnUse": "Введите действительный Amazon Bedrock ARN для используемой модели. Примеры формата:",
 		"awsCustomArnDesc": "Убедитесь, что регион в ARN совпадает с выбранным выше регионом AWS.",
+		"awsCustomArnBaseModel": "Базовая модель",
+		"awsCustomArnBaseModelOther": "Другая (нет в списке)",
+		"awsCustomArnBaseModelDesc": "Модель, на которую указывает этот ARN. Zoo Code использует её для мышления, температуры, контекстного окна, максимального вывода и цен. Определяется автоматически, если ARN содержит имя модели.",
+		"awsCustomArnContextWindow": "Контекстное окно (токены)",
+		"awsCustomArnMaxTokens": "Максимум выходных токенов",
 		"openRouterApiKey": "OpenRouter API-ключ",
 		"getOpenRouterApiKey": "Получить OpenRouter API-ключ",
 		"vercelAiGatewayApiKey": "Ключ API Vercel AI Gateway",
@@ -402,6 +411,12 @@
 		"getOpencodeGoApiKey": "Получить ключ API Opencode Go",
 		"kenariApiKey": "Ключ API Kenari",
 		"getKenariApiKey": "Получить ключ API Kenari",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "API-ключ IO Intelligence",
+			"getApiKey": "Получить API-ключ IO Intelligence",
+			"model": "Модель"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Ключ API NanoGPT",
@@ -530,6 +545,8 @@
 		"apiKey": "API-ключ",
 		"openAiApiKey": "OpenAI API-ключ",
 		"openAiBaseUrl": "Базовый URL",
+		"openAiStrictToolSchemas": "Строгие схемы инструментов (strict: true)",
+		"openAiStrictToolSchemasDescription": "Отправляет strict: true вместе со схемами инструментов, чтобы включить строгое соблюдение схемы. Отключите, чтобы использовать нестрогий вызов инструментов.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Имя развёртывания Azure",
 		"azureOpenAiDeploymentNameDescription": "Введите имя развёртывания из Azure AI Studio, а не имя базовой модели.",
@@ -568,6 +585,16 @@
 		"enablePromptCaching": "Включить кэширование подсказок",
 		"enablePromptCachingTitle": "Включить кэширование подсказок для повышения производительности и снижения затрат для поддерживаемых моделей.",
 		"cacheUsageNote": "Примечание: если вы не видите использование кэша, попробуйте выбрать другую модель, а затем вернуться к нужной.",
+		"githubCopilot": {
+			"accountActions": "Действия с учётной записью GitHub Copilot",
+			"signIn": "Войти в GitHub",
+			"reconnect": "Переподключить GitHub",
+			"signedIn": "Выполнен вход как {{account}}",
+			"connecting": "Подключение...",
+			"noModels": "Модели Copilot недоступны. Установите или включите GitHub Copilot Chat, войдите с подходящей учётной записью GitHub и обновите список. Вход не подтверждает наличие подписки на Copilot. Действуют ограничения вашего тарифа GitHub, премиум-запросов и частоты запросов.",
+			"manageAccount": "Управление учётной записью GitHub",
+			"manageAccountDescription": "Открывает меню учётных записей VS Code, где можно выйти из GitHub. Выход затрагивает Copilot и другие расширения, использующие эту учётную запись."
+		},
 		"vscodeLmModel": "Языковая модель",
 		"vscodeLmWarning": "Внимание: Модели, доступные через API VS Code Language Model, могут быть обёрнуты или дополнительно дообучены поставщиком, поэтому их поведение может отличаться от прямого использования той же модели у типичного провайдера или роутера. Чтобы использовать модель из выпадающего списка «Language Model», сначала переключитесь на эту модель, затем нажмите «Принять» в запросе Copilot Chat; в противном случае возможна ошибка, например 400 «The requested model is not supported».",
 		"googleCloudSetup": {
@@ -595,7 +622,7 @@
 			"baseUrl": "Базовый URL (опционально)",
 			"modelId": "ID модели",
 			"apiKey": "API-ключ Ollama",
-			"apiKeyHelp": "Опциональный API-ключ для аутентифицированных экземпляров Ollama или облачных сервисов. Оставьте пустым для локальных установок.",
+			"apiKeyHelp": "Необязательный API-ключ для экземпляров Ollama, которым нужна аутентификация, или для облачных сервисов. Zoo Code отправляет ключ только на конечные точки HTTPS или loopback. Удалённая конечная точка HTTP не получает ключ, потому что ключ шёл бы открытым текстом. Используйте HTTPS для удалённого экземпляра, которому нужен ключ. Для локальной установки оставьте поле пустым.",
 			"numCtx": "Размер контекстного окна (num_ctx)",
 			"numCtxHelp": "Переопределяет размер контекстного окна модели по умолчанию. Оставьте пустым, чтобы использовать конфигурацию Modelfile модели. Минимальное значение — 128.",
 			"thinking": "Включить рассуждение",
@@ -661,6 +688,10 @@
 			"description": "Количество последовательных ошибок или повторных действий перед показом диалогового окна 'У Zoo возникли проблемы'. Установите 0, чтобы отключить этот механизм безопасности (он никогда не сработает).",
 			"unlimitedDescription": "Включены неограниченные повторные попытки (автоматическое продолжение). Диалоговое окно никогда не появится.",
 			"warning": "⚠️ Установка значения 0 разрешает неограниченные повторные попытки, что может значительно увеличить использование API"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "Порог мягкого предупреждения о повторах",
+			"description": "После такого количества идентичных последовательных вызовов инструмента инструмент блокируется, и ИИ предлагается обосновать повторную попытку — без вашего участия. Установите 0, чтобы отключить мягкие предупреждения."
 		},
 		"reasoningEffort": {
 			"label": "Усилия по рассуждению модели",
@@ -820,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Сворачивать вывод команд по умолчанию",
+			"description": "Вывод команд, включая встроенный терминал, сначала свёрнут. При необходимости разверните его вручную. Способ выполнения команд не меняется."
+		},
 		"basic": {
 			"label": "Настройки терминала: Основные",
 			"description": "Основные настройки терминала"
@@ -987,8 +1022,14 @@
 		"rangeDescription": "Более высокие значения делают ответы более случайными, низкие — более детерминированными."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Поддержка изображений не сообщена",
+		"toolSupportUnknown": "Поддержка инструментов не сообщена",
+		"promptCacheManagedByCopilot": "Кэшированием промптов управляет GitHub Copilot",
+		"promptCacheCopilotDetails": "Кэширование зависит от модели и серверной части GitHub Copilot. Zoo Code не может настроить срок хранения кэша или отслеживать попадания в кэш через API VS Code.",
 		"supportsImages": "Поддерживает изображения",
 		"noImages": "Не поддерживает изображения",
+		"supportsTools": "Поддерживает инструменты",
+		"noTools": "Не поддерживает инструменты",
 		"supportsPromptCache": "Поддерживает кэширование подсказок",
 		"noPromptCache": "Не поддерживает кэширование подсказок",
 		"contextWindow": "Контекстное окно:",

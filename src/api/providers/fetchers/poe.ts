@@ -1,11 +1,22 @@
 import type { ModelInfo, ModelRecord } from "@roo-code/types"
 import { fetchPoeModels, getModels } from "ai-sdk-provider-poe/code"
 
-export async function getPoeModels(apiKey?: string, baseURL?: string): Promise<ModelRecord> {
+import { throwIfAborted } from "../utils/abort-signal"
+
+export async function getPoeModels(
+	apiKey?: string,
+	baseURL?: string,
+	opts?: { signal?: AbortSignal },
+): Promise<ModelRecord> {
 	try {
 		// fetchPoeModels populates the internal model store, then getModels()
 		// returns only code-capable models with camelCase fields.
+		// The Poe SDK exposes no cancellation option, so the caller's signal
+		// cannot reach the network here; an abort still releases the shared
+		// cache entry and stops the waiters at the model-cache layer.
+		throwIfAborted(opts?.signal)
 		await fetchPoeModels({ apiKey, baseURL })
+		throwIfAborted(opts?.signal)
 		const poeModels = getModels()
 		const models: ModelRecord = {}
 
@@ -36,6 +47,10 @@ export async function getPoeModels(apiKey?: string, baseURL?: string): Promise<M
 
 		return models
 	} catch (error) {
+		// Surface cancellation as a rejection: logging and returning here would
+		// present an aborted fetch to callers as a successful (empty) catalog.
+		throwIfAborted(opts?.signal)
+
 		console.error(
 			`[Poe] Error fetching models: ${JSON.stringify(error, Object.getOwnPropertyNames(error as object), 2)}`,
 		)

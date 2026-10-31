@@ -346,6 +346,10 @@
 				"label": "Włącz ochronę przed destrukcyjnymi poleceniami",
 				"description": "Pobiera i używa Destructive Command Guard (DCG) dla tej platformy. Polecenia dozwolone przez DCG są wykonywane automatycznie. Polecenia zablokowane przez DCG wymagają twojej zgody. Listy poleceń Zoo są wyłączone, gdy ta opcja jest aktywna. Pobrany plik wykonywalny pozostaje na dysku po wyłączeniu opcji."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "Dozwolone polecenia auto-wykonania",
 			"allowedCommandsDescription": "Prefiksy poleceń, które mogą być automatycznie wykonywane, gdy \"Zawsze zatwierdzaj operacje wykonania\" jest włączone. Dodaj * aby zezwolić na wszystkie polecenia (używaj z ostrożnością).",
 			"deniedCommands": "Odrzucone polecenia",
@@ -394,6 +398,11 @@
 		"vscodeLmDescription": "Interfejs API modelu językowego VS Code umożliwia uruchamianie modeli dostarczanych przez inne rozszerzenia VS Code (w tym, ale nie tylko, GitHub Copilot). Najłatwiejszym sposobem na rozpoczęcie jest zainstalowanie rozszerzeń Copilot i Copilot Chat z VS Code Marketplace.",
 		"awsCustomArnUse": "Wprowadź prawidłowy Amazon Bedrock ARN dla modelu, którego chcesz użyć. Przykłady formatu:",
 		"awsCustomArnDesc": "Upewnij się, że region w ARN odpowiada wybranemu powyżej regionowi AWS.",
+		"awsCustomArnBaseModel": "Model bazowy",
+		"awsCustomArnBaseModelOther": "Inny (niewymieniony)",
+		"awsCustomArnBaseModelDesc": "Model, na który wskazuje ten ARN. Zoo Code używa go do myślenia, temperatury, okna kontekstu, maksymalnego wyjścia i cen. Wykrywany automatycznie, gdy ARN zawiera nazwę modelu.",
+		"awsCustomArnContextWindow": "Okno kontekstu (tokeny)",
+		"awsCustomArnMaxTokens": "Maksymalna liczba tokenów wyjściowych",
 		"openRouterApiKey": "Klucz API OpenRouter",
 		"getOpenRouterApiKey": "Uzyskaj klucz API OpenRouter",
 		"vercelAiGatewayApiKey": "Klucz API Vercel AI Gateway",
@@ -402,6 +411,12 @@
 		"getOpencodeGoApiKey": "Uzyskaj klucz API Opencode Go",
 		"kenariApiKey": "Klucz API Kenari",
 		"getKenariApiKey": "Uzyskaj klucz API Kenari",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "Klucz API IO Intelligence",
+			"getApiKey": "Uzyskaj klucz API IO Intelligence",
+			"model": "Model"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Klucz API NanoGPT",
@@ -530,6 +545,8 @@
 		"apiKey": "Klucz API",
 		"openAiApiKey": "Klucz API OpenAI",
 		"openAiBaseUrl": "URL bazowy",
+		"openAiStrictToolSchemas": "Ścisłe schematy narzędzi (strict: true)",
+		"openAiStrictToolSchemasDescription": "Wysyła strict: true wraz ze schematami narzędzi, aby włączyć ścisłe przestrzeganie schematu. Wyłącz, aby korzystać z nieścisłego wywoływania narzędzi.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nazwa wdrożenia Azure",
 		"azureOpenAiDeploymentNameDescription": "Wprowadź nazwę wdrożenia z Azure AI Studio, a nie nazwę bazowego modelu.",
@@ -568,6 +585,16 @@
 		"enablePromptCaching": "Włącz buforowanie podpowiedzi",
 		"enablePromptCachingTitle": "Włącz buforowanie podpowiedzi, aby poprawić wydajność i zmniejszyć koszty dla obsługiwanych modeli.",
 		"cacheUsageNote": "Uwaga: Jeśli nie widzisz użycia bufora, spróbuj wybrać inny model, a następnie ponownie wybrać żądany model.",
+		"githubCopilot": {
+			"accountActions": "Akcje konta GitHub Copilot",
+			"signIn": "Zaloguj się do GitHub",
+			"reconnect": "Połącz ponownie z GitHub",
+			"signedIn": "Zalogowano jako {{account}}",
+			"connecting": "Łączenie...",
+			"noModels": "Brak dostępnych modeli Copilot. Zainstaluj lub włącz GitHub Copilot Chat, zaloguj się na uprawnione konto GitHub, a następnie odśwież. Zalogowanie nie potwierdza subskrypcji Copilot. Obowiązują limity planu GitHub, żądań premium i częstotliwości żądań.",
+			"manageAccount": "Zarządzaj kontem GitHub",
+			"manageAccountDescription": "Otwiera menu kont VS Code, w którym możesz wylogować się z GitHub. Wylogowanie wpływa na Copilot i inne rozszerzenia korzystające z tego konta."
+		},
 		"vscodeLmModel": "Model językowy",
 		"vscodeLmWarning": "Uwaga: Modele dostępne przez interfejs VS Code Language Model API mogą być opakowane lub dostrojone przez dostawcę, dlatego ich działanie może różnić się od bezpośredniego użycia tego samego modelu u typowego dostawcy lub routera. Aby użyć modelu z listy «Language Model», najpierw przełącz się na ten model, a następnie kliknij «Akceptuj» w monicie Copilot Chat; w przeciwnym razie możesz zobaczyć błąd, np. 400 „The requested model is not supported”.",
 		"googleCloudSetup": {
@@ -595,7 +622,7 @@
 			"baseUrl": "URL bazowy (opcjonalnie)",
 			"modelId": "ID modelu",
 			"apiKey": "Klucz API Ollama",
-			"apiKeyHelp": "Opcjonalny klucz API dla uwierzytelnionych instancji Ollama lub usług chmurowych. Pozostaw puste dla instalacji lokalnych.",
+			"apiKeyHelp": "Opcjonalny klucz API dla instancji Ollama, które wymagają uwierzytelnienia, lub dla usług chmurowych. Zoo Code wysyła klucz tylko do punktów końcowych HTTPS lub loopback. Zdalny punkt końcowy HTTP nie dostaje klucza, ponieważ klucz byłby przesłany jawnym tekstem. Użyj HTTPS dla zdalnej instancji, która wymaga klucza. Dla instalacji lokalnej pozostaw to pole puste.",
 			"numCtx": "Rozmiar okna kontekstu (num_ctx)",
 			"numCtxHelp": "Zastępuje domyślny rozmiar okna kontekstu modelu. Pozostaw puste, aby użyć konfiguracji Modelfile modelu. Minimalna wartość to 128.",
 			"thinking": "Włącz wnioskowanie",
@@ -661,6 +688,10 @@
 			"description": "Liczba kolejnych błędów lub powtórzonych akcji przed wyświetleniem okna dialogowego 'Zoo ma problemy'. Ustaw na 0, aby wyłączyć ten mechanizm bezpieczeństwa (nigdy się nie uruchomi).",
 			"unlimitedDescription": "Włączono nieograniczone próby (automatyczne kontynuowanie). Okno dialogowe nigdy się nie pojawi.",
 			"warning": "⚠️ Ustawienie na 0 pozwala na nieograniczone próby, co może zużyć znaczną ilość API"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "Próg miękkiego ostrzeżenia o powtórzeniach",
+			"description": "Po tylu identycznych kolejnych wywołaniach narzędzia narzędzie zostaje zablokowane, a AI jest proszona o uzasadnienie ponownej próby — bez angażowania Ciebie. Ustaw 0, aby wyłączyć miękkie ostrzeżenia."
 		},
 		"reasoningEffort": {
 			"label": "Wysiłek rozumowania modelu",
@@ -820,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Domyślnie zwijaj wyniki poleceń",
+			"description": "Wyniki poleceń, także z terminala wbudowanego, są początkowo zwinięte. Można je ręcznie rozwinąć. Nie zmienia to sposobu wykonywania poleceń."
+		},
 		"basic": {
 			"label": "Ustawienia terminala: Podstawowe",
 			"description": "Podstawowe ustawienia terminala"
@@ -987,8 +1022,14 @@
 		"rangeDescription": "Wyższe wartości sprawiają, że wyjście jest bardziej losowe, niższe wartości czynią je bardziej deterministycznym."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Obsługa obrazów nie została zgłoszona",
+		"toolSupportUnknown": "Obsługa narzędzi nie została zgłoszona",
+		"promptCacheManagedByCopilot": "Buforowaniem promptów zarządza GitHub Copilot",
+		"promptCacheCopilotDetails": "Buforowanie zależy od modelu i zaplecza GitHub Copilot. Zoo Code nie może skonfigurować czasu przechowywania pamięci podręcznej ani obserwować trafień w pamięci podręcznej przez API VS Code.",
 		"supportsImages": "Obsługuje obrazy",
 		"noImages": "Nie obsługuje obrazów",
+		"supportsTools": "Obsługuje narzędzia",
+		"noTools": "Nie obsługuje narzędzi",
 		"supportsPromptCache": "Obsługuje buforowanie podpowiedzi",
 		"noPromptCache": "Nie obsługuje buforowania podpowiedzi",
 		"contextWindow": "Okno kontekstowe:",

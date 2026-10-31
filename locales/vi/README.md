@@ -46,11 +46,11 @@ Zoo Code phát triển trên nền tảng do Roo Code tạo ra và tiếp tục 
 - **Workflow terminal và chỉnh sửa đáng tin cậy hơn** — sửa lỗi terminal hoàn tất quá sớm, xung đột trạng thái tác vụ, quản lý ngữ cảnh, chỉnh sửa diff và sử dụng công cụ riêng của từng provider.
 - **Kiểm soát workspace tốt hơn** — quản lý quy tắc, giới hạn MCP theo từng chế độ, kiểm soát đường dẫn multi-root, tùy chọn reasoning của model và thao tác xem lại thay đổi khi hoàn tất.
 
-## Điểm mới trong v3.82.0
+## Điểm mới trong v3.94.0
 
-- 🔑 **Dùng khóa API Zoo Gateway ở bất cứ đâu** — thêm khóa vào bất kỳ client hoặc workflow nào tương thích với OpenAI: https://zoocode.dev/models
-- 🎁 **Quyền truy cập model miễn phí trong thời gian giới hạn** — truy cập MiniMax-M3 miễn phí qua Zoo Gateway.
-- ✨ **Các model hoàn toàn mới** — GPT-6 Astra và Claude Fable 5.1 hiện đã có sẵn.
+- ✨ **Hỗ trợ model và provider rộng hơn:** Dùng Claude Haiku 5.5 qua Anthropic, gửi hình ảnh tới các model VS Code LM tương thích, chỉnh temperature cho các model OpenCode Go Responses và hủy request gọn gàng trên nhiều provider hơn.
+- 🔐 **MCP OAuth linh hoạt hơn:** Cấu hình cài đặt OAuth client tĩnh, dùng đường dẫn callback tùy chỉnh, tìm hiểu chi tiết xác thực từ `WWW-Authenticate` và xem lỗi callback trước khi thử lại.
+- 🧭 **Chat mượt mà và phiên dài hơn:** Đổi tên task trong lịch sử, kéo file vào chat mà không cần giữ Shift, giảm bộ nhớ giữ lại trong các phiên dài và giữ ổn định các liên kết subtask cùng webview đã thay thế.
 
 ## Zoo Code có thể làm gì cho BẠN?
 

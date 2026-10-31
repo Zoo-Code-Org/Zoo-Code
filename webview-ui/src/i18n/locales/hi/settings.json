@@ -346,6 +346,10 @@
 				"label": "विनाशकारी कमांड सुरक्षा सक्षम करें",
 				"description": "इस प्लेटफ़ॉर्म के लिए Destructive Command Guard (DCG) डाउनलोड करके उपयोग करें। DCG द्वारा अनुमत कमांड अपने आप चलते हैं। DCG द्वारा रोके गए कमांड चलाने के लिए आपकी मंज़ूरी आवश्यक होगी। इसके सक्षम रहने पर Zoo की कमांड सूचियाँ बंद रहेंगी। इसे बंद करने पर डाउनलोड किया गया executable रखा जाएगा।"
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "अनुमत स्वतः-निष्पादन कमांड",
 			"allowedCommandsDescription": "कमांड प्रीफिक्स जो स्वचालित रूप से निष्पादित किए जा सकते हैं जब \"निष्पादन ऑपरेशन हमेशा अनुमोदित करें\" सक्षम है। सभी कमांड की अनुमति देने के लिए * जोड़ें (सावधानी से उपयोग करें)।",
 			"deniedCommands": "अस्वीकृत कमांड",
@@ -394,6 +398,11 @@
 		"vscodeLmDescription": "VS कोड भाषा मॉडल API आपको अन्य VS कोड एक्सटेंशन (जैसे GitHub Copilot) द्वारा प्रदान किए गए मॉडल चलाने की अनुमति देता है। शुरू करने का सबसे आसान तरीका VS कोड मार्केटप्लेस से Copilot और Copilot चैट एक्सटेंशन इंस्टॉल करना है।",
 		"awsCustomArnUse": "आप जिस मॉडल का उपयोग करना चाहते हैं, उसके लिए एक वैध Amazon बेडरॉक ARN दर्ज करें। प्रारूप उदाहरण:",
 		"awsCustomArnDesc": "सुनिश्चित करें कि ARN में क्षेत्र ऊपर चयनित AWS क्षेत्र से मेल खाता है।",
+		"awsCustomArnBaseModel": "अंतर्निहित मॉडल",
+		"awsCustomArnBaseModelOther": "अन्य (सूची में नहीं)",
+		"awsCustomArnBaseModelDesc": "वह मॉडल जिसकी ओर यह ARN इंगित करता है। Zoo Code इसका उपयोग सोच, तापमान, संदर्भ विंडो, अधिकतम आउटपुट और मूल्य निर्धारण के लिए करता है। जब ARN में मॉडल का नाम हो तो यह स्वचालित रूप से पहचाना जाता है।",
+		"awsCustomArnContextWindow": "संदर्भ विंडो (टोकन)",
+		"awsCustomArnMaxTokens": "अधिकतम आउटपुट टोकन",
 		"openRouterApiKey": "OpenRouter API कुंजी",
 		"getOpenRouterApiKey": "OpenRouter API कुंजी प्राप्त करें",
 		"vercelAiGatewayApiKey": "Vercel AI Gateway API कुंजी",
@@ -402,6 +411,12 @@
 		"getOpencodeGoApiKey": "Opencode Go API कुंजी प्राप्त करें",
 		"kenariApiKey": "Kenari API कुंजी",
 		"getKenariApiKey": "Kenari API कुंजी प्राप्त करें",
+		"ioIntelligence": {
+			"provider": "IO Intelligence",
+			"apiKey": "IO Intelligence API कुंजी",
+			"getApiKey": "IO Intelligence API कुंजी प्राप्त करें",
+			"model": "मॉडल"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API कुंजी",
@@ -530,6 +545,8 @@
 		"openAiApiKey": "OpenAI API कुंजी",
 		"apiKey": "API कुंजी",
 		"openAiBaseUrl": "बेस URL",
+		"openAiStrictToolSchemas": "कड़े टूल स्कीमा (strict: true)",
+		"openAiStrictToolSchemasDescription": "strict schema adherence को सक्षम करने के लिए टूल स्कीमा के साथ strict: true भेजें। गैर-कड़े टूल कॉलिंग के लिए अक्षम करें।",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure परिनियोजन नाम",
 		"azureOpenAiDeploymentNameDescription": "अंतर्निहित मॉडल नाम के बजाय Azure AI Studio में दिया गया परिनियोजन नाम दर्ज करें।",
@@ -568,6 +585,16 @@
 		"enablePromptCaching": "प्रॉम्प्ट कैशिंग सक्षम करें",
 		"enablePromptCachingTitle": "समर्थित मॉडल के लिए प्रदर्शन में सुधार और लागत को कम करने के लिए प्रॉम्प्ट कैशिंग सक्षम करें।",
 		"cacheUsageNote": "नोट: यदि आप कैश उपयोग नहीं देखते हैं, तो एक अलग मॉडल चुनने का प्रयास करें और फिर अपने वांछित मॉडल को पुनः चुनें।",
+		"githubCopilot": {
+			"accountActions": "GitHub Copilot खाते की क्रियाएँ",
+			"signIn": "GitHub में साइन इन करें",
+			"reconnect": "GitHub फिर से कनेक्ट करें",
+			"signedIn": "{{account}} के रूप में साइन इन किया गया",
+			"connecting": "कनेक्ट हो रहा है...",
+			"noModels": "कोई Copilot मॉडल उपलब्ध नहीं है। GitHub Copilot Chat इंस्टॉल या सक्षम करें, किसी पात्र GitHub खाते से साइन इन करें, फिर रिफ्रेश करें। साइन इन करने से Copilot सदस्यता की पुष्टि नहीं होती। आपके GitHub प्लान, प्रीमियम-अनुरोध और दर सीमाएँ लागू होती हैं।",
+			"manageAccount": "GitHub खाता प्रबंधित करें",
+			"manageAccountDescription": "VS Code का खाता मेनू खोलता है, जहाँ आप GitHub से साइन आउट कर सकते हैं। साइन आउट करने से Copilot और इस खाते का उपयोग करने वाले अन्य एक्सटेंशन प्रभावित होते हैं।"
+		},
 		"vscodeLmModel": "भाषा मॉडल",
 		"vscodeLmWarning": "नोट: VS Code Language Model API के माध्यम से उपलब्ध मॉडल प्रदाता द्वारा रैप या फाइन‑ट्यून किए जा सकते हैं, इसलिए इनका व्यवहार किसी सामान्य प्रदाता या राउटर से सीधे उसी मॉडल का उपयोग करने की तुलना में अलग हो सकता है। «Language Model» ड्रॉपडाउन से मॉडल उपयोग करने के लिए पहले उसी मॉडल पर स्विच करें और फिर Copilot Chat प्रॉम्प्ट में «Accept» पर क्लिक करें; अन्यथा 400 \"The requested model is not supported\" जैसी त्रुटि दिखाई दे सकती है।",
 		"googleCloudSetup": {
@@ -595,7 +622,7 @@
 			"baseUrl": "बेस URL (वैकल्पिक)",
 			"modelId": "मॉडल ID",
 			"apiKey": "Ollama API Key",
-			"apiKeyHelp": "प्रमाणित Ollama इंस्टेंसेस या क्लाउड सेवाओं के लिए वैकल्पिक API key। स्थानीय इंस्टॉलेशन के लिए खाली छोड़ें।",
+			"apiKeyHelp": "प्रमाणीकरण चाहने वाले Ollama इंस्टेंस या क्लाउड सेवाओं के लिए वैकल्पिक API key। Zoo Code key केवल HTTPS या loopback endpoints को भेजता है। दूरस्थ HTTP endpoint को key नहीं मिलती, क्योंकि key सादे टेक्स्ट में जाएगी। key चाहने वाले दूरस्थ इंस्टेंस के लिए HTTPS का उपयोग करें। स्थानीय इंस्टॉलेशन के लिए इसे खाली छोड़ें।",
 			"numCtx": "संदर्भ विंडो आकार (num_ctx)",
 			"numCtxHelp": "मॉडल के डिफ़ॉल्ट संदर्भ विंडो आकार को ओवरराइड करें। मॉडल की मॉडलफ़ाइल कॉन्फ़िगरेशन का उपयोग करने के लिए खाली छोड़ दें। न्यूनतम मान 128 है।",
 			"thinking": "थिंकिंग सक्षम करें",
@@ -661,6 +688,10 @@
 			"description": "'Zoo को समस्या हो रही है' संवाद दिखाने से पहले लगातार त्रुटियों या दोहराए गए कार्यों की संख्या। इस सुरक्षा तंत्र को अक्षम करने के लिए 0 पर सेट करें (यह कभी ट्रिगर नहीं होगा)।",
 			"unlimitedDescription": "असीमित पुनः प्रयास सक्षम (स्वतः आगे बढ़ें)। संवाद कभी नहीं दिखाई देगा।",
 			"warning": "⚠️ 0 पर सेट करने से असीमित पुनः प्रयास की अनुमति मिलती है जिससे महत्वपूर्ण एपीआई उपयोग हो सकता है"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "पुनरावृत्ति सॉफ्ट चेतावनी सीमा",
+			"description": "इतनी समान लगातार टूल कॉल के बाद, टूल को ब्लॉक कर दिया जाता है और AI से पुनः प्रयास को उचित ठहराने के लिए कहा जाता है — आपको शामिल किए बिना। सॉफ्ट चेतावनियों को अक्षम करने के लिए 0 पर सेट करें।"
 		},
 		"reasoningEffort": {
 			"label": "मॉडल तर्क प्रयास",
@@ -820,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "कमांड आउटपुट डिफ़ॉल्ट रूप से संक्षिप्त करें",
+			"description": "इनलाइन टर्मिनल सहित कमांड आउटपुट को संक्षिप्त दिखाएँ। ज़रूरत पड़ने पर इसे मैन्युअल रूप से फैलाएँ। इससे कमांड चलाने का तरीका नहीं बदलता।"
+		},
 		"basic": {
 			"label": "टर्मिनल सेटिंग्स: मूल",
 			"description": "मूल टर्मिनल सेटिंग्स"
@@ -987,8 +1022,14 @@
 		"rangeDescription": "उच्च मान आउटपुट को अधिक यादृच्छिक बनाते हैं, निम्न मान इसे अधिक निर्धारित बनाते हैं।"
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "छवि समर्थन की जानकारी नहीं दी गई",
+		"toolSupportUnknown": "टूल समर्थन की जानकारी नहीं दी गई",
+		"promptCacheManagedByCopilot": "प्रॉम्प्ट कैशिंग GitHub Copilot द्वारा प्रबंधित है",
+		"promptCacheCopilotDetails": "कैशिंग मॉडल और GitHub Copilot बैकएंड पर निर्भर करती है। Zoo Code VS Code API के माध्यम से कैश प्रतिधारण को कॉन्फ़िगर नहीं कर सकता और न ही कैश हिट देख सकता है।",
 		"supportsImages": "छवियों का समर्थन करता है",
 		"noImages": "छवियों का समर्थन नहीं करता है",
+		"supportsTools": "टूल का समर्थन करता है",
+		"noTools": "टूल का समर्थन नहीं करता है",
 		"supportsPromptCache": "प्रॉम्प्ट कैशिंग का समर्थन करता है",
 		"noPromptCache": "प्रॉम्प्ट कैशिंग का समर्थन नहीं करता है",
 		"contextWindow": "संदर्भ विंडो:",

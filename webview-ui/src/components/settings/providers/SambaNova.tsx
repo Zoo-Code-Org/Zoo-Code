@@ -30,7 +30,7 @@ export const SambaNova = ({ apiConfiguration, setApiConfigurationField }: SambaN
 	return (
 		<>
 			<VSCodeTextField
-				value={apiConfiguration?.sambaNovaApiKey || ""}
+				value={apiConfiguration.sambaNovaApiKey || ""}
 				type="password"
 				onInput={handleInputChange("sambaNovaApiKey")}
 				placeholder={t("settings:placeholders.apiKey")}
@@ -40,7 +40,7 @@ export const SambaNova = ({ apiConfiguration, setApiConfigurationField }: SambaN
 			<div className="text-sm text-vscode-descriptionForeground -mt-2">
 				{t("settings:providers.apiKeyStorageNotice")}
 			</div>
-			{!apiConfiguration?.sambaNovaApiKey && (
+			{!apiConfiguration.sambaNovaApiKey && (
 				<VSCodeButtonLink
 					href="https://cloud.sambanova.ai/?utm_source=roocode&utm_medium=external&utm_campaign=cloud_signup"
 					appearance="secondary">

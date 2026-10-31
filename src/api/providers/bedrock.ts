@@ -30,11 +30,14 @@ import {
 	BEDROCK_DEFAULT_CONTEXT,
 	AWS_INFERENCE_PROFILE_MAPPING,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
+	BEDROCK_THINKING_DISABLE_MODEL_IDS,
 	BEDROCK_GLOBAL_INFERENCE_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_PRICING,
 	SERVICE_TIER_KEY,
 	ApiProviderError,
+	resolveBedrockCustomArnBaseModelId,
+	BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -51,6 +54,7 @@ import { normalizeToolSchema } from "../../utils/json-schema"
 import { getSystemProxyUrl } from "../../utils/networkProxy"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
+import { OutputTokenLimitError } from "./utils/output-token-limit-error"
 
 /************************************************************************************
  *
@@ -78,6 +82,7 @@ interface BedrockAdditionalModelFields {
 				// "summarized" shows thinking content in UI; omit to keep thinking internal only
 				display?: "summarized" | "none"
 		  }
+		| { type: "disabled" }
 	output_config?: {
 		// Claude 4.7+ effort levels: "low" | "medium" | "high" | "xhigh" | "max"
 		effort: string
@@ -326,12 +331,13 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	 * Detect models that require the adaptive-thinking API contract.
 	 *
 	 * Starting with Claude Opus 4.7 (and the matching Sonnet 4.7), and continuing
-	 * in Opus 4.8 / Sonnet 4.8, Claude Fable 5/5.1, Claude Sonnet 5, and Claude Opus 5,
-	 * Anthropic removed sampling parameters (temperature/top_p/top_k) and replaced
-	 * budget_tokens-based thinking with `thinking.type: "adaptive"` plus
+	 * in Opus 4.8 / Sonnet 4.8, Claude Fable 5/5.1, Claude Sonnet 5, Claude Opus 5,
+	 * and Claude Haiku 5.5, Anthropic removed sampling parameters (temperature/top_p/top_k)
+	 * and replaced budget_tokens-based thinking with `thinking.type: "adaptive"` plus
 	 * `output_config.effort`. The migration guide from 4.7 → 4.8 confirms there
-	 * are no further breaking API changes, and Fable 5+ / Sonnet 5 / Opus 5 keep the
-	 * same adaptive-thinking contract, so a single guard matches all generations.
+	 * are no further breaking API changes, and Fable 5+ / Sonnet 5 / Opus 5 /
+	 * Haiku 5.5 keep the same adaptive-thinking contract, so a single guard
+	 * matches all generations.
 	 * Shared by createMessage and completePrompt so both request paths omit
 	 * temperature for these models (sending it causes a 400).
 	 *
@@ -339,7 +345,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	 * the prefix via parseBaseModelId before matching.
 	 */
 	private isAdaptiveThinkingModel(modelId: string): boolean {
-		const baseModelId = this.parseBaseModelId(modelId)
+		const baseModelId = this.getCapabilityModelId(modelId)
 		return (
 			baseModelId.includes("opus-4-7") ||
 			baseModelId.includes("opus-4-8") ||
@@ -347,7 +353,8 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			baseModelId.includes("fable-5") ||
 			baseModelId.includes("sonnet-4-7") ||
 			baseModelId.includes("sonnet-4-8") ||
-			baseModelId.includes("sonnet-5")
+			baseModelId.includes("sonnet-5") ||
+			baseModelId.includes("haiku-5-5")
 		)
 	}
 
@@ -449,7 +456,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		// Detect models that require the adaptive-thinking API contract (Opus/Sonnet
 		// 4.7 and 4.8). See isAdaptiveThinkingModel for details. The same guard is
 		// reused in completePrompt so both request paths stay consistent.
-		const baseModelId = this.parseBaseModelId(modelConfig.id)
+		const baseModelId = this.getCapabilityModelId(modelConfig.id)
 		const isAdaptiveThinkingModel = this.isAdaptiveThinkingModel(modelConfig.id)
 
 		// Determine if thinking should be enabled
@@ -487,6 +494,10 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				modelId: modelConfig.id,
 				thinking: additionalModelRequestFields?.thinking,
 			})
+		} else if ((BEDROCK_THINKING_DISABLE_MODEL_IDS as readonly string[]).includes(baseModelId)) {
+			// Omitting thinking enables it by default on these models. Adaptive-only
+			// models (Fable 5/5.1, Opus 5.5) reject "disabled", so they keep the omit behavior.
+			additionalModelRequestFields = { thinking: { type: "disabled" } }
 		}
 
 		const inferenceConfig: BedrockInferenceConfig = {
@@ -601,6 +612,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				throw new Error("No stream available in the response")
 			}
 
+			let outputLimitReached = false
 			for await (const chunk of response.stream) {
 				// Parse the chunk as JSON if it's a string (for tests)
 				let streamEvent: StreamEvent
@@ -784,8 +796,13 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				}
 				// Handle message stop
 				if (streamEvent.messageStop) {
+					outputLimitReached = streamEvent.messageStop.stopReason === "max_tokens"
 					continue
 				}
+			}
+			// Bedrock sends usage metadata after messageStop. Preserve it before reporting truncation.
+			if (outputLimitReached) {
+				throw new OutputTokenLimitError()
 			}
 			// Clear timeout after stream completes
 			clearTimeout(timeoutId)
@@ -800,6 +817,12 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 			// Check if this is a throttling error that should trigger retry logic
 			const errorType = this.getErrorType(error)
+
+			// Truncation is deterministic: rethrow as-is so the task loop can tell it apart
+			// from transient stream failures and skip the automatic retry.
+			if (error instanceof OutputTokenLimitError) {
+				throw error
+			}
 
 			// For throttling errors, throw immediately without yielding chunks
 			// This allows the retry mechanism in attemptApiRequest() to catch and handle it
@@ -859,13 +882,6 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		try {
 			const modelConfig = this.getModel()
-
-			// For completePrompt, thinking is typically not used, but we should still check
-			// if thinking was somehow enabled in the model config
-			const thinkingEnabled =
-				shouldUseReasoningBudget({ model: modelConfig.info, settings: this.options }) &&
-				modelConfig.reasoning &&
-				modelConfig.reasoningBudget
 
 			const inferenceConfig: BedrockInferenceConfig = {
 				maxTokens: modelConfig.maxTokens || (modelConfig.info.maxTokens as number),
@@ -1067,7 +1083,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		 * match[4] - The resource ID (e.g., "anthropic.claude-3-sonnet-20240229-v1:0")
 		 */
 
-		const arnRegex = /^arn:[^:]+:(?:bedrock|sagemaker):([^:]+):([^:]*):(?:([^\/]+)\/([\w\.\-:]+)|([^\/]+))$/
+		const arnRegex = /^arn:[^:]+:(?:bedrock|sagemaker):([^:]+):([^:]*):(?:([^/]+)\/([\w.\-:]+)|([^/]+))$/
 		const match = arn.match(arnRegex)
 
 		if (match && match[1] && match[3] && match[4]) {
@@ -1117,6 +1133,40 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			errorMessage: "Invalid ARN format. ARN should follow the Amazon Bedrock ARN pattern.",
 			crossRegionInference: false,
 		}
+	}
+
+	/**
+	 * Model ID used to look up model info for a custom ARN. Foundation-model ARNs use the model they name;
+	 * an explicit "Other" choice uses the generic fallback instead of a model named in the ARN.
+	 */
+	private getCustomArnLookupModelId(): string {
+		if (this.arnInfo.modelType === "foundation-model") {
+			return this.arnInfo.modelId
+		}
+
+		const baseModelId = resolveBedrockCustomArnBaseModelId(
+			this.options.awsCustomArn,
+			this.options.awsCustomArnBaseModelId,
+		)
+		if (baseModelId) {
+			return baseModelId
+		}
+
+		return this.options.awsCustomArnBaseModelId === BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL
+			? BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL
+			: this.arnInfo.modelId
+	}
+
+	/**
+	 * Model ID used for capability checks (thinking contract, 1M context, service tier, ...).
+	 * For a custom ARN this is the model it points to rather than the ARN itself.
+	 */
+	private getCapabilityModelId(modelId: string): string {
+		if (this.options.awsCustomArn && modelId === this.options.awsCustomArn) {
+			return this.getCustomArnLookupModelId()
+		}
+
+		return this.parseBaseModelId(modelId)
 	}
 
 	//This strips any region prefix that used on cross-region model inference ARNs
@@ -1206,7 +1256,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 		// If custom ARN is provided, use it
 		if (this.options.awsCustomArn) {
-			modelConfig = this.getModelById(this.arnInfo.modelId, this.arnInfo.modelType)
+			modelConfig = this.getModelById(this.getCustomArnLookupModelId(), this.arnInfo.modelType)
 
 			//If the user entered an ARN for a foundation-model they've done the same thing as picking from our list of options.
 			//We leave the model data matching the same as if a drop-down input method was used by not overwriting the model ID with the user input ARN
@@ -1234,8 +1284,8 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		}
 
 		// Check if 1M context is enabled for supported Claude 4 models
-		// Use parseBaseModelId to handle cross-region inference prefixes
-		const baseModelId = this.parseBaseModelId(modelConfig.id)
+		// getCapabilityModelId handles cross-region prefixes and custom ARNs
+		const baseModelId = this.getCapabilityModelId(modelConfig.id)
 		if (BEDROCK_1M_CONTEXT_MODEL_IDS.includes(baseModelId as any) && this.options.awsBedrock1MContext) {
 			// Update context window and pricing to 1M tier when 1M context beta is enabled
 			const tier = modelConfig.info.tiers?.[0]
@@ -1259,7 +1309,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		})
 
 		// Apply service tier pricing if specified and model supports it
-		const baseModelIdForTier = this.parseBaseModelId(modelConfig.id)
+		const baseModelIdForTier = this.getCapabilityModelId(modelConfig.id)
 		if (this.options.awsBedrockServiceTier && BEDROCK_SERVICE_TIER_MODEL_IDS.includes(baseModelIdForTier as any)) {
 			const pricingMultiplier = BEDROCK_SERVICE_TIER_PRICING[this.options.awsBedrockServiceTier]
 			if (pricingMultiplier && pricingMultiplier !== 1.0) {
@@ -1312,21 +1362,6 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			(modelConfig?.info as any)?.cachableFields &&
 			(modelConfig?.info as any)?.cachableFields?.length > 0
 		)
-	}
-
-	/**
-	 * Removes any existing cachePoint nodes from content blocks
-	 */
-	private removeCachePoints(content: any): any {
-		if (Array.isArray(content)) {
-			return content.map((block) => {
-				// Use destructuring to remove cachePoint property
-				const { cachePoint: _, ...rest } = block
-				return rest
-			})
-		}
-
-		return content
 	}
 
 	/************************************************************************************

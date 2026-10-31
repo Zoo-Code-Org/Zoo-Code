@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Chọn chế độ tương tác",
 	"selectApiConfig": "Chọn cấu hình API",
+	"selectModel": "Chọn mô hình",
+	"modelSelector": {
+		"title": "Mô hình",
+		"settings": "Cài đặt mô hình",
+		"description": "Chọn mô hình được dùng cho cấu hình API này.",
+		"searchPlaceholder": "Tìm kiếm mô hình...",
+		"unsupportedTooltip": "Mô hình của nhà cung cấp này được cấu hình trong Cài đặt",
+		"loading": "Đang tải mô hình..."
+	},
 	"lockApiConfigAcrossModes": "Khóa cấu hình API cho tất cả chế độ trong workspace này",
 	"unlockApiConfigAcrossModes": "Cấu hình API đã bị khóa cho tất cả chế độ trong workspace này (nhấn để mở khóa)",
 	"enhancePrompt": "Nâng cao yêu cầu với ngữ cảnh bổ sung",
@@ -344,10 +353,10 @@
 		"title": "Zoo Code {{version}} đã phát hành",
 		"support": "Hãy ủng hộ Zoo Code bằng cách tặng sao cho chúng tôi trên <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Có gì mới:",
-			"highlight1": "🔑 Dùng khóa API Zoo Gateway ở bất cứ đâu—thêm khóa vào bất kỳ client hoặc workflow nào tương thích với OpenAI: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 Trong thời gian giới hạn, nhận quyền truy cập miễn phí vào MiniMax-M3 qua Zoo Gateway.",
-			"highlight3": "✨ Hiện đã có: các model GPT-6 Astra và Claude Fable 5.1 hoàn toàn mới."
+			"heading": "Có gì mới trong Zoo Code v3.94.0",
+			"highlight1": "✨ Hỗ trợ model và provider rộng hơn: Dùng Claude Haiku 5.5 qua Anthropic, gửi hình ảnh tới các model VS Code LM tương thích, chỉnh temperature cho các model OpenCode Go Responses và hủy request gọn gàng trên nhiều provider hơn.",
+			"highlight2": "🔐 MCP OAuth linh hoạt hơn: Cấu hình cài đặt OAuth client tĩnh, dùng đường dẫn callback tùy chỉnh, tìm hiểu chi tiết xác thực từ WWW-Authenticate và xem lỗi callback trước khi thử lại.",
+			"highlight3": "🧭 Chat mượt mà và phiên dài hơn: Đổi tên task trong lịch sử, kéo file vào chat mà không cần giữ Shift, giảm bộ nhớ giữ lại trong các phiên dài và giữ ổn định các liên kết subtask cùng webview đã thay thế."
 		},
 		"cloudAgents": {
 			"heading": "Mới trên Cloud:",
@@ -488,6 +497,10 @@
 		"serversPart_other": "{{count}} máy chủ MCP",
 		"messageTemplate": "Bạn đã bật {{tools}} qua {{servers}}. Số lượng lớn như vậy có thể khiến mô hình bối rối và dẫn đến lỗi. Cố gắng giữ nó dưới {{threshold}}.",
 		"openMcpSettings": "Mở cài đặt MCP"
+	},
+	"ignoredDisabledTools": {
+		"title": "Đã bỏ qua công cụ bị tắt",
+		"messageTemplate": "Các công cụ sau không thể bị tắt, nên các mục disabledTools tương ứng đã được bỏ qua: {{tools}}."
 	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"

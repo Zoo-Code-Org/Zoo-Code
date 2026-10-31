@@ -94,6 +94,76 @@ describe("batchNearby", () => {
 		expect(result[0].text).toBe("BATCH:match-1,match-2")
 	})
 
+	test("repeated assistant preambles between matching tools are consumed by a successful batch", () => {
+		const preamble = "I'll read the files now."
+		const messages = [
+			msg(preamble, "say", "text"),
+			msg("match-1", "ask"),
+			msg("", "say", "api_req_started"),
+			msg(preamble, "say", "text"),
+			msg("match-2", "ask"),
+			msg(preamble, "say", "text"),
+			msg("match-3", "ask"),
+		]
+		const result = batchNearby(messages, {
+			isTarget: isMatch,
+			isIgnorableBetweenTargets,
+			isBoundary,
+			synthesize: synthesizeBatch,
+		})
+
+		expect(result).toHaveLength(2)
+		expect(result[0].text).toBe(preamble)
+		expect(result[1].text).toBe("BATCH:match-1,match-2,match-3")
+	})
+
+	test("distinct assistant text between matching tools remains a boundary", () => {
+		const messages = [
+			msg("I'll read the files now.", "say", "text"),
+			msg("match-1", "ask"),
+			msg("I found something important.", "say", "text"),
+			msg("match-2", "ask"),
+		]
+		const result = batchNearby(messages, {
+			isTarget: isMatch,
+			isIgnorableBetweenTargets,
+			isBoundary,
+			synthesize: synthesizeBatch,
+		})
+
+		expect(result).toEqual(messages)
+	})
+
+	test("restores a repeated preamble when no later target is found", () => {
+		const preamble = "I'll read the files now."
+		const messages = [
+			msg(preamble, "say", "text"),
+			msg("match-1", "ask"),
+			msg(preamble, "say", "text"),
+			msg("different tool", "ask"),
+		]
+		const result = batchNearby(messages, {
+			isTarget: isMatch,
+			isIgnorableBetweenTargets,
+			isBoundary,
+			synthesize: synthesizeBatch,
+		})
+
+		expect(result).toEqual(messages)
+	})
+
+	test("an item matching target and boundary stops the current batch", () => {
+		const messages = [msg("match-1", "ask"), msg("match-boundary", "ask"), msg("match-2", "ask")]
+		const result = batchNearby(messages, {
+			isTarget: isMatch,
+			isIgnorableBetweenTargets: () => false,
+			isBoundary: (item) => item.text === "match-boundary",
+			synthesize: synthesizeBatch,
+		})
+
+		expect(result).toEqual(messages)
+	})
+
 	test("boundary message stops batching", () => {
 		const messages = [msg("match-1", "ask"), msg("visible text", "say", "text"), msg("match-2", "ask")]
 		const result = batchNearby(messages, {
@@ -379,5 +449,63 @@ describe("batchNearby", () => {
 		expect(result[0].text).toBe('BATCH:{"tool":"readFile","path":"a.ts"},{"tool":"readFile","path":"b.ts"}')
 		expect(result[1].text).toBe("feedback")
 		expect(result[2].text).toBe('BATCH:{"tool":"readFile","path":"c.ts"},{"tool":"readFile","path":"d.ts"}')
+	})
+
+	describe("ignorable items around a batch", () => {
+		const options = {
+			isTarget: isMatch,
+			isIgnorableBetweenTargets,
+			isBoundary,
+			synthesize: synthesizeBatch,
+		}
+
+		test("consumes ignorable items between targets but keeps the ones after the last target", () => {
+			const betweenRequest = msg("between request", "say", "api_req_started")
+			const nextRequest = msg("next request", "say", "api_req_started")
+			const nextReasoning = msg("next reasoning", "say", "reasoning")
+
+			const result = batchNearby(
+				[msg("match-1", "ask"), betweenRequest, msg("match-2", "ask"), nextRequest, nextReasoning],
+				options,
+			)
+
+			expect(result.map((m) => m.text)).toEqual(["BATCH:match-1,match-2", "next request", "next reasoning"])
+		})
+
+		test("keeps trailing ignorable items when the batch is followed by a boundary", () => {
+			const result = batchNearby(
+				[
+					msg("match-1", "ask"),
+					msg("match-2", "ask"),
+					msg("next request", "say", "api_req_started"),
+					msg("visible text", "say", "text"),
+				],
+				options,
+			)
+
+			expect(result.map((m) => m.text)).toEqual(["BATCH:match-1,match-2", "next request", "visible text"])
+		})
+
+		test("keeps ignorable items that follow a single target", () => {
+			const messages = [msg("match-1", "ask"), msg("next request", "say", "api_req_started")]
+
+			expect(batchNearby(messages, options)).toEqual(messages)
+		})
+
+		test("does not duplicate ignorable items between three targets", () => {
+			const result = batchNearby(
+				[
+					msg("match-1", "ask"),
+					msg("req a", "say", "api_req_started"),
+					msg("match-2", "ask"),
+					msg("req b", "say", "api_req_started"),
+					msg("match-3", "ask"),
+					msg("req c", "say", "api_req_started"),
+				],
+				options,
+			)
+
+			expect(result.map((m) => m.text)).toEqual(["BATCH:match-1,match-2,match-3", "req c"])
+		})
 	})
 })

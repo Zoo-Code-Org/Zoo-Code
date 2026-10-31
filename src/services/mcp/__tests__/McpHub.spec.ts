@@ -1,12 +1,17 @@
 import * as fs from "fs/promises"
+import * as path from "path"
 
 import type { Mock } from "vitest"
 import type { ExtensionContext, Uri } from "vscode"
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import type { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 
 import type { ClineProvider } from "../../../core/webview/ClineProvider"
+import type { SecretStorageService } from "../SecretStorageService"
 
 import type { McpHub as McpHubType, McpConnection, ConnectedMcpConnection, DisconnectedMcpConnection } from "../McpHub"
 import { ServerConfigSchema, McpHub } from "../McpHub"
+import { McpOAuthClientProvider } from "../McpOAuthClientProvider"
 import { OAUTH_FLOW_TIMEOUT_MS } from "../constants"
 import { t } from "../../../i18n"
 
@@ -30,16 +35,47 @@ vi.mock("fs/promises", () => {
 })
 
 // Import safeWriteJson to use in mocks
-import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 // Mock safeWriteJson
 vi.mock("../../../utils/safeWriteJson", () => ({
-	safeWriteJson: vi.fn(async (filePath, data) => {
-		// Instead of trying to write to the file system, just call fs.writeFile mock
-		// This avoids the complex file locking and temp file operations
-		const fs = await import("fs/promises")
-		return fs.writeFile(filePath, JSON.stringify(data), "utf8")
-	}),
+	safeWriteJson: vi.fn(
+		async (
+			filePath: string,
+			data: unknown,
+			options?: { merge?: (existing: unknown, incoming: unknown) => unknown },
+		) => {
+			// Instead of trying to write to the file system, just call fs.writeFile mock
+			// This avoids the complex file locking and temp file operations.
+			// When a merge callback is provided, honor it: read the current on-disk
+			// content via the fs.readFile mock (simulating the read under the lock)
+			// and let the callback decide the final value.
+			let value = data
+			if (options?.merge) {
+				let existing: unknown = null
+				try {
+					const fs = await import("fs/promises")
+					existing = JSON.parse(await fs.readFile(filePath, "utf8"))
+				} catch (error) {
+					// Mirror the production safeWriteJson merge contract: only ENOENT
+					// and SyntaxError are recoverable; an EACCES or I/O failure must
+					// reject before the merge callback runs.
+					// unknown-safe narrowing: no cast on the caught value (the "in"
+					// check narrows to object & Record<"code", unknown>).
+					const code =
+						error && typeof error === "object" && "code" in error && typeof error.code === "string"
+							? error.code
+							: undefined
+					if (!(error instanceof SyntaxError) && code !== "ENOENT") {
+						throw error
+					}
+					existing = null
+				}
+				value = options.merge(existing, data)
+			}
+			const fs = await import("fs/promises")
+			return fs.writeFile(filePath, JSON.stringify(value), "utf8")
+		},
+	),
 }))
 
 vi.mock("delay", () => ({ default: vi.fn().mockResolvedValue(undefined) }))
@@ -94,6 +130,18 @@ vi.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
 
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
 	Client: vi.fn(),
+}))
+
+vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
+	StreamableHTTPClientTransport: vi.fn(),
+}))
+
+vi.mock("../McpOAuthClientProvider", () => ({
+	McpOAuthClientProvider: {
+		create: vi.fn(),
+		isKnownNonOAuth: vi.fn().mockReturnValue(false),
+		clearNonOAuthCache: vi.fn(),
+	},
 }))
 
 // Mock chokidar
@@ -210,6 +258,350 @@ describe("McpHub", () => {
 		expect(console.error).toHaveBeenCalledWith("[McpHub] Failed to watch MCP settings file:", watcherError)
 		await failingHub.dispose()
 		watchSpy.mockRestore()
+	})
+
+	describe("getMcpSettingsFilePath", () => {
+		it("preserves a config written by a concurrent process during initial creation (#1371)", async () => {
+			const settingsPath = path.join("/mock/settings/path", "mcp_settings.json")
+			const concurrentConfig = {
+				mcpServers: {
+					"concurrent-server": { type: "stdio", command: "node", args: ["server.js"] },
+				},
+			}
+
+			// Window A's existence check sees the settings file as absent...
+			// (One-shot overrides: the factory defaults apply to all other tests.)
+			vi.mocked(fs.access).mockRejectedValueOnce(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			// ...but by the time the locked read runs (safeWriteJson merge),
+			// window B's config is already on disk.
+			vi.mocked(fs.readFile).mockResolvedValueOnce(JSON.stringify(concurrentConfig))
+
+			const returnedPath = await mcpHub.getMcpSettingsFilePath()
+
+			expect(returnedPath).toBe(settingsPath)
+			// The creation write must carry the concurrent config, not the empty stub.
+			expect(fs.writeFile).toHaveBeenCalledTimes(1)
+			const [writtenPath, writtenData] = vi.mocked(fs.writeFile).mock.calls[0]
+			expect(writtenPath).toBe(settingsPath)
+			expect(JSON.parse(writtenData as string)).toEqual(concurrentConfig)
+		})
+
+		it("writes the default stub when no settings file exists yet", async () => {
+			const settingsPath = path.join("/mock/settings/path", "mcp_settings.json")
+
+			// Existence check and the locked read both see an absent file.
+			vi.mocked(fs.access).mockRejectedValueOnce(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			vi.mocked(fs.readFile).mockRejectedValueOnce(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+
+			const returnedPath = await mcpHub.getMcpSettingsFilePath()
+
+			expect(returnedPath).toBe(settingsPath)
+			expect(fs.writeFile).toHaveBeenCalledTimes(1)
+			const [writtenPath, writtenData] = vi.mocked(fs.writeFile).mock.calls[0]
+			expect(writtenPath).toBe(settingsPath)
+			expect(JSON.parse(writtenData as string)).toEqual({ mcpServers: {} })
+		})
+
+		it("writes the default stub when the existing content has no mcpServers object", async () => {
+			// Existence check sees an absent file, but the locked read finds content
+			// that does not carry a mcpServers object (e.g. a torn or foreign write).
+			vi.mocked(fs.access).mockRejectedValueOnce(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			vi.mocked(fs.readFile).mockResolvedValueOnce(JSON.stringify({ someOtherKey: true }))
+
+			await mcpHub.getMcpSettingsFilePath()
+
+			expect(fs.writeFile).toHaveBeenCalledTimes(1)
+			const [, writtenData] = vi.mocked(fs.writeFile).mock.calls[0]
+			expect(JSON.parse(writtenData as string)).toEqual({ mcpServers: {} })
+		})
+
+		it("writes the default stub when the existing mcpServers value is not an object", async () => {
+			vi.mocked(fs.access).mockRejectedValueOnce(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			vi.mocked(fs.readFile).mockResolvedValueOnce(JSON.stringify({ mcpServers: "corrupted" }))
+
+			await mcpHub.getMcpSettingsFilePath()
+
+			expect(fs.writeFile).toHaveBeenCalledTimes(1)
+			const [, writtenData] = vi.mocked(fs.writeFile).mock.calls[0]
+			expect(JSON.parse(writtenData as string)).toEqual({ mcpServers: {} })
+		})
+
+		it("writes the default stub when the existing mcpServers value is an array", async () => {
+			// Arrays satisfy `typeof === "object"`; an mcpServers map must be a
+			// plain object, so an array is invalid and replaced by the stub
+			// instead of being preserved and rejected by McpSettingsSchema later.
+			vi.mocked(fs.access).mockRejectedValueOnce(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			vi.mocked(fs.readFile).mockResolvedValueOnce(JSON.stringify({ mcpServers: [] }))
+
+			await mcpHub.getMcpSettingsFilePath()
+
+			expect(fs.writeFile).toHaveBeenCalledTimes(1)
+			const [, writtenData] = vi.mocked(fs.writeFile).mock.calls[0]
+			expect(JSON.parse(writtenData as string)).toEqual({ mcpServers: {} })
+		})
+
+		it("writes the default stub when the existing mcpServers value is null", async () => {
+			const settingsPath = path.join("/mock/settings/path", "mcp_settings.json")
+
+			// `typeof null === "object"` and `!Array.isArray(null)` both hold, so only
+			// the truthy check on mcpServers stops a null map from being written back
+			// to disk: McpSettingsSchema (z.record) rejects `{ mcpServers: null }` on
+			// the next load, so the stub must replace it instead of preserving it.
+			vi.mocked(fs.access).mockRejectedValueOnce(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			vi.mocked(fs.readFile).mockResolvedValueOnce(JSON.stringify({ mcpServers: null }))
+
+			const returnedPath = await mcpHub.getMcpSettingsFilePath()
+
+			expect(returnedPath).toBe(settingsPath)
+			expect(fs.writeFile).toHaveBeenCalledTimes(1)
+			const [, writtenData] = vi.mocked(fs.writeFile).mock.calls[0]
+			expect(JSON.parse(writtenData as string)).toEqual({ mcpServers: {} })
+		})
+
+		it("writes the default stub when the locked read encounters malformed JSON", async () => {
+			const settingsPath = path.join("/mock/settings/path", "mcp_settings.json")
+
+			// A torn or foreign write leaves the file unparseable. JSON.parse throws
+			// SyntaxError, which the safeWriteJson merge contract treats as a
+			// recoverable absence (existing = null) rather than an I/O failure — the
+			// stub is written and creation succeeds.
+			vi.mocked(fs.access).mockRejectedValueOnce(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			vi.mocked(fs.readFile).mockResolvedValueOnce("{ mcpServers: not-json")
+
+			const returnedPath = await mcpHub.getMcpSettingsFilePath()
+
+			expect(returnedPath).toBe(settingsPath)
+			expect(fs.writeFile).toHaveBeenCalledTimes(1)
+			const [, writtenData] = vi.mocked(fs.writeFile).mock.calls[0]
+			expect(JSON.parse(writtenData as string)).toEqual({ mcpServers: {} })
+		})
+
+		it("rejects creation when the locked read fails with an I/O error (EACCES)", async () => {
+			vi.mocked(fs.access).mockRejectedValueOnce(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			// The locked read fails with a real I/O error (not ENOENT): the
+			// safeWriteJson mock mirrors the production contract — reject before
+			// the merge callback runs instead of treating the file as absent.
+			vi.mocked(fs.readFile).mockRejectedValueOnce(
+				Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }),
+			)
+
+			await expect(mcpHub.getMcpSettingsFilePath()).rejects.toThrow("EACCES: permission denied")
+			expect(fs.writeFile).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("static OAuth connection wiring", () => {
+		it("passes static OAuth options, performs discovery, and skips dynamic registration", async () => {
+			const streamableModule = await import("@modelcontextprotocol/sdk/client/streamableHttp.js")
+			const StreamableHTTPClientTransport = streamableModule.StreamableHTTPClientTransport as ReturnType<
+				typeof vi.fn
+			>
+			const clientModule = await import("@modelcontextprotocol/sdk/client/index.js")
+			const Client = clientModule.Client as ReturnType<typeof vi.fn>
+			const mockAuthProvider = {
+				registerClientIfNeeded: vi.fn(),
+				close: vi.fn().mockResolvedValue(undefined),
+			}
+			vi.mocked(McpOAuthClientProvider.create).mockResolvedValue(
+				mockAuthProvider as unknown as McpOAuthClientProvider,
+			)
+			const mockTransport = { close: vi.fn().mockResolvedValue(undefined) }
+			StreamableHTTPClientTransport.mockImplementation(function () {
+				return mockTransport as unknown as StreamableHTTPClientTransport
+			})
+			Client.mockImplementation(function () {
+				return {
+					connect: vi.fn().mockResolvedValue(undefined),
+					close: vi.fn().mockResolvedValue(undefined),
+					getInstructions: vi.fn(),
+					request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
+				} as unknown as Client
+			})
+			const secretStorage = {
+				hasOAuthData: vi.fn().mockResolvedValue(false),
+			} as unknown as SecretStorageService
+			const oauth = {
+				clientId: "registered-client",
+				scope: "openid offline_access",
+				redirectUri: "http://localhost:33418/callback",
+				resource: false as const,
+			}
+			vi.mocked(fs.readFile).mockResolvedValue(
+				JSON.stringify({
+					mcpServers: {
+						"static-oauth-server": {
+							type: "streamable-http",
+							url: "https://example.com/mcp",
+							oauth,
+						},
+					},
+				}),
+			)
+
+			const hub = new McpHub(mockProvider as ClineProvider, secretStorage)
+			await hub.waitUntilReady()
+
+			expect(McpOAuthClientProvider.create).toHaveBeenCalledWith(
+				"https://example.com/mcp",
+				secretStorage,
+				"static-oauth-server",
+				{ skipDiscovery: false, ...oauth },
+			)
+			expect(mockAuthProvider.registerClientIfNeeded).not.toHaveBeenCalled()
+			expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
+				new URL("https://example.com/mcp"),
+				expect.objectContaining({ authProvider: mockAuthProvider }),
+			)
+		})
+
+		it.each([
+			{
+				label: "a static client forces discovery despite the non-OAuth cache",
+				clientId: "registered-client",
+				hasStoredData: false,
+				knownNonOAuth: true,
+				expectedSkip: false,
+			},
+			{
+				label: "a dynamic client skips discovery for a known non-OAuth server",
+				clientId: undefined,
+				hasStoredData: false,
+				knownNonOAuth: true,
+				expectedSkip: true,
+			},
+			{
+				label: "stored OAuth data forces discovery despite the non-OAuth cache",
+				clientId: undefined,
+				hasStoredData: true,
+				knownNonOAuth: true,
+				expectedSkip: false,
+			},
+			{
+				label: "an uncached dynamic server performs discovery",
+				clientId: undefined,
+				hasStoredData: false,
+				knownNonOAuth: false,
+				expectedSkip: false,
+			},
+		])("computes skipDiscovery: $label", async ({ clientId, hasStoredData, knownNonOAuth, expectedSkip }) => {
+			const streamableModule = await import("@modelcontextprotocol/sdk/client/streamableHttp.js")
+			const StreamableHTTPClientTransport = streamableModule.StreamableHTTPClientTransport as ReturnType<
+				typeof vi.fn
+			>
+			const clientModule = await import("@modelcontextprotocol/sdk/client/index.js")
+			const Client = clientModule.Client as ReturnType<typeof vi.fn>
+			const mockAuthProvider = {
+				registerClientIfNeeded: vi.fn().mockResolvedValue(undefined),
+				close: vi.fn().mockResolvedValue(undefined),
+			}
+			vi.mocked(McpOAuthClientProvider.create).mockResolvedValue(
+				mockAuthProvider as unknown as McpOAuthClientProvider,
+			)
+			StreamableHTTPClientTransport.mockImplementation(function () {
+				return { close: vi.fn().mockResolvedValue(undefined) } as unknown as StreamableHTTPClientTransport
+			})
+			Client.mockImplementation(function () {
+				return {
+					connect: vi.fn().mockResolvedValue(undefined),
+					close: vi.fn().mockResolvedValue(undefined),
+					getInstructions: vi.fn(),
+					request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
+				} as unknown as Client
+			})
+			const hasOAuthData = vi.fn().mockResolvedValue(hasStoredData)
+			const secretStorage = { hasOAuthData } as unknown as SecretStorageService
+			vi.mocked(fs.readFile).mockResolvedValue(
+				JSON.stringify({
+					mcpServers: {
+						"oauth-server": {
+							type: "streamable-http",
+							url: "https://example.com/mcp",
+							...(clientId ? { oauth: { clientId } } : {}),
+						},
+					},
+				}),
+			)
+			vi.mocked(McpOAuthClientProvider.isKnownNonOAuth).mockReturnValue(knownNonOAuth)
+
+			try {
+				const hub = new McpHub(mockProvider as ClineProvider, secretStorage)
+				await hub.waitUntilReady()
+
+				expect(hasOAuthData).toHaveBeenCalledWith("https://example.com/mcp", clientId)
+				expect(McpOAuthClientProvider.create).toHaveBeenCalledWith(
+					"https://example.com/mcp",
+					secretStorage,
+					"oauth-server",
+					expect.objectContaining({ skipDiscovery: expectedSkip }),
+				)
+				// Dynamic registration runs only for a dynamic client that performed discovery.
+				if (!clientId && !expectedSkip) {
+					expect(mockAuthProvider.registerClientIfNeeded).toHaveBeenCalled()
+				} else {
+					expect(mockAuthProvider.registerClientIfNeeded).not.toHaveBeenCalled()
+				}
+			} finally {
+				vi.mocked(McpOAuthClientProvider.isKnownNonOAuth).mockReturnValue(false)
+			}
+		})
+
+		it("closes a static OAuth provider when the hub is disposed during provider creation", async () => {
+			const streamableModule = await import("@modelcontextprotocol/sdk/client/streamableHttp.js")
+			const StreamableHTTPClientTransport = streamableModule.StreamableHTTPClientTransport as ReturnType<
+				typeof vi.fn
+			>
+			let resolveProvider!: (provider: McpOAuthClientProvider) => void
+			vi.mocked(McpOAuthClientProvider.create).mockReturnValueOnce(
+				new Promise<McpOAuthClientProvider>((resolve) => {
+					resolveProvider = resolve
+				}),
+			)
+			const mockAuthProvider = {
+				registerClientIfNeeded: vi.fn(),
+				close: vi.fn().mockResolvedValue(undefined),
+			} as unknown as McpOAuthClientProvider
+			const secretStorage = {
+				hasOAuthData: vi.fn().mockResolvedValue(false),
+			} as unknown as SecretStorageService
+			vi.mocked(fs.readFile).mockResolvedValue(
+				JSON.stringify({
+					mcpServers: {
+						"static-oauth-server": {
+							type: "streamable-http",
+							url: "https://example.com/mcp",
+							oauth: { clientId: "registered-client" },
+						},
+					},
+				}),
+			)
+
+			const hub = new McpHub(mockProvider as ClineProvider, secretStorage)
+			await Promise.resolve()
+			await hub.dispose()
+			resolveProvider(mockAuthProvider)
+			await hub.waitUntilReady()
+
+			expect(mockAuthProvider.close).toHaveBeenCalledTimes(1)
+			expect(StreamableHTTPClientTransport).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("Discriminated union type handling", () => {
@@ -1511,6 +1903,57 @@ describe("McpHub", () => {
 			)
 		})
 
+		describe("static OAuth configuration", () => {
+			it("accepts static OAuth settings for streamable HTTP", () => {
+				const result = ServerConfigSchema.parse({
+					type: "streamable-http",
+					url: "https://mcp.example.com/mcp",
+					oauth: {
+						clientId: "registered-client",
+						scope: "openid profile offline_access",
+						redirectUri: "http://localhost:33418/callback",
+						resource: false,
+					},
+				})
+
+				expect(result.oauth).toEqual({
+					clientId: "registered-client",
+					scope: "openid profile offline_access",
+					redirectUri: "http://localhost:33418/callback",
+					resource: false,
+				})
+			})
+
+			it("accepts a static client without other OAuth settings", () => {
+				const result = ServerConfigSchema.parse({
+					type: "streamable-http",
+					url: "https://mcp.example.com/mcp",
+					oauth: { clientId: "registered-client" },
+				})
+
+				expect(result.oauth).toEqual({ clientId: "registered-client" })
+			})
+
+			it.each([
+				{ type: "stdio", command: "test", oauth: { clientId: "client" } },
+				{ type: "sse", url: "https://mcp.example.com/sse", oauth: { clientId: "client" } },
+				{ type: "streamable-http", url: "https://mcp.example.com/mcp", oauth: { clientId: "" } },
+				{
+					type: "streamable-http",
+					url: "https://mcp.example.com/mcp",
+					oauth: { clientId: "client", resource: "invalid" },
+				},
+				{
+					type: "streamable-http",
+					url: "https://mcp.example.com/mcp",
+					oauth: { clientId: "client", resource: true },
+				},
+				{ type: "streamable-http", url: "https://mcp.example.com/mcp", oauth: { resource: false } },
+			])("rejects invalid OAuth configuration: $type", (config) => {
+				expect(() => ServerConfigSchema.parse(config)).toThrow()
+			})
+		})
+
 		describe("timeout configuration", () => {
 			it("should validate timeout values", () => {
 				// Test valid timeout values
@@ -2438,7 +2881,7 @@ describe("McpHub", () => {
 		const serverName = "oauth-server"
 		const serverUrl = "https://example.com/mcp"
 		const source = "global" as const
-		const config = { url: serverUrl }
+		const config = ServerConfigSchema.parse({ type: "streamable-http", url: serverUrl })
 
 		let mockAuthProvider: any
 		let mockTransport: any
@@ -2768,6 +3211,29 @@ describe("McpHub", () => {
 			).resolves.toBeUndefined()
 		})
 
+		it("should record the callback error and disconnect when waitForAuthCode rejects", async () => {
+			vsc.window.showInformationMessage.mockResolvedValueOnce(t("mcp:oauth.flow.authenticateButton"))
+			// The provider reports a callback listener failure, such as a timeout before the user authenticated.
+			mockAuthProvider.waitForAuthCode.mockRejectedValueOnce(new Error("Callback timeout"))
+
+			await mcpHub["_initiateOAuthFlow"](
+				serverName,
+				source,
+				config,
+				mockAuthProvider,
+				mockTransport,
+				mockConnection,
+			)
+
+			expect(mockAuthProvider.openBrowser).toHaveBeenCalledTimes(1)
+			expect(mockAuthProvider.exchangeCodeForTokens).not.toHaveBeenCalled()
+			expect(mockAuthProvider.close).toHaveBeenCalled()
+			expect(mockConnection.server.status).toBe("disconnected")
+			expect(mcpHub["appendErrorMessage"]).toHaveBeenCalledTimes(1)
+			expect(mcpHub["appendErrorMessage"]).toHaveBeenCalledWith(mockConnection, "Callback timeout")
+			expect(mcpHub["connectToServer"]).not.toHaveBeenCalled()
+		})
+
 		it("should disconnect and flag error when Cancel is pressed after Authenticate is clicked", async () => {
 			// Simulate: user clicks Authenticate in the toast, then cancels via the progress bar
 			// while waitForAuthCode is still pending.
@@ -2822,6 +3288,30 @@ describe("McpHub", () => {
 				t("mcp:oauth.flow.cancelled"),
 			)
 			expect(mockAuthProvider.close).toHaveBeenCalled()
+		})
+
+		it("should close the provider when the hub is disposed during the initial token read", async () => {
+			let resolveTokenRead!: (value: null) => void
+			mockSecretStorage.getOAuthData.mockReturnValueOnce(
+				new Promise<null>((resolve) => {
+					resolveTokenRead = resolve
+				}),
+			)
+
+			const flowPromise = mcpHub["_initiateOAuthFlow"](
+				serverName,
+				source,
+				config,
+				mockAuthProvider,
+				mockTransport,
+				mockConnection,
+			)
+			mcpHub["isDisposed"] = true
+			resolveTokenRead(null)
+			await flowPromise
+
+			expect(mockAuthProvider.close).toHaveBeenCalledTimes(1)
+			expect(vsc.window.withProgress).not.toHaveBeenCalled()
 		})
 
 		it("should not reconnect when hub is disposed while cross-window tokens arrive", async () => {

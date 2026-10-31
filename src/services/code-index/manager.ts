@@ -3,7 +3,7 @@ import { ContextProxy } from "../../core/config/ContextProxy"
 import { VectorStoreSearchResult } from "./interfaces"
 import { IndexingState } from "./interfaces/manager"
 import { CodeIndexConfigManager } from "./config-manager"
-import { CodeIndexStateManager } from "./state-manager"
+import type { CodeIndexStateManager } from "./state-manager"
 import { CodeIndexServiceFactory } from "./service-factory"
 import { CodeIndexSearchService } from "./search-service"
 import { CodeIndexOrchestrator } from "./orchestrator"
@@ -13,7 +13,6 @@ import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 import fs from "fs/promises"
 import ignore from "ignore"
 import path from "path"
-import { t } from "../../i18n"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 
@@ -35,11 +34,16 @@ export class CodeIndexManager {
 	private readonly context: vscode.ExtensionContext
 
 	/** @internal — construct only via {@link CodeIndexManagerRegistry} */
-	public constructor(workspacePath: string, folderUri: vscode.Uri, context: vscode.ExtensionContext) {
+	public constructor(
+		workspacePath: string,
+		folderUri: vscode.Uri,
+		context: vscode.ExtensionContext,
+		stateManager: CodeIndexStateManager,
+	) {
 		this.workspacePath = workspacePath
 		this._folderUri = folderUri
 		this.context = context
-		this._stateManager = new CodeIndexStateManager()
+		this._stateManager = stateManager
 	}
 
 	// --- Public API ---
@@ -103,11 +107,16 @@ export class CodeIndexManager {
 		return this._configManager?.isFeatureConfigured ?? false
 	}
 
+	/** Whether configuration loading has succeeded, independently of service or indexing readiness. */
+	public get isConfigurationLoaded(): boolean {
+		return this._configManager?.isConfigurationLoaded ?? false
+	}
+
 	public get isInitialized(): boolean {
 		try {
 			this.assertInitialized()
 			return true
-		} catch (error) {
+		} catch {
 			return false
 		}
 	}
@@ -405,14 +414,6 @@ export class CodeIndexManager {
 			ignoreInstance,
 			rooIgnoreController,
 		)
-
-		// Validate embedder configuration before proceeding
-		const validationResult = await this._serviceFactory.validateEmbedder(embedder)
-		if (!validationResult.valid) {
-			const errorMessage = validationResult.error || "Embedder configuration validation failed"
-			this._stateManager.setSystemState("Error", errorMessage)
-			throw new Error(errorMessage)
-		}
 
 		// (Re)Initialize orchestrator
 		this._orchestrator = new CodeIndexOrchestrator(
