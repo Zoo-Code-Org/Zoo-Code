@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { providerIdentifiers } from "../provider-identifiers.js"
+import { anthropicDefaultModelId } from "./anthropic.js"
 import {
 	API_MODEL_ID_FIELD,
 	apiModelIdProviderModelShape,
@@ -8,16 +9,14 @@ import {
 	createProviderDefinition,
 } from "./common.js"
 
-export const zaiApiLineSchema = z.enum(["international_coding", "china_coding", "international_api", "china_api"])
-export type ZaiApiLine = z.infer<typeof zaiApiLineSchema>
-
-export const zaiProviderDefinition = createProviderDefinition({
-	apiProvider: providerIdentifiers.zai,
+export const fakeAiProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.fakeAi,
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	// Fake AI has no catalog of its own; it keeps the Anthropic fallback default.
+	getDefaultModelId: () => anthropicDefaultModelId,
 	schema: {
 		...apiModelIdProviderModelShape,
-		zaiApiKey: z.string().optional(),
-		zaiApiLine: zaiApiLineSchema.optional(),
+		fakeAi: z.unknown().optional(),
 	},
 })
