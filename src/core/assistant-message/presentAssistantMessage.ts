@@ -586,6 +586,16 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 						is_error: true,
 					})
 
+					// handle() is never reached on this path, so the parse-failure teardown it
+					// performs must run here instead: a streaming delta may already have opened a
+					// partial write_to_file ask and left per-task failure state behind.
+					if (block.name === "write_to_file") {
+						writeToFileTool.clearTaskState(cline)
+						await cline.finalizePartialToolAsk().catch((finalizeError) => {
+							console.error("Error finalizing write_to_file partial ask:", finalizeError)
+						})
+					}
+
 					break
 				}
 			}
