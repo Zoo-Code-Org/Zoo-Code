@@ -337,7 +337,8 @@
 		"followupQuestions": {
 			"label": "Domanda",
 			"description": "Seleziona automaticamente la prima risposta suggerita per le domande di follow-up dopo il timeout configurato",
-			"timeoutLabel": "Tempo di attesa prima di selezionare automaticamente la prima risposta"
+			"timeoutLabel": "Tempo di attesa prima di selezionare automaticamente la prima risposta",
+			"timeoutZeroDescription": "Imposta a 0 per non selezionare mai automaticamente — attendi sempre che tu scelga una risposta manualmente"
 		},
 		"execute": {
 			"label": "Esegui",

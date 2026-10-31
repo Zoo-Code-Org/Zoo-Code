@@ -337,7 +337,8 @@
 		"followupQuestions": {
 			"label": "Pytanie",
 			"description": "Automatycznie wybierz pierwszą sugerowaną odpowiedź na pytania uzupełniające po skonfigurowanym limicie czasu",
-			"timeoutLabel": "Czas oczekiwania przed automatycznym wybraniem pierwszej odpowiedzi"
+			"timeoutLabel": "Czas oczekiwania przed automatycznym wybraniem pierwszej odpowiedzi",
+			"timeoutZeroDescription": "Ustaw na 0, aby nigdy nie wybierać automatycznie — zawsze czekaj, aż ręcznie wybierzesz odpowiedź"
 		},
 		"execute": {
 			"label": "Wykonaj",

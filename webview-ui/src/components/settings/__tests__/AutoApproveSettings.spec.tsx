@@ -2,6 +2,8 @@
 
 import React from "react"
 
+import { within } from "@testing-library/react"
+
 import { render, screen, fireEvent } from "@/utils/test-utils"
 
 import { AutoApproveSettings } from "../AutoApproveSettings"
@@ -352,5 +354,41 @@ describe("AutoApproveSettings - Save/Discard contract", () => {
 
 		expect(setCachedStateField).not.toHaveBeenCalled()
 		expectNoImmediateUpdateSettings()
+	})
+})
+
+// The follow-up timeout slider is exercised here rather than in the visual suite:
+// behavior lives in Vitest and *.visual.tsx keeps only a focused screenshot.
+describe("AutoApproveSettings - follow-up timeout slider", () => {
+	// The Radix Slider root carries data-testid; the element with role="slider" is
+	// its thumb, which owns aria-valuemin/aria-valuenow.
+	const getSliderThumb = (): HTMLElement => within(screen.getByTestId("followup-timeout-slider")).getByRole("slider")
+
+	it("renders the slider with a zero minimum that allows a never-auto-select timeout", () => {
+		renderSettings({ alwaysAllowFollowupQuestions: true, followupAutoApproveTimeoutMs: 0 })
+
+		const thumb = getSliderThumb()
+
+		expect(thumb).toHaveAttribute("aria-valuemin", "0")
+		expect(thumb).toHaveAttribute("aria-valuenow", "0")
+	})
+
+	it("describes a zero timeout as never auto-selecting", () => {
+		renderSettings({ alwaysAllowFollowupQuestions: true, followupAutoApproveTimeoutMs: 0 })
+		const description = screen.getByTestId("auto-approve-followup-timeout-description")
+
+		// The translation mock returns the key verbatim, so the zero branch is
+		// distinguishable from the positive branch by its key alone.
+		expect(description).toHaveTextContent("settings:autoApprove.followupQuestions.timeoutZeroDescription")
+		expect(description).not.toHaveTextContent("settings:autoApprove.followupQuestions.timeoutLabel")
+	})
+
+	it("describes a positive timeout with the wait-time label", () => {
+		renderSettings({ alwaysAllowFollowupQuestions: true, followupAutoApproveTimeoutMs: 60000 })
+
+		expect(screen.getByText("settings:autoApprove.followupQuestions.timeoutLabel")).toBeInTheDocument()
+		expect(
+			screen.queryByText("settings:autoApprove.followupQuestions.timeoutZeroDescription"),
+		).not.toBeInTheDocument()
 	})
 })
