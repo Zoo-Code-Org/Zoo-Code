@@ -12,6 +12,7 @@ import { safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
 import {
 	assertValidTransition,
+	DELEGATED_PARENT_REPAIR_FIELDS,
 	isDelegatedChildLive,
 	isLivenessSignalFresh,
 	settleRejectedCreateSubtaskAction,
@@ -52,14 +53,14 @@ class RepairAbortedError extends Error {}
  * decision comes from this store's cache, but the disk record is shared, so a
  * peer window can write other fields of the same task (pending action, token
  * and cost totals, `childIds`, `apiConfigName`) before the advisory lock.
+ *
+ * The parent side is the shared `DELEGATED_PARENT_REPAIR_FIELDS` from
+ * `taskLifecycle`, so this store and the lifecycle model checker cannot drift
+ * on what a crash-orphan repair produces.
  */
 const CHILD_REPAIR_DELTA: Partial<HistoryItem> = { status: "interrupted" }
 
-const PARENT_REPAIR_DELTA: Partial<HistoryItem> = {
-	status: "active",
-	awaitingChildId: undefined,
-	delegatedToId: undefined,
-}
+const PARENT_REPAIR_DELTA: Partial<HistoryItem> = DELEGATED_PARENT_REPAIR_FIELDS
 
 /**
  * Durable intent for the one repair that spans an active delegated child and

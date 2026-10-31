@@ -5,6 +5,7 @@ import type { HistoryItem, PendingTaskAction } from "../packages/types/src/histo
 import {
 	abandonDelegatedChild,
 	completeDelegatedChild,
+	DELEGATED_PARENT_REPAIR_FIELDS,
 	delegateTaskToChild,
 	interruptDelegatedChild,
 	settleRejectedCreateSubtaskAction,
@@ -283,13 +284,14 @@ function transitions(state: ModelState): Transition[] {
 
 		// A child marked live-elsewhere is owned by another window's session, so
 		// window-local lifecycle operations cannot target it until the flag
-		// expires. The same holds for a heartbeat-alive child: the owning session
-		// is mid-turn and its completion can only arrive after the heartbeat
-		// expires (production clears the heartbeat timer when the stream ends).
+		// expires. `heartbeatAlive` deliberately does NOT gate these actions: the
+		// heartbeat runs for the child's whole active lifetime (it stops only on
+		// disposal or a failed resume), so the owning session can complete,
+		// interrupt, or abandon its own child while the beat is still fresh.
 		// `checkTransitionInvariants` re-proves universally that no reachable
 		// action clears the parent's link while the child is active and live
 		// (either signal).
-		if (state.liveElsewhere[childId] || state.heartbeatAlive[childId]) continue
+		if (state.liveElsewhere[childId]) continue
 
 		if (parent.status === "delegated" && parent.awaitingChildId === child.id && child.status === "active") {
 			const interrupted = interruptDelegatedChild(parent, child)
@@ -355,16 +357,12 @@ function transitions(state: ModelState): Transition[] {
 			result.push({ name: `reconcileStartup(${parentId})`, next: state })
 			continue
 		}
-		const repairedParent: HistoryItem = {
-			...parent,
-			status: "active",
-			awaitingChildId: undefined,
-			delegatedToId: undefined,
-		}
+		// The parent-side rewrite applies the shared repair target, so the model
+		// cannot drift from `TaskHistoryStore`'s under-lock repair delta.
 		const repairedChild = interruptDelegatedChild(parent, child)
 		result.push({
 			name: `reconcileStartup(${parentId})`,
-			next: replace(state, repairedParent, repairedChild),
+			next: replace(state, { ...parent, ...DELEGATED_PARENT_REPAIR_FIELDS }, repairedChild),
 		})
 	}
 
@@ -512,17 +510,26 @@ function checkTransitionInvariants(previous: ModelState, transition: Transition)
 			violations.push(`${id}: completed task changed after ${transition.name}`)
 			continue
 		}
-		// Cross-window ownership guard (PR #1495 bug class, extended by the
-		// liveness-heartbeat fix): no transition may clear a delegated parent's
-		// link to a child that is active AND live — where live means either a
-		// recent history-file mtime (`liveElsewhere`) or a fresh persisted
-		// `lastActivityAt` heartbeat (`heartbeatAlive`). Pre-fix, startup
+		// Startup-reconciliation guard (PR #1495 bug class, extended by the
+		// liveness-heartbeat fix): no `reconcileStartup` transition may clear a
+		// delegated parent's link to a child that is active AND live — where live
+		// means either a recent history-file mtime (`liveElsewhere`) or a fresh
+		// persisted `lastActivityAt` heartbeat (`heartbeatAlive`). Pre-fix, startup
 		// reconciliation repaired exactly these children; the shared production
 		// predicate `isDelegatedChildLive` skips them, so the only enabled
 		// successor for such a state is the identity reconciliation. Any future
-		// model edit that reintroduces a link-clearing transition on a live
-		// child fails here with the shortest causal trace.
-		if (before?.status === "delegated" && before.awaitingChildId) {
+		// model edit that reintroduces a link-clearing reconciliation fails here
+		// with the shortest causal trace.
+		//
+		// Scoped to reconciliation on purpose: the same link-clearing shape is
+		// legitimate for window-local actions. `interrupt`/`abandon` clear the
+		// parent's pointer while the owning session's heartbeat is still fresh,
+		// and `complete` moves the parent to active with `completedByChildId` set.
+		if (
+			transition.name.startsWith("reconcileStartup") &&
+			before?.status === "delegated" &&
+			before.awaitingChildId
+		) {
 			const childId = before.awaitingChildId as TaskId
 			const childBefore = previous.tasks[childId]
 			if (

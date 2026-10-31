@@ -179,3 +179,17 @@ export function isDelegatedChildLive(
 		isLivenessSignalFresh(child.lastActivityAt, now, thresholdMs)
 	)
 }
+
+/**
+ * Administrative crash-orphan repair target: the lifecycle fields a delegated
+ * parent must reach when its awaited child is repaired to `interrupted`. This
+ * is the single source of truth for both sides — `TaskHistoryStore` writes it
+ * as its under-lock repair delta and the lifecycle model checker derives its
+ * repaired parent from the same constant, so the two cannot drift.
+ * `interruptDelegatedChild` supplies the child side of the same repair.
+ */
+export const DELEGATED_PARENT_REPAIR_FIELDS = {
+	status: "active",
+	awaitingChildId: undefined,
+	delegatedToId: undefined,
+} as const satisfies Partial<HistoryItem>

@@ -914,11 +914,17 @@ describe("ClineProvider delegateParentAndOpenChild child ownership claim", () =>
 			}),
 		).rejects.toThrow("rejected delegation")
 
-		expect(store.markLocallyActive).toHaveBeenCalled()
+		// createTask produced the only TaskStub on this path (the parent is a plain
+		// stub object), so the claim and the release must both target that exact
+		// generated id — a release of the parent id or a stale id must fail here.
+		const childId = `task-stub-${TaskStub.instanceCount}`
+		expect(store.markLocallyActive).toHaveBeenCalledTimes(1)
+		expect(store.markLocallyActive).toHaveBeenCalledWith(childId)
 		// The settlement ran disk-authoritatively before the error propagated.
 		expect(store.clearPendingActionIfMatching).toHaveBeenCalledWith("parent-1", "action-1")
 		await flushMicrotasks()
-		expect(store.markLocallyInactive).toHaveBeenCalled()
+		expect(store.markLocallyInactive).toHaveBeenCalledTimes(1)
+		expect(store.markLocallyInactive).toHaveBeenCalledWith(childId)
 	})
 })
 
