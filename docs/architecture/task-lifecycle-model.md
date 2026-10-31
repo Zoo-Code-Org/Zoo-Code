@@ -271,7 +271,7 @@ Add E2E coverage only when a lifecycle change crosses one of those runtime bound
 
 `scripts/check-run-state-kernel.ts` explores the pure `nextRunState` in `src/core/task/run-state/runState.ts`. It is an independent submodel. It does not use `taskLifecycle.ts` and does not share state with the persisted graph.
 
-The checker applies every event in every reachable state, within the generation and ask-timestamp caps. The budget is 20,000 states and the depth bound is 20. The stream generation and the ask timestamp are each at most 3. At each step it checks:
+The checker applies every event except the seven turn events in every reachable state, within the generation and ask-timestamp caps. The budget is 20,000 states and the depth bound is 20. The stream generation and the ask timestamp are each at most 3. At each step it checks:
 
 - the result of the kernel against a transcription of the guard and effect table ([Transitions](task-lifecycle-target-architecture.md#transitions)), including that a rejection leaves the state unchanged;
 - the seven design-doc invariants (same document, Invariants);
@@ -279,13 +279,14 @@ The checker applies every event in every reachable state, within the generation 
 
 The checker also requires:
 
+- the seven turn events (`turnStarted`, `firstChunkAwaitStarted`, `firstChunkAwaitEnded`, `toolRejected`, `toolUsed`, `toolFailed`, `streamReadCompleted`) to be accepted and to match the table in each of the 32 turn states, and in one state of every distinct shape of the reachable states. Every other event is also applied to the same shape states with all five turn fields true, so no other event may change the turn. The search does not include turn events, because they would multiply the state count by 32;
 - the event tags in `runState.ts` to equal the event tags in the table (once, at startup, as a text scan of `case` labels);
 - every event to be reachable, with the `askSettledStale` no-op, a settle for an ask that a newer pending ask replaced, as its own action;
 - every guard clause to be the only failing clause in some rejected event;
 - named witnesses, each tied to an event and the states around it: abort during a pending approval in a live stream, an ask after the stream ends, abandon after the stream ends, dispose after completion, a new stream after a failure cleanup without abort, a stream that starts without user input, an approval before the first stream, and a rejected late completion accept after a newer ask;
 - every ordered pair of the stream, ask, cancel, and dispose event sources to follow each other, where both events change the state;
 - no unseen successor at the depth bound;
-- thirty-one known-unsafe kernels, each of which the checker must reject. They include a throwing kernel, a kernel that returns nothing, and one kernel for each check that runs at every search step without the table; and
+- thirty-three known-unsafe kernels, each of which the checker must reject. They include a throwing kernel, a kernel that returns nothing, and one kernel for each check that runs at every search step without the table; and
 - self-tests that a small depth bound and a small state budget each fail the checker.
 
 The kernel has no resume event. A resumed task is `initialized` followed by `streamStarted` or `askStarted`. The witnesses `first-stream-without-ask` and `approval-before-first-stream` cover those paths.

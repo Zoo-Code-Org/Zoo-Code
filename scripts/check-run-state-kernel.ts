@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url"
 import { nextRunState, initialRunState } from "../src/core/task/run-state/runState"
 import type { AbortReason, Ask, RunEvent, RunState, Transition } from "../src/core/task/run-state/runState"
 
-type Source = "init" | "stream" | "ask" | "cancel" | "dispose"
+type Source = "init" | "stream" | "ask" | "cancel" | "dispose" | "turn"
 type EventTag = RunEvent["tag"]
 type StartedAsk = Exclude<Ask, { tag: "none" }>
 type Step = (state: RunState, event: RunEvent) => Transition | undefined
@@ -62,6 +62,20 @@ const askBuilders: Record<string, (askTs: number) => StartedAsk> = {
 	other: (askTs) => ({ tag: "other", askTs }),
 }
 const eventSources = ["stream", "ask", "cancel", "dispose"] as const
+const turnTags = [
+	"turnStarted",
+	"firstChunkAwaitStarted",
+	"firstChunkAwaitEnded",
+	"toolRejected",
+	"toolUsed",
+	"toolFailed",
+	"streamReadCompleted",
+] as const
+const turnEvent = (tag: (typeof turnTags)[number]): ModelEvent => ({
+	name: `${tag}()`,
+	source: "turn",
+	event: { tag },
+})
 
 // One field per cell of the state described in the target-architecture doc, so rows read like the doc table.
 interface Flat {
@@ -70,6 +84,11 @@ interface Flat {
 	streamLive: boolean
 	streamGeneration: number | null
 	cleanupFinished: boolean | null
+	waitingForFirstChunk: boolean
+	toolRejected: boolean
+	toolUsed: boolean
+	toolFailed: boolean
+	streamReadComplete: boolean
 	askTag: Ask["tag"]
 	askTs: number | null
 	toolCallId: string | null
@@ -89,6 +108,7 @@ function flatten(run: RunState): Flat {
 		streamLive: run.stream.tag === "live",
 		streamGeneration: run.stream.tag === "live" ? run.stream.generation : null,
 		cleanupFinished: run.stream.tag === "live" ? run.stream.cleanupFinished : null,
+		...run.turn,
 		askTag: ask.tag,
 		askTs: ask.tag === "none" ? null : ask.askTs,
 		toolCallId: ("toolCallId" in ask && ask.toolCallId) || null,
@@ -119,6 +139,17 @@ const rows: Rows = {
 		guard: { uninitialized: (f) => f.phase === "uninitialized" },
 		effect: (f) => void (f.phase = "running"),
 	},
+	turnStarted: {
+		effect: (f) => {
+			f.toolRejected = f.toolUsed = f.toolFailed = f.streamReadComplete = false
+		},
+	},
+	firstChunkAwaitStarted: { effect: (f) => void (f.waitingForFirstChunk = true) },
+	firstChunkAwaitEnded: { effect: (f) => void (f.waitingForFirstChunk = false) },
+	toolRejected: { effect: (f) => void (f.toolRejected = true) },
+	toolUsed: { effect: (f) => void (f.toolUsed = true) },
+	toolFailed: { effect: (f) => void (f.toolFailed = true) },
+	streamReadCompleted: { effect: (f) => void (f.streamReadComplete = true) },
 	streamStarted: {
 		guard: { running: (f) => f.phase === "running", "no live stream": (f) => !f.streamLive },
 		effect: (f) => {
@@ -424,6 +455,62 @@ function formatCounterexample(message: string, trace: TraceStep[], options: Opti
 	].join("\n")
 }
 
+const dirtyTurn = {
+	waitingForFirstChunk: true,
+	toolRejected: true,
+	toolUsed: true,
+	toolFailed: true,
+	streamReadComplete: true,
+}
+
+const shapeOf = ({ run }: ModelState) =>
+	canonical({
+		phase: run.phase,
+		generation: run.generation > 0,
+		stream: run.stream.tag === "live" ? run.stream.cleanupFinished : "none",
+		ask: run.ask.tag,
+		latches: run.latches,
+		lastCompletionAskTs: run.lastCompletionAskTs !== undefined,
+	})
+
+function checkTurnRegion(options: Options, searched: ModelState[], reachedActions: Set<string>): void {
+	const shapes = new Map(searched.map((state) => [shapeOf(state), state]))
+	const cases = [...shapes.values()].flatMap((state) => [
+		{ state, events: [...eventsFor(state), ...turnTags.map(turnEvent)] },
+		{ state: { ...state, run: { ...state.run, turn: dirtyTurn } }, events: eventsFor(state) },
+	])
+	const everyTurn = Array.from({ length: 32 }, (_, bits) => ({
+		waitingForFirstChunk: Boolean(bits & 1),
+		toolRejected: Boolean(bits & 2),
+		toolUsed: Boolean(bits & 4),
+		toolFailed: Boolean(bits & 8),
+		streamReadComplete: Boolean(bits & 16),
+	}))
+	for (const turn of everyTurn) {
+		const state = initialState()
+		cases.push({ state: { ...state, run: { ...state.run, turn } }, events: turnTags.map(turnEvent) })
+	}
+
+	for (const { state, events } of cases) {
+		for (const modelEvent of events) {
+			const applied = apply(options, state, modelEvent)
+			const turnEventRejected = modelEvent.source === "turn" && !applied.accepted
+			const problems = [
+				...applied.problems,
+				...(turnEventRejected ? [`${modelEvent.event.tag} was rejected`] : []),
+			]
+			if (problems.length) {
+				const trace = [
+					{ action: "initial", source: "initial" as const, state },
+					{ action: modelEvent.name, source: modelEvent.source, state: applied.next },
+				]
+				throw new Error(formatCounterexample(problems.join("; "), trace, options))
+			}
+			if (modelEvent.source === "turn") reachedActions.add(modelEvent.event.tag)
+		}
+	}
+}
+
 interface CheckResult {
 	states: number
 	deepest: number
@@ -489,6 +576,12 @@ function runModelCheck(options: Options): CheckResult {
 			}
 		}
 	}
+
+	checkTurnRegion(
+		options,
+		queue.map((node) => node.state),
+		reachedActions,
+	)
 
 	const assertNoneMissing = (label: string, names: string[]) => {
 		if (names.length) throw new Error(`Run-state kernel model has ${label}: ${names.join(", ")}`)
@@ -706,6 +799,26 @@ const unsafeKernels: Record<string, UnsafeKernel> = {
 		step: (state, event) => (event.tag === "disposeRequested" ? { rejected: state } : nextRunState(state, event)),
 		caughtBy: /unreachable actions: disposeRequested$/,
 		useTable: false,
+	},
+	"turn-start-clears-first-chunk-wait": {
+		step: (state, event) => {
+			const result = nextRunState(state, event)
+			return event.tag === "turnStarted" && "ok" in result
+				? { ok: { ...result.ok, turn: { ...result.ok.turn, waitingForFirstChunk: false } } }
+				: result
+		},
+		caughtBy: differsFor("turnStarted"),
+		useTable: true,
+	},
+	"stream-start-resets-turn": {
+		step: (state, event) => {
+			const result = nextRunState(state, event)
+			return event.tag === "streamStarted" && "ok" in result
+				? { ok: { ...result.ok, turn: { ...result.ok.turn, toolUsed: false } } }
+				: result
+		},
+		caughtBy: differsFor("streamStarted"),
+		useTable: true,
 	},
 	"completion-keeps-ask": {
 		step: (state, event) => {
