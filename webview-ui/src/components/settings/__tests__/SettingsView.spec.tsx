@@ -46,17 +46,18 @@ vi.mock("../ApiConfigManager", () => ({
 }))
 
 vi.mock("@vscode/webview-ui-toolkit/react", () => ({
-	VSCodeButton: ({ children, onClick, appearance, "data-testid": dataTestId }: any) =>
+	VSCodeButton: ({ children, onClick, appearance, disabled, "data-testid": dataTestId }: any) =>
 		appearance === "icon" ? (
 			<button
 				onClick={onClick}
+				disabled={disabled}
 				className="codicon codicon-close"
 				aria-label="Remove command"
 				data-testid={dataTestId}>
 				<span className="codicon codicon-close" />
 			</button>
 		) : (
-			<button onClick={onClick} data-appearance={appearance} data-testid={dataTestId}>
+			<button onClick={onClick} disabled={disabled} data-appearance={appearance} data-testid={dataTestId}>
 				{children}
 			</button>
 		),
@@ -190,8 +191,13 @@ vi.mock("@/components/ui", () => ({
 			data-testid={dataTestId}
 		/>
 	),
-	Button: ({ children, onClick, variant, className, "data-testid": dataTestId }: any) => (
-		<button onClick={onClick} data-variant={variant} className={className} data-testid={dataTestId}>
+	Button: ({ children, onClick, variant, className, disabled, "data-testid": dataTestId }: any) => (
+		<button
+			onClick={onClick}
+			disabled={disabled}
+			data-variant={variant}
+			className={className}
+			data-testid={dataTestId}>
 			{children}
 		</button>
 	),
@@ -977,6 +983,265 @@ describe("SettingsView - Blanket Auto-Deny", () => {
 				updatedSettings: expect.objectContaining({ alwaysDenyUnapprovedCommands: true }),
 			}),
 		)
+	})
+})
+
+describe("SettingsView - Experiments", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("persists only the experiment the user toggled, not the whole map", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { imageGeneration: false } })
+		activateTab("experimental")
+
+		const saveButton = screen.getByTestId("save-button")
+		// The experiment toggle alone must enable Save: no unrelated setting change is needed.
+		await waitFor(() => expect(saveButton).toBeDisabled())
+
+		const label = await waitFor(() => {
+			const content = getSettingsContent()
+			return within(content).getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name").closest("label")
+		})
+		expect(label).not.toBeNull()
+		const checkbox = label!.querySelector('input[type="checkbox"]')
+		expect(checkbox).not.toBeNull()
+		fireEvent.click(checkbox as HTMLInputElement)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+
+		// Buffered only: nothing is persisted before Save.
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ experiments: expect.anything() }),
+			}),
+		)
+
+		fireEvent.click(saveButton)
+
+		// Only the toggled key is sent: the host merges the received map over the stored
+		// experiments, so sending the whole live map would freeze other defaults.
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({
+					// The control starts enabled by default; toggling it off is the change.
+					experiments: { preventFocusDisruption: false },
+				}),
+			}),
+		)
+	})
+
+	it("submits the toggled-on value when a stored false is rendered", async () => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection={"experimental"} />, {
+			state: { experiments: { preventFocusDisruption: false } },
+		})
+
+		const saveButton = screen.getByTestId("save-button")
+		await waitFor(() => expect(saveButton).toBeDisabled())
+
+		const label = await waitFor(() => {
+			const content = screen.getByTestId("settings-content")
+			return within(content).getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name").closest("label")
+		})
+		const checkbox = label!.querySelector('input[type="checkbox"]') as HTMLInputElement
+		// The stored false is hydrated, so the control starts unchecked.
+		expect(checkbox).not.toBeChecked()
+
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(saveButton)
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ experiments: { preventFocusDisruption: true } }),
+			}),
+		)
+	})
+
+	it("keeps a follow-up experiment edit when the previous save is not yet confirmed", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { imageGeneration: false } })
+		activateTab("experimental")
+
+		const saveButton = screen.getByTestId("save-button")
+		await waitFor(() => expect(saveButton).toBeDisabled())
+		const label = await waitFor(() => {
+			const content = getSettingsContent()
+			return within(content).getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name").closest("label")
+		})
+		const checkbox = label!.querySelector('input[type="checkbox"]') as HTMLInputElement
+
+		// Save the default-on -> false change, then (before the host state round-trip) toggle it
+		// back on. The second Save must compare against the submitted false, not the stale default.
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(saveButton)
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(saveButton)
+
+		const updateSettingsCalls = vi
+			.mocked(vscode.postMessage)
+			.mock.calls.filter(([message]) => (message as { type?: string }).type === "updateSettings")
+			.map(
+				([message]) =>
+					(message as { updatedSettings: { experiments?: Record<string, boolean> } }).updatedSettings,
+			)
+			.filter((settings) => settings.experiments !== undefined)
+		expect(updateSettingsCalls).toHaveLength(2)
+		expect(updateSettingsCalls[0]?.experiments).toEqual({ preventFocusDisruption: false })
+		expect(updateSettingsCalls[1]?.experiments).toEqual({ preventFocusDisruption: true })
+	})
+
+	it("clears the pending submitted baseline when settings are imported", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { imageGeneration: false } })
+		activateTab("experimental")
+
+		const saveButton = screen.getByTestId("save-button")
+		await waitFor(() => expect(saveButton).toBeDisabled())
+		const label = await waitFor(() => {
+			const content = getSettingsContent()
+			return within(content).getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name").closest("label")
+		})
+		const checkbox = label!.querySelector('input[type="checkbox"]') as HTMLInputElement
+
+		// Save default-on -> false to create a pending submitted baseline of false.
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(saveButton)
+
+		// Import replaces the settings: the pending baseline must be dropped.
+		act(() => {
+			mockPostMessage({ settingsImportedAt: Date.now(), experiments: {} })
+		})
+		await waitFor(() => expect(checkbox).toBeChecked())
+		await waitFor(() => expect(saveButton).toBeDisabled())
+
+		// Toggling off now equals the dropped baseline; if it were still pending, the save would be
+		// skipped. The import must have cleared it so the change is persisted.
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(saveButton)
+
+		const experimentPayloads = vi
+			.mocked(vscode.postMessage)
+			.mock.calls.filter(([message]) => (message as { type?: string }).type === "updateSettings")
+			.map(
+				([message]) =>
+					(message as { updatedSettings: { experiments?: Record<string, boolean> } }).updatedSettings,
+			)
+			.filter((settings) => settings.experiments !== undefined)
+		expect(experimentPayloads).toHaveLength(2)
+		expect(experimentPayloads[1]?.experiments).toEqual({ preventFocusDisruption: false })
+	})
+
+	it("clears the pending submitted baseline on an API/profile change", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { imageGeneration: false } })
+		activateTab("experimental")
+
+		const saveButton = screen.getByTestId("save-button")
+		await waitFor(() => expect(saveButton).toBeDisabled())
+		const label = await waitFor(() => {
+			const content = getSettingsContent()
+			return within(content).getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name").closest("label")
+		})
+		const checkbox = label!.querySelector('input[type="checkbox"]') as HTMLInputElement
+
+		// Create a pending submitted baseline of false.
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(saveButton)
+
+		// An API/profile change resets the settings edit session.
+		act(() => {
+			mockPostMessage({ currentApiConfigName: "other-config" })
+		})
+		await waitFor(() => expect(checkbox).toBeChecked())
+		await waitFor(() => expect(saveButton).toBeDisabled())
+
+		// The reset must have dropped the pending baseline so this change is persisted.
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(saveButton)
+
+		const experimentPayloads = vi
+			.mocked(vscode.postMessage)
+			.mock.calls.filter(([message]) => (message as { type?: string }).type === "updateSettings")
+			.map(
+				([message]) =>
+					(message as { updatedSettings: { experiments?: Record<string, boolean> } }).updatedSettings,
+			)
+			.filter((settings) => settings.experiments !== undefined)
+		expect(experimentPayloads.length).toBeGreaterThanOrEqual(2)
+		expect(experimentPayloads[experimentPayloads.length - 1]?.experiments).toEqual({
+			preventFocusDisruption: false,
+		})
+	})
+
+	it("clears the pending submitted baseline on a confirmed discard", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { imageGeneration: false } })
+		activateTab("experimental")
+
+		const saveButton = screen.getByTestId("save-button")
+		await waitFor(() => expect(saveButton).toBeDisabled())
+		const label = await waitFor(() => {
+			const content = getSettingsContent()
+			return within(content).getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name").closest("label")
+		})
+		const checkbox = label!.querySelector('input[type="checkbox"]') as HTMLInputElement
+
+		// Create a pending submitted baseline of false.
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(saveButton)
+
+		// Make a new unsaved edit after the Save, then confirm Discard: the dialog must open and
+		// its confirmation is what resets the edit session.
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(screen.getByText("settings:common.done"))
+		await waitFor(() => expect(screen.getByTestId("alert-dialog-action")).toBeInTheDocument())
+		fireEvent.click(screen.getByTestId("alert-dialog-action"))
+		await waitFor(() => expect(checkbox).toBeChecked())
+		await waitFor(() => expect(saveButton).toBeDisabled())
+
+		// The reset must have dropped the pending baseline so this change is persisted.
+		fireEvent.click(checkbox)
+		await waitFor(() => expect(saveButton).toBeEnabled())
+		fireEvent.click(saveButton)
+
+		const experimentPayloads = vi
+			.mocked(vscode.postMessage)
+			.mock.calls.filter(([message]) => (message as { type?: string }).type === "updateSettings")
+			.map(
+				([message]) =>
+					(message as { updatedSettings: { experiments?: Record<string, boolean> } }).updatedSettings,
+			)
+			.filter((settings) => settings.experiments !== undefined)
+		expect(experimentPayloads.length).toBeGreaterThanOrEqual(2)
+		expect(experimentPayloads[experimentPayloads.length - 1]?.experiments).toEqual({
+			preventFocusDisruption: false,
+		})
+	})
+
+	it("does not persist the experiments map when no experiment changed", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { imageGeneration: false } })
+
+		// A real non-experimental change guarantees Save is enabled and the handler runs.
+		activateTab("autoApprove")
+		fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-execute-toggle"))
+
+		activateTab("experimental")
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		const updateSettingsCalls = vi
+			.mocked(vscode.postMessage)
+			.mock.calls.filter(([message]) => (message as { type?: string }).type === "updateSettings")
+		expect(updateSettingsCalls.length).toBe(1)
+		expect(
+			(updateSettingsCalls[0][0] as { updatedSettings: Record<string, unknown> }).updatedSettings.experiments,
+		).toBeUndefined()
 	})
 })
 
