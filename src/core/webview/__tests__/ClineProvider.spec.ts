@@ -4323,16 +4323,21 @@ describe("ClineProvider", () => {
 				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "current-key",
 			})
-			// The replacement activation fails, and so does the restore, so the fallback runs.
+			// The replacement activation fails, and the restore fails before it can re-save the
+			// profile, so the name is genuinely gone and the fallback must run. (A restore that
+			// fails *after* re-saving leaves the profile in the manager, which the keep gate now
+			// treats as a selection that must not be replaced.)
 			// The fallback profile is OpenRouter, so its activation carries `openRouterApiKey`.
 			vi.mocked(provider.providerSettingsManager.activateProfile)
 				.mockRejectedValueOnce(new Error("Failed to activate profile: storage error"))
-				.mockRejectedValueOnce(new Error("Failed to restore profile: storage error"))
 				.mockImplementationOnce(async (params: { name: string } | { id: string }) => {
 					const resolvedName = "name" in params ? params.name : otherProfile.name
 					managerState.currentApiConfigName = resolvedName
 					return { ...otherProfile, openRouterModelId: "other-model", openRouterApiKey: "other-key" }
 				})
+			vi.mocked(provider.providerSettingsManager.saveConfigIfAbsent).mockRejectedValueOnce(
+				new Error("Failed to restore profile: storage error"),
+			)
 
 			await expect(provider.deleteProviderProfile(currentProfile)).rejects.toThrow(
 				"Failed to activate profile: storage error",
@@ -4350,9 +4355,10 @@ describe("ClineProvider", () => {
 			// Anthropic profile's differently-named secret must not survive under the fallback name.
 			expect(provider.contextProxy.getSecret("apiKey")).toBeUndefined()
 			expect(provider.contextProxy.getValues().apiKey).toBeUndefined()
-			// The fallback also re-applies the purge's dropped mode bindings and mirrors the map,
-			// so both stores agree again.
-			expect(modeApiConfigs).toEqual({ code: currentProfile.id, architect: currentProfile.id })
+			// The purge dropped the bindings and the restore never re-saved the profile, so its id is
+			// dangling: the guarded re-apply refuses it and both stores agree on the empty map rather
+			// than pointing a mode at a profile the manager no longer has.
+			expect(modeApiConfigs).toEqual({})
 			expect(provider.contextProxy.getValues().modeApiConfigs).toEqual(modeApiConfigs)
 		})
 
@@ -4566,13 +4572,14 @@ describe("ClineProvider", () => {
 				await deletionResult
 				await vi.advanceTimersByTimeAsync(0)
 
-				// The restore was aborted at the re-apply fence, so the fallback reconcile ran: it
-				// points both stores at the remaining profile and re-applies the purge's dropped
-				// bindings atomically, so the mode map agrees in both stores.
-				expect(provider.contextProxy.getValues().currentApiConfigName).toBe("other-config")
+				// The restore was aborted at the re-apply fence, but it had already re-saved the profile
+				// under its original id, so the selection is not a stale pointer: the reconcile keeps it
+				// instead of switching the user to another profile, and re-applies the purge's dropped
+				// bindings atomically so the mode map agrees in both stores.
+				expect(provider.contextProxy.getValues().currentApiConfigName).toBe("current-config")
 				expect(provider.contextProxy.getProviderSettings()).toMatchObject({
-					apiProvider: providerIdentifiers.openrouter,
-					openRouterModelId: "other-model",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "current-key",
 				})
 				expect(modeApiConfigs).toEqual({ code: currentProfile.id, architect: currentProfile.id })
 				expect(provider.contextProxy.getValues().modeApiConfigs).toEqual(modeApiConfigs)
@@ -5120,6 +5127,95 @@ describe("ClineProvider", () => {
 			} finally {
 				vi.useRealTimers()
 			}
+		})
+
+		test("T12: a delete that fails before any purge keeps the still-present active profile", async () => {
+			// The pre-purge read rejects, so nothing was deleted: the profile is still in the manager
+			// and still the user's selection. The rollback's reconcile used to test only name
+			// inequality, so `selectedName === deletedName` forced the fallback and switched the user
+			// to `listConfig()[0]` for a delete that never happened. When that fallback is a different
+			// provider, its `setProviderSettings` clear-out deletes the surviving profile's live
+			// SecretStorage credential.
+			const { managerState } = mockProviderSettingsManager()
+
+			// `listConfig()[0]` is the profile a spurious fallback would activate, and it must be
+			// activatable: a fallback that rejects is caught and logged by the reconcile, which would
+			// make the test pass without ever exercising the switch.
+			const thirdProfile: ProviderSettingsEntry = {
+				name: "third-config",
+				id: "third-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			vi.mocked(provider.providerSettingsManager.listConfig).mockImplementation(async () => [
+				thirdProfile,
+				currentProfile,
+			])
+			vi.mocked(provider.providerSettingsManager.activateProfile).mockImplementation(
+				async (params: { name: string } | { id: string }) => {
+					const name = "name" in params ? params.name : thirdProfile.name
+					managerState.currentApiConfigName = name
+					return { ...thirdProfile, name }
+				},
+			)
+			vi.mocked(provider.providerSettingsManager.getProfile).mockRejectedValueOnce(
+				new Error("Failed to read provider profiles from secrets: storage error"),
+			)
+
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "current-key",
+			})
+			expect(provider.contextProxy.getSecret("apiKey")).toBe("current-key")
+
+			await expect(provider.deleteProviderProfile(currentProfile)).rejects.toThrow(
+				"Failed to read provider profiles from secrets: storage error",
+			)
+
+			// Nothing was purged, so the delete is a no-op in both stores.
+			expect(managerState.currentApiConfigName).toBe("current-config")
+			expect(provider.contextProxy.getValues().currentApiConfigName).toBe("current-config")
+			expect(provider.contextProxy.getProviderSettings()).toMatchObject({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "current-key",
+			})
+			expect(mockContext.secrets.delete).not.toHaveBeenCalledWith("apiKey")
+		})
+
+		test("T13: a delete whose purge rejects after the capture keeps the still-present active profile", async () => {
+			// The second trigger: the active branch captured the config before `deleteConfig`
+			// rejected, so the restore runs with a real config but `saveConfigIfAbsent` finds the name
+			// still present and reports false. The reconcile then sees the unchanged selection and,
+			// without the existence conjunct, activates the fallback for a profile that was never
+			// deleted.
+			const { managerState } = mockProviderSettingsManager()
+
+			const thirdProfile: ProviderSettingsEntry = {
+				name: "third-config",
+				id: "third-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			vi.mocked(provider.providerSettingsManager.listConfig).mockImplementation(async () => [
+				thirdProfile,
+				currentProfile,
+			])
+			vi.mocked(provider.providerSettingsManager.activateProfile).mockImplementation(
+				async (params: { name: string } | { id: string }) => {
+					const name = "name" in params ? params.name : thirdProfile.name
+					managerState.currentApiConfigName = name
+					return { ...thirdProfile, name }
+				},
+			)
+			vi.mocked(provider.providerSettingsManager.deleteConfig).mockRejectedValueOnce(
+				new Error("Failed to delete config: storage error"),
+			)
+
+			await expect(provider.deleteProviderProfile(currentProfile)).rejects.toThrow(
+				"Failed to delete config: storage error",
+			)
+
+			expect(managerState.currentApiConfigName).toBe("current-config")
+			expect(provider.contextProxy.getValues().currentApiConfigName).toBe("current-config")
+			expect(provider.getProviderProfileEntries().map(({ name }) => name)).toContain("current-config")
 		})
 	})
 })

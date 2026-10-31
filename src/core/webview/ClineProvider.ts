@@ -2678,8 +2678,11 @@ export class ClineProvider
 	 * keep pointing a mode at the deleted profile after the purge dropped the binding in the manager.
 	 *
 	 * The fallback activation is the only write here that can *replace* a profile, so it is gated on
-	 * the deleted name: any other selection the manager still holds was never part of this delete,
-	 * or was picked by someone else while the restore was pending. The `onlyIfUnbound` re-applies
+	 * the deleted name *and* on whether that name still exists: a delete that failed before its
+	 * purge (a rejected pre-purge read, or a rejected `deleteConfig`) leaves the profile in the
+	 * manager, so the unchanged selection is not a stale pointer to a deleted profile and must not
+	 * be replaced. Any other selection the manager still holds was never part of this delete, or
+	 * was picked by someone else while the restore was pending. The `onlyIfUnbound` re-applies
 	 * and the mirror below are convergence writes over ids that exist and modes no newer selection
 	 * has bound, so they stay ungated: an aborted restore must still reconcile the mode bindings.
 	 */
@@ -2691,7 +2694,7 @@ export class ClineProvider
 			const selectedName = this.contextProxy.getValues().currentApiConfigName
 			const keepSelection =
 				!!selectedName &&
-				selectedName !== deletedName &&
+				(selectedName !== deletedName || (await this.providerSettingsManager.hasConfig(deletedName))) &&
 				(await this.providerSettingsManager.hasConfig(selectedName))
 
 			if (!keepSelection) {
