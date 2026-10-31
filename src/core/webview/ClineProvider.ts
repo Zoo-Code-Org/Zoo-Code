@@ -3744,7 +3744,7 @@ export class ClineProvider
 		if (this.webviewHostRecoveryInProgress || this._disposed || this.view !== view || !view.visible) return
 		const revision = this.webviewHeartbeatRevision
 		let started = false
-		let sidebarRemoved = false
+		let sidebarFocused = false
 		try {
 			let commands: string[] | undefined
 			if (!("onDidChangeViewState" in view)) {
@@ -3783,13 +3783,24 @@ export class ClineProvider
 				const resolved = this.resolveWebviewView(replacement)
 				if (this.view === replacement) view.dispose()
 				else replacement.dispose()
-				await resolved
+				try {
+					await resolved
+				} catch (error) {
+					// A published panel already owns this provider and its task.
+					// Keep its disposal subscription, and restore the watchdog even
+					// if HTML generation or state hydration failed before installation.
+					// The next stale tick uses the existing bounded recovery budget.
+					if (this.view === view) throw error
+					if (this._disposed || this.view !== replacement) return
+					this.log(`[Zoo Code] Failed to initialize replacement tab: ${String(error)}`)
+					this.startWebviewWatchdog()
+				}
 			} else {
 				this.pendingSidebarRecovery = true
 				await vscode.commands.executeCommand(`${ClineProvider.sideBarId}.removeView`)
-				sidebarRemoved = true
 				if (this._disposed) return
 				await vscode.commands.executeCommand(`${ClineProvider.sideBarId}.focus`, { preserveFocus: true })
+				sidebarFocused = true
 				await pWaitFor(
 					() =>
 						this._disposed ||
@@ -3801,9 +3812,9 @@ export class ClineProvider
 				)
 			}
 		} catch (error) {
-			// If removal failed, no replacement is expected. A removed sidebar
-			// can still resolve after the wait expires and must retain its task.
-			if (started && !sidebarRemoved) this.pendingSidebarRecovery = false
+			// Only a successful focus can leave a delayed replacement pending.
+			// Command failures must not mark a later manual open as recovery.
+			if (started && !sidebarFocused) this.pendingSidebarRecovery = false
 			// A late discovery failure must not stop a recovered/replaced view.
 			// Once recreation starts, disposal of the old view is expected.
 			if (
