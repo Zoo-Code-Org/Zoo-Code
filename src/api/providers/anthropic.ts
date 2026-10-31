@@ -298,6 +298,10 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 					// whole message (the `message_start` snapshot typically has none).
 					const deltaThinkingTokens = chunk.usage.output_tokens_details?.thinking_tokens
 
+					// The API reports the cumulative output token count, so adopt
+					// it rather than adding it to the message_start seed value.
+					outputTokens = chunk.usage.output_tokens || outputTokens
+
 					yield {
 						type: "usage",
 						inputTokens: 0,

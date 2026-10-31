@@ -1,6 +1,8 @@
 import { renderHook, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClientProvider } from "@tanstack/react-query"
 import React from "react"
+
+import { createTestQueryClient } from "@src/utils/test-utils"
 
 import { useOpenRouterModelProviders } from "../useOpenRouterModelProviders"
 
@@ -64,9 +66,7 @@ const endpointsPayload = (overrides: Record<string, unknown> = {}) => ({
 })
 
 const wrapper = ({ children }: React.PropsWithChildren) => (
-	<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-		{children}
-	</QueryClientProvider>
+	<QueryClientProvider client={createTestQueryClient()}>{children}</QueryClientProvider>
 )
 
 describe("useOpenRouterModelProviders", () => {

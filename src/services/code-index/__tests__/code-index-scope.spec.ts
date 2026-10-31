@@ -1,4 +1,5 @@
 import { makeExtensionContext } from "../../../test-utils/vscode"
+import { clearAllMocks } from "../../../test-utils/reset"
 import { CodeIndexScope } from "../code-index-scope"
 import { CodeIndexStatusManager } from "../code-index-status-manager"
 import { CodeIndexManagerRegistry } from "../code-index-manager-registry"
@@ -9,7 +10,7 @@ vi.mock("../code-index-manager-registry", () => ({
 }))
 
 describe("CodeIndexScope", () => {
-	beforeEach(() => vi.clearAllMocks())
+	beforeEach(() => clearAllMocks())
 
 	it("creates, initializes and disposes its status manager", () => {
 		const context = makeExtensionContext()
