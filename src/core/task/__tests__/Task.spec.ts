@@ -41,6 +41,7 @@ import { McpHub } from "../../../services/mcp/McpHub"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
 import { readFileTool } from "../../tools/ReadFileTool"
 import { writeToFileTool } from "../../tools/WriteToFileTool"
+import { attemptCompletionTool } from "../../tools/AttemptCompletionTool"
 
 type TaskTestAccess = {
 	getSystemPrompt: (requestState: ProviderState | undefined, requestModelInfo?: ModelInfo) => Promise<string>
@@ -8062,6 +8063,111 @@ describe("Cline", () => {
 			expect(reasoningMessages[0].text).toBe("Thinking about it.")
 
 			consoleErrorSpy.mockRestore()
+		})
+
+		it("does not finalize an abandoned partial completion_result row when the completing text is empty", async () => {
+			// AttemptCompletionTool.handlePartial passes `result ?? ""` with
+			// `block.partial` forwarded (AttemptCompletionTool.ts:312), so an
+			// empty completion_result is reachable in production. `"".startsWith`
+			// is false for any non-empty stored text, but `m.text.startsWith("")`
+			// is true for every stored text, so without a non-empty guard the
+			// empty completion matches any earlier partial completion_result row.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+
+			// A completion_result stream that was abandoned mid-flight: its row is
+			// still partial and no longer the tail, so nothing finalizes it.
+			task.clineMessages.push({
+				ts: 1,
+				type: "say",
+				say: "completion_result",
+				text: "Abandoned completion attempt",
+				partial: true,
+			})
+			task.clineMessages.push({
+				ts: 2,
+				type: "say",
+				say: "api_req_started",
+				text: "{}",
+				partial: false,
+			})
+			saveSpy.mockClear()
+
+			// The next turn's attempt_completion streams with an empty result.
+			await attemptCompletionTool.handlePartial(task, {
+				type: "tool_use",
+				name: "attempt_completion",
+				params: { result: "" },
+				partial: true,
+			})
+
+			const completionMessages = task.clineMessages.filter(
+				(m) => m.type === "say" && m.say === "completion_result",
+			)
+			// The dead row must stay dead: no finalize, no hijacked lastMessageTs.
+			expect(completionMessages[0]).toMatchObject({
+				ts: 1,
+				text: "Abandoned completion attempt",
+				partial: true,
+			})
+			// The empty stream starts its own row instead of resurrecting the old one.
+			expect(completionMessages).toHaveLength(2)
+			expect(completionMessages[1]).toMatchObject({ text: "", partial: true })
+			expect(completionMessages[1].ts).toBeGreaterThan(2)
+		})
+
+		it("does not turn an abandoned partial completion_result row into the completed row of an empty completion", async () => {
+			// The same degenerate match on the completing (partial=false) write, which
+			// is the branch that finalizes the row: the dead row's `partial` flips to
+			// false and `lastMessageTs` is re-stamped with the dead row's ts, so the
+			// abandoned attempt is persisted and rendered as this turn's completion.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+
+			task.clineMessages.push({
+				ts: 1,
+				type: "say",
+				say: "completion_result",
+				text: "Abandoned completion attempt",
+				partial: true,
+			})
+			task.clineMessages.push({
+				ts: 2,
+				type: "say",
+				say: "api_req_started",
+				text: "{}",
+				partial: false,
+			})
+			task.lastMessageTs = 2
+
+			// The empty completion is rejected by AttemptCompletionTool.handle before
+			// any say() call, so drive the completing write the way the tool's
+			// completion path does: say("completion_result", result, undefined, false).
+			await task.say("completion_result", "", undefined, false)
+
+			const completionMessages = task.clineMessages.filter(
+				(m) => m.type === "say" && m.say === "completion_result",
+			)
+			expect(completionMessages[0]).toMatchObject({
+				ts: 1,
+				text: "Abandoned completion attempt",
+				partial: true,
+			})
+			expect(completionMessages).toHaveLength(2)
+			expect(completionMessages[1].text).toBe("")
+			expect(completionMessages[1].partial).toBeUndefined()
+			// lastMessageTs must not be hijacked by the dead row's ts.
+			expect(task.lastMessageTs).not.toBe(1)
 		})
 	})
 })

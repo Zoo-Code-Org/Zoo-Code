@@ -2760,9 +2760,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * snapshot before the stream resumes or completes. Appending a fresh message
 	 * in that case would persist — and the webview would render — the same
 	 * content twice, so callers merge into the stranded snapshot instead.
+	 *
+	 * Empty text never matches, on either side. `m.text.startsWith("")` is true
+	 * for every stored text, so an empty write (`AttemptCompletionTool` passes
+	 * `result ?? ""`) would otherwise adopt an abandoned snapshot from an
+	 * earlier turn: the streaming write would overwrite its text and the
+	 * completing write would finalize it as this turn's message, re-stamping
+	 * `lastMessageTs` with the dead row's ts.
 	 */
 	private findStalePartialSaySnapshotIndex(type: ClineSay, text: string | undefined): number {
-		if (typeof text !== "string") {
+		if (typeof text !== "string" || text === "") {
 			return -1
 		}
 		return findLastIndex(
@@ -2772,6 +2779,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				m.type === "say" &&
 				m.say === type &&
 				typeof m.text === "string" &&
+				m.text !== "" &&
 				(text.startsWith(m.text) || m.text.startsWith(text)),
 		)
 	}
