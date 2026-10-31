@@ -493,6 +493,24 @@ describe("usageToCsv formula safety", () => {
 	})
 })
 
+describe("usageToCsv and summarizeUsage count the same tasks", () => {
+	it("leaves out a task whose time is not a number, in the export as in the totals", () => {
+		const history = [
+			item({ task: "good", ts: NOW, tokensIn: 7, totalCost: 1 }),
+			item({ task: "no time", ts: null as never, tokensIn: 99, totalCost: 50 }),
+			item({ task: "text time", ts: "yesterday" as never, tokensIn: 99, totalCost: 50 }),
+		]
+
+		const rows = usageToCsv(history, { range: "all", now: NOW }).split("\n").slice(1)
+		const summary = summarizeUsage(history, { range: "all", now: NOW })
+
+		expect(rows).toHaveLength(1)
+		expect(rows[0]).toContain('"good"')
+		expect(summary.taskCount).toBe(1)
+		expect(summary.totalCost).toBe(1)
+	})
+})
+
 describe("usageToCsv numeric columns", () => {
 	const numericKeys = ["tokensIn", "tokensOut", "cacheReads", "cacheWrites", "totalCost"] as const
 	const cells = (overrides: Record<string, unknown>) =>

@@ -176,17 +176,29 @@ function addTo(
 
 const byCostDesc = (a: UsageBucket, b: UsageBucket) => b.cost - a.cost || b.tokens - a.tokens
 
-export function summarizeUsage(history: HistoryItem[], options: UsageOptions): UsageSummary {
-	const now = options.now ?? Date.now()
-	const start = rangeStart(options.range, now)
-	const topTaskLimit = options.topTaskLimit ?? 5
+/**
+ * The tasks the Usage tab counts for these options: the same selection for the totals and for the CSV, so an export
+ * never has a row the displayed totals leave out. An item whose time is not a number (a corrupted task file) is
+ * dropped.
+ */
+function itemsInScope(history: HistoryItem[], options: UsageOptions): HistoryItem[] {
+	const start = rangeStart(options.range, options.now ?? Date.now())
 
-	const items = history.filter(
+	return history.filter(
 		(item) =>
 			typeof item.ts === "number" &&
 			(start === undefined || item.ts >= start) &&
 			(!options.workspace || item.workspace === options.workspace),
 	)
+}
+
+export function summarizeUsage(history: HistoryItem[], options: UsageOptions): UsageSummary {
+	const now = options.now ?? Date.now()
+	const start = rangeStart(options.range, now)
+	const topTaskLimit = options.topTaskLimit ?? 5
+
+	// The same `now` as above, so the range and the daily series agree on the day.
+	const items = itemsInScope(history, { ...options, now })
 
 	const providers = new Map<string, UsageBucket>()
 	const models = new Map<string, UsageBucket>()
@@ -304,7 +316,6 @@ export function modelIdFromKey(key: string): string | undefined {
 
 /** Serialises the filtered usage rows as CSV (one row per task). */
 export function usageToCsv(history: HistoryItem[], options: UsageOptions): string {
-	const start = rangeStart(options.range, options.now ?? Date.now())
 	const header = [
 		"date",
 		"task",
@@ -333,12 +344,7 @@ export function usageToCsv(history: HistoryItem[], options: UsageOptions): strin
 			? new Date(ts).toISOString()
 			: ""
 
-	const rows = history
-		.filter(
-			(item) =>
-				(start === undefined || item.ts >= start) &&
-				(!options.workspace || item.workspace === options.workspace),
-		)
+	const rows = itemsInScope(history, options)
 		.sort((a, b) => a.ts - b.ts)
 		.map((item) =>
 			[

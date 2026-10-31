@@ -173,9 +173,15 @@ describe("TaskHistoryStore real cross-host locking", () => {
 			await storeB.initialize()
 			await storeB.upsert({ ...item("shared-usage-task"), usageByModel }) // another host records usage on disk
 
+			// The setup really happened: the usage is on disk, and this host's cache does not have it yet.
+			const file = path.join(storagePath, "tasks", "shared-usage-task", "history_item.json")
+			expect(JSON.parse(await fs.readFile(file, "utf8")).usageByModel).toEqual(usageByModel)
+			expect(storeA.get("shared-usage-task")?.usageByModel).toBeUndefined()
+
 			// This host saves the task after its messages were replaced: no usage, so none must remain on disk.
 			await storeA.upsert({ ...item("shared-usage-task"), usageByModel: undefined })
 
+			expect(JSON.parse(await fs.readFile(file, "utf8")).usageByModel).toBeUndefined()
 			await storeA.invalidate("shared-usage-task")
 			expect(storeA.get("shared-usage-task")?.usageByModel).toBeUndefined()
 			await storeB.invalidate("shared-usage-task")

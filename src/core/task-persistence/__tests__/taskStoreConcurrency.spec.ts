@@ -56,8 +56,20 @@ describe("computeHistoryDelta", () => {
 		expect(computeHistoryDelta(cached, { usageByModel: [] })).toEqual({ usageByModel: [] })
 	})
 
-	it("does not treat an undefined of any other field as a deletion", () => {
+	it("omits an undefined other field when the cache has no value for it either", () => {
 		expect(computeHistoryDelta(item("active"), { mode: undefined })).toEqual({})
+	})
+
+	it("carries an undefined other field as an ordinary change when the cache has a value for it", () => {
+		const cached = { ...item("active"), mode: "code" }
+
+		expect(computeHistoryDelta(cached, { mode: undefined })).toEqual({ mode: undefined })
+	})
+
+	it("does not keep an undefined other field on every save: only usageByModel is a standing decision", () => {
+		const delta = computeHistoryDelta(item("active"), { mode: undefined, usageByModel: undefined })
+
+		expect(Object.keys(delta)).toEqual(["usageByModel"])
 	})
 
 	it("lets mergeHistoryDelta clear the usage another host wrote", () => {

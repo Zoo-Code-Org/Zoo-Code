@@ -666,7 +666,13 @@ describe("SettingsView - Usage tab", () => {
 		})
 
 		const content = screen.getByTestId("settings-content")
-		expect(within(content).getByTestId("usage-stats")).toBeInTheDocument()
+		// The totals of the supplied task, not just an element that exists.
+		const stats = within(content).getByTestId("usage-stats").textContent ?? ""
+		expect(stats).toContain("$0.50")
+		expect(stats).toContain("150") // 100 tokens in + 50 out
+		// The filter controls and the export are there.
+		expect(within(content).getByTestId("usage-range-7d")).toBeInTheDocument()
+		expect(within(content).getByTestId("usage-range-all")).toBeInTheDocument()
 		expect(within(content).getByTestId("usage-export-csv")).toBeInTheDocument()
 		expect(within(content).queryByTestId("usage-empty")).not.toBeInTheDocument()
 	})
