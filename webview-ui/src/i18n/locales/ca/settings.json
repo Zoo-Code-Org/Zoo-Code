@@ -42,7 +42,8 @@
 		"language": "Idioma",
 		"about": "Sobre Zoo Code",
 		"skills": "Skills",
-		"rules": "Regles"
+		"rules": "Regles",
+		"usage": "Ús"
 	},
 	"about": {
 		"bugReport": {
@@ -1233,5 +1234,64 @@
 			"descriptionTooLong": "La descripció ha de tenir com a màxim 1024 caràcters"
 		},
 		"footer": "Crea les teves pròpies skills amb el mode Skill Writer, disponible al <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"usage": {
+		"description": "Tokens i cost de l'historial de tasques de Zoo Code en aquesta màquina.",
+		"range": {
+			"label": "Interval de temps",
+			"today": "Avui",
+			"7d": "7 dies",
+			"30d": "30 dies",
+			"all": "Tot el temps"
+		},
+		"scope": {
+			"label": "Mostra",
+			"workspace": "Aquest espai de treball",
+			"all": "Tots els espais de treball"
+		},
+		"empty": "No hi ha tasques en aquest interval de temps.",
+		"stats": {
+			"cost": "cost",
+			"tokens": "tokens",
+			"tasks": "tasques",
+			"cacheHit": "{{percent}}% de la memòria cau",
+			"inOut": "{{input}} d'entrada · {{output}} de sortida",
+			"models": "models"
+		},
+		"dailyCost": "Cost diari",
+		"byMode": "Per mode",
+		"topTasks": "Tasques més cares",
+		"disclaimer": "Els costos són estimacions de l'historial de tasques i poden diferir de la factura del teu proveïdor.",
+		"exportCsv": "Exporta CSV",
+		"noPricingNote": "Alguns proveïdors (p. ex. GitHub Copilot) facturen per subscripció i no informen d'un preu per tasca, per això aquest historial es mostra en tokens. Consulta els límits dels proveïdors a dalt per als crèdits.",
+		"dailyTokens": "Tokens diaris",
+		"topTasksTokens": "Tasques més grans",
+		"byProvider": "Per proveïdor",
+		"history": "Historial d'ús",
+		"limits": {
+			"title": "Límits dels proveïdors",
+			"refresh": "Actualitza",
+			"updated": "Actualitzat {{time}}",
+			"loading": "Comprovant els proveïdors connectats…",
+			"resets": "Es restableix {{date}}",
+			"signedOut": "No has iniciat sessió",
+			"noCopilot": "Sense quota de Copilot",
+			"noKey": "Clau d'API absent o no vàlida",
+			"unsupported": "URL base personalitzada — no comprovat",
+			"error": "No s'ha pogut carregar",
+			"window": {
+				"weekly": "Setmanal",
+				"daily": "Diari",
+				"monthly": "Mensual",
+				"unlimited": "Il·limitat",
+				"hours": "{{n}} hores",
+				"days": "{{n}} dies"
+			}
+		},
+		"byModel": "Per model",
+		"notRecorded": "No registrat",
+		"noPrice": "sense preu",
+		"tokensShort": "tok",
+		"chartLabel": "{{metric}}, total {{total}}"
 	}
 }

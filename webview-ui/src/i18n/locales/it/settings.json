@@ -42,7 +42,8 @@
 		"language": "Lingua",
 		"about": "Informazioni su Zoo Code",
 		"skills": "Skills",
-		"rules": "Regole"
+		"rules": "Regole",
+		"usage": "Utilizzo"
 	},
 	"about": {
 		"bugReport": {
@@ -1233,5 +1234,64 @@
 			"descriptionTooLong": "La descrizione deve essere di massimo 1024 caratteri"
 		},
 		"footer": "Crea le tue skill con la modalità Skill Writer, disponibile in <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"usage": {
+		"description": "Token e costi dalla cronologia delle attività di Zoo Code su questo computer.",
+		"range": {
+			"label": "Intervallo di tempo",
+			"today": "Oggi",
+			"7d": "7 giorni",
+			"30d": "30 giorni",
+			"all": "Sempre"
+		},
+		"scope": {
+			"label": "Mostra",
+			"workspace": "Questo workspace",
+			"all": "Tutti i workspace"
+		},
+		"empty": "Nessuna attività in questo intervallo di tempo.",
+		"stats": {
+			"cost": "costo",
+			"tokens": "token",
+			"tasks": "attività",
+			"cacheHit": "{{percent}}% dalla cache",
+			"inOut": "{{input}} in ingresso · {{output}} in uscita",
+			"models": "modelli"
+		},
+		"dailyCost": "Costo giornaliero",
+		"byMode": "Per modalità",
+		"topTasks": "Attività più costose",
+		"disclaimer": "I costi sono stime basate sulla cronologia delle attività e possono differire dalla fattura del tuo provider.",
+		"exportCsv": "Esporta CSV",
+		"noPricingNote": "Alcuni provider (es. GitHub Copilot) fatturano tramite abbonamento e non riportano un prezzo per attività, quindi questa cronologia è mostrata in token. Vedi i limiti dei provider sopra per i crediti.",
+		"dailyTokens": "Token giornalieri",
+		"topTasksTokens": "Attività più grandi",
+		"byProvider": "Per provider",
+		"history": "Cronologia di utilizzo",
+		"limits": {
+			"title": "Limiti dei provider",
+			"refresh": "Aggiorna",
+			"updated": "Aggiornato {{time}}",
+			"loading": "Controllo dei provider collegati…",
+			"resets": "Si reimposta {{date}}",
+			"signedOut": "Accesso non effettuato",
+			"noCopilot": "Nessuna quota Copilot",
+			"noKey": "Chiave API mancante o non valida",
+			"unsupported": "URL di base personalizzato — non controllato",
+			"error": "Impossibile caricare",
+			"window": {
+				"weekly": "Settimanale",
+				"daily": "Giornaliero",
+				"monthly": "Mensile",
+				"unlimited": "Illimitato",
+				"hours": "{{n}} ore",
+				"days": "{{n}} giorni"
+			}
+		},
+		"byModel": "Per modello",
+		"notRecorded": "Non registrato",
+		"noPrice": "senza prezzo",
+		"tokensShort": "tok",
+		"chartLabel": "{{metric}}, totale {{total}}"
 	}
 }

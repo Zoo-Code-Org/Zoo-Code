@@ -42,7 +42,8 @@
 		"language": "Idioma",
 		"about": "Acerca de Zoo Code",
 		"skills": "Skills",
-		"rules": "Reglas"
+		"rules": "Reglas",
+		"usage": "Uso"
 	},
 	"about": {
 		"bugReport": {
@@ -1233,5 +1234,64 @@
 			"descriptionTooLong": "La descripción debe tener como máximo 1024 caracteres"
 		},
 		"footer": "Crea tus propias skills con el modo Skill Writer, disponible en el <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"usage": {
+		"description": "Tokens y coste del historial de tareas de Zoo Code en este equipo.",
+		"range": {
+			"label": "Intervalo de tiempo",
+			"today": "Hoy",
+			"7d": "7 días",
+			"30d": "30 días",
+			"all": "Todo el tiempo"
+		},
+		"scope": {
+			"label": "Mostrar",
+			"workspace": "Este espacio de trabajo",
+			"all": "Todos los espacios de trabajo"
+		},
+		"empty": "No hay tareas en este intervalo de tiempo.",
+		"stats": {
+			"cost": "coste",
+			"tokens": "tokens",
+			"tasks": "tareas",
+			"cacheHit": "{{percent}} % desde la caché",
+			"inOut": "{{input}} de entrada · {{output}} de salida",
+			"models": "modelos"
+		},
+		"dailyCost": "Coste diario",
+		"byMode": "Por modo",
+		"topTasks": "Tareas más caras",
+		"disclaimer": "Los costes son estimaciones del historial de tareas y pueden diferir de la factura de tu proveedor.",
+		"exportCsv": "Exportar CSV",
+		"noPricingNote": "Algunos proveedores (p. ej. GitHub Copilot) facturan por suscripción y no informan de un precio por tarea, por lo que este historial se muestra en tokens. Consulta los límites de los proveedores arriba para ver los créditos.",
+		"dailyTokens": "Tokens diarios",
+		"topTasksTokens": "Tareas más grandes",
+		"byProvider": "Por proveedor",
+		"history": "Historial de uso",
+		"limits": {
+			"title": "Límites de los proveedores",
+			"refresh": "Actualizar",
+			"updated": "Actualizado {{time}}",
+			"loading": "Comprobando los proveedores conectados…",
+			"resets": "Se restablece {{date}}",
+			"signedOut": "Sesión no iniciada",
+			"noCopilot": "Sin cuota de Copilot",
+			"noKey": "Falta la clave de API o no es válida",
+			"unsupported": "URL base personalizada: no comprobado",
+			"error": "No se pudo cargar",
+			"window": {
+				"weekly": "Semanal",
+				"daily": "Diario",
+				"monthly": "Mensual",
+				"unlimited": "Ilimitado",
+				"hours": "{{n}} horas",
+				"days": "{{n}} días"
+			}
+		},
+		"byModel": "Por modelo",
+		"notRecorded": "No registrado",
+		"noPrice": "sin precio",
+		"tokensShort": "tok",
+		"chartLabel": "{{metric}}, total {{total}}"
 	}
 }

@@ -415,6 +415,18 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"usage-settings": async () => {
+		const { UsageSettingsStory } = await import("@/components/settings/__tests__/UsageSettings.visual.fixture")
+		return <UsageSettingsStory />
+	},
+	"usage-settings-degraded": async () => {
+		const { UsageSettingsStory } = await import("@/components/settings/__tests__/UsageSettings.visual.fixture")
+		return <UsageSettingsStory variant="degraded" />
+	},
+	"usage-settings-empty": async () => {
+		const { UsageSettingsStory } = await import("@/components/settings/__tests__/UsageSettings.visual.fixture")
+		return <UsageSettingsStory variant="empty" />
+	},
 	"ui-settings": async () => {
 		const { UISettingsStory } = await import("@/components/settings/__tests__/UISettings.visual.fixture")
 		return <UISettingsStory />

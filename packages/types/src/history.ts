@@ -26,6 +26,23 @@ export const pendingTaskActionSchema = z.discriminatedUnion("kind", [
 
 export type PendingTaskAction = z.infer<typeof pendingTaskActionSchema>
 
+/**
+ * Token/cost totals for one provider+model within a task. A task can span
+ * several (the user may switch profiles mid-task), so history keeps a list.
+ */
+export const usageByModelEntrySchema = z.object({
+	apiProvider: z.string().optional(),
+	modelId: z.string().optional(),
+	requests: z.number(),
+	tokensIn: z.number(),
+	tokensOut: z.number(),
+	cacheReads: z.number().optional(),
+	cacheWrites: z.number().optional(),
+	cost: z.number(),
+})
+
+export type UsageByModelEntry = z.infer<typeof usageByModelEntrySchema>
+
 export const historyItemSchema = z.object({
 	id: z.string(),
 	rootTaskId: z.string().optional(),
@@ -39,6 +56,8 @@ export const historyItemSchema = z.object({
 	cacheWrites: z.number().optional(),
 	cacheReads: z.number().optional(),
 	totalCost: z.number(),
+	/** Per provider+model breakdown, recorded as requests happen. Absent on tasks created before this was tracked. */
+	usageByModel: z.array(usageByModelEntrySchema).optional(),
 	size: z.number().optional(),
 	workspace: z.string().optional(),
 	mode: z.string().optional(),

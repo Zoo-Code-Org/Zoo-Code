@@ -2119,6 +2119,17 @@ describe("ClineProvider", () => {
 		expect(state.allowedReadFiles).toEqual([])
 	})
 
+	test("dispose stops the provider-limit requests still in flight for this provider", async () => {
+		const abort = vi.spyOn(await import("../webviewMessageHandler"), "abortProviderQuotaRequests")
+		try {
+			await provider.dispose()
+
+			expect(abort).toHaveBeenCalledWith(provider)
+		} finally {
+			abort.mockRestore()
+		}
+	})
+
 	test("getState returns the saved allowed write files", async () => {
 		await provider.contextProxy.setValue("allowedWriteFiles", ["notes.md"])
 

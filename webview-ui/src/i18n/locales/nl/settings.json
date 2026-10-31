@@ -42,7 +42,8 @@
 		"language": "Taal",
 		"about": "Over Zoo Code",
 		"skills": "Skills",
-		"rules": "Regels"
+		"rules": "Regels",
+		"usage": "Gebruik"
 	},
 	"about": {
 		"bugReport": {
@@ -1233,5 +1234,64 @@
 			"descriptionTooLong": "Beschrijving moet maximaal 1024 tekens zijn"
 		},
 		"footer": "Maak je eigen skills met de Skill Writer modus, beschikbaar in de <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"usage": {
+		"description": "Tokens en kosten uit je Zoo Code-takengeschiedenis op deze machine.",
+		"range": {
+			"label": "Tijdsbereik",
+			"today": "Vandaag",
+			"7d": "7 dagen",
+			"30d": "30 dagen",
+			"all": "Alle tijd"
+		},
+		"scope": {
+			"label": "Tonen",
+			"workspace": "Deze werkruimte",
+			"all": "Alle werkruimtes"
+		},
+		"empty": "Geen taken in dit tijdsbereik.",
+		"stats": {
+			"cost": "kosten",
+			"tokens": "tokens",
+			"tasks": "taken",
+			"cacheHit": "{{percent}}% uit cache",
+			"inOut": "{{input}} in · {{output}} uit",
+			"models": "modellen"
+		},
+		"dailyCost": "Dagelijkse kosten",
+		"byMode": "Per modus",
+		"topTasks": "Duurste taken",
+		"disclaimer": "Kosten zijn schattingen op basis van de takengeschiedenis en kunnen afwijken van de rekening van je provider.",
+		"exportCsv": "CSV exporteren",
+		"noPricingNote": "Sommige providers (bijv. GitHub Copilot) factureren via een abonnement en melden geen prijs per taak, daarom wordt deze geschiedenis in tokens getoond. Zie hierboven de providerlimieten voor credits.",
+		"dailyTokens": "Dagelijkse tokens",
+		"topTasksTokens": "Grootste taken",
+		"byProvider": "Per provider",
+		"history": "Gebruiksgeschiedenis",
+		"limits": {
+			"title": "Providerlimieten",
+			"refresh": "Vernieuwen",
+			"updated": "Bijgewerkt {{time}}",
+			"loading": "Verbonden providers controleren…",
+			"resets": "Reset {{date}}",
+			"signedOut": "Niet aangemeld",
+			"noCopilot": "Geen Copilot-quotum",
+			"noKey": "API-sleutel ontbreekt of is ongeldig",
+			"unsupported": "Aangepaste basis-URL — niet gecontroleerd",
+			"error": "Kon niet laden",
+			"window": {
+				"weekly": "Wekelijks",
+				"daily": "Dagelijks",
+				"monthly": "Maandelijks",
+				"unlimited": "Onbeperkt",
+				"hours": "{{n}} uur",
+				"days": "{{n}} dagen"
+			}
+		},
+		"byModel": "Per model",
+		"notRecorded": "Niet vastgelegd",
+		"noPrice": "geen prijs",
+		"tokensShort": "tok",
+		"chartLabel": "{{metric}}, totaal {{total}}"
 	}
 }

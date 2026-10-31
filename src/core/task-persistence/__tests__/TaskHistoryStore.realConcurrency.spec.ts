@@ -2,7 +2,7 @@ import * as fs from "fs/promises"
 import * as os from "os"
 import * as path from "path"
 
-import type { HistoryItem } from "@roo-code/types"
+import { providerIdentifiers, type HistoryItem } from "@roo-code/types"
 
 import { TaskHistoryStore } from "../TaskHistoryStore"
 
@@ -115,6 +115,39 @@ describe("TaskHistoryStore real cross-host locking", () => {
 			writeBarrier?.dispose()
 			storeA.dispose()
 			storeB.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
+	it("clears a stored usageByModel when the same task is saved again without one (e.g. after a rewind)", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-usage-clear-"))
+		const store = new TaskHistoryStore(storagePath)
+		const usageByModel = [
+			{
+				apiProvider: providerIdentifiers.anthropic,
+				modelId: "m",
+				requests: 1,
+				tokensIn: 5,
+				tokensOut: 5,
+				cost: 1,
+			},
+		]
+
+		try {
+			await store.initialize()
+			await store.upsert({ ...item("usage-task"), usageByModel })
+			expect(store.get("usage-task")?.usageByModel).toEqual(usageByModel)
+
+			// What taskMetadata emits when the replaced messages record no usage.
+			await store.upsert({ ...item("usage-task"), usageByModel: undefined })
+			expect(store.get("usage-task")?.usageByModel).toBeUndefined()
+
+			// ...and the stored file no longer carries the stale breakdown either.
+			await store.invalidate("usage-task")
+			expect(store.get("usage-task")).toBeDefined()
+			expect(store.get("usage-task")?.usageByModel).toBeUndefined()
+		} finally {
+			store.dispose()
 			await fs.rm(storagePath, { recursive: true, force: true })
 		}
 	})

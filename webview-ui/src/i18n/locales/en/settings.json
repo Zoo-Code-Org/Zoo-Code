@@ -42,7 +42,8 @@
 		"ui": "UI",
 		"experimental": "Experimental",
 		"language": "Language",
-		"about": "About Zoo Code"
+		"about": "About Zoo Code",
+		"usage": "Usage"
 	},
 	"about": {
 		"bugReport": {
@@ -1233,5 +1234,64 @@
 			"output": "Output",
 			"cacheReads": "Cache reads"
 		}
+	},
+	"usage": {
+		"description": "Tokens and cost from your Zoo Code task history on this machine.",
+		"range": {
+			"label": "Time range",
+			"today": "Today",
+			"7d": "7 days",
+			"30d": "30 days",
+			"all": "All time"
+		},
+		"scope": {
+			"label": "Show",
+			"workspace": "This workspace",
+			"all": "All workspaces"
+		},
+		"empty": "No tasks in this time range.",
+		"stats": {
+			"cost": "cost",
+			"tokens": "tokens",
+			"tasks": "tasks",
+			"cacheHit": "{{percent}}% from cache",
+			"inOut": "{{input}} in · {{output}} out",
+			"models": "models"
+		},
+		"dailyCost": "Daily cost",
+		"byMode": "By mode",
+		"topTasks": "Most expensive tasks",
+		"disclaimer": "Costs are estimates from task history and may differ from your provider's bill.",
+		"exportCsv": "Export CSV",
+		"noPricingNote": "Some providers (e.g. GitHub Copilot) bill by subscription and don't report a per-task price, so this history is shown in tokens. See Provider limits above for credits.",
+		"dailyTokens": "Daily tokens",
+		"topTasksTokens": "Largest tasks",
+		"byProvider": "By provider",
+		"history": "Usage history",
+		"limits": {
+			"title": "Provider limits",
+			"refresh": "Refresh",
+			"updated": "Updated {{time}}",
+			"loading": "Checking connected providers…",
+			"resets": "Resets {{date}}",
+			"signedOut": "Not signed in",
+			"noCopilot": "No Copilot quota",
+			"noKey": "API key missing or invalid",
+			"unsupported": "Custom base URL — not checked",
+			"error": "Couldn't load",
+			"window": {
+				"weekly": "Weekly",
+				"daily": "Daily",
+				"monthly": "Monthly",
+				"unlimited": "Unlimited",
+				"hours": "{{n}}-hour",
+				"days": "{{n}}-day"
+			}
+		},
+		"byModel": "By model",
+		"notRecorded": "Not recorded",
+		"noPrice": "no price",
+		"tokensShort": "tok",
+		"chartLabel": "{{metric}}, total {{total}}"
 	}
 }

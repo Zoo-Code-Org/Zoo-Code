@@ -42,7 +42,8 @@
 		"language": "Język",
 		"about": "O Zoo Code",
 		"skills": "Skills",
-		"rules": "Reguły"
+		"rules": "Reguły",
+		"usage": "Użycie"
 	},
 	"about": {
 		"bugReport": {
@@ -1233,5 +1234,64 @@
 			"descriptionTooLong": "Opis musi mieć maksymalnie 1024 znaki"
 		},
 		"footer": "Twórz własne umiejętności za pomocą trybu Skill Writer, dostępnego w <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"usage": {
+		"description": "Tokeny i koszty z historii zadań Zoo Code na tym komputerze.",
+		"range": {
+			"label": "Zakres czasu",
+			"today": "Dzisiaj",
+			"7d": "7 dni",
+			"30d": "30 dni",
+			"all": "Cały czas"
+		},
+		"scope": {
+			"label": "Pokaż",
+			"workspace": "Ten obszar roboczy",
+			"all": "Wszystkie obszary robocze"
+		},
+		"empty": "Brak zadań w tym zakresie czasu.",
+		"stats": {
+			"cost": "koszt",
+			"tokens": "tokeny",
+			"tasks": "zadania",
+			"cacheHit": "{{percent}}% z pamięci podręcznej",
+			"inOut": "{{input}} wejście · {{output}} wyjście",
+			"models": "modele"
+		},
+		"dailyCost": "Koszt dzienny",
+		"byMode": "Według trybu",
+		"topTasks": "Najdroższe zadania",
+		"disclaimer": "Koszty są szacunkami z historii zadań i mogą różnić się od rachunku od dostawcy.",
+		"exportCsv": "Eksportuj CSV",
+		"noPricingNote": "Niektórzy dostawcy (np. GitHub Copilot) rozliczają się w ramach subskrypcji i nie podają ceny za zadanie, dlatego ta historia jest pokazana w tokenach. Kredyty znajdziesz wyżej w limitach dostawców.",
+		"dailyTokens": "Tokeny dzienne",
+		"topTasksTokens": "Największe zadania",
+		"byProvider": "Według dostawcy",
+		"history": "Historia użycia",
+		"limits": {
+			"title": "Limity dostawców",
+			"refresh": "Odśwież",
+			"updated": "Zaktualizowano {{time}}",
+			"loading": "Sprawdzanie połączonych dostawców…",
+			"resets": "Reset {{date}}",
+			"signedOut": "Nie zalogowano",
+			"noCopilot": "Brak limitu Copilot",
+			"noKey": "Brak klucza API lub jest nieprawidłowy",
+			"unsupported": "Niestandardowy bazowy URL — nie sprawdzono",
+			"error": "Nie udało się wczytać",
+			"window": {
+				"weekly": "Tygodniowo",
+				"daily": "Dziennie",
+				"monthly": "Miesięcznie",
+				"unlimited": "Bez limitu",
+				"hours": "{{n}} godz.",
+				"days": "{{n}} dni"
+			}
+		},
+		"byModel": "Według modelu",
+		"notRecorded": "Nie zapisano",
+		"noPrice": "brak ceny",
+		"tokensShort": "tok.",
+		"chartLabel": "{{metric}}, łącznie {{total}}"
 	}
 }

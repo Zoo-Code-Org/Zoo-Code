@@ -42,7 +42,8 @@
 		"language": "Sprache",
 		"about": "Über Zoo Code",
 		"skills": "Skills",
-		"rules": "Regeln"
+		"rules": "Regeln",
+		"usage": "Nutzung"
 	},
 	"about": {
 		"bugReport": {
@@ -1233,5 +1234,64 @@
 			"descriptionTooLong": "Beschreibung muss 1024 Zeichen oder weniger sein"
 		},
 		"footer": "Erstelle deine eigenen Skills mit dem Skill Writer Modus, verfügbar im <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"usage": {
+		"description": "Tokens und Kosten aus deinem Zoo-Code-Aufgabenverlauf auf diesem Rechner.",
+		"range": {
+			"label": "Zeitraum",
+			"today": "Heute",
+			"7d": "7 Tage",
+			"30d": "30 Tage",
+			"all": "Gesamter Zeitraum"
+		},
+		"scope": {
+			"label": "Anzeigen",
+			"workspace": "Dieser Workspace",
+			"all": "Alle Workspaces"
+		},
+		"empty": "Keine Aufgaben in diesem Zeitraum.",
+		"stats": {
+			"cost": "Kosten",
+			"tokens": "Tokens",
+			"tasks": "Aufgaben",
+			"cacheHit": "{{percent}} % aus dem Cache",
+			"inOut": "{{input}} ein · {{output}} aus",
+			"models": "Modelle"
+		},
+		"dailyCost": "Tägliche Kosten",
+		"byMode": "Nach Modus",
+		"topTasks": "Teuerste Aufgaben",
+		"disclaimer": "Die Kosten sind Schätzungen aus dem Aufgabenverlauf und können von der Rechnung deines Anbieters abweichen.",
+		"exportCsv": "CSV exportieren",
+		"noPricingNote": "Einige Anbieter (z. B. GitHub Copilot) rechnen per Abonnement ab und melden keinen Preis pro Aufgabe, daher wird dieser Verlauf in Tokens angezeigt. Credits findest du oben unter Anbieterlimits.",
+		"dailyTokens": "Tägliche Tokens",
+		"topTasksTokens": "Größte Aufgaben",
+		"byProvider": "Nach Anbieter",
+		"history": "Nutzungsverlauf",
+		"limits": {
+			"title": "Anbieterlimits",
+			"refresh": "Aktualisieren",
+			"updated": "Aktualisiert {{time}}",
+			"loading": "Verbundene Anbieter werden geprüft…",
+			"resets": "Zurücksetzung {{date}}",
+			"signedOut": "Nicht angemeldet",
+			"noCopilot": "Kein Copilot-Kontingent",
+			"noKey": "API-Schlüssel fehlt oder ist ungültig",
+			"unsupported": "Benutzerdefinierte Basis-URL – nicht geprüft",
+			"error": "Konnte nicht geladen werden",
+			"window": {
+				"weekly": "Wöchentlich",
+				"daily": "Täglich",
+				"monthly": "Monatlich",
+				"unlimited": "Unbegrenzt",
+				"hours": "{{n}} Stunden",
+				"days": "{{n}} Tage"
+			}
+		},
+		"byModel": "Nach Modell",
+		"notRecorded": "Nicht erfasst",
+		"noPrice": "kein Preis",
+		"tokensShort": "Tok.",
+		"chartLabel": "{{metric}}, insgesamt {{total}}"
 	}
 }

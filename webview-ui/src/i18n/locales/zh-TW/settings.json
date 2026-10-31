@@ -42,7 +42,8 @@
 		"language": "語言",
 		"about": "關於 Zoo Code",
 		"skills": "Skills",
-		"rules": "規則"
+		"rules": "規則",
+		"usage": "用量"
 	},
 	"about": {
 		"bugReport": {
@@ -1233,5 +1234,64 @@
 			"descriptionTooLong": "說明不得超過1024個字元"
 		},
 		"footer": "使用技能編寫器模式建立您自己的技能，可在 <MarketplaceLink>模式市集</MarketplaceLink> 中取得。"
+	},
+	"usage": {
+		"description": "來自此裝置上 Zoo Code 任務歷史的 Token 與費用。",
+		"range": {
+			"label": "時間範圍",
+			"today": "今天",
+			"7d": "7 天",
+			"30d": "30 天",
+			"all": "全部時間"
+		},
+		"scope": {
+			"label": "顯示",
+			"workspace": "此工作區",
+			"all": "所有工作區"
+		},
+		"empty": "此時間範圍內沒有任務。",
+		"stats": {
+			"cost": "費用",
+			"tokens": "Token",
+			"tasks": "任務",
+			"cacheHit": "{{percent}}% 來自快取",
+			"inOut": "輸入 {{input}} · 輸出 {{output}}",
+			"models": "模型"
+		},
+		"dailyCost": "每日費用",
+		"byMode": "依模式",
+		"topTasks": "費用最高的任務",
+		"disclaimer": "費用為根據任務歷史得出的估算值，可能與供應商的帳單不同。",
+		"exportCsv": "匯出 CSV",
+		"noPricingNote": "部分供應商（如 GitHub Copilot）按訂閱計費，不回報每個任務的價格，因此此歷史以 Token 顯示。額度請參閱上方的供應商限額。",
+		"dailyTokens": "每日 Token",
+		"topTasksTokens": "最大的任務",
+		"byProvider": "依供應商",
+		"history": "用量歷史",
+		"limits": {
+			"title": "供應商限額",
+			"refresh": "重新整理",
+			"updated": "更新於 {{time}}",
+			"loading": "正在檢查已連線的供應商…",
+			"resets": "重設於 {{date}}",
+			"signedOut": "未登入",
+			"noCopilot": "無 Copilot 配額",
+			"noKey": "API 金鑰遺失或無效",
+			"unsupported": "自訂基底 URL — 未檢查",
+			"error": "無法載入",
+			"window": {
+				"weekly": "每週",
+				"daily": "每日",
+				"monthly": "每月",
+				"unlimited": "無限制",
+				"hours": "{{n}} 小時",
+				"days": "{{n}} 天"
+			}
+		},
+		"byModel": "依模型",
+		"notRecorded": "未記錄",
+		"noPrice": "無價格",
+		"tokensShort": "Token",
+		"chartLabel": "{{metric}}，共 {{total}}"
 	}
 }

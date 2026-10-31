@@ -124,6 +124,7 @@ import {
 	saveTaskMessages,
 	taskMetadata,
 } from "../task-persistence"
+import { bindRequestToHandler, resolveRecordedModelId } from "../task-persistence/usageByModel"
 import { getEnvironmentDetails } from "../environment/getEnvironmentDetails"
 import { checkContextWindowExceededError } from "../context/context-management/context-error-handling"
 import {
@@ -1768,8 +1769,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * to replace the stored messages outright.
 	 */
 	private async saveClineMessages(merge = true): Promise<boolean> {
+		// What was actually persisted: with `merge`, newer messages another host wrote are folded in. The metadata
+		// (including the usage breakdown) is computed from it, so a stale local snapshot cannot clear usage that
+		// the stored messages still contain.
+		let persistedMessages: ClineMessage[] | undefined
 		try {
-			await saveTaskMessages({
+			persistedMessages = await saveTaskMessages({
 				messages: structuredClone(this.clineMessages),
 				taskId: this.taskId,
 				globalStoragePath: this.globalStoragePath,
@@ -1790,7 +1795,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				rootTaskId: this.rootTaskId,
 				parentTaskId: this.parentTaskId,
 				taskNumber: this.taskNumber,
-				messages: this.clineMessages,
+				messages: persistedMessages ?? this.clineMessages,
 				globalStoragePath: this.globalStoragePath,
 				workspace: this.cwd,
 				mode: this._taskMode || defaultModeSlug, // Use the task's own mode, not the current provider mode.
@@ -3937,6 +3942,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				"api_req_started",
 				JSON.stringify({
 					apiProtocol,
+					// Recorded now so Usage reflects what served this request, not the profile selected later.
+					apiProvider,
+					modelId,
 				}),
 			)
 
@@ -4014,6 +4022,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			this.clineMessages[lastApiReqIndex].text = JSON.stringify({
 				apiProtocol,
+				apiProvider,
+				modelId,
 			} satisfies ClineApiReqInfo)
 
 			await this.saveClineMessages()
@@ -4025,6 +4035,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				let inputTokens = 0
 				let outputTokens = 0
 				let totalCost: number | undefined
+				// The model that served this request, captured when it was chosen: a later request replaces
+				// `cachedStreamingModel` while this one's usage is still being collected in the background.
+				const served: { modelId?: string } = {}
 
 				// We can't use `api_req_finished` anymore since it's a unique case
 				// where it could come after a streaming message (i.e. in the middle
@@ -4067,6 +4080,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					this.clineMessages[lastApiReqIndex].text = JSON.stringify({
 						...existingData,
+						modelId: resolveRecordedModelId(existingData.modelId, served.modelId),
 						tokensIn: costResult.totalInputTokens,
 						tokensOut: costResult.totalOutputTokens,
 						cacheWrites: cacheWriteTokens,
@@ -4136,6 +4150,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// This is especially important for tools and background usage collection
 				this.cachedStreamingModel = this.api.getModel()
 				const streamModelInfo = this.cachedStreamingModel.info
+				served.modelId = this.cachedStreamingModel.id
+
+				// The handler that serves this request is known now. The placeholder was written before the waits
+				// above, so bring its provider and model in line with this handler.
+				this.clineMessages[lastApiReqIndex].text = bindRequestToHandler(
+					this.clineMessages[lastApiReqIndex].text,
+					{
+						apiProvider: this.apiConfiguration.apiProvider,
+						configuredModelId: getModelId(this.apiConfiguration),
+						servedModelId: served.modelId,
+					},
+				)
 
 				// Yields only if the first chunk is successful, otherwise will
 				// allow the user to retry the request (most likely due to rate

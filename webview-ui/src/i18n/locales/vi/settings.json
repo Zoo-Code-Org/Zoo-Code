@@ -42,7 +42,8 @@
 		"language": "Ngôn ngữ",
 		"about": "Giới thiệu",
 		"skills": "Skills",
-		"rules": "Quy tắc"
+		"rules": "Quy tắc",
+		"usage": "Mức sử dụng"
 	},
 	"about": {
 		"bugReport": {
@@ -1233,5 +1234,64 @@
 			"descriptionTooLong": "Mô tả phải có tối đa 1024 ký tự"
 		},
 		"footer": "Tạo các skill của riêng bạn với chế độ Skill Writer, có sẵn tại <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"usage": {
+		"description": "Token và chi phí từ lịch sử nhiệm vụ Zoo Code của bạn trên máy này.",
+		"range": {
+			"label": "Khoảng thời gian",
+			"today": "Hôm nay",
+			"7d": "7 ngày",
+			"30d": "30 ngày",
+			"all": "Mọi lúc"
+		},
+		"scope": {
+			"label": "Hiển thị",
+			"workspace": "Không gian làm việc này",
+			"all": "Tất cả không gian làm việc"
+		},
+		"empty": "Không có nhiệm vụ nào trong khoảng thời gian này.",
+		"stats": {
+			"cost": "chi phí",
+			"tokens": "token",
+			"tasks": "nhiệm vụ",
+			"cacheHit": "{{percent}}% từ bộ nhớ đệm",
+			"inOut": "{{input}} vào · {{output}} ra",
+			"models": "mô hình"
+		},
+		"dailyCost": "Chi phí hằng ngày",
+		"byMode": "Theo chế độ",
+		"topTasks": "Nhiệm vụ tốn kém nhất",
+		"disclaimer": "Chi phí là ước tính từ lịch sử nhiệm vụ và có thể khác với hóa đơn của nhà cung cấp.",
+		"exportCsv": "Xuất CSV",
+		"noPricingNote": "Một số nhà cung cấp (ví dụ GitHub Copilot) tính phí theo gói đăng ký và không báo cáo giá cho từng nhiệm vụ, nên lịch sử này được hiển thị bằng token. Xem Giới hạn nhà cung cấp ở trên để biết tín dụng.",
+		"dailyTokens": "Token hằng ngày",
+		"topTasksTokens": "Nhiệm vụ lớn nhất",
+		"byProvider": "Theo nhà cung cấp",
+		"history": "Lịch sử sử dụng",
+		"limits": {
+			"title": "Giới hạn nhà cung cấp",
+			"refresh": "Làm mới",
+			"updated": "Cập nhật {{time}}",
+			"loading": "Đang kiểm tra các nhà cung cấp đã kết nối…",
+			"resets": "Đặt lại {{date}}",
+			"signedOut": "Chưa đăng nhập",
+			"noCopilot": "Không có hạn mức Copilot",
+			"noKey": "Thiếu khóa API hoặc không hợp lệ",
+			"unsupported": "URL cơ sở tùy chỉnh — không kiểm tra",
+			"error": "Không thể tải",
+			"window": {
+				"weekly": "Hằng tuần",
+				"daily": "Hằng ngày",
+				"monthly": "Hằng tháng",
+				"unlimited": "Không giới hạn",
+				"hours": "{{n}} giờ",
+				"days": "{{n}} ngày"
+			}
+		},
+		"byModel": "Theo mô hình",
+		"notRecorded": "Chưa ghi nhận",
+		"noPrice": "không có giá",
+		"tokensShort": "tok",
+		"chartLabel": "{{metric}}, tổng {{total}}"
 	}
 }

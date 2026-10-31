@@ -42,7 +42,8 @@
 		"language": "言語",
 		"about": "Zoo Codeについて",
 		"skills": "Skills",
-		"rules": "ルール"
+		"rules": "ルール",
+		"usage": "使用状況"
 	},
 	"about": {
 		"bugReport": {
@@ -1233,5 +1234,64 @@
 			"descriptionTooLong": "説明は1024文字以内である必要があります"
 		},
 		"footer": "スキルライターモードで独自のスキルを作成します。<MarketplaceLink>モードマーケットプレイス</MarketplaceLink>で入手可能です。"
+	},
+	"usage": {
+		"description": "このマシン上の Zoo Code のタスク履歴によるトークンとコスト。",
+		"range": {
+			"label": "期間",
+			"today": "今日",
+			"7d": "7日間",
+			"30d": "30日間",
+			"all": "全期間"
+		},
+		"scope": {
+			"label": "表示",
+			"workspace": "このワークスペース",
+			"all": "すべてのワークスペース"
+		},
+		"empty": "この期間にタスクはありません。",
+		"stats": {
+			"cost": "コスト",
+			"tokens": "トークン",
+			"tasks": "タスク",
+			"cacheHit": "{{percent}}% がキャッシュから",
+			"inOut": "入力 {{input}} · 出力 {{output}}",
+			"models": "モデル"
+		},
+		"dailyCost": "日別コスト",
+		"byMode": "モード別",
+		"topTasks": "コストの高いタスク",
+		"disclaimer": "コストはタスク履歴からの推定値であり、プロバイダーの請求額と異なる場合があります。",
+		"exportCsv": "CSV をエクスポート",
+		"noPricingNote": "一部のプロバイダー(GitHub Copilot など)はサブスクリプション課金で、タスクごとの価格を報告しないため、この履歴はトークンで表示されます。クレジットについては上のプロバイダーの上限を参照してください。",
+		"dailyTokens": "日別トークン",
+		"topTasksTokens": "大きいタスク",
+		"byProvider": "プロバイダー別",
+		"history": "使用履歴",
+		"limits": {
+			"title": "プロバイダーの上限",
+			"refresh": "更新",
+			"updated": "{{time}} に更新",
+			"loading": "接続済みのプロバイダーを確認中…",
+			"resets": "{{date}} にリセット",
+			"signedOut": "サインインしていません",
+			"noCopilot": "Copilot のクォータなし",
+			"noKey": "API キーがないか無効です",
+			"unsupported": "カスタムベース URL — 確認していません",
+			"error": "読み込めませんでした",
+			"window": {
+				"weekly": "週間",
+				"daily": "日次",
+				"monthly": "月間",
+				"unlimited": "無制限",
+				"hours": "{{n}}時間",
+				"days": "{{n}}日"
+			}
+		},
+		"byModel": "モデル別",
+		"notRecorded": "記録なし",
+		"noPrice": "価格なし",
+		"tokensShort": "トークン",
+		"chartLabel": "{{metric}}、合計 {{total}}"
 	}
 }

@@ -42,7 +42,8 @@
 		"language": "언어",
 		"about": "Zoo Code 정보",
 		"skills": "Skills",
-		"rules": "규칙"
+		"rules": "규칙",
+		"usage": "사용량"
 	},
 	"about": {
 		"bugReport": {
@@ -1233,5 +1234,64 @@
 			"descriptionTooLong": "설명은 1024자 이하여야 합니다"
 		},
 		"footer": "스킬 작성자 모드로 자신만의 스킬을 만들 수 있습니다. <MarketplaceLink>모드 마켓플레이스</MarketplaceLink>에서 사용 가능합니다."
+	},
+	"usage": {
+		"description": "이 컴퓨터의 Zoo Code 작업 기록에서 집계한 토큰과 비용입니다.",
+		"range": {
+			"label": "기간",
+			"today": "오늘",
+			"7d": "7일",
+			"30d": "30일",
+			"all": "전체 기간"
+		},
+		"scope": {
+			"label": "표시",
+			"workspace": "이 워크스페이스",
+			"all": "모든 워크스페이스"
+		},
+		"empty": "이 기간에 작업이 없습니다.",
+		"stats": {
+			"cost": "비용",
+			"tokens": "토큰",
+			"tasks": "작업",
+			"cacheHit": "{{percent}}% 캐시에서",
+			"inOut": "입력 {{input}} · 출력 {{output}}",
+			"models": "모델"
+		},
+		"dailyCost": "일별 비용",
+		"byMode": "모드별",
+		"topTasks": "비용이 큰 작업",
+		"disclaimer": "비용은 작업 기록을 기반으로 한 추정치이며 공급자의 청구서와 다를 수 있습니다.",
+		"exportCsv": "CSV 내보내기",
+		"noPricingNote": "일부 공급자(예: GitHub Copilot)는 구독 방식으로 청구하며 작업별 가격을 보고하지 않으므로 이 기록은 토큰으로 표시됩니다. 크레딧은 위의 공급자 한도를 확인하세요.",
+		"dailyTokens": "일별 토큰",
+		"topTasksTokens": "큰 작업",
+		"byProvider": "공급자별",
+		"history": "사용 기록",
+		"limits": {
+			"title": "공급자 한도",
+			"refresh": "새로 고침",
+			"updated": "{{time}}에 업데이트됨",
+			"loading": "연결된 공급자를 확인하는 중…",
+			"resets": "{{date}}에 초기화",
+			"signedOut": "로그인하지 않음",
+			"noCopilot": "Copilot 할당량 없음",
+			"noKey": "API 키가 없거나 올바르지 않음",
+			"unsupported": "사용자 지정 기본 URL — 확인하지 않음",
+			"error": "불러올 수 없음",
+			"window": {
+				"weekly": "주간",
+				"daily": "일간",
+				"monthly": "월간",
+				"unlimited": "무제한",
+				"hours": "{{n}}시간",
+				"days": "{{n}}일"
+			}
+		},
+		"byModel": "모델별",
+		"notRecorded": "기록되지 않음",
+		"noPrice": "가격 없음",
+		"tokensShort": "토큰",
+		"chartLabel": "{{metric}}, 합계 {{total}}"
 	}
 }

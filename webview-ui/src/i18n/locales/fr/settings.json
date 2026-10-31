@@ -42,7 +42,8 @@
 		"language": "Langue",
 		"about": "À propos de Zoo Code",
 		"skills": "Skills",
-		"rules": "Règles"
+		"rules": "Règles",
+		"usage": "Utilisation"
 	},
 	"about": {
 		"bugReport": {
@@ -1233,5 +1234,64 @@
 			"descriptionTooLong": "La description doit contenir au maximum 1024 caractères"
 		},
 		"footer": "Créez vos propres skills avec le mode Skill Writer, disponible dans le <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"usage": {
+		"description": "Tokens et coût de l'historique des tâches de Zoo Code sur cette machine.",
+		"range": {
+			"label": "Période",
+			"today": "Aujourd'hui",
+			"7d": "7 jours",
+			"30d": "30 jours",
+			"all": "Tout"
+		},
+		"scope": {
+			"label": "Afficher",
+			"workspace": "Cet espace de travail",
+			"all": "Tous les espaces de travail"
+		},
+		"empty": "Aucune tâche sur cette période.",
+		"stats": {
+			"cost": "coût",
+			"tokens": "tokens",
+			"tasks": "tâches",
+			"cacheHit": "{{percent}} % depuis le cache",
+			"inOut": "{{input}} en entrée · {{output}} en sortie",
+			"models": "modèles"
+		},
+		"dailyCost": "Coût quotidien",
+		"byMode": "Par mode",
+		"topTasks": "Tâches les plus coûteuses",
+		"disclaimer": "Les coûts sont des estimations issues de l'historique des tâches et peuvent différer de la facture de votre fournisseur.",
+		"exportCsv": "Exporter en CSV",
+		"noPricingNote": "Certains fournisseurs (p. ex. GitHub Copilot) facturent par abonnement et ne communiquent pas de prix par tâche ; cet historique est donc affiché en tokens. Consultez les limites des fournisseurs ci-dessus pour les crédits.",
+		"dailyTokens": "Tokens quotidiens",
+		"topTasksTokens": "Plus grosses tâches",
+		"byProvider": "Par fournisseur",
+		"history": "Historique d'utilisation",
+		"limits": {
+			"title": "Limites des fournisseurs",
+			"refresh": "Actualiser",
+			"updated": "Mis à jour {{time}}",
+			"loading": "Vérification des fournisseurs connectés…",
+			"resets": "Réinitialisation {{date}}",
+			"signedOut": "Non connecté",
+			"noCopilot": "Aucun quota Copilot",
+			"noKey": "Clé API manquante ou invalide",
+			"unsupported": "URL de base personnalisée — non vérifiée",
+			"error": "Impossible de charger",
+			"window": {
+				"weekly": "Hebdomadaire",
+				"daily": "Quotidien",
+				"monthly": "Mensuel",
+				"unlimited": "Illimité",
+				"hours": "{{n}} heures",
+				"days": "{{n}} jours"
+			}
+		},
+		"byModel": "Par modèle",
+		"notRecorded": "Non enregistré",
+		"noPrice": "sans prix",
+		"tokensShort": "tok",
+		"chartLabel": "{{metric}}, total {{total}}"
 	}
 }

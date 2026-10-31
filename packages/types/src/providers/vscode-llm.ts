@@ -11,7 +11,70 @@ export const vsCodeLmModelsMessageTypes = [
 	"githubCopilotManageAccount",
 	"githubCopilotSignInResult",
 	"githubCopilotModels",
+	"requestProviderQuotas",
+	"cancelProviderQuotas",
+	"providerQuotas",
 ] as const
+
+/**
+ * One limit/balance a provider reports (e.g. Copilot premium credits for the
+ * month, an OpenRouter key limit, a DeepSeek prepaid balance).
+ */
+export interface ProviderQuotaWindow {
+	/** Stable key, e.g. "premium", "key_limit", "balance". */
+	id: string
+	/** Pre-formatted primary figure, e.g. "39,389.3 / 140,000 used", "$12.40 left". */
+	valueLabel: string
+	/**
+	 * Set when the label is just the name of a fixed window ("Weekly", "5-hour", "Unlimited"), so the webview can
+	 * show it in the user's language. `valueLabel` stays as the English fallback.
+	 */
+	name?: { key: "weekly" | "daily" | "monthly" | "unlimited" | "hours" | "days"; count?: number }
+	/** 0–100 when the provider reports a bounded allowance. */
+	usedPercent?: number
+	/** Epoch ms. */
+	resetAt?: number
+}
+
+export type ProviderQuota =
+	| {
+			providerId: string
+			ok: true
+			plan?: string
+			windows: ProviderQuotaWindow[]
+			fetchedAt: number
+	  }
+	| {
+			providerId: string
+			ok: false
+			reason: "signedOut" | "noCopilot" | "noKey" | "unsupported" | "error"
+			message?: string
+			fetchedAt: number
+	  }
+
+/**
+ * The signed-in account's GitHub Copilot premium-request allowance, as reported by
+ * `GET /copilot_internal/user` (the same source Copilot Chat's own usage panel reads).
+ */
+export interface GitHubCopilotQuota {
+	/** e.g. "business", "individual". */
+	plan?: string
+	unlimited: boolean
+	/** Total credits for the period; undefined when unlimited or not reported. */
+	entitlement?: number
+	/** Credits used this period, `entitlement - quota_remaining` (one decimal, like GitHub's panel). */
+	used?: number
+	/** 0–100. */
+	usedPercent?: number
+	/** Epoch ms when the allowance resets. */
+	resetAt?: number
+	/** Epoch ms when this snapshot was fetched. */
+	fetchedAt: number
+}
+
+export type GitHubCopilotQuotaResult =
+	| { ok: true; quota: GitHubCopilotQuota }
+	| { ok: false; reason: "signedOut" | "noCopilot" | "error"; message?: string }
 
 export const vsCodeLmModelsMessageTypeSchema = z.enum(vsCodeLmModelsMessageTypes)
 

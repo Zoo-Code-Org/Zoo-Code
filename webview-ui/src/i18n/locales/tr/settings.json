@@ -42,7 +42,8 @@
 		"language": "Dil",
 		"about": "Zoo Code Hakkında",
 		"skills": "Skills",
-		"rules": "Kurallar"
+		"rules": "Kurallar",
+		"usage": "Kullanım"
 	},
 	"about": {
 		"bugReport": {
@@ -1233,5 +1234,64 @@
 			"descriptionTooLong": "Açıklama en fazla 1024 karakter olmalıdır"
 		},
 		"footer": "Skill Writer modu ile kendi becerilerinizi oluşturun. <MarketplaceLink>Modes Marketplace</MarketplaceLink>'de mevcut."
+	},
+	"usage": {
+		"description": "Bu makinedeki Zoo Code görev geçmişinizden token ve maliyet.",
+		"range": {
+			"label": "Zaman aralığı",
+			"today": "Bugün",
+			"7d": "7 gün",
+			"30d": "30 gün",
+			"all": "Tüm zamanlar"
+		},
+		"scope": {
+			"label": "Göster",
+			"workspace": "Bu çalışma alanı",
+			"all": "Tüm çalışma alanları"
+		},
+		"empty": "Bu zaman aralığında görev yok.",
+		"stats": {
+			"cost": "maliyet",
+			"tokens": "token",
+			"tasks": "görev",
+			"cacheHit": "%{{percent}} önbellekten",
+			"inOut": "{{input}} giriş · {{output}} çıkış",
+			"models": "model"
+		},
+		"dailyCost": "Günlük maliyet",
+		"byMode": "Moda göre",
+		"topTasks": "En pahalı görevler",
+		"disclaimer": "Maliyetler görev geçmişinden yapılan tahminlerdir ve sağlayıcınızın faturasından farklı olabilir.",
+		"exportCsv": "CSV olarak dışa aktar",
+		"noPricingNote": "Bazı sağlayıcılar (ör. GitHub Copilot) abonelik üzerinden faturalandırır ve görev başına fiyat bildirmez; bu yüzden bu geçmiş token cinsinden gösterilir. Krediler için yukarıdaki sağlayıcı limitlerine bakın.",
+		"dailyTokens": "Günlük token",
+		"topTasksTokens": "En büyük görevler",
+		"byProvider": "Sağlayıcıya göre",
+		"history": "Kullanım geçmişi",
+		"limits": {
+			"title": "Sağlayıcı limitleri",
+			"refresh": "Yenile",
+			"updated": "Güncellendi: {{time}}",
+			"loading": "Bağlı sağlayıcılar kontrol ediliyor…",
+			"resets": "Sıfırlanma: {{date}}",
+			"signedOut": "Oturum açılmadı",
+			"noCopilot": "Copilot kotası yok",
+			"noKey": "API anahtarı eksik veya geçersiz",
+			"unsupported": "Özel temel URL — kontrol edilmedi",
+			"error": "Yüklenemedi",
+			"window": {
+				"weekly": "Haftalık",
+				"daily": "Günlük",
+				"monthly": "Aylık",
+				"unlimited": "Sınırsız",
+				"hours": "{{n}} saat",
+				"days": "{{n}} gün"
+			}
+		},
+		"byModel": "Modele göre",
+		"notRecorded": "Kaydedilmedi",
+		"noPrice": "fiyat yok",
+		"tokensShort": "tok",
+		"chartLabel": "{{metric}}, toplam {{total}}"
 	}
 }

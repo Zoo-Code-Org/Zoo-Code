@@ -42,7 +42,8 @@
 		"language": "भाषा",
 		"about": "परिचय",
 		"skills": "Skills",
-		"rules": "नियम"
+		"rules": "नियम",
+		"usage": "उपयोग"
 	},
 	"about": {
 		"bugReport": {
@@ -1233,5 +1234,64 @@
 			"descriptionTooLong": "विवरण 1024 वर्णों से अधिक नहीं होना चाहिए"
 		},
 		"footer": "Skill Writer मोड के साथ अपने स्वयं के Skills बनाएं, <MarketplaceLink>Modes Marketplace</MarketplaceLink> में उपलब्ध।"
+	},
+	"usage": {
+		"description": "इस मशीन पर आपके Zoo Code टास्क इतिहास से टोकन और लागत।",
+		"range": {
+			"label": "समय सीमा",
+			"today": "आज",
+			"7d": "7 दिन",
+			"30d": "30 दिन",
+			"all": "सभी समय"
+		},
+		"scope": {
+			"label": "दिखाएँ",
+			"workspace": "यह वर्कस्पेस",
+			"all": "सभी वर्कस्पेस"
+		},
+		"empty": "इस समय सीमा में कोई टास्क नहीं।",
+		"stats": {
+			"cost": "लागत",
+			"tokens": "टोकन",
+			"tasks": "टास्क",
+			"cacheHit": "{{percent}}% कैश से",
+			"inOut": "{{input}} इनपुट · {{output}} आउटपुट",
+			"models": "मॉडल"
+		},
+		"dailyCost": "दैनिक लागत",
+		"byMode": "मोड के अनुसार",
+		"topTasks": "सबसे महंगे टास्क",
+		"disclaimer": "लागत टास्क इतिहास से अनुमान हैं और आपके प्रदाता के बिल से भिन्न हो सकती हैं।",
+		"exportCsv": "CSV निर्यात करें",
+		"noPricingNote": "कुछ प्रदाता (जैसे GitHub Copilot) सदस्यता के आधार पर बिल करते हैं और प्रति-टास्क मूल्य नहीं बताते, इसलिए यह इतिहास टोकन में दिखाया गया है। क्रेडिट के लिए ऊपर प्रदाता सीमाएँ देखें।",
+		"dailyTokens": "दैनिक टोकन",
+		"topTasksTokens": "सबसे बड़े टास्क",
+		"byProvider": "प्रदाता के अनुसार",
+		"history": "उपयोग इतिहास",
+		"limits": {
+			"title": "प्रदाता सीमाएँ",
+			"refresh": "रीफ़्रेश करें",
+			"updated": "{{time}} को अपडेट किया गया",
+			"loading": "कनेक्टेड प्रदाताओं की जाँच हो रही है…",
+			"resets": "{{date}} को रीसेट होगा",
+			"signedOut": "साइन इन नहीं है",
+			"noCopilot": "कोई Copilot कोटा नहीं",
+			"noKey": "API कुंजी अनुपलब्ध या अमान्य",
+			"unsupported": "कस्टम बेस URL — जाँच नहीं की गई",
+			"error": "लोड नहीं हो सका",
+			"window": {
+				"weekly": "साप्ताहिक",
+				"daily": "दैनिक",
+				"monthly": "मासिक",
+				"unlimited": "असीमित",
+				"hours": "{{n}} घंटे",
+				"days": "{{n}} दिन"
+			}
+		},
+		"byModel": "मॉडल के अनुसार",
+		"notRecorded": "दर्ज नहीं",
+		"noPrice": "कोई मूल्य नहीं",
+		"tokensShort": "टोकन",
+		"chartLabel": "{{metric}}, कुल {{total}}"
 	}
 }

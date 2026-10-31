@@ -9,7 +9,7 @@ import type { ExtensionMessage, WebviewMessage } from "@roo-code/types"
 
 import { ContextProxy } from "../../config/ContextProxy"
 import { ClineProvider } from "../ClineProvider"
-import { webviewMessageHandler } from "../webviewMessageHandler"
+import { abortProviderQuotaRequests, webviewMessageHandler } from "../webviewMessageHandler"
 
 // Mock setup
 vi.mock("fs/promises", () => ({
@@ -132,6 +132,7 @@ vi.mock("../../../integrations/theme/getTheme", () => ({
 
 vi.mock("../webviewMessageHandler", () => ({
 	webviewMessageHandler: vi.fn().mockResolvedValue(undefined),
+	abortProviderQuotaRequests: vi.fn(),
 }))
 
 type ProviderState = Awaited<ReturnType<ClineProvider["getState"]>>
@@ -414,9 +415,11 @@ describe("ClineProvider - stale view lifecycle", () => {
 		expect(first.postMessage).not.toHaveBeenCalled()
 		expect(second.postMessage).not.toHaveBeenCalled()
 
-		// A stale dispose must not clear the current view's listeners.
+		// A stale dispose must not clear the current view's listeners, nor stop the requests of the current view.
+		vi.mocked(abortProviderQuotaRequests).mockClear()
 		first.disposed.fire()
 		expect(provider["view"]).toBe(second.view)
+		expect(abortProviderQuotaRequests).not.toHaveBeenCalled()
 		second.visibility.fire()
 		await flushAsync()
 		expect(second.postMessage).toHaveBeenCalledWith({ type: "action", action: "didBecomeVisible" })
@@ -507,6 +510,16 @@ describe("ClineProvider - stale view lifecycle", () => {
 		expect(first.disposed.listenerCount()).toBe(0)
 		// Only the view's resources are cleared; the sidebar provider instance itself remains.
 		expect(ClineProvider.getAllInstances()).toContain(provider)
+	})
+
+	test("disposing the sidebar view stops the provider-limit requests it started", async () => {
+		const first = createSidebarView()
+		await provider.resolveWebviewView(first.view)
+		vi.mocked(abortProviderQuotaRequests).mockClear()
+
+		first.disposed.fire()
+
+		expect(abortProviderQuotaRequests).toHaveBeenCalledWith(provider)
 	})
 
 	test("the current view keeps dispatching messages, visibility, and theme refreshes", async () => {

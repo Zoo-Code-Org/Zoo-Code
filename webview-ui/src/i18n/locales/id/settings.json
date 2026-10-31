@@ -42,7 +42,8 @@
 		"language": "Bahasa",
 		"about": "Tentang Zoo Code",
 		"skills": "Skills",
-		"rules": "Aturan"
+		"rules": "Aturan",
+		"usage": "Penggunaan"
 	},
 	"about": {
 		"bugReport": {
@@ -1233,5 +1234,64 @@
 			"descriptionTooLong": "Deskripsi harus 1024 karakter atau kurang"
 		},
 		"footer": "Buat skills Anda sendiri dengan mode Skill Writer, tersedia di <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"usage": {
+		"description": "Token dan biaya dari riwayat tugas Zoo Code Anda di mesin ini.",
+		"range": {
+			"label": "Rentang waktu",
+			"today": "Hari ini",
+			"7d": "7 hari",
+			"30d": "30 hari",
+			"all": "Sepanjang waktu"
+		},
+		"scope": {
+			"label": "Tampilkan",
+			"workspace": "Workspace ini",
+			"all": "Semua workspace"
+		},
+		"empty": "Tidak ada tugas dalam rentang waktu ini.",
+		"stats": {
+			"cost": "biaya",
+			"tokens": "token",
+			"tasks": "tugas",
+			"cacheHit": "{{percent}}% dari cache",
+			"inOut": "{{input}} masuk · {{output}} keluar",
+			"models": "model"
+		},
+		"dailyCost": "Biaya harian",
+		"byMode": "Menurut mode",
+		"topTasks": "Tugas termahal",
+		"disclaimer": "Biaya adalah perkiraan dari riwayat tugas dan bisa berbeda dari tagihan penyedia Anda.",
+		"exportCsv": "Ekspor CSV",
+		"noPricingNote": "Beberapa penyedia (mis. GitHub Copilot) menagih berdasarkan langganan dan tidak melaporkan harga per tugas, sehingga riwayat ini ditampilkan dalam token. Lihat Batas penyedia di atas untuk kredit.",
+		"dailyTokens": "Token harian",
+		"topTasksTokens": "Tugas terbesar",
+		"byProvider": "Menurut penyedia",
+		"history": "Riwayat penggunaan",
+		"limits": {
+			"title": "Batas penyedia",
+			"refresh": "Segarkan",
+			"updated": "Diperbarui {{time}}",
+			"loading": "Memeriksa penyedia yang terhubung…",
+			"resets": "Diatur ulang {{date}}",
+			"signedOut": "Belum masuk",
+			"noCopilot": "Tidak ada kuota Copilot",
+			"noKey": "Kunci API hilang atau tidak valid",
+			"unsupported": "URL dasar kustom — tidak diperiksa",
+			"error": "Tidak dapat dimuat",
+			"window": {
+				"weekly": "Mingguan",
+				"daily": "Harian",
+				"monthly": "Bulanan",
+				"unlimited": "Tanpa batas",
+				"hours": "{{n}} jam",
+				"days": "{{n}} hari"
+			}
+		},
+		"byModel": "Menurut model",
+		"notRecorded": "Tidak dicatat",
+		"noPrice": "tanpa harga",
+		"tokensShort": "tok",
+		"chartLabel": "{{metric}}, total {{total}}"
 	}
 }

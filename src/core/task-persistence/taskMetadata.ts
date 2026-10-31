@@ -5,6 +5,7 @@ import type { ClineMessage, HistoryItem } from "@roo-code/types"
 
 import { combineApiRequests } from "../../shared/combineApiRequests"
 import { combineCommandSequences } from "../../shared/combineCommandSequences"
+import { summarizeUsageByModel } from "./usageByModel"
 import { getApiMetrics } from "../../shared/getApiMetrics"
 import { findLastIndex } from "../../shared/array"
 import { getTaskDirectoryPath } from "../../utils/storage"
@@ -89,6 +90,8 @@ export async function taskMetadata({
 		}
 	}
 
+	const usageByModel = hasMessages ? summarizeUsageByModel(messages) : []
+
 	// Create historyItem once with pre-calculated values.
 	// initialStatus is included when provided (e.g., "active" for child tasks)
 	// to ensure the status is set from the very first save, avoiding race conditions
@@ -107,6 +110,11 @@ export async function taskMetadata({
 		cacheWrites: tokenUsage.totalCacheWrites,
 		cacheReads: tokenUsage.totalCacheReads,
 		totalCost: tokenUsage.totalCost,
+		// Always present, as `undefined` when nothing was recorded: the history store merges onto the stored
+		// item, so omitting the key would keep a stale breakdown after the messages were replaced (e.g. a
+		// rewind). `undefined` overrides it and is dropped when the item is written, so the stored shape of
+		// older and empty tasks is unchanged.
+		usageByModel: usageByModel.length > 0 ? usageByModel : undefined,
 		size: taskDirSize,
 		workspace,
 		mode,
