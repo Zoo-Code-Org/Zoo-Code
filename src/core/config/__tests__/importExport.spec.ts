@@ -390,7 +390,11 @@ describe("importExport", () => {
 				const result = await importWith({ interfaceFontScale: 120 })
 
 				expect(result).toEqual({ success: false, error: "failed after storing" })
-				expect(consoleError).toHaveBeenCalled()
+				expect(consoleError).toHaveBeenCalledTimes(1)
+				expect(consoleError).toHaveBeenCalledWith(
+					'Failed to restore setting "interfaceFontScale" after import failure:',
+					expect.objectContaining({ message: "restore failed" }),
+				)
 				consoleError.mockRestore()
 			})
 
