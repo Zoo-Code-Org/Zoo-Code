@@ -1,0 +1,3 @@
+Hello, world!
+
+This is a test file created by Roomote to verify source-control write access after the GitHub App reinstall. Safe to close without merging.
