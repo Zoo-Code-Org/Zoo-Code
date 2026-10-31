@@ -398,9 +398,15 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		if (isSettingValid) {
 			// Only a save that changes an appearance value waits for the host's answer: those are saved
 			// all-or-nothing, and a failed save has to keep the edits. Every other save behaves as it always did.
-			const appearanceEdited = (Object.keys(APPEARANCE_SETTINGS) as AppearanceKey[]).some(
-				(key) => (cachedState[key] ?? null) !== (extensionState[key] ?? null),
+			// Only the appearance values this form changed are sent, and null (not undefined) for a reset so it
+			// survives JSON and clears the stored value. A save that changes none sends none of them, so it neither
+			// waits for the host nor puts an appearance value into the host's all-or-nothing save.
+			const changedAppearance = Object.fromEntries(
+				(Object.keys(APPEARANCE_SETTINGS) as AppearanceKey[])
+					.filter((key) => (cachedState[key] ?? null) !== (extensionState[key] ?? null))
+					.map((key) => [key, cachedState[key] ?? null]),
 			)
+			const appearanceEdited = Object.keys(changedAppearance).length > 0
 			const saveId = appearanceEdited ? nextSaveRequestId() : undefined
 			if (saveId) {
 				pendingSaveEditedState.current = cachedState
@@ -467,11 +473,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					includeTaskHistoryInEnhance: includeTaskHistoryInEnhance ?? true,
 					reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 					chatFontSize: chatFontSize ?? null,
-					// null (not undefined) so a reset survives JSON and clears the stored value
-					interfaceFontScale: interfaceFontScale ?? null,
-					terminalFontSize: terminalFontSize ?? null,
-					editorFontSize: editorFontSize ?? null,
-					spacingScale: spacingScale ?? null,
+					...changedAppearance,
 					enterBehavior: enterBehavior ?? "send",
 					includeCurrentTime: includeCurrentTime ?? true,
 					includeCurrentCost: includeCurrentCost ?? true,

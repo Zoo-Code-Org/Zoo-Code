@@ -1,6 +1,6 @@
 import { globalSettingsSchema } from "@roo-code/types"
 
-import { applyAppearanceVariables, clampAppearance } from "../appearance"
+import { applyAppearanceVariables, clampAppearance, isChatFontSize } from "../appearance"
 
 describe("clampAppearance", () => {
 	it("passes through in-range integers", () => {
@@ -86,5 +86,31 @@ describe("applyAppearanceVariables", () => {
 	it("clamps out-of-range values before writing", () => {
 		applyAppearanceVariables(root, { spacingScale: 1000 })
 		expect(root.style.getPropertyValue("--zoo-spacing-scale")).toBe("2")
+	})
+})
+
+describe("isChatFontSize", () => {
+	it("accepts exactly what the host's schema accepts", () => {
+		const schema = globalSettingsSchema.shape.chatFontSize
+		for (const value of [
+			7,
+			8,
+			9,
+			16,
+			31,
+			32,
+			33,
+			12.5,
+			0,
+			-1,
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+			"12",
+			null,
+			undefined,
+			{},
+		]) {
+			expect(isChatFontSize(value)).toBe(typeof value === "number" && schema.safeParse(value).success)
+		}
 	})
 })

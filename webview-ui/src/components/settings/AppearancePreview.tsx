@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react"
 
 import { useAppTranslation } from "@/i18n/TranslationContext"
-import { APPEARANCE_SETTINGS, clampAppearance, type AppearanceKey } from "@/utils/appearance"
+import { APPEARANCE_SETTINGS, clampAppearance, isChatFontSize, type AppearanceKey } from "@/utils/appearance"
 
 interface AppearancePreviewProps {
 	values: Partial<Record<AppearanceKey, number | undefined>>
@@ -29,7 +29,9 @@ export const AppearancePreview = ({ values, chatFontSize }: AppearancePreviewPro
 		const v = clampAppearance(key, values[key])
 		vars[setting.cssVar] = v === undefined ? "initial" : setting.toCss(v)
 	}
-	vars["--zoo-chat-font-size"] = chatFontSize ? `${chatFontSize}px` : "initial"
+	// Only a whole number of pixels in the range the host accepts is written into the style; anything else (a
+	// corrupted stored value, a string) is left out, like an unset value.
+	vars["--zoo-chat-font-size"] = isChatFontSize(chatFontSize) ? `${chatFontSize}px` : "initial"
 
 	const uiText: CSSProperties = {
 		fontSize: "calc(var(--zoo-chat-font-size, var(--vscode-font-size)) * var(--zoo-ui-scale, 1))",

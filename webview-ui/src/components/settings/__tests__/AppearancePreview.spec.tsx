@@ -58,6 +58,27 @@ describe("AppearancePreview", () => {
 		expect(root().style.getPropertyValue("--zoo-chat-font-size")).toBe("16px")
 	})
 
+	it.each([8, 16, 32])("writes a chat font size of %i into the style", (size) => {
+		render(<AppearancePreview values={{}} chatFontSize={size} />)
+		expect(root().style.getPropertyValue("--zoo-chat-font-size")).toBe(`${size}px`)
+	})
+
+	it.each([
+		["below the range", 7],
+		["above the range", 33],
+		["zero", 0],
+		["negative", -12],
+		["fractional", 12.5],
+		["not a number", Number.NaN],
+		["infinite", Number.POSITIVE_INFINITY],
+		["a string that would break out of the declaration", "12px; background: url(x)"],
+		["an object", { size: 12 }],
+	])("leaves a chat font size that is %s out of the style", (_name, size) => {
+		render(<AppearancePreview values={{}} chatFontSize={size as never} />)
+		expect(root().style.getPropertyValue("--zoo-chat-font-size")).toBe("initial")
+		expect(root().getAttribute("style")).not.toContain("background")
+	})
+
 	it("sizes the editor sample like the live code block when no editor size is set (0.95em of the chat text)", () => {
 		const { container } = render(<AppearancePreview values={{}} />)
 		const sample = container.querySelector("pre")!

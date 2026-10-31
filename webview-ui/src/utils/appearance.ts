@@ -60,6 +60,10 @@ export const APPEARANCE_SETTINGS = {
 export type AppearanceKey = keyof typeof APPEARANCE_SETTINGS
 export type AppearanceValues = Partial<Record<AppearanceKey, number | null | undefined>>
 
+/** The chat font size the host accepts (`globalSettingsSchema`): an integer from 8 to 32 px. */
+export const isChatFontSize = (value: unknown): value is number =>
+	typeof value === "number" && Number.isInteger(value) && value >= 8 && value <= 32
+
 /** Clamps to the setting's range and snaps to an integer; non-finite → undefined. */
 export function clampAppearance(key: AppearanceKey, value: number | null | undefined): number | undefined {
 	if (typeof value !== "number" || !Number.isFinite(value)) return undefined

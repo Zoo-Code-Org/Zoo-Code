@@ -149,6 +149,8 @@ const APPEARANCE_VALUE_SCHEMAS = {
 	terminalFontSize: globalSettingsSchema.shape.terminalFontSize,
 	editorFontSize: globalSettingsSchema.shape.editorFontSize,
 	spacingScale: globalSettingsSchema.shape.spacingScale,
+	// Shown by the appearance preview next to these, so it is checked in the same pass.
+	chatFontSize: globalSettingsSchema.shape.chatFontSize,
 }
 
 export const webviewMessageHandler = async (
@@ -940,7 +942,10 @@ export const webviewMessageHandler = async (
 
 				provider.log(`[updateSettings] Save failed: ${failure}`)
 
-				if (failedKey !== undefined && isAppearanceSetting(failedKey)) {
+				if (
+					failedKey !== undefined &&
+					(isAppearanceSetting(failedKey) || failedKey in APPEARANCE_VALUE_SCHEMAS)
+				) {
 					vscode.window.showErrorMessage(t("common:errors.settings_save_failed", { error: failure }))
 				} else {
 					// Not an appearance value: handled as it always was, once the webview has been told.

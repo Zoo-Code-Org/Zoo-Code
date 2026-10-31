@@ -2387,6 +2387,8 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 			terminalFontSize: { min: 8, max: 32 },
 			editorFontSize: { min: 8, max: 32 },
 			spacingScale: { min: 50, max: 200 },
+			// Not an appearance value of the transaction, but shown by the same preview and checked in the same pass.
+			chatFontSize: { min: 8, max: 32 },
 		} as const
 		const keys = Object.keys(bounds) as Array<keyof typeof bounds>
 
