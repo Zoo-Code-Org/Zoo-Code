@@ -102,6 +102,33 @@ describe("TranslationProvider locale loading", () => {
 		})
 	})
 
+	it("keeps the previous locale rendered while a warm switch is still loading", async () => {
+		const { rerender } = renderProbe("de")
+
+		await waitFor(() => {
+			expect(screen.getByTestId("error-title")).toHaveTextContent("Etwas ist schiefgelaufen")
+		})
+
+		extensionState.language = "fr"
+		await act(async () => {
+			rerender(
+				<TranslationProvider>
+					<Probe />
+				</TranslationProvider>,
+			)
+		})
+
+		// French is not in the entry chunk and no other case loads it, so the
+		// switch cannot have landed yet. A `changeLanguage` fired before the fetch
+		// resolves would paint the English fallback here instead of German.
+		expect(screen.getByTestId("error-title")).toHaveTextContent("Etwas ist schiefgelaufen")
+
+		await waitFor(() => {
+			expect(screen.getByTestId("error-title")).toHaveTextContent("Une erreur s'est produite")
+		})
+		expect(screen.getByTestId("active-language")).toHaveTextContent("fr")
+	})
+
 	it("skips the language switch when the provider unmounts before the fetch resolves", async () => {
 		const changeLanguage = vi.spyOn(i18next, "changeLanguage")
 
