@@ -98,6 +98,22 @@ vitest.mock("../fetchers/modelCache", () => ({
 				cacheReadsPrice: 0.1,
 				description: "Claude 3.5 Haiku",
 			},
+			// The real gateway catalog never sets `promptCacheTtlSupport`, so this row
+			// exists only to inject the capability the accept path needs. It is kept
+			// separate from the shared haiku row so the reject-path test keeps a model
+			// with no TTL capability.
+			"anthropic/claude-3.5-sonnet": {
+				maxTokens: 8192,
+				contextWindow: 200000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				promptCacheTtlSupport: ["1h"],
+				inputPrice: 3,
+				outputPrice: 15,
+				cacheWritesPrice: 3.75,
+				cacheReadsPrice: 0.3,
+				description: "Claude 3.5 Sonnet",
+			},
 			"openai/gpt-4o": {
 				maxTokens: 16000,
 				contextWindow: 128000,
@@ -470,6 +486,24 @@ describe("VercelAiGatewayHandler", () => {
 			const lastCall = vitest.mocked(addCacheBreakpoints).mock.calls.at(-1)
 			expect(lastCall).toBeDefined()
 			expect(lastCall![2]).toBeUndefined()
+		})
+
+		it("passes the resolved ttl for a gateway model with 1h TTL capability", async () => {
+			// The runtime catalog never sets `promptCacheTtlSupport`, so the accept path is
+			// only reachable with an injected capability. The dedicated catalog row keeps
+			// the reject-path model capability-free.
+			const { addCacheBreakpoints } = await import("../../transform/caching/vercel-ai-gateway")
+			const handler = new VercelAiGatewayHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					vercelAiGatewayModelId: "anthropic/claude-3.5-sonnet",
+					promptCacheTtl: "1h",
+				}),
+			)
+
+			await handler.createMessage("You are a helpful assistant.", [{ role: "user", content: "Hello" }]).next()
+
+			expect(vitest.mocked(addCacheBreakpoints).mock.calls.at(-1)![2]).toBe("1h")
 		})
 
 		it("sets correct max_completion_tokens", async () => {
