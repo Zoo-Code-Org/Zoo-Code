@@ -34,6 +34,24 @@ import i18n from "../../../i18n/setup"
  *   throw handleProviderError(error, "Anthropic", { messagePrefix: "streaming" })
  * }
  */
+/**
+ * Whether the error carries a numeric HTTP status (SDK APIs expose it as
+ * `status` or, for the AI SDK, `statusCode`).
+ *
+ * Use before classifying a failure purely by cancellation state: a terminal
+ * API failure (401/429/5xx) can land in the same tick as an abort, and it must
+ * keep its own identity so retry, backoff and the UI still see the provider
+ * error instead of a cancellation.
+ */
+export function hasNumericHttpStatus(error: unknown): boolean {
+	if (!error || typeof error !== "object") return false
+	const candidate = error as { status?: unknown; statusCode?: unknown }
+	for (const status of [candidate.status, candidate.statusCode]) {
+		if (typeof status === "number" && Number.isFinite(status)) return true
+	}
+	return false
+}
+
 export function handleProviderError(
 	error: unknown,
 	providerName: string,
