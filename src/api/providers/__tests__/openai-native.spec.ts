@@ -1508,6 +1508,7 @@ describe("OpenAiNativeHandler", () => {
 
 		it("sends the task-scoped prompt_cache_key through the SDK path", async () => {
 			mockResponsesCreate.mockResolvedValue(asyncStreamFrom([]))
+			;(OpenAI as unknown as ReturnType<typeof vitest.fn>).mockClear()
 
 			const cacheHandler = new OpenAiNativeHandler({ ...mockOptions, apiModelId: "gpt-5.1" })
 
@@ -1521,6 +1522,14 @@ describe("OpenAiNativeHandler", () => {
 			expect(bodies[2].prompt_cache_key).toBe("sdk-task-two")
 			expect(bodies[0].prompt_cache_retention).toBe("24h")
 			expect(mockResponsesCreate.mock.calls[0][1].headers).not.toHaveProperty("session_id")
+
+			// Per-request headers are only half the surface: the SDK constructor also takes
+			// defaultHeaders, and a restored affinity header there would ship on every request
+			// while the assertion above still passed. Cache affinity is a body field, so neither
+			// the header name nor the body field name may appear in the constructor's defaults.
+			const constructorArgs = (OpenAI as unknown as ReturnType<typeof vitest.fn>).mock.calls[0][0]
+			expect(constructorArgs.defaultHeaders).not.toHaveProperty("session_id")
+			expect(constructorArgs.defaultHeaders).not.toHaveProperty("prompt_cache_key")
 		})
 
 		it("omits the prompt_cache_key through createMessage when no metadata is supplied", async () => {
