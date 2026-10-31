@@ -80,6 +80,12 @@ export class SkillsManager {
 
 	async initialize(): Promise<void> {
 		await this.discoverSkills()
+		// Disposal can land while discovery is awaited. Without this check the watchers below
+		// are created after dispose() has already drained the disposables, so nothing would ever
+		// unregister them.
+		if (this.isDisposed) {
+			return
+		}
 		await this.setupFileWatchers()
 	}
 
@@ -1118,6 +1124,12 @@ Add your skill instructions here.
 
 	private createSkillsWatcher(dirPath: string): vscode.Disposable | undefined {
 		if (process.env.NODE_ENV === "test" || !vscode.workspace.createFileSystemWatcher) {
+			return undefined
+		}
+
+		// Checked before the watcher is created, not only inside the handlers: a watcher created after
+		// dispose() has drained the disposables stays registered for the rest of the session.
+		if (this.isDisposed) {
 			return undefined
 		}
 

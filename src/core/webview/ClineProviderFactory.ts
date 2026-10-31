@@ -1,6 +1,6 @@
 import type * as vscode from "vscode"
 
-import { openClineInNewTab } from "../../activate/registerCommands"
+import { openClineInNewTabForApi } from "../../activate/registerCommands"
 import type { ClineProvider } from "./ClineProvider"
 import type { WebviewFocusTracker } from "./WebviewFocusTracker"
 
@@ -12,7 +12,7 @@ export class ClineProviderFactory {
 	) {}
 
 	public createInNewTab(): Promise<ClineProvider> {
-		return openClineInNewTab({
+		return openClineInNewTabForApi({
 			context: this.context,
 			outputChannel: this.outputChannel,
 			webviewFocusTracker: this.webviewFocusTracker,

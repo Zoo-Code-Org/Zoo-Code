@@ -22,6 +22,15 @@ import {
 	mergeExtensionState,
 	createInitialExtensionState,
 } from "../ExtensionStateContext"
+import { vscode } from "@src/utils/vscode"
+
+vi.mock("@src/utils/vscode", () => ({
+	vscode: {
+		postMessage: vi.fn(),
+		getViewStateId: vi.fn(() => "view-a"),
+	},
+}))
+
 import { StringCache } from "@/utils/stringCache"
 
 const TestComponent = () => {
@@ -140,7 +149,96 @@ const InitialStateTestComponent = () => {
 	)
 }
 
+const ViewLocalStateTestComponent = () => {
+	const { mode, setMode, currentApiConfigName, setCurrentApiConfigName } = useExtensionState()
+
+	return (
+		<div>
+			<div data-testid="view-local-mode">{mode}</div>
+			<div data-testid="view-local-api-config">{currentApiConfigName}</div>
+			<button data-testid="set-local-mode" onClick={() => setMode("ask")}>
+				Set Local Mode
+			</button>
+			<button data-testid="set-local-api-config" onClick={() => setCurrentApiConfigName("local-profile")}>
+				Set Local API Config
+			</button>
+		</div>
+	)
+}
+
 describe("ExtensionStateContext", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("posts webviewDidLaunch with the stable viewStateId from vscode API", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<TestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		expect(vscode.getViewStateId).toHaveBeenCalled()
+		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "webviewDidLaunch", viewStateId: "view-a" })
+	})
+
+	it("posts webviewDidLaunch without a viewStateId when getViewStateId is unavailable", () => {
+		const savedGetViewStateId = vscode.getViewStateId
+		Object.defineProperty(vscode, "getViewStateId", { configurable: true, value: undefined })
+		try {
+			render(
+				<ExtensionStateContextProvider>
+					<TestComponent />
+				</ExtensionStateContextProvider>,
+			)
+
+			expect(vscode.postMessage).toHaveBeenCalledWith({ type: "webviewDidLaunch", viewStateId: undefined })
+		} finally {
+			Object.defineProperty(vscode, "getViewStateId", { configurable: true, value: savedGetViewStateId })
+		}
+	})
+
+	it("applies mode and profile from a later state payload after local edits", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<ViewLocalStateTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "state",
+						state: { mode: "code", currentApiConfigName: "profile-a", apiConfiguration: {} },
+					},
+				}),
+			)
+		})
+		expect(screen.getByTestId("view-local-mode")).toHaveTextContent("code")
+		expect(screen.getByTestId("view-local-api-config")).toHaveTextContent("profile-a")
+
+		act(() => {
+			screen.getByTestId("set-local-mode").click()
+			screen.getByTestId("set-local-api-config").click()
+		})
+		expect(screen.getByTestId("view-local-mode")).toHaveTextContent("ask")
+		expect(screen.getByTestId("view-local-api-config")).toHaveTextContent("local-profile")
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "state",
+						state: { mode: "architect", currentApiConfigName: "profile-b", apiConfiguration: {} },
+					},
+				}),
+			)
+		})
+		expect(screen.getByTestId("view-local-mode")).toHaveTextContent("architect")
+		expect(screen.getByTestId("view-local-api-config")).toHaveTextContent("profile-b")
+	})
+
 	afterEach(() => vi.restoreAllMocks())
 	it("interns initial history and current task items and subsequent state pushes", () => {
 		const internSpy = vi.spyOn(StringCache.prototype, "intern")

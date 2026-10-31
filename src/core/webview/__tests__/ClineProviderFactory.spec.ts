@@ -3,10 +3,10 @@ import type * as vscode from "vscode"
 import { ClineProviderFactory } from "../ClineProviderFactory"
 import { ClineProvider } from "../ClineProvider"
 import { WebviewFocusTracker } from "../WebviewFocusTracker"
-import { openClineInNewTab } from "../../../activate/registerCommands"
+import { openClineInNewTabForApi } from "../../../activate/registerCommands"
 import { makeExtensionContext } from "../../../test-utils/vscode"
 
-vi.mock("../../../activate/registerCommands", () => ({ openClineInNewTab: vi.fn() }))
+vi.mock("../../../activate/registerCommands", () => ({ openClineInNewTabForApi: vi.fn() }))
 vi.mock("../ClineProvider", () => ({ ClineProvider: class {} }))
 
 describe("ClineProviderFactory", () => {
@@ -32,12 +32,12 @@ describe("ClineProviderFactory", () => {
 		tracker = new WebviewFocusTracker()
 		factory = new ClineProviderFactory(context, outputChannel, tracker)
 		provider = Object.create(ClineProvider.prototype) as ClineProvider
-		vi.mocked(openClineInNewTab).mockResolvedValue(provider)
+		vi.mocked(openClineInNewTabForApi).mockResolvedValue(provider)
 	})
 
 	it("creates a tab with its injected dependencies and returns the provider", async () => {
 		await expect(factory.createInNewTab()).resolves.toBe(provider)
-		expect(openClineInNewTab).toHaveBeenCalledExactlyOnceWith({
+		expect(openClineInNewTabForApi).toHaveBeenCalledExactlyOnceWith({
 			context,
 			outputChannel,
 			webviewFocusTracker: tracker,
@@ -49,16 +49,16 @@ describe("ClineProviderFactory", () => {
 		const secondTracker = new WebviewFocusTracker()
 		const secondFactory = new ClineProviderFactory(secondContext, outputChannel, secondTracker)
 		const secondProvider = Object.create(ClineProvider.prototype) as ClineProvider
-		vi.mocked(openClineInNewTab).mockResolvedValueOnce(provider).mockResolvedValueOnce(secondProvider)
+		vi.mocked(openClineInNewTabForApi).mockResolvedValueOnce(provider).mockResolvedValueOnce(secondProvider)
 
 		await expect(factory.createInNewTab()).resolves.toBe(provider)
 		await expect(secondFactory.createInNewTab()).resolves.toBe(secondProvider)
-		expect(openClineInNewTab).toHaveBeenNthCalledWith(1, {
+		expect(openClineInNewTabForApi).toHaveBeenNthCalledWith(1, {
 			context,
 			outputChannel,
 			webviewFocusTracker: tracker,
 		})
-		expect(openClineInNewTab).toHaveBeenNthCalledWith(2, {
+		expect(openClineInNewTabForApi).toHaveBeenNthCalledWith(2, {
 			context: secondContext,
 			outputChannel,
 			webviewFocusTracker: secondTracker,
@@ -67,7 +67,7 @@ describe("ClineProviderFactory", () => {
 
 	it("propagates tab creation errors", async () => {
 		const error = new Error("Cannot create a tab")
-		vi.mocked(openClineInNewTab).mockRejectedValueOnce(error)
+		vi.mocked(openClineInNewTabForApi).mockRejectedValueOnce(error)
 		await expect(factory.createInNewTab()).rejects.toBe(error)
 	})
 })

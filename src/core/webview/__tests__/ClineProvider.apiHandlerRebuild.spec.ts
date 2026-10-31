@@ -240,9 +240,15 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			new WebviewFocusTracker(),
 		)
 
-		// Mock providerSettingsManager
+		// Mock providerSettingsManager. saveConfig repoints the CURRENT getProfile mock at
+		// the record it wrote: the real manager reads back the stored record, and
+		// persistProviderProfile builds its activation writes from that read-back.
+		const currentGetProfile = () => provider["providerSettingsManager"].getProfile as ReturnType<typeof vi.fn>
 		;(provider as any).providerSettingsManager = {
-			saveConfig: vi.fn().mockResolvedValue("test-id"),
+			saveConfig: vi.fn().mockImplementation(async (name: string, config: Record<string, unknown>) => {
+				currentGetProfile().mockResolvedValue({ name, id: "test-id", ...config })
+				return "test-id"
+			}),
 			listConfig: vi.fn().mockResolvedValue([
 				{
 					name: "test-config",
@@ -288,6 +294,13 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		}
 
 		await provider.resolveWebviewView(mockWebviewView)
+	})
+
+	afterEach(() => {
+		// Spies installed by one test (notably a gated getState) must not leak into the next:
+		// the activation snapshot now reads getState before activateProfile.
+		vi.restoreAllMocks()
+		vi.useRealTimers()
 	})
 
 	describe("upsertProviderProfile", () => {
@@ -626,7 +639,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			})
 
 			const saved = vi.mocked(manager.saveConfig).mock.calls.map(([, config]) => config.openRouterModelId)
-			expect(saved).toEqual(["anthropic/claude", "openai/gpt-4"])
+			// This unit compensates the landed stores inside persistProviderProfile and
+			// updateProfileModel then runs its own explicit restore pass, so the previous
+			// record is rewritten twice with the same pre-update values.
+			expect(saved).toEqual(["anthropic/claude", "openai/gpt-4", "openai/gpt-4"])
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.create_api_config")
 		})
 
@@ -678,7 +694,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			}
 		})
 
-		test("upsertProviderProfile finishes activation after the caller timed out", async () => {
+		// This unit does not opt upsert into runToCompletion: the mutation timeout aborts
+		// the run so the landed-write compensation rolls the record back, which is the
+		// unit's registered contract. Upstream's run-to-completion variant does not apply.
+		test("upsertProviderProfile cancels and rolls back activation when the caller times out", async () => {
 			vi.useFakeTimers()
 
 			try {
@@ -709,8 +728,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				release()
 				await vi.advanceTimersByTimeAsync(0)
 
-				expect(manager.saveConfig).toHaveBeenCalledTimes(1)
-				expect(manager.setModeConfig).toHaveBeenCalledTimes(1)
+				// Two writes: the forward save plus the compensation's record rollback.
+				// Activation never starts because the abort lands before the first activation write.
+				expect(manager.saveConfig).toHaveBeenCalledTimes(2)
+				expect(manager.setModeConfig).not.toHaveBeenCalled()
 			} finally {
 				vi.useRealTimers()
 			}
@@ -783,18 +804,36 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			const update = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
 				openRouterModelId: "anthropic/claude",
 			})
-			await vi.waitFor(() => expect(events).toContain("activation:failed"))
-			expect(events).not.toContain("save:openai/gpt-4")
+			try {
+				await vi.waitFor(() => expect(events).toContain("activation:failed"))
+				// Writes are serialized here rather than raced, so there is no in-flight sibling
+				// to wait for: the landed-write compensation rolls the record back immediately
+				// after the failed activation, and updateProfileModel's restore pass then
+				// re-persists the previous profile (its shared-settings write is the gated
+				// context write released below).
+				expect(events).toEqual([
+					"save:anthropic/claude",
+					"activation:failed",
+					"save:openai/gpt-4",
+					"save:openai/gpt-4",
+				])
 
-			releaseContext()
-			await update
+				releaseContext()
+				await update
 
-			expect(events).toEqual([
-				"save:anthropic/claude",
-				"activation:failed",
-				"context:written",
-				"save:openai/gpt-4",
-			])
+				expect(events).toEqual([
+					"save:anthropic/claude",
+					"activation:failed",
+					"save:openai/gpt-4",
+					"save:openai/gpt-4",
+					"context:written",
+				])
+			} finally {
+				// Never leave the gated context write pending: this unit chains the mutation
+				// queue to the run, so an abandoned test would block every later mutation.
+				releaseContext()
+				await update.catch(() => undefined)
+			}
 		})
 
 		test("rejects a model that the organization allow-list forbids", async () => {
@@ -851,8 +890,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			const first = provider.activateProviderProfile({ name: "first-profile" })
 			const second = provider.activateProviderProfile({ name: "second-profile" })
 
-			await Promise.resolve()
-			expect(events).toEqual(["first:start"])
+			await vi.waitFor(() => expect(events).toEqual(["first:start"]))
 
 			resolveFirst()
 			await first
@@ -914,8 +952,11 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 				// Queue advanced immediately on timeout — second enqueues now.
 				const second = provider.activateProviderProfile({ name: "second-profile" })
-				// activateProfile not yet called for second (it runs in the next microtask).
-				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(1)
+				// activateProfile is not called for the second profile while the first mutation owns
+				// the queue; the first call itself runs after the snapshot microtasks.
+				await vi.waitFor(() =>
+					expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(1),
+				)
 
 				// Resolve the first activation's inner promise so its in-flight mock can return.
 				// The aborted signal prevents it from writing any state.
