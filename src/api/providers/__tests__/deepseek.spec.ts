@@ -27,9 +27,10 @@ vi.mock("openai", () => {
 										completion_tokens: 5,
 										total_tokens: 15,
 										prompt_tokens_details: {
-											cache_miss_tokens: 8,
 											cached_tokens: 2,
 										},
+										prompt_cache_hit_tokens: 2,
+										prompt_cache_miss_tokens: 8,
 									},
 								}
 							}
@@ -111,9 +112,10 @@ vi.mock("openai", () => {
 									completion_tokens: 5,
 									total_tokens: 15,
 									prompt_tokens_details: {
-										cache_miss_tokens: 8,
 										cached_tokens: 2,
 									},
+									prompt_cache_hit_tokens: 2,
+									prompt_cache_miss_tokens: 8,
 								},
 							})
 
@@ -129,9 +131,16 @@ vi.mock("openai", () => {
 import OpenAI from "openai"
 import type { Anthropic } from "@anthropic-ai/sdk"
 
-import { deepSeekDefaultModelId, DEEP_SEEK_DEFAULT_TEMPERATURE, type ModelInfo, DeepSeekModelId } from "@roo-code/types"
+import {
+	deepSeekDefaultModelId,
+	deepSeekModels,
+	DEEP_SEEK_DEFAULT_TEMPERATURE,
+	type ModelInfo,
+	DeepSeekModelId,
+} from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../../shared/api"
+import { calculateApiCostOpenAI } from "../../../shared/cost"
 
 import { DeepSeekHandler, normalizeDeepSeekReasoningEffort } from "../deepseek"
 
@@ -517,17 +526,55 @@ describe("DeepSeekHandler", () => {
 	})
 
 	describe("processUsageMetrics", () => {
-		it("should correctly process usage metrics including cache information", () => {
-			// We need to access the protected method, so we'll create a test subclass
-			class TestDeepSeekHandler extends DeepSeekHandler {
-				public testProcessUsageMetrics(usage: any) {
-					return this.processUsageMetrics(usage)
-				}
+		class TestDeepSeekHandler extends DeepSeekHandler {
+			public testProcessUsageMetrics(usage: any) {
+				return this.processUsageMetrics(usage)
 			}
+		}
 
-			const testHandler = new TestDeepSeekHandler(mockOptions)
+		// mockOptions is assigned in beforeEach, so the handler must be built
+		// per test rather than at describe-collection time.
+		const processUsage = (usage: any) => new TestDeepSeekHandler(mockOptions).testProcessUsageMetrics(usage)
 
-			const usage = {
+		// DeepSeek's OpenAPI marks prompt_cache_hit_tokens and
+		// prompt_cache_miss_tokens as required top-level members, and declares
+		// only cached_tokens inside prompt_tokens_details. This is the vendor's
+		// own documented example response.
+		// https://api-docs.deepseek.com/api/create-chat-completion
+		it("reads the documented top-level cache counters", () => {
+			const result = processUsage({
+				prompt_tokens: 7,
+				completion_tokens: 11,
+				total_tokens: 18,
+				prompt_tokens_details: { cached_tokens: 0 },
+				prompt_cache_hit_tokens: 0,
+				prompt_cache_miss_tokens: 7,
+			})
+
+			expect(result.type).toBe("usage")
+			expect(result.inputTokens).toBe(7)
+			expect(result.outputTokens).toBe(11)
+			expect(result.cacheReadTokens).toBe(0)
+			expect(result.cacheWriteTokens).toBe(7)
+		})
+
+		it("reads top-level cache counters when prompt_tokens_details is absent", () => {
+			const result = processUsage({
+				prompt_tokens: 100,
+				completion_tokens: 50,
+				total_tokens: 150,
+				prompt_cache_hit_tokens: 20,
+				prompt_cache_miss_tokens: 80,
+			})
+
+			expect(result.inputTokens).toBe(100)
+			expect(result.outputTokens).toBe(50)
+			expect(result.cacheWriteTokens).toBe(80)
+			expect(result.cacheReadTokens).toBe(20)
+		})
+
+		it("falls back to the nested cache counters for legacy shapes", () => {
+			const result = processUsage({
 				prompt_tokens: 100,
 				completion_tokens: 50,
 				total_tokens: 150,
@@ -535,40 +582,99 @@ describe("DeepSeekHandler", () => {
 					cache_miss_tokens: 80,
 					cached_tokens: 20,
 				},
-			}
+			})
 
-			const result = testHandler.testProcessUsageMetrics(usage)
-
-			expect(result.type).toBe("usage")
 			expect(result.inputTokens).toBe(100)
 			expect(result.outputTokens).toBe(50)
 			expect(result.cacheWriteTokens).toBe(80)
 			expect(result.cacheReadTokens).toBe(20)
 		})
 
+		it("does not double-count when both shapes are present", () => {
+			const result = processUsage({
+				prompt_tokens: 100,
+				completion_tokens: 50,
+				total_tokens: 150,
+				prompt_tokens_details: { cached_tokens: 20, cache_miss_tokens: 80 },
+				prompt_cache_hit_tokens: 20,
+				prompt_cache_miss_tokens: 80,
+			})
+
+			expect(result.cacheWriteTokens).toBe(80)
+			expect(result.cacheReadTokens).toBe(20)
+		})
+
 		it("should handle missing cache metrics gracefully", () => {
-			class TestDeepSeekHandler extends DeepSeekHandler {
-				public testProcessUsageMetrics(usage: any) {
-					return this.processUsageMetrics(usage)
-				}
-			}
-
-			const testHandler = new TestDeepSeekHandler(mockOptions)
-
 			const usage = {
 				prompt_tokens: 100,
 				completion_tokens: 50,
 				total_tokens: 150,
-				// No prompt_tokens_details
+				// No prompt_tokens_details and no top-level cache counters
 			}
 
-			const result = testHandler.testProcessUsageMetrics(usage)
+			const result = processUsage(usage)
 
 			expect(result.type).toBe("usage")
 			expect(result.inputTokens).toBe(100)
 			expect(result.outputTokens).toBe(50)
 			expect(result.cacheWriteTokens).toBeUndefined()
 			expect(result.cacheReadTokens).toBeUndefined()
+		})
+
+		it("bills a cache miss as a cache write, because the catalog prices input at zero", () => {
+			// This is the one handler that opts in to the normalizer's miss counter.
+			// Every deepSeekModels row sets `inputPrice: 0` on purpose ("the inputs
+			// are priced as cache read/write"), so a miss left in the input bucket
+			// would be billed at zero. The money is asserted, not just the label:
+			// a token-label assertion passes whether or not the price is right.
+			const usage = {
+				prompt_tokens: 1000,
+				completion_tokens: 500,
+				prompt_cache_hit_tokens: 100,
+				prompt_cache_miss_tokens: 400,
+			}
+
+			const result = processUsage(usage)
+
+			expect(result.cacheWriteTokens).toBe(400)
+
+			const { totalCost } = calculateApiCostOpenAI(
+				deepSeekModels["deepseek-flash"],
+				result.inputTokens,
+				result.outputTokens,
+				result.cacheWriteTokens,
+				result.cacheReadTokens,
+			)
+
+			// Cache writes: (0.3 / 1_000_000) * 400 = 0.00012
+			// Cache reads: (0.006 / 1_000_000) * 100 = 0.0000006
+			// Uncached input: (0 / 1_000_000) * 500 = 0
+			// Output cost: (1.2 / 1_000_000) * 500 = 0.0006
+			expect(totalCost).toBeCloseTo(0.0007206, 9)
+		})
+
+		it("preserves a reported zero miss counter instead of treating it as unreported", () => {
+			const result = processUsage({
+				prompt_tokens: 100,
+				completion_tokens: 50,
+				prompt_cache_hit_tokens: 100,
+				prompt_cache_miss_tokens: 0,
+			})
+
+			expect(result.cacheWriteTokens).toBe(0)
+		})
+
+		it("keeps a genuine write counter ahead of the miss counter", () => {
+			// A response can report both concepts. The write counter is the more
+			// specific one, so it wins rather than being shadowed by the miss count.
+			const result = processUsage({
+				prompt_tokens: 100,
+				completion_tokens: 50,
+				prompt_tokens_details: { cache_write_tokens: 30 },
+				prompt_cache_miss_tokens: 80,
+			})
+
+			expect(result.cacheWriteTokens).toBe(30)
 		})
 	})
 
