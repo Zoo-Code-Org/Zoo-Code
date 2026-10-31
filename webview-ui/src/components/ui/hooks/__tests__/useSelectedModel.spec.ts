@@ -382,6 +382,51 @@ describe("useSelectedModel", () => {
 		expect(result.current.info).toBeUndefined()
 	})
 
+	// The preserve branch must not swallow IDs the static catalog already knows:
+	// those take the normal validation path and keep their curated spec. Without
+	// that clause the branch would return `{ id, info: undefined }` for a
+	// perfectly well-described model, blanking capability UI such as the
+	// context-window display. The ID assertion alone cannot see the difference,
+	// so the metadata assertion is the one that pins the clause.
+	it("mimo: keeps the curated spec for a static-catalog ID when the router catalog settles empty", () => {
+		const staticModelId = "mimo-v2.6-flash"
+
+		// Guard the premise: an ID missing from the static catalog would exercise
+		// the preserve branch instead of the validation path under test.
+		expect(Object.hasOwn(mimoModels, staticModelId)).toBe(true)
+
+		mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [providerIdentifiers.mimo]: {} }))
+		mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+		const { result } = renderHook(
+			() => useSelectedModel({ apiProvider: providerIdentifiers.mimo, apiModelId: staticModelId }),
+			{ wrapper: createWrapper() },
+		)
+
+		expect(result.current.id).toBe(staticModelId)
+		expect(result.current.info).toEqual(mimoModels[staticModelId as keyof typeof mimoModels])
+		expect(result.current.info?.contextWindow).toBe(1_048_576)
+	})
+
+	// The `configuredId &&` clause keeps the empty-string convention on this
+	// branch too: "" means "unset", so it resolves to the default instead of
+	// being preserved as a phantom selection. Unlike the unsettled fixture, this
+	// one reaches the ready path with a settled-but-empty catalog.
+	it("mimo: treats an empty configured ID as unset when the router catalog settles empty", () => {
+		mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [providerIdentifiers.mimo]: {} }))
+		mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+		const { result } = renderHook(
+			() => useSelectedModel({ apiProvider: providerIdentifiers.mimo, apiModelId: "" }),
+			{
+				wrapper: createWrapper(),
+			},
+		)
+
+		expect(result.current.id).toBe(mimoDefaultModelId)
+		expect(result.current.info).toEqual(mimoModels[mimoDefaultModelId])
+	})
+
 	// Regression: both the ID validation and the metadata lookup used plain bracket
 	// reads, so an ID naming an Object.prototype member was "found" in the catalog and
 	// surfaced as a model with no metadata instead of falling back to the static spec.
