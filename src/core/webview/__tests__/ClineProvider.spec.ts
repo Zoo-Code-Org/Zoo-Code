@@ -5217,6 +5217,63 @@ describe("ClineProvider", () => {
 			expect(provider.contextProxy.getValues().currentApiConfigName).toBe("current-config")
 			expect(provider.getProviderProfileEntries().map(({ name }) => name)).toContain("current-config")
 		})
+
+		test("T14: the undo mirror catches a same-id provider change instead of stranding the cache", async () => {
+			// A queued save lands while the timed-out purge holds the lock and re-saves the same name
+			// under the *same* id (the manager preserves the id on update) with a different provider.
+			// The undo is skipped because the name exists, and the mirror gate used to compare only
+			// name+id: it saw "equal", wrote nothing, and left the webview showing the old provider
+			// for that profile until some later activation re-mirrored the list.
+			vi.useFakeTimers()
+
+			try {
+				const { profiles, withLock, deleteConfigUnlocked } = mockProviderSettingsManager()
+
+				let releasePurge!: () => void
+				const purgeGate = new Promise<void>((resolve) => {
+					releasePurge = resolve
+				})
+				vi.mocked(provider.providerSettingsManager.deleteConfig).mockImplementationOnce((name: string) =>
+					withLock(async () => {
+						await purgeGate
+						return deleteConfigUnlocked(name)
+					}),
+				)
+
+				const deletion = provider.deleteProviderProfile(otherProfile)
+				const deletionResult = expect(deletion).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+
+				// Same name, same id, different provider: exactly what an update through `saveConfig`
+				// produces, since the manager reuses the existing id.
+				const recreated = provider.providerSettingsManager.saveConfig("other-config", {
+					id: otherProfile.id,
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "new-user-key",
+				})
+
+				releasePurge()
+				for (let i = 0; i < 50; i++) {
+					await Promise.resolve()
+					await vi.advanceTimersByTimeAsync(0)
+				}
+
+				await recreated
+				await deletionResult
+
+				// The manager holds the new provider, so the cache must too; name+id equality is not
+				// enough to conclude the two views agree.
+				expect(profiles.find(({ name }) => name === "other-config")?.apiProvider).toBe(
+					providerIdentifiers.anthropic,
+				)
+				expect(provider.getProviderProfileEntries().find(({ name }) => name === "other-config")).toMatchObject({
+					id: otherProfile.id,
+					apiProvider: providerIdentifiers.anthropic,
+				})
+			} finally {
+				vi.useRealTimers()
+			}
+		})
 	})
 })
 

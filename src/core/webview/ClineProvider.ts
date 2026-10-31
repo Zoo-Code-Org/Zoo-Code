@@ -213,9 +213,15 @@ type GetStateOptions = {
 /** The ContextProxy snapshot a failed delete rolls back to. */
 type ProviderProfileSnapshot = Pick<RooCodeSettings, "currentApiConfigName" | "listApiConfigMeta" | "modeApiConfigs">
 
-/** Whether two profile lists name the same profiles with the same ids, so a mirror would be a no-op. */
+/**
+ * Whether two profile lists are the same list, so a mirror would be a no-op.
+ *
+ * Compares the whole entry, not just name+id: a save under an existing name reuses that profile's
+ * id, so a changed provider or model compares equal on those two fields and a mirror gated on them
+ * would leave the webview showing the old provider for that profile.
+ */
 const entriesEqual = (left: ProviderSettingsEntry[], right: ProviderSettingsEntry[] = []): boolean =>
-	left.length === right.length && left.every((entry, i) => entry.name === right[i]?.name && entry.id === right[i]?.id)
+	left.length === right.length && JSON.stringify(left) === JSON.stringify(right)
 
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
