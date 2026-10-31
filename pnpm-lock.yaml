@@ -44,7 +44,7 @@ overrides:
   csstype: 3.2.3
   zod: 4.6.7
   '@lmstudio/sdk>zod': 3.25.76
-  katex: 0.18.2
+  katex: 0.19.1
 
 importers:
 
@@ -810,8 +810,8 @@ importers:
         specifier: ^25.0.0
         version: 25.10.10(typescript@5.9.3)
       katex:
-        specifier: 0.18.2
-        version: 0.18.2
+        specifier: 0.19.1
+        version: 0.19.1
       lru-cache:
         specifier: ^11.1.0
         version: 11.5.3
@@ -937,8 +937,8 @@ importers:
         specifier: 29.5.14
         version: 29.5.14
       '@types/katex':
-        specifier: 0.16.7
-        version: 0.16.7
+        specifier: 0.16.8
+        version: 0.16.8
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.5
@@ -3487,8 +3487,8 @@ packages:
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
 
-  '@types/katex@0.16.7':
-    resolution: {integrity: sha512-HMwFiRujE5PjrgwHQ25+bsLJgowjGjm5Z8FVSf0N6PwgJrwxH0QxzHYDcKsTfV3wva0vzrpqMTJS2jXPr5BMEQ==}
+  '@types/katex@0.16.8':
+    resolution: {integrity: sha512-trgaNyfU+Xh2Tc+ABIb44a5AYUpicB3uwirOioeOkNPPbmgRNtcWyDeeFRzjPZENO9Vq8gvVqfhaaXWLlevVwg==}
 
   '@types/lodash.debounce@4.0.9':
     resolution: {integrity: sha512-Ma5JcgTREwpLRwMM+XwBR7DaWe96nC38uCBDFKZWbNKD+osjVzdpnUSwBcqCptrp16sSOLBAUb50Car5I0TCsQ==}
@@ -6178,8 +6178,8 @@ packages:
     resolution: {integrity: sha512-+KJGIyHgkGuIq3IEBNftfhW/LfWhXUIY6OmyVWjliu5KH1y0fw7VQ8YndE2O4qZdMSd9SqbnC8GOcZEy0Om7sA==}
     engines: {node: '>=18'}
 
-  katex@0.18.2:
-    resolution: {integrity: sha512-3snve4y0SXTMequLim1FMiPvLGElySam0blN5xQZBqEY3lOJz1TnuaaiugnBZBqHzlSAGmFTYL7MCQkORuLKCA==}
+  katex@0.19.1:
+    resolution: {integrity: sha512-jG8uKntjSEcm2EpQOh0XturpPuuC9r3Sq5HLHdsFdWZT27E672SF19QEi+of0/YeOy15lDgRhKvr5614uRrEfA==}
     hasBin: true
 
   keygrip@1.1.0:
@@ -11868,7 +11868,7 @@ snapshots:
 
   '@types/json-schema@7.0.15': {}
 
-  '@types/katex@0.16.7': {}
+  '@types/katex@0.16.8': {}
 
   '@types/lodash.debounce@4.0.9':
     dependencies:
@@ -14900,9 +14900,9 @@ snapshots:
 
   jwt-decode@4.0.0: {}
 
-  katex@0.18.2:
+  katex@0.19.1:
     dependencies:
-      commander: 8.3.0
+      commander: 15.0.0
 
   keygrip@1.1.0:
     dependencies:
@@ -15499,7 +15499,7 @@ snapshots:
       dompurify: 3.4.17
       es-toolkit: 1.52.0
       fastdom: 1.0.12
-      katex: 0.18.2
+      katex: 0.19.1
       khroma: 2.1.0
       marked: 16.4.2
       roughjs: 4.6.6
@@ -15587,9 +15587,9 @@ snapshots:
 
   micromark-extension-math@3.1.0:
     dependencies:
-      '@types/katex': 0.16.7
+      '@types/katex': 0.16.8
       devlop: 1.1.0
-      katex: 0.18.2
+      katex: 0.19.1
       micromark-factory-space: 2.1.0
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
@@ -16732,10 +16732,10 @@ snapshots:
   rehype-katex@7.0.1:
     dependencies:
       '@types/hast': 3.0.5
-      '@types/katex': 0.16.7
+      '@types/katex': 0.16.8
       hast-util-from-html-isomorphic: 2.0.0
       hast-util-to-text: 4.0.2
-      katex: 0.18.2
+      katex: 0.19.1
       unist-util-visit-parents: 6.0.2
       vfile: 6.0.3
 
