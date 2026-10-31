@@ -99,7 +99,7 @@ describe("ApplyDiffTool failure reporting", () => {
 			ask: vi.fn().mockResolvedValue(undefined),
 			recordToolError: vi.fn(),
 			recordToolUsage: vi.fn(),
-			processQueuedMessages: vi.fn(),
+			processQueuedMessages: vi.fn().mockResolvedValue(true),
 			sayAndCreateMissingParamError: vi.fn().mockResolvedValue("Missing param error"),
 			diffStrategy: undefined,
 		} as unknown as Task

@@ -226,7 +226,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, true)
 		pushToolResult(message)
 		await task.diffViewProvider.reset()
-		task.processQueuedMessages()
+		void task.processQueuedMessages().catch((error) => {
+			console.error("[ApplyPatchTool] Failed to process queued messages:", error)
+		})
 	}
 
 	private async handleDeleteFile(
@@ -283,7 +285,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 		task.didEditFile = true
 		pushToolResult(`Successfully deleted ${relPath}`)
-		task.processQueuedMessages()
+		void task.processQueuedMessages().catch((error) => {
+			console.error("[ApplyPatchTool] Failed to process queued messages:", error)
+		})
 	}
 
 	private async handleUpdateFile(
@@ -446,7 +450,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, false)
 		pushToolResult(message)
 		await task.diffViewProvider.reset()
-		task.processQueuedMessages()
+		void task.processQueuedMessages().catch((error) => {
+			console.error("[ApplyPatchTool] Failed to process queued messages:", error)
+		})
 	}
 
 	override async handlePartial(task: Task, block: ToolUse<"apply_patch">): Promise<void> {

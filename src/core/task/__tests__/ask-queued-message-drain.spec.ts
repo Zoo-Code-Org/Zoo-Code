@@ -3,7 +3,7 @@ import { Task } from "../Task"
 type QueueTaskTestAccess = {
 	say: Task["say"]
 	saveClineMessages: () => Promise<boolean>
-	addToClineMessages: () => Promise<void>
+	addToClineMessages: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	lastMessageTs?: number
 	abort: boolean
 }
@@ -22,9 +22,17 @@ describe("Task.ask queued message drain", () => {
 		;(task as any).askResponseText = undefined
 		;(task as any).askResponseImages = undefined
 		;(task as any).lastMessageTs = undefined
+		task["pendingAskCount"] = 0
+		task["drainRetainedQueuedMessageIds"] = new Set<string>()
+		task["queuedFeedbackRowWritten"] = new Map<string, string>()
 		return import("../../message-queue/MessageQueueService").then(({ MessageQueueService }) => {
 			;(task as any).messageQueueService = new MessageQueueService()
-			;(task as any).addToClineMessages = vi.fn(async () => {})
+			// Mirrors the real `addToClineMessages`: it stamps a messageId and pushes
+			// synchronously before its own awaits, and the tests here depend on both.
+			;(task as any).addToClineMessages = vi.fn(async (message: import("@roo-code/types").ClineMessage) => {
+				message.messageId ??= crypto.randomUUID()
+				task["clineMessages"].push(message)
+			})
 			;(task as any).saveClineMessages = vi.fn(async () => {})
 			;(task as any).updateClineMessage = vi.fn(async () => {})
 			;(task as any).cancelAutoApprovalTimeout = vi.fn(() => {})
@@ -380,6 +388,60 @@ describe("Task.ask queued message drain", () => {
 		}
 	})
 
+	it("keeps failed durable feedback out of the next command ask", async () => {
+		const task = await createTask()
+		// A drain submitted this message, so it is retained while it waits for a
+		// conversational ask to consume it.
+		task["drainRetainedQueuedMessageIds"].add(task.messageQueueService.addMessage("ship it")!.id)
+		const result = await task.ask("tool", JSON.stringify({ tool: "finishTask" }), false)
+		const access = getQueueTaskTestAccess(task)
+		access.say = vi.fn().mockResolvedValue(undefined)
+		access.saveClineMessages = vi.fn().mockResolvedValue(false)
+
+		vi.useFakeTimers()
+		try {
+			const persistence = task.persistQueuedFeedbackAndAcknowledge(
+				result.queuedMessageId!,
+				result.text,
+				result.images,
+			)
+			await vi.runAllTimersAsync()
+			await expect(persistence).resolves.toBe(false)
+		} finally {
+			vi.useRealTimers()
+		}
+
+		// The consume was undone, so the message must stay retained: a command
+		// ask that claimed it would skip checkAutoApproval and execute on text
+		// never answered to that command.
+		expect(task["drainRetainedQueuedMessageIds"].has(result.queuedMessageId!)).toBe(true)
+		expect(task.messageQueueService.claimNextMessage(task["drainRetainedQueuedMessageIds"])).toBeUndefined()
+
+		// A command ask gets a real prompt and leaves the message queued.
+		const commandAsk = task.ask("command", "rm -rf build", false)
+		setTimeout(() => task.denyAsk(), 0)
+		const denied = await commandAsk
+		expect(denied).toMatchObject({ response: "noButtonClicked" })
+		expect(denied.queuedMessageId).toBeUndefined()
+		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["ship it"])
+	})
+
+	it("reports success when the durable save lands but the queue entry is gone", async () => {
+		const task = await createTask()
+		task.messageQueueService.addMessage("Deleted mid-ack")
+		const result = await task.ask("completion_result", "Done", false)
+		const access = getQueueTaskTestAccess(task)
+		access.say = vi.fn().mockResolvedValue(undefined)
+		access.saveClineMessages = vi.fn().mockResolvedValue(true)
+		// The user removed the entry from the webview while the ack was in flight.
+		task.messageQueueService.removeMessage(result.queuedMessageId!)
+
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).resolves.toBe(true)
+		expect(task["drainRetainedQueuedMessageIds"].size).toBe(0)
+	})
+
 	it("releases durable queued feedback when the task aborts during retry backoff", async () => {
 		vi.useFakeTimers()
 		try {
@@ -408,5 +470,166 @@ describe("Task.ask queued message drain", () => {
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+
+	it("does not append a second user_feedback row when a reclaimed message is persisted again", async () => {
+		const task = await createTask()
+		task.messageQueueService.addMessage("Persist me twice")
+		const result = await task.ask("completion_result", "Done", false)
+		const access = getQueueTaskTestAccess(task)
+		const rowsBefore = task["clineMessages"].length
+
+		// First attempt appends the row, then fails every save and releases the
+		// claim, so the message is reclaimed as fresh input for a later turn.
+		access.saveClineMessages = vi.fn().mockResolvedValue(false)
+		vi.useFakeTimers()
+		try {
+			const first = task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images)
+			await vi.runAllTimersAsync()
+			await expect(first).resolves.toBe(false)
+		} finally {
+			vi.useRealTimers()
+		}
+		expect(task["clineMessages"]).toHaveLength(rowsBefore + 1)
+
+		// The retry succeeds, but the row it would append is already in history.
+		access.saveClineMessages = vi.fn().mockResolvedValue(true)
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).resolves.toBe(true)
+		expect(task["clineMessages"]).toHaveLength(rowsBefore + 1)
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("keeps a message reclaimable and appends once when say throws before the row lands", async () => {
+		const task = await createTask()
+		task.messageQueueService.addMessage("Row never landed")
+		const result = await task.ask("completion_result", "Done", false)
+		const access = getQueueTaskTestAccess(task)
+		access.saveClineMessages = vi.fn().mockResolvedValue(true)
+		// The ask above left its own row; only rows added from here count.
+		const rowsBefore = task["clineMessages"].length
+
+		// The real `say` guard rejects before `addToClineMessages` runs, so no row
+		// exists and the message must stay reclaimable.
+		access.abort = true
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).rejects.toThrow("aborted")
+		expect(task["clineMessages"]).toHaveLength(rowsBefore)
+		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["Row never landed"])
+		// Released, not left claimed: a later consumer can still claim it.
+		expect(task.messageQueueService.claimNextMessage()?.text).toBe("Row never landed")
+		task.messageQueueService.releaseMessage(result.queuedMessageId!)
+
+		// A later reclaim appends exactly one row, because the failed attempt left
+		// no record behind.
+		access.abort = false
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).resolves.toBe(true)
+		expect(task["clineMessages"]).toHaveLength(rowsBefore + 1)
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("re-appends the row when a rewind removed it before the reclaim", async () => {
+		const task = await createTask()
+		task.messageQueueService.addMessage("Rewound row")
+		const result = await task.ask("completion_result", "Done", false)
+		const access = getQueueTaskTestAccess(task)
+		access.saveClineMessages = vi.fn().mockResolvedValue(false)
+		const feedbackRows = () => task["clineMessages"].filter((message) => message.say === "user_feedback")
+
+		// The row lands, then every save fails and the claim is released.
+		vi.useFakeTimers()
+		try {
+			const first = task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images)
+			await vi.runAllTimersAsync()
+			await expect(first).resolves.toBe(false)
+		} finally {
+			vi.useRealTimers()
+		}
+		expect(feedbackRows()).toHaveLength(1)
+
+		// A rewind truncates the conversation, so the recorded row is gone while
+		// the message is still queued and reclaimable.
+		task["clineMessages"] = task["clineMessages"].filter((message) => message.say !== "user_feedback")
+		expect(feedbackRows()).toHaveLength(0)
+
+		// The reclaim must re-append: consuming without the row would drop the
+		// feedback from the conversation entirely.
+		access.saveClineMessages = vi.fn().mockResolvedValue(true)
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).resolves.toBe(true)
+		expect(feedbackRows()).toHaveLength(1)
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("keys the row record by message id, not by timestamp", async () => {
+		const task = await createTask()
+		task.messageQueueService.addMessage("Same millisecond")
+		const result = await task.ask("completion_result", "Done", false)
+		const access = getQueueTaskTestAccess(task)
+		access.saveClineMessages = vi.fn().mockResolvedValue(false)
+		const feedbackRows = () => task["clineMessages"].filter((message) => message.say === "user_feedback")
+
+		vi.useFakeTimers()
+		try {
+			const first = task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images)
+			await vi.runAllTimersAsync()
+			await expect(first).resolves.toBe(false)
+		} finally {
+			vi.useRealTimers()
+		}
+		expect(feedbackRows()).toHaveLength(1)
+
+		// A rewind drops the feedback row but leaves a different row carrying the
+		// same `ts`: `say` stamps `Date.now()`, so two rows written in the same
+		// millisecond collide. Keying the record by `ts` would read this survivor as
+		// the feedback row and skip the re-append, dropping the text entirely.
+		const feedbackTs = feedbackRows()[0]!.ts
+		task["clineMessages"] = task["clineMessages"].filter((message) => message.say !== "user_feedback")
+		task["clineMessages"].push({ ts: feedbackTs, type: "say", say: "text", text: "Unrelated row" })
+		expect(feedbackRows()).toHaveLength(0)
+
+		access.saveClineMessages = vi.fn().mockResolvedValue(true)
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).resolves.toBe(true)
+		expect(feedbackRows()).toHaveLength(1)
+		expect(feedbackRows()[0]!.text).toBe("Same millisecond")
+	})
+
+	it("does not double-append when say throws after the row landed", async () => {
+		const task = await createTask()
+		task.messageQueueService.addMessage("Row landed then threw")
+		const result = await task.ask("completion_result", "Done", false)
+		const access = getQueueTaskTestAccess(task)
+		access.saveClineMessages = vi.fn().mockResolvedValue(true)
+		const rowsBefore = task["clineMessages"].length
+		// The row is pushed the way `addToClineMessages` pushes it (synchronously,
+		// before its own awaits), then the call rejects the way a throwing
+		// `Message` listener makes `say` reject.
+		access.addToClineMessages = vi.fn(async (message: import("@roo-code/types").ClineMessage) => {
+			message.messageId ??= crypto.randomUUID()
+			task["clineMessages"].push(message)
+			throw new Error("listener threw")
+		})
+
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).rejects.toThrow("listener threw")
+		expect(task["clineMessages"]).toHaveLength(rowsBefore + 1)
+
+		// The row is retained in history, so the reclaim must not append a second
+		// one, and the release must leave the message reclaimable rather than
+		// leaked as claimed.
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).resolves.toBe(true)
+		expect(task["clineMessages"]).toHaveLength(rowsBefore + 1)
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+		expect(task["drainRetainedQueuedMessageIds"].size).toBe(0)
 	})
 })

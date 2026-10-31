@@ -223,16 +223,20 @@ export const webviewMessageHandler = async (
 	/**
 	 * Resolves image file mentions in incoming messages.
 	 * Matches read_file behavior: respects size limits and model capabilities.
+	 *
+	 * The cwd is read before the awaits below: it must be the workspace of the
+	 * task this message belongs to, which callers capture before their own await.
 	 */
 	const resolveIncomingImages = async (payload: { text?: string; images?: string[] }) => {
 		const text = payload.text ?? ""
 		const images = payload.images
 		const currentTask = provider.getCurrentTask()
+		const cwd = getCurrentCwd()
 		const state = await provider.getState()
 		const resolved = await resolveImageMentions({
 			text,
 			images,
-			cwd: getCurrentCwd(),
+			cwd,
 			rooIgnoreController: currentTask?.rooIgnoreController,
 			maxImageFileSize: state.maxImageFileSize,
 			maxTotalImageSize: state.maxTotalImageSize,
@@ -730,10 +734,10 @@ export const webviewMessageHandler = async (
 
 		case "askResponse":
 			{
+				// Same pre-await binding as `queueMessage`.
+				const targetTask = provider.getCurrentTask()
 				const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
-				provider
-					.getCurrentTask()
-					?.handleWebviewAskResponse(message.askResponse!, resolved.text, resolved.images)
+				targetTask?.handleWebviewAskResponse(message.askResponse!, resolved.text, resolved.images)
 			}
 			break
 
@@ -3962,8 +3966,12 @@ export const webviewMessageHandler = async (
 		 */
 
 		case "queueMessage": {
+			// Bind before the await: a task switch during image resolution would
+			// route this message into the new task's queue, where its text can
+			// answer that task's command ask.
+			const targetTask = provider.getCurrentTask()
 			const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
-			provider.getCurrentTask()?.messageQueueService.addMessage(resolved.text, resolved.images)
+			targetTask?.messageQueueService.addMessage(resolved.text, resolved.images)
 			break
 		}
 		case "removeQueuedMessage": {
