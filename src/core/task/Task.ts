@@ -154,6 +154,8 @@ import {
 } from "./run-state/runStateDivergence"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
+// Consecutive mid-stream failures retried automatically before the user is asked.
+const MAX_MID_STREAM_AUTO_RETRIES = 5
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
 // Upper bound on awaiting lazily loaded model metadata. Some model-catalog
 // fetchers (e.g. OpenRouter's bare axios GET) have no request timeout, so a
@@ -3865,6 +3867,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			userContent: Anthropic.Messages.ContentBlockParam[]
 			includeFileDetails: boolean
 			retryAttempt?: number
+			// Automatic retries of a mid-stream failure. Kept apart from `retryAttempt`, which also
+			// tells shouldAddUserMessageToHistory that the user message is already in history.
+			midStreamAutoRetries?: number
 			userMessageWasRemoved?: boolean // Track if user message was removed due to empty response
 		}
 
@@ -4672,26 +4677,50 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							})
 							continue
 						} else {
+							const stateForBackoff = await this.providerRef.deref()?.getState()
+							const midStreamRetryAttempt = currentItem.midStreamAutoRetries ?? 0
+
+							// Without auto-approval, or once automatic retries are exhausted, a
+							// persistently failing stream (e.g. an upstream idle timeout) would
+							// otherwise be re-requested forever. Let the user decide instead.
+							if (
+								!stateForBackoff?.autoApprovalEnabled ||
+								midStreamRetryAttempt >= MAX_MID_STREAM_AUTO_RETRIES
+							) {
+								const { response } = await this.ask("api_req_failed", rawErrorMessage)
+
+								if (response !== "yesButtonClicked") {
+									throw new Error("API request failed")
+								}
+
+								await this.say("api_req_retried")
+								// The user message is already in history, so keep the history attempt positive
+								// and only reset the automatic-retry count.
+								stack.push({
+									userContent: currentUserContent,
+									includeFileDetails: false,
+									retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
+									midStreamAutoRetries: 0,
+								})
+								continue
+							}
+
 							// Stream failed - log the error and retry with the same content
-							// The existing rate limiting will prevent rapid retries
 							console.error(
 								`[Task#${this.taskId}.${this.instanceId}] Stream failed, will retry: ${streamingFailedMessage}`,
 							)
 
-							// Apply exponential backoff similar to first-chunk errors when auto-resubmit is enabled
-							const stateForBackoff = await this.providerRef.deref()?.getState()
-							if (stateForBackoff?.autoApprovalEnabled) {
-								await this.backoffAndAnnounce(currentItem.retryAttempt ?? 0, error)
+							// Apply exponential backoff similar to first-chunk errors
+							await this.backoffAndAnnounce(midStreamRetryAttempt, error)
 
-								// Check if task was aborted during the backoff
-								if (this.abort) {
-									console.log(
-										`[Task#${this.taskId}.${this.instanceId}] Task aborted during mid-stream retry backoff`,
-									)
-									this.setAbortReason("user_cancelled")
-									await this.abortTask()
-									break
-								}
+							// Check if task was aborted during the backoff
+							if (this.abort) {
+								console.log(
+									`[Task#${this.taskId}.${this.instanceId}] Task aborted during mid-stream retry backoff`,
+								)
+								this.setAbortReason("user_cancelled")
+								await this.abortTask()
+								break
 							}
 
 							// Push the same content back onto the stack to retry, incrementing the retry attempt counter
@@ -4699,6 +4728,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								userContent: currentUserContent,
 								includeFileDetails: false,
 								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
+								midStreamAutoRetries: midStreamRetryAttempt + 1,
 							})
 
 							// Continue to retry the request
