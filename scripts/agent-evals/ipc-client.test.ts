@@ -85,6 +85,56 @@ const startPeer = async (socketPath: string) => {
 	}
 }
 
+const ACK_FRAME =
+	JSON.stringify({
+		type: "message",
+		data: {
+			type: IpcMessageType.Ack,
+			origin: IpcOrigin.Server,
+			data: { clientId: "client-1", pid: process.pid, ppid: process.ppid },
+		},
+	}) + DELIMITER
+
+// A schema-valid TaskEvent frame padded to an exact UTF-8 byte length by growing
+// the payload string, so a test can sit precisely on the ceiling boundary. The
+// padding is ASCII, so byte length and code-unit length coincide.
+const taskEventFrameOfBytes = (bytes: number): string => {
+	const base = JSON.stringify({
+		type: "message",
+		data: {
+			type: IpcMessageType.TaskEvent,
+			origin: IpcOrigin.Server,
+			data: { eventName: RooCodeEventName.TaskStarted, payload: [""], taskId: 1 } satisfies TaskEvent,
+		},
+	})
+	const paddingBytes = bytes - Buffer.byteLength(base, "utf8")
+
+	if (paddingBytes < 0)
+		throw new Error(`frame base is ${Buffer.byteLength(base, "utf8")} bytes, cannot shrink to ${bytes}`)
+
+	return base.replace('[""]', () => JSON.stringify(["A".repeat(paddingBytes)]))
+}
+
+// Completes the handshake and then writes `payload` in a single call, so the test
+// controls exactly which bytes share a chunk.
+const startOneShotPeer = async (socketPath: string, payload: string): Promise<() => Promise<void>> => {
+	const server = net.createServer((socket) => {
+		socket.on("error", () => {})
+		socket.write(ACK_FRAME)
+		socket.write(payload)
+	})
+
+	await new Promise<void>((resolve, reject) => {
+		server.once("error", reject)
+		server.listen(resolveSocketPath(socketPath), resolve)
+	})
+
+	return () => new Promise<void>((resolve) => server.close(() => resolve()))
+}
+
+const ceilingLogs = (logs: unknown[][]): unknown[][] =>
+	logs.filter((entry) => String(entry[0]).includes("MAX_FRAME_BYTES"))
+
 describe("eval ipc client", () => {
 	it("completes the ack handshake and reports readiness", async () => {
 		const dir = await socketDir()
@@ -546,6 +596,139 @@ describe("eval ipc client", () => {
 		} finally {
 			client.disconnect()
 			await new Promise<void>((resolve) => server.close(() => resolve()))
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("drops an oversized frame whose delimiter arrives in the same chunk", async () => {
+		const dir = await socketDir()
+		const socketPath = socketPathIn(dir, "oversized-inline")
+		const logs: unknown[][] = []
+		const events: TaskEvent[] = []
+		const ceiling = 1024
+		// A well-formed frame that is one byte past the ceiling. Without a check
+		// inside the delimiter loop it parses and dispatches instead of dropping.
+		const oversized = taskEventFrameOfBytes(ceiling + 1) + DELIMITER
+		const closePeer = await startOneShotPeer(socketPath, oversized)
+
+		const client = new EvalIpcClient(socketPath, (...args) => logs.push(args), { maxFrameBytes: ceiling })
+		client.on(IpcMessageType.TaskEvent, (event) => events.push(event as TaskEvent))
+
+		try {
+			await waitFor(() => !client.isConnected && ceilingLogs(logs).length > 0, 10_000)
+
+			assert.equal(ceilingLogs(logs).length, 1, "exactly one bounded log line")
+			assert.equal(events.length, 0, "a frame past the ceiling must never be dispatched")
+			assert.equal(client.isConnected, false, "the connection is dropped")
+		} finally {
+			client.disconnect()
+			await closePeer()
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("stops scanning the chunk after an oversized frame instead of parsing what follows", async () => {
+		const dir = await socketDir()
+		const socketPath = socketPathIn(dir, "oversized-then-valid")
+		const logs: unknown[][] = []
+		const events: TaskEvent[] = []
+		const ceiling = 1024
+		// The oversized frame and a valid frame share one chunk. The handler must
+		// return, not break: a break leaves the offset unmoved, so the rest of the
+		// chunk becomes the tail, re-populates the buffer and logs a second time.
+		const chunk = taskEventFrameOfBytes(ceiling + 1) + DELIMITER + taskEventFrameOfBytes(256) + DELIMITER
+		const closePeer = await startOneShotPeer(socketPath, chunk)
+
+		const client = new EvalIpcClient(socketPath, (...args) => logs.push(args), { maxFrameBytes: ceiling })
+		client.on(IpcMessageType.TaskEvent, (event) => events.push(event as TaskEvent))
+
+		try {
+			await waitFor(() => !client.isConnected && ceilingLogs(logs).length > 0, 10_000)
+			// Give any stray second frame a chance to surface before asserting.
+			await new Promise((resolve) => setTimeout(resolve, 60))
+
+			assert.equal(ceilingLogs(logs).length, 1, "the tail must not re-trip the ceiling")
+			assert.equal(events.length, 0, "the frame after the oversized one must not be processed")
+			assert.equal(client.isConnected, false, "the connection is dropped")
+		} finally {
+			client.disconnect()
+			await closePeer()
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("passes a frame at exactly the ceiling and drops one byte past it", async () => {
+		const ceiling = 512
+		const run = async (name: string, bytes: number) => {
+			const dir = await socketDir()
+			const socketPath = socketPathIn(dir, name)
+			const logs: unknown[][] = []
+			const events: TaskEvent[] = []
+			const closePeer = await startOneShotPeer(socketPath, taskEventFrameOfBytes(bytes) + DELIMITER)
+			const client = new EvalIpcClient(socketPath, (...args) => logs.push(args), { maxFrameBytes: ceiling })
+
+			client.on(IpcMessageType.TaskEvent, (event) => events.push(event as TaskEvent))
+
+			try {
+				await waitFor(() => events.length > 0 || ceilingLogs(logs).length > 0, 10_000)
+				return { events: events.length, drops: ceilingLogs(logs).length, connected: client.isConnected }
+			} finally {
+				client.disconnect()
+				await closePeer()
+				await fs.rm(dir, { recursive: true, force: true })
+			}
+		}
+
+		const atCeiling = await run("ceiling-exact", ceiling)
+		assert.equal(atCeiling.drops, 0, "a frame at exactly the ceiling is legal")
+		assert.equal(atCeiling.events, 1, "the frame at the ceiling is dispatched")
+		assert.equal(atCeiling.connected, true, "the connection survives a frame at the ceiling")
+
+		const pastCeiling = await run("ceiling-plus-one", ceiling + 1)
+		assert.equal(pastCeiling.drops, 1, "one byte past the ceiling drops the connection")
+		assert.equal(pastCeiling.events, 0, "the frame past the ceiling is never dispatched")
+		assert.equal(pastCeiling.connected, false, "the connection is dropped")
+	})
+
+	it("counts a delimited frame's multibyte content in bytes, not characters", async () => {
+		const dir = await socketDir()
+		const socketPath = socketPathIn(dir, "multibyte-inline")
+		const logs: unknown[][] = []
+		const events: TaskEvent[] = []
+		const ceiling = 2048
+		// 1000 three-byte characters: 1000 code units (under the ceiling) but 3000
+		// wire bytes (over it), and the delimiter shares the chunk with them.
+		const frame =
+			JSON.stringify({
+				type: "message",
+				data: {
+					type: IpcMessageType.TaskEvent,
+					origin: IpcOrigin.Server,
+					data: {
+						eventName: RooCodeEventName.TaskStarted,
+						payload: ["가".repeat(1000)],
+						taskId: 1,
+					} satisfies TaskEvent,
+				},
+			}) + DELIMITER
+		const closePeer = await startOneShotPeer(socketPath, frame)
+
+		const client = new EvalIpcClient(socketPath, (...args) => logs.push(args), { maxFrameBytes: ceiling })
+		client.on(IpcMessageType.TaskEvent, (event) => events.push(event as TaskEvent))
+
+		try {
+			await waitFor(() => !client.isConnected && ceilingLogs(logs).length > 0, 10_000)
+
+			assert.equal(
+				ceilingLogs(logs).length,
+				1,
+				"the byte ceiling must drop a frame whose code-unit count is under it",
+			)
+			assert.equal(events.length, 0, "the multibyte frame past the byte ceiling is never dispatched")
+			assert.equal(client.isConnected, false, "the connection is dropped")
+		} finally {
+			client.disconnect()
+			await closePeer()
 			await fs.rm(dir, { recursive: true, force: true })
 		}
 	})

@@ -124,7 +124,19 @@ export class EvalIpcClient extends EventEmitter<EvalIpcClientEvents> {
 		let index: number
 
 		while ((index = chunk.indexOf(DELIMITER, offset)) !== -1) {
-			const frame = this._buffer + chunk.slice(offset, index)
+			const segment = chunk.slice(offset, index)
+			const frameBytes = this._bufferBytes + Buffer.byteLength(segment, "utf8")
+
+			// A delimiter in the same chunk as the overrun must not buy the frame a
+			// pass: the ceiling applies to the assembled frame, not just the tail.
+			// Returning (not breaking) stops the scan, so the closed connection
+			// cannot re-populate the buffer and log a second time.
+			if (frameBytes > this._maxFrameBytes) {
+				this.onOversizedFrame()
+				return
+			}
+
+			const frame = this._buffer + segment
 			this._buffer = ""
 			this._bufferBytes = 0
 			if (frame.length > 0) this.onFrame(frame)
