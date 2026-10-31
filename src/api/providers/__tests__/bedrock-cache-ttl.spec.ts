@@ -314,6 +314,26 @@ describe("Bedrock cache-point TTL emission", () => {
 			expect(containsTtlKey(input)).toBe(false)
 		})
 
+		it("emits no ttl for an unlisted model that the heuristic fallback guesses", async () => {
+			// The fallback spreads the default row (which is 1h-capable) and then overlays
+			// the guess, so the capability is inherited unless it is cleared. An unlisted
+			// id is exactly the case where we cannot prove the model accepts 1h, and Bedrock
+			// answers an unsupported ttl with a ValidationException that kills the turn.
+			const handler = createHandler({
+				awsCustomArn:
+					"arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-3-5-sonnet-20241022-v1:0",
+				promptCacheTtl: "1h",
+			})
+			handler["client"].send = vi.fn().mockResolvedValue({ stream: asyncStreamFrom([]) })
+
+			const input = await captureConverseInput(handler)
+
+			// The guess still reports caching support, so cache points exist and the
+			// assertion is about the capability gate rather than caching being off.
+			expect(collectCachePoints(input).length).toBeGreaterThan(0)
+			expect(containsTtlKey(input)).toBe(false)
+		})
+
 		it("emits 1h for a foundation-model ARN that names a listed model", async () => {
 			const handler = createHandler({
 				awsCustomArn: "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -538,9 +558,17 @@ describe("Bedrock cache TTL capability catalog", () => {
 			}
 
 			for (const [index, tier] of (entry.tiers ?? []).entries()) {
-				if (tier.cacheWritesPrice1h === undefined) continue
-				expect(tier.inputPrice, `${id} tier ${index}`).toBeDefined()
-				expect(tier.cacheWritesPrice1h, `${id} tier ${index}`).toBeCloseTo((tier.inputPrice as number) * 2, 9)
+				// A tier that reprices input without repricing the 1h write is exactly the
+				// shadow this test exists to catch, so it must fail rather than be skipped.
+				if (tier.inputPrice === undefined) {
+					expect(
+						tier.cacheWritesPrice1h,
+						`${id} tier ${index} prices a 1h write without an input price`,
+					).toBeUndefined()
+					continue
+				}
+				expect(tier.cacheWritesPrice1h, `${id} tier ${index} reprices input but not the 1h write`).toBeDefined()
+				expect(tier.cacheWritesPrice1h, `${id} tier ${index}`).toBeCloseTo(tier.inputPrice * 2, 9)
 			}
 		}
 	})

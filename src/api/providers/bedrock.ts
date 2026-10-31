@@ -1247,13 +1247,15 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		} else {
 			// Use heuristics for model info, then allow overrides from ProviderSettings
 			const guessed = this.guessModelInfoFromId(modelId)
-			model = {
-				id: bedrockDefaultModelId,
-				info: {
-					...JSON.parse(JSON.stringify(bedrockModels[bedrockDefaultModelId])),
-					...guessed,
-				},
+			const info: ModelInfo = {
+				...JSON.parse(JSON.stringify(bedrockModels[bedrockDefaultModelId])),
+				...guessed,
 			}
+			// The default row is 1h-capable, but an id we cannot resolve is not. Inheriting
+			// the capability would send `ttl: "1h"` to a model that may reject it with a
+			// ValidationException that kills the turn, so an unlisted id fails closed (I2).
+			delete info.promptCacheTtlSupport
+			model = { id: bedrockDefaultModelId, info }
 		}
 
 		// Always allow user to override detected/guessed maxTokens and contextWindow
