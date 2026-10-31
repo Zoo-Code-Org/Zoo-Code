@@ -2,6 +2,7 @@ import os from "os"
 import osName from "os-name"
 
 import { getShell } from "../../../utils/shell"
+import { describeShellDialect } from "../../../utils/shellDialect"
 
 import type { EffectiveToolPolicy } from "../tools/effective-tool-policy"
 
@@ -33,12 +34,19 @@ export function getSystemInfoSection(cwd: string, policy: EffectiveToolPolicy): 
 		? " New terminals will be created in the current workspace directory, however if you change directories in a terminal it will then have a different working directory; changing directories in a terminal does not modify the workspace directory, because you do not have access to change the workspace directory."
 		: ""
 
+	const shell = getShell()
+	const shellDialect = executeCommandAvailable ? describeShellDialect(shell) : undefined
+	const shellDialectLine = shellDialect
+		? `
+Shell Syntax: ${shellDialect}`
+		: ""
+
 	const details = `====
 
 SYSTEM INFORMATION
 
 Operating System: ${osInfo}
-Default Shell: ${getShell()}
+Default Shell: ${shell}${shellDialectLine}
 Home Directory: ${os.homedir().toPosix()}
 Current Workspace Directory: ${cwd.toPosix()}
 
