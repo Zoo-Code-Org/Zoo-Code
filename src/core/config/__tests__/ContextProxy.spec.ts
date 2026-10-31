@@ -456,9 +456,38 @@ describe("ContextProxy", () => {
 				expect(mockGlobalState.update).toHaveBeenCalledWith(key, undefined)
 			}
 
-			// Total calls should include initial setup + reset operations
-			const expectedUpdateCalls = 2 + GLOBAL_STATE_KEYS.length
+			// Total calls should include initial setup + reset operations, plus the
+			// plaintext mimoApiKey purge (the key is a SECRET_STATE_KEY, so it is not
+			// covered by the GLOBAL_STATE_KEYS sweep).
+			const expectedUpdateCalls = 3 + GLOBAL_STATE_KEYS.length
 			expect(mockGlobalState.update).toHaveBeenCalledTimes(expectedUpdateCalls)
+			expect(mockGlobalState.update).toHaveBeenCalledWith("mimoApiKey", undefined)
+		})
+
+		it("does not resurrect a surviving plaintext mimoApiKey into SecretStorage", async () => {
+			// Builds before the key joined SECRET_STATE_KEYS could leave a plaintext
+			// mimoApiKey in globalState. Because the key is a secret-state key it is
+			// absent from GLOBAL_STATE_KEYS, so the reset sweep never touched the
+			// plaintext copy; the initialize() that reset runs afterwards then found
+			// it and migrated it into SecretStorage. Reset therefore resurrected the
+			// credential it is supposed to clear.
+			clearAllMocks()
+
+			let plaintextKey: string | undefined = "surviving-plaintext-mimo-key"
+			mockGlobalState.get.mockImplementation((key: string) => (key === "mimoApiKey" ? plaintextKey : undefined))
+			mockGlobalState.update.mockImplementation((key: string, value: unknown) => {
+				if (key === "mimoApiKey" && value === undefined) {
+					plaintextKey = undefined
+				}
+				return Promise.resolve()
+			})
+			mockSecrets.get.mockResolvedValue(undefined)
+
+			const resetProxy = new ContextProxy(mockContext)
+			await resetProxy.resetAllState()
+
+			expect(mockSecrets.store).not.toHaveBeenCalledWith("mimoApiKey", expect.anything())
+			expect(resetProxy.getSecret("mimoApiKey")).toBeUndefined()
 		})
 
 		it("should delete all secrets", async () => {

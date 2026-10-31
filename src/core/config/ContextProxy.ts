@@ -634,6 +634,11 @@ export class ContextProxy {
 			...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
 			...SECRET_STATE_KEYS.map((key) => this.originalContext.secrets.delete(key)),
 			...GLOBAL_SECRET_KEYS.map((key) => this.originalContext.secrets.delete(key)),
+			// mimoApiKey is a SECRET_STATE_KEY, so it is absent from GLOBAL_STATE_KEYS
+			// and the sweep above leaves any plaintext copy behind. The initialize()
+			// below would then migrate that survivor into SecretStorage, resurrecting
+			// a credential this reset is meant to clear.
+			this.originalContext.globalState.update("mimoApiKey", undefined),
 		])
 
 		await this.initialize()
