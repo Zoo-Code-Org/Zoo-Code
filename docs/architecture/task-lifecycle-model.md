@@ -6,7 +6,7 @@ Zoo Code checks task lifecycle protocols through one umbrella command for indepe
 pnpm lifecycle:model-check
 ```
 
-The baseline command runs eight independent bounded checks in sequence:
+The baseline command runs nine independent bounded checks in sequence:
 
 1. the persisted task delegation lifecycle;
 2. shared-store concurrency across task-history hosts;
@@ -14,8 +14,9 @@ The baseline command runs eight independent bounded checks in sequence:
 4. the task cleanup protocol;
 5. request-stream parser scoping;
 6. completion persistence;
-7. delegated-mode reader refinement; and
-8. tool-turn continuation.
+7. delegated-mode reader refinement;
+8. tool-turn continuation; and
+9. the in-memory run-state kernel.
 
 The planned two-sibling fan-out protocol is intentionally outside the baseline and CI umbrella. Run it explicitly with `pnpm fanout-protocol:model-check`; it describes optional future functionality, not current production coverage.
 
@@ -199,6 +200,7 @@ These are safety claims within the documented bounds. The checks do not claim li
 | Cleanup                        | Abstract bounded universal plus adapter tests                                | Abort, disposal, settlement, rejection, and provider shutdown are modeled as protocol/environment actions.                                 | No direct execution of all production cleanup methods, filesystem/editor promises, timing liveness, fairness, or arbitrary task counts.                                                                                                                                                                                         |
 | Parser request scope           | Production-backed bounded schedule replay                                    | The checker executes production parser APIs across 924 order-preserving schedules for two scopes.                                          | Assumes callers stop invoking a finalized scope; transport behavior, arbitrary request counts, indices, and malformed histories are outside the claim.                                                                                                                                                                          |
 | Completion persistence         | Abstract bounded universal plus production tests and one fresh-host E2E path | The model abstracts persistence as a durable phase with at most two write starts; production guards and retry paths are tested separately. | Production permits more retries; no power-loss/filesystem proof, fairness, arbitrary retry count, complete delegated fallback, provider status metadata, or downstream event-consumer model.                                                                                                                                    |
+| Run-state kernel               | Production-backed bounded universal                                          | The explorer calls the production `nextRunState` and compares each result with a transcription of the design-doc guard and effect table.   | Models one task's run state only. Excludes persistence, the actor mailbox, and the wiring of `Task.ts` to the kernel. Witness and source-pair checks have no self-test.                                                                                                                                                         |
 
 The production mapping above names primary lifecycle transitions, not every mutation or consumer. Generic store upserts, reconciliation, repair replay, migrations, tool entry points, webview/public API abandonment, provider status updates, and public `TaskCompleted` re-emission remain outside the persisted reducer graph unless explicitly named by a submodel or focused test. For task-local mode, the consumers named under #921/#1623 are a confirmed set, not an exhaustive repository-wide inventory; other mode-sensitive tools must be audited before claiming universal reader isolation.
 
@@ -257,8 +259,36 @@ Completion-readiness changes belong in `scripts/check-completion-persistence.ts`
 
 Parser request scoping is one such independent bounded submodel within the umbrella suite. Extend `scripts/check-native-tool-call-parser-scoping.ts` and its focused architecture document instead of adding parser state or transitions to `taskLifecycle.ts` or the persisted lifecycle state graph.
 
+Run-state kernel changes belong in `scripts/check-run-state-kernel.ts`. Update the guard and effect table in the checker together with the Transitions table in the target-architecture document, and add a known-unsafe kernel for each new check.
+
 ## Test layering
 
 Keep reducer permutations in this model and focused Vitest suites. The real VS Code extension-host suite using a mocked provider in `apps/vscode-e2e/src/suite/subtasks.test.ts` already covers the boundaries the pure explorer cannot: task creation and rehydration, persisted parent-child state, cancellation during a delayed provider stream, interrupted-child resume, abandonment followed by a real resume/save/completion cycle, pending approvals across leave/return, and scheduler-driven resume. `restart-persistence.test.ts` separately verifies completion history through a fresh extension host.
 
 Add E2E coverage only when a lifecycle change crosses one of those runtime boundaries or introduces a new one. For example, #1453 persistence-readiness semantics require a controlled fresh-host test, and #369/#372 fan-out requires scheduler permit, live-parent routing, orphan cleanup, and task-scoping E2E. Do not add E2E cases solely to replay reducer orderings already exhausted here; they increase fixture and timing cost without strengthening the proof claim.
+
+## Run-state kernel submodel
+
+`scripts/check-run-state-kernel.ts` explores the pure `nextRunState` in `src/core/task/run-state/runState.ts`. It is an independent submodel. It does not use `taskLifecycle.ts` and does not share state with the persisted graph.
+
+The checker applies every event except the seven turn events in every reachable state, within the generation and ask-timestamp caps. The budget is 20,000 states and the depth bound is 20. The stream generation and the ask timestamp are each at most 3. At each step it checks:
+
+- the result of the kernel against a transcription of the guard and effect table ([Transitions](task-lifecycle-target-architecture.md#transitions)), including that a rejection leaves the state unchanged;
+- the seven design-doc invariants (same document, Invariants);
+- the kernel does not mutate its state or its event, and the transition checks that hold without the table (latches, generation, phase, stream, and ask rules).
+
+The checker also requires:
+
+- the seven turn events (`turnStarted`, `firstChunkAwaitStarted`, `firstChunkAwaitEnded`, `toolRejected`, `toolUsed`, `toolFailed`, `streamReadCompleted`) to be accepted and to match the table in each of the 32 turn states, and in one state of every distinct shape of the reachable states. Every other event is also applied to the same shape states with all five turn fields true, so no other event may change the turn. The search does not include turn events, because they would multiply the state count by 32;
+- the event tags in `runState.ts` to equal the event tags in the table (once, at startup, as a text scan of `case` labels);
+- every event to be reachable, with the `askSettledStale` no-op, a settle for an ask that a newer pending ask replaced, as its own action;
+- every guard clause to be the only failing clause in some rejected event;
+- named witnesses, each tied to an event and the states around it: abort during a pending approval in a live stream, an ask after the stream ends, abandon after the stream ends, dispose after completion, a new stream after a failure cleanup without abort, a stream that starts without user input, an approval before the first stream, and a rejected late completion accept after a newer ask;
+- every ordered pair of the stream, ask, cancel, and dispose event sources to follow each other, where both events change the state;
+- no unseen successor at the depth bound;
+- thirty-three known-unsafe kernels, each of which the checker must reject. They include a throwing kernel, a kernel that returns nothing, and one kernel for each check that runs at every search step without the table; and
+- self-tests that a small depth bound and a small state budget each fail the checker.
+
+The kernel has no resume event. A resumed task is `initialized` followed by `streamStarted` or `askStarted`. The witnesses `first-stream-without-ask` and `approval-before-first-stream` cover those paths.
+
+The mapping from kernel events and latches to the cleanup protocol model is in [The verification boundary](task-lifecycle-target-architecture.md#the-verification-boundary).
