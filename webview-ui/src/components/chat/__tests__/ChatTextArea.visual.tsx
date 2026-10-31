@@ -22,4 +22,22 @@ for (const theme of visualThemes) {
 			focusedControl: editor,
 		})
 	})
+
+	test(`renders the prompt history picker in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
+		const component = mountedStory(await mount("chat-text-area-history"))
+		await applyVisualTheme(page, theme)
+		// The full provider bundle leaves a bare Zod reference after gallery tree-shaking.
+		await page.evaluate(() => Object.assign(globalThis, { z: undefined }))
+		const story = component.getByTestId("chat-text-area-story")
+		const editor = story.getByRole("textbox")
+		await expect(editor).toBeVisible()
+
+		// A leading "!" opens the picker. The newest prompt is listed first.
+		await editor.click()
+		await editor.pressSequentially("!")
+		await expect(story.getByText("Explain the diff for the parser change")).toBeVisible()
+		await expect(story.getByText("Add a retry guard to the upload test")).toBeVisible()
+
+		await expect(story).toHaveScreenshot(`chat-composer-history-${theme.name}.png`)
+	})
 }

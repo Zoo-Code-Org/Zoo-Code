@@ -132,6 +132,7 @@
 	"typeMessage": "Escribe un mensaje...",
 	"typeTask": "Escribe tu tarea aquí...",
 	"addContext": "@ para agregar contexto, / para comandos",
+	"historyHint": "! para el historial de usuario",
 	"dragFiles": "mantén shift para arrastrar archivos",
 	"dragFilesImages": "mantén shift para arrastrar archivos/imágenes",
 	"enhancePromptDescription": "El botón 'Mejorar el mensaje' ayuda a mejorar tu petición proporcionando contexto adicional, aclaraciones o reformulaciones. Intenta escribir una petición aquí y haz clic en el botón nuevamente para ver cómo funciona.",

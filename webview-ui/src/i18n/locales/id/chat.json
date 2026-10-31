@@ -171,6 +171,7 @@
 	"typeMessage": "Ketik pesan...",
 	"typeTask": "Bangun, cari, tanya sesuatu",
 	"addContext": "@ untuk menambah konteks, / untuk perintah",
+	"historyHint": "! untuk riwayat pengguna",
 	"dragFiles": "tahan shift untuk drag file",
 	"dragFilesImages": "tahan shift untuk drag file/gambar",
 	"errorReadingFile": "Error membaca file",
