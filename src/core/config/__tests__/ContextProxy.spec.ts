@@ -7,7 +7,7 @@ import { GLOBAL_STATE_KEYS, SECRET_STATE_KEYS, GLOBAL_SECRET_KEYS } from "@roo-c
 import { clearAllMocks } from "../../../test-utils/reset"
 import { makeExtensionContext, makeUri } from "../../../test-utils/vscode"
 
-import { ContextProxy } from "../ContextProxy"
+import { ContextProxy, getProfileSecretKeys } from "../ContextProxy"
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
 vi.mock("vscode", () => ({
@@ -573,6 +573,46 @@ describe("ContextProxy", () => {
 
 			expect(proxy.getSecret("apiKey")).toBeUndefined()
 			expect(mockSecrets.delete).toHaveBeenCalledWith("apiKey")
+		})
+	})
+
+	describe("getProfileSecretKeys", () => {
+		it("includes the keys the profile's own provider owns even when the blob omits them", async () => {
+			// A profile written from an `api.getConfiguration()` snapshot has its secret fields
+			// stripped while keeping `apiProvider`. Deriving the purge candidates from the blob alone
+			// therefore declares no secret, so deleting that profile would leave its live
+			// SecretStorage credential behind. Ownership answers what the omission cannot.
+			expect(
+				getProfileSecretKeys({
+					name: "stripped-profile",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4.1",
+				}),
+			).toEqual(["openRouterApiKey"])
+		})
+
+		it("keeps a declared key and drops nothing the provider does not own", async () => {
+			// The union must not turn into "every key the provider owns": a key the blob declares
+			// stays, and a non-secret setting is never a candidate.
+			expect(
+				getProfileSecretKeys({
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "declared-key",
+					apiModelId: "claude-sonnet-4-5",
+				}),
+			).toEqual(["apiKey"])
+		})
+
+		it("stays blob-only for a profile whose provider has no ownership branch", async () => {
+			// A retired provider has no branch in the discriminated union, so ownership is unknown.
+			// Guessing would either drop a declared key or invent one; the presence-based answer is
+			// the only safe one.
+			expect(
+				getProfileSecretKeys({
+					apiProvider: retiredProviderIdentifiers.groq,
+					apiKey: "retired-key",
+				}),
+			).toEqual(["apiKey"])
 		})
 	})
 

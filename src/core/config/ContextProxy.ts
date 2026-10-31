@@ -93,18 +93,23 @@ export const providerOwnsSecretKey = (apiProvider: unknown, key: string): boolea
 }
 
 /**
- * The secret keys a stored profile blob declares.
+ * The secret keys a stored profile uses.
  *
  * A profile blob is the record of which credentials that profile uses: `saveConfig`'s
  * discriminated parse keeps only the branch's own keys, so the keys present in the blob
  * are exactly the ones the profile owns. Used to purge a deleted profile's credentials
  * explicitly instead of inferring them from a later write.
  *
+ * The blob alone is not enough: `api.getConfiguration()` strips secret fields, so a profile
+ * saved from that round trip declares none while its live credential sits in SecretStorage.
+ * The profile's own `apiProvider` still names the keys it owns, so the candidates are the
+ * union of both. A provider with no ownership branch keeps the presence-based answer.
+ *
  * Membership is `PROVIDER_SETTINGS_KEYS ∩ SECRET_STATE_KEYS`, the same set the clear-out
  * loop iterates: it excludes the global image-generation key, which no profile blob owns.
  */
 export const getProfileSecretKeys = (config: Record<string, unknown>): string[] =>
-	Object.keys(config).filter((key) => PROVIDER_SECRET_KEYS.has(key))
+	[...PROVIDER_SECRET_KEYS].filter((key) => key in config || providerOwnsSecretKey(config.apiProvider, key) === true)
 
 const globalSettingsExportSchema = globalSettingsSchema.omit({
 	taskHistory: true,
