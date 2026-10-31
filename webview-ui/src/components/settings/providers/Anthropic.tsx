@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react"
+import { useCallback, useId, useState } from "react"
 import { Checkbox } from "vscrui"
 import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
@@ -40,6 +40,10 @@ export const Anthropic = ({ apiConfiguration, setApiConfigurationField }: Anthro
 	// which is exactly what the shared default says. The control still needs a
 	// visible selection, so an unset knob renders as the vendor's own 5m default.
 	const promptCacheTtl = apiConfiguration.promptCacheTtl ?? "5m"
+
+	// The visible label must activate the trigger for pointer users, so it is
+	// associated by id. The trigger keeps its aria-label for screen readers.
+	const promptCacheTtlId = useId()
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(
@@ -117,7 +121,9 @@ export const Anthropic = ({ apiConfiguration, setApiConfigurationField }: Anthro
 			)}
 			{supportsPromptCacheTtl1h && (
 				<div data-testid="prompt-cache-ttl">
-					<label className="block font-medium mb-1">{t("settings:providers.promptCacheTtlLabel")}</label>
+					<label htmlFor={promptCacheTtlId} className="block font-medium mb-1">
+						{t("settings:providers.promptCacheTtlLabel")}
+					</label>
 					<Select
 						value={promptCacheTtl}
 						onValueChange={(value) =>
@@ -128,7 +134,10 @@ export const Anthropic = ({ apiConfiguration, setApiConfigurationField }: Anthro
 									: (value as ProviderSettings["promptCacheTtl"]),
 							)
 						}>
-						<SelectTrigger className="w-full" aria-label={t("settings:providers.promptCacheTtlLabel")}>
+						<SelectTrigger
+							id={promptCacheTtlId}
+							className="w-full"
+							aria-label={t("settings:providers.promptCacheTtlLabel")}>
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>

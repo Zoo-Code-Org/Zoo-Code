@@ -7,10 +7,10 @@ import { mountedStory } from "../../../../../playwright/mounted-story"
 // advertises 1h, so this story pins the default Anthropic model
 // (claude-sonnet-4-5, promptCacheTtlSupport: ["5m", "1h"]) to exercise it.
 //
-// Assertions are geometric and textual rather than a pixel baseline: the
-// committed baselines are rendered in the CI Linux container, so a host-rendered
-// PNG would not match there. Everything a reviewer needs from the screenshot
-// (alignment, overflow, readable copy, default value) is checked directly.
+// Assertions are geometric and textual first, because those name what broke when
+// they fail, and the pixel baseline is the last line of defense for the parts
+// geometry cannot see (border, background, icon). The baseline is rendered in the
+// CI Linux container, so a host-rendered PNG would not match there.
 test("renders the prompt cache TTL control in the Anthropic settings form", async ({ mount, page }) => {
 	await page.setViewportSize({ width: 480, height: 720 })
 
@@ -75,12 +75,22 @@ test("renders the prompt cache TTL control in the Anthropic settings form", asyn
 	await expectContrast(label, { background: story, label: "prompt cache TTL label" })
 	await expectContrast(description, { background: story, label: "prompt cache TTL description" })
 
-	// The option list lives in a Radix portal that only exists while open, so the
-	// closed-state assertion above is the default-value check and this one proves
-	// both classes are offered.
-	await control.getByRole("combobox").click()
+	// Pixel receipt for the control's border, background, icon and spacing, which
+	// the geometry and contrast checks above cannot see. Taken before the label
+	// click below so the baseline captures the closed, unfocused state. The
+	// baseline is rendered in the CI Linux container (pnpm test:visual:docker:update);
+	// a host-rendered PNG would not match there.
+	await expect(story).toHaveScreenshot("anthropic-prompt-cache-ttl-dark.png")
+
+	// The visible label must activate the trigger for pointer users. A label with
+	// no htmlFor leaves the click inert, so this opens the listbox from the label
+	// rather than from the trigger.
+	await label.click()
 	const optionList = page.getByRole("listbox")
+	await expect(optionList).toBeVisible()
 	await expect(optionList.getByRole("option")).toHaveCount(2)
 	await expect(optionList.getByRole("option", { name: /5 minutes \(default\)/ })).toBeVisible()
 	await expect(optionList.getByRole("option", { name: /^1 hour$/ })).toBeVisible()
+	await page.keyboard.press("Escape")
+	await expect(optionList).toHaveCount(0)
 })

@@ -2,9 +2,15 @@
 
 import React from "react"
 
+import type { ICheckboxProps } from "vscrui"
+import type { VSCodeTextField as VSCodeTextFieldElement } from "@vscode/webview-ui-toolkit/react"
+
 import { providerIdentifiers, type ModelInfo, type ProviderSettings } from "@roo-code/types"
 
 import { fireEvent, render, screen } from "@/utils/test-utils"
+
+import type { Select, SelectContent, SelectItem } from "@src/components/ui"
+import type { VSCodeButtonLink as VSCodeButtonLinkComponent } from "@src/components/common/VSCodeButtonLink"
 
 import { Anthropic } from "../Anthropic"
 
@@ -19,38 +25,40 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 }))
 
 vi.mock("vscrui", () => ({
-	Checkbox: ({ children, checked, onChange }: any) => (
+	Checkbox: ({ children, checked, onChange }: React.PropsWithChildren<ICheckboxProps>) => (
 		<label>
-			<input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+			<input type="checkbox" checked={checked} onChange={(event) => onChange?.(event.target.checked)} />
 			{children}
 		</label>
 	),
 }))
 
 vi.mock("@vscode/webview-ui-toolkit/react", () => ({
-	VSCodeTextField: ({ children, value, onInput, type }: any) => (
+	VSCodeTextField: ({ children, value, onInput, type }: React.ComponentProps<typeof VSCodeTextFieldElement>) => (
 		<div>
 			{children}
-			<input type={type} value={value} onChange={(event) => onInput(event)} />
+			<input type={type} value={value} onChange={(event) => onInput?.(event)} />
 		</div>
 	),
 }))
 
 vi.mock("@src/components/common/VSCodeButtonLink", () => ({
-	VSCodeButtonLink: ({ children }: any) => <a>{children}</a>,
+	VSCodeButtonLink: ({ children }: React.ComponentProps<typeof VSCodeButtonLinkComponent>) => <a>{children}</a>,
 }))
 
 // Radix Select renders its content in a portal and needs pointer events JSDOM
 // does not provide, so the mock keeps the controlled value and the option list
 // addressable through plain DOM.
 vi.mock("@src/components/ui", () => ({
-	Select: ({ children, value, onValueChange }: any) => (
-		<select aria-label="prompt-cache-ttl" value={value} onChange={(event) => onValueChange(event.target.value)}>
+	Select: ({ children, value, onValueChange }: React.ComponentProps<typeof Select>) => (
+		<select aria-label="prompt-cache-ttl" value={value} onChange={(event) => onValueChange?.(event.target.value)}>
 			{children}
 		</select>
 	),
-	SelectContent: ({ children }: any) => <>{children}</>,
-	SelectItem: ({ children, value }: any) => <option value={value}>{children}</option>,
+	SelectContent: ({ children }: React.ComponentProps<typeof SelectContent>) => <>{children}</>,
+	SelectItem: ({ children, value }: React.ComponentProps<typeof SelectItem>) => (
+		<option value={value}>{children}</option>
+	),
 	SelectTrigger: () => null,
 	SelectValue: () => null,
 }))
