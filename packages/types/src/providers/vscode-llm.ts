@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import type { ModelInfo } from "../model.js"
+import { type ModelInfo } from "../model.js"
 import { openAiModelInfoSaneDefaults } from "./openai.js"
 
 export const vsCodeLmModelsMessageTypes = [

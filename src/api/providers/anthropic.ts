@@ -32,7 +32,7 @@ import {
 // Pre-sorted list of known Anthropic model IDs (lowercased) by length (descending) for case-insensitive substring matching.
 const ANTHROPIC_MODEL_IDS_SORTED_LOWER = (Object.keys(anthropicModels) as AnthropicModelId[])
 	.map((id) => id.toLowerCase())
-	.sort((a, b) => b.length - a.length) as string[]
+	.sort((a, b) => b.length - a.length)
 
 // Original-case mapping: lowercase key → original AnthropicModelId for lookup.
 const ANTHROPIC_MODEL_ID_LOWER_TO_ORIGINAL = Object.fromEntries(
@@ -405,7 +405,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			return anthropicModels[anthropicDefaultModelId]
 		}
 
-		const originalId = ANTHROPIC_MODEL_ID_LOWER_TO_ORIGINAL[matchedLower] as AnthropicModelId
+		const originalId = ANTHROPIC_MODEL_ID_LOWER_TO_ORIGINAL[matchedLower]
 		return anthropicModels[originalId]
 	}
 

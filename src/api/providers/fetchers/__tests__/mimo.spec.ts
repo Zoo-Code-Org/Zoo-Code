@@ -405,7 +405,7 @@ describe("getMimoModels", () => {
 
 	it("keeps the fetcher allowlist in sync with the persisted settings schema", () => {
 		// The fetcher mirrors the zod literal union from
-		// packages/types/src/provider-settings/mimo.ts because the definition is
+		// packages/types/src/providers/mimo.ts because the definition is
 		// not re-exported publicly. Enumerating the union's literals and asserting
 		// set equality in BOTH directions is what makes drift fail here: a
 		// one-directional "every allowlisted URL parses" check still passes when a

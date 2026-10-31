@@ -22,7 +22,7 @@ export const MIMO_DEFAULT_BASE_URL = "https://token-plan-sgp.xiaomimimo.com/v1"
 
 // Network-boundary allowlist: the same four Xiaomi MiMo endpoints the persisted
 // settings schema validates `mimoBaseUrl` against via a zod union of literals
-// (packages/types/src/provider-settings/mimo.ts). The definition itself is not
+// (packages/types/src/providers/mimo.ts). The definition itself is not
 // re-exported through the @roo-code/types public entry points, so the literals
 // are mirrored here; __tests__/mimo.spec.ts cross-checks this exported set
 // against providerSettingsSchema so the two sources cannot silently drift. The

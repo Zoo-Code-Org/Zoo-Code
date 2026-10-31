@@ -1,4 +1,8 @@
-import type { ModelInfo, ReasoningEffortExtended } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo, type ReasoningEffortExtended } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import { baseProviderSettingsShape, createModelIdAccessor, createProviderDefinition } from "./common.js"
 
 // Opencode "Go" plan — OpenAI-compatible gateway.
 // https://opencode.ai/docs/go/ · base URL: https://opencode.ai/zen/go/v1
@@ -846,3 +850,17 @@ export function opencodeGoResponsesSupportsTemperature(
 export function getOpencodeGoModelInfo(modelId: string): ModelInfo | undefined {
 	return opencodeGoModels[modelId]
 }
+
+export const OPENCODE_GO_MODEL_ID_FIELD = "opencodeGoModelId"
+
+export const opencodeGoProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.opencodeGo,
+	modelIdKey: OPENCODE_GO_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(OPENCODE_GO_MODEL_ID_FIELD),
+	getDefaultModelId: () => opencodeGoDefaultModelId,
+	schema: {
+		...baseProviderSettingsShape,
+		opencodeGoApiKey: z.string().optional(),
+		[OPENCODE_GO_MODEL_ID_FIELD]: z.string().optional(),
+	},
+})
