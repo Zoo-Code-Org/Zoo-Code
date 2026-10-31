@@ -9,6 +9,7 @@ import { ioIntelligenceDefaultModelId, providerIdentifiers } from "@roo-code/typ
 
 import { buildApiHandler } from "../../index"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 import { IOIntelligenceHandler } from "../io-intelligence"
 import { getModels } from "../fetchers/modelCache"
 
@@ -42,7 +43,7 @@ const loggedText = (spy: { mock: { calls: unknown[][] } }) =>
 
 describe("IOIntelligenceHandler", () => {
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		vi.mocked(getModels).mockResolvedValue({
 			"meta-llama/Llama-3.3-70B-Instruct": {
 				maxTokens: 8192,

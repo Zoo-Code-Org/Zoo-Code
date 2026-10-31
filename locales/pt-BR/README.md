@@ -47,11 +47,11 @@ O Zoo Code aproveita a base criada pelo Roo Code e continua ampliando-a com:
 - **Workflows de terminal e edição mais confiáveis** — correções para encerramento prematuro do terminal, race conditions no estado das tarefas, gerenciamento de contexto, edição de diff e uso de ferramentas específicas de cada provider.
 - **Mais controle sobre seu workspace** — gerenciamento de regras, restrições de MCP por modo, controles de caminhos multi-root, opções de reasoning dos modelos e ações para revisar alterações ao concluir uma tarefa.
 
-## Novidades na v3.92.0
+## Novidades na v3.94.0
 
-- ✨ **Escolha de modelos mais rápida e suporte aprimorado a modelos:** Troque de modelo pelo campo de composição do chat. Use Claude Haiku 5.5 no Amazon Bedrock, obtenha recursos mais precisos do Kimi K3 no OpenRouter e use os limites corrigidos do Gemini 4 Argon no Vercel AI Gateway.
-- 🧭 **Fluxos de trabalho de terminal, edição, chat e ambientes remotos mais confiáveis:** Escolha recolher a saída de comandos por padrão, veja falhas de edição mais claras, mantenha visíveis as linhas de raciocínio e de API e evite problemas de inicialização e proxy em espaços de trabalho remotos.
-- 🔌 **Marketplace de MCP expandido:** Conecte o Zoo Code ao AnySearch, Mailtea e Tradehand pelo marketplace de MCP.
+- ✨ **Suporte mais amplo a modelos e provedores:** Use Claude Haiku 5.5 pela Anthropic, envie imagens para modelos VS Code LM compatíveis, ajuste a temperatura para modelos OpenCode Go Responses e cancele solicitações de forma limpa em mais provedores.
+- 🔐 **MCP OAuth mais flexível:** Configure definições estáticas de cliente OAuth, use caminhos de callback personalizados, descubra detalhes de autenticação no `WWW-Authenticate` e veja falhas de callback antes de tentar de novo.
+- 🧭 **Chats mais fluidos e sessões longas:** Renomeie tarefas no histórico, arraste arquivos para o chat sem segurar Shift, reduza a memória retida durante sessões longas e mantenha estáveis os links de subtarefas e as webviews substituídas.
 
 ## O que o Zoo Code pode fazer por VOCÊ?
 

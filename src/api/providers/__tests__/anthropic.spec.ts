@@ -191,6 +191,55 @@ describe("AnthropicHandler", () => {
 			expect(mockCreate).toHaveBeenCalled()
 		})
 
+		it("should adopt the cumulative message_delta output tokens for the final totalCost", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 100,
+								output_tokens: 1,
+							},
+						},
+					},
+					{
+						type: "message_delta",
+						delta: { type: "stop_reason", stop_reason: "end_turn" },
+						usage: { output_tokens: 500 },
+					},
+					{
+						// A delta without a usable count (e.g. 0) must keep the
+						// previously adopted cumulative value.
+						type: "message_delta",
+						delta: { type: "stop_reason", stop_reason: "end_turn" },
+						usage: { output_tokens: 0 },
+					},
+					{
+						type: "message_stop",
+					},
+				]),
+			)
+
+			const stream = handler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			const chunks = await collectStream(stream)
+
+			const usageChunks = chunks.filter(
+				(chunk): chunk is ApiStreamUsageChunk => chunk.type === "usage" && chunk.totalCost !== undefined,
+			)
+			expect(usageChunks).toHaveLength(1)
+
+			const { info } = handler.getModel()
+			expect(usageChunks[0]?.totalCost).toBe(calculateApiCostAnthropic(info, 100, 500).totalCost)
+			expect(usageChunks[0]?.totalCost).not.toBe(calculateApiCostAnthropic(info, 100, 1).totalCost)
+		})
+
 		describe("prompt cache TTL", () => {
 			const threeTurnMessages = () => [
 				{ role: "user" as const, content: [{ type: "text" as const, text: "First message" }] },

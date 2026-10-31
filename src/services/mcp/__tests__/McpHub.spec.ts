@@ -3211,6 +3211,29 @@ describe("McpHub", () => {
 			).resolves.toBeUndefined()
 		})
 
+		it("should record the callback error and disconnect when waitForAuthCode rejects", async () => {
+			vsc.window.showInformationMessage.mockResolvedValueOnce(t("mcp:oauth.flow.authenticateButton"))
+			// The provider reports a callback listener failure, such as a timeout before the user authenticated.
+			mockAuthProvider.waitForAuthCode.mockRejectedValueOnce(new Error("Callback timeout"))
+
+			await mcpHub["_initiateOAuthFlow"](
+				serverName,
+				source,
+				config,
+				mockAuthProvider,
+				mockTransport,
+				mockConnection,
+			)
+
+			expect(mockAuthProvider.openBrowser).toHaveBeenCalledTimes(1)
+			expect(mockAuthProvider.exchangeCodeForTokens).not.toHaveBeenCalled()
+			expect(mockAuthProvider.close).toHaveBeenCalled()
+			expect(mockConnection.server.status).toBe("disconnected")
+			expect(mcpHub["appendErrorMessage"]).toHaveBeenCalledTimes(1)
+			expect(mcpHub["appendErrorMessage"]).toHaveBeenCalledWith(mockConnection, "Callback timeout")
+			expect(mcpHub["connectToServer"]).not.toHaveBeenCalled()
+		})
+
 		it("should disconnect and flag error when Cancel is pressed after Authenticate is clicked", async () => {
 			// Simulate: user clicks Authenticate in the toast, then cancels via the progress bar
 			// while waitForAuthCode is still pending.
