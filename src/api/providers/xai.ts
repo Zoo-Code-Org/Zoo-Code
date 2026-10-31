@@ -63,6 +63,61 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 	}
 
 	/**
+	 * Map a Chat Completions tool choice to the Responses API shape so TypeScript
+	 * validates the provider payload (the APIs use different object forms for the
+	 * named-tool choices: Chat Completions nests the name under `function`/`custom`,
+	 * Responses API puts it at the top level). String options (auto/required/none)
+	 * are identical in both APIs and pass through unchanged. `allowed_tools`
+	 * entries keep their allowlist mode, but Chat Completions function references
+	 * ({ type: "function", function: { name } }) are flattened to the Responses
+	 * API shape ({ type: "function", name }); other entry types pass through
+	 * unchanged.
+	 */
+	private mapToolChoice(
+		toolChoice: NonNullable<OpenAI.Chat.ChatCompletionCreateParams["tool_choice"]>,
+	): OpenAI.Responses.ResponseCreateParamsStreaming["tool_choice"] {
+		if (typeof toolChoice === "string") {
+			return toolChoice
+		}
+		switch (toolChoice.type) {
+			case "function":
+				return { type: "function", name: toolChoice.function.name }
+			case "custom":
+				return { type: "custom", name: toolChoice.custom.name }
+			case "allowed_tools":
+				return {
+					type: "allowed_tools",
+					mode: toolChoice.allowed_tools.mode,
+					tools: toolChoice.allowed_tools.tools.map((entry) => {
+						// Chat Completions allowlist entries nest the function reference
+						// ({ type: "function", function: { name } }); the Responses API
+						// expects the name at the top level ({ type: "function", name }).
+						// The Chat Completions type allows open records, so a function
+						// entry can arrive malformed (missing or non-string name).
+						// Forwarding it unchanged would send the nested Chat Completions
+						// shape to the Responses API, which cannot express that allowlist
+						// entry, and how xAI handles the malformed payload is unspecified;
+						// reject it at the boundary instead.
+						if (entry["type"] === "function") {
+							const functionRef = entry["function"]
+							const name =
+								functionRef != null && typeof functionRef === "object"
+									? (functionRef as Record<string, unknown>)["name"]
+									: undefined
+							if (typeof name !== "string") {
+								throw new Error(
+									'xAI: allowed_tools entry of type "function" is missing a valid function name',
+								)
+							}
+							return { type: "function", name }
+						}
+						return entry
+					}),
+				}
+		}
+	}
+
+	/**
 	 * Convert tools from OpenAI Chat Completions format to Responses API format.
 	 * Chat Completions: { type: "function", function: { name, description, parameters } }
 	 * Responses API: { type: "function", name, description, parameters }
@@ -101,18 +156,11 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 		// Convert directly from Anthropic format to Responses API input format
 		const input = convertToResponsesApiInput(messages)
 		const responseTools = this.mapResponseTools(metadata?.tools)
-
-		// Bridge the external abort signal from request metadata into a per-request
-		// controller so the SDK call is cancelled when the owning request is aborted
-		// (or when the signal is already aborted). Without an external signal the
-		// client-level timeout configured in the constructor remains the only
-		// cancellation mechanism, preserving the existing behavior.
-		const externalAbortSignal = metadata?.abortSignal
-		const { signal: abortSignal, dispose: removeExternalAbortListener } =
-			bridgeExternalAbortSignal(externalAbortSignal)
+		const toolChoice = metadata?.tool_choice
+		const parallelToolCalls = metadata?.parallelToolCalls
 
 		// Build request options
-		const requestBody: Record<string, any> = {
+		const requestBody: OpenAI.Responses.ResponseCreateParamsStreaming = {
 			model: model.id,
 			instructions: systemPrompt,
 			input: input,
@@ -121,19 +169,16 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 			include: ["reasoning.encrypted_content"],
 		}
 
-		if (model.maxTokens) {
-			requestBody.max_output_tokens = model.maxTokens
-		}
-
-		if (model.temperature !== undefined) {
-			requestBody.temperature = model.temperature
-		}
+		// Model params are always resolved by getModel(); send them unconditionally.
+		requestBody.max_output_tokens = model.maxTokens
+		requestBody.temperature = model.temperature
 
 		if (responseTools) {
 			requestBody.tools = responseTools
-			// Cast tool_choice since metadata uses Chat Completions types but Responses API has its own type
-			requestBody.tool_choice = (metadata?.tool_choice ?? "auto") as any
-			requestBody.parallel_tool_calls = metadata?.parallelToolCalls ?? true
+			// Metadata carries a Chat Completions tool choice; the Responses API
+			// uses its own shape, so map it explicitly instead of casting.
+			requestBody.tool_choice = this.mapToolChoice(toolChoice === undefined ? "auto" : toolChoice)
+			requestBody.parallel_tool_calls = parallelToolCalls ?? true
 		}
 
 		// Pass reasoning effort for models that support it (e.g., grok-4.5, grok-3-mini).
@@ -143,11 +188,19 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 			requestBody.reasoning = { effort: model.reasoning.reasoning_effort }
 		}
 
+		// Bridge the external abort signal only after every throw-prone part of the request
+		// construction (notably mapToolChoice, which rejects malformed allowed_tools entries)
+		// has run: the bridge's cleanup covers the request below, not construction failures,
+		// so registering earlier would leak a listener on metadata.abortSignal.
+		const externalAbortSignal = metadata?.abortSignal
+		const { signal: abortSignal, dispose: removeExternalAbortListener } =
+			bridgeExternalAbortSignal(externalAbortSignal)
+
 		try {
 			let stream: AsyncIterable<any>
 			try {
 				stream = (await this.client.responses.create(
-					{ ...requestBody, stream: true } as any,
+					requestBody,
 					abortSignal ? { signal: abortSignal } : undefined,
 				)) as unknown as AsyncIterable<any>
 			} catch (error) {

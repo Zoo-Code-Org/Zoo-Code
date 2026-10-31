@@ -3,7 +3,7 @@
 import type { ProviderSettings } from "@roo-code/types"
 
 import { singleCompletionHandler } from "../single-completion-handler"
-import { buildApiHandler, SingleCompletionHandler } from "../../api"
+import { buildApiHandler, type ApiHandler, type SingleCompletionHandler } from "../../api"
 import { supportPrompt } from "../../shared/support-prompt"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
@@ -12,6 +12,68 @@ vi.mock("../../api", () => ({
 	buildApiHandler: vi.fn(),
 	disposeApiHandler: vi.fn((handler?: { dispose?: () => void }) => handler?.dispose?.()),
 }))
+
+type ApiHandlerDouble = ApiHandler & { dispose?: () => void }
+type CompletionHandlerDouble = ApiHandlerDouble & SingleCompletionHandler
+
+const testModel = {
+	id: "test-model",
+	info: {
+		maxTokens: 4096,
+		contextWindow: 8192,
+		supportsPromptCache: false,
+	},
+} satisfies ReturnType<ApiHandler["getModel"]>
+
+const testModelCacheScope = {
+	urlScoped: false,
+	keyScoped: false,
+	authScoped: false,
+} satisfies ReturnType<ApiHandler["getModelCacheScope"]>
+
+function createApiHandlerDouble(options: { dispose?: () => void } = {}): ApiHandlerDouble {
+	const handler: ApiHandlerDouble = {
+		createMessage: vi.fn(),
+		getModel: vi.fn().mockReturnValue(testModel),
+		countTokens: vi.fn().mockResolvedValue(0),
+		getModelCacheScope: vi.fn().mockReturnValue(testModelCacheScope),
+	}
+
+	if (options.dispose) {
+		handler.dispose = options.dispose
+	}
+
+	return handler
+}
+
+function createCompletionHandlerDouble(
+	options: {
+		completePrompt?: SingleCompletionHandler["completePrompt"]
+		dispose?: () => void
+	} = {},
+): CompletionHandlerDouble {
+	return {
+		...createApiHandlerDouble(options),
+		completePrompt: options.completePrompt ?? vi.fn().mockResolvedValue("Enhanced prompt"),
+	}
+}
+
+function isCompletionHandler(handler: unknown): handler is SingleCompletionHandler {
+	return (
+		typeof handler === "object" &&
+		handler !== null &&
+		"completePrompt" in handler &&
+		typeof handler.completePrompt === "function"
+	)
+}
+
+function requireCompletionHandler(handler: unknown): SingleCompletionHandler {
+	if (!isCompletionHandler(handler)) {
+		throw new Error("Expected a completion-capable API handler")
+	}
+
+	return handler
+}
 
 describe("enhancePrompt", () => {
 	const mockApiConfig: ProviderSettings = {
@@ -25,18 +87,7 @@ describe("enhancePrompt", () => {
 		vi.clearAllMocks()
 
 		// Mock the API handler with a completePrompt method
-		;(buildApiHandler as any).mockReturnValue({
-			completePrompt: vi.fn().mockResolvedValue("Enhanced prompt"),
-			createMessage: vi.fn(),
-			getModel: vi.fn().mockReturnValue({
-				id: "test-model",
-				info: {
-					maxTokens: 4096,
-					contextWindow: 8192,
-					supportsPromptCache: false,
-				},
-			}),
-		} as unknown as SingleCompletionHandler)
+		vi.mocked(buildApiHandler).mockReturnValue(createCompletionHandlerDouble())
 	})
 
 	it("enhances prompt using default enhancement prompt when no custom prompt provided", async () => {
@@ -44,16 +95,19 @@ describe("enhancePrompt", () => {
 
 		expect(result).toBe("Enhanced prompt")
 		const handler = buildApiHandler(mockApiConfig)
-		expect((handler as any).completePrompt).toHaveBeenCalledWith(`Test prompt`, undefined)
+		expect(requireCompletionHandler(handler).completePrompt).toHaveBeenCalledWith(`Test prompt`, undefined)
 	})
 
 	it("disposes each handler it builds, after success and after failure", async () => {
-		const succeeding = { completePrompt: vi.fn().mockResolvedValue("ok"), dispose: vi.fn() }
-		const failing = { completePrompt: vi.fn().mockRejectedValue(new Error("boom")), dispose: vi.fn() }
-		type Handler = ReturnType<typeof buildApiHandler>
-		vi.mocked(buildApiHandler)
-			.mockReturnValueOnce(succeeding as unknown as Handler)
-			.mockReturnValueOnce(failing as unknown as Handler)
+		const succeeding = createCompletionHandlerDouble({
+			completePrompt: vi.fn().mockResolvedValue("ok"),
+			dispose: vi.fn(),
+		})
+		const failing = createCompletionHandlerDouble({
+			completePrompt: vi.fn().mockRejectedValue(new Error("boom")),
+			dispose: vi.fn(),
+		})
+		vi.mocked(buildApiHandler).mockReturnValueOnce(succeeding).mockReturnValueOnce(failing)
 
 		await expect(singleCompletionHandler(mockApiConfig, "a")).resolves.toBe("ok")
 		expect(succeeding.dispose).toHaveBeenCalledOnce()
@@ -65,8 +119,8 @@ describe("enhancePrompt", () => {
 	})
 
 	it("disposes the handler when the provider does not support prompt enhancement", async () => {
-		const unsupported = { createMessage: vi.fn(), dispose: vi.fn() }
-		vi.mocked(buildApiHandler).mockReturnValueOnce(unsupported as unknown as ReturnType<typeof buildApiHandler>)
+		const unsupported = createApiHandlerDouble({ dispose: vi.fn() })
+		vi.mocked(buildApiHandler).mockReturnValueOnce(unsupported)
 
 		await expect(singleCompletionHandler(mockApiConfig, "a")).rejects.toThrow(
 			"The selected API provider does not support prompt enhancement",
@@ -93,7 +147,10 @@ describe("enhancePrompt", () => {
 
 		expect(result).toBe("Enhanced prompt")
 		const handler = buildApiHandler(mockApiConfig)
-		expect((handler as any).completePrompt).toHaveBeenCalledWith(`${customEnhancePrompt}\n\nTest prompt`, undefined)
+		expect(requireCompletionHandler(handler).completePrompt).toHaveBeenCalledWith(
+			`${customEnhancePrompt}\n\nTest prompt`,
+			undefined,
+		)
 	})
 
 	it("throws error for empty prompt input", async () => {
@@ -107,18 +164,7 @@ describe("enhancePrompt", () => {
 	})
 
 	it("throws error for API provider that does not support prompt enhancement", async () => {
-		;(buildApiHandler as any).mockReturnValue({
-			// No completePrompt method
-			createMessage: vi.fn(),
-			getModel: vi.fn().mockReturnValue({
-				id: "test-model",
-				info: {
-					maxTokens: 4096,
-					contextWindow: 8192,
-					supportsPromptCache: false,
-				},
-			}),
-		})
+		vi.mocked(buildApiHandler).mockReturnValue(createApiHandlerDouble())
 
 		await expect(singleCompletionHandler(mockApiConfig, "Test prompt")).rejects.toThrow(
 			"The selected API provider does not support prompt enhancement",
@@ -134,18 +180,7 @@ describe("enhancePrompt", () => {
 		}
 
 		// Mock successful enhancement
-		;(buildApiHandler as any).mockReturnValue({
-			completePrompt: vi.fn().mockResolvedValue("Enhanced prompt"),
-			createMessage: vi.fn(),
-			getModel: vi.fn().mockReturnValue({
-				id: "test-model",
-				info: {
-					maxTokens: 4096,
-					contextWindow: 8192,
-					supportsPromptCache: false,
-				},
-			}),
-		} as unknown as SingleCompletionHandler)
+		vi.mocked(buildApiHandler).mockReturnValue(createCompletionHandlerDouble())
 
 		const result = await singleCompletionHandler(openRouterConfig, "Test prompt")
 
@@ -154,18 +189,11 @@ describe("enhancePrompt", () => {
 	})
 
 	it("propagates API errors", async () => {
-		;(buildApiHandler as any).mockReturnValue({
-			completePrompt: vi.fn().mockRejectedValue(new Error("API Error")),
-			createMessage: vi.fn(),
-			getModel: vi.fn().mockReturnValue({
-				id: "test-model",
-				info: {
-					maxTokens: 4096,
-					contextWindow: 8192,
-					supportsPromptCache: false,
-				},
+		vi.mocked(buildApiHandler).mockReturnValue(
+			createCompletionHandlerDouble({
+				completePrompt: vi.fn().mockRejectedValue(new Error("API Error")),
 			}),
-		} as unknown as SingleCompletionHandler)
+		)
 
 		await expect(singleCompletionHandler(mockApiConfig, "Test prompt")).rejects.toThrow("API Error")
 	})

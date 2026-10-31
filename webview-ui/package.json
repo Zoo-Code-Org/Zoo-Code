@@ -38,7 +38,6 @@
 		"@vscode/codicons": "^0.0.45",
 		"@vscode/webview-ui-toolkit": "^1.4.0",
 		"ansi-to-html": "^0.7.2",
-		"axios": "^1.18.1",
 		"class-variance-authority": "^0.7.1",
 		"clsx": "^2.1.1",
 		"cmdk": "^1.0.0",
