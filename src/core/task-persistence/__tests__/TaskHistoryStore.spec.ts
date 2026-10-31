@@ -53,6 +53,33 @@ describe("TaskHistoryStore", () => {
 	})
 
 	describe("initialize()", () => {
+		it("reports isInitialized only after the scan completes", async () => {
+			// Hold the reconciliation scan so the in-flight state can be observed.
+			let releaseScan!: () => void
+			const scanGate = new Promise<void>((resolve) => (releaseScan = resolve))
+			const reconcile = store["reconcile"].bind(store)
+			store["reconcile"] = async (...args) => {
+				await scanGate
+				return reconcile(...args)
+			}
+			const settled = vi.fn()
+			void store.initialized.then(settled)
+
+			expect(store.isInitialized).toBe(false)
+
+			const initializing = store.initialize()
+			await Promise.resolve()
+			expect(store.isInitialized).toBe(false)
+			expect(settled).not.toHaveBeenCalled()
+
+			releaseScan()
+			await initializing
+
+			expect(store.isInitialized).toBe(true)
+			await expect(store.initialized).resolves.toBeUndefined()
+			expect(settled).toHaveBeenCalledTimes(1)
+		})
+
 		it("initializes from empty state (no index, no task dirs)", async () => {
 			await store.initialize()
 			expect(store.getAll()).toEqual([])

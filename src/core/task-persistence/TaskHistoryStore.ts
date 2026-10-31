@@ -94,6 +94,12 @@ export class TaskHistoryStore {
 	 */
 	public readonly initialized: Promise<void>
 	private resolveInitialized!: () => void
+	private _isInitialized = false
+
+	/** True once the initial scan has finished, so reads no longer need to wait on `initialized`. */
+	get isInitialized(): boolean {
+		return this._isInitialized
+	}
 
 	/** Periodic reconciliation interval in milliseconds. */
 	private static readonly RECONCILE_INTERVAL_MS = 5 * 60 * 1000
@@ -140,6 +146,7 @@ export class TaskHistoryStore {
 			this.startPeriodicReconciliation()
 		} finally {
 			// Mark initialization as complete so callers awaiting `initialized` can proceed
+			this._isInitialized = true
 			this.resolveInitialized()
 		}
 	}

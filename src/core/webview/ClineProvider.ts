@@ -2793,8 +2793,11 @@ export class ClineProvider
 	}
 
 	async getStateToPostToWebview({ includeTaskHistory = true }: GetStateOptions = {}): Promise<ExtensionState> {
-		// Ensure the store is initialized before reading task history
-		await this.taskHistoryStore.initialized
+		// Only wait for the store when task history is requested, so a slow scan of a large
+		// history cannot keep the webview from receiving its first state.
+		if (includeTaskHistory) {
+			await this.taskHistoryStore.initialized
+		}
 
 		const {
 			apiConfiguration,

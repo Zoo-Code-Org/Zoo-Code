@@ -11,6 +11,7 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { Task } from "../../task/Task"
 import { ProfileValidator } from "../../../shared/ProfileValidator"
 import { ClineProvider } from "../ClineProvider"
+import { webviewMessageHandler } from "../webviewMessageHandler"
 
 // Mock setup
 vi.mock("p-wait-for", () => ({
@@ -923,6 +924,80 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(state.taskHistory.some((item: HistoryItem) => item.workspace === "/path/to/workspace2")).toBe(true)
 			expect(state.taskHistory.some((item: HistoryItem) => item.workspace === "/different/workspace")).toBe(true)
 		})
+	})
+
+	describe("state posts while the task history scan is pending", () => {
+		const postedStates = () =>
+			findCallsByType(mockPostMessage.mock.calls, "state").map(([message]) => message.state)
+
+		// Makes the already-loaded store look like it is still scanning until `release` is called.
+		function holdTaskHistoryScan() {
+			const store = provider.taskHistoryStore
+			let resolveGate!: () => void
+			const gate = new Promise<void>((resolve) => (resolveGate = resolve))
+			store["_isInitialized"] = false
+			Object.defineProperty(store, "initialized", { value: gate })
+
+			return () => {
+				store["_isInitialized"] = true
+				resolveGate()
+			}
+		}
+
+		it("launches without history, then posts the full state with history once the scan completes", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.updateTaskHistory(createHistoryItem({ id: "launch-task", task: "Launch task" }), {
+				broadcast: false,
+			})
+			// The module-level WorkspaceTracker mock returns undefined; the launch handler chains `.catch` on it.
+			provider.workspaceTracker!.initializeFilePaths = vi.fn().mockResolvedValue(undefined)
+			const release = holdTaskHistoryScan()
+			mockPostMessage.mockClear()
+
+			await webviewMessageHandler(provider, { type: "webviewDidLaunch" })
+
+			expect(postedStates()).toHaveLength(1)
+			expect(postedStates()[0]).not.toHaveProperty("taskHistory")
+
+			release()
+			await vi.waitFor(() => expect(postedStates()).toHaveLength(2))
+
+			expect(postedStates()[1].taskHistory).toEqual(
+				expect.arrayContaining([expect.objectContaining({ id: "launch-task" })]),
+			)
+		})
+
+		it.each([
+			{ scanComplete: false, expectHistory: false },
+			{ scanComplete: true, expectHistory: true },
+		])(
+			"updateSettings posts state with history: $expectHistory when the scan is complete: $scanComplete",
+			async ({ scanComplete, expectHistory }) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				await provider.updateTaskHistory(createHistoryItem({ id: "settings-task", task: "Settings task" }), {
+					broadcast: false,
+				})
+				if (!scanComplete) {
+					holdTaskHistoryScan()
+				}
+				mockPostMessage.mockClear()
+
+				await webviewMessageHandler(provider, {
+					type: "updateSettings",
+					updatedSettings: { soundEnabled: true },
+				})
+
+				expect(postedStates()).toHaveLength(1)
+				const state = postedStates()[0]
+				if (expectHistory) {
+					expect(state.taskHistory).toEqual(
+						expect.arrayContaining([expect.objectContaining({ id: "settings-task" })]),
+					)
+				} else {
+					expect(state).not.toHaveProperty("taskHistory")
+				}
+			},
+		)
 	})
 
 	describe("taskHistory write lock (mutex)", () => {
