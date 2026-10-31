@@ -37,6 +37,11 @@ export interface AgentClient {
 // The adapter owns processes, sockets, files and credentials. The controller
 // only sees these operations, so tests can drive it with synthetic IPC and a
 // deterministic clock.
+export interface FinalWorkspaceSnapshot {
+	files: readonly AgentFixtureWorkspaceFile[]
+	truncated: boolean
+}
+
 export interface AgentRuntime {
 	launch(workspaceFiles: readonly AgentFixtureWorkspaceFile[]): Promise<AgentHost>
 	connect(): AgentClient
@@ -46,6 +51,10 @@ export interface AgentRuntime {
 	now(): number
 	pause(ms: number): Promise<void>
 	readIdentity?(): Promise<TraceRunIdentity>
+	// Reads the final workspace as bounded file data. Graders consume it from a
+	// fresh copy; the launcher's scratch paths never leak. Capture must happen
+	// before cleanup removes the directory.
+	readFinalWorkspace?(): Promise<FinalWorkspaceSnapshot>
 }
 
 export interface AgentRunObservers {
@@ -75,6 +84,24 @@ export interface AgentRunResult {
 const EVENT_BUFFER_LIMIT = 256
 
 type BufferedEvent = { kind: "parsed"; event: TaskEvent }
+
+// True when the event carries the model's final, non-partial completion_result
+// say message for the accepted task. This is model output, not the
+// accepted-completion event. The headless stop policy in coding-run.ts uses
+// the same predicate as the trace's completionMessageSeen refinement.
+export const isFinalCompletionMessage = (event: TaskEvent): boolean => {
+	if (event.eventName !== RooCodeEventName.Message) return false
+	const message = event.payload[0]?.message
+	if (typeof message !== "object" || message === null) return false
+	const record = message as { type?: unknown; say?: unknown; partial?: unknown; text?: unknown }
+	return (
+		record.type === "say" &&
+		record.say === "completion_result" &&
+		record.partial !== true &&
+		typeof record.text === "string" &&
+		record.text.trim().length > 0
+	)
+}
 
 const traceSettings = (fixtureProjection: Record<string, unknown>, credential: string): AgentTrace["settings"] => {
 	try {
@@ -166,17 +193,7 @@ export async function runAgentFixture(runtime: AgentRuntime, options: AgentRunOp
 			return
 		}
 		accountant.observe(event)
-		if (event.eventName === RooCodeEventName.Message) {
-			const message = event.payload[0].message
-			if (
-				message.type === "say" &&
-				message.say === "completion_result" &&
-				message.partial !== true &&
-				typeof message.text === "string" &&
-				message.text.trim().length > 0
-			)
-				completionMessageSeen = true
-		}
+		if (isFinalCompletionMessage(event)) completionMessageSeen = true
 		if (event.eventName === RooCodeEventName.TaskCompleted) completedSeen = true
 		options.observers?.onAcceptedEvent?.(event, acceptedTaskId)
 	}
@@ -285,7 +302,12 @@ export async function runAgentFixture(runtime: AgentRuntime, options: AgentRunOp
 						)
 						runSessionLost = sessionLost
 						timings.taskRunMs = runtime.now() - runStart
-						if (completedSeen && !runSessionLost) {
+						const stopped = !runSessionLost && !completedSeen && options.observers?.shouldStop?.() === true
+						// The model's final completion message already produced
+						// reportable usage, so a stop issued after it gets the
+						// same bounded drain a confirmed completion gets. A
+						// plain stop, a timeout, and a session loss get none.
+						if ((completedSeen || (stopped && completionMessageSeen)) && !runSessionLost) {
 							// Fixed bound; ends early only on session loss.
 							const drainStart = runtime.now()
 							await until(() => false, fixture.limits.usageDrainMs)
@@ -295,7 +317,6 @@ export async function runAgentFixture(runtime: AgentRuntime, options: AgentRunOp
 							// accounting must carry the caveat.
 							lostDuringDrain = sessionLost
 						}
-						const stopped = !runSessionLost && !completedSeen && options.observers?.shouldStop?.() === true
 						if (completedSeen) {
 							// A confirmed accepted completion outranks a stop
 							// request or a loss observed in the same window.

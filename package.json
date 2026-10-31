@@ -19,6 +19,8 @@
 		"solheim-smoke:check-types": "tsc -p scripts/solheim-smoke/tsconfig.json",
 		"test:agent-evals:unit": "node --import tsx --test scripts/agent-evals/*.test.ts",
 		"agent-evals:check-types": "tsc -p scripts/agent-evals/tsconfig.json",
+		"coding-evals:side": "node --import tsx scripts/agent-evals/coding-side.mts",
+		"coding-evals:compare": "node --import tsx scripts/agent-evals/coding-compare.mts",
 		"test:mutation-ci": "node --test scripts/stryker-diff.test.mjs",
 		"lifecycle:model-check": "tsx scripts/check-task-lifecycle.ts && tsx scripts/check-task-store-concurrency.ts && tsx scripts/check-provider-handoff-scheduler.ts && pnpm cleanup-protocol:model-check && pnpm parser-scope:model-check && tsx scripts/check-completion-persistence.ts && tsx scripts/check-delegated-mode-readers.ts && pnpm tool-turn:model-check",
 		"fanout-protocol:model-check": "tsx scripts/check-task-fanout-protocol.ts",
