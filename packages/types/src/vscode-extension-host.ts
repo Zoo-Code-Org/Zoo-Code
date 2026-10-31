@@ -625,9 +625,7 @@ export interface WebviewMessage {
 		| "getDismissedUpsells"
 		| "openMarkdownPreview"
 		| "updateSettings"
-		| "allowedCommands"
 		| "getTaskWithAggregatedCosts"
-		| "deniedCommands"
 		| "openDebugApiHistory"
 		| "openDebugUiHistory"
 		| "downloadErrorDiagnostics"
@@ -684,7 +682,6 @@ export interface WebviewMessage {
 	stepIndex?: number
 	isLaunchAction?: boolean
 	forceShow?: boolean
-	commands?: string[]
 	audioType?: AudioType
 	serverName?: string
 	toolName?: string
