@@ -3,6 +3,7 @@
 	"compilerOptions": {
 		"module": "esnext",
 		"moduleResolution": "Bundler",
+		// Scripts import src code. Match the src package settings so the root check does not report src errors.
 		"noUncheckedIndexedAccess": false,
 		"types": ["node"],
 		"useUnknownInCatchVariables": false

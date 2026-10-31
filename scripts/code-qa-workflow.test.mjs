@@ -136,3 +136,15 @@ describe("Knip quality gate", () => {
 		assert.doesNotMatch(job, /continue-on-error|if:/)
 	})
 })
+
+describe("Code QA dependency install", () => {
+	it("installs every job with a frozen lockfile", () => {
+		const setups = workflow.match(/uses: \.\/\.github\/actions\/setup-node-pnpm\n/g) ?? []
+		const frozen =
+			workflow.match(
+				/uses: \.\/\.github\/actions\/setup-node-pnpm\n\s+with:\n\s+install-args: "--frozen-lockfile"\n/g,
+			) ?? []
+		assert.ok(setups.length > 0, "missing setup-node-pnpm steps")
+		assert.equal(frozen.length, setups.length)
+	})
+})
