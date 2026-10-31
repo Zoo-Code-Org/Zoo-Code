@@ -101,8 +101,9 @@ import { SkillsManager } from "../../services/skills/SkillsManager"
 import { fileExistsAtPath } from "../../utils/fs"
 import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
 import { getWorkspaceGitInfo } from "../../utils/git"
-import { getWorkspacePath } from "../../utils/path"
+import { arePathsEqual, getWorkspacePath } from "../../utils/path"
 import { OrganizationAllowListViolationError } from "../../utils/errors"
+import { getTaskDirectoryPath } from "../../utils/storage"
 
 import { setPanel } from "../../activate/registerCommands"
 
@@ -131,7 +132,7 @@ import {
 	interruptDelegatedChild,
 	LifecycleTransitionError,
 } from "../task-persistence"
-import { readTaskMessages } from "../task-persistence/taskMessages"
+import { readTaskMessages, updateTaskMessages } from "../task-persistence/taskMessages"
 import { getNonce } from "./getNonce"
 import { getUri } from "./getUri"
 import { omitOriginalContentFromExtensionMessage } from "./stripOriginalContent"
@@ -2480,10 +2481,191 @@ export class ClineProvider
 		if (id !== this.getCurrentTask()?.taskId) {
 			// Non-current task.
 			const { historyItem } = await this.getTaskWithId(id)
-			await this.createTaskWithHistoryItem(historyItem) // Clears existing task.
+			const preparedHistoryItem = await this.prepareHistoryItemForResume(historyItem)
+			if (!preparedHistoryItem) {
+				return
+			}
+			await this.createTaskWithHistoryItem(preparedHistoryItem) // Clears existing task.
 		}
 
 		await this.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
+	}
+
+	public async prepareHistoryItemForResume<T extends HistoryItem>(historyItem: T): Promise<T | undefined> {
+		const currentWorkspace = this.cwd
+		const originalWorkspace = historyItem.workspace
+
+		// The CLI has no modal to answer, and its host would wait forever for a task that is never created.
+		if (process.env.ROO_CLI_RUNTIME === "1") {
+			return historyItem
+		}
+
+		if (!currentWorkspace || !originalWorkspace || arePathsEqual(currentWorkspace, originalWorkspace)) {
+			return historyItem
+		}
+
+		// A live Task owns this history and would re-add checkpoint rows or rewrite its workspace after a reset.
+		if (this.isTaskLiveInAnyProvider(historyItem.id)) {
+			return historyItem
+		}
+
+		const useCurrentWorkspace = { title: "Use Current Workspace" }
+		const openOriginalWorkspace = { title: "Open Original Workspace" }
+		const selection = await vscode.window.showWarningMessage(
+			`This conversation was created in "${originalWorkspace}", but the current workspace is "${currentWorkspace}". ` +
+				"Choose where to continue. Using the current workspace resets checkpoints created in the original workspace.",
+			{ modal: true },
+			useCurrentWorkspace,
+			openOriginalWorkspace,
+		)
+
+		if (selection?.title === openOriginalWorkspace.title) {
+			await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(originalWorkspace), {
+				forceNewWindow: true,
+			})
+			return undefined
+		}
+
+		if (selection?.title !== useCurrentWorkspace.title) {
+			return undefined
+		}
+
+		// The modal has no timeout, so the task may have been opened elsewhere while it was shown.
+		if (this.isTaskLiveInAnyProvider(historyItem.id)) {
+			this.log(`[prepareHistoryItemForResume] Task ${historyItem.id} became live during workspace selection`)
+			return undefined
+		}
+
+		const updatedHistoryItem = { ...historyItem, workspace: currentWorkspace }
+		const persisted = await this.resetTaskCheckpointsForWorkspaceChange(historyItem, updatedHistoryItem)
+		// Resume from the record as persisted now, not the snapshot read before the prompt.
+		return { ...historyItem, ...persisted, workspace: currentWorkspace }
+	}
+
+	private isTaskLiveInAnyProvider(taskId: string): boolean {
+		return ClineProvider.getAllInstances().some((provider) => provider.taskRegistry.getById(taskId) !== undefined)
+	}
+
+	/**
+	 * Persist only `workspace`, read-modify-writing the stored record so fields that changed meanwhile
+	 * (status, pendingAction, ...) are never overwritten from a stale snapshot. With `expectedWorkspace`,
+	 * the stored record is left unchanged unless it still has that workspace.
+	 */
+	private async setTaskHistoryWorkspace(
+		historyItem: HistoryItem,
+		workspace: string | undefined,
+		expectedWorkspace?: string,
+	): Promise<HistoryItem | undefined> {
+		const taskId = historyItem.id
+		if (!this.taskHistoryStore.get(taskId)) {
+			// Legacy fallback before the store is initialized: there is no stored record to preserve.
+			if (expectedWorkspace !== undefined) return undefined
+			await this.updateTaskHistory({ ...historyItem, workspace })
+			return this.taskHistoryStore.get(taskId)
+		}
+
+		let changed = false
+		await this.taskHistoryStore.atomicReadAndUpdate(taskId, (current) => {
+			if (expectedWorkspace !== undefined && current.workspace !== expectedWorkspace) return current
+			changed = current.workspace !== workspace
+			return { ...current, workspace }
+		})
+		this.recentTasksCache = undefined
+		const updated = this.taskHistoryStore.get(taskId)
+		if (changed && updated && this.isViewLaunched) {
+			await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updated })
+		}
+		return updated
+	}
+
+	private async resetTaskCheckpointsForWorkspaceChange(
+		originalHistoryItem: HistoryItem,
+		updatedHistoryItem: HistoryItem,
+	): Promise<HistoryItem | undefined> {
+		const taskId = originalHistoryItem.id
+		const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
+		let removedCheckpoints: ClineMessage[] = []
+		let persisted: HistoryItem | undefined
+		const taskDir = await getTaskDirectoryPath(globalStoragePath, taskId)
+		const checkpointsDir = path.join(taskDir, "checkpoints")
+		const checkpointBackupDir = path.join(taskDir, `checkpoints.workspace-change-${crypto.randomUUID()}`)
+		let checkpointDirectoryStaged = false
+
+		try {
+			await fs.rename(checkpointsDir, checkpointBackupDir)
+			checkpointDirectoryStaged = true
+		} catch (error) {
+			if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+				throw error
+			}
+		}
+
+		try {
+			// History migration can create a record for a task directory that has no ui_messages.json;
+			// that is an empty set of checkpoint rows, not an error. Invalid existing content still rejects.
+			if (await fileExistsAtPath(path.join(taskDir, GlobalFileNames.uiMessages))) {
+				await updateTaskMessages({
+					taskId,
+					globalStoragePath,
+					update: (messages) => {
+						removedCheckpoints = messages.filter(
+							(message) => message.type === "say" && message.say === "checkpoint_saved",
+						)
+						return messages.filter((message) => !removedCheckpoints.includes(message))
+					},
+				})
+			}
+			persisted = await this.setTaskHistoryWorkspace(originalHistoryItem, updatedHistoryItem.workspace)
+		} catch (error) {
+			if (removedCheckpoints.length > 0) {
+				try {
+					// Restore only the removed rows; never replace intervening message writes.
+					await saveTaskMessages({ messages: removedCheckpoints, taskId, globalStoragePath, merge: true })
+				} catch (rollbackError) {
+					this.log(
+						`[resetTaskCheckpointsForWorkspaceChange] Failed to restore messages for ${taskId}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+					)
+				}
+			}
+			if (checkpointDirectoryStaged) {
+				try {
+					await fs.rename(checkpointBackupDir, checkpointsDir)
+				} catch (rollbackError) {
+					this.log(
+						`[resetTaskCheckpointsForWorkspaceChange] Failed to restore checkpoints for ${taskId} from ${checkpointBackupDir}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+					)
+				}
+			}
+			try {
+				// Revert only the workspace, and only if no newer write has moved it again.
+				await this.setTaskHistoryWorkspace(
+					originalHistoryItem,
+					originalHistoryItem.workspace,
+					updatedHistoryItem.workspace,
+				)
+			} catch (rollbackError) {
+				this.log(
+					`[resetTaskCheckpointsForWorkspaceChange] Failed to restore history for ${taskId}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+				)
+			}
+			throw error
+		}
+
+		if (checkpointDirectoryStaged) {
+			for (let attempt = 0; attempt < 3; attempt++) {
+				try {
+					await fs.rm(checkpointBackupDir, { recursive: true, force: true })
+					break
+				} catch (error) {
+					this.log(
+						`[resetTaskCheckpointsForWorkspaceChange] Failed to remove checkpoint backup ${checkpointBackupDir}: ${error instanceof Error ? error.message : String(error)}`,
+					)
+					if (attempt < 2) await delay(100)
+				}
+			}
+		}
+
+		return persisted
 	}
 
 	async exportTaskWithId(id: string) {
