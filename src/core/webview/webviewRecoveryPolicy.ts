@@ -73,7 +73,23 @@ export function recoveryWarningAction(
 	choice: string | undefined,
 	disposed: boolean,
 	sameHeartbeat: boolean,
-): "reload" | "logs" | "none" {
+	sameGeneration = true,
+): "reload" | "retry" | "logs" | "none" {
 	if (choice === "Show Logs") return "logs"
-	return choice === "Reload Window" && !disposed && sameHeartbeat ? "reload" : "none"
+	if (disposed || !sameHeartbeat || !sameGeneration) return "none"
+	if (choice === "Retry Interface Recovery") return "retry"
+	return choice === "Reload Window" ? "reload" : "none"
+}
+
+export function isRecoveryGenerationCurrent(captured: number, current: number): boolean {
+	return captured === current
+}
+
+export function beginExplicitRecovery(generation: number): {
+	generation: number
+	attempts: number
+	reported: boolean
+	stopLogged: boolean
+} {
+	return { generation: generation + 1, attempts: 1, reported: false, stopLogged: false }
 }

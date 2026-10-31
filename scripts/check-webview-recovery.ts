@@ -16,7 +16,7 @@ interface Node<S> {
 	depth: number
 }
 const MAX_STATES = 100_000
-const MAX_DEPTH = 60
+const MAX_DEPTH = 100
 
 function explore<S>(
 	name: string,
@@ -63,6 +63,10 @@ interface Ownership {
 	visible: boolean
 	owner: number | undefined
 	completed: boolean
+	generation: number
+	hostCompleted: boolean
+	hostCompletedAfterRetry: boolean
+	hostBusy: boolean
 	completionCase: "pending" | "valid" | "disposed" | "replaced" | "epoch" | "heartbeat" | "hidden"
 	fault?: string
 }
@@ -78,12 +82,33 @@ function ownershipCheck(p: Policy): void {
 			visible: true,
 			owner: 0,
 			completed: false,
+			generation: 0,
+			hostCompleted: false,
+			hostCompletedAfterRetry: false,
+			hostBusy: true,
 			completionCase: "pending",
 		},
 		(state) => {
 			const steps: Step<Ownership>[] = []
 			const add = (action: string, update: Partial<Ownership>) =>
 				steps.push({ action, state: { ...state, ...update } })
+			if (state.generation === 0)
+				add("explicit-retry-invalidates-old-work", {
+					generation: 1,
+					epochMatches: false,
+					owner: 1,
+					hostBusy: true,
+				})
+			if (!state.hostCompleted) {
+				const owns = p.isRecoveryGenerationCurrent(0, state.generation)
+				add("complete-old-host-command", {
+					hostCompleted: true,
+					hostCompletedAfterRetry: state.generation === 1,
+					hostBusy: owns ? false : state.hostBusy,
+					fault:
+						owns !== (state.generation === 0) ? "old host command changed a renewed incident" : undefined,
+				})
+			}
 			if (!state.disposed) add("dispose", { disposed: true })
 			if (state.isCurrent)
 				add("replace-and-start-new-recovery", { isCurrent: false, epochMatches: false, owner: 1 })
@@ -122,6 +147,7 @@ function ownershipCheck(p: Policy): void {
 		(s) => {
 			assert(!s.fault, s.fault)
 			const marks: string[] = []
+			if (s.hostCompletedAfterRetry && s.hostBusy) marks.push("old-host-completion-preserves-new-owner")
 			if (s.completionCase === "valid") marks.push("valid-html-commit")
 			if (s.completionCase === "epoch") marks.push("epoch-invalidates-html")
 			if (s.completionCase === "replaced" && s.owner === 1)
@@ -133,6 +159,7 @@ function ownershipCheck(p: Policy): void {
 		},
 	)
 	for (const mark of [
+		"old-host-completion-preserves-new-owner",
 		"valid-html-commit",
 		"epoch-invalidates-html",
 		"replacement-owner-survives-old-completion",
@@ -162,6 +189,10 @@ interface Host {
 	manualOpened: boolean
 	healthStarted: boolean
 	healthReset: boolean
+	generation: number
+	explicitRetried: boolean
+	retriedAfterAmbiguous: boolean
+	ambiguousOpened: boolean
 	fault?: string
 }
 
@@ -184,6 +215,10 @@ function hostCheck(kind: "sidebar" | "tab", p: Policy): void {
 		manualOpened: false,
 		healthStarted: false,
 		healthReset: false,
+		generation: 0,
+		explicitRetried: false,
+		retriedAfterAmbiguous: false,
+		ambiguousOpened: false,
 	}
 	const reached = explore<Host>(
 		`${kind} host`,
@@ -208,14 +243,15 @@ function hostCheck(kind: "sidebar" | "tab", p: Policy): void {
 							: undefined,
 				}
 			}
-			const publish = () => {
+			const publish = (manual = false) => {
 				const recovering = p.preservesRecoveryIncident(s.busy, s.pending)
-				add("publish-replacement", {
+				add(manual ? "manual-open-with-pending-marker" : "publish-replacement", {
 					phase: "initialize",
 					view: "replacement",
 					watchdog: false,
 					initialized: false,
 					recoveringResolve: recovering,
+					ambiguousOpened: s.ambiguousOpened || manual,
 					pending: false,
 					attempts: recovering ? s.attempts : 0,
 					fault: !recovering
@@ -273,6 +309,7 @@ function hostCheck(kind: "sidebar" | "tab", p: Policy): void {
 			}
 			if (s.phase === "wait") {
 				publish()
+				if (s.waitExpired && !s.ambiguousOpened) publish(true)
 				if (!s.waitExpired)
 					add("timeout-before-publication", { ...failure(true), busy: false, waitExpired: true })
 			}
@@ -293,6 +330,35 @@ function hostCheck(kind: "sidebar" | "tab", p: Policy): void {
 				})
 				if (kind === "sidebar" && !s.waitExpired)
 					add("timeout-after-publication", { ...failure(false), busy: false, waitExpired: true })
+			}
+			if (!s.explicitRetried) {
+				const fresh = p.beginExplicitRecovery(s.generation)
+				add("explicit-user-retry", {
+					generation: fresh.generation,
+					explicitRetried: true,
+					retriedAfterAmbiguous: s.ambiguousOpened,
+					attempts: fresh.attempts,
+					reported: fresh.reported,
+					stopLogged: fresh.stopLogged,
+					terminalLogs: 0,
+					retryWarned: false,
+					busy: true,
+					pending: kind === "sidebar",
+					healthStarted: false,
+					waitExpired: false,
+					phase: kind === "tab" ? "initialize" : s.view === "none" ? "focus" : "remove",
+					view: kind === "tab" ? "replacement" : s.view,
+					initialized: kind === "tab" ? false : s.initialized,
+					watchdog: kind === "tab" ? false : s.watchdog,
+					recoveringResolve: kind === "tab" || s.recoveringResolve,
+					fault:
+						fresh.generation !== s.generation + 1 ||
+						fresh.attempts !== 1 ||
+						fresh.reported ||
+						fresh.stopLogged
+							? "explicit retry failed to renew incident"
+							: undefined,
+				})
 			}
 			if (s.phase === "idle" && s.attempts === 3) add("exhaust-budget", { ...failure(true), phase: "stopped" })
 			if (s.phase === "stopped" && !s.pending && !s.manualOpened) {
@@ -353,6 +419,10 @@ function hostCheck(kind: "sidebar" | "tab", p: Policy): void {
 			if (s.phase === "idle")
 				assert(s.watchdog && !s.busy, "settled recovery lost watchdog or retained ownership")
 			const marks: string[] = []
+			if (s.ambiguousOpened && !s.explicitRetried && s.attempts === 3 && s.recoveringResolve)
+				marks.push("ambiguous-reopen-preserves-incident")
+			if (s.retriedAfterAmbiguous && s.attempts === 1 && s.generation === 1)
+				marks.push("explicit-retry-after-ambiguous-reopen")
 			if (s.retryWarned && s.stopLogged && s.terminalLogs === 1) marks.push("terminal-stop-after-retry-warning")
 			if (s.phase === "idle" && !s.initialized && s.attempts === 1) marks.push("initialization-failure-retryable")
 			if (s.phase === "stopped" && s.attempts === 3 && !s.initialized && s.view === "replacement")
@@ -377,10 +447,13 @@ function hostCheck(kind: "sidebar" | "tab", p: Policy): void {
 			"published-timeout-keeps-attempts",
 			"late-publication-preserves-cap",
 			"manual-open-after-focus-failure",
+			"ambiguous-reopen-preserves-incident",
+			"explicit-retry-after-ambiguous-reopen",
 		)
 	for (const mark of required) assert(reached.has(mark), `${kind} landmark missing: ${mark}`)
 	for (const action of [
 		"stale-watchdog",
+		"explicit-user-retry",
 		"duplicate-recovery",
 		"html-failure",
 		"resolve-success",
@@ -392,19 +465,38 @@ function hostCheck(kind: "sidebar" | "tab", p: Policy): void {
 }
 
 function policyContracts(p: Policy): void {
-	for (const choice of [undefined, "Reload Window", "Show Logs", "dismiss"])
+	for (const choice of [undefined, "Retry Interface Recovery", "Reload Window", "Show Logs", "dismiss"])
 		for (const disposed of [false, true])
-			for (const sameHeartbeat of [false, true]) {
-				assert.equal(
-					p.recoveryWarningAction(choice, disposed, sameHeartbeat),
-					choice === "Show Logs"
-						? "logs"
-						: choice === "Reload Window" && !disposed && sameHeartbeat
-							? "reload"
-							: "none",
-					"notification action contract",
-				)
-			}
+			for (const sameHeartbeat of [false, true])
+				for (const sameGeneration of [false, true]) {
+					assert.equal(
+						p.recoveryWarningAction(choice, disposed, sameHeartbeat, sameGeneration),
+						choice === "Show Logs"
+							? "logs"
+							: disposed || !sameHeartbeat || !sameGeneration
+								? "none"
+								: choice === "Retry Interface Recovery"
+									? "retry"
+									: choice === "Reload Window"
+										? "reload"
+										: "none",
+						"notification action contract",
+					)
+				}
+	for (const captured of [0, 1])
+		for (const current of [0, 1]) {
+			assert.equal(
+				p.isRecoveryGenerationCurrent(captured, current),
+				captured === current,
+				"recovery generation ownership",
+			)
+			assert.deepEqual(
+				p.beginExplicitRecovery(current),
+				{ generation: current + 1, attempts: 1, reported: false, stopLogged: false },
+				"explicit retry incident contract",
+			)
+		}
+
 	for (const recoveringHost of [false, true])
 		for (const disposed of [false, true])
 			for (const isCurrent of [false, true]) {
@@ -473,6 +565,28 @@ check(policy)
 // Representative policy regressions must be rejected, rather than merely
 // leaving a self-consistent abstract model green. These do not mutate source.
 const mutants: Array<[string, Policy, RegExp]> = [
+	[
+		"old work owns a new generation",
+		{ ...policy, isRecoveryGenerationCurrent: () => true },
+		/recovery generation ownership/,
+	],
+	[
+		"explicit retry inherits exhausted incident",
+		{
+			...policy,
+			beginExplicitRecovery: (generation) => ({ generation, attempts: 3, reported: true, stopLogged: true }),
+		},
+		/explicit retry incident contract/,
+	],
+	[
+		"old warning resets a new generation",
+		{
+			...policy,
+			recoveryWarningAction: (choice, disposed, sameHeartbeat) =>
+				policy.recoveryWarningAction(choice, disposed, sameHeartbeat, true),
+		},
+		/notification action contract/,
+	],
 	[
 		"terminal stop suppressed after retry warning",
 		{

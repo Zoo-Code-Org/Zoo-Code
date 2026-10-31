@@ -16,6 +16,7 @@
 	"command.fixCode.title": "Repareer Code",
 	"command.improveCode.title": "Verbeter Code",
 	"command.addToContext.title": "Toevoegen aan Context",
+	"command.retryWebviewRecovery.title": "Interfaceherstel opnieuw proberen",
 	"command.focusInput.title": "Focus op Invoerveld",
 	"command.setCustomStoragePath.title": "Aangepast Opslagpad Instellen",
 	"command.importSettings.title": "Instellingen Importeren",

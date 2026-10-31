@@ -21,6 +21,8 @@ import {
 	recordRecoveryFailure,
 	recoveryHealth,
 	recoveryWarningAction,
+	isRecoveryGenerationCurrent,
+	beginExplicitRecovery,
 } from "./webviewRecoveryPolicy"
 
 import {
@@ -277,6 +279,7 @@ export class ClineProvider
 	// the watched view is disposed; the reload must not reassign webview.html
 	// afterwards.
 	private webviewRecoveryEpoch = 0
+	private webviewRecoveryRequestGeneration = 0
 	// Epoch that owns an in-flight recovery reload, if any. Only a recovery
 	// from the same epoch is blocked, so disposing/replacing the view (which
 	// bumps webviewRecoveryEpoch) never makes the replacement wait on the
@@ -899,8 +902,8 @@ export class ClineProvider
 	 * view because the view was disposed or replaced (or the provider itself was
 	 * disposed) while the resolve was awaiting HTML or state hydration.
 	 */
-	private isStaleViewResolve(webviewView: vscode.WebviewView | vscode.WebviewPanel): boolean {
-		return this._disposed || this.view !== webviewView
+	private isStaleViewResolve(webviewView: vscode.WebviewView | vscode.WebviewPanel, epoch: number): boolean {
+		return this._disposed || this.view !== webviewView || epoch !== this.webviewRecoveryEpoch
 	}
 
 	/** Drain one task's memoized cleanup without preventing the remaining provider shutdown work. */
@@ -1089,6 +1092,7 @@ export class ClineProvider
 	}
 
 	async resolveWebviewView(webviewView: vscode.WebviewView | vscode.WebviewPanel) {
+		const generation = this.webviewRecoveryRequestGeneration
 		// Capture intent before yielding: host recovery can time out while this
 		// resolve is still generating HTML or hydrating state.
 		const recoveringHost = preservesRecoveryIncident(
@@ -1098,6 +1102,7 @@ export class ClineProvider
 		try {
 			await this.initializeWebviewView(webviewView, recoveringHost)
 		} catch (error) {
+			if (!isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration)) return
 			const action = resolutionFailureAction({
 				recoveringHost,
 				disposed: this._disposed,
@@ -1124,6 +1129,7 @@ export class ClineProvider
 			this.clearWebviewResources()
 		}
 
+		const epoch = this.webviewRecoveryEpoch
 		this.pendingSidebarRecovery = false
 		this.view = webviewView
 		const inTabMode = "onDidChangeViewState" in webviewView
@@ -1177,7 +1183,7 @@ export class ClineProvider
 
 		// The HTML load above can finish after the view was disposed or replaced.
 		// A stale resolve must not assign HTML to a view the provider no longer owns.
-		if (this.isStaleViewResolve(webviewView)) {
+		if (this.isStaleViewResolve(webviewView, epoch)) {
 			return
 		}
 
@@ -1199,6 +1205,7 @@ export class ClineProvider
 				ttsEnabled,
 				ttsSpeed,
 			}) => {
+				if (this.isStaleViewResolve(webviewView, epoch)) return
 				Terminal.setShellIntegrationTimeout(terminalShellIntegrationTimeout)
 				Terminal.setShellIntegrationDisabled(terminalShellIntegrationDisabled)
 				Terminal.setCommandDelay(terminalCommandDelay)
@@ -1215,7 +1222,7 @@ export class ClineProvider
 
 		// State hydration can also finish after the view was disposed or replaced.
 		// A stale resolve must not install listeners on a view the provider no longer owns.
-		if (this.isStaleViewResolve(webviewView)) {
+		if (this.isStaleViewResolve(webviewView, epoch)) {
 			return
 		}
 
@@ -3780,6 +3787,7 @@ export class ClineProvider
 	private async recreateWebviewHostForRecovery(view: vscode.WebviewView | vscode.WebviewPanel): Promise<void> {
 		if (this.webviewHostRecoveryInProgress || this._disposed || this.view !== view || !view.visible) return
 		const revision = this.webviewHeartbeatRevision
+		const generation = this.webviewRecoveryRequestGeneration
 		let started = false
 		let sidebarFocused = false
 		try {
@@ -3790,6 +3798,7 @@ export class ClineProvider
 				commands = await vscode.commands.getCommands(true)
 			}
 			if (
+				!isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration) ||
 				this.webviewHostRecoveryInProgress ||
 				this._disposed ||
 				this.view !== view ||
@@ -3824,20 +3833,15 @@ export class ClineProvider
 			} else {
 				this.pendingSidebarRecovery = true
 				await vscode.commands.executeCommand(`${ClineProvider.sideBarId}.removeView`)
-				if (this._disposed) return
+				if (this._disposed || !isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration))
+					return
 				await vscode.commands.executeCommand(`${ClineProvider.sideBarId}.focus`, { preserveFocus: true })
 				sidebarFocused = true
-				await pWaitFor(
-					() =>
-						this._disposed ||
-						(this.view !== undefined && this.view !== view && this.webviewWatchdogInterval !== null),
-					{
-						interval: 50,
-						timeout: 10_000,
-					},
-				)
+				if (!isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration)) return
+				await this.waitForRecoveryView(view, generation)
 			}
 		} catch (error) {
+			if (!isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration)) return
 			// Only a successful focus can leave a delayed replacement pending.
 			// Command failures must not mark a later manual open as recovery.
 			this.pendingSidebarRecovery = pendingSidebarAfterCommandFailure({
@@ -3862,7 +3866,89 @@ export class ClineProvider
 				!replacementPublished,
 			)
 		} finally {
-			if (started) this.webviewHostRecoveryInProgress = false
+			if (started && isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration))
+				this.webviewHostRecoveryInProgress = false
+		}
+	}
+
+	private async waitForRecoveryView(
+		previous: vscode.WebviewView | vscode.WebviewPanel | undefined,
+		generation: number,
+	): Promise<void> {
+		await pWaitFor(
+			() =>
+				this._disposed ||
+				!isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration) ||
+				(this.view !== undefined && this.view !== previous && this.webviewWatchdogInterval !== null),
+			{ interval: 50, timeout: 10_000 },
+		)
+	}
+
+	/** An explicit user action, unlike an ambiguous VS Code resolve callback. */
+	public async retryWebviewRecovery(expectedGeneration = this.webviewRecoveryRequestGeneration): Promise<void> {
+		if (this._disposed || !isRecoveryGenerationCurrent(expectedGeneration, this.webviewRecoveryRequestGeneration))
+			return
+		const fresh = beginExplicitRecovery(this.webviewRecoveryRequestGeneration)
+		const generation = fresh.generation
+		this.webviewRecoveryRequestGeneration = generation
+		const view = this.view
+		if (!view || !("onDidChangeViewState" in view)) this.pendingSidebarRecovery = true
+		this.webviewRecoveryEpoch++
+		this.webviewRecoveryInFlightEpoch = undefined
+		this.webviewHostRecoveryInProgress = false
+		// Count this user-requested attempt in its fresh, bounded incident.
+		this.webviewRecoveryAttempts = fresh.attempts
+		this.webviewRecoveryFailureReported = fresh.reported
+		this.webviewRecoveryStopLogged = fresh.stopLogged
+		this.lastReceivedWebviewHeartbeatAt = undefined
+		this.webviewHealthySince = undefined
+		this.resetWebviewHeartbeatGrace()
+		let focused = false
+		try {
+			if (view) {
+				if ("onDidChangeViewState" in view) view.reveal(view.viewColumn ?? vscode.ViewColumn.Active, true)
+				else view.show(true)
+				await pWaitFor(
+					() =>
+						this._disposed ||
+						!isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration) ||
+						this.view !== view ||
+						view.visible,
+					{ interval: 50, timeout: 10_000 },
+				)
+				if (
+					this._disposed ||
+					!isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration) ||
+					this.view !== view
+				)
+					return
+				await this.recreateWebviewHostForRecovery(view)
+			} else {
+				// The earlier timeout may have removed the only sidebar. The next
+				// resolve, whatever triggered it, repairs this explicitly renewed incident.
+				this.pendingSidebarRecovery = true
+				this.webviewHostRecoveryInProgress = true
+				await vscode.commands.executeCommand(`${ClineProvider.sideBarId}.focus`, { preserveFocus: true })
+				focused = true
+				if (!isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration)) return
+				await this.waitForRecoveryView(undefined, generation)
+			}
+		} catch (error) {
+			if (this._disposed || !isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration))
+				return
+			this.pendingSidebarRecovery = pendingSidebarAfterCommandFailure({
+				started: true,
+				focusSucceeded: focused,
+				pending: this.pendingSidebarRecovery,
+			})
+			const replacementPublished = this.view !== undefined && this.view !== view
+			this.reportWebviewRecoveryFailure(
+				`Explicit interface recovery failed: ${String(error)}`,
+				!replacementPublished,
+			)
+		} finally {
+			if (isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration))
+				this.webviewHostRecoveryInProgress = false
 		}
 	}
 
@@ -3884,9 +3970,11 @@ export class ClineProvider
 		if (failure.log) this.log(`[Zoo Code] Webview recovery ${stopRecovery ? "stopped" : "will retry"}: ${reason}`)
 		if (!failure.notify) return
 		const heartbeatCount = this.webviewHeartbeatCount
+		const generation = this.webviewRecoveryRequestGeneration
 		void Promise.resolve(
 			vscode.window.showWarningMessage(
-				"Zoo Code's interface is not responding. Reloading the VS Code window will restart extensions and may interrupt running tasks.",
+				"Zoo Code's interface is not responding. Retry interface recovery without restarting running tasks. Reloading the VS Code window will restart extensions and may interrupt running tasks.",
+				"Retry Interface Recovery",
 				"Reload Window",
 				"Show Logs",
 			),
@@ -3896,7 +3984,9 @@ export class ClineProvider
 					choice,
 					this._disposed,
 					this.webviewHeartbeatCount === heartbeatCount,
+					isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration),
 				)
+				if (action === "retry") await this.retryWebviewRecovery(generation)
 				if (action === "reload") {
 					await vscode.commands.executeCommand("workbench.action.reloadWindow")
 				}

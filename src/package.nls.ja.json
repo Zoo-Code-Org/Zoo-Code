@@ -16,6 +16,7 @@
 	"command.fixCode.title": "コードの修正",
 	"command.improveCode.title": "コードの改善",
 	"command.addToContext.title": "コンテキストに追加",
+	"command.retryWebviewRecovery.title": "インターフェイスの復旧を再試行",
 	"command.focusInput.title": "入力フィールドにフォーカス",
 	"command.setCustomStoragePath.title": "カスタムストレージパスの設定",
 	"command.importSettings.title": "設定をインポート",

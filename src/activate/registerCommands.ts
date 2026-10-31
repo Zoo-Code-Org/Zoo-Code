@@ -184,6 +184,9 @@ const getCommandsMap = ({
 			outputChannel.appendLine(`Error focusing input: ${error}`)
 		}
 	},
+	retryWebviewRecovery: async () => {
+		await (ClineProvider.getVisibleInstance() ?? provider).retryWebviewRecovery()
+	},
 	focusPanel: async () => {
 		try {
 			await focusPanel(tabPanel, sidebarPanel)

@@ -121,77 +121,105 @@ test("recovers when heartbeat delivery stops and resumes periodic heartbeats", a
 	}
 })
 
-test("recovers after the isolated Zoo Code renderer is terminated", async ({ browserName: _browserName }, testInfo) => {
-	// Allow startup, stale detection, recovery observations, and cleanup.
-	test.setTimeout(8 * 60_000)
-	const running = await startScene(
-		vscodeExecutablePath,
-		{ ...scenario, scene: "chat", startMock: true, landmark: CHAT_RESULT },
-		testInfo,
-	)
-	try {
-		expect(running.taskIds).toHaveLength(1)
-		const initial = await waitForContent(running.page, CHAT_RESULT)
-		await initial.evaluate(() => {
-			document.documentElement.dataset.heartbeatDocument = "before-crash"
-		})
-		const processes = await running.app.evaluate(({ BrowserWindow }) => {
-			const mainFrame = BrowserWindow.getAllWindows()[0]?.webContents.mainFrame
-			if (!mainFrame) throw new Error("VS Code workbench frame not found")
-			const renderer = mainFrame.framesInSubtree.find(
-				(frame: { url: string; parent?: { url: string }; osProcessId: number }) =>
-					frame.url.includes("/fake.html") &&
-					frame.parent?.url.includes("extensionId=ZooCodeOrganization.zoo-code"),
+for (const explicitRetry of [false, true])
+	test(
+		explicitRetry
+			? "explicit retry recovers the isolated Zoo Code renderer and retains its task"
+			: "recovers after the isolated Zoo Code renderer is terminated",
+		async ({ browserName: _browserName }, testInfo) => {
+			// Allow startup, stale detection, recovery observations, and cleanup.
+			test.setTimeout(8 * 60_000)
+			const running = await startScene(
+				vscodeExecutablePath,
+				{ ...scenario, scene: "chat", startMock: true, landmark: CHAT_RESULT },
+				testInfo,
 			)
-			if (!renderer) throw new Error("Zoo Code renderer process not found")
-			return { workbench: mainFrame.osProcessId, webview: renderer.osProcessId }
-		})
-		await testInfo.attach("renderer-processes.json", {
-			body: JSON.stringify(processes),
-			contentType: "application/json",
-		})
-		// Never terminate the workbench: this test requires a separate OOPIF process.
-		expect(processes.webview).toBeGreaterThan(0)
-		expect(processes.webview).not.toBe(processes.workbench)
-		process.kill(processes.webview, "SIGKILL")
+			try {
+				expect(running.taskIds).toHaveLength(1)
+				const initial = await waitForContent(running.page, CHAT_RESULT)
+				await initial.evaluate(() => {
+					document.documentElement.dataset.heartbeatDocument = "before-crash"
+				})
+				if (explicitRetry) {
+					// Establish a fresh delivered heartbeat before the crash. Explicit
+					// recovery must finish before the 90-second stale threshold.
+					const beforeCrash = await observeHeartbeats(running.page)
+					await expect
+						.poll(() => beforeCrash.evaluate((state) => state.forwarded), { timeout: 45_000 })
+						.toBeGreaterThan(0)
+				}
+				const processes = await running.app.evaluate(({ BrowserWindow }) => {
+					const mainFrame = BrowserWindow.getAllWindows()[0]?.webContents.mainFrame
+					if (!mainFrame) throw new Error("VS Code workbench frame not found")
+					const renderer = mainFrame.framesInSubtree.find(
+						(frame: { url: string; parent?: { url: string }; osProcessId: number }) =>
+							frame.url.includes("/fake.html") &&
+							frame.parent?.url.includes("extensionId=ZooCodeOrganization.zoo-code"),
+					)
+					if (!renderer) throw new Error("Zoo Code renderer process not found")
+					return { workbench: mainFrame.osProcessId, webview: renderer.osProcessId }
+				})
+				await testInfo.attach("renderer-processes.json", {
+					body: JSON.stringify(processes),
+					contentType: "application/json",
+				})
+				// Never terminate the workbench: this test requires a separate OOPIF process.
+				expect(processes.webview).toBeGreaterThan(0)
+				expect(processes.webview).not.toBe(processes.workbench)
+				process.kill(processes.webview, "SIGKILL")
+				if (explicitRetry) {
+					await running.page.keyboard.press("F1")
+					const input = running.page.locator(".quick-input-widget input")
+					await expect(input).toBeVisible({ timeout: 10_000 })
+					await input.fill(">Zoo Code: Retry Interface Recovery", { timeout: 10_000 })
+					await running.page
+						.locator(".quick-input-list .monaco-list-row")
+						.filter({ hasText: "Retry Interface Recovery" })
+						.first()
+						.click({ timeout: 10_000 })
+				}
 
-		// Allow stale detection (up to 150s), confirmation and replacement waits,
-		// plus webview loading. A passing fast run does not bound the slow path.
-		await expect
-			.poll(
-				async () => {
-					try {
-						const frame = contentFrame(running.page)
-						if (!frame || !(await frame.getByText(CHAT_RESULT, { exact: false }).isVisible()))
-							return "missing"
-						return (
-							(await frame.locator("html").getAttribute("data-heartbeat-document", { timeout: 1_000 })) ??
-							"recovered"
-						)
-					} catch {
-						return "unavailable"
-					}
-				},
-				{ timeout: 210_000, intervals: [1_000] },
-			)
-			.toBe("recovered")
-		await waitForContent(running.page, CHAT_RESULT)
-		await fs.writeFile(`${running.donePath}.probe`, "probe")
-		await expect
-			.poll(async () => {
-				const result = await fs.readFile(`${running.donePath}.probe.result`, "utf8").catch(() => "")
-				return result ? (JSON.parse(result) as { taskIds: string[] }) : undefined
-			})
-			.toMatchObject({ taskIds: running.taskIds })
-		const heartbeat = await observeHeartbeats(running.page)
-		await expect.poll(() => heartbeat.evaluate((state) => state.forwarded), { timeout: 45_000 }).toBeGreaterThan(0)
-	} catch (error) {
-		await attachFailureArtifacts(running, testInfo)
-		throw error
-	} finally {
-		await stopScene(running, testInfo)
-	}
-})
+				// Allow stale detection (up to 150s), confirmation and replacement waits,
+				// plus webview loading. A passing fast run does not bound the slow path.
+				await expect
+					.poll(
+						async () => {
+							try {
+								const frame = contentFrame(running.page)
+								if (!frame || !(await frame.getByText(CHAT_RESULT, { exact: false }).isVisible()))
+									return "missing"
+								return (
+									(await frame
+										.locator("html")
+										.getAttribute("data-heartbeat-document", { timeout: 1_000 })) ?? "recovered"
+								)
+							} catch {
+								return "unavailable"
+							}
+						},
+						{ timeout: explicitRetry ? 45_000 : 210_000, intervals: [1_000] },
+					)
+					.toBe("recovered")
+				await waitForContent(running.page, CHAT_RESULT)
+				await fs.writeFile(`${running.donePath}.probe`, "probe")
+				await expect
+					.poll(async () => {
+						const result = await fs.readFile(`${running.donePath}.probe.result`, "utf8").catch(() => "")
+						return result ? (JSON.parse(result) as { taskIds: string[] }) : undefined
+					})
+					.toMatchObject({ taskIds: running.taskIds })
+				const heartbeat = await observeHeartbeats(running.page)
+				await expect
+					.poll(() => heartbeat.evaluate((state) => state.forwarded), { timeout: 45_000 })
+					.toBeGreaterThan(0)
+			} catch (error) {
+				await attachFailureArtifacts(running, testInfo)
+				throw error
+			} finally {
+				await stopScene(running, testInfo)
+			}
+		},
+	)
 
 test("keeps the same document when the sidebar is hidden past the stale threshold", async ({
 	browserName: _browserName,
