@@ -4,8 +4,8 @@ import os from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
 import { downloadAndUnzipVSCode } from "@vscode/test-electron"
-import { IpcClient } from "@roo-code/ipc"
 import { IpcMessageType } from "@roo-code/types"
+import { EvalIpcClient } from "./ipc-client.ts"
 import { buildChildEnvironment, buildLaunchArgs } from "./isolation.ts"
 import type { AgentClient, AgentHost, AgentRuntime } from "./runner.ts"
 import { identityUnavailable, measured, type MeasuredString, type TraceRunIdentity } from "./trace.ts"
@@ -127,7 +127,7 @@ export function createHostRuntime(options: HostRuntimeOptions): AgentRuntime {
 		},
 		connect(): AgentClient {
 			const socket = path.join(temp ?? "", "ipc.sock")
-			const client = new IpcClient(socket, () => {})
+			const client = new EvalIpcClient(socket, () => {})
 			return {
 				get isReady() {
 					return client.isReady
