@@ -70,9 +70,10 @@ export function parseCopilotQuota(payload: unknown, now = Date.now()): GitHubCop
 
 /** Rejects as soon as `signal` aborts. The pending work cannot be cancelled, but nobody waits for it any more. */
 function raceAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+	// The caller has checked that `signal` is not aborted yet (an abort event does not fire again for a signal that
+	// already is), and nothing can abort it between that check and this call.
 	return new Promise<T>((resolve, reject) => {
-		// The signal is never aborted before this is called (it combines a fresh controller and a timeout).
-		const abort = () => reject(new DOMException("Aborted", "AbortError"))
+		const abort = () => reject(signal.reason)
 		signal.addEventListener("abort", abort, { once: true })
 		work.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort))
 	})
@@ -82,6 +83,8 @@ function raceAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
 async function getGitHubToken(signal: AbortSignal): Promise<string | undefined> {
 	const { authProviderId, authScopeSets } = githubCopilotLanguageModel
 	for (const scopes of authScopeSets) {
+		// A lookup that has been cancelled is not started: the session request is made before it is raced.
+		signal.throwIfAborted()
 		const session = await raceAbort(
 			Promise.resolve(vscode.authentication.getSession(authProviderId, scopes, { silent: true })),
 			signal,

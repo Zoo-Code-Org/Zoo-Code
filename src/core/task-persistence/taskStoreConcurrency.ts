@@ -14,9 +14,21 @@ export class DeltaRejectedError extends Error {
 	}
 }
 
+/**
+ * Fields whose `undefined` is a decision, not an absence: "this task has none". The delta normally leaves out a field
+ * that equals the cached one, but the cache can lack a value that another host wrote to disk, so an unchanged
+ * `undefined` would leave that stale value in place. For these fields an explicit `undefined` is always part of the
+ * delta, and `mergeHistoryDelta` applies it under the file lock (the key is dropped when the item is written).
+ */
+const EXPLICIT_CLEAR_KEYS: ReadonlySet<string> = new Set(["usageByModel"])
+
 export function computeHistoryDelta(cached: HistoryItem, incoming: Partial<HistoryItem>): Partial<HistoryItem> {
 	return Object.fromEntries(
-		Object.entries(incoming).filter(([key, value]) => !deepEqual(value, (cached as Record<string, unknown>)[key])),
+		Object.entries(incoming).filter(
+			([key, value]) =>
+				(value === undefined && EXPLICIT_CLEAR_KEYS.has(key)) ||
+				!deepEqual(value, (cached as Record<string, unknown>)[key]),
+		),
 	) as Partial<HistoryItem>
 }
 

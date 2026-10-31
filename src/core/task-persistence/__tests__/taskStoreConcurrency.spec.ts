@@ -1,6 +1,6 @@
 import type { HistoryItem } from "@roo-code/types"
 
-import { DeltaRejectedError, mergeHistoryDelta } from "../taskStoreConcurrency"
+import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "../taskStoreConcurrency"
 
 function item(status: HistoryItem["status"]): HistoryItem {
 	return {
@@ -32,5 +32,40 @@ describe("mergeHistoryDelta", () => {
 		const incoming = { ...disk, status: undefined }
 
 		expect(mergeHistoryDelta(disk, incoming, { id: disk.id, status: undefined }).status).toBe("active")
+	})
+})
+
+describe("computeHistoryDelta", () => {
+	it("leaves out a field that equals the cached one", () => {
+		expect(computeHistoryDelta(item("active"), { mode: "code", tokensIn: 0 } as Partial<HistoryItem>)).toEqual({
+			mode: "code",
+		})
+	})
+
+	it("always carries an explicit undefined usageByModel, even when the cache has none either", () => {
+		const delta = computeHistoryDelta(item("active"), { usageByModel: undefined, tokensIn: 0 })
+
+		expect(Object.keys(delta)).toEqual(["usageByModel"])
+	})
+
+	it("still carries a usageByModel that changed, and leaves out one that did not", () => {
+		const usage = [{ apiProvider: "p", modelId: "m", requests: 1, tokensIn: 1, tokensOut: 1, cost: 0 }]
+		const cached = { ...item("active"), usageByModel: usage }
+
+		expect(computeHistoryDelta(cached, { usageByModel: usage })).toEqual({})
+		expect(computeHistoryDelta(cached, { usageByModel: [] })).toEqual({ usageByModel: [] })
+	})
+
+	it("does not treat an undefined of any other field as a deletion", () => {
+		expect(computeHistoryDelta(item("active"), { mode: undefined })).toEqual({})
+	})
+
+	it("lets mergeHistoryDelta clear the usage another host wrote", () => {
+		const onDisk = { ...item("active"), usageByModel: [{ requests: 1 }] }
+		const delta = computeHistoryDelta(item("active"), { usageByModel: undefined })
+
+		const merged = mergeHistoryDelta(onDisk, item("active"), delta)
+
+		expect(JSON.parse(JSON.stringify(merged)).usageByModel).toBeUndefined()
 	})
 })

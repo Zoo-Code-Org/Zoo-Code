@@ -493,6 +493,60 @@ describe("usageToCsv formula safety", () => {
 	})
 })
 
+describe("usageToCsv numeric columns", () => {
+	const numericKeys = ["tokensIn", "tokensOut", "cacheReads", "cacheWrites", "totalCost"] as const
+	const cells = (overrides: Record<string, unknown>) =>
+		usageToCsv([item(overrides as never)], { range: "all", now: NOW })
+			.split("\n")[1]
+			.split(",")
+			.slice(-5)
+
+	it.each(numericKeys)("exports a formula in %s as 0, so no cell can be evaluated", (key) => {
+		for (const text of ['=HYPERLINK("http://x")', "+1+1", "-2+3", "@SUM(A1)", "\tcmd", "1;2"]) {
+			const row = cells({ [key]: text })
+			const index = numericKeys.indexOf(key)
+			expect(row[index]).toBe(key === "totalCost" ? "0.0000" : "0")
+		}
+	})
+
+	it.each([[Number.NaN], [Number.POSITIVE_INFINITY], [Number.NEGATIVE_INFINITY], [-5], [null], [{}]])(
+		"exports %p as 0",
+		(value) => {
+			expect(
+				cells({ tokensIn: value, tokensOut: value, cacheReads: value, cacheWrites: value, totalCost: value }),
+			).toEqual(["0", "0", "0", "0", "0.0000"])
+		},
+	)
+
+	it("keeps real counters as they are", () => {
+		expect(cells({ tokensIn: 10, tokensOut: 20, cacheReads: 3, cacheWrites: 4, totalCost: 1.5 })).toEqual([
+			"10",
+			"20",
+			"3",
+			"4",
+			"1.5000",
+		])
+	})
+
+	it("leaves the date empty for a time that cannot be written, instead of throwing", () => {
+		for (const ts of [Number.NaN, Number.POSITIVE_INFINITY, 8.64e15 + 1]) {
+			const csv = usageToCsv([item({ task: "t", ts })], { range: "all", now: NOW })
+			expect(csv.split("\n")[1].startsWith(',"t"')).toBe(true)
+		}
+	})
+
+	it("every cell of a row is digits, a quoted text with no leading trigger, or an ISO date", () => {
+		const hostile = '=cmd|" /C calc"!A0'
+		const row = usageToCsv(
+			[item({ task: hostile, mode: hostile, tokensIn: hostile as never, totalCost: hostile as never })],
+			{ range: "all", now: NOW },
+		).split("\n")[1]
+
+		expect(row).not.toMatch(/(^|,)[=+\-@\t\r]/)
+		expect(row).not.toMatch(/,"[=+\-@\t\r]/)
+	})
+})
+
 describe("usageToCsv", () => {
 	it("sorts oldest first and leaves provider, model and counters blank or zero when nothing was recorded", () => {
 		const csv = usageToCsv(

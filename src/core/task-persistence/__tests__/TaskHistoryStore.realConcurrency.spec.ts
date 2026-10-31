@@ -152,6 +152,41 @@ describe("TaskHistoryStore real cross-host locking", () => {
 		}
 	})
 
+	it("clears a usageByModel that another host wrote, when this host saves the task without one", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-usage-clear-other-"))
+		const storeA = new TaskHistoryStore(storagePath)
+		const storeB = new TaskHistoryStore(storagePath)
+		const usageByModel = [
+			{
+				apiProvider: providerIdentifiers.anthropic,
+				modelId: "m",
+				requests: 1,
+				tokensIn: 5,
+				tokensOut: 5,
+				cost: 1,
+			},
+		]
+
+		try {
+			await storeA.initialize()
+			await storeA.upsert(item("shared-usage-task")) // A's cache has no usageByModel
+			await storeB.initialize()
+			await storeB.upsert({ ...item("shared-usage-task"), usageByModel }) // another host records usage on disk
+
+			// This host saves the task after its messages were replaced: no usage, so none must remain on disk.
+			await storeA.upsert({ ...item("shared-usage-task"), usageByModel: undefined })
+
+			await storeA.invalidate("shared-usage-task")
+			expect(storeA.get("shared-usage-task")?.usageByModel).toBeUndefined()
+			await storeB.invalidate("shared-usage-task")
+			expect(storeB.get("shared-usage-task")?.usageByModel).toBeUndefined()
+		} finally {
+			storeA.dispose()
+			storeB.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
 	it("reports a bounded error when one store never reaches the write barrier", async () => {
 		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-missed-barrier-"))
 		const storeA = new TaskHistoryStore(storagePath)

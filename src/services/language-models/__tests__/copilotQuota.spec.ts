@@ -287,6 +287,41 @@ describe("getGitHubCopilotQuota", () => {
 			expect(signal()!.aborted).toBe(true)
 		})
 
+		it("does not look up the second scope once the caller has gone, after the first scope found no session", async () => {
+			const fetchSpy = vi.fn()
+			const controller = new AbortController()
+			getSession.mockReset()
+			// The first scope answers "no session", and the caller goes away just after that answer, before the
+			// lookup moves on to the second scope.
+			getSession.mockImplementationOnce(() => ({
+				then(resolve: (value: undefined) => void) {
+					resolve(undefined)
+					queueMicrotask(() => controller.abort())
+				},
+			}))
+
+			const result = getGitHubCopilotQuota({ signal: controller.signal }, fetchSpy as never)
+
+			await expect(result).rejects.toMatchObject({ name: "AbortError" })
+			await new Promise((resolve) => setTimeout(resolve, 0)) // let the lookup loop run on, if it is going to
+			expect(getSession).toHaveBeenCalledTimes(1)
+			expect(fetchSpy).not.toHaveBeenCalled()
+		})
+
+		it("rejects a lookup that was cancelled before its session answered, with the cancellation", async () => {
+			const fetchSpy = vi.fn()
+			const controller = new AbortController()
+			getSession.mockReset()
+			getSession.mockImplementationOnce(() => new Promise(() => {})) // never answers
+
+			const result = getGitHubCopilotQuota({ signal: controller.signal }, fetchSpy as never)
+			await vi.waitFor(() => expect(getSession).toHaveBeenCalledTimes(1))
+			controller.abort()
+
+			await expect(result).rejects.toMatchObject({ name: "AbortError" })
+			expect(fetchSpy).not.toHaveBeenCalled()
+		})
+
 		it("rejects at once with a signal that is already aborted, and makes no request", async () => {
 			const fetchSpy = vi.fn()
 			const controller = new AbortController()

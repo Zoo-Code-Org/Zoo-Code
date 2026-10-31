@@ -627,6 +627,51 @@ describe("SettingsView - Sound Settings", () => {
 	})
 })
 
+describe("SettingsView - Usage tab", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("renders the Usage tab content when it is the target section", () => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="usage" />)
+
+		const content = screen.getByTestId("settings-content")
+		expect(within(content).getByTestId("usage-empty")).toBeInTheDocument()
+	})
+
+	it("lists a Usage tab entry, and shows the usage content when it is clicked", () => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="providers" />)
+		expect(within(screen.getByTestId("settings-content")).queryByTestId("usage-empty")).not.toBeInTheDocument()
+
+		fireEvent.click(screen.getByTestId("tab-usage"))
+
+		expect(within(screen.getByTestId("settings-content")).getByTestId("usage-empty")).toBeInTheDocument()
+	})
+
+	it("shows the totals and the filters when there is history", () => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="usage" />, {
+			state: {
+				taskHistory: [
+					{
+						id: "t1",
+						number: 1,
+						ts: Date.now(),
+						task: "a task",
+						tokensIn: 100,
+						tokensOut: 50,
+						totalCost: 0.5,
+					},
+				],
+			},
+		})
+
+		const content = screen.getByTestId("settings-content")
+		expect(within(content).getByTestId("usage-stats")).toBeInTheDocument()
+		expect(within(content).getByTestId("usage-export-csv")).toBeInTheDocument()
+		expect(within(content).queryByTestId("usage-empty")).not.toBeInTheDocument()
+	})
+})
+
 describe("SettingsView - API Configuration", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()

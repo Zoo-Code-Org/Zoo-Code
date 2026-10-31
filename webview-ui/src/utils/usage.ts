@@ -325,6 +325,14 @@ export function usageToCsv(history: HistoryItem[], options: UsageOptions): strin
 		return `"${safe.replace(/"/g, '""').replace(/\r?\n/g, " ")}"`
 	}
 
+	// A counter that is not a finite, non-negative number (corrupted history, or text such as "=1+1" that a
+	// spreadsheet would evaluate) is exported as 0. What is written is then only ever digits, so every cell is inert.
+	const counter = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0)
+	const date = (ts: unknown) =>
+		typeof ts === "number" && Number.isFinite(ts) && !Number.isNaN(new Date(ts).getTime())
+			? new Date(ts).toISOString()
+			: ""
+
 	const rows = history
 		.filter(
 			(item) =>
@@ -334,16 +342,16 @@ export function usageToCsv(history: HistoryItem[], options: UsageOptions): strin
 		.sort((a, b) => a.ts - b.ts)
 		.map((item) =>
 			[
-				new Date(item.ts).toISOString(),
+				date(item.ts),
 				escape(item.title || item.task || ""),
 				escape(item.mode || ""),
 				escape(primaryUsage(item)?.apiProvider ?? ""),
 				escape(primaryUsage(item)?.modelId ?? ""),
-				item.tokensIn || 0,
-				item.tokensOut || 0,
-				item.cacheReads || 0,
-				item.cacheWrites || 0,
-				(item.totalCost || 0).toFixed(4),
+				counter(item.tokensIn),
+				counter(item.tokensOut),
+				counter(item.cacheReads),
+				counter(item.cacheWrites),
+				counter(item.totalCost).toFixed(4),
 			].join(","),
 		)
 
