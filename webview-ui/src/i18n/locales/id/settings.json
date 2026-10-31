@@ -4,7 +4,6 @@
 		"save": "Simpan",
 		"done": "Selesai",
 		"cancel": "Batal",
-		"reset": "Reset",
 		"select": "Pilih",
 		"add": "Tambah Header",
 		"remove": "Hapus"
@@ -171,8 +170,6 @@
 		"title": "Pengindeksan Codebase",
 		"enableLabel": "Aktifkan Pengindeksan Codebase",
 		"enableDescription": "Aktifkan pengindeksan kode untuk pencarian dan pemahaman konteks yang lebih baik",
-		"providerLabel": "Provider Embeddings",
-		"selectProviderPlaceholder": "Pilih provider",
 		"openaiProvider": "OpenAI",
 		"ollamaProvider": "Ollama",
 		"geminiProvider": "Gemini",
@@ -201,18 +198,11 @@
 		"openAiCompatibleBaseUrlLabel": "Base URL",
 		"openAiCompatibleApiKeyLabel": "API Key",
 		"openAiCompatibleApiKeyPlaceholder": "Masukkan kunci API kamu",
-		"openAiCompatibleModelDimensionLabel": "Dimensi Embedding:",
 		"modelDimensionLabel": "Dimensi Model",
-		"openAiCompatibleModelDimensionPlaceholder": "misalnya, 1536",
-		"openAiCompatibleModelDimensionDescription": "Dimensi embedding (ukuran output) untuk model kamu. Periksa dokumentasi provider kamu untuk nilai ini. Nilai umum: 384, 768, 1536, 3072.",
 		"modelLabel": "Model",
-		"selectModelPlaceholder": "Pilih model",
-		"ollamaUrlLabel": "Ollama URL:",
 		"qdrantUrlLabel": "Qdrant URL",
-		"qdrantKeyLabel": "Qdrant Key:",
 		"startIndexingButton": "Mulai",
 		"clearIndexDataButton": "Hapus Indeks",
-		"unsavedSettingsMessage": "Silakan simpan pengaturan kamu sebelum memulai proses pengindeksan.",
 		"clearDataDialog": {
 			"title": "Apakah kamu yakin?",
 			"description": "Tindakan ini tidak dapat dibatalkan. Ini akan menghapus data indeks codebase kamu secara permanen.",
@@ -221,8 +211,6 @@
 		},
 		"description": "Konfigurasi pengaturan pengindeksan codebase untuk mengaktifkan pencarian semantik proyek kamu. <0>Pelajari lebih lanjut</0>",
 		"statusTitle": "Status",
-		"settingsTitle": "Pengaturan Pengindeksan",
-		"disabledMessage": "Pengindeksan codebase saat ini dinonaktifkan. Aktifkan di pengaturan global untuk mengkonfigurasi opsi pengindeksan.",
 		"embedderProviderLabel": "Provider Embedder",
 		"modelPlaceholder": "Masukkan nama model",
 		"selectModel": "Pilih model",
@@ -236,7 +224,6 @@
 		"qdrantUrlPlaceholder": "http://localhost:6333",
 		"saveError": "Gagal menyimpan pengaturan",
 		"modelDimensions": "({{dimension}} dimensi)",
-		"saveSuccess": "Pengaturan berhasil disimpan",
 		"saving": "Menyimpan...",
 		"saveSettings": "Simpan",
 		"indexingStatuses": {
@@ -245,7 +232,6 @@
 			"indexed": "Terindeks",
 			"error": "Error"
 		},
-		"close": "Tutup",
 		"validation": {
 			"invalidQdrantUrl": "URL Qdrant tidak valid",
 			"invalidOllamaUrl": "URL Ollama tidak valid",
@@ -260,17 +246,14 @@
 			"mistralApiKeyRequired": "Kunci API Mistral diperlukan",
 			"vercelAiGatewayApiKeyRequired": "Kunci API Vercel AI Gateway diperlukan",
 			"bedrockRegionRequired": "Wilayah AWS diperlukan",
-			"bedrockProfileRequired": "Profil AWS diperlukan",
 			"ollamaBaseUrlRequired": "URL dasar Ollama diperlukan",
 			"baseUrlRequired": "URL dasar diperlukan",
-			"modelDimensionMinValue": "Dimensi model harus lebih besar dari 0",
 			"openRouterApiKeyRequired": "Kunci API OpenRouter diperlukan"
 		},
 		"optional": "opsional",
 		"advancedConfigLabel": "Konfigurasi Lanjutan",
 		"searchMinScoreLabel": "Ambang Batas Skor Pencarian",
 		"searchMinScoreDescription": "Skor kesamaan minimum (0.0-1.0) yang diperlukan untuk hasil pencarian. Nilai yang lebih rendah mengembalikan lebih banyak hasil tetapi mungkin kurang relevan. Nilai yang lebih tinggi mengembalikan lebih sedikit hasil tetapi lebih relevan.",
-		"searchMinScoreResetTooltip": "Reset ke nilai default (0.4)",
 		"searchMaxResultsLabel": "Hasil Pencarian Maksimum",
 		"searchMaxResultsDescription": "Jumlah maksimum hasil pencarian yang dikembalikan saat melakukan query indeks basis kode. Nilai yang lebih tinggi memberikan lebih banyak konteks tetapi mungkin menyertakan hasil yang kurang relevan.",
 		"resetToDefault": "Reset ke default",
@@ -286,7 +269,6 @@
 		"description": "Izinkan Zoo untuk secara otomatis melakukan operasi tanpa memerlukan persetujuan. Aktifkan pengaturan ini hanya jika kamu sepenuhnya mempercayai AI dan memahami risiko keamanan yang terkait.",
 		"enabled": "Auto-Approve Diaktifkan",
 		"toggleAriaLabel": "Beralih persetujuan otomatis",
-		"disabledAriaLabel": "Persetujuan otomatis dinonaktifkan - pilih opsi terlebih dahulu",
 		"readOnly": {
 			"label": "Baca",
 			"description": "Ketika diaktifkan, Zoo akan secara otomatis melihat konten direktori dan membaca file tanpa memerlukan kamu mengklik tombol Setujui.",
@@ -298,7 +280,6 @@
 		"write": {
 			"label": "Tulis",
 			"description": "Secara otomatis membuat dan mengedit file tanpa memerlukan persetujuan",
-			"delayLabel": "Delay setelah menulis untuk memungkinkan diagnostik mendeteksi masalah potensial",
 			"outsideWorkspace": {
 				"label": "Sertakan file di luar workspace",
 				"description": "Izinkan Zoo membuat dan mengedit file di luar workspace saat ini tanpa memerlukan persetujuan."
@@ -356,14 +337,12 @@
 			"deniedCommandsDescription": "Prefix perintah yang akan ditolak secara otomatis tanpa memerlukan persetujuan. Dalam kasus konflik dengan perintah yang diizinkan, pencocokan prefix terpanjang diprioritaskan. Tambahkan * untuk menolak semua perintah.",
 			"commandPlaceholder": "Masukkan prefix perintah (misalnya, 'git ')",
 			"deniedCommandPlaceholder": "Masukkan prefix perintah untuk ditolak (misalnya, 'rm -rf')",
-			"addButton": "Tambah",
-			"autoDenied": "Perintah dengan awalan `{{prefix}}` telah dilarang oleh pengguna. Jangan menghindari pembatasan ini dengan menjalankan perintah lain."
+			"addButton": "Tambah"
 		},
 		"apiRequestLimit": {
 			"title": "Permintaan Maks",
 			"unlimited": "Tidak terbatas"
 		},
-		"selectOptionsFirst": "Pilih setidaknya satu opsi di bawah ini untuk mengaktifkan persetujuan otomatis",
 		"apiCostLimit": {
 			"title": "Biaya Maksimal",
 			"unlimited": "Tidak Terbatas"
@@ -373,12 +352,10 @@
 		}
 	},
 	"providers": {
-		"providerDocumentation": "Dokumentasi {{provider}}",
 		"configProfile": "Profil Konfigurasi",
 		"description": "Simpan konfigurasi API yang berbeda untuk beralih dengan cepat antara provider dan pengaturan.",
 		"apiProvider": "Provider API",
 		"apiProviderDocs": "Dokumentasi Penyedia",
-		"model": "Model",
 		"nameEmpty": "Nama tidak boleh kosong",
 		"nameExists": "Profil dengan nama ini sudah ada",
 		"deleteProfile": "Hapus Profil",
@@ -470,7 +447,6 @@
 		},
 		"useCustomBaseUrl": "Gunakan base URL kustom",
 		"useReasoning": "Aktifkan reasoning",
-		"useHostHeader": "Gunakan Host header kustom",
 		"customHeaders": "Header Kustom",
 		"headerName": "Nama header",
 		"headerValue": "Nilai header",
@@ -482,7 +458,6 @@
 		"requestyApiKey": "Requesty API Key",
 		"refreshModels": {
 			"label": "Refresh Model",
-			"hint": "Silakan buka kembali pengaturan untuk melihat model terbaru.",
 			"loading": "Merefresh daftar model...",
 			"success": "Daftar model berhasil direfresh!",
 			"error": "Gagal merefresh daftar model. Silakan coba lagi."
@@ -571,11 +546,8 @@
 		"awsGlobalInference": "Gunakan inferensi Global (pilih Wilayah AWS optimal secara otomatis)",
 		"awsServiceTier": "Tingkat Layanan",
 		"awsServiceTierStandard": "Standard",
-		"awsServiceTierStandardDesc": "Performa dan biaya yang seimbang",
 		"awsServiceTierFlex": "Flex (diskon 50%)",
-		"awsServiceTierFlexDesc": "Biaya lebih rendah, latensi lebih tinggi untuk tugas non-kritikal",
 		"awsServiceTierPriority": "Priority (premium 75%)",
-		"awsServiceTierPriorityDesc": "Performa tercepat untuk aplikasi mission-critical",
 		"awsServiceTierNote": "Tingkat layanan memengaruhi harga dan performa. Flex menawarkan diskon 50% dengan latensi lebih tinggi, Priority menawarkan performa 25% lebih baik dengan premium 75%.",
 		"awsBedrockVpc": {
 			"useCustomVpcEndpoint": "Gunakan VPC endpoint kustom",
@@ -610,17 +582,13 @@
 		"googleCloudRegion": "Google Cloud Region",
 		"lmStudio": {
 			"baseUrl": "Base URL (opsional)",
-			"modelId": "Model ID",
 			"speculativeDecoding": "Aktifkan Speculative Decoding",
 			"draftModelId": "Draft Model ID",
 			"draftModelDesc": "Draft model harus dari keluarga model yang sama agar speculative decoding bekerja dengan benar.",
-			"selectDraftModel": "Pilih Draft Model",
-			"noModelsFound": "Tidak ada draft model ditemukan. Pastikan LM Studio berjalan dengan Server Mode diaktifkan.",
 			"description": "LM Studio memungkinkan kamu menjalankan model secara lokal di komputer. Untuk instruksi cara memulai, lihat <a>panduan quickstart</a> mereka. Kamu juga perlu memulai fitur <b>local server</b> LM Studio untuk menggunakannya dengan ekstensi ini. <span>Catatan:</span> Zoo Code menggunakan prompt kompleks dan bekerja terbaik dengan model Claude. Model yang kurang mampu mungkin tidak bekerja seperti yang diharapkan."
 		},
 		"ollama": {
 			"baseUrl": "Base URL (opsional)",
-			"modelId": "Model ID",
 			"apiKey": "Ollama API Key",
 			"apiKeyHelp": "API key opsional untuk instance Ollama yang memerlukan autentikasi, atau untuk layanan cloud. Zoo Code mengirim key hanya ke endpoint HTTPS atau loopback. Endpoint HTTP jarak jauh tidak mendapat key, karena key akan dikirim sebagai teks biasa. Gunakan HTTPS untuk instance jarak jauh yang memerlukan key. Biarkan kosong untuk instalasi lokal.",
 			"numCtx": "Ukuran Jendela Konteks (num_ctx)",
@@ -650,10 +618,6 @@
 			"imageSupport": {
 				"label": "Dukungan Gambar",
 				"description": "Apakah model ini mampu memproses dan memahami gambar?"
-			},
-			"computerUse": {
-				"label": "Computer Use",
-				"description": "Apakah model ini mampu berinteraksi dengan browser?"
 			},
 			"promptCache": {
 				"label": "Prompt Caching",
@@ -711,13 +675,6 @@
 			"description": "Mengontrol seberapa detail respons model. Verbositas rendah menghasilkan jawaban singkat, sedangkan verbositas tinggi memberikan penjelasan menyeluruh."
 		},
 		"setReasoningLevel": "Aktifkan Upaya Reasoning",
-		"claudeCode": {
-			"pathLabel": "Jalur Kode Claude",
-			"description": "Jalur opsional ke Claude Code CLI Anda. Defaultnya adalah 'claude' jika tidak diatur.",
-			"placeholder": "Default: claude",
-			"maxTokensLabel": "Token Output Maks",
-			"maxTokensDescription": "Jumlah maksimum token output untuk respons Claude Code. Default adalah 8000."
-		},
 		"zooGateway": {
 			"account": "Akun Zoo Code",
 			"signInButton": "Masuk ke Zoo Code",
@@ -750,25 +707,8 @@
 	},
 	"contextManagement": {
 		"description": "Kontrol informasi apa yang disertakan dalam context window AI, mempengaruhi penggunaan token dan kualitas respons",
-		"autoCondenseContextPercent": {
-			"label": "Ambang batas untuk memicu kondensasi konteks cerdas",
-			"description": "Ketika context window mencapai ambang batas ini, Zoo akan secara otomatis mengondensasikannya."
-		},
-		"condensingApiConfiguration": {
-			"label": "Konfigurasi API untuk Kondensasi Konteks",
-			"description": "Pilih konfigurasi API mana yang akan digunakan untuk operasi kondensasi konteks. Biarkan tidak dipilih untuk menggunakan konfigurasi aktif saat ini.",
-			"useCurrentConfig": "Default"
-		},
-		"customCondensingPrompt": {
-			"label": "Prompt Kondensasi Konteks Kustom",
-			"description": "Kustomisasi system prompt yang digunakan untuk kondensasi konteks. Biarkan kosong untuk menggunakan prompt default.",
-			"placeholder": "Masukkan prompt kondensasi kustom kamu di sini...\n\nKamu dapat menggunakan struktur yang sama dengan prompt default:\n- Previous Conversation\n- Current Work\n- Key Technical Concepts\n- Relevant Files and Code\n- Problem Solving\n- Pending Tasks and Next Steps",
-			"reset": "Reset ke Default",
-			"hint": "Kosong = gunakan prompt default"
-		},
 		"autoCondenseContext": {
-			"name": "Secara otomatis memicu kondensasi konteks cerdas",
-			"description": "Ketika diaktifkan, Zoo akan secara otomatis mengondensasi konteks ketika ambang batas tercapai. Ketika dinonaktifkan, kamu masih dapat memicu kondensasi konteks secara manual."
+			"name": "Secara otomatis memicu kondensasi konteks cerdas"
 		},
 		"diagnostics": {
 			"includeMessages": {
@@ -798,7 +738,6 @@
 			"defaultProfile": "Default Global (semua profil)",
 			"defaultDescription": "Ketika konteks mencapai persentase ini, akan secara otomatis dikondensasi untuk semua profil kecuali mereka memiliki pengaturan kustom",
 			"profileDescription": "Ambang batas kustom untuk profil ini saja (menimpa default global)",
-			"inheritDescription": "Profil ini mewarisi ambang batas default global ({{threshold}}%)",
 			"usesGlobal": "(menggunakan global {{threshold}}%)"
 		},
 		"openTabs": {
@@ -812,16 +751,6 @@
 		"rooignore": {
 			"label": "Tampilkan file .rooignore'd dalam daftar dan pencarian",
 			"description": "Ketika diaktifkan, file yang cocok dengan pola di .rooignore akan ditampilkan dalam daftar dengan simbol kunci. Ketika dinonaktifkan, file ini akan sepenuhnya disembunyikan dari daftar file dan pencarian."
-		},
-		"maxConcurrentFileReads": {
-			"label": "Batas pembacaan file bersamaan",
-			"description": "Jumlah maksimum file yang dapat diproses oleh tool 'read_file' secara bersamaan. Nilai yang lebih tinggi dapat mempercepat pembacaan beberapa file kecil tetapi meningkatkan penggunaan memori."
-		},
-		"maxReadFile": {
-			"label": "Ambang batas auto-truncate pembacaan file",
-			"description": "Zoo membaca sejumlah baris ini ketika model menghilangkan nilai start/end. Jika angka ini kurang dari total file, Zoo menghasilkan indeks nomor baris dari definisi kode. Kasus khusus: -1 menginstruksikan Zoo untuk membaca seluruh file (tanpa indexing), dan 0 menginstruksikannya untuk tidak membaca baris dan hanya menyediakan indeks baris untuk konteks minimal. Nilai yang lebih rendah meminimalkan penggunaan konteks awal, memungkinkan pembacaan rentang baris yang tepat selanjutnya. Permintaan start/end eksplisit tidak dibatasi oleh pengaturan ini.",
-			"lines": "baris",
-			"always_full_read": "Selalu baca seluruh file"
 		},
 		"maxImageFileSize": {
 			"label": "Ukuran file gambar maksimum",
@@ -856,20 +785,11 @@
 			"description": "Tampilkan keluaran perintah dalam keadaan diciutkan, termasuk terminal inline. Perluas secara manual bila diperlukan. Cara perintah dijalankan tidak berubah."
 		},
 		"basic": {
-			"label": "Pengaturan Terminal: Dasar",
-			"description": "Pengaturan terminal dasar"
+			"label": "Pengaturan Terminal: Dasar"
 		},
 		"advanced": {
 			"label": "Pengaturan Terminal: Lanjutan",
 			"description": "Pengaturan ini hanya berlaku ketika 'Gunakan Terminal Inline' dinonaktifkan. Hanya mempengaruhi terminal VS Code dan mungkin memerlukan restart IDE."
-		},
-		"outputLineLimit": {
-			"label": "Batas keluaran terminal",
-			"description": "Menyimpan baris pertama dan terakhir dan membuang yang tengah agar tetap di bawah batas. Turunkan untuk menghemat token; naikkan untuk memberi Zoo lebih banyak detail tengah. Zoo melihat placeholder di mana konten dilewati.<0>Pelajari lebih lanjut</0>"
-		},
-		"outputCharacterLimit": {
-			"label": "Batas karakter terminal",
-			"description": "Override batas baris untuk mencegah masalah memori dengan memberlakukan cap keras pada ukuran output. Jika terlampaui, simpan awal dan akhir lalu tampilkan placeholder ke Zoo di mana konten dilewati. <0>Pelajari lebih lanjut</0>"
 		},
 		"outputPreviewSize": {
 			"label": "Ukuran pratinjau keluaran perintah",
@@ -928,23 +848,6 @@
 		"title": "Pengaturan lanjutan"
 	},
 	"advanced": {
-		"diff": {
-			"label": "Aktifkan editing melalui diff",
-			"description": "Ketika diaktifkan, Zoo akan dapat mengedit file lebih cepat dan akan secara otomatis menolak penulisan file penuh yang terpotong",
-			"strategy": {
-				"label": "Strategi diff",
-				"options": {
-					"standard": "Standard (Single block)",
-					"multiBlock": "Eksperimental: Multi-block diff",
-					"unified": "Eksperimental: Unified diff"
-				},
-				"descriptions": {
-					"standard": "Strategi diff standard menerapkan perubahan ke satu blok kode pada satu waktu.",
-					"unified": "Strategi unified diff mengambil beberapa pendekatan untuk menerapkan diff dan memilih pendekatan terbaik.",
-					"multiBlock": "Strategi multi-block diff memungkinkan memperbarui beberapa blok kode dalam file dalam satu permintaan."
-				}
-			}
-		},
 		"todoList": {
 			"label": "Aktifkan alat daftar tugas",
 			"description": "Saat diaktifkan, Zoo dapat membuat dan mengelola daftar tugas untuk melacak kemajuan tugas. Ini membantu mengatur tugas kompleks menjadi langkah-langkah yang dapat dikelola."
@@ -1011,10 +914,6 @@
 			"refreshError": "Gagal merefresh tool",
 			"toolParameters": "Parameter"
 		}
-	},
-	"promptCaching": {
-		"label": "Nonaktifkan prompt caching",
-		"description": "Ketika dicentang, Zoo tidak akan menggunakan prompt caching untuk model ini."
 	},
 	"temperature": {
 		"useCustom": "Gunakan temperature kustom",
@@ -1085,7 +984,6 @@
 			"reservedKeys": "Body Tambahan tidak dapat menimpa field yang dikelola Zoo Code: {{keys}}."
 		},
 		"arn": {
-			"invalidFormat": "Format ARN tidak valid. Silakan periksa persyaratan format.",
 			"regionMismatch": "Peringatan: Region di ARN kamu ({{arnRegion}}) tidak cocok dengan region yang kamu pilih ({{region}}). Ini dapat menyebabkan masalah akses. Provider akan menggunakan region dari ARN."
 		},
 		"modelAvailability": "Model ID ({{modelId}}) yang kamu berikan tidak tersedia. Silakan pilih model yang berbeda.",
@@ -1107,11 +1005,6 @@
 		"projectId": "Masukkan Project ID...",
 		"customArn": "Masukkan ARN (misalnya arn:aws:bedrock:us-east-1:123456789012:foundation-model/my-model)",
 		"baseUrl": "Masukkan base URL...",
-		"modelId": {
-			"lmStudio": "misalnya meta-llama-3.1-8b-instruct",
-			"lmStudioDraft": "misalnya lmstudio-community/llama-3.2-1b-instruct",
-			"ollama": "misalnya llama3.1"
-		},
 		"numbers": {
 			"maxTokens": "misalnya 4096",
 			"contextWindow": "misalnya 128000",
@@ -1131,9 +1024,6 @@
 	},
 	"includeMaxOutputTokens": "Sertakan token output maksimum",
 	"includeMaxOutputTokensDescription": "Kirim parameter token output maksimum dalam permintaan API. Beberapa provider mungkin tidak mendukung ini.",
-	"limitMaxTokensDescription": "Batasi jumlah maksimum token dalam respons",
-	"maxOutputTokensLabel": "Token output maksimum",
-	"maxTokensGenerateDescription": "Token maksimum untuk dihasilkan dalam respons",
 	"openAiCodexSpeed": {
 		"label": "Kecepatan",
 		"tooltip": "Mode Cepat menggunakan pemrosesan prioritas Codex untuk kecepatan sekitar 1,5x dan memakai lebih banyak kuota langganan.",
@@ -1141,8 +1031,6 @@
 		"fast": "Cepat (kecepatan 1,5x, penggunaan meningkat)"
 	},
 	"serviceTier": {
-		"label": "Tingkat layanan",
-		"tooltip": "Untuk pemrosesan permintaan API yang lebih cepat, coba tingkat layanan pemrosesan prioritas. Untuk harga lebih rendah dengan latensi lebih tinggi, coba tingkat pemrosesan fleksibel.",
 		"standard": "Standar",
 		"flex": "Fleksibel",
 		"priority": "Prioritas",
@@ -1191,8 +1079,6 @@
 		"editSkill": "Edit skill",
 		"deleteSkill": "Hapus skill",
 		"configureModes": "Ketersediaan mode",
-		"modeAny": "Mode apa saja",
-		"modeCount": "{{count}} mode",
 		"deleteDialog": {
 			"title": "Hapus Skill",
 			"description": "Apakah Anda yakin ingin menghapus skill \"{{name}}\"? Tindakan ini tidak dapat dibatalkan.",
@@ -1201,7 +1087,6 @@
 		},
 		"modeDialog": {
 			"title": "Konfigurasi Mode Skill",
-			"description": "Pilih mode mana yang dapat menggunakan skill ini",
 			"intro": "Untuk menjaga konteks Anda tetap ringan, kami merekomendasikan hanya membuat skills tersedia untuk mode yang membutuhkannya.",
 			"anyMode": "Mode apa pun (tersedia di mana-mana)",
 			"save": "Simpan",
@@ -1211,13 +1096,9 @@
 			"title": "Buat Skill Baru",
 			"nameLabel": "Nama",
 			"namePlaceholder": "nama-skill-saya",
-			"descriptionLabel": "Deskripsi",
 			"descriptionPlaceholder": "Jelaskan kapan skill ini harus digunakan...",
 			"sourceLabel": "Lokasi",
 			"modeLabel": "Mode (opsional)",
-			"modePlaceholder": "Mode apa saja",
-			"modeHint": "Batasi skill ini ke mode tertentu",
-			"modeAny": "Mode apa saja",
 			"create": "Buat",
 			"cancel": "Batal"
 		},

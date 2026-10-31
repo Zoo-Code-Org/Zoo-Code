@@ -9,10 +9,7 @@
 	},
 	"answers": {
 		"yes": "Ja",
-		"no": "Nein",
-		"cancel": "Abbrechen",
-		"remove": "Entfernen",
-		"keep": "Behalten"
+		"cancel": "Abbrechen"
 	},
 	"number_format": {
 		"thousand_suffix": "k",
@@ -33,19 +30,11 @@
 			"copy": "Kopieren",
 			"save": "Bild speichern",
 			"viewCode": "Code anzeigen",
-			"viewDiagram": "Diagramm anzeigen",
 			"close": "Schließen"
-		},
-		"modal": {
-			"codeTitle": "Mermaid-Code"
 		},
 		"tabs": {
 			"diagram": "Diagramm",
 			"code": "Code"
-		},
-		"feedback": {
-			"imageCopied": "Bild in die Zwischenablage kopiert",
-			"copyError": "Fehler beim Kopieren des Bildes"
 		}
 	},
 	"image": {
@@ -53,19 +42,6 @@
 			"view": "Bild"
 		},
 		"noData": "Keine Bilddaten"
-	},
-	"file": {
-		"errors": {
-			"invalidDataUri": "Ungültiges Daten-URI-Format",
-			"copyingImage": "Fehler beim Kopieren des Bildes: {{error}}",
-			"openingImage": "Fehler beim Öffnen des Bildes: {{error}}",
-			"pathNotExists": "Pfad existiert nicht: {{path}}",
-			"couldNotOpen": "Datei konnte nicht geöffnet werden: {{error}}",
-			"couldNotOpenGeneric": "Datei konnte nicht geöffnet werden!"
-		},
-		"success": {
-			"imageDataUriCopied": "Bild-Daten-URI in die Zwischenablage kopiert"
-		}
 	},
 	"confirmation": {
 		"deleteMessage": "Nachricht löschen",
@@ -77,8 +53,7 @@
 		"editOnly": "Nein, nur Nachricht bearbeiten",
 		"deleteOnly": "Nein, nur Nachricht löschen",
 		"restoreToCheckpoint": "Ja, Checkpoint wiederherstellen",
-		"proceed": "Fortfahren",
-		"dontShowAgain": "Nicht mehr anzeigen"
+		"proceed": "Fortfahren"
 	},
 	"time_ago": {
 		"just_now": "gerade eben",
@@ -100,12 +75,6 @@
 		"wait_checkpoint_long_time": "Du hast {{timeout}} Sekunden auf die Initialisierung des Checkpoints gewartet. Wenn du die Checkpoint-Funktion nicht brauchst, kannst du sie in den <settingsLink>Checkpoint-Einstellungen</settingsLink> ausschalten.",
 		"init_checkpoint_fail_long_time": "Die Initialisierung des Checkpoints dauert länger als {{timeout}} Sekunden, deshalb sind Checkpoints für diese Aufgabe deaktiviert. Du kannst Checkpoints ausschalten oder die Wartezeit in den <settingsLink>Checkpoint-Einstellungen</settingsLink> verlängern.",
 		"attempt_completion_tool_failed": "Du kannst attempt_completion nicht ausführen, weil ein vorheriger Tool-Aufruf in diesem Durchgang fehlgeschlagen ist. Behebe den Tool-Fehler, bevor du versuchst, abzuschließen."
-	},
-	"tasks": {
-		"delegated": "An Unteraufgabe delegiert",
-		"delegated_to": "An Aufgabe {{childId}} delegiert",
-		"delegation_completed": "Unteraufgabe abgeschlossen, übergeordnete Aufgabe wird fortgesetzt",
-		"awaiting_child": "Warte auf Unteraufgabe {{childId}}"
 	},
 	"costs": {
 		"own": "Eigen",

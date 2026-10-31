@@ -9,10 +9,7 @@
 	},
 	"answers": {
 		"yes": "Ja",
-		"no": "Nee",
-		"cancel": "Annuleren",
-		"remove": "Verwijderen",
-		"keep": "Behouden"
+		"cancel": "Annuleren"
 	},
 	"number_format": {
 		"thousand_suffix": "k",
@@ -33,19 +30,11 @@
 			"copy": "Kopiëren",
 			"save": "Afbeelding opslaan",
 			"viewCode": "Code bekijken",
-			"viewDiagram": "Diagram bekijken",
 			"close": "Sluiten"
-		},
-		"modal": {
-			"codeTitle": "Mermaid-code"
 		},
 		"tabs": {
 			"diagram": "Diagram",
 			"code": "Code"
-		},
-		"feedback": {
-			"imageCopied": "Afbeelding gekopieerd naar klembord",
-			"copyError": "Fout bij kopiëren van afbeelding"
 		}
 	},
 	"image": {
@@ -53,19 +42,6 @@
 			"view": "Afbeelding"
 		},
 		"noData": "Geen afbeeldingsgegevens"
-	},
-	"file": {
-		"errors": {
-			"invalidDataUri": "Ongeldig data-URI-formaat",
-			"copyingImage": "Fout bij kopiëren van afbeelding: {{error}}",
-			"openingImage": "Fout bij openen van afbeelding: {{error}}",
-			"pathNotExists": "Pad bestaat niet: {{path}}",
-			"couldNotOpen": "Kon bestand niet openen: {{error}}",
-			"couldNotOpenGeneric": "Kon bestand niet openen!"
-		},
-		"success": {
-			"imageDataUriCopied": "Afbeelding data-URI gekopieerd naar klembord"
-		}
 	},
 	"confirmation": {
 		"deleteMessage": "Bericht Verwijderen",
@@ -77,8 +53,7 @@
 		"editOnly": "Nee, alleen bericht bewerken",
 		"deleteOnly": "Nee, alleen bericht verwijderen",
 		"restoreToCheckpoint": "Ja, checkpoint herstellen",
-		"proceed": "Doorgaan",
-		"dontShowAgain": "Niet meer tonen"
+		"proceed": "Doorgaan"
 	},
 	"time_ago": {
 		"just_now": "zojuist",
@@ -100,12 +75,6 @@
 		"wait_checkpoint_long_time": "Je hebt {{timeout}} seconden gewacht op de initialisatie van de checkpoint. Als je deze functie niet nodig hebt, schakel hem dan uit in de <settingsLink>checkpoint-instellingen</settingsLink>.",
 		"init_checkpoint_fail_long_time": "De initialisatie van de checkpoint duurde meer dan {{timeout}} seconden, dus checkpoints zijn uitgeschakeld voor deze taak. Je kunt checkpoints uitschakelen of de wachttijd in de <settingsLink>checkpoint-instellingen</settingsLink> verhogen.",
 		"attempt_completion_tool_failed": "Je kunt attempt_completion niet uitvoeren omdat een eerdere tool-aanroep in deze beurt is mislukt. Los het tool-probleem op voordat je probeert te voltooien."
-	},
-	"tasks": {
-		"delegated": "Gedelegeerd naar subtaak",
-		"delegated_to": "Gedelegeerd naar taak {{childId}}",
-		"delegation_completed": "Subtaak voltooid, hoofdtaak wordt hervat",
-		"awaiting_child": "Wachten op kindtaak {{childId}}"
 	},
 	"costs": {
 		"own": "Eigen",

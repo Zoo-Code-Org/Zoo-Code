@@ -1,23 +1,12 @@
 {
-	"extension": {
-		"name": "Zoo Code",
-		"description": "Een compleet ontwikkelteam van AI-agenten in je editor."
-	},
 	"number_format": {
 		"thousand_suffix": "k",
 		"million_suffix": "m",
 		"billion_suffix": "mrd"
 	},
-	"welcome": "Welkom, {{name}}! Je hebt {{count}} meldingen.",
-	"items": {
-		"zero": "Geen items",
-		"one": "Eén item",
-		"other": "{{count}} items"
-	},
 	"confirmation": {
 		"reset_state": "Weet je zeker dat je alle status en geheime opslag in de extensie wilt resetten? Dit kan niet ongedaan worden gemaakt.",
-		"delete_config_profile": "Weet je zeker dat je dit configuratieprofiel wilt verwijderen?",
-		"delete_custom_mode_with_rules": "Weet je zeker dat je deze {scope}-modus wilt verwijderen?\n\nDit verwijdert ook de bijbehorende regelsmap op:\n{rulesFolderPath}"
+		"delete_config_profile": "Weet je zeker dat je dit configuratieprofiel wilt verwijderen?"
 	},
 	"errors": {
 		"invalid_data_uri": "Ongeldig data-URI-formaat",
@@ -37,8 +26,6 @@
 		"checkpoint_diff_to_current": "Wijzigingen in huidige werkruimte",
 		"nested_git_repos_warning": "Checkpoints zijn uitgeschakeld omdat een geneste git-repository is gedetecteerd op: {{path}}. Om checkpoints te gebruiken, verwijder of verplaats deze geneste git-repository.",
 		"no_workspace": "Open eerst een projectmap",
-		"update_support_prompt": "Bijwerken van ondersteuningsprompt mislukt",
-		"reset_support_prompt": "Resetten van ondersteuningsprompt mislukt",
 		"enhance_prompt": "Verbeteren van prompt mislukt",
 		"get_system_prompt": "Ophalen van systeemprompt mislukt",
 		"search_commits": "Zoeken naar commits mislukt",
@@ -52,8 +39,6 @@
 		"update_server_timeout": "Bijwerken van server-timeout mislukt",
 		"hmr_not_running": "Lokale ontwikkelserver draait niet, HMR werkt niet. Voer 'npm run dev' uit voordat je de extensie start om HMR in te schakelen.",
 		"retrieve_current_mode": "Fout: ophalen van huidige modus uit status mislukt.",
-		"failed_delete_repo": "Verwijderen van gekoppelde schaduwrepository of branch mislukt: {{error}}",
-		"failed_remove_directory": "Verwijderen van taakmap mislukt: {{error}}",
 		"custom_storage_path_unusable": "Aangepast opslagpad \"{{path}}\" is onbruikbaar, standaardpad wordt gebruikt",
 		"cannot_access_path": "Kan pad {{path}} niet openen: {{error}}",
 		"path_outside_workspace": "Pad is buiten de werkomgeving",
@@ -65,24 +50,13 @@
 		"condensed_recently": "Context is recent gecomprimeerd; deze poging wordt overgeslagen",
 		"condense_handler_invalid": "API-handler voor het comprimeren van context is ongeldig",
 		"condense_api_failed": "Comprimeer API-oproep mislukt: {{message}}",
-		"url_timeout": "De website deed er te lang over om te laden (timeout). Dit kan komen door een trage verbinding, een zware website of tijdelijke onbeschikbaarheid. Je kunt het later opnieuw proberen of controleren of de URL correct is.",
-		"url_not_found": "Het websiteadres kon niet worden gevonden. Controleer of de URL correct is en probeer opnieuw.",
-		"no_internet": "Geen internetverbinding. Controleer je netwerkverbinding en probeer opnieuw.",
-		"url_forbidden": "Toegang tot deze website is verboden. De site kan geautomatiseerde toegang blokkeren of authenticatie vereisen.",
-		"url_page_not_found": "De pagina werd niet gevonden. Controleer of de URL correct is.",
-		"url_request_aborted": "Het verzoek om de URL op te halen is afgebroken. Dit kan gebeuren als de site geautomatiseerde toegang blokkeert, authenticatie vereist of als er een netwerkprobleem is. Probeer het opnieuw of controleer of de URL toegankelijk is in een normale browser.",
-		"url_fetch_failed": "Fout bij ophalen van URL-inhoud: {{error}}",
-		"url_fetch_error_with_url": "Fout bij ophalen van inhoud voor {{url}}: {{error}}",
 		"command_timeout": "Time-out bij uitvoeren van commando na {{seconds}} seconden",
 		"destructiveCommandGuard": {
 			"unavailable": "Destructive Command Guard is ingeschakeld, maar is niet beschikbaar voor dit platform",
 			"enableFailed": "Destructive Command Guard kan niet worden ingeschakeld: {{error}}"
 		},
-		"share_task_failed": "Delen van taak mislukt",
 		"share_no_active_task": "Geen actieve taak om te delen",
-		"share_auth_required": "Authenticatie vereist. Log in om taken te delen.",
 		"share_not_enabled": "Taken delen is niet ingeschakeld voor deze organisatie.",
-		"share_task_not_found": "Taak niet gevonden of toegang geweigerd.",
 		"mode_import_failed": "Importeren van modus mislukt: {{error}}",
 		"delete_rules_folder_failed": "Kan regelmap niet verwijderen: {{rulesFolderPath}}. Fout: {{error}}",
 		"command_not_found": "Opdracht '{{name}}' niet gevonden",
@@ -92,13 +66,6 @@
 		"command_already_exists": "Opdracht \"{{commandName}}\" bestaat al",
 		"create_command_failed": "Kan opdracht niet aanmaken",
 		"command_template_content": "---\ndescription: \"Korte beschrijving van wat deze opdracht doet\"\n---\n\nDit is een nieuwe slash-opdracht. Bewerk dit bestand om het opdrachtgedrag aan te passen.",
-		"claudeCode": {
-			"processExited": "Claude Code proces beëindigd met code {{exitCode}}.",
-			"errorOutput": "Foutuitvoer: {{output}}",
-			"processExitedWithError": "Claude Code proces beëindigd met code {{exitCode}}. Foutuitvoer: {{output}}",
-			"stoppedWithReason": "Claude Code gestopt om reden: {{reason}}",
-			"apiKeyModelPlanMismatch": "API-sleutels en abonnementsplannen staan verschillende modellen toe. Controleer of het geselecteerde model in je plan is inbegrepen."
-		},
 		"message": {
 			"no_active_task_to_delete": "Geen actieve taak om berichten uit te verwijderen",
 			"invalid_timestamp_for_deletion": "Ongeldig bericht tijdstempel voor verwijdering",
@@ -111,14 +78,9 @@
 		"gemini": {
 			"generate_stream": "Fout bij het genereren van contextstream door Gemini: {{error}}",
 			"generate_complete_prompt": "Fout bij het voltooien door Gemini: {{error}}",
-			"sources": "Bronnen:",
-			"thinking_complete_no_output": "(Nadenken voltooid, maar er is geen uitvoer gegenereerd.)",
-			"thinking_complete_truncated": "(Nadenken voltooid, maar uitvoer is afgekapt vanwege tokenlimiet.)",
-			"thinking_complete_safety": "(Nadenken voltooid, maar uitvoer is geblokkeerd vanwege veiligheidsinstellingen.)",
-			"thinking_complete_recitation": "(Nadenken voltooid, maar uitvoer is geblokkeerd vanwege recitatiecontrole.)"
+			"sources": "Bronnen:"
 		},
 		"roo": {
-			"authenticationRequired": "Roo provider vereist cloud authenticatie. Log in bij Roo Code Cloud.",
 			"routerRemoved": "Roo Code Router is verwijderd. Selecteer en configureer een andere provider."
 		},
 		"api": {
@@ -152,7 +114,6 @@
 	},
 	"warnings": {
 		"no_terminal_content": "Geen terminalinhoud geselecteerd",
-		"missing_task_files": "De bestanden van deze taak ontbreken. Wil je deze uit de takenlijst verwijderen?",
 		"auto_import_failed": "Automatisch importeren van ZooCode-instellingen mislukt: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "Geen Roo Code-taakgeschiedenis gevonden om te importeren van {{domain}}.",
@@ -161,18 +122,13 @@
 		}
 	},
 	"info": {
-		"no_changes": "Geen wijzigingen gevonden.",
 		"clipboard_copy": "Systeemprompt succesvol gekopieerd naar klembord",
-		"history_cleanup": "{{count}} taak/taken met ontbrekende bestanden uit geschiedenis verwijderd.",
 		"custom_storage_path_set": "Aangepast opslagpad ingesteld: {{path}}",
 		"default_storage_path": "Terug naar standaard opslagpad",
 		"settings_imported": "Instellingen succesvol geïmporteerd.",
 		"auto_import_success": "ZooCode-instellingen automatisch geïmporteerd van {{filename}}",
-		"share_link_copied": "Deellink gekopieerd naar klembord",
 		"image_copied_to_clipboard": "Afbeelding data-URI gekopieerd naar klembord",
 		"image_saved": "Afbeelding opgeslagen naar {{path}}",
-		"organization_share_link_copied": "Organisatie deel-link gekopieerd naar klembord!",
-		"public_share_link_copied": "Openbare deel-link gekopieerd naar klembord!",
 		"mode_exported": "Modus '{{mode}}' succesvol geëxporteerd",
 		"mode_imported": "Modus succesvol geïmporteerd",
 		"roo": {
@@ -184,25 +140,16 @@
 		}
 	},
 	"answers": {
-		"yes": "Ja",
-		"no": "Nee",
-		"remove": "Verwijderen",
-		"keep": "Behouden"
+		"yes": "Ja"
 	},
 	"buttons": {
-		"save": "Opslaan",
-		"edit": "Bewerken",
 		"learn_more": "Meer informatie"
 	},
 	"tasks": {
-		"canceled": "Taakfout: gestopt en geannuleerd door gebruiker.",
-		"deleted": "Taakfout: gestopt en verwijderd door gebruiker.",
 		"incomplete": "Taak #{{taskNumber}} (Onvolledig)",
 		"no_messages": "Taak #{{taskNumber}} (Geen berichten)"
 	},
 	"interruption": {
-		"responseInterruptedByUser": "Reactie onderbroken door gebruiker",
-		"responseInterruptedByApiError": "Reactie onderbroken door API-fout",
 		"streamTerminatedByProvider": "Provider heeft het verzoek beëindigd"
 	},
 	"storage": {
@@ -215,9 +162,6 @@
 		"task_prompt": "Wat moet Zoo doen?",
 		"task_placeholder": "Typ hier je taak"
 	},
-	"settings": {
-		"providers": {}
-	},
 	"customModes": {
 		"errors": {
 			"yamlParseError": "Ongeldige YAML in .roomodes bestand op regel {{line}}. Controleer:\n• Juiste inspringing (gebruik spaties, geen tabs)\n• Overeenkomende aanhalingstekens en haakjes\n• Geldige YAML syntaxis",
@@ -229,10 +173,6 @@
 			"modeNotFound": "Schrijffout: Modus niet gevonden",
 			"noWorkspaceForProject": "Geen workspace map gevonden voor projectspecifieke modus",
 			"rulesCleanupFailed": "Modus succesvol verwijderd, maar het verwijderen van de regelsmap op {{rulesFolderPath}} is mislukt. Je moet deze mogelijk handmatig verwijderen."
-		},
-		"scope": {
-			"project": "project",
-			"global": "globaal"
 		}
 	},
 	"marketplace": {
@@ -255,22 +195,8 @@
 			"organization_requires_auth": "Je organisatie vereist authenticatie."
 		}
 	},
-	"prompts": {
-		"deleteMode": {
-			"title": "Aangepaste modus verwijderen",
-			"description": "Weet je zeker dat je deze {{scope}}-modus wilt verwijderen? Dit zal ook de bijbehorende regelsmap op {{rulesFolderPath}} verwijderen",
-			"descriptionNoRules": "Weet je zeker dat je deze aangepaste modus wilt verwijderen?",
-			"confirm": "Verwijderen"
-		}
-	},
-	"commands": {
-		"preventCompletionWithOpenTodos": {
-			"description": "Voorkom taakafronding wanneer er onvolledige todos in de todolijst staan"
-		}
-	},
 	"docsLink": {
-		"label": "Docs",
-		"url": "https://docs.zoocode.dev"
+		"label": "Docs"
 	},
 	"zooAuth": {
 		"errors": {

@@ -1,6 +1,4 @@
 {
-	"title": "Modlar",
-	"done": "Tamamlandı",
 	"modes": {
 		"title": "Modlar",
 		"createNewMode": "Yeni mod oluştur",
@@ -53,9 +51,7 @@
 	},
 	"exportMode": {
 		"title": "Modu Dışa Aktar",
-		"description": "Bu modu tüm kurallar dahil olarak bir YAML dosyasına dışa aktararak başkalarıyla kolayca paylaşın.",
-		"export": "Modu Dışa Aktar",
-		"exporting": "Dışa aktarılıyor..."
+		"export": "Modu Dışa Aktar"
 	},
 	"globalCustomInstructions": {
 		"title": "Tüm Modlar için Özel Talimatlar",
@@ -81,7 +77,6 @@
 		"title": "Sistem promptu ({{modeName}} modu)"
 	},
 	"supportPrompts": {
-		"title": "Destek Promptları",
 		"resetPrompt": "{{promptType}} promptunu varsayılana sıfırla",
 		"prompt": "Prompt",
 		"enhance": {
@@ -93,11 +88,6 @@
 			"testEnhancement": "Geliştirmeyi test et",
 			"includeTaskHistory": "Görev geçmişini bağlam olarak dahil et",
 			"includeTaskHistoryDescription": "Etkinleştirildiğinde, mevcut konuşmanın son 10 mesajı promptları geliştirirken bağlam olarak dahil edilecek ve daha alakalı ve bağlam farkında öneriler üretmeye yardımcı olacaktır."
-		},
-		"condense": {
-			"apiConfiguration": "Bağlam Yoğunlaştırma için API Yapılandırması",
-			"apiConfigDescription": "Bağlam yoğunlaştırma işlemleri için hangi API yapılandırmasının kullanılacağını seçin. Geçerli etkin yapılandırmayı kullanmak için seçilmemiş bırakın.",
-			"useCurrentConfig": "Şu anda seçili olan API yapılandırmasını kullan"
 		},
 		"types": {
 			"ENHANCE": {
@@ -196,7 +186,6 @@
 		"title": "Modu Sil",
 		"message": "\"{{modeName}}\" modunu silmek istediğinizden emin misiniz?",
 		"rulesFolder": "Bu modun {{folderPath}} konumunda bir kurallar klasörü var ve bu da silinecek.",
-		"descriptionNoRules": "Bu özel modu silmek istediğinizden emin misiniz?",
 		"confirm": "Sil",
 		"cancel": "İptal"
 	}

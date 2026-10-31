@@ -1,6 +1,4 @@
 {
-	"title": "Modi",
-	"done": "Fertig",
 	"modes": {
 		"title": "Modi",
 		"createNewMode": "Neuen Modus erstellen",
@@ -53,9 +51,7 @@
 	},
 	"exportMode": {
 		"title": "Modus exportieren",
-		"description": "Exportiert diesen Modus in eine YAML-Datei mit allen enthaltenen Regeln zum einfachen Teilen mit anderen.",
-		"export": "Modus exportieren",
-		"exporting": "Exportieren..."
+		"export": "Modus exportieren"
 	},
 	"importMode": {
 		"selectLevel": "Wähle, wo dieser Modus importiert werden soll:",
@@ -81,7 +77,6 @@
 		"title": "System-Prompt (Modus {{modeName}})"
 	},
 	"supportPrompts": {
-		"title": "Support-Prompts",
 		"resetPrompt": "{{promptType}}-Prompt auf Standardwerte zurücksetzen",
 		"prompt": "Prompt",
 		"enhance": {
@@ -93,11 +88,6 @@
 			"testEnhancement": "Verbesserung testen",
 			"includeTaskHistory": "Aufgabenverlauf als Kontext einbeziehen",
 			"includeTaskHistoryDescription": "Wenn aktiviert, werden die letzten 10 Nachrichten aus der aktuellen Unterhaltung als Kontext beim Verbessern von Prompts einbezogen, um relevantere und kontextbewusste Vorschläge zu generieren."
-		},
-		"condense": {
-			"apiConfiguration": "API-Konfiguration für die Kontextverdichtung",
-			"apiConfigDescription": "Wählen Sie aus, welche API-Konfiguration für Kontextverdichtungsvorgänge verwendet werden soll. Lassen Sie die Auswahl leer, um die aktuell aktive Konfiguration zu verwenden.",
-			"useCurrentConfig": "Derzeit ausgewählte API-Konfiguration verwenden"
 		},
 		"types": {
 			"ENHANCE": {
@@ -196,7 +186,6 @@
 		"title": "Modus löschen",
 		"message": "Möchten Sie den Modus \"{{modeName}}\" wirklich löschen?",
 		"rulesFolder": "Dieser Modus hat einen Regelordner unter {{folderPath}}, der ebenfalls gelöscht wird.",
-		"descriptionNoRules": "Möchten Sie diesen benutzerdefinierten Modus wirklich löschen?",
 		"confirm": "Löschen",
 		"cancel": "Abbrechen"
 	}

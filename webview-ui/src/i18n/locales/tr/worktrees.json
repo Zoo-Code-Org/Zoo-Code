@@ -1,6 +1,5 @@
 {
 	"title": "Worktrees",
-	"done": "Tamam",
 	"description": "Git worktrees, ayrı dizinlerde aynı anda birden fazla branch üzerinde çalışmana olanak tanır. Her worktree, Zoo Code ile kendi VS Code penceresine sahip olur.",
 	"notGitRepo": "Bu çalışma alanı bir Git deposu değil. Worktrees'in çalışması için bir Git deposu gerekir.",
 	"multiRootNotSupported": "Worktrees, multi-root çalışma alanlarında desteklenmez. Worktrees kullanmak için tek bir klasör aç.",
@@ -10,25 +9,19 @@
 	"noIncludeFile": ".worktreeinclude dosyası bulunamadı",
 	"createFromGitignore": ".gitignore'dan oluştur",
 	"primary": "Birincil",
-	"current": "Mevcut",
 	"locked": "Kilitli",
 	"detachedHead": "Detached HEAD",
 	"noBranch": "Branch yok",
-	"switchInThisWindow": "Worktree'ye geç",
 	"openInNewWindow": "Yeni pencerede aç",
 	"delete": "Sil",
 	"newWorktree": "Yeni Worktree",
 	"createWorktree": "Worktree oluştur",
 	"branchName": "Branch adı",
-	"createNewBranch": "Yeni branch oluştur",
-	"checkoutExisting": "Mevcut branch'i checkout et",
 	"baseBranch": "Temel branch",
 	"loadingBranches": "Branch'ler yükleniyor...",
 	"selectBranch": "Branch seç",
 	"searchBranch": "Branch ara...",
 	"noBranchFound": "Branch bulunamadı",
-	"localBranches": "Yerel branch'ler",
-	"remoteBranches": "Uzak branch'ler",
 	"worktreePath": "In",
 	"selectWorktreeLocation": "Worktree Konumunu Seç",
 	"selectFolderForWorktree": "Yeni worktree için klasör seç",
@@ -47,14 +40,12 @@
 	"forceDelete": "Silmeye zorla",
 	"worktreeIsLocked": "worktree kilitli",
 	"deleting": "Siliniyor...",
-	"close": "Kapat",
 	"showInHomeScreen": "Ana ekranda worktrees göster",
 	"selector": {
 		"worktree": "Worktree",
 		"title": "Worktrees",
 		"tooltip": "Worktree'ler arasında geç",
 		"description": "Git worktree'leri aynı anda birden fazla branch'te çalışmanı sağlar. Workspace'i değiştirmek için tıkla.",
-		"settings": "Worktree'leri Yönet",
-		"info": "Git worktree'leri aynı depo ile bağlantılı birden fazla çalışma dizinine sahip olmanı sağlar."
+		"settings": "Worktree'leri Yönet"
 	}
 }

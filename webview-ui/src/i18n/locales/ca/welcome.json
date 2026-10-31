@@ -1,8 +1,7 @@
 {
 	"landing": {
 		"greeting": "Benvingut a Zoo Code!",
-		"introduction": "Amb una gamma de Modes integrats i ampliables, Zoo Code et permet planificar, arquitectar, codificar, depurar i augmentar la teva productivitat com mai abans.",
-		"getStarted": "Tria el teu proveïdor"
+		"introduction": "Amb una gamma de Modes integrats i ampliables, Zoo Code et permet planificar, arquitectar, codificar, depurar i augmentar la teva productivitat com mai abans."
 	},
 	"providerSignup": {
 		"heading": "Tria el teu proveïdor",

@@ -1,25 +1,21 @@
 {
-	"greeting": "Willkommen bei Zoo Code!",
 	"task": {
 		"title": "Aufgabe",
 		"expand": "Aufgabe erweitern",
 		"collapse": "Aufgabe einklappen",
 		"seeMore": "Mehr anzeigen",
-		"seeLess": "Weniger anzeigen",
 		"tokens": "Tokens",
 		"cache": "Cache",
 		"apiCost": "API-Kosten",
 		"size": "Größe",
 		"contextWindow": "Kontextfenster",
-		"closeAndStart": "Aufgabe schließen und neue starten",
 		"export": "Aufgabenverlauf exportieren",
 		"delete": "Aufgabe löschen (Shift + Klick zum Überspringen der Bestätigung)",
 		"condenseContext": "Kontext intelligent komprimieren",
 		"openApiHistory": "API-Verlauf öffnen",
 		"openUiHistory": "UI-Verlauf öffnen",
 		"backToParentTask": "Übergeordnete Aufgabe",
-		"waitingOnSubtask": "Wartet auf Unteraufgabe",
-		"goToSubtask": "Zur Unteraufgabe"
+		"waitingOnSubtask": "Wartet auf Unteraufgabe"
 	},
 	"unpin": "Lösen von oben",
 	"pin": "Anheften",
@@ -88,19 +84,16 @@
 		"tooltip": "Aktuelle Aufgabe beenden"
 	},
 	"stop": {
-		"title": "Stoppen",
-		"tooltip": "Aktuelle Aufgabe stoppen"
+		"title": "Stoppen"
 	},
 	"cancel": {
-		"title": "Abbrechen",
-		"tooltip": "Aktuelle Operation abbrechen"
+		"title": "Abbrechen"
 	},
 	"enqueueMessage": "Nachricht zur Warteschlange hinzufügen (wird nach Abschluss der aktuellen Aufgabe gesendet)",
 	"scrollToBottom": "Zum Chat-Ende scrollen",
 	"scrollToLatestCheckpoint": "Zum vorherigen Checkpoint scrollen",
 	"about": "Zoo Code ist ein ganzes KI-Entwicklerteam in deinem Editor.",
 	"docs": "Schau in unsere <DocsLink>Dokumentation</DocsLink>, um mehr zu erfahren.",
-	"onboarding": "Deine Aufgabenliste in diesem Arbeitsbereich ist leer.",
 	"rooTips": {
 		"customizableModes": {
 			"title": "Anpassbare Modi",
@@ -126,7 +119,6 @@
 	"unlockApiConfigAcrossModes": "API-Konfiguration ist für alle Modi in diesem Arbeitsbereich gesperrt (klicke zum Entsperren)",
 	"enhancePrompt": "Prompt mit zusätzlichem Kontext verbessern",
 	"addImages": "Bilder zur Nachricht hinzufügen",
-	"sendMessage": "Nachricht senden",
 	"pressToSend": "Drücke {{keyCombination}} zum Senden",
 	"stopTts": "Text-in-Sprache beenden",
 	"typeMessage": "Nachricht eingeben...",
@@ -145,7 +137,6 @@
 	},
 	"errorReadingFile": "Fehler beim Lesen der Datei",
 	"noValidImages": "Keine gültigen Bilder wurden verarbeitet",
-	"separator": "Trennlinie",
 	"edit": "Bearbeiten...",
 	"forNextMode": "für nächsten Modus",
 	"forPreviousMode": "für vorherigen Modus",
@@ -178,7 +169,6 @@
 	},
 	"checkpoint": {
 		"regular": "Checkpoint",
-		"initializingWarning": "Checkpoint wird noch initialisiert... Falls dies zu lange dauert, kannst du Checkpoints in den <settingsLink>Einstellungen</settingsLink> deaktivieren und deine Aufgabe neu starten.",
 		"menu": {
 			"viewDiff": "Unterschiede anzeigen",
 			"more": "Weitere Optionen",
@@ -206,10 +196,8 @@
 		"wantsToEdit": "Zoo möchte diese Datei bearbeiten",
 		"wantsToEditOutsideWorkspace": "Zoo möchte diese Datei außerhalb des Arbeitsbereichs bearbeiten",
 		"wantsToEditProtected": "Zoo möchte eine geschützte Konfigurationsdatei bearbeiten",
-		"wantsToCreate": "Zoo möchte eine neue Datei erstellen",
 		"wantsToSearchReplace": "Zoo möchte in dieser Datei suchen und ersetzen",
 		"didSearchReplace": "Zoo hat Suchen und Ersetzen in dieser Datei durchgeführt",
-		"wantsToInsert": "Zoo möchte Inhalte in diese Datei einfügen",
 		"wantsToInsertWithLineNumber": "Zoo möchte Inhalte in diese Datei in Zeile {{lineNumber}} einfügen",
 		"wantsToInsertAtEnd": "Zoo möchte Inhalte am Ende dieser Datei anhängen",
 		"wantsToReadMultiple": "Zoo möchte mehrere Dateien lesen",
@@ -231,14 +219,11 @@
 		"wantsToViewTopLevelOutsideWorkspace": "Zoo möchte die Dateien auf oberster Ebene in diesem Verzeichnis (außerhalb des Arbeitsbereichs) anzeigen",
 		"didViewTopLevelOutsideWorkspace": "Zoo hat die Dateien auf oberster Ebene in diesem Verzeichnis (außerhalb des Arbeitsbereichs) angezeigt",
 		"wantsToViewRecursiveOutsideWorkspace": "Zoo möchte rekursiv alle Dateien in diesem Verzeichnis (außerhalb des Arbeitsbereichs) anzeigen",
-		"didViewRecursiveOutsideWorkspace": "Zoo hat rekursiv alle Dateien in diesem Verzeichnis (außerhalb des Arbeitsbereichs) angezeigt",
-		"wantsToViewMultipleDirectories": "Zoo möchte mehrere Verzeichnisse anzeigen"
+		"didViewRecursiveOutsideWorkspace": "Zoo hat rekursiv alle Dateien in diesem Verzeichnis (außerhalb des Arbeitsbereichs) angezeigt"
 	},
-	"commandOutput": "Befehlsausgabe",
 	"commandExecution": {
 		"abort": "Abbrechen",
 		"running": "Wird ausgeführt",
-		"pid": "PID: {{pid}}",
 		"exitStatus": "Beendet mit Status {{exitCode}}",
 		"malformedCommand": "Fehlerhafter Befehl: Shell-Syntaxfehler",
 		"manageCommands": "Automatisch genehmigte Befehle",
@@ -246,15 +231,8 @@
 		"addToAllowed": "Zur erlaubten Liste hinzufügen",
 		"removeFromAllowed": "Von der erlaubten Liste entfernen",
 		"addToDenied": "Zur verweigerten Liste hinzufügen",
-		"removeFromDenied": "Von der verweigerten Liste entfernen",
-		"abortCommand": "Befehlsausführung abbrechen",
-		"expandOutput": "Ausgabe erweitern",
-		"collapseOutput": "Ausgabe reduzieren",
-		"expandManagement": "Befehlsverwaltungsbereich erweitern",
-		"collapseManagement": "Befehlsverwaltungsbereich reduzieren"
+		"removeFromDenied": "Von der verweigerten Liste entfernen"
 	},
-	"response": "Antwort",
-	"arguments": "Argumente",
 	"text": {
 		"rooSaid": "Zoo hat gesagt"
 	},
@@ -274,10 +252,8 @@
 	"subtasks": {
 		"wantsToCreate": "Zoo möchte eine neue Teilaufgabe im <code>{{mode}}</code>-Modus erstellen",
 		"wantsToFinish": "Zoo möchte diese Teilaufgabe abschließen",
-		"newTaskContent": "Teilaufgabenanweisungen",
 		"completionContent": "Teilaufgabe abgeschlossen",
 		"resultContent": "Teilaufgabenergebnisse",
-		"defaultResult": "Bitte fahre mit der nächsten Aufgabe fort.",
 		"completionInstructions": "Teilaufgabe abgeschlossen! Du kannst die Ergebnisse überprüfen und Korrekturen oder nächste Schritte vorschlagen. Wenn alles gut aussieht, bestätige, um das Ergebnis an die übergeordnete Aufgabe zurückzugeben.",
 		"goToSubtask": "Aufgabe anzeigen"
 	},
@@ -300,9 +276,6 @@
 		"diagnostics": "Detaillierte Fehlerinformationen abrufen",
 		"proxyProvider": "Du scheinst einen Proxy-basierten Anbieter zu verwenden. Überprüfe unbedingt seine Protokolle und stelle sicher, dass er Zoos Anfragen nicht umschreibt."
 	},
-	"powershell": {
-		"issues": "Es scheint, dass du Probleme mit Windows PowerShell hast, bitte sieh dir dies an"
-	},
 	"autoApprove": {
 		"tooltipManage": "Einstellungen für die automatische Genehmigung verwalten",
 		"tooltipStatus": "Automatische Genehmigung aktiviert für: {{toggles}}",
@@ -311,9 +284,6 @@
 		"all": "Alle",
 		"none": "Keine",
 		"description": "Führe diese Aktionen aus, ohne um Erlaubnis zu fragen. Aktiviere dies nur für Aktionen, denen du voll vertraust.",
-		"selectOptionsFirst": "Wähle mindestens eine Option unten aus, um die automatische Genehmigung zu aktivieren",
-		"toggleAriaLabel": "Automatische Genehmigung umschalten",
-		"disabledAriaLabel": "Automatische Genehmigung deaktiviert - wähle zuerst Optionen aus",
 		"triggerLabelOff": "Automatische Genehmigung aus",
 		"triggerLabelOffShort": "Aus",
 		"triggerLabel_zero": "0 automatisch genehmigt",
@@ -356,12 +326,6 @@
 			"highlight1": "✨ Breitere Modell- und Providerunterstützung: Nutze Claude Haiku 5.5 über Anthropic, schicke Bilder an kompatible VS Code LM-Modelle, stelle die Temperatur für OpenCode Go Responses-Modelle ein und brich Anfragen sauber bei mehr Providern ab.",
 			"highlight2": "🔐 Flexibleres MCP OAuth: Konfiguriere statische OAuth-Client-Einstellungen, nutze eigene Callback-Pfade, ermittle Authentifizierungsdetails aus WWW-Authenticate und sieh Callback-Fehler, bevor du es erneut versuchst.",
 			"highlight3": "🧭 Flüssigere Chats und lange Sessions: Benenne Aufgaben im Verlauf um, ziehe Dateien per Drag-and-drop in den Chat, ohne Shift gedrückt zu halten, reduziere den Speicherbedarf bei langen Sessions und halte Subtask-Links und ausgetauschte Webviews stabil."
-		},
-		"cloudAgents": {
-			"heading": "Neu in der Cloud:",
-			"specialized": "Wir stellen <bold>Explainer</bold>, <bold>Planner</bold> und <bold>Coder</bold> vor - drei spezialisierte Cloud-Agenten zur Verbesserung deiner Workflows.",
-			"description": "Die Agenten arbeiten zusammen in der Cloud und können vom Web oder über Slack ausgelöst werden.",
-			"tryButton": "Probiere Cloud-Agenten aus"
 		}
 	},
 	"costs": {
@@ -441,31 +405,11 @@
 		"description": "Führe Remote-Agenten in der Cloud aus, greife von überall auf deine Aufgaben zu, arbeite mit anderen zusammen und vieles mehr.",
 		"joinWaitlist": "Melde dich an, um die neuesten Updates zu erhalten."
 	},
-	"command": {
-		"triggerDescription": "Starte den {{name}} Befehl"
-	},
 	"editMessage": {
 		"placeholder": "Bearbeite deine Nachricht..."
 	},
 	"slashCommands": {
-		"tooltip": "Slash-Befehle verwalten",
-		"title": "Slash-Befehle",
-		"description": "Verwende eingebaute Slash-Befehle oder erstelle benutzerdefinierte für schnellen Zugriff auf häufig verwendete Prompts und Workflows. <DocsLink>Dokumentation</DocsLink>",
-		"manageCommands": "Slash-Befehle in den Einstellungen verwalten",
-		"builtInCommands": "Eingebaute Befehle",
-		"globalCommands": "Globale Befehle",
-		"workspaceCommands": "Arbeitsbereich-Befehle",
-		"globalCommand": "Globaler Befehl",
-		"editCommand": "Befehl bearbeiten",
-		"deleteCommand": "Befehl löschen",
-		"newGlobalCommandPlaceholder": "Neuer globaler Befehl...",
-		"newWorkspaceCommandPlaceholder": "Neuer Arbeitsbereich-Befehl...",
-		"deleteDialog": {
-			"title": "Befehl löschen",
-			"description": "Bist du sicher, dass du den Befehl \"{{name}}\" löschen möchtest? Diese Aktion kann nicht rückgängig gemacht werden.",
-			"cancel": "Abbrechen",
-			"confirm": "Löschen"
-		}
+		"manageCommands": "Slash-Befehle in den Einstellungen verwalten"
 	},
 	"contextMenu": {
 		"noResults": "Keine Ergebnisse",
@@ -484,9 +428,7 @@
 	"todo": {
 		"partial": "{{completed}} von {{total}} To-Dos erledigt",
 		"complete": "{{total}} To-Dos erledigt",
-		"updated": "Die To-Do-Liste wurde aktualisiert",
-		"completed": "Abgeschlossen",
-		"started": "Gestartet"
+		"updated": "Die To-Do-Liste wurde aktualisiert"
 	},
 	"tooManyTools": {
 		"title": "Zu viele Tools aktiviert",

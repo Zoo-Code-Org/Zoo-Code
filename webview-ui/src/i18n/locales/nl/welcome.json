@@ -1,8 +1,7 @@
 {
 	"landing": {
 		"greeting": "Welkom bij Zoo Code!",
-		"introduction": "Met een reeks ingebouwde en uitbreidbare Modi laat Zoo Code je plannen, ontwerpen, coderen, debuggen en je productiviteit verhogen als nooit tevoren.",
-		"getStarted": "Kies je provider"
+		"introduction": "Met een reeks ingebouwde en uitbreidbare Modi laat Zoo Code je plannen, ontwerpen, coderen, debuggen en je productiviteit verhogen als nooit tevoren."
 	},
 	"providerSignup": {
 		"heading": "Kies je provider",

@@ -1,8 +1,5 @@
 {
 	"readFile": {
-		"linesRange": " (línies {{start}}-{{end}})",
-		"definitionsOnly": " (només definicions)",
-		"maxLines": " (màxim {{max}} línies)",
 		"imageTooLarge": "El fitxer d'imatge és massa gran ({{size}} MB). La mida màxima permesa és {{max}} MB.",
 		"imageWithSize": "Fitxer d'imatge ({{size}} KB)"
 	},
@@ -11,20 +8,12 @@
 	"unknownToolError": "Zoo ha intentat utilitzar una eina desconeguda: \"{{toolName}}\". Reintentant...",
 	"missingToolParameter": "Zoo ha intentat utilitzar {{toolName}} sense valor per al paràmetre obligatori '{{paramName}}'. Reintentant...",
 	"missingToolParameterWithPath": "Zoo ha intentat utilitzar {{toolName}} per a '{{relPath}}' sense valor per al paràmetre obligatori '{{paramName}}'. Reintentant...",
-	"codebaseSearch": {
-		"approval": "Cercant '{{query}}' a la base de codi..."
-	},
 	"executeCommand": {
 		"destructiveCommandGuard": {
 			"blocked": "Destructive Command Guard ha bloquejat aquesta ordre.",
 			"blockedWithReason": "Destructive Command Guard ha bloquejat aquesta ordre. Missatge de DCG: {{reason}}",
 			"blockedWithRule": "Destructive Command Guard ha bloquejat aquesta ordre. (Regla: {{ruleId}})",
 			"blockedWithReasonAndRule": "Destructive Command Guard ha bloquejat aquesta ordre. Missatge de DCG: {{reason}} (Regla: {{ruleId}})"
-		}
-	},
-	"newTask": {
-		"errors": {
-			"policy_restriction": "No s'ha pogut crear una nova tasca a causa de restriccions de política."
 		}
 	},
 	"generateImage": {
@@ -34,9 +23,6 @@
 		"noImageGenerated": "No s'ha generat cap imatge en la resposta",
 		"invalidImageData": "Dades d'imatge no vàlides en la resposta",
 		"invalidImageFormat": "Format d'imatge no vàlid rebut",
-		"unknownError": "S'ha produït un error desconegut",
-		"roo": {
-			"authRequired": "Es requereix autenticació de Zoo Code Cloud per a la generació d'imatges. Inicia sessió a Zoo Code Cloud."
-		}
+		"unknownError": "S'ha produït un error desconegut"
 	}
 }

@@ -1,23 +1,12 @@
 {
-	"extension": {
-		"name": "Zoo Code",
-		"description": "Tim pengembang AI lengkap di editor kamu."
-	},
 	"number_format": {
 		"thousand_suffix": "rb",
 		"million_suffix": "jt",
 		"billion_suffix": "m"
 	},
-	"welcome": "Selamat datang, {{name}}! Kamu punya {{count}} notifikasi.",
-	"items": {
-		"zero": "Tidak ada item",
-		"one": "Satu item",
-		"other": "{{count}} item"
-	},
 	"confirmation": {
 		"reset_state": "Apakah kamu yakin ingin mereset semua state dan secret storage di ekstensi? Ini tidak dapat dibatalkan.",
-		"delete_config_profile": "Apakah kamu yakin ingin menghapus profil konfigurasi ini?",
-		"delete_custom_mode_with_rules": "Anda yakin ingin menghapus mode {scope} ini?\n\nIni juga akan menghapus folder aturan terkait di:\n{rulesFolderPath}"
+		"delete_config_profile": "Apakah kamu yakin ingin menghapus profil konfigurasi ini?"
 	},
 	"errors": {
 		"invalid_data_uri": "Format data URI tidak valid",
@@ -37,8 +26,6 @@
 		"checkpoint_diff_to_current": "Perubahan ke ruang kerja saat ini",
 		"nested_git_repos_warning": "Checkpoint dinonaktifkan karena repositori git bersarang terdeteksi di: {{path}}. Untuk menggunakan checkpoint, silakan hapus atau pindahkan repositori git bersarang ini.",
 		"no_workspace": "Silakan buka folder proyek terlebih dahulu",
-		"update_support_prompt": "Gagal memperbarui support prompt",
-		"reset_support_prompt": "Gagal mereset support prompt",
 		"enhance_prompt": "Gagal meningkatkan prompt",
 		"get_system_prompt": "Gagal mendapatkan system prompt",
 		"search_commits": "Gagal mencari commit",
@@ -52,8 +39,6 @@
 		"update_server_timeout": "Gagal memperbarui timeout server",
 		"hmr_not_running": "Server pengembangan lokal tidak berjalan, HMR tidak akan bekerja. Silakan jalankan 'npm run dev' sebelum meluncurkan ekstensi untuk mengaktifkan HMR.",
 		"retrieve_current_mode": "Error: gagal mengambil mode saat ini dari state.",
-		"failed_delete_repo": "Gagal menghapus shadow repository atau branch yang terkait: {{error}}",
-		"failed_remove_directory": "Gagal menghapus direktori tugas: {{error}}",
 		"custom_storage_path_unusable": "Path penyimpanan kustom \"{{path}}\" tidak dapat digunakan, akan menggunakan path default",
 		"cannot_access_path": "Tidak dapat mengakses path {{path}}: {{error}}",
 		"path_outside_workspace": "Path berada di luar workspace",
@@ -65,24 +50,13 @@
 		"condensed_recently": "Konteks baru saja dikompres; melewati percobaan ini",
 		"condense_handler_invalid": "Handler API untuk mengompres konteks tidak valid",
 		"condense_api_failed": "Panggilan API pengompresan gagal: {{message}}",
-		"url_timeout": "Situs web membutuhkan waktu terlalu lama untuk dimuat (timeout). Ini bisa disebabkan oleh koneksi lambat, situs web berat, atau sementara tidak tersedia. Kamu bisa mencoba lagi nanti atau memeriksa apakah URL sudah benar.",
-		"url_not_found": "Alamat situs web tidak dapat ditemukan. Silakan periksa apakah URL sudah benar dan coba lagi.",
-		"no_internet": "Tidak ada koneksi internet. Silakan periksa koneksi jaringan kamu dan coba lagi.",
-		"url_forbidden": "Akses ke situs web ini dilarang. Situs mungkin memblokir akses otomatis atau memerlukan autentikasi.",
-		"url_page_not_found": "Halaman tidak ditemukan. Silakan periksa apakah URL sudah benar.",
-		"url_request_aborted": "Permintaan untuk mengambil URL dibatalkan. Ini bisa terjadi jika situs memblokir akses otomatis, memerlukan autentikasi, atau ada masalah jaringan. Silakan coba lagi atau periksa apakah URL dapat diakses di browser biasa.",
-		"url_fetch_failed": "Gagal mengambil konten URL: {{error}}",
-		"url_fetch_error_with_url": "Error mengambil konten untuk {{url}}: {{error}}",
 		"command_timeout": "Eksekusi perintah waktu habis setelah {{seconds}} detik",
 		"destructiveCommandGuard": {
 			"unavailable": "Destructive Command Guard diaktifkan, tetapi tidak tersedia untuk platform ini",
 			"enableFailed": "Tidak dapat mengaktifkan Destructive Command Guard: {{error}}"
 		},
-		"share_task_failed": "Gagal membagikan tugas. Silakan coba lagi.",
 		"share_no_active_task": "Tidak ada tugas aktif untuk dibagikan",
-		"share_auth_required": "Autentikasi diperlukan. Silakan masuk untuk berbagi tugas.",
 		"share_not_enabled": "Berbagi tugas tidak diaktifkan untuk organisasi ini.",
-		"share_task_not_found": "Tugas tidak ditemukan atau akses ditolak.",
 		"mode_import_failed": "Gagal mengimpor mode: {{error}}",
 		"delete_rules_folder_failed": "Gagal menghapus folder aturan: {{rulesFolderPath}}. Error: {{error}}",
 		"command_not_found": "Perintah '{{name}}' tidak ditemukan",
@@ -92,13 +66,6 @@
 		"command_already_exists": "Perintah \"{{commandName}}\" sudah ada",
 		"create_command_failed": "Gagal membuat perintah",
 		"command_template_content": "---\ndescription: \"Deskripsi singkat tentang fungsi perintah ini\"\n---\n\nIni adalah perintah slash baru. Edit file ini untuk menyesuaikan perilaku perintah.",
-		"claudeCode": {
-			"processExited": "Proses Claude Code keluar dengan kode {{exitCode}}.",
-			"errorOutput": "Output error: {{output}}",
-			"processExitedWithError": "Proses Claude Code keluar dengan kode {{exitCode}}. Output error: {{output}}",
-			"stoppedWithReason": "Claude Code berhenti karena alasan: {{reason}}",
-			"apiKeyModelPlanMismatch": "API keys and subscription plans allow different models. Make sure the selected model is included in your plan."
-		},
 		"message": {
 			"no_active_task_to_delete": "Tidak ada tugas aktif untuk menghapus pesan",
 			"invalid_timestamp_for_deletion": "Timestamp pesan tidak valid untuk penghapusan",
@@ -111,14 +78,9 @@
 		"gemini": {
 			"generate_stream": "Kesalahan aliran konteks pembuatan Gemini: {{error}}",
 			"generate_complete_prompt": "Kesalahan penyelesaian Gemini: {{error}}",
-			"sources": "Sumber:",
-			"thinking_complete_no_output": "(Berpikir selesai, tetapi tidak ada output yang dihasilkan.)",
-			"thinking_complete_truncated": "(Berpikir selesai, tetapi output terpotong karena batas token.)",
-			"thinking_complete_safety": "(Berpikir selesai, tetapi output diblokir karena pengaturan keamanan.)",
-			"thinking_complete_recitation": "(Berpikir selesai, tetapi output diblokir karena pemeriksaan resitasi.)"
+			"sources": "Sumber:"
 		},
 		"roo": {
-			"authenticationRequired": "Penyedia Roo memerlukan autentikasi cloud. Silakan masuk ke Roo Code Cloud.",
 			"routerRemoved": "Roo Code Router telah dihapus. Pilih dan konfigurasikan penyedia lain."
 		},
 		"api": {
@@ -152,7 +114,6 @@
 	},
 	"warnings": {
 		"no_terminal_content": "Tidak ada konten terminal yang dipilih",
-		"missing_task_files": "File tugas ini hilang. Apakah kamu ingin menghapusnya dari daftar tugas?",
 		"auto_import_failed": "Gagal mengimpor pengaturan ZooCode secara otomatis: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "Tidak ada riwayat tugas Roo Code yang ditemukan untuk diimpor dari {{domain}}.",
@@ -161,18 +122,13 @@
 		}
 	},
 	"info": {
-		"no_changes": "Tidak ada perubahan ditemukan.",
 		"clipboard_copy": "System prompt berhasil disalin ke clipboard",
-		"history_cleanup": "Membersihkan {{count}} tugas dengan file yang hilang dari riwayat.",
 		"custom_storage_path_set": "Path penyimpanan kustom diatur: {{path}}",
 		"default_storage_path": "Kembali menggunakan path penyimpanan default",
 		"settings_imported": "Pengaturan berhasil diimpor.",
 		"auto_import_success": "Pengaturan ZooCode berhasil diimpor secara otomatis dari {{filename}}",
-		"share_link_copied": "Link bagikan disalin ke clipboard",
 		"image_copied_to_clipboard": "Data URI gambar disalin ke clipboard",
 		"image_saved": "Gambar disimpan ke {{path}}",
-		"organization_share_link_copied": "Tautan berbagi organisasi disalin ke clipboard!",
-		"public_share_link_copied": "Tautan berbagi publik disalin ke clipboard!",
 		"mode_exported": "Mode '{{mode}}' berhasil diekspor",
 		"mode_imported": "Mode berhasil diimpor",
 		"roo": {
@@ -184,25 +140,16 @@
 		}
 	},
 	"answers": {
-		"yes": "Ya",
-		"no": "Tidak",
-		"remove": "Hapus",
-		"keep": "Simpan"
+		"yes": "Ya"
 	},
 	"buttons": {
-		"save": "Simpan",
-		"edit": "Edit",
 		"learn_more": "Pelajari Lebih Lanjut"
 	},
 	"tasks": {
-		"canceled": "Error tugas: Dihentikan dan dibatalkan oleh pengguna.",
-		"deleted": "Kegagalan tugas: Dihentikan dan dihapus oleh pengguna.",
 		"incomplete": "Tugas #{{taskNumber}} (Tidak lengkap)",
 		"no_messages": "Tugas #{{taskNumber}} (Tidak ada pesan)"
 	},
 	"interruption": {
-		"responseInterruptedByUser": "Respons diinterupsi oleh pengguna",
-		"responseInterruptedByApiError": "Respons diinterupsi oleh error API",
 		"streamTerminatedByProvider": "Penyedia mengakhiri permintaan"
 	},
 	"storage": {
@@ -215,9 +162,6 @@
 		"task_prompt": "Apa yang harus Zoo lakukan?",
 		"task_placeholder": "Ketik tugas kamu di sini"
 	},
-	"settings": {
-		"providers": {}
-	},
 	"customModes": {
 		"errors": {
 			"yamlParseError": "YAML tidak valid dalam file .roomodes pada baris {{line}}. Silakan periksa:\n• Indentasi yang benar (gunakan spasi, bukan tab)\n• Tanda kutip dan kurung yang cocok\n• Sintaks YAML yang valid",
@@ -229,10 +173,6 @@
 			"modeNotFound": "Kesalahan tulis: Mode tidak ditemukan",
 			"noWorkspaceForProject": "Tidak ditemukan folder workspace untuk mode khusus proyek",
 			"rulesCleanupFailed": "Mode berhasil dihapus, tetapi gagal menghapus folder aturan di {{rulesFolderPath}}. Kamu mungkin perlu menghapusnya secara manual."
-		},
-		"scope": {
-			"project": "proyek",
-			"global": "global"
 		}
 	},
 	"marketplace": {
@@ -255,22 +195,8 @@
 			"organization_requires_auth": "Organisasi kamu memerlukan autentikasi."
 		}
 	},
-	"prompts": {
-		"deleteMode": {
-			"title": "Hapus Mode Kustom",
-			"description": "Anda yakin ingin menghapus mode {{scope}} ini? Ini juga akan menghapus folder aturan terkait di: {{rulesFolderPath}}",
-			"descriptionNoRules": "Anda yakin ingin menghapus mode kustom ini?",
-			"confirm": "Hapus"
-		}
-	},
-	"commands": {
-		"preventCompletionWithOpenTodos": {
-			"description": "Mencegah penyelesaian tugas ketika ada todo yang belum selesai dalam daftar todo"
-		}
-	},
 	"docsLink": {
-		"label": "Docs",
-		"url": "https://docs.zoocode.dev"
+		"label": "Docs"
 	},
 	"zooAuth": {
 		"errors": {

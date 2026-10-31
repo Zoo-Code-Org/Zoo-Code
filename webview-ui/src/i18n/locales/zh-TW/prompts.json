@@ -1,6 +1,4 @@
 {
-	"title": "模式",
-	"done": "完成",
 	"modes": {
 		"title": "模式",
 		"createNewMode": "建立新模式",
@@ -52,9 +50,7 @@
 		"loadFromFile": "{{mode}}模式的特定自訂指令也可以從工作區中的<span>.roo/rules-{{slug}}/</span>資料夾或全域<0>.roo/rules-{{slug}}/</0>載入（.roorules-{{slug}}和.clinerules-{{slug}}已棄用，即將停止運作）。"
 	},
 	"exportMode": {
-		"title": "匯出模式",
-		"description": "將此模式與 .roo/rules-{{slug}}/ 資料夾中的規則匯出，並合併成一個可分享的 YAML 檔案。原始檔案將維持不變。",
-		"exporting": "正在匯出..."
+		"title": "匯出模式"
 	},
 	"importMode": {
 		"selectLevel": "選擇匯入模式的位置：",
@@ -80,7 +76,6 @@
 		"title": "系統提示詞（{{modeName}} 模式）"
 	},
 	"supportPrompts": {
-		"title": "輔助提示詞",
 		"resetPrompt": "將 {{promptType}} 提示詞重設為預設值",
 		"prompt": "提示詞",
 		"enhance": {
@@ -92,11 +87,6 @@
 			"testEnhancement": "測試強化",
 			"includeTaskHistory": "將任務歷史紀錄納入內容",
 			"includeTaskHistoryDescription": "啟用後，目前對話的最後 10 則訊息將在強化提示時被納入為前後文，有助於產生更相關且具備情境感知能力的建議。"
-		},
-		"condense": {
-			"apiConfiguration": "用於上下文壓縮的 API 設定",
-			"apiConfigDescription": "選擇用於上下文壓縮操作的 API 設定。保留未選取狀態則使用目前啟用的設定。",
-			"useCurrentConfig": "使用目前選擇的 API 設定"
 		},
 		"types": {
 			"ENHANCE": {
@@ -195,7 +185,6 @@
 		"title": "刪除模式",
 		"message": "您確定要刪除「{{modeName}}」模式嗎？",
 		"rulesFolder": "此模式在 {{folderPath}} 有一個規則資料夾，該資料夾也將被刪除。",
-		"descriptionNoRules": "您確定要刪除此自訂模式嗎？",
 		"confirm": "刪除",
 		"cancel": "取消"
 	}

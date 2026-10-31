@@ -9,10 +9,7 @@
 	},
 	"answers": {
 		"yes": "Sí",
-		"no": "No",
-		"cancel": "Cancel·lar",
-		"remove": "Eliminar",
-		"keep": "Mantenir"
+		"cancel": "Cancel·lar"
 	},
 	"number_format": {
 		"thousand_suffix": "k",
@@ -33,19 +30,11 @@
 			"copy": "Copiar",
 			"save": "Desar imatge",
 			"viewCode": "Veure codi",
-			"viewDiagram": "Veure diagrama",
 			"close": "Tancar"
-		},
-		"modal": {
-			"codeTitle": "Codi Mermaid"
 		},
 		"tabs": {
 			"diagram": "Diagrama",
 			"code": "Codi"
-		},
-		"feedback": {
-			"imageCopied": "Imatge copiada al porta-retalls",
-			"copyError": "Error copiant la imatge"
 		}
 	},
 	"image": {
@@ -53,19 +42,6 @@
 			"view": "Imatge"
 		},
 		"noData": "Sense dades d'imatge"
-	},
-	"file": {
-		"errors": {
-			"invalidDataUri": "Format d'URI de dades no vàlid",
-			"copyingImage": "Error copiant la imatge: {{error}}",
-			"openingImage": "Error obrint la imatge: {{error}}",
-			"pathNotExists": "El camí no existeix: {{path}}",
-			"couldNotOpen": "No s'ha pogut obrir el fitxer: {{error}}",
-			"couldNotOpenGeneric": "No s'ha pogut obrir el fitxer!"
-		},
-		"success": {
-			"imageDataUriCopied": "URI de dades de la imatge copiada al porta-retalls"
-		}
 	},
 	"confirmation": {
 		"deleteMessage": "Eliminar missatge",
@@ -77,8 +53,7 @@
 		"editOnly": "No, només editar el missatge",
 		"deleteOnly": "No, només eliminar el missatge",
 		"restoreToCheckpoint": "Sí, restaurar el punt de control",
-		"proceed": "Continuar",
-		"dontShowAgain": "No tornis a mostrar això"
+		"proceed": "Continuar"
 	},
 	"time_ago": {
 		"just_now": "ara mateix",
@@ -100,12 +75,6 @@
 		"wait_checkpoint_long_time": "Has esperat {{timeout}} segons per inicialitzar el punt de control. Si no necessites aquesta funció, desactiva-la a <settingsLink>la configuració del punt de control</settingsLink>.",
 		"init_checkpoint_fail_long_time": "La inicialització del punt de control ha trigat més de {{timeout}} segons, per això els punts de control estan desactivats per a aquesta tasca. Pots desactivar els punts de control o augmentar el temps d'espera a <settingsLink>la configuració del punt de control</settingsLink>.",
 		"attempt_completion_tool_failed": "No es pot executar attempt_completion perquè una crida d'eina anterior ha fallat en aquest torn. Si us plau, resol el problema de l'eina abans d'intentar completar."
-	},
-	"tasks": {
-		"delegated": "Delegat a subtasca",
-		"delegated_to": "Delegat a la tasca {{childId}}",
-		"delegation_completed": "Subtasca completada, reprenent la tasca principal",
-		"awaiting_child": "Esperant la tasca filla {{childId}}"
 	},
 	"costs": {
 		"own": "Propi",
