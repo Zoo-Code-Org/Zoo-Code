@@ -1541,6 +1541,21 @@ describe("ClineProvider", () => {
 			expect(provider.getCurrentTask()).toBeUndefined()
 		})
 
+		test("stops retries after a terminal failure even when a retry warning was already shown", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const html = mockWebviewView.webview.html
+			provider["reportWebviewRecoveryFailure"]("Initialization failed; retry pending", false)
+			expect(provider["webviewRecoveryAttempts"]).toBe(0)
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+
+			provider["reportWebviewRecoveryFailure"]("Recovery is unavailable")
+			await vi.advanceTimersByTimeAsync(120_000)
+
+			expect(provider["webviewRecoveryAttempts"]).toBe(3)
+			expect(mockWebviewView.webview.html).toBe(html)
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		})
+
 		test.each(["Reload Window", "Show Logs"] as const)(
 			"runs only the selected recovery action: %s",
 			async (action) => {
@@ -2435,7 +2450,12 @@ describe("ClineProvider", () => {
 					expect(provider["webviewWatchdogInterval"]).not.toBeNull()
 					expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
 					expect(provider["webviewRecoveryAttempts"]).toBe(1)
-					expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+					expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+					expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+						expect.stringContaining("interface is not responding"),
+						"Reload Window",
+						"Show Logs",
+					)
 					expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
 						expect.stringContaining("Failed to initialize replacement tab"),
 					)

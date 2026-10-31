@@ -3792,7 +3792,8 @@ export class ClineProvider
 					// The next stale tick uses the existing bounded recovery budget.
 					if (this.view === view) throw error
 					if (this._disposed || this.view !== replacement) return
-					this.log(`[Zoo Code] Failed to initialize replacement tab: ${String(error)}`)
+					// Surface the unusable tab without exhausting its remaining retries.
+					this.reportWebviewRecoveryFailure(`Failed to initialize replacement tab: ${String(error)}`, false)
 					this.startWebviewWatchdog()
 				}
 			} else {
@@ -3831,11 +3832,14 @@ export class ClineProvider
 		}
 	}
 
-	private reportWebviewRecoveryFailure(reason: string): void {
-		if (this._disposed || this.webviewRecoveryFailureReported) return
+	private reportWebviewRecoveryFailure(reason: string, stopRecovery = true): void {
+		if (this._disposed) return
+		// A terminal failure still stops retries if an earlier retryable failure
+		// already showed the notification for this incident.
+		if (stopRecovery) this.webviewRecoveryAttempts = ClineProvider.WEBVIEW_RECOVERY_ATTEMPT_LIMIT
+		if (this.webviewRecoveryFailureReported) return
 		this.webviewRecoveryFailureReported = true
-		this.webviewRecoveryAttempts = ClineProvider.WEBVIEW_RECOVERY_ATTEMPT_LIMIT
-		this.log(`[Zoo Code] Webview recovery stopped: ${reason}`)
+		this.log(`[Zoo Code] Webview recovery ${stopRecovery ? "stopped" : "will retry"}: ${reason}`)
 		const heartbeatCount = this.webviewHeartbeatCount
 		void Promise.resolve(
 			vscode.window.showWarningMessage(
