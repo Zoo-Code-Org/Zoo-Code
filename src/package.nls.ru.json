@@ -16,6 +16,7 @@
 	"command.fixCode.title": "Исправить код",
 	"command.improveCode.title": "Улучшить код",
 	"command.addToContext.title": "Добавить в контекст",
+	"command.retryWebviewRecovery.title": "Повторить восстановление интерфейса",
 	"command.focusInput.title": "Фокус на поле ввода",
 	"command.setCustomStoragePath.title": "Указать путь хранения",
 	"command.importSettings.title": "Импортировать настройки",

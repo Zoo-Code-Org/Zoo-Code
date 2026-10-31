@@ -206,6 +206,15 @@ const App = () => {
 	// Tell the extension that we are ready to receive messages.
 	useEffect(() => vscode.postMessage({ type: "webviewDidLaunch" }), [])
 
+	// Heartbeat so the extension watchdog can detect a crashed webview renderer
+	// process (gray screen) and reload the view.
+	useEffect(() => {
+		const postHeartbeat = () => vscode.postMessage({ type: "webviewHeartbeat", timestamp: Date.now() })
+		postHeartbeat()
+		const interval = setInterval(postHeartbeat, 30_000)
+		return () => clearInterval(interval)
+	}, [])
+
 	useEffect(() => {
 		// Window activation and programmatic focus do not identify a chat interaction.
 		const onInteraction = () => vscode.postMessage({ type: "webviewDidFocus" })

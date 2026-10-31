@@ -16,6 +16,7 @@
 	"command.fixCode.title": "Perbaiki Kode",
 	"command.improveCode.title": "Tingkatkan Kode",
 	"command.addToContext.title": "Tambahkan ke Konteks",
+	"command.retryWebviewRecovery.title": "Coba Lagi Pemulihan Antarmuka",
 	"command.focusInput.title": "Fokus ke Field Input",
 	"command.setCustomStoragePath.title": "Atur Path Penyimpanan Kustom",
 	"command.importSettings.title": "Impor Pengaturan",

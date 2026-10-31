@@ -51,6 +51,7 @@
 		"list_api_config": "Nie udało się pobrać listy konfiguracji API",
 		"update_server_timeout": "Nie udało się zaktualizować limitu czasu serwera",
 		"hmr_not_running": "Lokalny serwer deweloperski nie jest uruchomiony, HMR nie będzie działać. Uruchom 'npm run dev' przed uruchomieniem rozszerzenia, aby włączyć HMR.",
+		"hmr_probe_timeout": "Lokalny serwer deweloperski nie odpowiedział w ciągu 5 sekund. Używany jest zbudowany interfejs rozszerzenia bez HMR.",
 		"retrieve_current_mode": "Błąd podczas pobierania bieżącego trybu ze stanu.",
 		"failed_delete_repo": "Nie udało się usunąć powiązanego repozytorium lub gałęzi pomocniczej: {{error}}",
 		"failed_remove_directory": "Nie udało się usunąć katalogu zadania: {{error}}",

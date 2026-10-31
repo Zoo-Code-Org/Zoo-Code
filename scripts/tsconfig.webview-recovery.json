@@ -1,0 +1,15 @@
+{
+	"compilerOptions": {
+		"esModuleInterop": true,
+		"isolatedModules": true,
+		"module": "esnext",
+		"moduleResolution": "bundler",
+		"noEmit": true,
+		"noUncheckedIndexedAccess": true,
+		"skipLibCheck": true,
+		"strict": true,
+		"target": "ES2022",
+		"types": ["node"]
+	},
+	"include": ["./check-webview-recovery.ts", "../src/core/webview/webviewRecoveryPolicy.ts"]
+}

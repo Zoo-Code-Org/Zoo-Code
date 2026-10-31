@@ -7,6 +7,7 @@ import { TaskRegistry } from "../../task/TaskRegistry"
 import Anthropic from "@anthropic-ai/sdk"
 import * as vscode from "vscode"
 import axios from "axios"
+import pWaitFor from "p-wait-for"
 
 import {
 	type ProviderSettingsEntry,
@@ -69,8 +70,9 @@ vi.mock("fs/promises", async (importOriginal) => {
 	}
 })
 
-vi.mock("axios", () => ({
+vi.mock("axios", async (importOriginal) => ({
 	default: {
+		isAxiosError: (await importOriginal<typeof import("axios")>()).default.isAxiosError,
 		get: vi.fn().mockResolvedValue({ data: { data: [] } }),
 		post: vi.fn(),
 	},
@@ -175,12 +177,15 @@ vi.mock("vscode", () => ({
 		QuickFix: { value: "quickfix" },
 		RefactorRewrite: { value: "refactor.rewrite" },
 	},
+	ViewColumn: { Active: -1 },
 	commands: {
+		getCommands: vi.fn().mockResolvedValue([]),
 		executeCommand: vi.fn().mockResolvedValue(undefined),
 	},
 	window: {
+		createWebviewPanel: vi.fn(),
 		showInformationMessage: vi.fn(),
-		showWarningMessage: vi.fn(),
+		showWarningMessage: vi.fn().mockResolvedValue(undefined),
 		showErrorMessage: vi.fn(),
 		showSaveDialog: vi.fn(),
 		showOpenDialog: vi.fn(),
@@ -273,7 +278,7 @@ vi.mock("../../../integrations/workspace/WorkspaceTracker", () => {
 })
 
 vi.mock("../../task/Task", () => ({
-	Task: vi.fn().mockImplementation(function (options: any) {
+	Task: vi.fn().mockImplementation(function (options: TaskOptions) {
 		return {
 			api: undefined,
 			abortTask: vi.fn(),
@@ -518,6 +523,7 @@ describe("ClineProvider", () => {
 
 		// Mock output channel
 		mockOutputChannel = {
+			show: vi.fn(),
 			appendLine: vi.fn(),
 			clear: vi.fn(),
 			dispose: vi.fn(),
@@ -536,6 +542,7 @@ describe("ClineProvider", () => {
 				cspSource: "vscode-webview://test-csp-source",
 			},
 			visible: true,
+			show: vi.fn(),
 			onDidDispose: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),
@@ -1093,6 +1100,1919 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	describe("webview heartbeat watchdog", () => {
+		let visibilityCallback: () => void
+		let disposeCallback: () => void
+
+		function trackHtmlAssignments() {
+			let html = mockWebviewView.webview.html
+			const assignHtml = vi.fn((value: string) => {
+				html = value
+			})
+			Object.defineProperty(mockWebviewView.webview, "html", {
+				configurable: true,
+				get: () => html,
+				set: assignHtml,
+			})
+			return assignHtml
+		}
+
+		beforeEach(() => {
+			vi.mocked(vscode.commands.executeCommand).mockReset().mockResolvedValue(undefined)
+			vi.mocked(vscode.window.showWarningMessage).mockResolvedValue(undefined)
+			vi.mocked(vscode.commands.getCommands).mockResolvedValue([
+				`${ClineProvider.sideBarId}.removeView`,
+				`${ClineProvider.sideBarId}.focus`,
+			])
+			// Fake timers must be active before resolveWebviewView so the
+			// watchdog interval is registered on the fake clock.
+			vi.useFakeTimers()
+			mockWebviewView.onDidChangeVisibility = vi.fn().mockImplementation((cb: () => void) => {
+				visibilityCallback = cb
+				return { dispose: vi.fn() }
+			})
+			// VS Code events are multi-listener: the provider and the focus
+			// tracker each register a disposal callback, and both must fire.
+			const disposeCallbacks: Array<() => void> = []
+			disposeCallback = () => disposeCallbacks.forEach((cb) => cb())
+			mockWebviewView.onDidDispose = vi.fn().mockImplementation((cb: () => void) => {
+				disposeCallbacks.push(cb)
+				return { dispose: vi.fn() }
+			})
+		})
+
+		afterEach(async () => {
+			await provider.dispose()
+			vi.useRealTimers()
+		})
+
+		test("does not reload the webview while heartbeats are fresh", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			await vi.advanceTimersByTimeAsync(110_000)
+			await webviewMessageHandler(provider, { type: "webviewHeartbeat", timestamp: Date.now() })
+			await vi.advanceTimersByTimeAsync(60_000)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("reloads the webview with fresh HTML when the heartbeat is stale and the view is visible", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			await vi.advanceTimersByTimeAsync(120_000)
+
+			// Reassigning webview.html with a fresh nonce is what forces the reload.
+			expect(mockWebviewView.webview.html).not.toBe(htmlAfterResolve)
+			expect(mockWebviewView.webview.html).toContain("<title>Zoo Code</title>")
+		})
+
+		test.each([
+			{ age: 89_999, reloads: 0 },
+			{ age: 90_000, reloads: 0 },
+			{ age: 90_001, reloads: 1 },
+		])("at heartbeat age $age ms performs $reloads reloads", async ({ age, reloads }) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const assignHtml = trackHtmlAssignments()
+			// Keep the next tick ordinary while placing heartbeat age exactly on
+			// either side of the stale threshold at that tick.
+			provider["lastWebviewHeartbeatAt"] = Date.now() + 60_000 - age
+
+			await vi.advanceTimersByTimeAsync(60_000)
+
+			expect(assignHtml).toHaveBeenCalledTimes(reloads)
+		})
+
+		test.each([
+			{ gap: 89_999, reloads: 1 },
+			{ gap: 90_000, reloads: 1 },
+			{ gap: 90_001, reloads: 0 },
+		])("at watchdog tick gap $gap ms performs $reloads reloads", async ({ gap, reloads }) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const assignHtml = trackHtmlAssignments()
+			// The heartbeat is stale in every row; only the suspend-gap guard
+			// can suppress recovery. No wall-clock jumps or extra ticks mask it.
+			provider["lastWebviewHeartbeatAt"] = Date.now() - 120_000
+			provider["lastWebviewWatchdogTickAt"] = Date.now() + 60_000 - gap
+
+			await vi.advanceTimersByTimeAsync(60_000)
+
+			expect(assignHtml).toHaveBeenCalledTimes(reloads)
+		})
+
+		test.each(["none", "disposed", "epoch"] as const)(
+			"checks only the %s post-await recovery guard",
+			async (guard) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				const assignHtml = trackHtmlAssignments()
+				let finishReload: (html: string) => void = () => {
+					throw new Error("Recovery HTML generation has not started")
+				}
+				provider["getWebviewHtml"] = vi.fn(
+					() =>
+						new Promise<string>((resolve) => {
+							finishReload = resolve
+						}),
+				)
+				const recovery = provider["reloadWebviewForRecovery"]()
+				// Change one field only: real dispose/re-resolve paths change
+				// multiple fields and would let other guards mask this one.
+				if (guard === "disposed") provider["_disposed"] = true
+				if (guard === "epoch") provider["webviewRecoveryEpoch"]++
+				try {
+					finishReload("recovered-html")
+					await recovery
+					expect(assignHtml).toHaveBeenCalledTimes(guard === "none" ? 1 : 0)
+					if (guard === "none") expect(mockWebviewView.webview.html).toBe("recovered-html")
+				} finally {
+					// Allow the regular afterEach to dispose the provider's resources.
+					provider["_disposed"] = false
+				}
+			},
+		)
+
+		test("grants a new grace window after recovery and caps reloads until sustained heartbeats", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const assignHtml = trackHtmlAssignments()
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(assignHtml).toHaveBeenCalledTimes(1)
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(assignHtml).toHaveBeenCalledTimes(1)
+			await vi.advanceTimersByTimeAsync(180_000)
+			expect(assignHtml).toHaveBeenCalledTimes(3)
+
+			const log = vi.spyOn(provider, "log")
+
+			// Visibility changes and host suspension grant grace, but cannot
+			// replenish attempts for a renderer that has never responded.
+			visibilityCallback()
+			vi.setSystemTime(Date.now() + 120_000)
+			await vi.advanceTimersByTimeAsync(600_000)
+			expect(assignHtml).toHaveBeenCalledTimes(3)
+			expect(log).not.toHaveBeenCalledWith(expect.stringContaining("Webview heartbeat stale"))
+
+			await webviewMessageHandler(provider, { type: "webviewHeartbeat" })
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(assignHtml).toHaveBeenCalledTimes(3)
+			// One mount heartbeat is insufficient: a new healthy window must
+			// span a full minute of periodic heartbeats before replenishing.
+			const attempts = provider["webviewRecoveryAttempts"]
+			expect(attempts).toBe(3)
+			provider.updateWebviewHeartbeat()
+			expect(provider["webviewRecoveryAttempts"]).toBe(attempts)
+			await vi.advanceTimersByTimeAsync(30_000)
+			provider.updateWebviewHeartbeat()
+			expect(provider["webviewRecoveryAttempts"]).toBe(attempts)
+			await vi.advanceTimersByTimeAsync(30_000)
+			provider.updateWebviewHeartbeat()
+			expect(provider["webviewRecoveryAttempts"]).toBe(0)
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(assignHtml).toHaveBeenCalledTimes(4)
+		})
+
+		test.each([false, true])(
+			"recreates only the failed sidebar host, retaining its task and budget (interrupted: %s)",
+			async (interrupted) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				const task = new Task(defaultTaskOptions)
+				task.abort = interrupted
+				provider["taskRegistry"].push(task)
+				const evict = vi.spyOn(provider, "evictCurrentTask")
+				const remove = vi.spyOn(provider, "removeClineFromStack")
+				const replacement = { ...mockWebviewView, webview: { ...mockWebviewView.webview, html: "" } }
+				vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command) => {
+					if (command === `${ClineProvider.sideBarId}.removeView`) disposeCallback()
+					if (command === `${ClineProvider.sideBarId}.focus`) await provider.resolveWebviewView(replacement)
+				})
+
+				await vi.advanceTimersByTimeAsync(120_000)
+				expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith(`${ClineProvider.sideBarId}.removeView`)
+				await vi.advanceTimersByTimeAsync(10_000)
+
+				expect(vscode.commands.executeCommand).toHaveBeenCalledWith(`${ClineProvider.sideBarId}.removeView`)
+				expect(vscode.commands.executeCommand).toHaveBeenCalledWith(`${ClineProvider.sideBarId}.focus`, {
+					preserveFocus: true,
+				})
+				expect(provider["view"]).toBe(replacement)
+				expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+				expect(provider["webviewRecoveryAttempts"]).toBe(1)
+				expect(provider.getCurrentTask()).toBe(task)
+				expect(evict).not.toHaveBeenCalled()
+				expect(remove).not.toHaveBeenCalled()
+				expect(task.dispose).not.toHaveBeenCalled()
+				expect(task.abortTask).not.toHaveBeenCalled()
+			},
+		)
+
+		test.each(["HTML generation", "state hydration"] as const)(
+			"preserves normal sidebar startup rejection for failed %s outside recovery",
+			async (stage) => {
+				const error = new Error("initial view failed")
+				provider["getWebviewHtml"] = vi.fn().mockResolvedValue("initial-html")
+				if (stage === "HTML generation") vi.mocked(provider["getWebviewHtml"]).mockRejectedValueOnce(error)
+				else vi.spyOn(provider, "getState").mockRejectedValueOnce(error)
+
+				await expect(provider.resolveWebviewView(mockWebviewView)).rejects.toBe(error)
+
+				expect(provider["webviewWatchdogInterval"]).toBeNull()
+				expect(provider["webviewRecoveryAttempts"]).toBe(0)
+				expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+			},
+		)
+
+		describe("sidebar replacement timing", () => {
+			beforeEach(async () => {
+				const actual = await vi.importActual<typeof import("p-wait-for")>("p-wait-for")
+				vi.mocked(pWaitFor).mockImplementation(actual.default)
+			})
+
+			afterEach(() => {
+				vi.mocked(pWaitFor).mockReset().mockResolvedValue(undefined)
+			})
+
+			function removeSidebarOnCommand() {
+				vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command) => {
+					if (command === `${ClineProvider.sideBarId}.removeView`) disposeCallback()
+				})
+			}
+
+			test.each([false, true])(
+				"explicit retry renews a timed-out sidebar incident after ambiguous reopen: %s",
+				async (reopened) => {
+					await provider.resolveWebviewView(mockWebviewView)
+					const task = new Task(defaultTaskOptions)
+					task.abort = true
+					provider["taskRegistry"].push(task)
+					const remove = vi.spyOn(provider, "removeClineFromStack")
+					let choose: (value: string) => void = () => {
+						throw new Error("No warning")
+					}
+					vi.mocked(vscode.window.showWarningMessage).mockImplementation(
+						vi.fn().mockReturnValue(
+							new Promise<string>((resolve) => {
+								choose = resolve
+							}),
+						),
+					)
+					removeSidebarOnCommand()
+					await vi.advanceTimersByTimeAsync(140_000)
+					expect(provider["pendingSidebarRecovery"]).toBe(true)
+					expect(provider["webviewRecoveryAttempts"]).toBe(3)
+					if (reopened) {
+						await provider.resolveWebviewView({
+							...mockWebviewView,
+							webview: { ...mockWebviewView.webview, html: "" },
+						})
+						expect(provider["webviewRecoveryAttempts"]).toBe(3)
+						expect(provider.getCurrentTask()).toBe(task)
+					}
+					const healthy = { ...mockWebviewView, webview: { ...mockWebviewView.webview, html: "" } }
+					vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command) => {
+						if (command === `${ClineProvider.sideBarId}.removeView`) disposeCallback()
+						if (command === `${ClineProvider.sideBarId}.focus`) await provider.resolveWebviewView(healthy)
+					})
+
+					choose("Retry Interface Recovery")
+					await vi.advanceTimersByTimeAsync(50)
+
+					expect(provider["view"]).toBe(healthy)
+					expect(provider["webviewRecoveryAttempts"]).toBe(1)
+					expect(provider["webviewRecoveryRequestGeneration"]).toBe(1)
+					expect(provider["webviewRecoveryFailureReported"]).toBe(false)
+					expect(provider["webviewRecoveryStopLogged"]).toBe(false)
+					expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+					expect(provider.getCurrentTask()).toBe(task)
+					expect(remove).not.toHaveBeenCalled()
+					expect(task.abortTask).not.toHaveBeenCalled()
+					expect(task.dispose).not.toHaveBeenCalled()
+					expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.reloadWindow")
+				},
+			)
+
+			test.each(["focus failure", "replacement timeout"] as const)(
+				"explicit retry reports %s without an automatic retry loop",
+				async (failure) => {
+					await provider.resolveWebviewView(mockWebviewView)
+					removeSidebarOnCommand()
+					await vi.advanceTimersByTimeAsync(140_000)
+					if (failure === "focus failure")
+						vi.mocked(vscode.commands.executeCommand).mockRejectedValue(new Error("focus unavailable"))
+					const retry = provider.retryWebviewRecovery()
+					await vi.advanceTimersByTimeAsync(10_000)
+					await retry
+					expect(provider["webviewRecoveryAttempts"]).toBe(3)
+					expect(provider["pendingSidebarRecovery"]).toBe(failure === "replacement timeout")
+					expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+					expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(2)
+					await vi.advanceTimersByTimeAsync(120_000)
+					expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(2)
+				},
+			)
+
+			test("warns once after ten seconds without a replacement and releases recovery ownership", async () => {
+				await provider.resolveWebviewView(mockWebviewView)
+				removeSidebarOnCommand()
+				await vi.advanceTimersByTimeAsync(130_000)
+				expect(provider["webviewHostRecoveryInProgress"]).toBe(true)
+				await vi.advanceTimersByTimeAsync(9_999)
+				expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+				await vi.advanceTimersByTimeAsync(1)
+				expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+				expect(provider["webviewRecoveryAttempts"]).toBe(3)
+				expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+				await vi.advanceTimersByTimeAsync(120_000)
+				expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+			})
+
+			test("settles the replacement wait when the provider is disposed", async () => {
+				await provider.resolveWebviewView(mockWebviewView)
+				removeSidebarOnCommand()
+				await vi.advanceTimersByTimeAsync(130_000)
+				expect(provider["webviewHostRecoveryInProgress"]).toBe(true)
+				await provider.dispose()
+				await vi.advanceTimersByTimeAsync(50)
+				expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+				expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+			})
+
+			test.each([5_000, 11_000])(
+				"retains an interrupted task and budget when replacement starts after %s ms",
+				async (delay) => {
+					await provider.resolveWebviewView(mockWebviewView)
+					const task = new Task(defaultTaskOptions)
+					task.abort = true
+					provider["taskRegistry"].push(task)
+					const remove = vi.spyOn(provider, "removeClineFromStack")
+					removeSidebarOnCommand()
+					await vi.advanceTimersByTimeAsync(130_000 + delay)
+					const attempts = delay < 10_000 ? 1 : 3
+					expect(provider["webviewRecoveryAttempts"]).toBe(attempts)
+					expect(provider["webviewHostRecoveryInProgress"]).toBe(delay < 10_000)
+
+					const replacement = { ...mockWebviewView, webview: { ...mockWebviewView.webview, html: "" } }
+					await provider.resolveWebviewView(replacement)
+					await vi.advanceTimersByTimeAsync(50)
+
+					expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+					expect(provider["pendingSidebarRecovery"]).toBe(false)
+					expect(provider["webviewRecoveryAttempts"]).toBe(attempts)
+					expect(provider["webviewRecoveryFailureReported"]).toBe(delay >= 10_000)
+					expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(delay < 10_000 ? 0 : 1)
+					expect(provider.getCurrentTask()).toBe(task)
+					expect(remove).not.toHaveBeenCalled()
+					expect(task.dispose).not.toHaveBeenCalled()
+					expect(task.abortTask).not.toHaveBeenCalled()
+				},
+			)
+
+			test.each(["HTML generation", "state hydration"] as const)(
+				"recovers an interrupted sidebar task after failed replacement %s",
+				async (stage) => {
+					await provider.resolveWebviewView(mockWebviewView)
+					const task = new Task(defaultTaskOptions)
+					task.abort = true
+					provider["taskRegistry"].push(task)
+					const remove = vi.spyOn(provider, "removeClineFromStack")
+					provider["getWebviewHtml"] = vi.fn().mockResolvedValue("recovered-html")
+					const failed = { ...mockWebviewView, webview: { ...mockWebviewView.webview, html: "" } }
+					const healthy = { ...mockWebviewView, webview: { ...mockWebviewView.webview, html: "" } }
+					const replacements = [failed, healthy]
+					let resolution: Promise<void> | undefined
+					vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command) => {
+						if (command === `${ClineProvider.sideBarId}.removeView`) disposeCallback()
+						if (command === `${ClineProvider.sideBarId}.focus`) {
+							const next = replacements.shift()
+							if (!next) throw new Error("Unexpected third replacement")
+							if (next === failed) {
+								if (stage === "HTML generation")
+									vi.mocked(provider["getWebviewHtml"]).mockRejectedValueOnce(
+										new Error("HTML failed"),
+									)
+								else vi.spyOn(provider, "getState").mockRejectedValueOnce(new Error("hydration failed"))
+							}
+							// VS Code resolves the view independently of its focus command.
+							resolution = provider.resolveWebviewView(next)
+						}
+					})
+
+					await vi.advanceTimersByTimeAsync(130_050)
+					await expect(resolution).resolves.toBeUndefined()
+
+					expect(provider["view"]).toBe(failed)
+					expect(provider["webviewWatchdogInterval"]).not.toBeNull()
+					expect(provider["webviewRecoveryAttempts"]).toBe(1)
+					expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+					expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+					expect(provider.getCurrentTask()).toBe(task)
+					expect(remove).not.toHaveBeenCalled()
+
+					await vi.advanceTimersByTimeAsync(130_000)
+					await expect(resolution).resolves.toBeUndefined()
+
+					expect(provider["view"]).toBe(healthy)
+					expect(healthy.webview.html).toBe("recovered-html")
+					expect(provider["webviewRecoveryAttempts"]).toBe(2)
+					expect(replacements).toHaveLength(0)
+					expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+					expect(provider.getCurrentTask()).toBe(task)
+					expect(remove).not.toHaveBeenCalled()
+					expect(task.abortTask).not.toHaveBeenCalled()
+					expect(task.dispose).not.toHaveBeenCalled()
+				},
+			)
+
+			test("caps repeated failed sidebar replacements without evicting the task", async () => {
+				await provider.resolveWebviewView(mockWebviewView)
+				const task = new Task(defaultTaskOptions)
+				provider["taskRegistry"].push(task)
+				provider["getWebviewHtml"] = vi.fn().mockResolvedValue("recovered-html")
+				const resolutions: Promise<void>[] = []
+				vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command) => {
+					if (command === `${ClineProvider.sideBarId}.removeView`) disposeCallback()
+					if (command === `${ClineProvider.sideBarId}.focus`) {
+						vi.spyOn(provider, "getState").mockRejectedValueOnce(new Error("hydration failed"))
+						const replacement = { ...mockWebviewView, webview: { ...mockWebviewView.webview, html: "" } }
+						resolutions.push(provider.resolveWebviewView(replacement))
+					}
+				})
+
+				await vi.advanceTimersByTimeAsync(720_000)
+				await Promise.all(resolutions)
+
+				expect(resolutions).toHaveLength(3)
+				expect(provider["webviewRecoveryAttempts"]).toBe(3)
+				expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+				expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+				expect(provider.getCurrentTask()).toBe(task)
+				expect(task.abortTask).not.toHaveBeenCalled()
+				expect(task.dispose).not.toHaveBeenCalled()
+			})
+
+			test("keeps retries available when a published sidebar rejects after the replacement wait", async () => {
+				await provider.resolveWebviewView(mockWebviewView)
+				removeSidebarOnCommand()
+				await vi.advanceTimersByTimeAsync(130_000)
+				let rejectHtml: (error: Error) => void = () => {
+					throw new Error("HTML generation has not started")
+				}
+				provider["getWebviewHtml"] = vi.fn(
+					() =>
+						new Promise<string>((_resolve, reject) => {
+							rejectHtml = reject
+						}),
+				)
+				const replacement = { ...mockWebviewView, webview: { ...mockWebviewView.webview, html: "" } }
+				const resolution = provider.resolveWebviewView(replacement)
+				await vi.advanceTimersByTimeAsync(10_000)
+				expect(provider["webviewRecoveryAttempts"]).toBe(1)
+				expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+
+				rejectHtml(new Error("late HTML failure"))
+				await expect(resolution).resolves.toBeUndefined()
+
+				expect(provider["view"]).toBe(replacement)
+				expect(provider["webviewWatchdogInterval"]).not.toBeNull()
+				expect(provider["webviewRecoveryAttempts"]).toBe(1)
+				expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+			})
+
+			test("retains recovery intent and remaining attempts while replacement HTML generation outlasts the wait", async () => {
+				await provider.resolveWebviewView(mockWebviewView)
+				const task = new Task(defaultTaskOptions)
+				task.abort = true
+				provider["taskRegistry"].push(task)
+				const remove = vi.spyOn(provider, "removeClineFromStack")
+				removeSidebarOnCommand()
+				await vi.advanceTimersByTimeAsync(130_000)
+				let finishHtml: (html: string) => void = () => {
+					throw new Error("HTML generation has not started")
+				}
+				provider["getWebviewHtml"] = vi.fn(
+					() =>
+						new Promise<string>((resolve) => {
+							finishHtml = resolve
+						}),
+				)
+				const replacement = { ...mockWebviewView, webview: { ...mockWebviewView.webview, html: "" } }
+				const resolving = provider.resolveWebviewView(replacement)
+				await vi.advanceTimersByTimeAsync(10_000)
+				expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+				finishHtml("replacement-html")
+				await resolving
+				expect(provider["webviewRecoveryAttempts"]).toBe(1)
+				expect(provider.getCurrentTask()).toBe(task)
+				expect(remove).not.toHaveBeenCalled()
+			})
+		})
+
+		test("recreates the sidebar again after a second incident", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const replacements = [0, 1].map(() => ({
+				...mockWebviewView,
+				webview: { ...mockWebviewView.webview, html: "" },
+			}))
+			vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command) => {
+				if (command === `${ClineProvider.sideBarId}.removeView`) disposeCallback()
+				if (command === `${ClineProvider.sideBarId}.focus`) {
+					const next = replacements.shift()
+					if (!next) throw new Error("Unexpected third replacement")
+					await provider.resolveWebviewView(next)
+				}
+			})
+			await vi.advanceTimersByTimeAsync(130_000)
+			expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+			provider.updateWebviewHeartbeat()
+			await vi.advanceTimersByTimeAsync(30_000)
+			provider.updateWebviewHeartbeat()
+			await vi.advanceTimersByTimeAsync(30_000)
+			provider.updateWebviewHeartbeat()
+			expect(provider["webviewRecoveryAttempts"]).toBe(0)
+			await vi.advanceTimersByTimeAsync(130_000)
+			expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+			expect(provider["webviewRecoveryAttempts"]).toBe(1)
+			expect(replacements).toHaveLength(0)
+			expect(
+				vi
+					.mocked(vscode.commands.executeCommand)
+					.mock.calls.filter(([command]) => command === `${ClineProvider.sideBarId}.removeView`),
+			).toHaveLength(2)
+		})
+
+		test.each(["heartbeat", "hidden", "disposed", "suspended"] as const)(
+			"does not recreate the host after %s during the confirmation window",
+			async (event) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				await vi.advanceTimersByTimeAsync(120_000)
+				if (event === "heartbeat") provider.updateWebviewHeartbeat()
+				if (event === "hidden")
+					Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
+				if (event === "disposed") await provider.dispose()
+				if (event === "suspended") vi.setSystemTime(Date.now() + 120_000)
+
+				await vi.advanceTimersByTimeAsync(10_000)
+
+				expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith(`${ClineProvider.sideBarId}.removeView`)
+			},
+		)
+
+		test.each(["heartbeat", "hidden", "disposed", "replacement"] as const)(
+			"cancels host recreation after %s during command discovery",
+			async (event) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				vi.mocked(vscode.commands.getCommands).mockImplementation(async () => {
+					if (event === "heartbeat") provider.updateWebviewHeartbeat()
+					if (event === "hidden")
+						Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
+					if (event === "disposed") await provider.dispose()
+					if (event === "replacement") provider["view"] = { ...mockWebviewView }
+					// Even an unavailable-command result must be ignored after cancellation.
+					return []
+				})
+
+				await vi.advanceTimersByTimeAsync(130_000)
+
+				expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith(`${ClineProvider.sideBarId}.removeView`)
+				expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+			},
+		)
+
+		test("ignores a late command-discovery error after a heartbeat returns", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			vi.mocked(vscode.commands.getCommands).mockImplementation(async () => {
+				provider.updateWebviewHeartbeat()
+				throw new Error("discovery failed")
+			})
+
+			await vi.advanceTimersByTimeAsync(130_000)
+
+			expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		})
+
+		test.each(["unavailable commands", "failed removal"] as const)(
+			"stops and notifies once when scoped recovery has %s",
+			async (failure) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				if (failure === "unavailable commands") vi.mocked(vscode.commands.getCommands).mockResolvedValue([])
+				if (failure === "failed removal")
+					vi.mocked(vscode.commands.executeCommand).mockRejectedValue(new Error("removal failed"))
+				const assignHtml = trackHtmlAssignments()
+
+				await vi.advanceTimersByTimeAsync(600_000)
+
+				expect(assignHtml).toHaveBeenCalledTimes(1)
+				expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+				expect(provider["pendingSidebarRecovery"]).toBe(false)
+				expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+				expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.reloadWindow")
+				expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+					expect.stringContaining("Webview recovery stopped:"),
+				)
+			},
+		)
+
+		test("clears a failed focus incident before a manual sidebar open", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const task = new Task(defaultTaskOptions)
+			task.abort = true
+			provider["taskRegistry"].push(task)
+			const remove = vi.spyOn(provider, "removeClineFromStack")
+			vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command) => {
+				if (command === `${ClineProvider.sideBarId}.removeView`) disposeCallback()
+				if (command === `${ClineProvider.sideBarId}.focus`) throw new Error("focus failed")
+			})
+
+			await vi.advanceTimersByTimeAsync(130_000)
+
+			expect(provider["view"]).toBeUndefined()
+			expect(provider["pendingSidebarRecovery"]).toBe(false)
+			expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+			expect(provider["webviewRecoveryAttempts"]).toBe(3)
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+			expect(remove).not.toHaveBeenCalled()
+
+			const manualView = { ...mockWebviewView, webview: { ...mockWebviewView.webview, html: "" } }
+			await provider.resolveWebviewView(manualView)
+
+			expect(provider["view"]).toBe(manualView)
+			expect(provider["webviewRecoveryAttempts"]).toBe(0)
+			expect(provider["webviewRecoveryFailureReported"]).toBe(false)
+			expect(remove).toHaveBeenCalledTimes(1)
+			expect(provider.getCurrentTask()).toBeUndefined()
+		})
+
+		test.each([false, true])(
+			"logs one terminal stop and notification despite repeated ticks (prior retry warning: %s)",
+			async (priorWarning) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				const html = mockWebviewView.webview.html
+				const log = vi.spyOn(provider, "log")
+				if (priorWarning) {
+					provider["reportWebviewRecoveryFailure"]("Initialization failed; retry pending", false)
+					expect(provider["webviewRecoveryAttempts"]).toBe(0)
+					expect(log).toHaveBeenCalledWith(
+						"[Zoo Code] Webview recovery will retry: Initialization failed; retry pending",
+					)
+				}
+
+				provider["reportWebviewRecoveryFailure"]("Recovery is unavailable")
+				expect(log).toHaveBeenCalledWith("[Zoo Code] Webview recovery stopped: Recovery is unavailable")
+				await vi.advanceTimersByTimeAsync(300_000)
+
+				expect(provider["webviewRecoveryAttempts"]).toBe(3)
+				expect(mockWebviewView.webview.html).toBe(html)
+				expect(log.mock.calls.filter(([line]) => line.includes("Webview recovery stopped:"))).toEqual([
+					["[Zoo Code] Webview recovery stopped: Recovery is unavailable"],
+				])
+				expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+			},
+		)
+
+		test.each(["heartbeat", "manual reopen"] as const)(
+			"logs a new terminal stop after %s begins a new incident",
+			async (reset) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				const log = vi.spyOn(provider, "log")
+				provider["reportWebviewRecoveryFailure"]("First incident")
+				if (reset === "heartbeat") provider.updateWebviewHeartbeat()
+				else {
+					disposeCallback()
+					await provider.resolveWebviewView({
+						...mockWebviewView,
+						webview: { ...mockWebviewView.webview, html: "" },
+					})
+				}
+				expect(provider["webviewRecoveryStopLogged"]).toBe(false)
+
+				provider["reportWebviewRecoveryFailure"]("Second incident")
+				await vi.advanceTimersByTimeAsync(300_000)
+
+				expect(log.mock.calls.filter(([line]) => line.includes("Webview recovery stopped:"))).toEqual([
+					["[Zoo Code] Webview recovery stopped: First incident"],
+					["[Zoo Code] Webview recovery stopped: Second incident"],
+				])
+				expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(2)
+			},
+		)
+
+		test.each(["Retry Interface Recovery", "Reload Window", "Show Logs"] as const)(
+			"an old notification action cannot restart a renewed generation: %s",
+			async (choice) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				let choose: (value: string) => void = () => {
+					throw new Error("No warning")
+				}
+				vi.mocked(vscode.window.showWarningMessage).mockImplementation(
+					vi.fn().mockReturnValue(
+						new Promise<string>((resolve) => {
+							choose = resolve
+						}),
+					),
+				)
+				provider["reportWebviewRecoveryFailure"]("Old incident")
+				const healthy = { ...mockWebviewView, webview: { ...mockWebviewView.webview, html: "" } }
+				vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command) => {
+					if (command === `${ClineProvider.sideBarId}.removeView`) disposeCallback()
+					if (command === `${ClineProvider.sideBarId}.focus`) await provider.resolveWebviewView(healthy)
+				})
+				await provider.retryWebviewRecovery()
+				choose(choice)
+				await vi.advanceTimersByTimeAsync(0)
+				expect(provider["webviewRecoveryRequestGeneration"]).toBe(1)
+				expect(provider["webviewRecoveryAttempts"]).toBe(1)
+				expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.reloadWindow")
+				expect(mockOutputChannel.show).toHaveBeenCalledTimes(choice === "Show Logs" ? 1 : 0)
+			},
+		)
+
+		test.each(["disposed", "stale notification"] as const)("does not renew recovery after %s", async (event) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			if (event === "disposed") await provider.dispose()
+			else provider["webviewRecoveryRequestGeneration"] = 1
+			vi.mocked(vscode.commands.executeCommand).mockClear()
+			await provider.retryWebviewRecovery(0)
+			expect(provider["webviewRecoveryRequestGeneration"]).toBe(event === "disposed" ? 0 : 1)
+			expect(vscode.commands.executeCommand).not.toHaveBeenCalled()
+		})
+
+		test("an old focus rejection cannot release or stop a newer explicit retry", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			let rejectOldFocus: (error: Error) => void = () => {
+				throw new Error("Old focus has not started")
+			}
+			let finishNewFocus: () => void = () => {
+				throw new Error("New focus has not started")
+			}
+			let focusCount = 0
+			vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command) => {
+				if (command === `${ClineProvider.sideBarId}.removeView`) disposeCallback()
+				if (command === `${ClineProvider.sideBarId}.focus`) {
+					focusCount++
+					if (focusCount === 1)
+						await new Promise<void>((_resolve, reject) => {
+							rejectOldFocus = reject
+						})
+					else
+						await new Promise<void>((resolve) => {
+							finishNewFocus = resolve
+						})
+				}
+			})
+			const old = provider["recreateWebviewHostForRecovery"](mockWebviewView)
+			await vi.advanceTimersByTimeAsync(0)
+			const retry = provider.retryWebviewRecovery()
+			await vi.advanceTimersByTimeAsync(0)
+			rejectOldFocus(new Error("obsolete focus rejection"))
+			await old
+			expect(provider["webviewHostRecoveryInProgress"]).toBe(true)
+			expect(provider["pendingSidebarRecovery"]).toBe(true)
+			expect(provider["webviewRecoveryAttempts"]).toBe(1)
+			expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+			await provider.resolveWebviewView({ ...mockWebviewView, webview: { ...mockWebviewView.webview, html: "" } })
+			finishNewFocus()
+			await retry
+			expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+		})
+
+		test.each(["resolve", "reject"] as const)(
+			"ignores old initialization that completes on the same view after explicit retry: %s",
+			async (completion) => {
+				let finishHtml: (html: string) => void = () => {
+					throw new Error("HTML has not started")
+				}
+				let rejectHtml: (error: Error) => void = () => {
+					throw new Error("HTML has not started")
+				}
+				provider["getWebviewHtml"] = vi
+					.fn()
+					.mockImplementationOnce(
+						() =>
+							new Promise<string>((resolve, reject) => {
+								finishHtml = resolve
+								rejectHtml = reject
+							}),
+					)
+					.mockResolvedValue("fresh-html")
+				const old = provider.resolveWebviewView(mockWebviewView)
+				let finishDiscovery: (commands: string[]) => void = () => {
+					throw new Error("Discovery has not started")
+				}
+				vi.mocked(vscode.commands.getCommands).mockImplementationOnce(
+					() =>
+						new Promise<string[]>((resolve) => {
+							finishDiscovery = resolve
+						}),
+				)
+				const retry = provider.retryWebviewRecovery()
+				await vi.advanceTimersByTimeAsync(0)
+				if (completion === "resolve") finishHtml("obsolete-html")
+				else rejectHtml(new Error("obsolete initialization failure"))
+				await old
+				expect(mockWebviewView.webview.html).toBe("")
+				expect(mockWebviewView.webview.onDidReceiveMessage).not.toHaveBeenCalled()
+				expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+				const healthy = { ...mockWebviewView, webview: { ...mockWebviewView.webview, html: "" } }
+				vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command) => {
+					if (command === `${ClineProvider.sideBarId}.removeView`) disposeCallback()
+					if (command === `${ClineProvider.sideBarId}.focus`) await provider.resolveWebviewView(healthy)
+				})
+				finishDiscovery([`${ClineProvider.sideBarId}.removeView`, `${ClineProvider.sideBarId}.focus`])
+				await retry
+				expect(provider["view"]).toBe(healthy)
+				expect(healthy.webview.html).toBe("fresh-html")
+			},
+		)
+
+		test("old hydration cannot change terminal settings after explicit retry renews the same view", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const state = await provider.getState()
+			provider["getWebviewHtml"] = vi.fn().mockResolvedValue("fresh-html")
+			let finishHydration: (value: typeof state) => void = () => {
+				throw new Error("Hydration has not started")
+			}
+			vi.spyOn(provider, "getState").mockImplementationOnce(
+				() =>
+					new Promise<typeof state>((resolve) => {
+						finishHydration = resolve
+					}),
+			)
+			const old = provider.resolveWebviewView(mockWebviewView)
+			await vi.advanceTimersByTimeAsync(0)
+			let finishDiscovery: (commands: string[]) => void = () => {
+				throw new Error("Discovery has not started")
+			}
+			vi.mocked(vscode.commands.getCommands).mockImplementationOnce(
+				() =>
+					new Promise<string[]>((resolve) => {
+						finishDiscovery = resolve
+					}),
+			)
+			const retry = provider.retryWebviewRecovery()
+			await vi.advanceTimersByTimeAsync(0)
+			const terminal = vi.spyOn(Terminal, "setTerminalProfile")
+			finishHydration({ ...state, terminalProfile: "obsolete-profile" })
+			await old
+			expect(terminal).not.toHaveBeenCalled()
+			vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command) => {
+				if (command === `${ClineProvider.sideBarId}.removeView`) disposeCallback()
+				if (command === `${ClineProvider.sideBarId}.focus`)
+					await provider.resolveWebviewView({
+						...mockWebviewView,
+						webview: { ...mockWebviewView.webview, html: "" },
+					})
+			})
+			finishDiscovery([`${ClineProvider.sideBarId}.removeView`, `${ClineProvider.sideBarId}.focus`])
+			await retry
+			expect(terminal).not.toHaveBeenCalledWith("obsolete-profile")
+		})
+
+		test.each(["Reload Window", "Show Logs"] as const)(
+			"runs only the selected recovery action: %s",
+			async (action) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				vi.mocked(vscode.commands.getCommands).mockResolvedValue([])
+				vi.mocked(vscode.window.showWarningMessage).mockImplementation(vi.fn().mockResolvedValue(action))
+
+				await vi.advanceTimersByTimeAsync(130_000)
+
+				if (action === "Reload Window")
+					expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow")
+				if (action === "Show Logs") {
+					expect(mockOutputChannel.show).toHaveBeenCalledTimes(1)
+					expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.reloadWindow")
+				}
+			},
+		)
+
+		test("ignores an old Reload Window choice after a heartbeat returns", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			vi.mocked(vscode.commands.getCommands).mockResolvedValue([])
+			let choose: (value: string) => void = () => {
+				throw new Error("Notification not shown")
+			}
+			const choice = new Promise<string>((resolve) => {
+				choose = resolve
+			})
+			vi.mocked(vscode.window.showWarningMessage).mockImplementation(vi.fn().mockReturnValue(choice))
+			await vi.advanceTimersByTimeAsync(130_000)
+
+			provider.updateWebviewHeartbeat()
+			choose("Reload Window")
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.reloadWindow")
+		})
+
+		test("offers a fresh actionable warning when one heartbeat is followed by another stall", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			vi.mocked(vscode.commands.getCommands).mockResolvedValue([])
+			let chooseOld: (value: string) => void = () => {
+				throw new Error("Notification not shown")
+			}
+			const oldChoice = new Promise<string>((resolve) => {
+				chooseOld = resolve
+			})
+			vi.mocked(vscode.window.showWarningMessage).mockImplementationOnce(vi.fn().mockReturnValue(oldChoice))
+			await vi.advanceTimersByTimeAsync(130_000)
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+
+			provider.updateWebviewHeartbeat()
+			expect(provider["webviewRecoveryAttempts"]).toBe(3)
+			chooseOld("Reload Window")
+			await vi.advanceTimersByTimeAsync(0)
+			expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.reloadWindow")
+
+			vi.mocked(vscode.window.showWarningMessage).mockImplementation(vi.fn().mockResolvedValue("Reload Window"))
+			await vi.advanceTimersByTimeAsync(170_000)
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(2)
+			expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow")
+			await vi.advanceTimersByTimeAsync(240_000)
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(2)
+		})
+
+		test("keeps the Reload Window action available after visibility grace resets", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			vi.mocked(vscode.commands.getCommands).mockResolvedValue([])
+			let choose: (value: string) => void = () => {
+				throw new Error("Notification not shown")
+			}
+			const choice = new Promise<string>((resolve) => {
+				choose = resolve
+			})
+			vi.mocked(vscode.window.showWarningMessage).mockImplementation(vi.fn().mockReturnValue(choice))
+			await vi.advanceTimersByTimeAsync(130_000)
+
+			visibilityCallback()
+			choose("Reload Window")
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow")
+		})
+
+		test("waits for the final HTML attempt to settle before reporting the limit", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			provider["webviewRecoveryAttempts"] = 2
+			let rejectHtml: (error: Error) => void = () => {
+				throw new Error("HTML not requested")
+			}
+			const html = new Promise<string>((_resolve, reject) => {
+				rejectHtml = reject
+			})
+			provider["getWebviewHtml"] = vi.fn<(webview: vscode.Webview) => Promise<string>>().mockReturnValue(html)
+			await vi.advanceTimersByTimeAsync(240_000)
+			expect(provider["webviewRecoveryAttempts"]).toBe(3)
+			expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+
+			rejectHtml(new Error("cannot generate"))
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		})
+
+		test("bounds failed HTML generation and reports the exhausted budget once", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const generate = vi.spyOn(provider, "getState").mockRejectedValue(new Error("cannot generate"))
+			const assignHtml = trackHtmlAssignments()
+
+			await vi.advanceTimersByTimeAsync(600_000)
+
+			expect(generate).toHaveBeenCalledTimes(3)
+			expect(assignHtml).not.toHaveBeenCalled()
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		})
+
+		test("does not replenish attempts in a mount-heartbeat-crash loop", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const assignHtml = trackHtmlAssignments()
+			for (let attempt = 0; attempt < 3; attempt++) {
+				await vi.advanceTimersByTimeAsync(120_000)
+				provider.updateWebviewHeartbeat()
+			}
+			await vi.advanceTimersByTimeAsync(240_000)
+
+			expect(assignHtml).toHaveBeenCalledTimes(3)
+			expect(provider["webviewRecoveryAttempts"]).toBe(3)
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		})
+
+		test("gives a user-opened replacement a fresh budget after unavailable host recovery", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			vi.mocked(vscode.commands.getCommands).mockResolvedValue([])
+			const generateHtml = vi.spyOn(provider, "getState")
+
+			await vi.advanceTimersByTimeAsync(130_000)
+			expect(generateHtml).toHaveBeenCalledTimes(1)
+			expect(provider["webviewRecoveryAttempts"]).toBe(3)
+
+			disposeCallback()
+			const replacementView = {
+				...mockWebviewView,
+				webview: { ...mockWebviewView.webview, html: "" },
+			}
+			await provider.resolveWebviewView(replacementView)
+			const htmlAfterResolve = replacementView.webview.html
+			generateHtml.mockClear()
+
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(replacementView.webview.html).toBe(htmlAfterResolve)
+			await vi.advanceTimersByTimeAsync(60_000)
+
+			expect(generateHtml).toHaveBeenCalledTimes(1)
+			expect(replacementView.webview.html).not.toBe(htmlAfterResolve)
+			expect(replacementView.webview.html).toContain("<title>Zoo Code</title>")
+		})
+
+		test("does not reload while the view is hidden even when the heartbeat is stale", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
+			const htmlAfterResolve = mockWebviewView.webview.html
+			const log = vi.spyOn(provider, "log")
+
+			await vi.advanceTimersByTimeAsync(180_000)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+			expect(log).not.toHaveBeenCalledWith(expect.stringContaining("Webview heartbeat stale"))
+		})
+
+		test("resets the grace window when the view becomes visible", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			Object.defineProperty(mockWebviewView, "visible", { value: true, configurable: true })
+			visibilityCallback()
+			const htmlAfterBecomingVisible = mockWebviewView.webview.html
+
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterBecomingVisible)
+
+			// Watchdog ticks every 60s; 120s after the flip the heartbeat is stale again.
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(mockWebviewView.webview.html).not.toBe(htmlAfterBecomingVisible)
+		})
+
+		test("restarts the grace window when a tick gap shows the host slept", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			// One ordinary tick, then a wall-clock jump past the stale
+			// threshold before the next tick. The gap means the host slept
+			// while both timers were paused, not that the renderer died.
+			await vi.advanceTimersByTimeAsync(60_000)
+			vi.setSystemTime(Date.now() + 120_000)
+			await vi.advanceTimersByTimeAsync(60_000)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			// The grace window restarted at the post-sleep tick, so the
+			// watchdog still reloads once the heartbeat genuinely goes stale.
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(mockWebviewView.webview.html).not.toBe(htmlAfterResolve)
+		})
+
+		test("stops watching after the provider is disposed", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			await provider.dispose()
+			await vi.advanceTimersByTimeAsync(180_000)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("stops watching and clears the view when the sidebar webview is disposed", async () => {
+			mockWebviewView.webview.onDidReceiveMessage = vi.fn(() => ({ dispose: vi.fn() }))
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+			const epochBefore = provider["webviewRecoveryEpoch"]
+			const trackedDisposables = [...provider["webviewDisposables"]]
+			expect(trackedDisposables).not.toHaveLength(0)
+			const disposeSpies = trackedDisposables.map((disposable) => vi.spyOn(disposable, "dispose"))
+
+			// Precondition: the watchdog interval was actually scheduled, so the
+			// null check below proves disposal stopped it rather than it never
+			// having started.
+			expect(provider["webviewWatchdogInterval"]).not.toBeNull()
+
+			// The provider outlives a disposed sidebar view; VS Code re-resolves
+			// a fresh view later. Disposal must stop the watchdog and drop the
+			// stale view reference so no recovery reload targets the dead view.
+			disposeCallback()
+			expect(provider["webviewWatchdogInterval"]).toBeNull()
+			expect(provider["view"]).toBeUndefined()
+			expect(provider["webviewDisposables"]).toHaveLength(0)
+			for (const disposeSpy of disposeSpies) {
+				expect(disposeSpy).toHaveBeenCalled()
+			}
+			expect(provider["webviewRecoveryEpoch"]).toBe(epochBefore + 1)
+
+			await vi.advanceTimersByTimeAsync(180_000)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("does not stack watchdog intervals when resolveWebviewView runs again", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const timersAfterFirstResolve = vi.getTimerCount()
+			await provider.resolveWebviewView(mockWebviewView)
+			expect(vi.getTimerCount()).toBe(timersAfterFirstResolve)
+
+			// getHtmlContent regenerates the HTML via one getState() call per reload,
+			// so getState invocations after this point count watchdog reloads.
+			const getStateSpy = vi.spyOn(provider, "getState")
+
+			await vi.advanceTimersByTimeAsync(120_000)
+
+			expect(getStateSpy).toHaveBeenCalledTimes(1)
+		})
+
+		test("logs when regenerating the reload HTML fails", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			vi.spyOn(provider, "getState").mockRejectedValue(new Error("regen boom"))
+			;(mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mockClear()
+
+			await vi.advanceTimersByTimeAsync(120_000)
+
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining("[Zoo Code] Failed to reload webview: regen boom"),
+			)
+		})
+
+		test("logs and keeps the webview html when the recovery reload rejects", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+			// The watchdog reload no longer goes through a VS Code command; stub
+			// the recovery HTML regeneration itself to reject.
+			provider["getWebviewHtml"] = vi.fn().mockRejectedValue(new Error("reload boom"))
+			;(mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mockClear()
+
+			await vi.advanceTimersByTimeAsync(120_000)
+
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining("[Zoo Code] Failed to reload webview: reload boom"),
+			)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("does not reassign html when the provider is disposed mid-recovery", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			let finishReload: (html: string) => void = () => {}
+			provider["getWebviewHtml"] = vi.fn().mockImplementation(
+				() =>
+					new Promise<string>((resolve) => {
+						finishReload = resolve
+					}),
+			)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			await provider.dispose()
+			finishReload("<!DOCTYPE html><html><body>recovered</body></html>")
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("does not reassign html when the sidebar view is disposed mid-recovery", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			// Defer the recovery reload's own HTML generation so the test proves
+			// the disposal lands while recovery is in flight, not before it starts.
+			let finishReload: (html: string) => void = () => {}
+			provider["getWebviewHtml"] = vi.fn().mockImplementation(
+				() =>
+					new Promise<string>((resolve) => {
+						finishReload = resolve
+					}),
+			)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			// The stale heartbeat started a recovery reload, and its HTML
+			// generation is still pending.
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			disposeCallback()
+			finishReload("<!DOCTYPE html><html><body>recovered</body></html>")
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("does not reassign html when the watched view is replaced mid-recovery", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			// Defer the recovery reload's own HTML generation so the test proves
+			// the replacement lands while recovery is in flight, not before it
+			// starts.
+			let finishReload: (html: string) => void = () => {}
+			provider["getWebviewHtml"] = vi.fn().mockImplementation(
+				() =>
+					new Promise<string>((resolve) => {
+						finishReload = resolve
+					}),
+			)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			// The stale heartbeat started a recovery reload, and its HTML
+			// generation is still pending.
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			// VS Code re-resolves a fresh view (e.g. sidebar re-opened) while the
+			// recovery reload for the old view is still awaiting its HTML.
+			// @ts-ignore - accessing private property for testing
+			provider.view = {
+				webview: {
+					postMessage: vi.fn(),
+					html: "",
+					options: {},
+					onDidReceiveMessage: vi.fn(),
+					asWebviewUri: vi.fn(),
+					cspSource: "vscode-webview://test-csp-source",
+				},
+				visible: true,
+			}
+
+			finishReload("<!DOCTYPE html><html><body>recovered</body></html>")
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("skips the recovery reload when a heartbeat arrives while regenerating HTML", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			let finishReload: (html: string) => void = () => {}
+			provider["getWebviewHtml"] = vi.fn().mockImplementation(
+				() =>
+					new Promise<string>((resolve) => {
+						finishReload = resolve
+					}),
+			)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			// The renderer process reported in again while the recovery HTML was
+			// still being generated, so the webview is alive and must not reload.
+			provider.updateWebviewHeartbeat()
+
+			finishReload("<!DOCTYPE html><html><body>recovered</body></html>")
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("skips the recovery reload when two heartbeats land in the same millisecond during recovery", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			let finishReload: (html: string) => void = () => {}
+			provider["getWebviewHtml"] = vi.fn().mockImplementation(
+				() =>
+					new Promise<string>((resolve) => {
+						finishReload = resolve
+					}),
+			)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			// Pin the clock to the timestamp captured before recovery: both
+			// heartbeats stamp the same millisecond, so a timestamp comparison
+			// would see no change, but the heartbeat revision moved, so the
+			// reload must still be skipped.
+			const heartbeatAtCapture = provider["lastWebviewHeartbeatAt"]
+			const nowSpy = vi.spyOn(Date, "now").mockReturnValue(heartbeatAtCapture)
+			provider.updateWebviewHeartbeat()
+			expect(provider["lastWebviewHeartbeatAt"]).toBe(heartbeatAtCapture)
+			provider.updateWebviewHeartbeat()
+			expect(provider["lastWebviewHeartbeatAt"]).toBe(heartbeatAtCapture)
+			nowSpy.mockRestore()
+
+			finishReload("<!DOCTYPE html><html><body>recovered</body></html>")
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("skips the recovery reload when the view hides while regenerating HTML", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			let finishReload: (html: string) => void = () => {}
+			provider["getWebviewHtml"] = vi.fn().mockImplementation(
+				() =>
+					new Promise<string>((resolve) => {
+						finishReload = resolve
+					}),
+			)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
+
+			// The view hid while the recovery HTML was still being generated; a
+			// hidden webview throttles heartbeats, so the stale heartbeat no
+			// longer proves a dead renderer.
+			Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
+
+			finishReload("<!DOCTYPE html><html><body>recovered</body></html>")
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+		})
+
+		test("does not start a second recovery while one is in flight and recovers after a failure", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			// The first recovery blocks on a controlled pending generation; the
+			// retry (second call) gets its own deferred generation.
+			let failFirst: (error: Error) => void = () => {}
+			let finishRetry: (html: string) => void = () => {}
+			provider["getWebviewHtml"] = vi
+				.fn()
+				.mockImplementationOnce(
+					() =>
+						new Promise<string>((_resolve, reject) => {
+							failFirst = reject
+						}),
+				)
+				.mockImplementationOnce(
+					() =>
+						new Promise<string>((resolve) => {
+							finishRetry = resolve
+						}),
+				)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
+
+			// The watchdog ticks again while the first recovery still awaits
+			// its HTML; no second generation may start for the same view.
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			// The pending generation rejects; the finally block must clear the
+			// in-flight state so a later watchdog tick can start a fresh
+			// recovery instead of being blocked forever.
+			failFirst(new Error("reload boom"))
+			await vi.advanceTimersByTimeAsync(0)
+
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(2)
+
+			// The retry's generation resolves with fresh HTML and must land in
+			// the webview.
+			finishRetry("<!DOCTYPE html><html><body>recovered-retry</body></html>")
+			await vi.advanceTimersByTimeAsync(0)
+			expect(mockWebviewView.webview.html).toContain("recovered-retry")
+		})
+
+		test("lets the replacement view's recovery start while a stale one is pending", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			// Each recovery generation gets its own deferred finish callback.
+			const generations: Array<{ finish: (html: string) => void }> = []
+			provider["getWebviewHtml"] = vi.fn().mockImplementation(
+				() =>
+					new Promise<string>((resolve) => {
+						generations.push({ finish: resolve })
+					}),
+			)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
+
+			// The sidebar view is disposed (bumping webviewRecoveryEpoch) and a
+			// replacement view takes over while recovery A's HTML generation is
+			// still pending, making A stale.
+			disposeCallback()
+			// @ts-ignore - accessing private property for testing
+			provider.view = {
+				webview: {
+					postMessage: vi.fn(),
+					html: "",
+					options: {},
+					onDidReceiveMessage: vi.fn(),
+					asWebviewUri: vi.fn(),
+					cspSource: "vscode-webview://test-csp-source",
+				},
+				visible: true,
+			}
+			const replacementEpoch = provider["webviewRecoveryEpoch"]
+
+			// Recovery B for the new view must start even though A is still
+			// pending: the in-flight guard is scoped to the epoch.
+			void provider["reloadWebviewForRecovery"]()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(2)
+
+			// A's completion is stale: it must not reassign the old view's html,
+			// and its finally must NOT release the ownership B took.
+			generations[0].finish("<!DOCTYPE html><html><body>stale-A</body></html>")
+			await vi.advanceTimersByTimeAsync(0)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+			expect(provider["webviewRecoveryInFlightEpoch"]).toBe(replacementEpoch)
+
+			// B completes and lands its HTML on the new view, then releases
+			// ownership so future recoveries can start.
+			generations[1].finish("<!DOCTYPE html><html><body>recovered-B</body></html>")
+			await vi.advanceTimersByTimeAsync(0)
+			// @ts-ignore - accessing private property for testing
+			expect(provider.view.webview.html).toContain("recovered-B")
+			expect(provider["webviewRecoveryInFlightEpoch"]).toBeUndefined()
+		})
+
+		test("advances the recovery epoch when resolveWebviewView replaces the view and lets the new recovery start", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+			const epochBeforeReplacement = provider["webviewRecoveryEpoch"]
+
+			// Recovery generations get their own deferred finish callbacks; the
+			// replacement view's initial HTML generation resolves immediately so
+			// resolveWebviewView can complete.
+			const generations: Array<{ finish: (html: string) => void }> = []
+			provider["getWebviewHtml"] = vi
+				.fn()
+				.mockImplementationOnce(
+					() =>
+						new Promise<string>((resolve) => {
+							generations.push({ finish: resolve })
+						}),
+				)
+				.mockImplementationOnce(() => Promise.resolve("<!DOCTYPE html><html><body>view2-initial</body></html>"))
+				.mockImplementation(
+					() =>
+						new Promise<string>((resolve) => {
+							generations.push({ finish: resolve })
+						}),
+				)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
+
+			// VS Code re-resolves a DIFFERENT view without a disposal in between
+			// (the gap path): the epoch must advance so the stale recovery can
+			// neither block nor reassign the replacement view's recovery.
+			const mockWebviewView2 = {
+				webview: {
+					postMessage: vi.fn(),
+					html: "",
+					options: {},
+					onDidReceiveMessage: vi.fn(),
+					asWebviewUri: vi.fn(),
+					cspSource: "vscode-webview://test-csp-source",
+				},
+				visible: true,
+				onDidDispose: vi.fn(),
+				onDidChangeVisibility: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
+			} as unknown as vscode.WebviewView
+			await provider.resolveWebviewView(mockWebviewView2)
+			expect(provider["webviewRecoveryEpoch"]).toBe(epochBeforeReplacement + 1)
+
+			// Recovery B for the replacement view starts immediately, unblocked
+			// by A's still-pending generation.
+			void provider["reloadWebviewForRecovery"]()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(3)
+
+			// A's completion is stale: the old view's html is untouched and A's
+			// finally does not release the ownership B took.
+			generations[0].finish("<!DOCTYPE html><html><body>stale-A</body></html>")
+			await vi.advanceTimersByTimeAsync(0)
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+			expect(provider["webviewRecoveryInFlightEpoch"]).toBe(provider["webviewRecoveryEpoch"])
+
+			// B completes and lands its HTML on the replacement view, then
+			// releases ownership.
+			generations[1].finish("<!DOCTYPE html><html><body>recovered-B</body></html>")
+			await vi.advanceTimersByTimeAsync(0)
+			expect(mockWebviewView2.webview.html).toContain("recovered-B")
+			expect(provider["webviewRecoveryInFlightEpoch"]).toBeUndefined()
+		})
+
+		test("does not advance the recovery epoch when the same view is re-resolved and keeps the pending recovery intact", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const epochAfterFirstResolve = provider["webviewRecoveryEpoch"]
+
+			// Recovery A blocks on a controlled pending generation; the same
+			// view's re-resolve initial HTML resolves immediately.
+			let finishReload: (html: string) => void = () => {}
+			provider["getWebviewHtml"] = vi
+				.fn()
+				.mockImplementationOnce(
+					() =>
+						new Promise<string>((resolve) => {
+							finishReload = resolve
+						}),
+				)
+				.mockImplementation(() =>
+					Promise.resolve("<!DOCTYPE html><html><body>same-view-reresolve</body></html>"),
+				)
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(1)
+
+			// Re-resolving the SAME view must not bump the epoch nor disrupt the
+			// pending recovery that belongs to it.
+			await provider.resolveWebviewView(mockWebviewView)
+			expect(provider["webviewRecoveryEpoch"]).toBe(epochAfterFirstResolve)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(2)
+			expect(provider["webviewRecoveryInFlightEpoch"]).toBe(epochAfterFirstResolve)
+
+			// A still owns the view across the re-resolve: another recovery
+			// attempt is blocked until A settles.
+			void provider["reloadWebviewForRecovery"]()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(provider["getWebviewHtml"]).toHaveBeenCalledTimes(2)
+
+			// A settles cleanly: the re-resolve restarted the watchdog, which
+			// re-stamped the heartbeat, so the revision guard (not the epoch)
+			// skips the stale assignment; the ownership A held is released.
+			finishReload("<!DOCTYPE html><html><body>recovered-A</body></html>")
+			await vi.advanceTimersByTimeAsync(0)
+			expect(mockWebviewView.webview.html).toContain("same-view-reresolve")
+			expect(provider["webviewRecoveryInFlightEpoch"]).toBeUndefined()
+		})
+
+		test("reloads only its own webview when multiple providers are active", async () => {
+			// Structural stand-in for the VS Code webview API surface this scenario
+			// exercises, same as the mockContext cast below.
+			const mockWebviewViewB = {
+				webview: {
+					postMessage: vi.fn(),
+					html: "",
+					options: {},
+					onDidReceiveMessage: vi.fn(),
+					asWebviewUri: vi.fn(),
+					cspSource: "vscode-webview://test-csp-source",
+				},
+				visible: true,
+				onDidDispose: vi.fn(),
+				onDidChangeVisibility: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
+			} as unknown as vscode.WebviewView
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				await provider.resolveWebviewView(mockWebviewView)
+				await providerB.resolveWebviewView(mockWebviewViewB)
+
+				const htmlBeforeA = mockWebviewView.webview.html
+				const htmlBeforeB = mockWebviewViewB.webview.html
+
+				// The pre-PR reload path fired the global
+				// workbench.action.webview.reloadWebviewAction command, which
+				// resets every webview. The html assertions below cannot catch a
+				// regression back to that command because the vscode mock
+				// swallows executeCommand without touching any view, so also
+				// assert the global command was never invoked.
+				const executeCommandMock = vscode.commands.executeCommand as ReturnType<typeof vi.fn>
+
+				await vi.advanceTimersByTimeAsync(119_000)
+				// B's view is still alive; refresh its heartbeat so a stale one
+				// would reload it too, leaving only A's watchdog to fire.
+				await webviewMessageHandler(providerB, { type: "webviewHeartbeat", timestamp: Date.now() })
+				await vi.advanceTimersByTimeAsync(1_000)
+
+				expect(mockWebviewView.webview.html).not.toBe(htmlBeforeA)
+				expect(mockWebviewViewB.webview.html).toBe(htmlBeforeB)
+				expect(executeCommandMock).not.toHaveBeenCalledWith("workbench.action.webview.reloadWebviewAction")
+			} finally {
+				await providerB.dispose()
+			}
+		})
+
+		describe("tab panel (WebviewPanel shape)", () => {
+			let viewStateCallback: () => void
+			// Structural stand-in for the VS Code webview API surface this
+			// scenario exercises, same as the mockWebviewViewB cast below.
+			let mockWebviewPanel: vscode.WebviewPanel
+
+			beforeEach(() => {
+				// WebviewPanel-shaped stand-in: same webview surface, but the
+				// visibility listener is onDidChangeViewState instead of
+				// onDidChangeVisibility, matching resolveWebviewView's tab branch.
+				mockWebviewPanel = {
+					webview: {
+						postMessage: vi.fn(),
+						html: "",
+						options: {},
+						onDidReceiveMessage: vi.fn(),
+						asWebviewUri: vi.fn(),
+						cspSource: "vscode-webview://test-csp-source",
+					},
+					visible: true,
+					onDidDispose: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
+					onDidChangeViewState: vi.fn().mockImplementation((cb: () => void) => {
+						viewStateCallback = cb
+						return { dispose: vi.fn() }
+					}),
+					dispose: vi.fn(),
+					reveal: vi.fn(),
+				} as unknown as vscode.WebviewPanel
+			})
+
+			test("disposes the current tab provider and its watchdog registration", async () => {
+				const onDispose: Array<() => unknown> = []
+				const registration = { dispose: vi.fn() }
+				vi.mocked(mockWebviewPanel.onDidDispose).mockImplementation((listener, _thisArg, disposables) => {
+					onDispose.push(listener)
+					const disposable = onDispose.length === 1 ? registration : { dispose: vi.fn() }
+					disposables?.push(disposable)
+					return disposable
+				})
+				await provider.resolveWebviewView(mockWebviewPanel)
+				expect(provider["webviewWatchdogInterval"]).not.toBeNull()
+				const dispose = vi.spyOn(provider, "dispose")
+				const html = mockWebviewPanel.webview.html
+
+				await onDispose[0]()
+
+				expect(dispose).toHaveBeenCalledTimes(1)
+				expect(provider["_disposed"]).toBe(true)
+				expect(provider["webviewWatchdogInterval"]).toBeNull()
+				expect(registration.dispose).toHaveBeenCalledTimes(1)
+				await vi.advanceTimersByTimeAsync(600_000)
+				expect(mockWebviewPanel.webview.html).toBe(html)
+			})
+
+			test.each([false, true])(
+				"replaces the tab host without disposing its provider or task (interrupted: %s)",
+				async (interrupted) => {
+					const callbacks: Array<() => unknown> = []
+					vi.mocked(mockWebviewPanel.onDidDispose).mockImplementation((listener) => {
+						callbacks.push(listener)
+						return { dispose: vi.fn() }
+					})
+					vi.mocked(mockWebviewPanel.dispose).mockImplementation(() => {
+						callbacks.forEach((callback) => callback())
+					})
+					mockWebviewPanel.title = "Zoo Code task"
+					await provider.resolveWebviewView(mockWebviewPanel)
+					const task = new Task(defaultTaskOptions)
+					task.abort = interrupted
+					provider["taskRegistry"].push(task)
+					const evict = vi.spyOn(provider, "evictCurrentTask")
+					const remove = vi.spyOn(provider, "removeClineFromStack")
+					const replacement = {
+						...mockWebviewPanel,
+						webview: { ...mockWebviewPanel.webview, html: "" },
+						onDidDispose: vi.fn(() => ({ dispose: vi.fn() })),
+						dispose: vi.fn(),
+					}
+					vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(replacement)
+
+					await vi.advanceTimersByTimeAsync(130_000)
+
+					expect(mockWebviewPanel.dispose).toHaveBeenCalledTimes(1)
+					expect(provider["view"]).toBe(replacement)
+					expect(provider["_disposed"]).toBe(false)
+					expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+					expect(provider["webviewRecoveryAttempts"]).toBe(1)
+					expect(provider.getCurrentTask()).toBe(task)
+					expect(evict).not.toHaveBeenCalled()
+					expect(remove).not.toHaveBeenCalled()
+					expect(task.dispose).not.toHaveBeenCalled()
+					expect(task.abortTask).not.toHaveBeenCalled()
+					expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith(
+						`${ClineProvider.sideBarId}.removeView`,
+					)
+				},
+			)
+
+			test("explicit retry replaces an exhausted tab without evicting its interrupted task", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				const task = new Task(defaultTaskOptions)
+				task.abort = true
+				provider["taskRegistry"].push(task)
+				const remove = vi.spyOn(provider, "removeClineFromStack")
+				provider["reportWebviewRecoveryFailure"]("Exhausted incident")
+				const healthy = replacementPanel()
+				vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(healthy)
+				await provider.retryWebviewRecovery()
+				expect(provider["view"]).toBe(healthy)
+				expect(provider["webviewRecoveryAttempts"]).toBe(1)
+				expect(provider.getCurrentTask()).toBe(task)
+				expect(remove).not.toHaveBeenCalled()
+				expect(task.dispose).not.toHaveBeenCalled()
+				expect(task.abortTask).not.toHaveBeenCalled()
+			})
+
+			test("keeps the old tab and its task when replacement resolution fails before publication", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				const task = new Task(defaultTaskOptions)
+				provider["taskRegistry"].push(task)
+				const replacement = { ...mockWebviewPanel, dispose: vi.fn() }
+				vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(replacement)
+				vi.spyOn(provider, "resolveWebviewView").mockRejectedValue(new Error("resolver unavailable"))
+
+				await provider["recreateWebviewHostForRecovery"](mockWebviewPanel)
+
+				expect(mockWebviewPanel.dispose).not.toHaveBeenCalled()
+				expect(replacement.dispose).toHaveBeenCalledTimes(1)
+				expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+				expect(provider["view"]).toBe(mockWebviewPanel)
+				expect(provider.getCurrentTask()).toBe(task)
+				expect(task.dispose).not.toHaveBeenCalled()
+				expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+			})
+
+			function replacementPanel() {
+				return {
+					...mockWebviewPanel,
+					webview: {
+						...mockWebviewPanel.webview,
+						html: "",
+						onDidReceiveMessage: vi.fn(() => ({ dispose: vi.fn() })),
+					},
+					onDidDispose: vi.fn(() => ({ dispose: vi.fn() })),
+					dispose: vi.fn(),
+				}
+			}
+
+			test.each(["HTML generation", "state hydration"] as const)(
+				"retries a published tab after failed %s without disposing its interrupted task",
+				async (stage) => {
+					await provider.resolveWebviewView(mockWebviewPanel)
+					const task = new Task(defaultTaskOptions)
+					task.abort = true
+					provider["taskRegistry"].push(task)
+					const remove = vi.spyOn(provider, "removeClineFromStack")
+					provider["getWebviewHtml"] = vi.fn().mockResolvedValue("recovered-html")
+					await provider["reloadWebviewForRecovery"]()
+					const failed = replacementPanel()
+					const healthy = replacementPanel()
+					vi.mocked(vscode.window.createWebviewPanel).mockReturnValueOnce(failed).mockReturnValue(healthy)
+					if (stage === "HTML generation") {
+						vi.mocked(provider["getWebviewHtml"]).mockRejectedValueOnce(new Error("HTML failed"))
+					} else {
+						vi.spyOn(provider, "getState").mockRejectedValueOnce(new Error("hydration failed"))
+					}
+					await vi.advanceTimersByTimeAsync(10_000)
+
+					expect(provider["view"]).toBe(failed)
+					expect(failed.webview.onDidReceiveMessage).not.toHaveBeenCalled()
+					expect(failed.dispose).not.toHaveBeenCalled()
+					expect(provider["webviewWatchdogInterval"]).not.toBeNull()
+					expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+					expect(provider["webviewRecoveryAttempts"]).toBe(1)
+					expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+					expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+						expect.stringContaining("interface is not responding"),
+						"Retry Interface Recovery",
+						"Reload Window",
+						"Show Logs",
+					)
+					expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+						expect.stringContaining("Failed to initialize replacement tab"),
+					)
+
+					await vi.advanceTimersByTimeAsync(130_000)
+
+					expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
+					expect(provider["view"]).toBe(healthy)
+					// The provider and focus tracker each install one message listener.
+					expect(healthy.webview.onDidReceiveMessage).toHaveBeenCalledTimes(2)
+					expect(failed.dispose).toHaveBeenCalledTimes(1)
+					expect(provider["webviewRecoveryAttempts"]).toBe(2)
+					expect(provider.getCurrentTask()).toBe(task)
+					expect(provider["_disposed"]).toBe(false)
+					expect(remove).not.toHaveBeenCalled()
+					expect(task.dispose).not.toHaveBeenCalled()
+					expect(task.abortTask).not.toHaveBeenCalled()
+				},
+			)
+
+			test.each(["disposed", "replaced"] as const)(
+				"does not restart a stale replacement watchdog after the provider is %s",
+				async (event) => {
+					await provider.resolveWebviewView(mockWebviewPanel)
+					provider["getWebviewHtml"] = vi.fn().mockResolvedValue("recovered-html")
+					await provider["reloadWebviewForRecovery"]()
+					let rejectHtml: (error: Error) => void = () => {
+						throw new Error("Replacement HTML generation has not started")
+					}
+					vi.mocked(provider["getWebviewHtml"]).mockImplementationOnce(
+						() =>
+							new Promise<string>((_resolve, reject) => {
+								rejectHtml = reject
+							}),
+					)
+					const failed = replacementPanel()
+					vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(failed)
+					await vi.advanceTimersByTimeAsync(10_000)
+					expect(provider["view"]).toBe(failed)
+					if (event === "disposed") await provider.dispose()
+					else await provider.resolveWebviewView(replacementPanel())
+					const watchdog = provider["webviewWatchdogInterval"]
+					rejectHtml(new Error("stale HTML failure"))
+					await vi.advanceTimersByTimeAsync(0)
+					expect(provider["webviewWatchdogInterval"]).toBe(watchdog)
+					expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+					expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+				},
+			)
+
+			test("bounds repeated published-tab initialization failures and keeps the task available", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				const task = new Task(defaultTaskOptions)
+				provider["taskRegistry"].push(task)
+				provider["getWebviewHtml"] = vi.fn().mockResolvedValue("recovered-html")
+				vi.mocked(vscode.window.createWebviewPanel).mockImplementation(() => {
+					const replacement = replacementPanel()
+					// Fail after publication, before any message listener is installed.
+					vi.spyOn(provider, "getState").mockRejectedValueOnce(new Error("hydration failed"))
+					return replacement
+				})
+
+				await vi.advanceTimersByTimeAsync(720_000)
+
+				expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(3)
+				expect(provider["webviewRecoveryAttempts"]).toBe(3)
+				expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+				expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+				expect(
+					vi
+						.mocked(mockOutputChannel.appendLine)
+						.mock.calls.filter(([line]) => line.includes("Webview recovery stopped:")),
+				).toHaveLength(1)
+				expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+					expect.stringContaining(
+						"Webview recovery stopped: Recovery attempt limit reached without sustained heartbeats",
+					),
+				)
+				expect(provider["_disposed"]).toBe(false)
+				expect(provider.getCurrentTask()).toBe(task)
+				expect(task.dispose).not.toHaveBeenCalled()
+				expect(task.abortTask).not.toHaveBeenCalled()
+			})
+
+			test("reloads the tab webview when the heartbeat is stale and the tab is visible", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				const htmlAfterResolve = mockWebviewPanel.webview.html
+
+				await vi.advanceTimersByTimeAsync(120_000)
+
+				expect(mockWebviewPanel.webview.html).not.toBe(htmlAfterResolve)
+				expect(mockWebviewPanel.webview.html).toContain("<title>Zoo Code</title>")
+			})
+
+			test("does not reload a hidden tab even when the heartbeat is stale", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				Object.defineProperty(mockWebviewPanel, "visible", { value: false, configurable: true })
+				const htmlAfterResolve = mockWebviewPanel.webview.html
+
+				await vi.advanceTimersByTimeAsync(180_000)
+
+				expect(mockWebviewPanel.webview.html).toBe(htmlAfterResolve)
+			})
+
+			test("resets the grace window when the tab becomes visible", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				Object.defineProperty(mockWebviewPanel, "visible", { value: false, configurable: true })
+				const htmlAfterResolve = mockWebviewPanel.webview.html
+
+				await vi.advanceTimersByTimeAsync(120_000)
+				expect(mockWebviewPanel.webview.html).toBe(htmlAfterResolve)
+
+				Object.defineProperty(mockWebviewPanel, "visible", { value: true, configurable: true })
+				viewStateCallback()
+				const htmlAfterBecomingVisible = mockWebviewPanel.webview.html
+
+				await vi.advanceTimersByTimeAsync(60_000)
+				expect(mockWebviewPanel.webview.html).toBe(htmlAfterBecomingVisible)
+
+				// Watchdog ticks every 60s; 120s after the flip the heartbeat is stale again.
+				await vi.advanceTimersByTimeAsync(60_000)
+				expect(mockWebviewPanel.webview.html).not.toBe(htmlAfterBecomingVisible)
+			})
+		})
+	})
+
 	test("resolveWebviewView sets up webview correctly in development mode even if local server is not running", async () => {
 		const developmentContext = { ...mockContext, extensionMode: vscode.ExtensionMode.Development }
 		provider = new ClineProvider(
@@ -1128,6 +3048,21 @@ describe("ClineProvider", () => {
 		expect(scriptSrcMatch![0]).toContain("'wasm-unsafe-eval'")
 	})
 
+	test.each([
+		["ECONNABORTED", "errors.hmr_probe_timeout"],
+		["ETIMEDOUT", "errors.hmr_probe_timeout"],
+		["ECONNREFUSED", "errors.hmr_not_running"],
+	])("reports dev-server probe failure %s accurately and falls back to built HTML", async (code, message) => {
+		const { AxiosError } = await vi.importActual<typeof import("axios")>("axios")
+		vi.mocked(axios.get).mockRejectedValueOnce(new AxiosError("probe failed", code))
+
+		const html = await provider["getHMRHtmlContent"](mockWebviewView.webview)
+
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(message)
+		expect(html).toContain("<!DOCTYPE html>")
+		expect(html).not.toContain("/@react-refresh")
+	})
+
 	test("resolveWebviewView builds HMR content against the local dev server when it is reachable", async () => {
 		const originalThemeFixtureProbe = process.env.ROO_CODE_THEME_FIXTURE_PROBE
 		delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
@@ -1159,7 +3094,7 @@ describe("ClineProvider", () => {
 			// Pin the health-check URL itself: the mock resolves for any URL, so only
 			// this assertion keeps the probe from silently drifting back to
 			// `localhost` (the IPv6 resolution failure this branch fixes).
-			expect(axios.get).toHaveBeenCalledWith("http://127.0.0.1:5173")
+			expect(axios.get).toHaveBeenCalledWith("http://127.0.0.1:5173", { timeout: 5_000 })
 
 			const html = mockWebviewView.webview.html
 			// The dev server URL must be baked into the module script tag and CSP directives.
