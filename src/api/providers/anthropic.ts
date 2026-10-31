@@ -132,6 +132,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			case "claude-opus-4-8":
 			case "claude-opus-5":
 			case "claude-opus-5-5":
+			case "claude-haiku-5-5":
 			case "claude-fable-5-1":
 			case "claude-fable-5":
 			case "claude-opus-4-5-20251101":
@@ -296,6 +297,10 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 					// Carries the final `thinking_tokens` decomposition for the
 					// whole message (the `message_start` snapshot typically has none).
 					const deltaThinkingTokens = chunk.usage.output_tokens_details?.thinking_tokens
+
+					// The API reports the cumulative output token count, so adopt
+					// it rather than adding it to the message_start seed value.
+					outputTokens = chunk.usage.output_tokens || outputTokens
 
 					yield {
 						type: "usage",

@@ -46,11 +46,11 @@ Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memper
 - **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
 - **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
 
-## Yang Baru di v3.92.0
+## Yang Baru di v3.94.0
 
-- ✨ **Pilihan model lebih cepat dan dukungan model lebih kuat:** Ganti model dari kolom penulisan chat. Gunakan Claude Haiku 5.5 di Amazon Bedrock, dapatkan kapabilitas Kimi K3 yang lebih akurat di OpenRouter, dan gunakan batas Gemini 4 Argon yang telah diperbaiki di Vercel AI Gateway.
-- 🧭 **Alur kerja terminal, pengeditan, chat, dan remote yang lebih andal:** Atur output perintah agar diciutkan secara default jika kamu mau, dapatkan kegagalan pengeditan yang lebih jelas, pertahankan baris reasoning dan API tetap terlihat, serta hindari masalah startup dan proxy di workspace remote.
-- 🔌 **Marketplace MCP yang diperluas:** Hubungkan Zoo Code ke AnySearch, Mailtea, dan Tradehand melalui marketplace MCP.
+- ✨ **Dukungan model dan provider lebih luas:** Gunakan Claude Haiku 5.5 lewat Anthropic, kirim gambar ke model VS Code LM yang kompatibel, atur temperature untuk model OpenCode Go Responses, dan batalkan permintaan dengan rapi di lebih banyak provider.
+- 🔐 **OAuth MCP lebih fleksibel:** Atur pengaturan klien OAuth statis, gunakan jalur callback khusus, temukan detail autentikasi dari `WWW-Authenticate`, dan lihat kegagalan callback sebelum mencoba ulang.
+- 🧭 **Chat dan sesi panjang yang lebih lancar:** Ubah nama task di riwayat, seret file ke chat tanpa menahan Shift, kurangi memori yang disimpan selama sesi panjang, dan jaga tautan subtask serta webview yang diganti tetap stabil.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 

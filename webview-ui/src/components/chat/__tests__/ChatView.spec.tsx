@@ -6,6 +6,7 @@ import {
 	mockVscodePostMessage,
 	renderWithExtensionState,
 	waitFor,
+	screen,
 	act,
 	fireEvent,
 } from "@/utils/test-utils"
@@ -49,6 +50,8 @@ vi.mock("use-sound", () => ({
 	}),
 }))
 
+let nextRowInstance = 0
+
 // Mock components that use ESM dependencies
 vi.mock("../ChatRow", () => ({
 	default: function MockChatRow({
@@ -60,6 +63,7 @@ vi.mock("../ChatRow", () => ({
 		onSuggestionClick?: (suggestion: SuggestionItem, event?: React.MouseEvent) => void
 		isFollowUpAnswered?: boolean
 	}) {
+		const [instance] = React.useState(() => ++nextRowInstance)
 		if (message.type === "ask" && message.ask === "followup" && message.text) {
 			try {
 				const followUp = JSON.parse(message.text) as { suggest?: SuggestionItem[] }
@@ -81,7 +85,11 @@ vi.mock("../ChatRow", () => ({
 			}
 		}
 
-		return <div data-testid="chat-row">{JSON.stringify(message)}</div>
+		return (
+			<div data-testid="chat-row" data-instance={instance}>
+				{JSON.stringify(message)}
+			</div>
+		)
 	},
 }))
 
@@ -721,6 +729,22 @@ describe("ChatView - Virtualization Configuration", () => {
 		mockVirtuosoState.lastConfig = null
 	})
 
+	it("preserves the row instance when a partial message completes", async () => {
+		renderChatView()
+		const task: ClineMessage = { type: "say", say: "task", ts: 1, text: "Task" }
+		const partial: ClineMessage = { type: "say", say: "text", ts: 2, text: "Streaming", partial: true }
+		mockPostMessage({ clineMessages: [task, partial] })
+		const row = await screen.findByTestId("chat-row")
+		const instance = row.getAttribute("data-instance")
+		expect(instance).not.toBeNull()
+		await dispatchExtensionMessage({
+			type: "messageUpdated",
+			clineMessage: { ...partial, text: "Completed", partial: false },
+		})
+		await waitFor(() => expect(screen.getByTestId("chat-row")).toHaveTextContent("Completed"))
+		expect(screen.getByTestId("chat-row").getAttribute("data-instance")).toBe(instance)
+	})
+
 	it("keeps the off-screen render buffer tight for chat rows", async () => {
 		renderChatView()
 
@@ -751,6 +775,9 @@ describe("ChatView - Virtualization Configuration", () => {
 		expect(mockVirtuosoState.lastConfig?.defaultItemHeight).toBe(180)
 		expect(mockVirtuosoState.lastConfig?.increaseViewportBy).toEqual({ top: 600, bottom: 800 })
 		expect(mockVirtuosoState.lastConfig?.computeItemKey?.(1, { type: "say", ts: rowTs })).toBe(`${rowTs}-1`)
+		expect(mockVirtuosoState.lastConfig?.computeItemKey?.(1, { type: "say", ts: rowTs, partial: true })).toBe(
+			`${rowTs}-1`,
+		)
 	})
 })
 

@@ -20,7 +20,7 @@ export const Anthropic = ({ apiConfiguration, setApiConfigurationField }: Anthro
 	const { t } = useAppTranslation()
 	const selectedModel = useSelectedModel(apiConfiguration)
 
-	const [anthropicBaseUrlSelected, setAnthropicBaseUrlSelected] = useState(!!apiConfiguration?.anthropicBaseUrl)
+	const [anthropicBaseUrlSelected, setAnthropicBaseUrlSelected] = useState(!!apiConfiguration.anthropicBaseUrl)
 
 	// Check if the current model supports 1M context beta
 	const supports1MContextBeta =
@@ -43,7 +43,7 @@ export const Anthropic = ({ apiConfiguration, setApiConfigurationField }: Anthro
 	return (
 		<>
 			<VSCodeTextField
-				value={apiConfiguration?.apiKey || ""}
+				value={apiConfiguration.apiKey || ""}
 				type="password"
 				onInput={handleInputChange("apiKey")}
 				placeholder={t("settings:placeholders.apiKey")}
@@ -53,7 +53,7 @@ export const Anthropic = ({ apiConfiguration, setApiConfigurationField }: Anthro
 			<div className="text-sm text-vscode-descriptionForeground -mt-2">
 				{t("settings:providers.apiKeyStorageNotice")}
 			</div>
-			{!apiConfiguration?.apiKey && (
+			{!apiConfiguration.apiKey && (
 				<VSCodeButtonLink href="https://console.anthropic.com/settings/keys" appearance="secondary">
 					{t("settings:providers.getAnthropicApiKey")}
 				</VSCodeButtonLink>
@@ -74,14 +74,14 @@ export const Anthropic = ({ apiConfiguration, setApiConfigurationField }: Anthro
 				{anthropicBaseUrlSelected && (
 					<>
 						<VSCodeTextField
-							value={apiConfiguration?.anthropicBaseUrl || ""}
+							value={apiConfiguration.anthropicBaseUrl || ""}
 							type="url"
 							onInput={handleInputChange("anthropicBaseUrl")}
 							placeholder="https://api.anthropic.com"
 							className="w-full mt-1"
 						/>
 						<Checkbox
-							checked={apiConfiguration?.anthropicUseAuthToken ?? false}
+							checked={apiConfiguration.anthropicUseAuthToken ?? false}
 							onChange={handleInputChange("anthropicUseAuthToken", noTransform)}
 							className="w-full mt-1">
 							{t("settings:providers.anthropicUseAuthToken")}
@@ -92,7 +92,7 @@ export const Anthropic = ({ apiConfiguration, setApiConfigurationField }: Anthro
 			{supports1MContextBeta && (
 				<div>
 					<Checkbox
-						checked={apiConfiguration?.anthropicBeta1MContext ?? false}
+						checked={apiConfiguration.anthropicBeta1MContext ?? false}
 						onChange={(checked: boolean) => {
 							setApiConfigurationField("anthropicBeta1MContext", checked)
 						}}>

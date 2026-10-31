@@ -28,6 +28,7 @@ import { CONTEXT_WINDOW_EXCEEDED_STATUS } from "../../core/context/context-manag
 
 import { BaseProvider } from "./base-provider"
 import { getVsCodeLmModelInfo } from "./vscode-lm-capabilities"
+import { createAbortError, hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
 /**
@@ -766,7 +767,12 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 	protected options: ApiHandlerOptions
 	protected client: vscode.LanguageModelChat | null
 	private disposable: vscode.Disposable | null
+	// Provider label for the shared abort contract (createAbortError).
+	private readonly providerName = "VS Code LM"
 	private currentRequestCancellation: vscode.CancellationTokenSource | null
+	// completePrompt requests do not use currentRequestCancellation (which belongs to
+	// createMessage); they are tracked here so handler disposal cancels them too.
+	private activeCompletionTokens = new Set<vscode.CancellationTokenSource>()
 
 	constructor(options: ApiHandlerOptions) {
 		super()
@@ -957,6 +963,14 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			this.currentRequestCancellation.cancel()
 			this.currentRequestCancellation.dispose()
 		}
+
+		// Cancel every in-flight completion request: a host request still running after the
+		// handler is disposed would otherwise keep streaming with no owner to stop it.
+		for (const tokenSource of this.activeCompletionTokens) {
+			tokenSource.cancel()
+			tokenSource.dispose()
+		}
+		this.activeCompletionTokens.clear()
 	}
 
 	/**
@@ -1153,73 +1167,35 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 	): ApiStream {
 		// Ensure clean state before starting a new request
 		this.ensureCleanState()
-		const client: vscode.LanguageModelChat = await this.getClient()
-		const modelInfo = this.getModel().info
 
-		// Process messages
-		const cleanedMessages = messages.map((msg) => ({
-			...msg,
-			content: this.cleanMessageContent(msg.content),
-		}))
-		this.assertRequestSupported(cleanedMessages, modelInfo)
+		// The VS Code LanguageModelChat API cannot carry an AbortSignal, so the
+		// request cancellation is established before client initialization and a
+		// pre-aborted external signal is reported immediately instead of being
+		// sent to the host.
+		const externalAbortSignal = metadata?.abortSignal
 
-		// Keep context-window trimming on OUR side. Copilot's backend trims an over-window request
-		// without preserving tool_use/tool_result pairing, which orphans a tool_result and triggers a
-		// 400 ("unexpected tool_use_id"). See truncateToolResultsToFitWindow.
-		const contextWindowTokens = this.getCondenseContextWindow()
-		if (Number.isFinite(contextWindowTokens) && contextWindowTokens > 0) {
-			const toolSchemaChars = metadata?.tools ? JSON.stringify(metadata.tools).length : 0
-			const rawBudgetChars =
-				contextWindowTokens * VSCODE_LM_INPUT_BUDGET_FRACTION * VSCODE_LM_BUDGET_CHARS_PER_TOKEN -
-				systemPrompt.length -
-				toolSchemaChars
-			// A system prompt or tool schema large enough to consume the whole budget would leave a
-			// non-positive budget, which disables trimming exactly when the request is most oversized.
-			const messagesBudgetChars = Math.max(MIN_TOOL_RESULT_CHARS, rawBudgetChars)
-			const { remainingChars } = truncateToolResultsToFitWindow(cleanedMessages, messagesBudgetChars)
+		// Initialize cancellation token for the request before getClient() so the
+		// client-initialization await is covered by the abort bridge and the
+		// finally cleanup below.
+		this.currentRequestCancellation = new vscode.CancellationTokenSource()
+		const cancellationTokenSource = this.currentRequestCancellation
 
-			// Shrinking tool_results cannot always reach the budget: each keeps MIN_TOOL_RESULT_CHARS,
-			// and the excess may be non-tool content (a huge paste, tool_use inputs, or the system
-			// prompt) that we must not touch. Dropping messages here would orphan a tool_result from
-			// its tool_use — the exact 400 this guard exists to prevent — so fail loudly instead of
-			// sending a request we already know is over the window.
-			// Admission is judged against the RAW budget, not the clamped one: the clamp exists only
-			// to keep trimming productive, so accepting up to it would send a request the window
-			// genuinely cannot hold whenever the raw budget falls below MIN_TOOL_RESULT_CHARS.
-			if (remainingChars > rawBudgetChars) {
-				// `status` is what makes checkContextWindowExceededError recognise this as a context
-				// -window failure; without it the task takes its generic retry path and re-sends the
-				// same over-window history instead of condensing.
-				throw Object.assign(
-					new Error(
-						"Zoo Code <Language Model API>: The request is too large for this model's context window " +
-							`(estimated ${remainingChars.toLocaleString("en-US")} characters against a budget of ` +
-							`${Math.max(0, Math.floor(rawBudgetChars)).toLocaleString("en-US")}), and it cannot be reduced further without ` +
-							"breaking tool-call pairing. Condense the conversation or start a new task.",
-					),
-					{ status: CONTEXT_WINDOW_EXCEEDED_STATUS },
-				)
-			}
-		}
-
-		// Convert Anthropic messages to VS Code LM messages
-		const vsCodeLmMessages: vscode.LanguageModelChatMessage[] = [
-			vscode.LanguageModelChatMessage.Assistant(sanitizeSurrogates(systemPrompt)),
-			...convertToVsCodeLmMessages(cleanedMessages, this.supportsImageInput(modelInfo)),
-		]
-
-		// Initialize cancellation token for the request. The caller's abort signal is
-		// connected to it at the start of the request `try` below, so its `finally`
-		// removes the listener on every exit path.
-		const requestCancellation = new vscode.CancellationTokenSource()
-		this.currentRequestCancellation = requestCancellation
-		const abortSignal = metadata?.abortSignal
-		// Recorded separately from the token: cleanup also cancels the token, so the
-		// token alone cannot tell a caller's abort apart from an ordinary failure.
+		// Bridge the caller's abort signal (e.g. a task abort) into the request's
+		// cancellation token: the VS Code LM API cannot carry an AbortSignal
+		// directly, so cancellation is signalled to the host through the token.
+		// The listener is kept in a named const and removed in the finally block
+		// because { once: true } only detaches it when the signal actually aborts.
+		let onExternalAbort: (() => void) | undefined
+		// Recorded separately from the token: cleanup also cancels the token, and a
+		// host token's flag is not observable before its cancel settles, so the
+		// token alone cannot always tell a caller's abort apart at a re-check point.
 		let abortedByCaller = false
-		const cancelOnAbort = () => {
-			abortedByCaller = true
-			requestCancellation.cancel()
+		if (externalAbortSignal) {
+			onExternalAbort = () => {
+				abortedByCaller = true
+				cancellationTokenSource.cancel()
+			}
+			externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
 		}
 
 		// Accumulate the text and count at the end of the stream to reduce token counting overhead.
@@ -1306,22 +1282,90 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		}
 
 		try {
-			// Let the caller's abort cancel the host work before any of it starts. Token
-			// counting and the request both take this token, so an abort during either
-			// ends it instead of leaving it pending; an abort that already happened
-			// cancels at once.
-			if (abortSignal?.aborted) {
-				cancelOnAbort()
-			} else {
-				abortSignal?.addEventListener("abort", cancelOnAbort, { once: true })
+			// Fail fast if the caller already aborted before we even started: do not
+			// initialize or invoke the host request for a cancelled request.
+			if (externalAbortSignal?.aborted) {
+				cancellationTokenSource.cancel()
+				throw createAbortError(this.providerName)
 			}
 
-			// Calculate input tokens before starting the stream.
+			const client: vscode.LanguageModelChat = await this.getClient()
+
+			// Re-check immediately after client initialization: the request-local token
+			// may have been cancelled while getClient() was pending — either because the
+			// external signal aborted (bridged into the token) or because a newer request
+			// superseded this one and cancelled its token. Bail before counting input
+			// tokens or invoking the host so no work happens for a cancelled request.
+			// The token is the superset here: the bridge makes every external abort cancel it.
+			if (abortedByCaller || cancellationTokenSource.token.isCancellationRequested) {
+				cancellationTokenSource.cancel()
+				throw createAbortError(this.providerName)
+			}
+
+			const modelInfo = this.getModel().info
+
+			// Process messages
+			const cleanedMessages = messages.map((msg) => ({
+				...msg,
+				content: this.cleanMessageContent(msg.content),
+			}))
+			this.assertRequestSupported(cleanedMessages, modelInfo)
+
+			// Keep context-window trimming on OUR side. Copilot's backend trims an over-window request
+			// without preserving tool_use/tool_result pairing, which orphans a tool_result and triggers a
+			// 400 ("unexpected tool_use_id"). See truncateToolResultsToFitWindow.
+			const contextWindowTokens = this.getCondenseContextWindow()
+			if (Number.isFinite(contextWindowTokens) && contextWindowTokens > 0) {
+				const toolSchemaChars = metadata?.tools ? JSON.stringify(metadata.tools).length : 0
+				const rawBudgetChars =
+					contextWindowTokens * VSCODE_LM_INPUT_BUDGET_FRACTION * VSCODE_LM_BUDGET_CHARS_PER_TOKEN -
+					systemPrompt.length -
+					toolSchemaChars
+				// A system prompt or tool schema large enough to consume the whole budget would leave a
+				// non-positive budget, which disables trimming exactly when the request is most oversized.
+				const messagesBudgetChars = Math.max(MIN_TOOL_RESULT_CHARS, rawBudgetChars)
+				const { remainingChars } = truncateToolResultsToFitWindow(cleanedMessages, messagesBudgetChars)
+
+				// Shrinking tool_results cannot always reach the budget: each keeps MIN_TOOL_RESULT_CHARS,
+				// and the excess may be non-tool content (a huge paste, tool_use inputs, or the system
+				// prompt) that we must not touch. Dropping messages here would orphan a tool_result from
+				// its tool_use — the exact 400 this guard exists to prevent — so fail loudly instead of
+				// sending a request we already know is over the window.
+				// Admission is judged against the RAW budget, not the clamped one: the clamp exists only
+				// to keep trimming productive, so accepting up to it would send a request the window
+				// genuinely cannot hold whenever the raw budget falls below MIN_TOOL_RESULT_CHARS.
+				if (remainingChars > rawBudgetChars) {
+					// `status` is what makes checkContextWindowExceededError recognise this as a context
+					// -window failure; without it the task takes its generic retry path and re-sends the
+					// same over-window history instead of condensing.
+					throw Object.assign(
+						new Error(
+							"Zoo Code <Language Model API>: The request is too large for this model's context window " +
+								`(estimated ${remainingChars.toLocaleString("en-US")} characters against a budget of ` +
+								`${Math.max(0, Math.floor(rawBudgetChars)).toLocaleString("en-US")}), and it cannot be reduced further without ` +
+								"breaking tool-call pairing. Condense the conversation or start a new task.",
+						),
+						{ status: CONTEXT_WINDOW_EXCEEDED_STATUS },
+					)
+				}
+			}
+
+			// Convert Anthropic messages to VS Code LM messages
+			const vsCodeLmMessages: vscode.LanguageModelChatMessage[] = [
+				vscode.LanguageModelChatMessage.Assistant(sanitizeSurrogates(systemPrompt)),
+				...convertToVsCodeLmMessages(cleanedMessages, this.supportsImageInput(modelInfo)),
+			]
+
+			// Calculate input tokens before starting the stream
 			const totalInputTokens: number = await this.calculateTotalInputTokens(vsCodeLmMessages)
-			// Token counting reports a cancelled count as zero, so stop here rather than
-			// send a request the caller has already abandoned.
-			if (abortedByCaller) {
-				throw new vscode.CancellationError()
+
+			// Re-check the request-local token after counting: the external signal may
+			// have aborted while counting was in flight (bridged into the token) or a
+			// newer request may have superseded this one and cancelled its token. Bail
+			// before invoking the host so no work happens for a cancelled request. The
+			// token is the superset here: the bridge makes every external abort cancel it.
+			if (abortedByCaller || cancellationTokenSource.token.isCancellationRequested) {
+				throw createAbortError(this.providerName)
 			}
 			this.assertWithinContextWindow(totalInputTokens, modelInfo)
 
@@ -1333,11 +1377,18 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			const response: vscode.LanguageModelChatResponse = await client.sendRequest(
 				vsCodeLmMessages,
 				requestOptions,
-				requestCancellation.token,
+				cancellationTokenSource.token,
 			)
 
 			// Consume the stream and handle both text and tool call chunks
 			for await (const chunk of response.stream) {
+				// A late abort while consuming must stop the stream instead of
+				// yielding stale chunks. The request-local token also covers local
+				// supersession (a newer request cancels this one), which the external
+				// signal alone cannot see.
+				if (externalAbortSignal?.aborted || cancellationTokenSource.token.isCancellationRequested) {
+					throw createAbortError(this.providerName)
+				}
 				if (chunk instanceof vscode.LanguageModelTextPart) {
 					// Validate text part value
 					if (typeof chunk.value !== "string") {
@@ -1437,11 +1488,30 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				}
 			}
 
+			// Guard against a quiet stream end after the request was aborted or superseded:
+			// the in-loop check only fires when the host delivers another chunk, so a stream
+			// that ends normally after cancellation would otherwise complete with partial
+			// text and a usage chunk instead of rejecting with the canonical abort.
+			// The guard runs before the salvage flush: an aborted request must not emit
+			// any further content, and the per-request salvage state is moot once the
+			// request is rejected.
+			if (externalAbortSignal?.aborted || cancellationTokenSource.token.isCancellationRequested) {
+				throw createAbortError(this.providerName)
+			}
+
 			// Flush any leaked tool-call recovery state accumulated during streaming.
 			yield* flushSalvage()
 
 			// Count tokens in the accumulated text after stream completion
 			const totalOutputTokens: number = await this.internalCountTokens(accumulatedText)
+
+			// internalCountTokens returns 0 on cancellation: re-check before reporting usage so an
+			// abort landing during the count rejects with the contract AbortError instead of
+			// completing normally with a zero-output usage chunk. The guard above the count runs
+			// before the await and does not cover this window.
+			if (externalAbortSignal?.aborted || cancellationTokenSource.token.isCancellationRequested) {
+				throw createAbortError(this.providerName)
+			}
 
 			// Report final usage after stream completion
 			yield {
@@ -1450,12 +1520,22 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				outputTokens: totalOutputTokens,
 			}
 		} catch (error: unknown) {
-			// Releases this request's cancellation source, never a newer request's. That cancels
-			// its token too, which is why a caller's abort is read from `abortedByCaller`.
-			this.releaseRequestCancellation(requestCancellation)
+			// When this request is already cancelled while getClient() was pending or
+			// rejected — the external signal aborted (bridged into the token) or a
+			// newer request superseded this one and cancelled its token — surface a
+			// standard abort error instead of leaking the raw client-initialization
+			// failure. completePrompt normalizes the same case through isAborted(),
+			// which includes the token state; both methods follow that contract.
+			if (externalAbortSignal?.aborted || cancellationTokenSource.token.isCancellationRequested) {
+				throw createAbortError(this.providerName)
+			}
 
-			if (error instanceof vscode.CancellationError || abortedByCaller) {
-				throw new Error("Zoo Code <Language Model API>: Request cancelled by user")
+			if (error instanceof vscode.CancellationError) {
+				// The host rejected because the request was cancelled: either the
+				// bridged external signal aborted or the user cancelled the request
+				// in VS Code. Both are aborts, so surface the shared canonical error
+				// instead of a hand-built copy.
+				throw createAbortError(this.providerName)
 			}
 
 			if (error instanceof Error) {
@@ -1479,8 +1559,26 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				throw new Error(`Zoo Code <Language Model API>: Response stream error: ${errorMessage}`)
 			}
 		} finally {
-			// Runs on completion, failure, and early close via the generator's return().
-			abortSignal?.removeEventListener("abort", cancelOnAbort)
+			// Detach the abort bridge listener on every path (success, error, and
+			// early consumer break); { once: true } alone would leak it when the
+			// request completes without the signal ever aborting.
+			if (externalAbortSignal && onExternalAbort) {
+				externalAbortSignal.removeEventListener("abort", onExternalAbort)
+			}
+			// Cancel before disposing: VS Code's CancellationTokenSource.dispose()
+			// frees resources without cancelling the token, so a premature consumer
+			// closure (break/return) would otherwise leave the host request running and
+			// consuming model quota. Cancel is idempotent, so this is a no-op on paths
+			// where the token was already cancelled (aborted or timed-out request).
+			cancellationTokenSource.cancel()
+			// Dispose the request-local source. Clear the shared field only if it still
+			// points at this request's source: a newer request may have replaced it, and
+			// disposing the shared field here would cancel and dispose the newer request's
+			// token.
+			cancellationTokenSource.dispose()
+			if (this.currentRequestCancellation === cancellationTokenSource) {
+				this.currentRequestCancellation = null
+			}
 		}
 	}
 
@@ -1552,25 +1650,66 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
-		const cancellation = new vscode.CancellationTokenSource()
-		const cancel = () => cancellation.cancel()
-		const abortSignal = options?.abortSignal
+		// The VS Code LanguageModelChat API cannot carry an AbortSignal: sendRequest
+		// only accepts a CancellationToken. Bridge the external signal and timeout
+		// into a request-local CancellationTokenSource instead. Cancellation is
+		// established before client initialization so the getClient() await is covered
+		// by the timeout, the abort bridge, and the finally cleanup below.
+		const tokenSource = new vscode.CancellationTokenSource()
+		this.activeCompletionTokens.add(tokenSource)
+		const externalAbortSignal = options?.abortSignal
+
+		// Apply the timeout only when the effective value (option, else the provider-wide
+		// request timeout default) is positive: cancelling at once for a
+		// zero/negative timeout would abort every such request immediately. Starting
+		// the timer before getClient() means a timeout that fires during a slow client
+		// lookup still cancels the request before any sendRequest call.
+		let timeoutId: ReturnType<typeof setTimeout> | undefined
 		const timeoutMs = options?.timeoutMs ?? this.timeoutMs
-		const timer = timeoutMs > 0 ? setTimeout(cancel, timeoutMs) : undefined
-		if (abortSignal?.aborted) {
-			cancel()
-		} else {
-			abortSignal?.addEventListener("abort", cancel, { once: true })
+		if (hasUsableTimeout(timeoutMs)) {
+			// hasUsableTimeout/toSdkTimeoutMs own the "disabled" and non-finite semantics:
+			// Node clamps large delays to 1 ms and rejects fractional ones, so only a
+			// rounded, capped budget reaches setTimeout.
+			timeoutId = setTimeout(() => tokenSource.cancel(), toSdkTimeoutMs(timeoutMs))
 		}
+
+		// Bridge the external abort signal: a pre-aborted signal cancels the token
+		// immediately, otherwise a one-shot listener relays the abort to the host.
+		let onAbort: (() => void) | undefined
+		if (externalAbortSignal) {
+			if (externalAbortSignal.aborted) {
+				tokenSource.cancel()
+			} else {
+				onAbort = () => tokenSource.cancel()
+				externalAbortSignal.addEventListener("abort", onAbort, { once: true })
+			}
+		}
+
+		// The request counts as aborted when the host-side token was cancelled
+		// (timeout or bridged signal) or when the external signal itself aborted.
+		const isAborted = () =>
+			tokenSource.token.isCancellationRequested === true || externalAbortSignal?.aborted === true
+
 		try {
-			if (cancellation.token.isCancellationRequested) {
-				throw new vscode.CancellationError()
+			// Fail fast if the caller already aborted before we even started: do not
+			// initialize or invoke the host request for a cancelled request.
+			if (isAborted()) {
+				throw createAbortError(this.providerName)
 			}
 			const client = await this.getClient()
+
+			// Re-check after client initialization: the signal may have aborted (or the
+			// timeout fired) while getClient() was pending. Bail before invoking the host
+			// so a timeout that fired during a slow client lookup can never lead to a
+			// sendRequest call.
+			if (isAborted()) {
+				throw createAbortError(this.providerName)
+			}
+
 			const response = await client.sendRequest(
 				[vscode.LanguageModelChatMessage.User(prompt)],
 				this.getCompletionRequestOptions(client),
-				cancellation.token,
+				tokenSource.token,
 			)
 			let result = ""
 			for await (const chunk of response.stream) {
@@ -1578,16 +1717,37 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 					result += chunk.value
 				}
 			}
+
+			// Guard against a quiet completion after the request was aborted.
+			if (isAborted()) {
+				throw createAbortError(this.providerName)
+			}
+
 			return result
 		} catch (error) {
+			// Report an aborted request (external signal, timeout, or host
+			// cancellation) as a standard AbortError instead of a generic
+			// completion error. A host CancellationError is treated as a cancellation
+			// even if the token flag was not observed (e.g. the host cancelled the
+			// request through the token without the flag being set).
+			if (isAborted() || error instanceof vscode.CancellationError) {
+				throw createAbortError(this.providerName)
+			}
+
 			if (error instanceof Error) {
 				throw new Error(`VSCode LM completion error: ${error.message}`)
 			}
 			throw error
 		} finally {
-			if (timer) clearTimeout(timer)
-			abortSignal?.removeEventListener("abort", cancel)
-			cancellation.dispose()
+			// clearTimeout(undefined) is a spec no-op, so clear unconditionally.
+			clearTimeout(timeoutId)
+			// { once: true } only detaches the listener when the signal actually
+			// aborts, so remove it explicitly on every path.
+			if (externalAbortSignal && onAbort) {
+				externalAbortSignal.removeEventListener("abort", onAbort)
+			}
+			this.activeCompletionTokens.delete(tokenSource)
+			tokenSource.dispose()
 		}
 	}
 }
