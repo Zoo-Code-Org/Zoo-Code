@@ -512,7 +512,8 @@
 			"hint": "請重新開啟設定以查看最新模型。",
 			"loading": "正在重新整理模型列表...",
 			"success": "模型列表重新整理成功！",
-			"error": "重新整理模型列表失敗。請再試一次。"
+			"error": "重新整理模型列表失敗。請再試一次。",
+			"missingConfig": "Enter an API key first, then refresh the models list."
 		},
 		"getRequestyApiKey": "取得 Requesty API 金鑰",
 		"getRequestyBaseUrl": "基礎 URL",

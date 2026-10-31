@@ -485,7 +485,8 @@
 			"hint": "Bitte öffne die Einstellungen erneut, um die neuesten Modelle zu sehen.",
 			"loading": "Modellliste wird aktualisiert...",
 			"success": "Modellliste erfolgreich aktualisiert!",
-			"error": "Fehler beim Aktualisieren der Modellliste. Bitte versuche es erneut."
+			"error": "Fehler beim Aktualisieren der Modellliste. Bitte versuche es erneut.",
+			"missingConfig": "Enter an API key first, then refresh the models list."
 		},
 		"getRequestyApiKey": "Requesty API-Schlüssel erhalten",
 		"getRequestyBaseUrl": "Basis-URL",

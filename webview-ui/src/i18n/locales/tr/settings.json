@@ -485,7 +485,8 @@
 			"hint": "En son modelleri görmek için lütfen ayarları yeniden açın.",
 			"loading": "Model listesi yenileniyor...",
 			"success": "Model listesi başarıyla yenilendi!",
-			"error": "Model listesi yenilenemedi. Lütfen tekrar deneyin."
+			"error": "Model listesi yenilenemedi. Lütfen tekrar deneyin.",
+			"missingConfig": "Enter an API key first, then refresh the models list."
 		},
 		"getRequestyApiKey": "Requesty API Anahtarı Al",
 		"getRequestyBaseUrl": "Temel URL",

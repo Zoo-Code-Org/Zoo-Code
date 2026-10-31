@@ -485,7 +485,8 @@
 			"hint": "नवीनतम मॉडल देखने के लिए कृपया सेटिंग्स को फिर से खोलें।",
 			"loading": "मॉडल सूची अपडेट हो रही है...",
 			"success": "मॉडल सूची सफलतापूर्वक अपडेट की गई!",
-			"error": "मॉडल सूची अपडेट करने में विफल। कृपया पुनः प्रयास करें।"
+			"error": "मॉडल सूची अपडेट करने में विफल। कृपया पुनः प्रयास करें।",
+			"missingConfig": "Enter an API key first, then refresh the models list."
 		},
 		"getRequestyApiKey": "Requesty API कुंजी प्राप्त करें",
 		"getRequestyBaseUrl": "बेस URL",

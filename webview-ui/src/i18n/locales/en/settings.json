@@ -565,7 +565,8 @@
 			"hint": "Please reopen the settings to see the latest models.",
 			"loading": "Refreshing models list...",
 			"success": "Models list refreshed successfully!",
-			"error": "Failed to refresh models list. Please try again."
+			"error": "Failed to refresh models list. Please try again.",
+			"missingConfig": "Enter an API key first, then refresh the models list."
 		},
 		"getRequestyApiKey": "Create new Requesty API Key",
 		"getRequestyBaseUrl": "Base URL",

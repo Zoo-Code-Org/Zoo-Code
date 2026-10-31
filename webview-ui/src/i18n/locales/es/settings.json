@@ -485,7 +485,8 @@
 			"hint": "Por favor, vuelve a abrir la configuración para ver los modelos más recientes.",
 			"loading": "Actualizando lista de modelos...",
 			"success": "¡Lista de modelos actualizada correctamente!",
-			"error": "Error al actualizar la lista de modelos. Por favor, inténtalo de nuevo."
+			"error": "Error al actualizar la lista de modelos. Por favor, inténtalo de nuevo.",
+			"missingConfig": "Enter an API key first, then refresh the models list."
 		},
 		"getRequestyApiKey": "Obtener clave API de Requesty",
 		"getRequestyBaseUrl": "URL base",
