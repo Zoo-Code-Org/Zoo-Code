@@ -1179,6 +1179,32 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "新しく作成されたファイルを自動的に閉じる",
 			"description": "有効にすると、Zooが作成した（変更ではなく）ファイルのタブも、変更を承認した後に自動的に閉じられます。"
+		},
+		"appearance": {
+			"reset": "デフォルトに戻す",
+			"interfaceFontScale": {
+				"label": "インターフェースのフォントサイズ",
+				"description": "Zoo Code のすべてのテキストを拡大縮小します。100% は VS Code と同じです。"
+			},
+			"terminalFontSize": {
+				"label": "ターミナルのフォントサイズ",
+				"description": "チャットに表示されるコマンド出力のフォントサイズ。"
+			},
+			"editorFontSize": {
+				"label": "エディターのフォントサイズ",
+				"description": "チャットに表示されるコードブロックと diff のフォントサイズ。"
+			},
+			"spacingScale": {
+				"label": "余白の密度",
+				"description": "チャットメッセージ間の余白。値が小さいほどコンパクトになります。"
+			},
+			"preview": "プレビュー",
+			"sample": {
+				"you": "あなた",
+				"zoo": "Zoo",
+				"user": "保存ボタンに読み込み中スピナーを追加して",
+				"assistant": "完了しました。リクエスト処理中に表示されるスピナーを追加しました。"
+			}
 		}
 	},
 	"skills": {

@@ -1179,6 +1179,32 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Tanca automaticament els fitxers nous creats",
 			"description": "Quan esta activat, les pestanyes dels fitxers que Zoo ha creat (en lloc de modificar) tambe es tanquen automaticament despres d'acceptar el canvi."
+		},
+		"appearance": {
+			"reset": "Restableix el valor per defecte",
+			"interfaceFontScale": {
+				"label": "Mida de la lletra de la interfície",
+				"description": "Escala tot el text de Zoo Code. El 100% coincideix amb VS Code."
+			},
+			"terminalFontSize": {
+				"label": "Mida de la lletra del terminal",
+				"description": "Mida de la lletra de la sortida d'ordres mostrada al xat."
+			},
+			"editorFontSize": {
+				"label": "Mida de la lletra de l'editor",
+				"description": "Mida de la lletra dels blocs de codi i dels diffs mostrats al xat."
+			},
+			"spacingScale": {
+				"label": "Densitat de l'espaiat",
+				"description": "Farciment entre els missatges del xat. Un valor més baix és més compacte."
+			},
+			"preview": "Previsualització",
+			"sample": {
+				"you": "Tu",
+				"zoo": "Zoo",
+				"user": "Afegeix un indicador de càrrega al botó Desa",
+				"assistant": "Fet. He afegit un indicador que es mostra mentre la sol·licitud està en curs."
+			}
 		}
 	},
 	"skills": {

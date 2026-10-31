@@ -1179,6 +1179,32 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Automatycznie zamykaj nowo utworzone pliki",
 			"description": "Gdy wlaczone, karty plikow, ktore Zoo utworzylo (zamiast zmodyfikowalo), sa rowniez automatycznie zamykane po zaakceptowaniu zmiany."
+		},
+		"appearance": {
+			"reset": "Przywróć domyślne",
+			"interfaceFontScale": {
+				"label": "Rozmiar czcionki interfejsu",
+				"description": "Skaluje cały tekst Zoo Code. 100% odpowiada VS Code."
+			},
+			"terminalFontSize": {
+				"label": "Rozmiar czcionki terminala",
+				"description": "Rozmiar czcionki danych wyjściowych poleceń wyświetlanych w czacie."
+			},
+			"editorFontSize": {
+				"label": "Rozmiar czcionki edytora",
+				"description": "Rozmiar czcionki bloków kodu i różnic wyświetlanych w czacie."
+			},
+			"spacingScale": {
+				"label": "Gęstość odstępów",
+				"description": "Odstęp między wiadomościami czatu. Niższa wartość oznacza zwartszy układ."
+			},
+			"preview": "Podgląd",
+			"sample": {
+				"you": "Ty",
+				"zoo": "Zoo",
+				"user": "Dodaj wskaźnik ładowania do przycisku Zapisz",
+				"assistant": "Gotowe. Dodałem wskaźnik, który jest widoczny, gdy żądanie jest w toku."
+			}
 		}
 	},
 	"skills": {

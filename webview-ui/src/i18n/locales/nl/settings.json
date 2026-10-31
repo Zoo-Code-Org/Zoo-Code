@@ -1179,6 +1179,32 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Automatisch sluiten van nieuw gemaakte bestanden",
 			"description": "Wanneer ingeschakeld, worden tabbladen van bestanden die Zoo heeft aangemaakt (in plaats van gewijzigd) ook automatisch gesloten nadat de wijziging is geaccepteerd."
+		},
+		"appearance": {
+			"reset": "Standaardwaarde herstellen",
+			"interfaceFontScale": {
+				"label": "Lettergrootte van de interface",
+				"description": "Schaalt alle Zoo Code-tekst. 100% komt overeen met VS Code."
+			},
+			"terminalFontSize": {
+				"label": "Lettergrootte van de terminal",
+				"description": "Lettergrootte voor de opdrachtuitvoer die in de chat wordt getoond."
+			},
+			"editorFontSize": {
+				"label": "Lettergrootte van de editor",
+				"description": "Lettergrootte voor codeblokken en diffs in de chat."
+			},
+			"spacingScale": {
+				"label": "Dichtheid van de witruimte",
+				"description": "Opvulling tussen chatberichten. Lager is compacter."
+			},
+			"preview": "Voorbeeld",
+			"sample": {
+				"you": "Jij",
+				"zoo": "Zoo",
+				"user": "Voeg een laadspinner toe aan de knop Opslaan",
+				"assistant": "Klaar. Ik heb een spinner toegevoegd die wordt getoond zolang het verzoek loopt."
+			}
 		}
 	},
 	"skills": {

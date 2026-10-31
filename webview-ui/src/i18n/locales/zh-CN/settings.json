@@ -1179,6 +1179,32 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "自动关闭新建的文件",
 			"description": "启用后，Zoo 新建（而非修改）的文件标签页在接受更改后也会自动关闭。"
+		},
+		"appearance": {
+			"reset": "恢复默认",
+			"interfaceFontScale": {
+				"label": "界面字体大小",
+				"description": "缩放所有 Zoo Code 文本。100% 与 VS Code 一致。"
+			},
+			"terminalFontSize": {
+				"label": "终端字体大小",
+				"description": "聊天中显示的命令输出的字体大小。"
+			},
+			"editorFontSize": {
+				"label": "编辑器字体大小",
+				"description": "聊天中显示的代码块和 diff 的字体大小。"
+			},
+			"spacingScale": {
+				"label": "间距密度",
+				"description": "聊天消息之间的内边距。数值越小越紧凑。"
+			},
+			"preview": "预览",
+			"sample": {
+				"you": "你",
+				"zoo": "Zoo",
+				"user": "给保存按钮添加一个加载动画",
+				"assistant": "完成。我添加了一个在请求进行时显示的加载动画。"
+			}
 		}
 	},
 	"skills": {

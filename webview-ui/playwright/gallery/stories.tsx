@@ -415,6 +415,16 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"appearance-consumers": async () => {
+		const { AppearanceConsumersStory } =
+			await import("@/components/settings/__tests__/AppearanceConsumers.visual.fixture")
+		return <AppearanceConsumersStory />
+	},
+	"appearance-preview": async () => {
+		const { AppearancePreviewStory } =
+			await import("@/components/settings/__tests__/AppearancePreview.visual.fixture")
+		return <AppearancePreviewStory />
+	},
 	"ui-settings": async () => {
 		const { UISettingsStory } = await import("@/components/settings/__tests__/UISettings.visual.fixture")
 		return <UISettingsStory />

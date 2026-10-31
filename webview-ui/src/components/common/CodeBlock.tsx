@@ -150,7 +150,7 @@ export const StyledPre = styled.div<{
 		white-space: ${({ wordwrap }) => (wordwrap === "false" ? "pre" : "pre-wrap")};
 		word-break: ${({ wordwrap }) => (wordwrap === "false" ? "normal" : "normal")};
 		overflow-wrap: ${({ wordwrap }) => (wordwrap === "false" ? "normal" : "break-word")};
-		font-size: 0.95em;
+		font-size: var(--zoo-editor-font-size, 0.95em);
 		font-family: var(--vscode-editor-font-family);
 	}
 

@@ -19,6 +19,14 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { ProviderSettingsManager, providerProfilesSchema } from "./ProviderSettingsManager"
 import { ContextProxy } from "./ContextProxy"
 import { CustomModesManager } from "./CustomModesManager"
+import {
+	APPEARANCE_SETTING_KEYS,
+	beginSettingWrite,
+	finishSettingWrites,
+	isAppearanceSetting,
+	performSettingWrite,
+	undoSettingWrite,
+} from "./appearanceSettingWrites"
 import { downgradeLegacyRooConfig, ROUTER_REMOVAL_IMPORT_WARNING } from "./routerRemoval"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { t } from "../../i18n"
@@ -228,7 +236,7 @@ export async function importSettingsFromPath(
 		// They will be imported automatically with the config - no special handling needed
 
 		await providerSettingsManager.import(providerProfiles)
-		await contextProxy.setValues(sanitizedGlobalSettings)
+		await setValuesThroughWriteChain(contextProxy, sanitizedGlobalSettings)
 
 		// Set the current provider.
 		const currentProviderName = providerProfiles.currentApiConfigName
@@ -262,6 +270,46 @@ export async function importSettingsFromPath(
 
 		return { success: false, error }
 	}
+}
+
+/**
+ * Writes global settings. The appearance values go through the same per-key write chain as saves, so a save that
+ * fails and rolls back does not undo a value the import stored meanwhile, even when it is the same value. The import
+ * is not rolled back as a whole, as before: a write that succeeded is final. A write that failed is undone, not
+ * finished, so it leaves the chain the way a failed save does and an earlier save that is still pending keeps its own
+ * rollback.
+ */
+async function setValuesThroughWriteChain(contextProxy: ContextProxy, settings: GlobalSettings) {
+	const keys = APPEARANCE_SETTING_KEYS.filter((key) => key in settings)
+	if (keys.length === 0) return contextProxy.setValues(settings)
+
+	const writes = keys.map((key) => beginSettingWrite(key, contextProxy.getValue(key), settings[key]))
+	const others = Object.fromEntries(
+		Object.entries(settings).filter(([key]) => !isAppearanceSetting(key)),
+	) as GlobalSettings
+
+	// Every write is awaited before any is finished or undone, so none is still running when it leaves the chain.
+	const [othersResult, ...writeResults] = await Promise.allSettled([
+		contextProxy.setValues(others),
+		...writes.map((write) => performSettingWrite(contextProxy, write)),
+	])
+
+	let failure = othersResult.status === "rejected" ? othersResult : undefined
+	for (const [index, write] of writes.entries()) {
+		const result = writeResults[index]
+		if (result.status === "fulfilled") {
+			finishSettingWrites([write])
+			continue
+		}
+		failure ??= result
+		try {
+			await undoSettingWrite(contextProxy, write)
+		} catch (restoreError) {
+			console.error(`Failed to restore setting "${write.key}" after import failure:`, restoreError)
+		}
+	}
+
+	if (failure) throw failure.reason
 }
 
 /**

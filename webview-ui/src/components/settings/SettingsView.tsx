@@ -43,6 +43,7 @@ import {
 } from "@roo-code/types"
 
 import { vscode } from "@src/utils/vscode"
+import { APPEARANCE_SETTINGS, type AppearanceKey } from "@src/utils/appearance"
 import { cn } from "@src/lib/utils"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { ExtensionStateContextType, useExtensionState } from "@src/context/ExtensionStateContext"
@@ -82,6 +83,7 @@ import { SlashCommandsSettings } from "./SlashCommandsSettings"
 import { SkillsSettings } from "./SkillsSettings"
 import { RulesSettings } from "./RulesSettings"
 import { UISettings } from "./UISettings"
+import { nextSaveRequestId } from "./saveRequestId"
 import ModesView from "../modes/ModesView"
 import McpView from "../mcp/McpView"
 import { WorktreesView } from "../worktrees/WorktreesView"
@@ -134,6 +136,10 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 	const [isDiscardDialogShow, setDiscardDialogShow] = useState(false)
 	const [isChangeDetected, setChangeDetected] = useState(false)
+	// The save currently waiting for the host's answer. The "unsaved changes" flag stays on until it succeeds.
+	const [pendingSaveId, setPendingSaveId] = useState<string | undefined>(undefined)
+	// The state the pending save was made from, to tell whether the user edited again while it was in flight.
+	const pendingSaveEditedState = useRef<typeof cachedState | undefined>(undefined)
 	const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined)
 	const [activeTab, setActiveTab] = useState<SectionName>(
 		targetSection && sectionNames.includes(targetSection as SectionName)
@@ -152,6 +158,10 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const confirmDialogHandler = useRef<() => void>()
 
 	const [cachedState, setCachedState] = useState(() => extensionState)
+	const latestCachedState = useRef(cachedState)
+	useEffect(() => {
+		latestCachedState.current = cachedState
+	}, [cachedState])
 
 	const {
 		alwaysAllowReadOnly,
@@ -214,6 +224,10 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		openRouterImageGenerationSelectedModel,
 		reasoningBlockCollapsed,
 		chatFontSize,
+		interfaceFontScale,
+		terminalFontSize,
+		editorFontSize,
+		spacingScale,
 		enterBehavior,
 		includeCurrentTime,
 		includeCurrentCost,
@@ -382,8 +396,19 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 	const handleSubmit = () => {
 		if (isSettingValid) {
+			// Only a save that changes an appearance value waits for the host's answer: those are saved
+			// all-or-nothing, and a failed save has to keep the edits. Every other save behaves as it always did.
+			const appearanceEdited = (Object.keys(APPEARANCE_SETTINGS) as AppearanceKey[]).some(
+				(key) => (cachedState[key] ?? null) !== (extensionState[key] ?? null),
+			)
+			const saveId = appearanceEdited ? nextSaveRequestId() : undefined
+			if (saveId) {
+				pendingSaveEditedState.current = cachedState
+				setPendingSaveId(saveId)
+			}
 			vscode.postMessage({
 				type: "updateSettings",
+				requestId: saveId,
 				updatedSettings: {
 					language,
 					alwaysAllowReadOnly: alwaysAllowReadOnly ?? undefined,
@@ -442,6 +467,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					includeTaskHistoryInEnhance: includeTaskHistoryInEnhance ?? true,
 					reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 					chatFontSize: chatFontSize ?? null,
+					// null (not undefined) so a reset survives JSON and clears the stored value
+					interfaceFontScale: interfaceFontScale ?? null,
+					terminalFontSize: terminalFontSize ?? null,
+					editorFontSize: editorFontSize ?? null,
+					spacingScale: spacingScale ?? null,
 					enterBehavior: enterBehavior ?? "send",
 					includeCurrentTime: includeCurrentTime ?? true,
 					includeCurrentCost: includeCurrentCost ?? true,
@@ -465,9 +495,31 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			vscode.postMessage({ type: "telemetrySetting", text: telemetrySetting })
 			vscode.postMessage({ type: "debugSetting", bool: cachedState.debug })
 
-			setChangeDetected(false)
+			// With an appearance edit, the "unsaved changes" flag is cleared only once the host reports that
+			// `updateSettings` was stored: see the `settingsSaveResult` listener below. A failed save leaves the
+			// user's edits in place to retry. Any other save clears it at once.
+			if (!saveId) setChangeDetected(false)
 		}
 	}
+
+	useEffect(() => {
+		if (!pendingSaveId) return
+
+		const onResult = (event: MessageEvent) => {
+			const message = event.data
+			if (message?.type !== "settingsSaveResult" || message.requestId !== pendingSaveId) return
+
+			const editedState = pendingSaveEditedState.current
+			pendingSaveEditedState.current = undefined
+			setPendingSaveId(undefined)
+
+			// An edit made while the save was in flight is not in what was sent: it stays unsaved.
+			if (message.success && latestCachedState.current === editedState) setChangeDetected(false)
+		}
+
+		window.addEventListener("message", onResult)
+		return () => window.removeEventListener("message", onResult)
+	}, [pendingSaveId])
 
 	const checkUnsaveChanges = useCallback(
 		(then: () => void) => {
@@ -696,7 +748,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 							variant={isSettingValid ? "primary" : "secondary"}
 							className={!isSettingValid ? "!border-vscode-errorForeground" : ""}
 							onClick={handleSubmit}
-							disabled={!isChangeDetected || !isSettingValid}
+							disabled={!isChangeDetected || !isSettingValid || !!pendingSaveId}
 							data-testid="save-button">
 							{t("settings:common.save")}
 						</Button>
@@ -944,6 +996,10 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								reasoningBlockCollapsed={reasoningBlockCollapsed ?? true}
 								enterBehavior={enterBehavior ?? "send"}
 								chatFontSize={chatFontSize ?? undefined}
+								interfaceFontScale={interfaceFontScale ?? undefined}
+								terminalFontSize={terminalFontSize ?? undefined}
+								editorFontSize={editorFontSize ?? undefined}
+								spacingScale={spacingScale ?? undefined}
 								autoCloseZooOpenedFiles={autoCloseZooOpenedFiles}
 								autoCloseZooOpenedFilesAfterUserEdited={autoCloseZooOpenedFilesAfterUserEdited}
 								autoCloseZooOpenedNewFiles={autoCloseZooOpenedNewFiles}

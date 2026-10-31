@@ -1179,6 +1179,32 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Tự động đóng các tệp mới tạo",
 			"description": "Khi bật, các tab của các tệp mà Zoo đã tạo (thay vì chỉnh sửa) cũng sẽ tự động đóng sau khi chấp nhận thay đổi."
+		},
+		"appearance": {
+			"reset": "Đặt lại về mặc định",
+			"interfaceFontScale": {
+				"label": "Cỡ chữ giao diện",
+				"description": "Thu phóng toàn bộ văn bản của Zoo Code. 100% khớp với VS Code."
+			},
+			"terminalFontSize": {
+				"label": "Cỡ chữ terminal",
+				"description": "Cỡ chữ cho kết quả lệnh hiển thị trong chat."
+			},
+			"editorFontSize": {
+				"label": "Cỡ chữ trình soạn thảo",
+				"description": "Cỡ chữ cho khối mã và diff hiển thị trong chat."
+			},
+			"spacingScale": {
+				"label": "Mật độ khoảng cách",
+				"description": "Khoảng đệm giữa các tin nhắn chat. Giá trị thấp hơn sẽ gọn hơn."
+			},
+			"preview": "Xem trước",
+			"sample": {
+				"you": "Bạn",
+				"zoo": "Zoo",
+				"user": "Thêm biểu tượng đang tải vào nút Lưu",
+				"assistant": "Xong. Tôi đã thêm một biểu tượng hiển thị khi yêu cầu đang được xử lý."
+			}
 		}
 	},
 	"skills": {

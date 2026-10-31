@@ -2119,6 +2119,88 @@ describe("ClineProvider", () => {
 		expect(state.allowedReadFiles).toEqual([])
 	})
 
+	describe("appearance settings", () => {
+		const keys = ["interfaceFontScale", "terminalFontSize", "editorFontSize", "spacingScale"] as const
+		const values = { interfaceFontScale: 120, terminalFontSize: 14, editorFontSize: 15, spacingScale: 80 }
+
+		/** Saves through the real `updateSettings` handler, as the settings view does. */
+		const save = async (updatedSettings: Record<string, unknown>) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const messageHandler = vi.mocked(mockWebviewView.webview.onDidReceiveMessage).mock.calls[0][0]
+			await messageHandler({ type: "updateSettings", updatedSettings })
+		}
+
+		test.each(keys)("%s is unset when it was never saved, in both states", async (key) => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			expect((await provider.getState())[key]).toBeUndefined()
+			expect((await provider.getStateToPostToWebview())[key]).toBeUndefined()
+		})
+
+		test.each(keys)("%s that was stored is returned by both states", async (key) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue(key, values[key])
+
+			expect((await provider.getState())[key]).toBe(values[key])
+			expect((await provider.getStateToPostToWebview())[key]).toBe(values[key])
+		})
+
+		test("all four are returned together, each with its own value", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			for (const key of keys) await provider.contextProxy.setValue(key, values[key])
+
+			expect(await provider.getState()).toMatchObject(values)
+			expect(await provider.getStateToPostToWebview()).toMatchObject(values)
+		})
+
+		test.each(keys)("a reset of %s (null) is kept, not replaced by a default", async (key) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue(key, values[key])
+			await provider.contextProxy.setValue(key, null)
+
+			expect((await provider.getState())[key]).toBeNull()
+			expect((await provider.getStateToPostToWebview())[key]).toBeNull()
+		})
+
+		test("saving through updateSettings stores the values and tells the open webview", async () => {
+			mockPostMessage.mockClear()
+
+			await save(values)
+
+			for (const key of keys) expect(mockContext.globalState.update).toHaveBeenCalledWith(key, values[key])
+			expect(await provider.getStateToPostToWebview()).toMatchObject(values)
+			expect(mockPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "state", state: expect.objectContaining(values) }),
+			)
+		})
+
+		test("saving a reset stores null and tells the open webview", async () => {
+			await save(values)
+			mockPostMessage.mockClear()
+
+			await save({ interfaceFontScale: null, terminalFontSize: null, editorFontSize: null, spacingScale: null })
+
+			expect(await provider.getStateToPostToWebview()).toMatchObject({
+				interfaceFontScale: null,
+				terminalFontSize: null,
+				editorFontSize: null,
+				spacingScale: null,
+			})
+			expect(mockPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "state",
+					state: expect.objectContaining({ interfaceFontScale: null, spacingScale: null }),
+				}),
+			)
+		})
+
+		test("a value the webview should not be able to store is refused, and nothing changes", async () => {
+			await save({ interfaceFontScale: 999 })
+
+			expect((await provider.getState()).interfaceFontScale).toBeUndefined()
+		})
+	})
+
 	test("getState returns the saved allowed write files", async () => {
 		await provider.contextProxy.setValue("allowedWriteFiles", ["notes.md"])
 

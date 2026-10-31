@@ -1179,6 +1179,32 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Nai banayi gayi files ko svachalit band karo",
 			"description": "Saksham hone par, Zoo dvara banaayi gayi (sanshodhit nahin) files ki tabs ko bhi parivartan svikaar hone ke baad svachalit roop se band kar diya jaata hai."
+		},
+		"appearance": {
+			"reset": "डिफ़ॉल्ट पर रीसेट करें",
+			"interfaceFontScale": {
+				"label": "इंटरफ़ेस फ़ॉन्ट आकार",
+				"description": "Zoo Code के सारे टेक्स्ट को स्केल करता है। 100% VS Code के बराबर है।"
+			},
+			"terminalFontSize": {
+				"label": "टर्मिनल फ़ॉन्ट आकार",
+				"description": "चैट में दिखाए गए कमांड आउटपुट का फ़ॉन्ट आकार।"
+			},
+			"editorFontSize": {
+				"label": "एडिटर फ़ॉन्ट आकार",
+				"description": "चैट में दिखाए गए कोड ब्लॉक और डिफ़ का फ़ॉन्ट आकार।"
+			},
+			"spacingScale": {
+				"label": "स्पेसिंग घनत्व",
+				"description": "चैट संदेशों के बीच की पैडिंग। कम मान अधिक सघन होता है।"
+			},
+			"preview": "पूर्वावलोकन",
+			"sample": {
+				"you": "आप",
+				"zoo": "Zoo",
+				"user": "Save बटन में लोडिंग स्पिनर जोड़ें",
+				"assistant": "हो गया। मैंने एक स्पिनर जोड़ा है जो अनुरोध चलने के दौरान दिखता है।"
+			}
 		}
 	},
 	"skills": {

@@ -48,6 +48,7 @@
 				"src/**/*.{ts,tsx}!",
 				"../src/shared/*.ts!",
 				"!src/utils/test-utils.tsx!",
+				"!src/**/__tests__/**!",
 				"!src/vite-plugins/**!",
 				"!src/**/*.visual.tsx!",
 				"!src/**/*.visual.{fixture,i18n}.{ts,tsx}!"

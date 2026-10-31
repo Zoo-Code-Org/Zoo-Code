@@ -59,7 +59,7 @@ export const TerminalOutput: React.FC<TerminalOutputProps> = ({ content, classNa
 			style={{
 				fontFamily:
 					"var(--vscode-editor-font-family, 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Menlo', 'Monaco', 'Courier New', monospace)",
-				fontSize: "var(--vscode-editor-font-size, 13px)",
+				fontSize: "var(--zoo-terminal-font-size, var(--vscode-editor-font-size, 13px))",
 				lineHeight: "var(--vscode-editor-line-height, 1.4)",
 				whiteSpace: "pre-wrap",
 				wordBreak: "break-word",

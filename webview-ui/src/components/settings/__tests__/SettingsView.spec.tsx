@@ -8,6 +8,7 @@ import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, type ProviderSettings } from "@roo-
 import type { ApiOptionsProps } from "../ApiOptions"
 
 import SettingsView from "../SettingsView"
+import { saveAndConfirm } from "./saveAcknowledgement"
 
 vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
 
@@ -498,6 +499,47 @@ describe("SettingsView - Sound Settings", () => {
 				updatedSettings: expect.objectContaining({ chatFontSize: null }),
 			}),
 		)
+	})
+
+	it("saves all four appearance values, and persists null for each after a reset", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView()
+		activateTab("ui")
+
+		const values = {
+			interfaceFontScale: 120,
+			terminalFontSize: 14,
+			editorFontSize: 15,
+			spacingScale: 80,
+		}
+		for (const [key, value] of Object.entries(values)) {
+			const input = within(getSettingsContent()).getByTestId(`appearance-${key}-input`)
+			fireEvent.change(input, { target: { value: String(value) } })
+			fireEvent.blur(input)
+		}
+		saveAndConfirm(vi.mocked(vscode.postMessage))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining(values),
+			}),
+		)
+
+		for (const key of Object.keys(values)) {
+			fireEvent.click(within(getSettingsContent()).getByTestId(`appearance-${key}-reset`))
+		}
+		saveAndConfirm(vi.mocked(vscode.postMessage))
+
+		const saves = vi
+			.mocked(vscode.postMessage)
+			.mock.calls.map(([message]) => message as { type?: string; updatedSettings?: Record<string, unknown> })
+			.filter((message) => message.type === "updateSettings")
+		expect(saves.at(-1)?.updatedSettings).toMatchObject({
+			interfaceFontScale: null,
+			terminalFontSize: null,
+			editorFontSize: null,
+			spacingScale: null,
+		})
 	})
 
 	it("saves fallback defaults for checkpoint and terminal settings", async () => {

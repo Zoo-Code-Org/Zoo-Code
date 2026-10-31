@@ -189,6 +189,32 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "自動關閉新建立的檔案",
 			"description": "啟用後，Zoo 新建（而非修改）的檔案分頁在接受變更後也會自動關閉。"
+		},
+		"appearance": {
+			"reset": "還原為預設值",
+			"interfaceFontScale": {
+				"label": "介面字型大小",
+				"description": "縮放所有 Zoo Code 文字。100% 與 VS Code 相同。"
+			},
+			"terminalFontSize": {
+				"label": "終端機字型大小",
+				"description": "聊天中顯示的指令輸出的字型大小。"
+			},
+			"editorFontSize": {
+				"label": "編輯器字型大小",
+				"description": "聊天中顯示的程式碼區塊與 diff 的字型大小。"
+			},
+			"spacingScale": {
+				"label": "間距密度",
+				"description": "聊天訊息之間的內距。數值越小越緊湊。"
+			},
+			"preview": "預覽",
+			"sample": {
+				"you": "你",
+				"zoo": "Zoo",
+				"user": "為儲存按鈕加上載入動畫",
+				"assistant": "完成。我加入了一個在請求進行中顯示的載入動畫。"
+			}
 		}
 	},
 	"prompts": {

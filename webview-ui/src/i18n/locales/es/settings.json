@@ -1179,6 +1179,32 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Cerrar automaticamente los archivos nuevos creados",
 			"description": "Cuando esta opcion esta activada, las pestanas de archivos que Zoo ha creado (en lugar de modificar) tambien se cierran automaticamente despues de aceptar la modificacion."
+		},
+		"appearance": {
+			"reset": "Restablecer al valor predeterminado",
+			"interfaceFontScale": {
+				"label": "Tamaño de fuente de la interfaz",
+				"description": "Escala todo el texto de Zoo Code. El 100 % coincide con VS Code."
+			},
+			"terminalFontSize": {
+				"label": "Tamaño de fuente del terminal",
+				"description": "Tamaño de fuente de la salida de comandos que se muestra en el chat."
+			},
+			"editorFontSize": {
+				"label": "Tamaño de fuente del editor",
+				"description": "Tamaño de fuente de los bloques de código y los diffs que se muestran en el chat."
+			},
+			"spacingScale": {
+				"label": "Densidad de espaciado",
+				"description": "Relleno entre los mensajes del chat. Un valor menor es más compacto."
+			},
+			"preview": "Vista previa",
+			"sample": {
+				"you": "Tú",
+				"zoo": "Zoo",
+				"user": "Añade un indicador de carga al botón Guardar",
+				"assistant": "Listo. He añadido un indicador que se muestra mientras la solicitud está en curso."
+			}
 		}
 	},
 	"skills": {

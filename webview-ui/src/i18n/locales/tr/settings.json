@@ -1179,6 +1179,32 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Yeni olusturulan dosyalari otomatik kapat",
 			"description": "Etkinlestirildiginde, Zoo'nun olusturdugu (degistirmedigi) dosyalarin sekmeleri de degisiklik kabul edildikten sonra otomatik olarak kapatilir."
+		},
+		"appearance": {
+			"reset": "Varsayılana sıfırla",
+			"interfaceFontScale": {
+				"label": "Arayüz yazı tipi boyutu",
+				"description": "Tüm Zoo Code metnini ölçekler. %100, VS Code ile aynıdır."
+			},
+			"terminalFontSize": {
+				"label": "Terminal yazı tipi boyutu",
+				"description": "Sohbette gösterilen komut çıktısının yazı tipi boyutu."
+			},
+			"editorFontSize": {
+				"label": "Düzenleyici yazı tipi boyutu",
+				"description": "Sohbette gösterilen kod blokları ve diff'lerin yazı tipi boyutu."
+			},
+			"spacingScale": {
+				"label": "Boşluk yoğunluğu",
+				"description": "Sohbet mesajları arasındaki dolgu. Düşük değer daha sıkışık görünür."
+			},
+			"preview": "Önizleme",
+			"sample": {
+				"you": "Sen",
+				"zoo": "Zoo",
+				"user": "Kaydet düğmesine bir yükleniyor göstergesi ekle",
+				"assistant": "Tamam. İstek sürerken görünen bir gösterge ekledim."
+			}
 		}
 	},
 	"skills": {

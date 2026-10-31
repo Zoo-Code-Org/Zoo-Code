@@ -1179,6 +1179,32 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Neu erstellte Dateien automatisch schließen",
 			"description": "Wenn aktiviert, werden Tabs für Dateien, die Zoo neu erstellt hat (anstatt sie zu bearbeiten), nach dem Akzeptieren der Änderung ebenfalls automatisch geschlossen."
+		},
+		"appearance": {
+			"reset": "Auf Standard zurücksetzen",
+			"interfaceFontScale": {
+				"label": "Schriftgröße der Oberfläche",
+				"description": "Skaliert den gesamten Zoo-Code-Text. 100 % entspricht VS Code."
+			},
+			"terminalFontSize": {
+				"label": "Schriftgröße des Terminals",
+				"description": "Schriftgröße für die im Chat angezeigte Befehlsausgabe."
+			},
+			"editorFontSize": {
+				"label": "Schriftgröße des Editors",
+				"description": "Schriftgröße für Codeblöcke und Diffs im Chat."
+			},
+			"spacingScale": {
+				"label": "Abstandsdichte",
+				"description": "Innenabstand zwischen Chat-Nachrichten. Niedriger ist kompakter."
+			},
+			"preview": "Vorschau",
+			"sample": {
+				"you": "Du",
+				"zoo": "Zoo",
+				"user": "Füge der Schaltfläche „Speichern“ einen Ladeindikator hinzu",
+				"assistant": "Erledigt. Ich habe einen Spinner hinzugefügt, der angezeigt wird, solange die Anfrage läuft."
+			}
 		}
 	},
 	"skills": {

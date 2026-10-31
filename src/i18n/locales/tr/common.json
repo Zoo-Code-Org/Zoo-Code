@@ -58,6 +58,7 @@
 		"cannot_access_path": "{{path}} yoluna erişilemiyor: {{error}}",
 		"path_outside_workspace": "Yol çalışma alanının dışında",
 		"settings_import_failed": "Ayarlar içe aktarılamadı: {{error}}.",
+		"settings_save_failed": "Ayarlar kaydedilemedi. Bazıları kısmen değişmiş olarak kalmış olabilir: {{error}}",
 		"mistake_limit_guidance": "Bu, modelin düşünce sürecindeki bir başarısızlığı veya bir aracı düzgün kullanamama durumunu gösterebilir, bu da kullanıcı rehberliği ile hafifletilebilir (örn. \"Görevi daha küçük adımlara bölmeyi deneyin\").",
 		"violated_organization_allowlist": "Görev yürütülemedi: Geçerli profil kuruluşunuzun ayarlarıyla uyumlu değil",
 		"condense_failed": "Bağlam sıkıştırılamadı",

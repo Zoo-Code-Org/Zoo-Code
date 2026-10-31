@@ -92,6 +92,33 @@ const ChatFontSizeTestComponent = () => {
 	)
 }
 
+const AppearanceTestComponent = () => {
+	const { interfaceFontScale, terminalFontSize, editorFontSize, spacingScale } = useExtensionState()
+
+	return (
+		<div data-testid="appearance">
+			{JSON.stringify({
+				interfaceFontScale: interfaceFontScale ?? null,
+				terminalFontSize: terminalFontSize ?? null,
+				editorFontSize: editorFontSize ?? null,
+				spacingScale: spacingScale ?? null,
+			})}
+		</div>
+	)
+}
+
+const sendState = (state: Partial<ExtensionState>) =>
+	act(() => {
+		window.dispatchEvent(new MessageEvent("message", { data: { type: "state", state } }))
+	})
+
+const APPEARANCE_VARS = [
+	"--zoo-ui-scale",
+	"--zoo-terminal-font-size",
+	"--zoo-editor-font-size",
+	"--zoo-spacing-scale",
+] as const
+
 const ApiConfigTestComponent = () => {
 	const { apiConfiguration, setApiConfiguration } = useExtensionState()
 
@@ -792,6 +819,79 @@ describe("ExtensionStateContext", () => {
 
 		expect(JSON.parse(screen.getByTestId("chat-font-size").textContent!)).toBe(null)
 		expect(document.documentElement.style.getPropertyValue("--zoo-chat-font-size")).toBe("")
+	})
+
+	describe("appearance settings", () => {
+		const clearVars = () => {
+			for (const name of APPEARANCE_VARS) document.documentElement.style.removeProperty(name)
+			document.documentElement.classList.remove("zoo-editor-font-set")
+		}
+		const appearance = () => JSON.parse(screen.getByTestId("appearance").textContent!)
+		const renderAppearance = () =>
+			render(
+				<ExtensionStateContextProvider>
+					<AppearanceTestComponent />
+				</ExtensionStateContextProvider>,
+			)
+
+		beforeEach(clearVars)
+		afterEach(clearVars)
+
+		it("leaves every value unset and the CSS variables absent before any state arrives", () => {
+			renderAppearance()
+
+			expect(appearance()).toEqual({
+				interfaceFontScale: null,
+				terminalFontSize: null,
+				editorFontSize: null,
+				spacingScale: null,
+			})
+			for (const name of APPEARANCE_VARS) expect(document.documentElement.style.getPropertyValue(name)).toBe("")
+		})
+
+		it("hydrates all four values from the host state and applies their CSS variables", () => {
+			renderAppearance()
+
+			sendState({ interfaceFontScale: 120, terminalFontSize: 14, editorFontSize: 15, spacingScale: 80 })
+
+			expect(appearance()).toEqual({
+				interfaceFontScale: 120,
+				terminalFontSize: 14,
+				editorFontSize: 15,
+				spacingScale: 80,
+			})
+			const style = document.documentElement.style
+			expect(style.getPropertyValue("--zoo-ui-scale")).toBe("1.2")
+			expect(style.getPropertyValue("--zoo-terminal-font-size")).toBe("14px")
+			expect(style.getPropertyValue("--zoo-editor-font-size")).toBe("15px")
+			expect(style.getPropertyValue("--zoo-spacing-scale")).toBe("0.8")
+		})
+
+		it("treats a null from the host (a saved reset) as unset and removes the CSS variables", () => {
+			renderAppearance()
+			sendState({ interfaceFontScale: 120, terminalFontSize: 14, editorFontSize: 15, spacingScale: 80 })
+
+			sendState({ interfaceFontScale: null, terminalFontSize: null, editorFontSize: null, spacingScale: null })
+
+			expect(appearance()).toEqual({
+				interfaceFontScale: null,
+				terminalFontSize: null,
+				editorFontSize: null,
+				spacingScale: null,
+			})
+			for (const name of APPEARANCE_VARS) expect(document.documentElement.style.getPropertyValue(name)).toBe("")
+		})
+
+		it("updates one value without disturbing the others", () => {
+			renderAppearance()
+			sendState({ interfaceFontScale: 120, terminalFontSize: 14 })
+
+			sendState({ terminalFontSize: 18 })
+
+			expect(appearance()).toMatchObject({ interfaceFontScale: 120, terminalFontSize: 18 })
+			expect(document.documentElement.style.getPropertyValue("--zoo-ui-scale")).toBe("1.2")
+			expect(document.documentElement.style.getPropertyValue("--zoo-terminal-font-size")).toBe("18px")
+		})
 	})
 
 	it("updates allowedCommands through setAllowedCommands", () => {

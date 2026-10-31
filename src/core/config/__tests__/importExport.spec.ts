@@ -19,6 +19,12 @@ import {
 } from "../importExport"
 import { ProviderSettingsManager } from "../ProviderSettingsManager"
 import { ContextProxy } from "../ContextProxy"
+import {
+	beginSettingWrite,
+	performSettingWrite,
+	settingWriteBookkeepingSize,
+	undoSettingWrite,
+} from "../appearanceSettingWrites"
 import { CustomModesManager } from "../CustomModesManager"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
 
@@ -272,6 +278,137 @@ describe("importExport", () => {
 			expect(fs.readFile).not.toHaveBeenCalled()
 			expect(mockProviderSettingsManager.import).not.toHaveBeenCalled()
 			expect(mockContextProxy.setValues).not.toHaveBeenCalled()
+		})
+
+		describe("appearance settings go through the write chain of the saves", () => {
+			const stored = new Map<string, unknown>()
+
+			const importWith = (globalSettings: Record<string, unknown>) => {
+				;(fs.readFile as Mock).mockResolvedValue(
+					JSON.stringify({
+						providerProfiles: {
+							currentApiConfigName: "test",
+							apiConfigs: {
+								test: { apiProvider: providerIdentifiers.openai, apiKey: "test-key", id: "test-id" },
+							},
+						},
+						globalSettings,
+					}),
+				)
+				return importSettingsFromPath("/mock/path/settings.json", {
+					providerSettingsManager: mockProviderSettingsManager,
+					contextProxy: mockContextProxy,
+					customModesManager: mockCustomModesManager,
+				})
+			}
+
+			beforeEach(() => {
+				stored.clear()
+				stored.set("interfaceFontScale", 100)
+				mockProviderSettingsManager.export.mockResolvedValue({
+					currentApiConfigName: "default",
+					apiConfigs: { default: { apiProvider: providerIdentifiers.anthropic, id: "default-id" } },
+				})
+				mockProviderSettingsManager.import.mockResolvedValue(undefined)
+				mockProviderSettingsManager.listConfig.mockResolvedValue([])
+				mockContextProxy.setProviderSettings.mockResolvedValue(undefined)
+				mockContextProxy.getValue.mockImplementation(((key: string) =>
+					stored.get(key)) as unknown as typeof mockContextProxy.getValue)
+				mockContextProxy.setValue.mockImplementation((async (key: string, value: unknown) => {
+					stored.set(key, value)
+				}) as unknown as typeof mockContextProxy.setValue)
+				mockContextProxy.setValues.mockResolvedValue(undefined)
+			})
+
+			it("stores an appearance value as a recorded write, and the rest through setValues", async () => {
+				const result = await importWith({ interfaceFontScale: 120, mode: "code" })
+
+				expect(result).toMatchObject({ success: true })
+				expect(stored.get("interfaceFontScale")).toBe(120)
+				expect(mockContextProxy.setValues).toHaveBeenCalledWith({ mode: "code" })
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			})
+
+			it("keeps an imported value when a save that wrote the same value fails afterwards", async () => {
+				const save = beginSettingWrite("interfaceFontScale", 100, 120)
+				await performSettingWrite(mockContextProxy as unknown as ContextProxy, save)
+
+				await importWith({ interfaceFontScale: 120 }) // the same value, while the save is pending
+				await undoSettingWrite(mockContextProxy as unknown as ContextProxy, save) // the save fails
+
+				expect(stored.get("interfaceFontScale")).toBe(120)
+			})
+
+			it("undoes a write that failed, so an earlier save still pending keeps its own rollback", async () => {
+				const proxy = mockContextProxy as unknown as ContextProxy
+				const save = beginSettingWrite("interfaceFontScale", 100, 150)
+				await performSettingWrite(proxy, save) // a save has stored 150 and is still pending
+
+				mockContextProxy.setValue.mockImplementation((async (key: string, value: unknown) => {
+					if (value === 120) throw new Error("storage unavailable") // the import's write fails
+					stored.set(key, value)
+				}) as unknown as typeof mockContextProxy.setValue)
+				const result = await importWith({ interfaceFontScale: 120 })
+				expect(result).toEqual({ success: false, error: "storage unavailable" })
+
+				await undoSettingWrite(proxy, save) // the save fails afterwards
+
+				expect(stored.get("interfaceFontScale")).toBe(100)
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			})
+
+			it("keeps the appearance values that were stored when the other settings fail to store", async () => {
+				mockContextProxy.setValues.mockRejectedValue(new Error("other settings failed"))
+
+				const result = await importWith({ interfaceFontScale: 120, mode: "code" })
+
+				expect(result).toEqual({ success: false, error: "other settings failed" })
+				expect(stored.get("interfaceFontScale")).toBe(120)
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			})
+
+			it("puts back a value that was stored before its write failed, and still reports the failure", async () => {
+				mockContextProxy.setValue.mockImplementation((async (key: string, value: unknown) => {
+					stored.set(key, value)
+					if (value === 120) throw new Error("failed after storing")
+				}) as unknown as typeof mockContextProxy.setValue)
+
+				const result = await importWith({ interfaceFontScale: 120 })
+
+				expect(result).toEqual({ success: false, error: "failed after storing" })
+				expect(stored.get("interfaceFontScale")).toBe(100)
+			})
+
+			it("reports the failure even when putting a value back fails as well", async () => {
+				const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+				mockContextProxy.setValue.mockImplementation((async (key: string, value: unknown) => {
+					if (value === 100) throw new Error("restore failed")
+					stored.set(key, value)
+					if (value === 120) throw new Error("failed after storing")
+				}) as unknown as typeof mockContextProxy.setValue)
+
+				const result = await importWith({ interfaceFontScale: 120 })
+
+				expect(result).toEqual({ success: false, error: "failed after storing" })
+				expect(consoleError).toHaveBeenCalled()
+				consoleError.mockRestore()
+			})
+
+			it("leaves nothing in the chain, and reports the failure, when a write fails", async () => {
+				mockContextProxy.setValue.mockRejectedValue(new Error("storage unavailable"))
+
+				const result = await importWith({ interfaceFontScale: 120 })
+
+				expect(result).toEqual({ success: false, error: "storage unavailable" })
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			})
+
+			it("writes everything through setValues when the file has no appearance value", async () => {
+				await importWith({ mode: "code" })
+
+				expect(mockContextProxy.setValues).toHaveBeenCalledWith({ mode: "code" })
+				expect(mockContextProxy.setValue).not.toHaveBeenCalledWith("interfaceFontScale", expect.anything())
+			})
 		})
 
 		it("should import settings successfully from a valid file", async () => {

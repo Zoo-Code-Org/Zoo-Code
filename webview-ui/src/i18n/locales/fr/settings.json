@@ -1179,6 +1179,32 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Fermer automatiquement les nouveaux fichiers créés",
 			"description": "Quand cette option est activée, les onglets des fichiers que Zoo a créés (plutôt que modifiés) sont également fermés automatiquement après l'acceptation de la modification."
+		},
+		"appearance": {
+			"reset": "Rétablir la valeur par défaut",
+			"interfaceFontScale": {
+				"label": "Taille de police de l'interface",
+				"description": "Met à l'échelle tout le texte de Zoo Code. 100 % correspond à VS Code."
+			},
+			"terminalFontSize": {
+				"label": "Taille de police du terminal",
+				"description": "Taille de police de la sortie des commandes affichée dans le chat."
+			},
+			"editorFontSize": {
+				"label": "Taille de police de l'éditeur",
+				"description": "Taille de police des blocs de code et des diffs affichés dans le chat."
+			},
+			"spacingScale": {
+				"label": "Densité d'espacement",
+				"description": "Marge intérieure entre les messages du chat. Plus bas, plus compact."
+			},
+			"preview": "Aperçu",
+			"sample": {
+				"you": "Vous",
+				"zoo": "Zoo",
+				"user": "Ajoute un indicateur de chargement au bouton Enregistrer",
+				"assistant": "Terminé. J'ai ajouté un indicateur qui s'affiche pendant que la requête est en cours."
+			}
 		}
 	},
 	"skills": {

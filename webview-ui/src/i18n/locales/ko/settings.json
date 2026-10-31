@@ -1179,6 +1179,32 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "새로 만든 파일 자동 닫기",
 			"description": "활성화 시, Zoo가 수정한 것이 아니라 새로 만든 파일의 탭도 변경 사항을 승인한 후 자동으로 닫힙니다."
+		},
+		"appearance": {
+			"reset": "기본값으로 재설정",
+			"interfaceFontScale": {
+				"label": "인터페이스 글꼴 크기",
+				"description": "모든 Zoo Code 텍스트의 크기를 조절합니다. 100%는 VS Code와 같습니다."
+			},
+			"terminalFontSize": {
+				"label": "터미널 글꼴 크기",
+				"description": "채팅에 표시되는 명령 출력의 글꼴 크기입니다."
+			},
+			"editorFontSize": {
+				"label": "편집기 글꼴 크기",
+				"description": "채팅에 표시되는 코드 블록과 diff의 글꼴 크기입니다."
+			},
+			"spacingScale": {
+				"label": "간격 밀도",
+				"description": "채팅 메시지 사이의 여백입니다. 낮을수록 더 촘촘합니다."
+			},
+			"preview": "미리보기",
+			"sample": {
+				"you": "나",
+				"zoo": "Zoo",
+				"user": "저장 버튼에 로딩 스피너를 추가해 줘",
+				"assistant": "완료했습니다. 요청이 진행되는 동안 표시되는 스피너를 추가했습니다."
+			}
 		}
 	},
 	"skills": {

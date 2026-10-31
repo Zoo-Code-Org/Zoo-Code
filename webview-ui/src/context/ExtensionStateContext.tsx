@@ -35,6 +35,7 @@ import { CustomSupportPrompts } from "@roo/support-prompt"
 import { experimentDefault } from "@roo/experiments"
 
 import { vscode } from "@src/utils/vscode"
+import { applyAppearanceVariables } from "@src/utils/appearance"
 import { convertTextMateToHljs } from "@src/utils/textMateToHljs"
 import { StringCache } from "@src/utils/stringCache"
 
@@ -133,6 +134,10 @@ export interface ExtensionStateContextType extends ExtensionState {
 	setHistoryPreviewCollapsed: (value: boolean) => void
 	setReasoningBlockCollapsed: (value: boolean) => void
 	chatFontSize?: number
+	interfaceFontScale?: number
+	terminalFontSize?: number
+	editorFontSize?: number
+	spacingScale?: number
 	setChatFontSize: (value: number | undefined) => void
 	enterBehavior?: "send" | "newline"
 	setEnterBehavior: (value: "send" | "newline") => void
@@ -619,11 +624,26 @@ export const ExtensionStateContextProvider: React.FC<{
 		}
 	}, [state.chatFontSize])
 
+	// Appearance scales/sizes. Unset values remove the inline override so the
+	// stylesheet defaults in index.css (100% / VS Code's sizes) apply.
+	useEffect(() => {
+		applyAppearanceVariables(document.documentElement, {
+			interfaceFontScale: state.interfaceFontScale,
+			terminalFontSize: state.terminalFontSize,
+			editorFontSize: state.editorFontSize,
+			spacingScale: state.spacingScale,
+		})
+	}, [state.interfaceFontScale, state.terminalFontSize, state.editorFontSize, state.spacingScale])
+
 	const contextValue: ExtensionStateContextType = {
 		...state,
 		// `chatFontSize` is persisted as nullish (null on reset); normalize null to
 		// undefined so it matches the context type and means "use VS Code default".
 		chatFontSize: state.chatFontSize ?? undefined,
+		interfaceFontScale: state.interfaceFontScale ?? undefined,
+		terminalFontSize: state.terminalFontSize ?? undefined,
+		editorFontSize: state.editorFontSize ?? undefined,
+		spacingScale: state.spacingScale ?? undefined,
 		reasoningBlockCollapsed: state.reasoningBlockCollapsed ?? true,
 		didHydrateState,
 		showWelcome,

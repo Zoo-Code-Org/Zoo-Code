@@ -51,3 +51,41 @@ describe("collapseCommandOutputByDefault global setting", () => {
 		expect(globalSettingsSchema.safeParse({ collapseCommandOutputByDefault: "true" }).success).toBe(false)
 	})
 })
+
+describe("appearance global settings", () => {
+	const bounds = {
+		interfaceFontScale: { min: 50, max: 200 },
+		terminalFontSize: { min: 8, max: 32 },
+		editorFontSize: { min: 8, max: 32 },
+		spacingScale: { min: 50, max: 200 },
+	} as const
+	const keys = Object.keys(bounds) as Array<keyof typeof bounds>
+
+	it.each(keys)("%s is a persisted global setting", (key) => {
+		expect(GLOBAL_SETTINGS_KEYS).toContain(key)
+	})
+
+	it.each(keys)("%s accepts the whole range, including both bounds", (key) => {
+		const { min, max } = bounds[key]
+		for (const value of [min, Math.round((min + max) / 2), max]) {
+			expect(globalSettingsSchema.parse({ [key]: value })).toEqual({ [key]: value })
+		}
+	})
+
+	it.each(keys)("%s accepts null (a saved reset) and an unset value", (key) => {
+		expect(globalSettingsSchema.parse({ [key]: null })).toEqual({ [key]: null })
+		expect(globalSettingsSchema.parse({})).not.toHaveProperty(key)
+	})
+
+	it.each(keys)("%s rejects out-of-range, fractional and non-numeric values", (key) => {
+		const { min, max } = bounds[key]
+		for (const value of [min - 1, max + 1, 0, -1, min + 0.5, Number.NaN, "100"]) {
+			expect(globalSettingsSchema.safeParse({ [key]: value }).success).toBe(false)
+		}
+	})
+
+	it("keeps all four values together", () => {
+		const all = { interfaceFontScale: 120, terminalFontSize: 14, editorFontSize: 15, spacingScale: 80 }
+		expect(globalSettingsSchema.parse(all)).toEqual(all)
+	})
+})
