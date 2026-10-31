@@ -571,7 +571,7 @@
 	},
 	"core/assistant-message/__tests__/presentAssistantMessage-images.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 16
+			"count": 14
 		}
 	},
 	"core/assistant-message/__tests__/presentAssistantMessage-unknown-tool.spec.ts": {
