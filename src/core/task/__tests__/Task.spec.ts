@@ -7452,6 +7452,9 @@ describe("Cline", () => {
 			// task directory to exist (uuid v7 is mocked to the fixed id below).
 			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
 			fsReal.mkdirSync(taskDir, { recursive: true })
+			// Earlier tests in this file can leave a ui_messages.json for the fixed task id;
+			// merge=true would read it here and fail the first save stage for an unrelated reason.
+			fsReal.rmSync(path.join(taskDir, "ui_messages.json"), { force: true })
 			// Declared outside the try so the finally block can restore them.
 			const updateSpy = vi
 				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
