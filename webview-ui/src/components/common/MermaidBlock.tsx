@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react"
-import mermaid from "mermaid"
 import styled from "styled-components"
 import { useDebounceEffect } from "@src/utils/useDebounceEffect"
 import { vscode } from "@src/utils/vscode"
@@ -8,6 +7,25 @@ import { useCopyToClipboard } from "@src/utils/clipboard"
 import CodeBlock from "./CodeBlock"
 import { MermaidButton } from "@/components/common/MermaidButton"
 import { getMermaidBackgroundColor, getMermaidConfig, useMermaidTheme } from "./mermaidTheme"
+
+type MermaidClient = (typeof import("mermaid"))["default"]
+
+// Mermaid is a large dependency that only matters once a message actually contains a
+// diagram, so it is loaded on demand instead of being part of the eager webview graph.
+let mermaidModulePromise: Promise<MermaidClient> | undefined
+
+function loadMermaid(): Promise<MermaidClient> {
+	mermaidModulePromise ??= import("mermaid").then(
+		(module) => module.default,
+		(error: unknown) => {
+			// Drop the cached rejection so a later diagram can retry the chunk load.
+			mermaidModulePromise = undefined
+			throw error
+		},
+	)
+
+	return mermaidModulePromise
+}
 
 interface MermaidBlockProps {
 	code: string
@@ -37,22 +55,32 @@ export default function MermaidBlock({ code }: MermaidBlockProps) {
 				containerRef.current.innerHTML = ""
 			}
 
-			mermaid.initialize(getMermaidConfig(theme.kind))
-			mermaid
-				.parse(code)
-				.then(() => {
-					const id = `mermaid-${Math.random().toString(36).substring(2)}`
-					return mermaid.render(id, code)
+			loadMermaid()
+				.then((mermaid) => {
+					if (renderVersion !== renderVersionRef.current) {
+						return
+					}
+
+					mermaid.initialize(getMermaidConfig(theme.kind))
+
+					return mermaid.parse(code).then(() => {
+						const id = `mermaid-${Math.random().toString(36).substring(2)}`
+						return mermaid.render(id, code)
+					})
 				})
-				.then(({ svg }) => {
+				.then((result) => {
+					if (!result) {
+						return
+					}
+
 					if (containerRef.current && renderVersion === renderVersionRef.current) {
-						containerRef.current.innerHTML = svg
+						containerRef.current.innerHTML = result.svg
 					}
 				})
 				.catch((err) => {
 					if (renderVersion === renderVersionRef.current) {
 						console.warn("Mermaid parse/render failed:", err)
-						setError(err.message || "Failed to render Mermaid diagram")
+						setError(err instanceof Error ? err.message : "Failed to render Mermaid diagram")
 					}
 				})
 				.finally(() => {
