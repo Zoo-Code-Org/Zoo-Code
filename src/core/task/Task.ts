@@ -95,6 +95,7 @@ import { calculateApiCostAnthropic, calculateApiCostOpenAI } from "../../shared/
 import { getWorkspacePath } from "../../utils/path"
 import { sanitizeToolUseId } from "../../utils/tool-id"
 import { getTaskDirectoryPath } from "../../utils/storage"
+import { stripThinkingTags } from "../../utils/text-normalization"
 
 // prompts
 import { formatResponse } from "../prompts/responses"
@@ -234,6 +235,38 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 	}
 
 	return { response: "messageResponse", requiresDurableAck: type === "completion_result" }
+}
+
+/**
+ * Whether an assistant API turn already carries the complete text of a streamed
+ * `say("text")` bubble that was interrupted before its UI finalize.
+ *
+ * `recursivelyMakeRooRequests` appends the assistant turn to API history before it
+ * releases the streaming presenter that clears the bubble's `partial` flag, so an
+ * abort landing between those two steps leaves a partial bubble and a complete
+ * turn coexisting. The bubble's text is then not orphaned and must not be
+ * discarded.
+ *
+ * The turn must be the LAST API message, not merely the last assistant one. An
+ * abort before the append throws at the post-stream guard, so API history keeps
+ * ending on that request's user turn while the bubble stays partial; matching an
+ * older assistant turn there would finalize text the model does not actually
+ * have, purely because the model happened to repeat itself.
+ *
+ * The comparison re-applies the streaming-time `<thinking>` strip that
+ * `presentAssistantMessage` applies to the bubble but not to the raw accumulator
+ * the API turn is built from. Both sites call the same `stripThinkingTags`, so the
+ * two cannot drift apart.
+ */
+function hasAssistantTextTurnFor(apiMessages: ApiMessage[], partialText: string): boolean {
+	const expected = stripThinkingTags(partialText)
+	const lastTurn = apiMessages.at(-1)
+
+	if (lastTurn?.role !== "assistant" || !Array.isArray(lastTurn.content)) {
+		return false
+	}
+
+	return lastTurn.content.some((block) => block.type === "text" && stripThinkingTags(block.text) === expected)
 }
 
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
@@ -3145,15 +3178,32 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}
 			}
 
-			// Incomplete reasoning has no matching API-history entry and would become
-			// an orphaned bubble when the resumed request starts fresh reasoning.
+			// A trailing partial `reasoning` or `text` bubble keeps the webview in its
+			// streaming state, which leaves the resumed chat stuck on "API Request..." with
+			// an input that only queues (see #257). Other partial say types (e.g. command
+			// output) record work that already ran, so they are kept.
+			//
+			// The two types are not equally orphaned, though. `recursivelyMakeRooRequests`
+			// appends the assistant turn to API history before it releases the streaming
+			// presenter that clears the bubble's `partial` flag, so an abort landing between
+			// those two steps leaves a partial text bubble whose complete text is already in
+			// API history. Those are restored below as finalized rows instead of being
+			// discarded; reasoning keeps the plain drop because it is never re-rendered
+			// from API history.
+			const trailingPartialStreamBubbles: ClineMessage[] = []
+
 			while (modifiedClineMessages.length > 0) {
 				const lastMessage = modifiedClineMessages[modifiedClineMessages.length - 1]
-				if (lastMessage.type === "say" && lastMessage.say === "reasoning" && lastMessage.partial === true) {
-					modifiedClineMessages.pop()
-				} else {
+				const isPartialStreamBubble =
+					lastMessage.type === "say" &&
+					(lastMessage.say === "reasoning" || lastMessage.say === "text") &&
+					lastMessage.partial === true
+
+				if (!isPartialStreamBubble) {
 					break
 				}
+
+				trailingPartialStreamBubbles.unshift(modifiedClineMessages.pop()!)
 			}
 
 			// Since we don't use `api_req_finished` anymore, we need to check if the
@@ -3180,6 +3230,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const savedApiConversationHistory = await this.getSavedApiConversationHistory()
 			if (this.abort || this.abandoned) {
 				return
+			}
+
+			// Restore the interrupted text bubbles whose complete text already reached API
+			// history, as finalized rows. Clearing `partial` is what keeps the retention from
+			// re-locking the chat: ChatView's streaming memo returns true for any trailing
+			// `partial === true` row (ChatView.tsx:583-587), so a retained partial would
+			// reintroduce exactly the #257 lock this cleanup exists to remove.
+			for (const bubble of trailingPartialStreamBubbles) {
+				if (bubble.say === "text" && hasAssistantTextTurnFor(savedApiConversationHistory, bubble.text ?? "")) {
+					modifiedClineMessages.push({ ...bubble, partial: false })
+				}
 			}
 
 			// Avoid a standalone write during hydration. The resume ask will persist only
