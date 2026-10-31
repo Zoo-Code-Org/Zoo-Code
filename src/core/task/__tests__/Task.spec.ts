@@ -1442,6 +1442,29 @@ describe("Cline", () => {
 			expect(JSON.stringify(truncatedCallResult)).toContain("missing nativeArgs")
 		})
 	})
+	describe("observation registry is task-local (S3, epic #1375)", () => {
+		it("gives each Task its own observation registry", () => {
+			const firstTask = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "first observation task",
+				startTask: false,
+			})
+			const secondTask = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "second observation task",
+				startTask: false,
+			})
+
+			// The guarded-write contract assumes an observation in one task never validates
+			// a write issued by another task, so the registries must not be shared state.
+			expect(firstTask.observationRegistry).not.toBe(secondTask.observationRegistry)
+			firstTask.observationRegistry.observe("/workspace/a.ts", "v-a")
+			expect(firstTask.observationRegistry.get("/workspace/a.ts")?.version).toBe("v-a")
+			expect(secondTask.observationRegistry.get("/workspace/a.ts")).toBeUndefined()
+		})
+	})
 
 	describe("create", () => {
 		it("rejects missing task inputs before constructing the task", () => {
@@ -1818,6 +1841,22 @@ describe("Cline", () => {
 			task.api = Object.assign(Object.create(task.api), { dispose })
 			return dispose
 		}
+
+		it("clears the observation registry when the task is disposed", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "t",
+				startTask: false,
+			})
+			task.observationRegistry.observe("/tmp/observed.txt", "v1")
+			expect(task.observationRegistry.get("/tmp/observed.txt")).toBeDefined()
+
+			await task.dispose()
+
+			// The registry is task-owned: its per-path entries must not outlive disposal.
+			expect(task.observationRegistry.get("/tmp/observed.txt")).toBeUndefined()
+		})
 
 		it("disposes the replaced handler when the configuration changes while idle", async () => {
 			const task = new Task({

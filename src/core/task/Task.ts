@@ -106,6 +106,7 @@ import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 import { ToolRepetitionDetector } from "../tools/ToolRepetitionDetector"
 import { restoreTodoListForTask } from "../tools/UpdateTodoListTool"
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
+import { ObservationRegistry } from "./observationRegistry"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
@@ -292,6 +293,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	readonly instanceId: string
 	readonly metadata: TaskMetadata
+
+	// The observed on-disk version of each file this task has read. Declared here so the
+	// read tools can record it; a write guard later compares a token against this registry.
+	readonly observationRegistry = new ObservationRegistry()
 
 	todoList?: TodoItem[]
 
@@ -3624,6 +3629,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async disposeOnce(): Promise<void> {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
 		this.cancelAssistantMessagePersistence()
+
+		// The observation registry is task-owned: clear it during disposal so its
+		// per-path Map cannot outlive the task that owns it.
+		try {
+			this.observationRegistry.clear()
+		} catch (error) {
+			console.error("Error clearing observation registry:", error)
+		}
 
 		// Release handler-owned host resources (e.g. VS Code configuration listeners).
 		// This is the fallback for leases that never settle; later lease releases
