@@ -6047,15 +6047,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				rateLimitDelay = Math.ceil(Math.min(rateLimit, Math.max(0, rateLimit * 1000 - elapsed) / 1000))
 			}
 
-			// Prefer RetryInfo on 429 if present
+			// Treat provider retry hints as a minimum delay. Native Responses API
+			// streams can report rate limits in-band and include retry-after metadata
+			// even though the original HTTP status was 200.
 			if (error?.status === 429) {
 				const retryInfo = error?.errorDetails?.find(
 					(d: any) => d["@type"] === "type.googleapis.com/google.rpc.RetryInfo",
 				)
 				const match = retryInfo?.retryDelay?.match?.(/^(\d+)s$/)
 				if (match) {
-					exponentialDelay = Number(match[1]) + 1
+					exponentialDelay = Math.max(exponentialDelay, Number(match[1]) + 1)
 				}
+				const retryAfterSeconds = error?.retryAfterSeconds
+				if (
+					typeof retryAfterSeconds === "number" &&
+					Number.isFinite(retryAfterSeconds) &&
+					retryAfterSeconds > 0
+				) {
+					exponentialDelay = Math.max(exponentialDelay, Math.ceil(retryAfterSeconds))
+				}
+				exponentialDelay = Math.min(exponentialDelay, MAX_EXPONENTIAL_BACKOFF_SECONDS)
 			}
 
 			const finalDelay = Math.max(exponentialDelay, rateLimitDelay)

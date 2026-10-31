@@ -34,6 +34,96 @@ import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 
 export type OpenAiNativeModel = ReturnType<OpenAiNativeHandler["getModel"]>
 
+/**
+ * The Responses API may report throttling as an in-band stream error while the
+ * HTTP request itself succeeded. Preserve the status so Task's retry/backoff
+ * path can distinguish provider throttling from an ordinary stream failure.
+ */
+function getOpenAiNativeErrorStatus(error: unknown, message: string): number | undefined {
+	if (error && typeof error === "object") {
+		const details = error as { status?: unknown; statusCode?: unknown; code?: unknown }
+		const status = details.status ?? details.statusCode
+		if (typeof status === "number" && Number.isInteger(status)) {
+			return status
+		}
+		if (details.code === 429) {
+			return 429
+		}
+		if (typeof details.code === "string" && /rate[_ -]?limit|too[_ -]?many[_ -]?requests/i.test(details.code)) {
+			return 429
+		}
+	}
+
+	return /rate[\s_-]*limit|too many requests|throttl(?:e|ed|ing)/i.test(message) ? 429 : undefined
+}
+
+function parseOpenAiNativeRetryAfter(value: unknown, milliseconds = false): number | undefined {
+	if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+		return Math.ceil(milliseconds ? value / 1000 : value)
+	}
+	if (typeof value !== "string" || !value.trim()) {
+		return undefined
+	}
+
+	const normalized = value.trim()
+	const numeric = Number(normalized)
+	if (Number.isFinite(numeric) && numeric >= 0) {
+		return Math.ceil(milliseconds ? numeric / 1000 : numeric)
+	}
+	const duration = normalized.match(/^(\d+(?:\.\d+)?)(ms|s)$/i)
+	if (duration) {
+		const amount = Number(duration[1])
+		return Math.ceil(duration[2].toLowerCase() === "ms" ? amount / 1000 : amount)
+	}
+
+	const date = Date.parse(normalized)
+	return Number.isFinite(date) ? Math.max(0, Math.ceil((date - Date.now()) / 1000)) : undefined
+}
+
+function getOpenAiNativeRetryAfterSeconds(error: unknown): number | undefined {
+	if (!error || typeof error !== "object") {
+		return undefined
+	}
+
+	const details = error as {
+		retryAfter?: unknown
+		retry_after?: unknown
+		retryAfterSeconds?: unknown
+		retry_after_seconds?: unknown
+		retryAfterMs?: unknown
+		retry_after_ms?: unknown
+	}
+	const seconds =
+		parseOpenAiNativeRetryAfter(details.retryAfterSeconds) ??
+		parseOpenAiNativeRetryAfter(details.retry_after_seconds) ??
+		parseOpenAiNativeRetryAfter(details.retryAfter) ??
+		parseOpenAiNativeRetryAfter(details.retry_after) ??
+		parseOpenAiNativeRetryAfter(details.retryAfterMs, true) ??
+		parseOpenAiNativeRetryAfter(details.retry_after_ms, true)
+	return seconds !== undefined && seconds > 0 ? seconds : undefined
+}
+
+function getOpenAiNativeRetryAfterHeaderSeconds(headers?: Headers): number | undefined {
+	if (!headers) {
+		return undefined
+	}
+	return (
+		parseOpenAiNativeRetryAfter(headers.get("retry-after-ms"), true) ??
+		parseOpenAiNativeRetryAfter(headers.get("retry-after")) ??
+		parseOpenAiNativeRetryAfter(headers.get("x-ratelimit-reset-tokens"))
+	)
+}
+
+function addOpenAiNativeRetryMetadata<T extends Error>(error: T, status?: number, retryAfterSeconds?: number): T {
+	if (status !== undefined) {
+		Object.assign(error, { status })
+	}
+	if (retryAfterSeconds !== undefined) {
+		Object.assign(error, { retryAfterSeconds })
+	}
+	return error
+}
+
 export class OpenAiNativeHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 	private client: OpenAI
@@ -562,8 +652,11 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		_messages?: Anthropic.Messages.MessageParam[],
 	): ApiStream {
 		const apiKey = this.options.openAiNativeApiKey ?? NOT_PROVIDED
-		const baseUrl = this.options.openAiNativeBaseUrl || "https://api.openai.com"
-		const url = `${baseUrl}/v1/responses`
+		const baseUrl = (this.options.openAiNativeBaseUrl || "https://api.openai.com").replace(/\/+$/, "")
+		// The OpenAI SDK accepts both an origin and a versioned base URL. Mirror
+		// that behavior in the manual SSE fallback to avoid requesting /v1/v1/responses.
+		const versionedBaseUrl = /\/v1$/i.test(baseUrl) ? baseUrl : `${baseUrl}/v1`
+		const url = `${versionedBaseUrl}/responses`
 
 		// Create AbortController for cancellation
 		this.abortController = new AbortController()
@@ -591,10 +684,12 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 				let errorMessage = `OpenAI Responses API request failed (${response.status})`
 				let errorDetails = ""
+				let errorMetadata: unknown
 
 				// Try to parse error as JSON for better error messages
 				try {
 					const errorJson = JSON.parse(errorText)
+					errorMetadata = errorJson.error ?? errorJson
 					if (errorJson.error?.message) {
 						errorDetails = errorJson.error.message
 					} else if (errorJson.message) {
@@ -619,8 +714,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 						errorMessage = "Access denied. Your API key may not have access to this endpoint."
 						break
 					case 404:
-						errorMessage =
-							"Responses API endpoint not found. The endpoint may not be available yet or requires a different configuration."
+						errorMessage = `Responses API returned 404. Verify that the configured base URL exposes /v1/responses and that model "${model.id}" is available to your API account.`
 						break
 					case 429:
 						errorMessage = "Rate limit exceeded. Please try again later."
@@ -639,7 +733,12 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 					errorMessage += ` - ${errorDetails}`
 				}
 
-				throw new Error(errorMessage)
+				throw addOpenAiNativeRetryMetadata(
+					new Error(errorMessage),
+					response.status,
+					getOpenAiNativeRetryAfterHeaderSeconds(response.headers) ??
+						getOpenAiNativeRetryAfterSeconds(errorMetadata),
+				)
 			}
 
 			if (!response.body) {
@@ -647,20 +746,29 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			}
 
 			// Handle streaming response
-			yield* this.handleStreamResponse(response.body, model)
+			yield* this.handleStreamResponse(
+				response.body,
+				model,
+				getOpenAiNativeRetryAfterHeaderSeconds(response.headers),
+			)
 		} catch (error) {
 			const model = this.getModel()
 			const errorMessage = error instanceof Error ? error.message : String(error)
-			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")
+			const status = getOpenAiNativeErrorStatus(error, errorMessage)
+			const retryAfterSeconds = getOpenAiNativeRetryAfterSeconds(error)
+			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage", status)
+			addOpenAiNativeRetryMetadata(apiError, status, retryAfterSeconds)
 			TelemetryService.instance.captureException(apiError)
 
 			if (error instanceof Error) {
 				// Re-throw with the original error message if it's already formatted
 				if (error.message.includes("Responses API")) {
+					addOpenAiNativeRetryMetadata(error, status, retryAfterSeconds)
 					throw error
 				}
 				// Otherwise, wrap it with context
-				throw new Error(`Failed to connect to Responses API: ${error.message}`)
+				const wrappedError = new Error(`Failed to connect to Responses API: ${error.message}`)
+				throw addOpenAiNativeRetryMetadata(wrappedError, status, retryAfterSeconds)
 			}
 			// Handle non-Error objects
 			throw new Error(`Unexpected error connecting to Responses API`)
@@ -676,7 +784,11 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	 * and yields structured data chunks (`ApiStream`). It handles a wide variety of event types,
 	 * including text deltas, reasoning, usage data, and various status/tool events.
 	 */
-	private async *handleStreamResponse(body: ReadableStream<Uint8Array>, model: OpenAiNativeModel): ApiStream {
+	private async *handleStreamResponse(
+		body: ReadableStream<Uint8Array>,
+		model: OpenAiNativeModel,
+		responseRetryAfterSeconds?: number,
+	): ApiStream {
 		const reader = body.getReader()
 		const decoder = new TextDecoder()
 		let buffer = ""
@@ -991,9 +1103,12 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 							else if (parsed.type === "response.error" || parsed.type === "error") {
 								// Error event from the API
 								if (parsed.error || parsed.message) {
-									throw new Error(
-										`Responses API error: ${parsed.error?.message || parsed.message || "Unknown error"}`,
-									)
+									const message = parsed.error?.message || parsed.message || "Unknown error"
+									const streamError = new Error(`Responses API error: ${message}`)
+									const status = getOpenAiNativeErrorStatus(parsed.error, message)
+									const retryAfterSeconds =
+										getOpenAiNativeRetryAfterSeconds(parsed.error) ?? responseRetryAfterSeconds
+									throw addOpenAiNativeRetryMetadata(streamError, status, retryAfterSeconds)
 								}
 							}
 							// Handle incomplete event
@@ -1012,9 +1127,12 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 							else if (parsed.type === "response.failed") {
 								// Response failed
 								if (parsed.error || parsed.message) {
-									throw new Error(
-										`Response failed: ${parsed.error?.message || parsed.message || "Unknown failure"}`,
-									)
+									const message = parsed.error?.message || parsed.message || "Unknown failure"
+									const streamError = new Error(`Response failed: ${message}`)
+									const status = getOpenAiNativeErrorStatus(parsed.error, message)
+									const retryAfterSeconds =
+										getOpenAiNativeRetryAfterSeconds(parsed.error) ?? responseRetryAfterSeconds
+									throw addOpenAiNativeRetryMetadata(streamError, status, retryAfterSeconds)
 								}
 							} else if (parsed.type === "response.completed" || parsed.type === "response.done") {
 								// Capture top-level response id
@@ -1129,7 +1247,10 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			// No captureException here: the createMessage catch captures this
 			// failure once when the rethrown error propagates.
 			if (error instanceof Error) {
-				throw new Error(`Error processing response stream: ${error.message}`)
+				const wrappedError = new Error(`Error processing response stream: ${error.message}`)
+				const status = getOpenAiNativeErrorStatus(error, error.message)
+				const retryAfterSeconds = getOpenAiNativeRetryAfterSeconds(error) ?? responseRetryAfterSeconds
+				throw addOpenAiNativeRetryMetadata(wrappedError, status, retryAfterSeconds)
 			}
 			throw new Error("Unexpected error processing response stream")
 		} finally {
