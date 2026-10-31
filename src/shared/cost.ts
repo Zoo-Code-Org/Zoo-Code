@@ -47,8 +47,16 @@ function calculateApiCostInternal(
 	totalInputTokens: number,
 	totalOutputTokens: number,
 ): ApiCostResult {
-	const cacheWritesCost = ((modelInfo.cacheWritesPrice || 0) / 1_000_000) * cacheCreationInputTokens
-	const cacheReadsCost = ((modelInfo.cacheReadsPrice || 0) / 1_000_000) * cacheReadInputTokens
+	// Cache tokens are billed at the model's cache price when it has one, and at
+	// its input price when the catalog omits the cache price entirely. The
+	// inner `??` (not `||`) is load-bearing: an explicit `cacheWritesPrice: 0`
+	// is a real price for providers that charge nothing for writes, and `||`
+	// would silently re-price those rows at `inputPrice`. The outer `|| 0`
+	// covers a fully unpriced model, where `undefined * 0` would be `NaN`.
+	const cacheWritesCost =
+		(((modelInfo.cacheWritesPrice ?? modelInfo.inputPrice) || 0) / 1_000_000) * cacheCreationInputTokens
+	const cacheReadsCost =
+		(((modelInfo.cacheReadsPrice ?? modelInfo.inputPrice) || 0) / 1_000_000) * cacheReadInputTokens
 	const baseInputCost = ((modelInfo.inputPrice || 0) / 1_000_000) * inputTokens
 	const outputCost = ((modelInfo.outputPrice || 0) / 1_000_000) * outputTokens
 	const totalCost = cacheWritesCost + cacheReadsCost + baseInputCost + outputCost

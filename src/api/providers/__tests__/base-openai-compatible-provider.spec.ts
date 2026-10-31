@@ -51,6 +51,32 @@ class TestOpenAiCompatibleProvider extends BaseOpenAiCompatibleProvider<"test-mo
 	}
 }
 
+// A provider whose catalog row publishes an explicit zero cache-write price,
+// the shape friendli and moonshot ship. It exists so the miss-token path can be
+// priced end to end rather than only asserted as a token label.
+const ZERO_WRITE_PRICE_MODEL_INFO: ModelInfo = {
+	maxTokens: 4096,
+	contextWindow: 128000,
+	supportsImages: false,
+	supportsPromptCache: true,
+	inputPrice: 1.4,
+	outputPrice: 4.4,
+	cacheWritesPrice: 0,
+	cacheReadsPrice: 0.26,
+}
+
+class ZeroWritePriceProvider extends BaseOpenAiCompatibleProvider<"zero-write"> {
+	constructor(apiKey: string) {
+		super({
+			providerName: "ZeroWriteProvider",
+			baseURL: "https://test.example.com/v1",
+			defaultProviderModelId: "zero-write",
+			providerModels: { "zero-write": ZERO_WRITE_PRICE_MODEL_INFO },
+			apiKey,
+		})
+	}
+}
+
 describe("BaseOpenAiCompatibleProvider", () => {
 	let handler: TestOpenAiCompatibleProvider
 
@@ -354,23 +380,29 @@ describe("BaseOpenAiCompatibleProvider", () => {
 				])
 			})
 
-			it("reads the DeepSeek top-level hit and miss counters", async () => {
-				expect(
-					await usageChunksFor({
-						prompt_tokens: 100,
-						completion_tokens: 50,
-						prompt_cache_hit_tokens: 20,
-						prompt_cache_miss_tokens: 30,
-					}),
-				).toEqual([
-					expect.objectContaining({
-						type: "usage",
-						inputTokens: 100,
-						outputTokens: 50,
-						cacheReadTokens: 20,
-						cacheWriteTokens: 30,
-					}),
-				])
+			it("bills a DeepSeek-shaped miss counter as ordinary input, not as a cache write", async () => {
+				// The base class serves baseten/fireworks/friendli/sambanova/zai, none of
+				// which price misses through the cache-write field. A miss is input that
+				// `prompt_tokens` already covers, so it must stay in the input bucket.
+				const [chunk] = await usageChunksFor({
+					prompt_tokens: 100,
+					completion_tokens: 50,
+					prompt_cache_hit_tokens: 20,
+					prompt_cache_miss_tokens: 30,
+				})
+
+				expect(chunk).toMatchObject({
+					type: "usage",
+					inputTokens: 100,
+					outputTokens: 50,
+					cacheReadTokens: 20,
+				})
+				expect(chunk.cacheWriteTokens).toBeUndefined()
+
+				// TEST_MODEL_INFO prices input at 0.5 and output at 1.5 with no cache
+				// prices, so both the 80 uncached tokens and the 20 reads bill at the
+				// input price: (100 * 0.5 + 50 * 1.5) / 1e6.
+				expect(chunk.totalCost).toBeCloseTo(0.000125, 9)
 			})
 
 			it("never sums two shapes that report the same quantity", async () => {
@@ -395,6 +427,41 @@ describe("BaseOpenAiCompatibleProvider", () => {
 						cacheWriteTokens: 30,
 					}),
 				])
+			})
+
+			it("bills a miss on an explicit-zero cache-write row at the input price", async () => {
+				// friendli and moonshot publish `cacheWritesPrice: 0`, so the kernel fix
+				// alone cannot repair this shape: a miss routed to the write bucket is
+				// still billed at zero. Only keeping misses out of that bucket bills them.
+				mockCreate.mockImplementationOnce(() =>
+					asyncStreamFrom([
+						{
+							choices: [{ delta: {} }],
+							usage: {
+								prompt_tokens: 1000,
+								completion_tokens: 500,
+								prompt_cache_hit_tokens: 100,
+								prompt_cache_miss_tokens: 400,
+							},
+						},
+					]),
+				)
+
+				const chunks = await collectStream(new ZeroWritePriceProvider("test-api-key").createMessage("s", []))
+				const [chunk] = chunks.filter((c) => c.type === "usage")
+
+				expect(chunk.cacheWriteTokens).toBeUndefined()
+
+				// The 400 misses stay inside prompt_tokens, so they are priced as input.
+				// Uncached input: (1.4 / 1_000_000) * 900 = 0.00126
+				// Cache reads: (0.26 / 1_000_000) * 100 = 0.000026
+				// Output cost: (4.4 / 1_000_000) * 500 = 0.0022
+				// Total: 0.00126 + 0.000026 + 0.0022 = 0.003486
+				expect(chunk.totalCost).toBeCloseTo(0.003486, 9)
+
+				// The defect moved those 400 tokens onto the row's zero write price and
+				// out of the input pool, billing 0.002926: 16.1% short.
+				expect(chunk.totalCost).not.toBeCloseTo(0.002926, 9)
 			})
 
 			it("reports no cache counters when the provider reports none", async () => {

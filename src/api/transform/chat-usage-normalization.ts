@@ -36,30 +36,53 @@ export interface NormalizedChatUsage {
 	 */
 	cacheReadTokens?: number
 	cacheWriteTokens?: number
+	/**
+	 * Tokens that were looked up in the prompt cache and not found. These are
+	 * ordinary input tokens for every provider except DeepSeek, so they are
+	 * reported separately and are never folded into `cacheWriteTokens`.
+	 * `undefined` when the provider reported no such counter at all, which is
+	 * distinct from a reported zero.
+	 */
+	cacheMissTokens?: number
 }
 
 /**
- * Aliases for cache-write (cache-miss) tokens, highest priority first.
+ * Aliases for true cache-write tokens, highest priority first.
  *
- * DeepSeek documents `prompt_cache_miss_tokens` at the top level of the usage
- * object and marks it required; its `prompt_tokens_details` schema declares
- * only `cached_tokens`. `prompt_tokens_details.cache_miss_tokens` is not part
- * of that schema and is kept last as a legacy fallback for proxies that
- * forwarded a rewritten shape.
+ * A cache write is a token the provider durably stored for reuse on a later
+ * request. It is billed at the provider's cache-write price, which is often
+ * zero (a write surcharge is not universal) but is a real, separate counter.
  *
  * `cache_creation_input_tokens` is the Anthropic-style top-level counter that
- * LiteLLM publishes for cached writes. It sits below every DeepSeek alias so
- * the documented DeepSeek shape keeps priority, and it is reached only by
- * providers that publish no DeepSeek counter at all.
+ * LiteLLM publishes for cached writes.
  *
  * https://api-docs.deepseek.com/api/create-chat-completion
  */
-const CACHE_WRITE_ALIASES = [
-	"prompt_cache_miss_tokens",
-	"prompt_tokens_details.cache_miss_tokens",
-	"prompt_tokens_details.cache_write_tokens",
-	"cache_creation_input_tokens",
-] as const
+const CACHE_WRITE_ALIASES = ["prompt_tokens_details.cache_write_tokens", "cache_creation_input_tokens"] as const
+
+/**
+ * Aliases for cache-miss tokens, highest priority first.
+ *
+ * A cache miss is a token that was looked up in the prompt cache and not
+ * found. Economically it is the opposite of a write: it is ordinary input
+ * that the provider already charges for through `prompt_tokens`, and it must
+ * not be moved onto the cache-write price line, because doing so removes it
+ * from the input bucket (`cost.ts` subtracts cache writes from the input
+ * total) and re-prices it at a cache-write rate that most catalogs leave
+ * unset, billing it at zero.
+ *
+ * `openai-native.ts` already states this rule and applies it: "missFromDetails
+ * is NOT used as fallback for cache writes". This module now agrees with it.
+ *
+ * DeepSeek is the one provider whose catalog prices misses through the
+ * cache-write field: all four `deepSeekModels` rows set `inputPrice: 0` by
+ * design ("the inputs are priced as cache read/write") and publish
+ * `cacheWritesPrice`. Only `DeepSeekHandler` therefore opts in to reading
+ * this list; see `processUsageMetrics` in `providers/deepseek.ts`.
+ *
+ * https://api-docs.deepseek.com/api/create-chat-completion
+ */
+const CACHE_MISS_ALIASES = ["prompt_cache_miss_tokens", "prompt_tokens_details.cache_miss_tokens"] as const
 
 /**
  * Aliases for cache-read (cache-hit) tokens, highest priority first.
@@ -204,17 +227,23 @@ const resolveTokenCount = (usage: ChatUsageLike, aliases: readonly string[]): nu
  * usage chunk entirely. Token counts that the provider did not report stay
  * `undefined` rather than defaulting to 0, which keeps "no cache counter" and
  * "zero cache hits" distinguishable for cost reporting.
+ *
+ * `cacheMissTokens` is reported but not merged into `cacheWriteTokens`: a miss
+ * is ordinary input, and only DeepSeek's catalog prices it as a write. Callers
+ * that bill misses as writes must opt in explicitly.
  */
 export function normalizeChatUsage(usage: ChatUsageLike | null | undefined): NormalizedChatUsage | undefined {
 	if (!usage || typeof usage !== "object") return undefined
 
 	const cacheReadTokens = resolveTokenCount(usage, CACHE_READ_ALIASES)
 	const cacheWriteTokens = resolveTokenCount(usage, CACHE_WRITE_ALIASES)
+	const cacheMissTokens = resolveTokenCount(usage, CACHE_MISS_ALIASES)
 
 	return {
 		inputTokens: asTokenCount(usage.prompt_tokens, "prompt_tokens") ?? 0,
 		outputTokens: asTokenCount(usage.completion_tokens, "completion_tokens") ?? 0,
 		...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
 		...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+		...(cacheMissTokens !== undefined ? { cacheMissTokens } : {}),
 	}
 }

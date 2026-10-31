@@ -32,11 +32,11 @@ describe("normalizeChatUsage", () => {
 			inputTokens: 7,
 			outputTokens: 11,
 			cacheReadTokens: 0,
-			cacheWriteTokens: 7,
+			cacheMissTokens: 7,
 		})
 	})
 
-	it("reads a top-level-only usage object with no nested details", () => {
+	it("reports a top-level-only miss counter as a miss, not a write", () => {
 		expect(
 			normalizeChatUsage({
 				prompt_tokens: 120,
@@ -44,7 +44,7 @@ describe("normalizeChatUsage", () => {
 				prompt_cache_hit_tokens: 100,
 				prompt_cache_miss_tokens: 20,
 			}),
-		).toEqual({ inputTokens: 120, outputTokens: 30, cacheReadTokens: 100, cacheWriteTokens: 20 })
+		).toEqual({ inputTokens: 120, outputTokens: 30, cacheReadTokens: 100, cacheMissTokens: 20 })
 	})
 
 	it("reads the nested-only shape used by OpenAI and by legacy DeepSeek fixtures", () => {
@@ -54,11 +54,11 @@ describe("normalizeChatUsage", () => {
 				completion_tokens: 50,
 				prompt_tokens_details: { cached_tokens: 20, cache_miss_tokens: 80 },
 			}),
-		).toEqual({ inputTokens: 100, outputTokens: 50, cacheReadTokens: 20, cacheWriteTokens: 80 })
+		).toEqual({ inputTokens: 100, outputTokens: 50, cacheReadTokens: 20, cacheMissTokens: 80 })
 	})
 
 	it("does not add the nested and top-level shapes together when both are present", () => {
-		// Both shapes describe the same 100 reads / 20 writes. Summing would
+		// Both shapes describe the same 100 reads / 20 misses. Summing would
 		// report 200 / 40 and double the billed cache tokens.
 		const normalized = normalizeChatUsage({
 			prompt_tokens: 120,
@@ -69,7 +69,7 @@ describe("normalizeChatUsage", () => {
 		})
 
 		expect(normalized?.cacheReadTokens).toBe(100)
-		expect(normalized?.cacheWriteTokens).toBe(20)
+		expect(normalized?.cacheMissTokens).toBe(20)
 	})
 
 	it("prefers the nested cached_tokens over the top-level hit counter for reads", () => {
@@ -82,13 +82,13 @@ describe("normalizeChatUsage", () => {
 		).toBe(100)
 	})
 
-	it("prefers the top-level miss counter over the nested one for writes", () => {
+	it("prefers the top-level miss counter over the nested one", () => {
 		expect(
 			normalizeChatUsage({
 				prompt_tokens: 120,
 				prompt_tokens_details: { cache_miss_tokens: 20 },
 				prompt_cache_miss_tokens: 30,
-			})?.cacheWriteTokens,
+			})?.cacheMissTokens,
 		).toBe(30)
 	})
 
@@ -98,12 +98,59 @@ describe("normalizeChatUsage", () => {
 				prompt_tokens: 120,
 				prompt_cache_miss_tokens: "30",
 				prompt_tokens_details: { cache_miss_tokens: 20 },
-			})?.cacheWriteTokens,
+			})?.cacheMissTokens,
 		).toBe(20)
 	})
 
+	describe("write and miss counters are separate concepts", () => {
+		// A write is a token stored for later reuse; a miss is a token that was
+		// looked up and not found, which is ordinary input. Merging them moves
+		// miss tokens off the input price line and onto the cache-write line,
+		// where most catalogs charge nothing. Each alias must land in exactly
+		// one field, so both lists are pinned here by behavior.
+		it.each(["prompt_cache_miss_tokens", "prompt_tokens_details.cache_miss_tokens"])(
+			"reports %s as a miss and never as a write",
+			(alias) => {
+				const usage = alias.includes(".")
+					? { prompt_tokens: 100, prompt_tokens_details: { cache_miss_tokens: 40 } }
+					: { prompt_tokens: 100, prompt_cache_miss_tokens: 40 }
+
+				const normalized = normalizeChatUsage(usage)
+
+				expect(normalized?.cacheMissTokens).toBe(40)
+				expect(normalized).not.toHaveProperty("cacheWriteTokens")
+			},
+		)
+
+		it.each(["prompt_tokens_details.cache_write_tokens", "cache_creation_input_tokens"])(
+			"reports %s as a write and never as a miss",
+			(alias) => {
+				const usage = alias.includes(".")
+					? { prompt_tokens: 100, prompt_tokens_details: { cache_write_tokens: 40 } }
+					: { prompt_tokens: 100, cache_creation_input_tokens: 40 }
+
+				const normalized = normalizeChatUsage(usage)
+
+				expect(normalized?.cacheWriteTokens).toBe(40)
+				expect(normalized).not.toHaveProperty("cacheMissTokens")
+			},
+		)
+
+		it("resolves a write and a miss from the same response without shadowing either", () => {
+			// 20 tokens were written into the cache and 40 were looked up but not
+			// found. They are different tokens, so both counters survive.
+			expect(
+				normalizeChatUsage({
+					prompt_tokens: 120,
+					prompt_cache_miss_tokens: 40,
+					cache_creation_input_tokens: 20,
+				}),
+			).toMatchObject({ cacheWriteTokens: 20, cacheMissTokens: 40 })
+		})
+	})
+
 	describe("cache_creation_input_tokens (LiteLLM write shape)", () => {
-		it("reads the LiteLLM top-level write counter when no DeepSeek write alias is present", () => {
+		it("reads the LiteLLM top-level write counter when no other write alias is present", () => {
 			expect(
 				normalizeChatUsage({
 					prompt_tokens: 100,
@@ -114,27 +161,7 @@ describe("normalizeChatUsage", () => {
 			).toEqual({ inputTokens: 100, outputTokens: 50, cacheReadTokens: 30, cacheWriteTokens: 20 })
 		})
 
-		it("keeps the documented DeepSeek top-level miss counter ahead of it", () => {
-			// Both describe the same writes. DeepSeek's documented shape wins and
-			// the two are never added together.
-			expect(
-				normalizeChatUsage({
-					prompt_tokens: 120,
-					prompt_cache_miss_tokens: 20,
-					cache_creation_input_tokens: 20,
-				})?.cacheWriteTokens,
-			).toBe(20)
-		})
-
-		it("keeps every DeepSeek write alias ahead of it", () => {
-			expect(
-				normalizeChatUsage({
-					prompt_tokens: 120,
-					prompt_tokens_details: { cache_miss_tokens: 20 },
-					cache_creation_input_tokens: 99,
-				})?.cacheWriteTokens,
-			).toBe(20)
-
+		it("keeps the nested cache_write_tokens alias ahead of it", () => {
 			expect(
 				normalizeChatUsage({
 					prompt_tokens: 120,
@@ -144,12 +171,11 @@ describe("normalizeChatUsage", () => {
 			).toBe(20)
 		})
 
-		it("does not sum it with a DeepSeek write alias reporting the same quantity", () => {
+		it("does not sum it with a write alias reporting the same quantity", () => {
 			const normalized = normalizeChatUsage({
 				prompt_tokens: 120,
 				completion_tokens: 30,
-				prompt_cache_miss_tokens: 20,
-				prompt_tokens_details: { cache_miss_tokens: 20, cache_write_tokens: 20 },
+				prompt_tokens_details: { cache_write_tokens: 20 },
 				cache_creation_input_tokens: 20,
 			})
 
@@ -172,7 +198,7 @@ describe("normalizeChatUsage", () => {
 					prompt_tokens: 120,
 					prompt_cache_miss_tokens: malformed,
 					prompt_tokens_details: { cache_miss_tokens: 20 },
-				})?.cacheWriteTokens,
+				})?.cacheMissTokens,
 			).toBe(20)
 		})
 
@@ -242,7 +268,7 @@ describe("normalizeChatUsage", () => {
 						prompt_tokens: 120,
 						prompt_cache_miss_tokens: "30",
 						prompt_tokens_details: { cache_miss_tokens: 20 },
-					})?.cacheWriteTokens,
+					})?.cacheMissTokens,
 				).toBe(20)
 			} finally {
 				warn.mockRestore()
