@@ -352,10 +352,10 @@
 		"title": "Zoo Code {{version}} est disponible",
 		"support": "Soutiens Zoo Code en nous donnant une étoile sur <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Nouveautés de Zoo Code v3.92.0",
-			"highlight1": "✨ Choix de modèle plus rapide et meilleure prise en charge des modèles : Change de modèle depuis la zone de saisie du chat. Utilise Claude Haiku 5.5 sur Amazon Bedrock, bénéficie de capacités Kimi K3 plus précises sur OpenRouter et profite des limites corrigées de Gemini 4 Argon sur Vercel AI Gateway.",
-			"highlight2": "🧭 Workflows de terminal, d'édition, de chat et à distance plus fiables : Choisis de réduire la sortie des commandes par défaut, obtiens des erreurs d'édition plus claires, garde les lignes de raisonnement et d'API visibles et évite les problèmes de démarrage et de proxy dans les espaces de travail distants.",
-			"highlight3": "🔌 Marketplace MCP enrichi : Connecte Zoo Code à AnySearch, Mailtea et Tradehand via le marketplace MCP."
+			"heading": "Nouveautés de Zoo Code v3.94.0",
+			"highlight1": "✨ Prise en charge plus large des modèles et fournisseurs : Utilise Claude Haiku 5.5 via Anthropic, envoie des images aux modèles VS Code LM compatibles, ajuste la température pour les modèles OpenCode Go Responses et annule les requêtes proprement chez plus de fournisseurs.",
+			"highlight2": "🔐 MCP OAuth plus flexible : Configure des paramètres statiques de client OAuth, utilise des chemins de callback personnalisés, découvre les détails d'authentification dans WWW-Authenticate et vois les échecs de callback avant de réessayer.",
+			"highlight3": "🧭 Chats et longues sessions plus fluides : Renomme les tâches dans l'historique, glisse des fichiers dans le chat sans maintenir Shift, réduis la mémoire conservée pendant les longues sessions et garde stables les liens de sous-tâches et les webviews remplacés."
 		},
 		"cloudAgents": {
 			"heading": "Nouveautés dans le Cloud :",

@@ -9,6 +9,7 @@ import { nanoGptDefaultModelId, providerIdentifiers } from "@roo-code/types"
 
 import { buildApiHandler } from "../../index"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 import { createReadFileTool } from "../../../core/prompts/tools/native-tools/read_file"
 import { NanoGptHandler } from "../nanogpt"
 import { getModels } from "../fetchers/modelCache"
@@ -45,7 +46,7 @@ const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "H
 
 describe("NanoGptHandler", () => {
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		vi.mocked(getModels).mockResolvedValue({
 			"model:thinking": {
 				maxTokens: 128000,
