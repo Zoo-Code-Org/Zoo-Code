@@ -10,6 +10,18 @@ import axios from "axios"
 import debounce from "lodash.debounce"
 import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
+import {
+	WEBVIEW_RECOVERY_LIMITS,
+	preservesRecoveryIncident,
+	resolutionFailureAction,
+	canCommitRecovery,
+	nextRecoveryAttempt,
+	releaseRecoveryOwner,
+	pendingSidebarAfterCommandFailure,
+	recordRecoveryFailure,
+	recoveryHealth,
+	recoveryWarningAction,
+} from "./webviewRecoveryPolicy"
 
 import {
 	type TaskProviderLike,
@@ -258,8 +270,7 @@ export class ClineProvider
 	private webviewHeartbeatCount = 0
 	private webviewHealthySince: number | undefined
 	private static readonly WEBVIEW_RECOVERY_CONFIRM_MS = 10_000
-	private static readonly WEBVIEW_HEALTHY_WINDOW_MS = 60_000
-	private static readonly WEBVIEW_RECOVERY_ATTEMPT_LIMIT = 3
+	private static readonly WEBVIEW_RECOVERY_ATTEMPT_LIMIT = WEBVIEW_RECOVERY_LIMITS.attempts
 	private webviewWatchdogInterval: ReturnType<typeof setInterval> | null = null
 	// Bumped to invalidate an in-flight recovery reload when the provider or
 	// the watched view is disposed; the reload must not reassign webview.html
@@ -275,7 +286,7 @@ export class ClineProvider
 	// instead of counting the suspended interval against a live renderer.
 	private lastWebviewWatchdogTickAt = 0
 	private static readonly WEBVIEW_WATCHDOG_TICK_MS = 60_000
-	private static readonly WEBVIEW_HEARTBEAT_STALE_MS = 90_000
+	private static readonly WEBVIEW_HEARTBEAT_STALE_MS = WEBVIEW_RECOVERY_LIMITS.staleMs
 	private readonly _postStateToWebviewThrottled = debounce(
 		async () => {
 			try {
@@ -867,7 +878,7 @@ export class ClineProvider
 		this.webviewRecoveryEpoch++
 		// User-opened replacements get a fresh budget; recreating a failed host
 		// must preserve its incident budget so crash loops remain bounded.
-		if (!this.webviewHostRecoveryInProgress && !this.pendingSidebarRecovery) {
+		if (!preservesRecoveryIncident(this.webviewHostRecoveryInProgress, this.pendingSidebarRecovery)) {
 			this.webviewRecoveryAttempts = 0
 			this.webviewRecoveryFailureReported = false
 		}
@@ -1078,12 +1089,20 @@ export class ClineProvider
 	async resolveWebviewView(webviewView: vscode.WebviewView | vscode.WebviewPanel) {
 		// Capture intent before yielding: host recovery can time out while this
 		// resolve is still generating HTML or hydrating state.
-		const recoveringHost = this.webviewHostRecoveryInProgress || this.pendingSidebarRecovery
+		const recoveringHost = preservesRecoveryIncident(
+			this.webviewHostRecoveryInProgress,
+			this.pendingSidebarRecovery,
+		)
 		try {
 			await this.initializeWebviewView(webviewView, recoveringHost)
 		} catch (error) {
-			if (!recoveringHost) throw error
-			if (this.isStaleViewResolve(webviewView)) return
+			const action = resolutionFailureAction({
+				recoveringHost,
+				disposed: this._disposed,
+				isCurrent: this.view === webviewView,
+			})
+			if (action === "propagate") throw error
+			if (action === "ignore") return
 			// VS Code invokes sidebar resolution itself, outside the focus command's
 			// promise. Handle both host types here so failed initialization retains
 			// its task, disposal subscription, and remaining recovery attempts.
@@ -3592,12 +3611,15 @@ export class ClineProvider
 	/** A heartbeat confirms liveness; only sustained health replenishes recovery attempts. */
 	public updateWebviewHeartbeat(): void {
 		const now = Date.now()
-		if (
-			this.lastReceivedWebviewHeartbeatAt === undefined ||
-			now - this.lastReceivedWebviewHeartbeatAt > ClineProvider.WEBVIEW_HEARTBEAT_STALE_MS
-		) {
-			this.webviewHealthySince = now
-		}
+		const health = recoveryHealth(
+			{
+				attempts: this.webviewRecoveryAttempts,
+				lastHeartbeatAt: this.lastReceivedWebviewHeartbeatAt,
+				healthySince: this.webviewHealthySince,
+			},
+			now,
+		)
+		this.webviewHealthySince = health.healthySince
 		this.lastReceivedWebviewHeartbeatAt = now
 		this.webviewHeartbeatCount++
 		// A new heartbeat invalidates the old warning action. Allow a fresh warning
@@ -3607,15 +3629,10 @@ export class ClineProvider
 			this.log("[Zoo Code] Webview heartbeat returned after recovery")
 		}
 		this.resetWebviewHeartbeatGrace()
-		if (
-			this.webviewHealthySince !== undefined &&
-			now - this.webviewHealthySince >= ClineProvider.WEBVIEW_HEALTHY_WINDOW_MS
-		) {
-			if (this.webviewRecoveryAttempts > 0)
-				this.log("[Zoo Code] Webview recovery confirmed by sustained heartbeats")
-			this.webviewRecoveryAttempts = 0
-			this.webviewRecoveryFailureReported = false
+		if (health.attempts === 0 && this.webviewRecoveryAttempts > 0) {
+			this.log("[Zoo Code] Webview recovery confirmed by sustained heartbeats")
 		}
+		this.webviewRecoveryAttempts = health.attempts
 	}
 
 	/** Restarts the grace window and invalidates pending recovery without recording a heartbeat. */
@@ -3688,12 +3705,11 @@ export class ClineProvider
 		// second one would only pile another forced reload onto it. Ownership
 		// is scoped to the epoch so a stale recovery (its view disposed or
 		// replaced, epoch bumped) never blocks the replacement view's recovery.
-		if (this.webviewRecoveryInFlightEpoch === epoch) {
-			return
-		}
+		const attempt = nextRecoveryAttempt(this.webviewRecoveryAttempts, this.webviewRecoveryInFlightEpoch === epoch)
+		if (attempt === undefined) return
 		this.webviewRecoveryInFlightEpoch = epoch
 		// Count the whole attempt, including HTML-generation failures.
-		this.webviewRecoveryAttempts++
+		this.webviewRecoveryAttempts = attempt
 		this.lastReceivedWebviewHeartbeatAt = undefined
 		this.webviewHealthySince = undefined
 		// A heartbeat that arrives while the HTML is being generated means the
@@ -3707,11 +3723,13 @@ export class ClineProvider
 			// recovered, or the view hid again would either touch a dead or
 			// unrelated webview or reload one that no longer needs recovery.
 			if (
-				this._disposed ||
-				this.webviewRecoveryEpoch !== epoch ||
-				this.view !== view ||
-				this.webviewHeartbeatRevision !== heartbeatRevision ||
-				view.visible !== true
+				!canCommitRecovery({
+					disposed: this._disposed,
+					isCurrent: this.view === view,
+					epochMatches: this.webviewRecoveryEpoch === epoch,
+					heartbeatMatches: this.webviewHeartbeatRevision === heartbeatRevision,
+					visible: view.visible === true,
+				})
 			) {
 				return
 			}
@@ -3746,9 +3764,7 @@ export class ClineProvider
 		} finally {
 			// Clear ownership only while this completion still holds it; a
 			// stale recovery must not release the replacement's in-flight state.
-			if (this.webviewRecoveryInFlightEpoch === epoch) {
-				this.webviewRecoveryInFlightEpoch = undefined
-			}
+			this.webviewRecoveryInFlightEpoch = releaseRecoveryOwner(this.webviewRecoveryInFlightEpoch, epoch)
 		}
 	}
 
@@ -3821,7 +3837,11 @@ export class ClineProvider
 		} catch (error) {
 			// Only a successful focus can leave a delayed replacement pending.
 			// Command failures must not mark a later manual open as recovery.
-			if (started && !sidebarFocused) this.pendingSidebarRecovery = false
+			this.pendingSidebarRecovery = pendingSidebarAfterCommandFailure({
+				started,
+				focusSucceeded: sidebarFocused,
+				pending: this.pendingSidebarRecovery,
+			})
 			// A late discovery failure must not stop a recovered/replaced view.
 			// Once recreation starts, disposal of the old view is expected.
 			if (
@@ -3847,9 +3867,13 @@ export class ClineProvider
 		if (this._disposed) return
 		// A terminal failure still stops retries if an earlier retryable failure
 		// already showed the notification for this incident.
-		if (stopRecovery) this.webviewRecoveryAttempts = ClineProvider.WEBVIEW_RECOVERY_ATTEMPT_LIMIT
-		if (this.webviewRecoveryFailureReported) return
-		this.webviewRecoveryFailureReported = true
+		const failure = recordRecoveryFailure(
+			{ attempts: this.webviewRecoveryAttempts, reported: this.webviewRecoveryFailureReported },
+			stopRecovery,
+		)
+		this.webviewRecoveryAttempts = failure.attempts
+		this.webviewRecoveryFailureReported = failure.reported
+		if (!failure.notify) return
 		this.log(`[Zoo Code] Webview recovery ${stopRecovery ? "stopped" : "will retry"}: ${reason}`)
 		const heartbeatCount = this.webviewHeartbeatCount
 		void Promise.resolve(
@@ -3859,11 +3883,16 @@ export class ClineProvider
 				"Show Logs",
 			),
 		)
-			.then(async (action) => {
-				if (action === "Reload Window" && !this._disposed && this.webviewHeartbeatCount === heartbeatCount) {
+			.then(async (choice) => {
+				const action = recoveryWarningAction(
+					choice,
+					this._disposed,
+					this.webviewHeartbeatCount === heartbeatCount,
+				)
+				if (action === "reload") {
 					await vscode.commands.executeCommand("workbench.action.reloadWindow")
 				}
-				if (action === "Show Logs") this.outputChannel.show()
+				if (action === "logs") this.outputChannel.show()
 			})
 			.then(undefined, (error: unknown) => {
 				this.log(`[Zoo Code] Recovery notification failed: ${String(error)}`)

@@ -110,6 +110,8 @@ jobs:
               run: pnpm agent-evals:check-types
             - name: Model-check task lifecycle protocols
               run: pnpm lifecycle:model-check
+            - name: Model-check webview recovery
+              run: pnpm webview-recovery:check-types && pnpm webview-recovery:model-check
             - name: Validate MCP OAuth integration
               run: pnpm mcp:integration-check
 

@@ -21,6 +21,8 @@
 		"agent-evals:check-types": "tsc -p scripts/agent-evals/tsconfig.json",
 		"test:mutation-ci": "node --test scripts/stryker-diff.test.mjs",
 		"lifecycle:model-check": "tsx scripts/check-task-lifecycle.ts && tsx scripts/check-task-store-concurrency.ts && tsx scripts/check-provider-handoff-scheduler.ts && pnpm cleanup-protocol:model-check && pnpm parser-scope:model-check && tsx scripts/check-completion-persistence.ts && tsx scripts/check-delegated-mode-readers.ts && pnpm tool-turn:model-check",
+		"webview-recovery:model-check": "node --import tsx scripts/check-webview-recovery.ts",
+		"webview-recovery:check-types": "tsc -p scripts/tsconfig.webview-recovery.json",
 		"fanout-protocol:model-check": "tsx scripts/check-task-fanout-protocol.ts",
 		"cleanup-protocol:model-check": "tsx scripts/check-task-cleanup-protocol.ts",
 		"tool-turn:model-check": "tsx scripts/check-tool-turn-continuation.ts",
