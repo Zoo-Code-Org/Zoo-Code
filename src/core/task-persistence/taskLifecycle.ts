@@ -181,12 +181,16 @@ export function isDelegatedChildLive(
 }
 
 /**
- * Administrative crash-orphan repair target: the lifecycle fields a delegated
- * parent must reach when its awaited child is repaired to `interrupted`. This
- * is the single source of truth for both sides — `TaskHistoryStore` writes it
- * as its under-lock repair delta and the lifecycle model checker derives its
- * repaired parent from the same constant, so the two cannot drift.
- * `interruptDelegatedChild` supplies the child side of the same repair.
+ * Administrative missing-child repair target: the lifecycle fields a delegated
+ * parent must reach when the child record it awaits is gone. This is the single
+ * source of truth for both sides — `TaskHistoryStore` writes it as its
+ * under-lock repair delta and the lifecycle model checker derives its repaired
+ * parent from the same constant, so the two cannot drift.
+ *
+ * This is NOT the active-child (crash-orphan) repair target. That repair stops at
+ * the child half and leaves the parent `delegated` with `awaitingChildId` intact,
+ * so a resumed child's result still routes back; `interruptDelegatedChild`
+ * supplies the child side of it.
  */
 export const DELEGATED_PARENT_REPAIR_FIELDS = {
 	status: "active",

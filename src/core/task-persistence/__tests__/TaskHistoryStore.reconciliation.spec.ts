@@ -9,7 +9,7 @@ import type { HistoryItem } from "@roo-code/types"
 import { GlobalFileNames } from "../../../shared/globalFileNames"
 import { LOCK_STALE_MS } from "../../../utils/fileLock"
 import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
-import { isLivenessSignalFresh } from "../taskLifecycle"
+import { completeDelegatedChild, isLivenessSignalFresh } from "../taskLifecycle"
 
 vi.mock("../../../utils/storage", () => ({
 	getStorageBasePath: vi.fn().mockImplementation((defaultPath: string) => defaultPath),
@@ -823,13 +823,14 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			rootTaskId: "parent-4",
 			childIds: ["grandchild-4"],
 		})
+		// The repair stops at the child half: the parent keeps its delegation link.
 		expect(repairedParent).toMatchObject({
 			id: "parent-4",
-			status: "active",
+			status: "delegated",
+			awaitingChildId: "child-4",
+			delegatedToId: "child-4",
 			childIds: ["child-4"],
 		})
-		expect(repairedParent?.awaitingChildId).toBeUndefined()
-		expect(repairedParent?.delegatedToId).toBeUndefined()
 
 		const tasksDir = path.join(tmpDir, "tasks")
 		const persistedChild = JSON.parse(
@@ -845,9 +846,12 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			rootTaskId: "parent-4",
 			childIds: ["grandchild-4"],
 		})
-		expect(persistedParent).toMatchObject({ id: "parent-4", status: "active" })
-		expect(persistedParent.awaitingChildId).toBeUndefined()
-		expect(persistedParent.delegatedToId).toBeUndefined()
+		expect(persistedParent).toMatchObject({
+			id: "parent-4",
+			status: "delegated",
+			awaitingChildId: "child-4",
+			delegatedToId: "child-4",
+		})
 	})
 
 	it("pins LIVE_CHILD_MTIME_THRESHOLD_MS to exactly 5 minutes in milliseconds", async () => {
@@ -949,7 +953,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 
 		await store.initialize()
 
-		// Original repair behavior: child → interrupted, parent → active.
+		// Repair behavior: child → interrupted, the parent keeps its delegation link.
 		const repairedChild = store.get("child-stale")
 		const repairedParent = store.get("parent-stale")
 		expect(repairedChild).toMatchObject({
@@ -959,9 +963,12 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			rootTaskId: "parent-stale",
 			childIds: ["grandchild-stale"],
 		})
-		expect(repairedParent).toMatchObject({ id: "parent-stale", status: "active" })
-		expect(repairedParent?.awaitingChildId).toBeUndefined()
-		expect(repairedParent?.delegatedToId).toBeUndefined()
+		expect(repairedParent).toMatchObject({
+			id: "parent-stale",
+			status: "delegated",
+			awaitingChildId: "child-stale",
+			delegatedToId: "child-stale",
+		})
 
 		// Kills line-495 StringLiteral mutants on the orphan-repair warning.
 		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Reconciled orphaned active child"))
@@ -1047,22 +1054,30 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 
 		expect(peerWriteInjected).toBe(true)
 
-		// The repair still landed...
+		// The repair still landed on the child half...
 		expect(store.get("child-peer")?.status).toBe("interrupted")
-		expect(store.get("parent-peer")?.status).toBe("active")
-		expect(store.get("parent-peer")?.awaitingChildId).toBeUndefined()
-		expect(store.get("parent-peer")?.delegatedToId).toBeUndefined()
+		// ...and the parent was not written at all, so it keeps its link.
+		expect(store.get("parent-peer")?.status).toBe("delegated")
+		expect(store.get("parent-peer")?.awaitingChildId).toBe("child-peer")
+		expect(store.get("parent-peer")?.delegatedToId).toBe("child-peer")
 
 		// ...and on disk the peer fields survived.
 		const persistedChild = JSON.parse(await fs.readFile(childFilePath, "utf8")) as HistoryItem
 		expect(persistedChild).toMatchObject({ status: "interrupted", ...peerChildFields })
 		const persistedParent = JSON.parse(await fs.readFile(parentFilePath, "utf8")) as HistoryItem
-		expect(persistedParent).toMatchObject({ status: "active", ...peerParentFields })
+		expect(persistedParent).toMatchObject({ status: "delegated", ...peerParentFields })
 
-		// The cache publishes the committed records, so this window's view also
+		// The cache publishes the committed child record, so this window's view also
 		// keeps the peer fields instead of reverting to its stale snapshot.
 		expect(store.get("child-peer")).toMatchObject(peerChildFields)
-		expect(store.get("parent-peer")).toMatchObject(peerParentFields)
+		// The parent is never written, so its cache entry is NOT refreshed: it keeps this
+		// window's snapshot, which predates the peer write. That is the deliberate
+		// consequence of the repair having one write instead of two — the disk record
+		// above is authoritative and untouched, and the next reconcile()/watcher pass
+		// refreshes the cache from it. Asserting the stale snapshot here pins the
+		// absence of a parent write rather than a desired freshness property.
+		expect(store.get("parent-peer")?.apiConfigName).toBeUndefined()
+		expect(store.get("parent-peer")?.status).toBe("delegated")
 
 		warnSpy.mockRestore()
 	})
@@ -1074,7 +1089,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		// same `undefined` return through `reconcileDelegationStateCore` via
 		// `initialize()` and asserts the conservative-repair contract fires —
 		// an unreadable mtime must NOT be treated as "live in another window",
-		// the child is repaired to interrupted and the parent back to active.
+		// the child is repaired to interrupted and the parent keeps its link.
 		// A mutant that flips the `mtimeMs !== undefined` short-circuit (e.g.
 		// treating missing mtimes as live) would skip the repair and break the
 		// status assertions and the negative skip-log assertion below.
@@ -1133,9 +1148,12 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 				rootTaskId: "parent-undef-mtime",
 				childIds: ["grandchild-undef-mtime"],
 			})
-			expect(repairedParent).toMatchObject({ id: "parent-undef-mtime", status: "active" })
-			expect(repairedParent?.awaitingChildId).toBeUndefined()
-			expect(repairedParent?.delegatedToId).toBeUndefined()
+			expect(repairedParent).toMatchObject({
+				id: "parent-undef-mtime",
+				status: "delegated",
+				awaitingChildId: "child-undef-mtime",
+				delegatedToId: "child-undef-mtime",
+			})
 
 			// Persisted state must match the cache, same as the stale-mtime test.
 			const tasksDir = path.join(tmpDir, "tasks")
@@ -1151,9 +1169,12 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 				parentTaskId: "parent-undef-mtime",
 				rootTaskId: "parent-undef-mtime",
 			})
-			expect(persistedParent).toMatchObject({ id: "parent-undef-mtime", status: "active" })
-			expect(persistedParent.awaitingChildId).toBeUndefined()
-			expect(persistedParent.delegatedToId).toBeUndefined()
+			expect(persistedParent).toMatchObject({
+				id: "parent-undef-mtime",
+				status: "delegated",
+				awaitingChildId: "child-undef-mtime",
+				delegatedToId: "child-undef-mtime",
+			})
 
 			// Repair ran and the liveness-skip branch was NOT taken.
 			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Reconciled orphaned active child"))
@@ -1190,9 +1211,9 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			await store.initialize()
 
 			expect(store.get("child-boundary-equal")?.status).toBe("interrupted")
-			expect(store.get("parent-boundary-equal")?.status).toBe("active")
-			expect(store.get("parent-boundary-equal")?.awaitingChildId).toBeUndefined()
-			expect(store.get("parent-boundary-equal")?.delegatedToId).toBeUndefined()
+			expect(store.get("parent-boundary-equal")?.status).toBe("delegated")
+			expect(store.get("parent-boundary-equal")?.awaitingChildId).toBe("child-boundary-equal")
+			expect(store.get("parent-boundary-equal")?.delegatedToId).toBe("child-boundary-equal")
 		} finally {
 			nowSpy.mockRestore()
 		}
@@ -1281,8 +1302,8 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			await store.initialize()
 
 			expect(store.get("child-epoch-mtime")?.status).toBe("interrupted")
-			expect(store.get("parent-epoch-mtime")?.status).toBe("active")
-			expect(store.get("parent-epoch-mtime")?.awaitingChildId).toBeUndefined()
+			expect(store.get("parent-epoch-mtime")?.status).toBe("delegated")
+			expect(store.get("parent-epoch-mtime")?.awaitingChildId).toBe("child-epoch-mtime")
 			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("Skipping repair for live child"))
 		} finally {
 			logSpy.mockRestore()
@@ -1384,9 +1405,12 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		await store.initialize()
 
 		expect(store.get(child.id)).toMatchObject({ id: child.id, status: "interrupted" })
-		expect(store.get(parent.id)).toMatchObject({ id: parent.id, status: "active" })
-		expect(store.get(parent.id)?.awaitingChildId).toBeUndefined()
-		expect(store.get(parent.id)?.delegatedToId).toBeUndefined()
+		expect(store.get(parent.id)).toMatchObject({
+			id: parent.id,
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
 
 		const persistedChild = JSON.parse(
 			await fs.readFile(path.join(tmpDir, "tasks", child.id, GlobalFileNames.historyItem), "utf8"),
@@ -1413,7 +1437,12 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		await store.initialize()
 
 		expect(store.get(child.id)?.status).toBe("interrupted")
-		expect(store.get(parent.id)?.status).toBe("active")
+		expect(store.get(parent.id)).toMatchObject({
+			id: parent.id,
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
 		const persistedChild = JSON.parse(
 			await fs.readFile(path.join(tmpDir, "tasks", child.id, GlobalFileNames.historyItem), "utf8"),
 		) as HistoryItem
@@ -1421,9 +1450,12 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			await fs.readFile(path.join(tmpDir, "tasks", parent.id, GlobalFileNames.historyItem), "utf8"),
 		) as HistoryItem
 		expect(persistedChild).toMatchObject({ id: child.id, status: "interrupted" })
-		expect(persistedParent).toMatchObject({ id: parent.id, status: "active" })
-		expect(persistedParent.awaitingChildId).toBeUndefined()
-		expect(persistedParent.delegatedToId).toBeUndefined()
+		expect(persistedParent).toMatchObject({
+			id: parent.id,
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
 		await expect(fs.access(intentPath)).rejects.toThrow()
 	})
 
@@ -1452,7 +1484,12 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		const replayedStore = registerStore(new TaskHistoryStore(tmpDir))
 		await replayedStore.initialize()
 		expect(replayedStore.get(child.id)?.status).toBe("interrupted")
-		expect(replayedStore.get(parent.id)?.status).toBe("active")
+		expect(replayedStore.get(parent.id)).toMatchObject({
+			id: parent.id,
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
 		const persistedChild = JSON.parse(
 			await fs.readFile(path.join(tmpDir, "tasks", child.id, GlobalFileNames.historyItem), "utf8"),
 		) as HistoryItem
@@ -1460,12 +1497,17 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			await fs.readFile(path.join(tmpDir, "tasks", parent.id, GlobalFileNames.historyItem), "utf8"),
 		) as HistoryItem
 		expect(persistedChild).toMatchObject({ id: child.id, status: "interrupted" })
-		expect(persistedParent).toMatchObject({ id: parent.id, status: "active" })
-		expect(persistedParent.awaitingChildId).toBeUndefined()
-		expect(persistedParent.delegatedToId).toBeUndefined()
+		expect(persistedParent).toMatchObject({
+			id: parent.id,
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
 	})
 
-	it("replays an intent after a failure before the parent write", async () => {
+	it("replays an intent when only the child write can fail (the parent is never written)", async () => {
+		// Companion to the previous test from the other side: the repair has exactly one
+		// task-file write, so a fault targeting the PARENT file must not affect it at all.
 		const child = makeItem({
 			id: "child-fault-before-parent",
 			status: "active",
@@ -1490,7 +1532,12 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		const replayedStore = registerStore(new TaskHistoryStore(tmpDir))
 		await replayedStore.initialize()
 		expect(replayedStore.get(child.id)?.status).toBe("interrupted")
-		expect(replayedStore.get(parent.id)?.status).toBe("active")
+		expect(replayedStore.get(parent.id)).toMatchObject({
+			id: parent.id,
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
 		const persistedChild = JSON.parse(
 			await fs.readFile(path.join(tmpDir, "tasks", child.id, GlobalFileNames.historyItem), "utf8"),
 		) as HistoryItem
@@ -1498,12 +1545,15 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			await fs.readFile(path.join(tmpDir, "tasks", parent.id, GlobalFileNames.historyItem), "utf8"),
 		) as HistoryItem
 		expect(persistedChild).toMatchObject({ id: child.id, status: "interrupted" })
-		expect(persistedParent).toMatchObject({ id: parent.id, status: "active" })
-		expect(persistedParent.awaitingChildId).toBeUndefined()
-		expect(persistedParent.delegatedToId).toBeUndefined()
+		expect(persistedParent).toMatchObject({
+			id: parent.id,
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
 	})
 
-	it("retains an intent when the callback fails after both writes", async () => {
+	it("retains an intent when the callback fails after the child write", async () => {
 		const child = makeItem({ id: "child-fault-cleanup", status: "active", parentTaskId: "parent-fault-cleanup" })
 		const parent = makeItem({
 			id: "parent-fault-cleanup",
@@ -1525,7 +1575,12 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		const replayedStore = registerStore(new TaskHistoryStore(tmpDir))
 		await replayedStore.initialize()
 		expect(replayedStore.get(child.id)?.status).toBe("interrupted")
-		expect(replayedStore.get(parent.id)?.status).toBe("active")
+		expect(replayedStore.get(parent.id)).toMatchObject({
+			id: parent.id,
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
 		const persistedChild = JSON.parse(
 			await fs.readFile(path.join(tmpDir, "tasks", child.id, GlobalFileNames.historyItem), "utf8"),
 		) as HistoryItem
@@ -1533,21 +1588,28 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			await fs.readFile(path.join(tmpDir, "tasks", parent.id, GlobalFileNames.historyItem), "utf8"),
 		) as HistoryItem
 		expect(persistedChild).toMatchObject({ id: child.id, status: "interrupted" })
-		expect(persistedParent).toMatchObject({ id: parent.id, status: "active" })
-		expect(persistedParent.awaitingChildId).toBeUndefined()
-		expect(persistedParent.delegatedToId).toBeUndefined()
+		expect(persistedParent).toMatchObject({
+			id: parent.id,
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
 		await expect(fs.access(intentPath)).rejects.toThrow()
 	})
 
-	it("replays a both-at-target intent without writing task files", async () => {
+	it("replays an intent at target without writing task files", async () => {
+		// The child is already interrupted and the parent still holds the link, which
+		// is exactly the completed state of the repair: nothing to write, journal removed.
 		const child = makeItem({ id: "child-at-target", status: "interrupted", parentTaskId: "parent-at-target" })
-		const parent = makeItem({ id: "parent-at-target", status: "active" })
+		const parent = makeItem({
+			id: "parent-at-target",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
 		await seedItems(tmpDir, [parent, child])
 		const intentPath = path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent)
-		await fs.writeFile(
-			intentPath,
-			JSON.stringify(makeRepairIntent({ ...parent, status: "delegated", awaitingChildId: child.id }, child)),
-		)
+		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
 
 		const writeCalls: string[] = []
 		safeWriteJsonMock.mockImplementation(async (filePath, data) => {
@@ -1764,7 +1826,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 	it("replays a repair intent whose child mtime is stale (crash orphan still repaired)", async () => {
 		// Regression guard for the replay liveness guard: a child file untouched for
 		// longer than the threshold is a genuine crash orphan, so the durable intent
-		// must still complete on restart — child → interrupted, parent → active.
+		// must still complete on restart — child → interrupted, parent link intact.
 		const child = makeItem({
 			id: "child-replay-stale",
 			status: "active",
@@ -1786,9 +1848,12 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		await store.initialize()
 
 		expect(store.get(child.id)?.status).toBe("interrupted")
-		expect(store.get(parent.id)?.status).toBe("active")
-		expect(store.get(parent.id)?.awaitingChildId).toBeUndefined()
-		expect(store.get(parent.id)?.delegatedToId).toBeUndefined()
+		expect(store.get(parent.id)).toMatchObject({
+			id: parent.id,
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
 		const persistedChild = JSON.parse(
 			await fs.readFile(path.join(tasksDir, child.id, GlobalFileNames.historyItem), "utf8"),
 		) as HistoryItem
@@ -1801,10 +1866,10 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		).toBe(false)
 	})
 
-	it("completes a parent-only replay while the child is live in another window (child already at target)", async () => {
+	it("clears a replay intent whose child is already at target while the child is live in another window", async () => {
 		// The guard must gate only actual child writes. Here the child is already at
 		// intent.target.childStatus, so no child write happens and the recent (live)
-		// mtime must not block the parent-side completion of the repair.
+		// mtime must not block the journal removal.
 		const child = makeItem({
 			id: "child-replay-parent-only",
 			status: "interrupted",
@@ -1826,8 +1891,12 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		await store.initialize()
 
 		expect(store.get(child.id)?.status).toBe("interrupted")
-		expect(store.get(parent.id)?.status).toBe("active")
-		expect(store.get(parent.id)?.awaitingChildId).toBeUndefined()
+		expect(store.get(parent.id)).toMatchObject({
+			id: parent.id,
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
 		await expect(fs.access(intentPath)).rejects.toThrow()
 	})
 
@@ -1863,7 +1932,12 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		await store.initialize()
 
 		expect(store.get(child.id)?.status).toBe("interrupted")
-		expect(store.get(parent.id)?.status).toBe("active")
+		expect(store.get(parent.id)).toMatchObject({
+			id: parent.id,
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
 		await expect(fs.access(intentPath)).rejects.toThrow()
 	})
 
@@ -1968,17 +2042,20 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 
 		await store.initialize()
 
-		// Replay repairs B/C, but B was delegated at the persisted startup snapshot.
-		// A must remain delegated to the now-interrupted/resumable B.
+		// Replay repairs C only; B keeps its link to the interrupted C, and A keeps its
+		// link to B. Nothing is unlinked, so no ancestor is mistaken for an orphan.
 		expect(store.get(grandparent.id)).toMatchObject({
 			id: grandparent.id,
 			status: "delegated",
 			awaitingChildId: parent.id,
 			delegatedToId: parent.id,
 		})
-		expect(store.get(parent.id)).toMatchObject({ id: parent.id, status: "active" })
-		expect(store.get(parent.id)?.awaitingChildId).toBeUndefined()
-		expect(store.get(parent.id)?.delegatedToId).toBeUndefined()
+		expect(store.get(parent.id)).toMatchObject({
+			id: parent.id,
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
 		expect(store.get(child.id)).toMatchObject({ id: child.id, status: "interrupted" })
 
 		const persistedGrandparent = JSON.parse(
@@ -1996,9 +2073,12 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			awaitingChildId: parent.id,
 			delegatedToId: parent.id,
 		})
-		expect(persistedParent).toMatchObject({ id: parent.id, status: "active" })
-		expect(persistedParent.awaitingChildId).toBeUndefined()
-		expect(persistedParent.delegatedToId).toBeUndefined()
+		expect(persistedParent).toMatchObject({
+			id: parent.id,
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
 		expect(persistedChild).toMatchObject({ id: child.id, status: "interrupted" })
 		await expect(fs.access(intentPath)).rejects.toThrow()
 	})
@@ -2025,7 +2105,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		const afterSecondChild = { ...store2.get(child.id) }
 		store2.dispose()
 
-		expect(afterFirstParent).toMatchObject({ status: "active" })
+		expect(afterFirstParent).toMatchObject({ status: "delegated", awaitingChildId: child.id })
 		expect(afterSecondParent).toEqual(afterFirstParent)
 		expect(afterFirstChild).toMatchObject({ status: "interrupted" })
 		expect(afterSecondChild).toEqual(afterFirstChild)
@@ -2160,9 +2240,279 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 
 		expect(store.get("child-hb-stale")).toMatchObject({ id: "child-hb-stale", status: "interrupted" })
 		const repairedParent = store.get("parent-hb-stale")
-		expect(repairedParent).toMatchObject({ id: "parent-hb-stale", status: "active" })
-		expect(repairedParent?.awaitingChildId).toBeUndefined()
-		expect(repairedParent?.delegatedToId).toBeUndefined()
+		expect(repairedParent).toMatchObject({
+			id: "parent-hb-stale",
+			status: "delegated",
+			awaitingChildId: "child-hb-stale",
+			delegatedToId: "child-hb-stale",
+		})
+	})
+
+	// ─────────────────────────────────────────────────────────────────────────
+	// Crash-orphan repair stops at the child half (yNs32)
+	//
+	// The repair used to be two independent locked writes: child → interrupted,
+	// then parent → active with both delegation pointers cleared. Nothing coupled
+	// the halves across the two per-file locks, so a peer window that resumed the
+	// child between them was invisible to the parent-only guard: the unlink
+	// committed and the resumed child's result could never be routed
+	// (`reopenParentFromDelegation` aborts when `awaitingChildId` no longer
+	// matches). The repair now stops at the child half and leaves the parent
+	// `delegated` with its link intact — the state `cancelTask` already produces
+	// mid-session and the routing guard already accepts.
+	// ─────────────────────────────────────────────────────────────────────────
+
+	it("leaves the parent delegated to the interrupted child instead of unlinking it", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const child = makeItem({
+			id: "child-keep-link",
+			status: "active",
+			parentTaskId: "parent-keep-link",
+			rootTaskId: "parent-keep-link",
+		})
+		const parent = makeItem({
+			id: "parent-keep-link",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+			childIds: [child.id],
+		})
+		await seedItems(tmpDir, [parent, child])
+		await markStaleMtime(child.id)
+
+		const parentFilePath = path.join(tmpDir, "tasks", parent.id, GlobalFileNames.historyItem)
+		const parentBefore = await fs.readFile(parentFilePath, "utf8")
+
+		await store.initialize()
+
+		// The child half still lands: the orphan is marked resumable.
+		expect(store.get(child.id)).toMatchObject({ id: child.id, status: "interrupted" })
+		const persistedChild = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", child.id, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		expect(persistedChild.status).toBe("interrupted")
+
+		// The parent half does not: the link survives in cache and on disk, and the
+		// parent file is never rewritten at all.
+		expect(store.get(parent.id)).toMatchObject({
+			id: parent.id,
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		expect(await fs.readFile(parentFilePath, "utf8")).toBe(parentBefore)
+
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Reconciled orphaned active child"))
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("stays delegated"))
+
+		warnSpy.mockRestore()
+	})
+
+	it("keeps the repaired parent able to route the interrupted child's result", async () => {
+		// The defect's actual consequence: the unlink made `reopenParentFromDelegation`
+		// abort on `awaitingChildId !== childTaskId`, so the resumed child's result was
+		// dropped. With the link intact the shared completion reducer — the same one the
+		// provider calls after a successful reopen — accepts the returning child.
+		const child = makeItem({
+			id: "child-route-back",
+			status: "active",
+			parentTaskId: "parent-route-back",
+			rootTaskId: "parent-route-back",
+		})
+		const parent = makeItem({
+			id: "parent-route-back",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+			childIds: [child.id],
+		})
+		await seedItems(tmpDir, [parent, child])
+		await markStaleMtime(child.id)
+
+		await store.initialize()
+
+		const repairedParent = store.get(parent.id)
+		const repairedChild = store.get(child.id)
+		expect(repairedParent?.status).toBe("delegated")
+		expect(repairedChild?.status).toBe("interrupted")
+
+		const completed = completeDelegatedChild(repairedParent!, repairedChild!, "resumed result")
+		expect(completed.parent).toMatchObject({
+			id: parent.id,
+			status: "active",
+			completedByChildId: child.id,
+			completionResultSummary: "resumed result",
+		})
+		expect(completed.parent.awaitingChildId).toBeUndefined()
+		expect(completed.parent.delegatedToId).toBeUndefined()
+		expect(completed.child).toMatchObject({ id: child.id, status: "completed" })
+	})
+
+	it("replays a crash-orphan intent without writing the parent record", async () => {
+		const child = makeItem({
+			id: "child-replay-keep-link",
+			status: "active",
+			parentTaskId: "parent-replay-keep-link",
+			rootTaskId: "parent-replay-keep-link",
+		})
+		const parent = makeItem({
+			id: "parent-replay-keep-link",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		await seedItems(tmpDir, [parent, child])
+		const tasksDir = path.join(tmpDir, "tasks")
+		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
+		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
+		await markStaleMtime(child.id)
+
+		const parentFilePath = path.join(tasksDir, parent.id, GlobalFileNames.historyItem)
+		const parentBefore = await fs.readFile(parentFilePath, "utf8")
+		const writtenPaths: string[] = []
+		safeWriteJsonMock.mockImplementation(async (filePath, data, options) => {
+			writtenPaths.push(filePath)
+			await writeJson(filePath, data, options)
+		})
+
+		await store.initialize()
+
+		expect(store.get(child.id)?.status).toBe("interrupted")
+		expect(store.get(parent.id)).toMatchObject({
+			id: parent.id,
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		expect(await fs.readFile(parentFilePath, "utf8")).toBe(parentBefore)
+		expect(writtenPaths).not.toContain(parentFilePath)
+		// The journal is removed: the child half is the whole repair.
+		await expect(fs.access(intentPath)).rejects.toThrow()
+		expect(
+			(await fs.readdir(tasksDir)).some((name) =>
+				name.startsWith(`${GlobalFileNames.delegationRepairIntent}.quarantine-`),
+			),
+		).toBe(false)
+	})
+
+	it("removes the intent without writing either task file when the child is already interrupted", async () => {
+		// Crash after the child half committed, before the journal removal. The parent
+		// still holds the link, so the repair is already complete: replay must clear the
+		// journal and write nothing. The liveness guard must not block this — it gates
+		// only an actual child write, and here there is none.
+		const child = makeItem({
+			id: "child-replay-at-target",
+			status: "interrupted",
+			parentTaskId: "parent-replay-at-target",
+		})
+		const parent = makeItem({
+			id: "parent-replay-at-target",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		await seedItems(tmpDir, [parent, child])
+		const tasksDir = path.join(tmpDir, "tasks")
+		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
+		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent({ ...parent, status: "delegated" }, child)))
+		// Live in another window: irrelevant, because no child write is needed.
+		const now = new Date()
+		await fs.utimes(path.join(tasksDir, child.id, GlobalFileNames.historyItem), now, now)
+
+		const writtenPaths: string[] = []
+		safeWriteJsonMock.mockImplementation(async (filePath, data, options) => {
+			writtenPaths.push(filePath)
+			await writeJson(filePath, data, options)
+		})
+
+		await store.initialize()
+
+		expect(writtenPaths.filter((filePath) => filePath.endsWith(GlobalFileNames.historyItem))).toEqual([])
+		expect(store.get(parent.id)?.status).toBe("delegated")
+		expect(store.get(parent.id)?.awaitingChildId).toBe(child.id)
+		await expect(fs.access(intentPath)).rejects.toThrow()
+	})
+
+	it("replays a legacy intent that still names parentStatus active without unlinking the parent", async () => {
+		// Journals written before the repair stopped at the child half carry
+		// `target.parentStatus: "active"`. Replaying one must apply the current rule —
+		// child half only — rather than completing the unlink the old code intended.
+		const child = makeItem({
+			id: "child-legacy-intent",
+			status: "active",
+			parentTaskId: "parent-legacy-intent",
+			rootTaskId: "parent-legacy-intent",
+		})
+		const parent = makeItem({
+			id: "parent-legacy-intent",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		await seedItems(tmpDir, [parent, child])
+		const tasksDir = path.join(tmpDir, "tasks")
+		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
+		await fs.writeFile(
+			intentPath,
+			JSON.stringify({
+				...makeRepairIntent(parent, child),
+				target: { childStatus: "interrupted", parentStatus: "active" },
+			}),
+		)
+		await markStaleMtime(child.id)
+
+		await store.initialize()
+
+		expect(store.get(child.id)?.status).toBe("interrupted")
+		expect(store.get(parent.id)).toMatchObject({
+			id: parent.id,
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		await expect(fs.access(intentPath)).rejects.toThrow()
+		expect(
+			(await fs.readdir(tasksDir)).some((name) =>
+				name.startsWith(`${GlobalFileNames.delegationRepairIntent}.quarantine-`),
+			),
+		).toBe(false)
+	})
+
+	it("quarantines a legacy intent whose parent the old code already unlinked", async () => {
+		// The pre-fix code committed the unlink and then crashed before removing the
+		// journal. The parent no longer matches the intent's guard, and there is nothing
+		// left to repair: quarantine, and touch neither record.
+		const child = makeItem({
+			id: "child-legacy-unlinked",
+			status: "interrupted",
+			parentTaskId: "parent-legacy-unlinked",
+		})
+		const parent = makeItem({ id: "parent-legacy-unlinked", status: "active" })
+		await seedItems(tmpDir, [parent, child])
+		const tasksDir = path.join(tmpDir, "tasks")
+		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
+		await fs.writeFile(
+			intentPath,
+			JSON.stringify({
+				...makeRepairIntent({ ...parent, status: "delegated", awaitingChildId: child.id }, child),
+				target: { childStatus: "interrupted", parentStatus: "active" },
+			}),
+		)
+		const childPath = path.join(tasksDir, child.id, GlobalFileNames.historyItem)
+		const parentPath = path.join(tasksDir, parent.id, GlobalFileNames.historyItem)
+		const beforeChild = await fs.readFile(childPath, "utf8")
+		const beforeParent = await fs.readFile(parentPath, "utf8")
+
+		await store.initialize()
+
+		expect(await fs.readFile(childPath, "utf8")).toBe(beforeChild)
+		expect(await fs.readFile(parentPath, "utf8")).toBe(beforeParent)
+		await expect(fs.access(intentPath)).rejects.toThrow()
+		expect(
+			(await fs.readdir(tasksDir)).some((name) =>
+				name.startsWith(`${GlobalFileNames.delegationRepairIntent}.quarantine-`),
+			),
+		).toBe(true)
 	})
 })
 
@@ -2482,12 +2832,15 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 			},
 		)
 
-		// Within ONE interval, the parent window must repair: child → interrupted,
-		// parent → active with delegation links cleared.
+		// Within ONE interval, the parent window must repair the child half: child →
+		// interrupted, and the parent keeps its delegation link.
 		expect(s.get(CHILD_ID)).toMatchObject({ id: CHILD_ID, status: "interrupted", parentTaskId: PARENT_ID })
-		expect(s.get(PARENT_ID)).toMatchObject({ id: PARENT_ID, status: "active" })
-		expect(s.get(PARENT_ID)?.awaitingChildId).toBeUndefined()
-		expect(s.get(PARENT_ID)?.delegatedToId).toBeUndefined()
+		expect(s.get(PARENT_ID)).toMatchObject({
+			id: PARENT_ID,
+			status: "delegated",
+			awaitingChildId: CHILD_ID,
+			delegatedToId: CHILD_ID,
+		})
 
 		// Repaired on disk, not just in the cache.
 		const persistedChild = JSON.parse(
@@ -2497,8 +2850,8 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 			await fs.readFile(path.join(tmpDir, "tasks", PARENT_ID, GlobalFileNames.historyItem), "utf8"),
 		) as HistoryItem
 		expect(persistedChild.status).toBe("interrupted")
-		expect(persistedParent.status).toBe("active")
-		expect(persistedParent.awaitingChildId).toBeUndefined()
+		expect(persistedParent.status).toBe("delegated")
+		expect(persistedParent.awaitingChildId).toBe(CHILD_ID)
 
 		// The warn message proves the DELEGATION pass (not the plain cache
 		// reconcile) ran inside the tick, and the tick raised no errors.
@@ -3105,7 +3458,12 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 				snapshot: () => `child=${s.get(childId)?.status} parent=${s.get(parentId)?.status}`,
 			})
 			expect(s.get(childId)?.status).toBe("interrupted")
-			expect(s.get(parentId)?.status).toBe("active")
+			expect(s.get(parentId)).toMatchObject({
+				id: parentId,
+				status: "delegated",
+				awaitingChildId: childId,
+				delegatedToId: childId,
+			})
 			expect(errorSpy).not.toHaveBeenCalled()
 		} finally {
 			errorSpy.mockRestore()
@@ -3296,7 +3654,12 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 			// Under '<=': the intent would be quarantined and the child would stay active (step 3
 			// sees the child as live and leaves it alone).
 			expect(s.get(child.id)?.status).toBe("interrupted")
-			expect(s.get(parent.id)?.status).toBe("active")
+			expect(s.get(parent.id)).toMatchObject({
+				id: parent.id,
+				status: "delegated",
+				awaitingChildId: child.id,
+				delegatedToId: child.id,
+			})
 		} finally {
 			nowSpy.mockRestore()
 		}
@@ -3937,12 +4300,13 @@ describe("TaskHistoryStore under-lock repair guards and heartbeat release", () =
 		}
 	})
 
-	it("aborts the parent half when a claim for the parent lands before its commit", async () => {
-		// The parent half's guard checks only the parent record's delegation, never
-		// ownership, so the explicit claim check in `preCommit` is what keeps a
-		// freshly resumed parent from being severed while it runs. Without it the
-		// parent commits as active with the link cleared, and the resumed session
-		// is left claim-less and beat-skipped for the rest of its life.
+	it("never writes a parent half, so a claim for the parent cannot be severed by the repair", async () => {
+		// The old repair wrote the parent as a second locked write, so it needed an
+		// ownership check in `preCommit` to keep a freshly resumed parent from being
+		// severed mid-run. The repair no longer writes the parent at all, which removes
+		// that whole failure mode: a claim on the parent is irrelevant because the link
+		// is never touched. The child half still lands, and the parent keeps both its
+		// link and its claim.
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 		try {
@@ -3954,35 +4318,22 @@ describe("TaskHistoryStore under-lock repair guards and heartbeat release", () =
 			const s = (store = new TaskHistoryStore(tmpDir))
 			await s.initialize()
 			installStaleChildInjector(childId)
+			// Claim the parent before the repair runs: under the old two-write shape this
+			// aborted the parent half; now there is no parent half to abort.
+			s.markLocallyActive(parentId)
 
-			const probe = TaskHistoryStore.prototype as unknown as {
-				assertParentRepairPreconditions: (existing: unknown, childId: string) => void
+			const internals = TaskHistoryStore.prototype as unknown as {
+				runPeriodicDelegationReconciliation: () => Promise<void>
 			}
-			const originalGuard = probe.assertParentRepairPreconditions
-			const guardSpy = vi.spyOn(probe, "assertParentRepairPreconditions").mockImplementation(function (
-				this: TaskHistoryStore,
-				existing: unknown,
-				id: string,
-			) {
-				originalGuard.call(this, existing, id)
-				s.markLocallyActive(parentId)
-			})
+			await internals.runPeriodicDelegationReconciliation.call(s)
 
-			try {
-				const internals = TaskHistoryStore.prototype as unknown as {
-					runPeriodicDelegationReconciliation: () => Promise<void>
-				}
-				await internals.runPeriodicDelegationReconciliation.call(s)
-			} finally {
-				guardSpy.mockRestore()
-			}
-
-			// The child half committed (the repair was already past its guard), but
-			// the parent half aborted: the link is intact and the parent's claim
-			// survives, so the resumed parent keeps its heartbeat and its shield.
 			expect(s.get(childId)?.status).toBe("interrupted")
-			expect(s.get(parentId)?.status).toBe("delegated")
-			expect(s.get(parentId)?.awaitingChildId).toBe(childId)
+			expect(s.get(parentId)).toMatchObject({
+				id: parentId,
+				status: "delegated",
+				awaitingChildId: childId,
+				delegatedToId: childId,
+			})
 			const owned = (s as unknown as { locallyActiveTaskIds: Set<string> }).locallyActiveTaskIds
 			expect(owned.has(parentId)).toBe(true)
 			expect(errorSpy).not.toHaveBeenCalled()
@@ -4112,8 +4463,12 @@ describe("TaskHistoryStore under-lock repair guards and heartbeat release", () =
 			await s.initialize()
 
 			expect(s.get(childId)?.status).toBe("interrupted")
-			expect(s.get(parentId)?.status).toBe("active")
-			expect(s.get(parentId)?.awaitingChildId).toBeUndefined()
+			expect(s.get(parentId)).toMatchObject({
+				id: parentId,
+				status: "delegated",
+				awaitingChildId: childId,
+				delegatedToId: childId,
+			})
 			expect(errorSpy).not.toHaveBeenCalled()
 		} finally {
 			warnSpy.mockRestore()

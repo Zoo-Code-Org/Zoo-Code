@@ -5,7 +5,6 @@ import type { HistoryItem, PendingTaskAction } from "../packages/types/src/histo
 import {
 	abandonDelegatedChild,
 	completeDelegatedChild,
-	DELEGATED_PARENT_REPAIR_FIELDS,
 	delegateTaskToChild,
 	interruptDelegatedChild,
 	settleRejectedCreateSubtaskAction,
@@ -122,15 +121,23 @@ const semanticLandmarks = {
 	},
 	// Proves the repair half of the same reconciliation outcome still works: a
 	// non-live (crash-orphan) active child — stale mtime AND stale/absent
-	// heartbeat — is repaired to interrupted while the parent resumes as active
-	// with both delegation pointers cleared. This state class is only reachable
-	// through `reconcileStartup`, never through `interrupt`/`abandon`/`complete`.
+	// heartbeat — is repaired to interrupted, and the parent KEEPS its delegation
+	// link instead of being unlinked. This state class is only reachable through
+	// `reconcileStartup`, never through `interrupt`/`abandon`/`complete`.
+	//
+	// The link is the point: the repair used to write the parent to active as a
+	// second, independently locked write, so a peer resuming the child between the
+	// two halves was invisible to the parent-only guard and the unlink committed.
+	// `reopenParentFromDelegation` then aborted on the `awaitingChildId` mismatch
+	// and the resumed child's result was dropped. Stopping at the child half makes
+	// every interleaving route, and it converges on the state `cancelTask` already
+	// produces mid-session.
 	"crash-orphan-repaired-by-startup": (state: ModelState) => {
 		const parent = state.tasks.parent
 		const child = state.tasks["child-a"]
 		return (
-			parent?.status === "active" &&
-			!parent.awaitingChildId &&
+			parent?.status === "delegated" &&
+			parent.awaitingChildId === "child-a" &&
 			child?.status === "interrupted" &&
 			child.parentTaskId === "parent" &&
 			!state.liveElsewhere["child-a"] &&
@@ -336,12 +343,13 @@ function transitions(state: ModelState): Transition[] {
 	// whose awaited child is active, the outcome is decided by the OR of the two
 	// abstract liveness signals (mirroring the shared production predicate
 	// `isDelegatedChildLive`):
-	//  - stale mtime AND stale/absent heartbeat (not live) → repair: child →
-	//    interrupted via the shared production reducer, parent → active with both
-	//    delegation pointers cleared. The parent-side rewrite is modeled directly
-	//    here because production performs it as administrative recovery through
-	//    `upsertCore(..., { skipTransitionCheck: true })`, outside the shared
-	//    `taskLifecycle.ts` reducers; the child side matches `interruptDelegatedChild`.
+	//  - stale mtime AND stale/absent heartbeat (not live) → repair the CHILD half
+	//    only: child → interrupted via the shared production reducer. The parent is
+	//    deliberately left `delegated` with `awaitingChildId` intact, matching
+	//    production, which never writes a parent half for this repair. Severing the
+	//    link here would reintroduce the missed-routing bug class: a peer that
+	//    resumes the child between the two halves leaves the resumed child
+	//    completing into an unlinked parent.
 	//  - recent mtime OR fresh heartbeat (live) → skip: the pre-fix bug repaired
 	//    exactly these children, breaking the delegation link so the subtask's
 	//    completion could no longer return to the parent. The fix `continue`s, so
@@ -357,12 +365,13 @@ function transitions(state: ModelState): Transition[] {
 			result.push({ name: `reconcileStartup(${parentId})`, next: state })
 			continue
 		}
-		// The parent-side rewrite applies the shared repair target, so the model
-		// cannot drift from `TaskHistoryStore`'s under-lock repair delta.
+		// Child half only, through the shared production reducer. The parent record is
+		// passed through unchanged, so the model cannot drift from production, which
+		// performs no parent write on this path.
 		const repairedChild = interruptDelegatedChild(parent, child)
 		result.push({
 			name: `reconcileStartup(${parentId})`,
-			next: replace(state, { ...parent, ...DELEGATED_PARENT_REPAIR_FIELDS }, repairedChild),
+			next: replace(state, parent, repairedChild),
 		})
 	}
 
@@ -702,8 +711,9 @@ function runRepresentativeScenarios(): void {
 		assert.equal(reconcile[0]!.next, state)
 	}
 
-	// Both signals stale — the genuine crash orphan: the startup repair must
-	// still run (child → interrupted, parent → active, both pointers cleared).
+	// Both signals stale — the genuine crash orphan: the startup repair must still
+	// run on the child half (child → interrupted) and must leave the parent
+	// delegated with its link intact, so the resumed child's result still routes.
 	{
 		const state: ModelState = {
 			tasks: { parent: delegated, "child-a": childA, "child-b": undefined },
@@ -714,9 +724,9 @@ function runRepresentativeScenarios(): void {
 		assert.equal(reconcile.length, 1)
 		const repaired = reconcile[0]!.next
 		assert.equal(repaired.tasks["child-a"]?.status, "interrupted")
-		assert.equal(repaired.tasks.parent?.status, "active")
-		assert.equal(repaired.tasks.parent?.awaitingChildId, undefined)
-		assert.equal(repaired.tasks.parent?.delegatedToId, undefined)
+		assert.equal(repaired.tasks.parent?.status, "delegated")
+		assert.equal(repaired.tasks.parent?.awaitingChildId, childA.id)
+		assert.equal(repaired.tasks.parent?.delegatedToId, delegated.delegatedToId)
 	}
 
 	const rejectedParent: HistoryItem = {

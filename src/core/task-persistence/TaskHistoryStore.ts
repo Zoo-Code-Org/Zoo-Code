@@ -54,9 +54,9 @@ class RepairAbortedError extends Error {}
  * peer window can write other fields of the same task (pending action, token
  * and cost totals, `childIds`, `apiConfigName`) before the advisory lock.
  *
- * The parent side is the shared `DELEGATED_PARENT_REPAIR_FIELDS` from
+ * `PARENT_REPAIR_DELTA` is the shared `DELEGATED_PARENT_REPAIR_FIELDS` from
  * `taskLifecycle`, so this store and the lifecycle model checker cannot drift
- * on what a crash-orphan repair produces.
+ * on what the missing-child repair produces.
  */
 const CHILD_REPAIR_DELTA: Partial<HistoryItem> = { status: "interrupted" }
 
@@ -66,6 +66,10 @@ const PARENT_REPAIR_DELTA: Partial<HistoryItem> = DELEGATED_PARENT_REPAIR_FIELDS
  * Durable intent for the one repair that spans an active delegated child and
  * its parent. Task files remain authoritative; this file only records the
  * guarded target transition that must be completed after a crash.
+ *
+ * The target names the child half only. The repair never writes the parent:
+ * leaving it `delegated` with `awaitingChildId` intact is what keeps a resumed
+ * child's result routable, and it is the state `cancelTask` already produces.
  */
 interface DelegationRepairIntent {
 	version: 1
@@ -86,7 +90,6 @@ interface DelegationRepairIntent {
 	}
 	target: {
 		childStatus: "interrupted"
-		parentStatus: "active"
 	}
 }
 
@@ -500,7 +503,7 @@ export class TaskHistoryStore {
 	 * - Parent `delegated` with no `awaitingChildId` → parent → `active` (invalid state)
 	 * - Parent `delegated`, child not found → parent → `active` (orphaned delegation)
 	 * - Parent `delegated`, child `completed` → parent → `active` (interrupted handoff)
-	 * - Parent `delegated`, child `active` → child → `interrupted`, parent → `active`
+	 * - Parent `delegated`, child `active` → child → `interrupted` (the parent keeps its link)
 	 *
 	 * A parent awaiting an `interrupted` or `delegated` child is left as-is — the child is
 	 * resumable. An `active` child is repaired only when it shows NO sign of life: its
@@ -511,6 +514,17 @@ export class TaskHistoryStore {
 	 * repair to a later tick. A child that is fresh on either signal is owned by a live
 	 * session (another window, or this one before a restart dropped its claim) and keeps
 	 * its delegation link.
+	 *
+	 * The active-child repair stops at the child half. It must not clear the parent's
+	 * `awaitingChildId`: the two records are written under separate per-file advisory
+	 * locks, so a peer window can resume the child between them, and the parent-only
+	 * under-lock guard cannot see that. Unlinking in that gap makes
+	 * `reopenParentFromDelegation` abort on the `awaitingChildId` mismatch, dropping the
+	 * resumed child's result. Leaving the parent `delegated` awaiting the now-interrupted
+	 * child is the state `cancelTask` already produces mid-session, and every
+	 * interleaving then routes: the child resumes and completes into the intact link, the
+	 * parent is re-delegated over an interrupted awaited child, the child record is
+	 * deleted (the missing-child branch above), or the user cancels.
 	 */
 	private async reconcileDelegationState(persistedActiveIds: ReadonlySet<string>): Promise<void> {
 		return this.withLock(() => this.reconcileDelegationStateCore(persistedActiveIds))
@@ -651,13 +665,13 @@ export class TaskHistoryStore {
 							continue
 						}
 						// An active child persisted across startup cannot have a live task session
-						// behind it. Mark it interrupted before releasing the parent's delegation
-						// link so the normal resume/re-delegate flow can take over. This is an
+						// behind it. Mark it interrupted so the normal resume/re-delegate flow can
+						// take over, leaving the parent delegated with its link intact. This is an
 						// administrative recovery, not a runtime delegation transition.
 						const repaired = await this.repairActiveDelegation(item, child)
 						if (repaired) {
 							console.warn(
-								`[TaskHistoryStore] Reconciled orphaned active child: child ${child.id} → interrupted, task ${item.id} → active`,
+								`[TaskHistoryStore] Reconciled orphaned active child: child ${child.id} → interrupted, task ${item.id} stays delegated`,
 							)
 							repairsInThisPass++
 						}
@@ -821,12 +835,21 @@ export class TaskHistoryStore {
 
 	/**
 	 * Replay the durable active-child repair intent, if one was left by a crash.
-	 * The expected fields are guards: an intent may update only the missing side
-	 * when the other side is already at its target, or when both records still
-	 * describe the original delegated handoff. Before writing the child, the same
-	 * cross-window liveness guard as `reconcileDelegationStateCore` applies: a
-	 * child whose history file was touched recently belongs to another live
-	 * window, so the stale intent is quarantined instead of replayed.
+	 * The expected fields are guards: an intent may update the child only when it
+	 * is still at its expected state, or when it already reached the target.
+	 *
+	 * The repair is the child half alone. The parent is never written: it must
+	 * still be delegated to the same child for the intent to be meaningful, and an
+	 * intent whose parent no longer matches is stale (the old code unlinked it, or
+	 * a peer completed/re-delegated it) and gets quarantined. Because the parent is
+	 * untouched, "parent still delegated with the link intact" IS the completed
+	 * state, so a crash after the child write leaves nothing for the replay to
+	 * finish beyond removing the journal.
+	 *
+	 * Before writing the child, the same cross-window liveness guard as
+	 * `reconcileDelegationStateCore` applies: a child whose history file was
+	 * touched recently belongs to another live window, so the stale intent is
+	 * quarantined instead of replayed.
 	 *
 	 * This method acquires the store's non-reentrant promise-chain lock. It must be
 	 * called outside an existing `withLock` callback; locked callers must use the
@@ -850,19 +873,17 @@ export class TaskHistoryStore {
 			}
 
 			const childAtTarget = child.status === intent.target.childStatus
-			const parentMatchesTargetState =
-				parent.status === intent.target.parentStatus &&
-				parent.awaitingChildId === undefined &&
-				parent.delegatedToId === undefined
 			const childMatchesExpected = this.matchesDelegationRepairChildPreconditions(intent, child)
+			// The parent is never written, so "matches its expected delegation" is the
+			// terminal condition: the link the repair exists to preserve is still there.
 			const parentMatchesExpected = this.matchesDelegationRepairParentPreconditions(intent, parent)
 
-			if ((!childAtTarget && !childMatchesExpected) || (!parentMatchesTargetState && !parentMatchesExpected)) {
+			if ((!childAtTarget && !childMatchesExpected) || !parentMatchesExpected) {
 				await this.quarantineDelegationRepairIntent(intent, "task state no longer matches its guards")
 				return
 			}
 
-			// Cross-instance liveness guard (same convention as reconcileDelegationStateCore): if this window crashed mid-repair and another window restarted the same child, the child's history file is being actively persisted there. Replaying the stale intent would overwrite the live child as "interrupted", so quarantine it instead. Only enforced when the replay would actually write the child record: a child already at its target needs no write, and parent-only completion must not be blocked by child liveness. A fresh mtime OR a fresh `lastActivityAt` heartbeat quarantines the intent; a transient stat failure reports the near-future sentinel (see `getChildFileMtimeMs`), which also counts as life and lets a later tick retry.
+			// Cross-instance liveness guard (same convention as reconcileDelegationStateCore): if this window crashed mid-repair and another window restarted the same child, the child's history file is being actively persisted there. Replaying the stale intent would overwrite the live child as "interrupted", so quarantine it instead. Only enforced when the replay would actually write the child record: a child already at its target needs no write. A fresh mtime OR a fresh `lastActivityAt` heartbeat quarantines the intent; a transient stat failure reports the near-future sentinel (see `getChildFileMtimeMs`), which also counts as life and lets a later tick retry.
 			if (!childAtTarget) {
 				const mtimeMs = await this.getChildFileMtimeMs(child.id)
 				if (isDelegatedChildLive(child, Date.now(), TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS, mtimeMs)) {
@@ -875,40 +896,34 @@ export class TaskHistoryStore {
 			}
 
 			// Same guarded write as the in-pass repair: preconditions re-validate
-			// under the target's advisory lock and again in `preCommit` right before
+			// under the child's advisory lock and again in `preCommit` right before
 			// the commit, so a peer write or a local claim aborts the stale replay
 			// (the journal stays for a later pass). Cache publication uses the
-			// committed records, so a side already at target keeps a peer's write.
-			let committedChild: HistoryItem = childAtTarget ? child : { ...child, ...CHILD_REPAIR_DELTA }
-			let committedParent: HistoryItem = parentMatchesTargetState ? parent : { ...parent, ...PARENT_REPAIR_DELTA }
-			try {
-				if (!childAtTarget) {
+			// committed record, so a child already at target keeps a peer's write.
+			let committedChild: HistoryItem = child
+			if (!childAtTarget) {
+				try {
 					committedChild = await this.writeAdministrativeRepair(
-						committedChild,
+						{ ...child, ...CHILD_REPAIR_DELTA },
 						CHILD_REPAIR_DELTA,
 						(existing, filePath) => this.assertChildRepairPreconditions(existing, filePath, child.id),
 					)
+				} catch (error) {
+					if (error instanceof RepairAbortedError) {
+						// A peer changed the record between the pre-write liveness
+						// check and the lock. The replay is stale: quarantine the
+						// intent rather than stomping the peer's write.
+						await this.quarantineDelegationRepairIntent(
+							intent,
+							`repair raced a peer write (${error.message})`,
+						)
+						return
+					}
+					throw error
 				}
-				if (!parentMatchesTargetState) {
-					committedParent = await this.writeAdministrativeRepair(
-						committedParent,
-						PARENT_REPAIR_DELTA,
-						(existing) => this.assertParentRepairPreconditions(existing, child.id),
-					)
-				}
-			} catch (error) {
-				if (error instanceof RepairAbortedError) {
-					// A peer changed the records between the pre-write liveness
-					// check and the lock. The replay is stale: quarantine the
-					// intent rather than stomping the peer's write.
-					await this.quarantineDelegationRepairIntent(intent, `repair raced a peer write (${error.message})`)
-					return
-				}
-				throw error
 			}
 
 			this.cache.set(committedChild.id, committedChild)
-			this.cache.set(committedParent.id, committedParent)
 
 			// The journal is retained until the write-through callback succeeds.
 			if (this.onWrite) {
@@ -920,7 +935,7 @@ export class TaskHistoryStore {
 
 	/**
 	 * Start and complete a guarded active-child repair while already holding the
-	 * store lock. The intent is durable before either task file is touched.
+	 * store lock. The intent is durable before the task file is touched.
 	 * Returns false when a last-moment liveness re-check (see
 	 * `applyDelegationRepairIntent`) shows the child is alive again — no write
 	 * happened and the durable intent is removed.
@@ -943,18 +958,14 @@ export class TaskHistoryStore {
 					rootTaskId: child.rootTaskId,
 				},
 			},
-			target: { childStatus: "interrupted", parentStatus: "active" },
+			target: { childStatus: "interrupted" },
 		}
 
 		await this.writeDelegationRepairIntent(intent)
-		return this.applyDelegationRepairIntent(intent, child, parent)
+		return this.applyDelegationRepairIntent(intent, child)
 	}
 
-	private async applyDelegationRepairIntent(
-		intent: DelegationRepairIntent,
-		child: HistoryItem,
-		parent: HistoryItem,
-	): Promise<boolean> {
+	private async applyDelegationRepairIntent(intent: DelegationRepairIntent, child: HistoryItem): Promise<boolean> {
 		// Pre-write liveness re-check (cheap early-out): the repair decision at the call
 		// site came from an unlocked stat, and a peer window can resume the child while
 		// the intent journal was being written.
@@ -974,38 +985,30 @@ export class TaskHistoryStore {
 			return false
 		}
 
-		// The authoritative writes carry an under-lock re-validation: the merge
-		// callback runs inside the target file's advisory lock (the same
-		// cross-process guard pattern as clearPendingActionIfMatching), so a
-		// peer write that lands in the gap before the lock is observed and the
-		// stale repair aborts instead of stomping it. An abort after the child
-		// write has landed keeps the durable intent: replay skips files already
-		// at target and completes only the missing side.
-		// The repair deltas supply the lifecycle fields under the lock; cache
-		// publication uses the committed records so peer-written fields merged
-		// there stay visible in this window.
-		let committedChild: HistoryItem | undefined
-		let committedParent: HistoryItem | undefined
+		// The child write carries an under-lock re-validation: the merge callback
+		// runs inside the child file's advisory lock (the same cross-process guard
+		// pattern as clearPendingActionIfMatching), so a peer write that lands in
+		// the gap before the lock is observed and the stale repair aborts instead of
+		// stomping it. The parent is deliberately never written (see
+		// `reconcileDelegationStateCore`): its delegation link is what keeps a
+		// resumed child's result routable, so the repair publishes the parent
+		// unchanged. The delta supplies the lifecycle field under the lock; cache
+		// publication uses the committed record so peer-written fields merged there
+		// stay visible in this window.
+		let committedChild: HistoryItem
 		try {
 			committedChild = await this.writeAdministrativeRepair(
 				{ ...child, ...CHILD_REPAIR_DELTA },
 				CHILD_REPAIR_DELTA,
 				(existing, filePath) => this.assertChildRepairPreconditions(existing, filePath, child.id),
 			)
-			committedParent = await this.writeAdministrativeRepair(
-				{ ...parent, ...PARENT_REPAIR_DELTA },
-				PARENT_REPAIR_DELTA,
-				(existing) => this.assertParentRepairPreconditions(existing, child.id),
-			)
 		} catch (error) {
 			if (!(error instanceof RepairAbortedError)) throw error
 			console.warn(`[TaskHistoryStore] Aborting repair for child ${child.id}: ${error.message}`)
-			if (committedChild) this.cache.set(committedChild.id, committedChild)
 			return false
 		}
 
 		this.cache.set(committedChild.id, committedChild)
-		this.cache.set(committedParent.id, committedParent)
 
 		if (this.onWrite) {
 			await this.onWrite(this.getAll())
@@ -1037,11 +1040,12 @@ export class TaskHistoryStore {
 	 * write, and only an in-process claim can land.
 	 *
 	 * What an abort leaves behind depends on the half. A claim on the child
-	 * aborts with NOTHING committed, so the parent half never runs and the live
-	 * session keeps its record, its claim, and its delegation link. A claim on
-	 * the parent aborts only the parent half, after the child half already
-	 * committed as `interrupted`: the delegation link survives, which is what
-	 * keeps the resumed parent's session recoverable.
+	 * aborts with NOTHING committed, so the live session keeps its record, its
+	 * claim, and its delegation link. A claim on the parent aborts only the
+	 * parent half, after the child half already committed as `interrupted`: the
+	 * delegation link survives, which is what keeps the resumed parent's session
+	 * recoverable. The active-child repair no longer writes a parent half at all
+	 * (see `reconcileDelegationStateCore`); only the missing-child repair does.
 	 */
 	private async writeAdministrativeRepair(
 		target: HistoryItem,
@@ -1128,9 +1132,12 @@ export class TaskHistoryStore {
 	}
 
 	/**
-	 * Under-lock preconditions for the parent half of an orphan repair: the
-	 * record must still exist and still be delegated to the same child (a peer
-	 * may have completed, abandoned, or re-delegated it in the gap).
+	 * Under-lock preconditions for the parent half of the missing-child repair:
+	 * the record must still exist and still be delegated to the same child (a
+	 * peer may have completed, abandoned, or re-delegated it in the gap).
+	 *
+	 * Only the missing-child repair writes a parent half. The active-child repair
+	 * deliberately does not, so this guard no longer has a second caller.
 	 */
 	private assertParentRepairPreconditions(existing: unknown, childId: string): void {
 		const disk = existing as HistoryItem | undefined
@@ -1224,8 +1231,7 @@ export class TaskHistoryStore {
 			(expectedChild.parentTaskId === undefined || typeof expectedChild.parentTaskId === "string") &&
 			(expectedChild.rootTaskId === undefined || typeof expectedChild.rootTaskId === "string") &&
 			!!targetRecord &&
-			targetRecord.childStatus === "interrupted" &&
-			targetRecord.parentStatus === "active"
+			targetRecord.childStatus === "interrupted"
 		)
 	}
 
