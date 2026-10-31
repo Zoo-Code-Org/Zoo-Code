@@ -86,7 +86,7 @@ describe("toMatcherPattern", () => {
 	// name, so `C:/tmp/notes.md` names a file inside it, relative to the workspace.
 	describe("on Windows", () => {
 		// The colon is dropped, leaving the drive as an ordinary leading path
-		// segment; see `toPosixAbsolutePath` for why it cannot stay.
+		// segment: the Windows strategy avoids drive-rooted paths rejected by `ignore`.
 		it("keeps the drive of an absolute pattern as its first path segment", () => {
 			expect(toWindowsPattern("D:/tmp/notes.md")).toBe("/D/tmp/notes.md")
 		})
