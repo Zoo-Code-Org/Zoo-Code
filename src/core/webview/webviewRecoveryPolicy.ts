@@ -42,13 +42,15 @@ export function pendingSidebarAfterCommandFailure(input: {
 }
 
 export function recordRecoveryFailure(
-	state: { attempts: number; reported: boolean },
+	state: { attempts: number; reported: boolean; stopLogged: boolean },
 	stopRecovery: boolean,
-): { attempts: number; reported: boolean; notify: boolean } {
+): { attempts: number; reported: boolean; notify: boolean; stopLogged: boolean; log: boolean } {
 	return {
 		attempts: stopRecovery ? WEBVIEW_RECOVERY_LIMITS.attempts : state.attempts,
 		reported: true,
 		notify: !state.reported,
+		stopLogged: state.stopLogged || stopRecovery,
+		log: stopRecovery ? !state.stopLogged : !state.reported && !state.stopLogged,
 	}
 }
 

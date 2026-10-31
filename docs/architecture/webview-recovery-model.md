@@ -11,7 +11,7 @@ Code QA runs both commands in its compile job. This is an independent webview pr
 
 ## Production connection
 
-`src/core/webview/webviewRecoveryPolicy.ts` owns pure decisions used by both `ClineProvider` and the checker. These include attempt admission, recovery-incident preservation, resolve-failure classification, HTML commit eligibility, release of an async recovery owner, command-failure marker cleanup, failure accounting and notification deduplication, heartbeat health, and warning actions.
+`src/core/webview/webviewRecoveryPolicy.ts` owns pure decisions used by both `ClineProvider` and the checker. These include attempt admission, recovery-incident preservation, resolve-failure classification, HTML commit eligibility, release of an async recovery owner, command-failure marker cleanup, failure accounting, notification deduplication and terminal-stop logging, heartbeat health, and warning actions.
 
 The provider still performs VS Code effects. It installs subscriptions, starts timers, assigns HTML, resolves views, and retains its task stack. The policy extraction does not move those effects into the model.
 
@@ -41,15 +41,15 @@ The checker rejects:
 3. duplicate in-flight recovery or attempts exceeding the cap;
 4. a recovery replacement resetting its incident budget or being classified as normal startup;
 5. a current recovery resolve failure losing the retry disposition;
-6. retryable warnings consuming the remaining attempts, or duplicate notifications without a notification-state reset;
+6. retryable warnings consuming the remaining attempts, duplicate notifications, missing terminal-stop reasons after retry warnings, or repeated terminal-stop logs without an incident reset;
 7. a failed sidebar focus leaving a marker that contaminates a later manual reopen;
 8. a startup heartbeat replenishing attempts before sustained health;
 9. a stale Reload Window action reloading after a heartbeat or disposal; and
 10. a late Show Logs action being incorrectly suppressed.
 
-Required actions and semantic witnesses prevent a vacuous pass. They include a valid HTML commit, each invalidated completion class, a replacement owner surviving old completion, a retryable initialization failure, repeated initialization failures reaching the cap, healthy budget refill, a published sidebar timing out with attempts remaining, late publication retaining an exhausted budget, and a fresh manual open after focus failure.
+Required actions and semantic witnesses prevent a vacuous pass. They include a valid HTML commit, each invalidated completion class, a replacement owner surviving old completion, a retryable initialization failure, repeated initialization failures reaching the cap, healthy budget refill, a published sidebar timing out with attempts remaining, late publication retaining an exhausted budget, and a fresh manual open after focus failure, and one terminal-stop log after an earlier retry warning.
 
-Ten representative faulty policies are injected without editing source. Each must fail with its expected contract violation. Exploration truncation or an unrelated exception does not count as rejecting a regression.
+Twelve representative faulty policies are injected without editing source. Each must fail with its expected contract violation. Exploration truncation or an unrelated exception does not count as rejecting a regression.
 
 ## Effect and integration evidence
 

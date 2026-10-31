@@ -266,6 +266,7 @@ export class ClineProvider
 	// Keep that repair distinct from a user-opened view until it arrives.
 	private pendingSidebarRecovery = false
 	private webviewRecoveryFailureReported = false
+	private webviewRecoveryStopLogged = false
 	private lastReceivedWebviewHeartbeatAt: number | undefined
 	private webviewHeartbeatCount = 0
 	private webviewHealthySince: number | undefined
@@ -881,6 +882,7 @@ export class ClineProvider
 		if (!preservesRecoveryIncident(this.webviewHostRecoveryInProgress, this.pendingSidebarRecovery)) {
 			this.webviewRecoveryAttempts = 0
 			this.webviewRecoveryFailureReported = false
+			this.webviewRecoveryStopLogged = false
 		}
 		this.lastReceivedWebviewHeartbeatAt = undefined
 		this.webviewHealthySince = undefined
@@ -3625,6 +3627,7 @@ export class ClineProvider
 		// A new heartbeat invalidates the old warning action. Allow a fresh warning
 		// if this renderer stalls again, without replenishing its retry budget.
 		this.webviewRecoveryFailureReported = false
+		this.webviewRecoveryStopLogged = false
 		if (this.webviewRecoveryConfirmation) {
 			this.log("[Zoo Code] Webview heartbeat returned after recovery")
 		}
@@ -3868,13 +3871,18 @@ export class ClineProvider
 		// A terminal failure still stops retries if an earlier retryable failure
 		// already showed the notification for this incident.
 		const failure = recordRecoveryFailure(
-			{ attempts: this.webviewRecoveryAttempts, reported: this.webviewRecoveryFailureReported },
+			{
+				attempts: this.webviewRecoveryAttempts,
+				reported: this.webviewRecoveryFailureReported,
+				stopLogged: this.webviewRecoveryStopLogged,
+			},
 			stopRecovery,
 		)
 		this.webviewRecoveryAttempts = failure.attempts
 		this.webviewRecoveryFailureReported = failure.reported
+		this.webviewRecoveryStopLogged = failure.stopLogged
+		if (failure.log) this.log(`[Zoo Code] Webview recovery ${stopRecovery ? "stopped" : "will retry"}: ${reason}`)
 		if (!failure.notify) return
-		this.log(`[Zoo Code] Webview recovery ${stopRecovery ? "stopped" : "will retry"}: ${reason}`)
 		const heartbeatCount = this.webviewHeartbeatCount
 		void Promise.resolve(
 			vscode.window.showWarningMessage(

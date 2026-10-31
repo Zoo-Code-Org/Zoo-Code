@@ -148,6 +148,9 @@ interface Host {
 	phase: Phase
 	attempts: number
 	reported: boolean
+	stopLogged: boolean
+	terminalLogs: number
+	retryWarned: boolean
 	busy: boolean
 	pending: boolean
 	view: "old" | "none" | "replacement"
@@ -167,6 +170,9 @@ function hostCheck(kind: "sidebar" | "tab", p: Policy): void {
 		phase: "idle",
 		attempts: 0,
 		reported: false,
+		stopLogged: false,
+		terminalLogs: 0,
+		retryWarned: false,
 		busy: false,
 		pending: false,
 		view: "old",
@@ -186,10 +192,16 @@ function hostCheck(kind: "sidebar" | "tab", p: Policy): void {
 			const steps: Step<Host>[] = []
 			const add = (action: string, update: Partial<Host>) => steps.push({ action, state: { ...s, ...update } })
 			const failure = (stop: boolean): Partial<Host> => {
-				const next = p.recordRecoveryFailure({ attempts: s.attempts, reported: s.reported }, stop)
+				const next = p.recordRecoveryFailure(
+					{ attempts: s.attempts, reported: s.reported, stopLogged: s.stopLogged },
+					stop,
+				)
 				return {
 					attempts: next.attempts,
 					reported: next.reported,
+					stopLogged: next.stopLogged,
+					terminalLogs: s.terminalLogs + (stop && next.log ? 1 : 0),
+					retryWarned: s.retryWarned || (!stop && next.notify),
 					fault:
 						next.attempts !== (stop ? 3 : s.attempts) || next.notify === s.reported
 							? "failure consumed retries or repeated a warning"
@@ -292,6 +304,9 @@ function hostCheck(kind: "sidebar" | "tab", p: Policy): void {
 					watchdog: true,
 					initialized: true,
 					reported: false,
+					stopLogged: false,
+					terminalLogs: 0,
+					retryWarned: false,
 					manualOpened: true,
 					fault: recovering ? "manual open inherited a failed incident" : undefined,
 				})
@@ -305,6 +320,9 @@ function hostCheck(kind: "sidebar" | "tab", p: Policy): void {
 					add("startup-heartbeat", {
 						healthStarted: true,
 						reported: false,
+						stopLogged: false,
+						terminalLogs: 0,
+						retryWarned: false,
 						attempts: health.attempts,
 						fault: health.attempts !== s.attempts ? "one heartbeat refilled the budget" : undefined,
 					})
@@ -318,6 +336,9 @@ function hostCheck(kind: "sidebar" | "tab", p: Policy): void {
 						healthReset: true,
 						attempts: health.attempts,
 						reported: false,
+						stopLogged: false,
+						terminalLogs: 0,
+						retryWarned: false,
 						fault: health.attempts !== 0 ? "healthy window failed to replenish attempts" : undefined,
 					})
 				}
@@ -326,10 +347,13 @@ function hostCheck(kind: "sidebar" | "tab", p: Policy): void {
 		},
 		(s) => {
 			assert(!s.fault, s.fault)
+			assert(s.terminalLogs <= 1, "duplicate terminal stop log in one incident")
+			assert.equal(s.stopLogged, s.terminalLogs === 1, "terminal stop log was suppressed")
 			assert(Number.isInteger(s.attempts) && s.attempts >= 0 && s.attempts <= 3, "attempt budget")
 			if (s.phase === "idle")
 				assert(s.watchdog && !s.busy, "settled recovery lost watchdog or retained ownership")
 			const marks: string[] = []
+			if (s.retryWarned && s.stopLogged && s.terminalLogs === 1) marks.push("terminal-stop-after-retry-warning")
 			if (s.phase === "idle" && !s.initialized && s.attempts === 1) marks.push("initialization-failure-retryable")
 			if (s.phase === "stopped" && s.attempts === 3 && !s.initialized && s.view === "replacement")
 				marks.push("failed-resolutions-bounded")
@@ -342,7 +366,12 @@ function hostCheck(kind: "sidebar" | "tab", p: Policy): void {
 			return marks
 		},
 	)
-	const required = ["initialization-failure-retryable", "failed-resolutions-bounded", "healthy-budget-refill"]
+	const required = [
+		"initialization-failure-retryable",
+		"failed-resolutions-bounded",
+		"healthy-budget-refill",
+		"terminal-stop-after-retry-warning",
+	]
 	if (kind === "sidebar")
 		required.push(
 			"published-timeout-keeps-attempts",
@@ -407,13 +436,21 @@ function policyContracts(p: Policy): void {
 	}
 	for (let attempts = 0; attempts <= 3; attempts++)
 		for (const reported of [false, true])
-			for (const stop of [false, true]) {
-				assert.deepEqual(
-					p.recordRecoveryFailure({ attempts, reported }, stop),
-					{ attempts: stop ? 3 : attempts, reported: true, notify: !reported },
-					"failure accounting and notification deduplication",
-				)
-			}
+			for (const stopLogged of [false, true])
+				for (const stop of [false, true]) {
+					assert.deepEqual(
+						p.recordRecoveryFailure({ attempts, reported, stopLogged }, stop),
+						{
+							attempts: stop ? 3 : attempts,
+							reported: true,
+							notify: !reported,
+							stopLogged: stopLogged || stop,
+							log: stop ? !stopLogged : !reported && !stopLogged,
+						},
+						"failure accounting, notification deduplication, and terminal stop logging",
+					)
+				}
+
 	for (const started of [false, true])
 		for (const focusSucceeded of [false, true])
 			for (const pending of [false, true]) {
@@ -436,6 +473,28 @@ check(policy)
 // Representative policy regressions must be rejected, rather than merely
 // leaving a self-consistent abstract model green. These do not mutate source.
 const mutants: Array<[string, Policy, RegExp]> = [
+	[
+		"terminal stop suppressed after retry warning",
+		{
+			...policy,
+			recordRecoveryFailure: (state, stop) => ({
+				...policy.recordRecoveryFailure(state, stop),
+				log: !state.reported,
+			}),
+		},
+		/terminal stop logging/,
+	],
+	[
+		"terminal stop repeated on every tick",
+		{
+			...policy,
+			recordRecoveryFailure: (state, stop) => ({
+				...policy.recordRecoveryFailure(state, stop),
+				log: stop || !state.reported,
+			}),
+		},
+		/terminal stop logging/,
+	],
 	[
 		"stale notification reloads window",
 		{ ...policy, recoveryWarningAction: (choice) => (choice === "Reload Window" ? "reload" : "none") },

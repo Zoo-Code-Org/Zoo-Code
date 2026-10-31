@@ -1668,20 +1668,59 @@ describe("ClineProvider", () => {
 			expect(provider.getCurrentTask()).toBeUndefined()
 		})
 
-		test("stops retries after a terminal failure even when a retry warning was already shown", async () => {
-			await provider.resolveWebviewView(mockWebviewView)
-			const html = mockWebviewView.webview.html
-			provider["reportWebviewRecoveryFailure"]("Initialization failed; retry pending", false)
-			expect(provider["webviewRecoveryAttempts"]).toBe(0)
-			expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		test.each([false, true])(
+			"logs one terminal stop and notification despite repeated ticks (prior retry warning: %s)",
+			async (priorWarning) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				const html = mockWebviewView.webview.html
+				const log = vi.spyOn(provider, "log")
+				if (priorWarning) {
+					provider["reportWebviewRecoveryFailure"]("Initialization failed; retry pending", false)
+					expect(provider["webviewRecoveryAttempts"]).toBe(0)
+					expect(log).toHaveBeenCalledWith(
+						"[Zoo Code] Webview recovery will retry: Initialization failed; retry pending",
+					)
+				}
 
-			provider["reportWebviewRecoveryFailure"]("Recovery is unavailable")
-			await vi.advanceTimersByTimeAsync(120_000)
+				provider["reportWebviewRecoveryFailure"]("Recovery is unavailable")
+				expect(log).toHaveBeenCalledWith("[Zoo Code] Webview recovery stopped: Recovery is unavailable")
+				await vi.advanceTimersByTimeAsync(300_000)
 
-			expect(provider["webviewRecoveryAttempts"]).toBe(3)
-			expect(mockWebviewView.webview.html).toBe(html)
-			expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
-		})
+				expect(provider["webviewRecoveryAttempts"]).toBe(3)
+				expect(mockWebviewView.webview.html).toBe(html)
+				expect(log.mock.calls.filter(([line]) => line.includes("Webview recovery stopped:"))).toEqual([
+					["[Zoo Code] Webview recovery stopped: Recovery is unavailable"],
+				])
+				expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+			},
+		)
+
+		test.each(["heartbeat", "manual reopen"] as const)(
+			"logs a new terminal stop after %s begins a new incident",
+			async (reset) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				const log = vi.spyOn(provider, "log")
+				provider["reportWebviewRecoveryFailure"]("First incident")
+				if (reset === "heartbeat") provider.updateWebviewHeartbeat()
+				else {
+					disposeCallback()
+					await provider.resolveWebviewView({
+						...mockWebviewView,
+						webview: { ...mockWebviewView.webview, html: "" },
+					})
+				}
+				expect(provider["webviewRecoveryStopLogged"]).toBe(false)
+
+				provider["reportWebviewRecoveryFailure"]("Second incident")
+				await vi.advanceTimersByTimeAsync(300_000)
+
+				expect(log.mock.calls.filter(([line]) => line.includes("Webview recovery stopped:"))).toEqual([
+					["[Zoo Code] Webview recovery stopped: First incident"],
+					["[Zoo Code] Webview recovery stopped: Second incident"],
+				])
+				expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(2)
+			},
+		)
 
 		test.each(["Reload Window", "Show Logs"] as const)(
 			"runs only the selected recovery action: %s",
@@ -2651,6 +2690,16 @@ describe("ClineProvider", () => {
 				expect(provider["webviewRecoveryAttempts"]).toBe(3)
 				expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
 				expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+				expect(
+					vi
+						.mocked(mockOutputChannel.appendLine)
+						.mock.calls.filter(([line]) => line.includes("Webview recovery stopped:")),
+				).toHaveLength(1)
+				expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+					expect.stringContaining(
+						"Webview recovery stopped: Recovery attempt limit reached without sustained heartbeats",
+					),
+				)
 				expect(provider["_disposed"]).toBe(false)
 				expect(provider.getCurrentTask()).toBe(task)
 				expect(task.dispose).not.toHaveBeenCalled()
