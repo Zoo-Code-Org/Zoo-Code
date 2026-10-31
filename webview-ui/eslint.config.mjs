@@ -49,9 +49,15 @@ export default [
 	{
 		// Test-utils rollout guardrail: component specs render through the shared
 		// renderWithExtensionState helper instead of hand-wrapping providers.
-		// Scoped to .tsx component specs; .ts hook specs keep local renderHook
-		// wrappers since they pass a specific QueryClient instance to the hook.
+		// Hook specs (including .tsx ones) keep local renderHook wrappers since
+		// they pass a specific QueryClient instance to the hook, and Playwright
+		// visual fixtures mount real providers inside stories rather than Vitest
+		// renders.
 		files: ["src/components/**/__tests__/**/*.tsx"],
+		ignores: [
+			"src/components/**/hooks/**/__tests__/**/*.tsx",
+			"src/components/**/__tests__/**/*.visual.fixture.tsx",
+		],
 		rules: {
 			"no-restricted-imports": [
 				"error",

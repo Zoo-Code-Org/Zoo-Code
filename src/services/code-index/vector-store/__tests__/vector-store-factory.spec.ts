@@ -1,5 +1,6 @@
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import { getDefaultModelId, getModelDimension } from "../../../../shared/embeddingModels"
+import { clearAllMocks } from "../../../../test-utils/reset"
 import type { CodeIndexConfig } from "../../interfaces/config"
 import { QdrantVectorStore } from "../qdrant-client"
 import { VectorStoreFactory } from "../vector-store-factory"
@@ -15,7 +16,7 @@ describe("VectorStoreFactory", () => {
 	let config: CodeIndexConfig
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		vi.mocked(getDefaultModelId).mockReturnValue("default-model")
 		vi.mocked(getModelDimension).mockReturnValue(undefined)
 		factory = new VectorStoreFactory()

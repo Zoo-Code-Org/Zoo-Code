@@ -6676,7 +6676,7 @@ describe("getVsCodeLmModels", () => {
 		...overrides,
 	})
 
-	beforeEach(() => vi.clearAllMocks())
+	beforeEach(() => clearAllMocks())
 
 	it("returns serializable model metadata with host-reported image support", async () => {
 		const model = liveModel({ capabilities: { supportsImageToText: true } })
