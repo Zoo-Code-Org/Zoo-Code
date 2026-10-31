@@ -46,4 +46,32 @@ export default [
 			"no-undef": "off",
 		},
 	},
+	{
+		// Test-utils rollout guardrail: component specs render through the shared
+		// renderWithExtensionState helper instead of hand-wrapping providers.
+		// Hook specs (including .tsx ones) keep local renderHook wrappers since
+		// they pass a specific QueryClient instance to the hook, and Playwright
+		// visual fixtures mount real providers inside stories rather than Vitest
+		// renders.
+		files: ["src/components/**/__tests__/**/*.tsx"],
+		ignores: [
+			"src/components/**/hooks/**/__tests__/**/*.tsx",
+			"src/components/**/__tests__/**/*.visual.fixture.tsx",
+		],
+		rules: {
+			"no-restricted-imports": [
+				"error",
+				{
+					paths: [
+						{
+							name: "@tanstack/react-query",
+							importNames: ["QueryClientProvider"],
+							message:
+								"Use renderWithExtensionState from @/utils/test-utils instead of hand-wrapping QueryClientProvider in component specs.",
+						},
+					],
+				},
+			],
+		},
+	},
 ]
