@@ -574,6 +574,21 @@ export class ProviderSettingsManager {
 		}
 	}
 
+	/**
+	 * Get a copy of the persisted mode -> API config ID map. The map is shared by every VS Code
+	 * window, so callers that need a stable view must keep their own copy.
+	 */
+	public async getModeConfigIds(): Promise<Record<string, string>> {
+		try {
+			return await this.lock(async () => {
+				const { modeApiConfigs } = await this.load()
+				return { ...modeApiConfigs }
+			})
+		} catch (error) {
+			throw new Error(`Failed to get mode configs: ${error}`)
+		}
+	}
+
 	public async export() {
 		try {
 			return await this.lock(async () => {

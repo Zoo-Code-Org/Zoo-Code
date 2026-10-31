@@ -356,6 +356,20 @@ export class ClineProvider
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
+	/**
+	 * Mode -> profile id choices made by this window. The persisted mode map in
+	 * `providerSettingsManager` is shared by every VS Code window, so reading it
+	 * alone lets another window's profile selection leak into this window's tasks.
+	 */
+	private readonly localModeConfigIds = new Map<string, string>()
+
+	/**
+	 * The shared mode map as it was when this window opened. Modes this window has not changed
+	 * resolve against it, so another window's later selection cannot reach this window's tasks
+	 * (including delegated subtasks).
+	 */
+	private initialModeConfigIds: Promise<Record<string, string>> = Promise.resolve({})
+
 	constructor(
 		readonly context: vscode.ExtensionContext,
 		private readonly outputChannel: vscode.OutputChannel,
@@ -392,6 +406,7 @@ export class ClineProvider
 		this._workspaceTracker = new WorkspaceTracker(this)
 
 		this.providerSettingsManager = new ProviderSettingsManager(this.context)
+		this.captureInitialModeConfigIds()
 
 		this.customModesManager = new CustomModesManager(this.context, async () => {
 			await this.postStateToWebviewWithoutClineMessages()
@@ -1317,7 +1332,7 @@ export class ClineProvider
 			const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
 
 			if (!historyItem.apiConfigName && !lockApiConfigAcrossModes && !skipProfileRestoreFromHistory) {
-				const savedConfigId = await this.providerSettingsManager.getModeConfigId(historyItem.mode)
+				const savedConfigId = await this.getModeConfigId(historyItem.mode)
 				const listApiConfig = await this.providerSettingsManager.listConfig()
 
 				// Update listApiConfigMeta first to ensure UI has latest data.
@@ -1825,7 +1840,7 @@ export class ClineProvider
 		if (signal?.aborted) return
 
 		// Load the saved API config for the new mode if it exists.
-		const savedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
+		const savedConfigId = await this.getModeConfigId(newMode)
 		const listApiConfig = await this.providerSettingsManager.listConfig()
 
 		if (signal?.aborted) return
@@ -1867,7 +1882,7 @@ export class ClineProvider
 				const config = listApiConfig.find((c) => c.name === currentApiConfigNameAfter)
 
 				if (config?.id) {
-					await this.providerSettingsManager.setModeConfig(newMode, config.id)
+					await this.setModeConfig(newMode, config.id)
 				}
 			}
 		}
@@ -1878,6 +1893,27 @@ export class ClineProvider
 	}
 
 	// Provider Profile Management
+
+	private captureInitialModeConfigIds(): void {
+		this.initialModeConfigIds = this.providerSettingsManager.getModeConfigIds().catch((error) => {
+			this.log(`Failed to snapshot mode profile choices: ${error instanceof Error ? error.message : error}`)
+			return {}
+		})
+	}
+
+	private async getModeConfigId(mode: Mode): Promise<string | undefined> {
+		return (
+			this.localModeConfigIds.get(mode) ??
+			(await this.initialModeConfigIds)[mode] ??
+			// Modes created after this window opened have no snapshot entry.
+			(await this.providerSettingsManager.getModeConfigId(mode))
+		)
+	}
+
+	private async setModeConfig(mode: Mode, id: string): Promise<void> {
+		this.localModeConfigIds.set(mode, id)
+		await this.providerSettingsManager.setModeConfig(mode, id)
+	}
 
 	/**
 	 * Updates the current task's API handler.
@@ -2084,7 +2120,7 @@ export class ClineProvider
 			const activationResults = await Promise.allSettled([
 				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
 				this.updateGlobalState("currentApiConfigName", name),
-				this.providerSettingsManager.setModeConfig(mode, id),
+				this.setModeConfig(mode, id),
 				this.contextProxy.setProviderSettings(providerSettings),
 			])
 			const failedActivation = activationResults.find(
@@ -2206,7 +2242,7 @@ export class ClineProvider
 		const { mode } = await this.getState()
 
 		if (id && persistModeConfig) {
-			await this.providerSettingsManager.setModeConfig(mode, id)
+			await this.setModeConfig(mode, id)
 		}
 
 		// Change the provider for the current task.
@@ -3430,6 +3466,9 @@ export class ClineProvider
 
 		await this.contextProxy.resetAllState()
 		await this.providerSettingsManager.resetAllConfigs()
+		// Cached choices point at profiles that no longer exist; re-read the reset mapping.
+		this.localModeConfigIds.clear()
+		this.captureInitialModeConfigIds()
 		await this.customModesManager.resetCustomModes()
 		await this.removeClineFromStack()
 		await this.postStateToWebview()
@@ -4057,7 +4096,7 @@ export class ClineProvider
 			mode !== parentMode && this.context.workspaceState.get("lockApiConfigAcrossModes", false)
 		let savedModeProfile: { name?: string; apiConfiguration: ProviderSettings } | undefined
 		if (mode !== parentMode && !lockApiConfigAcrossModes) {
-			const savedConfigId = await this.providerSettingsManager.getModeConfigId(mode as Mode)
+			const savedConfigId = await this.getModeConfigId(mode as Mode)
 			if (savedConfigId) {
 				try {
 					const {

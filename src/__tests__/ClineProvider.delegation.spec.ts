@@ -295,6 +295,8 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			isViewLaunched: false,
 			taskHistoryStore: makeStoreStub(),
 			providerSettingsManager,
+			// No window-local choice is recorded, so the lookup reaches the shared manager.
+			getModeConfigId: (mode: string) => providerSettingsManager.getModeConfigId(mode),
 			context: { workspaceState: { get: workspaceGet } },
 		} as unknown as ClineProvider
 
@@ -326,6 +328,53 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		)
 	})
 
+	it("uses this window's mode profile instead of one another window saved in shared storage", async () => {
+		const parentTask = makeParentTask()
+		const createTask = vi
+			.fn()
+			.mockResolvedValue({ taskId: "child-local", run: vi.fn().mockResolvedValue(undefined) })
+		const getProfile = vi.fn().mockResolvedValue({
+			name: "local-profile",
+			id: "local-profile-id",
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4.1-mini",
+		})
+		const sharedGetModeConfigId = vi.fn().mockResolvedValue("other-window-profile-id")
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			log: vi.fn(),
+			isViewLaunched: false,
+			taskHistoryStore: makeStoreStub(),
+			providerSettingsManager: { getModeConfigId: sharedGetModeConfigId, getProfile },
+			// This window's own choice differs from the shared value another window wrote.
+			getModeConfigId: vi.fn().mockResolvedValue("local-profile-id"),
+			context: { workspaceState: { get: vi.fn().mockReturnValue(false) } },
+		} as unknown as ClineProvider
+
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Local child",
+			initialTodos: [],
+			mode: "ask",
+		})
+
+		expect(getProfile).toHaveBeenCalledOnce()
+		expect(getProfile).toHaveBeenCalledWith({ id: "local-profile-id" })
+		expect(sharedGetModeConfigId).not.toHaveBeenCalled()
+		expect(createTask).toHaveBeenCalledWith(
+			"Local child",
+			undefined,
+			parentTask,
+			expect.objectContaining({
+				handoffExecutionContext: expect.objectContaining({ mode: "ask", apiConfigName: "local-profile" }),
+			}),
+		)
+	})
+
 	it.each([
 		{ name: "has no saved mode profile", savedConfigId: undefined, savedProfile: undefined },
 		{
@@ -347,6 +396,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				? vi.fn().mockRejectedValue(savedProfile)
 				: vi.fn().mockResolvedValue(savedProfile)
 		const log = vi.fn()
+		const getModeConfigId = vi.fn().mockResolvedValue(savedConfigId)
 		const provider = {
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
@@ -356,10 +406,9 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			log,
 			isViewLaunched: false,
 			taskHistoryStore: makeStoreStub(),
-			providerSettingsManager: {
-				getModeConfigId: vi.fn().mockResolvedValue(savedConfigId),
-				getProfile,
-			},
+			providerSettingsManager: { getModeConfigId, getProfile },
+			// No window-local choice is recorded, so the lookup reaches the shared manager.
+			getModeConfigId,
 			context: { workspaceState: { get: vi.fn().mockReturnValue(false) } },
 		} as unknown as ClineProvider
 

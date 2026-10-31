@@ -239,6 +239,8 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			new ContextProxy(mockContext),
 			new WebviewFocusTracker(),
 		)
+		// These tests stub providerSettingsManager and expect it to be consulted for mode profiles.
+		provider["initialModeConfigIds"] = Promise.resolve({})
 
 		// Mock providerSettingsManager
 		;(provider as any).providerSettingsManager = {
