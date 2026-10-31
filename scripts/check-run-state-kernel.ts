@@ -14,7 +14,7 @@ interface ModelState {
 	run: RunState
 	askCount: number
 	completionAsks: number[]
-	lastEndedStreamCleaned: boolean
+	lastEndedStreamFailedAndCleaned: boolean
 }
 
 interface ModelEvent {
@@ -263,7 +263,7 @@ const semanticWitnesses = {
 		event.tag === "disposeRequested" && prev.run.phase === "completed" && next.run.latches.disposed,
 	"stream-after-failure-cleanup": ({ prev, next, event }: WitnessContext) =>
 		event.tag === "streamStarted" &&
-		prev.lastEndedStreamCleaned &&
+		prev.lastEndedStreamFailedAndCleaned &&
 		!prev.run.latches.abort &&
 		next.run.stream.tag === "live" &&
 		!next.run.stream.cleanupFinished &&
@@ -289,7 +289,12 @@ const semanticWitnesses = {
 } satisfies Record<string, (context: WitnessContext) => boolean>
 
 function initialState(): ModelState {
-	return { run: structuredClone(initialRunState), askCount: 0, completionAsks: [], lastEndedStreamCleaned: false }
+	return {
+		run: structuredClone(initialRunState),
+		askCount: 0,
+		completionAsks: [],
+		lastEndedStreamFailedAndCleaned: false,
+	}
 }
 
 function stable(value: unknown): unknown {
@@ -435,7 +440,8 @@ function apply(options: Options, state: ModelState, { event }: ModelEvent): Appl
 		if (event.ask.tag === "completion") next.completionAsks = [...state.completionAsks, event.ask.askTs]
 	}
 	if (event.tag === "streamEnded" && state.run.stream.tag === "live") {
-		next.lastEndedStreamCleaned = state.run.stream.cleanupFinished
+		next.lastEndedStreamFailedAndCleaned =
+			state.run.stream.cleanupFinished && state.run.latches.reason === "streaming_failed"
 	}
 	return { next, accepted, problems }
 }
