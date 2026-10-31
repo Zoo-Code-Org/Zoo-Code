@@ -23,6 +23,7 @@ import type { ModelInfo } from "@roo-code/types"
 import { applyOpenRouterMoonshotK3Profile } from "../fetchers/openrouter"
 
 import { OpenRouterHandler } from "../openrouter"
+import { getModels } from "../fetchers/modelCache"
 import { Package } from "../../../shared/package"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
@@ -81,6 +82,34 @@ vitest.mock("../fetchers/modelCache", () => ({
 				description: "Claude 4.5 Sonnet",
 				thinking: false,
 			},
+			// Not in OPEN_ROUTER_PROMPT_CACHING_MODELS: stands in for a Claude
+			// model released after the static allowlist was last edited.
+			"anthropic/claude-opus-4.8": {
+				maxTokens: 128000,
+				contextWindow: 1000000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				inputPrice: 5,
+				outputPrice: 25,
+				cacheWritesPrice: 6.25,
+				cacheReadsPrice: 0.5,
+				description: "Claude 4.8 Opus",
+				thinking: false,
+			},
+			// Not in OPEN_ROUTER_PROMPT_CACHING_MODELS and not Anthropic: the
+			// negative control for the widened gate. It advertises cache pricing
+			// so the fixture states the premise instead of relying on the
+			// hardcoded default info's flag.
+			"google/gemini-9-pro": {
+				maxTokens: 65536,
+				contextWindow: 1000000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				inputPrice: 1.25,
+				outputPrice: 10,
+				cacheReadsPrice: 0.31,
+				description: "Gemini 9 Pro (hypothetical)",
+			},
 			"anthropic/claude-3.7-sonnet:thinking": {
 				maxTokens: 128000,
 				contextWindow: 200000,
@@ -138,6 +167,32 @@ describe("OpenRouterHandler", () => {
 		openRouterApiKey: "test-key",
 		openRouterModelId: "anthropic/claude-sonnet-4",
 	})
+
+	/**
+	 * Install a `chat.completions.create` stub on the vitest-mocked OpenAI class
+	 * and hand back the mock plus a restore function. The mocked class is
+	 * structurally incompatible with the narrow chat stub, so the double
+	 * assertion routes through `unknown` (instead of `any`) to keep this file's
+	 * no-explicit-any budget flat.
+	 */
+	function stubChatCompletions() {
+		const create = vitest
+			.fn()
+			.mockResolvedValue(asyncStreamFrom([{ id: "test-id", choices: [{ delta: { content: "test response" } }] }]))
+		const openAiPrototype = OpenAI as unknown as { prototype: { chat?: unknown } }
+		const originalChat = openAiPrototype.prototype.chat
+		openAiPrototype.prototype.chat = { completions: { create } }
+
+		return {
+			create,
+			requestParams: () => (create.mock.calls[0] as [Record<string, unknown>])[0],
+			restore: () => {
+				// clearAllMocks does not undo prototype assignment, so every stub
+				// must be removed explicitly or it leaks into later tests.
+				openAiPrototype.prototype.chat = originalChat
+			},
+		}
+	}
 
 	beforeEach(() => {
 		clearAllMocks()
@@ -483,6 +538,319 @@ describe("OpenRouterHandler", () => {
 				}),
 				{ headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } },
 			)
+		})
+
+		it("adds cache control for a Claude model missing from the static allowlist", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "anthropic/claude-opus-4.8",
+				}),
+			)
+
+			const mockStream = asyncStreamFrom([{ id: "test-id", choices: [{ delta: { content: "test response" } }] }])
+			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
+			const chatStub = { completions: { create: mockCreate } }
+			const openAiPrototype = OpenAI as unknown as { prototype: { chat?: unknown } }
+			const originalChat = openAiPrototype.prototype.chat
+			openAiPrototype.prototype.chat = chatStub
+
+			try {
+				await handler.createMessage("test system", [{ role: "user", content: "test message" }]).next()
+
+				const [requestParams] = mockCreate.mock.calls[0] as [Record<string, unknown>]
+				expect(requestParams).toMatchObject({
+					messages: expect.arrayContaining([
+						expect.objectContaining({
+							role: "system",
+							content: expect.arrayContaining([
+								expect.objectContaining({ cache_control: { type: "ephemeral" } }),
+							]),
+						}),
+					]),
+				})
+			} finally {
+				openAiPrototype.prototype.chat = originalChat
+			}
+		})
+
+		it("keeps Gemini cache breakpoints allowlist-only", async () => {
+			// A Gemini model absent from the allowlist must not gain Anthropic-style
+			// breakpoints just because its catalog record advertises cache pricing.
+			// `google/gemini-9-pro` is in the mocked catalog with
+			// `supportsPromptCache: true`, so the premise is stated by the fixture
+			// rather than by the hardcoded default info's flag.
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "google/gemini-9-pro",
+				}),
+			)
+			const stub = stubChatCompletions()
+
+			try {
+				await handler.createMessage("test system", [{ role: "user", content: "test message" }]).next()
+
+				expect(stub.requestParams()).toMatchObject({
+					messages: [{ role: "system", content: "test system" }, expect.anything()],
+				})
+			} finally {
+				stub.restore()
+			}
+		})
+
+		it("adds no cache breakpoints when the catalog is empty and the id is not allowlisted", async () => {
+			// The fallback info hardcodes `supportsPromptCache: true`, so trusting
+			// `model.info` would hand breakpoints to any `anthropic/*` id whenever
+			// the catalog is empty or degraded. An id that never resolved from the
+			// fetched catalog is not live evidence, so the allowlist alone decides.
+			vitest.mocked(getModels).mockResolvedValueOnce({})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "anthropic/claude-not-in-catalog",
+				}),
+			)
+			const stub = stubChatCompletions()
+
+			try {
+				await handler.createMessage("test system", [{ role: "user", content: "test message" }]).next()
+
+				expect(stub.requestParams()).toMatchObject({
+					messages: [{ role: "system", content: "test system" }, expect.anything()],
+				})
+			} finally {
+				stub.restore()
+			}
+		})
+
+		it("reads the cache capability from the model record when a provider is pinned", async () => {
+			// getModel() substitutes the pinned endpoint's record, whose
+			// `supportsPromptCache` comes from that one endpoint's pricing. The gate
+			// must follow the model-level catalog record instead, or pinning a
+			// provider silently drops breakpoints for a caching Claude model.
+			mockGetModelEndpoints.mockResolvedValue({
+				anthropic: {
+					maxTokens: 128000,
+					contextWindow: 1000000,
+					supportsImages: true,
+					supportsPromptCache: false,
+					inputPrice: 5,
+					outputPrice: 25,
+					description: "Claude 4.8 Opus (Anthropic endpoint)",
+				},
+			})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "anthropic/claude-opus-4.8",
+					openRouterSpecificProvider: providerIdentifiers.anthropic,
+				}),
+			)
+			const stub = stubChatCompletions()
+
+			try {
+				await handler.createMessage("test system", [{ role: "user", content: "test message" }]).next()
+
+				// The endpoint record is what the request is built from...
+				expect(stub.requestParams()).toMatchObject({ model: "anthropic/claude-opus-4.8" })
+				// ...but the model-level flag still turns breakpoints on.
+				expect(stub.requestParams()).toMatchObject({
+					messages: expect.arrayContaining([
+						expect.objectContaining({
+							role: "system",
+							content: expect.arrayContaining([
+								expect.objectContaining({ cache_control: { type: "ephemeral" } }),
+							]),
+						}),
+					]),
+				})
+			} finally {
+				stub.restore()
+			}
+		})
+
+		it("adds no cache breakpoints when a pinned endpoint advertises caching the model record denies", async () => {
+			// Mirror of the case above: an endpoint record that reports cache
+			// pricing must not widen the gate for a model whose catalog record says
+			// no. Otherwise pinning a provider would add breakpoints the unpinned
+			// path withholds.
+			mockGetModelEndpoints.mockResolvedValue({
+				anthropic: {
+					maxTokens: 128000,
+					contextWindow: 1000000,
+					supportsImages: true,
+					supportsPromptCache: true,
+					inputPrice: 5,
+					outputPrice: 25,
+					cacheReadsPrice: 0.5,
+					description: "Claude 4.8 Opus (Anthropic endpoint)",
+				},
+			})
+			vitest.mocked(getModels).mockResolvedValueOnce({
+				"anthropic/claude-opus-4.8": {
+					maxTokens: 128000,
+					contextWindow: 1000000,
+					supportsImages: true,
+					supportsPromptCache: false,
+					inputPrice: 5,
+					outputPrice: 25,
+					description: "Claude 4.8 Opus",
+				},
+			})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "anthropic/claude-opus-4.8",
+					openRouterSpecificProvider: providerIdentifiers.anthropic,
+				}),
+			)
+			const stub = stubChatCompletions()
+
+			try {
+				await handler.createMessage("test system", [{ role: "user", content: "test message" }]).next()
+
+				expect(stub.requestParams()).toMatchObject({
+					messages: [{ role: "system", content: "test system" }, expect.anything()],
+				})
+			} finally {
+				stub.restore()
+			}
+		})
+
+		it("sends the task ID as the OpenRouter cache session affinity key", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+
+			const mockStream = asyncStreamFrom([{ id: "test-id", choices: [{ delta: { content: "test response" } }] }])
+			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
+			const chatStub = { completions: { create: mockCreate } }
+			const openAiPrototype = OpenAI as unknown as { prototype: { chat?: unknown } }
+			const originalChat = openAiPrototype.prototype.chat
+			openAiPrototype.prototype.chat = chatStub
+
+			try {
+				await handler
+					.createMessage("test system", [{ role: "user", content: "test message" }], { taskId: "task-123" })
+					.next()
+
+				const [requestParams] = mockCreate.mock.calls[0] as [Record<string, unknown>]
+				expect(requestParams).toMatchObject({ session_id: "task-123" })
+			} finally {
+				openAiPrototype.prototype.chat = originalChat
+			}
+		})
+
+		it("omits session_id when no task ID is available", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+
+			const mockStream = asyncStreamFrom([{ id: "test-id", choices: [{ delta: { content: "test response" } }] }])
+			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
+			const chatStub = { completions: { create: mockCreate } }
+			const openAiPrototype = OpenAI as unknown as { prototype: { chat?: unknown } }
+			const originalChat = openAiPrototype.prototype.chat
+			openAiPrototype.prototype.chat = chatStub
+
+			try {
+				await handler.createMessage("test system", [{ role: "user", content: "test message" }]).next()
+
+				const [requestParams] = mockCreate.mock.calls[0] as [Record<string, unknown>]
+				expect(requestParams).not.toHaveProperty("session_id")
+			} finally {
+				openAiPrototype.prototype.chat = originalChat
+			}
+		})
+
+		it("truncates an over-long task ID to OpenRouter's 256-character session_id limit", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+
+			const mockStream = asyncStreamFrom([{ id: "test-id", choices: [{ delta: { content: "test response" } }] }])
+			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
+			const chatStub = { completions: { create: mockCreate } }
+			const openAiPrototype = OpenAI as unknown as { prototype: { chat?: unknown } }
+			const originalChat = openAiPrototype.prototype.chat
+			openAiPrototype.prototype.chat = chatStub
+
+			try {
+				await handler
+					.createMessage("test system", [{ role: "user", content: "test message" }], {
+						taskId: "a".repeat(300),
+					})
+					.next()
+
+				const [requestParams] = mockCreate.mock.calls[0] as [Record<string, unknown>]
+				expect(requestParams.session_id).toBe("a".repeat(256))
+			} finally {
+				openAiPrototype.prototype.chat = originalChat
+			}
+		})
+
+		it("maps OpenRouter cache read and write usage tokens", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+
+			const mockStream = asyncStreamFrom([
+				{
+					id: "test-id",
+					choices: [{ delta: {} }],
+					usage: {
+						prompt_tokens: 10,
+						completion_tokens: 2,
+						prompt_tokens_details: { cached_tokens: 6, cache_write_tokens: 4 },
+					},
+				},
+			])
+			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
+			const chatStub = { completions: { create: mockCreate } }
+			const openAiPrototype = OpenAI as unknown as { prototype: { chat?: unknown } }
+			const originalChat = openAiPrototype.prototype.chat
+			openAiPrototype.prototype.chat = chatStub
+
+			try {
+				const chunks = await collectStream(
+					handler.createMessage("test system", [{ role: "user", content: "test message" }]),
+				)
+
+				expect(chunks).toContainEqual({
+					type: "usage",
+					inputTokens: 10,
+					outputTokens: 2,
+					cacheReadTokens: 6,
+					cacheWriteTokens: 4,
+					totalCost: 0,
+				})
+			} finally {
+				openAiPrototype.prototype.chat = originalChat
+			}
+		})
+
+		it("leaves cache token fields unset when OpenRouter reports no cache usage", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+
+			const mockStream = asyncStreamFrom([
+				{
+					id: "test-id",
+					choices: [{ delta: {} }],
+					usage: { prompt_tokens: 10, completion_tokens: 2 },
+				},
+			])
+			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
+			const chatStub = { completions: { create: mockCreate } }
+			const openAiPrototype = OpenAI as unknown as { prototype: { chat?: unknown } }
+			const originalChat = openAiPrototype.prototype.chat
+			openAiPrototype.prototype.chat = chatStub
+
+			try {
+				const chunks = await collectStream(
+					handler.createMessage("test system", [{ role: "user", content: "test message" }]),
+				)
+
+				const usageChunk = chunks.find((chunk) => chunk.type === "usage")
+				expect(usageChunk).toMatchObject({ cacheReadTokens: undefined, cacheWriteTokens: undefined })
+			} finally {
+				openAiPrototype.prototype.chat = originalChat
+			}
 		})
 
 		it("handles API errors and captures telemetry", async () => {
