@@ -734,6 +734,14 @@
 		"enable": {
 			"label": "Otomatik kontrol noktalarını etkinleştir",
 			"description": "Etkinleştirildiğinde, Zoo görev yürütme sırasında otomatik olarak kontrol noktaları oluşturarak değişiklikleri gözden geçirmeyi veya önceki durumlara dönmeyi kolaylaştırır. <0>Daha fazla bilgi</0>"
+		},
+		"perWrite": {
+			"label": "Her dosya yazımından sonra kontrol noktası",
+			"description": "Her başarılı yazma işleminden sonra bir kontrol noktası anlık görüntüsü kaydeder; çok dosyalı bir yama tek bir kontrol noktası üretir."
+		},
+		"changeCardDetail": {
+			"label": "Değişiklik kartlarında tam diff'i göster",
+			"description": "Adım başına değişiklik kartlarında her dosya için tam birleşik diff'i satır içi olarak içerir. Kapalıyken kartlar yalnızca eklenen/çıkarılan satır sayılarıyla birlikte dosya listesini gösterir."
 		}
 	},
 	"notifications": {

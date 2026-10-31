@@ -13,6 +13,8 @@ import { unescapeHtmlEntities } from "../../utils/text-normalization"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { computeDiffStats, sanitizeUnifiedDiff } from "../diff/stats"
 import type { DiffResult, ToolUse } from "../../shared/tools"
+import { checkAutoApproval } from "../auto-approval"
+import { checkpointSave } from "../checkpoints"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 
@@ -145,9 +147,13 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				diff: diffContent,
 			}
 
+			// Hoisted: both save branches build the same approval message, and the
+			// B3a per-write checkpoint (below) needs it for auto-approval parity.
+			let completeMessage = ""
+
 			if (isPreventFocusDisruptionEnabled) {
 				// Direct file write without diff view
-				const completeMessage = JSON.stringify({
+				completeMessage = JSON.stringify({
 					...sharedMessageProps,
 					diff: diffContent,
 					content: unifiedPatch,
@@ -192,7 +198,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				await task.diffViewProvider.update(diffResult.content, true)
 				task.diffViewProvider.scrollToFirstDiff()
 
-				const completeMessage = JSON.stringify({
+				completeMessage = JSON.stringify({
 					...sharedMessageProps,
 					diff: diffContent,
 					content: unifiedPatch,
@@ -223,6 +229,40 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 
 				// Call saveChanges to update the DiffViewProvider properties
 				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+			}
+
+			// B3a: per-write checkpoint + change card for the apply_diff write, with
+			// the same parity as write_to_file / edit_file / apply_patch (this tool
+			// previously wrote with no checkpoint and no card, so its edits had no
+			// per-file rollback surface in chat). The applied unified diff and its
+			// stats were already computed above for the tool message and are reused
+			// verbatim; auto-approved steps always get the compact card. Live setting
+			// with default-on semantics: skip only when explicitly false. apply_diff
+			// only ever modifies an existing file (a missing file errors out before
+			// the diff is applied), so the operation is always "update".
+			const perWriteCheckpoints = state?.perWriteCheckpoints
+			if (perWriteCheckpoints !== false) {
+				const autoApproved =
+					(
+						await checkAutoApproval({
+							state,
+							cwd: task.cwd,
+							ask: "tool",
+							text: completeMessage,
+							isProtected: isWriteProtected,
+						})
+					).decision === "approve"
+				await checkpointSave(task, false, true, {
+					path: relPath,
+					operation: "update",
+					...(diffStats ? { diffStats: { additions: diffStats.added, deletions: diffStats.removed } } : {}),
+					...(unifiedPatch ? { diff: unifiedPatch } : {}),
+					...(autoApproved ? { autoApproved: true } : {}),
+					// A persistence failure (a committed checkpoint whose journal
+					// update was lost) propagates to the catch below - explicit tool
+					// failure handling surfacing the checkpoint id and affected paths -
+					// instead of reporting the edit as fully persisted.
+				})
 			}
 
 			// Track file edit operation
