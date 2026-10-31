@@ -1090,6 +1090,10 @@
 			"refreshSuccess": "Tools refreshed successfully",
 			"refreshError": "Failed to refresh tools",
 			"toolParameters": "Parameters"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Dynamic thinking effort",
+			"description": "Prepares the set_thinking_effort tool for later support: this setting stores the preference only, and the tool's per-request behavior arrives in follow-up work. The manual in-chat control is always available. (experimental)"
 		}
 	},
 	"promptCaching": {

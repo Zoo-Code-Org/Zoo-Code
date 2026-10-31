@@ -1010,6 +1010,10 @@
 			"refreshSuccess": "ツールが正常に更新されました",
 			"refreshError": "ツールの更新に失敗しました",
 			"toolParameters": "パラメーター"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "ダイナミック思考強度",
+			"description": "set_thinking_effort ツールを将来のサポートに備えて準備します。この設定は選好を保存するだけで、リクエストごとの動作は後続の作業で提供されます。チャット内での手動調整は常に利用可能です。（実験的機能）"
 		}
 	},
 	"promptCaching": {
