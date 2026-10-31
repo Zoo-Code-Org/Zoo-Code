@@ -324,8 +324,7 @@ describe("eval ipc client", () => {
 			if (connections === 1) {
 				// Only half a frame, no ack, then the peer dies. The rest can
 				// never arrive, so these bytes are unrecoverable garbage.
-				socket.write(taskEvent.slice(0, 34))
-				socket.destroy()
+				socket.write(taskEvent.slice(0, 34), () => socket.destroy())
 				return
 			}
 
