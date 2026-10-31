@@ -2834,6 +2834,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						staleSnapshot.images = images
 						staleSnapshot.partial = partial
 						staleSnapshot.progressStatus = progressStatus
+						// Move the merged row to the tail so the next delta takes the
+						// in-place fast path above instead of re-entering this branch
+						// and awaiting another full save. `ts` is untouched: it is the
+						// webview's virtuoso key, so re-stamping it would remount the row.
+						this.clineMessages.splice(staleSnapshotIndex, 1)
+						this.clineMessages.push(staleSnapshot)
 						// A stranded snapshot merge has no guaranteed later save, so
 						// persist the merged delta before the webview update — the
 						// same save-then-post pattern as the complete-merge branch.

@@ -7860,10 +7860,60 @@ describe("Cline", () => {
 
 			expect(events).toEqual(["save", "update"])
 			// The save observed the already-merged snapshot, not the stale text.
+			// The merged row is moved to the tail before the save, so the array
+			// order matches content recency rather than the original position.
 			expect(persistedAtSaveCall).toEqual([
-				{ text: "Thinking about it", partial: true },
 				{ text: "Execute command?", partial: false },
+				{ text: "Thinking about it", partial: true },
 			])
+		})
+
+		it("moves a merged stranded snapshot to the tail so later deltas take the in-place fast path", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+
+			await task.say("reasoning", "Thinking ab", undefined, true)
+			const snapshotTs = task.clineMessages[0].ts
+			const askTs = snapshotTs + 1
+			task.clineMessages.push({
+				ts: askTs,
+				type: "ask",
+				ask: "tool",
+				text: "Execute command?",
+				partial: false,
+			})
+			task.lastMessageTs = askTs
+			const tsBefore = task.clineMessages.map((m) => m.ts)
+			saveSpy.mockClear()
+
+			// Three more deltas of the same stranded stream.
+			await task.say("reasoning", "Thinking about", undefined, true)
+			await task.say("reasoning", "Thinking about the", undefined, true)
+			await task.say("reasoning", "Thinking about the plan", undefined, true)
+
+			// (b) One awaited full save for the whole stranding, not one per delta:
+			// the first delta merges and persists, the rest update the tail in place.
+			expect(saveSpy).toHaveBeenCalledTimes(1)
+
+			// (a) The splice must not mint or re-stamp a ts: the webview uses ts as
+			// the virtuoso list key (Task.ts:4180), so a changed key remounts the row.
+			expect([...task.clineMessages.map((m) => m.ts)].sort((a, b) => a - b)).toEqual(
+				[...tsBefore].sort((a, b) => a - b),
+			)
+			const reasoning = task.clineMessages.find((m) => m.type === "say" && m.say === "reasoning")
+			expect(reasoning?.ts).toBe(snapshotTs)
+
+			// (c) The tail is the row whose content was written most recently.
+			expect(task.clineMessages.at(-1)).toBe(reasoning)
+			expect(task.clineMessages.at(-1)?.text).toBe("Thinking about the plan")
+			expect(task.clineMessages.at(-1)?.partial).toBe(true)
+			// The partial-merge branch leaves lastMessageTs on the pending ask.
+			expect(task.lastMessageTs).toBe(askTs)
 		})
 
 		it("appends a new partial message when no prefix-related stranded snapshot exists", async () => {
