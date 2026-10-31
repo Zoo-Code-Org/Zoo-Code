@@ -8,7 +8,12 @@ import { initReactI18next } from "react-i18next"
  */
 export const FALLBACK_LANGUAGE = "en"
 
-type LocaleResources = Record<string, any>
+/**
+ * A locale JSON file is a tree of translated strings, e.g.
+ * `{ "errorBoundary": { "title": "Something went wrong" } }`. Typing the leaves
+ * keeps the values checked on their way into `i18next.addResourceBundle`.
+ */
+type LocaleResources = { [key: string]: string | LocaleResources }
 type LocaleModule = { default?: LocaleResources } & LocaleResources
 
 // Example path: './locales/en/common.json' -> language: 'en', namespace: 'common'

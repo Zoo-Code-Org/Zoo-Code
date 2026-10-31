@@ -25,7 +25,7 @@ describe("i18n setup locale load failure", () => {
 		expect(i18next.t("common:errorBoundary.title", { lng: "ja" })).toBe("Something went wrong")
 	})
 
-	it("retries the fetch on the next call instead of caching the failure", async () => {
+	it("does not memoize a failed load, so the next call re-attempts it", async () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
 
 		await loadLanguage("ja")
@@ -33,6 +33,10 @@ describe("i18n setup locale load failure", () => {
 
 		// `loadedLanguages` is only updated on success and `pendingLanguages` is
 		// cleared in `finally`, so a transient failure must not be memoized.
+		// This covers `loadLanguage`'s own bookkeeping only: engines that cache a
+		// failed module fetch in the module map (every Chromium below 156, so the
+		// VS Code webview) can still reject the second import from that cache
+		// without re-requesting the chunk.
 		expect(warn).toHaveBeenCalledTimes(2)
 		expect(i18next.language).toBe(FALLBACK_LANGUAGE)
 	})

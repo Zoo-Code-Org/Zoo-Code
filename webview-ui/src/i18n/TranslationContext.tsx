@@ -24,8 +24,10 @@ const TranslationProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 	// has to fetch its bundles before i18next can resolve a key. Switching after
 	// the fetch is deliberate: `changeLanguage` is what emits `languageChanged`,
 	// the event `useTranslation` subscribes to for re-renders. Until it fires the
-	// subtree keeps resolving keys through `fallbackLng`, the same
-	// fallback-then-swap shape this provider had when every locale was bundled.
+	// subtree keeps resolving keys through whichever language is still active:
+	// `fallbackLng` on a cold start, the previous language on a warm switch
+	// between two non-English locales. The swap-then-render shape is the same one
+	// this provider had when every locale was bundled.
 	useEffect(() => {
 		let cancelled = false
 
