@@ -12,6 +12,8 @@ import {
 
 import { calculateApiCostOpenAI } from "../../shared/cost"
 
+import { normalizeChatUsage } from "../transform/chat-usage-normalization"
+
 import { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
@@ -383,18 +385,15 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			throwIfAborted(requestSignal)
 
 			if (lastUsage) {
-				// Extract cache-related information if available
-				// LiteLLM may use different field names for cache tokens
-				const cacheWriteTokens =
-					lastUsage.cache_creation_input_tokens ||
-					lastUsage.prompt_tokens_details?.cache_write_tokens ||
-					(lastUsage as any).prompt_cache_miss_tokens ||
-					0
-				const cacheReadTokens =
-					lastUsage.prompt_tokens_details?.cached_tokens ||
-					(lastUsage as any).cache_read_input_tokens ||
-					(lastUsage as any).prompt_cache_hit_tokens ||
-					0
+				// LiteLLM relays whatever cache counters the upstream provider
+				// publishes: Anthropic-style top-level fields, OpenAI-style nested
+				// `prompt_tokens_details`, and DeepSeek-style hit/miss counters. The
+				// shared normalizer resolves one value per counter across those shapes
+				// and keeps cache misses out of the cache-write total, because a miss
+				// is ordinary input that `prompt_tokens` already counts.
+				const normalized = normalizeChatUsage(lastUsage)
+				const cacheWriteTokens = normalized?.cacheWriteTokens ?? 0
+				const cacheReadTokens = normalized?.cacheReadTokens ?? 0
 
 				const { totalCost } = calculateApiCostOpenAI(
 					info,
@@ -572,9 +571,12 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 }
 
 // LiteLLM usage may include an extra field for Anthropic use cases.
+// The index signature keeps this assignable to the normalizer's `ChatUsageLike`,
+// which an interface without one never is.
 interface LiteLLMUsage extends OpenAI.CompletionUsage {
 	cache_creation_input_tokens?: number
 	prompt_tokens_details?: OpenAI.CompletionUsage["prompt_tokens_details"] & {
 		cache_write_tokens?: number
 	}
+	[key: string]: unknown
 }
