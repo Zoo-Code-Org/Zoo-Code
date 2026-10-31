@@ -105,6 +105,7 @@ import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 // core modules
 import { ToolRepetitionDetector } from "../tools/ToolRepetitionDetector"
 import { restoreTodoListForTask } from "../tools/UpdateTodoListTool"
+import { writeToFileTool } from "../tools/WriteToFileTool"
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
@@ -386,6 +387,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * @private
 	 */
 	private taskApiConfigReady: Promise<void>
+	/**
+	 * Whether taskApiConfigReady has settled. The dispose-time metadata retry needs it only while
+	 * _taskApiConfigName is still undefined: persistTaskMetadata() awaits the promise in that case,
+	 * and teardown must not block on it. A legacy history item legitimately has no stored api
+	 * config while its initialization completed, and that task still needs the retry; once the
+	 * name IS known, persistTaskMetadata() skips the await, so an unsettled promise must not
+	 * suppress the repair either.
+	 */
+	private taskApiConfigReadySettled = false
+
+	/**
+	 * Set when the derived metadata / task-history stage of a save failed while the message
+	 * write itself succeeded. Drives one awaited retry in disposeOnce() so a task being torn
+	 * down does not leave its history entry stale; cleared on the next successful metadata
+	 * stage.
+	 *
+	 * @private
+	 */
+	private pendingTaskMetadataRepair: boolean = false
 
 	providerRef: WeakRef<ClineProvider>
 	private readonly globalStoragePath: string
@@ -499,7 +519,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private telemetryMessageCountsBaseline: { user: number; assistant: number } = { user: 0, assistant: 0 }
 	private abortPromise?: Promise<void>
 	private disposalPromise?: Promise<void>
-	private diffReversionPromise: Promise<void> = Promise.resolve()
+	// Undefined until a diff view with unapproved content starts being released. The promise is
+	// the single owner of that release: disposal and the stream abort teardown both await it
+	// instead of starting a second rollback over the same buffer (see releaseUnapprovedDiffView).
+	private diffReversionPromise: Promise<void> | undefined
 
 	// Checkpoints
 	enableCheckpoints: boolean
@@ -777,12 +800,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this._taskApiConfigName = handoffExecutionContext.apiConfigName
 			this.taskModeReady = Promise.resolve()
 			this.taskApiConfigReady = Promise.resolve()
+			this.taskApiConfigReadySettled = true
 			TelemetryService.instance.captureTaskCreated(this.taskId)
 		} else if (historyItem) {
 			this._taskMode = historyItem.mode || defaultModeSlug
 			this._taskApiConfigName = historyItem.apiConfigName
 			this.taskModeReady = Promise.resolve()
 			this.taskApiConfigReady = Promise.resolve()
+			// historyItem.apiConfigName is undefined for tasks saved before the api config was
+			// recorded. That is a completed initialization, not a pending one.
+			this.taskApiConfigReadySettled = true
 			TelemetryService.instance.captureTaskRestarted(this.taskId)
 		} else {
 			// For new tasks, don't set the mode/apiConfigName yet - wait for async initialization.
@@ -790,6 +817,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this._taskApiConfigName = undefined
 			this.taskModeReady = this.initializeTaskMode(provider)
 			this.taskApiConfigReady = this.initializeTaskApiConfigName(provider)
+			// Observe settlement without replacing the promise: a rejection must still reach
+			// every other awaiter of taskApiConfigReady.
+			void this.taskApiConfigReady.then(
+				() => {
+					this.taskApiConfigReadySettled = true
+				},
+				() => {
+					this.taskApiConfigReadySettled = true
+				},
+			)
 			TelemetryService.instance.captureTaskCreated(this.taskId)
 		}
 
@@ -1757,11 +1794,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/**
 	 * Persist the message array, then refresh the derived metadata / task-history entries.
 	 *
-	 * The returned boolean reflects the message write only: `saveTaskMessages` failure
-	 * leaves the on-disk record stale, so callers gating UI updates on durable state must
-	 * skip them. Metadata / task-history stage failures are logged and swallowed — the
-	 * message array is already persisted, and the next save recomputes and re-emits the
-	 * metadata.
+	 * The two stages report separately on purpose. The returned boolean reflects the MESSAGE
+	 * WRITE: `saveTaskMessages` failure leaves the on-disk record stale, so callers gating
+	 * UI updates on durable state must skip them. A metadata / task-history failure does NOT
+	 * turn that result false — the message array really is persisted, and reporting it as
+	 * failed would make callers skip a webview update that is safe. It is not silently
+	 * dropped either: `persistTaskMetadata()` records the failure and `disposeOnce()` retries
+	 * it once, awaited, before the task stops.
 	 *
 	 * `merge` (default `true`) is passed through to `saveTaskMessages`: the in-memory
 	 * snapshot is merged with the on-disk record. `overwriteClineMessages` passes `false`
@@ -1780,6 +1819,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return false
 		}
 
+		await this.persistTaskMetadata()
+
+		return true
+	}
+
+	/**
+	 * Recompute the derived task metadata and write the task-history entry for messages that
+	 * are already on disk. Returns whether THIS stage succeeded — deliberately separate from
+	 * `saveClineMessages()` so a metadata failure is never reported as a failed message write.
+	 *
+	 * A failure is recorded in `pendingTaskMetadataRepair` so `disposeOnce()` gets one awaited
+	 * retry before shutdown; any later `saveClineMessages()` also recomputes it from scratch.
+	 */
+	private async persistTaskMetadata(): Promise<boolean> {
 		try {
 			if (this._taskApiConfigName === undefined) {
 				await this.taskApiConfigReady
@@ -1806,16 +1859,27 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.debouncedEmitTokenUsage(tokenUsage, this.toolUsage)
 
 			const provider = this.providerRef.deref()
-			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
-			await provider?.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
+			// A released provider makes the two calls below optional-chain no-ops, so without this
+			// guard the stage reports success while persisting nothing and clears the repair flag -
+			// the history entry then stays behind the messages that ARE on disk and nothing retries
+			// it. Treat it as the failed stage it is and leave the flag set for disposeOnce().
+			if (!provider) {
+				this.pendingTaskMetadataRepair = true
+				console.error("Failed to save task metadata: the task has no provider to persist task history.")
+				return false
+			}
+			const existingStatus = provider.taskHistoryStore.get(this.taskId)?.status
+			await provider.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
+			this.pendingTaskMetadataRepair = false
+			return true
 		} catch (error) {
-			// The message array was persisted above; a metadata or task-history failure must
-			// not mask that write (see the method docs). The next saveClineMessages() call
-			// recomputes and re-emits the metadata update.
+			// The message array is already durable; a metadata or task-history failure must not
+			// mask that write (see saveClineMessages). Record it so the retry in disposeOnce()
+			// runs even if no further save happens before the task is torn down.
+			this.pendingTaskMetadataRepair = true
 			console.error("Failed to save task metadata:", error)
+			return false
 		}
-
-		return true
 	}
 
 	private findMessageByTimestamp(ts: number): ClineMessage | undefined {
@@ -3675,6 +3739,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		// Remove all event listeners to prevent memory leaks.
 		try {
+			// The per-task write_to_file stream state lives in a tool singleton and is
+			// normally released by the TaskAborted listener registered with it. removeAllListeners
+			// above drops that listener, so a task disposed directly - without an abort - would
+			// leave the singleton holding this task, its provider, and a stream that can never
+			// advance again. Release it here, where every disposal path passes.
+			writeToFileTool.clearTaskState(this)
 			this.removeAllListeners()
 		} catch (error) {
 			console.error("Error removing event listeners:", error)
@@ -3715,15 +3785,80 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		try {
-			// If we're not streaming then `abortStream` won't be called.
+			// If we're not streaming then `abortStream` won't be called; when it already ran, it
+			// started the one release this task may perform and isEditing is already false.
 			if (this.isStreaming && this.diffViewProvider.isEditing) {
-				this.diffReversionPromise = this.diffViewProvider.revertChanges().catch(console.error)
+				void this.releaseUnapprovedDiffView()
 			}
 		} catch (error) {
 			console.error("Error reverting diff changes:", error)
 		}
 
+		// A save whose metadata / task-history stage failed leaves the history entry
+		// behind the messages that are already on disk. Give that stage one awaited chance to
+		// catch up before the task stops serving. Deliberately last: everything synchronous above
+		// has to happen before the first yield, because abortTaskOnce() awaits diffReversionPromise
+		// right after void dispose(), an abandoned stream can reach its finally while this await is
+		// in flight and leave the revert decision below false, and direct dispose() callers rely on
+		// the abort flag being set synchronously. Skipped only when the retry could block: while
+		// taskApiConfigReady has not settled AND _taskApiConfigName is still undefined,
+		// persistTaskMetadata() awaits that promise and teardown must not wait on it. Once the name
+		// is known the await is skipped inside persistTaskMetadata(), so the repair is safe to run
+		// and skipping it would leave the history entry stale for a task that could repair it.
+		if (
+			this.pendingTaskMetadataRepair &&
+			(this.taskApiConfigReadySettled || this._taskApiConfigName !== undefined)
+		) {
+			await this.persistTaskMetadata()
+		}
+
 		await pendingCleanup
+		await this.diffReversionPromise
+	}
+
+	/**
+	 * Release a diff view whose content this task never approved.
+	 *
+	 * Both disposal and the stream abort teardown reach an abandoned diff view, and each used
+	 * to start its own rollback. That left two defects: abortStream() reverted unconditionally,
+	 * and revertChanges()'s create branch SAVES the dirty buffer - the partial model output
+	 * nobody approved - before deleting the file, so a failed delete left it on disk; and a
+	 * release one path had already started could be repeated by the other over the same view.
+	 *
+	 * The promise is the single owner of the release. It is assigned synchronously, before any
+	 * await, because abortTaskOnce() and waitForDiffReversion() await it immediately after the
+	 * trigger; a later caller gets that same promise instead of a second rollback.
+	 *
+	 * The edit type selects the mechanism. A modify's restore is the content already on disk,
+	 * so revertChanges() puts the editor back where the stream started. A create has no prior
+	 * content: discardUnapprovedStream() empties the buffer first, so the only bytes that can
+	 * ever reach the placeholder are none.
+	 *
+	 * Cleared at the start of the next API request, because each request's diff view is a new
+	 * session that has to be able to release itself.
+	 */
+	private releaseUnapprovedDiffView(): Promise<void> {
+		if (this.diffReversionPromise) {
+			return this.diffReversionPromise
+		}
+		if (!this.diffViewProvider.isEditing) {
+			return Promise.resolve()
+		}
+		const releaseUnapprovedEdit =
+			this.diffViewProvider.editType === "modify"
+				? this.diffViewProvider.revertChanges()
+				: this.diffViewProvider.discardUnapprovedStream()
+		this.diffReversionPromise = releaseUnapprovedEdit.catch(console.error)
+		return this.diffReversionPromise
+	}
+
+	/**
+	 * The diff teardown this task started, for a continuation that observes its own
+	 * stream released mid-await. Single-owner by construction: the in-flight
+	 * handlePartial() waits for the discard disposal or the abort teardown already started
+	 * instead of running an independent one over the same buffer.
+	 */
+	public async waitForDiffReversion(): Promise<void> {
 		await this.diffReversionPromise
 	}
 
@@ -4078,9 +4213,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}
 
 				const abortStream = async (cancelReason: ClineApiReqCancelReason, streamingFailedMessage?: string) => {
-					if (this.diffViewProvider.isEditing) {
-						await this.diffViewProvider.revertChanges() // closes diff view
-					}
+					// A cancelled or failed stream never reached approval, so its diff view holds
+					// content the user never approved. Same release as disposal: the edit type
+					// decides the mechanism (a create must be discarded, never reverted - that
+					// SAVES the dirty buffer), and a release disposal already started is awaited
+					// instead of rolled back a second time over the same view.
+					await this.releaseUnapprovedDiffView()
 
 					// if last message is a partial we need to update and save it
 					const lastMessage = this.clineMessages.at(-1)
@@ -4129,6 +4267,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				const nativeToolCallParserScope = NativeToolCallParser.createScope()
 
 				await this.diffViewProvider.reset()
+				// A new request opens a new diff-view session: the previous stream's release (if it
+				// had one) is over, and this session's abandoned view has to be able to release
+				// itself instead of awaiting the settled promise of the one before.
+				this.diffReversionPromise = undefined
 
 				await this.safeEnsureModelFetched()
 
