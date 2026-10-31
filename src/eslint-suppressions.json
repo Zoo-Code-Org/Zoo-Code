@@ -6,7 +6,7 @@
 	},
 	"__tests__/ClineProvider.delegation.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 9
+			"count": 8
 		}
 	},
 	"__tests__/ClineProvider.history-resume-delegation.spec.ts": {
