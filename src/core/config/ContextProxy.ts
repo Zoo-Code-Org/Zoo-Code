@@ -36,12 +36,20 @@ const globalSettingsExportSchema = globalSettingsSchema.omit({
 	taskHistory: true,
 	listApiConfigMeta: true,
 	currentApiConfigName: true,
+	// Per-view selection state is machine-local: it keeps flowing through the
+	// normal runtime and pruning paths but must not transfer between settings.
+	viewStates: true,
 })
 
 export class ContextProxy {
 	private readonly originalContext: vscode.ExtensionContext
 
 	private stateCache: GlobalState
+	private stateWriteGenerations = new Map<GlobalStateKey, number>()
+
+	// The value storage last accepted per key: a failed write must roll the cache back to
+	// what is actually persisted, not to another pending write's unpersisted value.
+	private statePersistedCache = new Map<GlobalStateKey, unknown>()
 	private secretCache: SecretState
 	private _isInitialized = false
 
@@ -360,13 +368,35 @@ export class ContextProxy {
 		return value !== undefined ? value : defaultValue
 	}
 
-	updateGlobalState<K extends GlobalStateKey>(key: K, value: GlobalState[K]) {
+	async updateGlobalState<K extends GlobalStateKey>(key: K, value: GlobalState[K]) {
 		if (isPassThroughStateKey(key)) {
 			return this.originalContext.globalState.update(key, value)
 		}
 
+		const previousCachedValue = this.stateCache[key]
+		const generation = (this.stateWriteGenerations.get(key) ?? 0) + 1
+		this.stateWriteGenerations.set(key, generation)
 		this.stateCache[key] = value
-		return this.originalContext.globalState.update(key, value)
+
+		try {
+			const result = await this.originalContext.globalState.update(key, value)
+			this.statePersistedCache.set(key, value)
+			return result
+		} catch (error) {
+			// A newer write for the same key may already own the cache: only undo this write
+			// while it is still the newest one, and only to the last value storage accepted.
+			if (this.stateWriteGenerations.get(key) === generation) {
+				this.stateCache[key] = this.statePersistedCache.has(key)
+					? (this.statePersistedCache.get(key) as GlobalState[K])
+					: previousCachedValue
+			}
+			throw error
+		}
+	}
+
+	/** Current per-key write generation, used by callers whose rollback must not clobber a newer write. */
+	public getStateWriteGeneration<K extends GlobalStateKey>(key: K): number {
+		return this.stateWriteGenerations.get(key) ?? 0
 	}
 
 	private getAllGlobalState(): GlobalState {
@@ -590,6 +620,11 @@ export class ContextProxy {
 		// Clear in-memory caches
 		this.stateCache = {}
 		this.secretCache = {}
+		// A write that started before this reset must not restore its pre-reset value when it
+		// rejects afterwards, so advance every generation the pending writes still hold.
+		for (const key of this.stateWriteGenerations.keys()) {
+			this.stateWriteGenerations.set(key, (this.stateWriteGenerations.get(key) ?? 0) + 1)
+		}
 
 		await Promise.all([
 			...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
