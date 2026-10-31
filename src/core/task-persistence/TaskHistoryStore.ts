@@ -198,7 +198,7 @@ export class TaskHistoryStore {
 			// as an orphaned active child in the same startup pass.
 			const persistedActiveIds = this.getPersistedActiveIds()
 
-			// 2. Complete any two-record repair interrupted after its intent was durable.
+			// 2. Complete any child-half repair interrupted after its intent was durable.
 			try {
 				await this.replayDelegationRepairIntent()
 			} catch (error) {

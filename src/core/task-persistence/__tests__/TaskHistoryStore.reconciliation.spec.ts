@@ -2514,6 +2514,99 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			),
 		).toBe(true)
 	})
+
+	it("replays the exact journal production writes for the child-half-only target", async () => {
+		// The `makeRepairIntent` helper still emits the legacy `target.parentStatus`
+		// shape, so no test pinned the journal the repair actually writes now. This one
+		// takes the bytes off disk from a real in-pass repair instead of re-deriving
+		// them, then replays those same bytes: store outcomes alone cannot catch a
+		// regression that widens the written target again.
+		const child = makeItem({
+			id: "child-new-shape",
+			status: "active",
+			parentTaskId: "parent-new-shape",
+			rootTaskId: "parent-new-shape",
+		})
+		const parent = makeItem({
+			id: "parent-new-shape",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		await seedItems(tmpDir, [parent, child])
+		await markStaleMtime(child.id)
+		// The journal goes through the REAL writer: the fs-backed mock pretty-prints,
+		// so its bytes are not the compact ones production commits.
+		const { safeWriteJson: realSafeWriteJson } =
+			await vi.importActual<typeof import("../../../utils/safeWriteJson")>("../../../utils/safeWriteJson")
+		safeWriteJsonMock.mockImplementation(async (filePath, data, options) => {
+			if (filePath.endsWith(GlobalFileNames.delegationRepairIntent)) {
+				await realSafeWriteJson(filePath, data, options)
+				return
+			}
+			await writeJson(filePath, data, options)
+		})
+		// A failing onWrite retains the journal after the in-pass child write commits,
+		// which is the only way to observe the written bytes without re-deriving them.
+		store.dispose()
+		store = registerStore(
+			new TaskHistoryStore(tmpDir, { onWrite: vi.fn().mockRejectedValue(new Error("retain journal")) }),
+		)
+		await expect(store.initialize()).resolves.toBeUndefined()
+		store.dispose()
+
+		const tasksDir = path.join(tmpDir, "tasks")
+		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
+		const journalBytes = await fs.readFile(intentPath, "utf8")
+		const writtenJournal = JSON.parse(journalBytes) as { target: Record<string, unknown> }
+		// The target names the child half and nothing else: no `parentStatus` key, and
+		// the journal's last bytes are that single-key target.
+		expect(Object.keys(writtenJournal.target)).toEqual(["childStatus"])
+		expect(writtenJournal.target).toEqual({ childStatus: "interrupted" })
+		expect(journalBytes).not.toContain("parentStatus")
+		expect(journalBytes.endsWith('"target":{"childStatus":"interrupted"}}')).toBe(true)
+
+		// Rewind to the crash point the journal exists for: the child write never landed.
+		const childPath = path.join(tasksDir, child.id, GlobalFileNames.historyItem)
+		await fs.writeFile(childPath, JSON.stringify(child))
+		await markStaleMtime(child.id)
+		const parentPath = path.join(tasksDir, parent.id, GlobalFileNames.historyItem)
+		const parentBefore = await fs.readFile(parentPath, "utf8")
+		expect(await fs.readFile(intentPath, "utf8")).toBe(journalBytes)
+
+		store = registerStore(new TaskHistoryStore(tmpDir))
+		await store.reconcile({ forceRefresh: true })
+		const storeInternals = store as unknown as {
+			readDelegationRepairIntent: () => Promise<{ target: Record<string, unknown> } | null>
+			replayDelegationRepairIntent: () => Promise<void>
+		}
+
+		const intent = await storeInternals.readDelegationRepairIntent()
+		// The schema guard accepts the new shape. Re-tightening it to the pre-change
+		// `target.parentStatus === "active"` requirement makes this null (the journal
+		// quarantines as malformed) and every assertion below fail.
+		expect(intent).not.toBeNull()
+		expect(intent?.target).toEqual({ childStatus: "interrupted" })
+
+		await storeInternals.replayDelegationRepairIntent()
+
+		expect(store.get(child.id)?.status).toBe("interrupted")
+		expect(store.get(parent.id)).toMatchObject({
+			id: parent.id,
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		const persistedChild = JSON.parse(await fs.readFile(childPath, "utf8")) as HistoryItem
+		expect(persistedChild.status).toBe("interrupted")
+		expect(await fs.readFile(parentPath, "utf8")).toBe(parentBefore)
+		await expect(fs.access(intentPath)).rejects.toThrow()
+		expect(
+			(await fs.readdir(tasksDir)).some((name) =>
+				name.startsWith(`${GlobalFileNames.delegationRepairIntent}.quarantine-`),
+			),
+		).toBe(false)
+	})
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
