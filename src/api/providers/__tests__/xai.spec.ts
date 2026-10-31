@@ -33,6 +33,24 @@ import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { clearAllMocks } from "../../../test-utils/reset"
 
+/**
+ * Flip only `supportsPromptCache` on the handler's resolved model, so the rest of
+ * the catalog entry (maxTokens, temperature, reasoning) stays as the real one.
+ *
+ * The xAI catalog is declared `as const`, so every entry's `supportsPromptCache`
+ * is the literal `true` and no real uncached model exists to point at. The double
+ * assertion is confined to this test double and is the only way to reach the
+ * `supportsPromptCache === false` arm; the production code is untouched by it.
+ */
+function stubSupportsPromptCache(handler: XAIHandler, supportsPromptCache: boolean): void {
+	const realModel = handler.getModel()
+	vitest
+		.spyOn(handler, "getModel")
+		.mockReturnValue({ ...realModel, info: { ...realModel.info, supportsPromptCache } } as unknown as ReturnType<
+			XAIHandler["getModel"]
+		>)
+}
+
 describe("XAIHandler", () => {
 	let handler: XAIHandler
 
@@ -565,6 +583,8 @@ describe("XAIHandler", () => {
 			model: xaiDefaultModelId,
 			input: [{ role: "user", content: [{ type: "input_text", text: "test prompt" }] }],
 			store: false,
+			// No task metadata exists on this path, so the handler session scopes the cache.
+			prompt_cache_key: expect.any(String),
 		})
 	})
 
@@ -911,5 +931,131 @@ describe("XAIHandler", () => {
 		// Abandoning the generator mid-stream runs the finally block too.
 		expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
 		expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)
+	})
+
+	describe("prompt cache affinity", () => {
+		const lastRequestBody = () => mockResponsesCreate.mock.calls[mockResponsesCreate.mock.calls.length - 1][0]
+
+		it("should send the task id as the body prompt_cache_key", async () => {
+			mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+
+			const stream = handler.createMessage("test prompt", [], makeCreateMessageMetadata({ taskId: "task-abc" }))
+			await stream.next()
+
+			expect(lastRequestBody().prompt_cache_key).toBe("task-abc")
+		})
+
+		it("should keep the key stable across two turns of the same task", async () => {
+			mockResponsesCreate.mockResolvedValue(asyncStreamFrom([]))
+
+			const first = handler.createMessage("first turn", [], makeCreateMessageMetadata({ taskId: "task-stable" }))
+			await first.next()
+			const second = handler.createMessage(
+				"second turn",
+				[],
+				makeCreateMessageMetadata({ taskId: "task-stable" }),
+			)
+			await second.next()
+
+			// Two separate requests, one value: routing is pinned to one cache server.
+			expect(mockResponsesCreate).toHaveBeenCalledTimes(2)
+			expect(mockResponsesCreate.mock.calls[0][0].prompt_cache_key).toBe("task-stable")
+			expect(mockResponsesCreate.mock.calls[1][0].prompt_cache_key).toBe(
+				mockResponsesCreate.mock.calls[0][0].prompt_cache_key,
+			)
+		})
+
+		it("should give distinct keys to distinct tasks", async () => {
+			mockResponsesCreate.mockResolvedValue(asyncStreamFrom([]))
+
+			for (const taskId of ["task-one", "task-two"]) {
+				const stream = handler.createMessage("test prompt", [], makeCreateMessageMetadata({ taskId }))
+				await stream.next()
+			}
+
+			expect(mockResponsesCreate.mock.calls[0][0].prompt_cache_key).toBe("task-one")
+			expect(mockResponsesCreate.mock.calls[1][0].prompt_cache_key).toBe("task-two")
+		})
+
+		it("should fall back to the handler session id when no task id is supplied", async () => {
+			mockResponsesCreate.mockResolvedValue(asyncStreamFrom([]))
+
+			const stream = handler.createMessage("test prompt", [])
+			await stream.next()
+
+			const key = lastRequestBody().prompt_cache_key
+			expect(typeof key).toBe("string")
+			expect(key.length).toBeGreaterThan(0)
+
+			// The same handler keeps the same fallback key on the next turn.
+			const second = handler.createMessage("test prompt", [])
+			await second.next()
+			expect(lastRequestBody().prompt_cache_key).toBe(key)
+		})
+
+		it("should clamp an over-length task id to the 64-character limit", async () => {
+			mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+
+			const overLongTaskId = "t".repeat(80)
+			const stream = handler.createMessage(
+				"test prompt",
+				[],
+				makeCreateMessageMetadata({ taskId: overLongTaskId }),
+			)
+			await stream.next()
+
+			const key = lastRequestBody().prompt_cache_key
+			expect(key).toHaveLength(64)
+			expect(key).toBe(overLongTaskId.slice(0, 64))
+		})
+
+		it("should never send an empty-string prompt_cache_key", async () => {
+			mockResponsesCreate.mockResolvedValue(asyncStreamFrom([]))
+
+			const stream = handler.createMessage("test prompt", [], makeCreateMessageMetadata({ taskId: "" }))
+			await stream.next()
+
+			const key = lastRequestBody().prompt_cache_key
+			// An empty task id falls back to the session id instead of sending "".
+			expect(key).not.toBe("")
+			expect(typeof key).toBe("string")
+		})
+
+		it("should omit the key when the model does not support prompt caching", async () => {
+			const uncachedHandler = new XAIHandler({ apiModelId: xaiDefaultModelId })
+			stubSupportsPromptCache(uncachedHandler, false)
+
+			mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+			const stream = uncachedHandler.createMessage(
+				"test prompt",
+				[],
+				makeCreateMessageMetadata({ taskId: "task-x" }),
+			)
+			await stream.next()
+
+			expect(lastRequestBody()).not.toHaveProperty("prompt_cache_key")
+		})
+
+		it("completePrompt should scope the prompt_cache_key to the handler session", async () => {
+			mockResponsesCreate.mockResolvedValue({ output_text: "response" })
+
+			await handler.completePrompt("first prompt")
+			await handler.completePrompt("second prompt")
+
+			const firstKey = mockResponsesCreate.mock.calls[0][0].prompt_cache_key
+			expect(typeof firstKey).toBe("string")
+			expect(firstKey.length).toBeGreaterThan(0)
+			expect(mockResponsesCreate.mock.calls[1][0].prompt_cache_key).toBe(firstKey)
+		})
+
+		it("completePrompt should omit the key when the model does not support prompt caching", async () => {
+			const uncachedHandler = new XAIHandler({ apiModelId: xaiDefaultModelId })
+			stubSupportsPromptCache(uncachedHandler, false)
+
+			mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
+			await uncachedHandler.completePrompt("test prompt")
+
+			expect(mockResponsesCreate.mock.calls[0][0]).not.toHaveProperty("prompt_cache_key")
+		})
 	})
 })
