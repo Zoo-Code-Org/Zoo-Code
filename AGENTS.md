@@ -58,6 +58,15 @@ Prefer the narrowest test layer that proves the behavior. This follows standard 
 - Use `it.each` for repeated cases and share the setup in a helper. Do not copy a test body per input.
 - A `Stryker disable` comment states the reason in one sentence. ESLint `max-len` limits it to 300 characters.
 
+## Reading the changed-code mutation report
+
+The `mutation-diff` job publishes the changed-code mutation report in two places:
+
+- The job summary (`mutation-diff` → Summary tab) lists every mutated file with its `Survived` and `NoCoverage` counts, worst file first. Use the `changed-code-mutation-report` artifact to inspect each surviving or uncovered mutant's line, mutator, and replacement.
+- The report is uploaded as the `changed-code-mutation-report` artifact (`reports/mutation/<package>/mutation.json` and `mutation.html`, retained 7 days) for a browsable view.
+
+Close a listed mutant by adding or strengthening a focused test that fails under the mutation. If a suppression is genuinely unavoidable, follow the existing `Stryker disable` reason rule under Test Placement Guidelines above.
+
 ## Task Lifecycle Changes
 
 - Read `docs/architecture/task-lifecycle-model.md` before changing task status, delegation, interruption, completion, abandonment, persistence ownership, or scheduler fan-out behavior.
