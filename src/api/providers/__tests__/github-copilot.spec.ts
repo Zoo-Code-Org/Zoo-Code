@@ -119,7 +119,7 @@ const mockLanguageModelChat = {
 }
 
 describe("connectGitHubCopilot", () => {
-	beforeEach(() => vi.clearAllMocks())
+	beforeEach(() => clearAllMocks())
 
 	it("authenticates through VS Code and selects only Copilot models", async () => {
 		vi.mocked(vscode.authentication.getSession).mockResolvedValue({
@@ -413,7 +413,7 @@ describe("Copilot model capabilities", () => {
 	}
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		mockLanguageModelChat.countTokens.mockResolvedValue(10)
 		mockLanguageModelChat.sendRequest.mockImplementation(async () => ({
 			stream: (async function* () {
@@ -1322,7 +1322,7 @@ describe("getGitHubCopilotModels", () => {
 		...overrides,
 	})
 
-	beforeEach(() => vi.clearAllMocks())
+	beforeEach(() => clearAllMocks())
 
 	it("describes each model by identity and by the capabilities the host reports", async () => {
 		vi.mocked(vscode.lm.selectChatModels).mockResolvedValue([
