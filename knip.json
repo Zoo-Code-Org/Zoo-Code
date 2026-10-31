@@ -30,6 +30,8 @@
 				"!utils/WorkspacePathResolver.ts!",
 				"!test-utils/**!",
 				"!utils/versionToken.ts!",
+				"!services/tools/Bm25Ranker.ts!",
+				"!services/tools/types.ts!",
 				"!core/tools/helpers/toolResultFormatting.ts!"
 			],
 			"ignoreDependencies": [
