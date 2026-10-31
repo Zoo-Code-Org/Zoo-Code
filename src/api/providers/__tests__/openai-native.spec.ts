@@ -534,6 +534,25 @@ describe("OpenAiNativeHandler", () => {
 
 			expect(result).toBe("")
 		})
+
+		it("should omit the prompt_cache_key because no task-scoped identity exists", async () => {
+			mockResponsesCreate.mockResolvedValue({ output: [] })
+
+			await handler.completePrompt("Test prompt")
+
+			const [request] = mockResponsesCreate.mock.calls[0]
+			expect(request).not.toHaveProperty("prompt_cache_key")
+		})
+
+		it("should omit the prompt_cache_key when the model does not support prompt caching", async () => {
+			mockResponsesCreate.mockResolvedValue({ output: [] })
+			handler = new OpenAiNativeHandler({ ...mockOptions, apiModelId: "codex-mini-latest" })
+
+			await handler.completePrompt("Test prompt")
+
+			const [request] = mockResponsesCreate.mock.calls[0]
+			expect(request).not.toHaveProperty("prompt_cache_key")
+		})
 	})
 
 	describe("getModel", () => {
@@ -1444,6 +1463,101 @@ describe("OpenAiNativeHandler", () => {
 				},
 			])
 			expect(callBody.previous_response_id).toBeUndefined()
+		})
+
+		it("sends a task-scoped prompt_cache_key in the body and no session_id header", async () => {
+			const mockFetch = vitest.fn().mockResolvedValue({
+				ok: true,
+				body: new ReadableStream({
+					start(controller) {
+						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+						controller.close()
+					},
+				}),
+			})
+			global.fetch = mockFetch as typeof fetch
+			// Force the hand-built SSE path so the wire body and headers are inspectable.
+			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+
+			const cacheHandler = new OpenAiNativeHandler({ ...mockOptions, apiModelId: "gpt-5.1" })
+
+			for (const taskId of ["task-cache-one", "task-cache-one", "task-cache-two"]) {
+				for await (const _chunk of cacheHandler.createMessage(systemPrompt, messages, { taskId })) {
+					// consume
+				}
+			}
+
+			const bodies = mockFetch.mock.calls.map(([, init]) => JSON.parse(init.body))
+			expect(bodies).toHaveLength(3)
+			expect(bodies[0].prompt_cache_key).toBe("task-cache-one")
+			// Same task, second turn: the key must not drift, or the growing prefix loses affinity.
+			expect(bodies[1].prompt_cache_key).toBe(bodies[0].prompt_cache_key)
+			// A different task must not share the bucket.
+			expect(bodies[2].prompt_cache_key).toBe("task-cache-two")
+			expect(bodies[2].prompt_cache_key).not.toBe(bodies[0].prompt_cache_key)
+
+			// The retention control is untouched by this change.
+			expect(bodies[0].prompt_cache_retention).toBe("24h")
+
+			// The affinity header is gone: OpenAI ignores it for caching and hardened
+			// gateways reject underscore header names outright.
+			for (const [, init] of mockFetch.mock.calls) {
+				expect(init.headers).not.toHaveProperty("session_id")
+			}
+		})
+
+		it("sends the task-scoped prompt_cache_key through the SDK path", async () => {
+			mockResponsesCreate.mockResolvedValue(asyncStreamFrom([]))
+			;(OpenAI as unknown as ReturnType<typeof vitest.fn>).mockClear()
+
+			const cacheHandler = new OpenAiNativeHandler({ ...mockOptions, apiModelId: "gpt-5.1" })
+
+			// The second turn of the same task carries a longer conversation. Reusing one
+			// messages array would let a key derived from the conversation pass, so the two
+			// calls must differ in input while the key holds.
+			const followUp: Anthropic.Messages.MessageParam[] = [
+				...messages,
+				{ role: "assistant", content: "Hello! How can I help?" },
+				{ role: "user", content: "Tell me about prompt caching." },
+			]
+			const turns: Array<{ taskId: string; messages: Anthropic.Messages.MessageParam[] }> = [
+				{ taskId: "sdk-task-one", messages },
+				{ taskId: "sdk-task-one", messages: followUp },
+				{ taskId: "sdk-task-two", messages },
+			]
+
+			for (const turn of turns) {
+				await collectStream(cacheHandler.createMessage(systemPrompt, turn.messages, { taskId: turn.taskId }))
+			}
+
+			const bodies = mockResponsesCreate.mock.calls.map(([body]) => body)
+			expect(bodies[0].prompt_cache_key).toBe("sdk-task-one")
+			expect(bodies[1].input).not.toEqual(bodies[0].input)
+			expect(bodies[1].prompt_cache_key).toBe(bodies[0].prompt_cache_key)
+			expect(bodies[2].prompt_cache_key).toBe("sdk-task-two")
+			expect(bodies[0].prompt_cache_retention).toBe("24h")
+			expect(mockResponsesCreate.mock.calls[0][1].headers).not.toHaveProperty("session_id")
+
+			// Per-request headers are only half the surface: the SDK constructor also takes
+			// defaultHeaders, and a restored affinity header there would ship on every request
+			// while the assertion above still passed. Cache affinity is a body field, so neither
+			// the header name nor the body field name may appear in the constructor's defaults.
+			const constructorArgs = (OpenAI as unknown as ReturnType<typeof vitest.fn>).mock.calls[0][0]
+			expect(constructorArgs.defaultHeaders).not.toHaveProperty("session_id")
+			expect(constructorArgs.defaultHeaders).not.toHaveProperty("prompt_cache_key")
+		})
+
+		it("omits the prompt_cache_key through createMessage when no metadata is supplied", async () => {
+			mockResponsesCreate.mockResolvedValue(asyncStreamFrom([]))
+
+			const cacheHandler = new OpenAiNativeHandler({ ...mockOptions, apiModelId: "gpt-5.1" })
+
+			// No metadata at all: the streaming entry point must not synthesize a fallback
+			// task id, or the field would replace OpenAI's default routing for no affinity.
+			await collectStream(cacheHandler.createMessage(systemPrompt, messages))
+
+			const [body] = mockResponsesCreate.mock.calls[0]
+			expect(body).not.toHaveProperty("prompt_cache_key")
 		})
 
 		it("should provide helpful error messages for different error codes", async () => {

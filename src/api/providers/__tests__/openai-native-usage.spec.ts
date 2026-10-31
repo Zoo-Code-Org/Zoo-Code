@@ -1,6 +1,22 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import { OpenAiNativeHandler } from "../openai-native"
 import { OpenAiServiceTier, openAiNativeModels } from "@roo-code/types"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+
+// The streaming entry point reaches the SDK client, so stub the client surface the
+// handler actually calls. Without this the real SDK would attempt a network request.
+const mockResponsesCreate = vitest.fn()
+
+vitest.mock("openai", () => ({
+	__esModule: true,
+	default: vitest.fn().mockImplementation(function () {
+		return {
+			responses: {
+				create: mockResponsesCreate,
+			},
+		}
+	}),
+}))
 
 describe("OpenAiNativeHandler - normalizeUsage", () => {
 	let handler: OpenAiNativeHandler
@@ -437,6 +453,97 @@ describe("OpenAiNativeHandler - normalizeUsage", () => {
 
 			const body = buildRequestBodyForModel(modelId)
 			expect(body.prompt_cache_retention).toBeUndefined()
+		})
+	})
+
+	describe("OpenAiNativeHandler - prompt cache key", () => {
+		let handler: OpenAiNativeHandler
+
+		beforeEach(() => {
+			handler = new OpenAiNativeHandler({
+				openAiNativeApiKey: "test-key",
+			})
+		})
+
+		const buildRequestBody = (modelId: string, taskId?: string) => {
+			handler["options"].apiModelId = modelId
+			const model = handler.getModel()
+			const metadata = taskId === undefined ? undefined : { taskId }
+			return handler["buildRequestBody"](model, [], "", model.verbosity, undefined, metadata)
+		}
+
+		it("should send the task id as the body prompt_cache_key", () => {
+			const body = buildRequestBody("gpt-5.1", "task-abc")
+			expect(body.prompt_cache_key).toBe("task-abc")
+		})
+
+		it("should keep the key stable across turns of the same task", () => {
+			const firstTurn = buildRequestBody("gpt-5.1", "task-stable")
+			const secondTurn = buildRequestBody("gpt-5.1", "task-stable")
+			expect(firstTurn.prompt_cache_key).toBe("task-stable")
+			expect(secondTurn.prompt_cache_key).toBe(firstTurn.prompt_cache_key)
+		})
+
+		it("should give distinct keys to distinct tasks", () => {
+			const first = buildRequestBody("gpt-5.1", "task-one")
+			const second = buildRequestBody("gpt-5.1", "task-two")
+			expect(first.prompt_cache_key).toBe("task-one")
+			expect(second.prompt_cache_key).toBe("task-two")
+			expect(first.prompt_cache_key).not.toBe(second.prompt_cache_key)
+		})
+
+		it("should omit the key when no task id is supplied", () => {
+			// No task-scoped identity means no accumulating prefix, so the field is omitted
+			// rather than filled with a per-call random value that would override default routing.
+			const body = buildRequestBody("gpt-5.1")
+			expect(body).not.toHaveProperty("prompt_cache_key")
+		})
+
+		it("should omit the key when the model does not support prompt caching", () => {
+			const modelId = "codex-mini-latest"
+			expect(openAiNativeModels[modelId as keyof typeof openAiNativeModels].supportsPromptCache).toBe(false)
+
+			const body = buildRequestBody(modelId, "task-abc")
+			expect(body.prompt_cache_key).toBeUndefined()
+		})
+
+		it("should omit the key for a non-caching model through the streaming entry point", async () => {
+			// The builder-level test above cannot see the streaming path: createMessage forwards
+			// metadata into buildRequestBody, so a key added anywhere along that path would still
+			// pass it. Drive the public entry point with a task id to pin the model gate there too.
+			const modelId = "codex-mini-latest"
+			expect(openAiNativeModels[modelId as keyof typeof openAiNativeModels].supportsPromptCache).toBe(false)
+
+			mockResponsesCreate.mockClear()
+			mockResponsesCreate.mockResolvedValue(asyncStreamFrom([]))
+
+			const streamingHandler = new OpenAiNativeHandler({
+				openAiNativeApiKey: "test-key",
+				apiModelId: modelId,
+			})
+
+			await collectStream(
+				streamingHandler.createMessage("You are a helpful assistant.", [{ role: "user", content: "Hello!" }], {
+					taskId: "task-abc",
+				}),
+			)
+
+			expect(mockResponsesCreate).toHaveBeenCalledTimes(1)
+			const [body] = mockResponsesCreate.mock.calls[0]
+			expect(body).not.toHaveProperty("prompt_cache_key")
+		})
+
+		it("should clamp an over-length task id to OpenAI's 64-character limit", () => {
+			const longTaskId = "t".repeat(80)
+			const body = buildRequestBody("gpt-5.1", longTaskId)
+			expect(body.prompt_cache_key).toHaveLength(64)
+			expect(body.prompt_cache_key).toBe(longTaskId.slice(0, 64))
+		})
+
+		it("should keep prompt_cache_retention alongside the key for 24h models", () => {
+			const body = buildRequestBody("gpt-5.1", "task-abc")
+			expect(body.prompt_cache_key).toBe("task-abc")
+			expect(body.prompt_cache_retention).toBe("24h")
 		})
 	})
 
