@@ -129,8 +129,9 @@ describe("API - configuration", () => {
 
 		// The declared type is the four-literal union, so an off-list value needs
 		// the same widening the guard itself documents: callers of this public API
-		// are not the schema.
-		const offListConfiguration = (mimoBaseUrl: string): RooCodeSettings =>
+		// are not the schema. `unknown` rather than `string` because the runtime
+		// value is whatever the caller passed, including non-strings.
+		const offListConfiguration = (mimoBaseUrl: unknown): RooCodeSettings =>
 			({ currentApiConfigName: "default", mimoBaseUrl }) as unknown as RooCodeSettings
 
 		it("drops an off-list mimoBaseUrl instead of persisting it", async () => {
@@ -189,6 +190,23 @@ describe("API - configuration", () => {
 				apiModelId: "mimo-v2.6-pro",
 			})
 		})
+
+		it.each([[42], [{ nested: "https://attacker.example/v1" }], [true]])(
+			"drops a non-string incoming mimoBaseUrl (%s) instead of throwing",
+			async (mimoBaseUrl) => {
+				// Same hazard as the stored-value read below, on the incoming side: the
+				// parameter is typed `string | undefined`, but this is a public entry
+				// point and stripTrailingSlashes calls .endsWith. Without a typeof guard
+				// the sanitizer throws TypeError, which rejects the whole configuration
+				// write, so a mistyped caller loses every other setting it sent.
+				const { api, setValues, saveConfig } = makeApi()
+
+				await expect(api.setConfiguration(offListConfiguration(mimoBaseUrl))).resolves.toBeUndefined()
+
+				expect(setValues).toHaveBeenCalledWith({ currentApiConfigName: "default" })
+				expect(saveConfig).toHaveBeenCalledWith("default", { currentApiConfigName: "default" })
+			},
+		)
 
 		it("purges a stored off-list mimoBaseUrl that a partial update would otherwise leave behind", async () => {
 			// The stored value was written by an older build or another extension, so

@@ -697,19 +697,22 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	/**
 	 * Returns `values` unchanged unless it carries a non-empty mimoBaseUrl outside
 	 * the four allowed Xiaomi endpoints, in which case that one key is omitted.
-	 * Empty string means "unset" and passes through untouched.
+	 * Empty string means "unset" and passes through untouched. A non-string value
+	 * cannot be an allowed endpoint, so it is dropped like any other off-list value.
 	 */
 	private withoutOffListMimoBaseUrl(values: RooCodeSettings): RooCodeSettings {
 		// Declared as the four-literal union, but this API is a public entry point
 		// for other extensions and automation: the runtime value is whatever the
 		// caller passed, and the schema is exactly what it never went through.
-		const mimoBaseUrl: string | undefined = values.mimoBaseUrl
+		// Typed `unknown` for that reason: a caller that sends a number or an object
+		// must be rejected, not allowed to throw out of stripTrailingSlashes.
+		const mimoBaseUrl: unknown = values.mimoBaseUrl
 
-		if (
-			mimoBaseUrl === undefined ||
-			mimoBaseUrl === "" ||
-			ALLOWED_BASE_URLS.has(stripTrailingSlashes(mimoBaseUrl))
-		) {
+		if (mimoBaseUrl === undefined || mimoBaseUrl === "") {
+			return values
+		}
+
+		if (typeof mimoBaseUrl === "string" && ALLOWED_BASE_URLS.has(stripTrailingSlashes(mimoBaseUrl))) {
 			return values
 		}
 
