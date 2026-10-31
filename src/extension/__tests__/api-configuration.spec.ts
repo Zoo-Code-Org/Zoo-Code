@@ -17,12 +17,14 @@ describe("API - configuration", () => {
 		const saveConfig = vi.fn().mockResolvedValue("default-id")
 		const setModeConfig = vi.fn().mockResolvedValue(undefined)
 		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const updateGlobalState = vi.fn().mockResolvedValue(undefined)
 		const provider = {
 			context: {},
 			on: vi.fn(),
-			contextProxy: { setValues },
+			contextProxy: { setValues, updateGlobalState },
 			providerSettingsManager: { saveConfig, setModeConfig },
 			postStateToWebview,
+			getValue: vi.fn(),
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
 		const api = new API(outputChannel, provider, makeClineProviderFactory())
@@ -50,12 +52,14 @@ describe("API - configuration", () => {
 		const saveConfig = vi.fn().mockResolvedValue("default-id")
 		const setModeConfig = vi.fn().mockResolvedValue(undefined)
 		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const updateGlobalState = vi.fn().mockResolvedValue(undefined)
 		const provider = {
 			context: {},
 			on: vi.fn(),
-			contextProxy: { setValues },
+			contextProxy: { setValues, updateGlobalState },
 			providerSettingsManager: { saveConfig, setModeConfig },
 			postStateToWebview,
+			getValue: vi.fn(),
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
 		const api = new API(outputChannel, provider, makeClineProviderFactory())
@@ -95,21 +99,30 @@ describe("API - configuration", () => {
 		// schema rejection, so this was the one write path where an off-list
 		// mimoBaseUrl could newly enter storage. Both persistence calls are
 		// asserted: the proxy write and the saved profile.
-		const makeApi = () => {
+		const makeApi = (storedBaseUrl?: string) => {
 			const setValues = vi.fn().mockResolvedValue(undefined)
 			const saveConfig = vi.fn().mockResolvedValue("default-id")
 			const setModeConfig = vi.fn().mockResolvedValue(undefined)
 			const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+			const updateGlobalState = vi.fn().mockResolvedValue(undefined)
 			const provider = {
 				context: {},
 				on: vi.fn(),
-				contextProxy: { setValues },
+				contextProxy: { setValues, updateGlobalState },
 				providerSettingsManager: { saveConfig, setModeConfig },
 				postStateToWebview,
+				// The stored-value read goes through the provider-facing accessor, the
+				// same one every other consumer uses, so the double only needs that.
+				getValue: vi.fn((key: string) => (key === "mimoBaseUrl" ? storedBaseUrl : undefined)),
 			} as unknown as ClineProvider
 			const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
 
-			return { api: new API(outputChannel, provider, makeClineProviderFactory()), setValues, saveConfig }
+			return {
+				api: new API(outputChannel, provider, makeClineProviderFactory()),
+				setValues,
+				saveConfig,
+				updateGlobalState,
+			}
 		}
 
 		// The declared type is the four-literal union, so an off-list value needs
@@ -173,6 +186,41 @@ describe("API - configuration", () => {
 				currentApiConfigName: "default",
 				apiModelId: "mimo-v2.6-pro",
 			})
+		})
+
+		it("purges a stored off-list mimoBaseUrl that a partial update would otherwise leave behind", async () => {
+			// The stored value was written by an older build or another extension, so
+			// the sanitizer never saw it. A partial update that omits mimoBaseUrl does
+			// not overwrite it, so without an explicit purge the off-list endpoint
+			// survives the call and keeps steering requests.
+			const { api, setValues, updateGlobalState } = makeApi("https://attacker.example/v1")
+
+			await api.setConfiguration({ currentApiConfigName: "default", apiModelId: "mimo-v2.6-pro" })
+
+			expect(updateGlobalState).toHaveBeenCalledWith("mimoBaseUrl", undefined)
+			expect(setValues).toHaveBeenCalledWith({
+				currentApiConfigName: "default",
+				apiModelId: "mimo-v2.6-pro",
+			})
+		})
+
+		it("preserves a valid stored mimoBaseUrl during a partial update with rejected input", async () => {
+			// The rejected input must not take the stored cluster down with it: only
+			// the incoming value is dropped, and the stored allowlisted endpoint stays.
+			const { api, setValues, updateGlobalState } = makeApi("https://token-plan-ams.xiaomimimo.com/v1")
+
+			await api.setConfiguration(offListConfiguration("https://attacker.example/v1"))
+
+			expect(updateGlobalState).not.toHaveBeenCalledWith("mimoBaseUrl", undefined)
+			expect(setValues).toHaveBeenCalledWith(expect.not.objectContaining({ mimoBaseUrl: expect.anything() }))
+		})
+
+		it("does not purge a stored allowlisted mimoBaseUrl on a partial update", async () => {
+			const { api, updateGlobalState } = makeApi("https://api.xiaomimimo.com/v1")
+
+			await api.setConfiguration({ currentApiConfigName: "default", apiModelId: "mimo-v2.6-pro" })
+
+			expect(updateGlobalState).not.toHaveBeenCalledWith("mimoBaseUrl", undefined)
 		})
 	})
 })

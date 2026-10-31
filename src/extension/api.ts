@@ -640,6 +640,15 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		// (fall back to the default cluster) instead of pinning a cluster.
 		const sanitizedValues = this.withoutOffListMimoBaseUrl(values)
 
+		// Dropping the incoming value is not enough on its own: a partial update
+		// omits mimoBaseUrl, so an off-list value already in storage (written by an
+		// older build or another extension) survives this call and keeps steering
+		// requests. Purge it explicitly. A stored allowlisted endpoint is left alone
+		// so a rejected input cannot take a valid cluster down with it.
+		if (this.isStoredMimoBaseUrlOffList()) {
+			await this.sidebarProvider.contextProxy.updateGlobalState("mimoBaseUrl", undefined)
+		}
+
 		await this.sidebarProvider.contextProxy.setValues(sanitizedValues)
 		await this.sidebarProvider.providerSettingsManager.saveConfig(
 			sanitizedValues.currentApiConfigName || "default",
@@ -653,6 +662,21 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			)
 		}
 		await this.sidebarProvider.postStateToWebview()
+	}
+
+	/**
+	 * Reports whether the mimoBaseUrl currently in storage is a non-empty value
+	 * outside the four allowed Xiaomi endpoints. Empty string means "unset" and
+	 * counts as on-list, matching the sanitizer's convention.
+	 */
+	private isStoredMimoBaseUrlOffList(): boolean {
+		const storedBaseUrl: string | undefined = this.sidebarProvider.getValue("mimoBaseUrl")
+
+		if (storedBaseUrl === undefined || storedBaseUrl === "") {
+			return false
+		}
+
+		return !ALLOWED_BASE_URLS.has(stripTrailingSlashes(storedBaseUrl))
 	}
 
 	/**
