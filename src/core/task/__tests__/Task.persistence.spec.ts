@@ -21,6 +21,7 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import { attemptCompletionTool, type AttemptCompletionCallbacks } from "../../tools/AttemptCompletionTool"
 import type { AttemptCompletionToolUse } from "../../../shared/tools"
+import { setAbortLatch } from "../../../test-utils/run-state"
 
 type TaskPersistenceAccess = {
 	addToApiConversationHistory: (message: Anthropic.MessageParam) => Promise<void>
@@ -909,7 +910,7 @@ describe("Task persistence", () => {
 				task: "test task",
 				startTask: false,
 			})
-			task.abort = true
+			setAbortLatch(task, true)
 			task.userMessageContent = [{ type: "tool_result", tool_use_id: "tool-1", content: "done" }]
 			const waitForPersistence = vi.spyOn(task, "waitForCurrentAssistantMessagePersistence")
 

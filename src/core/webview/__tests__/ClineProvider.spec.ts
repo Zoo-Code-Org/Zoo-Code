@@ -1076,7 +1076,7 @@ describe("ClineProvider", () => {
 		test("does not log when the active task is aborted", async () => {
 			const task = new Task(defaultTaskOptions)
 			Object.defineProperty(task, "taskId", { value: "aborted-task", writable: true })
-			task.abort = true
+			Object.assign(task, { abort: true })
 			await provider.addClineToStack(task)
 			Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
 			visibilityCallback()

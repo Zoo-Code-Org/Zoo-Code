@@ -811,12 +811,12 @@
 	},
 	"core/task/__tests__/ask-clear-approval-buttons.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 19
+			"count": 18
 		}
 	},
 	"core/task/__tests__/ask-queued-message-drain.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 18
+			"count": 17
 		}
 	},
 	"core/task/__tests__/flushPendingToolResultsToHistory.spec.ts": {

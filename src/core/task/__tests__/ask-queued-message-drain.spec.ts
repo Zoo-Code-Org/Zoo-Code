@@ -1,11 +1,11 @@
 import { Task } from "../Task"
+import { setAbortLatch } from "../../../test-utils/run-state"
 
 type QueueTaskTestAccess = {
 	say: Task["say"]
 	saveClineMessages: () => Promise<boolean>
 	addToClineMessages: () => Promise<void>
 	lastMessageTs?: number
-	abort: boolean
 }
 
 const getQueueTaskTestAccess = (task: Task) => task as unknown as QueueTaskTestAccess
@@ -16,7 +16,7 @@ const getQueueTaskTestAccess = (task: Task) => task as unknown as QueueTaskTestA
 describe("Task.ask queued message drain", () => {
 	function createTask(provider?: { getState: () => Promise<Record<string, boolean>> }) {
 		const task = Object.create(Task.prototype) as Task
-		;(task as any).abort = false
+		setAbortLatch(task, false)
 		;(task as any).clineMessages = []
 		;(task as any).askResponse = undefined
 		;(task as any).askResponseText = undefined
@@ -346,7 +346,7 @@ describe("Task.ask queued message drain", () => {
 		task.messageQueueService.addMessage("Persist me later")
 		const ask = task.ask("completion_result", "Done", false)
 		await Promise.resolve()
-		access.abort = true
+		setAbortLatch(task, true)
 		finishAddingAsk()
 
 		await expect(ask).rejects.toThrow("aborted")
@@ -398,7 +398,7 @@ describe("Task.ask queued message drain", () => {
 			await vi.advanceTimersByTimeAsync(0)
 			expect(access.saveClineMessages).toHaveBeenCalledTimes(1)
 
-			access.abort = true
+			setAbortLatch(task, true)
 			await vi.advanceTimersByTimeAsync(250)
 
 			await expect(persistence).resolves.toBe(false)
