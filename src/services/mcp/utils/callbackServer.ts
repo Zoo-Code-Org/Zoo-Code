@@ -84,7 +84,12 @@ export function startCallbackServer(
 			}
 
 			server.on("request", (req: any, res: any) => {
-				if (resolved) return
+				if (resolved) {
+					// Answer late requests so that their connections can close when the server stops.
+					res.writeHead(404)
+					res.end("Not found")
+					return
+				}
 
 				const url = new URL(req.url || "", `http://localhost:${actualPort}`)
 				const pathname = url.pathname
