@@ -81,6 +81,21 @@ export default [
 		},
 	},
 	{
+		// Ratchet: flag type assertions (`as X`, `!`) that do not change the type.
+		// They hide type errors once an SDK type narrows. Tests are not covered yet.
+		files: ["api/**/*.ts"],
+		ignores: ["api/**/__tests__/**"],
+		languageOptions: {
+			parserOptions: {
+				project: true,
+				tsconfigRootDir: import.meta.dirname,
+			},
+		},
+		rules: {
+			"@typescript-eslint/no-unnecessary-type-assertion": "error",
+		},
+	},
+	{
 		ignores: [".stryker-tmp", "webview-ui", "out"],
 	},
 	{

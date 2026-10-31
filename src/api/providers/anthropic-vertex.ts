@@ -143,7 +143,7 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 			for await (const chunk of stream) {
 				switch (chunk.type) {
 					case "message_start": {
-						const usage = chunk.message!.usage
+						const usage = chunk.message.usage
 
 						// `output_tokens_details.thinking_tokens` decomposes the billed
 						// output into internal reasoning tokens; surfaced for per-turn
@@ -155,19 +155,19 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 							cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
 							cacheReadTokens: usage.cache_read_input_tokens || undefined,
 							...(typeof usage.output_tokens_details?.thinking_tokens === "number"
-								? { reasoningTokens: usage.output_tokens_details!.thinking_tokens }
+								? { reasoningTokens: usage.output_tokens_details.thinking_tokens }
 								: {}),
 						}
 
 						break
 					}
 					case "message_delta": {
-						const deltaThinkingTokens = chunk.usage!.output_tokens_details?.thinking_tokens
+						const deltaThinkingTokens = chunk.usage.output_tokens_details?.thinking_tokens
 
 						yield {
 							type: "usage",
 							inputTokens: 0,
-							outputTokens: chunk.usage!.output_tokens || 0,
+							outputTokens: chunk.usage.output_tokens || 0,
 							...(typeof deltaThinkingTokens === "number"
 								? { reasoningTokens: deltaThinkingTokens }
 								: {}),
@@ -176,17 +176,17 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 						break
 					}
 					case "content_block_start": {
-						switch (chunk.content_block!.type) {
+						switch (chunk.content_block.type) {
 							case "text": {
-								if (chunk.index! > 0) {
+								if (chunk.index > 0) {
 									yield { type: "text", text: "\n" }
 								}
 
-								yield { type: "text", text: chunk.content_block!.text }
+								yield { type: "text", text: chunk.content_block.text }
 								break
 							}
 							case "thinking": {
-								if (chunk.index! > 0) {
+								if (chunk.index > 0) {
 									yield { type: "reasoning", text: "\n" }
 								}
 
@@ -198,8 +198,8 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 								yield {
 									type: "tool_call_partial",
 									index: chunk.index,
-									id: chunk.content_block!.id,
-									name: chunk.content_block!.name,
+									id: chunk.content_block.id,
+									name: chunk.content_block.name,
 									arguments: undefined,
 								}
 								break
@@ -209,9 +209,9 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 						break
 					}
 					case "content_block_delta": {
-						switch (chunk.delta!.type) {
+						switch (chunk.delta.type) {
 							case "text_delta": {
-								yield { type: "text", text: chunk.delta!.text }
+								yield { type: "text", text: chunk.delta.text }
 								break
 							}
 							case "thinking_delta": {

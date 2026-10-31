@@ -63,14 +63,6 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 	}
 
 	/**
-	 * Convert tools from OpenAI Chat Completions format to Responses API format.
-	 * Chat Completions: { type: "function", function: { name, description, parameters } }
-	 * Responses API: { type: "function", name, description, parameters }
-	 *
-	 * Uses base provider's convertToolSchemaForOpenAI() for schema hardening
-	 * (additionalProperties: false, ensureAllRequired) and handles MCP tools.
-	 */
-	/**
 	 * Map a Chat Completions tool choice to the Responses API shape so TypeScript
 	 * validates the provider payload (the APIs use different object forms for the
 	 * named-tool choices: Chat Completions nests the name under `function`/`custom`,
@@ -125,6 +117,14 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 		}
 	}
 
+	/**
+	 * Convert tools from OpenAI Chat Completions format to Responses API format.
+	 * Chat Completions: { type: "function", function: { name, description, parameters } }
+	 * Responses API: { type: "function", name, description, parameters }
+	 *
+	 * Uses base provider's convertToolSchemaForOpenAI() for schema hardening
+	 * (additionalProperties: false, ensureAllRequired) and handles MCP tools.
+	 */
 	private mapResponseTools(tools?: any[]): any[] | undefined {
 		const converted = this.convertToolsForOpenAI(tools)
 		if (!converted?.length) {
@@ -200,7 +200,7 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 			let stream: AsyncIterable<any>
 			try {
 				stream = (await this.client.responses.create(
-					{ ...requestBody, stream: true } as any,
+					requestBody,
 					abortSignal ? { signal: abortSignal } : undefined,
 				)) as unknown as AsyncIterable<any>
 			} catch (error) {
