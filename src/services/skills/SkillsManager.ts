@@ -6,7 +6,7 @@ import matter from "gray-matter"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
 import { getGlobalRooDirectory, getGlobalAgentsDirectory, getProjectAgentsDirectoryForCwd } from "../roo-config"
 import { directoryExists, fileExists } from "../roo-config"
-import { SkillMetadata, SkillContent } from "../../shared/skills"
+import { SkillMetadata, SkillContent, SkillDiagnostic } from "../../shared/skills"
 import { modes, getAllModes } from "../../shared/modes"
 import {
 	validateSkillName as validateSkillNameShared,
@@ -16,10 +16,44 @@ import {
 import { t } from "../../i18n"
 
 // Re-export for convenience
-export type { SkillMetadata, SkillContent }
+export type { SkillMetadata, SkillContent, SkillDiagnostic }
 
 // Direct children (new skill folders or container symlinks) and their SKILL.md files.
 const SKILLS_WATCH_PATTERN = "{*,*/SKILL.md}"
+
+/**
+ * Extract the raw top-level `key: ...` line from the frontmatter block of a
+ * SKILL.md file, along with its 1-based line number in the file. Used to
+ * point users at the exact line when YAML parsing fails (see issue #859).
+ * Returns undefined when the file has no frontmatter block or no matching
+ * top-level line.
+ */
+function getFrontmatterLine(fileContent: string, key: string): { line: string; lineNumber: number } | undefined {
+	const match = fileContent.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+	if (!match) {
+		return undefined
+	}
+	const linePattern = new RegExp(`^${key}\\s*:`)
+	const frontmatterLines = match[1].split(/\r?\n/)
+	const index = frontmatterLines.findIndex((line) => linePattern.test(line))
+	if (index === -1) {
+		return undefined
+	}
+	// The opening `---` occupies file line 1, so frontmatter index 0 is file line 2.
+	return { line: frontmatterLines[index], lineNumber: index + 2 }
+}
+
+// gray-matter's bundled typings predate its options passthrough: `stringify`
+// forwards its options object to js-yaml's safeDump, so js-yaml dump options
+// such as `lineWidth` are honored at runtime even though the declared
+// `GrayMatterOption` interface does not list them. This type names the
+// supported subset explicitly (see issue #859).
+type SkillYamlDumpOptions = matter.GrayMatterOption<string, SkillYamlDumpOptions> & { lineWidth: number }
+
+// `lineWidth: -1` keeps long plain scalars (e.g. descriptions) on a single
+// line instead of reflowing them into folded block scalars, keeping SKILL.md
+// files stable across edits.
+const SKILL_YAML_DUMP_OPTIONS: SkillYamlDumpOptions = { lineWidth: -1 }
 
 /** Mutable state shared by every scan in a single discovery pass. */
 interface DiscoveryPass {
@@ -35,6 +69,8 @@ interface DiscoveryPass {
 	 * unreadable for a moment. Everything else is replaced by the results of the pass.
 	 */
 	failedPaths: string[]
+	/** Frontmatter parse failures recorded during this pass. Published to the manager only when the pass ends. */
+	diagnostics: SkillDiagnostic[]
 }
 
 function isNotFoundError(error: unknown): boolean {
@@ -57,8 +93,13 @@ function isHiddenEntry(name: string): boolean {
 	return name.startsWith(".")
 }
 
+// Stale-sidecar sweep: a matching temp file younger than this may belong to a live write in
+// another process, so only older sidecars are treated as abandoned by a previous host.
+const SKILL_TEMP_SIDECAR_STALE_MS = 10 * 60 * 1000
+
 export class SkillsManager {
 	private skills: Map<string, SkillMetadata> = new Map()
+	private diagnostics: SkillDiagnostic[] = []
 	// SKILL.md paths of skills that come from a symlinked container. These are read-only for move/delete.
 	private containerSkillPaths: Set<string> = new Set()
 	// Published symlinked containers: real path -> the root entry that links to it
@@ -73,14 +114,79 @@ export class SkillsManager {
 	// Runs discovery passes one at a time, so an older pass can't finish after a newer one
 	private discoveryQueue: Promise<void> = Promise.resolve()
 	private isDisposed = false
+	// Atomic SKILL.md writes in flight, tracked so dispose() can remove temp sidecars if the
+	// extension host stops between the staged write and the rename.
+	private activeTempFiles: Set<string> = new Set()
+	// Per-directory serialization for SKILL.md sidecar cleanup and writes. The queue is static so
+	// every SkillsManager instance in this process shares it: a sweep cannot unlink a sidecar that
+	// another instance is still writing, and writes cannot interleave their validate/rename steps.
+	private static directoryQueues: Map<string, Promise<void>> = new Map()
 
 	constructor(provider: ClineProvider) {
 		this.providerRef = new WeakRef(provider)
 	}
 
-	async initialize(): Promise<void> {
-		await this.discoverSkills()
-		await this.setupFileWatchers()
+	private initialization: Promise<void> | null = null
+
+	initialize(): Promise<void> {
+		if (this.initialization) return this.initialization
+		this.initialization = (async () => {
+			// A previous extension-host stop can leave a staged SKILL.md temp sidecar behind; the
+			// in-memory tracking cannot survive that, so sweep the known skills directories once.
+			try {
+				await this.sweepStaleSkillTempFiles()
+			} catch {
+				// Stale-cleanup is best effort; discovery and watcher setup still run.
+			}
+			// Disposal can land during the sweep: stop before touching discovery or watchers.
+			if (this.isDisposed) return
+			await this.discoverSkills()
+			if (this.isDisposed) return
+			await this.setupFileWatchers()
+		})()
+		return this.initialization
+	}
+
+	/**
+	 * Remove SKILL.md temp sidecars left by a previous host: the name pattern is the one
+	 * writeSkillFileAtomically generates, and only the skill directories under the known skills
+	 * roots are scanned.
+	 */
+	private async sweepStaleSkillTempFiles(): Promise<void> {
+		const tempPattern = /^\.SKILL\.md\.\d+\.[a-z0-9]+\.tmp$/
+		const roots = (await this.getSkillsDirectories()).map((entry) => entry.dir)
+		for (const root of roots) {
+			let entries: unknown[]
+			try {
+				entries = await fs.readdir(root, { withFileTypes: true })
+			} catch {
+				continue
+			}
+			const directories = [root]
+			for (const entry of entries) {
+				const dirent = entry as { name?: string; isDirectory?: () => boolean }
+				if (!dirent?.isDirectory?.()) continue
+				directories.push(path.join(root, String(dirent.name)))
+			}
+			for (const directory of directories) {
+				await this.withDirectoryLock(directory, async () => {
+					let files: string[]
+					try {
+						files = await fs.readdir(directory)
+					} catch {
+						return
+					}
+					for (const file of files) {
+						if (!tempPattern.test(file)) continue
+						const stalePath = path.join(directory, file)
+						const stats = await fs.stat(stalePath).catch(() => undefined)
+						// Leave fresh sidecars alone: they may belong to a write in another process.
+						if (!stats || Date.now() - stats.mtimeMs < SKILL_TEMP_SIDECAR_STALE_MS) continue
+						await fs.unlink(stalePath).catch(() => {})
+					}
+				})
+			}
+		}
 	}
 
 	/**
@@ -108,6 +214,7 @@ export class SkillsManager {
 			containerSkillPaths: new Set(),
 			containers: new Map(),
 			failedPaths: [],
+			diagnostics: [],
 		}
 		const skillsDirs = await this.getSkillsDirectories()
 
@@ -148,6 +255,7 @@ export class SkillsManager {
 		this.skills = pass.skills
 		this.containerSkillPaths = pass.containerSkillPaths
 		this.containers = pass.containers
+		this.diagnostics = pass.diagnostics
 	}
 
 	/**
@@ -315,8 +423,44 @@ export class SkillsManager {
 		}
 
 		try {
-			// Use gray-matter to parse frontmatter
-			const { data: frontmatter } = matter(fileContent)
+			// Parse the frontmatter. Parse errors are handled separately from field
+			// validation so that YAML syntax problems (e.g. unescaped double quotes in
+			// the description) report the actual cause instead of a misleading
+			// "missing required field" message (see issue #859).
+			//
+			// The `{}` options argument is deliberate: gray-matter keeps a global
+			// content-keyed cache and populates it *before* parsing, so a
+			// frontmatter that throws on first parse is cached with an empty data
+			// object and every later parse of the same content silently returns
+			// that empty object instead of re-throwing. Passing options disables
+			// the cache for this call, keeping the parse deterministic.
+			let parsed: ReturnType<typeof matter>
+			try {
+				parsed = matter(fileContent, {})
+			} catch (error) {
+				this.recordDiagnostic(skillMdPath, source, error, pass.diagnostics)
+				console.error(`Failed to parse skill at ${skillDir}:`, error)
+				// The most common cause is unescaped double quotes in the
+				// description value. Only hint at that when the parser error is
+				// located on the description line itself, so a valid quoted
+				// description plus an unrelated YAML error elsewhere does not
+				// produce a misleading hint (see issue #859).
+				const descriptionLine = getFrontmatterLine(fileContent, "description")
+				const errorMark = (error as { mark?: { line?: unknown } }).mark
+				if (
+					descriptionLine?.line.includes('"') &&
+					typeof errorMark?.line === "number" &&
+					errorMark.line + 1 === descriptionLine.lineNumber
+				) {
+					console.error(
+						`Hint: the "description" value in ${skillMdPath} contains unescaped double quotes. ` +
+							"Wrap the value in single quotes (or escape the double quotes) and save.",
+					)
+				}
+				return undefined
+			}
+
+			const { data: frontmatter } = parsed
 
 			// Validate required fields (only name and description for now)
 			if (!frontmatter.name || typeof frontmatter.name !== "string") {
@@ -389,6 +533,29 @@ export class SkillsManager {
 			console.error(`Failed to load skill at ${skillDir}:`, error)
 			return undefined
 		}
+	}
+
+	/**
+	 * Record a frontmatter parse failure so the user learns which SKILL.md is broken
+	 * and why, with the parser's own reason and location when available (see issue #859).
+	 */
+	private recordDiagnostic(
+		path: string,
+		source: "global" | "project",
+		error: unknown,
+		diagnostics: SkillDiagnostic[],
+	): void {
+		const yamlError = error as {
+			reason?: unknown
+			message?: unknown
+			mark?: { line?: unknown; column?: unknown }
+		}
+		const reason = typeof yamlError.reason === "string" ? yamlError.reason : undefined
+		const errorMessage = error instanceof Error ? error.message.split("\n", 1)[0] : String(error)
+		const line = typeof yamlError.mark?.line === "number" ? yamlError.mark.line + 1 : undefined
+		const column = typeof yamlError.mark?.column === "number" ? yamlError.mark.column + 1 : undefined
+
+		diagnostics.push({ path, source, message: reason ?? errorMessage, line, column })
 	}
 
 	/**
@@ -502,6 +669,10 @@ export class SkillsManager {
 	 * Get all skills metadata (for UI display)
 	 * Returns skills from all sources without content
 	 */
+	getSkillDiagnostics(): SkillDiagnostic[] {
+		return [...this.diagnostics]
+	}
+
 	getSkillsMetadata(): SkillMetadata[] {
 		return this.getAllSkills()
 	}
@@ -561,6 +732,77 @@ export class SkillsManager {
 	 * @param modeSlugs - Optional mode restrictions (undefined/empty = any mode)
 	 * @returns Path to created SKILL.md file
 	 */
+	/**
+	 * Write one SKILL.md atomically: stage the content in a same-directory temp file,
+	 * await the complete write, then rename it over the target. A crash or failed write
+	 * must not leave a truncated SKILL.md that the loader would silently misparse.
+	 * The temp file is removed when the write or rename fails.
+	 */
+	private async withDirectoryLock<T>(directory: string, operation: () => Promise<T>): Promise<T> {
+		// Normalize through realpath first so a symlinked alias shares the same queue key; fall
+		// back to the resolved path when the directory cannot be resolved (e.g. not created yet).
+		const key = await fs.realpath(directory).catch(() => path.resolve(directory))
+		const previous = SkillsManager.directoryQueues.get(key) ?? Promise.resolve()
+		const run = previous.then(async () => {
+			// A manager disposed while this operation waited must not run at all.
+			if (this.isDisposed) throw new Error("SkillsManager is disposed")
+			return operation()
+		})
+		const tracked = run.then(
+			() => undefined,
+			() => undefined,
+		)
+		SkillsManager.directoryQueues.set(key, tracked)
+		try {
+			return await run
+		} finally {
+			if (SkillsManager.directoryQueues.get(key) === tracked) {
+				SkillsManager.directoryQueues.delete(key)
+			}
+		}
+	}
+
+	private async writeSkillFileAtomically(
+		filePath: string,
+		content: string,
+		validateTarget?: (targetPath: string) => Promise<void>,
+	): Promise<void> {
+		const directory = path.dirname(filePath)
+		await this.withDirectoryLock(directory, async () => {
+			const temporaryPath = path.join(
+				directory,
+				`.${path.basename(filePath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+			)
+			this.activeTempFiles.add(temporaryPath)
+			// Only a write that actually created the sidecar through exclusive creation may remove
+			// it: when wx fails because the path already exists, that file belongs to someone else.
+			let ownsTemporaryPath = false
+			try {
+				if (this.isDisposed) throw new Error("SkillsManager is disposed")
+				// Exclusive creation: a pre-created symlink at the generated name cannot be followed.
+				await fs.writeFile(temporaryPath, content, { encoding: "utf-8", flag: "wx" })
+				ownsTemporaryPath = true
+				if (this.isDisposed) throw new Error("SkillsManager is disposed")
+				// Re-validate the final target immediately before the rename: the target (or an
+				// ancestor) can change between the caller's resolution and this publish.
+				await validateTarget?.(filePath)
+				if (this.isDisposed) throw new Error("SkillsManager is disposed")
+				await fs.rename(temporaryPath, filePath)
+			} catch (error) {
+				// Best effort: a partial temp file must not be left behind, but an EEXIST failure
+				// means exclusive creation never acquired the path and the existing file belongs to
+				// someone else. Any other failure may have created a partial sidecar and is cleaned
+				// up; the original failure is the one the caller needs to see.
+				if (ownsTemporaryPath || (error as { code?: string })?.code !== "EEXIST") {
+					await fs.unlink(temporaryPath).catch(() => {})
+				}
+				throw error
+			} finally {
+				this.activeTempFiles.delete(temporaryPath)
+			}
+		})
+	}
+
 	async createSkill(
 		name: string,
 		source: "global" | "project",
@@ -601,8 +843,9 @@ export class SkillsManager {
 			throw new Error(t("skills:errors.already_exists", { name, path: skillMdPath }))
 		}
 
-		// Create the skill directory
-		await fs.mkdir(skillDir, { recursive: true })
+		// Create the skill directory. mkdir reports the path it created (when any), so a
+		// failed persistence can remove exactly the directory this call introduced.
+		const createdDir = await fs.mkdir(skillDir, { recursive: true })
 
 		// Generate SKILL.md content with frontmatter
 		const titleName = name
@@ -610,28 +853,38 @@ export class SkillsManager {
 			.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
 			.join(" ")
 
-		// Build frontmatter with optional modeSlugs
-		const frontmatterLines = [`name: ${name}`, `description: ${trimmedDescription}`]
-		if (modeSlugs && modeSlugs.length > 0) {
-			frontmatterLines.push(`modeSlugs:`)
-			for (const slug of modeSlugs) {
-				frontmatterLines.push(`  - ${slug}`)
-			}
+		// Build the frontmatter as data and serialize it with gray-matter so
+		// values containing YAML special characters (e.g. double quotes in the
+		// description) are quoted/escaped automatically. Hand-built frontmatter
+		// produced unparseable SKILL.md files that silently failed to load
+		// (see issue #859). lineWidth: -1 keeps plain values on a single line,
+		// matching the previous output format.
+		const frontmatter = {
+			name,
+			description: trimmedDescription,
+			...(modeSlugs && modeSlugs.length > 0 ? { modeSlugs } : {}),
 		}
-
-		const skillContent = `---
-${frontmatterLines.join("\n")}
----
-
+		const body = `
 # ${titleName}
 
 ## Instructions
 
 Add your skill instructions here.
 `
-
-		// Write the SKILL.md file
-		await fs.writeFile(skillMdPath, skillContent, "utf-8")
+		const skillContent = matter.stringify(body, frontmatter, SKILL_YAML_DUMP_OPTIONS)
+		// Publish the SKILL.md atomically, and leave no half-created skill directory behind
+		// when persistence fails. mkdir(recursive) can report the first ancestor it created
+		// (.roo or skills), so a recursive removal of that value could delete unrelated
+		// skills: only this call's own skill directory is removed, and only while it is
+		// empty. Any created ancestor stays behind like the empty directory it is.
+		try {
+			await this.writeSkillFileAtomically(skillMdPath, skillContent)
+		} catch (error) {
+			if (createdDir) {
+				await fs.rmdir(skillDir).catch(() => {})
+			}
+			throw error
+		}
 
 		// Refresh skills list
 		await this.discoverSkills()
@@ -927,6 +1180,26 @@ Add your skill instructions here.
 	 * @param source - Where the skill is located ("global" or "project")
 	 * @param newModeSlugs - New mode slugs (undefined/empty = any mode)
 	 */
+	/**
+	 * The resolved SKILL.md target must stay inside one of the configured skills roots for the
+	 * source: a direct skill-directory symlink can point anywhere, and publishing through it
+	 * would write outside the user selected skills folder.
+	 */
+	private async assertTargetWithinSkillsRoots(targetPath: string, source: "global" | "project"): Promise<void> {
+		const roots = (await this.getSkillsDirectories())
+			.filter((entry) => entry.source === source)
+			.map((entry) => entry.dir)
+		const inside = async (root: string): Promise<boolean> => {
+			const resolvedRoot = await fs.realpath(root).catch(() => root)
+			const relative = path.relative(resolvedRoot, targetPath)
+			return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative)
+		}
+		for (const root of roots) {
+			if (await inside(root)) return
+		}
+		throw new Error(`Refusing to update SKILL.md outside the ${source} skills directories: ${targetPath}`)
+	}
+
 	async updateSkillModes(name: string, source: "global" | "project", newModeSlugs?: string[]): Promise<void> {
 		// Find any skill with this name and source (regardless of current mode)
 		let skill: SkillMetadata | undefined
@@ -958,9 +1231,22 @@ Add your skill instructions here.
 			delete frontmatter.mode
 		}
 
-		// Serialize back to SKILL.md format
-		const newContent = matter.stringify(body, frontmatter)
-		await fs.writeFile(skill.path, newContent, "utf-8")
+		// Serialize back to SKILL.md format. lineWidth: -1 prevents long
+		// values from being reflowed into folded block scalars, keeping the
+		// file stable (see issue #859).
+		const newContent = matter.stringify(body, frontmatter, SKILL_YAML_DUMP_OPTIONS)
+		// Resolve the link target first: publishing through the temp+rename must update the file
+		// the skill was discovered through, not replace a symlinked SKILL.md with a regular file.
+		// A resolution failure propagates: publishing through the unresolved path could replace a
+		// symlink with a regular file (or write somewhere other than the target the caller saw).
+		const targetPath = await fs.realpath(skill.path)
+		await this.assertTargetWithinSkillsRoots(targetPath, source)
+		await this.writeSkillFileAtomically(targetPath, newContent, async (target) => {
+			// Fail closed: a resolution failure must propagate so the staged temp write is removed
+			// and the rename is skipped, rather than publishing through a stale path.
+			const freshTarget = await fs.realpath(target)
+			await this.assertTargetWithinSkillsRoots(freshTarget, source)
+		})
 
 		// Refresh skills list
 		await this.discoverSkills()
@@ -1051,6 +1337,7 @@ Add your skill instructions here.
 	}
 
 	private async setupFileWatchers(): Promise<void> {
+		if (this.isDisposed) return
 		// Skip if test environment is detected or VSCode APIs are not available
 		if (process.env.NODE_ENV === "test" || !vscode.workspace.createFileSystemWatcher) {
 			return
@@ -1090,6 +1377,7 @@ Add your skill instructions here.
 	}
 
 	private watchDirectory(dirPath: string): void {
+		if (this.isDisposed) return
 		const watcher = this.createSkillsWatcher(dirPath)
 		if (watcher) {
 			this.disposables.push(watcher)
@@ -1141,6 +1429,11 @@ Add your skill instructions here.
 
 	async dispose(): Promise<void> {
 		this.isDisposed = true
+		// Any sidecar still tracked is a write that never reached its rename.
+		for (const temporaryPath of this.activeTempFiles) {
+			await fs.unlink(temporaryPath).catch(() => {})
+		}
+		this.activeTempFiles.clear()
 		this.disposables.forEach((d) => d.dispose())
 		this.disposables = []
 		this.containerWatchers.forEach((w) => w.dispose())
