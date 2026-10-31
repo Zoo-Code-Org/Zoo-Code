@@ -95,6 +95,7 @@ import { calculateApiCostAnthropic, calculateApiCostOpenAI } from "../../shared/
 import { getWorkspacePath } from "../../utils/path"
 import { sanitizeToolUseId } from "../../utils/tool-id"
 import { getTaskDirectoryPath } from "../../utils/storage"
+import { stripThinkingTags } from "../../utils/text-normalization"
 
 // prompts
 import { formatResponse } from "../prompts/responses"
@@ -254,21 +255,18 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
  *
  * The comparison re-applies the streaming-time `<thinking>` strip that
  * `presentAssistantMessage` applies to the bubble but not to the raw accumulator
- * the API turn is built from.
+ * the API turn is built from. Both sites call the same `stripThinkingTags`, so the
+ * two cannot drift apart.
  */
 function hasAssistantTextTurnFor(apiMessages: ApiMessage[], partialText: string): boolean {
-	const expected = partialText.replace(/<thinking>\s?/g, "").replace(/\s?<\/thinking>/g, "")
+	const expected = stripThinkingTags(partialText)
 	const lastTurn = apiMessages.at(-1)
 
 	if (lastTurn?.role !== "assistant" || !Array.isArray(lastTurn.content)) {
 		return false
 	}
 
-	return lastTurn.content.some(
-		(block) =>
-			block.type === "text" &&
-			block.text.replace(/<thinking>\s?/g, "").replace(/\s?<\/thinking>/g, "") === expected,
-	)
+	return lastTurn.content.some((block) => block.type === "text" && stripThinkingTags(block.text) === expected)
 }
 
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
