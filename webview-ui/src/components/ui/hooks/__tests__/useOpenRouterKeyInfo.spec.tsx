@@ -2,42 +2,9 @@ import { renderHook, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import React from "react"
 
+import { stubTransport } from "@src/utils/test-utils"
+
 import { useOpenRouterKeyInfo } from "../useOpenRouterKeyInfo"
-
-// --- transport seam (phase 2: fetch) -----------------------------------------
-// Only this block changed between phase 1 (axios) and phase 2 (fetch). Every
-// assertion below is shared by both phases, so the unchanged green run is the
-// behavior-preservation proof.
-type TransportCall = { url: string; method: string; headers: Record<string, string> }
-type TransportResult = { status: number; body: unknown; jsonRejects?: Error }
-
-const stubTransport = (handler: (call: TransportCall) => TransportResult | Promise<TransportResult>) => {
-	const calls: TransportCall[] = []
-
-	vi.spyOn(globalThis, "fetch").mockImplementation((async (input: string, init?: RequestInit) => {
-		const call: TransportCall = {
-			url: String(input),
-			method: init?.method ?? "GET",
-			headers: { ...((init?.headers ?? {}) as Record<string, string>) },
-		}
-		calls.push(call)
-		const result = await handler(call)
-
-		return {
-			ok: result.status >= 200 && result.status < 300,
-			status: result.status,
-			json: async () => {
-				if (result.jsonRejects) {
-					throw result.jsonRejects
-				}
-				return result.body
-			},
-		} as Response
-	}) as typeof fetch)
-
-	return { calls }
-}
-// -----------------------------------------------------------------------------
 
 const KEY_INFO = {
 	label: "sk-or-v1-...abc",
@@ -82,7 +49,7 @@ describe("useOpenRouterKeyInfo", () => {
 			{
 				url: "https://openrouter.ai/api/v1/key",
 				method: "GET",
-				headers: { Authorization: "Bearer sk-or-v1-test" },
+				headers: { authorization: "Bearer sk-or-v1-test" },
 			},
 		])
 	})

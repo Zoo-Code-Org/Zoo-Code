@@ -90,11 +90,7 @@ async function getOpenRouterProvidersForModel(modelId: string, baseUrl?: string)
 			models[providerName] = modelInfo
 		}
 	} catch (error) {
-		if (error instanceof z.ZodError) {
-			console.error(`OpenRouter API response validation failed:`, error.issues)
-		} else {
-			console.error(`Error fetching OpenRouter providers:`, error)
-		}
+		console.error(`Error fetching OpenRouter providers:`, error)
 	}
 
 	return models
