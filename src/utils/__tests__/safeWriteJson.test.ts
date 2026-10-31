@@ -435,8 +435,8 @@ describe("safeWriteJson", () => {
 	})
 
 	// Test for rollback failure scenario
-	test("should log error and re-throw original if rollback fails", async () => {
-		const initialData = { message: "Initial, should be lost if rollback fails" }
+	test("should keep the backup and re-throw the original error if rollback fails", async () => {
+		const initialData = { message: "Initial, must survive in the kept backup" }
 		const newData = { message: "New content" }
 
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
@@ -465,6 +465,13 @@ describe("safeWriteJson", () => {
 			expect.stringContaining("Failed to restore backup"),
 			expect.objectContaining({ message: "Rollback rename failed" }),
 		)
+
+		// The failed rollback left the original only in the backup: cleanup must
+		// not unlink it, or the caller's data is gone with no copy anywhere.
+		const backups = (await fs.readdir(tempDir)).filter((name) => name.includes(".bak_"))
+		expect(backups).toHaveLength(1)
+		expect(JSON.parse(await fs.readFile(path.join(tempDir, backups[0]), "utf8"))).toEqual(initialData)
+		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Keeping backup"))
 
 		consoleErrorSpy.mockRestore()
 	})
@@ -541,5 +548,49 @@ describe("safeWriteJson", () => {
 
 		const content = await readFileContent(currentTestFilePath)
 		expect(content).toEqual({ c: 3 })
+	})
+
+	test("should abort with nothing committed when preCommit throws", async () => {
+		// preCommit is the last-moment re-validation hook: a caller whose decision
+		// depends on state another actor can change during the temp-file writes
+		// throws here to abort. The original content must survive untouched, and
+		// the temp and backup files must be cleaned up.
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify({ original: true }))
+		const preCommit = vi.fn(() => {
+			throw new Error("claim landed before commit")
+		})
+
+		await expect(safeWriteJson(currentTestFilePath, { replacement: true }, { preCommit })).rejects.toThrow(
+			"claim landed before commit",
+		)
+
+		expect(preCommit).toHaveBeenCalledTimes(1)
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual({ original: true })
+		const leftovers = (await fs.readdir(tempDir)).filter((name) => name.includes(".tmp"))
+		expect(leftovers).toEqual([])
+	})
+
+	test("should run preCommit after the merge callback and before the commit rename", async () => {
+		// Ordering is the contract: the merge decides the payload, preCommit
+		// re-validates against the world as it is at commit time.
+		const order: string[] = []
+		await safeWriteJson(
+			currentTestFilePath,
+			{ value: 1 },
+			{
+				merge: (_existing, incoming) => {
+					order.push("merge")
+					return incoming
+				},
+				preCommit: () => {
+					order.push("preCommit")
+				},
+			},
+		)
+
+		expect(order).toEqual(["merge", "preCommit"])
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual({ value: 1 })
 	})
 })

@@ -26,6 +26,17 @@ export interface SafeWriteJsonOptions {
 	 * cannot be parsed.
 	 */
 	merge?: (existing: unknown, incoming: unknown) => unknown
+
+	/**
+	 * Synchronous last-moment re-validation, invoked immediately before the
+	 * commit rename with no `await` in between. A caller whose decision depends
+	 * on state another actor can change during the temp-file writes (an
+	 * in-process ownership claim, for example) re-checks it here: throwing
+	 * aborts the write with nothing committed and the previous file restored.
+	 * Must stay synchronous so nothing can interleave between the check and the
+	 * rename it guards.
+	 */
+	preCommit?: () => void
 }
 
 /**
@@ -121,7 +132,10 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		}
 
 		// Step 3: Rename the new temporary file to the target file path.
-		// This is the main "commit" step.
+		// This is the main "commit" step. `preCommit` runs immediately before it
+		// with no await in between, so a caller can abort with nothing committed
+		// (the backup restore in the catch below puts the original back).
+		options?.preCommit?.()
 		await fs.rename(actualTempNewFilePath, absoluteFilePath)
 
 		// If we reach here, the new file is successfully in place.
@@ -177,16 +191,11 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			}
 		}
 
-		// Cleanup the .bak file if it still needs to be (i.e., wasn't successfully restored)
+		// A backup still set here means the rollback rename failed, so it holds the
+		// only copy of the original file. Never unlink it: report the path so the
+		// data is recoverable by hand instead of being destroyed by cleanup.
 		if (actualTempBackupFilePath) {
-			try {
-				await fs.unlink(actualTempBackupFilePath)
-			} catch (cleanupError) {
-				console.error(
-					`[Catch] Failed to clean up temporary backup file ${actualTempBackupFilePath}:`,
-					cleanupError,
-				)
-			}
+			console.error(`[Catch] Keeping backup ${actualTempBackupFilePath}: rollback failed, original not restored`)
 		}
 		throw originalError // This MUST be the error that rejects the promise.
 	} finally {

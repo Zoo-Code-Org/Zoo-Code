@@ -89,6 +89,8 @@ function makeTaskHistoryStoreStub(
 		atomicUpdatePair: overrides.atomicUpdatePair ?? atomicUpdatePair,
 		get: vi.fn((id: string) => itemMap.get(id)),
 		invalidate: vi.fn().mockResolvedValue(undefined),
+		markLocallyActive: vi.fn(),
+		markLocallyInactive: vi.fn(),
 	}
 }
 
@@ -902,6 +904,8 @@ describe("History resume delegation - parent metadata transitions", () => {
 			resumeAfterDelegation: vi.fn().mockRejectedValue(resumeError),
 			overwriteClineMessages: vi.fn().mockResolvedValue(undefined),
 			overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
+			// Private on the real Task; the failed-resume catch arm stops the beat here.
+			stopLivenessHeartbeat: vi.fn(),
 		}
 		const parentItem = {
 			id: "parent-resume-failure",
@@ -956,6 +960,10 @@ describe("History resume delegation - parent metadata transitions", () => {
 			"child-resume-failure",
 		)
 		expect(parentInstance.taskId).toBe("parent-resume-failure")
+		// CodeRabbit 4429868250: the failed resume releases the eager claim (concrete
+		// parent id, not the child) and stops the liveness heartbeat it started.
+		expect(taskHistoryStore.markLocallyInactive).toHaveBeenCalledWith("parent-resume-failure")
+		expect(parentInstance.stopLivenessHeartbeat).toHaveBeenCalledTimes(1)
 		consoleError.mockRestore()
 	})
 
