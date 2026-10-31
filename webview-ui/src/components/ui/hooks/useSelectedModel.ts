@@ -456,7 +456,25 @@ function getSelectedModel({
 		case providerIdentifiers.mimo: {
 			const routerCatalog = routerModels[providerIdentifiers.mimo]
 			const availableModels = routerCatalog ? { ...mimoModels, ...routerCatalog } : mimoModels
-			const id = getValidatedModelId(apiConfiguration.apiModelId, availableModels, defaultModelId)
+			const configuredId = apiConfiguration.apiModelId
+			// A settled-but-empty router catalog carries no information about which
+			// IDs exist: the provider answered, but listed nothing. Validating the
+			// saved ID against the static catalog alone would reset a router-only
+			// selection to the default and leak that default into ApiOptions'
+			// apiModelId sync effect, so preserve it here, mirroring the unsettled
+			// path. Prototype-safe on both sides: an ID naming an Object.prototype
+			// member has no own entry in either catalog, so it must still fall back
+			// to the static spec instead of being preserved as a phantom selection.
+			const settledEmptyCatalog = !!routerCatalog && Object.keys(routerCatalog).length === 0
+			if (
+				settledEmptyCatalog &&
+				configuredId &&
+				!Object.hasOwn(mimoModels, configuredId) &&
+				!Object.hasOwn(Object.prototype, configuredId)
+			) {
+				return { id: configuredId, info: undefined }
+			}
+			const id = getValidatedModelId(configuredId, availableModels, defaultModelId)
 			// Prototype-safe on both sides: the router catalog carries IDs straight
 			// from the provider's /models response, so `catalog["constructor"]`
 			// would otherwise resolve to an inherited member and surface as a model

@@ -356,6 +356,32 @@ describe("useSelectedModel", () => {
 		expect(result.current.info).toEqual(routerModelInfo)
 	})
 
+	// Regression: a settled-but-EMPTY router catalog (the provider returned no
+	// models) reaches the ready path, where the ID was validated against the merged
+	// catalog. A saved router-only ID is absent from the static catalog, so it was
+	// reset to the static default — the same overwrite the unsettled path already
+	// guards against, and it leaked into ApiOptions' apiModelId sync effect.
+	it("mimo: preserves a router-only configured ID when the router catalog settles empty", () => {
+		const routerOnlyModelId = "mimo-router-only-settled-empty"
+
+		// Guard the premise: an ID in the static catalog would not exercise the
+		// preserve branch at all.
+		expect(mimoModels[routerOnlyModelId as keyof typeof mimoModels]).toBeUndefined()
+
+		mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [providerIdentifiers.mimo]: {} }))
+		mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+		const { result } = renderHook(
+			() => useSelectedModel({ apiProvider: providerIdentifiers.mimo, apiModelId: routerOnlyModelId }),
+			{ wrapper: createWrapper() },
+		)
+
+		// The saved ID survives; info stays undefined because no catalog describes it,
+		// mirroring the unsettled-preservation contract.
+		expect(result.current.id).toBe(routerOnlyModelId)
+		expect(result.current.info).toBeUndefined()
+	})
+
 	// Regression: both the ID validation and the metadata lookup used plain bracket
 	// reads, so an ID naming an Object.prototype member was "found" in the catalog and
 	// surfaced as a model with no metadata instead of falling back to the static spec.
@@ -2426,6 +2452,19 @@ describe("useSelectedModel", () => {
 		})
 
 		it("should fallback to default when model ID is not in static or router models", () => {
+			// The router catalog must be POPULATED for this to be an invalid selection:
+			// a settled-but-empty catalog carries no information about which IDs exist,
+			// so the hook preserves the saved ID instead (see the router-only
+			// settled-empty regression above). Listing other models is what makes the
+			// configured ID provably absent.
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({
+					[providerIdentifiers.mimo]: {
+						"mimo-v2.6-flash": { contextWindow: 1_048_576, supportsPromptCache: true, maxTokens: 131_072 },
+					},
+				}),
+			)
+
 			const apiConfiguration: ProviderSettings = {
 				apiProvider: providerIdentifiers.mimo,
 				apiModelId: "non-existent-model",
