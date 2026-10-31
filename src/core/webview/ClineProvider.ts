@@ -1079,6 +1079,24 @@ export class ClineProvider
 		// Capture intent before yielding: host recovery can time out while this
 		// resolve is still generating HTML or hydrating state.
 		const recoveringHost = this.webviewHostRecoveryInProgress || this.pendingSidebarRecovery
+		try {
+			await this.initializeWebviewView(webviewView, recoveringHost)
+		} catch (error) {
+			if (!recoveringHost) throw error
+			if (this.isStaleViewResolve(webviewView)) return
+			// VS Code invokes sidebar resolution itself, outside the focus command's
+			// promise. Handle both host types here so failed initialization retains
+			// its task, disposal subscription, and remaining recovery attempts.
+			const host = "onDidChangeViewState" in webviewView ? "tab" : "sidebar"
+			this.reportWebviewRecoveryFailure(`Failed to initialize replacement ${host}: ${String(error)}`, false)
+			this.startWebviewWatchdog()
+		}
+	}
+
+	private async initializeWebviewView(
+		webviewView: vscode.WebviewView | vscode.WebviewPanel,
+		recoveringHost: boolean,
+	): Promise<void> {
 		// A different view replaces the current one: dispose its subscriptions so
 		// the replaced view can no longer dispatch messages or refresh provider state.
 		if (this.view !== webviewView) {
@@ -3783,19 +3801,7 @@ export class ClineProvider
 				const resolved = this.resolveWebviewView(replacement)
 				if (this.view === replacement) view.dispose()
 				else replacement.dispose()
-				try {
-					await resolved
-				} catch (error) {
-					// A published panel already owns this provider and its task.
-					// Keep its disposal subscription, and restore the watchdog even
-					// if HTML generation or state hydration failed before installation.
-					// The next stale tick uses the existing bounded recovery budget.
-					if (this.view === view) throw error
-					if (this._disposed || this.view !== replacement) return
-					// Surface the unusable tab without exhausting its remaining retries.
-					this.reportWebviewRecoveryFailure(`Failed to initialize replacement tab: ${String(error)}`, false)
-					this.startWebviewWatchdog()
-				}
+				await resolved
 			} else {
 				this.pendingSidebarRecovery = true
 				await vscode.commands.executeCommand(`${ClineProvider.sideBarId}.removeView`)
@@ -3824,8 +3830,13 @@ export class ClineProvider
 			)
 				return
 			if (started && this.lastReceivedWebviewHeartbeatAt !== undefined) return
+			// A published replacement may still be initializing after the wait
+			// expires. Its resolver will restore the watchdog on failure; keep the
+			// remaining attempts available instead of turning this into a dead end.
+			const replacementPublished = this.view !== undefined && this.view !== view
 			this.reportWebviewRecoveryFailure(
 				`Host recreation failed: ${error instanceof Error ? error.message : String(error)}`,
+				!replacementPublished,
 			)
 		} finally {
 			if (started) this.webviewHostRecoveryInProgress = false
