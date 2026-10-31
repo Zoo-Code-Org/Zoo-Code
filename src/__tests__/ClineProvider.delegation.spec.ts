@@ -95,6 +95,92 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		expect(taskHistoryStore.atomicReadAndUpdate).not.toHaveBeenCalled()
 	})
 
+	describe("when the parent's pending tool results cannot be saved", () => {
+		const setup = (parentTask: ReturnType<typeof makeParentTask>) => {
+			const child = { taskId: "child-1", run: vi.fn().mockResolvedValue(undefined) }
+			const taskHistoryStore = makeStoreStub({ get: vi.fn().mockReturnValue(parentHistoryItem) })
+			const provider = {
+				taskScheduler: new TaskScheduler(),
+				emit: vi.fn(),
+				getCurrentTask: vi.fn(() => parentTask),
+				removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+				createTask: vi.fn().mockResolvedValue(child),
+				handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+				log: vi.fn(),
+				isViewLaunched: false,
+				taskHistoryStore,
+			} as unknown as ClineProvider
+			const delegate = () =>
+				ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+					parentTaskId: "parent-1",
+					message: "Do something",
+					initialTodos: [],
+					mode: "code",
+				})
+			return { provider, taskHistoryStore, delegate }
+		}
+
+		const expectNothingDelegated = ({ provider, taskHistoryStore }: ReturnType<typeof setup>) => {
+			expect(provider.removeClineFromStack).not.toHaveBeenCalled()
+			expect(provider.createTask).not.toHaveBeenCalled()
+			expect(taskHistoryStore.atomicReadAndUpdate).not.toHaveBeenCalled()
+		}
+
+		it.each([
+			{
+				name: "the flush and the retry save both fail",
+				arrange: (parent: ReturnType<typeof makeParentTask>) => {
+					parent.flushPendingToolResultsToHistory.mockResolvedValue(false)
+					parent.retrySaveApiConversationHistory.mockResolvedValue(false)
+				},
+			},
+			{
+				name: "the retry save succeeds but the results are still not in history",
+				arrange: (parent: ReturnType<typeof makeParentTask>) => {
+					parent.flushPendingToolResultsToHistory.mockResolvedValue(false)
+					parent.retrySaveApiConversationHistory.mockResolvedValue(true)
+				},
+			},
+			{
+				name: "the flush throws",
+				arrange: (parent: ReturnType<typeof makeParentTask>) => {
+					parent.flushPendingToolResultsToHistory.mockRejectedValue(new Error("unexpected"))
+				},
+			},
+		])("refuses to delegate and leaves the parent open when $name", async ({ arrange }) => {
+			const parentTask = makeParentTask()
+			arrange(parentTask)
+			const harness = setup(parentTask)
+
+			await expect(harness.delegate()).rejects.toThrow("pending tool results could not be saved")
+
+			expectNothingDelegated(harness)
+			expect(parentTask.emit).not.toHaveBeenCalled()
+		})
+
+		it("delegates when a repeat flush after the retry save succeeds", async () => {
+			const parentTask = makeParentTask()
+			parentTask.flushPendingToolResultsToHistory.mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+			parentTask.retrySaveApiConversationHistory.mockResolvedValue(true)
+			const harness = setup(parentTask)
+
+			await expect(harness.delegate()).resolves.toMatchObject({ taskId: "child-1" })
+
+			expect(parentTask.flushPendingToolResultsToHistory).toHaveBeenCalledTimes(2)
+			expect(harness.provider.createTask).toHaveBeenCalledOnce()
+		})
+
+		it("delegates without a retry when the first flush succeeds", async () => {
+			const parentTask = makeParentTask()
+			const harness = setup(parentTask)
+
+			await expect(harness.delegate()).resolves.toMatchObject({ taskId: "child-1" })
+
+			expect(parentTask.flushPendingToolResultsToHistory).toHaveBeenCalledOnce()
+			expect(parentTask.retrySaveApiConversationHistory).not.toHaveBeenCalled()
+		})
+	})
+
 	it("clears a matching pending action when delegation commits", async () => {
 		const pendingAction = {
 			kind: "create_subtask" as const,

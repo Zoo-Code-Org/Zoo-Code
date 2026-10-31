@@ -2467,5 +2467,58 @@ describe("Task persistence", () => {
 			// userMessageContent should be cleared on success
 			expect(task.userMessageContent).toEqual([])
 		})
+
+		const toolResultMessages = (task: Task) =>
+			task.apiConversationHistory.filter(
+				(message) =>
+					message.role === "user" &&
+					Array.isArray(message.content) &&
+					message.content.some((block) => block.type === "tool_result"),
+			)
+
+		it("saves, without appending again, results that were added to history but not saved", async () => {
+			mockSaveApiMessages.mockRejectedValueOnce(new Error("disk full")).mockResolvedValueOnce([])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			task.assistantMessageSavedToHistory = true
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "tool-1", content: "done" }]
+
+			await expect(task.flushPendingToolResultsToHistory()).resolves.toBe(false)
+			expect(toolResultMessages(task)).toHaveLength(1)
+
+			await expect(task.flushPendingToolResultsToHistory()).resolves.toBe(true)
+
+			// The retry saved the history as it was; it did not append a second copy of the results.
+			expect(toolResultMessages(task)).toHaveLength(1)
+			expect(task.userMessageContent).toEqual([])
+			expect(mockSaveApiMessages).toHaveBeenCalledTimes(2)
+		})
+
+		it("keeps results that never reached history so a later flush can still add them", async () => {
+			mockSaveApiMessages.mockResolvedValue([])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "tool-1", content: "done" }]
+			vi.spyOn(task, "waitForCurrentAssistantMessagePersistence")
+				.mockResolvedValueOnce(false)
+				.mockResolvedValue(true)
+
+			await expect(task.flushPendingToolResultsToHistory()).resolves.toBe(false)
+			expect(toolResultMessages(task)).toHaveLength(0)
+			expect(task.userMessageContent).toHaveLength(1)
+
+			await expect(task.flushPendingToolResultsToHistory()).resolves.toBe(true)
+
+			expect(toolResultMessages(task)).toHaveLength(1)
+			expect(task.userMessageContent).toEqual([])
+		})
 	})
 })

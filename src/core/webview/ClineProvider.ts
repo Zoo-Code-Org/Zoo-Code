@@ -4092,27 +4092,33 @@ export class ClineProvider
 		//    is already added to apiConversationHistory by the normal flow in
 		//    recursivelyMakeClineRequests BEFORE tools start executing. We only need to
 		//    flush the pending user message with tool_results.
+		let pendingResultsPersisted = false
 		try {
-			const flushSuccess = await parent.flushPendingToolResultsToHistory()
+			pendingResultsPersisted = await parent.flushPendingToolResultsToHistory()
 
-			if (!flushSuccess) {
+			if (!pendingResultsPersisted) {
 				console.warn(`[delegateParentAndOpenChild] Flush failed for parent ${parentTaskId}, retrying...`)
-				const retrySuccess = await parent.retrySaveApiConversationHistory()
-
-				if (!retrySuccess) {
-					console.error(
-						`[delegateParentAndOpenChild] CRITICAL: Parent ${parentTaskId} API history not persisted to disk. Child return may produce stale state.`,
-					)
-					vscode.window.showWarningMessage(
-						"Warning: Parent task state could not be saved. The parent task may lose recent context when resumed.",
-					)
-				}
+				await parent.retrySaveApiConversationHistory()
+				// Saving the existing history does not add results that never reached it, so flush again.
+				pendingResultsPersisted = await parent.flushPendingToolResultsToHistory()
 			}
 		} catch (error) {
 			this.log(
-				`[delegateParentAndOpenChild] Error flushing pending tool results (non-fatal): ${
+				`[delegateParentAndOpenChild] Error flushing pending tool results: ${
 					error instanceof Error ? error.message : String(error)
 				}`,
+			)
+		}
+
+		if (!pendingResultsPersisted) {
+			// Resuming this parent later would send a tool_use without its tool_result (a provider 400).
+			// Nothing has been disposed or created yet: the parent stays open with its pending results in
+			// memory, so the same delegation can simply be retried.
+			console.error(
+				`[delegateParentAndOpenChild] CRITICAL: Pending tool results of parent ${parentTaskId} could not be saved.`,
+			)
+			throw new Error(
+				`Could not start the subtask: the parent task's pending tool results could not be saved to disk. The parent task stays open and nothing was delegated. Check disk space and permissions, then try again.`,
 			)
 		}
 
