@@ -23,7 +23,7 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 10
         container:
-            image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+            image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
             options: --ipc=host
         steps:
             - name: Checkout code
@@ -38,7 +38,7 @@ jobs:
               run: pnpm --filter @roo-code/vscode-webview test:visual
             - name: Upload visual test coverage to Codecov
               if: always()
-              uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+              uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
               with:
                   files: webview-ui/coverage-ct/lcov.info
                   disable_search: true
@@ -46,7 +46,7 @@ jobs:
                   token: ${{ secrets.CODECOV_TOKEN }}
             - name: Upload visual test artifacts
               if: failure()
-              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
               with:
                   name: webview-visual-regression
                   path: |
@@ -87,7 +87,7 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 20
         container:
-            image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+            image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
             options: --ipc=host
         env:
             LANG: en_US.UTF-8
@@ -116,7 +116,7 @@ jobs:
               run: xvfb-run -a pnpm --filter @roo-code/vscode-e2e test:visual:electron
             - name: Upload Extension Host visual artifacts
               if: failure()
-              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
               with:
                   name: extension-host-visual-regression
                   path: |

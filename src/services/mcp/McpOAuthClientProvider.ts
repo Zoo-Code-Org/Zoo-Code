@@ -93,6 +93,15 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 	private _effectiveResourceIndicator: string | null
 	/** Deduplicates concurrent _ensureCallbackServer() calls. */
 	private _ensureServerPromise: Promise<void> | null = null
+	/** Callback promise most recently returned to a waitForAuthCode() caller. */
+	private _awaitedAuthCodePromise: Promise<string> | null = null
+	/**
+	 * Rejected callback promise of a listener that failed while no caller was waiting.
+	 * The next waitForAuthCode() call reports it once instead of starting another listener.
+	 */
+	private _unreportedAuthCodeFailure: Promise<string> | null = null
+	/** Stops a detached listener. A replacement listener waits for it because it may reuse the port. */
+	private _listenerCleanup: Promise<void> | null = null
 
 	private constructor(
 		private readonly _serverUrl: string,
@@ -243,11 +252,17 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 
 	private async _doStartCallbackServer(): Promise<void> {
 		this._closed = false
-		const { port: configuredPort, host } = getCallbackAddress(this._configuredRedirectUri)
+		// A new listener belongs to a new authorization attempt, so an earlier failure no longer applies.
+		this._unreportedAuthCodeFailure = null
+		if (this._listenerCleanup) {
+			await this._listenerCleanup
+		}
+		const { port: configuredPort, host, path } = getCallbackAddress(this._configuredRedirectUri)
 		const { server, port, result, cancel } = await startCallbackServer(
 			configuredPort ?? this._port,
 			this._state,
 			host,
+			path,
 		)
 		this._server = server
 		this._port = port
@@ -260,18 +275,31 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		this._authCodePromise = authCodePromise
 
 		// Static clients can start this promise before waitForAuthCode() observes it.
-		// Observe rejection now to prevent an unhandled rejection, but keep the original
-		// promise so waitForAuthCode() still receives the callback error. Stop only this
-		// promise's listener before clearing it so a later flow can bind a fresh listener.
-		void authCodePromise.catch(async () => {
-			if (this._authCodePromise === authCodePromise && this._server === server) {
-				await stopCallbackServer(server, cancel).catch(() => {})
-				if (this._authCodePromise === authCodePromise && this._server === server) {
-					this._server = null
-					this._cancelCallbackServer = null
-				}
+		// Observe rejection now to prevent an unhandled rejection. A caller that is already
+		// waiting receives the error from this promise; otherwise keep the rejected promise so
+		// the next waitForAuthCode() call reports it instead of waiting on a new listener.
+		void authCodePromise.catch(() => {
+			// close() detaches this promise before it cancels the listener and stops it itself.
+			if (this._authCodePromise !== authCodePromise) return
+			if (this._awaitedAuthCodePromise !== authCodePromise) {
+				this._unreportedAuthCodeFailure = authCodePromise
+			}
+			// Detach only the failed listener so a later authorization attempt starts a fresh one.
+			// Keep the failed promise current for callers that are still resuming from startup.
+			this._server = null
+			this._cancelCallbackServer = null
+			this._stopDetachedListener(server, cancel)
+		})
+	}
+
+	/** Stops a listener that is no longer attached. A replacement listener waits because it may reuse the port. */
+	private _stopDetachedListener(server: http.Server, cancel: () => void): void {
+		const cleanup = stopCallbackServerIgnoringErrors(server, cancel).finally(() => {
+			if (this._listenerCleanup === cleanup) {
+				this._listenerCleanup = null
 			}
 		})
+		this._listenerCleanup = cleanup
 	}
 
 	state(): string {
@@ -520,12 +548,24 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 	 * Resolves with the authorization code once the user completes the OAuth
 	 * browser flow and the local callback server receives the redirect.
 	 * Rejects on error or 5-minute timeout.
+	 *
+	 * If the listener failed before any caller waited, the first call rejects with
+	 * that failure without starting another listener. A later call starts a fresh one.
 	 */
 	async waitForAuthCode(): Promise<string> {
-		if (!this._authCodePromise || !this._server) {
+		if (!this._unreportedAuthCodeFailure && (!this._authCodePromise || !this._server)) {
 			await this._ensureCallbackServer()
 		}
-		return this._authCodePromise!
+		const unreportedFailure = this._unreportedAuthCodeFailure
+		if (unreportedFailure) {
+			this._unreportedAuthCodeFailure = null
+			return unreportedFailure
+		}
+		// A caller that waited for listener startup receives that listener's result, even when
+		// another caller already took the failure while this caller was resuming.
+		const authCodePromise = this._authCodePromise!
+		this._awaitedAuthCodePromise = authCodePromise
+		return authCodePromise
 	}
 
 	/**
@@ -654,13 +694,30 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		if (this._ensureServerPromise) {
 			await this._ensureServerPromise.catch(() => {})
 		}
-		if (!this._closed && this._server) {
+		// A closed flow must not report its failure to a later flow.
+		this._unreportedAuthCodeFailure = null
+		const server = this._server
+		if (!this._closed && server) {
 			this._closed = true
-			await stopCallbackServer(this._server, this._cancelCallbackServer ?? (() => {})).catch(() => {})
+			const cancel = this._cancelCallbackServer ?? (() => {})
+			// Detach before cancelling so the rejection handler does not record the cancellation.
 			this._server = null
 			this._cancelCallbackServer = null
 			this._authCodePromise = null
+			this._stopDetachedListener(server, cancel)
 		}
+		if (this._listenerCleanup) {
+			await this._listenerCleanup
+		}
+	}
+}
+
+/** Stops a callback listener. A cleanup error must not replace the callback error. */
+async function stopCallbackServerIgnoringErrors(server: http.Server, cancel: () => void): Promise<void> {
+	try {
+		await stopCallbackServer(server, cancel)
+	} catch {
+		// The callback result, not the cleanup result, is the error that callers report.
 	}
 }
 
@@ -670,8 +727,12 @@ function resolveResourceIndicator(configured: McpOAuthResource | undefined, disc
 	return discovered ?? null
 }
 
-function getCallbackAddress(redirectUri?: string): { port?: number; host: "localhost" | "127.0.0.1" } {
-	if (!redirectUri) return { host: "127.0.0.1" }
+function getCallbackAddress(redirectUri?: string): {
+	port?: number
+	host: "localhost" | "127.0.0.1"
+	path: string
+} {
+	if (!redirectUri) return { host: "127.0.0.1", path: "/callback" }
 	const url = new URL(redirectUri)
 	if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
 		throw new Error("MCP OAuth redirectUri must use a loopback host")
@@ -679,8 +740,9 @@ function getCallbackAddress(redirectUri?: string): { port?: number; host: "local
 	if (url.protocol !== "http:") {
 		throw new Error("MCP OAuth redirectUri must use HTTP on a loopback host")
 	}
-	if (url.pathname !== "/callback") {
-		throw new Error("MCP OAuth redirectUri path must be /callback")
+	// Authorization servers with pre-registered clients may require a specific path.
+	if (url.pathname === "/") {
+		throw new Error("MCP OAuth redirectUri must specify a callback path")
 	}
 	if (url.username || url.password || url.search || url.hash) {
 		throw new Error("MCP OAuth redirectUri must not contain credentials, a query, or a fragment")
@@ -689,5 +751,5 @@ function getCallbackAddress(redirectUri?: string): { port?: number; host: "local
 	if (!Number.isInteger(port) || port < 1 || port > 65535) {
 		throw new Error("MCP OAuth redirectUri must specify a valid port")
 	}
-	return { port, host: url.hostname }
+	return { port, host: url.hostname, path: url.pathname }
 }

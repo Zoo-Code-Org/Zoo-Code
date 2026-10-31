@@ -40,7 +40,7 @@ export const OpenRouter = ({
 }: OpenRouterProps) => {
 	const { t } = useAppTranslation()
 
-	const [openRouterBaseUrlSelected, setOpenRouterBaseUrlSelected] = useState(!!apiConfiguration?.openRouterBaseUrl)
+	const [openRouterBaseUrlSelected, setOpenRouterBaseUrlSelected] = useState(!!apiConfiguration.openRouterBaseUrl)
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(
@@ -56,14 +56,14 @@ export const OpenRouter = ({
 	return (
 		<>
 			<VSCodeTextField
-				value={apiConfiguration?.openRouterApiKey || ""}
+				value={apiConfiguration.openRouterApiKey || ""}
 				type="password"
 				onInput={handleInputChange("openRouterApiKey")}
 				placeholder={t("settings:placeholders.apiKey")}
 				className="w-full">
 				<div className="flex justify-between items-center mb-1">
 					<label className="block font-medium">{t("settings:providers.openRouterApiKey")}</label>
-					{apiConfiguration?.openRouterApiKey && (
+					{apiConfiguration.openRouterApiKey && (
 						<OpenRouterBalanceDisplay
 							apiKey={apiConfiguration.openRouterApiKey}
 							baseUrl={apiConfiguration.openRouterBaseUrl}
@@ -74,7 +74,7 @@ export const OpenRouter = ({
 			<div className="text-sm text-vscode-descriptionForeground -mt-2">
 				{t("settings:providers.apiKeyStorageNotice")}
 			</div>
-			{!apiConfiguration?.openRouterApiKey && (
+			{!apiConfiguration.openRouterApiKey && (
 				<VSCodeButtonLink href={getOpenRouterAuthUrl(uriScheme)} style={{ width: "100%" }} appearance="primary">
 					{t("settings:providers.getOpenRouterApiKey")}
 				</VSCodeButtonLink>
@@ -94,7 +94,7 @@ export const OpenRouter = ({
 					</Checkbox>
 					{openRouterBaseUrlSelected && (
 						<VSCodeTextField
-							value={apiConfiguration?.openRouterBaseUrl || ""}
+							value={apiConfiguration.openRouterBaseUrl || ""}
 							type="url"
 							onInput={handleInputChange("openRouterBaseUrl")}
 							placeholder="Default: https://openrouter.ai/api/v1"
