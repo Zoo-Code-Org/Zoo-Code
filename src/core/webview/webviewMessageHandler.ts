@@ -29,6 +29,7 @@ import {
 	OpenAiModelsMessageType,
 	RouterModelsMessageType,
 	VsCodeLmModelsMessageType,
+	globalSettingsSchema,
 	isTelemetryOptedIn,
 } from "@roo-code/types"
 import { customToolRegistry } from "@roo-code/core"
@@ -37,6 +38,14 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import { type ApiMessage } from "../task-persistence/apiMessages"
 import { saveTaskMessages } from "../task-persistence"
+import {
+	beginSettingWrite,
+	finishSettingWrites,
+	isTrackedSetting,
+	performSettingWrite,
+	undoSettingWrite,
+	type SettingWrite,
+} from "../config/settingWrites"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
@@ -129,6 +138,16 @@ import {
 
 const handlerFor = (apiConfiguration: ProviderSettings, provider: RouterName): ApiHandler =>
 	buildApiHandler({ ...apiConfiguration, apiProvider: provider })
+
+/**
+ * What the webview may send for each display value: the schema the setting is defined with. The webview is not
+ * trusted, and its own controls do not bind a message that was written by hand.
+ */
+const DISPLAY_VALUE_SCHEMAS = {
+	timeFormat: globalSettingsSchema.shape.timeFormat,
+	dateFormat: globalSettingsSchema.shape.dateFormat,
+	showRelativeTimes: globalSettingsSchema.shape.showRelativeTimes,
+}
 
 export const webviewMessageHandler = async (
 	provider: ClineProvider,
@@ -737,8 +756,31 @@ export const webviewMessageHandler = async (
 			}
 			break
 
-		case "updateSettings":
-			if (message.updatedSettings) {
+		case "updateSettings": {
+			// The display settings are saved all-or-nothing: if a write fails, the ones this save already stored are
+			// put back. A key is recorded before it is written, so a write that failed after changing the stored
+			// value is put back too (see `undoSettingWrite` for when a key is left alone). A failure while writing
+			// any other setting is not handled here: it follows the existing error path, after the display
+			// settings have been put back.
+			const written: SettingWrite[] = []
+			let failedKey: string | undefined
+			let unhandledFailure: unknown
+
+			try {
+				if (!message.updatedSettings) break
+
+				// Checked before anything else happens, so an invalid value changes nothing: no side effect runs and
+				// no setting is stored, not even the valid ones sent with it.
+				for (const [key, schema] of Object.entries(DISPLAY_VALUE_SCHEMAS)) {
+					if (
+						key in message.updatedSettings &&
+						!schema.safeParse(Reflect.get(message.updatedSettings, key)).success
+					) {
+						failedKey = key
+						throw new Error(`Invalid value for ${key}`)
+					}
+				}
+
 				if (message.updatedSettings.destructiveCommandGuardEnabled === true) {
 					try {
 						const { ensureDcgInstalled } = await import("../../services/destructive-command-guard")
@@ -758,6 +800,8 @@ export const webviewMessageHandler = async (
 				}
 
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
+					failedKey = key
+					const previous = provider.contextProxy.getValue(key as keyof RooCodeSettings)
 					let newValue = value
 
 					if (key === "language") {
@@ -867,13 +911,53 @@ export const webviewMessageHandler = async (
 						}
 					}
 
+					if (isTrackedSetting(key)) {
+						const write = beginSettingWrite(key, previous, newValue)
+						written.push(write)
+						await performSettingWrite(provider.contextProxy, write)
+						continue
+					}
+
 					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
 				}
 
-				await provider.postStateToWebview()
+				finishSettingWrites(written)
+			} catch (error) {
+				const failure = error instanceof Error ? error.message : String(error)
+
+				for (const write of written.reverse()) {
+					try {
+						await undoSettingWrite(provider.contextProxy, write)
+					} catch (rollbackError) {
+						provider.log(
+							`[updateSettings] Could not restore ${write.key}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+						)
+					}
+				}
+
+				provider.log(`[updateSettings] Save failed: ${failure}`)
+
+				if (failedKey !== undefined && isTrackedSetting(failedKey)) {
+					vscode.window.showErrorMessage(t("common:errors.settings_save_failed", { error: failure }))
+				} else {
+					// Not a display setting: handled as it always was, once the webview has been refreshed.
+					unhandledFailure = error
+				}
 			}
 
+			// The outcome is decided above. A failed refresh must not undo a stored save.
+			try {
+				await provider.postStateToWebview()
+			} catch (error) {
+				provider.log(
+					`[updateSettings] Could not refresh the webview state: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+
+			if (unhandledFailure !== undefined) throw unhandledFailure
+
 			break
+		}
 
 		case "terminalOperation":
 			if (message.terminalOperation) {

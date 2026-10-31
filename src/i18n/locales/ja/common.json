@@ -58,6 +58,7 @@
 		"cannot_access_path": "パス {{path}} にアクセスできません：{{error}}",
 		"path_outside_workspace": "パスはワークスペースの外にあります",
 		"settings_import_failed": "設定のインポートに失敗しました：{{error}}",
+		"settings_save_failed": "設定を保存できませんでした。一部の設定が部分的に変更されたままになっている可能性があります：{{error}}",
 		"mistake_limit_guidance": "これは、モデルの思考プロセスの失敗やツールを適切に使用できないことを示している可能性があり、ユーザーのガイダンスによって軽減できます（例：「タスクをより小さなステップに分割してみてください」）。",
 		"violated_organization_allowlist": "タスクの実行に失敗しました: 現在のプロファイルは組織の設定と互換性がありません",
 		"condense_failed": "コンテキストの圧縮に失敗しました",

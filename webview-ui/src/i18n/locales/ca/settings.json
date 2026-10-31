@@ -1233,5 +1233,41 @@
 			"descriptionTooLong": "La descripció ha de tenir com a màxim 1024 caràcters"
 		},
 		"footer": "Crea les teves pròpies skills amb el mode Skill Writer, disponible al <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"language": {
+		"description": "Idioma i visualització de data i hora.",
+		"languageTitle": "Idioma",
+		"displayLanguage": "Idioma de visualització",
+		"displayLanguageDescription": "Idioma de la interfície de Zoo Code.",
+		"dateTimeTitle": "Data i hora",
+		"timeFormat": {
+			"label": "Format de l'hora",
+			"description": "Automàtic segueix l'idioma de visualització.",
+			"options": {
+				"auto": "Automàtic",
+				"12h": "12 hores",
+				"24h": "24 hores"
+			}
+		},
+		"dateFormat": {
+			"label": "Format de la data",
+			"example": "p. ex. {{example}}",
+			"options": {
+				"auto": "Automàtic",
+				"mdy": "MM/DD/AAAA",
+				"dmy": "DD/MM/AAAA",
+				"ymd": "AAAA-MM-DD"
+			}
+		},
+		"relativeTimes": {
+			"label": "Mostra els temps relatius (\"fa 5 min\") a l'historial de tasques"
+		},
+		"preview": {
+			"title": "Previsualització",
+			"chat": "Missatge del xat",
+			"history": "Historial de tasques",
+			"relative": "fa 5 min",
+			"hover": "(en passar el cursor: {{value}})"
+		}
 	}
 }

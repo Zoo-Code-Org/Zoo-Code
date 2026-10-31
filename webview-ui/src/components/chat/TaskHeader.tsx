@@ -25,6 +25,7 @@ import { vscode } from "@src/utils/vscode"
 import Thumbnails from "../common/Thumbnails"
 import { TaskTitleEditor } from "../history/TaskTitleEditor"
 import { TaskActions } from "./TaskActions"
+import { isShowableTimestamp, MessageTimestamp } from "./MessageTimestamp"
 import { ContextWindowProgress } from "./ContextWindowProgress"
 import { Mention } from "./Mention"
 import { TodoListDisplay } from "./TodoListDisplay"
@@ -64,7 +65,7 @@ const TaskHeader = ({
 	todos,
 }: TaskHeaderProps) => {
 	const { t } = useTranslation()
-	const { apiConfiguration, currentTaskItem } = useExtensionState()
+	const { apiConfiguration, currentTaskItem, timeFormat, dateFormat } = useExtensionState()
 	const { id: modelId, info: model } = useSelectedModel(apiConfiguration)
 	const [isTaskExpanded, setIsTaskExpanded] = useState(false)
 	const [isRenaming, setIsRenaming] = useState(false)
@@ -350,6 +351,13 @@ const TaskHeader = ({
 							</div>
 						</div>
 						{task.images && task.images.length > 0 && <Thumbnails images={task.images} />}
+
+						{/* When the task's first message was sent (follows the Time/Date format settings). */}
+						{isShowableTimestamp(task.ts) && (
+							<div onClick={(e) => e.stopPropagation()}>
+								<MessageTimestamp ts={task.ts} timeFormat={timeFormat} dateFormat={dateFormat} />
+							</div>
+						)}
 
 						<div onClick={(e) => e.stopPropagation()}>
 							<TaskActions

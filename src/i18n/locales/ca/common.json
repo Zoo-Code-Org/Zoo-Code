@@ -62,6 +62,7 @@
 		"cannot_access_path": "No es pot accedir a la ruta {{path}}: {{error}}",
 		"path_outside_workspace": "La ruta és fora de l'espai de treball",
 		"settings_import_failed": "Ha fallat la importació de la configuració: {{error}}.",
+		"settings_save_failed": "No s'ha pogut desar la configuració. Alguns valors poden haver quedat parcialment canviats: {{error}}",
 		"mistake_limit_guidance": "Això pot indicar un error en el procés de pensament del model o la incapacitat d'utilitzar una eina correctament, que es pot mitigar amb orientació de l'usuari (p. ex. \"Prova de dividir la tasca en passos més petits\").",
 		"violated_organization_allowlist": "Ha fallat l'execució de la tasca: el perfil actual no és compatible amb la configuració de la teva organització",
 		"condense_failed": "Ha fallat la condensació del context",

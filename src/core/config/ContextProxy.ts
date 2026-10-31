@@ -23,6 +23,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { logger } from "../../utils/logging"
 import { supportPrompt } from "../../shared/support-prompt"
 import { downgradeLegacyRooConfig } from "./routerRemoval"
+import { forgetSettingStore, isTrackedSetting, noteSettingStored } from "./settingWrites"
 
 type GlobalStateKey = keyof GlobalState
 type SecretStateKey = keyof SecretState
@@ -361,12 +362,27 @@ export class ContextProxy {
 	}
 
 	updateGlobalState<K extends GlobalStateKey>(key: K, value: GlobalState[K]) {
+		const storeNumber = noteSettingStored(key)
+
 		if (isPassThroughStateKey(key)) {
 			return this.originalContext.globalState.update(key, value)
 		}
 
+		const cachedBefore = this.stateCache[key]
 		this.stateCache[key] = value
-		return this.originalContext.globalState.update(key, value)
+		const updated = this.originalContext.globalState.update(key, value)
+		// Annotated, so it is a plain flag: the key is not narrowed to the tracked ones below.
+		const tracked: boolean = isTrackedSetting(key)
+		if (!tracked) return updated
+
+		// A rejected store never reached storage. A rollback must not treat it as someone else's store, and the
+		// cache must not keep a value that storage does not have, which the next save would read as what to restore.
+		return Promise.resolve(updated).catch((error: unknown) => {
+			if (storeNumber !== undefined) forgetSettingStore(key, storeNumber)
+			// Unless a newer store has replaced the value meanwhile: that value stays.
+			if (this.stateCache[key] === value) this.stateCache[key] = cachedBefore
+			throw error
+		})
 	}
 
 	private getAllGlobalState(): GlobalState {

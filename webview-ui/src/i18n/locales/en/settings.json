@@ -1233,5 +1233,41 @@
 			"output": "Output",
 			"cacheReads": "Cache reads"
 		}
+	},
+	"language": {
+		"description": "Language and date/time display.",
+		"languageTitle": "Language",
+		"displayLanguage": "Display language",
+		"displayLanguageDescription": "Language for Zoo Code's interface.",
+		"dateTimeTitle": "Date & time",
+		"timeFormat": {
+			"label": "Time format",
+			"description": "Auto follows your display language.",
+			"options": {
+				"auto": "Auto",
+				"12h": "12-hour",
+				"24h": "24-hour"
+			}
+		},
+		"dateFormat": {
+			"label": "Date format",
+			"example": "e.g. {{example}}",
+			"options": {
+				"auto": "Auto",
+				"mdy": "MM/DD/YYYY",
+				"dmy": "DD/MM/YYYY",
+				"ymd": "YYYY-MM-DD"
+			}
+		},
+		"relativeTimes": {
+			"label": "Show relative times (\"5 min ago\") in task history"
+		},
+		"preview": {
+			"title": "Preview",
+			"chat": "Chat message",
+			"history": "Task history",
+			"relative": "5 min ago",
+			"hover": "(hover: {{value}})"
+		}
 	}
 }

@@ -1233,5 +1233,41 @@
 			"descriptionTooLong": "Açıklama en fazla 1024 karakter olmalıdır"
 		},
 		"footer": "Skill Writer modu ile kendi becerilerinizi oluşturun. <MarketplaceLink>Modes Marketplace</MarketplaceLink>'de mevcut."
+	},
+	"language": {
+		"description": "Dil ile tarih/saat gösterimi.",
+		"languageTitle": "Dil",
+		"displayLanguage": "Görüntüleme dili",
+		"displayLanguageDescription": "Zoo Code arayüzünün dili.",
+		"dateTimeTitle": "Tarih ve saat",
+		"timeFormat": {
+			"label": "Saat biçimi",
+			"description": "Otomatik, görüntüleme dilini izler.",
+			"options": {
+				"auto": "Otomatik",
+				"12h": "12 saatlik",
+				"24h": "24 saatlik"
+			}
+		},
+		"dateFormat": {
+			"label": "Tarih biçimi",
+			"example": "ör. {{example}}",
+			"options": {
+				"auto": "Otomatik",
+				"mdy": "AA/GG/YYYY",
+				"dmy": "GG/AA/YYYY",
+				"ymd": "YYYY-AA-GG"
+			}
+		},
+		"relativeTimes": {
+			"label": "Görev geçmişinde göreli zamanları (\"5 dk önce\") göster"
+		},
+		"preview": {
+			"title": "Önizleme",
+			"chat": "Sohbet mesajı",
+			"history": "Görev geçmişi",
+			"relative": "5 dk önce",
+			"hover": "(üzerine gelince: {{value}})"
+		}
 	}
 }

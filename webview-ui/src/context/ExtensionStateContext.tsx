@@ -133,6 +133,9 @@ export interface ExtensionStateContextType extends ExtensionState {
 	setHistoryPreviewCollapsed: (value: boolean) => void
 	setReasoningBlockCollapsed: (value: boolean) => void
 	chatFontSize?: number
+	timeFormat?: "auto" | "12h" | "24h"
+	dateFormat?: "auto" | "mdy" | "dmy" | "ymd"
+	showRelativeTimes?: boolean
 	setChatFontSize: (value: number | undefined) => void
 	enterBehavior?: "send" | "newline"
 	setEnterBehavior: (value: "send" | "newline") => void
@@ -624,6 +627,9 @@ export const ExtensionStateContextProvider: React.FC<{
 		// `chatFontSize` is persisted as nullish (null on reset); normalize null to
 		// undefined so it matches the context type and means "use VS Code default".
 		chatFontSize: state.chatFontSize ?? undefined,
+		timeFormat: state.timeFormat ?? "auto",
+		dateFormat: state.dateFormat ?? "auto",
+		showRelativeTimes: state.showRelativeTimes ?? true,
 		reasoningBlockCollapsed: state.reasoningBlockCollapsed ?? true,
 		didHydrateState,
 		showWelcome,

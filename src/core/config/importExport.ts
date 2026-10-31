@@ -18,6 +18,15 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import { ProviderSettingsManager, providerProfilesSchema } from "./ProviderSettingsManager"
 import { ContextProxy } from "./ContextProxy"
+import {
+	TRACKED_SETTING_KEYS,
+	beginSettingWrite,
+	finishSettingWrites,
+	isTrackedSetting,
+	performSettingWrite,
+	undoSettingWrite,
+	type SettingWrite,
+} from "./settingWrites"
 import { CustomModesManager } from "./CustomModesManager"
 import { downgradeLegacyRooConfig, ROUTER_REMOVAL_IMPORT_WARNING } from "./routerRemoval"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
@@ -147,6 +156,9 @@ export async function importSettingsFromPath(
 		globalSettings: z.unknown().optional(),
 	})
 
+	// Display writes of this import that are not yet final: they are put back if a later step fails.
+	let displayWrites: SettingWrite[] = []
+
 	try {
 		const previousProviderProfiles = await providerSettingsManager.export()
 
@@ -228,7 +240,7 @@ export async function importSettingsFromPath(
 		// They will be imported automatically with the config - no special handling needed
 
 		await providerSettingsManager.import(providerProfiles)
-		await contextProxy.setValues(sanitizedGlobalSettings)
+		displayWrites = await setValuesRestoringDisplaySettings(contextProxy, sanitizedGlobalSettings)
 
 		// Set the current provider.
 		const currentProviderName = providerProfiles.currentApiConfigName
@@ -244,13 +256,18 @@ export async function importSettingsFromPath(
 
 		await contextProxy.setValue("listApiConfigMeta", await providerSettingsManager.listConfig())
 
+		// Every step has succeeded: the display writes are final.
+		finishSettingWrites(displayWrites)
+
 		return {
 			providerProfiles,
 			globalSettings: sanitizedGlobalSettings,
 			success: true,
 			warnings: warnings.length > 0 ? warnings : undefined,
 		}
-	} catch (e) {
+	} catch (failure) {
+		// A step after the settings were written failed: the display settings are put back with the rest undone.
+		const e = withRestoreReport(failure, await restoreDisplayWrites(contextProxy, displayWrites))
 		let error = "Unknown error"
 
 		if (e instanceof ZodError) {
@@ -262,6 +279,68 @@ export async function importSettingsFromPath(
 
 		return { success: false, error }
 	}
+}
+
+/**
+ * Puts the writes of an import back, last first. Returns the settings that could not be put back.
+ */
+async function restoreDisplayWrites(contextProxy: ContextProxy, writes: SettingWrite[]): Promise<string[]> {
+	const notRestored: string[] = []
+
+	for (const write of [...writes].reverse()) {
+		try {
+			await undoSettingWrite(contextProxy, write)
+		} catch (restoreError) {
+			notRestored.push(write.key)
+			console.error(`Failed to restore setting "${write.key}" after import failure:`, restoreError)
+		}
+	}
+
+	return notRestored
+}
+
+/** The failure with a note of what is still stored, when part of the import could not be put back. */
+function withRestoreReport(failure: unknown, notRestored: string[]): unknown {
+	if (notRestored.length === 0) return failure
+	const reason = failure instanceof Error ? failure.message : String(failure)
+	return new Error(`${reason} (these settings could not be restored: ${notRestored.join(", ")})`)
+}
+
+/**
+ * Writes global settings. The display settings are written all-or-nothing: every write is awaited before anything is
+ * restored (`setValues` rejects at the first failure while its other writes are still running, and a restore made
+ * then could be overwritten by a write that lands later), and then the ones this import changed are put back. The
+ * writes are recorded with the same bookkeeping as saves (`settingWrites`), so a failed import does not undo a save
+ * that wrote the same setting meanwhile, and a failed save does not undo this import. The original error is
+ * rethrown, so the caller's failure handling is unchanged. Other settings are written as before.
+ *
+ * On success the display writes are returned still active: the caller finishes them when the whole import has
+ * succeeded, or puts them back (`restoreDisplayWrites`) if a later step fails.
+ */
+async function setValuesRestoringDisplaySettings(
+	contextProxy: ContextProxy,
+	settings: GlobalSettings,
+): Promise<SettingWrite[]> {
+	const displayKeys = TRACKED_SETTING_KEYS.filter((key) => key in settings)
+	if (displayKeys.length === 0) {
+		await contextProxy.setValues(settings)
+		return []
+	}
+
+	const writes = displayKeys.map((key) => beginSettingWrite(key, contextProxy.getValue(key), settings[key]))
+	const others = Object.fromEntries(
+		Object.entries(settings).filter(([key]) => !isTrackedSetting(key)),
+	) as GlobalSettings
+
+	const results = await Promise.allSettled([
+		contextProxy.setValues(others),
+		...writes.map((write) => performSettingWrite(contextProxy, write)),
+	])
+	const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected")
+	if (!failed) return writes
+
+	// Part of the import may still be stored: say so, instead of reporting only the first failure.
+	throw withRestoreReport(failed.reason, await restoreDisplayWrites(contextProxy, writes))
 }
 
 /**

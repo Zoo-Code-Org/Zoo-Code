@@ -63,6 +63,7 @@
 		"cannot_access_path": "无法访问路径 {{path}}：{{error}}",
 		"path_outside_workspace": "路径位于工作区之外",
 		"settings_import_failed": "设置导入失败：{{error}}。",
+		"settings_save_failed": "无法保存设置。部分设置可能仍处于部分更改的状态：{{error}}",
 		"mistake_limit_guidance": "这可能表明模型思维过程失败或无法正确使用工具，可通过用户指导来缓解（例如\"尝试将任务分解为更小的步骤\"）。",
 		"violated_organization_allowlist": "执行任务失败：当前配置文件与您的组织设置不兼容",
 		"condense_failed": "压缩上下文失败",

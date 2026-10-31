@@ -1233,5 +1233,41 @@
 			"descriptionTooLong": "Описание должно быть не более 1024 символов"
 		},
 		"footer": "Создавайте собственные навыки с режимом Skill Writer, доступным в <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"language": {
+		"description": "Язык и отображение даты и времени.",
+		"languageTitle": "Язык",
+		"displayLanguage": "Язык интерфейса",
+		"displayLanguageDescription": "Язык интерфейса Zoo Code.",
+		"dateTimeTitle": "Дата и время",
+		"timeFormat": {
+			"label": "Формат времени",
+			"description": "Авто следует языку интерфейса.",
+			"options": {
+				"auto": "Авто",
+				"12h": "12-часовой",
+				"24h": "24-часовой"
+			}
+		},
+		"dateFormat": {
+			"label": "Формат даты",
+			"example": "напр. {{example}}",
+			"options": {
+				"auto": "Авто",
+				"mdy": "ММ/ДД/ГГГГ",
+				"dmy": "ДД/ММ/ГГГГ",
+				"ymd": "ГГГГ-ММ-ДД"
+			}
+		},
+		"relativeTimes": {
+			"label": "Показывать относительное время («5 мин назад») в истории задач"
+		},
+		"preview": {
+			"title": "Предпросмотр",
+			"chat": "Сообщение чата",
+			"history": "История задач",
+			"relative": "5 мин назад",
+			"hover": "(при наведении: {{value}})"
+		}
 	}
 }

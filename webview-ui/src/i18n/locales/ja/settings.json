@@ -1233,5 +1233,41 @@
 			"descriptionTooLong": "説明は1024文字以内である必要があります"
 		},
 		"footer": "スキルライターモードで独自のスキルを作成します。<MarketplaceLink>モードマーケットプレイス</MarketplaceLink>で入手可能です。"
+	},
+	"language": {
+		"description": "言語と日付/時刻の表示。",
+		"languageTitle": "言語",
+		"displayLanguage": "表示言語",
+		"displayLanguageDescription": "Zoo Code のインターフェースの言語。",
+		"dateTimeTitle": "日付と時刻",
+		"timeFormat": {
+			"label": "時刻形式",
+			"description": "自動は表示言語に従います。",
+			"options": {
+				"auto": "自動",
+				"12h": "12時間制",
+				"24h": "24時間制"
+			}
+		},
+		"dateFormat": {
+			"label": "日付形式",
+			"example": "例: {{example}}",
+			"options": {
+				"auto": "自動",
+				"mdy": "MM/DD/YYYY",
+				"dmy": "DD/MM/YYYY",
+				"ymd": "YYYY-MM-DD"
+			}
+		},
+		"relativeTimes": {
+			"label": "タスク履歴に相対時間(「5分前」)を表示する"
+		},
+		"preview": {
+			"title": "プレビュー",
+			"chat": "チャットメッセージ",
+			"history": "タスク履歴",
+			"relative": "5分前",
+			"hover": "(ホバー: {{value}})"
+		}
 	}
 }

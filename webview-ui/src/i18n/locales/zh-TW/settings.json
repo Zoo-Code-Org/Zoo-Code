@@ -1233,5 +1233,41 @@
 			"descriptionTooLong": "說明不得超過1024個字元"
 		},
 		"footer": "使用技能編寫器模式建立您自己的技能，可在 <MarketplaceLink>模式市集</MarketplaceLink> 中取得。"
+	},
+	"language": {
+		"description": "語言與日期/時間顯示。",
+		"languageTitle": "語言",
+		"displayLanguage": "顯示語言",
+		"displayLanguageDescription": "Zoo Code 介面的語言。",
+		"dateTimeTitle": "日期與時間",
+		"timeFormat": {
+			"label": "時間格式",
+			"description": "自動會跟隨顯示語言。",
+			"options": {
+				"auto": "自動",
+				"12h": "12 小時制",
+				"24h": "24 小時制"
+			}
+		},
+		"dateFormat": {
+			"label": "日期格式",
+			"example": "例如 {{example}}",
+			"options": {
+				"auto": "自動",
+				"mdy": "MM/DD/YYYY",
+				"dmy": "DD/MM/YYYY",
+				"ymd": "YYYY-MM-DD"
+			}
+		},
+		"relativeTimes": {
+			"label": "在任務歷史中顯示相對時間（「5 分鐘前」）"
+		},
+		"preview": {
+			"title": "預覽",
+			"chat": "聊天訊息",
+			"history": "任務歷史",
+			"relative": "5 分鐘前",
+			"hover": "（懸停：{{value}}）"
+		}
 	}
 }

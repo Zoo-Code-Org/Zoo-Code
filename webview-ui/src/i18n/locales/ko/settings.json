@@ -1233,5 +1233,41 @@
 			"descriptionTooLong": "설명은 1024자 이하여야 합니다"
 		},
 		"footer": "스킬 작성자 모드로 자신만의 스킬을 만들 수 있습니다. <MarketplaceLink>모드 마켓플레이스</MarketplaceLink>에서 사용 가능합니다."
+	},
+	"language": {
+		"description": "언어 및 날짜/시간 표시.",
+		"languageTitle": "언어",
+		"displayLanguage": "표시 언어",
+		"displayLanguageDescription": "Zoo Code 인터페이스 언어입니다.",
+		"dateTimeTitle": "날짜 및 시간",
+		"timeFormat": {
+			"label": "시간 형식",
+			"description": "자동은 표시 언어를 따릅니다.",
+			"options": {
+				"auto": "자동",
+				"12h": "12시간제",
+				"24h": "24시간제"
+			}
+		},
+		"dateFormat": {
+			"label": "날짜 형식",
+			"example": "예: {{example}}",
+			"options": {
+				"auto": "자동",
+				"mdy": "MM/DD/YYYY",
+				"dmy": "DD/MM/YYYY",
+				"ymd": "YYYY-MM-DD"
+			}
+		},
+		"relativeTimes": {
+			"label": "작업 기록에 상대 시간(\"5분 전\") 표시"
+		},
+		"preview": {
+			"title": "미리보기",
+			"chat": "채팅 메시지",
+			"history": "작업 기록",
+			"relative": "5분 전",
+			"hover": "(호버: {{value}})"
+		}
 	}
 }

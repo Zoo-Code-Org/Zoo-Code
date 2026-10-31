@@ -1233,5 +1233,41 @@
 			"descriptionTooLong": "विवरण 1024 वर्णों से अधिक नहीं होना चाहिए"
 		},
 		"footer": "Skill Writer मोड के साथ अपने स्वयं के Skills बनाएं, <MarketplaceLink>Modes Marketplace</MarketplaceLink> में उपलब्ध।"
+	},
+	"language": {
+		"description": "भाषा और तारीख़/समय का प्रदर्शन।",
+		"languageTitle": "भाषा",
+		"displayLanguage": "प्रदर्शन भाषा",
+		"displayLanguageDescription": "Zoo Code के इंटरफ़ेस की भाषा।",
+		"dateTimeTitle": "तारीख़ और समय",
+		"timeFormat": {
+			"label": "समय प्रारूप",
+			"description": "ऑटो आपकी प्रदर्शन भाषा का पालन करता है।",
+			"options": {
+				"auto": "ऑटो",
+				"12h": "12-घंटे",
+				"24h": "24-घंटे"
+			}
+		},
+		"dateFormat": {
+			"label": "तारीख़ प्रारूप",
+			"example": "उदा. {{example}}",
+			"options": {
+				"auto": "ऑटो",
+				"mdy": "MM/DD/YYYY",
+				"dmy": "DD/MM/YYYY",
+				"ymd": "YYYY-MM-DD"
+			}
+		},
+		"relativeTimes": {
+			"label": "टास्क इतिहास में सापेक्ष समय (\"5 मिनट पहले\") दिखाएँ"
+		},
+		"preview": {
+			"title": "पूर्वावलोकन",
+			"chat": "चैट संदेश",
+			"history": "टास्क इतिहास",
+			"relative": "5 मिनट पहले",
+			"hover": "(होवर: {{value}})"
+		}
 	}
 }

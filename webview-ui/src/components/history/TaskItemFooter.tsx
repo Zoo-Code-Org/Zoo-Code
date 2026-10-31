@@ -1,6 +1,7 @@
-import React from "react"
+import React, { useContext } from "react"
 import type { HistoryItem } from "@roo-code/types"
-import { formatTimeAgo } from "@/utils/format"
+import { formatDateTime, formatTimeAgo } from "@/utils/format"
+import { ExtensionStateContext } from "@/context/ExtensionStateContext"
 import { CopyButton } from "./CopyButton"
 import { ExportButton } from "./ExportButton"
 import { DeleteButton } from "./DeleteButton"
@@ -28,6 +29,11 @@ const TaskItemFooter: React.FC<TaskItemFooterProps> = ({
 	onRename,
 }) => {
 	const { t } = useAppTranslation()
+	// Optional read: this leaf renders standalone (tests, previews) without a provider.
+	const ext = useContext(ExtensionStateContext)
+	const timeFormat = ext?.timeFormat
+	const dateFormat = ext?.dateFormat
+	const showRelativeTimes = ext?.showRelativeTimes ?? true
 
 	return (
 		<div className="text-xs text-vscode-descriptionForeground flex justify-between items-center">
@@ -47,10 +53,15 @@ const TaskItemFooter: React.FC<TaskItemFooterProps> = ({
 						<span>·</span>
 					</>
 				)}
-				{/* Datetime with time-ago format */}
-				<StandardTooltip content={new Date(item.ts).toLocaleString()}>
-					<span className="first-letter:uppercase">{formatTimeAgo(item.ts)}</span>
-				</StandardTooltip>
+				{/* Datetime. A relative time carries the full date and time in a tooltip; the absolute time already
+				    shows it, so it gets no tooltip that would only repeat it. */}
+				{showRelativeTimes ? (
+					<StandardTooltip content={formatDateTime(item.ts, timeFormat, dateFormat)}>
+						<span className="first-letter:uppercase">{formatTimeAgo(item.ts)}</span>
+					</StandardTooltip>
+				) : (
+					<span className="first-letter:uppercase">{formatDateTime(item.ts, timeFormat, dateFormat)}</span>
+				)}
 
 				{/* Cost */}
 				{!!item.totalCost && (

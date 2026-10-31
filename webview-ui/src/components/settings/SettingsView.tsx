@@ -214,6 +214,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		openRouterImageGenerationSelectedModel,
 		reasoningBlockCollapsed,
 		chatFontSize,
+		timeFormat,
+		dateFormat,
+		showRelativeTimes,
 		enterBehavior,
 		includeCurrentTime,
 		includeCurrentCost,
@@ -442,6 +445,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					includeTaskHistoryInEnhance: includeTaskHistoryInEnhance ?? true,
 					reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 					chatFontSize: chatFontSize ?? null,
+					timeFormat: timeFormat ?? "auto",
+					dateFormat: dateFormat ?? "auto",
+					showRelativeTimes: showRelativeTimes ?? true,
 					enterBehavior: enterBehavior ?? "send",
 					includeCurrentTime: includeCurrentTime ?? true,
 					includeCurrentCost: includeCurrentCost ?? true,
@@ -971,7 +977,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 						{/* Language Section */}
 						{renderTab === "language" && (
-							<LanguageSettings language={language || "en"} setCachedStateField={setCachedStateField} />
+							<LanguageSettings
+								language={language || "en"}
+								timeFormat={timeFormat}
+								dateFormat={dateFormat}
+								showRelativeTimes={showRelativeTimes}
+								setCachedStateField={setCachedStateField}
+							/>
 						)}
 
 						{/* About Section */}

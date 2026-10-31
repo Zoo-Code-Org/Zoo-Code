@@ -62,6 +62,7 @@
 		"cannot_access_path": "Não é possível acessar o caminho {{path}}: {{error}}",
 		"path_outside_workspace": "O caminho está fora do espaço de trabalho",
 		"settings_import_failed": "Falha ao importar configurações: {{error}}",
+		"settings_save_failed": "Não foi possível salvar as configurações. Algumas podem ter ficado parcialmente alteradas: {{error}}",
 		"mistake_limit_guidance": "Isso pode indicar uma falha no processo de pensamento do modelo ou incapacidade de usar uma ferramenta adequadamente, o que pode ser mitigado com orientação do usuário (ex. \"Tente dividir a tarefa em etapas menores\").",
 		"violated_organization_allowlist": "Falha ao executar a tarefa: o perfil atual não é compatível com as configurações da sua organização",
 		"condense_failed": "Falha ao condensar o contexto",

@@ -1233,5 +1233,41 @@
 			"descriptionTooLong": "Beschrijving moet maximaal 1024 tekens zijn"
 		},
 		"footer": "Maak je eigen skills met de Skill Writer modus, beschikbaar in de <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"language": {
+		"description": "Taal en weergave van datum en tijd.",
+		"languageTitle": "Taal",
+		"displayLanguage": "Weergavetaal",
+		"displayLanguageDescription": "Taal van de Zoo Code-interface.",
+		"dateTimeTitle": "Datum en tijd",
+		"timeFormat": {
+			"label": "Tijdnotatie",
+			"description": "Automatisch volgt je weergavetaal.",
+			"options": {
+				"auto": "Automatisch",
+				"12h": "12-uurs",
+				"24h": "24-uurs"
+			}
+		},
+		"dateFormat": {
+			"label": "Datumnotatie",
+			"example": "bijv. {{example}}",
+			"options": {
+				"auto": "Automatisch",
+				"mdy": "MM/DD/JJJJ",
+				"dmy": "DD/MM/JJJJ",
+				"ymd": "JJJJ-MM-DD"
+			}
+		},
+		"relativeTimes": {
+			"label": "Relatieve tijden (\"5 min geleden\") tonen in de takengeschiedenis"
+		},
+		"preview": {
+			"title": "Voorbeeld",
+			"chat": "Chatbericht",
+			"history": "Takengeschiedenis",
+			"relative": "5 min geleden",
+			"hover": "(bij aanwijzen: {{value}})"
+		}
 	}
 }

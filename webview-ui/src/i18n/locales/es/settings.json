@@ -1233,5 +1233,41 @@
 			"descriptionTooLong": "La descripción debe tener como máximo 1024 caracteres"
 		},
 		"footer": "Crea tus propias skills con el modo Skill Writer, disponible en el <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"language": {
+		"description": "Idioma y visualización de fecha y hora.",
+		"languageTitle": "Idioma",
+		"displayLanguage": "Idioma de visualización",
+		"displayLanguageDescription": "Idioma de la interfaz de Zoo Code.",
+		"dateTimeTitle": "Fecha y hora",
+		"timeFormat": {
+			"label": "Formato de hora",
+			"description": "Automático sigue el idioma de visualización.",
+			"options": {
+				"auto": "Automático",
+				"12h": "12 horas",
+				"24h": "24 horas"
+			}
+		},
+		"dateFormat": {
+			"label": "Formato de fecha",
+			"example": "p. ej. {{example}}",
+			"options": {
+				"auto": "Automático",
+				"mdy": "MM/DD/AAAA",
+				"dmy": "DD/MM/AAAA",
+				"ymd": "AAAA-MM-DD"
+			}
+		},
+		"relativeTimes": {
+			"label": "Mostrar tiempos relativos («hace 5 min») en el historial de tareas"
+		},
+		"preview": {
+			"title": "Vista previa",
+			"chat": "Mensaje del chat",
+			"history": "Historial de tareas",
+			"relative": "hace 5 min",
+			"hover": "(al pasar el cursor: {{value}})"
+		}
 	}
 }

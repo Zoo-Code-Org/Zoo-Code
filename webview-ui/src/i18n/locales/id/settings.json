@@ -1233,5 +1233,41 @@
 			"descriptionTooLong": "Deskripsi harus 1024 karakter atau kurang"
 		},
 		"footer": "Buat skills Anda sendiri dengan mode Skill Writer, tersedia di <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"language": {
+		"description": "Bahasa dan tampilan tanggal/waktu.",
+		"languageTitle": "Bahasa",
+		"displayLanguage": "Bahasa tampilan",
+		"displayLanguageDescription": "Bahasa untuk antarmuka Zoo Code.",
+		"dateTimeTitle": "Tanggal & waktu",
+		"timeFormat": {
+			"label": "Format waktu",
+			"description": "Otomatis mengikuti bahasa tampilan Anda.",
+			"options": {
+				"auto": "Otomatis",
+				"12h": "12 jam",
+				"24h": "24 jam"
+			}
+		},
+		"dateFormat": {
+			"label": "Format tanggal",
+			"example": "mis. {{example}}",
+			"options": {
+				"auto": "Otomatis",
+				"mdy": "MM/DD/YYYY",
+				"dmy": "DD/MM/YYYY",
+				"ymd": "YYYY-MM-DD"
+			}
+		},
+		"relativeTimes": {
+			"label": "Tampilkan waktu relatif (\"5 menit lalu\") di riwayat tugas"
+		},
+		"preview": {
+			"title": "Pratinjau",
+			"chat": "Pesan chat",
+			"history": "Riwayat tugas",
+			"relative": "5 menit lalu",
+			"hover": "(arahkan kursor: {{value}})"
+		}
 	}
 }
