@@ -126,6 +126,17 @@ export function throwIfAborted(signal?: AbortSignal): void {
 }
 
 /**
+ * Request options this series passes to the OpenAI SDK call. The SDK's
+ * `RequestOptions` declares `signal` as `AbortSignal | null | undefined`,
+ * which does not satisfy the builder's base constraint, so the builder is
+ * typed with only the options this series sets. The built config is still
+ * assignable to the SDK's `RequestOptions`.
+ */
+export type OpenAiRequestOptions = {
+	signal?: AbortSignal
+}
+
+/**
  * Whether a failure indicates an aborted request: the caller's signal fired,
  * an `Error` carries a native abort error name (`AbortError`,
  * `APIUserAbortError`), or an `Error` carries the OpenAI SDK abort error
@@ -249,4 +260,84 @@ export async function resolveModelWithAbort<T>(
 		}
 		throw error
 	}
+}
+
+/**
+ * Await pending work, but reject with a request abort error the moment the
+ * signal aborts. The underlying promise keeps running to completion — only
+ * the wait is cut — so shared work (a deduped token refresh, for example) is
+ * never cancelled by one request's signal.
+ *
+ * An undefined signal skips the race entirely, and an already-aborted signal
+ * rejects immediately: listeners registered on an already-aborted signal
+ * never fire, so the aborted state must be checked up front.
+ */
+export function settleOnAbort<T>(
+	pending: Promise<T>,
+	signal: AbortSignal | undefined,
+	providerName: string,
+): Promise<T> {
+	if (!signal) {
+		return pending
+	}
+	if (signal.aborted) {
+		// Nobody awaits `pending` after this early return: attach a no-op
+		// rejection handler so a rejecting pending promise cannot surface as
+		// an unhandled rejection while its work runs to completion.
+		void pending.catch(() => {})
+		return Promise.reject(createAbortError(providerName))
+	}
+	return new Promise<T>((resolve, reject) => {
+		// Detach the exact registered listener at most once, from whichever
+		// side settles first: the abort callback (the pending promise may
+		// never settle, e.g. a wedged shared refresh) or the pending
+		// promise's fulfillment/rejection handlers (no abort ever fires).
+		let detached = false
+		const cleanup = () => {
+			if (detached) {
+				return
+			}
+			detached = true
+			signal.removeEventListener("abort", onAbort)
+		}
+		const onAbort = () => {
+			cleanup()
+			reject(createAbortError(providerName))
+		}
+		signal.addEventListener("abort", onAbort)
+		void pending.then(
+			(value) => {
+				cleanup()
+				resolve(value)
+			},
+			(error) => {
+				cleanup()
+				reject(error)
+			},
+		)
+	})
+}
+
+/**
+ * A per-request timeout is not a caller cancellation: report it as the distinct TimeoutError so
+ * callers can tell a stalled request from a user stop (the Gemini and LiteLLM units in this
+ * series use the same contract).
+ */
+export function createTimeoutError(providerName: string): Error {
+	const timeoutError = new Error(`The ${providerName} completion request timed out`)
+	timeoutError.name = "TimeoutError"
+	return timeoutError
+}
+
+/**
+ * Whether an abort-shaped failure came from the merged signal's own timeout rather than from the
+ * caller's stop signal.
+ */
+export function isTimeoutAbort(requestSignal: AbortSignal | undefined): boolean {
+	// Classify by the merged signal's retained abort reason: if its own timeout fired first, the
+	// reason stays the TimeoutError even when the caller aborts later, so the failure must still be
+	// reported as a deadline. A caller-first abort retains the caller's reason instead.
+	return Boolean(
+		requestSignal?.aborted && (requestSignal.reason as { name?: string } | undefined)?.name === "TimeoutError",
+	)
 }
