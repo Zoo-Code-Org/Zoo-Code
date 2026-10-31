@@ -98,7 +98,7 @@ import type { CodeIndexWorkspaceScope } from "../../services/code-index/code-ind
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
 
-import { fileExistsAtPath } from "../../utils/fs"
+import { getErrorCode, readFileWithMissingRetry } from "../task-persistence/readFileWithMissingRetry"
 import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
 import { getWorkspaceGitInfo } from "../../utils/git"
 import { getWorkspacePath } from "../../utils/path"
@@ -263,6 +263,8 @@ export class ClineProvider
 	private recentTasksCache?: string[]
 	public readonly taskHistoryStore: TaskHistoryStore
 	private taskHistoryStoreInitialized = false
+	private taskHistoryInitializationPromise: Promise<void> | undefined
+	private taskHistoryInitializationError: unknown
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
 	private providerProfileMutationQueue = Promise.resolve()
 	private historyTaskCreationQueue = Promise.resolve()
@@ -493,9 +495,21 @@ export class ClineProvider
 	/**
 	 * Initialize the TaskHistoryStore and migrate from globalState if needed.
 	 */
-	private async initializeTaskHistoryStore(): Promise<void> {
+	private initializeTaskHistoryStore(): Promise<void> {
+		if (!this.taskHistoryInitializationPromise) {
+			this.taskHistoryInitializationPromise = this.initializeTaskHistoryStoreAttempt().finally(() => {
+				this.taskHistoryInitializationPromise = undefined
+			})
+		}
+		return this.taskHistoryInitializationPromise
+	}
+
+	private async initializeTaskHistoryStoreAttempt(): Promise<void> {
+		this.taskHistoryStoreInitialized = false
+		this.taskHistoryInitializationError = undefined
 		try {
 			await this.taskHistoryStore.initialize()
+			if (this._disposed) return
 
 			// Migration: backfill per-task files from globalState on first run
 			const migrationKey = "taskHistoryMigratedToFiles"
@@ -506,16 +520,38 @@ export class ClineProvider
 
 				if (legacyHistory.length > 0) {
 					this.log(`[initializeTaskHistoryStore] Migrating ${legacyHistory.length} entries from globalState`)
-					await this.taskHistoryStore.migrateFromGlobalState(legacyHistory)
+					await this.taskHistoryStore.migrateFromGlobalState(legacyHistory, async () => {
+						if (this._disposed) throw new Error("Provider disposed during history migration")
+						await this.context.globalState.update(migrationKey, true)
+					})
+				} else {
+					if (this._disposed) return
+					await this.context.globalState.update(migrationKey, true)
 				}
-
-				await this.context.globalState.update(migrationKey, true)
 				this.log("[initializeTaskHistoryStore] Migration complete")
 			}
 
+			if (this._disposed) return
 			this.taskHistoryStoreInitialized = true
+			this.recentTasksCache = undefined
 		} catch (error) {
-			this.log(`[initializeTaskHistoryStore] Error: ${error instanceof Error ? error.message : String(error)}`)
+			if (this._disposed) return
+			this.taskHistoryInitializationError = error
+			this.log(
+				`[initializeTaskHistoryStore] History unavailable; displaying legacy history in degraded mode. ` +
+					`Opening a task will retry initialization. Code: ${getErrorCode(error) ?? "unknown"}. ` +
+					`${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+			)
+			return
+		}
+		if (this.isViewLaunched && !this._disposed) {
+			try {
+				await this.postStateToWebview()
+			} catch (error) {
+				this.log(
+					`[initializeTaskHistoryStore] History is ready but state publication failed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+				)
+			}
 		}
 	}
 
@@ -708,7 +744,9 @@ export class ClineProvider
 
 		try {
 			await this.runDelegationTransition(parentTaskId, async () => {
-				const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
+				const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId, {
+					includeApiConversationHistory: false,
+				})
 
 				if (parentHistory?.status !== "delegated" || parentHistory?.awaitingChildId !== childTaskId) {
 					this.log(
@@ -722,7 +760,8 @@ export class ClineProvider
 				// getTaskWithId reads from disk and may return an incomplete record (missing
 				// parentTaskId) if the child was evicted before its first saveClineMessages().
 				const childHistory =
-					this.taskHistoryStore.get(childTaskId) ?? (await this.getTaskWithId(childTaskId)).historyItem
+					this.taskHistoryStore.get(childTaskId) ??
+					(await this.getTaskWithId(childTaskId, { includeApiConversationHistory: false })).historyItem
 
 				// Re-check inside the lock to close the TOCTOU window with cancelTask() or
 				// a concurrent completion. Only proceed when the child is still "active";
@@ -2405,52 +2444,85 @@ export class ClineProvider
 
 	// Task history
 
+	private getAvailableTaskHistory(): HistoryItem[] {
+		return this.taskHistoryStoreInitialized && this.taskHistoryStore.isHealthy
+			? this.taskHistoryStore.getAll()
+			: (this.contextProxy.getValue("taskHistory") ?? [])
+	}
+
 	private getTaskHistoryItem(id: string): HistoryItem | undefined {
 		const historyItem = this.taskHistoryStore.get(id)
 
-		// Once initialization and migration succeed, the file-backed store is authoritative.
-		// Legacy global state is only a fallback while startup is incomplete or has failed.
-		if (historyItem || this.taskHistoryStoreInitialized) {
+		// A completed migration keeps files authoritative across later startup failures.
+		// Legacy history can still be displayed, but must not recreate a deleted task.
+		const alreadyMigrated = this.context.globalState.get<boolean>("taskHistoryMigratedToFiles")
+		if (historyItem || this.taskHistoryStoreInitialized || alreadyMigrated) {
 			return historyItem
 		}
 
 		return (this.getGlobalState("taskHistory") ?? []).find((item) => item.id === id)
 	}
 
-	async getTaskWithId(id: string): Promise<{
-		historyItem: HistoryItem
-		taskDirPath: string
-		apiConversationHistoryFilePath: string
-		uiMessagesFilePath: string
-		apiConversationHistory: Anthropic.MessageParam[]
-	}> {
+	private async requireTaskHistoryItem(id: string, waitForInitialization = true): Promise<HistoryItem> {
+		// Runtime metadata reads must not gate cancellation or completion on startup.
+		const cached = this.taskHistoryStore.get(id)
+		if (cached && !waitForInitialization) return cached
+		// Opening/exporting is an explicit operation: wait for a complete migration
+		// instead of interpreting a partial startup cache as a missing task.
+		if (
+			!this.taskHistoryStoreInitialized &&
+			(this.taskHistoryInitializationError ||
+				this.context.globalState.get<boolean>("taskHistoryMigratedToFiles") ||
+				!this.getTaskHistoryItem(id))
+		) {
+			await this.initializeTaskHistoryStore()
+			if (this.taskHistoryInitializationError) {
+				throw new Error("Task history is unavailable; try opening the task again", {
+					cause: this.taskHistoryInitializationError,
+				})
+			}
+		}
 		const historyItem = this.getTaskHistoryItem(id)
 
 		if (!historyItem) {
 			throw new Error("Task not found")
 		}
 
+		return historyItem
+	}
+
+	async getTaskWithId(
+		id: string,
+		options: { includeApiConversationHistory?: boolean; waitForInitialization?: boolean } = {},
+	): Promise<{
+		historyItem: HistoryItem
+		taskDirPath: string
+		apiConversationHistoryFilePath: string
+		uiMessagesFilePath: string
+		apiConversationHistory: Anthropic.MessageParam[]
+	}> {
+		const historyItem = await this.requireTaskHistoryItem(
+			id,
+			options.waitForInitialization ?? options.includeApiConversationHistory !== false,
+		)
+
 		const { getTaskDirectoryPath } = await import("../../utils/storage")
 		const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
 		const taskDirPath = await getTaskDirectoryPath(globalStoragePath, id)
 		const apiConversationHistoryFilePath = path.join(taskDirPath, GlobalFileNames.apiConversationHistory)
 		const uiMessagesFilePath = path.join(taskDirPath, GlobalFileNames.uiMessages)
-		const fileExists = await fileExistsAtPath(apiConversationHistoryFilePath)
-
 		let apiConversationHistory: Anthropic.MessageParam[] = []
-
-		if (fileExists) {
+		if (options.includeApiConversationHistory !== false) {
 			try {
-				apiConversationHistory = JSON.parse(await fs.readFile(apiConversationHistoryFilePath, "utf8"))
+				apiConversationHistory = JSON.parse(await readFileWithMissingRetry(apiConversationHistoryFilePath))
 			} catch (error) {
+				// Preserve the existing missing/corrupt-history behavior, but never
+				// turn an I/O or recovery failure into an empty conversation.
+				if (!(error instanceof SyntaxError) && getErrorCode(error) !== "ENOENT") throw error
 				console.warn(
-					`[getTaskWithId] api_conversation_history.json corrupted for task ${id}, returning empty history: ${error instanceof Error ? error.message : String(error)}`,
+					`[getTaskWithId] API history unavailable for task ${id}, returning empty history: ${error instanceof Error ? error.message : String(error)}`,
 				)
 			}
-		} else {
-			console.warn(
-				`[getTaskWithId] api_conversation_history.json missing for task ${id}, returning empty history`,
-			)
 		}
 
 		return {
@@ -2466,12 +2538,9 @@ export class ClineProvider
 		historyItem: HistoryItem
 		aggregatedCosts: AggregatedCosts
 	}> {
-		const { historyItem } = await this.getTaskWithId(taskId)
+		const historyItem = await this.requireTaskHistoryItem(taskId)
 
-		const aggregatedCosts = await aggregateTaskCostsRecursive(taskId, async (id: string) => {
-			const result = await this.getTaskWithId(id)
-			return result.historyItem
-		})
+		const aggregatedCosts = await aggregateTaskCostsRecursive(taskId, (id) => this.requireTaskHistoryItem(id))
 
 		return { historyItem, aggregatedCosts }
 	}
@@ -2479,7 +2548,7 @@ export class ClineProvider
 	async showTaskWithId(id: string) {
 		if (id !== this.getCurrentTask()?.taskId) {
 			// Non-current task.
-			const { historyItem } = await this.getTaskWithId(id)
+			const historyItem = await this.requireTaskHistoryItem(id)
 			await this.createTaskWithHistoryItem(historyItem) // Clears existing task.
 		}
 
@@ -2541,7 +2610,7 @@ export class ClineProvider
 	// If the task has subtasks (childIds), they will also be deleted recursively
 	async deleteTaskWithId(id: string, cascadeSubtasks: boolean = true) {
 		try {
-			await this.getTaskWithId(id)
+			await this.requireTaskHistoryItem(id)
 
 			// Collect all task IDs to delete (parent + all subtasks)
 			const allIdsToDelete: string[] = [id]
@@ -2550,7 +2619,7 @@ export class ClineProvider
 				// Recursively collect all child IDs
 				const collectChildIds = async (taskId: string): Promise<void> => {
 					try {
-						const { historyItem: item } = await this.getTaskWithId(taskId)
+						const item = await this.requireTaskHistoryItem(taskId)
 						if (item.childIds && item.childIds.length > 0) {
 							for (const childId of item.childIds) {
 								allIdsToDelete.push(childId)
@@ -2630,8 +2699,13 @@ export class ClineProvider
 	}
 
 	async postStateToWebview() {
+		const historyWasReady = this.taskHistoryStoreInitialized
 		const clineMessagesSeq = ++this.clineMessagesSeq
 		const state = await this.getStateToPostToWebview()
+		// A delayed startup snapshot must not replace a newer healthy history list.
+		if (!historyWasReady && this.taskHistoryStoreInitialized) {
+			state.taskHistory = this.getAvailableTaskHistory().filter((item) => item.ts && item.task)
+		}
 		state.clineMessagesSeq = clineMessagesSeq
 		await this.postMessageToWebview({ type: "state", state })
 	}
@@ -2793,8 +2867,8 @@ export class ClineProvider
 	}
 
 	async getStateToPostToWebview({ includeTaskHistory = true }: GetStateOptions = {}): Promise<ExtensionState> {
-		// Ensure the store is initialized before reading task history
-		await this.taskHistoryStore.initialized
+		// Use legacy history until initialization and migration are ready.
+		// Runtime metadata reads can independently use already-cached task records.
 
 		const {
 			apiConfiguration,
@@ -2986,7 +3060,7 @@ export class ClineProvider
 			currentTaskTodos: currentTask?.todoList || [],
 			messageQueue: currentTask?.messageQueueService?.messages,
 			taskHistory: includeTaskHistory
-				? this.taskHistoryStore.getAll().filter((item: HistoryItem) => item.ts && item.task)
+				? this.getAvailableTaskHistory().filter((item) => item.ts && item.task)
 				: [],
 			soundEnabled: soundEnabled ?? false,
 			ttsEnabled: ttsEnabled ?? false,
@@ -3226,7 +3300,7 @@ export class ClineProvider
 			allowedMaxCost: stateValues.allowedMaxCost,
 			autoCondenseContext: stateValues.autoCondenseContext ?? true,
 			autoCondenseContextPercent: stateValues.autoCondenseContextPercent ?? 100,
-			taskHistory: includeTaskHistory ? this.taskHistoryStore.getAll() : [],
+			taskHistory: includeTaskHistory ? this.getAvailableTaskHistory() : [],
 			allowedCommands: stateValues.allowedCommands,
 			deniedCommands: stateValues.deniedCommands,
 			soundEnabled: stateValues.soundEnabled ?? false,
@@ -3362,7 +3436,7 @@ export class ClineProvider
 			return
 		}
 
-		const taskHistory = history ?? this.taskHistoryStore.getAll()
+		const taskHistory = history ?? this.getAvailableTaskHistory()
 
 		// Sort and filter the history the same way as getStateToPostToWebview
 		const sortedHistory = taskHistory
@@ -3515,7 +3589,7 @@ export class ClineProvider
 			return this.recentTasksCache
 		}
 
-		const history = this.taskHistoryStore.getAll()
+		const history = this.getAvailableTaskHistory()
 		const workspaceTasks: HistoryItem[] = []
 
 		for (const item of history) {
@@ -3681,7 +3755,7 @@ export class ClineProvider
 	private async cancelTaskInternal(task: Task): Promise<void> {
 		let historyItem: HistoryItem | undefined
 		try {
-			const history = await this.getTaskWithId(task.taskId)
+			const history = await this.getTaskWithId(task.taskId, { includeApiConversationHistory: false })
 			historyItem = history.historyItem
 		} catch (error) {
 			// During task startup there is a short window where currentTask exists
@@ -3764,14 +3838,17 @@ export class ClineProvider
 		if (task.parentTaskId) {
 			try {
 				await this.runDelegationTransition(task.parentTaskId, async () => {
-					const { historyItem: parentHistory } = await this.getTaskWithId(task.parentTaskId!)
+					const { historyItem: parentHistory } = await this.getTaskWithId(task.parentTaskId!, {
+						includeApiConversationHistory: false,
+					})
 
 					if (parentHistory?.status === "delegated" && parentHistory?.awaitingChildId === task.taskId) {
 						// Refresh the child after acquiring the parent transition lock. The pre-abort
 						// history snapshot can be stale if another serialized path interrupted it.
 						historyItem =
 							this.taskHistoryStore.get(task.taskId) ??
-							(await this.getTaskWithId(task.taskId)).historyItem
+							(await this.getTaskWithId(task.taskId, { includeApiConversationHistory: false }))
+								.historyItem
 						// Mark the child interrupted and leave parent delegated with awaitingChildId
 						// intact — the user can resume this child later and it will report back.
 						// A previous cancellation may already have persisted the interrupted status
@@ -4246,7 +4323,9 @@ export class ClineProvider
 				// this process, so leave the parent unrestored. Restart recovery also
 				// settles interrupted create-subtask actions before allowing replay.
 				if (!settlementFailed) {
-					const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
+					const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId, {
+						includeApiConversationHistory: false,
+					})
 					await this.createTaskWithHistoryItem(parentHistory)
 				}
 			} catch (rollbackError) {
@@ -4324,7 +4403,7 @@ export class ClineProvider
 			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
 
 			// 1) Load parent from history and current persisted messages
-			const { historyItem } = await this.getTaskWithId(parentTaskId)
+			const { historyItem } = await this.getTaskWithId(parentTaskId, { includeApiConversationHistory: false })
 			const childHistory = this.taskHistoryStore.get(childTaskId)
 			if (pendingActionId && childHistory?.pendingAction?.actionId !== pendingActionId) {
 				this.log(
@@ -4664,7 +4743,9 @@ export class ClineProvider
 	 * links are cleared so a later resume-and-complete cannot reattach it.
 	 */
 	public async abandonSubtask(childTaskId: string): Promise<boolean> {
-		const { historyItem: childHistory } = await this.getTaskWithId(childTaskId)
+		const { historyItem: childHistory } = await this.getTaskWithId(childTaskId, {
+			includeApiConversationHistory: false,
+		})
 		const parentTaskId = childHistory.parentTaskId
 
 		if (!parentTaskId) {
@@ -4682,7 +4763,9 @@ export class ClineProvider
 		}
 
 		return this.runDelegationTransition(parentTaskId, async () => {
-			const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
+			const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId, {
+				includeApiConversationHistory: false,
+			})
 
 			if (parentHistory?.status !== "delegated" || parentHistory?.awaitingChildId !== childTaskId) {
 				this.log(

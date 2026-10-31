@@ -33,18 +33,14 @@ export async function createScenarioWorkspace(): Promise<ScenarioWorkspace> {
 
 	await Promise.all(
 		[
-			scenarioPath(scenarioWorkspace, "workspace"),
-			scenarioPath(scenarioWorkspace, "userData"),
-			scenarioPath(scenarioWorkspace, "extensions"),
-			scenarioPath(scenarioWorkspace, "results"),
+			scenarioWorkspace.workspace,
+			scenarioWorkspace.userData,
+			scenarioWorkspace.extensions,
+			scenarioWorkspace.results,
 		].map((directory) => fs.mkdir(directory, { recursive: true })),
 	)
 
 	return scenarioWorkspace
-}
-
-function scenarioPath(scenarioWorkspace: ScenarioWorkspace, key: "workspace" | "userData" | "extensions" | "results") {
-	return scenarioWorkspace[key]
 }
 
 export async function removeScenarioWorkspace(scenarioWorkspace: ScenarioWorkspace): Promise<void> {

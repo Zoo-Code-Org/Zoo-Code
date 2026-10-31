@@ -1,4 +1,6 @@
 import * as assert from "assert"
+import * as fs from "fs/promises"
+import * as path from "path"
 import * as vscode from "vscode"
 
 import { RooCodeEventName, type RooCodeAPI } from "@roo-code/types"
@@ -60,6 +62,28 @@ async function runCreate(api: RooCodeAPI): Promise<void> {
 		// never reads a task directory whose final write has not landed yet.
 		const createdTaskId: string = taskId
 		await waitFor(() => api.hasTaskUiMessageText(createdTaskId, MARKER))
+		const globalStoragePath = process.env.E2E_GLOBAL_STORAGE_PATH
+		if (!globalStoragePath) throw new Error("E2E_GLOBAL_STORAGE_PATH is required")
+		// The public history API reads the cache; check the committed file
+		// before quitting so the fresh host has both history and messages.
+		await waitFor(async () => {
+			try {
+				const persisted: unknown = JSON.parse(
+					await fs.readFile(
+						path.join(globalStoragePath, "tasks", createdTaskId, "history_item.json"),
+						"utf8",
+					),
+				)
+				return (
+					typeof persisted === "object" &&
+					persisted !== null &&
+					"id" in persisted &&
+					persisted.id === createdTaskId
+				)
+			} catch {
+				return false
+			}
+		})
 
 		const result: PhaseResult = {
 			version: PHASE_RESULT_VERSION,
@@ -103,7 +127,31 @@ async function runVerify(api: RooCodeAPI): Promise<void> {
 		const historyItem = await api.getTaskHistoryItem(taskId)
 		assert.ok(historyItem, "Task history item should be available after restart")
 		assert.ok(historyItem.task.includes("RESTART_PERSISTENCE_SMOKE"), "History title should persist after restart")
+
+		// No task is running in this fresh host yet. Recreate the on-disk
+		// state left by an interrupted two-step replacement, then require
+		// public reads to recover it before resume can write anything.
+		const globalStoragePath = process.env.E2E_GLOBAL_STORAGE_PATH
+		if (!globalStoragePath) throw new Error("E2E_GLOBAL_STORAGE_PATH is required")
+		const taskDir = path.join(globalStoragePath, "tasks", taskId)
+		const interruptedFiles = []
+		for (const file of ["ui_messages.json", "api_conversation_history.json"]) {
+			const canonical = path.join(taskDir, file)
+			const backup = path.join(taskDir, `.${file}.bak_restart_e2e.tmp`)
+			const committed = await fs.readFile(canonical, "utf8")
+			await fs.rename(canonical, backup)
+			interruptedFiles.push({ canonical, backup, committed })
+		}
+		assert.strictEqual(await api.hasTaskUiMessageText(taskId, MARKER), true, "Read should recover the UI marker")
 		await waitForMarkedCompletion(api, taskId)
+		for (const { canonical, backup, committed } of interruptedFiles) {
+			assert.strictEqual(
+				await fs.readFile(canonical, "utf8"),
+				committed,
+				"Read recovery must retain committed bytes",
+			)
+			await assert.rejects(fs.access(backup), { code: "ENOENT" }, "Recovery should consume the backup")
+		}
 
 		await api.resumeTask(taskId)
 		await waitFor(() => taskMessages.some(({ type, ask }) => type === "ask" && ask === "resume_completed_task"))
@@ -137,7 +185,7 @@ async function runVerify(api: RooCodeAPI): Promise<void> {
 }
 
 suite("Restart persistence", () => {
-	test("persists completed task across a fresh extension host", async () => {
+	test("persists and recovers completed task history across a fresh extension host", async () => {
 		const api = globalThis.api
 		if (process.env.E2E_PHASE === "create") {
 			await runCreate(api)

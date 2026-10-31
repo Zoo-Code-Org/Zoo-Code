@@ -1,5 +1,7 @@
 // pnpm --filter roo-cline test core/webview/__tests__/ClineProvider.spec.ts
 
+import type { HistoryItem } from "@roo-code/types"
+
 import fs from "fs"
 import * as path from "path"
 import { TaskRegistry } from "../../task/TaskRegistry"
@@ -30,7 +32,8 @@ import { setTtsEnabled } from "../../../utils/tts"
 import { ContextProxy } from "../../config/ContextProxy"
 import { WorkspaceIndexingEnablementManager } from "../../../services/code-index/workspace-indexing-enablement-manager"
 import { Task, TaskOptions } from "../../task/Task"
-import { safeWriteJson } from "../../../utils/safeWriteJson"
+import { attemptCompletionTool, type AttemptCompletionCallbacks } from "../../tools/AttemptCompletionTool"
+import { recoverJsonFile, safeWriteJson } from "../../../utils/safeWriteJson"
 
 import { ClineProvider } from "../ClineProvider"
 import { webviewMessageHandler } from "../webviewMessageHandler"
@@ -1485,7 +1488,482 @@ describe("ClineProvider", () => {
 		expect(postMessageSpy.mock.calls[0]?.[0].state).not.toHaveProperty("taskHistory")
 	})
 
+	test.each([
+		{ launched: true, fails: false },
+		{ launched: false, fails: false },
+		{ launched: true, fails: true },
+	])("refreshes history after initialization: launched=$launched, fails=$fails", async ({ launched, fails }) => {
+		await provider["initializeTaskHistoryStore"]()
+		let release!: () => void
+		const waiting = new Promise<void>((resolve, reject) => {
+			release = () => (fails ? reject(new Error("initialization failed")) : resolve())
+		})
+		const initialize = vi.spyOn(provider.taskHistoryStore, "initialize").mockReturnValue(waiting)
+		const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+		provider.isViewLaunched = launched
+		provider["taskHistoryStoreInitialized"] = false
+		try {
+			const pending = provider["initializeTaskHistoryStore"]()
+			expect(post).not.toHaveBeenCalled()
+			release()
+			await pending
+			expect(post).toHaveBeenCalledTimes(launched && !fails ? 1 : 0)
+			expect(provider["taskHistoryStoreInitialized"]).toBe(!fails)
+		} finally {
+			provider.isViewLaunched = false
+			initialize.mockRestore()
+			post.mockRestore()
+		}
+	})
+
+	describe("history initialization availability", () => {
+		const item: HistoryItem = {
+			id: "waiting-history",
+			number: 1,
+			ts: 1,
+			task: "legacy",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+
+		async function unavailableInitialization(phase: "pending" | "failed") {
+			await provider["initializeTaskHistoryStore"]()
+			await mockContext.globalState.update("taskHistoryMigratedToFiles", true)
+			provider["taskHistoryStoreInitialized"] = false
+			let release!: () => void
+			const waiting = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			const failure = Object.assign(new Error("history unavailable"), { code: "EIO" })
+			const initialize = vi.spyOn(provider.taskHistoryStore, "initialize")
+			if (phase === "pending") initialize.mockReturnValue(waiting)
+			else initialize.mockRejectedValue(failure)
+			const pending = provider["initializeTaskHistoryStore"]()
+			if (phase === "failed") await pending
+			return {
+				initialize,
+				async finish() {
+					release()
+					await pending
+					initialize.mockRestore()
+				},
+			}
+		}
+
+		it.each(["pending", "failed"] as const)("cancels a cached task while initialization is %s", async (phase) => {
+			const initialization = await unavailableInitialization(phase)
+			const task = new Task({ ...defaultTaskOptions, historyItem: item })
+			const replacement = new Task({ ...defaultTaskOptions, historyItem: { ...item, id: "replacement" } })
+			Object.assign(replacement, { instanceId: "replacement-instance", isStreaming: false })
+			const current = vi.spyOn(provider, "getCurrentTask").mockReturnValue(task)
+			const abort = vi.fn<Task["abortTask"]>().mockImplementation(async () => {
+				current.mockReturnValue(replacement)
+			})
+			const cancel = vi.fn<Task["cancelCurrentRequest"]>()
+			Object.assign(task, {
+				instanceId: "original-instance",
+				isStreaming: false,
+				abortTask: abort,
+				cancelCurrentRequest: cancel,
+				setAbortReason: vi.fn<Task["setAbortReason"]>(),
+				requestAbandon: vi.fn<Task["requestAbandon"]>(),
+			} satisfies Partial<Task>)
+			provider.taskHistoryStore["cache"].set(item.id, item)
+			initialization.initialize.mockClear()
+			try {
+				await provider.cancelTask()
+				expect(cancel).toHaveBeenCalledOnce()
+				expect(abort).toHaveBeenCalledOnce()
+				expect(initialization.initialize).not.toHaveBeenCalled()
+			} finally {
+				current.mockRestore()
+				await initialization.finish()
+			}
+		})
+
+		it.each(["pending", "failed"] as const)(
+			"completes a cached delegated child while initialization is %s",
+			async (phase) => {
+				const initialization = await unavailableInitialization(phase)
+				const child = { ...item, id: "cached-child", status: "active" as const, parentTaskId: "cached-parent" }
+				const parent = { ...item, id: "cached-parent", status: "delegated" as const, awaitingChildId: child.id }
+				provider.taskHistoryStore["cache"].set(child.id, child)
+				provider.taskHistoryStore["cache"].set(parent.id, parent)
+				const task = new Task({ ...defaultTaskOptions, historyItem: child })
+				Object.assign(task, {
+					parentTaskId: parent.id,
+					providerRef: new WeakRef(provider),
+					say: vi.fn<Task["say"]>().mockResolvedValue(undefined),
+					flushTelemetryInstallment: vi.fn<Task["flushTelemetryInstallment"]>(),
+					waitForCurrentAssistantMessagePersistence: vi
+						.fn<Task["waitForCurrentAssistantMessagePersistence"]>()
+						.mockResolvedValue(true),
+					emitFinalTokenUsageUpdate: vi.fn<Task["emitFinalTokenUsageUpdate"]>(),
+					getTokenUsage: vi
+						.fn<Task["getTokenUsage"]>()
+						.mockReturnValue({ totalTokensIn: 0, totalTokensOut: 0, totalCost: 0, contextTokens: 0 }),
+					toolUsage: {},
+				} satisfies Partial<Task>)
+				const reopen = vi.spyOn(provider, "reopenParentFromDelegation").mockResolvedValue(true)
+				const completed = vi.spyOn(provider, "emitDelegatedTaskCompleted").mockImplementation(() => {})
+				const callbacks: AttemptCompletionCallbacks = {
+					askApproval: vi.fn().mockResolvedValue(true),
+					handleError: vi.fn(),
+					pushToolResult: vi.fn(),
+					toolCallId: "",
+					askFinishSubTaskApproval: vi.fn().mockResolvedValue(true),
+					toolDescription: () => "complete",
+				}
+				initialization.initialize.mockClear()
+				try {
+					await attemptCompletionTool.execute({ result: "done" }, task, callbacks)
+					expect(reopen).toHaveBeenCalledWith({
+						parentTaskId: parent.id,
+						childTaskId: child.id,
+						completionResultSummary: "done",
+					})
+					expect(completed).toHaveBeenCalledOnce()
+					expect(callbacks.handleError).not.toHaveBeenCalled()
+					expect(initialization.initialize).not.toHaveBeenCalled()
+				} finally {
+					reopen.mockRestore()
+					completed.mockRestore()
+					await initialization.finish()
+				}
+			},
+		)
+
+		it("uses unmigrated legacy history without starting initialization", async () => {
+			await provider["initializeTaskHistoryStore"]()
+			await mockContext.globalState.update("taskHistoryMigratedToFiles", false)
+			await provider["contextProxy"].setValue("taskHistory", [item])
+			expect(mockContext.globalState.get("taskHistory")).toEqual([item])
+			provider.taskHistoryStore["cache"].clear()
+			provider["taskHistoryStoreInitialized"] = false
+			const initialize = vi.spyOn(provider.taskHistoryStore, "initialize")
+			try {
+				expect(
+					(await provider.getTaskWithId(item.id, { includeApiConversationHistory: false })).historyItem,
+				).toEqual(item)
+				expect(initialize).not.toHaveBeenCalled()
+			} finally {
+				initialize.mockRestore()
+			}
+		})
+
+		it.each(["costs", "open", "resume"] as const)(
+			"serves cached runtime metadata while explicit %s waits for fresh history",
+			async (action) => {
+				const initialization = await unavailableInitialization("pending")
+				const stale = { ...item, totalCost: 1 }
+				const fresh = { ...item, totalCost: 2 }
+				provider.taskHistoryStore["cache"].set(item.id, stale)
+				let querySettled = false
+				const operation =
+					action === "costs"
+						? provider.getTaskWithAggregatedCosts(item.id)
+						: provider.getTaskWithId(
+								item.id,
+								action === "resume"
+									? { includeApiConversationHistory: false, waitForInitialization: true }
+									: {},
+							)
+				const query = operation.then((result) => {
+					querySettled = true
+					return result
+				})
+				try {
+					expect(
+						(await provider.getTaskWithId(item.id, { includeApiConversationHistory: false })).historyItem,
+					).toEqual(stale)
+					expect(querySettled).toBe(false)
+					expect(initialization.initialize).toHaveBeenCalledOnce()
+					provider.taskHistoryStore["cache"].set(item.id, fresh)
+					await initialization.finish()
+					expect((await query).historyItem).toEqual(fresh)
+				} finally {
+					await initialization.finish()
+				}
+			},
+		)
+
+		it("does not let a delayed legacy snapshot overwrite the initialization-complete post", async () => {
+			const initialization = await unavailableInitialization("pending")
+			await provider["contextProxy"].setValue("taskHistory", [item])
+			const fresh = { ...item, task: "ready" }
+			provider.taskHistoryStore["cache"].set(item.id, fresh)
+			let captured!: () => void
+			const didCapture = new Promise<void>((resolve) => {
+				captured = resolve
+			})
+			let release!: () => void
+			const waiting = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			const getState = provider.getStateToPostToWebview.bind(provider)
+			const state = vi.spyOn(provider, "getStateToPostToWebview").mockImplementationOnce(async () => {
+				const legacy = await getState()
+				expect(legacy.taskHistory).toEqual([item])
+				captured()
+				await waiting
+				return legacy
+			})
+			const post = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			provider.isViewLaunched = true
+			const first = provider.postStateToWebview()
+			try {
+				await didCapture
+				await initialization.finish()
+				expect(post).toHaveBeenCalledOnce()
+				release()
+				await first
+				const histories = post.mock.calls.flatMap(([message]) =>
+					message.type === "state" ? [message.state?.taskHistory] : [],
+				)
+				expect(histories).toEqual([[fresh], [fresh]])
+			} finally {
+				release()
+				await first
+				provider.isViewLaunched = false
+				state.mockRestore()
+				post.mockRestore()
+				await initialization.finish()
+			}
+		})
+
+		it("keeps history ready if the initialization-complete state post fails", async () => {
+			await provider["initializeTaskHistoryStore"]()
+			const post = vi.spyOn(provider, "postStateToWebview").mockRejectedValue(new Error("post failed"))
+			provider.isViewLaunched = true
+			provider["recentTasksCache"] = ["stale"]
+			try {
+				await provider["initializeTaskHistoryStore"]()
+				expect(provider["taskHistoryStoreInitialized"]).toBe(true)
+				expect(provider["taskHistoryInitializationError"]).toBeUndefined()
+				expect(provider["recentTasksCache"]).toBeUndefined()
+				expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+					expect.stringContaining("History is ready but state publication failed"),
+				)
+			} finally {
+				provider.isViewLaunched = false
+				post.mockRestore()
+			}
+		})
+
+		it("does not log degraded history when disposal interrupts initialization", async () => {
+			await provider["initializeTaskHistoryStore"]()
+			let reject!: () => void
+			const initialize = vi.spyOn(provider.taskHistoryStore, "initialize").mockReturnValue(
+				new Promise<void>((_resolve, rejectPromise) => {
+					reject = () => rejectPromise(new Error("disposed during initialization"))
+				}),
+			)
+			const pending = provider["initializeTaskHistoryStore"]()
+			provider["_disposed"] = true
+			vi.mocked(mockOutputChannel.appendLine).mockClear()
+			try {
+				reject()
+				await pending
+				expect(provider["taskHistoryInitializationError"]).toBeUndefined()
+				expect(mockOutputChannel.appendLine).not.toHaveBeenCalled()
+			} finally {
+				provider["_disposed"] = false
+				initialize.mockRestore()
+			}
+		})
+
+		it("shares pending initialization with an open instead of reporting a missing task", async () => {
+			await provider["initializeTaskHistoryStore"]()
+			await mockContext.globalState.update("taskHistoryMigratedToFiles", true)
+			provider["taskHistoryStoreInitialized"] = false
+			let release!: () => void
+			const waiting = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			const initialize = vi.spyOn(provider.taskHistoryStore, "initialize").mockImplementation(async () => {
+				await waiting
+				provider.taskHistoryStore["cache"].set(item.id, item)
+			})
+			try {
+				const initialization = provider["initializeTaskHistoryStore"]()
+				const opening = provider.getTaskWithId(item.id)
+				expect(initialize).toHaveBeenCalledOnce()
+				release()
+				await initialization
+				expect((await opening).historyItem).toEqual(item)
+			} finally {
+				initialize.mockRestore()
+			}
+		})
+
+		it.each(["scan", "migration"])(
+			"keeps legacy state after a failed %s and retries on the next open",
+			async (phase) => {
+				await provider["initializeTaskHistoryStore"]()
+				await mockContext.globalState.update("taskHistoryMigratedToFiles", phase === "scan")
+				await mockContext.globalState.update("taskHistory", [item])
+				await provider["contextProxy"].setValue("taskHistory", [item])
+				const repaired = { ...item, task: "repaired" }
+				provider["taskHistoryStoreInitialized"] = false
+				provider.taskHistoryStore["cache"].set(item.id, repaired)
+				const failure = Object.assign(new Error("history disk failed"), { code: "EIO" })
+				const initialize = vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue()
+				const migrate = vi.spyOn(provider.taskHistoryStore, "migrateFromGlobalState").mockResolvedValue()
+				if (phase === "scan") initialize.mockRejectedValueOnce(failure)
+				else migrate.mockRejectedValueOnce(failure)
+				const health = vi.spyOn(provider.taskHistoryStore, "isHealthy", "get").mockReturnValue(true)
+				try {
+					await provider["initializeTaskHistoryStore"]()
+					expect(provider["taskHistoryStoreInitialized"]).toBe(false)
+					expect((await provider.getStateToPostToWebview()).taskHistory).toEqual([item])
+					expect((await provider.getState()).taskHistory).toEqual([item])
+					expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+						expect.stringMatching(/degraded mode.*Code: EIO.*Error: history disk failed/s),
+					)
+					expect((await provider.getTaskWithId(item.id)).historyItem).toEqual(repaired)
+					expect(provider["taskHistoryStoreInitialized"]).toBe(true)
+					expect((await provider.getStateToPostToWebview()).taskHistory).toEqual([repaired])
+				} finally {
+					initialize.mockRestore()
+					migrate.mockRestore()
+					health.mockRestore()
+				}
+			},
+		)
+
+		it("reports unavailable history rather than a missing task after a terminal retry", async () => {
+			await provider["initializeTaskHistoryStore"]()
+			await mockContext.globalState.update("taskHistoryMigratedToFiles", true)
+			provider["taskHistoryStoreInitialized"] = false
+			const failure = Object.assign(new Error("cannot read history"), { code: "EACCES" })
+			const initialize = vi.spyOn(provider.taskHistoryStore, "initialize").mockRejectedValue(failure)
+			try {
+				await expect(provider.getTaskWithId(item.id)).rejects.toMatchObject({
+					message: expect.stringContaining("Task history is unavailable"),
+					cause: failure,
+				})
+			} finally {
+				initialize.mockRestore()
+			}
+		})
+
+		it.each([false, true])(
+			"publishes healthy history when the first post finishes after initialization: %s",
+			async (finishInitializationFirst) => {
+				await provider["initializeTaskHistoryStore"]()
+				await provider["contextProxy"].setValue("taskHistory", [item])
+				const repaired = { ...item, task: "ready" }
+				provider.taskHistoryStore["cache"].set(item.id, repaired)
+				provider["taskHistoryStoreInitialized"] = false
+				let releaseInitialization!: () => void
+				const waiting = new Promise<void>((resolve) => {
+					releaseInitialization = resolve
+				})
+				const initialize = vi.spyOn(provider.taskHistoryStore, "initialize").mockReturnValue(waiting)
+				const post = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+				const getState = provider.getState.bind(provider)
+				let releaseFirstPost!: () => void
+				const firstWaiting = new Promise<void>((resolve) => {
+					releaseFirstPost = resolve
+				})
+				const state = vi.spyOn(provider, "getState").mockImplementationOnce(async (options) => {
+					if (finishInitializationFirst) await firstWaiting
+					return getState(options)
+				})
+				provider.isViewLaunched = true
+				try {
+					const initialization = provider["initializeTaskHistoryStore"]()
+					const firstPost = provider.postStateToWebview()
+					if (!finishInitializationFirst) await firstPost
+					releaseInitialization()
+					await initialization
+					releaseFirstPost()
+					await firstPost
+					const histories = post.mock.calls.flatMap(([message]) =>
+						message.type === "state" ? [message.state?.taskHistory] : [],
+					)
+					expect(histories).toEqual(
+						finishInitializationFirst ? [[repaired], [repaired]] : [[item], [repaired]],
+					)
+				} finally {
+					provider.isViewLaunched = false
+					initialize.mockRestore()
+					post.mockRestore()
+					state.mockRestore()
+				}
+			},
+		)
+
+		it("skips API history for metadata-only lookups", async () => {
+			await provider["initializeTaskHistoryStore"]()
+			provider.taskHistoryStore["cache"].set(item.id, item)
+			const fsp = await import("fs/promises")
+			const read = vi
+				.spyOn(fsp, "readFile")
+				.mockClear()
+				.mockRejectedValue(Object.assign(new Error("busy API history"), { code: "ELOCKED" }))
+			try {
+				expect(
+					(await provider.getTaskWithId(item.id, { includeApiConversationHistory: false })).historyItem,
+				).toEqual(item)
+				expect(read).not.toHaveBeenCalled()
+			} finally {
+				read.mockRestore()
+			}
+		})
+
+		it("reads metadata for costs without opening locked API history", async () => {
+			await provider["initializeTaskHistoryStore"]()
+			provider.taskHistoryStore["cache"].set(item.id, item)
+			const conversation = vi
+				.spyOn(provider, "getTaskWithId")
+				.mockRejectedValue(Object.assign(new Error("busy conversation"), { code: "ELOCKED" }))
+			try {
+				expect((await provider.getTaskWithAggregatedCosts(item.id)).historyItem).toEqual(item)
+				expect(conversation).not.toHaveBeenCalled()
+			} finally {
+				conversation.mockRestore()
+			}
+		})
+	})
+
+	test.each([
+		{ healthy: true, includeTaskHistory: true },
+		{ healthy: false, includeTaskHistory: true },
+		{ healthy: false, includeTaskHistory: false },
+		{ healthy: true, includeTaskHistory: false },
+	])(
+		"publishes history with store health $healthy and inclusion $includeTaskHistory",
+		async ({ healthy, includeTaskHistory }) => {
+			const item = {
+				id: "legacy",
+				number: 1,
+				ts: 1,
+				task: "legacy task",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			const cached = { ...item, id: "cached", task: "cached task" }
+			const health = vi.spyOn(provider.taskHistoryStore, "isHealthy", "get").mockReturnValue(healthy)
+			const getAll = vi.spyOn(provider.taskHistoryStore, "getAll").mockReturnValue([cached])
+			await provider["contextProxy"].setValue("taskHistory", [item, { ...item, id: "invalid", ts: 0 }])
+			try {
+				provider["taskHistoryStoreInitialized"] = true
+				const state = await provider.getStateToPostToWebview({ includeTaskHistory })
+				expect(state.taskHistory).toEqual(includeTaskHistory ? [healthy ? cached : item] : [])
+				expect(getAll).toHaveBeenCalledTimes(healthy && includeTaskHistory ? 1 : 0)
+			} finally {
+				health.mockRestore()
+				getAll.mockRestore()
+			}
+		},
+	)
+
 	test("getStateToPostToWebview computes task history once after its base state resolves", async () => {
+		provider["taskHistoryStoreInitialized"] = true
+		const health = vi.spyOn(provider.taskHistoryStore, "isHealthy", "get").mockReturnValue(true)
 		const historyItem = {
 			id: "history-task",
 			number: 1,
@@ -1515,6 +1993,7 @@ describe("ClineProvider", () => {
 		expect(getAllSpy).toHaveBeenCalledOnce()
 		expect(historyReadPhases).toEqual([true])
 		expect(state.taskHistory).toEqual([historyItem])
+		health.mockRestore()
 	})
 
 	describe("postStateToWebviewThrottled", () => {
@@ -3017,6 +3496,57 @@ describe("ClineProvider", () => {
 				}),
 			)
 		})
+	})
+
+	describe("early launch history authority", () => {
+		it.each(
+			(["resume", "mode", "profile"] as const).flatMap((action) =>
+				[false, true].map((cached) => ({ action, cached })),
+			),
+		)(
+			"uses file-backed authority for launch-time $action with cached record $cached",
+			async ({ action, cached }) => {
+				await provider["initializeTaskHistoryStore"]()
+				const item = {
+					id: "stale-launch-task",
+					number: 1,
+					ts: 1,
+					task: "stale task",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+				}
+				await provider["contextProxy"].setValue("taskHistory", [item])
+				await mockContext.globalState.update("taskHistoryMigratedToFiles", true)
+				const authoritative = { ...item, task: "current task", tokensIn: 42 }
+				if (cached) provider.taskHistoryStore["cache"].set(item.id, authoritative)
+				provider["taskHistoryStoreInitialized"] = false
+				const initialize = vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue()
+				const health = vi.spyOn(provider.taskHistoryStore, "isHealthy", "get").mockReturnValue(false)
+				const update = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+				const task = new Task({ ...defaultTaskOptions, historyItem: item })
+				task.setTaskApiConfigName = vi.fn()
+				const current = vi.spyOn(provider, "getCurrentTask").mockReturnValue(task)
+				try {
+					expect((await provider.getStateToPostToWebview()).taskHistory).toEqual([item])
+					if (action === "resume") {
+						if (cached) expect((await provider.getTaskWithId(item.id)).historyItem).toEqual(authoritative)
+						else await expect(provider.getTaskWithId(item.id)).rejects.toThrow("Task not found")
+					}
+					if (action === "mode") await provider.handleModeSwitch("architect", task)
+					if (action === "profile") await provider["persistStickyProviderProfileToCurrentTask"]("new-profile")
+					if (cached && action !== "resume")
+						expect(update).toHaveBeenCalledWith(expect.objectContaining(authoritative))
+					else expect(update).not.toHaveBeenCalled()
+					expect(provider.taskHistoryStore.get(item.id)).toEqual(cached ? authoritative : undefined)
+				} finally {
+					initialize.mockRestore()
+					current.mockRestore()
+					update.mockRestore()
+					health.mockRestore()
+				}
+			},
+		)
 	})
 
 	describe("handleModeSwitch", () => {
@@ -5805,6 +6335,19 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 	})
 
 	describe("getTaskWithId", () => {
+		const apiHistoryPath = path.join("/test/task/path", "api_conversation_history.json")
+
+		beforeEach(async () => {
+			provider["taskHistoryStoreInitialized"] = true
+			const fsp = await import("fs/promises")
+			vi.mocked(fsp.readFile).mockReset().mockResolvedValue("")
+		})
+
+		afterEach(async () => {
+			const fsp = await import("fs/promises")
+			vi.mocked(fsp.readFile).mockReset().mockResolvedValue("")
+		})
+
 		it("does not restore a deleted file-backed task from legacy history", async () => {
 			const historyItem = {
 				id: "deleted-task",
@@ -5829,14 +6372,32 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			await expect(provider.getTaskWithId(historyItem.id)).rejects.toThrow("Task not found")
 		})
 
-		it("rejects a missing task before file-backed history initialization", async () => {
+		it("rejects a missing task after waiting for file-backed history initialization", async () => {
+			const initialize = vi.fn(provider["initializeTaskHistoryStore"].bind(provider)).mockResolvedValue(undefined)
+			const originalInitialize = provider["initializeTaskHistoryStore"]
+			provider["initializeTaskHistoryStore"] = initialize
+			provider["taskHistoryInitializationError"] = undefined
 			provider["taskHistoryStoreInitialized"] = false
 			vi.mocked(mockContext.globalState.get).mockReturnValue(undefined)
-			await expect(provider.getTaskWithId("cold-start-missing-task")).rejects.toThrow("Task not found")
+			try {
+				await expect(provider.getTaskWithId("cold-start-missing-task")).rejects.toThrow("Task not found")
+				expect(initialize).toHaveBeenCalledOnce()
+			} finally {
+				provider["initializeTaskHistoryStore"] = originalInitialize
+			}
 		})
 
 		it("returns empty apiConversationHistory when file is missing", async () => {
-			const historyItem = { id: "missing-api-file-task", task: "test task", ts: Date.now() }
+			const historyItem = {
+				id: "missing-api-file-task",
+				task: "test task",
+				ts: Date.now(),
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			provider.taskHistoryStore["cache"].set(historyItem.id, historyItem)
 			vi.mocked(mockContext.globalState.get).mockImplementation((key: string) => {
 				if (key === "taskHistory") {
 					return [historyItem]
@@ -5846,15 +6407,75 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 			const deleteTaskSpy = vi.spyOn(provider, "deleteTaskFromState")
 
-			const result = await (provider as any).getTaskWithId("missing-api-file-task")
+			const result = await provider.getTaskWithId("missing-api-file-task")
 
 			expect(result.historyItem).toEqual(historyItem)
 			expect(result.apiConversationHistory).toEqual([])
 			expect(deleteTaskSpy).not.toHaveBeenCalled()
 		})
 
+		it("recovers API history through the shared reader before returning a task", async () => {
+			const historyItem = {
+				id: "recover-api-task",
+				task: "test task",
+				ts: Date.now(),
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			provider.taskHistoryStore["cache"].set(historyItem.id, historyItem)
+			vi.mocked(mockContext.globalState.get).mockImplementation((key: string) =>
+				key === "taskHistory" ? [historyItem] : undefined,
+			)
+			const fsp = await import("fs/promises")
+			const missing = Object.assign(new Error("missing"), { code: "ENOENT" })
+			const messages = [{ role: "user", content: "committed" }]
+			let historyReads = 0
+			vi.mocked(fsp.readFile).mockImplementation(async (filePath) => {
+				if (filePath !== apiHistoryPath) return ""
+				if (++historyReads <= 2) throw missing
+				return JSON.stringify(messages)
+			})
+			const result = await provider.getTaskWithId(historyItem.id)
+			expect(result.apiConversationHistory).toEqual(messages)
+			expect(historyReads).toBe(3)
+			expect(recoverJsonFile).toHaveBeenCalledWith(result.apiConversationHistoryFilePath)
+		})
+
+		it.each(["EIO", "EACCES", "ELOCKED"])("does not return empty history after a %s read failure", async (code) => {
+			const historyItem = {
+				id: "failed-api-task",
+				task: "test task",
+				ts: Date.now(),
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			provider.taskHistoryStore["cache"].set(historyItem.id, historyItem)
+			vi.mocked(mockContext.globalState.get).mockImplementation((key: string) =>
+				key === "taskHistory" ? [historyItem] : undefined,
+			)
+			const fsp = await import("fs/promises")
+			vi.mocked(fsp.readFile).mockImplementation(async (filePath) => {
+				if (filePath === apiHistoryPath) throw Object.assign(new Error(code), { code })
+				return ""
+			})
+			await expect(provider.getTaskWithId(historyItem.id)).rejects.toMatchObject({ code })
+		})
+
 		it("returns empty apiConversationHistory when file contains invalid JSON", async () => {
-			const historyItem = { id: "corrupt-api-task", task: "test task", ts: Date.now() }
+			const historyItem = {
+				id: "corrupt-api-task",
+				task: "test task",
+				ts: Date.now(),
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			provider.taskHistoryStore["cache"].set(historyItem.id, historyItem)
 			vi.mocked(mockContext.globalState.get).mockImplementation((key: string) => {
 				if (key === "taskHistory") {
 					return [historyItem]
@@ -5862,24 +6483,19 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				return undefined
 			})
 
-			// Make fileExistsAtPath return true so the read path is exercised
-			const fsUtils = await import("../../../utils/fs")
-			vi.spyOn(fsUtils, "fileExistsAtPath").mockResolvedValue(true)
-
 			// Make readFile return corrupted JSON
 			const fsp = await import("fs/promises")
-			vi.mocked(fsp.readFile).mockResolvedValueOnce("{not valid json!!!" as never)
+			vi.mocked(fsp.readFile).mockImplementation(async (filePath) =>
+				filePath === apiHistoryPath ? "{not valid json!!!" : "",
+			)
 
 			const deleteTaskSpy = vi.spyOn(provider, "deleteTaskFromState")
 
-			const result = await (provider as any).getTaskWithId("corrupt-api-task")
+			const result = await provider.getTaskWithId("corrupt-api-task")
 
 			expect(result.historyItem).toEqual(historyItem)
 			expect(result.apiConversationHistory).toEqual([])
 			expect(deleteTaskSpy).not.toHaveBeenCalled()
-
-			// Restore the spy
-			vi.mocked(fsUtils.fileExistsAtPath).mockRestore()
 		})
 	})
 

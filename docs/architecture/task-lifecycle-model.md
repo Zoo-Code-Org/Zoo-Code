@@ -6,7 +6,7 @@ Zoo Code checks task lifecycle protocols through one umbrella command for indepe
 pnpm lifecycle:model-check
 ```
 
-The baseline command runs eight independent bounded checks in sequence:
+The baseline command runs ten independent bounded checks in sequence:
 
 1. the persisted task delegation lifecycle;
 2. shared-store concurrency across task-history hosts;
@@ -14,8 +14,10 @@ The baseline command runs eight independent bounded checks in sequence:
 4. the task cleanup protocol;
 5. request-stream parser scoping;
 6. completion persistence;
-7. delegated-mode reader refinement; and
-8. tool-turn continuation.
+7. delegated-mode reader refinement;
+8. tool-turn continuation;
+9. production JSON replacement crash points; and
+10. production task-history initialization retries.
 
 The planned two-sibling fan-out protocol is intentionally outside the baseline and CI umbrella. Run it explicitly with `pnpm fanout-protocol:model-check`; it describes optional future functionality, not current production coverage.
 
@@ -87,6 +89,58 @@ CI fails if either exact causal witness or violation class changes, a witness di
 The known-unsafe witnesses currently compare exact shortest action sequences. This is intentionally simple and reviewable, but brittle to harmless action renames or serialization refactors. A causal partial-order comparator would reduce that brittleness but would add a second trace-equivalence protocol to maintain. Until that complexity is justified, update an exact witness only after confirming the terminal violation class and required causal ordering are unchanged.
 
 `TaskHistoryStore.realConcurrency.spec.ts` complements the abstract interleavings with real-filesystem checks through the real `proper-lockfile` and filesystem rename path, including stale-settlement compare-and-clear. History-file deletion holds the same per-file advisory lock as `safeWriteJson` around each unlink, and the real-filesystem suite covers a deletion that targets the settlement read-to-commit window plus schema and task-ID validation of the locked disk record before settlement (#1726). That lock serialization is best-effort: a lock acquisition or unlink failure is swallowed, so a deletion can proceed without the lock and the two sides serialize only when both acquire it. Restart recovery is covered by `Task.persistence.spec.ts`: it refreshes the persisted record first, treats a refreshed interrupted `create_subtask` action as rejected, settles that exact action before replay, adopts the authoritative pending action, blocks replay when an adopted action is missing from the loaded conversation, and stops replay on a failed refresh, lookup, or settlement rather than creating another child. Broader VS Code E2E remains reserved for other restart and extension-host behavior.
+
+## History-file availability boundary
+
+`TaskHistoryStore.reconcile()` recovers a missing canonical history file from its backup under the file lock.
+Forced scans, including startup and replay refreshes, report read failures after scanning all tasks.
+A failed forced scan blocks delegation repair or replay.
+Background scans keep unreadable cached records, log the first error, and continue updating other tasks.
+A failed refresh keeps the last cached record.
+
+### Initialization and availability
+
+Initialization retries only `ELOCKED` and `EBUSY`.
+It uses one timeout chain with delays of 1, 2, 4, 8, 8, and 8 seconds.
+Each retry repeats the full scan before delegation repair.
+The active-task snapshot from the first complete scan is preserved across retries, including an explicit retry after terminal failure, so this process’s repairs are not reclassified as crash evidence. Successful initialization clears the snapshot.
+Replay and repair failures propagate through the same retry policy.
+An intent read error is not treated as malformed JSON.
+Lock acquisition has separate retries, which add time to this sequence.
+
+Concurrent `initialize()` calls share one promise.
+A healthy store does not repeat initialization.
+Disposal cancels a pending retry.
+
+`initialize()` rejects after a persistent error or exhausted retries.
+The provider therefore skips legacy migration after initialization failure.
+`isHealthy` is true only after a successful attempt.
+Webview state publication does not wait for this attempt.
+It uses legacy history until both store initialization and legacy migration succeed, or omits history when requested.
+The provider posts fresh state after successful initialization.
+
+Activation can continue after terminal failure.
+The cache can remain incomplete, and observers do not start.
+The provider logs the error code, stack, degraded legacy mode, and the retry behavior.
+Explicit open, export, delete, and cost queries wait for pending provider initialization, or start another attempt after a terminal failure. Runtime metadata reads return an already-cached task immediately, so cancellation, completion, and delegation do not wait for unrelated startup recovery.
+A failed attempt reports unavailable history rather than a missing task.
+Metadata-only cost, open, and delete operations do not load API conversation history.
+Migration retains its original active-task snapshot across explicit retries and clears it after successful repair and persistence of the migration-complete marker. A marker write failure retains the snapshot for the next retry. State-publication errors do not change history readiness, and disposal does not log a degraded-history warning.
+A persistent warning and manual retry action are tracked in [#2179](https://github.com/Zoo-Code-Org/Zoo-Code/issues/2179).
+
+### Tests and model limits
+
+`TaskHistoryStore.recovery.spec.ts` checks startup, reconciliation, invalidation, failed restores, fresh locks, and stale-lock recovery.
+`TaskHistoryStore.initialization.spec.ts` checks retries, persistent failures, shared initialization, health state, and disposal.
+These tests use temporary files or controlled timers.
+The initialization suite also commits a nested-child repair, injects a later retryable write failure, and verifies that the retry preserves the repaired parent as active on disk.
+The task-history initialization checker below explores nested delegation repair and same-process retries through production code. The persisted reducer and JSON replacement crash models retain their separate scopes.
+
+This boundary controls which records reach the lifecycle reducers.
+It does not change their transitions.
+The pure shared-store model does not represent filenames, backups, or filesystem errors.
+A failed read is not evidence of deletion.
+The filesystem tests cover this distinction.
 
 ## Task cleanup protocol model
 
@@ -262,3 +316,104 @@ Parser request scoping is one such independent bounded submodel within the umbre
 Keep reducer permutations in this model and focused Vitest suites. The real VS Code extension-host suite using a mocked provider in `apps/vscode-e2e/src/suite/subtasks.test.ts` already covers the boundaries the pure explorer cannot: task creation and rehydration, persisted parent-child state, cancellation during a delayed provider stream, interrupted-child resume, abandonment followed by a real resume/save/completion cycle, pending approvals across leave/return, and scheduler-driven resume. `restart-persistence.test.ts` separately verifies completion history through a fresh extension host.
 
 Add E2E coverage only when a lifecycle change crosses one of those runtime boundaries or introduces a new one. For example, #1453 persistence-readiness semantics require a controlled fresh-host test, and #369/#372 fan-out requires scheduler permit, live-parent routing, orphan cleanup, and task-scoping E2E. Do not add E2E cases solely to replay reducer orderings already exhausted here; they increase fixture and timing cost without strengthening the proof claim.
+
+## JSON replacement crash points
+
+Run `pnpm json-replacement:model-check` for the production-backed filesystem check.
+The umbrella command also runs this check and its four negative controls.
+This check enumerates call boundaries, rather than actor interleavings.
+
+The harness bundles production code and runs it in child processes against real temporary directories.
+It patches filesystem calls to record boundaries and inject faults.
+It substitutes only the VS Code storage-path adapter.
+It does not add a production injection interface or copy the replacement protocol.
+
+| Scenario or follow-up                                      | Production function                               |
+| ---------------------------------------------------------- | ------------------------------------------------- |
+| Normal, EPERM fallback, rollback, or orphaned-backup write | `safeWriteJson`                                   |
+| Missing or newer-canonical read                            | `readFileWithMissingRetry` and `recoverJsonFile`  |
+| Delete followed by recovery read                           | `TaskHistoryStore.delete` and `removeJsonBackups` |
+| Cold initialization and repair guard                       | `TaskHistoryStore.initialize` and `reconcile`     |
+
+Each scenario starts with a committed child record and its parent.
+Some scenarios also contain an orphaned backup and an incomplete replacement.
+The baseline records stream, filesystem, and advisory-lock calls.
+Recovery also records descriptor opens, stat, reads, writes, and closes.
+Recovery copies a validated regular backup into a new temporary file before commit.
+The original backup remains available across failed copies and interrupted commits.
+After the restore rename succeeds, leftover cleanup removes the backup before an incoming write commits.
+Each recorded call gets a SIGKILL before and after it.
+Each call also gets one injected EPERM, EBUSY, EACCES, or EIO error.
+Each resulting state gets four isolated follow-ups: read, write, delete, and cold initialization.
+A bounded pool runs four cases concurrently by default.
+Set `JSON_REPLACEMENT_WORKERS` to an integer from 1 to 8 to change the pool size.
+Each case uses its own directory and child processes.
+After a failure, the pool stops new cases and waits for active cases before cleanup.
+It reports the earliest failing case in enumeration order.
+The harness ages leftover locks before those follow-ups.
+It therefore checks recovery after the stale interval, rather than fresh-lock availability.
+
+The checker observes canonical and backup bytes at each boundary.
+The newest complete committed value must remain available until replacement.
+A successful write must publish the incoming value.
+Recovery must return complete committed bytes.
+A reader must preserve an existing canonical value.
+Deletion followed by recovery must leave the child absent.
+Failed initialization must not enter delegation repair.
+Successful cold initialization must report a healthy store.
+
+A successful rename can publish a new value before the write promise resolves.
+The checker treats that value as committed.
+A native rename can also finish after the last JavaScript snapshot but before SIGKILL.
+The checker reads committed files after child exit to set exact follow-up expectations.
+That final state must preserve the newest value already observed.
+An observer also retries a complete snapshot if a rename races its directory listing and file reads.
+Three failed attempts exhaust the snapshot budget and fail the check.
+Deterministic regressions cover both orderings without waiting for scheduling races.
+Each child writes trace events synchronously to its own regular file.
+The parent reads the file after child exit and removes it afterwards.
+This avoids stdout pipe backpressure without buffering events across SIGKILL.
+A deterministic regression makes stdout writes fail with `EAGAIN`.
+Deletion follow-ups run without injected faults.
+The best-effort delete API can resolve after an I/O failure; this check does not strengthen that contract.
+
+The bounds are seven baseline scenarios, 128 filesystem calls per execution, and 2,000 injected cases.
+Backup-recovery seeds include an incomplete `.new_` file, multiple backups, and committed JSON larger than 64 KiB. The newer-canonical scenario combines these leftovers with an existing canonical record.
+Budget exhaustion fails the command.
+A violation prints the observed trace through the first failing boundary.
+This prefix is replayable, but it is not a shortest interleaving counterexample.
+Five source mutations must fail with their named invariants:
+
+- Swallowing a failed backup restore must violate backup preservation, invariant 2.
+- Omitting backup removal from deletion must violate no resurrection, invariant 4.
+- Ignoring an existing canonical file during reader recovery must violate reader preservation, invariant 6.
+- Swallowing a replay I/O failure must violate initialization integrity, invariant 5.
+- Selecting the oldest backup must violate backup preservation, invariant 2; backup seeds carry distinct committed payloads.
+
+The cold-start oracle requires injected non-retryable intent read errors to reject initialization.
+Checking only rejected attempts would miss a swallowed error followed by false health.
+Focused production tests cover busy replay reads, failed repair writes, and pending webview initialization.
+These are boundary tests, not an exhaustive liveness proof.
+
+The rollback baseline includes its EPERM and EIO failures, plus crashes at the recorded rollback boundaries.
+Coverage excludes concurrent actors and stale takeover of a paused owner.
+It also excludes crash combinations with additional replay-injected faults beyond the fixed scenario failures.
+It also excludes native Windows open-handle semantics and power-loss durability.
+The existing subprocess SIGKILL tests and extension-host restart tests remain separate checks.
+See the [JSON persistence contract](./json-persistence-audit.md) for caller coverage and remaining gaps.
+
+## Task-history initialization retry check
+
+The CI lifecycle-check step has a ten-minute timeout.
+
+`pnpm history-initialization:model-check` runs a bounded production-backed exploration and its mutation test. It is included in `pnpm lifecycle:model-check`.
+
+The harness bundles `TaskHistoryStore`, substitutes the VS Code storage-path adapter, and sets the six retry delays to zero without changing retry count or control flow. Each execution uses a fresh store and real temporary files. It enumerates all 24 scan orders for a grandparent awaiting a delegated parent, that parent awaiting an active child, and an independent invalid delegation. Three initial states enter ordinary repair, replay of a durable repair intent, or legacy migration into initially empty task directories. Migration exercises explicit caller retries through its public entry point; the provider tests cover the caller orchestration.
+
+Each order runs without faults and with `ELOCKED` or `EBUSY` injected before or after each of the three task-file writes. Before-write failures repeat once or twice; after-write failures occur once, after the real write has committed but before its caller receives the result. The complete bound is 1,368 executions, at most eight task-file write attempts per execution, and at most two injected retries. Every scheduled fault and resulting retry must be reached. Losing a scenario or exceeding a bound fails the check.
+
+The invariant requires healthy initialization, exact expected disk records, matching cache records, and removal of the completed repair intent. In particular, the recovered parent stays active and its grandparent keeps the delegation to it. A failure prints the scenario, scan order, fault schedule, scans, attempted writes, and committed writes. This trace is deterministic and replayable, but is not a shortest-state counterexample.
+
+The `resnapshot-active` source mutation restores the original startup bug by recomputing the active-task snapshot on every attempt. The mutation test must fail with the initialization invariant after a committed parent repair and a second scan. The `resnapshot-migration` mutation removes the corresponding migration snapshot guard and must fail after a committed parent repair and a second migration attempt. These checks demonstrate that the checker detects both regressions rather than merely accepting the current implementation.
+
+This check exhausts only the declared orders and fault schedules. It does not prove concurrent-host behavior, process crashes, arbitrary task graphs, wall-clock backoff, or arbitrary-length failures. The JSON crash campaign and persisted reducer models cover separate boundaries.

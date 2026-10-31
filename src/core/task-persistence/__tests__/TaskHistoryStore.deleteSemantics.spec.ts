@@ -90,6 +90,32 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 		return store
 	}
 
+	it.each(["delete", "deleteMany"] as const)("%s retains canonical data when backup cleanup fails", async (entry) => {
+		const store = createStore()
+		await store.initialize()
+		const item = makeHistoryItem({ id: "backup-cleanup-failure" })
+		await store.upsert(item)
+		const canonical = historyFilePath(storagePath, item.id)
+		const backup = path.join(path.dirname(canonical), ".history_item.json.bak_old.tmp")
+		await fs.writeFile(backup, JSON.stringify(item))
+		const error = Object.assign(new Error("backup busy"), { code: "EACCES" })
+		vi.mocked(fs.unlink).mockImplementation(async (file) => {
+			if (file === backup) throw error
+			return actualFs.unlink(file)
+		})
+		const log = vi.spyOn(console, "warn").mockImplementation(() => {})
+		try {
+			if (entry === "delete") await store.delete(item.id)
+			else await store.deleteMany([item.id])
+			expect(JSON.parse(await fs.readFile(canonical, "utf8"))).toEqual(item)
+			expect(JSON.parse(await fs.readFile(backup, "utf8"))).toEqual(item)
+			expect(log).toHaveBeenCalledWith(expect.stringContaining("Failed to delete"), error)
+			expect(store.get(item.id)).toBeUndefined()
+		} finally {
+			log.mockRestore()
+		}
+	})
+
 	describe("delete()", () => {
 		it("unlinks under the shared per-file lock, evicts cache and mtime, and writes through once", async () => {
 			const store = createStore()

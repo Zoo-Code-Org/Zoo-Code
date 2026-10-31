@@ -33,6 +33,8 @@ import type { Mode } from "../shared/modes"
 import type { ClineProvider } from "../core/webview/ClineProvider"
 import type { ClineProviderFactory } from "../core/webview/ClineProviderFactory"
 import { readTaskMessages } from "../core/task-persistence/taskMessages"
+import { formatErrorDetail } from "../core/task-persistence/readFileWithMissingRetry"
+import { tracePersistenceEvent } from "../core/task-persistence/persistenceTrace"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
 import { getCommands } from "../services/command/commands"
@@ -265,7 +267,10 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		await vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`)
 		await this.waitForWebviewLaunch(5_000)
 
-		const { historyItem } = await this.sidebarProvider.getTaskWithId(taskId)
+		const { historyItem } = await this.sidebarProvider.getTaskWithId(taskId, {
+			includeApiConversationHistory: false,
+			waitForInitialization: true,
+		})
 		await this.sidebarProvider.createTaskWithHistoryItem(historyItem)
 
 		if (this.sidebarProvider.viewLaunched) {
@@ -279,7 +284,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 	public async isTaskInHistory(taskId: string): Promise<boolean> {
 		try {
-			await this.sidebarProvider.getTaskWithId(taskId)
+			await this.sidebarProvider.getTaskWithId(taskId, { includeApiConversationHistory: false })
 			return true
 		} catch {
 			return false
@@ -355,15 +360,22 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		let uiMessages: Awaited<ReturnType<typeof readTaskMessages>>
 		try {
 			// Reject unknown ids first: readTaskMessages creates the task directory.
-			await this.sidebarProvider.getTaskWithId(taskId)
+			await this.sidebarProvider.getTaskWithId(taskId, { includeApiConversationHistory: false })
 			uiMessages = await readTaskMessages({
 				taskId,
 				globalStoragePath: this.sidebarProvider.contextProxy.globalStorageUri.fsPath,
 			})
-		} catch {
+		} catch (error) {
+			tracePersistenceEvent("ui-messages-marker-check", {
+				taskId,
+				result: "read-error",
+				detail: formatErrorDetail(error),
+			})
 			return false
 		}
-		return uiMessages.some((message) => message.text?.includes(text))
+		const hasText = uiMessages.some((message) => message.text?.includes(text))
+		tracePersistenceEvent("ui-messages-marker-check", { taskId, result: hasText ? "match" : "no-match" })
+		return hasText
 	}
 
 	public getCurrentTaskStack() {

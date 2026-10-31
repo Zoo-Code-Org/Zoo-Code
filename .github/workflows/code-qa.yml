@@ -109,6 +109,7 @@ jobs:
             - name: Check agent evals types
               run: pnpm agent-evals:check-types
             - name: Model-check task lifecycle protocols
+              timeout-minutes: 10
               run: pnpm lifecycle:model-check
             - name: Validate MCP OAuth integration
               run: pnpm mcp:integration-check

@@ -8,10 +8,11 @@ import { historyItemSchema, type HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, withFileLock } from "../../utils/fileLock"
-import { safeWriteJson } from "../../utils/safeWriteJson"
+import { safeWriteJson, removeJsonBackups, recoverJsonFile } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
 import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
+import { getErrorCode, readFileWithMissingRetry } from "./readFileWithMissingRetry"
 
 export { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
 export { DeltaRejectedError } from "./taskStoreConcurrency"
@@ -87,13 +88,21 @@ export class TaskHistoryStore {
 	private fsWatcher: fsSync.FSWatcher | null = null
 	private reconcileTimer: ReturnType<typeof setTimeout> | null = null
 	private disposed = false
+	private initializationPromise: Promise<void> | undefined
+	private initializationRetryTimer: ReturnType<typeof setTimeout> | null = null
+	private resolveInitializationRetry: (() => void) | undefined
+	private initializationHealthy = false
+	private initializationActiveIds: ReadonlySet<string> | undefined
+	private migrationActiveIds: ReadonlySet<string> | undefined
+	private migrationComplete = false
 
-	/**
-	 * Promise that resolves when initialization is complete.
-	 * Callers can await this to ensure the store is ready before reading.
-	 */
-	public readonly initialized: Promise<void>
-	private resolveInitialized!: () => void
+	/** Whether startup completed successfully with a full snapshot. */
+	get isHealthy(): boolean {
+		return this.initializationHealthy
+	}
+
+	// Six retries cover a stale crash lock without polling aggressively.
+	private static readonly INITIALIZATION_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 8_000, 8_000]
 
 	/** Periodic reconciliation interval in milliseconds. */
 	private static readonly RECONCILE_INTERVAL_MS = 5 * 60 * 1000
@@ -101,9 +110,6 @@ export class TaskHistoryStore {
 	constructor(globalStoragePath: string, options?: TaskHistoryStoreOptions) {
 		this.globalStoragePath = globalStoragePath
 		this.onWrite = options?.onWrite
-		this.initialized = new Promise<void>((resolve) => {
-			this.resolveInitialized = resolve
-		})
 	}
 
 	// ────────────────────────────── Lifecycle ──────────────────────────────
@@ -111,37 +117,65 @@ export class TaskHistoryStore {
 	/**
 	 * Scan task files, reconcile delegation state, start watchers.
 	 */
-	async initialize(): Promise<void> {
-		try {
-			const tasksDir = await this.getTasksDir()
-			await fs.mkdir(tasksDir, { recursive: true })
-
-			// 1. Scan task directories to populate the cache
-			await this.reconcile({ forceRefresh: true })
-			// Capture which active tasks were present in persisted state before replay can
-			// change any statuses. Reconciliation must not treat a replay-repaired parent
-			// as an orphaned active child in the same startup pass.
-			const persistedActiveIds = this.getPersistedActiveIds()
-
-			// 2. Complete any two-record repair interrupted after its intent was durable.
-			try {
-				await this.replayDelegationRepairIntent()
-			} catch (error) {
-				console.error("[TaskHistoryStore] Failed to replay delegation repair intent:", error)
-			}
-
-			// 3. Repair delegation inconsistencies left by a previous crash
-			await this.reconcileDelegationState(persistedActiveIds)
-
-			// 4. Start fs.watch for cross-instance reactivity
-			this.startWatcher()
-
-			// 5. Start periodic reconciliation as a defensive fallback
-			this.startPeriodicReconciliation()
-		} finally {
-			// Mark initialization as complete so callers awaiting `initialized` can proceed
-			this.resolveInitialized()
+	initialize(): Promise<void> {
+		if (this.initializationHealthy) return Promise.resolve()
+		if (!this.initializationPromise) {
+			this.initializationPromise = this.initializeWithRetry().finally(() => {
+				this.initializationPromise = undefined
+			})
 		}
+		return this.initializationPromise
+	}
+
+	private async initializeWithRetry(): Promise<void> {
+		for (let attempt = 0; ; attempt++) {
+			try {
+				if (this.disposed) throw new Error("TaskHistoryStore was disposed during initialization")
+				await this.initializeAttempt()
+				if (this.disposed) throw new Error("TaskHistoryStore was disposed during initialization")
+				this.initializationHealthy = true
+				this.initializationActiveIds = undefined
+				return
+			} catch (error) {
+				const code = getErrorCode(error)
+				const delay = TaskHistoryStore.INITIALIZATION_RETRY_DELAYS_MS[attempt]
+				if (this.disposed || (code !== "ELOCKED" && code !== "EBUSY") || delay === undefined) throw error
+				console.warn(`[TaskHistoryStore] Initialization failed with ${code}; retrying in ${delay}ms`)
+				await new Promise<void>((resolve) => {
+					this.resolveInitializationRetry = resolve
+					this.initializationRetryTimer = setTimeout(resolve, delay)
+				})
+				this.initializationRetryTimer = null
+				this.resolveInitializationRetry = undefined
+				if (this.disposed) throw error
+			}
+		}
+	}
+
+	private async initializeAttempt(): Promise<void> {
+		const tasksDir = await this.getTasksDir()
+		await fs.mkdir(tasksDir, { recursive: true })
+
+		// 1. Scan task directories to populate the cache
+		await this.reconcile({ forceRefresh: true })
+		// Capture which active tasks were present in persisted state before replay can
+		// change any statuses. Reconciliation must not treat a replay-repaired parent
+		// as an orphaned active child in this process, including subsequent retries.
+		const persistedActiveIds = (this.initializationActiveIds ??= this.getPersistedActiveIds())
+
+		// 2. Complete any two-record repair interrupted after its intent was durable.
+		// Replay must succeed before repair or health publication. Lock failures
+		// use the same bounded retry policy as the initial scan.
+		await this.replayDelegationRepairIntent()
+
+		// 3. Repair delegation inconsistencies left by a previous crash
+		await this.reconcileDelegationState(persistedActiveIds)
+
+		// 4. Start fs.watch for cross-instance reactivity
+		this.startWatcher()
+
+		// 5. Start periodic reconciliation as a defensive fallback
+		this.startPeriodicReconciliation()
 	}
 
 	/**
@@ -149,6 +183,13 @@ export class TaskHistoryStore {
 	 */
 	dispose(): void {
 		this.disposed = true
+		this.initializationHealthy = false
+		if (this.initializationRetryTimer) {
+			clearTimeout(this.initializationRetryTimer)
+			this.initializationRetryTimer = null
+		}
+		this.resolveInitializationRetry?.()
+		this.resolveInitializationRetry = undefined
 
 		if (this.reconcileTimer) {
 			clearTimeout(this.reconcileTimer)
@@ -277,13 +318,7 @@ export class TaskHistoryStore {
 			this.cache.delete(taskId)
 			this.taskFileMtimes.delete(taskId)
 
-			// Remove per-task file (best-effort)
-			try {
-				const filePath = await this.getTaskFilePath(taskId)
-				await withFileLock(filePath, (absoluteFilePath) => fs.unlink(absoluteFilePath))
-			} catch {
-				// File may already be deleted
-			}
+			await this.deleteTaskFile(taskId)
 
 			// Call onWrite callback inside the lock for serialized write-through
 			if (this.onWrite) {
@@ -305,13 +340,7 @@ export class TaskHistoryStore {
 				this.cache.delete(taskId)
 				this.taskFileMtimes.delete(taskId)
 
-				// Remove per-task file (best-effort)
-				try {
-					const filePath = await this.getTaskFilePath(taskId)
-					await withFileLock(filePath, (absoluteFilePath) => fs.unlink(absoluteFilePath))
-				} catch {
-					// File may already be deleted
-				}
+				await this.deleteTaskFile(taskId)
 			}
 
 			// Call onWrite callback inside the lock for serialized write-through
@@ -319,6 +348,21 @@ export class TaskHistoryStore {
 				await this.onWrite(this.getAll())
 			}
 		})
+	}
+
+	private async deleteTaskFile(taskId: string): Promise<void> {
+		try {
+			const filePath = await this.getTaskFilePath(taskId)
+			await withFileLock(filePath, async (absoluteFilePath) => {
+				// If backup cleanup fails, retain the canonical copy too. Deleting it
+				// would allow a subsequent reader to restore older task state.
+				await removeJsonBackups(absoluteFilePath)
+				await fs.unlink(absoluteFilePath)
+			})
+		} catch (error) {
+			if (getErrorCode(error) !== "ENOENT")
+				console.warn(`[TaskHistoryStore] Failed to delete task ${taskId}:`, error)
+		}
 	}
 
 	// ────────────────────────────── Reconciliation ──────────────────────────────
@@ -337,7 +381,8 @@ export class TaskHistoryStore {
 			let dirEntries: string[]
 			try {
 				dirEntries = await fs.readdir(tasksDir)
-			} catch {
+			} catch (error) {
+				if (getErrorCode(error) !== "ENOENT") throw error
 				return // tasks dir doesn't exist yet
 			}
 
@@ -347,11 +392,16 @@ export class TaskHistoryStore {
 			const onDiskIds = new Set(taskDirNames)
 			const cacheIds = new Set(this.cache.keys())
 			const liveIds = new Set<string>()
+			let scanFailure: { error: unknown } | undefined
 
 			for (const taskId of onDiskIds) {
 				try {
 					const taskFilePath = await this.getTaskFilePath(taskId)
-					const { mtimeMs } = await fs.stat(taskFilePath)
+					const { mtimeMs } = await fs.stat(taskFilePath).catch(async (error: unknown) => {
+						if (getErrorCode(error) !== "ENOENT") throw error
+						await recoverJsonFile(taskFilePath)
+						return fs.stat(taskFilePath)
+					})
 					liveIds.add(taskId)
 					if (
 						!options.forceRefresh &&
@@ -369,7 +419,14 @@ export class TaskHistoryStore {
 							this.cache.set(taskId, item)
 						}
 					}
-				} catch {
+				} catch (error) {
+					// An unreadable record is not evidence of deletion. Keep its
+					// cached value and scan the other tasks before reporting failure.
+					if (!["ENOENT", "ENOTDIR"].includes(getErrorCode(error) ?? "")) {
+						liveIds.add(taskId)
+						scanFailure ??= { error }
+						continue
+					}
 					// File may be temporarily absent during a peer's atomic
 					// rename window in safeWriteJson. The advisory lock is
 					// held for the entire write, so its presence means a
@@ -392,6 +449,12 @@ export class TaskHistoryStore {
 					this.cache.delete(taskId)
 					this.taskFileMtimes.delete(taskId)
 				}
+			}
+
+			if (scanFailure) {
+				// Startup and replay require a complete snapshot before repair.
+				if (options.forceRefresh) throw scanFailure.error
+				console.warn("[TaskHistoryStore] Reconciliation retained unreadable task records:", scanFailure.error)
 			}
 		})
 	}
@@ -508,6 +571,7 @@ export class TaskHistoryStore {
 					}
 				} catch (error) {
 					console.error(`[TaskHistoryStore] Failed to reconcile delegation for task ${item.id}:`, error)
+					throw error
 				}
 				// child.status === "interrupted" or "delegated" → leave as-is this pass
 			}
@@ -665,6 +729,7 @@ export class TaskHistoryStore {
 			if (this.isFileNotFoundError(error)) {
 				return null
 			}
+			if (!(error instanceof SyntaxError)) throw error
 			await this.quarantineDelegationRepairIntent(null, "malformed JSON")
 			return null
 		}
@@ -769,17 +834,14 @@ export class TaskHistoryStore {
 	 */
 	async invalidate(taskId: string): Promise<void> {
 		return this.withLock(async () => {
-			try {
-				const item = await this.readTaskFile(taskId)
-				if (item) {
-					this.cache.set(taskId, item)
-				} else {
-					this.cache.delete(taskId)
-				}
-				this.taskFileMtimes.delete(taskId)
-			} catch {
+			// A failed read must retain the last known record, not evict it.
+			const item = await this.readTaskFile(taskId)
+			if (item) {
+				this.cache.set(taskId, item)
+			} else {
 				this.cache.delete(taskId)
 			}
+			this.taskFileMtimes.delete(taskId)
 		})
 	}
 
@@ -799,13 +861,19 @@ export class TaskHistoryStore {
 	 *
 	 * For each entry in the globalState array, writes a `history_item.json`
 	 * file if one doesn't already exist. This is idempotent and safe to re-run.
+	 * commitMigration persists the caller's completion marker under the store
+	 * lock after repairs; it must not re-enter this store.
 	 */
-	async migrateFromGlobalState(taskHistoryEntries: HistoryItem[]): Promise<void> {
+	async migrateFromGlobalState(
+		taskHistoryEntries: HistoryItem[],
+		commitMigration?: () => Promise<void>,
+	): Promise<void> {
 		if (!taskHistoryEntries || taskHistoryEntries.length === 0) {
 			return
 		}
 
 		await this.withLock(async () => {
+			if (this.migrationComplete) return
 			const tasksDir = await this.getTasksDir()
 
 			for (const item of taskHistoryEntries) {
@@ -837,7 +905,12 @@ export class TaskHistoryStore {
 
 			// Repair any delegation inconsistencies introduced by the migrated entries.
 			// Run the lock-free core because migration already holds the store lock.
-			await this.reconcileDelegationStateCore(this.getPersistedActiveIds())
+			await this.reconcileDelegationStateCore((this.migrationActiveIds ??= this.getPersistedActiveIds()))
+			// Marker persistence is part of the migration epoch. A failed marker write
+			// must retain this snapshot for the provider's next explicit retry.
+			await commitMigration?.()
+			this.migrationActiveIds = undefined
+			this.migrationComplete = true
 		})
 	}
 
@@ -888,10 +961,11 @@ export class TaskHistoryStore {
 		const filePath = await this.getTaskFilePath(taskId)
 
 		try {
-			const raw = await fs.readFile(filePath, "utf8")
+			const raw = await readFileWithMissingRetry(filePath)
 			const item: HistoryItem = JSON.parse(raw)
 			return item.id ? item : null
-		} catch {
+		} catch (error) {
+			if (!(error instanceof SyntaxError) && getErrorCode(error) !== "ENOENT") throw error
 			return null
 		}
 	}

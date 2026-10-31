@@ -136,3 +136,11 @@ describe("Knip quality gate", () => {
 		assert.doesNotMatch(job, /continue-on-error|if:/)
 	})
 })
+
+describe("lifecycle verification timeout", () => {
+	it("gives the bounded check suite an explicit ten-minute budget", () => {
+		const step = workflowStep("Model-check task lifecycle protocols")
+		assert.match(step, /timeout-minutes: 10/)
+		assert.match(step, /run: pnpm lifecycle:model-check/)
+	})
+})

@@ -1016,7 +1016,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 196
+			"count": 194
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
@@ -1037,11 +1037,6 @@
 	"core/webview/__tests__/checkpointRestoreHandler.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 3
-		}
-	},
-	"core/webview/__tests__/diagnosticsHandler.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
 		}
 	},
 	"core/webview/__tests__/messageEnhancer.test.ts": {
@@ -1677,11 +1672,6 @@
 	"utils/export.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
-		}
-	},
-	"utils/safeWriteJson.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
 		}
 	},
 	"vitest.setup.ts": {

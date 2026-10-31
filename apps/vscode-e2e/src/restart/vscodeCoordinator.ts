@@ -27,6 +27,12 @@ function phaseEnvironment(options: RestartCoordinatorOptions, phase: RestartPhas
 		E2E_PHASE: phase,
 		E2E_SCENARIO: options.scenario,
 		E2E_RESULTS_DIR: options.workspace.results,
+		E2E_GLOBAL_STORAGE_PATH: path.join(
+			options.workspace.userData,
+			"User",
+			"globalStorage",
+			"zoocodeorganization.zoo-code",
+		),
 	}
 }
 

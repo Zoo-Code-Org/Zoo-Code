@@ -1202,6 +1202,10 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
 			createTask,
 			getTaskWithId,
+			// The real deletion path now asks for metadata without reading API history.
+			requireTaskHistoryItem: vi.fn(async (taskId: string) =>
+				taskId === "parent-1" ? settledParent : childItem,
+			),
 			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
 			// The real deletion path: the store swallows a per-file history
 			// lock failure, so deleteMany resolves and cleanup continues.
@@ -1239,6 +1243,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			// history lock failed and was swallowed, and the settled parent
 			// was restored before the original rejection surfaced.
 			await expect(fs.access(childDir)).rejects.toMatchObject({ code: "ENOENT" })
+			expect(getTaskWithId).not.toHaveBeenCalledWith("child-1")
 			expect(clearPendingActionIfMatching).toHaveBeenCalledWith("parent-1", "create-action")
 			expect(createTaskWithHistoryItem).toHaveBeenCalledWith(
 				expect.objectContaining({ status: "interrupted", pendingAction: undefined }),
