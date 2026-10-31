@@ -1,5 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI from "openai"
+import OpenAI, { APIConnectionTimeoutError } from "openai"
 
 import {
 	vercelAiGatewayDefaultModelId,
@@ -25,6 +25,14 @@ import type {
 	ModelCacheScope,
 } from "../index"
 import { RouterProvider } from "./router-provider"
+import {
+	bridgeExternalAbortSignal,
+	createAbortError,
+	hasUsableTimeout,
+	isRequestAborted,
+	resolveModelWithAbort,
+	toSdkTimeoutMs,
+} from "./utils/abort-signal"
 import { getVercelAiGatewayModels } from "./fetchers/vercel-ai-gateway"
 
 // Extend OpenAI's CompletionUsage to include Vercel AI Gateway specific fields
@@ -74,7 +82,14 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const { id: modelId, info } = await this.fetchModel()
+		// Establish the cancellation scope around model resolution: a
+		// pre-aborted signal rejects before the lookup starts, and a signal
+		// that fires while model metadata is loading settles on the
+		// standardized AbortError; any other resolution failure propagates
+		// unchanged.
+		const externalAbortSignal = metadata?.abortSignal
+		const resolved = await resolveModelWithAbort(() => this.fetchModel(), externalAbortSignal, "Vercel AI Gateway")
+		const { id: modelId, info } = resolved
 
 		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
 			{ role: "system", content: systemPrompt },
@@ -105,57 +120,84 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 			;(body as { reasoning_effort?: ReasoningEffortExtended }).reasoning_effort = reasoningEffort
 		}
 
-		const completion = await this.client.chat.completions.create(body)
+		// Per-request signal bridged from the caller's abort signal via the shared helper
+		// (pre-aborted guard, once-only listener, retained cleanup). The never-aborting
+		// fallback preserves the previous always-signal behaviour when the caller has no
+		// external signal, and dispose() detaches the listener when the request ends.
+		const { signal: bridgedSignal, dispose: detachExternalAbortSignal } =
+			bridgeExternalAbortSignal(externalAbortSignal)
+		const requestSignal = bridgedSignal ?? new AbortController().signal
 
-		for await (const chunk of completion) {
-			// Vercel AI Gateway reports mid-stream failures as an in-band error chunk
-			// rather than throwing, so surface it instead of returning an empty response.
-			if ("error" in chunk && chunk.error) {
-				const raw = chunk.error as { message?: unknown }
-				const message =
-					typeof raw.message === "string" && raw.message.length > 0
-						? raw.message
-						: "Vercel AI Gateway stream error"
-				throw new Error(message)
-			}
+		try {
+			const completion = await this.client.chat.completions.create(body, { signal: requestSignal })
 
-			const delta = chunk.choices[0]?.delta
-			if (delta?.content) {
-				yield {
-					type: "text",
-					text: delta.content,
+			for await (const chunk of completion) {
+				// Vercel AI Gateway reports mid-stream failures as an in-band error chunk
+				// rather than throwing, so surface it instead of returning an empty response.
+				if ("error" in chunk && chunk.error) {
+					const raw = chunk.error as { message?: unknown }
+					const message =
+						typeof raw.message === "string" && raw.message.length > 0
+							? raw.message
+							: "Vercel AI Gateway stream error"
+					throw new Error(message)
 				}
-			}
 
-			// Emit raw tool call chunks - NativeToolCallParser handles state management
-			if (delta?.tool_calls) {
-				for (const toolCall of delta.tool_calls) {
+				const delta = chunk.choices[0]?.delta
+				if (delta?.content) {
 					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+						type: "text",
+						text: delta.content,
+					}
+				}
+
+				// Emit raw tool call chunks - NativeToolCallParser handles state management
+				if (delta?.tool_calls) {
+					for (const toolCall of delta.tool_calls) {
+						yield {
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
+						}
+					}
+				}
+
+				if (chunk.usage) {
+					const usage = chunk.usage as VercelAiGatewayUsage
+					yield {
+						type: "usage",
+						inputTokens: usage.prompt_tokens || 0,
+						outputTokens: usage.completion_tokens || 0,
+						cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
+						cacheReadTokens: usage.prompt_tokens_details?.cached_tokens || undefined,
+						totalCost: usage.cost ?? 0,
 					}
 				}
 			}
-
-			if (chunk.usage) {
-				const usage = chunk.usage as VercelAiGatewayUsage
-				yield {
-					type: "usage",
-					inputTokens: usage.prompt_tokens || 0,
-					outputTokens: usage.completion_tokens || 0,
-					cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
-					cacheReadTokens: usage.prompt_tokens_details?.cached_tokens || undefined,
-					totalCost: usage.cost ?? 0,
-				}
+		} catch (error) {
+			// Preserve abort identity (series standard): a cancelled request
+			// must surface as a DOM-standard AbortError, not the raw SDK abort
+			// error or an in-band stream error raised while aborting.
+			if (isRequestAborted(error, externalAbortSignal)) {
+				throw createAbortError("Vercel AI Gateway")
 			}
+			throw error
+		} finally {
+			detachExternalAbortSignal()
 		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
-		const { id: modelId, info } = await this.fetchModel()
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Model resolution must honour the caller's cancellation scope the same
+		// way createMessage does: a signal that fires during the lookup settles on
+		// the standardized AbortError instead of waiting for the catalog to finish.
+		const { id: modelId, info } = await resolveModelWithAbort(
+			() => this.fetchModel(),
+			options?.abortSignal,
+			"Vercel AI Gateway",
+		)
 
 		try {
 			const reasoningEffort = getReasoningEffort(this.options, info)
@@ -173,10 +215,36 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 			}
 
 			requestOptions.max_completion_tokens = info.maxTokens
+			// Build request options with abortSignal and/or timeout.
+			// timeoutMs <= 0 means "no explicit timeout": omit the SDK timeout
+			// option entirely — the OpenAI SDK treats timeout: 0 as an immediate
+			// abort, which would cancel the request right away.
+			const createOptions: OpenAI.RequestOptions = {}
+			if (options?.abortSignal) {
+				createOptions.signal = options.abortSignal
+			}
+			const timeoutMs = options?.timeoutMs
+			if (hasUsableTimeout(timeoutMs)) {
+				createOptions.timeout = toSdkTimeoutMs(timeoutMs)
+			}
 
-			const response = await this.client.chat.completions.create(requestOptions)
+			const response = await this.client.chat.completions.create(
+				requestOptions,
+				Object.keys(createOptions).length > 0 ? createOptions : undefined,
+			)
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
+			// Preserve abort identity (series standard): caller-initiated
+			// cancellations and request timeouts must surface as a
+			// DOM-standard AbortError, not a wrapped completion error. The
+			// OpenAI SDK reports both with messages ending in a period
+			// ("Request was aborted.", "Request timed out."), which would not
+			// match task-level abort detection (message ending in "aborted").
+			// SDK request timeouts are not aborts, but the series standard maps
+			// them to the same AbortError identity as caller cancellations.
+			if (isRequestAborted(error, options?.abortSignal) || error instanceof APIConnectionTimeoutError) {
+				throw createAbortError("Vercel AI Gateway")
+			}
 			if (error instanceof Error) {
 				throw new Error(`Vercel AI Gateway completion error: ${error.message}`)
 			}
