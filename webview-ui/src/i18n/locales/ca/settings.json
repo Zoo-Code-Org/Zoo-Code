@@ -485,7 +485,8 @@
 			"hint": "Si us plau, torneu a obrir la configuració per veure els models més recents.",
 			"loading": "Actualitzant la llista de models...",
 			"success": "Llista de models actualitzada correctament!",
-			"error": "No s'ha pogut actualitzar la llista de models. Si us plau, torneu-ho a provar."
+			"error": "No s'ha pogut actualitzar la llista de models. Si us plau, torneu-ho a provar.",
+			"missingConfig": "Enter an API key first, then refresh the models list."
 		},
 		"getRequestyApiKey": "Obtenir clau API de Requesty",
 		"getRequestyBaseUrl": "URL base",

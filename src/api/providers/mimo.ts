@@ -1,8 +1,15 @@
 import OpenAI from "openai"
 
-import { mimoModels, mimoDefaultModelId, MIMO_DEFAULT_TEMPERATURE, type ModelInfo } from "@roo-code/types"
+import {
+	getMimoModelInfo,
+	mimoDefaultModelInfo,
+	mimoDefaultModelId,
+	MIMO_DEFAULT_TEMPERATURE,
+	type ModelInfo,
+	type ModelRecord,
+} from "@roo-code/types"
 
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import { ApiStream } from "../transform/stream"
 import { convertToR1Format } from "../transform/r1-format"
@@ -13,8 +20,10 @@ import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
 import { OpenAiHandler } from "./openai"
 import { NOT_PROVIDED } from "./constants"
-import type { ApiHandlerCreateMessageMetadata } from "../index"
+import type { ApiHandlerCreateMessageMetadata, ModelCacheScope } from "../index"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
+
+import { ALLOWED_BASE_URLS, MIMO_DEFAULT_BASE_URL, stripTrailingSlashes, getMimoModels } from "./fetchers/mimo"
 
 /**
  * MiMoHandler extends OpenAiHandler with MiMo-specific adaptations.
@@ -26,25 +35,68 @@ import { sanitizeOpenAiCallId } from "../../utils/tool-id"
  */
 export class MimoHandler extends OpenAiHandler {
 	constructor(options: ApiHandlerOptions) {
+		// Fail closed on the network boundary BEFORE OpenAiHandler constructs its
+		// OpenAI client. The persisted settings schema pins mimoBaseUrl to four
+		// zod literals, but ContextProxy.getProviderSettings() fails open on a
+		// schema rejection and returns the raw stored value — so a value written
+		// by a pre-allowlist build or a crafted webview message would otherwise
+		// reach `new OpenAI({ baseURL })` and could exfiltrate the bearer key
+		// plus the whole conversation to an arbitrary origin. Unset/empty falls
+		// back to the default cluster; trailing slashes are normalized for the
+		// check exactly like the model fetcher does.
+		const mimoBaseUrl = options.mimoBaseUrl || MIMO_DEFAULT_BASE_URL
+		if (!ALLOWED_BASE_URLS.has(stripTrailingSlashes(mimoBaseUrl))) {
+			throw new Error(
+				"MIMO/MimoHandler/001: MiMo chat completion rejected: base URL is not an allowed Xiaomi MiMo endpoint.",
+			)
+		}
 		super({
 			...options,
 			openAiApiKey: options.mimoApiKey ?? NOT_PROVIDED,
 			openAiModelId: options.apiModelId ?? mimoDefaultModelId,
-			openAiBaseUrl: options.mimoBaseUrl || "https://token-plan-sgp.xiaomimimo.com/v1",
+			openAiBaseUrl: mimoBaseUrl,
 			openAiStreamingEnabled: true,
 			includeMaxTokens: false,
 		})
+
+		// The allowlist above pins the URL this client is BUILT with, not the URLs
+		// it can end up talking to: the SDK's default fetch follows 3xx, so an
+		// allowlisted origin answering with a redirect would replay the POST body
+		// (system prompt, conversation, tool output) to an origin the allowlist
+		// never vetted, and would re-scope the bearer key wherever the fetch
+		// implementation forwards it. Pin the same redirect:"error" policy the
+		// model fetcher uses (fetchers/mimo.ts) so both paths carry the key under
+		// one transport rule. Set on the client rather than by replacing `fetch`
+		// so proxy agents and any other transport configuration still apply.
+		this.client.fetchOptions = { redirect: "error" }
+	}
+
+	/**
+	 * MiMo's catalog is scoped by BOTH the endpoint (token-plan vs PAYG clusters) and the
+	 * API key (per-key plan visibility), and is never user-account scoped: the same
+	 * credentials always yield the same catalog, so on-disk caching stays safe.
+	 */
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: true, keyScoped: true, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getMimoModels(options.baseUrl, options.apiKey, ...fetchOpts)
 	}
 
 	/**
 	 * Maps the configured model ID to its MiMo model info and parameters.
-	 * Falls back to the default model (mimo-v2.5-pro) if the stored ID
+	 * Falls back to the default model (mimo-v2.6-pro) if the stored ID
 	 * doesn't match any known model — this can happen when users manually
 	 * type a model name in settings.
 	 */
 	override getModel() {
 		const id = this.options.apiModelId ?? mimoDefaultModelId
-		const info: ModelInfo = mimoModels[id as keyof typeof mimoModels] || mimoModels[mimoDefaultModelId]
+		// getMimoModelInfo is prototype-safe: a plain `mimoModels[id]` read would
+		// resolve an ID like `constructor` to an inherited member and hand
+		// getModelParams an empty spec instead of the family default.
+		const info: ModelInfo = getMimoModelInfo(id) ?? mimoDefaultModelInfo
 		const params = getModelParams({
 			format: "openai",
 			modelId: id,

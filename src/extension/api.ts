@@ -36,6 +36,7 @@ import { readTaskMessages } from "../core/task-persistence/taskMessages"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
 import { getCommands } from "../services/command/commands"
+import { ALLOWED_BASE_URLS, stripTrailingSlashes } from "../api/providers/fetchers/mimo"
 
 export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly outputChannel: vscode.OutputChannel
@@ -629,8 +630,36 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	public async setConfiguration(values: RooCodeSettings) {
-		await this.sidebarProvider.contextProxy.setValues(values)
-		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
+		// The allowlist lives at the two boundaries that consume this value (the
+		// updateSettings persistence gate and MimoHandler's constructor), but this
+		// public API writes straight to ContextProxy and ContextProxy fails open on
+		// a schema rejection, so a caller could park an off-list mimoBaseUrl in
+		// storage. Drop it here instead of persisting it. The value is removed
+		// rather than overwritten so "unset" keeps its existing meaning (fall back
+		// to the default cluster) instead of pinning a cluster.
+		//
+		// This is not the only write path: ClineProvider.createTask persists a
+		// caller-supplied configuration through setValues without consulting the
+		// allowlist, so an off-list value can still reach storage that way. Every
+		// consumer therefore fails closed on its own (MimoHandler's constructor
+		// throws, the model fetcher and the router-models handlers refuse the
+		// value) rather than trusting that storage was sanitized on the way in.
+		const sanitizedValues = this.withoutOffListMimoBaseUrl(values)
+
+		// Dropping the incoming value is not enough on its own: a partial update
+		// omits mimoBaseUrl, so an off-list value already in storage (written by an
+		// older build or another extension) survives this call and keeps steering
+		// requests. Purge it explicitly. A stored allowlisted endpoint is left alone
+		// so a rejected input cannot take a valid cluster down with it.
+		if (this.isStoredMimoBaseUrlOffList()) {
+			await this.sidebarProvider.contextProxy.updateGlobalState("mimoBaseUrl", undefined)
+		}
+
+		await this.sidebarProvider.contextProxy.setValues(sanitizedValues)
+		await this.sidebarProvider.providerSettingsManager.saveConfig(
+			sanitizedValues.currentApiConfigName || "default",
+			sanitizedValues,
+		)
 		if (values.modeApiConfigs) {
 			await Promise.all(
 				Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
@@ -639,6 +668,60 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			)
 		}
 		await this.sidebarProvider.postStateToWebview()
+	}
+
+	/**
+	 * Reports whether the mimoBaseUrl currently in storage is a non-empty value
+	 * outside the four allowed Xiaomi endpoints. Empty string means "unset" and
+	 * counts as on-list, matching the sanitizer's convention.
+	 */
+	private isStoredMimoBaseUrlOffList(): boolean {
+		// Typed as the four-literal union, but the type is compile-time only: the
+		// accessor returns whatever the state cache holds, and this helper exists
+		// because storage can carry values no schema ever saw. A non-string is
+		// corrupted storage, not a usable endpoint, so it counts as off-list and
+		// gets purged instead of throwing out of stripTrailingSlashes.
+		const storedBaseUrl: unknown = this.sidebarProvider.getValue("mimoBaseUrl")
+
+		if (storedBaseUrl === undefined || storedBaseUrl === "") {
+			return false
+		}
+
+		if (typeof storedBaseUrl !== "string") {
+			return true
+		}
+
+		return !ALLOWED_BASE_URLS.has(stripTrailingSlashes(storedBaseUrl))
+	}
+
+	/**
+	 * Returns `values` unchanged unless it carries a non-empty mimoBaseUrl outside
+	 * the four allowed Xiaomi endpoints, in which case that one key is omitted.
+	 * Empty string means "unset" and passes through untouched. A non-string value
+	 * cannot be an allowed endpoint, so it is dropped like any other off-list value.
+	 */
+	private withoutOffListMimoBaseUrl(values: RooCodeSettings): RooCodeSettings {
+		// Declared as the four-literal union, but this API is a public entry point
+		// for other extensions and automation: the runtime value is whatever the
+		// caller passed, and the schema is exactly what it never went through.
+		// Typed `unknown` for that reason: a caller that sends a number or an object
+		// must be rejected, not allowed to throw out of stripTrailingSlashes.
+		const mimoBaseUrl: unknown = values.mimoBaseUrl
+
+		if (mimoBaseUrl === undefined || mimoBaseUrl === "") {
+			return values
+		}
+
+		if (typeof mimoBaseUrl === "string" && ALLOWED_BASE_URLS.has(stripTrailingSlashes(mimoBaseUrl))) {
+			return values
+		}
+
+		console.warn(
+			"[API] Rejected mimoBaseUrl outside the allowed Xiaomi MiMo endpoints; the value was not persisted.",
+		)
+
+		const { mimoBaseUrl: _rejected, ...rest } = values
+		return rest
 	}
 
 	public setTerminalProfile(name: string | undefined): void {

@@ -485,7 +485,8 @@
 			"hint": "Vui lòng mở lại cài đặt để xem các mô hình mới nhất.",
 			"loading": "Đang làm mới danh sách mô hình...",
 			"success": "Danh sách mô hình đã được làm mới thành công!",
-			"error": "Không thể làm mới danh sách mô hình. Vui lòng thử lại."
+			"error": "Không thể làm mới danh sách mô hình. Vui lòng thử lại.",
+			"missingConfig": "Enter an API key first, then refresh the models list."
 		},
 		"getRequestyApiKey": "Lấy khóa API Requesty",
 		"getRequestyBaseUrl": "URL cơ sở",

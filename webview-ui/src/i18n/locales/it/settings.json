@@ -485,7 +485,8 @@
 			"hint": "Riapri le impostazioni per vedere i modelli più recenti.",
 			"loading": "Aggiornamento dell'elenco dei modelli...",
 			"success": "Elenco dei modelli aggiornato con successo!",
-			"error": "Impossibile aggiornare l'elenco dei modelli. Riprova."
+			"error": "Impossibile aggiornare l'elenco dei modelli. Riprova.",
+			"missingConfig": "Enter an API key first, then refresh the models list."
 		},
 		"getRequestyApiKey": "Ottieni chiave API Requesty",
 		"getRequestyBaseUrl": "URL base",

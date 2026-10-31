@@ -485,7 +485,8 @@
 			"hint": "Open de instellingen opnieuw om de nieuwste modellen te zien.",
 			"loading": "Modellenlijst wordt vernieuwd...",
 			"success": "Modellenlijst succesvol vernieuwd!",
-			"error": "Kan modellenlijst niet vernieuwen. Probeer het opnieuw."
+			"error": "Kan modellenlijst niet vernieuwen. Probeer het opnieuw.",
+			"missingConfig": "Enter an API key first, then refresh the models list."
 		},
 		"getRequestyApiKey": "Requesty API-sleutel ophalen",
 		"getRequestyBaseUrl": "Basis-URL",

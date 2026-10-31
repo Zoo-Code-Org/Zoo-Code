@@ -100,6 +100,7 @@ import { generateSystemPrompt } from "./generateSystemPrompt"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { getCommand } from "../../utils/commands"
 import { getLMStudioModels } from "../../api/providers/fetchers/lmstudio"
+import { ALLOWED_BASE_URLS, stripTrailingSlashes } from "../../api/providers/fetchers/mimo"
 
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 
@@ -129,6 +130,15 @@ import {
 
 const handlerFor = (apiConfiguration: ProviderSettings, provider: RouterName): ApiHandler =>
 	buildApiHandler({ ...apiConfiguration, apiProvider: provider })
+
+// True when a non-empty mimoBaseUrl is outside the four Xiaomi endpoints the
+// fetcher and MimoHandler both enforce. handlerFor() builds its handler eagerly
+// from stored config and MimoHandler's constructor throws on such a value, so
+// every router-models case that constructs a MiMo handler must consult this
+// first: the throw would otherwise escape webviewMessageHandler entirely
+// (onReceiveMessage has no catch) and take the whole response with it.
+const isOffListMimoBaseUrl = (mimoBaseUrl: string | undefined): boolean =>
+	mimoBaseUrl !== undefined && mimoBaseUrl !== "" && !ALLOWED_BASE_URLS.has(stripTrailingSlashes(mimoBaseUrl))
 
 export const webviewMessageHandler = async (
 	provider: ClineProvider,
@@ -865,6 +875,32 @@ export const webviewMessageHandler = async (
 						if (!value) {
 							continue
 						}
+					} else if (key === "mimoBaseUrl") {
+						// Persistence-boundary gate for the settings form. The settings
+						// schema pins this key to the four allowed Xiaomi endpoints, but
+						// ContextProxy fails open on a schema rejection and returns raw
+						// stored values, so validate again here rather than trusting
+						// storage. This is one of two write paths, not the only one: the
+						// exported ZooCodeAPI.setConfiguration applies the same allowlist
+						// in src/extension/api.ts, and every consumer re-checks anyway
+						// because a value can also predate this gate. Empty string means
+						// "unset" (mirroring the handler and router fallbacks) and is
+						// normalized to undefined; an off-list non-empty value is dropped
+						// with a warning so it can never reach the chat-completion client
+						// via persisted state. Trailing slashes are tolerated for the
+						// check and canonicalized away on save.
+						if (typeof value === "string" && value !== "") {
+							const normalized = stripTrailingSlashes(value)
+							if (!ALLOWED_BASE_URLS.has(normalized)) {
+								console.warn(
+									"[webviewMessageHandler] Rejected mimoBaseUrl outside the allowed Xiaomi MiMo endpoints; the value was not persisted.",
+								)
+								continue
+							}
+							newValue = normalized
+						} else {
+							newValue = undefined
+						}
 					}
 
 					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
@@ -1120,6 +1156,20 @@ export const webviewMessageHandler = async (
 		case RouterModelsMessageType.flushRouterModels: {
 			const { apiConfiguration } = await provider.getState()
 			const routerNameFlush: RouterName = toRouterName(message.text)
+
+			// Same stored-value gate as requestRouterModels: an off-list mimoBaseUrl
+			// (written by a pre-allowlist build, or by a caller of the exported
+			// ZooCodeAPI.setConfiguration, since ContextProxy fails open on a schema
+			// rejection) makes MimoHandler's constructor throw here. This case has no
+			// surrounding catch, so the rejection would escape the message handler and
+			// break the flush for good; skip the dispatch instead.
+			if (routerNameFlush === providerIdentifiers.mimo && isOffListMimoBaseUrl(apiConfiguration.mimoBaseUrl)) {
+				console.warn(
+					"[flushRouterModels] Skipped MiMo model flush: the stored base URL is not an allowed Xiaomi MiMo endpoint.",
+				)
+				break
+			}
+
 			// Note: flushRouterModels is a generic flush without credentials
 			// For providers that need credentials, use their specific handlers
 			await flushModels(
@@ -1153,6 +1203,7 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.poe]: {},
 						[providerIdentifiers.deepseek]: {},
 						[providerIdentifiers.moonshot]: {},
+						[providerIdentifiers.mimo]: {},
 						[providerIdentifiers.opencodeGo]: {},
 						[providerIdentifiers.kenari]: {},
 						[providerIdentifiers.ioIntelligence]: {},
@@ -1296,6 +1347,91 @@ export const webviewMessageHandler = async (
 				})
 			}
 
+			// MiMo is conditional on apiKey. The baseUrl selects the cluster
+			// (cn/sgp/ams token-plan or pay-as-you-go), so unsaved form values are
+			// honored the same way as DeepSeek/Moonshot above.
+			const mimoApiKey = message?.values?.mimoApiKey ?? apiConfiguration.mimoApiKey
+
+			// An unsaved empty string means "unset" (the form's cleared state),
+			// matching the handler-side fallback: it must not override the stored
+			// cluster value and silently reroute the stored key to the default
+			// Singapore endpoint.
+			const unsavedMimoBaseUrlValue = message?.values?.mimoBaseUrl
+			const unsavedMimoBaseUrl =
+				typeof unsavedMimoBaseUrlValue === "string" && unsavedMimoBaseUrlValue !== ""
+					? unsavedMimoBaseUrlValue
+					: undefined
+			const mimoBaseUrl = unsavedMimoBaseUrl ?? apiConfiguration.mimoBaseUrl
+
+			// handlerFor() spreads the RAW stored config, so a handler built for MiMo
+			// would re-validate the stored base URL instead of the one this request
+			// actually uses. In mixed state (valid unsaved URL + off-list stored URL)
+			// the guard below accepts the resolved value while MimoHandler's
+			// constructor rejects the stored one, and that throw escapes this case --
+			// so every handler built here takes the resolved value. mimoBaseUrl is
+			// inert for the other providers.
+			//
+			// The cast is sound because the value only reaches MimoHandler after the
+			// allowlist guard below accepts it, and MimoHandler re-applies the same
+			// stripTrailingSlashes normalization before building its client. The
+			// declared type is the four-literal union, but an unsaved form value is a
+			// plain string that the guard (not the schema) is what vets.
+			const handlerConfiguration: ProviderSettings = {
+				...apiConfiguration,
+				mimoBaseUrl: mimoBaseUrl as ProviderSettings["mimoBaseUrl"],
+			}
+
+			// Unsaved form values bypass the settings-schema validation that pins
+			// stored mimoBaseUrl to the four allowed Xiaomi endpoints, so gate them
+			// on the fetcher's allowlist before they can carry the bearer key into
+			// modelCache. The exact match subsumes credential-bearing URLs (no
+			// allowlisted literal contains userinfo), and the raw value is never
+			// echoed since an unsaved one may embed credentials.
+			//
+			// The resolved value is gated too, not just the unsaved one: a stored
+			// value can be off-list (ContextProxy fails open on a schema rejection,
+			// so one written by a pre-allowlist build survives), and flushModels()
+			// now takes a handler that is built eagerly at this call site --
+			// MimoHandler's constructor rejects off-list endpoints, and that throw
+			// escapes the whole requestRouterModels case, skipping both the MiMo
+			// failure response and the aggregate routerModels response.
+			const mimoBaseUrlRejected = isOffListMimoBaseUrl(mimoBaseUrl)
+
+			if (mimoApiKey) {
+				if (mimoBaseUrlRejected) {
+					// Same surface as a failed refresh: post the MiMo failure
+					// response and skip the candidate so no fetch is dispatched,
+					// while router aggregation for other providers continues.
+					const errorMessage =
+						"MIMO/requestRouterModels/001: MiMo model fetch rejected: the provided base URL is not an allowed Xiaomi MiMo endpoint."
+					console.error(`Error refreshing models for ${providerIdentifiers.mimo}: ${errorMessage}`)
+
+					await provider.postMessageToWebview({
+						type: RouterModelsMessageType.singleRouterModelFetchResponse,
+						success: false,
+						error: errorMessage,
+						values: { provider: providerIdentifiers.mimo },
+					})
+				} else {
+					const mimoOptions = {
+						provider: providerIdentifiers.mimo,
+						apiKey: mimoApiKey,
+						baseUrl: mimoBaseUrl,
+					}
+
+					if (message?.values?.mimoApiKey || unsavedMimoBaseUrl) {
+						// Unsaved form values win over stored config: flush refreshes the cache
+						// with them before the aggregate fetch (same pattern as DeepSeek/Moonshot).
+						await flushModels(mimoOptions, handlerFor(handlerConfiguration, providerIdentifiers.mimo), true)
+					}
+
+					candidates.push({
+						key: providerIdentifiers.mimo,
+						options: mimoOptions,
+					})
+				}
+			}
+
 			// Opencode Go's /models endpoint is public — it returns the full model list with no
 			// Authorization header — so it's fetched unconditionally like openrouter/vercel-ai-gateway
 			// above. Gating it behind a key meant the picker stayed empty (and fell back to the default
@@ -1395,12 +1531,12 @@ export const webviewMessageHandler = async (
 			// If refresh flag is set and we have a specific provider, flush its cache first
 			if (shouldRefresh && providerFilter && modelFetchPromises.length > 0) {
 				const targetCandidate = modelFetchPromises[0]
-				await flushModels(targetCandidate.options, handlerFor(apiConfiguration, targetCandidate.key), true)
+				await flushModels(targetCandidate.options, handlerFor(handlerConfiguration, targetCandidate.key), true)
 			}
 
 			const results = await Promise.allSettled(
 				modelFetchPromises.map(async ({ key, options }) => {
-					const models = await safeGetModels(options, handlerFor(apiConfiguration, key))
+					const models = await safeGetModels(options, handlerFor(handlerConfiguration, key))
 					return { key, models } // The key is `ProviderName` here.
 				}),
 			)
@@ -1428,10 +1564,20 @@ export const webviewMessageHandler = async (
 				}
 			})
 
+			// Echo the webview's request ID when one was provided so
+			// fetchRouterModels can correlate the response to the exact pending
+			// request (a remount may re-issue the same provider request while a
+			// stale response is in flight). Requests without an ID keep the
+			// previous response shape.
+			const requestId = message?.values?.requestId
 			await provider.postMessageToWebview({
 				type: RouterModelsMessageType.routerModels,
 				routerModels,
-				values: providerFilter ? { provider: requestedProvider } : undefined,
+				values: requestId
+					? { requestId, ...(providerFilter ? { provider: requestedProvider } : {}) }
+					: providerFilter
+						? { provider: requestedProvider }
+						: undefined,
 			})
 			break
 		}

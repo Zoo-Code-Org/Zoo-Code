@@ -40,6 +40,23 @@ vi.mock("fs", () => ({
 	readFileSync: vi.fn().mockReturnValue("{}"),
 }))
 
+// Wrap (not replace) pbkdf2Sync so tests can count KDF invocations while real digests
+// are still produced.
+vi.mock("crypto", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("crypto")>()
+	return { ...actual, pbkdf2Sync: vi.fn(actual.pbkdf2Sync) }
+})
+
+// Mock all the model fetchers
+vi.mock("../litellm")
+vi.mock("../openrouter")
+vi.mock("../requesty")
+vi.mock("../kenari")
+vi.mock("../nanogpt")
+vi.mock("../moonshot")
+vi.mock("../mimo")
+vi.mock("../zoo-gateway")
+
 // Mock ContextProxy with a simple static instance
 vi.mock("../../../core/config/ContextProxy", () => ({
 	ContextProxy: {
@@ -57,6 +74,7 @@ import type { Mock, Mocked } from "vitest"
 import type { ModelRecord } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types"
 import * as fsSync from "fs"
+import { pbkdf2Sync } from "crypto"
 import NodeCache from "node-cache"
 import { TelemetryService } from "@roo-code/telemetry"
 import { getModels, getModelsFromCache } from "../modelCache"
@@ -80,9 +98,13 @@ const NANOGPT_SCOPE: ModelCacheScope = { urlScoped: false, keyScoped: true, auth
 const IOINTELLIGENCE_SCOPE: ModelCacheScope = { urlScoped: false, keyScoped: true, authScoped: false }
 const ZOO_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: true }
 const MOONSHOT_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: false }
+// MiMo is url+key scoped and not auth scoped: the same credentials always yield the
+// same catalog, so results are cacheable on disk.
+const MIMO_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: false }
 
 const openRouterHandler = makeHandler(OPENROUTER_SCOPE, vi.fn())
 const zooGatewayHandler = makeHandler(ZOO_SCOPE, vi.fn())
+const mockPbkdf2Sync = vi.mocked(pbkdf2Sync)
 
 const DUMMY_REQUESTY_KEY = "requesty-key-for-testing"
 const DUMMY_IOINTELLIGENCE_KEY = "io-intelligence-key-for-testing"
@@ -282,6 +304,29 @@ describe("getModels with new GetModelsOptions", () => {
 			provider: providerIdentifiers.moonshot,
 			apiKey: "test-key",
 			baseUrl: "https://api.moonshot.ai/v1",
+		} as const
+		const result = await getModels(options, handler)
+
+		expect(fetchModels).toHaveBeenCalledWith(options, expect.any(AbortSignal))
+		expect(result).toEqual(mockModels)
+	})
+
+	it("dispatches MiMo through the handler's fetchModels with the same options", async () => {
+		const mockModels = {
+			"mimo-v2.6-pro": {
+				maxTokens: 16384,
+				contextWindow: 262144,
+				supportsPromptCache: false,
+				description: "MiMo model via dynamic catalog endpoint",
+			},
+		}
+		const fetchModels = vi.fn().mockResolvedValue(mockModels)
+		const handler = makeHandler(MIMO_SCOPE, fetchModels)
+
+		const options = {
+			provider: providerIdentifiers.mimo,
+			apiKey: "mimo-test-key",
+			baseUrl: "https://api.mimo.example/v1",
 		} as const
 		const result = await getModels(options, handler)
 
@@ -1231,6 +1276,67 @@ describe("key-scoped cache key derivation", () => {
 	})
 })
 
+describe("cache digest derivation memoization", () => {
+	// The bounded FIFO memo exists because getCacheKey/deriveApiKeyDiscriminator run on the
+	// per-message hot path (PoeHandler.getModel -> getModelsFromCache -> getCacheKey): the KDF
+	// must not run per request, but the memo must not grow unbounded either. Keys are unique
+	// per test because the memo is module-level state shared across the file.
+	const memoProvider = providerIdentifiers.requesty
+	const memoModels = {
+		"memo/model": { maxTokens: 4096, contextWindow: 200_000, supportsPromptCache: false },
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+	})
+
+	it("reuses the derived digest across repeated calls with the same key", async () => {
+		const handler = makeHandler(REQUESTY_SCOPE, vi.fn().mockResolvedValue(memoModels))
+
+		await getModels({ provider: memoProvider, apiKey: "memo-repeat-key" }, handler)
+		const afterFirst = mockPbkdf2Sync.mock.calls.length
+		expect(afterFirst).toBeGreaterThan(0)
+
+		// Per-request cache lookups with the same key must not re-run the KDF.
+		await getModels({ provider: memoProvider, apiKey: "memo-repeat-key" }, handler)
+		await getModels({ provider: memoProvider, apiKey: "memo-repeat-key" }, handler)
+
+		expect(mockPbkdf2Sync.mock.calls.length).toBe(afterFirst)
+	})
+
+	it("derives a fresh digest for each distinct key", async () => {
+		const handler = makeHandler(REQUESTY_SCOPE, vi.fn().mockResolvedValue(memoModels))
+
+		await getModels({ provider: memoProvider, apiKey: "memo-distinct-a" }, handler)
+		const afterA = mockPbkdf2Sync.mock.calls.length
+		expect(afterA).toBeGreaterThan(0)
+
+		await getModels({ provider: memoProvider, apiKey: "memo-distinct-b" }, handler)
+		expect(mockPbkdf2Sync.mock.calls.length).toBeGreaterThan(afterA)
+	})
+
+	it("bounds the memo and recomputes inputs that fell out of the FIFO window", async () => {
+		const handler = makeHandler(REQUESTY_SCOPE, vi.fn().mockResolvedValue(memoModels))
+
+		// Each call introduces two memo inputs (the raw key and its compound cache key),
+		// so 12 distinct keys overflow the 16-entry cap: the earliest pairs are evicted
+		// while the most recent ones are retained.
+		for (let i = 0; i < 12; i++) {
+			await getModels({ provider: memoProvider, apiKey: `memo-flood-${i}` }, handler)
+		}
+
+		const beforeEvicted = mockPbkdf2Sync.mock.calls.length
+		await getModels({ provider: memoProvider, apiKey: "memo-flood-0" }, handler)
+		expect(mockPbkdf2Sync.mock.calls.length).toBeGreaterThan(beforeEvicted)
+
+		const beforeRecent = mockPbkdf2Sync.mock.calls.length
+		await getModels({ provider: memoProvider, apiKey: "memo-flood-11" }, handler)
+		expect(mockPbkdf2Sync.mock.calls.length).toBe(beforeRecent)
+	})
+})
+
 describe("NanoGPT key-scoped cache isolation", () => {
 	const nanoGptModels = {
 		"openai/gpt-5.6-sol": { maxTokens: 128000, contextWindow: 1050000, supportsPromptCache: false },
@@ -1255,6 +1361,56 @@ describe("NanoGPT key-scoped cache isolation", () => {
 		expect(new Set(cacheKeys).size).toBe(3)
 		expect(cacheKeys).toContain("nanogpt")
 		expect(cacheKeys.every((key) => !key.includes("nano-key-a") && !key.includes("nano-key-b"))).toBe(true)
+	})
+})
+
+describe("MiMo url+key-scoped cache isolation", () => {
+	// MiMo's handler reports urlScoped AND keyScoped (see MimoHandler.getModelCacheScope), so
+	// distinct base URLs and distinct API keys must never collapse into a shared cache
+	// identity. Mirrors the NanoGPT key-scoped isolation test above, extended across the
+	// url dimension that NanoGPT (key-scoped only) does not exercise.
+	const mimoModels = {
+		"mimo-v2.6-pro": { maxTokens: 16384, contextWindow: 262144, supportsPromptCache: false },
+	}
+
+	let handler: ApiHandler
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		handler = makeHandler(MIMO_SCOPE, vi.fn().mockResolvedValue(mimoModels))
+	})
+
+	it("separates cache identities by base URL and API key without exposing raw keys", async () => {
+		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+
+		await getModels({ provider: providerIdentifiers.mimo }, handler)
+		await getModels({ provider: providerIdentifiers.mimo, baseUrl: "https://api.mimo.example/v1" }, handler)
+		await getModels(
+			{
+				provider: providerIdentifiers.mimo,
+				baseUrl: "https://api.mimo.example/v1",
+				apiKey: "mimo-key-a",
+			},
+			handler,
+		)
+		await getModels(
+			{
+				provider: providerIdentifiers.mimo,
+				baseUrl: "https://api.mimo.example/v1",
+				apiKey: "mimo-key-b",
+			},
+			handler,
+		)
+
+		const cacheKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		expect(new Set(cacheKeys).size).toBe(4)
+		// Bare provider fallback when neither URL nor key is set; url-only component when
+		// the key is absent (MiMo PAYG vs token-plan visibility differs per key).
+		expect(cacheKeys).toContain("mimo")
+		expect(cacheKeys).toContain("mimo:https://api.mimo.example/v1")
+		// Raw secrets must never appear in the on-disk-bound cache keys.
+		expect(cacheKeys.every((key) => !key.includes("mimo-key-a") && !key.includes("mimo-key-b"))).toBe(true)
 	})
 })
 

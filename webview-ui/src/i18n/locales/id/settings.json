@@ -485,7 +485,8 @@
 			"hint": "Silakan buka kembali pengaturan untuk melihat model terbaru.",
 			"loading": "Merefresh daftar model...",
 			"success": "Daftar model berhasil direfresh!",
-			"error": "Gagal merefresh daftar model. Silakan coba lagi."
+			"error": "Gagal merefresh daftar model. Silakan coba lagi.",
+			"missingConfig": "Enter an API key first, then refresh the models list."
 		},
 		"getRequestyApiKey": "Dapatkan Requesty API Key",
 		"getRequestyBaseUrl": "Base URL",

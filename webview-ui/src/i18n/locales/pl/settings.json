@@ -485,7 +485,8 @@
 			"hint": "Proszę ponownie otworzyć ustawienia, aby zobaczyć najnowsze modele.",
 			"loading": "Odświeżanie listy modeli...",
 			"success": "Lista modeli została pomyślnie odświeżona!",
-			"error": "Nie udało się odświeżyć listy modeli. Spróbuj ponownie."
+			"error": "Nie udało się odświeżyć listy modeli. Spróbuj ponownie.",
+			"missingConfig": "Enter an API key first, then refresh the models list."
 		},
 		"getRequestyApiKey": "Uzyskaj klucz API Requesty",
 		"getRequestyBaseUrl": "Bazowy URL",
