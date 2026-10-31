@@ -1,6 +1,7 @@
 import * as vscode from "vscode"
 import * as path from "path"
 import * as fs from "fs/promises"
+import { constants as fsConstants } from "fs"
 import * as diff from "diff"
 import stripBom from "strip-bom"
 import delay from "delay"
@@ -18,6 +19,11 @@ import { arePathsEqual, getReadablePath } from "../../utils/path"
 import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
 import { Task } from "../../core/task/Task"
+import {
+	assertPublishWithinAuthorizedRoot,
+	isPublishCommittedError,
+	safeWriteText,
+} from "../../services/file-safety/safeWriteText"
 
 import { DecorationController } from "./DecorationController"
 
@@ -1154,9 +1160,44 @@ export class DiffViewProvider {
 		// Get diagnostics before editing the file
 		this.preDiagnostics = vscode.languages.getDiagnostics()
 
+		// Reject an escape through an intermediate symlink before anything is
+		// created on disk: createDirectoriesForFile follows symlinks, so an
+		// approved inside path whose intermediate link points outside the
+		// workspace would otherwise create the outside directory before
+		// safeWriteText's authorizedRoot check rejected the publish. The same
+		// canonical check runs inside safeWriteText; running it here first keeps
+		// the allowlist decision free of filesystem side effects.
+		await assertPublishWithinAuthorizedRoot(this.cwd, absolutePath, absolutePath)
+
 		// Write the content directly to the file
 		await createDirectoriesForFile(absolutePath)
-		await fs.writeFile(absolutePath, content, "utf-8")
+		// safeWriteText publishes with rename, which only needs write permission on the
+		// DIRECTORY. The previous fs.writeFile required it on the file itself, so a target
+		// the user marked read-only used to fail with EACCES; keep that contract instead of
+		// silently renaming over it. A not-yet-existing target stays creatable.
+		try {
+			await fs.access(absolutePath, fsConstants.W_OK)
+		} catch (error: unknown) {
+			const code =
+				typeof error === "object" && error !== null && "code" in error
+					? (error as { code?: string }).code
+					: undefined
+			if (code !== "ENOENT") throw error
+		}
+		try {
+			await safeWriteText(absolutePath, content, { authorizedRoot: this.cwd })
+		} catch (error) {
+			// Both errors are raised after the atomic rename committed the content: they
+			// describe a durability or access-rights condition the tool layer cannot fix by
+			// writing again. Treat the save as completed so the tool's bookkeeping matches
+			// the disk (and content already on disk is not retried), and surface the
+			// condition as a warning instead.
+			if (isPublishCommittedError(error)) {
+				console.warn(`saveDirectly: content committed with a warning: ${error.message}`)
+			} else {
+				throw error
+			}
+		}
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
