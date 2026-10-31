@@ -120,8 +120,8 @@ describe("platform unit-test workflow", () => {
 describe("Knip quality gate", () => {
 	it("runs analyzer challenge tests and both dependency graphs without allowing failure", () => {
 		const manifest = JSON.parse(fs.readFileSync(path.join(repositoryRoot, "package.json"), "utf8"))
-		assert.equal(manifest.scripts.knip, "knip")
-		assert.equal(manifest.scripts["knip:production"], "knip --production")
+		assert.equal(manifest.scripts.knip, "knip --treat-config-hints-as-errors")
+		assert.equal(manifest.scripts["knip:production"], "knip --production --treat-config-hints-as-errors")
 		assert.equal(manifest.scripts["test:knip-policy"], "node --test scripts/knip-policy.test.mjs")
 		for (const [stepName, command] of [
 			["Verify Knip guardrails", "pnpm test:knip-policy"],

@@ -41,6 +41,14 @@ export default [
 		},
 	},
 	{
+		files: ["playwright/run-docker.mjs"],
+		languageOptions: {
+			globals: {
+				process: "readonly",
+			},
+		},
+	},
+	{
 		files: ["src/__mocks__/**/*.js"],
 		rules: {
 			"no-undef": "off",

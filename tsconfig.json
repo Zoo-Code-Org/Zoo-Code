@@ -1,8 +1,12 @@
 {
 	"extends": "@roo-code/config-typescript/base.json",
 	"compilerOptions": {
-		"types": ["node"]
+		"module": "esnext",
+		"moduleResolution": "Bundler",
+		"noUncheckedIndexedAccess": false,
+		"types": ["node"],
+		"useUnknownInCatchVariables": false
 	},
 	"exclude": ["node_modules"],
-	"include": ["scripts/*.ts"]
+	"include": ["scripts/*.ts", "src/types/global-agent.d.ts"]
 }
