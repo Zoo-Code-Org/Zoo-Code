@@ -45,6 +45,8 @@ describe("TranslationProvider locale loading", () => {
 
 		// Korean bundles are not in the entry chunk, so the first paint resolves
 		// through the English fallback and the switch lands after the fetch.
+		expect(screen.getByTestId("error-title")).toHaveTextContent("Something went wrong")
+
 		await waitFor(() => {
 			expect(screen.getByTestId("error-title")).toHaveTextContent("문제가 발생했습니다")
 		})
