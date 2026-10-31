@@ -1512,12 +1512,27 @@ describe("OpenAiNativeHandler", () => {
 
 			const cacheHandler = new OpenAiNativeHandler({ ...mockOptions, apiModelId: "gpt-5.1" })
 
-			for (const taskId of ["sdk-task-one", "sdk-task-one", "sdk-task-two"]) {
-				await collectStream(cacheHandler.createMessage(systemPrompt, messages, { taskId }))
+			// The second turn of the same task carries a longer conversation. Reusing one
+			// messages array would let a key derived from the conversation pass, so the two
+			// calls must differ in input while the key holds.
+			const followUp: Anthropic.Messages.MessageParam[] = [
+				...messages,
+				{ role: "assistant", content: "Hello! How can I help?" },
+				{ role: "user", content: "Tell me about prompt caching." },
+			]
+			const turns: Array<{ taskId: string; messages: Anthropic.Messages.MessageParam[] }> = [
+				{ taskId: "sdk-task-one", messages },
+				{ taskId: "sdk-task-one", messages: followUp },
+				{ taskId: "sdk-task-two", messages },
+			]
+
+			for (const turn of turns) {
+				await collectStream(cacheHandler.createMessage(systemPrompt, turn.messages, { taskId: turn.taskId }))
 			}
 
 			const bodies = mockResponsesCreate.mock.calls.map(([body]) => body)
 			expect(bodies[0].prompt_cache_key).toBe("sdk-task-one")
+			expect(bodies[1].input).not.toEqual(bodies[0].input)
 			expect(bodies[1].prompt_cache_key).toBe(bodies[0].prompt_cache_key)
 			expect(bodies[2].prompt_cache_key).toBe("sdk-task-two")
 			expect(bodies[0].prompt_cache_retention).toBe("24h")
