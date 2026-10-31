@@ -136,6 +136,13 @@ export const modelInfoSchema = z.object({
 	inputPrice: z.number().optional(),
 	outputPrice: z.number().optional(),
 	cacheWritesPrice: z.number().optional(),
+	// Per-TTL cache-write rates. Vendors bill a longer cache lifetime at a higher
+	// write rate than the default 5m/30m class, so a single `cacheWritesPrice`
+	// under-reports whenever the response reports a long-lived write. Omitted
+	// means "no long-lived writes are expected on this model"; the cost layer
+	// derives a fail-closed rate from `inputPrice` if one still arrives.
+	cacheWritesPrice1h: z.number().optional(),
+	cacheWritesPrice12h: z.number().optional(),
 	cacheReadsPrice: z.number().optional(),
 	longContextPricing: z
 		.object({
@@ -180,6 +187,11 @@ export const modelInfoSchema = z.object({
 				inputPrice: z.number().optional(),
 				outputPrice: z.number().optional(),
 				cacheWritesPrice: z.number().optional(),
+				// Per-TTL write rates for this tier. A tier that overrides inputPrice
+				// must also override these, otherwise a long-context or flex/priority
+				// write bills at the base tier's TTL rate.
+				cacheWritesPrice1h: z.number().optional(),
+				cacheWritesPrice12h: z.number().optional(),
 				cacheReadsPrice: z.number().optional(),
 			}),
 		)
@@ -187,6 +199,34 @@ export const modelInfoSchema = z.object({
 })
 
 export type ModelInfo = z.infer<typeof modelInfoSchema>
+
+/**
+ * Multipliers vendors apply to the base input price for a cache write, by TTL class.
+ * Anthropic: 5m = 1.25x, 1h = 2x. OpenAI: 30m = 1.25x, 12h = 2.5x.
+ */
+export const CACHE_WRITE_MULTIPLIER_5M = 1.25
+export const CACHE_WRITE_MULTIPLIER_1H = 2.0
+export const CACHE_WRITE_MULTIPLIER_12H = 2.5
+
+/**
+ * Derive the 1h cache-write rate from the base input price.
+ *
+ * Stated once here so every Anthropic-family catalog entry and every runtime
+ * fallback agrees on the 2x relationship. Returns `undefined` when the model
+ * has no input price to scale, which keeps the cost layer fail-closed: it will
+ * fall back to `cacheWritesPrice` rather than invent a rate.
+ */
+export function deriveCacheWritesPrice1h(inputPrice: number | undefined): number | undefined {
+	return inputPrice === undefined ? undefined : inputPrice * CACHE_WRITE_MULTIPLIER_1H
+}
+
+/**
+ * Derive the 12h cache-write rate from the base input price (OpenAI 12h class).
+ * Same fail-closed contract as {@link deriveCacheWritesPrice1h}.
+ */
+export function deriveCacheWritesPrice12h(inputPrice: number | undefined): number | undefined {
+	return inputPrice === undefined ? undefined : inputPrice * CACHE_WRITE_MULTIPLIER_12H
+}
 
 export type ModelRecord = Record<string, ModelInfo>
 

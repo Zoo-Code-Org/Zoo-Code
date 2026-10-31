@@ -145,6 +145,10 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 					case "message_start": {
 						const usage = chunk.message!.usage
 
+						// Per-TTL breakdown of the write total; absent when the provider
+						// does not report it, leaving the split at 0.
+						const cacheWrite1hTokens = usage.cache_creation?.ephemeral_1h_input_tokens
+
 						// `output_tokens_details.thinking_tokens` decomposes the billed
 						// output into internal reasoning tokens; surfaced for per-turn
 						// thinking telemetry (billing already includes it in output_tokens).
@@ -153,6 +157,7 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 							inputTokens: usage.input_tokens || 0,
 							outputTokens: usage.output_tokens || 0,
 							cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
+							cacheWrite1hTokens: cacheWrite1hTokens || undefined,
 							cacheReadTokens: usage.cache_read_input_tokens || undefined,
 							...(typeof usage.output_tokens_details?.thinking_tokens === "number"
 								? { reasoningTokens: usage.output_tokens_details!.thinking_tokens }
@@ -270,6 +275,10 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 					inputPrice: tier.inputPrice,
 					outputPrice: tier.outputPrice,
 					cacheWritesPrice: tier.cacheWritesPrice,
+					// Carry the tier's own TTL rate; the entry-level one was derived from
+					// the 200K input price and would halve a 1M-context 1h write.
+					cacheWritesPrice1h: tier.cacheWritesPrice1h ?? info.cacheWritesPrice1h,
+					cacheWritesPrice12h: tier.cacheWritesPrice12h ?? info.cacheWritesPrice12h,
 					cacheReadsPrice: tier.cacheReadsPrice,
 				}
 			}
