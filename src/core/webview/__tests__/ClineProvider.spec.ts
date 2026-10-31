@@ -3595,6 +3595,13 @@ describe("ClineProvider", () => {
 
 			Object.assign(provider, {
 				providerSettingsManager: {
+					// The queued delete body reads the stored profile first: it is both the undo
+					// snapshot and the identity check against the entry the caller selected.
+					getProfile: vi.fn().mockResolvedValue({
+						name: "deleted-config",
+						id: "deleted-id",
+						apiProvider: providerIdentifiers.anthropic,
+					}),
 					deleteConfig: vi.fn().mockImplementation(async () => {
 						const removedModeConfigs = { code: modeApiConfigs.code }
 						delete modeApiConfigs.code
@@ -4121,6 +4128,11 @@ describe("ClineProvider", () => {
 		test("fails fast without writing ContextProxy state when the config purge rejects", async () => {
 			Object.assign(provider, {
 				providerSettingsManager: {
+					// The queued body reads the stored profile before it purges, so the double has
+					// to answer that read for the purge below to be the call that rejects.
+					getProfile: vi
+						.fn()
+						.mockResolvedValue({ ...otherProfile, openRouterModelId: "other-model", apiKey: "other-key" }),
 					deleteConfig: vi.fn().mockRejectedValue(new Error("Config 'other-config' not found")),
 					listConfig: vi.fn().mockResolvedValue([currentProfile, otherProfile]),
 				},
@@ -4157,8 +4169,10 @@ describe("ClineProvider", () => {
 			)
 
 			// The purge is undone so the manager and ContextProxy still name the same profile,
-			// including the credential: a restore that dropped `apiKey` fails here.
-			expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith(
+			// including the credential: a restore that dropped `apiKey` fails here. The restore
+			// goes through the conditional save, so a same-name profile saved during the window
+			// is not overwritten by the pre-delete snapshot.
+			expect(provider.providerSettingsManager.saveConfigIfAbsent).toHaveBeenCalledWith(
 				"current-config",
 				expect.objectContaining({
 					id: "current-id",
@@ -4204,7 +4218,7 @@ describe("ClineProvider", () => {
 
 				// The timeout path restores the purged profile instead of leaving ContextProxy
 				// naming a profile the manager no longer has. The credential must survive too.
-				expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith(
+				expect(provider.providerSettingsManager.saveConfigIfAbsent).toHaveBeenCalledWith(
 					"current-config",
 					expect.objectContaining({
 						id: "current-id",
@@ -4257,14 +4271,14 @@ describe("ClineProvider", () => {
 				// The rollback is gated on the abandoned body's settlement: while the body is
 				// still hung past the timeout, no restore write may be observable yet.
 				await vi.advanceTimersByTimeAsync(0)
-				expect(provider.providerSettingsManager.saveConfig).not.toHaveBeenCalled()
+				expect(provider.providerSettingsManager.saveConfigIfAbsent).not.toHaveBeenCalled()
 
 				resolveActivation()
 				await deletionResult
 				await vi.advanceTimersByTimeAsync(0)
 
 				// Only after the body settled does the rollback restore the purged profile.
-				expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith(
+				expect(provider.providerSettingsManager.saveConfigIfAbsent).toHaveBeenCalledWith(
 					"current-config",
 					expect.objectContaining({ id: "current-id" }),
 				)
@@ -4365,14 +4379,14 @@ describe("ClineProvider", () => {
 				vi.mocked(provider.providerSettingsManager.activateProfile).mockRejectedValueOnce(
 					new Error("Failed to activate profile: storage error"),
 				)
-				vi.mocked(provider.providerSettingsManager.saveConfig).mockImplementationOnce(async () => {
+				vi.mocked(provider.providerSettingsManager.saveConfigIfAbsent).mockImplementationOnce(async () => {
 					await pendingRestore
 					return "current-id"
 				})
 
 				const deletion = provider.deleteProviderProfile(currentProfile)
 				const deletionResult = expect(deletion).rejects.toThrow("Failed to activate profile: storage error")
-				await vi.waitFor(() => expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalled())
+				await vi.waitFor(() => expect(provider.providerSettingsManager.saveConfigIfAbsent).toHaveBeenCalled())
 
 				// Queue a newer mutation while the rollback is still pending.
 				const queued = provider.activateProviderProfile({ name: "other-config" })
@@ -4473,19 +4487,19 @@ describe("ClineProvider", () => {
 			try {
 				const { managerState } = mockProviderSettingsManager()
 				// Fail the replacement activation so the rollback starts, then hang the rollback's
-				// own `saveConfig` forever: this is the manager lock held by a never-settling
+				// own `saveConfigIfAbsent` forever: this is the manager lock held by a never-settling
 				// SecretStorage write, the one case a queue-level escape hatch has to cover.
 				vi.mocked(provider.providerSettingsManager.activateProfile).mockRejectedValueOnce(
 					new Error("Failed to activate profile: storage error"),
 				)
-				vi.mocked(provider.providerSettingsManager.saveConfig).mockImplementationOnce(
+				vi.mocked(provider.providerSettingsManager.saveConfigIfAbsent).mockImplementationOnce(
 					() => new Promise<string>(() => {}),
 				)
 
 				const deletion = provider.deleteProviderProfile(currentProfile)
 				const deletionResult = expect(deletion).rejects.toThrow("Failed to activate profile: storage error")
 				await vi.advanceTimersByTimeAsync(0)
-				await vi.waitFor(() => expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalled())
+				await vi.waitFor(() => expect(provider.providerSettingsManager.saveConfigIfAbsent).toHaveBeenCalled())
 
 				// Queue a newer mutation behind the hung rollback.
 				const queued = provider.activateProviderProfile({ name: "other-config" })
@@ -4744,14 +4758,14 @@ describe("ClineProvider", () => {
 				const pendingRestore = new Promise<void>((resolve) => {
 					releaseRestore = resolve
 				})
-				vi.mocked(provider.providerSettingsManager.saveConfig).mockImplementationOnce(async () => {
+				vi.mocked(provider.providerSettingsManager.saveConfigIfAbsent).mockImplementationOnce(async () => {
 					await pendingRestore
 					return currentProfile.id
 				})
 
 				const deletion = provider.deleteProviderProfile(currentProfile)
 				const deletionResult = expect(deletion).rejects.toThrow("Failed to activate profile: storage error")
-				await vi.waitFor(() => expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalled())
+				await vi.waitFor(() => expect(provider.providerSettingsManager.saveConfigIfAbsent).toHaveBeenCalled())
 
 				// The user selects the surviving profile while the restore is still pending. The
 				// manager holds that name, so the reconcile's gate sees a live newer selection.
@@ -4801,12 +4815,12 @@ describe("ClineProvider", () => {
 			modeApiConfigs.architect = currentProfile.id
 			await provider.contextProxy.setValue("modeApiConfigs", { ...modeApiConfigs })
 
-			// The replacement activation fails, and the restore's own `saveConfig` rejects, so the
-			// deleted profile never comes back (probe-C shape).
+			// The replacement activation fails, and the restore's own `saveConfigIfAbsent` rejects, so
+			// the deleted profile never comes back (probe-C shape).
 			vi.mocked(provider.providerSettingsManager.activateProfile).mockRejectedValueOnce(
 				new Error("Failed to activate profile: storage error"),
 			)
-			vi.mocked(provider.providerSettingsManager.saveConfig).mockRejectedValueOnce(
+			vi.mocked(provider.providerSettingsManager.saveConfigIfAbsent).mockRejectedValueOnce(
 				new Error("Failed to save config: storage error"),
 			)
 
@@ -5051,12 +5065,12 @@ describe("ClineProvider", () => {
 			modeApiConfigs.code = currentProfile.id
 			await provider.contextProxy.setValue("modeApiConfigs", { ...modeApiConfigs })
 
-			// The replacement activation fails and the restore's own `saveConfig` rejects, so the
-			// reconcile runs with the purge's dropped binding.
+			// The replacement activation fails and the restore's own `saveConfigIfAbsent` rejects, so
+			// the reconcile runs with the purge's dropped binding.
 			vi.mocked(provider.providerSettingsManager.activateProfile).mockRejectedValueOnce(
 				new Error("Failed to activate profile: storage error"),
 			)
-			vi.mocked(provider.providerSettingsManager.saveConfig).mockRejectedValueOnce(
+			vi.mocked(provider.providerSettingsManager.saveConfigIfAbsent).mockRejectedValueOnce(
 				new Error("Failed to save config: storage error"),
 			)
 
