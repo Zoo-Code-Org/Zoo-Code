@@ -141,6 +141,7 @@ import { type AutoDenyDetail, AutoApprovalHandler, checkAutoApproval } from "../
 import { MessageManager } from "../message-manager"
 import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
+import { capMcpToolUseNames } from "./capMcpToolUseNames"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
@@ -5832,7 +5833,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// For API only: merge consecutive user messages (excludes summary messages per
 		// mergeConsecutiveApiMessages implementation) without mutating stored history.
 		const mergedForApi = mergeConsecutiveApiMessages(messagesSinceLastSummary, { roles: ["user"] })
-		const messagesWithoutImages = maybeRemoveImageBlocks(mergedForApi, this.api)
+		const messagesWithoutImages = maybeRemoveImageBlocks(capMcpToolUseNames(mergedForApi), this.api)
 		const cleanConversationHistory = this.buildCleanConversationHistory(
 			messagesWithoutImages as ApiMessage[],
 			requestModelInfo,
