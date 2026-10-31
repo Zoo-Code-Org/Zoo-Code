@@ -2829,7 +2829,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// A stranded snapshot merge has no guaranteed later save, so
 						// persist the merged delta before the webview update — the
 						// same save-then-post pattern as the complete-merge branch.
-						await this.saveClineMessages()
+						const saved = await this.saveClineMessages()
+						if (!saved) {
+							// The persistence write failed: the on-disk record still carries
+							// the pre-merge snapshot while the in-memory message is updated.
+							// Skip the webview-only post so the two views do not diverge (a
+							// reload would restore the stale text). The next saveClineMessages()
+							// call re-persists the full message array and repairs the disk record.
+							console.error("[Task#say] saveClineMessages failed; skipping webview update")
+							return
+						}
 						this.updateClineMessage(staleSnapshot).catch((error) => {
 							console.error("[Task#say] updateClineMessage failed:", error)
 						})
@@ -2897,7 +2906,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 						// Instead of streaming partialMessage events, we do a save
 						// and post like normal to persist to disk.
-						await this.saveClineMessages()
+						const saved = await this.saveClineMessages()
+
+						if (!saved) {
+							// Same durable-state gate as the partial-merge branch above: the
+							// on-disk record still carries the partial snapshot, so posting the
+							// completed row would let a reload restore a spinner over a
+							// finished message. The next saveClineMessages() repairs the disk.
+							console.error("[Task#say] saveClineMessages failed; skipping webview update")
+							return
+						}
 
 						this.updateClineMessage(staleSnapshot).catch((error) => {
 							console.error("[Task#say] updateClineMessage failed:", error)
