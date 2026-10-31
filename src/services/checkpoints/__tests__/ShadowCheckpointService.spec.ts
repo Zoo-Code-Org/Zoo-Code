@@ -320,6 +320,94 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				await expect(fs.readFile(untrackedFile, "utf-8")).rejects.toThrow()
 			})
 
+			it("does not modify the workspace when restoring a missing commit", async () => {
+				await fs.writeFile(testFile, "Committed content")
+				const commit = await service.saveCheckpoint("Checkpoint before loss")
+				expect(commit?.commit).toBeTruthy()
+
+				const untrackedFile = path.join(service.workspaceDir, "precious-untracked.txt")
+				await fs.writeFile(untrackedFile, "Unsaved user work")
+				await fs.writeFile(testFile, "Uncommitted edit")
+
+				const errorHandler = vi.fn()
+				const restoreHandler = vi.fn()
+				service.on("error", errorHandler)
+				service.on("restore", restoreHandler)
+				const checkpointsBeforeRestore = service.getCheckpoints()
+				const missingCommitHash = "0".repeat(40)
+				const expectedMessage = `Cannot restore checkpoint ${missingCommitHash}: this checkpoint no longer exists in the checkpoint repository. No files were changed.`
+
+				await expect(service.restoreCheckpoint(missingCommitHash)).rejects.toThrow(expectedMessage)
+
+				expect(await fs.readFile(untrackedFile, "utf-8")).toBe("Unsaved user work")
+				expect(await fs.readFile(testFile, "utf-8")).toBe("Uncommitted edit")
+				expect(service.getCheckpoints()).toEqual(checkpointsBeforeRestore)
+				expect(errorHandler).toHaveBeenCalledExactlyOnceWith({
+					type: "error",
+					error: new Error(expectedMessage),
+				})
+				expect(restoreHandler).not.toHaveBeenCalled()
+			})
+
+			it("still restores normally to a valid commit", async () => {
+				await fs.writeFile(testFile, "Checkpointed content")
+				const commit = await service.saveCheckpoint("Valid checkpoint")
+				expect(commit?.commit).toBeTruthy()
+
+				await fs.writeFile(testFile, "Later edit")
+				const laterTrackedFile = path.join(service.workspaceDir, "created-after.txt")
+				await fs.writeFile(laterTrackedFile, "Created after checkpoint")
+				await service.saveCheckpoint("After checkpoint")
+
+				const unsavedFile = path.join(service.workspaceDir, "unsaved.txt")
+				await fs.writeFile(unsavedFile, "Never checkpointed")
+
+				await service.restoreCheckpoint(commit!.commit)
+				expect(await fs.readFile(testFile, "utf-8")).toBe("Checkpointed content")
+				await expect(fs.readFile(laterTrackedFile, "utf-8")).rejects.toThrow()
+				await expect(fs.readFile(unsavedFile, "utf-8")).rejects.toThrow()
+			})
+
+			it("does not modify the workspace when a saved checkpoint's commit object was removed", async () => {
+				await fs.writeFile(testFile, "Committed content")
+				const commit = await service.saveCheckpoint("Checkpoint to lose")
+				const savedHash = commit!.commit
+				expect(service.getCheckpoints()).toContain(savedHash)
+
+				const objectPath = path.join(
+					service.checkpointsDir,
+					".git",
+					"objects",
+					savedHash.slice(0, 2),
+					savedHash.slice(2),
+				)
+				await fs.rm(objectPath, { force: true })
+
+				const untrackedFile = path.join(service.workspaceDir, "precious-untracked.txt")
+				await fs.writeFile(untrackedFile, "Unsaved user work")
+
+				await expect(service.restoreCheckpoint(savedHash)).rejects.toThrow(
+					`Cannot restore checkpoint ${savedHash}: this checkpoint no longer exists`,
+				)
+				expect(await fs.readFile(untrackedFile, "utf-8")).toBe("Unsaved user work")
+			})
+
+			it("reports unexpected Git failures during the commit check without changing files", async () => {
+				await fs.writeFile(testFile, "Committed content")
+				const commit = await service.saveCheckpoint("Checkpoint")
+				const untrackedFile = path.join(service.workspaceDir, "precious-untracked.txt")
+				await fs.writeFile(untrackedFile, "Unsaved user work")
+
+				const git = service["git"]!
+				vitest.spyOn(git, "raw").mockRejectedValueOnce(new Error("fatal: unable to read index"))
+				const cleanSpy = vitest.spyOn(git, "clean")
+
+				await expect(service.restoreCheckpoint(commit!.commit)).rejects.toThrow("fatal: unable to read index")
+				expect(cleanSpy).not.toHaveBeenCalled()
+				expect(await fs.readFile(untrackedFile, "utf-8")).toBe("Unsaved user work")
+				vitest.restoreAllMocks()
+			})
+
 			it("does not create a checkpoint for ignored files", async () => {
 				// Create a file that matches an ignored pattern (e.g., .log file).
 				const ignoredFile = path.join(service.workspaceDir, "ignored.log")
