@@ -379,6 +379,20 @@ describe("importExport", () => {
 				expect(stored.get("interfaceFontScale")).toBe(100)
 			})
 
+			it("puts back an unset value as unset when the write failed after storing", async () => {
+				stored.delete("interfaceFontScale") // cold start: nothing was ever stored for it
+				mockContextProxy.setValue.mockImplementation((async (key: string, value: unknown) => {
+					stored.set(key, value)
+					if (value === 120) throw new Error("failed after storing")
+				}) as unknown as typeof mockContextProxy.setValue)
+
+				const result = await importWith({ interfaceFontScale: 120 })
+
+				expect(result).toEqual({ success: false, error: "failed after storing" })
+				expect(stored.get("interfaceFontScale")).toBeUndefined()
+				expect(mockContextProxy.setValue).toHaveBeenCalledWith("interfaceFontScale", undefined)
+			})
+
 			it("reports the failure even when putting a value back fails as well", async () => {
 				const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 				mockContextProxy.setValue.mockImplementation((async (key: string, value: unknown) => {
