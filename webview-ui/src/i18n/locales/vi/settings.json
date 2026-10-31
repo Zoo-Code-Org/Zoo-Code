@@ -334,6 +334,10 @@
 			"label": "Công việc phụ",
 			"description": "Cho phép tạo và hoàn thành các công việc phụ mà không cần phê duyệt"
 		},
+		"webFetch": {
+			"label": "Web",
+			"description": "Cho phép tải nội dung web mà không cần phê duyệt"
+		},
 		"followupQuestions": {
 			"label": "Câu hỏi",
 			"description": "Tự động chọn câu trả lời đầu tiên được đề xuất cho các câu hỏi tiếp theo sau thời gian chờ đã cấu hình",

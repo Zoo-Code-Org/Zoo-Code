@@ -57,6 +57,7 @@ import { useSelectedModel } from "../ui/hooks/useSelectedModel"
 import {
 	Eye,
 	FileDiff,
+	Globe,
 	ListTree,
 	User,
 	Edit,
@@ -484,6 +485,7 @@ export const ChatRowContent = ({
 	}, [message.type, message.ask, message.partial, message.text])
 
 	if (tool) {
+		// Entering this branch implies message.ask === "tool". See tool useMemo above
 		const toolIcon = (name: string) => (
 			<span
 				className={`codicon codicon-${name}`}
@@ -1047,6 +1049,24 @@ export const ChatRowContent = ({
 						)}
 					</>
 				)
+			case "fetchWebContent":
+				return (
+					<>
+						<div style={headerStyle}>
+							<Globe className="w-4 shrink-0" aria-label="Web fetch icon" />
+							<span style={{ fontWeight: "bold" }}>{t("chat:webFetch.wantsToFetch")}</span>
+						</div>
+						<div className="pl-6">
+							<ToolUseBlock>
+								<ToolUseBlockHeader className="group">
+									<span className="whitespace-nowrap overflow-hidden text-ellipsis text-left mr-2">
+										{tool.url}
+									</span>
+								</ToolUseBlockHeader>
+							</ToolUseBlock>
+						</div>
+					</>
+				)
 			default:
 				return null
 		}
@@ -1458,6 +1478,24 @@ export const ChatRowContent = ({
 					if (!sayTool) return null
 
 					switch (sayTool.tool) {
+						case "fetchWebContent":
+							return (
+								<>
+									<div style={headerStyle}>
+										<Globe className="w-4 shrink-0" aria-label="Web fetch icon" />
+										<span style={{ fontWeight: "bold" }}>{t("chat:webFetch.didFetch")}</span>
+									</div>
+									<div className="pl-6">
+										<ToolUseBlock>
+											<ToolUseBlockHeader className="group">
+												<span className="whitespace-nowrap overflow-hidden text-ellipsis text-left mr-2">
+													{sayTool.url}
+												</span>
+											</ToolUseBlockHeader>
+										</ToolUseBlock>
+									</div>
+								</>
+							)
 						case "runSlashCommand": {
 							const slashCommandInfo = sayTool
 							return (

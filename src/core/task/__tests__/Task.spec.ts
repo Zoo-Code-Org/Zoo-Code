@@ -4696,6 +4696,65 @@ describe("Cline", () => {
 				expect(() => task.cancelCurrentRequest()).not.toThrow()
 			})
 
+			it("should abort and clear tool-owned abort controllers", () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+				const controller = new AbortController()
+				const abortSpy = vi.spyOn(controller, "abort")
+				const unregister = task.registerToolAbortController(controller)
+
+				task.cancelCurrentRequest()
+
+				expect(abortSpy).toHaveBeenCalledTimes(1)
+				expect(controller.signal.aborted).toBe(true)
+
+				// A second cancel must not re-abort a controller the task dropped.
+				task.cancelCurrentRequest()
+				expect(abortSpy).toHaveBeenCalledTimes(1)
+
+				unregister()
+			})
+
+			it("should not abort a tool controller that was unregistered", () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+				const controller = new AbortController()
+				const abortSpy = vi.spyOn(controller, "abort")
+				const unregister = task.registerToolAbortController(controller)
+
+				unregister()
+				task.cancelCurrentRequest()
+
+				expect(abortSpy).not.toHaveBeenCalled()
+			})
+
+			it("should abort a tool controller registered after the task started aborting", () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+				task.requestAbort(false)
+
+				const controller = new AbortController()
+				task.registerToolAbortController(controller)
+
+				// A tool that starts after a cancel must not outlive it.
+				expect(controller.signal.aborted).toBe(true)
+			})
+
 			it("should be called during dispose", () => {
 				const task = new Task({
 					provider: mockProvider,

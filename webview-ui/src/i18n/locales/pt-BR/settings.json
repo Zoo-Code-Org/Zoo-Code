@@ -334,6 +334,10 @@
 			"label": "Subtarefas",
 			"description": "Permitir a criação e conclusão de subtarefas sem exigir aprovação"
 		},
+		"webFetch": {
+			"label": "Web",
+			"description": "Permitir buscar conteúdo da web sem exigir aprovação"
+		},
 		"followupQuestions": {
 			"label": "Pergunta",
 			"description": "Selecionar automaticamente a primeira resposta sugerida para perguntas de acompanhamento após o tempo limite configurado",

@@ -334,6 +334,10 @@
 			"label": "Sottoattività",
 			"description": "Consenti la creazione e il completamento di attività secondarie senza richiedere approvazione"
 		},
+		"webFetch": {
+			"label": "Web",
+			"description": "Consenti il recupero di contenuti web senza richiedere approvazione"
+		},
 		"followupQuestions": {
 			"label": "Domanda",
 			"description": "Seleziona automaticamente la prima risposta suggerita per le domande di follow-up dopo il timeout configurato",

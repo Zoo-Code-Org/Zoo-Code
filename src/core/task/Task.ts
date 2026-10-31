@@ -392,6 +392,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	abort: boolean = false
 	currentRequestAbortController?: AbortController
 	/**
+	 * Abort controllers owned by long-running tool executions (e.g. an outbound
+	 * web fetch) that must stop when the task is cancelled or disposed.
+	 * `cancelCurrentRequest()` aborts and clears them alongside the API request
+	 * controller, so a cancelled task cannot keep a tool's network request (or
+	 * its body read) open until the tool's own timeout fires.
+	 */
+	private readonly toolAbortControllers = new Set<AbortController>()
+	/**
 	 * Controller for the waiter on an in-flight `ensureModelFetched()` call (see
 	 * safeEnsureModelFetched). Aborting it detaches this task from the provider-side
 	 * metadata fetch; it is aborted when the bounded wait expires and when the task's
@@ -3451,6 +3459,27 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
+	 * Register an abort controller owned by a long-running tool execution so
+	 * `cancelCurrentRequest()` (cancel/dispose) aborts it. Returns an
+	 * unregister function the tool must call when its execution finishes.
+	 *
+	 * The controller is aborted immediately if the task is already aborting, so
+	 * a tool that starts after a cancel cannot outlive it.
+	 */
+	public registerToolAbortController(controller: AbortController): () => void {
+		if (this.abort || this.abandoned) {
+			controller.abort()
+			return () => {}
+		}
+
+		this.toolAbortControllers.add(controller)
+
+		return () => {
+			this.toolAbortControllers.delete(controller)
+		}
+	}
+
+	/**
 	 * Cancels the current HTTP request if one is in progress.
 	 * This immediately aborts the underlying stream rather than waiting for the next chunk.
 	 */
@@ -3466,6 +3495,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.metadataFetchAbortController.abort()
 			this.metadataFetchAbortController = undefined
 		}
+		// Tool-owned requests (e.g. an outbound web fetch) are as stale as the
+		// stream: abort them so a cancelled task does not keep a network
+		// request or body read open until the tool's own timeout fires.
+		for (const controller of this.toolAbortControllers) {
+			controller.abort()
+		}
+		this.toolAbortControllers.clear()
 	}
 
 	/**

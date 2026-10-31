@@ -334,6 +334,10 @@
 			"label": "Subtasques",
 			"description": "Permetre la creació i finalització de subtasques sense requerir aprovació"
 		},
+		"webFetch": {
+			"label": "Web",
+			"description": "Permet obtenir contingut web sense requerir aprovació"
+		},
 		"followupQuestions": {
 			"label": "Pregunta",
 			"description": "Seleccionar automàticament la primera resposta suggerida per a preguntes de seguiment després del temps d'espera configurat",
