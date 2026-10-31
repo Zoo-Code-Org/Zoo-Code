@@ -2319,13 +2319,17 @@ describe("LiteLLMHandler", () => {
 		})
 
 		it("bills a folded miss at zero when the relayed row prices writes at zero", async () => {
-			// This is the money case. `cache_creation_input_token_cost: 0` upstream
-			// reaches the catalog as `cacheWritesPrice: 0`, which the cost kernel
-			// honours as a real price. A folded miss is then subtracted from the
-			// input pool and billed at zero, so the user pays for neither the input
-			// nor the write. When the row publishes no write price at all the fold
-			// is economically neutral instead, because the kernel falls back to
-			// `inputPrice`; only an explicit zero write price loses revenue.
+			// This is the money case, and the row below is hand-built rather than
+			// fetched: `fetchers/litellm.ts` maps a numeric 0 through a truthiness
+			// test, so an upstream `cache_creation_input_token_cost: 0` arrives as
+			// `cacheWritesPrice: undefined`, never as an explicit zero. Explicit-zero
+			// rows arise outside that fetcher, from a hand-configured or
+			// differently-sourced catalog, and this test pins the kernel's behaviour
+			// for them: a folded miss is subtracted from the input pool and billed at
+			// the row's zero write price, so the user pays for neither the input nor
+			// the write. On a fetcher-shaped row the fold is economically neutral
+			// instead, because the kernel falls back to `inputPrice`; it still
+			// mis-reports `cacheWriteTokens`, which is the defect this change fixes.
 			handler["models"] = { "deepseek-chat": { ...relayedDeepSeekRow, cacheWritesPrice: 0 } }
 			streamWithUsage({
 				prompt_tokens: 100,
@@ -2395,12 +2399,14 @@ describe("LiteLLMHandler", () => {
 
 		it("falls through a malformed counter to the next alias", async () => {
 			// A proxy can relay a counter as a string. The normalizer discards it and
-			// keeps resolving instead of poisoning the total with NaN.
+			// keeps resolving instead of poisoning the total with NaN. The malformed
+			// value sits on the highest-priority alias so the discard is what the
+			// assertion depends on: without it the string would win and be reported.
 			streamWithUsage({
 				prompt_tokens: 100,
 				completion_tokens: 5,
-				prompt_tokens_details: { cached_tokens: 20 },
-				cache_read_input_tokens: "30",
+				prompt_tokens_details: { cached_tokens: "30" },
+				cache_read_input_tokens: 20,
 			})
 
 			const usage = await collectUsage()
