@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from "vitest"
 
-import { anthropicModels } from "../providers/anthropic.js"
+import { anthropicModels, anthropicProviderDefinition } from "../providers/anthropic.js"
 import { vertexModels } from "../providers/vertex.js"
 import { openRouterDefaultModelInfo } from "../providers/openrouter.js"
 import {
@@ -16,8 +16,7 @@ import {
 	promptCacheTtlValues,
 	type ModelInfo,
 } from "../model.js"
-import { anthropicProviderDefinition } from "../provider-settings/anthropic.js"
-import { baseProviderSettingsShape } from "../provider-settings/common.js"
+import { baseProviderSettingsShape } from "../providers/common.js"
 import { providerIdentifiers } from "../provider-identifiers.js"
 import { globalSettingsSchema } from "../global-settings.js"
 

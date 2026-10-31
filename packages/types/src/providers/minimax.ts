@@ -1,4 +1,13 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 // Minimax
 // https://platform.minimax.io/docs/guides/models-intro
@@ -149,3 +158,17 @@ export const minimaxDefaultModelInfo: ModelInfo = minimaxModels[minimaxDefaultMo
 
 export const MINIMAX_DEFAULT_MAX_TOKENS = 16_384
 export const MINIMAX_DEFAULT_TEMPERATURE = 1.0
+
+export const minimaxProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.minimax,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => minimaxDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		minimaxBaseUrl: z
+			.union([z.literal("https://api.minimax.io/v1"), z.literal("https://api.minimaxi.com/v1")])
+			.optional(),
+		minimaxApiKey: z.string().optional(),
+	},
+})

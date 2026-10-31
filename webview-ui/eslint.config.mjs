@@ -41,6 +41,23 @@ export default [
 		},
 	},
 	{
+		files: ["src/**/*.{ts,tsx}"],
+		rules: {
+			"no-restricted-imports": [
+				"error",
+				{
+					paths: [
+						{
+							name: "axios",
+							message:
+								"axios was removed from the webview bundle in favour of global fetch. Use fetch() for network calls. The dependency is no longer declared in webview-ui/package.json, so an import here only resolves through the hoisted store and would fail at build time.",
+						},
+					],
+				},
+			],
+		},
+	},
+	{
 		files: ["src/__mocks__/**/*.js"],
 		rules: {
 			"no-undef": "off",
@@ -63,6 +80,11 @@ export default [
 				"error",
 				{
 					paths: [
+						{
+							name: "axios",
+							message:
+								"axios was removed from the webview bundle in favour of global fetch. Use fetch() for network calls. The dependency is no longer declared in webview-ui/package.json, so an import here only resolves through the hoisted store and would fail at build time.",
+						},
 						{
 							name: "@tanstack/react-query",
 							importNames: ["QueryClientProvider"],

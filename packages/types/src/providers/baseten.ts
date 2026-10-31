@@ -1,4 +1,13 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 // Baseten
 // https://baseten.co/products/model-apis/
@@ -158,3 +167,14 @@ export const basetenModels = {
 export type BasetenModelId = keyof typeof basetenModels
 
 export const basetenDefaultModelId = "zai-org/GLM-4.6" satisfies BasetenModelId
+
+export const basetenProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.baseten,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => basetenDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		basetenApiKey: z.string().optional(),
+	},
+})

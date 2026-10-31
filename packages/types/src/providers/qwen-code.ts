@@ -1,4 +1,13 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 export type QwenCodeModelId = "qwen3-coder-plus" | "qwen3-coder-flash"
 
@@ -28,3 +37,14 @@ export const qwenCodeModels = {
 		description: "Qwen3 Coder Flash - Fast coding model with 1M context window optimized for speed",
 	},
 } as const satisfies Record<QwenCodeModelId, ModelInfo>
+
+export const qwenCodeProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.qwenCode,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => qwenCodeDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		qwenCodeOauthPath: z.string().optional(),
+	},
+})

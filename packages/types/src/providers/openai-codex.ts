@@ -1,4 +1,11 @@
-import type { ModelInfo } from "../model.js"
+import { openAiCodexServiceTierSchema, type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 /**
  * OpenAI Codex Provider
@@ -350,3 +357,17 @@ export const openAiCodexModels = {
 		description: "GPT-5.2: Latest GPT model via ChatGPT subscription",
 	},
 } as const satisfies Record<string, ModelInfo>
+
+export const OPEN_AI_CODEX_SERVICE_TIER_KEY = "openAiCodexServiceTier"
+
+export const openAiCodexProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.openaiCodex,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => openAiCodexDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		// Codex "Fast" mode maps to the Responses API priority service tier.
+		[OPEN_AI_CODEX_SERVICE_TIER_KEY]: openAiCodexServiceTierSchema.optional(),
+	},
+})

@@ -1,4 +1,13 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 // https://platform.deepseek.com/docs/api
 // preserveReasoning enables interleaved thinking mode for tool calls:
@@ -75,3 +84,15 @@ export const deepSeekModels = {
 
 // https://api-docs.deepseek.com/quick_start/parameter_settings
 export const DEEP_SEEK_DEFAULT_TEMPERATURE = 0.0
+
+export const deepSeekProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.deepseek,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => deepSeekDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		deepSeekBaseUrl: z.string().optional(),
+		deepSeekApiKey: z.string().optional(),
+	},
+})

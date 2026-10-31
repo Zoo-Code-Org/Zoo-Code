@@ -1,4 +1,13 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 // https://docs.sambanova.ai/cloud/docs/get-started/supported-models
 export type SambaNovaModelId =
@@ -88,3 +97,14 @@ export const sambaNovaModels = {
 		description: "OpenAI gpt oss 120b model with 128k context window.",
 	},
 } as const satisfies Record<string, ModelInfo>
+
+export const sambaNovaProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.sambanova,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => sambaNovaDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		sambaNovaApiKey: z.string().optional(),
+	},
+})

@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import { providerIdentifiers } from "../provider-identifiers.js"
 import { baseProviderSettingsShape, createProviderDefinition } from "./common.js"
+import { vscodeLlmDefaultModelId } from "./vscode-llm.js"
 
 const schema = {
 	...baseProviderSettingsShape,
@@ -18,11 +19,13 @@ const schema = {
 export const vsCodeLmProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.vscodeLm,
 	getModelId: (settings) => settings.vsCodeLmModelSelector?.id,
+	getDefaultModelId: () => vscodeLlmDefaultModelId,
 	schema,
 })
 
 export const githubCopilotProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.githubCopilot,
 	getModelId: (settings) => settings.vsCodeLmModelSelector?.id,
+	getDefaultModelId: () => vscodeLlmDefaultModelId,
 	schema,
 })
