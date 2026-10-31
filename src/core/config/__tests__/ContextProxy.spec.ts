@@ -120,6 +120,39 @@ describe("ContextProxy", () => {
 			expect(result).toBe("deepseek")
 		})
 
+		it("should not let an older rejected write clobber a newer cached value", async () => {
+			let rejectFirst: (error: Error) => void = () => {}
+			const firstWriteResult = new Promise<void>((_, reject) => {
+				rejectFirst = reject
+			})
+
+			mockGlobalState.update.mockReset()
+			mockGlobalState.update.mockReturnValueOnce(firstWriteResult)
+			mockGlobalState.update.mockResolvedValueOnce(undefined)
+
+			const firstWrite = proxy.updateGlobalState("apiProvider", "anthropic")
+			await proxy.updateGlobalState("apiProvider", "openai")
+			rejectFirst(new Error("disk full"))
+			await expect(firstWrite).rejects.toThrow("disk full")
+
+			expect(proxy.getGlobalState("apiProvider")).toBe("openai")
+		})
+
+		it("should not restore a pre-reset value when a pending write rejects after reset", async () => {
+			let rejectPending: (error: Error) => void = () => {}
+			mockGlobalState.update.mockReset()
+			mockGlobalState.update.mockReturnValueOnce(
+				new Promise<void>((_, reject) => {
+					rejectPending = reject
+				}),
+			)
+			const pending = proxy.updateGlobalState("apiProvider", "anthropic")
+			await proxy.resetAllState()
+			rejectPending(new Error("disk full"))
+			await expect(pending).rejects.toThrow("disk full")
+			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
+		})
+
 		it("should bypass cache for pass-through state keys", async () => {
 			// Setup mock return value
 			mockGlobalState.get.mockReturnValue("pass-through-value")
@@ -738,6 +771,22 @@ Output only the summary of the conversation so far, without any additional comme
 				(call: any[]) => call[0] === "customSupportPrompts",
 			)
 			expect(customSupportPromptsUpdateCalls.length).toBe(0)
+		})
+	})
+
+	describe("export", () => {
+		it("should exclude viewStates from the exported settings", async () => {
+			await proxy.setValue("viewStates", {
+				"stable-sidebar-view": { mode: "architect", currentApiConfigName: "profile-a", updatedAt: 1 },
+			})
+			await proxy.setValue("customInstructions", "global instructions")
+
+			const exported = await proxy.export()
+
+			// Per-view selection state is machine-local and must never transfer
+			// between settings, while ordinary global settings keep round-tripping.
+			expect(exported).not.toHaveProperty("viewStates")
+			expect(exported?.customInstructions).toBe("global instructions")
 		})
 	})
 })

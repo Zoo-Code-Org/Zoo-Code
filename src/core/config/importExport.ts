@@ -98,6 +98,12 @@ function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
 
 	for (const [key, rawValue] of Object.entries(rawGlobalSettings)) {
 		const path = `globalSettings.${key}`
+
+		// Per-view selections are machine-local: they must not import across machines.
+		if (key === "viewStates") {
+			continue
+		}
+
 		const schema = globalSettingsShape[key as keyof GlobalSettings]
 
 		if (!schema) {
