@@ -3296,20 +3296,31 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		expect(ownedIds(s).has(parent.id)).toBe(false)
 	})
 
-	it("non-active runtime write DELETES local ownership (kills L566 Conditional->true / LogicalOperator / StringLiteral, L569 CallExpression)", async () => {
+	it("non-active runtime write DELETES local ownership (kills L569 CallExpression, L566 LogicalOperator)", async () => {
 		// trackLocalSessionOwnership: `if ((written.status ?? "active") === "active") add else delete`.
 		// Observable under test: after an active runtime write registers ownership, a later NON-active
-		// runtime write must remove it (the else/`delete(id)` branch). If the mutant forces the add
-		// branch (L566 ->true) or drops the delete (L569 `;`), the task stays owned and the periodic
-		// tick will NOT repair it as a crash orphan.
+		// runtime write must remove it (the else/`delete(id)` branch). If the delete is dropped (L569
+		// `;`) or the status test is weakened (L566 LogicalOperator, e.g. `written.status && "active"`),
+		// the task stays owned and the periodic tick will NOT repair it as a crash orphan.
+		//
+		// The two always-DELETE mutants (L566 ConditionalExpression->true, StringLiteral->"") are NOT
+		// killed here: they delete for every status, so the completed write still releases the claim
+		// and this scenario still repairs. They are killed by the sibling test
+		// "non-active runtime write removes the id from locallyActiveTaskIds", which asserts the ADD
+		// branch for an explicit "active" write. Verified by mutation, not assumed.
 		//
 		// Sequence on ONE task id `orphan`:
 		//   1. runtime `active` write   -> ownership ADDED.
 		//   2. runtime `completed` write (valid active->completed) -> ownership DELETED.
-		//   3. seed disk so the SAME id is again an active child of a delegated parent (crash orphan)
-		//      and reload the store — the only ownership signal is from step 1/2 runtime writes.
+		//   3. rewrite disk so the SAME id is again an active child of a delegated parent (crash
+		//      orphan), then refresh THIS store from disk — the only ownership signal is step 1/2.
 		//   4. tick: with ownership deleted, the orphan is repaired (interrupted). Under either mutant
 		//      it stays owned -> stays active.
+		//
+		// Steps 1-4 must share ONE store instance. `locallyActiveTaskIds` is per-instance by design
+		// (`private readonly locallyActiveTaskIds = new Set<string>()`), so a second store would start
+		// unowned and repair the orphan under every mutant — the assertion would pass vacuously and
+		// kill nothing.
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 		const childId = "orphan-l566"
 		const parentId = "parent-l566"
@@ -3322,41 +3333,35 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		await s.upsert(makeItem({ id: childId, status: "active", parentTaskId: parentId, rootTaskId: parentId }))
 		await s.atomicReadAndUpdate(childId, (c) => ({ ...c, status: "completed" as const }))
 		expect(s.get(childId)?.status).toBe("completed")
-		s.dispose()
+		// The completed write released the claim; this is the state the tick must observe.
+		expect(ownedIds(s).has(childId)).toBe(false)
 
 		// Step 3: rewrite disk so the same child id is once more an ACTIVE orphan of a delegated
-		// parent (as if another window crashed mid-delegation), then reload into a fresh store.
+		// parent (as if another window crashed mid-delegation), then refresh this store from disk.
 		const [parent, child] = delegatedPair(parentId, childId)
 		await seedItems(tmpDir, [parent, child])
-		const s2 = (store = new TaskHistoryStore(tmpDir))
-		useTickClock()
+		await s.reconcile({ forceRefresh: true })
+		expect(s.get(childId)?.status).toBe("active")
+		expect(s.get(parentId)?.status).toBe("delegated")
 
-		// Startup reconciliation must NOT repair it yet: make the mtime look live at startup, then
-		// stale only for the tick.
-		let age = 60_000
-		const probe = TaskHistoryStore.prototype as unknown as {
-			getChildFileMtimeMs: (id: string) => Promise<number | undefined>
-		}
-		mtimeSpy = vi
-			.spyOn(probe, "getChildFileMtimeMs")
-			.mockImplementation((id: string) =>
-				id === childId ? Promise.resolve(Date.now() - age) : Promise.resolve(undefined),
-			)
-
-		await s2.initialize()
-		expect(s2.get(childId)?.status).toBe("active")
+		// Both liveness probes must agree that the child is stale: the async one decides the repair,
+		// and the under-lock sync one re-checks it immediately before the commit. Wiring only the
+		// async probe leaves the guard reading the REAL file mtime, so the repair commits only while
+		// that mtime happens to sit more than LIVE_CHILD_MTIME_THRESHOLD_MS below the fake clock — a
+		// margin of ~100-180ms on Windows that a slow fs poll phase can eat, which is the `flushUntil`
+		// starvation this test used to flake with on windows-latest.
+		installStaleChildInjector(childId)
 
 		// Step 4: tick with a now-stale mtime.
-		age = 10 * 60 * 1000
 		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
-		await flushUntil(() => s2.get(childId)?.status === "interrupted", {
+		await flushUntil(() => s.get(childId)?.status === "interrupted", {
 			label: "completed write released ownership so the tick repaired the orphan",
-			snapshot: () => `child=${s2.get(childId)?.status} parent=${s2.get(parentId)?.status}`,
+			snapshot: () => `child=${s.get(childId)?.status} parent=${s.get(parentId)?.status}`,
 		})
 
 		// Ownership was deleted by the completed write, so the orphan is repaired.
 		// (Under L566->true or L569 `;` it would remain owned and stay active.)
-		expect(s2.get(childId)?.status).toBe("interrupted")
+		expect(s.get(childId)?.status).toBe("interrupted")
 		expect(errorSpy).not.toHaveBeenCalled()
 		errorSpy.mockRestore()
 	})
