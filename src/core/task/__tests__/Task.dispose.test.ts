@@ -410,6 +410,33 @@ describe("Task.run() idempotency", () => {
 		mockApiConfiguration = { apiProvider: providerIdentifiers.anthropic, apiKey: "test-key" } as ProviderSettings
 	})
 
+	test("each Task constructs its own observation registry", async () => {
+		// The guard authorizes a write from the observations of the task that made it. One
+		// shared registry would let a parent read authorize a subtask write, and one task
+		// clearing its registry would revoke the other task authorization. The field is an
+		// instance initializer, so this asserts the ownership rather than the type.
+		const first = new Task({
+			provider: mockProvider as unknown as ClineProvider,
+			apiConfiguration: mockApiConfiguration,
+			task: "first",
+			startTask: false,
+		})
+		const second = new Task({
+			provider: mockProvider as unknown as ClineProvider,
+			apiConfiguration: mockApiConfiguration,
+			task: "second",
+			startTask: false,
+		})
+
+		expect(first.observationRegistry).not.toBe(second.observationRegistry)
+		first.observationRegistry.observe("/same/path.ts", "1:2:22:100:100", true)
+		expect(second.observationRegistry.get("/same/path.ts")).toBeUndefined()
+		expect(second.observationRegistry.size).toBe(0)
+
+		await first.dispose()
+		await second.dispose()
+	})
+
 	test("run() does not invoke startTask when task was already started by constructor", async () => {
 		// Spy on the prototype before construction so we capture the constructor's call too.
 		const startTaskSpy = vi.spyOn(Task.prototype as any, "startTask").mockResolvedValue(undefined)

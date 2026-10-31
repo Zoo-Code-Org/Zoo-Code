@@ -13,7 +13,7 @@ export {
 } from "./taskMessages"
 export { taskMetadata } from "./taskMetadata"
 export { ensureMessageIdentifiers } from "./mergeMessageSnapshots"
-export { TaskHistoryStore } from "./TaskHistoryStore"
+export { TaskHistoryDeleteError, TaskHistoryStore } from "./TaskHistoryStore"
 export {
 	abandonDelegatedChild,
 	assertValidTransition,
