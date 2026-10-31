@@ -186,6 +186,90 @@ Line 2
 			}
 		})
 
+		it("should not send messages hidden by sliding-window truncation to the summarizer", async () => {
+			const truncationId = "trunc-1"
+			const messages: ApiMessage[] = [
+				{ role: "user", content: "Hidden first", truncationParent: truncationId },
+				{ role: "assistant", content: "Hidden second", truncationParent: truncationId },
+				{ role: "assistant", content: "Truncation marker", isTruncationMarker: true, truncationId },
+				{ role: "user", content: "Visible third" },
+				{ role: "assistant", content: "Visible fourth" },
+				{ role: "user", content: "Visible fifth" },
+			]
+			const original = structuredClone(messages)
+			const sentMessages: unknown[] = []
+			const createMessageSpy = vi
+				.spyOn(mockApiHandler, "createMessage")
+				.mockImplementation((...args: unknown[]) => {
+					sentMessages.push(args[1])
+					return (async function* () {
+						yield { type: "text", text: "Mock summary" }
+					})()
+				})
+
+			const result = await summarizeConversation({
+				messages,
+				apiHandler: mockApiHandler,
+				systemPrompt: "System prompt",
+				taskId,
+				isAutomaticTrigger: false,
+			})
+
+			const sentText = JSON.stringify(sentMessages[0])
+			expect(sentText).not.toContain("Hidden first")
+			expect(sentText).not.toContain("Hidden second")
+			expect(sentText).toContain("Visible third")
+
+			// Complete stored history is preserved (non-destructive) and the input is not mutated
+			const preserved = result.messages.filter((msg) => !msg.isSummary)
+			expect(preserved).toHaveLength(messages.length)
+			// Each stored message is unchanged apart from the condenseParent tag.
+			expect(preserved.map(({ condenseParent: _tag, ...rest }) => rest)).toEqual(original)
+			expect(messages).toEqual(original)
+
+			createMessageSpy.mockRestore()
+		})
+
+		it("should exclude truncated messages when a prior summary exists", async () => {
+			const truncationId = "trunc-2"
+			const messages: ApiMessage[] = [
+				{ role: "user", content: "Condensed away", condenseParent: "prior-summary" },
+				{ role: "user", content: "Prior summary text", isSummary: true, condenseId: "prior-summary" },
+				{ role: "user", content: "Hidden after summary", truncationParent: truncationId },
+				{ role: "assistant", content: "Hidden reply", truncationParent: truncationId },
+				{ role: "assistant", content: "Truncation marker", isTruncationMarker: true, truncationId },
+				{ role: "user", content: "Visible third" },
+				{ role: "assistant", content: "Visible fourth" },
+				{ role: "user", content: "Visible fifth" },
+			]
+			const sentMessages: unknown[] = []
+			const createMessageSpy = vi
+				.spyOn(mockApiHandler, "createMessage")
+				.mockImplementation((...args: unknown[]) => {
+					sentMessages.push(args[1])
+					return (async function* () {
+						yield { type: "text", text: "Mock summary" }
+					})()
+				})
+
+			await summarizeConversation({
+				messages,
+				apiHandler: mockApiHandler,
+				systemPrompt: "System prompt",
+				taskId,
+				isAutomaticTrigger: false,
+			})
+
+			const sentText = JSON.stringify(sentMessages[0])
+			expect(sentText).toContain("Prior summary text")
+			expect(sentText).toContain("Visible third")
+			expect(sentText).not.toContain("Hidden after summary")
+			expect(sentText).not.toContain("Hidden reply")
+			expect(sentText).not.toContain("Condensed away")
+
+			createMessageSpy.mockRestore()
+		})
+
 		it("should preserve <command> blocks in the summary", async () => {
 			const messages: ApiMessage[] = [
 				{
