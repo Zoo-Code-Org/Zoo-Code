@@ -167,6 +167,9 @@ const messagesAreStale = (incoming: Partial<ExtensionState>, currentSequence: nu
 	currentSequence !== undefined &&
 	incoming.clineMessagesSeq <= currentSequence
 
+const snapshotIsStale = (incoming: Partial<ExtensionState>, currentSequence: number | undefined): boolean =>
+	incoming.stateSeq !== undefined && currentSequence !== undefined && incoming.stateSeq <= currentSequence
+
 function internMessages(messages: ClineMessage[], previousMessages: ClineMessage[], cache: StringCache): void {
 	const previousByTimestamp = new Map(previousMessages.map((item) => [item.ts, item]))
 	for (const message of messages) {
@@ -220,6 +223,13 @@ export const mergeExtensionState = (prevState: ExtensionState, newState: Partial
 		rest.currentTaskId = prevState.currentTaskId
 	} else {
 		rest.currentTaskId = newState.currentTaskId
+	}
+
+	// Snapshots are read asynchronously, so an older one can arrive after a newer one. Keep the
+	// language from the newest snapshot instead of reverting to the one the stale snapshot read.
+	if (snapshotIsStale(newState, prevState.stateSeq)) {
+		rest.language = prevState.language
+		rest.stateSeq = prevState.stateSeq
 	}
 
 	// Note that we completely replace the previous apiConfiguration and customSupportPrompts objects
@@ -328,6 +338,7 @@ export const ExtensionStateContextProvider: React.FC<{
 	const messagesRef = useRef(initialState?.clineMessages ?? [])
 	const currentTaskIdRef = useRef(initialState?.currentTaskId)
 	const clineMessagesSeqRef = useRef(initialState?.clineMessagesSeq)
+	const stateSeqRef = useRef(initialState?.stateSeq)
 
 	const [state, setState] = useState<ExtensionState>(() => {
 		const mergedState = mergeExtensionState(createInitialExtensionState(), initialState ?? {})
@@ -424,7 +435,10 @@ export const ExtensionStateContextProvider: React.FC<{
 					if (newState.currentTaskItem) {
 						historyCache.intern(newState.currentTaskItem)
 					}
-					applyLanguage(i18next, newState.language)
+					if (!snapshotIsStale(newState, stateSeqRef.current)) {
+						applyLanguage(i18next, newState.language)
+						stateSeqRef.current = newState.stateSeq ?? stateSeqRef.current
+					}
 					setState((prevState) => mergeExtensionState(prevState, newState))
 					setShowWelcome(!checkExistKey(newState.apiConfiguration, newState.zooCodeIsAuthenticated))
 					setDidHydrateState(true)

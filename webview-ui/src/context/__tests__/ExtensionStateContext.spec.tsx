@@ -1111,4 +1111,37 @@ describe("mergeExtensionState", () => {
 			expect(result.clineMessagesSeq).toBe(1)
 		})
 	})
+
+	describe("stateSeq protection", () => {
+		const prevState: ExtensionState = { ...createInitialExtensionState(), language: "es", stateSeq: 5 }
+
+		it.each([
+			["older", 4],
+			["equal", 5],
+		])("keeps the language when the snapshot seq is %s", (_label, stateSeq) => {
+			const result = mergeExtensionState(prevState, { language: "en", stateSeq, soundEnabled: true })
+
+			expect(result.language).toBe("es")
+			expect(result.stateSeq).toBe(5)
+			// Only the language is protected; the rest of the snapshot still applies.
+			expect(result.soundEnabled).toBe(true)
+		})
+
+		it.each<[string, Partial<ExtensionState>, number]>([
+			["newer", { language: "en", stateSeq: 6 }, 6],
+			["unsequenced", { language: "en" }, 5],
+		])("applies the language from an %s snapshot", (_label, newState, expectedSeq) => {
+			const result = mergeExtensionState(prevState, newState)
+
+			expect(result.language).toBe("en")
+			expect(result.stateSeq).toBe(expectedSeq)
+		})
+
+		it("applies the language from the first sequenced snapshot", () => {
+			const result = mergeExtensionState(createInitialExtensionState(), { language: "es", stateSeq: 1 })
+
+			expect(result.language).toBe("es")
+			expect(result.stateSeq).toBe(1)
+		})
+	})
 })

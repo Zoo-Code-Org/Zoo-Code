@@ -48,6 +48,33 @@ describe("hydrated language", () => {
 	})
 })
 
+describe("out-of-order state pushes", () => {
+	beforeEach(async () => {
+		await i18next.changeLanguage("en")
+	})
+
+	const LanguageProbe = () => <span data-testid="language">{useExtensionState().language}</span>
+
+	it("keeps the newer language when an older snapshot arrives later", async () => {
+		render(
+			<ExtensionStateContextProvider>
+				<LanguageProbe />
+			</ExtensionStateContextProvider>,
+		)
+
+		await postState({ language: "es", stateSeq: 2 })
+		await postState({ language: "en", stateSeq: 1 })
+
+		expect(i18next.language).toBe("es")
+		expect(screen.getByTestId("language")).toHaveTextContent("es")
+
+		await postState({ language: "en", stateSeq: 3 })
+
+		expect(i18next.language).toBe("en")
+		expect(screen.getByTestId("language")).toHaveTextContent("en")
+	})
+})
+
 describe("applyLanguage", () => {
 	beforeEach(async () => {
 		await i18next.changeLanguage("en")
@@ -56,6 +83,13 @@ describe("applyLanguage", () => {
 	it("switches to a different language", () => {
 		applyLanguage(i18next, "es")
 		expect(i18next.language).toBe("es")
+	})
+
+	it("keeps the language from the latest of consecutive pushes", () => {
+		applyLanguage(i18next, "es")
+		applyLanguage(i18next, "en")
+		expect(i18next.language).toBe("en")
+		expect(i18next.t("history:recentTasks")).toBe("Recent Tasks")
 	})
 
 	it("does not re-emit languageChanged for the active language or a missing one", () => {
