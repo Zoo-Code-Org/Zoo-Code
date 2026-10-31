@@ -1352,6 +1352,47 @@ describe("ProviderSettingsManager", () => {
 		})
 	})
 
+	describe("ClearModeConfig", () => {
+		const profilesWithModes = (modeApiConfigs?: Record<string, string>) =>
+			JSON.stringify({
+				currentApiConfigName: "default",
+				apiConfigs: { default: { id: "default" } },
+				modeApiConfigs,
+				migrations: { rateLimitSecondsMigrated: true },
+			})
+
+		const lastStored = () => {
+			const calls = mockSecrets.store.mock.calls
+			return JSON.parse(calls[calls.length - 1][1])
+		}
+
+		it("removes only the binding of the given mode", async () => {
+			mockSecrets.get.mockResolvedValue(profilesWithModes({ code: "code-id", architect: "architect-id" }))
+
+			await providerSettingsManager.clearModeConfig("code")
+
+			expect(lastStored().modeApiConfigs).toEqual({ architect: "architect-id" })
+		})
+
+		it.each([
+			{ name: "the mode has no binding", modeApiConfigs: { architect: "architect-id" } },
+			{ name: "no mode map is stored", modeApiConfigs: undefined },
+		])("does not write when $name", async ({ modeApiConfigs }) => {
+			mockSecrets.get.mockResolvedValue(profilesWithModes(modeApiConfigs))
+			mockSecrets.store.mockClear()
+
+			await providerSettingsManager.clearModeConfig("code")
+
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
+		it("should throw error if secrets storage fails", async () => {
+			mockSecrets.get.mockRejectedValue(new Error("Storage failed"))
+
+			await expect(providerSettingsManager.clearModeConfig("code")).rejects.toThrow("Failed to clear mode config")
+		})
+	})
+
 	describe("HasConfig", () => {
 		it("should return true for existing config", async () => {
 			const existingConfig: ProviderProfiles = {
