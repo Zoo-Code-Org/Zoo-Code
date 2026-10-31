@@ -477,7 +477,13 @@ describe("eval ipc client", () => {
 		client.on(IpcMessageType.TaskEvent, (event) => events.push(event as TaskEvent))
 
 		try {
-			await waitFor(() => logs.some((entry) => String(entry[0]).includes("MAX_FRAME_BYTES")), 10_000)
+			// The handler logs and then destroys the socket, but `isConnected` is only
+			// cleared in the close callback, which runs after a timer tick. Waiting on
+			// the log alone would race that callback, so the predicate covers both.
+			await waitFor(
+				() => !client.isConnected && logs.some((entry) => String(entry[0]).includes("MAX_FRAME_BYTES")),
+				10_000,
+			)
 
 			const oversized = logs.filter((entry) => String(entry[0]).includes("MAX_FRAME_BYTES"))
 			assert.equal(oversized.length, 1, "exactly one bounded log line")
@@ -524,7 +530,12 @@ describe("eval ipc client", () => {
 		const client = new EvalIpcClient(socketPath, (...args) => logs.push(args), { maxFrameBytes: ceiling })
 
 		try {
-			await waitFor(() => logs.some((entry) => String(entry[0]).includes("MAX_FRAME_BYTES")), 10_000)
+			// Same close-callback race as the oversized-frame test above: wait for the
+			// disconnect, not just for the log line.
+			await waitFor(
+				() => !client.isConnected && logs.some((entry) => String(entry[0]).includes("MAX_FRAME_BYTES")),
+				10_000,
+			)
 
 			assert.equal(
 				logs.filter((entry) => String(entry[0]).includes("MAX_FRAME_BYTES")).length,
