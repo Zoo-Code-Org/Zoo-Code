@@ -1,11 +1,17 @@
 import { z } from "zod"
 
 import { reasoningEffortSettingSchema, verbosityLevelsSchema } from "../model.js"
-import type { ProviderIdentifier } from "../provider-identifiers.js"
+import { type ProviderIdentifier } from "../provider-identifiers.js"
 
 export const API_PROVIDER_FIELD = "apiProvider"
 export const SETTINGS_SHAPE_FIELD = "settingsShape"
 export const API_MODEL_ID_FIELD = "apiModelId"
+
+/**
+ * Providers whose model is chosen by the user (custom endpoints or locally
+ * discovered models) have no meaningful default.
+ */
+export const NO_DEFAULT_MODEL_ID = ""
 
 // Treat a persisted `null` as an unset value. Previously persisted or imported
 // profiles may store `null` for these fields; converting `null` to `undefined`
@@ -43,6 +49,7 @@ export const apiModelIdProviderModelShape = {
 type ModelId = string | undefined
 type UntypedProviderSettings = Record<string, unknown>
 type ProviderModelIdAccessor = (settings: UntypedProviderSettings) => ModelId
+type ProviderDefaultModelIdAccessor = (settings: UntypedProviderSettings) => string
 type ProviderSettingsFromSchema<S extends z.ZodRawShape> = z.infer<z.ZodObject<S>>
 type TypedProviderModelIdAccessor<S extends z.ZodRawShape> = (settings: ProviderSettingsFromSchema<S>) => ModelId
 
@@ -51,6 +58,8 @@ type ProviderDefinitionInput<P extends ProviderIdentifier, S extends z.ZodRawSha
 	schema: S
 	modelIdKey?: Extract<keyof S, string>
 	getModelId: TypedProviderModelIdAccessor<S>
+	// Provider-specific default model data lives with the provider definition, mirroring `getModelId`.
+	getDefaultModelId: ProviderDefaultModelIdAccessor
 }
 
 export type ProviderDefinition = {
@@ -59,6 +68,7 @@ export type ProviderDefinition = {
 	modelIdKey?: string
 	schema: z.ZodObject
 	getModelId: ProviderModelIdAccessor
+	getDefaultModelId: ProviderDefaultModelIdAccessor
 }
 
 export const createModelIdAccessor =
@@ -87,5 +97,6 @@ export const createProviderDefinition = <P extends ProviderIdentifier, S extends
 			[API_PROVIDER_FIELD]: z.literal(apiProvider),
 		}),
 		getModelId,
+		getDefaultModelId: modelIdDefinition.getDefaultModelId,
 	}
 }

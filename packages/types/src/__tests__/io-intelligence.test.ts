@@ -12,7 +12,7 @@ describe("IO Intelligence shared contract", () => {
 	it("registers the stable dynamic-provider identity and default model", () => {
 		expect(providerIdentifiers.ioIntelligence).toBe("io-intelligence")
 		expect(dynamicProviders).toContain(providerIdentifiers.ioIntelligence)
-		expect(getProviderDefaultModelId(providerIdentifiers.ioIntelligence)).toBe(ioIntelligenceDefaultModelId)
+		expect(getProviderDefaultModelId(providerIdentifiers.ioIntelligence, {})).toBe(ioIntelligenceDefaultModelId)
 	})
 
 	it("classifies the API key as secret and resolves the configured model", () => {

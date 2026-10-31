@@ -1,4 +1,3 @@
-import axios from "axios"
 import { z } from "zod"
 import { useQuery, UseQueryOptions } from "@tanstack/react-query"
 
@@ -28,13 +27,18 @@ async function getOpenRouterKeyInfo(apiKey?: string, baseUrl?: string) {
 
 		const keyEndpoint = `${apiBaseUrl}/key`
 
-		const response = await axios.get(keyEndpoint, {
+		const response = await fetch(keyEndpoint, {
+			method: "GET",
 			headers: {
 				Authorization: `Bearer ${apiKey}`,
 			},
 		})
 
-		const result = openRouterKeyInfoSchema.safeParse(response.data)
+		if (!response.ok) {
+			throw new Error(`Request failed with status code ${response.status}`)
+		}
+
+		const result = openRouterKeyInfoSchema.safeParse(await response.json())
 		if (!result.success) {
 			console.error("OpenRouter API key info validation failed:", result.error)
 			return null

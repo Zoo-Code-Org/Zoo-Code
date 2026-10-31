@@ -1,5 +1,13 @@
-import type { ModelInfo } from "../model.js"
-import { ZaiApiLine } from "../provider-settings.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 // Z AI
 // https://docs.z.ai/guides/llm/glm-4-32b-0414-128k
@@ -561,3 +569,41 @@ export function getZAiModels(apiLine: ZaiApiLine = "international_coding"): Reco
 		? { ...regionalModels, ...mainlandZAiCodingPlanOnlyModels }
 		: regionalModels
 }
+
+export const zaiApiLineSchema = z.enum(["international_coding", "china_coding", "international_api", "china_api"])
+export type ZaiApiLine = z.infer<typeof zaiApiLineSchema>
+
+export type ZaiDefaultModelIds = {
+	readonly china: string
+	readonly international: string
+}
+
+const zaiDefaultModelIds: ZaiDefaultModelIds = {
+	china: mainlandZAiDefaultModelId,
+	international: internationalZAiDefaultModelId,
+}
+
+/**
+ * Resolve the default model for a Z.ai API line. Both regional catalogs currently
+ * share a default model ID, so the regional defaults are injectable to let tests
+ * prove the mainland/international mapping is not inverted.
+ */
+export function getZAiDefaultModelId(zaiApiLine: unknown, defaults: ZaiDefaultModelIds = zaiDefaultModelIds): string {
+	const parsedApiLine = zaiApiLineSchema.safeParse(zaiApiLine)
+	const apiLine = parsedApiLine.success ? parsedApiLine.data : "international_coding"
+	return zaiApiLineConfigs[apiLine].isChina ? defaults.china : defaults.international
+}
+
+export const zaiProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.zai,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	// Z.ai serves separate model catalogs for mainland China and international
+	// endpoints, so the default depends on the configured API line.
+	getDefaultModelId: (settings) => getZAiDefaultModelId(settings.zaiApiLine),
+	schema: {
+		...apiModelIdProviderModelShape,
+		zaiApiKey: z.string().optional(),
+		zaiApiLine: zaiApiLineSchema.optional(),
+	},
+})

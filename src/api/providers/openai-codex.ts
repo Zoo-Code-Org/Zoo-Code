@@ -627,7 +627,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 						if (block.type === "text") {
 							content.push({ type: "input_text", text: block.text })
 						} else if (block.type === "image") {
-							const image = block as Anthropic.Messages.ImageBlockParam
+							const image = block
 							if (image.source.type === "base64") {
 								const imageUrl = `data:${image.source.media_type};base64,${image.source.data}`
 								content.push({ type: "input_image", image_url: imageUrl })

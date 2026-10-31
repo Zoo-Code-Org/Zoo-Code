@@ -1,4 +1,13 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 export type FriendliModelId =
 	"zai-org/GLM-5.2" | "zai-org/GLM-5.1" | "deepseek-ai/DeepSeek-V3.2" | "MiniMaxAI/MiniMax-M2.5"
@@ -62,3 +71,14 @@ export const friendliModels = {
 			"MiniMax M2.5 is a high-performance language model with a 204.8K context window, optimized for long-context understanding and generation tasks, served via Friendli Model APIs.",
 	},
 } as const satisfies Record<string, ModelInfo>
+
+export const friendliProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.friendli,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => friendliDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		friendliApiKey: z.string().optional(),
+	},
+})

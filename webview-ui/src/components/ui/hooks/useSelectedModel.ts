@@ -21,7 +21,6 @@ import {
 	openAiCodexModels,
 	sambaNovaModels,
 	getZAiModels,
-	zaiApiLineConfigs,
 	fireworksModels,
 	friendliModels,
 	basetenModels,
@@ -162,10 +161,18 @@ export const useSelectedModel = (apiConfiguration: ProviderSettings) => {
 				})
 			: activeProvider === providerIdentifiers.kimiCode && apiConfiguration
 				? {
-						id: apiConfiguration.apiModelId || getProviderDefaultModelId(providerIdentifiers.kimiCode),
+						id:
+							apiConfiguration.apiModelId ||
+							getProviderDefaultModelId(providerIdentifiers.kimiCode, apiConfiguration),
 						info: kimiCodeDefaultModelInfo,
 					}
-				: { id: getProviderDefaultModelId(activeProvider ?? providerIdentifiers.openrouter), info: undefined }
+				: {
+						id: getProviderDefaultModelId(
+							activeProvider ?? providerIdentifiers.openrouter,
+							apiConfiguration ?? {},
+						),
+						info: undefined,
+					}
 
 	return {
 		provider,
@@ -206,7 +213,7 @@ function getSelectedModel({
 	// the `undefined` case are used to show the invalid selection to prevent
 	// users from seeing the default model if their selection is invalid
 	// this gives a better UX than showing the default model
-	const defaultModelId = getProviderDefaultModelId(provider)
+	const defaultModelId = getProviderDefaultModelId(provider, apiConfiguration)
 	switch (provider) {
 		case providerIdentifiers.openrouter: {
 			const id = getValidatedModelId(
@@ -393,9 +400,8 @@ function getSelectedModel({
 		}
 		case providerIdentifiers.zai: {
 			const apiLine = apiConfiguration.zaiApiLine ?? "international_coding"
-			const isChina = zaiApiLineConfigs[apiLine].isChina
 			const models = getZAiModels(apiLine)
-			const defaultModelId = getProviderDefaultModelId(provider, { isChina })
+			const defaultModelId = getProviderDefaultModelId(provider, apiConfiguration)
 			const configuredId = apiConfiguration.apiModelId
 			if (configuredId) {
 				return { id: configuredId, info: models[configuredId] ?? openAiModelInfoSaneDefaults }

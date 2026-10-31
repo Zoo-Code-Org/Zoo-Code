@@ -1,4 +1,13 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 // https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-claude
 export type VertexModelId = keyof typeof vertexModels
@@ -812,3 +821,18 @@ export const VERTEX_REGIONS = [
 	{ value: "me-central1", label: "me-central1" },
 	{ value: "africa-south1", label: "africa-south1" },
 ]
+
+export const vertexProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.vertex,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => vertexDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		vertexKeyFile: z.string().optional(),
+		vertexJsonCredentials: z.string().optional(),
+		vertexProjectId: z.string().optional(),
+		vertexRegion: z.string().optional(),
+		vertex1MContext: z.boolean().optional(), // Enable 'context-1m-2025-08-07' beta for 1M context window.
+	},
+})

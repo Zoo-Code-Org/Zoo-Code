@@ -1,4 +1,13 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 // https://docs.x.ai/docs/api-reference
 export type XAIModelId = keyof typeof xaiModels
@@ -159,3 +168,14 @@ export const xaiModels = {
 		excludedTools: ["apply_diff"],
 	},
 } as const satisfies Record<string, ModelInfo>
+
+export const xaiProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.xai,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => xaiDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		xaiApiKey: z.string().optional(),
+	},
+})

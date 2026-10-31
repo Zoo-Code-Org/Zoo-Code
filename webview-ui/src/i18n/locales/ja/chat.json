@@ -352,10 +352,10 @@
 		"title": "Zoo Code {{version}} リリース",
 		"support": "<githubLink>GitHub</githubLink>でスターを付けて Zoo Code を応援してください。",
 		"release": {
-			"heading": "Zoo Code v3.92.0 の新機能",
-			"highlight1": "✨ より速いモデル選択と強化されたモデルサポート: チャット入力欄からモデルを切り替えられます。Amazon Bedrock で Claude Haiku 5.5 を使用し、OpenRouter でより正確な Kimi K3 の機能を利用し、Vercel AI Gateway で修正された Gemini 4 Argon の制限を適用できます。",
-			"highlight2": "🧭 より信頼性の高いターミナル、編集、チャット、リモートワークフロー: 必要に応じてコマンド出力をデフォルトで折りたたみ、編集エラーをより明確に確認し、推論行と API 行を表示したままにして、リモートワークスペースでの起動とプロキシの問題を回避できます。",
-			"highlight3": "🔌 MCP Marketplace の拡充: MCP Marketplace から Zoo Code を AnySearch、Mailtea、Tradehand に接続できます。"
+			"heading": "Zoo Code v3.94.0 の新機能",
+			"highlight1": "✨ さらに広がるモデルとプロバイダーのサポート: Anthropic 経由で Claude Haiku 5.5 を使用し、対応する VS Code LM モデルに画像を送信し、OpenCode Go Responses モデルの temperature を調整し、より多くのプロバイダーでリクエストをクリーンにキャンセルできます。",
+			"highlight2": "🔐 より柔軟な MCP OAuth: 静的な OAuth クライアント設定を構成し、カスタムコールバックパスを使用し、WWW-Authenticate から認証の詳細を取得し、再試行前にコールバックの失敗を確認できます。",
+			"highlight3": "🧭 よりスムーズなチャットと長時間セッション: 履歴でタスク名を変更し、Shift を押さずにファイルをチャットにドラッグし、長時間セッション中に保持されるメモリを削減し、サブタスクのリンクと置き換えられた webview を安定して維持できます。"
 		},
 		"cloudAgents": {
 			"heading": "クラウドの新機能:",
