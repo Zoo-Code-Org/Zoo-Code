@@ -443,6 +443,34 @@ export class ProviderSettingsManager {
 		}
 	}
 
+	/**
+	 * Save a config only when no config with that name exists, as one locked step.
+	 *
+	 * A caller that has to restore a profile it is not sure still belongs there (the undo of a
+	 * purge that committed after the caller timed out) cannot check-then-write: a save for the
+	 * same name can land between the check and the write, and the restore would then overwrite
+	 * it with a stale snapshot. The existence check and the write share one lock here, so a
+	 * concurrent `saveConfig` either lands before the check (and this call skips) or after the
+	 * write (and wins). Returns the written id, or `undefined` when the name was taken.
+	 *
+	 * The blob is stored verbatim: the caller restores a config this manager produced, so
+	 * re-parsing it would only strip fields (a retired provider's legacy keys) it already holds.
+	 */
+	public async saveConfigIfAbsent(name: string, config: ProviderSettingsWithId): Promise<string | undefined> {
+		return await this.lock(async () => {
+			const providerProfiles = await this.load()
+
+			if (providerProfiles.apiConfigs[name]) {
+				return undefined
+			}
+
+			const id = config.id || this.generateId()
+			providerProfiles.apiConfigs[name] = { ...config, id }
+			await this.store(providerProfiles)
+			return id
+		})
+	}
+
 	public async getProfile(
 		params: { name: string } | { id: string },
 	): Promise<ProviderSettingsWithId & { name: string }> {
@@ -503,9 +531,12 @@ export class ProviderSettingsManager {
 	}
 
 	/**
-	 * Delete a config by name.
+	 * Delete a config by name. The per-mode bindings that point at the deleted profile are dropped
+	 * with it: a surviving binding makes the next switch to that mode resolve no profile and
+	 * silently keep the current one. The dropped bindings are returned so a caller that rolls the
+	 * deletion back can re-apply them.
 	 */
-	public async deleteConfig(name: string) {
+	public async deleteConfig(name: string): Promise<{ removedModeConfigs: Record<string, string> }> {
 		try {
 			return await this.lock(async () => {
 				const providerProfiles = await this.load()
@@ -518,8 +549,26 @@ export class ProviderSettingsManager {
 					throw new Error(`Cannot delete the last remaining configuration`)
 				}
 
+				const deletedId = providerProfiles.apiConfigs[name].id
 				delete providerProfiles.apiConfigs[name]
+
+				const removedModeConfigs: Record<string, string> = {}
+				// A rename saves the profile under its new name with the same `id` before deleting
+				// the old one, so only an id no remaining profile carries is an orphan.
+				const idStillInUse =
+					!!deletedId && Object.values(providerProfiles.apiConfigs).some((config) => config.id === deletedId)
+
+				if (deletedId && !idStillInUse) {
+					for (const [mode, configId] of Object.entries(providerProfiles.modeApiConfigs ?? {})) {
+						if (configId === deletedId) {
+							removedModeConfigs[mode] = configId
+							delete providerProfiles.modeApiConfigs![mode]
+						}
+					}
+				}
+
 				await this.store(providerProfiles)
+				return { removedModeConfigs }
 			})
 		} catch (error) {
 			throw new Error(`Failed to delete config: ${error}`)
@@ -542,11 +591,25 @@ export class ProviderSettingsManager {
 
 	/**
 	 * Set the API config for a specific mode.
+	 *
+	 * `onlyIfUnbound` makes the write conditional, for the rollback that re-applies the bindings a
+	 * purge dropped. That rollback must not overwrite a mode a newer selection has already bound
+	 * (its queue advances at its timeout, so a newer binding can commit while the aborted rollback
+	 * still runs), and it must not re-apply a binding whose profile no longer exists (the restore's
+	 * `saveConfig` can reject, and a dangling id makes the next switch to that mode resolve nothing
+	 * and silently keep the current profile). Both checks and the write share this one lock, so
+	 * neither can straddle a concurrent purge or rename. Returns whether the write happened.
 	 */
-	public async setModeConfig(mode: Mode, configId: string) {
+	public async setModeConfig(mode: Mode, configId: string, { onlyIfUnbound = false } = {}): Promise<boolean> {
 		try {
 			return await this.lock(async () => {
 				const providerProfiles = await this.load()
+
+				if (onlyIfUnbound) {
+					const exists = Object.values(providerProfiles.apiConfigs).some((config) => config.id === configId)
+					if (!exists || providerProfiles.modeApiConfigs?.[mode] !== undefined) return false
+				}
+
 				// Ensure the per-mode config map exists
 				if (!providerProfiles.modeApiConfigs) {
 					providerProfiles.modeApiConfigs = {}
@@ -554,6 +617,7 @@ export class ProviderSettingsManager {
 				// Assign the chosen config ID to this mode
 				providerProfiles.modeApiConfigs[mode] = configId
 				await this.store(providerProfiles)
+				return true
 			})
 		} catch (error) {
 			throw new Error(`Failed to set mode config: ${error}`)
@@ -571,6 +635,21 @@ export class ProviderSettingsManager {
 			})
 		} catch (error) {
 			throw new Error(`Failed to get mode config: ${error}`)
+		}
+	}
+
+	/**
+	 * Get every per-mode config binding. Callers that mirror this map into `ContextProxy` read it
+	 * here rather than recomputing it, so the two stores cannot drift.
+	 */
+	public async getModeApiConfigs(): Promise<Record<string, string>> {
+		try {
+			return await this.lock(async () => {
+				const { modeApiConfigs } = await this.load()
+				return { ...modeApiConfigs }
+			})
+		} catch (error) {
+			throw new Error(`Failed to get mode configs: ${error}`)
 		}
 	}
 

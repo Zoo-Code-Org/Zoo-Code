@@ -2512,24 +2512,45 @@ export const webviewMessageHandler = async (
 
 				const oldName = message.text
 
-				const newName = (await provider.providerSettingsManager.listConfig()).filter(
-					(c) => c.name !== oldName,
-				)[0]?.name
+				// Route through the same policy entry point the extension API uses. The twin used to
+				// call `deleteConfig` + `activateProviderProfile` directly, which left it outside the
+				// mutation queue (a queued upsert could save the profile back after the purge) and
+				// without the rollback that restores the profile when the replacement activation
+				// fails (the webview then listed a profile the manager no longer had). The queued
+				// path also purges the deleted profile's own secrets, which the raw call never did
+				// on the inactive branch.
+				const entry = provider.getProviderProfileEntry(oldName)
 
-				if (!newName) {
+				if (!entry) {
 					vscode.window.showErrorMessage(t("common:errors.delete_api_config"))
-					return
+					break
 				}
 
 				try {
-					await provider.providerSettingsManager.deleteConfig(oldName)
-					await provider.activateProviderProfile({ name: newName })
+					await provider.deleteProviderProfile(entry)
 				} catch (error) {
 					provider.log(
 						`Error delete api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 					)
 
 					vscode.window.showErrorMessage(t("common:errors.delete_api_config"))
+				} finally {
+					// `deleteProviderProfile` mirrors the manager's mode map on both branches, but a
+					// failed delete rolls back to the pre-delete map through a queued restore. Mirroring
+					// here keeps the webview's map equal to the manager's whatever the outcome, so a
+					// mode can never keep pointing at a profile the manager no longer has.
+					try {
+						await provider.contextProxy.setValue(
+							"modeApiConfigs",
+							await provider.providerSettingsManager.getModeApiConfigs(),
+						)
+					} catch (mirrorError) {
+						provider.log(
+							`Error mirroring mode configs after delete api configuration: ${
+								mirrorError instanceof Error ? mirrorError.message : String(mirrorError)
+							}`,
+						)
+					}
 				}
 			}
 			break

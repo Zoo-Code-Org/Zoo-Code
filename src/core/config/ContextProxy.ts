@@ -13,7 +13,9 @@ import {
 	type GlobalState,
 	type RooCodeSettings,
 	providerSettingsSchema,
+	providerSettingsSchemaDiscriminated,
 	globalSettingsSchema,
+	codebaseIndexProviderSchema,
 	isSecretStateKey,
 	isProviderName,
 	isRetiredProvider,
@@ -31,6 +33,83 @@ type RooCodeSettingsKey = keyof RooCodeSettings
 const PASS_THROUGH_STATE_KEYS = ["taskHistory"]
 
 export const isPassThroughStateKey = (key: string) => PASS_THROUGH_STATE_KEYS.includes(key)
+
+// Codebase-index credentials are part of `ProviderSettings` but are not owned by a
+// provider profile: the index settings handler writes them flat and `saveConfig`'s
+// discriminated parse strips them from every profile blob. Clearing them here would
+// delete the user's index credentials on every profile switch.
+const FLAT_ONLY_PROVIDER_SECRET_KEYS = new Set<string>(Object.keys(codebaseIndexProviderSchema.shape))
+
+// The secret keys a provider profile can own: `PROVIDER_SETTINGS_KEYS ∩ SECRET_STATE_KEYS`,
+// minus the FLAT_ONLY carve-out. The global image-generation key is in `SECRET_STATE_KEYS` but
+// not in `ProviderSettings`, so it is excluded here exactly as the clear-out loop excludes it.
+const PROVIDER_SECRET_KEYS = new Set<string>(
+	PROVIDER_SETTINGS_KEYS.filter((key) => isSecretStateKey(key) && !FLAT_ONLY_PROVIDER_SECRET_KEYS.has(key)),
+)
+
+// Which provider owns each secret key, read from the same discriminated union that
+// `saveConfig` parses profiles with: a provider branch declares the keys its own
+// profile blob carries, so ownership is exactly "this key appears in this branch".
+// Every provider-owned secret key has exactly one owner (verified across all 37
+// branches); the codebase-index credentials have none, which is why they are the
+// FLAT_ONLY carve-out above.
+const PROVIDER_SECRET_KEY_OWNERS = new Map<string, Set<string>>()
+
+for (const branch of providerSettingsSchemaDiscriminated.options) {
+	const literal = branch.shape.apiProvider
+
+	// The union's last branch is the `apiProvider: undefined` default, which owns nothing.
+	if (!("value" in literal) || typeof literal.value !== "string") continue
+
+	for (const key of Object.keys(branch.shape)) {
+		if (!isSecretStateKey(key)) continue
+
+		const owners = PROVIDER_SECRET_KEY_OWNERS.get(key) ?? new Set<string>()
+		owners.add(literal.value)
+		PROVIDER_SECRET_KEY_OWNERS.set(key, owners)
+	}
+}
+
+/**
+ * Whether the provider named by a write is the one that owns `key`.
+ *
+ * A partial write can legitimately omit a secret the writing provider still uses:
+ * `api.getConfiguration()` strips secrets (`src/extension/api.ts`), so a
+ * save-then-reactivate round trip rewrites a profile from a snapshot that has no
+ * secret in it. Treating that omission as "this profile uses none of these" deleted
+ * the live profile's credentials from SecretStorage and broke every task rehydrated
+ * afterwards. Ownership answers the question the omission cannot.
+ *
+ * Returns `undefined` when ownership is unknown (no provider named, or a retired
+ * provider, whose branch is not in the union), so callers keep the old
+ * presence-based semantics instead of guessing.
+ */
+export const providerOwnsSecretKey = (apiProvider: unknown, key: string): boolean | undefined => {
+	if (typeof apiProvider !== "string" || !isProviderName(apiProvider)) {
+		return undefined
+	}
+
+	return PROVIDER_SECRET_KEY_OWNERS.get(key)?.has(apiProvider) ?? false
+}
+
+/**
+ * The secret keys a stored profile uses.
+ *
+ * A profile blob is the record of which credentials that profile uses: `saveConfig`'s
+ * discriminated parse keeps only the branch's own keys, so the keys present in the blob
+ * are exactly the ones the profile owns. Used to purge a deleted profile's credentials
+ * explicitly instead of inferring them from a later write.
+ *
+ * The blob alone is not enough: `api.getConfiguration()` strips secret fields, so a profile
+ * saved from that round trip declares none while its live credential sits in SecretStorage.
+ * The profile's own `apiProvider` still names the keys it owns, so the candidates are the
+ * union of both. A provider with no ownership branch keeps the presence-based answer.
+ *
+ * Membership is `PROVIDER_SETTINGS_KEYS ∩ SECRET_STATE_KEYS`, the same set the clear-out
+ * loop iterates: it excludes the global image-generation key, which no profile blob owns.
+ */
+export const getProfileSecretKeys = (config: Record<string, unknown>): string[] =>
+	[...PROVIDER_SECRET_KEYS].filter((key) => key in config || providerOwnsSecretKey(config.apiProvider, key) === true)
 
 const globalSettingsExportSchema = globalSettingsSchema.omit({
 	taskHistory: true,
@@ -507,7 +586,18 @@ export class ContextProxy {
 		return sanitizedValues
 	}
 
-	public async setProviderSettings(values: ProviderSettings) {
+	/**
+	 * Write a provider slice, clearing out the settings it no longer carries.
+	 *
+	 * `expectedProvider` is the provider the caller resolved from the manager for the profile
+	 * being written. It is the ownership discriminator, and it must not be read off `values`:
+	 * `values.apiProvider` is whatever the caller put in the slice, so a crafted partial write
+	 * could name the owner of a secret it wants preserved and keep a credential that belongs to
+	 * a different profile. Callers that activate or persist a stored profile pass the provider
+	 * from the manager blob; callers with no manager record (import, tests) omit it and fall
+	 * back to the slice's own field.
+	 */
+	public async setProviderSettings(values: ProviderSettings, expectedProvider?: string) {
 		// Explicitly clear out any old API configuration values before that
 		// might not be present in the new configuration.
 		// If a value is not present in the new configuration, then it is assumed
@@ -523,12 +613,59 @@ export class ContextProxy {
 			}
 		}
 
+		// Secret keys live in `secretCache`, not `stateCache`, so they need their own
+		// presence check. Without this a deleted profile's differently-named secrets
+		// (`openRouterApiKey` when the replacement uses `apiKey`) survive the switch and
+		// keep being merged back by `getValues`.
+		//
+		// A secret the writing provider still owns is not stale, even when the write omits
+		// it: partial writes are normal (`api.getConfiguration()` strips secrets, so a
+		// save-then-reactivate round trip rewrites a profile from a secret-less snapshot).
+		// Purging on omission alone deleted the live profile's credentials, and every task
+		// rehydrated afterwards ran without an API key.
+		const owner = expectedProvider ?? values.apiProvider
+
+		const isStale = (key: string) => {
+			if (!isSecretStateKey(key)) {
+				return !!this.stateCache[key as GlobalStateKey]
+			}
+
+			if (!this.secretCache[key as SecretStateKey]) {
+				return false
+			}
+
+			return providerOwnsSecretKey(owner, key) !== true
+		}
+
 		await this.setValues({
-			...PROVIDER_SETTINGS_KEYS.filter((key) => !isSecretStateKey(key))
-				.filter((key) => !!this.stateCache[key])
+			...PROVIDER_SETTINGS_KEYS.filter((key) => !FLAT_ONLY_PROVIDER_SECRET_KEYS.has(key))
+				.filter(isStale)
 				.reduce((acc, key) => ({ ...acc, [key]: undefined }), {} as ProviderSettings),
 			...values,
 		})
+	}
+
+	/**
+	 * Delete the named secrets from the cache and from SecretStorage.
+	 *
+	 * This is the explicit form of the clear-out above: the caller names the keys, so the
+	 * decision does not depend on what a later write happens to omit. A profile delete uses it
+	 * to remove exactly the credentials the deleted profile's own blob declared, which is the
+	 * only way to cover the inactive branch (no replacement write runs) and a same-provider
+	 * succession (ownership would preserve the deleted profile's key by design).
+	 *
+	 * Keys outside `PROVIDER_SETTINGS_KEYS ∩ SECRET_STATE_KEYS` are ignored, as are the flat
+	 * codebase-index credentials: the global image-generation secret and the index keys belong
+	 * to no profile, so a profile delete must not take them with it.
+	 */
+	public async purgeProviderSecrets(keys: Iterable<string>): Promise<void> {
+		const purgeable = [...keys].filter((key) => PROVIDER_SECRET_KEYS.has(key))
+
+		if (purgeable.length === 0) {
+			return
+		}
+
+		await this.setValues(purgeable.reduce((acc, key) => ({ ...acc, [key]: undefined }), {} as RooCodeSettings))
 	}
 
 	/**

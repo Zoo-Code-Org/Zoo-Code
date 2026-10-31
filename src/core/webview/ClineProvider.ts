@@ -17,6 +17,7 @@ import {
 	type GlobalState,
 	type ProviderName,
 	type ProviderSettings,
+	type ProviderSettingsWithId,
 	type RooCodeSettings,
 	type ProviderSettingsEntry,
 	type StaticAppProperties,
@@ -111,7 +112,7 @@ import { t } from "../../i18n"
 import { buildApiHandler } from "../../api"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/providers/fetchers/lmstudio"
 
-import { ContextProxy } from "../config/ContextProxy"
+import { ContextProxy, getProfileSecretKeys, providerOwnsSecretKey } from "../config/ContextProxy"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
 import { PendingActionSettlementError, Task } from "../task/Task"
@@ -209,6 +210,19 @@ type GetStateOptions = {
 	includeTaskHistory?: boolean
 }
 
+/** The ContextProxy snapshot a failed delete rolls back to. */
+type ProviderProfileSnapshot = Pick<RooCodeSettings, "currentApiConfigName" | "listApiConfigMeta" | "modeApiConfigs">
+
+/**
+ * Whether two profile lists are the same list, so a mirror would be a no-op.
+ *
+ * Compares the whole entry, not just name+id: a save under an existing name reuses that profile's
+ * id, so a changed provider or model compares equal on those two fields and a mirror gated on them
+ * would leave the webview showing the old provider for that profile.
+ */
+const entriesEqual = (left: ProviderSettingsEntry[], right: ProviderSettingsEntry[] = []): boolean =>
+	left.length === right.length && JSON.stringify(left) === JSON.stringify(right)
+
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
 	implements vscode.WebviewViewProvider, TelemetryPropertiesProvider, TaskProviderLike
@@ -272,28 +286,51 @@ export class ClineProvider
 	}
 
 	/**
-	 * With `runToCompletion`, a timeout only rejects the caller: the mutation is not aborted and the
-	 * queue advances once it settles. Use it for multi-write mutations that must not stop halfway
-	 * (storage saved but not activated) or overlap with the next mutation.
+	 * With `runToCompletion`, a timeout only rejects the caller: the queue advances once the body
+	 * settles. Use it for multi-write mutations that must not stop halfway (storage saved but not
+	 * activated) or overlap with the next mutation. Add `abortOnTimeout` when the remaining writes
+	 * must not land after the caller was told the mutation failed: the body is aborted, and the
+	 * queue may advance on the timeout instead of waiting for it.
+	 *
+	 * A `runToCompletion` body without `abortOnTimeout` keeps the queue until it settles, because
+	 * nothing would stop its remaining writes from landing after the next mutation started. With
+	 * `abortOnTimeout` the queue advances on the timeout-bounded result, so a body hung on storage
+	 * (e.g. a never-settling SecretStorage write behind the manager lock) cannot pin the queue:
+	 * every write in such a body re-checks its AbortSignal, which the timeout fires.
 	 */
 	private enqueueProviderProfileMutation<T>(
 		fn: (signal: AbortSignal) => Promise<T>,
-		options: { runToCompletion?: boolean } = {},
+		options: { runToCompletion?: boolean; abortOnTimeout?: boolean } = {},
 	): Promise<T> {
+		return this.enqueueProviderProfileMutationWithBody(fn, options).callerResult
+	}
+
+	/**
+	 * The queue primitive behind `enqueueProviderProfileMutation`. It also returns the raw body
+	 * promise so a caller can wait for an abandoned body to settle (e.g. before running its
+	 * rollback) without being subject to the mutation timeout.
+	 */
+	private enqueueProviderProfileMutationWithBody<T>(
+		fn: (signal: AbortSignal) => Promise<T>,
+		options: { runToCompletion?: boolean; abortOnTimeout?: boolean } = {},
+	): { callerResult: Promise<T>; body: Promise<T> } {
 		const controller = new AbortController()
-		// Run fn after either outcome so a rejected mutation never poisons the queue.
 		const run = this.providerProfileMutationQueue.then(
 			() => fn(controller.signal),
 			() => fn(controller.signal),
 		)
 		const callerResult = this.withProviderProfileMutationTimeout(run, () => {
-			if (options.runToCompletion) {
-				this.log("Provider profile mutation timed out; waiting for it to finish before the next mutation")
-				return
-			}
+			// The abort and the queue advance both treat `abortOnTimeout` as "the body stops here",
+			// so the log must too: branching on `runToCompletion` alone reports that the queue is
+			// waiting for a body that was just aborted.
+			const abortsBody = !options.runToCompletion || options.abortOnTimeout
+			if (abortsBody) controller.abort()
 
-			controller.abort()
-			this.log("Provider profile mutation timed out; aborting in-flight mutation")
+			this.log(
+				abortsBody
+					? "Provider profile mutation timed out; aborting in-flight mutation"
+					: "Provider profile mutation timed out; waiting for it to finish before the next mutation",
+			)
 		})
 
 		void run.then(
@@ -313,13 +350,16 @@ export class ClineProvider
 			},
 		)
 
-		// Advance from the timeout-bounded result. Each fn checks its AbortSignal before
-		// writing state, so advancing the queue on timeout cannot produce stale overwrites.
-		this.providerProfileMutationQueue = (options.runToCompletion ? run : callerResult).then(
+		// Advance from the raw body unless the timeout aborted it: an aborted body's remaining
+		// writes are fenced by its own signal checks, so the queue can move on without waiting for
+		// a hung storage call. A body that was never aborted still holds the queue, or its late
+		// writes would land after the next mutation.
+		const queueTail = options.runToCompletion && !options.abortOnTimeout ? run : callerResult
+		this.providerProfileMutationQueue = queueTail.then(
 			() => undefined,
 			() => undefined,
 		)
-		return callerResult
+		return { callerResult, body: run }
 	}
 
 	private withProviderProfileMutationTimeout<T>(operation: Promise<T>, onTimeout: () => void): Promise<T> {
@@ -336,6 +376,39 @@ export class ClineProvider
 				clearTimeout(timeoutId)
 			}
 		})
+	}
+
+	/**
+	 * Wait for an abandoned mutation body to settle, but never longer than one mutation window.
+	 *
+	 * A rollback must not run while the body it compensates can still write, so it waits for that
+	 * body first. That wait has to be bounded: a body hung on a never-settling SecretStorage write
+	 * holds the manager lock, and an unbounded wait would pin the rollback (and the whole mutation
+	 * queue behind it) forever. After the bound the body's own abort fences are what keep its late
+	 * writes out, so the rollback proceeds instead of waiting indefinitely.
+	 */
+	private async settleProviderProfileMutationBody(body: Promise<unknown>): Promise<void> {
+		let timeoutId: ReturnType<typeof setTimeout> | undefined
+		const bound = new Promise<void>((resolve) => {
+			timeoutId = setTimeout(() => {
+				this.log("Abandoned provider profile mutation still running; rolling back without it")
+				resolve()
+			}, ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+		})
+
+		try {
+			await Promise.race([
+				body.then(
+					() => undefined,
+					() => undefined,
+				),
+				bound,
+			])
+		} finally {
+			if (timeoutId) {
+				clearTimeout(timeoutId)
+			}
+		}
 	}
 
 	private readonly pendingEditOperations: PendingEditOperationStore
@@ -2070,6 +2143,17 @@ export class ClineProvider
 
 			if (signal.aborted) return id
 
+			// Read the stored entries once: they are the manager's authoritative view of each
+			// profile, including the provider `saveConfig` pinned into the blob. The ownership
+			// discriminator below must not be taken from `providerSettings.apiProvider`, which is
+			// the caller's own field and can disagree with what was stored (a legacy router config
+			// is downgraded to no provider at all).
+			const storedProfiles = await this.providerSettingsManager.listConfig()
+
+			if (signal.aborted) return id
+
+			const storedProvider = storedProfiles.find((profile) => profile.name === name)?.apiProvider
+
 			// These promises do the following:
 			// 1. Adds or updates the list of provider profiles.
 			// 2. Sets the current provider profile.
@@ -2082,10 +2166,10 @@ export class ClineProvider
 			// I left the original implementation in just to be safe.
 			// `allSettled` so a caller that rolls back after a failure never races a write still in flight.
 			const activationResults = await Promise.allSettled([
-				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+				this.updateGlobalState("listApiConfigMeta", storedProfiles),
 				this.updateGlobalState("currentApiConfigName", name),
 				this.providerSettingsManager.setModeConfig(mode, id),
-				this.contextProxy.setProviderSettings(providerSettings),
+				this.contextProxy.setProviderSettings(providerSettings, storedProvider),
 			])
 			const failedActivation = activationResults.find(
 				(result): result is PromiseRejectedResult => result.status === "rejected",
@@ -2112,26 +2196,550 @@ export class ClineProvider
 	}
 
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
-		const globalSettings = this.contextProxy.getValues()
-		let profileToActivate: string | undefined = globalSettings.currentApiConfigName
+		// Captured inside the queued mutation so the rollback below can restore them even when the
+		// mutation times out (the timeout rejects the outer wrapper, so an inner catch never runs).
+		let deletedProfileConfig: (ProviderSettingsWithId & { name: string }) | undefined
+		let previousContextValues: ProviderProfileSnapshot = {}
+		// The mode bindings the purge dropped from the manager, so the rollback can re-apply them.
+		let removedModeConfigs: Record<string, string> = {}
 
-		if (profileToDelete.name === profileToActivate) {
-			profileToActivate = this.getProviderProfileEntries().find(({ name }) => name !== profileToDelete.name)?.name
+		// The purge and any replacement switch run as one queued mutation: otherwise a queued
+		// `upsertProviderProfile` for the same name can save the profile back after the purge and
+		// make it reappear in `listApiConfigMeta` after this call has already resolved.
+		//
+		// The body keeps the default timeout semantics (abort, then let the queue advance): holding
+		// the queue here would deadlock the rollback below, which is itself queued, whenever the
+		// activation hangs. The rollback is what gets the hold-and-abort treatment, and it waits for
+		// this body to settle first so its writes can never race the abandoned body's late writes.
+		// The body promise is tracked separately because the queue enqueuer returns the
+		// timeout-bounded caller result, not the raw body.
+		let deleteBodySettled: Promise<unknown> = Promise.resolve()
+		try {
+			const enqueued = this.enqueueProviderProfileMutationWithBody(async (signal) => {
+				// Read inside the queue: a queued activation may have changed the active profile.
+				const globalSettings = this.contextProxy.getValues()
+				const deletedActiveProfile = profileToDelete.name === globalSettings.currentApiConfigName
+
+				previousContextValues = {
+					currentApiConfigName: globalSettings.currentApiConfigName,
+					listApiConfigMeta: globalSettings.listApiConfigMeta,
+					modeApiConfigs: globalSettings.modeApiConfigs,
+				}
+
+				// Read the stored profile once, before either branch purges: it is both the undo
+				// snapshot and the identity check. A failed read must reject the delete, because a
+				// delete that purges without the blob leaves the profile's credentials behind. A
+				// same-name profile saved after the caller picked this name carries a different id,
+				// so deleting by name alone would destroy that newer profile.
+				const storedProfile = await this.providerSettingsManager.getProfile({ name: profileToDelete.name })
+				if (profileToDelete.id && storedProfile.id !== profileToDelete.id) return
+
+				// Both abort checks below undo a committed purge the same way. The mirror is
+				// conditional on the entries, not on the abort: this runs *because* the body was
+				// aborted, so an abort guard here would make the mirror dead code and strand the
+				// cache on a list that predates a profile saved while the purge held the lock.
+				// Comparing name+id instead of the length catches a same-name recreation, which
+				// keeps the length and changes the id.
+				const undoPurge = async () => {
+					await this.undoCommittedProviderProfilePurge(
+						profileToDelete.name,
+						storedProfile,
+						removedModeConfigs,
+					)
+					const listApiConfigMeta = await this.providerSettingsManager.listConfig()
+					const modeApiConfigs = await this.providerSettingsManager.getModeApiConfigs()
+					if (!entriesEqual(listApiConfigMeta, this.contextProxy.getValues().listApiConfigMeta)) {
+						await this.contextProxy.setValues({ listApiConfigMeta, modeApiConfigs })
+					}
+				}
+
+				if (!deletedActiveProfile) {
+					// A timeout may have fired while queued or while an earlier manager call held
+					// the lock. Purging now would delete the profile after the caller was told it failed.
+					if (signal.aborted) {
+						return
+					}
+
+					// Purge first so a failing purge fails fast before any ContextProxy write, matching
+					// the ordering the webview delete path established.
+					removedModeConfigs = (await this.providerSettingsManager.deleteConfig(profileToDelete.name))
+						.removedModeConfigs
+
+					// A timeout may have fired under the manager lock. The purge committed, so the
+					// caller must not be left with a deleted profile it was told survived: undo it.
+					if (signal.aborted) {
+						await undoPurge()
+						return
+					}
+
+					// The delete is committed, so the profile's credentials go with it. This branch
+					// activates no replacement, so no `setProviderSettings` write runs the ownership
+					// clear-out: without an explicit purge the secrets stay in the cache and in
+					// SecretStorage until some unrelated future write names a provider that does not
+					// own them, which may never happen.
+					//
+					// The keep-set comes from the providers of the profiles that remain, not from the
+					// active blob: that round-trip strips secret fields while keeping `apiProvider`, so
+					// a surviving OpenRouter blob declares no `openRouterApiKey` even though the slot
+					// holds its live value. A shared provider+key means the slot they would purge *is*
+					// that profile's credential.
+					await this.purgeDeletedProfileSecrets(
+						storedProfile,
+						await this.getSurvivingProviderSecretKeys(profileToDelete.name, storedProfile),
+					)
+
+					// The purge above can outlast the mutation timeout, and the reads below sit behind
+					// the manager lock, so the abort can fire during either: re-check once after both,
+					// then undo the purge this body already committed rather than landing a late
+					// `setValues` after a newer queued mutation. Reading before the check is safe:
+					// both calls are side-effect free.
+					const listApiConfigMeta = await this.providerSettingsManager.listConfig()
+					const modeApiConfigs = await this.providerSettingsManager.getModeApiConfigs()
+
+					if (signal.aborted) {
+						await undoPurge()
+						return
+					}
+
+					await this.contextProxy.setValues({ listApiConfigMeta, modeApiConfigs })
+
+					await this.postStateToWebview()
+					return
+				}
+
+				// Pick the replacement from the manager, not from ContextProxy metadata: the chosen
+				// name must exist in the manager or the activation below rejects with "not found".
+				const remainingProfiles = (await this.providerSettingsManager.listConfig()).filter(
+					({ name }) => name !== profileToDelete.name,
+				)
+
+				// Prefer a configured profile, mirroring the mode-switch path which skips entries with
+				// no `apiProvider`; fall back to any remaining entry so deletion still works.
+				const profileToActivate = (
+					remainingProfiles.find(({ apiProvider }) => !!apiProvider) ?? remainingProfiles[0]
+				)?.name
+
+				if (!profileToActivate) {
+					throw new Error("You cannot delete the last profile")
+				}
+
+				// Capture the profile before purging so a failed active-profile switch can restore it.
+				deletedProfileConfig = storedProfile
+
+				// A timeout may have already fired while the manager lock was held. Purging now
+				// would delete the profile after the caller was told the deletion failed.
+				if (signal.aborted) {
+					return
+				}
+
+				removedModeConfigs = (await this.providerSettingsManager.deleteConfig(profileToDelete.name))
+					.removedModeConfigs
+
+				// Route through the standard activation path so the effective provider settings, mode
+				// config, and current-task wiring match a user activating the replacement from the
+				// webview. The unlocked variant is used because this already runs in the mutation queue.
+				await this.activateProviderProfileUnlocked({ name: profileToActivate }, undefined, signal)
+
+				// A timeout may have fired while the activation was in flight. The queued rollback is
+				// restoring the pre-delete state, so these tail writes must not land after it.
+				if (signal.aborted) {
+					return
+				}
+
+				// The activation's clear-out is ownership-based, which deliberately preserves a
+				// secret the replacement provider owns. When the replacement is the same provider as
+				// the deleted profile, that rule keeps the deleted profile's credential alive under the
+				// replacement's name. The delete is explicit intent, so the deleted profile's own keys
+				// are removed here, after the activation has written the replacement's slice.
+				//
+				// The keep-set is ownership-derived for the same reason as the inactive branch: a
+				// blob-derived set is empty when the replacement's blob came from a secrets-stripped
+				// snapshot, and purging then deletes its live credential from the shared slot. It spans
+				// every remaining profile, so a same-provider profile that is not the replacement keeps
+				// its credential too.
+				await this.purgeDeletedProfileSecrets(
+					deletedProfileConfig,
+					await this.getSurvivingProviderSecretKeys(profileToDelete.name, deletedProfileConfig),
+				)
+				// The activation above only rebinds the *current* mode, so every other mode that
+				// pointed at the deleted profile would keep a dangling id and silently no-op on the
+				// next switch. The manager dropped those bindings with the purge; mirror its map into
+				// ContextProxy so the two stores agree.
+				await this.contextProxy.setValue(
+					"modeApiConfigs",
+					await this.providerSettingsManager.getModeApiConfigs(),
+				)
+
+				// The activation posted state before this mirror landed, so post again: the webview
+				// must not keep a map that names a mode bound to a profile the manager no longer has.
+				await this.postStateToWebview()
+			})
+			deleteBodySettled = enqueued.body
+			await enqueued.callerResult
+		} catch (error) {
+			// Either the manager or ContextProxy can be left naming the deleted profile, so both
+			// are rolled back to their pre-delete state. The rollback is queued too, so no other
+			// mutation can interleave with its writes, and it first waits (bounded) for the
+			// abandoned delete body to settle so no late write of that body can land after the
+			// restoration.
+			await this.settleProviderProfileMutationBody(deleteBodySettled)
+			await this.restoreDeletedProviderProfile(
+				profileToDelete.name,
+				deletedProfileConfig,
+				previousContextValues,
+				removedModeConfigs,
+			)
+			throw error
+		}
+	}
+
+	/**
+	 * The deleted profile's secret keys that any *remaining* profile's provider also owns.
+	 *
+	 * Both delete branches purge the deleted profile's credentials explicitly, and both need the
+	 * same answer: is a key about to be deleted still in use by a profile that survives? That
+	 * cannot be answered from a surviving profile's blob. The `api.getConfiguration()` round-trip
+	 * rewrites a profile without its secret fields while keeping `apiProvider`, so a surviving
+	 * OpenRouter profile's blob declares no `openRouterApiKey` even though that SecretStorage slot
+	 * holds its live value. Provider ownership answers it from the schema instead, which no
+	 * round-trip can strip.
+	 *
+	 * The answer spans *every* remaining profile, not just the one that ends up active. A profile
+	 * shares one SecretStorage slot per key name with every profile of the same provider, so a
+	 * remaining OpenRouter profile that is not active still reads the slot an inactive delete would
+	 * otherwise purge. Keeping a key is the correct semantics, not a leak, because nothing is
+	 * orphaned: a key no remaining provider owns is still purged, so a cross-provider delete keeps
+	 * nothing.
+	 *
+	 * A remaining profile that cannot be read contributes nothing, so its keys are purged. That is
+	 * the confidentiality-safe direction, and it is also what an unresolvable survivor set does:
+	 * the keep-set is empty and every key the deleted profile declared is removed.
+	 */
+	private async getSurvivingProviderSecretKeys(
+		deletedName: string,
+		deletedConfig: (ProviderSettingsWithId & { name: string }) | undefined,
+	): Promise<Set<string>> {
+		const deletedKeys = deletedConfig ? getProfileSecretKeys(deletedConfig) : []
+		const keep = new Set<string>()
+
+		try {
+			for (const { name } of await this.providerSettingsManager.listConfig()) {
+				if (name === deletedName) continue
+
+				try {
+					const { apiProvider } = await this.providerSettingsManager.getProfile({ name })
+					for (const key of deletedKeys) {
+						if (providerOwnsSecretKey(apiProvider, key) === true) keep.add(key)
+					}
+				} catch {
+					// An unreadable remaining profile contributes nothing, so its keys are purged.
+				}
+			}
+		} catch {
+			return new Set()
 		}
 
-		if (!profileToActivate) {
-			throw new Error("You cannot delete the last profile")
+		return keep
+	}
+
+	/**
+	 * Delete the credentials a purged profile's own blob declared.
+	 *
+	 * The ownership clear-out in `setProviderSettings` infers staleness from a *later* write, so
+	 * it cannot cover two cases: the inactive branch runs no replacement write at all, and a
+	 * same-provider succession is exactly the case ownership preserves. A delete is explicit
+	 * intent, so the deleted profile's keys are removed by name here instead of being inferred.
+	 *
+	 * `keep` names the keys a remaining profile's provider still owns: those carry a live
+	 * credential (profiles of one provider share one SecretStorage slot per key name), so removing
+	 * them would delete a surviving profile's own key.
+	 *
+	 * The delete itself stays successful: the profile is already gone from the manager, so a purge
+	 * failure is retried once and then surfaced, never rethrown. A retry is needed because
+	 * `storeSecret` clears the cache before it awaits `secrets.delete`: a rejected delete leaves the
+	 * cache empty while SecretStorage still holds the value, and the ownership clear-out skips keys
+	 * absent from the cache, so nothing else retries them in this session. The keys are logged by
+	 * name only, never by value.
+	 */
+	private async purgeDeletedProfileSecrets(
+		config: (ProviderSettingsWithId & { name: string }) | undefined,
+		keep: Set<string> = new Set(),
+	): Promise<void> {
+		if (!config) {
+			return
 		}
 
-		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
+		const secretKeys = getProfileSecretKeys(config).filter((key) => !keep.has(key))
 
-		await this.contextProxy.setValues({
-			...globalSettings,
-			currentApiConfigName: profileToActivate,
-			listApiConfigMeta: entries,
-		})
+		if (secretKeys.length === 0) {
+			return
+		}
 
-		await this.postStateToWebview()
+		try {
+			try {
+				await this.contextProxy.purgeProviderSecrets(secretKeys)
+			} catch {
+				// The cache is already cleared for these keys, so a retry re-issues the storage delete
+				// that failed rather than relying on a later clear-out that would skip them.
+				await this.contextProxy.purgeProviderSecrets(secretKeys)
+			}
+
+			this.log(`Purged ${secretKeys.length} secret(s) of the deleted profile '${config.name}'`)
+		} catch (error) {
+			const message = `Failed to purge the secrets of the deleted profile '${config.name}': ${error instanceof Error ? error.message : String(error)}`
+
+			this.log(message)
+			// The delete succeeded, so this must not reject it; the user still has to learn that a
+			// credential may remain in SecretStorage until the next successful purge or restart.
+			void vscode.window.showWarningMessage(message)
+		}
+	}
+
+	/**
+	 * Undo the purge of an active profile whose replacement activation failed, so the manager and
+	 * ContextProxy keep naming the same profile. Best-effort: a failed restore is logged rather
+	 * than replacing the original activation error.
+	 */
+	private async restoreDeletedProviderProfile(
+		name: string,
+		config: (ProviderSettingsWithId & { name: string }) | undefined,
+		previousContextValues: ProviderProfileSnapshot,
+		removedModeConfigs: Record<string, string>,
+	): Promise<void> {
+		// Run the rollback through the mutation queue: it used to race queued activations, and its
+		// late writes could overwrite a newer selection. `runToCompletion` keeps the queue held
+		// until every restore write has landed, and the aborted signal stops those writes once the
+		// caller has been told the restore timed out. The fallback reconcile runs inside the same
+		// queued body for the same reason. A restore timeout is logged, never rethrown: the caller
+		// must still see the original activation error.
+		try {
+			await this.enqueueProviderProfileMutation(
+				async (signal) => {
+					let restored = false
+
+					try {
+						restored = await this.applyProviderProfileRestore(
+							name,
+							config,
+							previousContextValues,
+							removedModeConfigs,
+							signal,
+						)
+					} catch (error) {
+						this.log(
+							`Failed to restore provider profile '${name}' after a failed replacement activation: ${
+								error instanceof Error ? error.message : String(error)
+							}`,
+						)
+					}
+
+					if (restored) {
+						this.log(`Restored provider profile '${name}' after a failed replacement activation`)
+					} else {
+						// The restore did not finish, so both stores may still name a profile the manager
+						// no longer has. The reconcile also re-applies the purge's dropped mode bindings
+						// and mirrors the mode map, so an aborted restore cannot silently lose them.
+						await this.reconcileActiveProfileAfterFailedRestore(name, removedModeConfigs)
+					}
+
+					// The replacement activation posted state before this rollback landed, and the
+					// rollback's writes change what the webview must show: without a post it keeps
+					// naming the replacement while both stores name the restored profile.
+					await this.postStateToWebview()
+				},
+				{ runToCompletion: true, abortOnTimeout: true },
+			)
+		} catch (error) {
+			this.log(
+				`Provider profile restore for '${name}' did not complete: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
+	}
+
+	/**
+	 * Undo a purge that committed after the caller was already told the deletion timed out.
+	 *
+	 * The inactive branch has no replacement activation, so nothing else would converge the two
+	 * stores: the manager would be missing the profile while `listApiConfigMeta` still lists it.
+	 * Re-saving the captured config restores the profile under its original `id`, which makes the
+	 * mode bindings the purge dropped name a live profile again. Best-effort: a failure here is
+	 * logged rather than replacing the timeout the caller already received.
+	 *
+	 * Returns false when a profile with that name exists again, i.e. when the undo was skipped:
+	 * the caller must then converge from the manager's view instead of a stale snapshot.
+	 */
+	private async undoCommittedProviderProfilePurge(
+		name: string,
+		config: (ProviderSettingsWithId & { name: string }) | undefined,
+		removedModeConfigs: Record<string, string>,
+	): Promise<boolean> {
+		if (!config) {
+			return false
+		}
+
+		try {
+			const { name: _name, ...providerSettings } = config
+
+			// The check and the write share one manager lock: a queued save for the same name can
+			// land while the purge holds that lock, and re-saving the pre-delete snapshot over it
+			// would silently revert the newer profile's credentials.
+			if ((await this.providerSettingsManager.saveConfigIfAbsent(name, providerSettings)) === undefined) {
+				this.log(`Skipped undoing the purge for '${name}': a same-name profile was saved after the timeout`)
+				return false
+			}
+
+			// A newer selection can bind the mode while the purge holds the lock, so the re-apply
+			// must not overwrite it: the guarded form skips a mode that is already bound.
+			for (const [mode, configId] of Object.entries(removedModeConfigs)) {
+				await this.providerSettingsManager.setModeConfig(mode as Mode, configId, { onlyIfUnbound: true })
+			}
+
+			this.log(`Undid a provider profile purge for '${name}' that committed after the caller timed out`)
+			return true
+		} catch (error) {
+			this.log(
+				`Failed to undo the provider profile purge for '${name}' after a timeout: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+			return false
+		}
+	}
+
+	/**
+	 * Rewrite the purged profile into the manager and ContextProxy. Returns false when the caller
+	 * already timed out, so the caller can reconcile instead of leaving a half-applied restore.
+	 *
+	 * With no captured config there is nothing to restore (the inactive branch never captures one),
+	 * so this writes nothing and reports false: writing the `previousContextValues` snapshot would
+	 * re-mirror a `listApiConfigMeta` that predates any profile created while the purge held the
+	 * lock, dropping that profile from the webview's list while the manager keeps it.
+	 */
+	private async applyProviderProfileRestore(
+		name: string,
+		config: (ProviderSettingsWithId & { name: string }) | undefined,
+		previousContextValues: ProviderProfileSnapshot,
+		removedModeConfigs: Record<string, string>,
+		signal: AbortSignal,
+	): Promise<boolean> {
+		if (!config) {
+			// The inactive branch never captures a config, so there is nothing to restore: writing
+			// the `previousContextValues` snapshot would re-mirror a list that predates any profile
+			// created while the purge held the lock.
+			return false
+		}
+
+		// Keep `id`: the manager reuses it for the mode associations that point at this profile.
+		// The conditional save makes the check and the write one lock: a same-name profile saved
+		// outside the mutation queue during the replacement activation must not be overwritten by
+		// the pre-delete snapshot. When the name is taken the restore is skipped and the reconcile
+		// converges from the manager's view instead.
+		const { name: _name, ...providerSettings } = config
+		if ((await this.providerSettingsManager.saveConfigIfAbsent(name, providerSettings)) === undefined) return false
+
+		if (signal.aborted) return false
+
+		await this.providerSettingsManager.activateProfile({ name })
+
+		if (signal.aborted) return false
+
+		// Restore the whole provider slice, not just the name pointers: a partial activation may
+		// have left the replacement's provider settings under the deleted name. `id` is manager
+		// metadata, not a setting, so it must not reach `ContextProxy`. `apiProvider` belongs to
+		// this slice, so the snapshot below deliberately does not carry it: writing it again
+		// would overwrite the restored provider with the pre-delete pointer. It is still passed
+		// as the ownership discriminator, because the profile being restored is the one whose
+		// own secrets must survive this write.
+		const { id: _id, ...settings } = providerSettings
+		await this.contextProxy.setProviderSettings(settings, config.apiProvider)
+
+		if (signal.aborted) return false
+
+		// `saveConfig` above reused the profile's `id`, so the mode bindings the purge dropped
+		// name a profile that exists again. Re-apply them in the manager with a per-write abort
+		// check, then mirror the pre-delete map into ContextProxy: the snapshot below restores
+		// every mode, including the ones the purge never touched.
+		for (const [mode, configId] of Object.entries(removedModeConfigs)) {
+			if (signal.aborted) return false
+			await this.providerSettingsManager.setModeConfig(mode as Mode, configId)
+		}
+
+		if (signal.aborted) return false
+
+		await this.contextProxy.setValues(previousContextValues)
+		return true
+	}
+
+	/**
+	 * Point both stores at a profile that still exists, including its settings, so a retry can
+	 * proceed and the webview cannot show a name with the wrong settings. The manager is activated
+	 * too: reconciling ContextProxy alone would leave the manager's own `currentApiConfigName`
+	 * naming the deleted profile.
+	 *
+	 * The fallback's provider slice is written through `setProviderSettings` so the stale-clear
+	 * semantics apply: a raw `setValues` merge would leave the restored profile's differently-named
+	 * secrets behind under the fallback name. The mode map is reconciled too, so ContextProxy cannot
+	 * keep pointing a mode at the deleted profile after the purge dropped the binding in the manager.
+	 *
+	 * The fallback activation is the only write here that can *replace* a profile, so it is gated on
+	 * the deleted name *and* on whether that name still exists: a delete that failed before its
+	 * purge (a rejected pre-purge read, or a rejected `deleteConfig`) leaves the profile in the
+	 * manager, so the unchanged selection is not a stale pointer to a deleted profile and must not
+	 * be replaced. Any other selection the manager still holds was never part of this delete, or
+	 * was picked by someone else while the restore was pending. The `onlyIfUnbound` re-applies
+	 * and the mirror below are convergence writes over ids that exist and modes no newer selection
+	 * has bound, so they stay ungated: an aborted restore must still reconcile the mode bindings.
+	 */
+	private async reconcileActiveProfileAfterFailedRestore(
+		deletedName: string,
+		removedModeConfigs: Record<string, string> = {},
+	): Promise<void> {
+		try {
+			const selectedName = this.contextProxy.getValues().currentApiConfigName
+			const keepSelection =
+				!!selectedName &&
+				(selectedName !== deletedName || (await this.providerSettingsManager.hasConfig(deletedName))) &&
+				(await this.providerSettingsManager.hasConfig(selectedName))
+
+			if (!keepSelection) {
+				const remainingProfiles = await this.providerSettingsManager.listConfig()
+				const fallback = remainingProfiles[0]?.name
+
+				if (!fallback) {
+					return
+				}
+
+				const {
+					name: _fallbackName,
+					id: _fallbackId,
+					...fallbackSettings
+				} = await this.providerSettingsManager.activateProfile({ name: fallback })
+
+				await this.contextProxy.setProviderSettings(fallbackSettings, fallbackSettings.apiProvider)
+				await this.contextProxy.setValues({
+					currentApiConfigName: fallback,
+					listApiConfigMeta: remainingProfiles,
+				})
+			}
+			// The purge may have dropped mode bindings the restore could not re-apply; re-apply
+			// them now so the manager's map matches the pre-delete state again. The check and the
+			// write share one manager lock: a newer selection can bind the mode while this
+			// rollback runs, and a binding whose profile no longer exists must not be re-applied.
+			// The mirror below runs after the re-apply, so ContextProxy never holds a map the
+			// manager disagrees with.
+			for (const [mode, configId] of Object.entries(removedModeConfigs)) {
+				await this.providerSettingsManager.setModeConfig(mode as Mode, configId, { onlyIfUnbound: true })
+			}
+			await this.contextProxy.setValue("modeApiConfigs", await this.providerSettingsManager.getModeApiConfigs())
+		} catch (reconcileError) {
+			this.log(
+				`Failed to reconcile the active profile after a failed restore: ${
+					reconcileError instanceof Error ? reconcileError.message : String(reconcileError)
+				}`,
+			)
+		}
 	}
 
 	private async persistStickyProviderProfileToCurrentTask(
@@ -2195,19 +2803,30 @@ export class ClineProvider
 		const skipCurrentTaskRebuild = options?.skipCurrentTaskRebuild ?? false
 
 		if (!skipCurrentTaskRebuild) {
-			// See `upsertProviderProfile` for a description of what this is doing.
+			// See `upsertProviderProfile` for a description of what this is doing. The slice comes
+			// from the manager's own blob, so its `apiProvider` is the stored provider rather than a
+			// caller-supplied field; passing it explicitly keeps the ownership discriminator pinned
+			// to the profile being activated.
 			await Promise.all([
 				this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
 				this.contextProxy.setValue("currentApiConfigName", name),
-				this.contextProxy.setProviderSettings(providerSettings),
+				this.contextProxy.setProviderSettings(providerSettings, providerSettings.apiProvider),
 			])
 		}
 
+		// A timeout may have fired while the writes above were in flight. Every later write is
+		// skipped so an abandoned activation body cannot clobber a queued rollback's restoration.
+		if (signal?.aborted) return
+
 		const { mode } = await this.getState()
+
+		if (signal?.aborted) return
 
 		if (id && persistModeConfig) {
 			await this.providerSettingsManager.setModeConfig(mode, id)
 		}
+
+		if (signal?.aborted) return
 
 		// Change the provider for the current task.
 		this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true, skipCurrentTaskRebuild })
@@ -2217,6 +2836,8 @@ export class ClineProvider
 		if (persistTaskHistory) {
 			await this.persistStickyProviderProfileToCurrentTask(name, { skipCurrentTaskRebuild })
 		}
+
+		if (signal?.aborted) return
 
 		if (!skipCurrentTaskRebuild) {
 			await this.postStateToWebview()
