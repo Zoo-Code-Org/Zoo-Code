@@ -16,6 +16,9 @@ import { DIFF_VIEW_URI_SCHEME } from "../../integrations/editor/DiffViewProvider
 
 import { CheckpointServiceOptions, RepoPerTaskCheckpointService } from "../../services/checkpoints"
 
+import { appendChanges } from "./changeJournal"
+import { buildChangeCardPayload } from "./changeCard"
+
 const WARNING_THRESHOLD_MS = 5000
 
 function sendCheckpointInitWarn(task: Task, type?: "WAIT_TIMEOUT" | "INIT_TIMEOUT", timeout?: number) {
@@ -23,6 +26,16 @@ function sendCheckpointInitWarn(task: Task, type?: "WAIT_TIMEOUT" | "INIT_TIMEOU
 		type: "checkpointInitWarning",
 		checkpointWarning: type && timeout ? { type, timeout } : undefined,
 	})
+}
+
+// Every checkpoint disable in this module is failure-driven (init, save,
+// restore, or diff). Route the flip through this helper so checkpointSave
+// can tell an earlier failure apart from a user who never enabled
+// checkpoints: the persisted setting cannot make that distinction (it can
+// change after the task started).
+function disableCheckpointsAfterFailure(task: Task): void {
+	task.enableCheckpoints = false
+	task.checkpointsDisabledByFailure = true
 }
 
 export async function getCheckpointService(task: Task, { interval = 250 }: { interval?: number } = {}) {
@@ -56,7 +69,7 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 
 		if (!workspaceDir) {
 			log("[Task#getCheckpointService] workspace folder not found, disabling checkpoints")
-			task.enableCheckpoints = false
+			disableCheckpointsAfterFailure(task)
 			return undefined
 		}
 
@@ -64,7 +77,7 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 
 		if (!globalStorageDir) {
 			log("[Task#getCheckpointService] globalStorageDir not found, disabling checkpoints")
-			task.enableCheckpoints = false
+			disableCheckpointsAfterFailure(task)
 			return undefined
 		}
 
@@ -98,7 +111,7 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 			)
 			if (!task?.checkpointService) {
 				sendCheckpointInitWarn(task, "INIT_TIMEOUT", task.checkpointTimeout)
-				task.enableCheckpoints = false
+				disableCheckpointsAfterFailure(task)
 				return undefined
 			} else {
 				sendCheckpointInitWarn(task)
@@ -113,6 +126,15 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 		const service = RepoPerTaskCheckpointService.create(options)
 		task.checkpointServiceInitializing = true
 		await checkGitInstallation(task, service, log, provider)
+		if (!service.isInitialized) {
+			// checkGitInstallation disables checkpoints when Git is unavailable and
+			// logs initShadowGit failures without throwing: storing such a service
+			// would hand later saves (and the fast path above) an uninitialized
+			// handle whose isInitialized can never flip, so a failed
+			// initialization must resolve to no service at all.
+			task.checkpointServiceInitializing = false
+			return undefined
+		}
 		task.checkpointService = service
 		if (task.enableCheckpoints) {
 			sendCheckpointInitWarn(task)
@@ -123,7 +145,7 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 			sendCheckpointInitWarn(task, "INIT_TIMEOUT", task.checkpointTimeout)
 		}
 		log(`[Task#getCheckpointService] ${err.message}`)
-		task.enableCheckpoints = false
+		disableCheckpointsAfterFailure(task)
 		task.checkpointServiceInitializing = false
 		return undefined
 	}
@@ -140,7 +162,7 @@ async function checkGitInstallation(
 
 		if (!gitInstalled) {
 			log("[Task#getCheckpointService] Git is not installed, disabling checkpoints")
-			task.enableCheckpoints = false
+			disableCheckpointsAfterFailure(task)
 			task.checkpointServiceInitializing = false
 
 			// Show user-friendly notification
@@ -189,7 +211,7 @@ async function checkGitInstallation(
 			} catch (err) {
 				log("[Task#getCheckpointService] caught unexpected error in on('checkpoint'), disabling checkpoints")
 				console.error(err)
-				task.enableCheckpoints = false
+				disableCheckpointsAfterFailure(task)
 			}
 		})
 
@@ -199,32 +221,266 @@ async function checkGitInstallation(
 			await service.initShadowGit()
 		} catch (err) {
 			log(`[Task#getCheckpointService] initShadowGit -> ${err.message}`)
-			task.enableCheckpoints = false
+			disableCheckpointsAfterFailure(task)
+			// The "initialize" event never fires for a failed initShadowGit, so
+			// clear the flag here or later lookups wait on an initialization
+			// that already died.
+			task.checkpointServiceInitializing = false
 		}
 	} catch (err) {
 		log(`[Task#getCheckpointService] Unexpected error during Git check: ${err.message}`)
 		console.error("Git check error:", err)
-		task.enableCheckpoints = false
+		disableCheckpointsAfterFailure(task)
 		task.checkpointServiceInitializing = false
 	}
 }
 
-export async function checkpointSave(task: Task, force = false, suppressMessage = false) {
-	const service = await getCheckpointService(task)
+/**
+ * Write metadata for the per-task change journal (B2).
+ *
+ * `path` is the file path as the tool knows it (relative to the task cwd),
+ * consistent with what the B1 per-write checkpoint hooks see. `diffStats` is
+ * the { additions, deletions } pair from the approval diff when it was
+ * computable; omitted otherwise. ApplyPatchTool passes one entry per file
+ * change of a fully successful patch (an array), all sharing the single
+ * checkpoint the patch's post-loop hook saves.
+ */
+export type CheckpointWriteInfo = {
+	path: string
+	operation: "create" | "update" | "delete"
+	diffStats?: { additions: number; deletions: number }
+	/**
+	 * The unified approval diff for this write, reused verbatim by the B3a
+	 * change card (never recomputed).
+	 */
+	diff?: string
+	/**
+	 * Whether the tool step was auto-approved (no human interaction). Auto-
+	 * approved steps always get the compact ("summary") change card.
+	 */
+	autoApproved?: boolean
+}
+/**
+ * Thrown when a checkpoint commit succeeded but its journal/card persistence
+ * did not. Carries the committed checkpoint id and the complete affected write
+ * set so tool callers can report an explicit partial-persistence state
+ * instead of a silent full success.
+ */
+export class CheckpointPartialPersistenceError extends Error {
+	constructor(
+		message: string,
+		readonly checkpointId: string,
+		readonly writes: CheckpointWriteInfo[],
+	) {
+		super(message)
+		this.name = "CheckpointPartialPersistenceError"
+	}
+}
+
+export async function checkpointSave(
+	task: Task,
+	force = false,
+	suppressMessage = false,
+	write?: CheckpointWriteInfo | CheckpointWriteInfo[],
+) {
+	// A save that carries write metadata must end with rollback metadata
+	// existing: every failure below (service init-failure, no commit, no
+	// journal location, journal write failure) surfaces explicitly instead
+	// of resolving to a tool success over an orphaned write. A user-disabled
+	// checkpoint setting is NOT such a failure: absence of rollback metadata
+	// is then the user's explicit choice, so the save resolves silently
+	// (documented contract, see PR description).
+	const journalWrites = write === undefined ? undefined : Array.isArray(write) ? write : [write]
+	const hasWriteMetadata = !!journalWrites && journalWrites.length > 0
+
+	// Captured before the lookup: getCheckpointService flips the flag off when
+	// initialization fails, so reading it after the call cannot distinguish
+	// "user disabled checkpoints" (resolve silently) from "init failed while
+	// the user expects checkpoints" (throw).
+	const checkpointsRequested = task.enableCheckpoints
+
+	let service = await getCheckpointService(task)
 
 	if (!service) {
-		return
+		if (hasWriteMetadata && !checkpointsRequested && task.checkpointsDisabledByFailure) {
+			// An earlier failure (init or save) disabled checkpoints while the
+			// user never turned them off. Attempt one recovery so a single
+			// transient failure (e.g. index.lock contention) does not
+			// permanently fail every later write in the task: reuse a live
+			// service handle when one exists (a save failure does not
+			// invalidate the handle), otherwise retry initialization once. The
+			// persisted setting cannot make this decision - it can change
+			// after the task started, and enabling checkpoints mid-task must
+			// not retroactively fail writes that were never promised a
+			// checkpoint.
+			task.enableCheckpoints = true
+			// Only a live, initialized handle may be reused: an uninitialized
+			// stored service would go straight to saveCheckpoint (which throws)
+			// instead of retrying initialization.
+			const live = task.checkpointService?.isInitialized ? task.checkpointService : undefined
+			if (!live) {
+				task.checkpointService = undefined
+				task.checkpointServiceInitializing = false
+			}
+			service = live ?? (await getCheckpointService(task))
+		}
+		if (!service) {
+			if (hasWriteMetadata && (checkpointsRequested || task.checkpointsDisabledByFailure)) {
+				throw new Error(
+					"Checkpoint save with write metadata could not initialize the checkpoint service; the write has no rollback metadata.",
+				)
+			}
+			return
+		}
+	}
+
+	// A save that carries write metadata needs a stable journal location for
+	// the whole commit + journal transaction. Capture it before the commit:
+	// the weak provider reference can disappear while the Git save is
+	// awaited, and a commit whose journal update was then silently skipped
+	// leaves rollback metadata incomplete with no error surfaced. Without a
+	// location at all, fail before committing so the tool reports an
+	// explicit failure instead of a checkpoint nobody can roll back.
+	const journalDir = task.providerRef.deref()?.context.globalStorageUri.fsPath
+	if (hasWriteMetadata && !journalDir) {
+		throw new Error(
+			"Checkpoint save with write metadata requires a stable journal location, but the provider reference or global storage path is unavailable.",
+		)
 	}
 
 	TelemetryService.instance.captureCheckpointCreated(task.taskId)
 
-	// Start the checkpoint process in the background.
-	return service
-		.saveCheckpoint(`Task: ${task.taskId}, Time: ${Date.now()}`, { allowEmpty: force, suppressMessage })
-		.catch((err) => {
+	// Save failures keep the historical behavior for non-write calls:
+	// logged, checkpoints disabled, and the save resolves undefined. A
+	// write-metadata save must not swallow a failed commit: the file write
+	// already happened, so the caller must see an explicit failure instead
+	// of a success whose rollback metadata does not exist. Journal/card
+	// work below runs only for a real commit, and its failures propagate to
+	// the caller instead of flowing through this handler.
+	const savePromise = service.saveCheckpoint(`Task: ${task.taskId}, Time: ${Date.now()}`, {
+		allowEmpty: force,
+		suppressMessage,
+	})
+	// `void` keeps the historical union member of the awaited legacy
+	// catch path (and of this function's return type) unchanged.
+	let result: Awaited<typeof savePromise> | void
+	if (hasWriteMetadata) {
+		try {
+			result = await savePromise
+		} catch (err) {
 			console.error("[Task#checkpointSave] caught unexpected error, disabling checkpoints", err)
-			task.enableCheckpoints = false
+			disableCheckpointsAfterFailure(task)
+			throw new Error(
+				`Checkpoint save failed after a file write; the write has no rollback metadata: ${err instanceof Error ? err.message : String(err)}`,
+				{ cause: err },
+			)
+		}
+	} else {
+		result = await savePromise.catch((err) => {
+			console.error("[Task#checkpointSave] caught unexpected error, disabling checkpoints", err)
+			disableCheckpointsAfterFailure(task)
 		})
+	}
+
+	// Paths excluded from the shadow repository (node_modules, build
+	// output, .gitignore'd files) never enter the journal: the shadow
+	// commit cannot contain them, so a journal entry would route a later
+	// rollback into restoreFile's delete branch, where absence from the
+	// commit would delete the user's live file. Skipping excluded paths
+	// at journaling time keeps rollback metadata honest and removes
+	// excluded-path noise from the journal and the change card. The
+	// filter runs BEFORE the no-commit rejection below: an all-excluded
+	// step stages nothing, so requiring a commit would make the tool's
+	// outcome depend on unrelated workspace changes.
+	const writes: CheckpointWriteInfo[] = []
+	if (hasWriteMetadata) {
+		for (const w of journalWrites ?? []) {
+			if (await service.isPathIgnored(w.path)) {
+				continue
+			}
+			writes.push(w)
+		}
+		if (writes.length === 0) {
+			// Every write landed on an excluded path: nothing to journal and
+			// nothing to show, and no rollback metadata is expected - the save
+			// resolves whether or not unrelated changes produced a commit.
+			return result
+		}
+	}
+
+	// A save that resolves without a commit despite non-excluded writes
+	// produced no rollback point: journaling is skipped and a later
+	// restore reports no entry. With write metadata that is a partial
+	// persistence, not a success.
+	if (hasWriteMetadata && !result?.commit) {
+		throw new Error(
+			"Checkpoint save with write metadata did not produce a commit; the write has no rollback metadata.",
+		)
+	}
+	// B2: record successful file writes in the per-task change journal.
+	// Only a real commit produces an entry (an empty or failed save
+	// resolves to undefined / rejects), and non-write checkpoint calls
+	// (e.g. the task-start baseline) pass no `write` value at all.
+	// A no-op checkpoint carries an empty writes array: unrelated workspace
+	// changes can still produce a commit, and emitting a card for it would
+	// show a change card with zero files. The checkpoint itself still runs.
+	if (result?.commit && hasWriteMetadata) {
+		if (!journalDir) {
+			// Defensive: the pre-commit guard above normally makes this
+			// unreachable. If the location is nonetheless gone while the commit
+			// succeeded, surface the partial state instead of skipping the
+			// journal silently.
+			throw new CheckpointPartialPersistenceError(
+				`Checkpoint ${result.commit} was committed but no stable journal location was available (files: ${writes
+					.map((w) => w.path)
+					.join(", ")}); rollback metadata is incomplete.`,
+				result.commit,
+				writes,
+			)
+		}
+		// Persist the whole step's journal update as one serialized,
+		// atomic replacement (temp file + fsync + rename + directory
+		// sync), preserving write order. A journal failure is logged and
+		// propagated: the checkpoint must not be reported fully durable
+		// while its journal entries were lost.
+		try {
+			await appendChanges(
+				journalDir,
+				task.taskId,
+				writes.map((w) => ({
+					path: w.path,
+					operation: w.operation,
+					checkpointId: result.commit,
+					...(w.diffStats ? { diffStats: w.diffStats } : {}),
+				})),
+			)
+		} catch (err) {
+			console.error("[Task#checkpointSave] failed to persist change journal entries", err)
+			throw new CheckpointPartialPersistenceError(
+				`Checkpoint ${result.commit} was committed but its change journal could not be persisted (files: ${writes
+					.map((w) => w.path)
+					.join(", ")}); rollback metadata is incomplete.`,
+				result.commit,
+				writes,
+			)
+		}
+
+		// B3a: emit the per-step change card now that the checkpoint commit
+		// exists and the journal update is durable (a journal failure above
+		// propagated and skips the card). The card reuses the approval diff/stats the tool already
+		// computed and is always emitted (auto-approved steps included);
+		// a card failure is logged and never disables checkpoints.
+		try {
+			const state = await task.providerRef.deref()?.getState()
+			const card = buildChangeCardPayload(result.commit, writes, state?.changeCardDetail)
+			await task.say("change_card", JSON.stringify(card), undefined, undefined, undefined, undefined, {
+				isNonInteractive: true,
+			})
+		} catch (err) {
+			console.error("[Task#checkpointSave] failed to emit change card", err)
+		}
+	}
+	return result
 }
 
 export type CheckpointRestoreOptions = {
@@ -297,7 +553,7 @@ export async function checkpointRestore(
 		provider?.cancelTask()
 	} catch {
 		provider?.log("[checkpointRestore] disabling checkpoints for this task")
-		task.enableCheckpoints = false
+		disableCheckpointsAfterFailure(task)
 	}
 }
 
@@ -387,6 +643,6 @@ export async function checkpointDiff(task: Task, { commitHash, mode }: Checkpoin
 	} catch {
 		const provider = task.providerRef.deref()
 		provider?.log("[checkpointDiff] disabling checkpoints for this task")
-		task.enableCheckpoints = false
+		disableCheckpointsAfterFailure(task)
 	}
 }
