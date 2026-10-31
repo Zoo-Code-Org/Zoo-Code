@@ -233,6 +233,7 @@ export const PROVIDERS_WITH_CUSTOM_MODEL_UI: ProviderName[] = [
 	providerIdentifiers.vscodeLm,
 	providerIdentifiers.githubCopilot,
 	providerIdentifiers.moonshot, // Moonshot has custom ModelPicker inside Moonshot.tsx
+	providerIdentifiers.fireworks, // Fireworks has custom ModelPicker (API-fetched list) inside Fireworks.tsx
 ]
 
 /**

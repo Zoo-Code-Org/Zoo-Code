@@ -22,9 +22,9 @@ import {
 	sambaNovaModels,
 	getZAiModels,
 	zaiApiLineConfigs,
-	fireworksModels,
 	friendliModels,
 	basetenModels,
+	fireworksUnknownModelInfo,
 	qwenCodeModels,
 	kimiCodeDefaultModelInfo,
 	litellmDefaultModelInfo,
@@ -67,7 +67,7 @@ function getValidatedModelId(
 
 /**
  * Resolves a static-catalog model for providers backed by `BaseOpenAiCompatibleProvider`
- * (Fireworks, Baseten, SambaNova). Mirrors the backend `getModel()`: a user-supplied custom
+ * (Baseten, SambaNova). Mirrors the backend `getModel()`: a user-supplied custom
  * model ID that isn't in the static list is honored with `openAiModelInfoSaneDefaults`, so the
  * UI shows sensible limits (e.g. context window) instead of treating the selection as unknown.
  */
@@ -127,14 +127,16 @@ export const useSelectedModel = (apiConfiguration: ProviderSettings) => {
 	const needLmStudio = typeof lmStudioModelId !== "undefined"
 	const needOllama = typeof ollamaModelId !== "undefined"
 
-	// LiteLLM and IO Intelligence may legitimately have no entry in the router
-	// payload (partial listing, failed fetch, renamed deployment) even though
-	// the configured ID is a valid selection, so they only need the fetch to
-	// settle. Other dynamic providers require a populated provider entry
-	// before the selection is resolved.
+	// LiteLLM, IO Intelligence and Fireworks may legitimately have no entry in
+	// the router payload (partial listing, failed fetch, renamed deployment, or
+	// no API key yet) even though the configured ID is a valid selection, so
+	// they only need the fetch to settle. Other dynamic providers require a
+	// populated provider entry before the selection is resolved.
 	const hasValidRouterData =
 		needRouterModels && dynamicProvider
-			? dynamicProvider === providerIdentifiers.litellm || dynamicProvider === providerIdentifiers.ioIntelligence
+			? dynamicProvider === providerIdentifiers.litellm ||
+				dynamicProvider === providerIdentifiers.ioIntelligence ||
+				dynamicProvider === providerIdentifiers.fireworks
 				? !routerModels.isLoading
 				: routerModels.data &&
 					routerModels.data[dynamicProvider] !== undefined &&
@@ -165,7 +167,14 @@ export const useSelectedModel = (apiConfiguration: ProviderSettings) => {
 						id: apiConfiguration.apiModelId || getProviderDefaultModelId(providerIdentifiers.kimiCode),
 						info: kimiCodeDefaultModelInfo,
 					}
-				: { id: getProviderDefaultModelId(activeProvider ?? providerIdentifiers.openrouter), info: undefined }
+				: activeProvider === providerIdentifiers.fireworks && apiConfiguration?.apiModelId
+					? // The catalog is still loading. Returning the default here would let the
+						// ApiOptions sync effect overwrite the user's saved nondefault selection.
+						{ id: apiConfiguration.apiModelId, info: fireworksUnknownModelInfo }
+					: {
+							id: getProviderDefaultModelId(activeProvider ?? providerIdentifiers.openrouter),
+							info: undefined,
+						}
 
 	return {
 		provider,
@@ -503,8 +512,16 @@ function getSelectedModel({
 		}
 		case providerIdentifiers.sambanova:
 			return getStaticCatalogModel(apiConfiguration.apiModelId, sambaNovaModels, defaultModelId)
-		case providerIdentifiers.fireworks:
-			return getStaticCatalogModel(apiConfiguration.apiModelId, fireworksModels, defaultModelId)
+		case providerIdentifiers.fireworks: {
+			// Model metadata and pricing come only from the Fireworks API. Keep the
+			// configured id even when it isn't listed (the backend honours custom ids)
+			// and fall back to the same unpriced defaults as FireworksHandler.getModel().
+			const id = apiConfiguration.apiModelId || defaultModelId
+			const models = routerModels[providerIdentifiers.fireworks]
+			const info =
+				models && Object.prototype.hasOwnProperty.call(models, id) ? models[id] : fireworksUnknownModelInfo
+			return { id, info }
+		}
 		case providerIdentifiers.friendli: {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
 			const info = friendliModels[id as keyof typeof friendliModels]

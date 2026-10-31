@@ -30,7 +30,7 @@ import {
 	friendliDefaultModelId,
 	friendliModels,
 	fireworksDefaultModelId,
-	fireworksModels,
+	fireworksUnknownModelInfo,
 	basetenDefaultModelId,
 	basetenModels,
 	sambaNovaDefaultModelId,
@@ -305,6 +305,102 @@ describe("useSelectedModel", () => {
 			}
 		},
 	)
+
+	describe("Fireworks model selection", () => {
+		beforeEach(() => {
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+		})
+
+		it("uses API-fetched metadata (including pricing) for the configured model", () => {
+			const modelId = "accounts/fireworks/models/glm-5p3"
+			const modelInfo: ModelInfo = {
+				contextWindow: 1_048_576,
+				supportsPromptCache: true,
+				supportsImages: false,
+				inputPrice: 1.4,
+				outputPrice: 4.4,
+				cacheReadsPrice: 0.26,
+			}
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({ [providerIdentifiers.fireworks]: { [modelId]: modelInfo } }),
+			)
+
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.fireworks, apiModelId: modelId }),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe(modelId)
+			expect(result.current.info).toEqual(modelInfo)
+		})
+
+		it("falls back to the default model id when none is configured", () => {
+			const modelInfo: ModelInfo = { contextWindow: 262_144, supportsPromptCache: false }
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({ [providerIdentifiers.fireworks]: { [fireworksDefaultModelId]: modelInfo } }),
+			)
+
+			const { result } = renderHook(() => useSelectedModel({ apiProvider: providerIdentifiers.fireworks }), {
+				wrapper: createWrapper(),
+			})
+
+			expect(result.current.id).toBe(fireworksDefaultModelId)
+			expect(result.current.info).toEqual(modelInfo)
+		})
+
+		it("keeps a saved nondefault id while the model list is loading", () => {
+			const savedId = "accounts/fireworks/models/glm-5p3"
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult(undefined, { isLoading: true }))
+
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.fireworks, apiModelId: savedId }),
+				{ wrapper: createWrapper() },
+			)
+
+			// Returning the default here would let ApiOptions persist it over the saved selection.
+			expect(result.current.id).toBe(savedId)
+			expect(result.current.info).toEqual(fireworksUnknownModelInfo)
+			expect(result.current.isLoading).toBe(true)
+		})
+
+		it("falls back to the default id while loading when nothing is saved", () => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult(undefined, { isLoading: true }))
+
+			const { result } = renderHook(() => useSelectedModel({ apiProvider: providerIdentifiers.fireworks }), {
+				wrapper: createWrapper(),
+			})
+
+			expect(result.current.id).toBe(fireworksDefaultModelId)
+		})
+
+		it("keeps an unknown configured id with unpriced default info when absent from the fetched list", () => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [providerIdentifiers.fireworks]: {} }))
+
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.fireworks, apiModelId: "custom/model" }),
+				{ wrapper: createWrapper() },
+			)
+
+			// Mirrors FireworksHandler.getModel(): sane limits, but no guessed price.
+			expect(result.current.id).toBe("custom/model")
+			expect(result.current.info).toEqual(fireworksUnknownModelInfo)
+			expect(result.current.info?.inputPrice).toBeUndefined()
+		})
+
+		it("treats inherited Object.prototype keys as custom ids with unpriced default info", () => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [providerIdentifiers.fireworks]: {} }))
+
+			for (const apiModelId of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+				const { result } = renderHook(
+					() => useSelectedModel({ apiProvider: providerIdentifiers.fireworks, apiModelId }),
+					{ wrapper: createWrapper() },
+				)
+
+				expect(result.current.id).toBe(apiModelId)
+				expect(result.current.info).toEqual(fireworksUnknownModelInfo)
+			}
+		})
+	})
 
 	it("uses router data for Poe", () => {
 		const modelInfo: ModelInfo = { contextWindow: 42_000, supportsPromptCache: false }
@@ -1896,19 +1992,13 @@ describe("useSelectedModel", () => {
 		})
 	})
 
-	describe("OpenAI-compatible static catalog providers (fireworks, baseten, sambanova)", () => {
+	describe("OpenAI-compatible static catalog providers (baseten, sambanova)", () => {
 		beforeEach(() => {
 			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
 			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
 		})
 
 		const staticCatalogCases = [
-			{
-				apiProvider: providerIdentifiers.fireworks,
-				defaultId: fireworksDefaultModelId,
-				models: fireworksModels as Record<string, ModelInfo>,
-				knownId: "accounts/fireworks/models/kimi-k2-instruct",
-			},
 			{
 				apiProvider: providerIdentifiers.baseten,
 				defaultId: basetenDefaultModelId,
@@ -1962,7 +2052,7 @@ describe("useSelectedModel", () => {
 			},
 		)
 
-		it.each([providerIdentifiers.fireworks, providerIdentifiers.baseten, providerIdentifiers.sambanova])(
+		it.each([providerIdentifiers.baseten, providerIdentifiers.sambanova])(
 			"honors a custom %s model ID with sane default metadata (not undefined info)",
 			(apiProvider) => {
 				// Regression: custom models had undefined info, so the task header fell back to a
@@ -1978,7 +2068,7 @@ describe("useSelectedModel", () => {
 			},
 		)
 
-		describe.each([providerIdentifiers.fireworks, providerIdentifiers.baseten, providerIdentifiers.sambanova])(
+		describe.each([providerIdentifiers.baseten, providerIdentifiers.sambanova])(
 			"%s inherited Object.prototype keys",
 			(apiProvider) => {
 				// An `in` check would match these keys on the prototype chain and return a function as `info`.
@@ -2156,6 +2246,7 @@ describe("useSelectedModel", () => {
 					requesty: {},
 					litellm: {},
 					moonshot: {},
+					fireworks: {},
 				},
 				isLoading: false,
 				isError: false,
