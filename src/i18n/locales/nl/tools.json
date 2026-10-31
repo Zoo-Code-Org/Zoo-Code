@@ -19,7 +19,8 @@
 			"blocked": "Destructive Command Guard heeft deze opdracht geblokkeerd.",
 			"blockedWithReason": "Destructive Command Guard heeft deze opdracht geblokkeerd. Bericht van DCG: {{reason}}",
 			"blockedWithRule": "Destructive Command Guard heeft deze opdracht geblokkeerd. (Regel: {{ruleId}})",
-			"blockedWithReasonAndRule": "Destructive Command Guard heeft deze opdracht geblokkeerd. Bericht van DCG: {{reason}} (Regel: {{ruleId}})"
+			"blockedWithReasonAndRule": "Destructive Command Guard heeft deze opdracht geblokkeerd. Bericht van DCG: {{reason}} (Regel: {{ruleId}})",
+			"assumedPosixNote": "Opmerking: DCG analyseert opdrachten als POSIX-shellsyntaxis, maar deze opdracht wordt uitgevoerd in {{shell}}. Een blokkade kan dus betekenen dat DCG de opdracht niet kon lezen, niet dat deze destructief is."
 		}
 	},
 	"newTask": {

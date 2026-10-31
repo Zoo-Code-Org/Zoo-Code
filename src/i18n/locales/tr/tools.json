@@ -19,7 +19,8 @@
 			"blocked": "Destructive Command Guard bu komutu engelledi.",
 			"blockedWithReason": "Destructive Command Guard bu komutu engelledi. DCG mesajı: {{reason}}",
 			"blockedWithRule": "Destructive Command Guard bu komutu engelledi. (Kural: {{ruleId}})",
-			"blockedWithReasonAndRule": "Destructive Command Guard bu komutu engelledi. DCG mesajı: {{reason}} (Kural: {{ruleId}})"
+			"blockedWithReasonAndRule": "Destructive Command Guard bu komutu engelledi. DCG mesajı: {{reason}} (Kural: {{ruleId}})",
+			"assumedPosixNote": "Not: DCG komutları POSIX kabuk sözdizimi olarak analiz eder, ancak bu komut {{shell}} içinde çalışır; bu nedenle bir engelleme, komutun yıkıcı olduğunu değil DCG'nin komutu okuyamadığını gösteriyor olabilir."
 		}
 	},
 	"newTask": {

@@ -19,7 +19,8 @@
 			"blocked": "Destructive Command Guard ने इस कमांड को ब्लॉक कर दिया।",
 			"blockedWithReason": "Destructive Command Guard ने इस कमांड को ब्लॉक कर दिया। DCG का संदेश: {{reason}}",
 			"blockedWithRule": "Destructive Command Guard ने इस कमांड को ब्लॉक कर दिया। (नियम: {{ruleId}})",
-			"blockedWithReasonAndRule": "Destructive Command Guard ने इस कमांड को ब्लॉक कर दिया। DCG का संदेश: {{reason}} (नियम: {{ruleId}})"
+			"blockedWithReasonAndRule": "Destructive Command Guard ने इस कमांड को ब्लॉक कर दिया। DCG का संदेश: {{reason}} (नियम: {{ruleId}})",
+			"assumedPosixNote": "नोट: DCG कमांड को POSIX शेल सिंटैक्स के रूप में विश्लेषित करता है, लेकिन यह कमांड {{shell}} में चलती है, इसलिए ब्लॉक का मतलब यह हो सकता है कि DCG कमांड को पढ़ नहीं सका, न कि वह विनाशकारी है।"
 		}
 	},
 	"newTask": {

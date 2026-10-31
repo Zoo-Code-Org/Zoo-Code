@@ -19,7 +19,8 @@
 			"blocked": "Destructive Command Guard가 이 명령어를 차단했습니다.",
 			"blockedWithReason": "Destructive Command Guard가 이 명령어를 차단했습니다. DCG 메시지: {{reason}}",
 			"blockedWithRule": "Destructive Command Guard가 이 명령어를 차단했습니다. (규칙: {{ruleId}})",
-			"blockedWithReasonAndRule": "Destructive Command Guard가 이 명령어를 차단했습니다. DCG 메시지: {{reason}} (규칙: {{ruleId}})"
+			"blockedWithReasonAndRule": "Destructive Command Guard가 이 명령어를 차단했습니다. DCG 메시지: {{reason}} (규칙: {{ruleId}})",
+			"assumedPosixNote": "참고: DCG는 명령을 POSIX 셸 구문으로 분석하지만 이 명령은 {{shell}}에서 실행됩니다. 따라서 차단은 명령이 파괴적이라는 뜻이 아니라 DCG가 명령을 읽지 못했다는 뜻일 수 있습니다."
 		}
 	},
 	"newTask": {

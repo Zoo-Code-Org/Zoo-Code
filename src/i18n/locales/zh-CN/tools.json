@@ -19,7 +19,8 @@
 			"blocked": "Destructive Command Guard 已拦截此命令。",
 			"blockedWithReason": "Destructive Command Guard 已拦截此命令。来自 DCG 的消息：{{reason}}",
 			"blockedWithRule": "Destructive Command Guard 已拦截此命令。（规则：{{ruleId}}）",
-			"blockedWithReasonAndRule": "Destructive Command Guard 已拦截此命令。来自 DCG 的消息：{{reason}}（规则：{{ruleId}}）"
+			"blockedWithReasonAndRule": "Destructive Command Guard 已拦截此命令。来自 DCG 的消息：{{reason}}（规则：{{ruleId}}）",
+			"assumedPosixNote": "注意:DCG 按 POSIX shell 语法分析命令,但此命令在 {{shell}} 中运行,因此拦截可能意味着 DCG 无法解析该命令,而不是该命令具有破坏性。"
 		}
 	},
 	"newTask": {

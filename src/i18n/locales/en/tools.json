@@ -19,7 +19,8 @@
 			"blocked": "Destructive Command Guard blocked this command.",
 			"blockedWithReason": "Destructive Command Guard blocked this command. Message from DCG: {{reason}}",
 			"blockedWithRule": "Destructive Command Guard blocked this command. (Rule: {{ruleId}})",
-			"blockedWithReasonAndRule": "Destructive Command Guard blocked this command. Message from DCG: {{reason}} (Rule: {{ruleId}})"
+			"blockedWithReasonAndRule": "Destructive Command Guard blocked this command. Message from DCG: {{reason}} (Rule: {{ruleId}})",
+			"assumedPosixNote": "Note: DCG analyzes commands as POSIX shell syntax, but this command runs in {{shell}}, so a block may mean DCG could not read the command rather than that it is destructive."
 		}
 	},
 	"newTask": {

@@ -19,7 +19,8 @@
 			"blocked": "Destructive Command Guard đã chặn lệnh này.",
 			"blockedWithReason": "Destructive Command Guard đã chặn lệnh này. Thông báo từ DCG: {{reason}}",
 			"blockedWithRule": "Destructive Command Guard đã chặn lệnh này. (Quy tắc: {{ruleId}})",
-			"blockedWithReasonAndRule": "Destructive Command Guard đã chặn lệnh này. Thông báo từ DCG: {{reason}} (Quy tắc: {{ruleId}})"
+			"blockedWithReasonAndRule": "Destructive Command Guard đã chặn lệnh này. Thông báo từ DCG: {{reason}} (Quy tắc: {{ruleId}})",
+			"assumedPosixNote": "Lưu ý: DCG phân tích lệnh theo cú pháp shell POSIX, nhưng lệnh này chạy trong {{shell}}, vì vậy việc chặn có thể nghĩa là DCG không đọc được lệnh chứ không phải lệnh đó mang tính phá hủy."
 		}
 	},
 	"newTask": {
