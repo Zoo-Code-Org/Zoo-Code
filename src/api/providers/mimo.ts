@@ -135,7 +135,7 @@ export class MimoHandler extends OpenAiHandler {
 		const tools = metadata?.tools
 
 		// Build request per MiMo's OpenAI-compatible API
-		// https://developer.puter.com/ai/xiaomi/mimo-v2.5-pro/
+		// https://mimo.mi.com/docs/en-US/quick-start/usage-guide/text-generation/deep-thinking
 		// Note: temperature is omitted because MiMo forces it to 1.0 when thinking mode
 		// is enabled, regardless of what is passed (see model-hyperparameters docs).
 		const params: Record<string, any> = {

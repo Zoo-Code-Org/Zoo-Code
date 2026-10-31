@@ -37,7 +37,8 @@ export const LITELLM_PRESERVE_REASONING_MODEL_IDS = [
 	"deepseek-v4-pro",
 	"deepseek-reasoner",
 
-	// mimo.ts, opencode-go.ts
+	// opencode-go.ts (MiMo V2.5 is retired from mimo.ts; the gateway can still
+	// front opencode-go's V2.5 routes)
 	"mimo-v2.5",
 	"mimo-v2.5-pro",
 

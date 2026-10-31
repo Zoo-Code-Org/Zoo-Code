@@ -41,10 +41,11 @@ describe("getMimoModels", () => {
 			description: "MiMo model: mimo-v3-future",
 		})
 
-		// mimo-v2.5-pro is still served today, but this mock response omits it
-		// (post-EOL world): a model absent from the API response must stay absent
-		// from the result, guarding against a wholesale-static-map regression.
-		expect(models["mimo-v2.5-pro"]).toBeUndefined()
+		// A model that IS in the static catalog but absent from the API response must
+		// stay absent from the result: a mutation that returned the static map
+		// wholesale would surface it here. (mimo-v2.6-pro-ultraspeed is the current
+		// catalog entry this response omits.)
+		expect(models["mimo-v2.6-pro-ultraspeed"]).toBeUndefined()
 	})
 
 	it("provides MiMo-family defaults for unknown model IDs without pricing", async () => {

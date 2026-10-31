@@ -34,7 +34,7 @@ vi.mock("openai", () => {
 
 import type { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
-import { mimoDefaultModelId, mimoModels } from "@roo-code/types"
+import { mimoDefaultModelId, mimoDefaultModelInfo, mimoModels } from "@roo-code/types"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import { MimoHandler } from "../mimo"
 import { ALLOWED_BASE_URLS } from "../fetchers/mimo"
@@ -48,7 +48,7 @@ describe("MimoHandler", () => {
 	beforeEach(() => {
 		mockOptions = {
 			mimoApiKey: "test-api-key",
-			apiModelId: "mimo-v2.5-pro",
+			apiModelId: "mimo-v2.6-pro",
 			mimoBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
 		}
 		handler = new MimoHandler(mockOptions)
@@ -58,7 +58,7 @@ describe("MimoHandler", () => {
 	describe("constructor", () => {
 		it("should initialize with provided options", () => {
 			expect(handler).toBeInstanceOf(MimoHandler)
-			expect(handler.getModel().id).toBe("mimo-v2.5-pro")
+			expect(handler.getModel().id).toBe("mimo-v2.6-pro")
 		})
 
 		it("should use default model ID if not provided", () => {
@@ -139,22 +139,24 @@ describe("MimoHandler", () => {
 	})
 
 	describe("getModel", () => {
-		it("should return correct model info for mimo-v2.5-pro", () => {
-			const model = handler.getModel()
-			expect(model.id).toBe("mimo-v2.5-pro")
-			expect(model.info.contextWindow).toBe(1_048_576)
-			expect(model.info.maxTokens).toBe(131_072)
-			expect(model.info.inputPrice).toBe(0.435)
-			expect(model.info.outputPrice).toBe(0.87)
-		})
-
-		it("should return correct model info for mimo-v2.5", () => {
-			const h = new MimoHandler({ ...mockOptions, apiModelId: "mimo-v2.5" })
-			const model = h.getModel()
-			expect(model.id).toBe("mimo-v2.5")
-			expect(model.info.inputPrice).toBe(0.14)
-			expect(model.info.outputPrice).toBe(0.28)
-		})
+		// Saved users: a configuration persisted before the V2.5 retirement still carries
+		// a retired ID, and `apiModelId` is `z.string().optional()`, so nothing rejects it.
+		// The handler must keep constructing and must price the request as the family
+		// default -- `getMimoModelInfo` returns undefined for a retired ID, and the
+		// `?? mimoDefaultModelInfo` fallback supplies the spec. The ID itself is passed
+		// through unchanged, which is what makes the provider error visible instead of
+		// silently switching the user's model.
+		it.each(["mimo-v2.5-pro", "mimo-v2.5"])(
+			"should fall back to the default spec for the retired model ID %s",
+			(retiredModelId) => {
+				const h = new MimoHandler({ ...mockOptions, apiModelId: retiredModelId })
+				const model = h.getModel()
+				expect(model.id).toBe(retiredModelId)
+				expect(model.info).toBe(mimoDefaultModelInfo)
+				expect(model.info).toBe(mimoModels[mimoDefaultModelId])
+				expect(model.maxTokens).toBe(mimoDefaultModelInfo.maxTokens)
+			},
+		)
 
 		it("should return correct model info for mimo-v2.6-pro", () => {
 			const h = new MimoHandler({ ...mockOptions, apiModelId: "mimo-v2.6-pro" })
@@ -991,7 +993,7 @@ describe("MimoHandler", () => {
 			await handler.completePrompt("What is 2+2?")
 
 			const params = mockCreate.mock.calls[0][0]
-			expect(params.model).toBe("mimo-v2.5-pro")
+			expect(params.model).toBe("mimo-v2.6-pro")
 			expect(params.messages).toHaveLength(1)
 			expect(params.messages[0].role).toBe("user")
 			expect(params.messages[0].content).toBe("What is 2+2?")
@@ -1031,8 +1033,28 @@ describe("MimoHandler", () => {
 			await expect(handler.completePrompt("Test prompt")).rejects.toThrow("OpenAI completion error:")
 		})
 
-		it("should use correct model ID for mimo-v2.5 variant", async () => {
-			const v25Handler = new MimoHandler({
+		it("should use correct model ID for mimo-v2.6-flash variant", async () => {
+			const flashHandler = new MimoHandler({
+				...mockOptions,
+				apiModelId: "mimo-v2.6-flash",
+			})
+
+			mockCreate.mockResolvedValueOnce({
+				choices: [{ message: { content: "Response" } }],
+			})
+
+			await flashHandler.completePrompt("Test")
+
+			const params = mockCreate.mock.calls[0][0]
+			expect(params.model).toBe("mimo-v2.6-flash")
+		})
+
+		// Saved users: a retired ID is not rewritten on the wire. The spec falls back to
+		// the family default (see getModel), but the request still names the ID the user
+		// has stored, so the provider's own error reaches the user instead of the
+		// extension silently answering as a model they did not pick.
+		it("should pass a retired model ID through unchanged on the wire", async () => {
+			const retiredHandler = new MimoHandler({
 				...mockOptions,
 				apiModelId: "mimo-v2.5",
 			})
@@ -1041,7 +1063,7 @@ describe("MimoHandler", () => {
 				choices: [{ message: { content: "Response" } }],
 			})
 
-			await v25Handler.completePrompt("Test")
+			await retiredHandler.completePrompt("Test")
 
 			const params = mockCreate.mock.calls[0][0]
 			expect(params.model).toBe("mimo-v2.5")
