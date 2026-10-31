@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { reasoningEffortSettingSchema, verbosityLevelsSchema } from "../model.js"
+import { reasoningEffortSettingSchema, verbosityLevelsSchema, promptCacheTtlSchema } from "../model.js"
 import type { ProviderIdentifier } from "../provider-identifiers.js"
 
 export const API_PROVIDER_FIELD = "apiProvider"
@@ -33,6 +33,11 @@ export const baseProviderSettingsShape = {
 	modelMaxTokens: z.number().optional(),
 	modelMaxThinkingTokens: z.number().optional(),
 	verbosity: verbosityLevelsSchema.optional(),
+	// Opt-in prompt cache TTL for this provider profile. Lives here, not in global
+	// settings, because `ApiHandlerOptions = Omit<ProviderSettings, "apiProvider">`
+	// (src/shared/api.ts) makes a global key invisible to handlers. Unset emits no
+	// ttl key at all, not "5m" (ADR-0006 I3).
+	promptCacheTtl: promptCacheTtlSchema.optional(),
 }
 
 export const apiModelIdProviderModelShape = {

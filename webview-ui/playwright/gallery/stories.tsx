@@ -415,6 +415,36 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"anthropic-settings": async () => {
+		const [{ AppProviders }, { Anthropic }, { providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/providers/Anthropic"),
+			import("@roo-code/types"),
+		])
+		function AnthropicSettings() {
+			const [config, setConfig] = useState<import("@roo-code/types").ProviderSettings>({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "sk-ant-example-key",
+			})
+			return (
+				<div data-testid="anthropic-settings-story" className="w-[420px] p-4 bg-vscode-editor-background">
+					<div className="flex flex-col gap-3">
+						<Anthropic
+							apiConfiguration={config}
+							setApiConfigurationField={(field, value) =>
+								setConfig((previous) => ({ ...previous, [field]: value }))
+							}
+						/>
+					</div>
+				</div>
+			)
+		}
+		return (
+			<AppProviders>
+				<AnthropicSettings />
+			</AppProviders>
+		)
+	},
 	"ui-settings": async () => {
 		const { UISettingsStory } = await import("@/components/settings/__tests__/UISettings.visual.fixture")
 		return <UISettingsStory />
