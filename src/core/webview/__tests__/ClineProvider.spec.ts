@@ -7,6 +7,7 @@ import { TaskRegistry } from "../../task/TaskRegistry"
 import Anthropic from "@anthropic-ai/sdk"
 import * as vscode from "vscode"
 import axios from "axios"
+import pWaitFor from "p-wait-for"
 
 import {
 	type ProviderSettingsEntry,
@@ -1294,6 +1295,7 @@ describe("ClineProvider", () => {
 					preserveFocus: true,
 				})
 				expect(provider["view"]).toBe(replacement)
+				expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
 				expect(provider["webviewRecoveryAttempts"]).toBe(1)
 				expect(provider.getCurrentTask()).toBe(task)
 				expect(evict).not.toHaveBeenCalled()
@@ -1302,6 +1304,140 @@ describe("ClineProvider", () => {
 				expect(task.abortTask).not.toHaveBeenCalled()
 			},
 		)
+
+		describe("sidebar replacement timing", () => {
+			beforeEach(async () => {
+				const actual = await vi.importActual<typeof import("p-wait-for")>("p-wait-for")
+				vi.mocked(pWaitFor).mockImplementation(actual.default)
+			})
+
+			afterEach(() => {
+				vi.mocked(pWaitFor).mockReset().mockResolvedValue(undefined)
+			})
+
+			function removeSidebarOnCommand() {
+				vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command) => {
+					if (command === `${ClineProvider.sideBarId}.removeView`) disposeCallback()
+				})
+			}
+
+			test("warns once after ten seconds without a replacement and releases recovery ownership", async () => {
+				await provider.resolveWebviewView(mockWebviewView)
+				removeSidebarOnCommand()
+				await vi.advanceTimersByTimeAsync(130_000)
+				expect(provider["webviewHostRecoveryInProgress"]).toBe(true)
+				await vi.advanceTimersByTimeAsync(9_999)
+				expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+				await vi.advanceTimersByTimeAsync(1)
+				expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+				expect(provider["webviewRecoveryAttempts"]).toBe(3)
+				expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+				await vi.advanceTimersByTimeAsync(120_000)
+				expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+			})
+
+			test("settles the replacement wait when the provider is disposed", async () => {
+				await provider.resolveWebviewView(mockWebviewView)
+				removeSidebarOnCommand()
+				await vi.advanceTimersByTimeAsync(130_000)
+				expect(provider["webviewHostRecoveryInProgress"]).toBe(true)
+				await provider.dispose()
+				await vi.advanceTimersByTimeAsync(50)
+				expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+				expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+			})
+
+			test.each([5_000, 11_000])(
+				"retains an interrupted task and budget when replacement starts after %s ms",
+				async (delay) => {
+					await provider.resolveWebviewView(mockWebviewView)
+					const task = new Task(defaultTaskOptions)
+					task.abort = true
+					provider["taskRegistry"].push(task)
+					const remove = vi.spyOn(provider, "removeClineFromStack")
+					removeSidebarOnCommand()
+					await vi.advanceTimersByTimeAsync(130_000 + delay)
+					const attempts = delay < 10_000 ? 1 : 3
+					expect(provider["webviewRecoveryAttempts"]).toBe(attempts)
+					expect(provider["webviewHostRecoveryInProgress"]).toBe(delay < 10_000)
+
+					const replacement = { ...mockWebviewView, webview: { ...mockWebviewView.webview, html: "" } }
+					await provider.resolveWebviewView(replacement)
+					await vi.advanceTimersByTimeAsync(50)
+
+					expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+					expect(provider["pendingSidebarRecovery"]).toBe(false)
+					expect(provider["webviewRecoveryAttempts"]).toBe(attempts)
+					expect(provider["webviewRecoveryFailureReported"]).toBe(delay >= 10_000)
+					expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(delay < 10_000 ? 0 : 1)
+					expect(provider.getCurrentTask()).toBe(task)
+					expect(remove).not.toHaveBeenCalled()
+					expect(task.dispose).not.toHaveBeenCalled()
+					expect(task.abortTask).not.toHaveBeenCalled()
+				},
+			)
+
+			test("retains recovery intent while replacement HTML generation outlasts the wait", async () => {
+				await provider.resolveWebviewView(mockWebviewView)
+				const task = new Task(defaultTaskOptions)
+				task.abort = true
+				provider["taskRegistry"].push(task)
+				const remove = vi.spyOn(provider, "removeClineFromStack")
+				removeSidebarOnCommand()
+				await vi.advanceTimersByTimeAsync(130_000)
+				let finishHtml: (html: string) => void = () => {
+					throw new Error("HTML generation has not started")
+				}
+				provider["getWebviewHtml"] = vi.fn(
+					() =>
+						new Promise<string>((resolve) => {
+							finishHtml = resolve
+						}),
+				)
+				const replacement = { ...mockWebviewView, webview: { ...mockWebviewView.webview, html: "" } }
+				const resolving = provider.resolveWebviewView(replacement)
+				await vi.advanceTimersByTimeAsync(10_000)
+				expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+				finishHtml("replacement-html")
+				await resolving
+				expect(provider["webviewRecoveryAttempts"]).toBe(3)
+				expect(provider.getCurrentTask()).toBe(task)
+				expect(remove).not.toHaveBeenCalled()
+			})
+		})
+
+		test("recreates the sidebar again after a second incident", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const replacements = [0, 1].map(() => ({
+				...mockWebviewView,
+				webview: { ...mockWebviewView.webview, html: "" },
+			}))
+			vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command) => {
+				if (command === `${ClineProvider.sideBarId}.removeView`) disposeCallback()
+				if (command === `${ClineProvider.sideBarId}.focus`) {
+					const next = replacements.shift()
+					if (!next) throw new Error("Unexpected third replacement")
+					await provider.resolveWebviewView(next)
+				}
+			})
+			await vi.advanceTimersByTimeAsync(130_000)
+			expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+			provider.updateWebviewHeartbeat()
+			await vi.advanceTimersByTimeAsync(30_000)
+			provider.updateWebviewHeartbeat()
+			await vi.advanceTimersByTimeAsync(30_000)
+			provider.updateWebviewHeartbeat()
+			expect(provider["webviewRecoveryAttempts"]).toBe(0)
+			await vi.advanceTimersByTimeAsync(130_000)
+			expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+			expect(provider["webviewRecoveryAttempts"]).toBe(1)
+			expect(replacements).toHaveLength(0)
+			expect(
+				vi
+					.mocked(vscode.commands.executeCommand)
+					.mock.calls.filter(([command]) => command === `${ClineProvider.sideBarId}.removeView`),
+			).toHaveLength(2)
+		})
 
 		test.each(["heartbeat", "hidden", "disposed", "suspended"] as const)(
 			"does not recreate the host after %s during the confirmation window",
@@ -1365,6 +1501,8 @@ describe("ClineProvider", () => {
 				await vi.advanceTimersByTimeAsync(600_000)
 
 				expect(assignHtml).toHaveBeenCalledTimes(1)
+				expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
+				expect(provider["pendingSidebarRecovery"]).toBe(false)
 				expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
 				expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.reloadWindow")
 				expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
@@ -1501,12 +1639,14 @@ describe("ClineProvider", () => {
 			expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
 		})
 
-		test("gives a replacement view a fresh recovery budget after exhausting attempts", async () => {
+		test("gives a user-opened replacement a fresh budget after unavailable host recovery", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
+			vi.mocked(vscode.commands.getCommands).mockResolvedValue([])
 			const generateHtml = vi.spyOn(provider, "getState")
 
-			await vi.advanceTimersByTimeAsync(480_000)
-			expect(generateHtml).toHaveBeenCalledTimes(3)
+			await vi.advanceTimersByTimeAsync(130_000)
+			expect(generateHtml).toHaveBeenCalledTimes(1)
+			expect(provider["webviewRecoveryAttempts"]).toBe(3)
 
 			disposeCallback()
 			const replacementView = {
@@ -2194,6 +2334,7 @@ describe("ClineProvider", () => {
 					expect(mockWebviewPanel.dispose).toHaveBeenCalledTimes(1)
 					expect(provider["view"]).toBe(replacement)
 					expect(provider["_disposed"]).toBe(false)
+					expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
 					expect(provider["webviewRecoveryAttempts"]).toBe(1)
 					expect(provider.getCurrentTask()).toBe(task)
 					expect(evict).not.toHaveBeenCalled()
@@ -2218,6 +2359,7 @@ describe("ClineProvider", () => {
 
 				expect(mockWebviewPanel.dispose).not.toHaveBeenCalled()
 				expect(replacement.dispose).toHaveBeenCalledTimes(1)
+				expect(provider["webviewHostRecoveryInProgress"]).toBe(false)
 				expect(provider["view"]).toBe(mockWebviewPanel)
 				expect(provider.getCurrentTask()).toBe(task)
 				expect(task.dispose).not.toHaveBeenCalled()

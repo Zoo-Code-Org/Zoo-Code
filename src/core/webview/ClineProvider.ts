@@ -250,6 +250,9 @@ export class ClineProvider
 	private webviewRecoveryAttempts = 0
 	private webviewRecoveryConfirmation: ReturnType<typeof setTimeout> | undefined
 	private webviewHostRecoveryInProgress = false
+	// VS Code may resolve the focused sidebar after our bounded wait expires.
+	// Keep that repair distinct from a user-opened view until it arrives.
+	private pendingSidebarRecovery = false
 	private webviewRecoveryFailureReported = false
 	private lastReceivedWebviewHeartbeatAt: number | undefined
 	private webviewHeartbeatCount = 0
@@ -864,7 +867,7 @@ export class ClineProvider
 		this.webviewRecoveryEpoch++
 		// User-opened replacements get a fresh budget; recreating a failed host
 		// must preserve its incident budget so crash loops remain bounded.
-		if (!this.webviewHostRecoveryInProgress) {
+		if (!this.webviewHostRecoveryInProgress && !this.pendingSidebarRecovery) {
 			this.webviewRecoveryAttempts = 0
 			this.webviewRecoveryFailureReported = false
 		}
@@ -1073,12 +1076,16 @@ export class ClineProvider
 	}
 
 	async resolveWebviewView(webviewView: vscode.WebviewView | vscode.WebviewPanel) {
+		// Capture intent before yielding: host recovery can time out while this
+		// resolve is still generating HTML or hydrating state.
+		const recoveringHost = this.webviewHostRecoveryInProgress || this.pendingSidebarRecovery
 		// A different view replaces the current one: dispose its subscriptions so
 		// the replaced view can no longer dispatch messages or refresh provider state.
 		if (this.view !== webviewView) {
 			this.clearWebviewResources()
 		}
 
+		this.pendingSidebarRecovery = false
 		this.view = webviewView
 		const inTabMode = "onDidChangeViewState" in webviewView
 
@@ -1243,7 +1250,7 @@ export class ClineProvider
 		const currentTask = this.getCurrentTask()
 		// Host recreation is a UI repair, including when the displayed task is
 		// interrupted. It must not evict or resume that task as a side effect.
-		if (!this.webviewHostRecoveryInProgress && (!currentTask || currentTask.abandoned || currentTask.abort)) {
+		if (!recoveringHost && (!currentTask || currentTask.abandoned || currentTask.abort)) {
 			await this.removeClineFromStack()
 		}
 
@@ -3737,6 +3744,7 @@ export class ClineProvider
 		if (this.webviewHostRecoveryInProgress || this._disposed || this.view !== view || !view.visible) return
 		const revision = this.webviewHeartbeatRevision
 		let started = false
+		let sidebarRemoved = false
 		try {
 			let commands: string[] | undefined
 			if (!("onDidChangeViewState" in view)) {
@@ -3777,7 +3785,9 @@ export class ClineProvider
 				else replacement.dispose()
 				await resolved
 			} else {
+				this.pendingSidebarRecovery = true
 				await vscode.commands.executeCommand(`${ClineProvider.sideBarId}.removeView`)
+				sidebarRemoved = true
 				if (this._disposed) return
 				await vscode.commands.executeCommand(`${ClineProvider.sideBarId}.focus`, { preserveFocus: true })
 				await pWaitFor(
@@ -3791,6 +3801,9 @@ export class ClineProvider
 				)
 			}
 		} catch (error) {
+			// If removal failed, no replacement is expected. A removed sidebar
+			// can still resolve after the wait expires and must retain its task.
+			if (started && !sidebarRemoved) this.pendingSidebarRecovery = false
 			// A late discovery failure must not stop a recovered/replaced view.
 			// Once recreation starts, disposal of the old view is expected.
 			if (

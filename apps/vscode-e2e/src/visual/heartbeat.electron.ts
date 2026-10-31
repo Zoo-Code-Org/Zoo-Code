@@ -155,7 +155,8 @@ test("recovers after the isolated Zoo Code renderer is terminated", async ({ bro
 		expect(processes.webview).not.toBe(processes.workbench)
 		process.kill(processes.webview, "SIGKILL")
 
-		// Use production timers: the next stale tick is at most two minutes away.
+		// Allow stale detection (up to 150s), confirmation and replacement waits,
+		// plus webview loading. A passing fast run does not bound the slow path.
 		await expect
 			.poll(
 				async () => {
@@ -171,7 +172,7 @@ test("recovers after the isolated Zoo Code renderer is terminated", async ({ bro
 						return "unavailable"
 					}
 				},
-				{ timeout: 150_000, intervals: [1_000] },
+				{ timeout: 210_000, intervals: [1_000] },
 			)
 			.toBe("recovered")
 		await waitForContent(running.page, CHAT_RESULT)

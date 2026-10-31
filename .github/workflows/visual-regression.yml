@@ -85,7 +85,8 @@ jobs:
 
     extension-host-visual:
         runs-on: ubuntu-latest
-        timeout-minutes: 20
+        # Includes dependency setup, builds, repeated visuals, and production watchdog waits.
+        timeout-minutes: 35
         container:
             image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
             options: --ipc=host
