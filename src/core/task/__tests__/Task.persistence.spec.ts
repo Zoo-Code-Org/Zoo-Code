@@ -2522,6 +2522,60 @@ describe("Task persistence", () => {
 
 		it.each([
 			{
+				// The turn that reaches API history right before the presenter release can
+				// also carry tool_use blocks; only the text block has to match. This shape
+				// additionally re-enters the synthetic tool_result path below, so the restore
+				// must survive it rather than depend on the turn being text-only.
+				name: "the matching assistant turn also carries a tool_use block",
+				assistantContent: [
+					{ type: "text" as const, text: "Half a sentence" },
+					{ type: "tool_use" as const, id: "toolu_1", name: "read_file", input: {} },
+				],
+			},
+			{
+				// Pins the closing-tag half of the strip, which the `<thinking>` case above
+				// leaves unexercised: the bubble drops the markup, the accumulator keeps it.
+				name: "the matching text carries a closing thinking tag and its whitespace",
+				assistantContent: [{ type: "text" as const, text: "Half a sentence\n</thinking>" }],
+			},
+		])("restores the partial text bubble when $name", async ({ assistantContent }) => {
+			mockReadTaskMessages.mockResolvedValue([
+				{ ts: 1, type: "say", say: "text", text: "Original task" },
+				{ ts: 2, type: "say", say: "text", text: "Half a sentence", partial: true },
+			])
+			mockReadApiMessages.mockResolvedValue([
+				{ role: "user", content: [{ type: "text", text: "Original task" }] },
+				{ role: "assistant", content: assistantContent },
+			])
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "issue-257-restore-shape",
+					number: 1,
+					ts: 1,
+					task: "Original task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			vi.spyOn(task, "ask").mockImplementation(async () => {
+				expect(task.clineMessages).toContainEqual(
+					expect.objectContaining({ say: "text", text: "Half a sentence", partial: false }),
+				)
+				expect(task.clineMessages).not.toContainEqual(expect.objectContaining({ partial: true }))
+				throw new Error("stop after hydration")
+			})
+
+			await expect(getTaskPersistenceAccess(task).resumeTaskFromHistory()).rejects.toThrow("stop after hydration")
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+		})
+
+		it.each([
+			{
 				name: "the last assistant turn holds different text",
 				apiHistory: [
 					{ role: "assistant" as const, content: [{ type: "text" as const, text: "An older answer" }] },
