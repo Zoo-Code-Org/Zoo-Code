@@ -353,10 +353,10 @@
 		"title": "Zoo Code {{version}} 已发布",
 		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
 		"release": {
-			"heading": "Zoo Code v3.92.0 新增内容",
-			"highlight1": "✨ 更快选择模型，更强模型支持：直接从聊天输入框切换模型。在 Amazon Bedrock 上使用 Claude Haiku 5.5；在 OpenRouter 上获得更准确的 Kimi K3 功能支持；在 Vercel AI Gateway 上使用修正后的 Gemini 4 Argon 限制。",
-			"highlight2": "🧭 更可靠的终端、编辑、聊天和远程工作流：可按需默认收起命令输出，更清晰地了解编辑失败原因，保持推理和 API 行可见，并避免远程工作区中的启动和代理问题。",
-			"highlight3": "🔌 扩展 MCP 市场：通过 MCP 市场将 Zoo Code 连接到 AnySearch、Mailtea 和 Tradehand。"
+			"heading": "Zoo Code v3.94.0 新增内容",
+			"highlight1": "✨ 更广泛的模型和提供商支持：通过 Anthropic 使用 Claude Haiku 5.5，向兼容的 VS Code LM 模型发送图片，为 OpenCode Go Responses 模型调节 temperature，并在更多提供商上顺畅取消请求。",
+			"highlight2": "🔐 更灵活的 MCP OAuth：配置静态 OAuth 客户端设置，使用自定义回调路径，从 WWW-Authenticate 中发现认证详情，并在重试前看到回调失败。",
+			"highlight3": "🧭 更流畅的聊天和长会话：在历史记录中重命名任务，无需按住 Shift 即可将文件拖入聊天，减少长会话期间占用的内存，并保持子任务链接和被替换的 webview 稳定。"
 		},
 		"cloudAgents": {
 			"heading": "云端新功能：",
