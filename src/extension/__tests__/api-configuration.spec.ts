@@ -96,10 +96,12 @@ describe("API - configuration", () => {
 
 	describe("mimoBaseUrl allowlist at the public API boundary", () => {
 		// setConfiguration writes straight to ContextProxy, which fails open on a
-		// schema rejection, so this was the one write path where an off-list
+		// schema rejection, so this is one of the write paths where an off-list
 		// mimoBaseUrl could newly enter storage. Both persistence calls are
 		// asserted: the proxy write and the saved profile.
-		const makeApi = (storedBaseUrl?: string) => {
+		// `storedBaseUrl` is deliberately `unknown`: storage is not schema-validated
+		// on read, so the corrupted-value cases below need to inject a non-string.
+		const makeApi = (storedBaseUrl?: unknown) => {
 			const setValues = vi.fn().mockResolvedValue(undefined)
 			const saveConfig = vi.fn().mockResolvedValue("default-id")
 			const setModeConfig = vi.fn().mockResolvedValue(undefined)
@@ -222,5 +224,41 @@ describe("API - configuration", () => {
 
 			expect(updateGlobalState).not.toHaveBeenCalledWith("mimoBaseUrl", undefined)
 		})
+
+		it("does not purge a stored allowlisted mimoBaseUrl that carries a trailing slash", async () => {
+			// setConfiguration persists a trailing-slash variant verbatim (see the
+			// incoming-value case above), so this exact stored shape is reachable
+			// through this very API. Only the slash-less literal is on the allowlist,
+			// so a stored-value check that skipped stripTrailingSlashes would purge
+			// every such cluster and silently drop the user to the default SGP one.
+			const { api, updateGlobalState } = makeApi("https://token-plan-ams.xiaomimimo.com/v1/")
+
+			await api.setConfiguration({ currentApiConfigName: "default", apiModelId: "mimo-v2.6-pro" })
+
+			expect(updateGlobalState).not.toHaveBeenCalledWith("mimoBaseUrl", undefined)
+		})
+
+		it.each([[42], [{ nested: "https://attacker.example/v1" }], [true]])(
+			"treats a non-string stored mimoBaseUrl (%s) as off-list instead of throwing",
+			async (storedBaseUrl) => {
+				// The stored read is typed `string | undefined`, but that is compile-time
+				// only: ContextProxy hands back whatever the cache holds, and this helper
+				// exists precisely because storage can carry values no schema ever saw.
+				// stripTrailingSlashes calls .endsWith, so without a typeof guard a
+				// corrupted value throws TypeError and rejects the whole configuration
+				// write - a new failure mode in the scenario the helper targets.
+				const { api, setValues, updateGlobalState } = makeApi(storedBaseUrl)
+
+				await expect(
+					api.setConfiguration({ currentApiConfigName: "default", apiModelId: "mimo-v2.6-pro" }),
+				).resolves.toBeUndefined()
+
+				expect(updateGlobalState).toHaveBeenCalledWith("mimoBaseUrl", undefined)
+				expect(setValues).toHaveBeenCalledWith({
+					currentApiConfigName: "default",
+					apiModelId: "mimo-v2.6-pro",
+				})
+			},
+		)
 	})
 })

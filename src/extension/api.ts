@@ -630,14 +630,20 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	public async setConfiguration(values: RooCodeSettings) {
-		// The allowlist normally lives at the two boundaries that consume this
-		// value (the updateSettings persistence gate and MimoHandler's
-		// constructor), but this public API writes straight to ContextProxy and
-		// ContextProxy fails open on a schema rejection, so a caller could park
-		// an off-list mimoBaseUrl in storage and every consumer would then have to
-		// defend against it. Drop it here instead of persisting it. The value is
-		// removed rather than overwritten so "unset" keeps its existing meaning
-		// (fall back to the default cluster) instead of pinning a cluster.
+		// The allowlist lives at the two boundaries that consume this value (the
+		// updateSettings persistence gate and MimoHandler's constructor), but this
+		// public API writes straight to ContextProxy and ContextProxy fails open on
+		// a schema rejection, so a caller could park an off-list mimoBaseUrl in
+		// storage. Drop it here instead of persisting it. The value is removed
+		// rather than overwritten so "unset" keeps its existing meaning (fall back
+		// to the default cluster) instead of pinning a cluster.
+		//
+		// This is not the only write path: ClineProvider.createTask persists a
+		// caller-supplied configuration through setValues without consulting the
+		// allowlist, so an off-list value can still reach storage that way. Every
+		// consumer therefore fails closed on its own (MimoHandler's constructor
+		// throws, the model fetcher and the router-models handlers refuse the
+		// value) rather than trusting that storage was sanitized on the way in.
 		const sanitizedValues = this.withoutOffListMimoBaseUrl(values)
 
 		// Dropping the incoming value is not enough on its own: a partial update
@@ -670,10 +676,19 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	 * counts as on-list, matching the sanitizer's convention.
 	 */
 	private isStoredMimoBaseUrlOffList(): boolean {
-		const storedBaseUrl: string | undefined = this.sidebarProvider.getValue("mimoBaseUrl")
+		// Typed as the four-literal union, but the type is compile-time only: the
+		// accessor returns whatever the state cache holds, and this helper exists
+		// because storage can carry values no schema ever saw. A non-string is
+		// corrupted storage, not a usable endpoint, so it counts as off-list and
+		// gets purged instead of throwing out of stripTrailingSlashes.
+		const storedBaseUrl: unknown = this.sidebarProvider.getValue("mimoBaseUrl")
 
 		if (storedBaseUrl === undefined || storedBaseUrl === "") {
 			return false
+		}
+
+		if (typeof storedBaseUrl !== "string") {
+			return true
 		}
 
 		return !ALLOWED_BASE_URLS.has(stripTrailingSlashes(storedBaseUrl))
