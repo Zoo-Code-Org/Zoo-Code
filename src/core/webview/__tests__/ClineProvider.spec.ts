@@ -3791,13 +3791,6 @@ describe("ClineProvider", () => {
 						.mockImplementation((name: string, config: ProviderSettingsEntry) =>
 							withLock(async () => (configs.has(name) ? undefined : writeConfig(name, config))),
 						),
-					hasConfigById: vi
-						.fn()
-						.mockImplementation((id: string) =>
-							withLock(async () =>
-								Object.values(Object.fromEntries(configs)).some((config) => config.id === id),
-							),
-						),
 					hasConfig: vi.fn().mockImplementation((name: string) => withLock(async () => configs.has(name))),
 					activateProfile: vi.fn().mockImplementation(({ name }: { name: string }) =>
 						withLock(async () => {
