@@ -3,7 +3,7 @@ import { MarketplaceItem, TelemetryEventName } from "@roo-code/types"
 import { vscode } from "@/utils/vscode"
 import { telemetryClient } from "@/utils/TelemetryClient"
 import { ViewState } from "../MarketplaceViewStateManager"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { isValidUrl } from "../../../utils/url"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -36,7 +36,7 @@ interface MarketplaceItemCardProps {
 }
 
 export const MarketplaceItemCard: React.FC<MarketplaceItemCardProps> = ({ item, filters, setFilters, installed }) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const { cwd } = useExtensionState()
 	const [showInstallModal, setShowInstallModal] = useState(false)
 	const [showRemoveConfirm, setShowRemoveConfirm] = useState(false)
@@ -172,7 +172,7 @@ export const MarketplaceItemCard: React.FC<MarketplaceItemCardProps> = ({ item, 
 									key={tag}
 									content={
 										filters.tags.includes(tag)
-											? t("marketplace:filters.tags.clear", { count: tag })
+											? t("marketplace:filters.tags.clear")
 											: t("marketplace:filters.tags.clickToFilter")
 									}>
 									<Button
@@ -255,7 +255,7 @@ interface AuthorInfoProps {
 }
 
 const AuthorInfo: React.FC<AuthorInfoProps> = ({ item, typeLabel }) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const handleOpenAuthorUrl = () => {
 		if (item.authorUrl && isValidUrl(item.authorUrl)) {

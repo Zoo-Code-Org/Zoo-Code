@@ -5,7 +5,7 @@ import { RefreshCw, Loader2, FileCode } from "lucide-react"
 
 import type { SerializedCustomToolDefinition } from "@roo-code/types"
 
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 
 import { vscode } from "@/utils/vscode"
 
@@ -31,7 +31,7 @@ interface CustomToolsSettingsProps {
 }
 
 export const CustomToolsSettings = ({ enabled, onChange }: CustomToolsSettingsProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const [tools, setTools] = useState<SerializedCustomToolDefinition[]>([])
 	const [isRefreshing, setIsRefreshing] = useState(false)
 	const [refreshError, setRefreshError] = useState<string | null>(null)

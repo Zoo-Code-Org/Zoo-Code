@@ -4,7 +4,7 @@ import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
 import { OpenAiServiceTier, type ModelInfo, type ProviderSettings } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, StandardTooltip } from "@src/components/ui"
 
@@ -18,7 +18,7 @@ type OpenAIProps = {
 }
 
 export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedModelInfo }: OpenAIProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const [openAiNativeBaseUrlSelected, setOpenAiNativeBaseUrlSelected] = useState(
 		!!apiConfiguration.openAiNativeBaseUrl,

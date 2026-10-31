@@ -1466,6 +1466,42 @@ describe("ClineProvider", () => {
 	})
 
 	test.each([
+		["postStateToWebview", (currentProvider: ClineProvider) => currentProvider.postStateToWebview()],
+		[
+			"postStateToWebviewWithoutTaskHistory",
+			(currentProvider: ClineProvider) => currentProvider.postStateToWebviewWithoutTaskHistory(),
+		],
+		[
+			"postStateToWebviewWithoutClineMessages",
+			(currentProvider: ClineProvider) => currentProvider.postStateToWebviewWithoutClineMessages(),
+		],
+	])("%s orders snapshots by when they were read, not when they were posted", async (_methodName, postState) => {
+		const baseState = await provider.getState({ includeTaskHistory: false })
+		let releaseOlderRead!: () => void
+		const olderRead = new Promise<void>((resolve) => {
+			releaseOlderRead = resolve
+		})
+		vi.spyOn(provider, "getState")
+			.mockImplementationOnce(async () => {
+				await olderRead
+				return { ...baseState, language: "en" }
+			})
+			.mockResolvedValueOnce({ ...baseState, language: "es" })
+		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+
+		const olderPost = postState(provider)
+		await Promise.resolve()
+		await postState(provider)
+		releaseOlderRead()
+		await olderPost
+
+		const posted = postMessageSpy.mock.calls.map(([message]) => message.state)
+		expect(posted.map((state) => state?.language)).toEqual(["es", "en"])
+		const [newer, older] = posted.map((state) => state?.stateSeq ?? 0)
+		expect(older).toBeLessThan(newer)
+	})
+
+	test.each([
 		[
 			"postStateToWebviewWithoutTaskHistory",
 			(currentProvider: ClineProvider) => currentProvider.postStateToWebviewWithoutTaskHistory(),

@@ -1,7 +1,7 @@
 import type { FormEvent } from "react"
 import { VSCodeTextArea } from "@vscode/webview-ui-toolkit/react"
 
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 
 import { SetCachedStateField } from "./types"
 import { SearchableSetting } from "./SearchableSetting"
@@ -58,7 +58,7 @@ export const FilePatternAllowlist = ({
 	patterns,
 	setCachedStateField,
 }: FilePatternAllowlistProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const label = t(`settings:autoApprove.allowlists.${translationKey}.label`)
 	const headingId = `${settingId}-label`

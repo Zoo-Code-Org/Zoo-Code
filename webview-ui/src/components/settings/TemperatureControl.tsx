@@ -1,6 +1,6 @@
 import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 import { useEffect, useState } from "react"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { useDebounce } from "react-use"
 
 import { Slider } from "@/components/ui"
@@ -13,7 +13,7 @@ interface TemperatureControlProps {
 }
 
 export const TemperatureControl = ({ value, onChange, maxValue = 1, defaultValue }: TemperatureControlProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const [isCustomTemperature, setIsCustomTemperature] = useState(value !== undefined)
 	const [inputValue, setInputValue] = useState(value)
 

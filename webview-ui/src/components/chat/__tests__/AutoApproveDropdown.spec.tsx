@@ -19,8 +19,8 @@ vi.mock("@/context/ExtensionStateContext", () => ({
 	}),
 }))
 
-vi.mock("@/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({ t: (key: string) => key }),
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({ t: (key: string) => key }),
 }))
 
 vi.mock("@/hooks/useAutoApprovalToggles", () => ({

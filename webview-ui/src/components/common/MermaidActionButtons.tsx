@@ -1,5 +1,5 @@
 import React from "react"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { IconButton } from "./IconButton"
 import { ZoomControls } from "./ZoomControls"
 import { StandardTooltip } from "@/components/ui"
@@ -29,7 +29,7 @@ export const MermaidActionButtons: React.FC<MermaidActionButtonsProps> = ({
 	showZoomControls = false,
 	zoomLevel,
 }) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	if (showZoomControls && onZoomOut && onZoomIn && zoomLevel !== undefined) {
 		return (

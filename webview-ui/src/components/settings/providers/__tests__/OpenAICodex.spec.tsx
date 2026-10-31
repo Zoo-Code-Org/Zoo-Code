@@ -12,8 +12,8 @@ import { vscode } from "@src/utils/vscode"
 
 import { OpenAICodex } from "../OpenAICodex"
 
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string) =>
 			({
 				"settings:openAiCodexSpeed.label": "Speed",

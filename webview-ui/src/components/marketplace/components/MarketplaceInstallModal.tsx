@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react"
 import { MarketplaceItem, McpParameter, McpInstallationMethod } from "@roo-code/types"
 import { vscode } from "@/utils/vscode"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import {
 	Dialog,
 	DialogContent,
@@ -27,7 +27,7 @@ export const MarketplaceInstallModal: React.FC<MarketplaceInstallModalProps> = (
 	onClose,
 	hasWorkspace,
 }) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const [scope, setScope] = useState<"project" | "global">(hasWorkspace ? "project" : "global")
 	const [selectedMethodIndex, setSelectedMethodIndex] = useState(0)
 	const [parameterValues, setParameterValues] = useState<Record<string, string>>({})

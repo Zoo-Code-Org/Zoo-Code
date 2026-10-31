@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react"
 import { Plus, Globe, Folder, Edit, Trash2, Settings } from "lucide-react"
-import { Trans } from "react-i18next"
 
 import type { SkillMetadata } from "@roo-code/types"
 
 import { getAllModes } from "@roo/modes"
 
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { Trans, useTranslation } from "react-i18next"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import {
 	AlertDialog,
@@ -34,7 +33,7 @@ import { SectionHeader } from "./SectionHeader"
 import { CreateSkillDialog } from "./CreateSkillDialog"
 
 export const SkillsSettings: React.FC = () => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const { cwd, skills: rawSkills, customModes } = useExtensionState()
 	const skills = useMemo(() => rawSkills ?? [], [rawSkills])
 
@@ -218,6 +217,7 @@ export const SkillsSettings: React.FC = () => {
 				<div className="flex flex-col gap-2 px-5 py-2">
 					<p className="text-vscode-descriptionForeground text-sm m-0">
 						<Trans
+							t={t}
 							i18nKey="settings:skills.description"
 							components={{
 								DocsLink: (
@@ -279,6 +279,7 @@ export const SkillsSettings: React.FC = () => {
 			{/* Fixed Footer */}
 			<div className="px-6 py-1 text-sm border-t border-vscode-panel-border text-muted-foreground">
 				<Trans
+					t={t}
 					i18nKey="settings:skills.footer"
 					components={{
 						MarketplaceLink: (

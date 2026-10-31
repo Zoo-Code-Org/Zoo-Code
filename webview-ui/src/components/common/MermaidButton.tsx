@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react"
 import { useCopyToClipboard } from "@src/utils/clipboard"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { vscode } from "@src/utils/vscode"
 import { MermaidActionButtons } from "./MermaidActionButtons"
 import { Modal } from "./Modal"
@@ -29,7 +29,7 @@ export function MermaidButton({ containerRef, code, isLoading, svgToPng, childre
 	const [isDragging, setIsDragging] = useState(false)
 	const [dragPosition, setDragPosition] = useState({ x: 0, y: 0 })
 	const { copyWithFeedback } = useCopyToClipboard()
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	/**
 	 * Opens a modal with the diagram for zooming

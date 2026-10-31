@@ -11,7 +11,7 @@ import {
 	RouterModelsMessageType,
 } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
 import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@src/components/ui"
 import { vscode } from "@src/utils/vscode"
@@ -36,7 +36,7 @@ export const KimiCode = ({
 	kimiCodeIsAuthenticated = false,
 	kimiCodeOAuthState,
 }: KimiCodeProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const authMethod = apiConfiguration.kimiCodeAuthMethod ?? "oauth"
 	const { data, refetch, isFetching } = useRouterModels({
 		provider: providerIdentifiers.kimiCode,

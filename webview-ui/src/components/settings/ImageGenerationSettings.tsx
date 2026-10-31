@@ -2,7 +2,7 @@ import { providerIdentifiers } from "@roo-code/types"
 import React, { useMemo } from "react"
 import { VSCodeCheckbox, VSCodeTextField, VSCodeDropdown, VSCodeOption } from "@vscode/webview-ui-toolkit/react"
 import { IMAGE_GENERATION_MODELS, type ImageGenerationProvider, getImageGenerationProvider } from "@roo-code/types"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 
 interface ImageGenerationSettingsProps {
 	enabled: boolean
@@ -25,7 +25,7 @@ export const ImageGenerationSettings = ({
 	setOpenRouterImageApiKey,
 	setImageGenerationSelectedModel,
 }: ImageGenerationSettingsProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	// Use shared utility for backwards compatibility logic
 	const currentProvider = getImageGenerationProvider(

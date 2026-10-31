@@ -5,8 +5,8 @@ import type { ModelInfo, ProviderSettings, RouterModels } from "@roo-code/types"
 
 import { ZooGateway, pickZooGatewayDefaultModelId } from "../ZooGateway"
 
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string) => key,
 	}),
 }))

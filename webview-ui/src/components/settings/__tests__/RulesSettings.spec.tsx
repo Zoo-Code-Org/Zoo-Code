@@ -12,8 +12,8 @@ vi.mock("@/utils/vscode", () => ({
 	},
 }))
 
-vi.mock("@/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string, params?: any) =>
 			params?.mode ? `${key} ${params.mode}` : params?.name ? `${key} ${params.name}` : key,
 	}),

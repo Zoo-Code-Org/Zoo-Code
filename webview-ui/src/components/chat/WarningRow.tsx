@@ -1,6 +1,6 @@
 import React from "react"
 import { TriangleAlert, BookOpenText } from "lucide-react"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { vscode } from "@src/utils/vscode"
 
 export interface WarningRowProps {
@@ -31,7 +31,7 @@ export interface WarningRowProps {
  * />
  */
 const WarningRow: React.FC<WarningRowProps> = ({ title, message, docsURL, actionText, onAction }) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	return (
 		<div className="group pr-2 py-2">

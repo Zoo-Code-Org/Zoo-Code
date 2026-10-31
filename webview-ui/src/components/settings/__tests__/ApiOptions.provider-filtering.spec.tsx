@@ -21,8 +21,9 @@ vi.mock("@src/context/ExtensionStateContext", () => ({
 }))
 
 // Mock the translation hook
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", async (importOriginal) => ({
+	...(await importOriginal<typeof import("react-i18next")>()),
+	useTranslation: () => ({
 		t: (key: string) => key,
 	}),
 }))

@@ -4,19 +4,6 @@ import { render, screen, fireEvent, waitFor } from "@/utils/test-utils"
 import { ContextManagementSettings } from "../ContextManagementSettings"
 import { vscode } from "@/utils/vscode"
 
-// Mock the translation hook
-vi.mock("@/hooks/useAppTranslation", () => ({
-	useAppTranslation: () => ({
-		t: (key: string) => {
-			// Return specific translations for our test cases
-			if (key === "settings:contextManagement.diagnostics.maxMessages.unlimitedLabel") {
-				return "Unlimited"
-			}
-			return key
-		},
-	}),
-}))
-
 // Mock the UI components
 vi.mock("@/components/ui", () => ({
 	...vi.importActual("@/components/ui"),

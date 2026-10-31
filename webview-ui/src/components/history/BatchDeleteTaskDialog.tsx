@@ -1,5 +1,5 @@
 import { useCallback } from "react"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -19,7 +19,7 @@ interface BatchDeleteTaskDialogProps extends AlertDialogProps {
 }
 
 export const BatchDeleteTaskDialog = ({ taskIds, ...props }: BatchDeleteTaskDialogProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const { onOpenChange } = props
 
 	const onDelete = useCallback(() => {

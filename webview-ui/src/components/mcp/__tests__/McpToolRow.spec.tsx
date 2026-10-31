@@ -5,8 +5,8 @@ import { vscode } from "@src/utils/vscode"
 
 import McpToolRow from "../McpToolRow"
 
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string) => {
 			const translations: Record<string, string> = {
 				"mcp:tool.alwaysAllow": "Always allow",

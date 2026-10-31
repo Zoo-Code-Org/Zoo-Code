@@ -14,7 +14,7 @@ import {
 import type { RouterName } from "@roo/api"
 
 import { vscode } from "@src/utils/vscode"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
 import { Button } from "@src/components/ui"
 
@@ -45,7 +45,7 @@ export const OpenCodeGo = ({
 	modelValidationError,
 	simplifySettings,
 }: OpenCodeGoProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const [refreshStatus, setRefreshStatus] = useState(RefreshStatus.Idle)
 	const [refreshError, setRefreshError] = useState<string | undefined>()
 	const errorJustReceived = useRef(false)

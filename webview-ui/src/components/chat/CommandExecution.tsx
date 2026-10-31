@@ -1,6 +1,6 @@
 import { useCallback, useState, memo, useMemo } from "react"
 import { useEvent } from "react-use"
-import { t } from "i18next"
+import { useTranslation } from "react-i18next"
 import { ChevronDown, OctagonX } from "lucide-react"
 
 import {
@@ -45,6 +45,7 @@ interface CommandExecutionProps {
 }
 
 export const CommandExecution = ({ executionId, text, icon, title, isDenied = false }: CommandExecutionProps) => {
+	const { t } = useTranslation()
 	const {
 		terminalShellIntegrationDisabled = false,
 		collapseCommandOutputByDefault = DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT,
@@ -197,7 +198,7 @@ export const CommandExecution = ({ executionId, text, icon, title, isDenied = fa
 					{status?.status === "exited" && (
 						<div className="flex flex-row items-center gap-2 font-mono text-xs">
 							<StandardTooltip
-								content={t("chat.commandExecution.exitStatus", { exitStatus: status.exitCode })}>
+								content={t("chat:commandExecution.exitStatus", { exitCode: status.exitCode })}>
 								<div
 									className={cn(
 										"rounded-full size-2",

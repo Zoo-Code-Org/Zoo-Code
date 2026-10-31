@@ -14,7 +14,7 @@ import {
 
 import { RouterName } from "@roo/api"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { vscode } from "@src/utils/vscode"
@@ -46,7 +46,7 @@ export const Poe = ({
 	modelValidationError,
 	simplifySettings,
 }: PoeProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const queryClient = useQueryClient()
 	const { routerModels } = useExtensionState()
 	const [refreshStatus, setRefreshStatus] = useState(RefreshStatus.Idle)

@@ -33,7 +33,7 @@ import { isTemperatureControlSupported } from "./utils/temperatureSupport"
 
 import { vscode } from "@src/utils/vscode"
 import { validateApiConfigurationExcludingModelErrors, getModelValidationError } from "@src/utils/validate"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
 import { useZooGatewayRouterModelsSync } from "@src/components/ui/hooks/useZooGatewayRouterModelsSync"
 import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
@@ -129,7 +129,7 @@ const ApiOptions = ({
 	errorMessage,
 	setErrorMessage,
 }: ApiOptionsProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const { organizationAllowList, openAiCodexIsAuthenticated, kimiCodeIsAuthenticated, kimiCodeOAuthState } =
 		useExtensionState()
 
@@ -308,11 +308,12 @@ const ApiOptions = ({
 
 		const apiValidationResult = validateApiConfigurationExcludingModelErrors(
 			apiConfiguration,
+			t,
 			routerModels,
 			organizationAllowList,
 		)
 		setErrorMessage(apiValidationResult)
-	}, [apiConfiguration, routerModels, organizationAllowList, setErrorMessage, isRetiredSelectedProvider])
+	}, [apiConfiguration, t, routerModels, organizationAllowList, setErrorMessage, isRetiredSelectedProvider])
 
 	const onProviderChange = useCallback(
 		(value: ProviderName) => {
@@ -378,8 +379,8 @@ const ApiOptions = ({
 	)
 
 	const modelValidationError = useMemo(() => {
-		return getModelValidationError(apiConfiguration, routerModels, organizationAllowList)
-	}, [apiConfiguration, routerModels, organizationAllowList])
+		return getModelValidationError(apiConfiguration, t, routerModels, organizationAllowList)
+	}, [apiConfiguration, t, routerModels, organizationAllowList])
 
 	const docs = useMemo(() => {
 		const provider = PROVIDERS.find(({ value }) => value === selectedProvider)

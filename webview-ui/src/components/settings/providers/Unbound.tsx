@@ -11,7 +11,7 @@ import {
 } from "@roo-code/types"
 
 import { vscode } from "@src/utils/vscode"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { Button } from "@src/components/ui"
 
 import { inputEventTransform } from "../transforms"
@@ -35,7 +35,7 @@ export const Unbound = ({
 	modelValidationError,
 	simplifySettings,
 }: UnboundProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(

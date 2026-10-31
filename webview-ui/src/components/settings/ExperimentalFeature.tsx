@@ -1,5 +1,5 @@
 import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 
 interface ExperimentalFeatureProps {
 	enabled: boolean
@@ -9,7 +9,7 @@ interface ExperimentalFeatureProps {
 }
 
 export const ExperimentalFeature = ({ enabled, onChange, experimentKey }: ExperimentalFeatureProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	// Generate translation keys based on experiment key
 	const nameKey = experimentKey ? `settings:experimental.${experimentKey}.name` : ""

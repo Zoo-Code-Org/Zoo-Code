@@ -4,8 +4,8 @@ import TaskGroupItem from "../TaskGroupItem"
 import type { TaskGroup, DisplayHistoryItem, SubtaskTreeNode } from "../types"
 
 vi.mock("@src/utils/vscode")
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string, options?: Record<string, unknown>) => {
 			if (key === "history:subtasks" && options?.count !== undefined) {
 				return `${options.count} Subtask${options.count === 1 ? "" : "s"}`

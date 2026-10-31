@@ -3,7 +3,7 @@ import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
 import type { ProviderSettings } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
 
 import { inputEventTransform } from "../transforms"
@@ -14,7 +14,7 @@ type SambaNovaProps = {
 }
 
 export const SambaNova = ({ apiConfiguration, setApiConfigurationField }: SambaNovaProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(

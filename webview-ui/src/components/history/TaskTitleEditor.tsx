@@ -2,7 +2,7 @@ import { useCallback, useState } from "react"
 import type { HistoryItem } from "@roo-code/types"
 
 import { AutosizeTextarea } from "@/components/ui"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 import { vscode } from "@/utils/vscode"
 
@@ -24,7 +24,7 @@ const normalizeTitle = (text: string) => text.replace(/\s+/g, " ").trim()
  * It wraps instead of scrolling sideways so a long title stays readable at narrow widths.
  */
 export const TaskTitleEditor = ({ item, onDone, className }: TaskTitleEditorProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const [value, setValue] = useState(() => normalizeTitle(getTaskDisplayTitle(item)))
 
 	const save = useCallback(() => {

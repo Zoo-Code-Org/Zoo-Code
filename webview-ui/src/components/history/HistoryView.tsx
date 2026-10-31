@@ -16,7 +16,7 @@ import {
 	SelectValue,
 	StandardTooltip,
 } from "@/components/ui"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 
 import { Tab, TabContent, TabHeader } from "../common/Tab"
 import { useTaskSearch } from "./useTaskSearch"
@@ -42,7 +42,7 @@ const HistoryView = ({ onDone }: HistoryViewProps) => {
 		showAllWorkspaces,
 		setShowAllWorkspaces,
 	} = useTaskSearch()
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	// Use grouped tasks hook
 	const { groups, flatTasks, toggleExpand, isSearchMode } = useGroupedTasks(tasks, searchQuery)

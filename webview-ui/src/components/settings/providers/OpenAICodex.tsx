@@ -7,7 +7,7 @@ import {
 	openAiCodexModels,
 } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { Button } from "@src/components/ui"
 import { vscode } from "@src/utils/vscode"
 
@@ -28,7 +28,7 @@ export const OpenAICodex: React.FC<OpenAICodexProps> = ({
 	simplifySettings,
 	openAiCodexIsAuthenticated = false,
 }) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	return (
 		<div className="flex flex-col gap-4">

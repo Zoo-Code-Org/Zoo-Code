@@ -1,9 +1,8 @@
 import { memo, type MouseEvent, type ReactNode, useState } from "react"
-import { Trans } from "react-i18next"
 import { SiDiscord, SiReddit, SiX } from "react-icons/si"
 
 import { Package } from "@roo/package"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { Trans, useTranslation } from "react-i18next"
 import { vscode } from "@src/utils/vscode"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@src/components/ui"
 import { EXTERNAL_LINKS } from "@src/constants/externalLinks"
@@ -24,7 +23,7 @@ interface AnnouncementProps {
  */
 
 const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const [open, setOpen] = useState(true)
 
 	return (
@@ -72,7 +71,7 @@ const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 					</div>
 
 					<div className="mt-3 text-sm text-center text-vscode-descriptionForeground">
-						<Trans i18nKey="chat:announcement.support" components={{ githubLink: <GitHubLink /> }} />
+						<Trans t={t} i18nKey="chat:announcement.support" components={{ githubLink: <GitHubLink /> }} />
 					</div>
 				</div>
 			</DialogContent>

@@ -350,6 +350,12 @@ export class ClineProvider
 	 */
 	private clineMessagesSeq = 0
 
+	/**
+	 * Monotonically increasing sequence number for every state snapshot.
+	 * Used by the frontend to ignore the language from snapshots that arrive out-of-order.
+	 */
+	private stateSeq = 0
+
 	public isViewLaunched = false
 	public settingsImportedAt?: number
 	public readonly latestAnnouncementId = "oct-2026-v3.94.0-models-oauth-chat" // v3.94.0 model support, MCP OAuth, and chat reliability
@@ -2793,6 +2799,8 @@ export class ClineProvider
 	}
 
 	async getStateToPostToWebview({ includeTaskHistory = true }: GetStateOptions = {}): Promise<ExtensionState> {
+		// Assign the sequence before the first await so it orders snapshots by when they were read.
+		const stateSeq = ++this.stateSeq
 		// Ensure the store is initialized before reading task history
 		await this.taskHistoryStore.initialized
 
@@ -3034,6 +3042,7 @@ export class ClineProvider
 			showRooIgnoredFiles: showRooIgnoredFiles ?? false,
 			enableSubfolderRules: enableSubfolderRules ?? false,
 			language: language ?? formatLanguage(vscode.env.language),
+			stateSeq,
 			renderContext: this.renderContext,
 			maxImageFileSize: maxImageFileSize ?? 5,
 			maxTotalImageSize: maxTotalImageSize ?? 20,

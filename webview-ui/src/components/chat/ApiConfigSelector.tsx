@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { enabledSelectorTriggerClassName, selectorTriggerClassName } from "@/components/ui/selectorTriggerStyles"
 import { useRooPortal } from "@/components/ui/hooks/useRooPortal"
 import { Popover, PopoverContent, PopoverTrigger, StandardTooltip } from "@/components/ui"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { vscode } from "@/utils/vscode"
 import { Button } from "@/components/ui"
 
@@ -38,7 +38,7 @@ export const ApiConfigSelector = ({
 	lockApiConfigAcrossModes,
 	onToggleLockApiConfig,
 }: ApiConfigSelectorProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const [open, setOpen] = useState(false)
 	const [searchValue, setSearchValue] = useState("")
 	const portalContainer = useRooPortal("roo-portal")

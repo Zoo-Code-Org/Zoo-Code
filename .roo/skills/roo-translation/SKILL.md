@@ -70,7 +70,10 @@ This guidance file is loaded at runtime and should be consulted for the latest b
 ## WebView UI Localization (webview-ui/src/)
 
 - Located in `webview-ui/src/i18n/locales/`
-- Uses standard React i18next patterns with the `useTranslation` hook
+- Use react-i18next's `useTranslation` and `Trans` (`import { Trans, useTranslation } from "react-i18next"`):
+    - Always pass the component's `t` to `Trans` (`<Trans t={t} i18nKey="..." />`); `Trans` does not follow language changes on its own (ESLint enforces this)
+    - Never use the global `t` from `i18next` (`i18next.t`); memoized output would keep showing the previous language after a switch (ESLint enforces this). Pass `t` to helpers instead, as `utils/format.ts` and `utils/validate.ts` do
+- `useTranslation()` takes fully qualified keys (`t("chat:about")`); `useTranslation("chat")` also takes keys relative to that namespace (`t("about")`); fully qualified keys still work
 - All user interface strings should be internationalized
 - Always use the `Trans` component with named components for text with embedded components
 
@@ -86,6 +89,7 @@ React component usage:
 
 ```tsx
 <Trans
+	t={t}
 	i18nKey="welcome:telemetry.changeSettings"
 	components={{
 		settingsLink: <VSCodeLink href="#" onClick={handleOpenSettings} />,

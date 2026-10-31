@@ -4,7 +4,7 @@ import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
 import type { ProviderSettings } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
 import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 
@@ -17,7 +17,7 @@ type AnthropicProps = {
 }
 
 export const Anthropic = ({ apiConfiguration, setApiConfigurationField }: AnthropicProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const selectedModel = useSelectedModel(apiConfiguration)
 
 	const [anthropicBaseUrlSelected, setAnthropicBaseUrlSelected] = useState(!!apiConfiguration.anthropicBaseUrl)

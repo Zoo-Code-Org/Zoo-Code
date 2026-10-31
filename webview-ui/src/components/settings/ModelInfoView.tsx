@@ -5,7 +5,7 @@ import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 import { formatPrice } from "@src/utils/formatPrice"
 import { cn } from "@src/lib/utils"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { StandardTooltip } from "@src/components/ui"
 
 import { ModelDescriptionMarkdown } from "./ModelDescriptionMarkdown"
@@ -47,7 +47,7 @@ export const ModelInfoView = ({
 	setIsDescriptionExpanded,
 	hidePricing,
 }: ModelInfoViewProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	// Show tiered pricing table for OpenAI Native when model supports non-standard tiers
 	const allowedTierNames =

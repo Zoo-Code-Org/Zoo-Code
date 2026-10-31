@@ -4,7 +4,7 @@ import type { Worktree, WorktreeListResponse, WorktreeIncludeStatus } from "@roo
 
 import { Badge, Button, StandardTooltip, ToggleSwitch } from "@/components/ui"
 import { useExtensionState } from "@/context/ExtensionStateContext"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { vscode } from "@/utils/vscode"
 
 import { SectionHeader } from "../settings/SectionHeader"
@@ -14,7 +14,7 @@ import { DeleteWorktreeModal } from "./DeleteWorktreeModal"
 import { Folder, GitBranch, Lock, Plus, SquareArrowOutUpRight, Trash } from "lucide-react"
 
 export const WorktreesView = () => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const { showWorktreesInHomeScreen, setShowWorktreesInHomeScreen } = useExtensionState()
 
 	// State

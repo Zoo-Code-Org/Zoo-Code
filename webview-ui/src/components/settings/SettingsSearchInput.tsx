@@ -2,7 +2,7 @@ import { useState, type RefObject } from "react"
 import { Search, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { Input } from "@/components/ui"
 
 export interface SettingsSearchInputProps {
@@ -22,7 +22,7 @@ export function SettingsSearchInput({
 	onKeyDown,
 	inputRef,
 }: SettingsSearchInputProps) {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const [isExpanded, setIsExpanded] = useState(false)
 
 	const handleFocus = () => {

@@ -1,7 +1,6 @@
 import { HTMLAttributes } from "react"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { Trans, useTranslation } from "react-i18next"
 import { VSCodeCheckbox, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
-import { Trans } from "react-i18next"
 import { buildDocLink } from "@src/utils/docLinks"
 import { Slider } from "@/components/ui"
 
@@ -27,7 +26,7 @@ export const CheckpointSettings = ({
 	setCachedStateField,
 	...props
 }: CheckpointSettingsProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	return (
 		<div {...props}>
 			<SectionHeader>{t("settings:sections.checkpoints")}</SectionHeader>
@@ -45,7 +44,7 @@ export const CheckpointSettings = ({
 						<span className="font-medium">{t("settings:checkpoints.enable.label")}</span>
 					</VSCodeCheckbox>
 					<div className="text-vscode-descriptionForeground text-sm mt-1">
-						<Trans i18nKey="settings:checkpoints.enable.description">
+						<Trans t={t} i18nKey="settings:checkpoints.enable.description">
 							<VSCodeLink
 								href={buildDocLink("features/checkpoints", "settings_checkpoints")}
 								style={{ display: "inline" }}>

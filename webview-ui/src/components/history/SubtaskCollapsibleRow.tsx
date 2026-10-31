@@ -1,6 +1,6 @@
 import { memo } from "react"
 import { ChevronRight } from "lucide-react"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 
 interface SubtaskCollapsibleRowProps {
@@ -19,7 +19,7 @@ interface SubtaskCollapsibleRowProps {
  * Clicking this row toggles the visibility of the subtask list.
  */
 const SubtaskCollapsibleRow = ({ count, isExpanded, onToggle, className }: SubtaskCollapsibleRowProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	if (count === 0) {
 		return null

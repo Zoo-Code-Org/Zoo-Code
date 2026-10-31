@@ -3,8 +3,8 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import { TodoListSettingsControl } from "../TodoListSettingsControl"
 
 // Mock the translation hook
-vi.mock("@/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string) => {
 			const translations: Record<string, string> = {
 				"settings:advanced.todoList.label": "Enable todo list tool",

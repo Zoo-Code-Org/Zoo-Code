@@ -3,7 +3,9 @@ import React from "react"
 import { OpenAiServiceTier, type ModelInfo } from "@roo-code/types/model"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
-import { TranslationContext } from "@src/i18n/TranslationContext"
+import { I18nextProvider } from "react-i18next"
+
+import { createFixtureI18n } from "@src/i18n/__tests__/createFixtureI18n.visual.i18n"
 import { ModelInfoView } from "../ModelInfoView"
 
 const modelInfo: ModelInfo = {
@@ -49,12 +51,10 @@ const translations: Record<string, string> = {
 	"settings:serviceTier.priority": "Priority",
 }
 
+const i18n = createFixtureI18n(translations)
+
 export const ModelInfoViewFixture = () => (
-	<TranslationContext.Provider
-		value={{
-			t: (key) => translations[key] ?? key,
-			i18n: null as unknown as typeof import("../../../i18n/setup").default,
-		}}>
+	<I18nextProvider i18n={i18n}>
 		<div className="w-[480px] bg-vscode-editor-background p-4 text-vscode-foreground">
 			<ModelInfoView
 				apiProvider={providerIdentifiers.openaiNative}
@@ -64,5 +64,5 @@ export const ModelInfoViewFixture = () => (
 				setIsDescriptionExpanded={() => {}}
 			/>
 		</div>
-	</TranslationContext.Provider>
+	</I18nextProvider>
 )

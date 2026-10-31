@@ -1,12 +1,11 @@
 import React, { useState } from "react"
-import { Trans } from "react-i18next"
 import { VSCodeLink, VSCodePanels, VSCodePanelTab, VSCodePanelView } from "@vscode/webview-ui-toolkit/react"
 
 import type { McpServer } from "@roo-code/types"
 
 import { vscode } from "@src/utils/vscode"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { Trans, useTranslation } from "react-i18next"
 import { useTooManyTools } from "@src/hooks/useTooManyTools"
 import {
 	Button,
@@ -40,7 +39,7 @@ const McpView = ({ mcpEnabled: propsMcpEnabled, setMcpEnabled }: McpViewProps = 
 	// only persisted on Save. Fall back to live extension state when used uncontrolled.
 	const mcpEnabled = propsMcpEnabled ?? contextMcpEnabled
 
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const { isOverThreshold, title, message } = useTooManyTools()
 
 	return (
@@ -55,7 +54,7 @@ const McpView = ({ mcpEnabled: propsMcpEnabled, setMcpEnabled }: McpViewProps = 
 						marginBottom: "10px",
 						marginTop: "5px",
 					}}>
-					<Trans i18nKey="mcp:description">
+					<Trans t={t} i18nKey="mcp:description">
 						<VSCodeLink
 							href={buildDocLink("features/mcp/using-mcp-in-roo", "mcp_settings")}
 							style={{ display: "inline" }}>
@@ -184,7 +183,7 @@ const McpView = ({ mcpEnabled: propsMcpEnabled, setMcpEnabled }: McpViewProps = 
 }
 
 const ServerRow = ({ server, alwaysAllowMcp }: { server: McpServer; alwaysAllowMcp?: boolean }) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const [isExpanded, setIsExpanded] = useState(false)
 	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 	const [timeoutValue, setTimeoutValue] = useState(() => {

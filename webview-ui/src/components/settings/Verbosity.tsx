@@ -1,6 +1,6 @@
 import { type ProviderSettings, type ModelInfo, type VerbosityLevel, verbosityLevels } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@src/components/ui"
 
 interface VerbosityProps {
@@ -10,7 +10,7 @@ interface VerbosityProps {
 }
 
 export const Verbosity = ({ apiConfiguration, setApiConfigurationField, modelInfo }: VerbosityProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	// For now, we'll show verbosity for all models, but this can be restricted later
 	// based on model capabilities (e.g., only for GPT-5 models)

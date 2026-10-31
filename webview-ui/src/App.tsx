@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { type ExtensionMessage, TelemetryEventName } from "@roo-code/types"
 
-import TranslationProvider from "./i18n/TranslationContext"
+import "./i18n/setup"
 import { MarketplaceViewStateManager } from "./components/marketplace/MarketplaceViewStateManager"
 
 import { vscode } from "./utils/vscode"
@@ -344,13 +344,11 @@ const queryClient = new QueryClient()
 const AppWithProviders = () => (
 	<ErrorBoundary>
 		<ExtensionStateContextProvider>
-			<TranslationProvider>
-				<QueryClientProvider client={queryClient}>
-					<TooltipProvider delayDuration={STANDARD_TOOLTIP_DELAY}>
-						<App />
-					</TooltipProvider>
-				</QueryClientProvider>
-			</TranslationProvider>
+			<QueryClientProvider client={queryClient}>
+				<TooltipProvider delayDuration={STANDARD_TOOLTIP_DELAY}>
+					<App />
+				</TooltipProvider>
+			</QueryClientProvider>
 		</ExtensionStateContextProvider>
 	</ErrorBoundary>
 )

@@ -6,7 +6,7 @@ import type { BundledTheme, ShikiTransformer } from "shiki"
 import { toJsxRuntime } from "hast-util-to-jsx-runtime"
 import { Fragment, jsx, jsxs } from "react/jsx-runtime"
 import { ChevronDown, ChevronUp, Copy, Check } from "lucide-react"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { StandardTooltip } from "@/components/ui"
 
 export const CODE_BLOCK_BG_COLOR =
@@ -194,7 +194,7 @@ const CodeBlock = memo(
 		const preRef = useRef<HTMLDivElement>(null)
 		const copyButtonWrapperRef = useRef<HTMLDivElement>(null)
 		const { showCopyFeedback, copyWithFeedback } = useCopyToClipboard()
-		const { t } = useAppTranslation()
+		const { t } = useTranslation()
 		const isMountedRef = useRef(true)
 		const buttonPositionTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 		const collapseTimeout1Ref = useRef<NodeJS.Timeout | null>(null)

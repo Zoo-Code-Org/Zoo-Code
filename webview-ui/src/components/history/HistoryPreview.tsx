@@ -1,7 +1,7 @@
 import { memo } from "react"
 
 import { vscode } from "@src/utils/vscode"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 
 import { useTaskSearch } from "./useTaskSearch"
 import { useGroupedTasks } from "./useGroupedTasks"
@@ -10,7 +10,7 @@ import TaskGroupItem from "./TaskGroupItem"
 const HistoryPreview = () => {
 	const { tasks, searchQuery } = useTaskSearch()
 	const { groups, toggleExpand } = useGroupedTasks(tasks, searchQuery)
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const handleViewAllHistory = () => {
 		vscode.postMessage({ type: "switchTab", tab: "history" })

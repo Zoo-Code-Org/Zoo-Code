@@ -21,8 +21,8 @@ vi.mock("@/context/ExtensionStateContext", () => ({
 	}),
 }))
 
-vi.mock("@/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string, params?: any) => {
 			if (key === "marketplace:items.card.by") {
 				return `by ${params.author}`

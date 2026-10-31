@@ -1,6 +1,5 @@
 import { useCallback, useState, useMemo, useEffect, useRef } from "react"
 import { useEvent } from "react-use"
-import { Trans } from "react-i18next"
 import { Checkbox } from "vscrui"
 import { VSCodeLink, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
@@ -12,7 +11,7 @@ import {
 	providerIdentifiers,
 } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { Trans, useTranslation } from "react-i18next"
 import { requestLmStudioModels } from "@src/components/ui/hooks/useLmStudioModels"
 import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
 
@@ -25,7 +24,7 @@ type LMStudioProps = {
 }
 
 export const LMStudio = ({ apiConfiguration, setApiConfigurationField }: LMStudioProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const [lmStudioModels, setLmStudioModels] = useState<ModelRecord>({})
 	const routerModels = useRouterModels({ provider: providerIdentifiers.lmstudio })
@@ -158,6 +157,7 @@ export const LMStudio = ({ apiConfiguration, setApiConfigurationField }: LMStudi
 			)}
 			<div className="text-sm text-vscode-descriptionForeground">
 				<Trans
+					t={t}
 					i18nKey="settings:providers.lmStudio.description"
 					components={{
 						a: <VSCodeLink href="https://lmstudio.ai/docs" />,

@@ -2,9 +2,9 @@ import { render, fireEvent } from "@testing-library/react"
 
 import { ImageGenerationSettings } from "../ImageGenerationSettings"
 
-// Mock the translation context
-vi.mock("@/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+// Mock the translation hook
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string) => key,
 	}),
 }))

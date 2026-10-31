@@ -4,8 +4,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { providerIdentifiers, type ProviderSettings } from "@roo-code/types"
 
-import { TranslationContext as AppTranslationContext } from "@/i18n/TranslationContext"
-import { TranslationContext as PlaywrightTranslationContext } from "@src/i18n/TranslationContext"
+import { I18nextProvider } from "react-i18next"
+
+import { createFixtureI18n } from "@src/i18n/__tests__/createFixtureI18n.visual.i18n"
 import { TooltipProvider } from "@src/components/ui/tooltip"
 import { OpenAICompatible } from "../OpenAICompatible"
 import enSettings from "@/i18n/locales/en/settings.json"
@@ -23,7 +24,7 @@ function flattenTranslations(obj: Record<string, unknown>, prefix = "settings:")
 	return result
 }
 
-const translations = flattenTranslations(enSettings as Record<string, unknown>)
+const i18n = createFixtureI18n(flattenTranslations(enSettings as Record<string, unknown>))
 
 const apiConfiguration: ProviderSettings = {
 	apiProvider: providerIdentifiers.openai,
@@ -48,19 +49,9 @@ const Providers = ({ children }: React.PropsWithChildren) => {
 	)
 
 	return (
-		<PlaywrightTranslationContext.Provider
-			value={{
-				t: (key) => translations[key] ?? key,
-				i18n: null as unknown as typeof import("../../../../i18n/setup").default,
-			}}>
-			<AppTranslationContext.Provider
-				value={{
-					t: (key) => translations[key] ?? key,
-					i18n: null as unknown as typeof import("../../../../i18n/setup").default,
-				}}>
-				<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-			</AppTranslationContext.Provider>
-		</PlaywrightTranslationContext.Provider>
+		<I18nextProvider i18n={i18n}>
+			<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+		</I18nextProvider>
 	)
 }
 

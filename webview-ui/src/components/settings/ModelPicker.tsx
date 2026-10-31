@@ -1,6 +1,5 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from "react"
 import { VSCodeLink } from "@vscode/webview-ui-toolkit/react"
-import { Trans } from "react-i18next"
 import { ChevronsUpDown, Check, X, Info } from "lucide-react"
 
 import {
@@ -11,7 +10,7 @@ import {
 	providerIdentifiers,
 } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { Trans, useTranslation } from "react-i18next"
 import { useSelectedModel } from "@/components/ui/hooks/useSelectedModel"
 import { filterModels } from "./utils/organizationFilters"
 import { cn } from "@src/lib/utils"
@@ -95,7 +94,7 @@ export const ModelPicker = ({
 	displayTransform,
 	onModelChange,
 }: ModelPickerProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const [open, setOpen] = useState(false)
 	const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
@@ -316,6 +315,7 @@ export const ModelPicker = ({
 					{!hidePricing && apiConfiguration.apiProvider !== providerIdentifiers.mimo && (
 						<div className="text-sm text-vscode-descriptionForeground" data-testid="automatic-fetch-hint">
 							<Trans
+								t={t}
 								i18nKey="settings:modelPicker.automaticFetch"
 								components={{
 									serviceLink: <VSCodeLink href={serviceUrl} className="text-sm" />,

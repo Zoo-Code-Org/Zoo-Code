@@ -1,6 +1,5 @@
 import { VSCodeLink } from "@vscode/webview-ui-toolkit/react"
-import { useTranslation } from "react-i18next"
-import { Trans } from "react-i18next"
+import { Trans, useTranslation } from "react-i18next"
 
 import { buildDocLink } from "@src/utils/docLinks"
 import { ReplaceAll, Users } from "lucide-react"
@@ -26,7 +25,7 @@ const RooTips = () => {
 	return (
 		<div className="flex flex-col gap-2 mb-4 max-w-[500px] text-vscode-descriptionForeground">
 			<p className="my-0 pr-2">
-				<Trans i18nKey="chat:about" />
+				<Trans t={t} i18nKey="chat:about" />
 			</p>
 			<div className="gap-4">
 				{tips.map((tip) => (
@@ -43,6 +42,7 @@ const RooTips = () => {
 			</div>
 			<p className="my-0 pr-8">
 				<Trans
+					t={t}
 					i18nKey="chat:docs"
 					components={{
 						DocsLink: (

@@ -64,23 +64,16 @@ vi.mock("@src/utils/vscode", () => ({
 }))
 
 vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
+		t: (key: string) => key,
+	}),
 	Trans: ({ i18nKey, children }: any) => <span data-testid={`trans-${i18nKey}`}>{children || i18nKey}</span>,
-	initReactI18next: {
-		type: "3rdParty",
-		init: () => {},
-	},
 }))
 
 vi.mock("i18next", () => ({
 	default: {
 		t: (key: string) => key,
 	},
-}))
-
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
-		t: (key: string) => key,
-	}),
 }))
 
 // Mock buildDocLink

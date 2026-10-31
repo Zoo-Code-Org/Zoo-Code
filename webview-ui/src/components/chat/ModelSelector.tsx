@@ -16,7 +16,7 @@ import { useRooPortal } from "@/components/ui/hooks/useRooPortal"
 import { useRouterModels } from "@/components/ui/hooks/useRouterModels"
 import { useSelectedModel } from "@/components/ui/hooks/useSelectedModel"
 import { Popover, PopoverContent, PopoverTrigger, StandardTooltip } from "@/components/ui"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { vscode } from "@/utils/vscode"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import {
@@ -87,7 +87,7 @@ export const ModelSelector = ({
 	const [searchValue, setSearchValue] = React.useState("")
 	const searchInputRef = React.useRef<HTMLInputElement>(null)
 	const portalContainer = useRooPortal("roo-portal")
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const { organizationAllowList, currentApiConfigName } = useExtensionState()
 
 	const providerRaw = apiConfiguration.apiProvider || providerIdentifiers.openrouter

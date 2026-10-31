@@ -12,7 +12,7 @@ import {
 } from "@roo-code/types"
 
 import { validateBedrockArn } from "@src/utils/validate"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@src/components/ui"
 
 const baseModelIds = Object.keys(bedrockModels).sort((a, b) => a.localeCompare(b))
@@ -28,12 +28,14 @@ type BedrockCustomArnProps = {
 }
 
 export const BedrockCustomArn = ({ apiConfiguration, setApiConfigurationField }: BedrockCustomArnProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const validation = useMemo(() => {
 		const { awsCustomArn, awsRegion } = apiConfiguration
-		return awsCustomArn ? validateBedrockArn(awsCustomArn, awsRegion) : { isValid: true, errorMessage: undefined }
-	}, [apiConfiguration])
+		return awsCustomArn
+			? validateBedrockArn(awsCustomArn, t, awsRegion)
+			: { isValid: true, errorMessage: undefined }
+	}, [apiConfiguration, t])
 
 	const baseModelId =
 		resolveBedrockCustomArnBaseModelId(apiConfiguration.awsCustomArn, apiConfiguration.awsCustomArnBaseModelId) ??

@@ -1,5 +1,5 @@
 import React from "react"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -24,7 +24,7 @@ interface DeleteModeDialogProps {
 }
 
 export const DeleteModeDialog: React.FC<DeleteModeDialogProps> = ({ open, onOpenChange, modeToDelete, onConfirm }) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>

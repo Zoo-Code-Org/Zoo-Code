@@ -15,7 +15,7 @@ import {
 
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@src/components/ui"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { vscode } from "@src/utils/vscode"
 
 import { ModelPicker } from "../ModelPicker"
@@ -48,7 +48,7 @@ export const NanoGPT = ({
 	modelValidationError,
 	simplifySettings,
 }: NanoGPTProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const routingPreference = apiConfiguration.nanoGptRoutingPreference ?? nanoGptDefaultRoutingPreference
 
 	const handleInputChange = useCallback(

@@ -448,6 +448,13 @@ export type ExtensionState = Pick<
 	 * (captured during async getStateToPostToWebview) from overwriting newer messages.
 	 */
 	clineMessagesSeq?: number
+
+	/**
+	 * Monotonically increasing sequence number for every state snapshot, assigned before the
+	 * snapshot is read. Snapshots are built asynchronously and can be posted out of order, so the
+	 * frontend applies `language` only from a snapshot newer than the last one it applied.
+	 */
+	stateSeq?: number
 }
 
 export interface Command {

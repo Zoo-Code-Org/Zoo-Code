@@ -44,7 +44,7 @@ import {
 	getModelMaxOutputTokens,
 } from "@roo/api"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { Slider, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@src/components/ui"
 import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 
@@ -59,7 +59,7 @@ interface ThinkingBudgetProps {
 }
 
 export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, modelInfo }: ThinkingBudgetProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const { id: selectedModelId } = useSelectedModel(apiConfiguration)
 
 	// Check if this is a Gemini 2.5 Pro model

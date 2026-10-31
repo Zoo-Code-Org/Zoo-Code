@@ -6,7 +6,7 @@ import { ExportButton } from "./ExportButton"
 import { DeleteButton } from "./DeleteButton"
 import { RenameButton } from "./RenameButton"
 import { StandardTooltip } from "../ui/standard-tooltip"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { Split } from "lucide-react"
 import { TaskStatusBadge } from "./TaskStatusBadge"
 
@@ -27,7 +27,7 @@ const TaskItemFooter: React.FC<TaskItemFooterProps> = ({
 	onDelete,
 	onRename,
 }) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	return (
 		<div className="text-xs text-vscode-descriptionForeground flex justify-between items-center">
@@ -49,7 +49,7 @@ const TaskItemFooter: React.FC<TaskItemFooterProps> = ({
 				)}
 				{/* Datetime with time-ago format */}
 				<StandardTooltip content={new Date(item.ts).toLocaleString()}>
-					<span className="first-letter:uppercase">{formatTimeAgo(item.ts)}</span>
+					<span className="first-letter:uppercase">{formatTimeAgo(item.ts, t)}</span>
 				</StandardTooltip>
 
 				{/* Cost */}

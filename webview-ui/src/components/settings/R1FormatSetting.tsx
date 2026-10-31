@@ -1,6 +1,6 @@
 import { Checkbox } from "vscrui"
 
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 
 interface R1FormatSettingProps {
 	onChange: (value: boolean) => void
@@ -8,7 +8,7 @@ interface R1FormatSettingProps {
 }
 
 export const R1FormatSetting = ({ onChange, openAiR1FormatEnabled }: R1FormatSettingProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	return (
 		<div>

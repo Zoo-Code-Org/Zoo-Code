@@ -6,8 +6,8 @@ import { DeleteTaskDialog } from "../DeleteTaskDialog"
 
 vi.mock("@/utils/vscode")
 
-vi.mock("@/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string, options?: Record<string, unknown>) => {
 			const translations: Record<string, string> = {
 				"history:deleteTask": "Delete Task",

@@ -3,7 +3,7 @@ import { Edit, Folder, Globe, Plus, ScrollText, Trash2 } from "lucide-react"
 
 import type { RuleMetadata } from "@roo-code/types"
 
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import {
 	AlertDialog,
@@ -23,7 +23,7 @@ import { SectionHeader } from "./SectionHeader"
 import { CreateRuleDialog } from "./CreateRuleDialog"
 
 export const RulesSettings: React.FC = () => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const { cwd, rules: rawRules } = useExtensionState()
 	const rules = useMemo(() => rawRules ?? [], [rawRules])
 

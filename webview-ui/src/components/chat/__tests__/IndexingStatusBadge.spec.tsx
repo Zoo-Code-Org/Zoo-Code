@@ -20,57 +20,6 @@ vi.mock("@/i18n/setup", () => ({
 vi.mock("react-i18next", () => ({
 	useTranslation: () => ({
 		t: (key: string, params?: any) => {
-			const translations: Record<string, string> = {
-				"indexingStatus.ready": "Index ready",
-				"indexingStatus.indexing": params?.progress !== undefined ? `Indexing ${params.progress}%` : "Indexing",
-				"indexingStatus.error": "Index error",
-				"indexingStatus.indexed": "Indexed",
-				"indexingStatus.tooltip.ready": "The codebase index is ready for use",
-				"indexingStatus.tooltip.indexing":
-					params?.progress !== undefined
-						? `Indexing in progress: ${params.progress}% complete`
-						: "Indexing in progress",
-				"indexingStatus.tooltip.error": "An error occurred during indexing",
-				"indexingStatus.tooltip.indexed": "Codebase has been successfully indexed",
-				"indexingStatus.tooltip.clickToSettings": "Click to open indexing settings",
-			}
-			return translations[key] || key
-		},
-		i18n: {
-			language: "en",
-			changeLanguage: vi.fn(),
-		},
-	}),
-	initReactI18next: {
-		type: "3rdParty",
-		init: vi.fn(),
-	},
-	Trans: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}))
-
-// Mock vscode API
-vi.mock("@src/utils/vscode", () => ({
-	vscode: {
-		postMessage: vi.fn(),
-	},
-}))
-
-// Mock the ExtensionStateContext
-vi.mock("@/context/ExtensionStateContext", () => ({
-	useExtensionState: () => ({
-		version: "1.0.0",
-		clineMessages: [],
-		taskHistory: [],
-		shouldShowAnnouncement: false,
-		language: "en",
-	}),
-	ExtensionStateContextProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}))
-
-// Mock TranslationContext to provide t function directly
-vi.mock("@/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
-		t: (key: string, params?: any) => {
 			// Remove namespace prefix if present
 			const cleanKey = key.includes(":") ? key.split(":")[1] : key
 
@@ -92,6 +41,26 @@ vi.mock("@/i18n/TranslationContext", () => ({
 			return translations[cleanKey] || cleanKey
 		},
 	}),
+	Trans: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
+
+// Mock vscode API
+vi.mock("@src/utils/vscode", () => ({
+	vscode: {
+		postMessage: vi.fn(),
+	},
+}))
+
+// Mock the ExtensionStateContext
+vi.mock("@/context/ExtensionStateContext", () => ({
+	useExtensionState: () => ({
+		version: "1.0.0",
+		clineMessages: [],
+		taskHistory: [],
+		shouldShowAnnouncement: false,
+		language: "en",
+	}),
+	ExtensionStateContextProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
 
 describe("IndexingStatusBadge", () => {

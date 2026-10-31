@@ -11,8 +11,8 @@ vi.mock("@src/utils/vscode", () => ({
 	},
 }))
 
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({ t: (key: string) => key }),
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({ t: (key: string) => key }),
 }))
 
 // Exposed so tests can assert the context (uncontrolled) setter still fires.

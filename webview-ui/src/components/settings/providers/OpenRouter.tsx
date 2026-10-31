@@ -9,7 +9,7 @@ import {
 	openRouterDefaultModelId,
 } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { getOpenRouterAuthUrl } from "@src/oauth/urls"
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
 
@@ -38,7 +38,7 @@ export const OpenRouter = ({
 	organizationAllowList,
 	modelValidationError,
 }: OpenRouterProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const [openRouterBaseUrlSelected, setOpenRouterBaseUrlSelected] = useState(!!apiConfiguration.openRouterBaseUrl)
 

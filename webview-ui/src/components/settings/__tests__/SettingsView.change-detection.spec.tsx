@@ -32,9 +32,10 @@ vi.mock("@src/context/ExtensionStateContext", () => ({
 
 const mockTranslate = vi.hoisted(() => (key: string) => key)
 
-// Mock the translation context
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+// Mock the translation hook
+vi.mock("react-i18next", async (importOriginal) => ({
+	...(await importOriginal<typeof import("react-i18next")>()),
+	useTranslation: () => ({
 		t: mockTranslate,
 	}),
 }))

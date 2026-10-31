@@ -7,7 +7,6 @@ import {
 	VSCodeLink,
 	VSCodeTextField,
 } from "@vscode/webview-ui-toolkit/react"
-import { Trans } from "react-i18next"
 import { ChevronDown, X, Upload, Download } from "lucide-react"
 
 import { ModeConfig, GroupEntry, PromptComponent, ToolGroup, modeConfigSchema } from "@roo-code/types"
@@ -26,7 +25,7 @@ import { TOOL_GROUPS } from "@roo/tools"
 
 import { vscode } from "@src/utils/vscode"
 import { buildDocLink } from "@src/utils/docLinks"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { Trans, useTranslation } from "react-i18next"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { Section } from "@src/components/settings/Section"
 import {
@@ -66,7 +65,7 @@ function getGroupName(group: GroupEntry): ToolGroup {
 }
 
 const ModesView = () => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const {
 		customModePrompts,
@@ -710,7 +709,7 @@ const ModesView = () => {
 					</div>
 
 					<div className="text-sm text-vscode-descriptionForeground mb-3">
-						<Trans i18nKey="prompts:modes.createModeHelpText">
+						<Trans t={t} i18nKey="prompts:modes.createModeHelpText">
 							<VSCodeLink
 								href={buildDocLink("basic-usage/using-modes", "prompts_view_modes")}
 								style={{ display: "inline" }}
@@ -1302,6 +1301,7 @@ const ModesView = () => {
 					/>
 					<div className="text-xs text-vscode-descriptionForeground mt-1.5">
 						<Trans
+							t={t}
 							i18nKey="prompts:customInstructions.loadFromFile"
 							values={{
 								mode: getCurrentMode()?.name || "Code",
@@ -1382,7 +1382,7 @@ const ModesView = () => {
 					<h3 className="text-vscode-foreground mb-3">{t("prompts:globalCustomInstructions.title")}</h3>
 
 					<div className="text-sm text-vscode-descriptionForeground mb-2">
-						<Trans i18nKey="prompts:globalCustomInstructions.description">
+						<Trans t={t} i18nKey="prompts:globalCustomInstructions.description">
 							<VSCodeLink
 								href={buildDocLink(
 									"features/custom-instructions#setting-up-global-rules",
@@ -1411,6 +1411,7 @@ const ModesView = () => {
 					/>
 					<div className="text-xs text-vscode-descriptionForeground mt-1.5">
 						<Trans
+							t={t}
 							i18nKey="prompts:globalCustomInstructions.loadFromFile"
 							components={{
 								span: (

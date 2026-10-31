@@ -4,7 +4,7 @@ import { TriangleAlert } from "lucide-react"
 
 import type { ProviderSettingsEntry, OrganizationAllowList } from "@roo-code/types"
 
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import {
 	type SearchableSelectOption,
 	Button,
@@ -35,7 +35,7 @@ const ApiConfigManager = ({
 	onRenameConfig,
 	onUpsertConfig,
 }: ApiConfigManagerProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const [isRenaming, setIsRenaming] = useState(false)
 	const [isCreating, setIsCreating] = useState(false)

@@ -1,7 +1,7 @@
 import { useMemo } from "react"
 import type { LucideIcon } from "lucide-react"
 
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 
 import { SectionName } from "./SettingsView"
@@ -73,7 +73,7 @@ export function SettingsSearchResults({
 	sections,
 	highlightedResultId,
 }: SettingsSearchResultsProps) {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	// Group results by section/tab
 	const groupedResults = useMemo(() => {

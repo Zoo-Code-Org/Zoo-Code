@@ -12,7 +12,7 @@ import {
 } from "@roo-code/types"
 
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { vscode } from "@src/utils/vscode"
 
 import { ModelPicker } from "../ModelPicker"
@@ -35,7 +35,7 @@ export const IOIntelligence = ({
 	modelValidationError,
 	simplifySettings,
 }: IOIntelligenceProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(

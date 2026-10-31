@@ -1,7 +1,5 @@
-import { Trans } from "react-i18next"
-
 import { Button } from "@src/components/ui"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { Trans, useTranslation } from "react-i18next"
 
 import { Tab, TabContent } from "../common/Tab"
 import RooHero from "./RooHero"
@@ -12,7 +10,7 @@ interface WelcomeLandingProps {
 }
 
 export function WelcomeLanding({ onGetStarted, onImportSettings }: WelcomeLandingProps) {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	return (
 		<Tab>
@@ -22,7 +20,7 @@ export function WelcomeLanding({ onGetStarted, onImportSettings }: WelcomeLandin
 
 				<div className="space-y-4 leading-normal">
 					<p className="text-base text-vscode-foreground">
-						<Trans i18nKey="welcome:landing.introduction" />
+						<Trans t={t} i18nKey="welcome:landing.introduction" />
 					</p>
 				</div>
 

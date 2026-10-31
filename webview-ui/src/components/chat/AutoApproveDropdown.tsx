@@ -8,7 +8,7 @@ import { enabledSelectorTriggerClassName, selectorTriggerClassName } from "@/com
 
 import { useExtensionState } from "@/context/ExtensionStateContext"
 
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 
 import { useAutoApprovalToggles } from "@/hooks/useAutoApprovalToggles"
 import { useAutoApprovalState } from "@/hooks/useAutoApprovalState"
@@ -27,7 +27,7 @@ interface AutoApproveDropdownProps {
 export const AutoApproveDropdown = ({ disabled = false, triggerClassName = "" }: AutoApproveDropdownProps) => {
 	const [open, setOpen] = React.useState(false)
 	const portalContainer = useRooPortal("roo-portal")
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	const {
 		autoApprovalEnabled,

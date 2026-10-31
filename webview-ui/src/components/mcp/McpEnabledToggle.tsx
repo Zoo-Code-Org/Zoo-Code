@@ -2,7 +2,7 @@ import { FormEvent } from "react"
 import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 
 import { useExtensionState } from "@src/context/ExtensionStateContext"
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { vscode } from "@src/utils/vscode"
 
 interface McpEnabledToggleProps {
@@ -15,7 +15,7 @@ const McpEnabledToggle = ({
 	setMcpEnabled: propsSetMcpEnabled,
 }: McpEnabledToggleProps = {}) => {
 	const { mcpEnabled: contextMcpEnabled, setMcpEnabled: contextSetMcpEnabled } = useExtensionState()
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	// When rendered inside SettingsView the value is buffered in `cachedState` and
 	// only persisted on Save. Fall back to live extension state when used uncontrolled.

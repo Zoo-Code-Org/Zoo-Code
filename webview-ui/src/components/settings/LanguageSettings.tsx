@@ -1,5 +1,5 @@
 import { HTMLAttributes } from "react"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 
 import type { Language } from "@roo-code/types"
 
@@ -19,7 +19,7 @@ type LanguageSettingsProps = HTMLAttributes<HTMLDivElement> & {
 }
 
 export const LanguageSettings = ({ language, setCachedStateField, className, ...props }: LanguageSettingsProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	return (
 		<div className={cn("flex flex-col gap-2", className)} {...props}>

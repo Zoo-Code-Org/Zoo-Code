@@ -1,11 +1,10 @@
 import { useCallback, useMemo } from "react"
-import { Trans } from "react-i18next"
 import { Checkbox } from "vscrui"
 import { VSCodeLink, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
 import { type ProviderSettings, VERTEX_REGIONS, VERTEX_1M_CONTEXT_MODEL_IDS, looksLikeFilePath } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { Trans, useTranslation } from "react-i18next"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@src/components/ui"
 
 import { inputEventTransform } from "../transforms"
@@ -16,7 +15,7 @@ type VertexProps = {
 }
 
 export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 
 	// Check if the selected model supports 1M context (supported Claude 4 models)
 	const supports1MContextBeta =
@@ -80,6 +79,7 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 					role="status"
 					className="text-sm text-vscode-errorForeground">
 					<Trans
+						t={t}
 						i18nKey="settings:providers.googleCloudCredentialsPathWarning"
 						components={{
 							strong: <strong />,

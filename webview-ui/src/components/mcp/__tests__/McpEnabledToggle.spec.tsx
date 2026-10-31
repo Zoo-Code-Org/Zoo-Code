@@ -11,8 +11,8 @@ vi.mock("@src/utils/vscode", () => ({
 	},
 }))
 
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({ t: (key: string) => key }),
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({ t: (key: string) => key }),
 }))
 
 const contextSetMcpEnabled = vi.fn()

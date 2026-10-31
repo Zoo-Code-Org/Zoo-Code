@@ -19,17 +19,7 @@ vi.mock("@roo/package", () => ({
 }))
 
 vi.mock("react-i18next", () => ({
-	Trans: ({ i18nKey, components }: { i18nKey: string; components?: Record<string, React.ReactElement> }) => {
-		if (i18nKey === "chat:announcement.support" && components?.githubLink) {
-			return React.cloneElement(components.githubLink, undefined, "GitHub")
-		}
-
-		return <span>{i18nKey}</span>
-	},
-}))
-
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
+	useTranslation: () => ({
 		t: (key: string, options?: { version?: string }) => {
 			const translations: Record<string, string> = {
 				"chat:announcement.release.heading": "What is new in Zoo Code v3.90.0",
@@ -48,6 +38,13 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 			return translations[key] ?? key
 		},
 	}),
+	Trans: ({ i18nKey, components }: { i18nKey: string; components?: Record<string, React.ReactElement> }) => {
+		if (i18nKey === "chat:announcement.support" && components?.githubLink) {
+			return React.cloneElement(components.githubLink, undefined, "GitHub")
+		}
+
+		return <span>{i18nKey}</span>
+	},
 }))
 
 describe("Announcement", () => {

@@ -1,6 +1,6 @@
 import { HTMLAttributes } from "react"
 import React from "react"
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useTranslation } from "react-i18next"
 import { VSCodeCheckbox, VSCodeTextArea } from "@vscode/webview-ui-toolkit/react"
 import { ListChevronsDownUp } from "lucide-react"
 import { DEFAULT_DIFF_FUZZY_THRESHOLD } from "@roo-code/types"
@@ -89,7 +89,7 @@ export const ContextManagementSettings = ({
 	className,
 	...props
 }: ContextManagementSettingsProps) => {
-	const { t } = useAppTranslation()
+	const { t } = useTranslation()
 	const [selectedThresholdProfile, setSelectedThresholdProfile] = React.useState<string>("default")
 
 	// Helper function to get the CONDENSE prompt value

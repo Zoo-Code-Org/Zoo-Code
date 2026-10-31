@@ -6,9 +6,8 @@ import type { SuggestionItem } from "@roo-code/types"
 import { FollowUpSuggest } from "../FollowUpSuggest"
 
 // Mock the translation hook
-vi.mock("@src/i18n/TranslationContext", () => ({
-	TranslationProvider: ({ children }: { children: React.ReactNode }) => children,
-	useAppTranslation: () => ({
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({
 		t: (key: string, options?: any) => {
 			if (key === "chat:followUpSuggest.countdownDisplay" && options?.count !== undefined) {
 				return `${options.count}s`
