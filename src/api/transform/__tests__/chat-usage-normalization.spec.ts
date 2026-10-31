@@ -308,9 +308,32 @@ describe("normalizeChatUsage", () => {
 				expect(meta).not.toHaveProperty("value")
 				expect(meta.type).toBe("string")
 				expect(meta.length).toBe(1_000_000)
-				expect(typeof meta.preview).toBe("string")
-				expect((meta.preview as string).length).toBeLessThanOrEqual(65)
+				expect(meta.preview).toBe(`${"9".repeat(64)}…`)
 				expect(JSON.stringify(meta).length).toBeLessThan(200)
+			} finally {
+				warn.mockRestore()
+			}
+		})
+
+		it.each([
+			["exactly at the cap", 64, "9".repeat(64)],
+			["one past the cap", 65, `${"9".repeat(64)}…`],
+		])("keeps a preview %s without truncating or over-truncating", async (_name, length, expected) => {
+			vi.resetModules()
+			const { CompactLogger: FreshCompactLogger } = await import("../../../utils/logging/CompactLogger")
+			const { normalizeChatUsage: freshNormalize } = await import("../chat-usage-normalization")
+			const warn = vi.spyOn(FreshCompactLogger.prototype, "warn").mockImplementation(() => {})
+
+			try {
+				freshNormalize({ prompt_tokens: 120, prompt_cache_miss_tokens: "9".repeat(length) })
+
+				const [, meta] = warn.mock.calls[0] as [string, Record<string, unknown>]
+
+				// A length-only assertion cannot tell an empty preview from a full
+				// one, nor 64 characters from 65, so the boundary is pinned exactly.
+				expect(meta.preview).toBe(expected)
+				expect(meta.length).toBe(length)
+				expect(meta).not.toHaveProperty("value")
 			} finally {
 				warn.mockRestore()
 			}
