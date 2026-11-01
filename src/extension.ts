@@ -40,6 +40,7 @@ import { McpServerManager } from "./services/mcp/McpServerManager"
 import { CodeIndexManagerRegistry } from "./services/code-index/code-index-manager-registry"
 import { CodeIndexScope } from "./services/code-index/code-index-scope"
 import { MdmService } from "./services/mdm/MdmService"
+import { ZooRemoteControlBridge } from "./services/zoo-remote-control/ZooRemoteControlBridge"
 import { migrateSettings } from "./utils/migrateSettings"
 import { autoImportSettings } from "./utils/autoImportSettings"
 import { API } from "./extension/api"
@@ -397,12 +398,37 @@ export async function activate(context: vscode.ExtensionContext) {
 	})
 
 	const providerFactory = new ClineProviderFactory(context, outputChannel, webviewFocusTracker)
-	return new API(outputChannel, provider, providerFactory, socketPath, enableLogging)
+	const api = new API(outputChannel, provider, providerFactory, socketPath, enableLogging)
+
+	zooRemoteControlBridge = new ZooRemoteControlBridge({
+		api,
+		provider,
+		context,
+		log: (message) => outputChannel.appendLine(message),
+	})
+	context.subscriptions.push(zooRemoteControlBridge)
+
+	return api
+}
+
+let zooRemoteControlBridge: ZooRemoteControlBridge | undefined
+
+export function getZooRemoteControlBridge(): ZooRemoteControlBridge | undefined {
+	return zooRemoteControlBridge
 }
 
 // This method is called when your extension is deactivated.
 export async function deactivate() {
 	outputChannel.appendLine(`${Package.name} extension deactivated`)
+
+	try {
+		await zooRemoteControlBridge?.shutdown()
+	} catch (error) {
+		outputChannel.appendLine(
+			`Failed to shut down Zoo remote control: ${error instanceof Error ? error.message : String(error)}`,
+		)
+	}
+	zooRemoteControlBridge = undefined
 
 	if (cloudService && CloudService.hasInstance()) {
 		try {

@@ -1,6 +1,6 @@
 # Zoo Code Privacy Policy
 
-**Last Updated: August 15th, 2026**
+**Last Updated: October 21st, 2026**
 
 Zoo Code respects your privacy and is committed to transparency about how we
 handle your data. Below is a simple breakdown of where key pieces of data
@@ -15,20 +15,30 @@ go—and, importantly, where they don't.
   provider (proxy mode), your code may transit Zoo Code servers only to forward
   it to the upstream provider. We do not store your code; it is deleted
   immediately after forwarding. Otherwise, your code is sent directly to the
-  provider. AI providers may store data per their privacy policies.
+  provider. AI providers may store data per their privacy policies. Remote
+  control, described below, is separate: that task transcript is stored for 7
+  days.
 - **Commands**: Any commands executed through Zoo Code happen on your local
   environment. However, when you use AI-powered features, the relevant code and
   context from your commands may be transmitted to your chosen AI model provider
-  (e.g., OpenAI, Anthropic, OpenRouter) to generate responses. We do not have
-  access to or store this data, but AI providers may process it per their
-  privacy policies.
+  (e.g., OpenAI, Anthropic, OpenRouter) to generate responses. We do not store
+  that model-request context, but AI providers may process it per their privacy
+  policies. Remote control, described below, is separate: that task transcript
+  is stored for 7 days.
 - **Prompts & AI Requests**: When you use AI-powered features, your prompts and
   relevant project context are sent to your chosen AI model provider (e.g.,
   OpenAI, Anthropic, OpenRouter) to generate responses. We do not store or
   process this data. These AI providers have their own privacy policies and may
   store data per their terms of service. If you choose Zoo Code Cloud as the
   provider (proxy mode), prompts may transit Zoo Code servers only to forward
-  them to the upstream model and are not stored.
+  them to the upstream model and are not stored. Remote control, described
+  below, is separate: that task transcript is stored for 7 days.
+- **Remote control**: Turning on remote control is optional. When you do, Zoo
+  Code sends that task's conversation, the file contents included in the task,
+  and command output to your Zoo account. Zoo stores that transcript for 7 days
+  so you can view the task and approve, reply, or otherwise control it from the
+  Zoo dashboard, then deletes it. This storage is separate from model-provider
+  requests and from telemetry. Ending the remote session stops further uploads.
 - **API Keys & Credentials**: If you enter an API key (e.g., to connect an AI
   model), it is stored locally on your device and never sent to us or any third
   party, except the provider you have chosen.

@@ -19,7 +19,15 @@
 		"openUiHistory": "UI履歴を開く",
 		"backToParentTask": "親タスク",
 		"waitingOnSubtask": "サブタスク待ち",
-		"goToSubtask": "サブタスクへ"
+		"goToSubtask": "サブタスクへ",
+		"steerRemotely": "Steer this task remotely",
+		"steerRemotelyHint": "Sends this task's conversation, file contents, and command output to your Zoo account. Zoo keeps that transcript for 7 days so you can approve, reply, and continue the task from the dashboard.",
+		"steerRemotelyNeedsGateway": "Switch this profile to Zoo Gateway before you can steer the task remotely.",
+		"steerRemotelyOpenSettings": "Open settings",
+		"steerRemotelyActive": "Remote session is active, control this task from the Zoo dashboard.",
+		"steerRemotelyUnavailable": "Remote session is on, but the Zoo dashboard endpoint is unreachable. Retry shortly or check your connection.",
+		"openRemoteDashboard": "Open dashboard",
+		"endRemoteSession": "End remote session"
 	},
 	"unpin": "ピン留めを解除",
 	"pin": "ピン留め",
