@@ -43,6 +43,9 @@ vitest.mock("../fetchers/modelCache", () => ({
 			// Responses-format models (Zoo-Code-Org/Zoo-Code#1431 and issue #1979).
 			"gpt-5.6-luna": { ...opencodeGoModels["gpt-5.6-luna"] },
 			"gpt-6-luna": { ...opencodeGoModels["gpt-6-luna"] },
+			"grok-4.6": { ...opencodeGoModels["grok-4.6"] },
+			"muse-spark-1.3-contributor": { ...opencodeGoModels["muse-spark-1.3-contributor"] },
+			"muse-spark-1.2-contributor": { ...opencodeGoModels["muse-spark-1.2-contributor"] },
 		})
 	}),
 	refreshModels: vitest.fn().mockImplementation(function () {
@@ -51,6 +54,9 @@ vitest.mock("../fetchers/modelCache", () => ({
 			"qwen3.7-max": { ...opencodeGoModels["qwen3.7-max"] },
 			"gpt-5.6-luna": { ...opencodeGoModels["gpt-5.6-luna"] },
 			"gpt-6-luna": { ...opencodeGoModels["gpt-6-luna"] },
+			"grok-4.6": { ...opencodeGoModels["grok-4.6"] },
+			"muse-spark-1.3-contributor": { ...opencodeGoModels["muse-spark-1.3-contributor"] },
+			"muse-spark-1.2-contributor": { ...opencodeGoModels["muse-spark-1.2-contributor"] },
 		})
 	}),
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
@@ -370,6 +376,78 @@ describe("OpencodeGoHandler", () => {
 			expect(callArgs.messages[0]).toEqual({ role: "system", content: "sys" })
 			// A single user turn stays a single user message after OpenAI conversion.
 			expect(callArgs.messages.filter((m) => m.role === "user")).toHaveLength(1)
+		})
+
+		it("preserves reasoning across a tool-call continuation for MiMo V2.6 Flash", async () => {
+			// Xiaomi's deep-thinking guide requires the reasoning from the assistant
+			// turn to be passed back on the tool-call continuation. MiMo V2.6 must
+			// therefore convert through convertToR1Format (preserveReasoning) and
+			// keep the reasoning -> tool_call -> tool_result history intact.
+			vitest.mocked(getModels).mockImplementationOnce(async () => ({
+				"mimo-v2.6-flash": { ...opencodeGoModels["mimo-v2.6-flash"] },
+			}))
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { content: "Done" }, index: 0 }] },
+					{
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					},
+				]),
+			)
+
+			const handler = new OpencodeGoHandler({ ...mockOptions, opencodeGoModelId: "mimo-v2.6-flash" })
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Read the config file" },
+				{
+					role: "assistant",
+					content: [
+						{ type: "text", text: "I will read it." },
+						{ type: "tool_use", id: "call_mimo_1", name: "read_file", input: { path: "config.json" } },
+					],
+					reasoning_content: "The user wants the config contents.",
+				} as Anthropic.Messages.MessageParam,
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "call_mimo_1", content: '{"a":1}' },
+						{ type: "text", text: "<environment_details>cwd: /repo</environment_details>" },
+					],
+				},
+			]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const callArgs = mockCreate.mock.calls[0][0] as {
+				model: string
+				messages: Array<Record<string, unknown>>
+			}
+			expect(callArgs.model).toBe("mimo-v2.6-flash")
+
+			// Index 0 is the system prompt; the converted history follows it.
+			expect(callArgs.messages[0]).toEqual({ role: "system", content: "sys" })
+			const [, userMessage, assistantMessage, toolMessage] = callArgs.messages
+			expect(userMessage).toEqual({ role: "user", content: "Read the config file" })
+			// The assistant turn keeps both its reasoning and its tool call.
+			expect(assistantMessage).toMatchObject({
+				role: "assistant",
+				reasoning_content: "The user wants the config contents.",
+			})
+			expect(assistantMessage.tool_calls).toEqual([
+				{
+					id: "call_mimo_1",
+					type: "function",
+					function: { name: "read_file", arguments: '{"path":"config.json"}' },
+				},
+			])
+			// The tool result follows as a tool message, with the trailing
+			// environment details merged in so no user turn drops the reasoning.
+			expect(toolMessage).toEqual({
+				role: "tool",
+				tool_call_id: "call_mimo_1",
+				content: '{"a":1}\n\n<environment_details>cwd: /repo</environment_details>',
+			})
+			expect(callArgs.messages.filter((message) => message.role === "user")).toHaveLength(1)
 		})
 
 		it("emits a usage chunk with zeroed tokens when the stream reports no usage", async () => {
@@ -1115,7 +1193,7 @@ describe("OpencodeGoHandler", () => {
 			expect(callArgs.store).toBe(false)
 			const input = callArgs.input as unknown[]
 			expect(input.some((item) => (item as { role?: string }).role === "system")).toBe(false)
-			// The gateway rejects temperature for Responses-format models.
+			// No custom temperature is set, so the provider default is not sent.
 			expect(callArgs.temperature).toBeUndefined()
 			// No tools were provided, so no tools/tool_choice are sent.
 			expect(callArgs.tools).toBeUndefined()
@@ -1498,6 +1576,141 @@ describe("OpencodeGoHandler", () => {
 			await expect(async () => {
 				await collectStream(handler.createMessage("sys", messages))
 			}).rejects.toThrow("Opencode Go completion error: internal server error")
+		})
+
+		describe("temperature (Zoo-Code-Org/Zoo-Code#2055)", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const streamRequest = async (options: ApiHandlerOptions) => {
+				await collectStream(new OpencodeGoHandler(options).createMessage("sys", messages))
+				return mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			}
+
+			const completeRequest = async (options: ApiHandlerOptions) => {
+				mockResponsesCreate.mockResolvedValue({ output_text: "Hello!" })
+				await new OpencodeGoHandler(options).completePrompt("ping")
+				return mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			}
+
+			const paths = [
+				["streaming", streamRequest],
+				["non-streaming", completeRequest],
+			] as const
+
+			describe.each(paths)("%s request", (_path, sendRequest) => {
+				it.each([
+					["grok-4.6", undefined],
+					["muse-spark-1.3-contributor", undefined],
+					["muse-spark-1.2-contributor", undefined],
+					["gpt-5.6-luna", "none"],
+					["gpt-6-luna", "none"],
+				] as const)("forwards a custom temperature for %s (effort %s)", async (modelId, reasoningEffort) => {
+					const callArgs = await sendRequest({
+						opencodeGoApiKey: "test-key",
+						opencodeGoModelId: modelId,
+						modelTemperature: 0.37,
+						...(reasoningEffort && { reasoningEffort }),
+					})
+
+					// The value keeps the UI's 0.01 resolution.
+					expect(callArgs.temperature).toBe(0.37)
+				})
+
+				it.each([
+					["grok-4.6", "low"],
+					["grok-4.6", "high"],
+					["muse-spark-1.3-contributor", "minimal"],
+					["muse-spark-1.2-contributor", "high"],
+				] as const)(
+					"forwards a custom temperature for %s with explicit effort %s",
+					async (modelId, reasoningEffort) => {
+						const callArgs = await sendRequest({
+							opencodeGoApiKey: "test-key",
+							opencodeGoModelId: modelId,
+							modelTemperature: 0.37,
+							reasoningEffort,
+						})
+
+						// Grok and Muse support does not depend on reasoning effort.
+						expect(callArgs.reasoning).toEqual({ effort: reasoningEffort })
+						expect(callArgs.temperature).toBe(0.37)
+					},
+				)
+
+				it("omits temperature for a stale none effort when reasoning effort is switched off", async () => {
+					// A saved "none" does not reach the wire while the toggle is off,
+					// so the configuration is unverified and temperature is omitted.
+					const callArgs = await sendRequest({
+						...lunaOptions,
+						modelTemperature: 0.5,
+						reasoningEffort: "none",
+						enableReasoningEffort: false,
+					})
+
+					expect(callArgs).not.toHaveProperty("reasoning")
+					expect(callArgs).not.toHaveProperty("temperature")
+				})
+
+				it.each([
+					["gpt-5.6-luna", "low"],
+					["gpt-5.6-luna", "max"],
+					["gpt-6-luna", "medium"],
+					["gpt-6-luna", "xhigh"],
+					["gpt-6-luna", "disable"],
+				] as const)("omits a saved temperature for %s with effort %s", async (modelId, reasoningEffort) => {
+					const callArgs = await sendRequest({
+						opencodeGoApiKey: "test-key",
+						opencodeGoModelId: modelId,
+						modelTemperature: 0.5,
+						reasoningEffort,
+					})
+
+					expect(callArgs).not.toHaveProperty("temperature")
+				})
+
+				it("omits temperature 1 for a GPT Luna model with a non-none effort", async () => {
+					// Temperature 1 is the only value the gateway accepted with
+					// reasoning, but it is the model default, so it is omitted.
+					const callArgs = await sendRequest({
+						opencodeGoApiKey: "test-key",
+						opencodeGoModelId: "gpt-5.6-luna",
+						modelTemperature: 1,
+						reasoningEffort: "high",
+					})
+
+					expect(callArgs).not.toHaveProperty("temperature")
+				})
+
+				it("omits a saved temperature for a GPT Luna model on its default effort", async () => {
+					const callArgs = await sendRequest({ ...gpt6LunaOptions, modelTemperature: 0.5 })
+
+					expect(callArgs.reasoning).toEqual({ effort: "medium" })
+					expect(callArgs).not.toHaveProperty("temperature")
+				})
+
+				it.each([undefined, null])(
+					"omits temperature when no custom value is set (%s)",
+					async (modelTemperature) => {
+						const callArgs = await sendRequest({
+							opencodeGoApiKey: "test-key",
+							opencodeGoModelId: "grok-4.6",
+							modelTemperature,
+						})
+
+						expect(callArgs).not.toHaveProperty("temperature")
+					},
+				)
+
+				it("forwards temperature 0 as an explicit custom value", async () => {
+					const callArgs = await sendRequest({
+						opencodeGoApiKey: "test-key",
+						opencodeGoModelId: "grok-4.6",
+						modelTemperature: 0,
+					})
+
+					expect(callArgs.temperature).toBe(0)
+				})
+			})
 		})
 
 		it("classifies documented Responses models as Responses-format and other models as not", () => {
