@@ -178,9 +178,16 @@ function addTo(
 
 const byCostDesc = (a: UsageBucket, b: UsageBucket) => b.cost - a.cost || b.tokens - a.tokens
 
-/** A time that `Date` can represent: a finite number inside the range of a date (±8.64e15 ms). */
+/**
+ * A time the Usage tab can place on a day: a finite number inside the range of a date (±8.64e15 ms) whose local day
+ * also starts inside that range. Near the ends of the range, in a time zone ahead of UTC, the start of the local day
+ * falls outside it and would key the task under NaN, which the chart then cannot format.
+ */
 const isRepresentableTime = (ts: unknown): ts is number =>
-	typeof ts === "number" && Number.isFinite(ts) && !Number.isNaN(new Date(ts).getTime())
+	typeof ts === "number" &&
+	Number.isFinite(ts) &&
+	!Number.isNaN(new Date(ts).getTime()) &&
+	!Number.isNaN(startOfLocalDay(ts))
 
 /**
  * The tasks the Usage tab counts for these options: the same selection for the totals and for the CSV, so an export
@@ -188,12 +195,17 @@ const isRepresentableTime = (ts: unknown): ts is number =>
  * corrupted or hand-edited task file) is dropped.
  */
 function itemsInScope(history: HistoryItem[], options: UsageOptions): HistoryItem[] {
-	const start = rangeStart(options.range, options.now ?? Date.now())
+	const now = options.now ?? Date.now()
+	const start = rangeStart(options.range, now)
+	// A bounded range ends with today: its daily series has no bar after today, so a task dated on a later day would
+	// be in the headline total without being in the chart. "All time" has no such end and keeps every task.
+	const lastDay = start === undefined ? undefined : startOfLocalDay(now)
 
 	return history.filter(
 		(item) =>
 			isRepresentableTime(item.ts) &&
 			(start === undefined || item.ts >= start) &&
+			(lastDay === undefined || startOfLocalDay(item.ts) <= lastDay) &&
 			(!options.workspace || item.workspace === options.workspace),
 	)
 }
@@ -354,12 +366,18 @@ export function usageToCsv(history: HistoryItem[], options: UsageOptions): strin
 	// spreadsheet would evaluate) is exported as 0. What is written is then only ever digits, so every cell is inert.
 	const counter = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0)
 
+	// The ISO form of a date near the ends of the range starts with a sign (+275760-09-13…), which a spreadsheet
+	// could read as a formula: it gets the same leading apostrophe as the text cells.
+	const dateCell = (ts: number) => {
+		const iso = new Date(ts).toISOString()
+		return /^[=+\-@]/.test(iso) ? `'${iso}` : iso
+	}
+
 	const rows = itemsInScope(history, options)
 		.sort((a, b) => a.ts - b.ts)
 		.map((item) =>
 			[
-				// The selection above keeps only times a date can represent.
-				new Date(item.ts).toISOString(),
+				dateCell(item.ts),
 				escape(item.title || item.task || ""),
 				escape(item.mode || ""),
 				escape(primaryUsage(item)?.apiProvider ?? ""),

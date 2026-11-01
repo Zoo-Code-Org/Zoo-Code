@@ -551,9 +551,95 @@ describe("a time that Date cannot represent", () => {
 		},
 	)
 
-	it("keeps the boundary times a date can represent", () => {
-		const summary = summarizeUsage([item({ task: "edge", ts: 8.64e15, totalCost: 1 })], { range: "all", now: NOW })
+	it("keeps the upper boundary time, and writes its date so that a spreadsheet cannot read it as a formula", () => {
+		const history = [item({ task: "edge", ts: 8.64e15, totalCost: 1 })]
+		const summary = summarizeUsage(history, { range: "all", now: NOW })
 		expect(summary.taskCount).toBe(1)
+
+		// The ISO form of this date starts with "+" (+275760-09-13T00:00:00.000Z).
+		const row = usageToCsv(history, { range: "all", now: NOW }).split("\n")[1]
+		expect(row.startsWith("'+275760-09-13T00:00:00.000Z,")).toBe(true)
+		expect(row).not.toMatch(/^[=+\-@]/)
+	})
+
+	describe("in UTC, where the dates near the ends of the range keep their year", () => {
+		let originalTz: string | undefined
+		beforeEach(() => {
+			originalTz = process.env.TZ
+			process.env.TZ = "UTC"
+		})
+		afterEach(() => {
+			if (originalTz === undefined) delete process.env.TZ
+			else process.env.TZ = originalTz
+		})
+
+		it("neutralises a date written with a negative year, and leaves an ordinary date alone", () => {
+			const ordinary = usageToCsv([item({ task: "t", ts: NOW })], { range: "all", now: NOW }).split("\n")[1]
+			expect(ordinary.startsWith("2026-10-14T")).toBe(true)
+			expect(ordinary).not.toMatch(/^'/)
+
+			// A year before 0 is written with a leading "-": the earliest date is -271821-04-20T00:00:00.000Z.
+			const early = usageToCsv([item({ task: "t", ts: -8.64e15 + 24 * 3600 * 1000 })], { range: "all", now: NOW })
+			expect(early.split("\n")[1].startsWith("'-271821-04-21T00:00:00.000Z,")).toBe(true)
+		})
+	})
+
+	describe("in a time zone ahead of UTC, near the start of the range of dates", () => {
+		let originalTz: string | undefined
+		beforeEach(() => {
+			originalTz = process.env.TZ
+			process.env.TZ = "Pacific/Kiritimati" // UTC+14
+		})
+		afterEach(() => {
+			if (originalTz === undefined) delete process.env.TZ
+			else process.env.TZ = originalTz
+		})
+
+		it("leaves out a time whose local day starts before the range, so no day is NaN and the chart can format every day", () => {
+			const history = [
+				item({ task: "early", ts: -8.64e15 + 3600 * 1000, totalCost: 7 }), // 1 h after the earliest date
+				item({ task: "ok", ts: NOW, totalCost: 1 }),
+			]
+
+			const summary = summarizeUsage(history, { range: "all", now: NOW })
+
+			expect(summary.daily.every((d) => Number.isFinite(d.day))).toBe(true)
+			expect(summary.taskCount).toBe(1)
+			expect(summary.totalCost).toBe(1)
+			expect(usageToCsv(history, { range: "all", now: NOW }).split("\n")).toHaveLength(2)
+			for (const d of summary.daily) expect(() => new Intl.DateTimeFormat("en").format(d.day)).not.toThrow()
+		})
+	})
+})
+
+describe("a task dated after today", () => {
+	const DAY = 24 * 3600 * 1000
+	const history = () => [
+		item({ task: "today", ts: NOW, tokensIn: 10, totalCost: 1 }),
+		item({ task: "later today", ts: NOW + 2 * 3600 * 1000, tokensIn: 10, totalCost: 2 }),
+		item({ task: "tomorrow", ts: NOW + DAY, tokensIn: 10, totalCost: 4 }),
+		item({ task: "next year", ts: NOW + 365 * DAY, tokensIn: 10, totalCost: 8 }),
+	]
+
+	it.each(["today", "7d", "30d"] as const)(
+		"is left out of the totals and the export for %s, so the chart adds up to the headline",
+		(range) => {
+			const summary = summarizeUsage(history(), { range, now: NOW })
+
+			// A task later on the same day is still today's.
+			expect(summary.taskCount).toBe(2)
+			expect(summary.totalCost).toBe(3)
+			expect(summary.daily.reduce((sum, d) => sum + d.cost, 0)).toBe(summary.totalCost)
+			expect(usageToCsv(history(), { range, now: NOW }).split("\n")).toHaveLength(3)
+		},
+	)
+
+	it("is kept for all time, where the daily series has a bar for every day with spend", () => {
+		const summary = summarizeUsage(history(), { range: "all", now: NOW })
+
+		expect(summary.taskCount).toBe(4)
+		expect(summary.totalCost).toBe(15)
+		expect(summary.daily.reduce((sum, d) => sum + d.cost, 0)).toBe(15)
 	})
 })
 
