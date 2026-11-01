@@ -34,6 +34,7 @@ import type { ClineProvider } from "../core/webview/ClineProvider"
 import type { ClineProviderFactory } from "../core/webview/ClineProviderFactory"
 import { withoutInvalidDisplaySettings } from "../core/config/displaySettings"
 import { readTaskMessages } from "../core/task-persistence/taskMessages"
+import { tracePersistenceEvent } from "../core/task-persistence/persistenceTrace"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
 import { getCommands } from "../services/command/commands"
@@ -362,9 +363,12 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				globalStoragePath: this.sidebarProvider.contextProxy.globalStorageUri.fsPath,
 			})
 		} catch {
+			tracePersistenceEvent("ui-messages-marker-check", { taskId, result: "read-error" })
 			return false
 		}
-		return uiMessages.some((message) => message.text?.includes(text))
+		const hasText = uiMessages.some((message) => message.text?.includes(text))
+		tracePersistenceEvent("ui-messages-marker-check", { taskId, result: hasText ? "match" : "no-match" })
+		return hasText
 	}
 
 	public getCurrentTaskStack() {
