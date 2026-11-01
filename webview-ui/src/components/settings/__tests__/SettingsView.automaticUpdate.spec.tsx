@@ -28,8 +28,8 @@ const emptyFields = [
 ]
 let fieldsFilled = 0
 
-vi.mock("../ApiOptions", () => ({
-	default: ({
+vi.mock("../ApiOptions", () => {
+	const ApiOptionsMock = ({
 		setApiConfigurationField,
 	}: {
 		setApiConfigurationField: (field: string, value: unknown, isUserAction?: boolean) => void
@@ -38,8 +38,10 @@ vi.mock("../ApiOptions", () => ({
 			setApiConfigurationField(emptyFields[fieldsFilled++ % emptyFields.length], "a-default-model", false)
 		}, [setApiConfigurationField])
 		return <div data-testid="api-options-mock" />
-	},
-}))
+	}
+
+	return { default: ApiOptionsMock }
+})
 
 const postMessage = vi.mocked(vscode.postMessage)
 
