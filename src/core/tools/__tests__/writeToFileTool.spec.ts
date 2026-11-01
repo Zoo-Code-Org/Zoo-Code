@@ -1186,6 +1186,36 @@ describe("writeToFileTool", () => {
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
 
+		it("keeps the refused-rollback guard across an API request that clears the task state", async () => {
+			mockCline.diffViewProvider.update.mockRejectedValue(
+				Object.assign(new Error("EROFS: read-only file system, write '/ro/test.py'"), { code: "EROFS" }),
+			)
+			mockCline.diffViewProvider.revertChanges.mockRejectedValue(
+				Object.assign(new Error("EACCES: rollback failed"), { code: "EACCES" }),
+			)
+
+			// First delta pins the path, second reaches update() and hits the refused rollback.
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+
+			// Task clears the per-stream state at the start of EVERY API request; a refused
+			// rollback left the dirty buffer in place, so the guard must survive that clear.
+			writeToFileTool.clearTaskState(mockCline)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+
+			await executeWriteFileTool({})
+
+			// Still fail closed: no second open(), no approval, one report.
+			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.update).toHaveBeenCalledTimes(1)
+			expect(mockAskApproval).not.toHaveBeenCalled()
+			const writeCalls = mockHandleError.mock.calls.filter(([context]) => context === "writing file")
+			expect(writeCalls).toHaveLength(1)
+			expect(writeCalls[0][1]).toBeInstanceOf(Error)
+			// Reported once: the marker is released so a later retry can run.
+			expect(writeToFileTool["taskRollbackFailures"].size).toBe(0)
+		})
+
 		it("reports only the execute() failure when the write is retried after a failed stream", async () => {
 			// Combined path: a streaming delta failed (the failure is captured, not reported), then
 			// the completed block arrives with valid nativeArgs, so execute() runs and retries the

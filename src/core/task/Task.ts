@@ -4134,7 +4134,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// A new API request starts a new stream. Clear any per-task partial-stream failure
 				// state left by a previous stream that failed without aborting (streaming_failed):
 				// otherwise the retried write would keep skipping previews and fail on the stale
-				// rollback error before it ever writes.
+				// rollback error before it ever writes. A REFUSED rollback is the exception:
+				// clearTaskState() keeps that marker until the dirty buffer is restored (or the
+				// failure is reported), so the retry — this request — still fails closed instead
+				// of letting open() save unapproved streamed content.
 				writeToFileTool.clearTaskState(this)
 
 				await this.safeEnsureModelFetched()

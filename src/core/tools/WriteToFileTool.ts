@@ -79,6 +79,15 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 */
 	private taskPartialStreamState = new Map<string, TaskPartialStreamState>()
 
+	/**
+	 * Refused-rollback markers per task. These outlive resetTaskPartialState()/clearTaskState()
+	 * because Task clears the per-stream state at the start of EVERY API request: if the dirty
+	 * streamed buffer survived a refused rollback, the retry request must still fail closed
+	 * instead of letting open() save that buffer before approval. Cleared once execute() reports
+	 * the failure, or when the task is torn down.
+	 */
+	private taskRollbackFailures = new Map<string, Error>()
+
 	private getPartialStreamFailureKey(task: Task): string {
 		return `${task.taskId}.${task.instanceId}`
 	}
@@ -123,6 +132,9 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * this singleton would keep the disposed task and its diff-view provider.
 	 */
 	public clearTaskState(task: Task): void {
+		// The per-stream state is per request, but a refused rollback left the dirty buffer in
+		// place: taskRollbackFailures is intentionally NOT cleared here so the retry request
+		// still fails closed. It is released by execute() once reported, or by resetPartialState().
 		this.resetTaskPartialState(task)
 	}
 
@@ -208,6 +220,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			return false
 		}
 
+		const failureKey = this.getPartialStreamFailureKey(task)
 		this.resetTaskPartialState(task)
 		// Only an edit in progress may be reverted. DiffViewProvider keeps relPath after a
 		// completed write, so reverting against that stale target would roll back - and for a
@@ -215,6 +228,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		let rollbackError: Error | undefined
 		if (task.diffViewProvider.isEditing) {
 			rollbackError = await this.revertDiffChangesBeforeReset(task)
+		}
+		if (rollbackError) {
+			// The dirty buffer is still on disk after the refused rollback: keep the fail-closed
+			// marker on the TASK, not the per-stream state this teardown is about to delete.
+			this.taskRollbackFailures.set(failureKey, rollbackError)
 		}
 		await this.resetDiffViewAfterWrite(task)
 
@@ -251,6 +269,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 	override resetPartialState(): void {
 		super.resetPartialState()
+		this.taskRollbackFailures.clear()
 		for (const state of this.taskPartialStreamState.values()) {
 			state.task.off(RooCodeEventName.TaskAborted, state.abortCleanup)
 		}
@@ -271,10 +290,14 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		// once and touch no write path (no open/update/save, no directory creation). The state
 		// is released here, so the parse-failure path - which only runs when execute() never
 		// did - can never report the same failure a second time.
+		const rollbackFailure = this.taskRollbackFailures.get(this.getPartialStreamFailureKey(task))
 		const streamState = this.taskPartialStreamState.get(this.getPartialStreamFailureKey(task))
-		if (streamState?.rollbackFailure) {
+		if (rollbackFailure || streamState?.rollbackFailure) {
+			// Reported once here: delete both markers so a later retry can run, and so the
+			// parse-failure teardown cannot report the same failure a second time.
+			this.taskRollbackFailures.delete(this.getPartialStreamFailureKey(task))
 			this.resetTaskPartialState(task)
-			await handleError("writing file", streamState.rollbackFailure)
+			await handleError("writing file", streamState?.rollbackFailure ?? rollbackFailure!)
 			return
 		}
 
@@ -636,6 +659,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					// unapproved streamed content before approval. Record the failure on this task's
 					// state; execute() reports it once and touches no write path.
 					partialStreamState.rollbackFailure = rollbackFailure
+					this.taskRollbackFailures.set(this.getPartialStreamFailureKey(task), rollbackFailure)
 				}
 				await this.resetDiffViewAfterWrite(task)
 			}

@@ -1438,6 +1438,48 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(mockTargetPath)
 		})
 
+		it("revertChanges() restores the buffer through the real helpers when only the diff editor holds it", async () => {
+			// Same shape as the no-tab test above, but without stubbing restorePreStreamBuffer /
+			// saveBufferClean: the document is reached through activeDiffEditor, the restore is
+			// applied to it, and the save is asserted on the document itself.
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = true
+			editor.document.getText = vi.fn().mockReturnValue("streamed content")
+			const originalDocs = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			// The document is registered so the real helpers can resolve it; the TAB list stays
+			// empty: only the diff editor holds the document.
+			Object.defineProperty(vscode.workspace, "textDocuments", {
+				get: () => [editor.document],
+				configurable: true,
+			})
+			const originalTabs = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "all")
+			Object.defineProperty(vscode.window.tabGroups, "all", { get: () => [{ tabs: [] }], configurable: true })
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "create",
+				createdDirs: [],
+				originalContent: "",
+			})
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+
+			try {
+				await diffViewProvider.revertChanges()
+			} finally {
+				if (originalDocs) Object.defineProperty(vscode.workspace, "textDocuments", originalDocs)
+				if (originalTabs) Object.defineProperty(vscode.window.tabGroups, "all", originalTabs)
+			}
+
+			// The real rollback ran even though no plain text tab exists for the path.
+			expect(vscode.workspace.applyEdit).toHaveBeenCalledTimes(1)
+			expect(mockWorkspaceEdit.replace).toHaveBeenCalledWith(editor.document.uri, expect.anything(), "")
+			expect(editor.document.save).toHaveBeenCalledTimes(1)
+			// Rollback completed: the empty placeholder it created is unlinked.
+			expect(fs.unlink).toHaveBeenCalledWith(mockTargetPath)
+		})
+
 		it("revertChanges() restores and saves an existing file through the real rollback path", async () => {
 			// The existing-file branch used to build its own WorkspaceEdit, discard applyEdit()'s boolean,
 			// and save unconditionally, so a refused restore wrote the unapproved streamed content to an
