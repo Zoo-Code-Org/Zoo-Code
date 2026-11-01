@@ -11,12 +11,12 @@ const tool = (serverName: string, toolName: string, description: string): ToolDo
 describe("Bm25Ranker", () => {
 	it("ranks matching MCP tools by BM25 relevance", () => {
 		const items = [
-			tool("slack", "postMessage", "Send a Slack message"),
-			tool("jira", "createIssue", "Send messages and create Jira issues"),
 			tool("postgres", "query", "Send data and query a Postgres database"),
+			tool("jira", "createIssue", "Send messages and create Jira issues"),
+			tool("slack", "postMessage", "Send a Slack message"),
 		]
 
-		expect(new Bm25Ranker().rank("send slack message", items, 3)).toEqual([items[0], items[1], items[2]])
+		expect(new Bm25Ranker().rank("send slack message", items, 3)).toEqual([items[2], items[1], items[0]])
 	})
 
 	it("returns an empty result for empty queries, empty items, and no matches", () => {
@@ -69,10 +69,11 @@ describe("Bm25Ranker", () => {
 
 	it("matches composed and decomposed forms of the same accented character", () => {
 		const decomposed = tool("café", "menu", "Liste du café")
+		const composed = tool("café", "menu", "Menu")
 		const other = tool("calendar", "events", "Show events")
 
 		expect(new Bm25Ranker().rank("café", [other, decomposed], 10)).toEqual([decomposed])
-		expect(new Bm25Ranker().rank("café", [other, tool("café", "menu", "Menu")], 10)).toHaveLength(1)
+		expect(new Bm25Ranker().rank("café", [other, composed], 10)).toEqual([composed])
 	})
 
 	it("handles tools with empty descriptions", () => {
