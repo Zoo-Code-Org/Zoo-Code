@@ -5,6 +5,7 @@ import * as vscode from "vscode"
 import { makeCompositeDisposable } from "../../../test-utils/vscode"
 import { TelemetryService } from "@roo-code/telemetry"
 import { ClineProvider } from "../ClineProvider"
+import type { Task } from "../../task/Task"
 import { ContextProxy } from "../../config/ContextProxy"
 import type { HistoryItem } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
@@ -395,6 +396,33 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			expect(mockTask.setTaskApiConfigName).toHaveBeenCalledWith("new-profile")
 		})
 
+		it.each([
+			{ expectedCurrentTaskId: "test-task-id", applies: true },
+			{ expectedCurrentTaskId: "other-task-id", applies: false },
+		])(
+			"expectedCurrentTaskId $expectedCurrentTaskId rebuilds and sticky-writes the current task: $applies",
+			async ({ expectedCurrentTaskId, applies }) => {
+				const currentTask = {
+					taskId: "test-task-id",
+					setTaskApiConfigName: vi.fn<(name: string) => void>(),
+					updateApiConfiguration: vi.fn<(settings: unknown) => void>(),
+					emit: vi.fn(),
+				}
+				// Supplies only the members that profile activation touches on the current task.
+				vi.spyOn(provider, "getCurrentTask").mockReturnValue(currentTask as unknown as Task)
+				vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+					name: "new-profile",
+					id: "new-profile-id",
+					apiProvider: providerIdentifiers.anthropic,
+				})
+
+				await provider.activateProviderProfile({ name: "new-profile" }, { expectedCurrentTaskId })
+
+				expect(currentTask.updateApiConfiguration).toHaveBeenCalledTimes(applies ? 1 : 0)
+				expect(currentTask.setTaskApiConfigName).toHaveBeenCalledTimes(applies ? 1 : 0)
+			},
+		)
+
 		it("should update task's taskApiConfigName property when switching profiles", async () => {
 			// Create a mock task with initial profile
 			const mockTask = {
@@ -531,7 +559,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			// Verify provider profile was restored via activateProviderProfile (restore-only: don't persist mode config)
 			expect(activateProviderProfileSpy).toHaveBeenCalledWith(
 				{ name: "saved-profile" },
-				{ persistModeConfig: false, persistTaskHistory: false },
+				{ persistModeConfig: false, persistTaskHistory: false, expectedCurrentTaskId: historyItem.id },
 			)
 		})
 

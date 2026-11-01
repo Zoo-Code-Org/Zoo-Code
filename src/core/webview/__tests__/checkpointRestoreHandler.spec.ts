@@ -76,7 +76,8 @@ function createFixture() {
 	const store = new PendingEditOperationStore(60_000, vi.fn())
 	const providerDouble = {
 		pendingEditOperations: store,
-		taskRegistry: { current: undefined },
+		taskRegistry: { current: task as Pick<Task, "taskId" | "abortTask"> | undefined, replace: vi.fn() },
+		taskEventListeners: new Map<Task, Array<() => void>>(),
 		performPreparationTasks: vi.fn<(task: Task) => Promise<void>>(),
 		log: vi.fn<(message: string) => void>(),
 		getCurrentTask: vi.fn<ClineProvider["getCurrentTask"]>(() => task),
@@ -241,18 +242,21 @@ describe("checkpointRestoreHandler", () => {
 		)
 	})
 
-	it("restart does not abort a different task that became current during rehydration setup", async () => {
+	it.each([
+		{ name: "a different task became current", replacement: "newer" },
+		{ name: "no task remains current", replacement: "none" },
+	] as const)("restart skips replacement and scheduling when $name during setup", async ({ replacement }) => {
 		const newerTask = { taskId: "newer-task", abortTask: vi.fn<Task["abortTask"]>() }
-		const registry = { current: fixture.task as Task | typeof newerTask, replace: vi.fn() }
-		Object.assign(fixture.providerDouble, { taskRegistry: registry })
+		const registry = fixture.providerDouble.taskRegistry
 		fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(new Error("Missing commit"))
 		showWarningMessage.mockResolvedValueOnce("common:checkpoints.restart")
 		fixture.providerDouble.getState.mockImplementationOnce(async () => {
-			registry.current = newerTask
+			registry.current = replacement === "newer" ? newerTask : undefined
 			return { apiConfiguration: {} }
 		})
 		await expect(handleCheckpointRestoreOperation(fixture.config)).rejects.toThrow("Missing commit")
 		expect(Task).toHaveBeenCalledOnce()
+		expect(fixture.taskDouble.abortTask).toHaveBeenLastCalledWith(true)
 		expect(newerTask.abortTask).not.toHaveBeenCalled()
 		expect(registry.replace).not.toHaveBeenCalled()
 		expect(fixture.providerDouble.taskScheduler.schedule).not.toHaveBeenCalled()

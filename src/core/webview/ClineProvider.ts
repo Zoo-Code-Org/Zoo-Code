@@ -1364,7 +1364,10 @@ export class ClineProvider
 							const hasActualSettings = !!fullProfile.apiProvider
 
 							if (hasActualSettings) {
-								await this.activateProviderProfile({ name: profile.name })
+								await this.activateProviderProfile(
+									{ name: profile.name },
+									{ expectedCurrentTaskId: historyItem.id },
+								)
 							} else {
 								// The task will continue with the current/default configuration.
 							}
@@ -1396,7 +1399,11 @@ export class ClineProvider
 					if (profile.apiProvider) {
 						await this.activateProviderProfile(
 							{ name: profile.name },
-							{ persistModeConfig: false, persistTaskHistory: false },
+							{
+								persistModeConfig: false,
+								persistTaskHistory: false,
+								expectedCurrentTaskId: historyItem.id,
+							},
 						)
 					}
 				} catch (error) {
@@ -1446,8 +1453,8 @@ export class ClineProvider
 			// Replace the current task in-place to avoid UI flicker
 			const oldTask = this.taskRegistry.current
 
-			// A different task may have become current during the awaits above; never abort it.
-			if (oldTask && oldTask.taskId !== task.taskId) {
+			// The current task may have changed or been removed during the awaits above; never touch it.
+			if (oldTask?.taskId !== task.taskId) {
 				await task.abortTask(true).catch(() => {})
 				return task
 			}
@@ -1923,11 +1930,11 @@ export class ClineProvider
 	 */
 	private updateTaskApiHandlerIfNeeded(
 		providerSettings: ProviderSettings,
-		options: { forceRebuild?: boolean; skipCurrentTaskRebuild?: boolean } = {},
+		options: { forceRebuild?: boolean; skipCurrentTaskRebuild?: boolean; expectedCurrentTaskId?: string } = {},
 	): void {
 		if (options.skipCurrentTaskRebuild) return
 		const task = this.getCurrentTask()
-		if (!task) return
+		if (!task || (options.expectedCurrentTaskId && task.taskId !== options.expectedCurrentTaskId)) return
 
 		const { forceRebuild = false } = options
 
@@ -2169,11 +2176,11 @@ export class ClineProvider
 
 	private async persistStickyProviderProfileToCurrentTask(
 		apiConfigName: string,
-		options: { skipCurrentTaskRebuild?: boolean } = {},
+		options: { skipCurrentTaskRebuild?: boolean; expectedCurrentTaskId?: string } = {},
 	): Promise<void> {
 		if (options.skipCurrentTaskRebuild) return
 		const task = this.getCurrentTask()
-		if (!task) {
+		if (!task || (options.expectedCurrentTaskId && task.taskId !== options.expectedCurrentTaskId)) {
 			return
 		}
 
@@ -2203,6 +2210,8 @@ export class ClineProvider
 			persistModeConfig?: boolean
 			persistTaskHistory?: boolean
 			skipCurrentTaskRebuild?: boolean
+			/** Rebuild and sticky-write only when this task is still current. */
+			expectedCurrentTaskId?: string
 		},
 	) {
 		return this.enqueueProviderProfileMutation((signal) =>
@@ -2216,6 +2225,7 @@ export class ClineProvider
 			persistModeConfig?: boolean
 			persistTaskHistory?: boolean
 			skipCurrentTaskRebuild?: boolean
+			expectedCurrentTaskId?: string
 		},
 		signal?: AbortSignal,
 	): Promise<void> {
@@ -2243,12 +2253,20 @@ export class ClineProvider
 		}
 
 		// Change the provider for the current task.
-		this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true, skipCurrentTaskRebuild })
+		const expectedCurrentTaskId = options?.expectedCurrentTaskId
+		this.updateTaskApiHandlerIfNeeded(providerSettings, {
+			forceRebuild: true,
+			skipCurrentTaskRebuild,
+			expectedCurrentTaskId,
+		})
 
 		// Update the current task's sticky provider profile, unless this activation is
 		// being used purely as a non-persisting restoration (e.g., reopening a task from history).
 		if (persistTaskHistory) {
-			await this.persistStickyProviderProfileToCurrentTask(name, { skipCurrentTaskRebuild })
+			await this.persistStickyProviderProfileToCurrentTask(name, {
+				skipCurrentTaskRebuild,
+				expectedCurrentTaskId,
+			})
 		}
 
 		if (!skipCurrentTaskRebuild) {
