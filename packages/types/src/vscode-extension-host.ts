@@ -493,6 +493,7 @@ export interface WebviewMessage {
 		| "getListApiConfiguration"
 		| "customInstructions"
 		| "webviewDidLaunch"
+		| "webviewHeartbeat"
 		| "webviewDidFocus"
 		| "newTask"
 		| "askResponse"
@@ -725,6 +726,7 @@ export interface WebviewMessage {
 	ids?: string[]
 	terminalOperation?: "continue" | "abort"
 	messageTs?: number
+	timestamp?: number // For webviewHeartbeat
 	messageId?: string
 	restoreCheckpoint?: boolean
 	historyPreviewCollapsed?: boolean
