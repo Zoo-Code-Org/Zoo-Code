@@ -46,11 +46,11 @@ Zoo Code は Roo Code が築いた基盤を引き継ぎ、次の機能で拡張�
 - **より信頼性の高いターミナルと編集ワークフロー** — ターミナルの早期完了、タスク状態の競合、コンテキスト管理、diff 編集、プロバイダー固有のツール利用に関する問題を修正。
 - **ワークスペースをより細かく制御** — ルール管理、モードごとの MCP 制限、マルチルートのパス制御、モデルの reasoning オプション、完了時の変更レビュー操作を追加。
 
-## v3.90.0 の新機能
+## v3.94.0 の新機能
 
-- ✨ **Provider とモデル:** GitHub Copilot が provider になりました。サインインすると、Zoo Code が Copilot モデルを読み込みます。IO Intelligence は専用の API キーを使う provider です。Gemini 4 Argon は Gemini と Vertex にあります。GPT-6 Luna は OpenCode Go にあります。Gemini 4 Argon と GPT-6 Luna は Zoo Gateway にもあります。
-- 🧭 **ツール実行:** 同じツール呼び出しを繰り返すと警告が出て、その後 Zoo Code がそのループを止めます。`attempt_completion` を無効にしても、タスクが完了できない状態にはなりません。キュー内のメッセージは、直接送るコマンドと同じコマンド保護チェックを通ります。
-- ⚡ **推論とストリーミング:** Anthropic の adaptive thinking がチャットに表示され、thinking token がカウントされます。R1 トグルは llama.cpp、Ollama、LM Studio の推論を保持します。Codex は、表示される要約とともに暗号化された推論を保持します。VS Code の language model ストリームは、ストリームが失敗したときに guarded recovery を使います。
+- ✨ **さらに広がるモデルとプロバイダーのサポート:** Anthropic 経由で Claude Haiku 5.5 を使用し、対応する VS Code LM モデルに画像を送信し、OpenCode Go Responses モデルの temperature を調整し、より多くのプロバイダーでリクエストをクリーンにキャンセルできます。
+- 🔐 **より柔軟な MCP OAuth:** 静的な OAuth クライアント設定を構成し、カスタムコールバックパスを使用し、`WWW-Authenticate` から認証の詳細を取得し、再試行前にコールバックの失敗を確認できます。
+- 🧭 **よりスムーズなチャットと長時間セッション:** 履歴でタスク名を変更し、Shift を押さずにファイルをチャットにドラッグし、長時間セッション中に保持されるメモリを削減し、サブタスクのリンクと置き換えられた webview を安定して維持できます。
 
 ## Zoo Codeがあなたのためにできること
 
