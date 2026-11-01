@@ -94,6 +94,7 @@ function createFixture() {
 		getPendingEditOperation: ClineProvider.prototype["getPendingEditOperation"],
 		getState: vi.fn(async () => ({ apiConfiguration: {} })),
 		contextProxy: { globalStorageUri: { fsPath: "/test/storage" } },
+		taskScheduler: { schedule: vi.fn<(task: Task, run: () => Promise<void>) => Promise<void>>(async () => {}) },
 	}
 	// Supplies restore/rehydration dependencies and the real store; scheduling is disabled in the rehydration test.
 	const provider = providerDouble as unknown as ClineProvider
@@ -230,6 +231,31 @@ describe("checkpointRestoreHandler", () => {
 		await expect(handleCheckpointRestoreOperation(fixture.config)).rejects.toThrow("Missing commit")
 		expect(fixture.providerDouble.getTaskWithId).toHaveBeenCalledExactlyOnceWith(fixture.task.taskId)
 		expect(Task).toHaveBeenCalledOnce()
+		expect(fixture.providerDouble.taskScheduler.schedule).toHaveBeenCalledExactlyOnceWith(
+			fixture.task,
+			expect.any(Function),
+		)
+		expect(console.error).not.toHaveBeenCalledWith(
+			"Failed to restart task after checkpoint restore failure:",
+			expect.anything(),
+		)
+	})
+
+	it("restart does not abort a different task that became current during rehydration setup", async () => {
+		const newerTask = { taskId: "newer-task", abortTask: vi.fn<Task["abortTask"]>() }
+		const registry = { current: fixture.task as Task | typeof newerTask, replace: vi.fn() }
+		Object.assign(fixture.providerDouble, { taskRegistry: registry })
+		fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(new Error("Missing commit"))
+		showWarningMessage.mockResolvedValueOnce("common:checkpoints.restart")
+		fixture.providerDouble.getState.mockImplementationOnce(async () => {
+			registry.current = newerTask
+			return { apiConfiguration: {} }
+		})
+		await expect(handleCheckpointRestoreOperation(fixture.config)).rejects.toThrow("Missing commit")
+		expect(Task).toHaveBeenCalledOnce()
+		expect(newerTask.abortTask).not.toHaveBeenCalled()
+		expect(registry.replace).not.toHaveBeenCalled()
+		expect(fixture.providerDouble.taskScheduler.schedule).not.toHaveBeenCalled()
 	})
 
 	it.each([

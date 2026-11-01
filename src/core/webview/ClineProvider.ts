@@ -1446,6 +1446,12 @@ export class ClineProvider
 			// Replace the current task in-place to avoid UI flicker
 			const oldTask = this.taskRegistry.current
 
+			// A different task may have become current during the awaits above; never abort it.
+			if (oldTask && oldTask.taskId !== task.taskId) {
+				await task.abortTask(true).catch(() => {})
+				return task
+			}
+
 			if (oldTask) {
 				// Abort the old task to stop running processes and mark as abandoned
 				try {
