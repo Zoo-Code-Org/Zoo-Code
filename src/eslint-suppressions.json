@@ -446,7 +446,7 @@
 	},
 	"api/providers/xai.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 7
+			"count": 4
 		}
 	},
 	"api/transform/__tests__/ai-sdk.spec.ts": {
@@ -571,7 +571,7 @@
 	},
 	"core/assistant-message/__tests__/presentAssistantMessage-images.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 16
+			"count": 14
 		}
 	},
 	"core/assistant-message/__tests__/presentAssistantMessage-unknown-tool.spec.ts": {
@@ -1016,7 +1016,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 196
+			"count": 195
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {

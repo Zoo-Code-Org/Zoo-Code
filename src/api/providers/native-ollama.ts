@@ -6,6 +6,7 @@ import { ApiStream } from "../transform/stream"
 import { BaseProvider } from "./base-provider"
 import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { getOllamaModels, isSecureOllamaEndpoint } from "./fetchers/ollama"
+import { MODEL_CATALOG_FETCH_TIMEOUT_MS } from "./fetchers/modelCache"
 import {
 	createAbortError,
 	hasUsableTimeout,
@@ -664,6 +665,18 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 	async fetchModel(signal?: AbortSignal) {
 		this.models = await getOllamaModels(this.options.ollamaBaseUrl, this.options.ollamaApiKey, { signal })
 		return this.getModel()
+	}
+
+	async ensureModelFetched(signal?: AbortSignal): Promise<void> {
+		await this.ensureCatalogLoaded(async () => {
+			// This path bypasses getModels()'s single-flight, so it carries its own
+			// bound: a hung Ollama endpoint would otherwise leave the shared
+			// catalogFetch pending forever and block every later retry. The timeout
+			// is fetch-local so the caller's signal stays independent of it.
+			await this.fetchModel(AbortSignal.timeout(MODEL_CATALOG_FETCH_TIMEOUT_MS))
+			// An empty catalog must stay retryable instead of being memoized.
+			return Object.keys(this.models).length > 0
+		}, signal)
 	}
 
 	override getModel(): { id: string; info: ModelInfo } {
