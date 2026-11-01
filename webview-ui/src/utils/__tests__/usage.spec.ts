@@ -366,8 +366,29 @@ describe("spend that has no provider or model (context condensing)", () => {
 		const s = summarizeUsage([item({ totalCost: 5, usageByModel: [entry(4)] })], { range: "all", now: NOW })
 		const unrecorded = s.byProvider.find((b) => b.key === UNRECORDED)!
 		expect(unrecorded.tokens).toBe(0)
+		expect(unrecorded.cost).toBe(1)
 		// The one task is counted under its real provider; the remainder is a cost line, not another task.
 		expect(s.byProvider.find((b) => b.key === providerIdentifiers.anthropic)?.tasks).toBe(1)
+		expect(unrecorded.tasks).toBe(0)
+		// The same in the model rows.
+		const unrecordedModel = s.byModel.find((b) => b.key === UNRECORDED)!
+		expect(unrecordedModel.cost).toBe(1)
+		expect(unrecordedModel.tasks).toBe(0)
+		expect(unrecordedModel.tokens).toBe(0)
+	})
+
+	it("still counts a task under 'not recorded' when it has no usage record at all", () => {
+		const s = summarizeUsage([item({ totalCost: 2, tokensIn: 50 })], { range: "all", now: NOW })
+		expect(s.byProvider.find((b) => b.key === UNRECORDED)?.tasks).toBe(1)
+		expect(s.byModel.find((b) => b.key === UNRECORDED)?.tasks).toBe(1)
+	})
+
+	it("counts a task under 'not recorded' once when a recorded request has no provider, plus the remainder", () => {
+		const noProvider = { requests: 1, tokensIn: 1, tokensOut: 1, cost: 1 }
+		const s = summarizeUsage([item({ totalCost: 3, usageByModel: [noProvider] })], { range: "all", now: NOW })
+		const unrecorded = s.byProvider.find((b) => b.key === UNRECORDED)!
+		expect(unrecorded.tasks).toBe(1)
+		expect(unrecorded.cost).toBe(3)
 	})
 
 	it("ignores float noise: no spurious 'not recorded' row when the costs agree", () => {
@@ -511,6 +532,31 @@ describe("usageToCsv and summarizeUsage count the same tasks", () => {
 	})
 })
 
+describe("a time that Date cannot represent", () => {
+	it.each([1e20, -1e20, 8.64e15 + 1, Number.POSITIVE_INFINITY, Number.NaN])(
+		"is left out of the totals, the daily series and the export (ts = %s)",
+		(ts) => {
+			const history = [
+				item({ task: "good", ts: NOW, tokensIn: 7, totalCost: 1 }),
+				item({ task: "bad", ts, totalCost: 50 }),
+			]
+
+			const summary = summarizeUsage(history, { range: "all", now: NOW })
+
+			expect(summary.taskCount).toBe(1)
+			expect(summary.totalCost).toBe(1)
+			expect(summary.daily.every((d) => Number.isFinite(d.day))).toBe(true)
+			expect(summary.daily).toHaveLength(1)
+			expect(usageToCsv(history, { range: "all", now: NOW }).split("\n")).toHaveLength(2)
+		},
+	)
+
+	it("keeps the boundary times a date can represent", () => {
+		const summary = summarizeUsage([item({ task: "edge", ts: 8.64e15, totalCost: 1 })], { range: "all", now: NOW })
+		expect(summary.taskCount).toBe(1)
+	})
+})
+
 describe("usageToCsv numeric columns", () => {
 	const numericKeys = ["tokensIn", "tokensOut", "cacheReads", "cacheWrites", "totalCost"] as const
 	const cells = (overrides: Record<string, unknown>) =>
@@ -546,10 +592,10 @@ describe("usageToCsv numeric columns", () => {
 		])
 	})
 
-	it("leaves the date empty for a time that cannot be written, instead of throwing", () => {
-		for (const ts of [Number.NaN, Number.POSITIVE_INFINITY, 8.64e15 + 1]) {
+	it("leaves out a task whose time cannot be written, instead of throwing or writing a blank date", () => {
+		for (const ts of [Number.NaN, Number.POSITIVE_INFINITY, 8.64e15 + 1, 1e20, -1e20]) {
 			const csv = usageToCsv([item({ task: "t", ts })], { range: "all", now: NOW })
-			expect(csv.split("\n")[1].startsWith(',"t"')).toBe(true)
+			expect(csv.split("\n")).toHaveLength(1) // the header only
 		}
 	})
 

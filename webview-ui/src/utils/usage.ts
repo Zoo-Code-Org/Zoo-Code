@@ -161,13 +161,15 @@ function addTo(
 	tokens: number,
 	countedForTask: Set<string>,
 	extra?: Partial<UsageBucket>,
+	/** False for spend that belongs to a task already counted elsewhere (the cost-only remainder). */
+	countTask = true,
 ) {
 	const bucket = map.get(key) ?? { key, cost: 0, tokens: 0, tasks: 0, priced: false, ...extra }
 	bucket.cost += cost
 	bucket.tokens += tokens
 	if (cost > 0) bucket.priced = true
 	// Count the task once per bucket even if several of its requests land here.
-	if (!countedForTask.has(key)) {
+	if (countTask && !countedForTask.has(key)) {
 		countedForTask.add(key)
 		bucket.tasks += 1
 	}
@@ -176,17 +178,21 @@ function addTo(
 
 const byCostDesc = (a: UsageBucket, b: UsageBucket) => b.cost - a.cost || b.tokens - a.tokens
 
+/** A time that `Date` can represent: a finite number inside the range of a date (±8.64e15 ms). */
+const isRepresentableTime = (ts: unknown): ts is number =>
+	typeof ts === "number" && Number.isFinite(ts) && !Number.isNaN(new Date(ts).getTime())
+
 /**
  * The tasks the Usage tab counts for these options: the same selection for the totals and for the CSV, so an export
- * never has a row the displayed totals leave out. An item whose time is not a number (a corrupted task file) is
- * dropped.
+ * never has a row the displayed totals leave out. An item whose time is not a time a date can represent (a
+ * corrupted or hand-edited task file) is dropped.
  */
 function itemsInScope(history: HistoryItem[], options: UsageOptions): HistoryItem[] {
 	const start = rangeStart(options.range, options.now ?? Date.now())
 
 	return history.filter(
 		(item) =>
-			typeof item.ts === "number" &&
+			isRepresentableTime(item.ts) &&
 			(start === undefined || item.ts >= start) &&
 			(!options.workspace || item.workspace === options.workspace),
 	)
@@ -231,6 +237,7 @@ export function summarizeUsage(history: HistoryItem[], options: UsageOptions): U
 		const entries: Entry[] = item.usageByModel?.length
 			? [...item.usageByModel]
 			: [{ requests: 0, tokensIn: tIn, tokensOut: tOut, cost }]
+		let remainderCost = 0
 
 		// The task's cost also covers work that has no provider or model of its own (condensing the context).
 		// Without this, the provider and model rows would add up to less than the headline total. The
@@ -239,7 +246,7 @@ export function summarizeUsage(history: HistoryItem[], options: UsageOptions): U
 		if (item.usageByModel?.length) {
 			const attributed = item.usageByModel.reduce((sum, e) => sum + (Number.isFinite(e.cost) ? e.cost : 0), 0)
 			const remainder = cost - attributed
-			if (remainder > REMAINDER_EPSILON) entries.push({ requests: 0, tokensIn: 0, tokensOut: 0, cost: remainder })
+			if (remainder > REMAINDER_EPSILON) remainderCost = remainder
 		}
 
 		for (const e of entries) {
@@ -249,6 +256,13 @@ export function summarizeUsage(history: HistoryItem[], options: UsageOptions): U
 			const modelKey = e.modelId ? `${e.apiProvider ?? ""}\u0000${e.modelId}` : UNRECORDED
 			addTo(providers, providerKey, entryCost, entryTokens, seenProviders)
 			addTo(models, modelKey, entryCost, entryTokens, seenModels, { apiProvider: e.apiProvider })
+		}
+
+		// The remainder is spend of a task whose recorded requests already count it under their own provider and
+		// model, so it adds cost to the "not recorded" rows and no task (and no tokens).
+		if (remainderCost > 0) {
+			addTo(providers, UNRECORDED, remainderCost, 0, seenProviders, undefined, false)
+			addTo(models, UNRECORDED, remainderCost, 0, seenModels, { apiProvider: undefined }, false)
 		}
 
 		const modeSeen = new Set<string>()
@@ -339,16 +353,13 @@ export function usageToCsv(history: HistoryItem[], options: UsageOptions): strin
 	// A counter that is not a finite, non-negative number (corrupted history, or text such as "=1+1" that a
 	// spreadsheet would evaluate) is exported as 0. What is written is then only ever digits, so every cell is inert.
 	const counter = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0)
-	const date = (ts: unknown) =>
-		typeof ts === "number" && Number.isFinite(ts) && !Number.isNaN(new Date(ts).getTime())
-			? new Date(ts).toISOString()
-			: ""
 
 	const rows = itemsInScope(history, options)
 		.sort((a, b) => a.ts - b.ts)
 		.map((item) =>
 			[
-				date(item.ts),
+				// The selection above keeps only times a date can represent.
+				new Date(item.ts).toISOString(),
 				escape(item.title || item.task || ""),
 				escape(item.mode || ""),
 				escape(primaryUsage(item)?.apiProvider ?? ""),
