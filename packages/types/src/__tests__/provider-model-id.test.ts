@@ -1,33 +1,20 @@
 import { retiredProviderIdentifiers } from "../provider-identifiers.js"
+import { providerDefinitionList } from "../providers/index.js"
 import {
 	getModelId,
-	modelIdKeys,
 	providerIdentifiers,
 	providerSettingsSchema,
+	PROVIDER_SETTINGS_KEYS,
 	type ProviderSettings,
 } from "../index.js"
 
-const expectedModelIdKeys = [
-	"apiModelId",
-	"openRouterModelId",
-	"openAiModelId",
-	"ollamaModelId",
-	"lmStudioModelId",
-	"lmStudioDraftModelId",
-	"requestyModelId",
-	"unboundModelId",
-	"litellmModelId",
-	"vercelAiGatewayModelId",
-	"opencodeGoModelId",
-	"kenariModelId",
-	"nanoGptModelId",
-	"ioIntelligenceModelId",
-	"zooGatewayModelId",
-] as const
-
-describe("modelIdKeys", () => {
-	it("preserves every model ID setting and its legacy precedence order", () => {
-		expect(modelIdKeys).toEqual(expectedModelIdKeys)
+describe("provider model ID fields", () => {
+	it.each(
+		providerDefinitionList.flatMap((definition) =>
+			definition.modelIdKey ? [[definition.apiProvider, definition.modelIdKey] as const] : [],
+		),
+	)("declares a persisted ProviderSettings key for %s", (_apiProvider, modelIdKey) => {
+		expect(PROVIDER_SETTINGS_KEYS).toContain(modelIdKey)
 	})
 })
 

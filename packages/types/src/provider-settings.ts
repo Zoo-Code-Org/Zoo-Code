@@ -294,32 +294,6 @@ export type ProviderSettingsWithId = z.infer<typeof providerSettingsWithIdSchema
 export const PROVIDER_SETTINGS_KEYS = providerSettingsSchema.keyof().options
 
 /**
- * @deprecated Use `getModelId()` to resolve the model ID for the active provider.
- */
-export type ModelIdKey = Extract<keyof ProviderSettingsShape, `${string}ModelId`>
-
-/**
- * @deprecated Use `getModelId()` to resolve the model ID for the active provider.
- */
-export const modelIdKeys = [
-	"apiModelId",
-	"openRouterModelId",
-	"openAiModelId",
-	"ollamaModelId",
-	"lmStudioModelId",
-	"lmStudioDraftModelId",
-	"requestyModelId",
-	"unboundModelId",
-	"litellmModelId",
-	"vercelAiGatewayModelId",
-	"opencodeGoModelId",
-	"kenariModelId",
-	"nanoGptModelId",
-	"ioIntelligenceModelId",
-	"zooGatewayModelId",
-] as const satisfies readonly ModelIdKey[]
-
-/**
  * Model ID field each retired provider used before it was removed.
  *
  * Retired profiles are preserved verbatim (see `ProviderSettingsManager`), so
