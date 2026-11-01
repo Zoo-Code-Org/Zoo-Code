@@ -149,11 +149,6 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		const apiKey = this.options.openRouterApiKey ?? NOT_PROVIDED
 
 		this.client = new OpenAI({ baseURL, apiKey, defaultHeaders: DEFAULT_HEADERS, timeout: this.timeoutMs })
-
-		// Load models asynchronously to populate cache before getModel() is called
-		this.loadDynamicModels().catch((error) => {
-			console.error("[OpenRouterHandler] Failed to load dynamic models:", error)
-		})
 	}
 
 	override getModelCacheScope(): ModelCacheScope {
@@ -165,28 +160,30 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		return getOpenRouterModels(undefined, ...fetchOpts)
 	}
 
-	private async loadDynamicModels(): Promise<void> {
-		try {
-			const [models, endpoints] = await Promise.all([
-				getModels({ provider: providerIdentifiers.openrouter }, this),
-				getModelEndpoints(
-					{
-						router: providerIdentifiers.openrouter,
-						modelId: this.options.openRouterModelId,
-						endpoint: this.options.openRouterSpecificProvider,
-					},
-					this,
-				),
-			])
+	/**
+	 * Whether the user pinned a concrete OpenRouter upstream provider. The
+	 * "[default]" sentinel means "let OpenRouter choose", so it behaves like no
+	 * selection at all.
+	 */
+	private get hasSpecificProvider(): boolean {
+		return (
+			Boolean(this.options.openRouterSpecificProvider) &&
+			this.options.openRouterSpecificProvider !== OPENROUTER_DEFAULT_PROVIDER_NAME
+		)
+	}
 
-			this.models = models
-			this.endpoints = endpoints
-		} catch (error) {
-			console.error("[OpenRouterHandler] Error loading dynamic models:", {
-				error: error instanceof Error ? error.message : String(error),
-				stack: error instanceof Error ? error.stack : undefined,
-			})
-		}
+	async ensureModelFetched(signal?: AbortSignal): Promise<void> {
+		await this.ensureCatalogLoaded(async () => {
+			await this.fetchModel()
+			// fetchModel() returns model info, not the catalog, so report emptiness
+			// from the catalogs it assigned: an empty response must stay retryable.
+			// With a specific provider selected, the endpoint catalog is what
+			// getModel() uses, so an empty endpoint response is a failed load even
+			// when the model-level catalog arrived.
+			const hasModels = Object.keys(this.models).length > 0
+			const hasEndpoints = Object.keys(this.endpoints).length > 0
+			return hasModels && (!this.hasSpecificProvider || hasEndpoints)
+		}, signal)
 	}
 
 	getReasoningDetails(): any[] | undefined {

@@ -16,6 +16,7 @@
 	"command.fixCode.title": "Fix Code",
 	"command.improveCode.title": "Improve Code",
 	"command.addToContext.title": "Add To Context",
+	"command.retryWebviewRecovery.title": "Retry Interface Recovery",
 	"command.focusInput.title": "Focus Input Field",
 	"command.setCustomStoragePath.title": "Set Custom Storage Path",
 	"command.importSettings.title": "Import Settings",
