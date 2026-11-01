@@ -55,6 +55,7 @@
 		"list_api_config": "Ha fallat l'obtenció de la llista de configuracions de l'API",
 		"update_server_timeout": "Ha fallat l'actualització del temps d'espera del servidor",
 		"hmr_not_running": "El servidor de desenvolupament local no està executant-se, l'HMR no funcionarà. Si us plau, executa 'npm run dev' abans de llançar l'extensió per habilitar l'HMR.",
+		"hmr_probe_timeout": "El servidor de desenvolupament local no ha respost en 5 segons. Es farà servir la interfície compilada de l’extensió sense HMR.",
 		"retrieve_current_mode": "Error en recuperar el mode actual de l'estat.",
 		"failed_delete_repo": "Ha fallat l'eliminació del repositori o branca associada: {{error}}",
 		"failed_remove_directory": "Ha fallat l'eliminació del directori de tasques: {{error}}",
