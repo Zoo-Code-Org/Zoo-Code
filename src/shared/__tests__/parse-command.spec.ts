@@ -1,4 +1,4 @@
-import { findUnterminatedQuote, parseCommand } from "../parse-command"
+import { parseCommand, type UnterminatedQuote } from "../parse-command"
 
 // Toggle that lets a test force shell-quote's parse() to throw so the
 // parser's tokenizer-rejection path can be exercised deterministically.
@@ -16,6 +16,8 @@ vi.mock("shell-quote", async (importOriginal) => {
 		},
 	}
 })
+
+const structuralError = (command: string): UnterminatedQuote | null => parseCommand(command).parseError
 
 describe("parseCommand", () => {
 	describe("basic chaining", () => {
@@ -349,17 +351,17 @@ describe("parseCommand", () => {
 			const { commands, parseError } = parseCommand(input)
 			expect(commands).toEqual([input])
 			expect(parseError?.quoteType).toBe("heredoc")
-			expect(findUnterminatedQuote("cat <<-EOF\r\n\techo C\r\n\tEOF\r\n")?.quoteType).toBe("heredoc")
-			expect(findUnterminatedQuote("cat <<'EOF'\r\nbody\r\nEOF\r\n")?.quoteType).toBe("heredoc")
-			expect(findUnterminatedQuote('cat <<"EOF"\r\nbody\r\nEOF\r\n')?.quoteType).toBe("heredoc")
-			expect(findUnterminatedQuote("cat <<\\EOF\r\nbody\r\nEOF\r\n")?.quoteType).toBe("heredoc")
+			expect(structuralError("cat <<-EOF\r\n\techo C\r\n\tEOF\r\n")?.quoteType).toBe("heredoc")
+			expect(structuralError("cat <<'EOF'\r\nbody\r\nEOF\r\n")?.quoteType).toBe("heredoc")
+			expect(structuralError('cat <<"EOF"\r\nbody\r\nEOF\r\n')?.quoteType).toBe("heredoc")
+			expect(structuralError("cat <<\\EOF\r\nbody\r\nEOF\r\n")?.quoteType).toBe("heredoc")
 			// A delimiter quote left open does not end at the CR. bash spans
 			// the newline with the quote. It reads a delimiter that can never
 			// match a body line, and it keeps executing the opener line's tail.
 			// An unclosed delimiter quote therefore fails closed instead of
 			// masking the body.
-			expect(findUnterminatedQuote("cat <<'EOF\r\nbody\r\nEOF\r\n")?.quoteType).toBe("heredoc")
-			expect(findUnterminatedQuote('cat <<"EOF\r\nbody\r\nEOF\r\n')?.quoteType).toBe("heredoc")
+			expect(structuralError("cat <<'EOF\r\nbody\r\nEOF\r\n")?.quoteType).toBe("heredoc")
+			expect(structuralError('cat <<"EOF\r\nbody\r\nEOF\r\n')?.quoteType).toBe("heredoc")
 		})
 	})
 
@@ -398,8 +400,8 @@ describe("parseCommand", () => {
 		})
 
 		it("does not report an unterminated quote for a balanced herestring", () => {
-			expect(findUnterminatedQuote(`sh <<< "echo hello"`)).toBeNull()
-			expect(findUnterminatedQuote("sh <<< 'echo hello'")).toBeNull()
+			expect(structuralError(`sh <<< "echo hello"`)).toBeNull()
+			expect(structuralError("sh <<< 'echo hello'")).toBeNull()
 		})
 	})
 
@@ -438,9 +440,10 @@ describe("parseCommand", () => {
 	})
 
 	describe("placeholder collision guard", () => {
-		// If the raw command literally contains the internal placeholder tokens
-		// (e.g. __QUOTE_0__) the pre-escape/post-unescape round-trip must preserve
-		// them verbatim instead of corrupting them during the masking phase.
+		// The scan's placeholders are a kind letter plus an index wrapped in NUL
+		// sentinels, and an input containing NUL is rejected before any masking,
+		// so literal text cannot collide with a placeholder. `__NAME_0__`-style
+		// text is inert word content; this round-trip pins that.
 		it("round-trips a command that contains every internal placeholder token", () => {
 			const input =
 				"echo __QUOTE_0__ __SQUOTE_0__ __REDIR_0__ __ARITH_0__ __PARAM_0__ __VAR_0__ __SUBSH_0__ __TOPLEVEL_QUOTE_0__"
@@ -448,97 +451,97 @@ describe("parseCommand", () => {
 		})
 	})
 
-	describe("findUnterminatedQuote", () => {
+	describe("structural error reporting", () => {
 		it("returns null for balanced and quote-free input", () => {
-			expect(findUnterminatedQuote("git status")).toBeNull()
-			expect(findUnterminatedQuote("echo 'hello'")).toBeNull()
-			expect(findUnterminatedQuote('echo "hello"')).toBeNull()
-			expect(findUnterminatedQuote("sh -c 'echo a\necho b'")).toBeNull()
-			expect(findUnterminatedQuote("sh -c $'echo a\necho b'")).toBeNull()
+			expect(structuralError("git status")).toBeNull()
+			expect(structuralError("echo 'hello'")).toBeNull()
+			expect(structuralError('echo "hello"')).toBeNull()
+			expect(structuralError("sh -c 'echo a\necho b'")).toBeNull()
+			expect(structuralError("sh -c $'echo a\necho b'")).toBeNull()
 		})
 
 		it("detects an unterminated single quote and reports its opening index", () => {
-			expect(findUnterminatedQuote("echo 'hello")).toEqual(
+			expect(structuralError("echo 'hello")).toEqual(
 				expect.objectContaining({ quoteType: "posix-single", openIndex: 5 }),
 			)
 		})
 
 		it("detects an unterminated double quote and reports its opening index", () => {
-			expect(findUnterminatedQuote('echo "hello')).toEqual(
+			expect(structuralError('echo "hello')).toEqual(
 				expect.objectContaining({ quoteType: "double", openIndex: 5 }),
 			)
 		})
 
 		it("reports ansi-c style and the $ position for an unterminated ANSI-C quote", () => {
-			expect(findUnterminatedQuote("echo $'hello")).toEqual(
+			expect(structuralError("echo $'hello")).toEqual(
 				expect.objectContaining({ quoteType: "ansi-c", openIndex: 5 }),
 			)
 		})
 
 		it("treats a backslash-escaped quote outside a string as literal", () => {
 			// `echo \'` is a literal quote, not an unterminated region.
-			expect(findUnterminatedQuote("echo \\'")).toBeNull()
-			expect(findUnterminatedQuote('echo \\"')).toBeNull()
+			expect(structuralError("echo \\'")).toBeNull()
+			expect(structuralError('echo \\"')).toBeNull()
 		})
 
 		it("ignores a quote that appears inside a comment", () => {
-			expect(findUnterminatedQuote("echo hi # it's fine")).toBeNull()
+			expect(structuralError("echo hi # it's fine")).toBeNull()
 		})
 
 		it("ignores an apostrophe inside a # comment that follows a closed quoted argument", () => {
 			// A well-formed quoted argument followed by a comment whose content
 			// contains a quote character. The comment apostrophe must not open a
 			// new region.
-			expect(findUnterminatedQuote("echo 'hello' # it's a comment")).toBeNull()
-			expect(findUnterminatedQuote('echo "hello" # it\'s a comment')).toBeNull()
+			expect(structuralError("echo 'hello' # it's a comment")).toBeNull()
+			expect(structuralError('echo "hello" # it\'s a comment')).toBeNull()
 		})
 
 		it("treats # attached to a word as an ordinary character", () => {
-			expect(findUnterminatedQuote("echo foo#'bar'")).toBeNull()
-			expect(findUnterminatedQuote("echo foo#'bar")).toEqual(
+			expect(structuralError("echo foo#'bar'")).toBeNull()
+			expect(structuralError("echo foo#'bar")).toEqual(
 				expect.objectContaining({ quoteType: "posix-single", openIndex: 9 }),
 			)
 		})
 
 		it("does not let an apostrophe inside double quotes open a region", () => {
-			expect(findUnterminatedQuote(`echo "don't"`)).toBeNull()
+			expect(structuralError(`echo "don't"`)).toBeNull()
 		})
 
 		it("does not let a double quote inside single quotes open a region", () => {
-			expect(findUnterminatedQuote(`echo 'a " b'`)).toBeNull()
+			expect(structuralError(`echo 'a " b'`)).toBeNull()
 		})
 
 		it("honors backslash escapes inside double quotes", () => {
 			// The escaped quote does not close the region; the final quote does.
-			expect(findUnterminatedQuote('echo "a \\" b"')).toBeNull()
-			expect(findUnterminatedQuote('echo "a \\"')?.quoteType).toBe("double")
+			expect(structuralError('echo "a \\" b"')).toBeNull()
+			expect(structuralError('echo "a \\"')?.quoteType).toBe("double")
 		})
 
 		it("honors backslash escapes inside ANSI-C quotes", () => {
-			expect(findUnterminatedQuote("echo $'it\\'s ok'")).toBeNull()
-			expect(findUnterminatedQuote("echo $'it\\'s ok")?.quoteType).toBe("ansi-c")
+			expect(structuralError("echo $'it\\'s ok'")).toBeNull()
+			expect(structuralError("echo $'it\\'s ok")?.quoteType).toBe("ansi-c")
 		})
 
 		it("treats POSIX single quotes as opaque to backslashes", () => {
 			// Inside a POSIX single quote a backslash is literal, so the quote
 			// closes at the next apostrophe regardless of any preceding backslash.
-			expect(findUnterminatedQuote("echo 'a\\'")).toBeNull()
+			expect(structuralError("echo 'a\\'")).toBeNull()
 		})
 
 		it("reports locale style and the $ position for an unterminated locale quote", () => {
-			expect(findUnterminatedQuote('echo $"hello')).toEqual(
+			expect(structuralError('echo $"hello')).toEqual(
 				expect.objectContaining({ quoteType: "locale", openIndex: 5 }),
 			)
 		})
 
 		it("returns null for a balanced locale-quoted string", () => {
-			expect(findUnterminatedQuote('echo $"hello world"')).toBeNull()
+			expect(structuralError('echo $"hello world"')).toBeNull()
 		})
 
 		it("returns null for a balanced <<- heredoc with an indented terminator", () => {
 			// The <<- form alone enables tab stripping. Unconditional stripping
 			// would make << and <<- indistinguishable at the terminator.
-			expect(findUnterminatedQuote("sh <<-EOF\n\techo hello\n\tEOF")).toBeNull()
+			expect(structuralError("sh <<-EOF\n\techo hello\n\tEOF")).toBeNull()
 		})
 	})
 
@@ -1112,8 +1115,8 @@ describe("parseCommand", () => {
 			// bash refuses `cat <<E(rm x)`: a `(` after a completed word token
 			// is a syntax error, never a delimiter break. The word keeps the
 			// parens, no body line matches it, and the construct fails closed
-			// exactly like the base parser instead of approving unexecutable
-			// input whose remainder hides the parenthesized text unsplit.
+			// instead of approving unexecutable input whose remainder hides the
+			// parenthesized text unsplit.
 			const input = "cat <<E(rm x)\nhi\nE"
 			const { commands, parseError } = parseCommand(input)
 			expect(commands).toEqual([input])
@@ -1137,10 +1140,10 @@ describe("parseCommand", () => {
 			expect(parseError?.quoteType).toBe("heredoc")
 		})
 
-		it("splits a spaced parenthesized remainder as before (no over-reject)", () => {
-			// A blank before the `(` ends the delimiter word the way bash's
-			// token boundary does: the heredoc closes and the group reaches
-			// the host text unsplit, approved at base and now alike.
+		it("splits a spaced parenthesized remainder: the heredoc closes and keeps the group (no over-reject)", () => {
+			// A blank before the `(` ends the delimiter word at bash's token
+			// boundary, so the heredoc closes and the group reaches the host
+			// text unsplit.
 			const { commands, parseError } = parseCommand("cat <<E (rm x)\nhi\nE")
 			expect(parseError).toBeNull()
 			expect(commands).toEqual(["cat <<E\nhi\nE ( rm x )"])
@@ -1162,7 +1165,7 @@ describe("parseCommand", () => {
 		it("fails closed on a delimiter glued to a closing paren", () => {
 			// `)` is a metacharacter only at token start; glued after the word
 			// `E` it is a syntax error in bash, so the word keeps it, the body
-			// never terminates, and the base rejection is restored.
+			// never terminates, and the construct is rejected.
 			const input = "cat <<E)rm x\nhi\nE"
 			const { commands, parseError } = parseCommand(input)
 			expect(commands).toEqual([input])
@@ -2070,12 +2073,10 @@ describe("parseCommand", () => {
 		})
 
 		it("reports the widened expansion kinds with the opening index", () => {
-			expect(findUnterminatedQuote("echo $(x")).toEqual(
+			expect(structuralError("echo $(x")).toEqual(
 				expect.objectContaining({ quoteType: "command-substitution", openIndex: 5 }),
 			)
-			expect(findUnterminatedQuote("echo `x")).toEqual(
-				expect.objectContaining({ quoteType: "backtick", openIndex: 5 }),
-			)
+			expect(structuralError("echo `x")).toEqual(expect.objectContaining({ quoteType: "backtick", openIndex: 5 }))
 		})
 
 		it("fails closed on a raw NUL byte anywhere in the input", () => {
@@ -2427,7 +2428,7 @@ describe("parseCommand", () => {
 			expect(parseCommand("echo $((1+2))").commands).toEqual(["echo $((1+2))"])
 			expect(parseCommand("echo $(( (1) ))").commands).toEqual(["echo $(( (1) ))"])
 			expect(parseCommand("echo $[1+2]").commands).toEqual(["echo $[1+2]"])
-			expect(findUnterminatedQuote("echo $(( x")?.quoteType).toBe("arithmetic")
+			expect(structuralError("echo $(( x")?.quoteType).toBe("arithmetic")
 		})
 
 		it("extracts a mis-nested $(( … ) … ) group from an unquoted heredoc body", () => {
@@ -2444,7 +2445,7 @@ describe("parseCommand", () => {
 			const { commands, parseError } = parseCommand("echo $( $((rm -rf /) ) )")
 			expect(parseError).toBeNull()
 			expect(commands).toEqual(["echo", "( rm -rf / )"])
-			// Without any depth-1 closer the opener stays arithmetic, as before.
+			// Without any depth-1 closer nothing closes the inner `(`, so the opener stays arithmetic.
 			const unclosed = parseCommand("echo $((rm -rf /")
 			expect(unclosed.commands).toEqual(["echo $((rm -rf /"])
 			expect(unclosed.parseError?.quoteType).toBe("arithmetic")

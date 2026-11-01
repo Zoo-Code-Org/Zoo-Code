@@ -121,8 +121,9 @@ export function findLongestPrefixMatch(command: string, prefixes: string[]): str
  * unterminated quote or heredoc. It also reports it for an expansion
  * delimiter ($(), ${}, backtick, <( or >() or an arithmetic expression
  * ($(( or $[) that never closes. A stray "}" with no matching "{", a raw
- * NUL byte, and substitution nesting deeper than the re-scan depth cap
- * also produce this outcome. No approval may use a partial decomposition
+ * NUL byte, substitution nesting deeper than the re-scan depth cap, and
+ * the shell tokenizer rejecting the masked command also produce this
+ * outcome. No approval may use a partial decomposition
  * of the command.
  * A shell never parses delimiters inside quoted regions, so unbalanced
  * delimiters there do not qualify.
@@ -151,8 +152,9 @@ export type CommandDecision = "auto_approve" | "auto_deny" | "ask_user" | "malfo
  *   structure. Causes: an unterminated quote or heredoc, an expansion
  *   delimiter ($(...), ${...}, backtick, <( or >()) or arithmetic expression
  *   ($(( or $[) that never closes, a stray "}" with no matching "{", a raw
- *   NUL byte, or substitution nesting deeper than the parser's re-scan depth
- *   cap. The parser must not approve a command whose structure is unproven
+ *   NUL byte, substitution nesting deeper than the parser's re-scan depth
+ *   cap, or the shell tokenizer rejecting the masked command. The parser
+ *   must not approve a command whose structure is unproven
  *   based on a partial decomposition. A shell never parses delimiter
  *   characters inside quoted regions, so unbalanced delimiters there stay
  *   parseable.
@@ -236,8 +238,9 @@ export function getCommandDecisionDetailed(
 	// detects input it cannot account for. That covers unterminated quotes
 	// or heredocs, expansion delimiters ($(), ${}, backticks, <( or >() or
 	// arithmetic expressions ($(( or $[) that never close, a stray closer,
-	// a raw NUL byte, and substitution nesting that is too deep. In that
-	// case parseCommand returns a non-null parseError.
+	// a raw NUL byte, substitution nesting that is too deep, and the shell
+	// tokenizer rejecting the masked command. In that case parseCommand
+	// returns a non-null parseError.
 	const { commands: subCommands, parseError } = parseCommand(command)
 
 	// Reject commands whose structure the parser cannot fully account for.

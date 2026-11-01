@@ -52,9 +52,10 @@ describe("extractPatternsFromCommand", () => {
 	})
 
 	it("should handle null/undefined", () => {
-		// The runtime guard under test (`command?.trim()`) is exactly what
-		// makes a non-string caller value safe. Route the nullish values
-		// through one typed choke point instead of an untyped cast.
+		// These calls pin the runtime guard `command?.trim()` in
+		// extractPatternsFromCommand. `asString` is a deliberate type lie:
+		// its `as string` routes values the signature forbids past the
+		// compiler, so the guard, not the type checker, handles them.
 		const asString = (value: unknown): string => value as string
 		expect(extractPatternsFromCommand(asString(null))).toEqual([])
 		expect(extractPatternsFromCommand(asString(undefined))).toEqual([])

@@ -38,9 +38,9 @@ describe("getCommandDecision", () => {
 	})
 })
 
-describe("containsDangerousSubstitution — node -e one-liner false positive regression", () => {
-	const nodeOneLiner = `node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('prd.json','utf8'));const allowed=new Set(['pending','in-progress','complete','blocked']);const bad=(p.items||[]).filter(i=>!allowed.has(i.status));console.log('meta.status',p.meta?.status);console.log('workstreams', (p.workstreams||[]).length);console.log('items', (p.items||[]).length);console.log('statusCounts', (p.items||[]).reduce((a,i)=>(a[i.status]=(a[i.status]||0)+1,a),{}));console.log('invalidStatuses', bad.length);if(bad.length){console.log(bad.map(i=>i.id+':'+i.status).join('\\\\n'));process.exit(2);} "`
+const nodeOneLiner = `node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('prd.json','utf8'));const allowed=new Set(['pending','in-progress','complete','blocked']);const bad=(p.items||[]).filter(i=>!allowed.has(i.status));console.log('meta.status',p.meta?.status);console.log('workstreams', (p.workstreams||[]).length);console.log('items', (p.items||[]).length);console.log('statusCounts', (p.items||[]).reduce((a,i)=>(a[i.status]=(a[i.status]||0)+1,a),{}));console.log('invalidStatuses', bad.length);if(bad.length){console.log(bad.map(i=>i.id+':'+i.status).join('\\\\n'));process.exit(2);} "`
 
+describe("containsDangerousSubstitution — node -e one-liner false positive regression", () => {
 	it("should NOT flag the complex node -e one-liner as dangerous substitution", () => {
 		expect(containsDangerousSubstitution(nodeOneLiner)).toBe(false)
 	})
@@ -86,8 +86,6 @@ describe("getCommandDecision — integration with dangerous substitution checks"
 	const allowedCommands = ["node", "echo"]
 
 	it("should auto-approve the complex node -e one-liner when node is allowed", () => {
-		const nodeOneLiner = `node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('prd.json','utf8'));const allowed=new Set(['pending','in-progress','complete','blocked']);const bad=(p.items||[]).filter(i=>!allowed.has(i.status));console.log('meta.status',p.meta?.status);console.log('workstreams', (p.workstreams||[]).length);console.log('items', (p.items||[]).length);console.log('statusCounts', (p.items||[]).reduce((a,i)=>(a[i.status]=(a[i.status]||0)+1,a),{}));console.log('invalidStatuses', bad.length);if(bad.length){console.log(bad.map(i=>i.id+':'+i.status).join('\\\\n'));process.exit(2);} "`
-
 		expect(getCommandDecision(nodeOneLiner, allowedCommands)).toBe("auto_approve")
 	})
 
@@ -250,8 +248,8 @@ describe("getCommandDecision — integration with dangerous substitution checks"
 	})
 
 	it("rejects a delimiter glued to a subshell paren instead of approving it", () => {
-		// bash refuses `cat <<E(rm x)` as a syntax error. The parser must fail
-		// the construct closed like the base parser, never approve input whose
+		// bash rejects `cat <<E(rm x)` outright as a syntax error, so the
+		// parser must reject the construct too, never approve input whose
 		// parenthesized remainder hides commands from the lists.
 		expect(getCommandDecision("cat <<E(rm x)\nhi\nE", ["cat", "echo"], ["rm"])).toBe("malformed_command")
 	})
@@ -599,8 +597,8 @@ describe("getCommandDecision — integration with dangerous substitution checks"
 
 	it("does not reject a subshell group inside a command substitution as malformed", () => {
 		// `$( (echo safe) )` is ordinary syntax that bash runs. A top-level
-		// bare `(` stays host grouping, as segmentation worked before this
-		// change. The extracted group starts with `(`, so it matches neither
+		// bare `(` stays host grouping rather than a substitution payload.
+		// The extracted group starts with `(`, so it matches neither
 		// list and the decision is `ask_user`, never `malformed_command`.
 		expect(getCommandDecision("$( (echo safe) )", ["echo"])).toBe("ask_user")
 	})

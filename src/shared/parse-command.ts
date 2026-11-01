@@ -66,9 +66,10 @@ export type QuoteType =
  * unquoted newlines and chain operators. When `parseError` is non-null, the
  * command string is malformed. Causes: an unterminated quote or heredoc, an
  * expansion delimiter or arithmetic expression that never closes, a stray
- * closer, a raw NUL byte, or substitution nesting beyond the re-scan depth
- * cap. `commands` then holds the raw input as one opaque token. Callers can
- * surface the error without splitting unsafe fragments.
+ * closer, a raw NUL byte, substitution nesting beyond the re-scan depth cap,
+ * or the shell tokenizer rejecting the masked command. `commands` then holds
+ * the raw input as one opaque token. Callers can surface the error without
+ * splitting unsafe fragments.
  *
  * Callers that only need the sub-command list can destructure `{ commands }`.
  * A caller that must tell a parse error from a normal single-command result
@@ -131,29 +132,6 @@ function unterminatedQuoteMessage(quoteType: QuoteType, openIndex: number, comma
 	const suffix = snippetEnd < command.length ? "..." : ""
 	const excerpt = prefix + command.slice(snippetStart, snippetEnd).replace(/\r?\n/g, "\\n") + suffix
 	return `Malformed command: ${problem} at position ${openIndex} -- near: \`${excerpt}\`. `
-}
-
-/**
- * Report the first structural problem in `command`. Return `null` when every
- * quoted region, heredoc, and expansion delimiter closes properly and no
- * closer appears without its opener.
- *
- * A regex cannot answer "can a shell parse this?" because shell syntax is
- * context-sensitive. Outside single quotes a backslash escapes the next
- * character. A `#` may begin a comment that the parser must ignore. A quote
- * inside double quotes is literal text. Nesting must be balanced. The shared
- * state-machine walk in `scanShellSyntax` mirrors POSIX tokenization. It
- * accepts legitimate multi-line quoted arguments and detects genuinely
- * malformed input.
- *
- * A shell never looks at unbalanced delimiter characters inside ordinary
- * quoted regions, so this check does not look at them either. They stay
- * parseable.
- *
- * @internal
- */
-export function findUnterminatedQuote(command: string): UnterminatedQuote | null {
-	return scanShellSyntax(command).error
 }
 
 /** The kinds of region the scanner tracks on its open-delimiter stack. */
@@ -431,8 +409,8 @@ function scanShellSyntax(text: string): ScanOutcome {
 	// Reject a raw NUL before any masking. NUL is this scan's placeholder
 	// sentinel. An input containing one could degrade a masked placeholder
 	// into inert literal text. That would hide a substitution from the lists.
-	// Rejecting at the scan head also covers `findUnterminatedQuote`, which
-	// shares this scan.
+	// Rejecting at the scan head protects the placeholder sentinel everywhere
+	// the masked text travels.
 	const nulIndex = text.indexOf(NUL)
 	if (nulIndex !== -1) {
 		outcome.error = errorAt("nul-byte", nulIndex)
@@ -2125,11 +2103,12 @@ function expandPlaceholders(text: string, outcome: ScanOutcome): string {
  * optional `parseError`. The error is non-null when the input cannot be
  * accounted for: an unterminated quote or heredoc, an expansion delimiter or
  * arithmetic expression opened but never closed, a stray closer, a raw NUL
- * byte, or substitution nesting beyond the re-scan depth cap. When
- * `parseError` is set, the `commands` array contains the raw input as a single
- * opaque token. A command whose structure the parser cannot fully account for
- * must never reach approval: the tool call fails with an error instead. It
- * must not get a free pass built on a partial decomposition.
+ * byte, substitution nesting beyond the re-scan depth cap, or the shell
+ * tokenizer rejecting the masked command. When `parseError` is set, the
+ * `commands` array contains the raw input as a single opaque token. A command
+ * whose structure the parser cannot fully account for must never reach
+ * approval: the tool call fails with an error instead. It must not get a free
+ * pass built on a partial decomposition.
  */
 export function parseCommand(command: string): ParseResult {
 	// A NUL byte is not whitespace. A NUL-bearing command therefore still
