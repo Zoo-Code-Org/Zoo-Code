@@ -46,9 +46,21 @@ export const usePromptHistory = ({
 			?.filter((message) => message.type === "say" && message.say === "user_feedback" && message.text?.trim())
 			.map((message) => message.text!)
 
+		// The task prompt lives in the first message as `say: "text"`; ChatView
+		// skips that entry when it renders the message rows. Include it only at
+		// index 0: later `say: "text"` messages are assistant output, and an
+		// image-only task has no text to recall.
+		const firstMessage = clineMessages?.[0]
+		const initialPrompt =
+			firstMessage?.type === "say" && firstMessage.say === "text" && firstMessage.text?.trim()
+				? firstMessage.text
+				: undefined
+
+		const allPrompts = initialPrompt ? [initialPrompt, ...(conversationPrompts ?? [])] : conversationPrompts
+
 		// If we have conversation messages, use those (newest first when navigating up)
-		if (conversationPrompts?.length) {
-			return conversationPrompts.slice(-MAX_PROMPT_HISTORY_SIZE).reverse()
+		if (allPrompts?.length) {
+			return allPrompts.slice(-MAX_PROMPT_HISTORY_SIZE).reverse()
 		}
 
 		// If we have clineMessages array (meaning we're in an active task), don't fall back to task history
