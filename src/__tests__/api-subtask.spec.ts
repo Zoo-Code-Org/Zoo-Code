@@ -66,6 +66,7 @@ describe("API.clearCurrentTask()", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		provider = makeProviderMock()
+		// Double provides event methods, context, task access, eviction, abandonment, and webview posting.
 		api = new API({} as OutputChannel, provider as unknown as ClineProvider, makeClineProviderFactory())
 	})
 
@@ -87,6 +88,7 @@ describe("API.abandonSubtask()", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		provider = makeProviderMock()
+		// Double provides event methods, context, task access, eviction, abandonment, and webview posting.
 		api = new API({} as OutputChannel, provider as unknown as ClineProvider, makeClineProviderFactory())
 	})
 

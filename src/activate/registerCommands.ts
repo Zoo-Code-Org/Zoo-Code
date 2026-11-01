@@ -76,11 +76,9 @@ export const registerCommands = (options: RegisterCommandOptions) => {
 // lifecycle alongside the command registration, so it's intentionally
 // excluded from this map.
 //
-// Callback shape mirrors VS Code's own `commands.registerCommand` signature
-// (`(...args: any[]) => any`), with the return narrowed to `unknown` so
-// callers must inspect before using. `never[]` permits the heterogeneous
-// callbacks here (`importSettings` takes an optional `filePath?: string`,
-// others take none) while VS Code dispatches positional args dynamically.
+// `never[]` deliberately lets callbacks with different parameters share one map
+// type while rejecting direct calls with arguments. VS Code dispatches positional
+// arguments dynamically; `unknown` requires callers to inspect returned values.
 type CommandCallback = (...args: never[]) => unknown
 const getCommandsMap = ({
 	context,

@@ -1787,7 +1787,9 @@ describe("History resume delegation - parent metadata transitions", () => {
 					fU: (h: HistoryItem) => HistoryItem,
 					sU: (h: HistoryItem) => HistoryItem,
 				) => {
+					// Child double provides id and status, the fields read by this updater.
 					fU(childItem as unknown as HistoryItem)
+					// Parent double provides id, status, delegation links, timestamp, task, token counts, and cost.
 					sU(parentItem as unknown as HistoryItem)
 					return []
 				},

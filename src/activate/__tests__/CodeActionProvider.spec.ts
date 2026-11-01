@@ -69,6 +69,7 @@ describe("CodeActionProvider", () => {
 	beforeEach(() => {
 		provider = new CodeActionProvider()
 
+		// Document double provides getText, lineAt, lineCount, and uri.fsPath.
 		mockDocument = {
 			getText: vi.fn(),
 			lineAt: vi.fn(),
