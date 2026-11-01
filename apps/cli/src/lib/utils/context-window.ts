@@ -12,7 +12,7 @@ const DEFAULT_CONTEXT_WINDOW = 200_000
 export function getContextWindow(contextWindow: number | null | undefined): number {
 	// Reject non-finite values (NaN, Infinity) as well as non-positive ones, so the
 	// progress bar never divides by an infinite window and reports 0% usage.
-	return typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0
+	return typeof contextWindow === "number" && Number.isInteger(contextWindow) && contextWindow > 0
 		? contextWindow
 		: DEFAULT_CONTEXT_WINDOW
 }
