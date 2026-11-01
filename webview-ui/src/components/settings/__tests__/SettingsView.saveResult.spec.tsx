@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -33,6 +33,18 @@ const makeAnOtherEdit = async () => {
 	fireEvent.click(await screen.findByTestId("collapse-thinking-checkbox"))
 	await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
 }
+
+/** The extension host reports a new state, as when another webview or the host changes a saved value. */
+const liveStateChange = (state: Record<string, unknown>) =>
+	act(() => {
+		window.dispatchEvent(new MessageEvent("message", { data: { type: "state", state } }))
+	})
+
+const lastUpdatedSettings = () =>
+	(posted("updateSettings").at(-1) as { updatedSettings?: Record<string, unknown> } | undefined)?.updatedSettings ??
+	{}
+
+const appearanceKeys = ["interfaceFontScale", "terminalFontSize", "editorFontSize", "spacingScale"] as const
 
 describe("SettingsView – save acknowledgement", () => {
 	beforeEach(() => postMessage.mockClear())
@@ -225,5 +237,89 @@ describe("SettingsView – save acknowledgement", () => {
 
 		answerSave(laterId, { success: false })
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+	})
+})
+
+describe("SettingsView – which appearance values a save sends", () => {
+	beforeEach(() => postMessage.mockClear())
+
+	it("does not send a value that only differs because the live state changed, and asks for no acknowledgement", async () => {
+		renderUiTab()
+		await screen.findByTestId("appearance-terminalFontSize-input")
+
+		liveStateChange({ terminalFontSize: 20 }) // another webview changed it; the user did not
+		await makeAnOtherEdit()
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		const sent = lastUpdatedSettings()
+		for (const key of appearanceKeys) expect(sent).not.toHaveProperty(key)
+		expect((posted("updateSettings").at(-1) as { requestId?: string }).requestId).toBeUndefined()
+	})
+
+	it("sends only the value the user edited, not another that the live state changed meanwhile", async () => {
+		renderUiTab()
+		await screen.findByTestId("appearance-terminalFontSize-input")
+
+		liveStateChange({ editorFontSize: 18 }) // not edited here
+		await makeAnEdit() // the terminal font size
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		const sent = lastUpdatedSettings()
+		expect(sent.terminalFontSize).toBe(13)
+		expect(sent).not.toHaveProperty("editorFontSize")
+		expect((posted("updateSettings").at(-1) as { requestId?: string }).requestId).toBeDefined()
+	})
+
+	it("sends nothing for a value that was edited and then put back to what is saved", async () => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="ui" />, {
+			state: { terminalFontSize: 14 },
+		})
+		fireEvent.click(await screen.findByTestId("appearance-terminalFontSize-increment")) // 15
+		fireEvent.click(screen.getByTestId("appearance-terminalFontSize-decrement")) // back to the saved 14
+		await makeAnOtherEdit()
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		for (const key of appearanceKeys) expect(lastUpdatedSettings()).not.toHaveProperty(key)
+	})
+
+	it("stops treating a value as an edit once its save was stored, so a later save does not send it again", async () => {
+		renderUiTab()
+		await makeAnEdit()
+		fireEvent.click(screen.getByTestId("save-button"))
+		answerSave(lastSaveRequestId(postMessage), { success: true })
+		liveStateChange({ terminalFontSize: 25 }) // later, someone else changes it
+		postMessage.mockClear()
+
+		await makeAnOtherEdit()
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(lastUpdatedSettings()).not.toHaveProperty("terminalFontSize")
+	})
+
+	it("keeps a value edited again while the save was pending as an edit, and sends it with the next save", async () => {
+		renderUiTab()
+		await makeAnEdit() // 13
+		fireEvent.click(screen.getByTestId("save-button"))
+		fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // 14, after what was sent
+		answerSave(lastSaveRequestId(postMessage), { success: true })
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+		postMessage.mockClear()
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(lastUpdatedSettings().terminalFontSize).toBe(14)
+	})
+
+	it("keeps the edit after a failed save, so a retry sends it again", async () => {
+		renderUiTab()
+		await makeAnEdit()
+		fireEvent.click(screen.getByTestId("save-button"))
+		answerSave(lastSaveRequestId(postMessage), { success: false, error: "nope" })
+		postMessage.mockClear()
+
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(lastUpdatedSettings().terminalFontSize).toBe(13)
 	})
 })

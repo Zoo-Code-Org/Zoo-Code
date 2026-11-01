@@ -140,6 +140,12 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const [pendingSaveId, setPendingSaveId] = useState<string | undefined>(undefined)
 	// The state the pending save was made from, to tell whether the user edited again while it was in flight.
 	const pendingSaveEditedState = useRef<typeof cachedState | undefined>(undefined)
+	// The appearance values this form has edited. A value that only differs from the live state because the live state
+	// changed (another webview, a reset from the host) is not an edit and is never sent. A ref, not state: it is read
+	// when saving and needs no render of its own.
+	const editedAppearance = useRef(new Set<AppearanceKey>())
+	// What the pending save sent for each appearance value, to tell which edits it has saved when it succeeds.
+	const pendingAppearanceSent = useRef<Record<string, number | null>>({})
 	const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined)
 	const [activeTab, setActiveTab] = useState<SectionName>(
 		targetSection && sectionNames.includes(targetSection as SectionName)
@@ -249,6 +255,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
 		prevApiConfigName.current = currentApiConfigName
 		prevMode.current = mode
+		editedAppearance.current.clear()
 		setChangeDetected(false)
 	}, [currentApiConfigName, mode, extensionState])
 
@@ -260,6 +267,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 		handledSettingsImportedAt.current = settingsImportedAt
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
+		editedAppearance.current.clear()
 		setChangeDetected(false)
 	}, [settingsImportedAt, extensionState])
 
@@ -269,6 +277,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				return prevState
 			}
 
+			if (field in APPEARANCE_SETTINGS) editedAppearance.current.add(field as AppearanceKey)
 			setChangeDetected(true)
 			return { ...prevState, [field]: value }
 		})
@@ -401,8 +410,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			// Only the appearance values this form changed are sent, and null (not undefined) for a reset so it
 			// survives JSON and clears the stored value. A save that changes none sends none of them, so it neither
 			// waits for the host nor puts an appearance value into the host's all-or-nothing save.
-			const changedAppearance = Object.fromEntries(
-				(Object.keys(APPEARANCE_SETTINGS) as AppearanceKey[])
+			const changedAppearance: Record<string, number | null> = Object.fromEntries(
+				[...editedAppearance.current]
 					.filter((key) => (cachedState[key] ?? null) !== (extensionState[key] ?? null))
 					.map((key) => [key, cachedState[key] ?? null]),
 			)
@@ -410,6 +419,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			const saveId = appearanceEdited ? nextSaveRequestId() : undefined
 			if (saveId) {
 				pendingSaveEditedState.current = cachedState
+				pendingAppearanceSent.current = changedAppearance
 				setPendingSaveId(saveId)
 			}
 			vscode.postMessage({
@@ -500,7 +510,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			// With an appearance edit, the "unsaved changes" flag is cleared only once the host reports that
 			// `updateSettings` was stored: see the `settingsSaveResult` listener below. A failed save leaves the
 			// user's edits in place to retry. Any other save clears it at once.
-			if (!saveId) setChangeDetected(false)
+			if (!saveId) {
+				// Nothing was sent, so no appearance edit is left to save (an edit that was undone equals the live value).
+				editedAppearance.current.clear()
+				setChangeDetected(false)
+			}
 		}
 	}
 
@@ -512,8 +526,19 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			if (message?.type !== "settingsSaveResult" || message.requestId !== pendingSaveId) return
 
 			const editedState = pendingSaveEditedState.current
+			const sent = pendingAppearanceSent.current
 			pendingSaveEditedState.current = undefined
+			pendingAppearanceSent.current = {}
 			setPendingSaveId(undefined)
+
+			// What was stored is no longer an unsaved edit, unless the user changed that value again meanwhile.
+			if (message.success) {
+				for (const [key, value] of Object.entries(sent)) {
+					if ((latestCachedState.current[key as AppearanceKey] ?? null) === value) {
+						editedAppearance.current.delete(key as AppearanceKey)
+					}
+				}
+			}
 
 			// An edit made while the save was in flight is not in what was sent: it stays unsaved.
 			if (message.success && latestCachedState.current === editedState) setChangeDetected(false)
@@ -542,6 +567,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			if (confirm) {
 				// Discard changes: Reset state and flag
 				setCachedState(extensionState) // Revert to original state
+				editedAppearance.current.clear()
 				setChangeDetected(false) // Reset change flag
 				confirmDialogHandler.current?.() // Execute the pending action (e.g., tab switch)
 			}
