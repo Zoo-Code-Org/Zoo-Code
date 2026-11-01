@@ -319,34 +319,6 @@ export const modelIdKeys = [
 	"zooGatewayModelId",
 ] as const satisfies readonly ModelIdKey[]
 
-/**
- * @deprecated Provider categories should use the specific provider type guards.
- */
-export type TypicalProvider = Exclude<ProviderName, InternalProvider | CustomProvider | FauxProvider>
-
-/**
- * @deprecated Use the specific provider type guards instead.
- */
-export const isTypicalProvider = (key: unknown): key is TypicalProvider =>
-	isProviderName(key) && !isInternalProvider(key) && !isCustomProvider(key) && !isFauxProvider(key)
-
-/**
- * @deprecated Use `getModelId()` instead. This map is retained for API compatibility.
- */
-export const modelIdKeysByProvider = Object.fromEntries(
-	providerDefinitionList.flatMap((definition) => {
-		if (!isTypicalProvider(definition.apiProvider)) {
-			return []
-		}
-
-		if (!definition.modelIdKey) {
-			throw new Error(`Missing model ID key for provider definition: ${definition.apiProvider}`)
-		}
-
-		return [[definition.apiProvider, definition.modelIdKey] as const]
-	}),
-) as Record<TypicalProvider, ModelIdKey>
-
 export function getModelId(settings: ProviderSettings): string | undefined {
 	if (isProviderName(settings.apiProvider)) {
 		return providerDefinitions[settings.apiProvider]?.getModelId(settings)
