@@ -138,13 +138,17 @@ describe("Knip quality gate", () => {
 })
 
 describe("Code QA dependency install", () => {
-	it("installs every job with a frozen lockfile", () => {
+	it("installs every job with a frozen lockfile unless the translation check skips installation", () => {
 		const setups = workflow.match(/uses: \.\/\.github\/actions\/setup-node-pnpm\n/g) ?? []
 		const frozen =
 			workflow.match(
 				/uses: \.\/\.github\/actions\/setup-node-pnpm\n\s+with:\n\s+install-args: "--frozen-lockfile"\n/g,
 			) ?? []
+		const skipped =
+			workflow.match(/uses: \.\/\.github\/actions\/setup-node-pnpm\n\s+with:\n\s+skip-install: true\n/g) ?? []
 		assert.ok(setups.length > 0, "missing setup-node-pnpm steps")
-		assert.equal(frozen.length, setups.length)
+		assert.equal(frozen.length + skipped.length, setups.length)
+		assert.equal(skipped.length, 1)
+		assert.match(workflow, /check-translations:[\s\S]*?skip-install: true/)
 	})
 })
