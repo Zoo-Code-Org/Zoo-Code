@@ -3,8 +3,6 @@
 	"ignore": [
 		"apps/vscode-e2e/**",
 		"scripts/**",
-		"apps/cli/scripts/**",
-		"**/__tests__/**!",
 		"packages/core/src/custom-tools/__tests__/fixtures/**",
 		"packages/core/src/custom-tools/__tests__/fixtures-override/**",
 		"src/integrations/misc/__tests__/performance/**",
@@ -44,7 +42,7 @@
 			]
 		},
 		"webview-ui": {
-			"entry": ["src/index.tsx!", "src/**/*.visual.tsx", "src/**/*.visual.{fixture,i18n}.{ts,tsx}"],
+			"entry": ["src/**/*.visual.tsx", "src/**/*.visual.{fixture,i18n}.{ts,tsx}"],
 			"project": [
 				"src/**/*.{ts,tsx}!",
 				"../src/shared/*.ts!",
@@ -67,7 +65,6 @@
 			]
 		},
 		"apps/cli": {
-			"ignore": ["eslint.config.mjs", "scripts/**"],
 			"project": ["src/**/*.ts!", "src/**/*.tsx!"],
 			"ignoreDependencies": ["@vscode/ripgrep"]
 		},

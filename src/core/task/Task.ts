@@ -110,6 +110,7 @@ import { ObservationRegistry } from "./observationRegistry"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
+import { DispatchState, type PendingWork } from "./dispatchState"
 import { type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
 import { manageContext, willManageContext } from "../context-management"
@@ -526,8 +527,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	currentStreamingContentIndex = 0
 	currentStreamingDidCheckpoint = false
 	assistantMessageContent: AssistantMessageContent[] = []
-	presentAssistantMessageLocked = false
-	presentAssistantMessageHasPendingUpdates = false
+	dispatchState: DispatchState = DispatchState.IDLE
+	pendingWork: PendingWork | null = null
 	userMessageContent: (Anthropic.TextBlockParam | Anthropic.ImageBlockParam | Anthropic.ToolResultBlockParam)[] = []
 	userMessageContentReady = false
 
@@ -587,6 +588,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Push a tool_result block to userMessageContent, preventing duplicates.
 	 * Duplicate tool_use_ids cause API errors.
 	 *
+	 * Keeps all tool_result blocks first and contiguous, as the Anthropic API
+	 * requires: a user message responding to tool_use blocks must begin with
+	 * the tool_result blocks, and any other content (images, text) between or
+	 * ahead of them is rejected ("tool_use ids were found without tool_result
+	 * blocks immediately after"). All tool_result blocks are therefore kept
+	 * ahead of other content in this array.
+	 *
 	 * @param toolResult - The tool_result block to add
 	 * @returns true if added, false if duplicate was skipped
 	 */
@@ -602,6 +610,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return false
 		}
 		this.userMessageContent.push(toolResult)
+
+		// Partition into [tool_results, other blocks], preserving order within
+		// each group, so results stay first and contiguous regardless of what
+		// other content (images, text) arrived between pushes.
+		const results = this.userMessageContent.filter(
+			(block): block is Anthropic.ToolResultBlockParam => block.type === "tool_result",
+		)
+		const others = this.userMessageContent.filter((block) => block.type !== "tool_result")
+		this.userMessageContent.splice(0, this.userMessageContent.length, ...results, ...others)
+
 		return true
 	}
 
@@ -619,7 +637,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// A non-abort presenter rejection releases the lock and is logged, but
 		// nothing schedules another presentation pass. Gating on the index would
 		// strand this wait after exactly that failure.
-		if (!this.didCompleteReadingStream || this.presentAssistantMessageLocked) {
+		if (!this.didCompleteReadingStream || this.dispatchState !== DispatchState.IDLE) {
 			return false
 		}
 
@@ -1390,22 +1408,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.blanketDeniedCommandThisTurn = true
 	}
 
+	/** When provided, historyItem overrides task and images in the startup metadata. */
 	static create(options: TaskOptions): [Task, Promise<void>] {
-		const instance = new Task({ ...options, startTask: false })
-		const { images, task, historyItem } = options
-		let promise
-
-		instance.startIdleTelemetryCheck()
-
-		if (images || task) {
-			promise = instance.startTask(task, images)
-		} else if (historyItem) {
-			promise = instance.resumeTaskFromHistory()
-		} else {
+		if (!options.task && !options.images && !options.historyItem) {
 			throw new Error("Either historyItem or task/images must be provided")
 		}
 
-		return [instance, promise]
+		const instance = new Task({ ...options, startTask: false })
+
+		return [instance, instance.run()]
 	}
 
 	// API Messages
@@ -4148,8 +4159,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// for the turn that earned it: a message the user queues afterward
 				// (a new turn) is fair game for the next ask to answer.
 				this.blanketDeniedCommandThisTurn = false
-				this.presentAssistantMessageLocked = false
-				this.presentAssistantMessageHasPendingUpdates = false
+				this.dispatchState = DispatchState.IDLE
+				this.pendingWork = null
 				// No legacy text-stream tool parser.
 				this.streamingToolCallIndices.clear()
 				const nativeToolCallParserScope = NativeToolCallParser.createScope()

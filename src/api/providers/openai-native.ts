@@ -145,8 +145,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			usage.cache_read_input_tokens ?? usage.cache_read_tokens ?? usage.cached_tokens ?? cachedFromDetails ?? 0
 
 		// Resolve effective tier: prefer actual tier from response; otherwise requested tier
-		const effectiveTier =
-			this.lastServiceTier || (this.options.openAiNativeServiceTier as ServiceTier | undefined) || undefined
+		const effectiveTier = this.lastServiceTier || this.options.openAiNativeServiceTier || undefined
 		const effectiveInfo = this.applyServiceTierPricing(model.info, effectiveTier)
 
 		// Pass total input tokens directly to calculateApiCostOpenAI
@@ -486,7 +485,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 						if (block.type === "text") {
 							content.push({ type: "input_text", text: block.text })
 						} else if (block.type === "image") {
-							const image = block as Anthropic.Messages.ImageBlockParam
+							const image = block
 							if (image.source.type === "base64") {
 								const imageUrl = `data:${image.source.media_type};base64,${image.source.data}`
 								content.push({ type: "input_image", image_url: imageUrl })
@@ -1551,7 +1550,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 			// Include text.verbosity only when the model explicitly supports it
 			if (model.info.supportsVerbosity === true) {
-				requestBody.text = { verbosity: (verbosity || "medium") as VerbosityLevel }
+				requestBody.text = { verbosity: verbosity || "medium" }
 			}
 
 			// Enable extended prompt cache retention for eligible models

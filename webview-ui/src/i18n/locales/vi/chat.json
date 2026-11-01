@@ -353,10 +353,10 @@
 		"title": "Zoo Code {{version}} đã phát hành",
 		"support": "Hãy ủng hộ Zoo Code bằng cách tặng sao cho chúng tôi trên <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Có gì mới trong Zoo Code v3.90.0",
-			"highlight1": "✨ Provider và model: GitHub Copilot giờ là một provider: đăng nhập và Zoo Code tải model Copilot của bạn. IO Intelligence là provider với API key riêng. Gemini 4 Argon có trên Gemini và Vertex. GPT-6 Luna có trên OpenCode Go. Gemini 4 Argon và GPT-6 Luna cũng có trên Zoo Gateway.",
-			"highlight2": "🧭 Thực thi tool: Lặp lại cùng một tool call sẽ có cảnh báo, rồi Zoo Code dừng vòng lặp đó. Tắt attempt_completion không còn để task không thể hoàn thành. Tin nhắn trong hàng đợi chạy cùng kiểm tra bảo vệ lệnh như lệnh bạn gửi trực tiếp.",
-			"highlight3": "⚡ Suy luận và streaming: Adaptive thinking của Anthropic hiện trong chat và thinking token được đếm. Công tắc R1 giữ suy luận từ llama.cpp, Ollama và LM Studio. Codex giữ suy luận đã mã hóa cùng bản tóm tắt bạn thấy. Stream language model của VS Code dùng guarded recovery khi stream lỗi."
+			"heading": "Có gì mới trong Zoo Code v3.94.0",
+			"highlight1": "✨ Hỗ trợ model và provider rộng hơn: Dùng Claude Haiku 5.5 qua Anthropic, gửi hình ảnh tới các model VS Code LM tương thích, chỉnh temperature cho các model OpenCode Go Responses và hủy request gọn gàng trên nhiều provider hơn.",
+			"highlight2": "🔐 MCP OAuth linh hoạt hơn: Cấu hình cài đặt OAuth client tĩnh, dùng đường dẫn callback tùy chỉnh, tìm hiểu chi tiết xác thực từ WWW-Authenticate và xem lỗi callback trước khi thử lại.",
+			"highlight3": "🧭 Chat mượt mà và phiên dài hơn: Đổi tên task trong lịch sử, kéo file vào chat mà không cần giữ Shift, giảm bộ nhớ giữ lại trong các phiên dài và giữ ổn định các liên kết subtask cùng webview đã thay thế."
 		},
 		"cloudAgents": {
 			"heading": "Mới trên Cloud:",

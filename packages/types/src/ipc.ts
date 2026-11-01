@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { type TaskEvent, taskEventSchema } from "./events.js"
+import { type TaskEvent, taskEventSchema, taskStartRequestIdSchema } from "./events.js"
 import { rooCodeSettingsSchema } from "./global-settings.js"
 
 /**
@@ -64,6 +64,8 @@ export const taskCommandSchema = z.discriminatedUnion("commandName", [
 			text: z.string(),
 			images: z.array(z.string()).optional(),
 			newTab: z.boolean().optional(),
+			// Senders without a requestId keep the fire-and-forget contract.
+			requestId: taskStartRequestIdSchema.optional(),
 		}),
 	}),
 	z.object({
