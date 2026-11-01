@@ -45,11 +45,11 @@ Zoo Code rozwija fundament stworzony przez Roo Code i stale rozszerza go o:
 - **Bardziej niezawodne workflow terminala i edycji** — poprawki przedwczesnego kończenia poleceń terminala, race condition stanu zadań, zarządzania kontekstem, edycji diff i użycia narzędzi właściwych dla providerów.
 - **Większą kontrolę nad workspace** — zarządzanie regułami, ograniczenia MCP dla poszczególnych trybów, kontrolę ścieżek multi-root, opcje reasoning modeli i akcje przeglądu zmian po ukończeniu.
 
-## Nowości w v3.88.0
+## Nowości w v3.94.0
 
-- ✨ **Obsługa dostawców i modeli:** Korzystaj z Grok Build oraz ulepszonej obsługi modeli niestandardowych. Ta wersja poprawia także limity modeli Bedrock i wysyła ustawienie szczegółowości Codex.
-- 🧭 **Niezawodność zadań:** Ta wersja poprawia obsługę przerywania, kontynuowanie tur narzędzi oraz zapisywanie wiadomości zadań.
-- ⚡ **Szybsza edycja i czat:** Zapisywanie plików nie używa już domyślnie sztucznych opóźnień. Wiadomości czatu zawierają mniej danych plików, a akcje kodu trafiają do ostatnio aktywnego czatu.
+- ✨ **Szersza obsługa modeli i dostawców:** Używaj Claude Haiku 5.5 przez Anthropic, wysyłaj obrazy do zgodnych modeli VS Code LM, dostrajaj temperaturę dla modeli OpenCode Go Responses i anuluj żądania w czysty sposób u większej liczby dostawców.
+- 🔐 **Bardziej elastyczne MCP OAuth:** Skonfiguruj statyczne ustawienia klienta OAuth, użyj niestandardowych ścieżek callback, odkrywaj szczegóły uwierzytelniania z nagłówka `WWW-Authenticate` i zobacz błędy callback przed ponowną próbą.
+- 🧭 **Płynniejsze czaty i długie sesje:** Zmieniaj nazwy zadań w historii, przeciągaj pliki do czatu bez przytrzymywania Shift, zmniejszaj ilość pamięci zachowywanej podczas długich sesji i utrzymuj stabilne linki podzadań oraz zastąpione widoki webview.
 
 ## Co Zoo Code może zrobić dla CIEBIE?
 

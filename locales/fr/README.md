@@ -47,11 +47,11 @@ Zoo Code s'appuie sur les fondations créées par Roo Code et continue de les en
 - **Des workflows de terminal et d'édition plus fiables** — correctifs pour les fins prématurées de commandes dans le terminal, les conditions de concurrence liées à l'état des tâches, la gestion du contexte, l'édition de diff et l'utilisation d'outils propres aux providers.
 - **Davantage de contrôle sur ton espace de travail** — gestion des règles, restrictions MCP par mode, contrôle des chemins multi-root, options de raisonnement des modèles et actions de vérification des modifications à la fin d'une tâche.
 
-## Nouveautés de la v3.88.0
+## Nouveautés de la v3.94.0
 
-- ✨ **Prise en charge des fournisseurs et des modèles :** Utilise Grok Build et une prise en charge améliorée des modèles personnalisés. Cette version corrige aussi les limites de modèles Bedrock et envoie le paramètre de verbosité de Codex.
-- 🧭 **Fiabilité des tâches :** Cette version corrige la gestion des annulations, la poursuite des tours d'outils et la sauvegarde des messages de tâche.
-- ⚡ **Édition et chat plus rapides :** Les écritures de fichiers n'utilisent plus de délais artificiels par défaut. Les messages du chat transportent moins de données de fichiers, et les actions de code atteignent le dernier chat actif.
+- ✨ **Prise en charge plus large des modèles et fournisseurs :** Utilise Claude Haiku 5.5 via Anthropic, envoie des images aux modèles VS Code LM compatibles, ajuste la température pour les modèles OpenCode Go Responses et annule les requêtes proprement chez plus de fournisseurs.
+- 🔐 **MCP OAuth plus flexible :** Configure des paramètres statiques de client OAuth, utilise des chemins de callback personnalisés, découvre les détails d'authentification dans `WWW-Authenticate` et vois les échecs de callback avant de réessayer.
+- 🧭 **Chats et longues sessions plus fluides :** Renomme les tâches dans l'historique, glisse des fichiers dans le chat sans maintenir Shift, réduis la mémoire conservée pendant les longues sessions et garde stables les liens de sous-tâches et les webviews remplacés.
 
 ## Que peut faire Zoo Code pour VOUS ?
 

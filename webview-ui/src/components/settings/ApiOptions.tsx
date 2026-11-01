@@ -29,6 +29,7 @@ import {
 	handleModelChangeSideEffects,
 	toBedrockModelId,
 } from "./utils/providerModelConfig"
+import { isTemperatureControlSupported } from "./utils/temperatureSupport"
 
 import { vscode } from "@src/utils/vscode"
 import { validateApiConfigurationExcludingModelErrors, getModelValidationError } from "@src/utils/validate"
@@ -85,6 +86,7 @@ import {
 	VercelAiGateway,
 	OpenCodeGo,
 	Kenari,
+	IOIntelligence,
 	NanoGPT,
 	ZooGateway,
 	MiniMax,
@@ -132,17 +134,17 @@ const ApiOptions = ({
 		useExtensionState()
 
 	const [customHeaders, setCustomHeaders] = useState<[string, string][]>(() => {
-		const headers = apiConfiguration?.openAiHeaders || {}
+		const headers = apiConfiguration.openAiHeaders || {}
 		return Object.entries(headers)
 	})
 
 	useEffect(() => {
-		const propHeaders = apiConfiguration?.openAiHeaders || {}
+		const propHeaders = apiConfiguration.openAiHeaders || {}
 
 		if (JSON.stringify(customHeaders) !== JSON.stringify(Object.entries(propHeaders))) {
 			setCustomHeaders(Object.entries(propHeaders))
 		}
-	}, [apiConfiguration?.openAiHeaders, customHeaders])
+	}, [apiConfiguration.openAiHeaders, customHeaders])
 
 	// Helper to convert array of tuples to object (filtering out empty keys).
 
@@ -150,7 +152,7 @@ const ApiOptions = ({
 	// customHeaders state stabilizes.
 	useDebounce(
 		() => {
-			const currentConfigHeaders = apiConfiguration?.openAiHeaders || {}
+			const currentConfigHeaders = apiConfiguration.openAiHeaders || {}
 			const newHeadersObject = convertHeadersToObject(customHeaders)
 
 			// Only update if the processed object is different from the current config.
@@ -159,7 +161,7 @@ const ApiOptions = ({
 			}
 		},
 		300,
-		[customHeaders, apiConfiguration?.openAiHeaders, setApiConfigurationField],
+		[customHeaders, apiConfiguration.openAiHeaders, setApiConfigurationField],
 	)
 
 	const [isAdvancedSettingsOpen, setIsAdvancedSettingsOpen] = useState(false)
@@ -195,11 +197,11 @@ const ApiOptions = ({
 	useZooGatewayRouterModelsSync()
 
 	const { data: openRouterModelProviders } = useOpenRouterModelProviders(
-		apiConfiguration?.openRouterModelId,
-		apiConfiguration?.openRouterBaseUrl,
+		apiConfiguration.openRouterModelId,
+		apiConfiguration.openRouterBaseUrl,
 		{
 			enabled:
-				!!apiConfiguration?.openRouterModelId &&
+				!!apiConfiguration.openRouterModelId &&
 				routerModels?.openrouter &&
 				Object.keys(routerModels.openrouter).length > 1 &&
 				apiConfiguration.openRouterModelId in routerModels.openrouter,
@@ -230,8 +232,8 @@ const ApiOptions = ({
 				vscode.postMessage({
 					type: OpenAiModelsMessageType.requestOpenAiModels,
 					values: {
-						baseUrl: apiConfiguration?.openAiBaseUrl,
-						apiKey: apiConfiguration?.openAiApiKey,
+						baseUrl: apiConfiguration.openAiBaseUrl,
+						apiKey: apiConfiguration.openAiApiKey,
 						customHeaders: {}, // Reserved for any additional headers.
 						openAiHeaders: headerObject,
 					},
@@ -240,12 +242,12 @@ const ApiOptions = ({
 				vscode.postMessage({
 					type: OllamaModelsMessageType.requestOllamaModels,
 					values: {
-						baseUrl: apiConfiguration?.ollamaBaseUrl,
-						apiKey: apiConfiguration?.ollamaApiKey,
+						baseUrl: apiConfiguration.ollamaBaseUrl,
+						apiKey: apiConfiguration.ollamaApiKey,
 					},
 				})
 			} else if (selectedProvider === providerIdentifiers.lmstudio) {
-				requestLmStudioModels(apiConfiguration?.lmStudioBaseUrl)
+				requestLmStudioModels(apiConfiguration.lmStudioBaseUrl)
 			} else if (
 				selectedProvider === providerIdentifiers.vscodeLm ||
 				selectedProvider === providerIdentifiers.githubCopilot
@@ -262,8 +264,8 @@ const ApiOptions = ({
 					type: RouterModelsMessageType.requestRouterModels,
 					values: {
 						provider: providerIdentifiers.litellm,
-						litellmApiKey: apiConfiguration?.litellmApiKey,
-						litellmBaseUrl: apiConfiguration?.litellmBaseUrl,
+						litellmApiKey: apiConfiguration.litellmApiKey,
+						litellmBaseUrl: apiConfiguration.litellmBaseUrl,
 					},
 				})
 			} else if (selectedProvider === providerIdentifiers.poe) {
@@ -276,16 +278,16 @@ const ApiOptions = ({
 		250,
 		[
 			selectedProvider,
-			apiConfiguration?.requestyApiKey,
-			apiConfiguration?.openAiBaseUrl,
-			apiConfiguration?.openAiApiKey,
-			apiConfiguration?.ollamaBaseUrl,
-			apiConfiguration?.ollamaApiKey,
-			apiConfiguration?.lmStudioBaseUrl,
-			apiConfiguration?.litellmBaseUrl,
-			apiConfiguration?.litellmApiKey,
-			apiConfiguration?.poeApiKey,
-			apiConfiguration?.poeBaseUrl,
+			apiConfiguration.requestyApiKey,
+			apiConfiguration.openAiBaseUrl,
+			apiConfiguration.openAiApiKey,
+			apiConfiguration.ollamaBaseUrl,
+			apiConfiguration.ollamaApiKey,
+			apiConfiguration.lmStudioBaseUrl,
+			apiConfiguration.litellmBaseUrl,
+			apiConfiguration.litellmApiKey,
+			apiConfiguration.poeApiKey,
+			apiConfiguration.poeBaseUrl,
 			customHeaders,
 		],
 	)
@@ -707,6 +709,17 @@ const ApiOptions = ({
 						/>
 					)}
 
+					{selectedProvider === providerIdentifiers.ioIntelligence && (
+						<IOIntelligence
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							routerModels={routerModels}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
+							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
 					{selectedProvider === providerIdentifiers.nanogpt && (
 						<NanoGPT
 							apiConfiguration={apiConfiguration}
@@ -824,7 +837,12 @@ const ApiOptions = ({
 									todoListEnabled={apiConfiguration.todoListEnabled}
 									onChange={(field, value) => setApiConfigurationField(field, value)}
 								/>
-								{selectedModelInfo?.supportsTemperature !== false && (
+								{isTemperatureControlSupported({
+									provider: activeSelectedProvider,
+									modelId: selectedModelId,
+									modelInfo: selectedModelInfo,
+									apiConfiguration,
+								}) && (
 									<TemperatureControl
 										value={apiConfiguration.modelTemperature}
 										onChange={handleInputChange("modelTemperature", noTransform)}
@@ -876,7 +894,7 @@ const ApiOptions = ({
 								/>
 								{selectedProvider === providerIdentifiers.poe && (
 									<VSCodeTextField
-										value={apiConfiguration?.poeBaseUrl || ""}
+										value={apiConfiguration.poeBaseUrl || ""}
 										onInput={handleInputChange("poeBaseUrl")}
 										placeholder="https://api.poe.com/v1"
 										className="w-full">
@@ -899,7 +917,7 @@ const ApiOptions = ({
 											</div>
 											<Select
 												value={
-													apiConfiguration?.openRouterSpecificProvider ||
+													apiConfiguration.openRouterSpecificProvider ||
 													OPENROUTER_DEFAULT_PROVIDER_NAME
 												}
 												onValueChange={(value) =>

@@ -700,6 +700,10 @@ export const webviewMessageHandler = async (
 
 			provider.isViewLaunched = true
 			break
+		case "webviewHeartbeat":
+			// Confirm renderer liveness and advance the watchdog recovery health window.
+			provider.updateWebviewHeartbeat()
+			break
 		case "newTask":
 			// Initializing new instance of Cline will make sure that any
 			// agentically running promises in old instance don't affect our new
@@ -981,6 +985,11 @@ export const webviewMessageHandler = async (
 		case "exportTaskWithId":
 			await provider.exportTaskWithId(message.text!)
 			break
+		case "renameTaskWithId":
+			if (message.taskId) {
+				await provider.renameTaskWithId(message.taskId, message.text)
+			}
+			break
 		case "getTaskWithAggregatedCosts": {
 			try {
 				const taskId = message.text
@@ -1150,6 +1159,7 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.moonshot]: {},
 						[providerIdentifiers.opencodeGo]: {},
 						[providerIdentifiers.kenari]: {},
+						[providerIdentifiers.ioIntelligence]: {},
 						[providerIdentifiers.nanogpt]: {},
 						[providerIdentifiers.kimiCode]: {},
 					}
@@ -1330,6 +1340,22 @@ export const webviewMessageHandler = async (
 			candidates.push({
 				key: providerIdentifiers.kenari,
 				options: { provider: providerIdentifiers.kenari, apiKey: kenariApiKey },
+			})
+
+			// IO Intelligence's /models catalog is public; an optional key can scope
+			// the visible model set. Prefer an explicitly supplied unsaved key.
+			const ioIntelligenceApiKey = message?.values?.ioIntelligenceApiKey ?? apiConfiguration.ioIntelligenceApiKey
+			if (message?.values?.ioIntelligenceApiKey !== undefined) {
+				await flushModels(
+					{ provider: providerIdentifiers.ioIntelligence, apiKey: ioIntelligenceApiKey },
+					handlerFor(apiConfiguration, providerIdentifiers.ioIntelligence),
+					true,
+				)
+			}
+
+			candidates.push({
+				key: providerIdentifiers.ioIntelligence,
+				options: { provider: providerIdentifiers.ioIntelligence, apiKey: ioIntelligenceApiKey },
 			})
 
 			// NanoGPT's detailed catalog is public, while an optional key can expose a
@@ -2408,6 +2434,20 @@ export const webviewMessageHandler = async (
 				await provider.upsertProviderProfile(message.text, message.apiConfiguration)
 			}
 			break
+		case "updateProfileModel": {
+			const { expectedProvider, patch } = message.values ?? {}
+
+			if (
+				message.text &&
+				typeof expectedProvider === "string" &&
+				patch &&
+				typeof patch === "object" &&
+				!Array.isArray(patch)
+			) {
+				await provider.updateProfileModel(message.text, expectedProvider, patch)
+			}
+			break
+		}
 		case "renameApiConfiguration":
 			if (message.values && message.apiConfiguration) {
 				try {

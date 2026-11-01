@@ -331,12 +331,13 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	 * Detect models that require the adaptive-thinking API contract.
 	 *
 	 * Starting with Claude Opus 4.7 (and the matching Sonnet 4.7), and continuing
-	 * in Opus 4.8 / Sonnet 4.8, Claude Fable 5/5.1, Claude Sonnet 5, and Claude Opus 5,
-	 * Anthropic removed sampling parameters (temperature/top_p/top_k) and replaced
-	 * budget_tokens-based thinking with `thinking.type: "adaptive"` plus
+	 * in Opus 4.8 / Sonnet 4.8, Claude Fable 5/5.1, Claude Sonnet 5, Claude Opus 5,
+	 * and Claude Haiku 5.5, Anthropic removed sampling parameters (temperature/top_p/top_k)
+	 * and replaced budget_tokens-based thinking with `thinking.type: "adaptive"` plus
 	 * `output_config.effort`. The migration guide from 4.7 → 4.8 confirms there
-	 * are no further breaking API changes, and Fable 5+ / Sonnet 5 / Opus 5 keep the
-	 * same adaptive-thinking contract, so a single guard matches all generations.
+	 * are no further breaking API changes, and Fable 5+ / Sonnet 5 / Opus 5 /
+	 * Haiku 5.5 keep the same adaptive-thinking contract, so a single guard
+	 * matches all generations.
 	 * Shared by createMessage and completePrompt so both request paths omit
 	 * temperature for these models (sending it causes a 400).
 	 *
@@ -352,7 +353,8 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			baseModelId.includes("fable-5") ||
 			baseModelId.includes("sonnet-4-7") ||
 			baseModelId.includes("sonnet-4-8") ||
-			baseModelId.includes("sonnet-5")
+			baseModelId.includes("sonnet-5") ||
+			baseModelId.includes("haiku-5-5")
 		)
 	}
 

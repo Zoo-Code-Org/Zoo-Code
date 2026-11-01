@@ -13,6 +13,7 @@
 	"deleteTaskTitle": "删除任务（Shift + 点击跳过确认）",
 	"copyPrompt": "复制提示词",
 	"exportTask": "导出任务",
+	"renameTask": "重命名任务",
 	"deleteTask": "删除任务",
 	"deleteTaskMessage": "确认删除该任务？此操作不可逆。",
 	"cancel": "取消",

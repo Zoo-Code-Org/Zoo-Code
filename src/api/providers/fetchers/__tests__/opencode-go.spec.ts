@@ -75,6 +75,26 @@ describe("Opencode Go Fetchers", () => {
 			})
 		})
 
+		it("keeps curated Responses temperature support after merging live metadata", async () => {
+			mockedAxios.get.mockResolvedValue({
+				data: {
+					data: [
+						{ id: "grok-4.6", context_window: 400_000 },
+						{ id: "muse-spark-1.2-contributor", max_tokens: 65_536 },
+						{ id: "gpt-5.6-luna", context_window: 900_000 },
+					],
+				},
+			})
+
+			const models = await getOpencodeGoModels("k")
+
+			// Live limits never override the curated temperature capability
+			// (Zoo-Code-Org/Zoo-Code#2055).
+			expect(models["grok-4.6"]).toMatchObject({ contextWindow: 400_000, supportsTemperature: true })
+			expect(models["muse-spark-1.2-contributor"]).toMatchObject({ maxTokens: 65_536, supportsTemperature: true })
+			expect(models["gpt-5.6-luna"]).toMatchObject({ contextWindow: 900_000, supportsTemperature: false })
+		})
+
 		it("uses curated gpt-6-luna metadata when the live model omits metadata", async () => {
 			mockedAxios.get.mockResolvedValue({ data: { data: [{ id: "gpt-6-luna" }] } })
 
@@ -86,9 +106,9 @@ describe("Opencode Go Fetchers", () => {
 				supportsImages: true,
 				supportsPromptCache: true,
 				supportsMaxTokens: true,
-				// The Opencode Go Responses gateway rejects `temperature` for
-				// `gpt-6-luna`, so the curated registry must opt out so the UI
-				// hides the dead control rather than rendering it.
+				// The Go gateway accepts `temperature` for `gpt-6-luna` only with
+				// reasoning effort "none", so the static baseline opts out and the
+				// effort-aware rule opts back in (Zoo-Code-Org/Zoo-Code#2055).
 				supportsTemperature: false,
 				supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
 				reasoningEffort: "medium",
@@ -140,6 +160,37 @@ describe("Opencode Go Fetchers", () => {
 				inputPrice: 0.1,
 				outputPrice: 0.2,
 				cacheReadsPrice: 0.002,
+			})
+		})
+
+		it("resolves MiMo V2.6 Flash and Pro from an ID-only catalog response", async () => {
+			mockedAxios.get.mockResolvedValue({
+				data: { data: [{ id: "mimo-v2.6-flash" }, { id: "mimo-v2.6-pro" }] },
+			})
+
+			const models = await getOpencodeGoModels("k")
+
+			// The generic fallback would report 200_000 context / 32_768 output and
+			// no pricing, so these values prove the native registry was used.
+			expect(models["mimo-v2.6-flash"]).toMatchObject({
+				contextWindow: 1_048_576,
+				maxTokens: 131_072,
+				supportsImages: true,
+				supportsPromptCache: false,
+				preserveReasoning: true,
+				inputPrice: 0.14,
+				outputPrice: 0.28,
+				cacheReadsPrice: 0.0028,
+			})
+			expect(models["mimo-v2.6-pro"]).toMatchObject({
+				contextWindow: 1_048_576,
+				maxTokens: 131_072,
+				supportsImages: true,
+				supportsPromptCache: false,
+				preserveReasoning: true,
+				inputPrice: 0.435,
+				outputPrice: 0.87,
+				cacheReadsPrice: 0.003625,
 			})
 		})
 
@@ -233,6 +284,8 @@ describe("Opencode Go Fetchers", () => {
 				"mimo-v2-omni",
 				"mimo-v2.5-pro",
 				"mimo-v2.5",
+				"mimo-v2.6-flash",
+				"mimo-v2.6-pro",
 				"hy4-preview",
 				"hy3",
 				"hy3-preview",
@@ -308,6 +361,28 @@ describe("Opencode Go Fetchers", () => {
 			expect(info.inputPrice).toBe(0.3)
 			expect(info.outputPrice).toBe(1.2)
 			expect(info.cacheReadsPrice).toBe(0.006)
+		})
+
+		it("resolves MiMo V2.6 Flash and Pro to their 1M context when live metadata is absent", () => {
+			const flash = parseOpencodeGoModel({ id: "mimo-v2.6-flash" })
+			expect(flash.contextWindow).toBe(1_048_576)
+			expect(flash.maxTokens).toBe(131_072)
+			expect(flash.supportsImages).toBe(true)
+			expect(flash.supportsPromptCache).toBe(false)
+			expect(flash.preserveReasoning).toBe(true)
+			expect(flash.inputPrice).toBe(0.14)
+			expect(flash.outputPrice).toBe(0.28)
+			expect(flash.cacheReadsPrice).toBe(0.0028)
+
+			const pro = parseOpencodeGoModel({ id: "mimo-v2.6-pro" })
+			expect(pro.contextWindow).toBe(1_048_576)
+			expect(pro.maxTokens).toBe(131_072)
+			expect(pro.supportsImages).toBe(true)
+			expect(pro.supportsPromptCache).toBe(false)
+			expect(pro.preserveReasoning).toBe(true)
+			expect(pro.inputPrice).toBe(0.435)
+			expect(pro.outputPrice).toBe(0.87)
+			expect(pro.cacheReadsPrice).toBe(0.003625)
 		})
 
 		it("resolves GLM-5.2 with its 1M context and High/Max reasoning effort", () => {

@@ -77,6 +77,7 @@ const OPENROUTER_SCOPE: ModelCacheScope = { urlScoped: false, keyScoped: false, 
 const LITELLM_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: false }
 const REQUESTY_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: false }
 const NANOGPT_SCOPE: ModelCacheScope = { urlScoped: false, keyScoped: true, authScoped: false }
+const IOINTELLIGENCE_SCOPE: ModelCacheScope = { urlScoped: false, keyScoped: true, authScoped: false }
 const ZOO_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: true }
 const MOONSHOT_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: false }
 
@@ -84,6 +85,7 @@ const openRouterHandler = makeHandler(OPENROUTER_SCOPE, vi.fn())
 const zooGatewayHandler = makeHandler(ZOO_SCOPE, vi.fn())
 
 const DUMMY_REQUESTY_KEY = "requesty-key-for-testing"
+const DUMMY_IOINTELLIGENCE_KEY = "io-intelligence-key-for-testing"
 
 describe("getModels with new GetModelsOptions", () => {
 	beforeEach(() => {
@@ -223,6 +225,24 @@ describe("getModels with new GetModelsOptions", () => {
 		const handler = makeHandler(NANOGPT_SCOPE, fetchModels)
 
 		const options = { provider: providerIdentifiers.nanogpt, apiKey: "nanogpt-key" } as const
+		const result = await getModels(options, handler)
+
+		expect(fetchModels).toHaveBeenCalledWith(options, expect.any(AbortSignal))
+		expect(result).toEqual(mockModels)
+	})
+
+	it("dispatches IO Intelligence with an optional API key", async () => {
+		const mockModels = {
+			"meta-llama/Llama-3.3-70B-Instruct": {
+				maxTokens: 8192,
+				contextWindow: 128000,
+				supportsPromptCache: false,
+			},
+		}
+		const fetchModels = vi.fn().mockResolvedValue(mockModels)
+		const handler = makeHandler(IOINTELLIGENCE_SCOPE, fetchModels)
+
+		const options = { provider: providerIdentifiers.ioIntelligence, apiKey: DUMMY_IOINTELLIGENCE_KEY } as const
 		const result = await getModels(options, handler)
 
 		expect(fetchModels).toHaveBeenCalledWith(options, expect.any(AbortSignal))
@@ -1178,6 +1198,37 @@ describe("key-scoped cache key derivation", () => {
 		const discriminator = cacheKey.split(":").pop() as string
 		expect(discriminator).toMatch(/^[0-9a-f]{8}$/)
 	})
+
+	it("never serves one key's catalog to another key on the same server", async () => {
+		// Requesty enforces per-key model allowlists, so a shared entry would expose one
+		// key's catalog to another. Drive the real getModels() cache path with a stateful
+		// in-memory store so a cache hit is observable.
+		const store = new Map<string, unknown>()
+		// NodeCache keys are `string | number`; the cache only ever writes string keys here.
+		mockCache.get.mockImplementation((key: string | number) => store.get(String(key)) as never)
+		mockCache.set.mockImplementation(((key: string | number, value: unknown) => {
+			store.set(String(key), value)
+			return true
+		}) as never)
+
+		const keyOneModels = { "key-one/model": mockModels["key-scoped/model"] }
+		const keyTwoModels = { "key-two/model": mockModels["key-scoped/model"] }
+		const fetchKeyOne = vi.fn().mockResolvedValue(keyOneModels)
+		const fetchKeyTwo = vi.fn().mockResolvedValue(keyTwoModels)
+		const handlerOne = makeHandler(REQUESTY_SCOPE, fetchKeyOne)
+		const handlerTwo = makeHandler(REQUESTY_SCOPE, fetchKeyTwo)
+
+		const keyOneOptions = { provider: keyScopedProvider, apiKey: "key-one" } as const
+		const keyTwoOptions = { provider: keyScopedProvider, apiKey: "key-two" } as const
+
+		await expect(getModels(keyOneOptions, handlerOne)).resolves.toEqual(keyOneModels)
+		await expect(getModels(keyTwoOptions, handlerTwo)).resolves.toEqual(keyTwoModels)
+
+		// Re-reading key one must hit its own entry, not key two's.
+		await expect(getModels(keyOneOptions, handlerOne)).resolves.toEqual(keyOneModels)
+		expect(fetchKeyOne).toHaveBeenCalledTimes(1)
+		expect(fetchKeyTwo).toHaveBeenCalledTimes(1)
+	})
 })
 
 describe("NanoGPT key-scoped cache isolation", () => {
@@ -1204,6 +1255,33 @@ describe("NanoGPT key-scoped cache isolation", () => {
 		expect(new Set(cacheKeys).size).toBe(3)
 		expect(cacheKeys).toContain("nanogpt")
 		expect(cacheKeys.every((key) => !key.includes("nano-key-a") && !key.includes("nano-key-b"))).toBe(true)
+	})
+})
+
+describe("IO Intelligence key-scoped cache isolation", () => {
+	const ioIntelligenceModels = {
+		"meta-llama/Llama-3.3-70B-Instruct": { maxTokens: 8_192, contextWindow: 128_000, supportsPromptCache: false },
+	}
+
+	let handler: ApiHandler
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		handler = makeHandler(IOINTELLIGENCE_SCOPE, vi.fn().mockResolvedValue(ioIntelligenceModels))
+	})
+
+	it("separates public, key A, and key B cache identities without exposing raw keys", async () => {
+		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+
+		await getModels({ provider: providerIdentifiers.ioIntelligence }, handler)
+		await getModels({ provider: providerIdentifiers.ioIntelligence, apiKey: "ionet-key-a" }, handler)
+		await getModels({ provider: providerIdentifiers.ioIntelligence, apiKey: "ionet-key-b" }, handler)
+
+		const cacheKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		expect(new Set(cacheKeys).size).toBe(3)
+		expect(cacheKeys).toContain("io-intelligence")
+		expect(cacheKeys.every((key) => !key.includes("ionet-key-a") && !key.includes("ionet-key-b"))).toBe(true)
 	})
 })
 

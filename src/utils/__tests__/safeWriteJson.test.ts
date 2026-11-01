@@ -61,6 +61,20 @@ vi.mock("fs", async () => {
 
 import * as fs from "fs/promises" // This will now be the mocked version
 
+function makeErrorWriteStream(message: string): fsSyncActual.WriteStream {
+	const stream = Object.assign(
+		new Writable({
+			write(_chunk, _encoding, callback) {
+				callback(new Error(message))
+			},
+		}),
+		{ close: () => {}, bytesWritten: 0, path: "", pending: false },
+	)
+
+	// The double provides the Writable behavior and WriteStream properties consumed by the serializer.
+	return stream as unknown as fsSyncActual.WriteStream
+}
+
 describe("safeWriteJson", () => {
 	let originalConsoleError: typeof console.error
 
@@ -101,7 +115,7 @@ describe("safeWriteJson", () => {
 	})
 
 	// Helper function to read file content
-	async function readFileContent(filePath: string): Promise<any> {
+	async function readFileContent(filePath: string): Promise<unknown> {
 		const readContent = await fs.readFile(filePath, "utf-8")
 		return JSON.parse(readContent)
 	}
@@ -364,20 +378,10 @@ describe("safeWriteJson", () => {
 		// currentTestFilePath exists due to beforeEach, allowing lock acquisition.
 		const data = { message: "test write failure" }
 
-		const mockErrorStream = new Writable() as any
-		mockErrorStream._write = (_chunk: any, _encoding: any, callback: any) => {
-			callback(new Error("Write stream error"))
-		}
-		// Add missing WriteStream properties
-		mockErrorStream.close = vi.fn()
-		mockErrorStream.bytesWritten = 0
-		mockErrorStream.path = ""
-		mockErrorStream.pending = false
+		const mockErrorStream = makeErrorWriteStream("Write stream error")
 
 		// Mock createWriteStream to return a stream that errors on write
-		;(fsSyncActual.createWriteStream as any).mockImplementationOnce((_path: any, _options: any) => {
-			return mockErrorStream
-		})
+		vi.mocked(fsSyncActual.createWriteStream).mockImplementationOnce(() => mockErrorStream)
 
 		await expect(safeWriteJson(currentTestFilePath, data)).rejects.toThrow("Write stream error")
 
@@ -471,8 +475,7 @@ describe("safeWriteJson", () => {
 	test("should handle directory creation permission errors", async () => {
 		// fs.mkdir is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
 		vi.mocked(fs.mkdir).mockImplementationOnce(async () => {
-			const error = new Error("EACCES: permission denied") as any
-			error.code = "EACCES"
+			const error = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
 			throw error
 		})
 
@@ -585,18 +588,7 @@ describe("safeWriteJson", () => {
 
 		// Mock createWriteStream to throw an error
 		const createWriteStreamSpy = vi.spyOn(fsSyncActual, "createWriteStream")
-		createWriteStreamSpy.mockImplementationOnce((_path: any, _options: any) => {
-			const errorStream = new Writable() as any
-			errorStream._write = (_chunk: any, _encoding: any, callback: any) => {
-				callback(new Error("Stream write error"))
-			}
-			// Add missing WriteStream properties
-			errorStream.close = vi.fn()
-			errorStream.bytesWritten = 0
-			errorStream.path = _path
-			errorStream.pending = false
-			return errorStream
-		})
+		createWriteStreamSpy.mockImplementationOnce(() => makeErrorWriteStream("Stream write error"))
 
 		// This should throw but still release the lock
 		await expect(safeWriteJson(currentTestFilePath, data)).rejects.toThrow("Stream write error")
@@ -613,8 +605,7 @@ describe("safeWriteJson", () => {
 		const data = { message: "access error test" }
 		// fs.access is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
 		vi.mocked(fs.access).mockImplementationOnce(async () => {
-			const error = new Error("EACCES: permission denied") as any
-			error.code = "EACCES"
+			const error = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
 			throw error
 		})
 

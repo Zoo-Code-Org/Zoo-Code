@@ -16,8 +16,10 @@ export type InjectableConfigType =
  * Uses VSCode env:name pattern: https://code.visualstudio.com/docs/reference/variables-reference#_environment-variables
  *
  * Does not mutate original object
+ *
+ * @internal
  */
-export async function injectEnv<C extends InjectableConfigType>(config: C, notFoundValue: any = "") {
+export async function injectEnv<C extends InjectableConfigType>(config: C, notFoundValue = "") {
 	return injectVariables(config, { env: process.env }, notFoundValue)
 }
 
@@ -35,7 +37,7 @@ export async function injectEnv<C extends InjectableConfigType>(config: C, notFo
 export async function injectVariables<C extends InjectableConfigType>(
 	config: C,
 	variables: Record<string, undefined | null | string | Record<string, undefined | null | string>>,
-	propNotFoundValue?: any,
+	propNotFoundValue?: string,
 ) {
 	const isObject = typeof config === "object"
 	let configString: string = isObject ? JSON.stringify(config) : config

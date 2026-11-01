@@ -47,7 +47,7 @@ export interface SafeWriteJsonOptions {
  * - Supports pretty-printing with indentation while maintaining streaming efficiency.
  *
  * @param {string} filePath - The absolute path to the target file.
- * @param {any} data - The data to serialize to JSON and write.
+ * @param {unknown} data - The data to serialize to JSON and write.
  * @param {SafeWriteJsonOptions} options - Optional configuration for JSON formatting.
  * @returns {Promise<void>}
  */
@@ -70,7 +70,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	try {
 		await fs.mkdir(dirPath, { recursive: true })
 		await fs.access(dirPath)
-	} catch (dirError: any) {
+	} catch (dirError: unknown) {
 		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
 		throw dirError
 	}
