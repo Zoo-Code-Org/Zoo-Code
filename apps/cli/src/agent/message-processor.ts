@@ -405,29 +405,6 @@ export class MessageProcessor {
 // =============================================================================
 
 /**
- * Check if a message is a valid ClineMessage.
- * Useful for validating messages before processing.
- */
-export function isValidClineMessage(message: unknown): message is ClineMessage {
-	if (!message || typeof message !== "object") {
-		return false
-	}
-
-	const msg = message as Record<string, unknown>
-
-	// Required fields
-	if (typeof msg.ts !== "number") {
-		return false
-	}
-
-	if (msg.type !== "ask" && msg.type !== "say") {
-		return false
-	}
-
-	return true
-}
-
-/**
  * Check if a message is a valid ExtensionMessage.
  */
 export function isValidExtensionMessage(message: unknown): message is ExtensionMessage {
@@ -460,22 +437,6 @@ export function parseExtensionMessage(json: string): ExtensionMessage | undefine
 			return parsed
 		}
 		return undefined
-	} catch {
-		return undefined
-	}
-}
-
-/**
- * Parse the text field of an api_req_started message.
- * Returns undefined if parsing fails or text is not present.
- */
-export function parseApiReqStartedText(message: ClineMessage): { cost?: number } | undefined {
-	if (message.say !== "api_req_started" || !message.text) {
-		return undefined
-	}
-
-	try {
-		return JSON.parse(message.text)
 	} catch {
 		return undefined
 	}

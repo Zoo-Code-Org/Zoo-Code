@@ -306,4 +306,3 @@ function escapeRegExp(input: string): string {
 }
 
 export const editTool = new EditTool()
-export const searchAndReplaceTool = editTool // alias for backward compat

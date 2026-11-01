@@ -436,28 +436,3 @@ export function detectAgentState(messages: ClineMessage[]): AgentStateInfo {
 		description: getStateDescription(AgentLoopState.RUNNING),
 	}
 }
-
-/**
- * Quick check: Is the agent waiting for user input?
- *
- * This is a convenience function for simple use cases where you just need
- * to know if user action is required.
- */
-export function isAgentWaitingForInput(messages: ClineMessage[]): boolean {
-	return detectAgentState(messages).isWaitingForInput
-}
-
-/**
- * Quick check: Is the agent actively running (not waiting)?
- */
-export function isAgentRunning(messages: ClineMessage[]): boolean {
-	const state = detectAgentState(messages)
-	return state.isRunning && !state.isWaitingForInput
-}
-
-/**
- * Quick check: Is content currently streaming?
- */
-export function isContentStreaming(messages: ClineMessage[]): boolean {
-	return detectAgentState(messages).isStreaming
-}

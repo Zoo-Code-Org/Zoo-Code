@@ -20,7 +20,7 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 
 	// Check if the selected model supports 1M context (supported Claude 4 models)
 	const supports1MContextBeta =
-		!!apiConfiguration?.apiModelId &&
+		!!apiConfiguration.apiModelId &&
 		VERTEX_1M_CONTEXT_MODEL_IDS.includes(
 			apiConfiguration.apiModelId as (typeof VERTEX_1M_CONTEXT_MODEL_IDS)[number],
 		)
@@ -37,8 +37,8 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 	)
 
 	const credentialsLooksLikePath = useMemo(
-		() => looksLikeFilePath(apiConfiguration?.vertexJsonCredentials),
-		[apiConfiguration?.vertexJsonCredentials],
+		() => looksLikeFilePath(apiConfiguration.vertexJsonCredentials),
+		[apiConfiguration.vertexJsonCredentials],
 	)
 
 	return (
@@ -68,7 +68,7 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 				</div>
 			</div>
 			<VSCodeTextField
-				value={apiConfiguration?.vertexJsonCredentials || ""}
+				value={apiConfiguration.vertexJsonCredentials || ""}
 				onInput={handleInputChange("vertexJsonCredentials")}
 				placeholder={t("settings:placeholders.credentialsJson")}
 				className="w-full">
@@ -89,14 +89,14 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 				</div>
 			)}
 			<VSCodeTextField
-				value={apiConfiguration?.vertexKeyFile || ""}
+				value={apiConfiguration.vertexKeyFile || ""}
 				onInput={handleInputChange("vertexKeyFile")}
 				placeholder={t("settings:placeholders.keyFilePath")}
 				className="w-full">
 				<label className="block font-medium mb-1">{t("settings:providers.googleCloudKeyFile")}</label>
 			</VSCodeTextField>
 			<VSCodeTextField
-				value={apiConfiguration?.vertexProjectId || ""}
+				value={apiConfiguration.vertexProjectId || ""}
 				onInput={handleInputChange("vertexProjectId")}
 				placeholder={t("settings:placeholders.projectId")}
 				className="w-full">
@@ -105,7 +105,7 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 			<div>
 				<label className="block font-medium mb-1">{t("settings:providers.googleCloudRegion")}</label>
 				<Select
-					value={apiConfiguration?.vertexRegion || ""}
+					value={apiConfiguration.vertexRegion || ""}
 					onValueChange={(value) => setApiConfigurationField("vertexRegion", value)}>
 					<SelectTrigger className="w-full">
 						<SelectValue placeholder={t("settings:common.select")} />
@@ -124,7 +124,7 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 				<div>
 					<Checkbox
 						data-testid="checkbox-vertex-1m-context"
-						checked={apiConfiguration?.vertex1MContext ?? false}
+						checked={apiConfiguration.vertex1MContext ?? false}
 						onChange={(checked: boolean) => {
 							setApiConfigurationField("vertex1MContext", checked)
 						}}>

@@ -1,4 +1,3 @@
-import axios from "axios"
 import { z } from "zod"
 import { useQuery, UseQueryOptions } from "@tanstack/react-query"
 import { toRequestyServiceUrl } from "@roo/utils/requesty"
@@ -22,14 +21,19 @@ async function getRequestyKeyInfo(baseUrl?: string, apiKey?: string) {
 	const apiKeyUrl = new URL("x/apikey", url)
 
 	try {
-		const response = await axios.get(apiKeyUrl.toString(), {
+		const response = await fetch(apiKeyUrl.toString(), {
+			method: "GET",
 			headers: {
 				Authorization: `Bearer ${apiKey}`,
 				"Content-Type": "application/json",
 			},
 		})
 
-		const result = requestyKeyInfoSchema.safeParse(response.data)
+		if (!response.ok) {
+			throw new Error(`Request failed with status code ${response.status}`)
+		}
+
+		const result = requestyKeyInfoSchema.safeParse(await response.json())
 		if (!result.success) {
 			console.error("Requesty API key info validation failed:", result.error)
 			return null
