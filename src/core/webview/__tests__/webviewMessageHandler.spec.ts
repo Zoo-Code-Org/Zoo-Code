@@ -1455,14 +1455,21 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 	// is awaited by the handler, so a rejected promise fails that write), in
 	// call order; a plain value resolves like the default mock, and an Error
 	// element makes that call throw.
+	type InspectedCommandList = {
+		globalValue?: string[]
+		workspaceValue?: string[]
+		workspaceFolderValue?: string[]
+	}
+
+	// `inspected` may be a function of the requested key so a two-key payload
+	// test can give each list its own layers. `gateEnabled` scripts the
+	// `workspaceCommandListsEnabled` configuration read; leaving it unset
+	// keeps the gate off, matching the extension default.
 	function mockCommandConfiguration(
-		inspected: {
-			globalValue?: string[]
-			workspaceValue?: string[]
-			workspaceFolderValue?: string[]
-		},
+		inspected: InspectedCommandList | ((key: string) => InspectedCommandList),
 		updateSequence?: unknown[],
 		inspectSequence?: unknown[],
+		gateEnabled?: boolean,
 	) {
 		const update = vi.fn()
 		if (updateSequence) {
@@ -1478,11 +1485,13 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 				return next
 			})
 		} else {
-			inspect.mockReturnValue(inspected)
+			inspect.mockImplementation((key: string) => (typeof inspected === "function" ? inspected(key) : inspected))
 		}
 		// The shared structurally complete double keeps the configuration type
 		// correct; the scripted members are installed per test.
-		const config = makeWorkspaceConfiguration()
+		const config = makeWorkspaceConfiguration(
+			gateEnabled === undefined ? {} : { workspaceCommandListsEnabled: gateEnabled },
+		)
 		config.update = update
 		config.inspect = inspect
 		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
@@ -1504,10 +1513,11 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		// Extension global state holds only the global layer, so the next save
 		// cannot double-home the workspace entry.
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["aws"])
-		// Exactly one snapshot per key: the scope read, write target, and
-		// rollback all derive from the same inspect(), so a helper re-reading
-		// the configuration would raise this count and could diverge.
-		expect(inspect).toHaveBeenCalledTimes(1)
+		// One snapshot per command-list key: this key's scope read, write
+		// target, and rollback all derive from the same inspect(), and the
+		// shadowing check reads the opposite key through its own guarded
+		// snapshot, so the count is two, never more.
+		expect(inspect).toHaveBeenCalledTimes(2)
 	})
 
 	it("writes the workspace-folder value at the folder target in multi-root workspaces", async () => {
@@ -1528,7 +1538,10 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 	})
 
 	it("clears a deleted workspace entry at the workspace scope without adding it to global", async () => {
-		const { update } = mockCommandConfiguration({ workspaceValue: ["docker"] })
+		// Gate on: the entry is visible in the dialog, and only visible entries
+		// are deletable there (a hidden entry is re-added by the preservation
+		// rule instead).
+		const { update } = mockCommandConfiguration({ workspaceValue: ["docker"] }, undefined, undefined, true)
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "updateSettings",
@@ -1556,6 +1569,30 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		expect(update).toHaveBeenCalledTimes(1)
 		expect(update).toHaveBeenCalledWith("allowedCommands", ["git"], vscode.ConfigurationTarget.Global)
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedCommands", ["git"])
+	})
+
+	it("restores the raw workspace value when a workspace-target global write fails", async () => {
+		// With no folder layer the rewind must read the workspace value, not
+		// the absent folder value. The raw value holds the entry this save
+		// dropped, so the restore call is distinguishable from the workspace
+		// write itself and provably uses the raw inspected value.
+		const { update } = mockCommandConfiguration({ workspaceValue: ["npm docker", "docker"] }, [
+			undefined,
+			Promise.reject(new Error("disk on fire")),
+		])
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(update).toHaveBeenCalledWith(
+			"deniedCommands",
+			["npm docker", "docker"],
+			vscode.ConfigurationTarget.Workspace,
+		)
+		expect(update).toHaveBeenCalledTimes(3)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Failed to save deniedCommands: disk on fire")
 	})
 
 	it("restores the previous workspace value when the global write fails", async () => {
@@ -1708,6 +1745,115 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 			"Failed to save deniedCommands: disk on fire. The workspace-scoped restore also failed: Error: restore also failed. Review the command lists in your user and workspace settings.",
 		)
 		// No exception escaped the handler: the state post still ran.
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	// Entries the dialog never displayed — hidden while the gate is off, or
+	// shadowed by a global entry with it on — cannot be deleted by omission
+	// from a list the user could not see, so a save re-adds them to the
+	// workspace layer it rewrites.
+	it("re-adds gate-hidden workspace entries to the workspace write instead of deleting them", async () => {
+		const { update } = mockCommandConfiguration({ workspaceValue: ["docker", "npm"] }, undefined, undefined, false)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// The gate is off, so the dialog displayed nothing for this key.
+			updatedSettings: { deniedCommands: [] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker", "npm"], vscode.ConfigurationTarget.Workspace)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Workspace)
+	})
+
+	it("keeps hidden workspace entries out of the global write", async () => {
+		const { update } = mockCommandConfiguration({ workspaceValue: ["docker", "npm"] }, undefined, undefined, false)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: [] },
+		})
+
+		// Preservation is workspace-side only: re-adding hidden entries must
+		// not leak them into the user's global settings.
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["docker", "npm"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", [])
+	})
+
+	it("re-adds a workspace deny entry shadowed by a global allow entry when the gate is on", async () => {
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			(key) => (key === "deniedCommands" ? { workspaceValue: ["git push"] } : {}),
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// "git push" is shadowed by the global allow "git", so the dialog
+			// displayed nothing deletable.
+			updatedSettings: { deniedCommands: [] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["git push"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+	})
+
+	it("re-adds a shadowed workspace allow entry alongside the user's visible deletions", async () => {
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "deniedCommands" ? ["git"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			(key) => (key === "allowedCommands" ? { workspaceValue: ["git", "docker"] } : {}),
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// "docker" stayed visible and kept; "git" was hidden by the global
+			// deny, and a workspace entry the user never saw is not deletable.
+			updatedSettings: { allowedCommands: ["docker"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("allowedCommands", ["docker", "git"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("allowedCommands", [], vscode.ConfigurationTarget.Global)
+	})
+
+	it("does not persist a webview-supplied workspaceCommandListsEnabled value", async () => {
+		mockCommandConfiguration({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// A settings payload is not a second source for the gate: the
+			// synchronous user-scope configuration read is.
+			updatedSettings: { workspaceCommandListsEnabled: true, alwaysDenyUnapprovedCommands: true },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith(
+			"workspaceCommandListsEnabled",
+			expect.anything(),
+		)
+		// Sibling keys of the same payload are unaffected by the refusal.
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", true)
+	})
+
+	it("abandons a payload carrying only the gate key without writing configuration", async () => {
+		const { update } = mockCommandConfiguration({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { workspaceCommandListsEnabled: true },
+		})
+
+		expect(update).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		// The state post still runs, so the dialog re-reads the effective value
+		// instead of keeping the refused one.
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
 	})
 })

@@ -63,8 +63,10 @@ import {
 	type CommandListInspection,
 	commandListConfiguration,
 	readCommandListScopes,
+	resolveEffectiveCommandLists,
 	resolveWorkspaceWriteTarget,
 	splitCommandListScopes,
+	workspaceCommandListsEnabled,
 } from "../auto-approval/commandScope"
 import { type RouterName, toRouterName } from "../../shared/api"
 import { MessageEnhancer } from "./messageEnhancer"
@@ -758,6 +760,13 @@ export const webviewMessageHandler = async (
 					if (key === "language") {
 						newValue = value ?? "en"
 						changeLanguage(newValue as Language)
+					} else if (key === "workspaceCommandListsEnabled") {
+						// The gate's effective value is the synchronous
+						// user-scope configuration read that enforcement and
+						// display already perform; a value arriving in a
+						// settings payload is not a second source that can flip
+						// it, so it is never persisted here.
+						continue
 					} else if (key === "allowedCommands" || key === "deniedCommands") {
 						const commands = value ?? []
 
@@ -798,11 +807,34 @@ export const webviewMessageHandler = async (
 						}
 
 						const currentScopes = readCommandListScopes(key, getGlobalState(key), inspection)
-						const { globalWrite, workspaceWrite } = splitCommandListScopes(
+						const { globalWrite, workspaceWrite: keptWorkspaceWrite } = splitCommandListScopes(
 							incoming,
 							currentScopes.workspace,
 							currentScopes.global,
 						)
+
+						// Shadowing is cross-directional, so the hidden-entry
+						// set needs the opposite key's global layer as input.
+						// That opposite-key read is a fresh guarded read: it
+						// only feeds the additive preservation below and never
+						// this key's split, target, or rollback, which stay on
+						// the single snapshot.
+						const otherKey = key === "allowedCommands" ? "deniedCommands" : "allowedCommands"
+						const otherScopes = readCommandListScopes(otherKey, getGlobalState(otherKey))
+						const { hiddenWorkspaceAllow, hiddenWorkspaceDeny } = resolveEffectiveCommandLists(
+							key === "allowedCommands" ? currentScopes : otherScopes,
+							key === "deniedCommands" ? currentScopes : otherScopes,
+							workspaceCommandListsEnabled(),
+						)
+						// Entries hidden from the dialog — while the gate is off,
+						// or shadowed by a global entry with it on — cannot be
+						// deleted through a list that never displayed them, so a
+						// save re-adds them to the workspace layer it rewrites.
+						// Users remove those directly in the workspace settings
+						// file.
+						const hiddenWorkspaceEntries =
+							key === "allowedCommands" ? hiddenWorkspaceAllow : hiddenWorkspaceDeny
+						const workspaceWrite = [...new Set([...keptWorkspaceWrite, ...hiddenWorkspaceEntries])]
 						const workspaceTarget = resolveWorkspaceWriteTarget(key, inspection)
 
 						// The two configuration writes below are not atomic, so the raw

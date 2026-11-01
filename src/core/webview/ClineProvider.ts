@@ -54,6 +54,7 @@ import {
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_MODES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
+	DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED,
 	getModelId,
 	isRetiredProvider,
 	providerIdentifiers,
@@ -112,7 +113,11 @@ import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/provi
 import { ContextProxy } from "../config/ContextProxy"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
-import { readCommandListScopes } from "../auto-approval/commandScope"
+import {
+	readCommandListScopes,
+	resolveEffectiveCommandLists,
+	workspaceCommandListsEnabled,
+} from "../auto-approval/commandScope"
 import { PendingActionSettlementError, Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
@@ -2549,6 +2554,7 @@ export class ClineProvider
 			alwaysDenyUnapprovedCommands,
 			allowedCommands,
 			deniedCommands,
+			workspaceCommandListsEnabled: gateEnabled,
 			alwaysAllowMcp,
 			alwaysAllowModeSwitch,
 			alwaysAllowSubtasks,
@@ -2729,8 +2735,11 @@ export class ClineProvider
 			checkpointTimeout: checkpointTimeout ?? DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 			shouldShowAnnouncement:
 				telemetrySetting !== "unset" && lastShownAnnouncementId !== this.latestAnnouncementId,
-			allowedCommands: allowedCommands ?? [],
-			deniedCommands: deniedCommands ?? [],
+			// getState() always resolves these to the effective command lists
+			// (never undefined), so no fallback is needed here.
+			allowedCommands,
+			deniedCommands,
+			workspaceCommandListsEnabled: gateEnabled ?? DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED,
 			soundVolume: soundVolume ?? 0.5,
 			writeDelayMs: writeDelayMs ?? DEFAULT_WRITE_DELAY_MS,
 			diffFuzzyThreshold: diffFuzzyThreshold ?? DEFAULT_DIFF_FUZZY_THRESHOLD,
@@ -2930,6 +2939,14 @@ export class ClineProvider
 
 		const taskSyncEnabled: boolean = false
 
+		// One gate read and one resolver pass per getState() call, so the
+		// effective lists and the gate value posted together describe a single
+		// configuration state.
+		const gateEnabled = workspaceCommandListsEnabled()
+		const allowScopes = readCommandListScopes("allowedCommands", stateValues.allowedCommands)
+		const denyScopes = readCommandListScopes("deniedCommands", stateValues.deniedCommands)
+		const effectiveCommandLists = resolveEffectiveCommandLists(allowScopes, denyScopes, gateEnabled)
+
 		// Return the same structure as before.
 		return {
 			apiConfiguration: providerSettings,
@@ -2959,11 +2976,13 @@ export class ClineProvider
 			autoCondenseContext: stateValues.autoCondenseContext ?? true,
 			autoCondenseContextPercent: stateValues.autoCondenseContextPercent ?? 100,
 			taskHistory: includeTaskHistory ? this.taskHistoryStore.getAll() : [],
-			// Enforce and display the set union of the global-state layer and the
-			// workspace-scope configuration layer; getStateToPostToWebview shows
+			// Enforce and display the effective lists that
+			// resolveEffectiveCommandLists composes from the global-state and
+			// workspace-scope configuration layers; getStateToPostToWebview shows
 			// exactly these values, so display cannot drift from enforcement.
-			allowedCommands: readCommandListScopes("allowedCommands", stateValues.allowedCommands).merged,
-			deniedCommands: readCommandListScopes("deniedCommands", stateValues.deniedCommands).merged,
+			allowedCommands: effectiveCommandLists.allowed,
+			deniedCommands: effectiveCommandLists.denied,
+			workspaceCommandListsEnabled: gateEnabled,
 			soundEnabled: stateValues.soundEnabled ?? false,
 			ttsEnabled: stateValues.ttsEnabled ?? false,
 			ttsSpeed: stateValues.ttsSpeed ?? 1.0,

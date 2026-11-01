@@ -1,6 +1,8 @@
+import { DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED } from "@roo-code/types"
 import * as vscode from "vscode"
 
 import { Package } from "../../shared/package"
+import { isShadowedByAnyEntry } from "./commands"
 
 export type CommandListConfigKey = "allowedCommands" | "deniedCommands"
 
@@ -180,6 +182,79 @@ export function resolveWorkspaceWriteTarget(
 		return vscode.ConfigurationTarget.Workspace
 	}
 	return undefined
+}
+
+/**
+ * Reads the `zoo-code.workspaceCommandListsEnabled` gate that decides whether
+ * the workspace layers of the command-list keys take part in enforcement and
+ * display at all. The configuration declares the key with `scope:
+ * "application"`, so only user settings can flip it. The lookup is guarded
+ * leniently like the command-list reads: a configuration failure keeps the
+ * workspace layers inert, which cannot widen what auto-approval allows.
+ */
+export function workspaceCommandListsEnabled(): boolean {
+	try {
+		return commandListConfiguration().get<boolean>("workspaceCommandListsEnabled") === true
+	} catch {
+		return DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED
+	}
+}
+
+export interface EffectiveCommandLists {
+	allowed: string[]
+	denied: string[]
+	/**
+	 * Workspace allow entries absent from the effective allowlist — hidden by
+	 * the gate or shadowed by a global entry — which a dialog save must not be
+	 * able to delete by omission.
+	 */
+	hiddenWorkspaceAllow: string[]
+	/** Deny-side counterpart of {@link hiddenWorkspaceAllow}. */
+	hiddenWorkspaceDeny: string[]
+}
+
+/**
+ * Composes the raw per-key layers into the pair of lists to enforce and
+ * display, keeping display byte-equal to enforcement.
+ *
+ * Gate off: the workspace layers contribute nothing and the global layers are
+ * effective verbatim. Gate on: a workspace entry survives only when no entry
+ * of either global list shadows it, so a global entry decides every command it
+ * matches while workspace entries apply where the global layer is silent.
+ * Shadowing is cross-directional because a global allow entry silences a
+ * workspace deny entry (and vice versa) just as much as a same-list shadow.
+ *
+ * Composing here — not inside {@link readCommandListScopes} — keeps the raw
+ * layers intact for the save path, which derives the write split from them and
+ * must never see entries filtered out of the workspace layer.
+ *
+ * @param allowScopes - Raw `allowedCommands` layers from readCommandListScopes.
+ * @param denyScopes - Raw `deniedCommands` layers from readCommandListScopes.
+ * @param enabled - The value of the `workspaceCommandListsEnabled` gate.
+ * @returns The effective allow/deny lists and the workspace entries hidden
+ * from each.
+ */
+export function resolveEffectiveCommandLists(
+	allowScopes: CommandListScopes,
+	denyScopes: CommandListScopes,
+	enabled: boolean,
+): EffectiveCommandLists {
+	const globalEntries = [...allowScopes.global, ...denyScopes.global]
+
+	const keptAllow = enabled
+		? allowScopes.workspace.filter((entry) => !isShadowedByAnyEntry(entry, globalEntries))
+		: []
+	const keptDeny = enabled ? denyScopes.workspace.filter((entry) => !isShadowedByAnyEntry(entry, globalEntries)) : []
+
+	const allowed = [...new Set([...allowScopes.global, ...keptAllow])]
+	const denied = [...new Set([...denyScopes.global, ...keptDeny])]
+
+	return {
+		allowed,
+		denied,
+		hiddenWorkspaceAllow: allowScopes.workspace.filter((entry) => !allowed.includes(entry)),
+		hiddenWorkspaceDeny: denyScopes.workspace.filter((entry) => !denied.includes(entry)),
+	}
 }
 
 function sanitizeCommandList(list: unknown): string[] {

@@ -287,6 +287,7 @@ export type ExtensionState = Pick<
 	| "followupAutoApproveTimeoutMs"
 	| "allowedCommands"
 	| "deniedCommands"
+	| "workspaceCommandListsEnabled"
 	| "allowedMaxRequests"
 	| "allowedMaxCost"
 	| "ttsEnabled"

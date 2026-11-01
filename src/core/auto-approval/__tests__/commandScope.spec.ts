@@ -1,8 +1,18 @@
+import * as fs from "fs"
+import * as path from "path"
+
+import { DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED, globalSettingsSchema } from "@roo-code/types"
 import * as vscode from "vscode"
 
 import { Package } from "../../../shared/package"
 import { makeUri, makeWorkspaceConfiguration } from "../../../test-utils/vscode"
-import { readCommandListScopes, resolveWorkspaceWriteTarget, splitCommandListScopes } from "../commandScope"
+import {
+	readCommandListScopes,
+	resolveEffectiveCommandLists,
+	resolveWorkspaceWriteTarget,
+	splitCommandListScopes,
+	workspaceCommandListsEnabled,
+} from "../commandScope"
 
 // Scriptable stand-in for `vscode.workspace.workspaceFolders`: the module
 // mock's getter reads through this object, so a test can change the open
@@ -311,4 +321,123 @@ describe("resolveWorkspaceWriteTarget", () => {
 			expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, undefined)
 		},
 	)
+})
+
+function mockGateConfiguration(gate: unknown) {
+	const config = makeWorkspaceConfiguration()
+	vi.mocked(config.get).mockReturnValue(gate)
+	vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+	return config
+}
+
+// Raw per-key layers in the shape readCommandListScopes returns them.
+const listScopes = (globalList: string[], workspaceList: string[]) => ({
+	global: globalList,
+	workspace: workspaceList,
+	merged: [...new Set([...globalList, ...workspaceList])],
+})
+
+it("workspaceCommandListsEnabled: enables the workspace layers only when the gate configuration reads true", () => {
+	vi.clearAllMocks()
+	const config = mockGateConfiguration(true)
+
+	expect(workspaceCommandListsEnabled()).toBe(true)
+	expect(config.get).toHaveBeenCalledWith("workspaceCommandListsEnabled")
+})
+
+it("workspaceCommandListsEnabled: keeps the workspace layers disabled when the gate lookup throws", () => {
+	vi.clearAllMocks()
+	// Fail-closed: a broken configuration read must never widen what the
+	// workspace layer can auto-approve.
+	vi.mocked(vscode.workspace.getConfiguration).mockImplementation(() => {
+		throw new Error("configuration unavailable")
+	})
+
+	expect(workspaceCommandListsEnabled()).toBe(DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED)
+	expect(workspaceCommandListsEnabled()).toBe(false)
+})
+
+// The manifest declaration is what makes the gate workspace-unsettable;
+// VS Code itself refusing a workspace-layer value is platform behavior.
+it("manifest: declares the gate as a default-off, application-scoped boolean", () => {
+	const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "../../../package.json"), "utf8"))
+	const gate = manifest.contributes.configuration.properties["zoo-code.workspaceCommandListsEnabled"]
+
+	expect(gate.type).toBe("boolean")
+	expect(gate.default).toBe(false)
+	expect(gate.scope).toBe("application")
+})
+
+it("manifest: keeps the command-list keys workspace-settable so the gated layer can exist", () => {
+	// The gate scopes the workspace layers' effect; scoping the list keys
+	// themselves would remove the workspace layer entirely.
+	const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "../../../package.json"), "utf8"))
+	const properties = manifest.contributes.configuration.properties
+
+	expect(properties["zoo-code.allowedCommands"].scope).toBeUndefined()
+	expect(properties["zoo-code.deniedCommands"].scope).toBeUndefined()
+})
+
+it("persisted-settings schema: defaults the gate to disabled", () => {
+	expect(globalSettingsSchema.parse({}).workspaceCommandListsEnabled).toBeUndefined()
+	expect(globalSettingsSchema.parse({ workspaceCommandListsEnabled: true }).workspaceCommandListsEnabled).toBe(true)
+	expect(DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED).toBe(false)
+})
+
+it("resolveEffectiveCommandLists: hides every workspace entry, allow and deny alike, while the gate is disabled", () => {
+	const effective = resolveEffectiveCommandLists(listScopes([], ["docker"]), listScopes([], ["rm"]), false)
+
+	expect(effective.allowed).toEqual([])
+	expect(effective.denied).toEqual([])
+	expect(effective.hiddenWorkspaceAllow).toEqual(["docker"])
+	expect(effective.hiddenWorkspaceDeny).toEqual(["rm"])
+})
+
+it("resolveEffectiveCommandLists: treats unshadowed workspace entries as the sole layer when the global layer is empty", () => {
+	const effective = resolveEffectiveCommandLists(listScopes(["git"], ["docker", "aws"]), listScopes([], ["rm"]), true)
+
+	expect(effective.allowed).toEqual(["git", "docker", "aws"])
+	expect(effective.denied).toEqual(["rm"])
+	expect(effective.hiddenWorkspaceAllow).toEqual([])
+	expect(effective.hiddenWorkspaceDeny).toEqual([])
+})
+
+it("resolveEffectiveCommandLists: lets a global allow entry decide a command a longer workspace deny entry also matches", () => {
+	// Cross-directional shadowing: the workspace deny entry cannot decide
+	// anything the global allow layer already covers, so it never reaches
+	// the matcher.
+	const effective = resolveEffectiveCommandLists(listScopes(["git"], []), listScopes([], ["git push"]), true)
+
+	expect(effective.allowed).toEqual(["git"])
+	expect(effective.denied).toEqual([])
+	expect(effective.hiddenWorkspaceDeny).toEqual(["git push"])
+})
+
+it("resolveEffectiveCommandLists: lets a global deny entry veto a longer workspace allow entry", () => {
+	const effective = resolveEffectiveCommandLists(listScopes([], ["git push"]), listScopes(["git"], []), true)
+
+	expect(effective.allowed).toEqual([])
+	expect(effective.denied).toEqual(["git"])
+	expect(effective.hiddenWorkspaceAllow).toEqual(["git push"])
+})
+
+it("resolveEffectiveCommandLists: silences every workspace deny entry behind a global wildcard allow entry", () => {
+	const effective = resolveEffectiveCommandLists(listScopes(["*"], []), listScopes([], ["git push", "rm -rf"]), true)
+
+	expect(effective.allowed).toEqual(["*"])
+	expect(effective.denied).toEqual([])
+	expect(effective.hiddenWorkspaceDeny).toEqual(["git push", "rm -rf"])
+})
+
+it("resolveEffectiveCommandLists: shadows workspace entries case-insensitively, the way the matcher matches", () => {
+	const effective = resolveEffectiveCommandLists(
+		listScopes(["Git"], ["git status"]),
+		listScopes([], ["DOCKER"]),
+		true,
+	)
+
+	expect(effective.allowed).toEqual(["Git"])
+	expect(effective.denied).toEqual(["DOCKER"])
+	expect(effective.hiddenWorkspaceAllow).toEqual(["git status"])
+	expect(effective.hiddenWorkspaceDeny).toEqual([])
 })
