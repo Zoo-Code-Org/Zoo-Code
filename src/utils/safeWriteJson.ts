@@ -121,7 +121,7 @@ function _escapesScope(scopeRoot: string, candidate: string): boolean {
  * - Supports pretty-printing with indentation while maintaining streaming efficiency.
  *
  * @param {string} filePath - The absolute path to the target file.
- * @param {any} data - The data to serialize to JSON and write.
+ * @param {unknown} data - The data to serialize to JSON and write.
  * @param {SafeWriteJsonOptions} options - Optional configuration for JSON formatting.
  * @returns {Promise<void>}
  */
@@ -154,7 +154,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	try {
 		await fs.mkdir(dirPath, { recursive: true })
 		await fs.access(dirPath)
-	} catch (dirError: any) {
+	} catch (dirError: unknown) {
 		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
 		throw dirError
 	}
@@ -321,7 +321,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
  * @param prettyPrint Whether to format the JSON with indentation.
  * @returns Promise<void>
  */
-async function _streamDataToFile(targetPath: string, data: any, prettyPrint = false): Promise<void> {
+async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint = false): Promise<void> {
 	// Stream data to avoid high memory usage for large JSON objects.
 	const fileWriteStream = fsSync.createWriteStream(targetPath, { encoding: "utf8" })
 

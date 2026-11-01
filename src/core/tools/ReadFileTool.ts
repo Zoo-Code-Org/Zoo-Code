@@ -8,6 +8,7 @@
  * Also supports legacy format for backward compatibility:
  * - Legacy format: { files: [{ path: string, lineRanges?: [...] }] }
  */
+import { markToolRejected } from "../task/toolExecutionContext"
 import path from "path"
 import * as fs from "fs/promises"
 import { isBinaryFile } from "isbinaryfile"
@@ -85,7 +86,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 	 * Execute new single-file format with slice/indentation mode support.
 	 */
 	private async executeNew(params: ReadFileParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
-		const { pushToolResult } = callbacks
+		const { pushToolResult, toolCallId } = callbacks
 		const modelInfo = task.api.getModel().info
 		const filePath = params.path
 
@@ -164,7 +165,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 			}
 
 			// Phase 2: Request user approval
-			await this.requestApproval(task, filesToApprove, updateFileResult)
+			await this.requestApproval(task, toolCallId, filesToApprove, updateFileResult)
 
 			// Phase 3: Process approved files
 			const imageMemoryTracker = new ImageMemoryTracker()
@@ -473,6 +474,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 	 */
 	private async requestApproval(
 		task: Task,
+		toolCallId: string,
 		filesToApprove: FileResult[],
 		updateFileResult: (path: string, updates: Partial<FileResult>) => void,
 	): Promise<void> {
@@ -502,7 +504,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				})
 			} else if (response === "noButtonClicked") {
 				if (text) await task.say("user_feedback", text, images)
-				task.didRejectTool = true
+				markToolRejected(task, toolCallId)
 				filesToApprove.forEach((fr) => {
 					updateFileResult(fr.path, {
 						status: "denied",
@@ -532,9 +534,9 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 						}
 					})
 
-					if (hasAnyDenial) task.didRejectTool = true
+					if (hasAnyDenial) markToolRejected(task, toolCallId)
 				} catch {
-					task.didRejectTool = true
+					markToolRejected(task, toolCallId)
 					filesToApprove.forEach((fr) => {
 						updateFileResult(fr.path, {
 							status: "denied",
@@ -566,7 +568,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 
 			if (response !== "yesButtonClicked") {
 				if (text) await task.say("user_feedback", text, images)
-				task.didRejectTool = true
+				markToolRejected(task, toolCallId)
 				updateFileResult(relPath, {
 					status: "denied",
 					nativeContent: `File: ${relPath}\nStatus: Denied by user`,
@@ -712,7 +714,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 	 * This handles the old format: { files: [{ path: string, lineRanges?: [...] }] }
 	 */
 	private async executeLegacy(fileEntries: FileEntry[], task: Task, callbacks: ToolCallbacks): Promise<void> {
-		const { pushToolResult } = callbacks
+		const { pushToolResult, toolCallId } = callbacks
 		const modelInfo = task.api.getModel().info
 
 		if (!fileEntries || fileEntries.length === 0) {
@@ -763,7 +765,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 
 			if (response !== "yesButtonClicked") {
 				if (text) await task.say("user_feedback", text, images)
-				task.didRejectTool = true
+				markToolRejected(task, toolCallId)
 				results.push(`File: ${relPath}\nStatus: Denied by user`)
 				continue
 			}

@@ -2,9 +2,10 @@
 //
 // Gemini `includeAllToolsWithRestrictions` path: with the flag on, `tools`
 // contains ALL declarations while `allowedFunctionNames` is derived from the
-// resolver-filtered set, so every `disabledTools`/`excludedTools` entry —
-// protocol tools included — leaves the callable allowlist while the
-// declarations stay advertised.
+// resolver-filtered set, so every `disabledTools`/`excludedTools` entry leaves
+// the callable allowlist while the declarations stay advertised — except a
+// `disabledTools` entry naming a protocol tool, which the resolver ignores, so
+// the completion tool stays callable.
 
 import type OpenAI from "openai"
 import type * as vscode from "vscode"
@@ -65,7 +66,7 @@ function toolNames(tools: OpenAI.Chat.ChatCompletionTool[]): string[] {
 describe("buildNativeToolsArrayWithRestrictions — Gemini includeAllToolsWithRestrictions", () => {
 	const provider = makeProvider()
 
-	it("sends all declarations but restricts allowedFunctionNames (protocol tool follows the allowlist once disabled)", async () => {
+	it("sends all declarations but restricts allowedFunctionNames (disabled protocol tool entry is ignored)", async () => {
 		const result = await buildNativeToolsArrayWithRestrictions({
 			provider,
 			cwd: "/test/path",
@@ -77,18 +78,29 @@ describe("buildNativeToolsArrayWithRestrictions — Gemini includeAllToolsWithRe
 			includeAllToolsWithRestrictions: true,
 		})
 
-		// All tools are still advertised (declarations), including the two
-		// disabled ones.
 		expect(toolNames(result.tools)).toContain("execute_command")
 		expect(toolNames(result.tools)).toContain("attempt_completion")
 
-		// The logical set (allowedFunctionNames) honors the policy for both:
-		// an explicit disable of a protocol tool leaves the callable allowlist
-		// just like any other tool.
-		expect(result.allowedFunctionNames).not.toContain("attempt_completion")
+		expect(result.allowedFunctionNames).toContain("attempt_completion")
 		expect(result.allowedFunctionNames).not.toContain("execute_command")
 		// Anchor: code mode still grants read_file, so the allowlist is populated.
 		expect(result.allowedFunctionNames).toContain("read_file")
+	})
+
+	it("default path (flag omitted) keeps the protocol-tool declaration while omitting disabled regular tools", async () => {
+		const result = await buildNativeToolsArrayWithRestrictions({
+			provider,
+			cwd: "/test/path",
+			mode: "code",
+			customModes: undefined,
+			experiments: {},
+			apiConfiguration: undefined,
+			disabledTools: ["execute_command", "attempt_completion"],
+		})
+
+		expect(toolNames(result.tools)).toContain("attempt_completion")
+		expect(toolNames(result.tools)).not.toContain("execute_command")
+		expect(result.allowedFunctionNames).toBeUndefined()
 	})
 
 	it("flows mode filtering through the resolver into allowedFunctionNames", async () => {

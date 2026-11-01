@@ -35,9 +35,11 @@ const expectedProviderIdentifiers = [
 	"opencode-go",
 	"kenari",
 	"nanogpt",
+	"io-intelligence",
 	"ollama",
 	"lmstudio",
 	"vscode-lm",
+	"github-copilot",
 	"openai",
 	"fake-ai",
 	"anthropic",
@@ -69,7 +71,6 @@ const expectedRetiredProviderIdentifiers = [
 	"featherless",
 	"groq",
 	"huggingface",
-	"io-intelligence",
 	"roo",
 ]
 /* eslint-enable zoo/no-raw-provider-identifiers */
@@ -111,10 +112,11 @@ describe("provider identifiers", () => {
 			providerIdentifiers.opencodeGo,
 			providerIdentifiers.kenari,
 			providerIdentifiers.nanogpt,
+			providerIdentifiers.ioIntelligence,
 			providerIdentifiers.kimiCode,
 		])
 		expect(localProviders).toEqual([providerIdentifiers.ollama, providerIdentifiers.lmstudio])
-		expect(internalProviders).toEqual([providerIdentifiers.vscodeLm])
+		expect(internalProviders).toEqual([providerIdentifiers.vscodeLm, providerIdentifiers.githubCopilot])
 		expect(customProviders).toEqual([providerIdentifiers.openai])
 		expect(fauxProviders).toEqual([providerIdentifiers.fakeAi])
 	})

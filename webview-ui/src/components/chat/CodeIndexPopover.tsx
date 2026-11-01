@@ -498,7 +498,7 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 		} catch (error) {
 			if (error instanceof z.ZodError) {
 				const errors: Record<string, string> = {}
-				error.errors.forEach((err) => {
+				error.issues.forEach((err) => {
 					if (err.path[0]) {
 						errors[err.path[0] as string] = err.message
 					}
@@ -728,7 +728,7 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 												// if the main API provider is also configured for Bedrock
 												if (
 													value === providerIdentifiers.bedrock &&
-													apiConfiguration?.apiProvider === providerIdentifiers.bedrock
+													apiConfiguration.apiProvider === providerIdentifiers.bedrock
 												) {
 													// Only populate if currently empty
 													if (

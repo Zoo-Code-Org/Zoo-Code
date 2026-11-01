@@ -15,9 +15,11 @@ export const providerIdentifiers = {
 	opencodeGo: "opencode-go",
 	kenari: "kenari",
 	nanogpt: "nanogpt",
+	ioIntelligence: "io-intelligence",
 	ollama: "ollama",
 	lmstudio: "lmstudio",
 	vscodeLm: "vscode-lm",
+	githubCopilot: "github-copilot",
 	openai: "openai",
 	fakeAi: "fake-ai",
 	anthropic: "anthropic",
@@ -52,7 +54,6 @@ export const retiredProviderIdentifiers = {
 	featherless: "featherless",
 	groq: "groq",
 	huggingface: "huggingface",
-	ioIntelligence: "io-intelligence",
 	roo: "roo",
 } as const
 

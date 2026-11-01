@@ -7,6 +7,14 @@
 	"prConcurrentLimit": 5,
 	"prCreation": "immediate",
 	"ignoreDeps": ["@vscode/vsce"],
+	"lockFileMaintenance": {
+		"enabled": true,
+		"schedule": ["before 6am on monday"]
+	},
+	"vulnerabilityAlerts": {
+		"labels": ["security"],
+		"prConcurrentLimit": 0
+	},
 	"packageRules": [
 		{
 			"description": "Group GitHub Actions updates for one review pass.",
@@ -35,6 +43,11 @@
 			],
 			"matchUpdateTypes": ["minor", "patch"],
 			"groupName": "AI SDKs and providers"
+		},
+		{
+			"description": "Move ai and @ai-sdk/* together, including majors, so exact-pinned provider deps do not split.",
+			"matchPackageNames": ["ai", "/^@ai-sdk\\//"],
+			"groupName": "AI SDK core and providers"
 		},
 		{
 			"description": "Group frontend and UI patch/minor updates.",
@@ -87,6 +100,12 @@
 			"description": "Keep @types/node pinned to the Node 22 LTS major.",
 			"matchPackageNames": ["@types/node"],
 			"allowedVersions": "22.x"
+		},
+		{
+			"description": "Update Playwright test runners and CI/local browser images together because their versions must match.",
+			"matchPackageNames": ["@playwright/test", "playwright", "playwright-core", "mcr.microsoft.com/playwright"],
+			"groupName": "Playwright",
+			"groupSingleUpdates": true
 		},
 		{
 			"description": "Update extension-host VS Code types only with an intentional minimum-version review.",

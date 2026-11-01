@@ -8,13 +8,12 @@ import {
 	isDynamicProvider,
 	parseOpenAiExtraBody,
 	providerIdentifiers,
+	githubCopilotLanguageModel,
 } from "@roo-code/types"
 
 type OpenAiExtraBodyParseResult = ReturnType<typeof parseOpenAiExtraBody>
 type OpenAiExtraBodyTranslationKey = `settings:validation.openAiExtraBody.${
-	| "invalidJson"
-	| "objectRequired"
-	| "reservedKeys"}`
+	"invalidJson" | "objectRequired" | "reservedKeys"}`
 type OpenAiExtraBodyTranslationFunction = (key: OpenAiExtraBodyTranslationKey, options?: { keys: string }) => string
 
 export function formatOpenAiExtraBodyValidationError(
@@ -147,6 +146,14 @@ function validateModelsAndKeysProvided(
 				return i18next.t("settings:validation.modelSelector")
 			}
 			break
+		case providerIdentifiers.githubCopilot:
+			if (
+				apiConfiguration.vsCodeLmModelSelector?.vendor !== githubCopilotLanguageModel.vendor ||
+				(!apiConfiguration.vsCodeLmModelSelector.id && !apiConfiguration.vsCodeLmModelSelector.family)
+			) {
+				return i18next.t("settings:validation.modelSelector")
+			}
+			break
 		case providerIdentifiers.fireworks:
 			if (!apiConfiguration.fireworksApiKey) {
 				return i18next.t("settings:validation.apiKey")
@@ -179,6 +186,11 @@ function validateModelsAndKeysProvided(
 			break
 		case providerIdentifiers.kenari:
 			if (!apiConfiguration.kenariApiKey) {
+				return i18next.t("settings:validation.apiKey")
+			}
+			break
+		case providerIdentifiers.ioIntelligence:
+			if (!apiConfiguration.ioIntelligenceApiKey) {
 				return i18next.t("settings:validation.apiKey")
 			}
 			break

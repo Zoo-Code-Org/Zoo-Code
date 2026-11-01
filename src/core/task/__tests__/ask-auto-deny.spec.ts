@@ -79,6 +79,7 @@ function attachTurnHarness(task: Task) {
 	Object.defineProperty(task, "rateLimitClock", { value: createRateLimitClock() })
 	Object.defineProperty(task, "diffViewProvider", { value: { isEditing: false, reset: async () => {} } })
 	Object.defineProperty(task, "streamingToolCallIndices", { value: new Map() })
+	Object.defineProperty(task, "activeToolContexts", { value: new Map() })
 	task["saveApiConversationHistory"] = vi.fn(async () => true)
 	task["say"] = vi.fn(async () => undefined)
 	// The loop rewrites the newest api_req_started row with cost data; the
