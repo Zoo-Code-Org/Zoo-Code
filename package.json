@@ -2,7 +2,7 @@
 	"name": "roo-code",
 	"packageManager": "pnpm@10.8.1",
 	"engines": {
-		"node": "22.23.1"
+		"node": "22.23.4"
 	},
 	"scripts": {
 		"preinstall": "node scripts/bootstrap.mjs",
@@ -10,18 +10,26 @@
 		"install": "node scripts/bootstrap.mjs",
 		"install:all": "node scripts/bootstrap.mjs",
 		"lint": "turbo lint --log-order grouped --output-logs new-only",
-		"check-types": "turbo check-types --log-order grouped --output-logs new-only",
+		"check-types": "tsc -p tsconfig.json --noEmit && turbo check-types --log-order grouped --output-logs new-only",
 		"test": "turbo test --log-order grouped --output-logs new-only",
 		"test:code-qa-ci": "node --test scripts/code-qa-workflow.test.mjs",
+		"solheim:smoke": "node --import tsx scripts/solheim-smoke/driver.mts",
+		"test:solheim-smoke-ci": "node --test scripts/solheim-smoke-workflow.test.mjs",
+		"test:solheim-smoke:unit": "node --import tsx --test scripts/solheim-smoke/*.test.ts",
+		"solheim-smoke:check-types": "tsc -p scripts/solheim-smoke/tsconfig.json",
+		"test:agent-evals:unit": "node --import tsx --test scripts/agent-evals/*.test.ts",
+		"agent-evals:check-types": "tsc -p scripts/agent-evals/tsconfig.json",
 		"test:mutation-ci": "node --test scripts/stryker-diff.test.mjs",
 		"lifecycle:model-check": "tsx scripts/check-task-lifecycle.ts && tsx scripts/check-task-store-concurrency.ts && tsx scripts/check-provider-handoff-scheduler.ts && pnpm cleanup-protocol:model-check && pnpm parser-scope:model-check && tsx scripts/check-completion-persistence.ts && tsx scripts/check-delegated-mode-readers.ts && pnpm tool-turn:model-check",
+		"webview-recovery:model-check": "node --import tsx scripts/check-webview-recovery.ts",
+		"webview-recovery:check-types": "tsc -p scripts/tsconfig.webview-recovery.json",
 		"fanout-protocol:model-check": "tsx scripts/check-task-fanout-protocol.ts",
 		"cleanup-protocol:model-check": "tsx scripts/check-task-cleanup-protocol.ts",
 		"tool-turn:model-check": "tsx scripts/check-tool-turn-continuation.ts",
 		"parser-scope:model-check": "node scripts/run-native-tool-call-parser-scoping.mjs",
 		"mcp:integration-check": "tsx scripts/check-mcp-oauth-integration.ts",
 		"test:coverage": "turbo test:coverage --log-order grouped --output-logs new-only",
-		"format": "turbo format --log-order grouped --output-logs new-only",
+		"format": "prettier --write .",
 		"format:check": "prettier --check .",
 		"build": "turbo build --log-order grouped --output-logs new-only",
 		"bundle": "turbo bundle --log-order grouped --output-logs new-only",
@@ -30,17 +38,20 @@
 		"install:vsix": "pnpm install --frozen-lockfile && pnpm clean && pnpm vsix && node scripts/install-vsix.js",
 		"code-server:install": "node scripts/code-server.js",
 		"changeset:version": "cp CHANGELOG.md src/CHANGELOG.md && changeset version && cp -vf src/CHANGELOG.md .",
-		"knip": "knip",
+		"knip": "knip --treat-config-hints-as-errors",
 		"npm:publish:types": "pnpm --filter @roo-code/types npm:publish",
-		"knip:production": "knip --production",
+		"knip:production": "knip --production --treat-config-hints-as-errors",
 		"test:knip-policy": "node --test scripts/knip-policy.test.mjs"
 	},
 	"devDependencies": {
 		"@changesets/cli": "2.31.1",
 		"@roo-code/config-typescript": "workspace:^",
+		"@roo-code/ipc": "workspace:^",
+		"@roo-code/types": "workspace:^",
+		"@vscode/test-electron": "2.5.2",
 		"@stryker-mutator/core": "10.0.0",
 		"@stryker-mutator/vitest-runner": "10.0.0",
-		"@types/node": "22.20.1",
+		"@types/node": "catalog:",
 		"@vscode/vsce": "3.9.2",
 		"esbuild": "0.28.2",
 		"eslint": "9.39.5",
@@ -51,8 +62,9 @@
 		"prettier": "3.9.10",
 		"rimraf": "6.0.1",
 		"tsx": "4.23.15",
-		"turbo": "2.11.8",
-		"typescript": "5.9.3"
+		"turbo": "catalog:",
+		"typescript": "5.9.3",
+		"yaml": "2.9.1"
 	},
 	"lint-staged": {
 		"src/**/*.ts": [
@@ -61,7 +73,7 @@
 		"webview-ui/src/**/*.{ts,tsx}": [
 			"pnpm --dir webview-ui exec eslint --max-warnings=0 --no-warn-ignored"
 		],
-		"apps/cli/src/**/*.ts": [
+		"apps/cli/src/**/*.{ts,tsx}": [
 			"pnpm --dir apps/cli exec eslint --max-warnings=0 --no-warn-ignored"
 		],
 		"apps/vscode-e2e/src/**/*.ts": [
@@ -101,15 +113,15 @@
 			"mocha>diff": "8.0.4",
 			"esbuild": "0.28.2",
 			"rollup": "4.60.4",
-			"vite": "8.3.4",
-			"undici": "6.28.1",
+			"vite": "catalog:",
+			"undici": "6.29.1",
 			"@ai-sdk/provider@3": "3.0.19",
-			"@ai-sdk/provider-utils@4": "4.0.61",
-			"@ai-sdk/openai-compatible@2": "2.0.56",
+			"@ai-sdk/provider-utils@4": "4.0.62",
+			"@ai-sdk/openai-compatible@2": "2.0.87",
 			"form-data": ">=4.0.4",
 			"bluebird": ">=3.7.2",
 			"glob": "11.1.0",
-			"qs": "6.15.2",
+			"qs": "6.16.1",
 			"@types/react": "18.3.31",
 			"@types/react-dom": "18.3.7",
 			"csstype": "3.2.3",

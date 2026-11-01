@@ -45,11 +45,11 @@ Zoo Code는 Roo Code가 만든 기반 위에서 다음 기능을 더하며 계�
 - **더 안정적인 터미널 및 편집 워크플로우** — 터미널 조기 완료, 작업 상태 경합, 컨텍스트 관리, diff 편집, 프로바이더별 도구 사용 문제를 수정.
 - **워크스페이스를 더 세밀하게 제어** — 규칙 관리, 모드별 MCP 제한, 멀티 루트 경로 제어, 모델 reasoning 옵션, 완료 시 변경 사항 검토 작업을 제공.
 
-## v3.90.0의 새로운 기능
+## v3.94.0의 새로운 기능
 
-- ✨ **Provider와 모델:** GitHub Copilot이 이제 provider입니다. 로그인하면 Zoo Code가 Copilot 모델을 불러옵니다. IO Intelligence는 자체 API 키를 쓰는 provider입니다. Gemini 4 Argon은 Gemini와 Vertex에 있습니다. GPT-6 Luna는 OpenCode Go에 있습니다. Gemini 4 Argon과 GPT-6 Luna는 Zoo Gateway에도 있습니다.
-- 🧭 **도구 실행:** 같은 도구 호출을 반복하면 경고가 나오고, 그다음 Zoo Code가 그 루프를 멈춥니다. `attempt_completion`을 꺼도 작업이 끝나지 못하는 상태가 되지 않습니다. 대기 중인 메시지는 직접 보내는 명령과 같은 명령 보호 검사를 거칩니다.
-- ⚡ **추론과 스트리밍:** Anthropic adaptive thinking이 채팅에 표시되고 thinking token이 집계됩니다. R1 토글은 llama.cpp, Ollama, LM Studio의 추론을 유지합니다. Codex는 보이는 요약과 함께 암호화된 추론을 유지합니다. VS Code language model 스트림은 스트림이 실패하면 guarded recovery를 사용합니다.
+- ✨ **더 넓어진 모델 및 공급자 지원:** Anthropic을 통해 Claude Haiku 5.5를 사용하고, 호환되는 VS Code LM 모델에 이미지를 보내고, OpenCode Go Responses 모델의 temperature를 조정하고, 더 많은 공급자에서 요청을 깔끔하게 취소하세요.
+- 🔐 **더 유연한 MCP OAuth:** 정적 OAuth 클라이언트 설정을 구성하고, 사용자 지정 콜백 경로를 사용하고, `WWW-Authenticate`에서 인증 세부 정보를 확인하고, 재시도 전에 콜백 실패를 확인하세요.
+- 🧭 **더 원활한 채팅과 긴 세션:** 기록에서 작업 이름을 바꾸고, Shift를 누르지 않고도 파일을 채팅으로 드래그하고, 긴 세션 동안 유지되는 메모리를 줄이고, 하위 작업 링크와 교체된 웹뷰를 안정적으로 유지하세요.
 
 ## Zoo Code가 당신을 위해 무엇을 할 수 있을까요?
 
