@@ -1,11 +1,12 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
+import { createRef } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { renderWithExtensionState } from "@/utils/test-utils"
 import { vscode } from "@src/utils/vscode"
 
-import SettingsView from "../SettingsView"
+import SettingsView, { type SettingsViewRef } from "../SettingsView"
 import { answerSave, lastSaveRequestId } from "./saveAcknowledgement"
 
 vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
@@ -321,5 +322,62 @@ describe("SettingsView – which appearance values a save sends", () => {
 		fireEvent.click(screen.getByTestId("save-button"))
 
 		expect(lastUpdatedSettings().terminalFontSize).toBe(13)
+	})
+})
+
+describe("SettingsView – leaving while an appearance save is pending", () => {
+	beforeEach(() => postMessage.mockClear())
+
+	const doneButton = () => screen.getByRole("button", { name: "settings:common.done" })
+
+	it("disables Done while the save waits, and enables it again once the host has answered", async () => {
+		renderUiTab()
+		await makeAnEdit()
+		expect(doneButton()).toBeEnabled()
+
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(doneButton()).toBeDisabled()
+
+		answerSave(lastSaveRequestId(postMessage), { success: true })
+		await waitFor(() => expect(doneButton()).toBeEnabled())
+	})
+
+	it("offers the discard dialog again after a failed save, which left the edits in place", async () => {
+		renderUiTab()
+		await makeAnEdit()
+		fireEvent.click(screen.getByTestId("save-button"))
+		answerSave(lastSaveRequestId(postMessage), { success: false, error: "nope" })
+		await waitFor(() => expect(doneButton()).toBeEnabled())
+
+		fireEvent.click(doneButton())
+
+		expect(await screen.findByText("settings:unsavedChangesDialog.title")).toBeInTheDocument()
+	})
+
+	it("does not disable Done for a save that changes no appearance value", async () => {
+		renderUiTab()
+		await makeAnOtherEdit()
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(doneButton()).toBeEnabled()
+	})
+
+	it("ignores a request to leave (a tab switch) while the save waits, without showing the dialog", async () => {
+		const ref = createRef<SettingsViewRef>()
+		renderWithExtensionState(<SettingsView ref={ref} onDone={vi.fn()} targetSection="ui" />)
+		await makeAnEdit()
+		fireEvent.click(screen.getByTestId("save-button"))
+		const then = vi.fn()
+
+		act(() => ref.current?.checkUnsaveChanges(then))
+
+		expect(then).not.toHaveBeenCalled()
+		expect(screen.queryByText("settings:unsavedChangesDialog.title")).not.toBeInTheDocument()
+
+		answerSave(lastSaveRequestId(postMessage), { success: true })
+		await waitFor(() => expect(doneButton()).toBeEnabled())
+		act(() => ref.current?.checkUnsaveChanges(then)) // saved: nothing to discard, so it goes ahead
+		expect(then).toHaveBeenCalledTimes(1)
 	})
 })

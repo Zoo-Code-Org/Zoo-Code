@@ -550,6 +550,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 	const checkUnsaveChanges = useCallback(
 		(then: () => void) => {
+			// A save waiting for the host's answer keeps going whatever is chosen here, so leaving now (and offering
+			// to discard changes that are being stored) would say something untrue. The answer arrives, on success or
+			// failure, and the form can be left or the edits retried then.
+			if (pendingSaveId) return
+
 			if (isChangeDetected) {
 				confirmDialogHandler.current = then
 				setDiscardDialogShow(true)
@@ -557,7 +562,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				then()
 			}
 		},
-		[isChangeDetected],
+		[isChangeDetected, pendingSaveId],
 	)
 
 	useImperativeHandle(ref, () => ({ checkUnsaveChanges }), [checkUnsaveChanges])
@@ -753,7 +758,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			<TabHeader className="flex justify-between items-center gap-2">
 				<div className="flex items-center gap-2 grow">
 					<StandardTooltip content={t("settings:header.doneButtonTooltip")}>
-						<Button variant="ghost" className="px-1.5 -ml-2" onClick={() => checkUnsaveChanges(onDone)}>
+						<Button
+							variant="ghost"
+							className="px-1.5 -ml-2"
+							disabled={!!pendingSaveId}
+							onClick={() => checkUnsaveChanges(onDone)}>
 							<ArrowLeft />
 							<span className="sr-only">{t("settings:common.done")}</span>
 						</Button>
