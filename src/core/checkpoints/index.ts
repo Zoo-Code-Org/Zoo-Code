@@ -227,8 +227,8 @@ export async function checkpointSave(task: Task, force = false, suppressMessage 
 		})
 }
 
-// The shadow repo is created with `git init` defaults (SHA-1) and stores full hashes.
-const FULL_COMMIT_HASH = /^[0-9a-f]{40}$/
+// `git init` honours the user's init.defaultObjectFormat, so full hashes are SHA-1 or SHA-256.
+const FULL_COMMIT_HASH = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
 
 // The hash arrives from the webview, so it must name a checkpoint this task recorded before reaching Git.
 function assertRecordedCheckpoint(task: Task, commitHash: unknown): asserts commitHash is string {

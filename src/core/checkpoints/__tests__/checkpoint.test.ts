@@ -309,9 +309,19 @@ describe("Checkpoint functionality", () => {
 			},
 		)
 
+		it("accepts a recorded SHA-256 checkpoint hash", async () => {
+			const sha256Hash = "c".repeat(64)
+			mockTask.clineMessages.push({ ts: 5, say: "checkpoint_saved", text: sha256Hash })
+
+			await checkpointRestore(mockTask, { ts: 2, commitHash: sha256Hash, mode: "preview" })
+
+			expect(mockCheckpointService.restoreCheckpoint).toHaveBeenCalledWith(sha256Hash)
+		})
+
 		it.each([
 			["a malformed hash", "HEAD~1"],
 			["an abbreviated hash", "a".repeat(7)],
+			["a hash between SHA-1 and SHA-256 length", "a".repeat(41)],
 			["a well-formed but unrecorded hash", "b".repeat(40)],
 			["a non-string", 42],
 		])("rejects %s before any Git call", async (_label, commitHash) => {
