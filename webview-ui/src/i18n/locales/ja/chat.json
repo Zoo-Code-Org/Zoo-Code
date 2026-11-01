@@ -113,6 +113,15 @@
 	},
 	"selectMode": "対話モードを選択",
 	"selectApiConfig": "API構成を選択",
+	"selectModel": "モデルを選択",
+	"modelSelector": {
+		"title": "モデル",
+		"settings": "モデル設定",
+		"description": "この API 設定で使用するモデルを選択します。",
+		"searchPlaceholder": "モデルを検索...",
+		"unsupportedTooltip": "このプロバイダーのモデルは設定で構成します",
+		"loading": "モデルを読み込み中..."
+	},
 	"lockApiConfigAcrossModes": "このワークスペースのすべてのモードでAPI構成をロック",
 	"unlockApiConfigAcrossModes": "このワークスペースのすべてのモードでAPI構成がロックされています（クリックで解除）",
 	"enhancePrompt": "追加コンテキストでプロンプトを強化",
@@ -343,10 +352,10 @@
 		"title": "Zoo Code {{version}} リリース",
 		"support": "<githubLink>GitHub</githubLink>でスターを付けて Zoo Code を応援してください。",
 		"release": {
-			"heading": "Zoo Code v3.88.0 の新機能",
-			"highlight1": "✨ Provider とモデルへの対応: Grok Build を利用でき、カスタムモデルのサポートが向上しました。このリリースでは、Bedrock のモデル上限の修正と、Codex の verbosity 設定の送信も行われます。",
-			"highlight2": "🧭 タスクの信頼性: このリリースでは、キャンセル処理、tool turn の継続、タスクメッセージの保存を修正しました。",
-			"highlight3": "⚡ より速い編集とチャット: ファイルへの書き込みは、デフォルトでは人為的な遅延を行わなくなりました。チャットメッセージはファイルデータを減らして伝え、code action は最後にアクティブなチャットに届きます。"
+			"heading": "Zoo Code v3.94.0 の新機能",
+			"highlight1": "✨ さらに広がるモデルとプロバイダーのサポート: Anthropic 経由で Claude Haiku 5.5 を使用し、対応する VS Code LM モデルに画像を送信し、OpenCode Go Responses モデルの temperature を調整し、より多くのプロバイダーでリクエストをクリーンにキャンセルできます。",
+			"highlight2": "🔐 より柔軟な MCP OAuth: 静的な OAuth クライアント設定を構成し、カスタムコールバックパスを使用し、WWW-Authenticate から認証の詳細を取得し、再試行前にコールバックの失敗を確認できます。",
+			"highlight3": "🧭 よりスムーズなチャットと長時間セッション: 履歴でタスク名を変更し、Shift を押さずにファイルをチャットにドラッグし、長時間セッション中に保持されるメモリを削減し、サブタスクのリンクと置き換えられた webview を安定して維持できます。"
 		},
 		"cloudAgents": {
 			"heading": "クラウドの新機能:",

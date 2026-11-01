@@ -428,6 +428,47 @@ describe("SettingsView - Sound Settings", () => {
 		)
 	})
 
+	it.each([true, false, undefined])("buffers the output collapse preference (%s) until Save", (savedValue) => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="terminal" />, {
+			state: { collapseCommandOutputByDefault: savedValue, terminalShellIntegrationDisabled: true },
+		})
+		const checkbox = within(screen.getByTestId("settings-content")).getByTestId(
+			"terminal-collapse-command-output-checkbox",
+		)
+		expect(checkbox).toHaveProperty("checked", savedValue ?? false)
+		vi.mocked(vscode.postMessage).mockClear()
+		fireEvent.click(checkbox)
+		expect(checkbox).toHaveProperty("checked", !(savedValue ?? false))
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "updateSettings" }))
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({
+					collapseCommandOutputByDefault: !(savedValue ?? false),
+					terminalShellIntegrationDisabled: true,
+				}),
+			}),
+		)
+	})
+
+	it("keeps the buffered collapse preference during an unrelated live state refresh", async () => {
+		const { getSettingsContent, activateTab } = renderSettingsView({ settingsImportedAt: "initial-collapse-state" })
+		activateTab("terminal")
+		const checkbox = await within(getSettingsContent()).findByTestId("terminal-collapse-command-output-checkbox")
+		fireEvent.click(checkbox)
+		act(() =>
+			mockPostMessage({ collapseCommandOutputByDefault: false, settingsImportedAt: "initial-collapse-state" }),
+		)
+		expect(checkbox).toHaveProperty("checked", true)
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ collapseCommandOutputByDefault: true }),
+			}),
+		)
+	})
 	it("saves the selected chat font size and persists null on reset", () => {
 		const { activateTab, getSettingsContent } = renderSettingsView()
 

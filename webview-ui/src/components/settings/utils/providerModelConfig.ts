@@ -16,7 +16,6 @@ import {
 	xaiDefaultModelId,
 	sambaNovaDefaultModelId,
 	internationalZAiDefaultModelId,
-	mainlandZAiDefaultModelId,
 	fireworksDefaultModelId,
 	friendliDefaultModelId,
 	minimaxDefaultModelId,
@@ -29,10 +28,11 @@ import {
 	vercelAiGatewayDefaultModelId,
 	opencodeGoDefaultModelId,
 	kenariDefaultModelId,
+	ioIntelligenceDefaultModelId,
 	nanoGptDefaultModelId,
 	zooGatewayDefaultModelId,
-	zaiApiLineConfigs,
 	getZAiModels,
+	getProviderDefaultModelId,
 } from "@roo-code/types"
 
 import { MODELS_BY_PROVIDER } from "../constants"
@@ -98,10 +98,9 @@ export const getProviderServiceConfig = (provider: ProviderName): ProviderServic
 }
 
 export const getDefaultModelIdForProvider = (provider: ProviderName, apiConfiguration?: ProviderSettings): string => {
-	// Handle Z.ai's China/International entrypoint distinction
-	if (provider === providerIdentifiers.zai && apiConfiguration) {
-		const apiLine = apiConfiguration.zaiApiLine ?? "international_coding"
-		return zaiApiLineConfigs[apiLine].isChina ? mainlandZAiDefaultModelId : internationalZAiDefaultModelId
+	// Z.ai's default depends on the configured China/International API line.
+	if (provider === providerIdentifiers.zai) {
+		return getProviderDefaultModelId(provider, apiConfiguration ?? {})
 	}
 
 	return PROVIDER_DEFAULT_MODEL_IDS[provider] ?? ""
@@ -145,6 +144,10 @@ const PROVIDER_MODEL_CONFIG: Partial<Record<ProviderName, ProviderModelConfig>> 
 	},
 	[providerIdentifiers.opencodeGo]: { field: "opencodeGoModelId", default: opencodeGoDefaultModelId },
 	[providerIdentifiers.kenari]: { field: "kenariModelId", default: kenariDefaultModelId },
+	[providerIdentifiers.ioIntelligence]: {
+		field: "ioIntelligenceModelId",
+		default: ioIntelligenceDefaultModelId,
+	},
 	[providerIdentifiers.nanogpt]: { field: "nanoGptModelId", default: nanoGptDefaultModelId },
 	[providerIdentifiers.zooGateway]: { field: "zooGatewayModelId", default: zooGatewayDefaultModelId },
 	[providerIdentifiers.openai]: { field: "openAiModelId" },

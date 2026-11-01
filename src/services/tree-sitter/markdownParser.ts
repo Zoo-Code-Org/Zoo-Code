@@ -190,6 +190,8 @@ export function parseMarkdown(content: string): QueryCapture[] {
  * @param captures - The array of query captures
  * @param minSectionLines - Minimum number of lines for a section to be included
  * @returns A formatted string with headers and section line ranges
+ *
+ * @internal
  */
 export function formatMarkdownCaptures(captures: QueryCapture[], minSectionLines: number = 4): string | null {
 	if (captures.length === 0) {

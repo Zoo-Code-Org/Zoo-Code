@@ -102,6 +102,8 @@ function unterminatedQuoteMessage(quoteType: QuoteType, openIndex: number, comma
  *   opener line's newline through the line that is exactly the terminator word
  *   (after stripping leading tabs for `<<-`). If no terminator line is found the
  *   heredoc is unterminated.
+ *
+ * @internal
  */
 export function findUnterminatedQuote(command: string): UnterminatedQuote | null {
 	return scanTopLevelQuotes(command).unterminatedQuote

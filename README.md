@@ -46,12 +46,11 @@ Zoo Code builds on the foundation created by Roo Code and continues to expand it
 - **More dependable terminal and editing workflows** — fixes for premature terminal completion, task-state races, context management, diff editing, and provider-specific tool use.
 - **More control over your workspace** — rules management, per-mode MCP restrictions, multi-root path controls, model reasoning options, and completion change review actions.
 
-## What's New in v3.88.0
+## What's New in v3.94.0
 
-- 🐙 **GitHub Copilot provider:** Sign in to GitHub and use your Copilot models directly in Zoo Code.
-- ✨ **Provider and model support:** Use Grok Build and improved custom-model support. This release also fixes Bedrock model limits and sends the Codex verbosity setting.
-- 🧭 **Task reliability:** This release fixes cancellation handling, tool-turn continuation, and task-message saving.
-- ⚡ **Faster editing and chat:** File writes no longer use artificial delays by default. Chat messages carry less file data, and code actions reach the last active chat.
+- ✨ **Broader model and provider support:** Use Claude Haiku 5.5 through Anthropic, send images to compatible VS Code LM models, tune temperature for OpenCode Go Responses models, and cancel requests cleanly across more providers.
+- 🔐 **More flexible MCP OAuth:** Configure static OAuth client settings, use custom callback paths, discover authentication details from `WWW-Authenticate`, and see callback failures before retrying.
+- 🧭 **Smoother chats and long sessions:** Rename tasks in history, drag files into chat without holding Shift, reduce memory retained during long sessions, and keep subtask links and replaced webviews stable.
 
 <details>
   <summary>🌐 Available languages</summary>

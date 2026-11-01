@@ -3,7 +3,7 @@ import React from "react"
 import { render, screen, fireEvent } from "@/utils/test-utils"
 import { vscode } from "@/utils/vscode"
 
-import { ErrorRow } from "../ErrorRow"
+import ErrorRow from "../ErrorRow"
 
 // Mock vscode webview messaging
 vi.mock("@/utils/vscode", () => ({
