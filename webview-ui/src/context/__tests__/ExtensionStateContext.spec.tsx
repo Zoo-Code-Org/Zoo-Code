@@ -7,6 +7,7 @@ import {
 	type ExperimentId,
 	type ExtensionState,
 	type ClineMessage,
+	type ExtensionMessage,
 	type MarketplaceItem,
 	type MarketplaceInstalledMetadata,
 	type RouterModels,
@@ -43,6 +44,10 @@ const TestComponent = () => {
 
 	return (
 		<div>
+			<div data-testid="task-history">{JSON.stringify(taskHistory)}</div>
+			<div data-testid="current-task-item">{JSON.stringify(currentTaskItem)}</div>
+			<div data-testid="cline-messages">{JSON.stringify(clineMessages)}</div>
+			<div data-testid="current-task-id">{currentTaskId ?? "no-task"}</div>
 			<div data-testid="allowed-commands">{JSON.stringify(allowedCommands)}</div>
 			<div data-testid="sound-enabled">{JSON.stringify(soundEnabled)}</div>
 			<div data-testid="show-rooignored-files">{JSON.stringify(showRooIgnoredFiles)}</div>
@@ -58,6 +63,20 @@ const TestComponent = () => {
 			</button>
 		</div>
 	)
+}
+
+const expectMessages = (messages: ClineMessage[]) => {
+	expect(JSON.parse(screen.getByTestId("cline-messages").textContent!)).toEqual(messages)
+}
+
+type InternSpy = { mock: { contexts: readonly unknown[] } }
+
+const cacheFor = (spy: InternSpy, kind: "message" | "history"): StringCache => {
+	const cache = spy.mock.contexts.find(
+		(value) => value instanceof StringCache && (value["shouldIntern"] !== undefined) === (kind === "message"),
+	)
+	if (!(cache instanceof StringCache)) throw new Error(`Missing ${kind} cache`)
+	return cache
 }
 
 const RulesTestComponent = () => {
