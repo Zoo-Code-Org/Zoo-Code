@@ -319,14 +319,35 @@ export const modelIdKeys = [
 	"zooGatewayModelId",
 ] as const satisfies readonly ModelIdKey[]
 
+/**
+ * Model ID field each retired provider used before it was removed.
+ *
+ * Retired profiles are preserved verbatim (see `ProviderSettingsManager`), so
+ * `getModelId()` still needs to read the model the user had selected.
+ */
+const retiredProviderModelIdKeys: Record<RetiredProviderName, string> = {
+	[retiredProviderIdentifiers.cerebras]: "apiModelId",
+	[retiredProviderIdentifiers.chutes]: "apiModelId",
+	[retiredProviderIdentifiers.deepinfra]: "deepInfraModelId",
+	[retiredProviderIdentifiers.doubao]: "apiModelId",
+	[retiredProviderIdentifiers.featherless]: "apiModelId",
+	[retiredProviderIdentifiers.groq]: "apiModelId",
+	[retiredProviderIdentifiers.huggingface]: "huggingFaceModelId",
+	[retiredProviderIdentifiers.roo]: "apiModelId",
+}
+
+const readStringField = (settings: ProviderSettings, field: string): string | undefined => {
+	const value = (settings as Record<string, unknown>)[field]
+	return typeof value === "string" ? value : undefined
+}
+
 export function getModelId(settings: ProviderSettings): string | undefined {
 	if (isProviderName(settings.apiProvider)) {
 		return providerDefinitions[settings.apiProvider]?.getModelId(settings)
 	}
 
 	if (typeof settings.apiProvider === "string" && isRetiredProvider(settings.apiProvider)) {
-		const modelIdKey = modelIdKeys.find((key) => settings[key])
-		return modelIdKey ? settings[modelIdKey] : undefined
+		return readStringField(settings, retiredProviderModelIdKeys[settings.apiProvider])
 	}
 
 	return undefined

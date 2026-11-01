@@ -115,14 +115,28 @@ describe("getModelId", () => {
 		expect(getModelId({})).toBeUndefined()
 	})
 
-	it("preserves legacy model ID precedence for retired providers", () => {
-		const settings: ProviderSettings = {
-			apiProvider: retiredProviderIdentifiers.groq,
-			lmStudioDraftModelId: "draft-model",
-			requestyModelId: "requesty-model",
-		}
+	it.each([
+		[retiredProviderIdentifiers.cerebras, "apiModelId"],
+		[retiredProviderIdentifiers.chutes, "apiModelId"],
+		[retiredProviderIdentifiers.deepinfra, "deepInfraModelId"],
+		[retiredProviderIdentifiers.doubao, "apiModelId"],
+		[retiredProviderIdentifiers.featherless, "apiModelId"],
+		[retiredProviderIdentifiers.groq, "apiModelId"],
+		[retiredProviderIdentifiers.huggingface, "huggingFaceModelId"],
+		[retiredProviderIdentifiers.roo, "apiModelId"],
+	] as const)("reads the retired provider's own model ID field for %s", (apiProvider, modelIdField) => {
+		const settings = {
+			apiProvider,
+			[modelIdField]: "retired-model",
+			// A field belonging to a different provider must not win.
+			requestyModelId: "other-provider-model",
+		} as ProviderSettings
 
-		expect(getModelId(settings)).toBe("draft-model")
+		expect(getModelId(settings)).toBe("retired-model")
+	})
+
+	it("returns undefined for a retired provider without a model ID", () => {
+		expect(getModelId({ apiProvider: retiredProviderIdentifiers.groq })).toBeUndefined()
 	})
 
 	it("resolves a model ID for every provider definition without throwing", () => {
