@@ -11,6 +11,7 @@ import {
 	isDynamicProvider,
 	isRetiredProvider,
 	providerIdentifiers,
+	selectableProviders,
 	DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
 	OllamaModelsMessageType,
 	OpenAiModelsMessageType,
@@ -94,7 +95,6 @@ import {
 	Mimo,
 } from "./providers"
 
-import { PROVIDERS } from "./constants"
 import { inputEventTransform, noTransform } from "./transforms"
 import { ModelPicker } from "./ModelPicker"
 import { ApiErrorMessage } from "./ApiErrorMessage"
@@ -383,7 +383,7 @@ const ApiOptions = ({
 	}, [apiConfiguration, routerModels, organizationAllowList])
 
 	const docs = useMemo(() => {
-		const provider = PROVIDERS.find(({ value }) => value === selectedProvider)
+		const provider = selectableProviders.find(({ value }) => value === selectedProvider)
 		if (!provider) {
 			return undefined
 		}
@@ -398,7 +398,7 @@ const ApiOptions = ({
 	// Convert providers to SearchableSelect options
 	const providerOptions = useMemo(() => {
 		// First filter by organization allow list
-		const allowedProviders = filterProviders(PROVIDERS, organizationAllowList)
+		const allowedProviders = filterProviders(selectableProviders, organizationAllowList)
 
 		// Then filter out static providers that have no models (unless currently selected)
 		const providersWithModels = allowedProviders.filter(({ value }) => {

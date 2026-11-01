@@ -64,6 +64,11 @@ type ProviderDefinitionInput<P extends ProviderIdentifier, S extends z.ZodRawSha
 	getDefaultModelId: ProviderDefaultModelIdAccessor
 	// Static model catalog. Providers whose models are discovered at runtime omit it.
 	models?: Record<string, ModelInfo>
+	// True when the endpoint is configured by the user (a proxy) instead of the vendor's own API.
+	isProxy?: boolean
+	// Providers the settings UI must not offer. They stay registered so persisted
+	// settings and internal callers keep resolving them.
+	hidden?: boolean
 }
 
 export type ProviderDefinition = {
@@ -75,6 +80,8 @@ export type ProviderDefinition = {
 	getModelId: ProviderModelIdAccessor
 	getDefaultModelId: ProviderDefaultModelIdAccessor
 	models: Record<string, ModelInfo>
+	isProxy: boolean
+	hidden: boolean
 }
 
 export const createModelIdAccessor =
@@ -107,5 +114,7 @@ export const createProviderDefinition = <P extends ProviderIdentifier, S extends
 		getModelId,
 		getDefaultModelId: modelIdDefinition.getDefaultModelId,
 		models: modelIdDefinition.models ?? {},
+		isProxy: modelIdDefinition.isProxy ?? false,
+		hidden: modelIdDefinition.hidden ?? false,
 	}
 }

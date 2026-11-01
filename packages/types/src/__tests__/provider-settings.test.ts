@@ -1,13 +1,16 @@
 import { ANTHROPIC_API_PROTOCOL, OPENAI_API_PROTOCOL, providerIdentifiers, providerNames } from "../index.js"
 import {
 	getApiProtocol,
+	getProviderIsProxy,
 	getProviderLabel,
 	getProviderModels,
+	isProviderHidden,
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
 	parseOpenAiExtraBody,
 	PROVIDER_SETTINGS_KEYS,
 	providerSettingsSchema,
 	providerSettingsSchemaDiscriminated,
+	selectableProviders,
 } from "../provider-settings.js"
 import { OpenAiCodexServiceTier, OpenAiServiceTier } from "../model.js"
 import { anthropicModels } from "../providers/index.js"
@@ -70,6 +73,88 @@ describe("provider definition metadata", () => {
 		providerIdentifiers.geminiCli,
 	])("returns an empty catalog for the runtime-discovered provider %s", (provider) => {
 		expect(getProviderModels(provider)).toEqual({})
+	})
+
+	it.each([
+		providerIdentifiers.openai,
+		providerIdentifiers.litellm,
+		providerIdentifiers.ollama,
+		providerIdentifiers.lmstudio,
+	])("marks the user-configured proxy provider %s as a proxy", (provider) => {
+		expect(getProviderIsProxy(provider)).toBe(true)
+	})
+
+	it.each([
+		providerIdentifiers.anthropic,
+		providerIdentifiers.openrouter,
+		providerIdentifiers.gemini,
+		providerIdentifiers.bedrock,
+	])("does not mark the vendor-hosted provider %s as a proxy", (provider) => {
+		expect(getProviderIsProxy(provider)).toBe(false)
+	})
+
+	it("treats an unregistered provider as neither a proxy nor hidden", () => {
+		const unregistered = "unregistered-provider" as (typeof providerNames)[number]
+
+		expect(getProviderIsProxy(unregistered)).toBe(false)
+		expect(isProviderHidden(unregistered)).toBe(false)
+	})
+
+	it.each([providerIdentifiers.geminiCli, providerIdentifiers.fakeAi])(
+		"hides the non-selectable provider %s from the settings UI",
+		(provider) => {
+			expect(isProviderHidden(provider)).toBe(true)
+		},
+	)
+
+	it.each([
+		providerIdentifiers.anthropic,
+		providerIdentifiers.openrouter,
+		providerIdentifiers.openai,
+		providerIdentifiers.ollama,
+	])("keeps the selectable provider %s visible in the settings UI", (provider) => {
+		expect(isProviderHidden(provider)).toBe(false)
+	})
+})
+
+describe("selectableProviders", () => {
+	it("offers exactly the non-hidden provider definitions", () => {
+		const expected = providerDefinitionList
+			.filter((definition) => !definition.hidden)
+			.map((definition) => definition.apiProvider)
+			.sort()
+
+		expect(selectableProviders.map(({ value }) => value).sort()).toEqual(expected)
+	})
+
+	it.each([providerIdentifiers.geminiCli, providerIdentifiers.fakeAi])("omits the hidden provider %s", (provider) => {
+		expect(selectableProviders.map(({ value }) => value)).not.toContain(provider)
+	})
+
+	it("sorts providers by label", () => {
+		const labels = selectableProviders.map(({ label }) => label)
+
+		expect(labels).toEqual([...labels].sort((a, b) => a.localeCompare(b)))
+	})
+
+	it("derives every label and proxy flag from the provider definition", () => {
+		for (const { value, label, isProxy } of selectableProviders) {
+			expect(label).toBe(getProviderLabel(value))
+			expect(isProxy).toBe(getProviderIsProxy(value))
+		}
+	})
+
+	it("marks only the user-configured proxy providers as proxy", () => {
+		const proxyValues = selectableProviders.filter(({ isProxy }) => isProxy).map(({ value }) => value)
+
+		expect(new Set(proxyValues)).toEqual(
+			new Set([
+				providerIdentifiers.openai,
+				providerIdentifiers.lmstudio,
+				providerIdentifiers.ollama,
+				providerIdentifiers.litellm,
+			]),
+		)
 	})
 })
 

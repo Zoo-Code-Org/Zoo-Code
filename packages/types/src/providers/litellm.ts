@@ -9,6 +9,8 @@ export const LITELLM_MODEL_ID_FIELD = "litellmModelId"
 export const litellmProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.litellm,
 	label: "LiteLLM",
+	// LiteLLM is a self-hosted proxy in front of other providers.
+	isProxy: true,
 	modelIdKey: LITELLM_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(LITELLM_MODEL_ID_FIELD),
 	getDefaultModelId: () => litellmDefaultModelId,

@@ -367,6 +367,37 @@ export function getProviderModels(provider: ProviderName): Record<string, ModelI
 }
 
 /**
+ * Whether the provider's endpoint is configured by the user (a proxy) rather
+ * than the vendor's own API. Unregistered providers are not proxies.
+ */
+export function getProviderIsProxy(provider: ProviderName): boolean {
+	return providerDefinitions[provider]?.isProxy ?? false
+}
+
+/**
+ * Whether the settings UI must not offer the provider. Hidden providers stay
+ * registered so persisted settings and internal callers keep resolving them.
+ */
+export function isProviderHidden(provider: ProviderName): boolean {
+	return providerDefinitions[provider]?.hidden ?? false
+}
+
+/**
+ * The providers the settings UI may offer, sorted by label. Hidden providers are
+ * excluded, and each entry carries the label and proxy flag declared by its
+ * definition, so the picker needs no list of its own.
+ */
+export const selectableProviders: Array<{ value: ProviderName; label: string; isProxy: boolean }> =
+	providerDefinitionList
+		.filter((definition) => !definition.hidden)
+		.map((definition) => ({
+			value: definition.apiProvider,
+			label: definition.label,
+			isProxy: definition.isProxy,
+		}))
+		.sort((a, b) => a.label.localeCompare(b.label))
+
+/**
  * ANTHROPIC_STYLE_PROVIDERS
  */
 

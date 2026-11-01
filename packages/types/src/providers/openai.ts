@@ -1067,6 +1067,8 @@ const openAiExtraBodySchema = z
 export const openAiProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.openai,
 	label: "OpenAI Compatible",
+	// The user supplies the endpoint, so requests may go through their own proxy.
+	isProxy: true,
 	modelIdKey: OPEN_AI_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(OPEN_AI_MODEL_ID_FIELD),
 	// OpenAI-compatible endpoints are fully user-configured, so there is no default.
