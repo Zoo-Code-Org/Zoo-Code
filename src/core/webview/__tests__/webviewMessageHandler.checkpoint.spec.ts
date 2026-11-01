@@ -99,6 +99,7 @@ function createFixture() {
 			apiConversationHistory: [],
 		}),
 		createTaskWithHistoryItem: vi.fn<ClineProvider["createTaskWithHistoryItem"]>().mockResolvedValue(task),
+		restartTaskIfCurrent: vi.fn<ClineProvider["restartTaskIfCurrent"]>().mockResolvedValue(true),
 		setPendingEditOperation: vi.fn<ClineProvider["setPendingEditOperation"]>(),
 		clearPendingEditOperation: vi.fn<ClineProvider["clearPendingEditOperation"]>(),
 		cancelTask: vi.fn<ClineProvider["cancelTask"]>(),
@@ -109,8 +110,8 @@ function createFixture() {
 	providerDouble.setPendingEditOperation.mockImplementation((operationId, editData) =>
 		ClineProvider.prototype.setPendingEditOperation.call(provider, operationId, editData),
 	)
-	providerDouble.clearPendingEditOperation.mockImplementation((operationId) =>
-		ClineProvider.prototype.clearPendingEditOperation.call(provider, operationId),
+	providerDouble.clearPendingEditOperation.mockImplementation((operationId, owner) =>
+		ClineProvider.prototype.clearPendingEditOperation.call(provider, operationId, owner),
 	)
 	return { task, taskDouble, provider, providerDouble, historyItem, store }
 }
@@ -139,7 +140,7 @@ describe("webviewMessageHandler - checkpoint operations", () => {
 	}
 
 	it.each([true, false])("failed delete restarts only after accepting the prompt: %s", async (accept) => {
-		const { task, taskDouble, provider, providerDouble, historyItem } = fixture
+		const { task, taskDouble, provider, providerDouble } = fixture
 		const messages = structuredClone(task.clineMessages)
 		const history = structuredClone(task.apiConversationHistory)
 		const restoreError = new Error("Checkpoint commit is missing")
@@ -190,12 +191,11 @@ describe("webviewMessageHandler - checkpoint operations", () => {
 		answerPrompt(accept ? "common:checkpoints.restart" : undefined)
 		await operation
 		if (accept) {
-			expect(providerDouble.getTaskWithId).toHaveBeenCalledExactlyOnceWith(task.taskId)
-			expect(providerDouble.createTaskWithHistoryItem).toHaveBeenCalledExactlyOnceWith(historyItem)
+			expect(providerDouble.restartTaskIfCurrent).toHaveBeenCalledExactlyOnceWith(task)
 		} else {
-			expect(providerDouble.getTaskWithId).not.toHaveBeenCalled()
-			expect(providerDouble.createTaskWithHistoryItem).not.toHaveBeenCalled()
+			expect(providerDouble.restartTaskIfCurrent).not.toHaveBeenCalled()
 		}
+		expect(providerDouble.createTaskWithHistoryItem).not.toHaveBeenCalled()
 		expectUnchanged(messages, history)
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledTimes(2)
 		expect(vscode.window.showErrorMessage).toHaveBeenLastCalledWith(
@@ -235,7 +235,10 @@ describe("webviewMessageHandler - checkpoint operations", () => {
 			error: "Checkpoint belongs to another task",
 		})
 		expect(providerDouble.getTaskWithId).not.toHaveBeenCalled()
-		expect(providerDouble.clearPendingEditOperation).toHaveBeenCalledExactlyOnceWith(operationId)
+		expect(providerDouble.clearPendingEditOperation).toHaveBeenCalledExactlyOnceWith(
+			operationId,
+			expect.any(Object),
+		)
 		expect(store.get(operationId)).toBeUndefined()
 		expect(taskDouble.abortTask).not.toHaveBeenCalled()
 		expect(providerDouble.createTaskWithHistoryItem).not.toHaveBeenCalled()

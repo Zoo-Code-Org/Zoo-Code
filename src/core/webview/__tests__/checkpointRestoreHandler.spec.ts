@@ -88,6 +88,7 @@ function createFixture() {
 			apiConversationHistory: [],
 		}),
 		createTaskWithHistoryItem: vi.fn<ClineProvider["createTaskWithHistoryItem"]>().mockResolvedValue(task),
+		restartTaskIfCurrent: vi.fn<ClineProvider["restartTaskIfCurrent"]>(),
 		setPendingEditOperation: vi.fn<ClineProvider["setPendingEditOperation"]>(),
 		clearPendingEditOperation: vi.fn<ClineProvider["clearPendingEditOperation"]>(),
 		getPendingEditOperation: ClineProvider.prototype["getPendingEditOperation"],
@@ -99,8 +100,11 @@ function createFixture() {
 	providerDouble.setPendingEditOperation.mockImplementation((operationId, editData) =>
 		ClineProvider.prototype.setPendingEditOperation.call(provider, operationId, editData),
 	)
-	providerDouble.clearPendingEditOperation.mockImplementation((operationId) =>
-		ClineProvider.prototype.clearPendingEditOperation.call(provider, operationId),
+	providerDouble.clearPendingEditOperation.mockImplementation((operationId, owner) =>
+		ClineProvider.prototype.clearPendingEditOperation.call(provider, operationId, owner),
+	)
+	providerDouble.restartTaskIfCurrent.mockImplementation((restartTask) =>
+		ClineProvider.prototype.restartTaskIfCurrent.call(provider, restartTask),
 	)
 	const config: CheckpointRestoreConfig = {
 		provider,
@@ -214,21 +218,80 @@ describe("checkpointRestoreHandler", () => {
 				expect(showWarningMessage).not.toHaveBeenCalled()
 				expect(fixture.providerDouble.clearPendingEditOperation).toHaveBeenCalledWith(
 					`task-${fixture.task.taskId}`,
+					expect.any(Object),
 				)
 			}
 		},
 	)
 
-	it("does not restart a different current task when the user accepts", async () => {
+	it("restarts the failed task when it is still current and the user accepts", async () => {
 		fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(new Error("Missing commit"))
-		showWarningMessage.mockImplementationOnce(async () => {
-			fixture.providerDouble.getCurrentTask.mockReturnValue(undefined)
-			return "common:checkpoints.restart"
-		})
+		showWarningMessage.mockResolvedValueOnce("common:checkpoints.restart")
 		await expect(handleCheckpointRestoreOperation(fixture.config)).rejects.toThrow("Missing commit")
-		expect(fixture.providerDouble.getTaskWithId).not.toHaveBeenCalled()
-		expect(fixture.providerDouble.createTaskWithHistoryItem).not.toHaveBeenCalled()
+		expect(fixture.providerDouble.getTaskWithId).toHaveBeenCalledExactlyOnceWith(fixture.task.taskId)
+		expect(Task).toHaveBeenCalledOnce()
+	})
+
+	it.each([
+		{
+			name: "before the restart is queued",
+			setup: (current: ReturnType<typeof createFixture>) =>
+				showWarningMessage.mockImplementationOnce(async () => {
+					current.providerDouble.getCurrentTask.mockReturnValue(undefined)
+					return "common:checkpoints.restart"
+				}),
+			loadsHistory: false,
+		},
+		{
+			name: "while history is loading",
+			setup: (current: ReturnType<typeof createFixture>) => {
+				showWarningMessage.mockResolvedValueOnce("common:checkpoints.restart")
+				current.providerDouble.getTaskWithId.mockImplementationOnce(async () => {
+					current.providerDouble.getCurrentTask.mockReturnValue(undefined)
+					return { historyItem: current.historyItem } as Awaited<ReturnType<ClineProvider["getTaskWithId"]>>
+				})
+			},
+			loadsHistory: true,
+		},
+		{
+			name: "by a navigation queued first",
+			setup: (current: ReturnType<typeof createFixture>) =>
+				showWarningMessage.mockImplementationOnce(async () => {
+					void ClineProvider.prototype["enqueueHistoryTaskTransition"].call(current.provider, async () => {
+						current.providerDouble.getCurrentTask.mockReturnValue(undefined)
+					})
+					return "common:checkpoints.restart"
+				}),
+			loadsHistory: false,
+		},
+	])("does not restart when another task becomes current $name", async ({ setup, loadsHistory }) => {
+		fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(new Error("Missing commit"))
+		setup(fixture)
+		await expect(handleCheckpointRestoreOperation(fixture.config)).rejects.toThrow("Missing commit")
+		expect(fixture.providerDouble.getTaskWithId).toHaveBeenCalledTimes(loadsHistory ? 1 : 0)
+		expect(Task).not.toHaveBeenCalled()
 		expect(saveTaskMessages).not.toHaveBeenCalled()
+	})
+
+	it("a failed older edit keeps a newer edit staged during its restore", async () => {
+		const operationId = `task-${fixture.task.taskId}`
+		fixture.taskDouble.checkpointRestore.mockImplementationOnce(async () => {
+			fixture.provider.setPendingEditOperation(operationId, {
+				messageTs: 3,
+				editedContent: "Newer edit",
+				messageIndex: 1,
+				apiConversationHistoryIndex: 0,
+			})
+			throw new Error("Missing commit")
+		})
+		await expect(
+			handleCheckpointRestoreOperation({
+				...fixture.config,
+				operation: "edit",
+				editData: { editedContent: "Older edit", apiConversationHistoryIndex: 0 },
+			}),
+		).rejects.toThrow("Missing commit")
+		expect(fixture.store.get(operationId)?.editedContent).toBe("Newer edit")
 	})
 
 	it("does not apply a failed pending edit on later real provider rehydration", async () => {

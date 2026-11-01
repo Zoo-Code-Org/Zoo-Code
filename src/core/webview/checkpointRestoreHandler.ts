@@ -28,6 +28,7 @@ export async function handleCheckpointRestoreOperation(config: CheckpointRestore
 	const { provider, currentCline, messageTs, checkpoint, operation, editData } = config
 
 	let checkpointRestored = false
+	let pendingEditOwner: object | undefined
 
 	try {
 		// For delete operations, ensure the task is properly aborted to handle any pending ask operations
@@ -47,7 +48,7 @@ export async function handleCheckpointRestoreOperation(config: CheckpointRestore
 		// For edit operations, set up pending edit data before restoration
 		if (operation === "edit" && editData) {
 			const operationId = `task-${currentCline.taskId}`
-			provider.setPendingEditOperation(operationId, {
+			pendingEditOwner = provider.setPendingEditOperation(operationId, {
 				messageTs,
 				editedContent: editData.editedContent,
 				images: editData.images,
@@ -84,8 +85,8 @@ export async function handleCheckpointRestoreOperation(config: CheckpointRestore
 		// For edit operations, the task cancellation in checkpointRestore
 		// will trigger reinitialization, which will process pendingEditAfterRestore
 	} catch (error) {
-		if (operation === "edit" && !checkpointRestored) {
-			provider.clearPendingEditOperation(`task-${currentCline.taskId}`)
+		if (operation === "edit" && !checkpointRestored && pendingEditOwner) {
+			provider.clearPendingEditOperation(`task-${currentCline.taskId}`, pendingEditOwner)
 		}
 		console.error(`Error in checkpoint restore (${operation}):`, error)
 		void vscode.window.showErrorMessage(
@@ -100,9 +101,8 @@ export async function handleCheckpointRestoreOperation(config: CheckpointRestore
 					t("common:checkpoints.restart_after_restore_failure"),
 					restart,
 				)
-				if (response === restart && provider.getCurrentTask() === currentCline) {
-					const { historyItem } = await provider.getTaskWithId(currentCline.taskId)
-					await provider.createTaskWithHistoryItem(historyItem)
+				if (response === restart) {
+					await provider.restartTaskIfCurrent(currentCline)
 				}
 			} catch (restartError) {
 				console.error("Failed to restart task after checkpoint restore failure:", restartError)

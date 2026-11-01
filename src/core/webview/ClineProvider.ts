@@ -796,8 +796,8 @@ export class ClineProvider
 	/**
 	 * Sets a pending edit operation with automatic timeout cleanup
 	 */
-	public setPendingEditOperation(operationId: string, editData: PendingEditOperationInput): void {
-		this.pendingEditOperations.set(operationId, editData)
+	public setPendingEditOperation(operationId: string, editData: PendingEditOperationInput): object {
+		return this.pendingEditOperations.set(operationId, editData)
 	}
 
 	/**
@@ -810,8 +810,8 @@ export class ClineProvider
 	/**
 	 * Clears a specific pending edit operation
 	 */
-	public clearPendingEditOperation(operationId: string): boolean {
-		return this.pendingEditOperations.clear(operationId)
+	public clearPendingEditOperation(operationId: string, owner?: object): boolean {
+		return this.pendingEditOperations.clear(operationId, owner)
 	}
 
 	/**
@@ -1265,11 +1265,38 @@ export class ClineProvider
 		// transition so both callers cannot observe the same previous registry
 		// state and schedule distinct Task instances for one history item.
 		// Fail forward so one rejected restoration does not poison the queue.
+		return ClineProvider.prototype.enqueueHistoryTaskTransition.call<
+			ClineProvider,
+			[() => Promise<Task>],
+			Promise<Task>
+		>(this, () => ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem, options))
+	}
+
+	/**
+	 * Rehydrates `task` from history only if it is still current when the queued
+	 * step runs, so a navigation queued earlier is never evicted.
+	 */
+	public restartTaskIfCurrent(task: Task): Promise<boolean> {
+		return ClineProvider.prototype.enqueueHistoryTaskTransition.call<
+			ClineProvider,
+			[() => Promise<boolean>],
+			Promise<boolean>
+		>(this, async () => {
+			if (this.getCurrentTask() !== task) {
+				return false
+			}
+			const { historyItem } = await this.getTaskWithId(task.taskId)
+			if (this.getCurrentTask() !== task) {
+				return false
+			}
+			await ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem)
+			return true
+		})
+	}
+
+	private enqueueHistoryTaskTransition<T>(transition: () => Promise<T>): Promise<T> {
 		const previous = this.historyTaskCreationQueue ?? Promise.resolve()
-		const run = previous.then(
-			() => ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem, options),
-			() => ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem, options),
-		)
+		const run = previous.then(transition, transition)
 		this.historyTaskCreationQueue = run.then(
 			() => {},
 			() => {},
