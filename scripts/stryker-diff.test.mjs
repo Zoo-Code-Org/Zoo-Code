@@ -10,6 +10,8 @@ import {
 	MAX_CHANGED_LINES,
 	MAX_MUTANTS,
 	PACKAGE_CONFIGS,
+	PR_COMMENT_FILENAME,
+	PR_COMMENT_MARKER,
 	appendSummary,
 	buildManifest,
 	discoverRelatedTestFiles,
@@ -19,6 +21,7 @@ import {
 	formatAdvisoryCommand,
 	formatAnnotationCommand,
 	formatBlockingMutants,
+	formatPrComment,
 	formatSummary,
 	mutantCounts,
 	parseChangedLines,
@@ -65,7 +68,11 @@ describe("mutation testing workflow", () => {
 		assert.equal(workflow.match(/continue-on-error: true/g)?.length, 1)
 		assert.equal(workflow.match(/Could not write the job summary/g)?.length, 2)
 		const script = fs.readFileSync(path.join(repositoryRoot, "scripts/stryker-diff.mjs"), "utf8")
-		assert.ok(script.includes("appendSummary([], manifest.advisories, manifest)"))
+		assert.ok(
+			script.includes(
+				"appendSummary([], manifest.advisories, manifest, path.join(reportRoot, PR_COMMENT_FILENAME))",
+			),
+		)
 	})
 
 	it("waits until a draft pull request is ready before emitting mutation annotations", () => {
@@ -989,5 +996,182 @@ describe("report evaluation", () => {
 			evaluateReport({ files: { "src/value.ts": { mutants } } }, packageEntry).advisories.join("\n"),
 			/result is inconclusive/,
 		)
+	})
+})
+
+describe("PR comment file", () => {
+	const headSha = "d".repeat(40)
+	const manifest = { baseSha: "c".repeat(40), headSha }
+	const survivedMutant = {
+		filePath: "src/value.ts",
+		status: "Survived",
+		mutatorName: "BooleanLiteral",
+		replacement: "false",
+		location: { start: { line: 4 } },
+	}
+	const advisoryRow = {
+		id: "core",
+		root: "packages/core",
+		selectors: ["src/value.ts:4-4"],
+		testFiles: [],
+		reportPath: "reports/mutation/core/mutation.html",
+		changedLines: 1,
+		valid: 3,
+		killed: 1,
+		timeout: 0,
+		survived: 1,
+		noCoverage: 0,
+		blocking: [survivedMutant],
+		result: "Advisory findings",
+	}
+
+	it("formats the hidden marker, validated counts, and the job summary for the comment", () => {
+		const comment = formatPrComment([advisoryRow], ["manifest advisory"], manifest)
+		const lines = comment.split("\n")
+
+		assert.equal(lines[0], PR_COMMENT_MARKER)
+		assert.equal(lines[1], `<!-- zoo-code-mutation-report head:${headSha} blocking:1 advisories:1 -->`)
+		assert.ok(comment.includes("#### `packages/core/src/value.ts`"))
+		assert.ok(comment.includes("| 4 | Survived | BooleanLiteral | false |"))
+		assert.ok(comment.includes("### Resolve a mutation gap"))
+		assert.ok(comment.includes("### Advisory findings"))
+	})
+
+	it("counts zero survivors for clean runs", () => {
+		const passedRow = { ...advisoryRow, blocking: [], survived: 0, result: "Passed" }
+		const lines = formatPrComment([passedRow], [], manifest).split("\n")
+
+		assert.equal(lines[1], `<!-- zoo-code-mutation-report head:${headSha} blocking:0 advisories:0 -->`)
+	})
+
+	it("refuses to format a comment without a full head SHA to validate provenance", () => {
+		assert.equal(formatPrComment([advisoryRow], [], {}), undefined)
+		assert.equal(formatPrComment([advisoryRow], [], { headSha: "abc123" }), undefined)
+	})
+
+	it("writes the comment file without requiring a GitHub job summary", () => {
+		const commentDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-pr-comment-"))
+		const commentFile = path.join(commentDirectory, "nested", PR_COMMENT_FILENAME)
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		delete process.env.GITHUB_STEP_SUMMARY
+
+		try {
+			appendSummary([advisoryRow], ["manifest advisory"], manifest, commentFile)
+			const lines = fs.readFileSync(commentFile, "utf8").split("\n")
+			assert.equal(lines[0], PR_COMMENT_MARKER)
+			assert.equal(lines[1], `<!-- zoo-code-mutation-report head:${headSha} blocking:1 advisories:1 -->`)
+			assert.ok(lines.join("\n").includes("### Resolve a mutation gap"))
+		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			fs.rmSync(commentDirectory, { recursive: true, force: true })
+		}
+	})
+
+	it("skips the comment file when no head SHA can be validated", () => {
+		const commentDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-pr-comment-"))
+		const commentFile = path.join(commentDirectory, PR_COMMENT_FILENAME)
+
+		try {
+			appendSummary([advisoryRow], [], {}, commentFile)
+			assert.equal(fs.existsSync(commentFile), false)
+		} finally {
+			fs.rmSync(commentDirectory, { recursive: true, force: true })
+		}
+	})
+
+	it("warns without failing when the comment file cannot be written", () => {
+		const commentDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-pr-comment-"))
+		const directoryPath = path.join(commentDirectory, "occupied")
+		fs.mkdirSync(directoryPath)
+		const previousWarn = console.warn
+		const warnings = []
+		console.warn = (...args) => warnings.push(args.join(" "))
+
+		try {
+			assert.doesNotThrow(() => appendSummary([advisoryRow], [], manifest, directoryPath))
+			assert.ok(warnings.some((warning) => warning.includes("Could not write the mutation PR comment file")))
+		} finally {
+			console.warn = previousWarn
+			fs.rmSync(commentDirectory, { recursive: true, force: true })
+		}
+	})
+})
+
+describe("mutation PR comment workflow", () => {
+	const readCommentWorkflow = () =>
+		fs.readFileSync(path.join(repositoryRoot, ".github/workflows/mutation-pr-comment.yml"), "utf8")
+
+	it("only trusts completed runs of the mutation workflow and never checks out PR code", () => {
+		const workflow = readCommentWorkflow()
+
+		assert.ok(workflow.includes('workflows: ["Changed-code mutation testing"]'))
+		assert.ok(workflow.includes("types: [completed]"))
+		assert.ok(workflow.includes("if: github.event.workflow_run.event == 'pull_request'"))
+		assert.ok(!workflow.includes("pull_request_target"))
+		assert.ok(!workflow.includes("pull_request:"))
+		assert.ok(!workflow.includes("actions/checkout"))
+		assert.ok(!workflow.includes("repository:"))
+	})
+
+	it("grants write access only to the per-PR comment shards", () => {
+		const workflow = readCommentWorkflow()
+
+		assert.ok(workflow.includes("permissions:\n    contents: read"))
+		assert.ok(workflow.includes("        permissions:\n            actions: read\n        outputs:"))
+		assert.ok(
+			workflow.includes("        permissions:\n            actions: read\n            pull-requests: write"),
+		)
+		assert.ok(!workflow.includes("contents: write"))
+		assert.ok(workflow.includes("actions/download-artifact@"))
+		assert.ok(workflow.includes("run-id: ${{ github.event.workflow_run.id }}"))
+	})
+
+	it("resolves the PR number from workflow_run event data, never from the artifact", () => {
+		const workflow = readCommentWorkflow()
+
+		assert.ok(workflow.includes("run.pull_requests?.length > 0"))
+		assert.ok(workflow.includes("run.head_repository?.owner?.login"))
+		assert.ok(workflow.includes("pr.head?.sha === run.head_sha"))
+		assert.ok(workflow.includes("pr_number: ${{ fromJSON(needs.resolve.outputs.pr_numbers) }}"))
+		assert.ok(workflow.includes("PR_NUMBER: ${{ matrix.pr_number }}"))
+		assert.ok(workflow.includes("listArtifactsForWorkflowRun"))
+	})
+
+	it("validates the artifact as untrusted data before using it as a comment body", () => {
+		const workflow = readCommentWorkflow()
+
+		assert.ok(workflow.includes("fs.statSync(reportFile)"))
+		assert.ok(workflow.includes("maxReportBytes"))
+		assert.ok(workflow.includes("Mutation report marker mismatch"))
+		assert.ok(workflow.includes("reportHeadSha !== headSha"))
+		assert.ok(workflow.includes("/<!--\\s*zoo-code-mutation-report[^>]*-->/g"))
+		assert.ok(workflow.includes("maxReportChars"))
+	})
+
+	it("keeps exactly one comment per PR using the shared marker and comment pattern", () => {
+		const workflow = readCommentWorkflow()
+
+		assert.ok(workflow.includes(PR_COMMENT_MARKER))
+		assert.ok(workflow.includes("zoo-code-mutation-report head:"))
+		assert.ok(workflow.includes("blocking:"))
+		assert.ok(workflow.includes("advisories:"))
+		assert.ok(workflow.includes("issues.listComments"))
+		assert.ok(workflow.includes("issues.createComment"))
+		assert.ok(workflow.includes("issues.updateComment"))
+		assert.ok(workflow.includes("comment.user?.login === 'github-actions[bot]'"))
+		assert.ok(workflow.includes("No mutants survived"))
+		assert.ok(workflow.includes("group: mutation-pr-comment-${{ github.event.workflow_run.id }}"))
+		assert.ok(workflow.includes("group: mutation-pr-comment-comment-${{ matrix.pr_number }}"))
+	})
+
+	it("reads the report file written by the mutation gate", () => {
+		const workflow = readCommentWorkflow()
+		const script = fs.readFileSync(path.join(repositoryRoot, "scripts/stryker-diff.mjs"), "utf8")
+
+		assert.ok(script.includes(`export const PR_COMMENT_MARKER = "${PR_COMMENT_MARKER}"`))
+		assert.ok(script.includes(`export const PR_COMMENT_FILENAME = "${PR_COMMENT_FILENAME}"`))
+		assert.ok(workflow.includes(`mutation-report/${PR_COMMENT_FILENAME}`))
+		assert.ok(script.includes("path.join(reportRoot, PR_COMMENT_FILENAME)"))
 	})
 })

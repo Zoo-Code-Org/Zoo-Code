@@ -1,0 +1,267 @@
+name: Mutation report PR comment
+
+on:
+    # The mutation run's own token is read-only for fork PRs, so the PR comment
+    # is posted by this trusted workflow after "Changed-code mutation testing"
+    # completes. This workflow only reads PR metadata and the run's artifact;
+    # it never checks out or executes PR code, and all unspecified permissions,
+    # including contents, are none.
+    workflow_run:
+        workflows: ["Changed-code mutation testing"]
+        types: [completed]
+
+permissions:
+    contents: read
+
+# Each completed mutation run gets its own workflow-level group; the comment
+# shards below serialize per PR so concurrent mutation runs for one PR can
+# never interleave their non-atomic comment writes.
+concurrency:
+    group: mutation-pr-comment-${{ github.event.workflow_run.id }}
+    cancel-in-progress: false
+
+jobs:
+    resolve:
+        name: Zoo Code / resolve mutation comment target
+        # merge_group completions have no pull request to comment on.
+        if: github.event.workflow_run.event == 'pull_request'
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        permissions:
+            actions: read
+        outputs:
+            pr_numbers: ${{ steps.resolve.outputs.pr_numbers }}
+            artifact_id: ${{ steps.resolve.outputs.artifact_id }}
+        steps:
+            - name: Resolve pull request and artifact
+              id: resolve
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  retries: 3
+                  script: |
+                      const { owner, repo } = context.repo;
+                      const run = context.payload.workflow_run;
+
+                      if (run?.event !== 'pull_request') {
+                        core.info(`Ignoring workflow_run with event '${run?.event}'`);
+                        core.setOutput('pr_numbers', '[]');
+                        core.setOutput('artifact_id', '');
+                        return;
+                      }
+
+                      // The PR number comes from trusted event data, never from the
+                      // artifact. Fork runs backfill pull_requests empty, so fall back
+                      // to an exact head owner, branch, and SHA match; the triggering
+                      // workflow runs on pull_request, whose head_repository is the
+                      // real fork, so the owner-and-branch query is safe here (see the
+                      // workflow_run branch of label-pr-review-state.yml).
+                      let prNumbers = [];
+                      if (run.pull_requests?.length > 0) {
+                        prNumbers = run.pull_requests.map(pr => pr.number).filter(Number.isFinite);
+                      } else {
+                        const headOwner = run.head_repository?.owner?.login;
+                        if (headOwner && run.head_branch && run.head_sha) {
+                          const candidates = await github.paginate(github.rest.pulls.list, {
+                            owner,
+                            repo,
+                            state: 'open',
+                            head: `${headOwner}:${run.head_branch}`,
+                            per_page: 100,
+                          });
+                          const baseRepository = `${owner}/${repo}`.toLowerCase();
+                          prNumbers = candidates
+                            .filter(pr =>
+                              pr.head?.sha === run.head_sha &&
+                              pr.base?.repo?.full_name?.toLowerCase() === baseRepository
+                            )
+                            .map(pr => pr.number);
+                          core.info(
+                            `Resolved workflow_run ${run.id ?? '(unknown)'} to ` +
+                            `${prNumbers.length} PR(s) by exact head owner, branch, and SHA`
+                          );
+                        }
+                      }
+                      prNumbers = [...new Set(prNumbers)].sort((a, b) => a - b);
+
+                      const { data: { artifacts } } = await github.rest.actions.listArtifactsForWorkflowRun({
+                        owner,
+                        repo,
+                        run_id: run.id,
+                        per_page: 100,
+                      });
+                      const artifact = artifacts.find(candidate =>
+                        candidate.name === 'changed-code-mutation-report' && !candidate.expired
+                      );
+                      if (!artifact) core.info('No mutation report artifact on this run; nothing to comment');
+
+                      core.info(
+                        `Reconciliation targets: ${prNumbers.length > 0 ? prNumbers.join(', ') : '(none)'}`
+                      );
+                      core.setOutput('pr_numbers', JSON.stringify(prNumbers));
+                      core.setOutput('artifact_id', artifact ? String(artifact.id) : '');
+
+    comment:
+        name: Zoo Code / comment mutation survivors
+        needs: resolve
+        if: >-
+            needs.resolve.outputs.pr_numbers != '[]' &&
+            needs.resolve.outputs.artifact_id != ''
+        strategy:
+            fail-fast: false
+            matrix:
+                pr_number: ${{ fromJSON(needs.resolve.outputs.pr_numbers) }}
+        # One mutating shard per PR, serialized per PR across concurrent mutation
+        # runs, so non-atomic list/create/update comment writes can never
+        # interleave. cancel-in-progress stays false: within one PR,
+        # newest-pending-wins is exactly freshest-state-wins. The -comment-
+        # infix keeps shard groups out of the workflow-level run-id namespace.
+        concurrency:
+            group: mutation-pr-comment-comment-${{ matrix.pr_number }}
+            cancel-in-progress: false
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        permissions:
+            actions: read
+            pull-requests: write
+        env:
+            PR_NUMBER: ${{ matrix.pr_number }}
+            HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+            TRIGGERING_RUN_URL: ${{ github.event.workflow_run.html_url }}
+        steps:
+            - name: Download mutation report artifact
+              uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+              with:
+                  name: changed-code-mutation-report
+                  run-id: ${{ github.event.workflow_run.id }}
+                  path: mutation-report
+
+            - name: Update pull request comment
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  retries: 3
+                  script: |
+                      const fs = require('fs');
+                      const { owner, repo } = context.repo;
+
+                      const marker = '<!-- zoo-code-mutation-report -->';
+                      const detailsPattern =
+                        /^<!-- zoo-code-mutation-report head:([0-9a-f]{40}) blocking:(\d+) advisories:(\d+) -->$/;
+                      const reportFile = 'mutation-report/pr-comment.md';
+                      const maxReportBytes = 1024 * 1024;
+                      const maxReportChars = 60000;
+
+                      const prNumber = Number(process.env.PR_NUMBER);
+                      const headSha = process.env.HEAD_SHA;
+
+                      // The artifact is produced by a run of PR code, so it is untrusted
+                      // data: validate its size and markers, cross-check the head SHA,
+                      // then strip any forged markers and control characters before the
+                      // text is ever used as a comment body. It is never executed and
+                      // never interpolated into API paths or commands.
+                      function readReport() {
+                        let raw;
+                        try {
+                          const stats = fs.statSync(reportFile);
+                          if (stats.size > maxReportBytes) {
+                            core.warning(`Mutation report exceeds ${maxReportBytes} bytes; ignoring untrusted artifact`);
+                            return null;
+                          }
+                          raw = fs.readFileSync(reportFile, 'utf8');
+                        } catch (error) {
+                          core.warning(`Mutation report artifact is unreadable: ${error.message}`);
+                          return null;
+                        }
+                        const lines = raw.split('\n');
+                        const detailsMatch = detailsPattern.exec((lines[1] ?? '').trim());
+                        if ((lines[0] ?? '').trim() !== marker || !detailsMatch) {
+                          core.warning('Mutation report marker mismatch; ignoring untrusted artifact');
+                          return null;
+                        }
+                        const [, reportHeadSha, blockingCount, advisoryCount] = detailsMatch;
+                        if (reportHeadSha !== headSha) {
+                          core.warning(
+                            `Mutation report head ${reportHeadSha} does not match run head ${headSha}; ignoring`
+                          );
+                          return null;
+                        }
+                        const content = lines.slice(2).join('\n')
+                          .replace(/<!--\s*zoo-code-mutation-report[^>]*-->/g, '')
+                          .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+                          .trim();
+                        return {
+                          headSha: reportHeadSha,
+                          blocking: Number(blockingCount),
+                          advisories: Number(advisoryCount),
+                          content,
+                        };
+                      }
+
+                      const report = readReport();
+                      if (!report) return;
+
+                      const informative = report.blocking > 0 || report.advisories > 0;
+                      let body;
+                      if (informative) {
+                        let content = report.content;
+                        if (content.length > maxReportChars) {
+                          // Cut at a paragraph boundary so a truncated table or code
+                          // fence cannot swallow the truncation note.
+                          const cutPoint = content.lastIndexOf('\n\n', maxReportChars);
+                          content =
+                            content.slice(0, cutPoint > 0 ? cutPoint : maxReportChars) +
+                            '\n\n[truncated - download the changed-code-mutation-report artifact for the complete report]';
+                        }
+                        body = [
+                          marker,
+                          `<!-- zoo-code-mutation-report head:${report.headSha} blocking:${report.blocking} advisories:${report.advisories} -->`,
+                          '',
+                          content,
+                          '',
+                        ].join('\n');
+                      } else {
+                        body = [
+                          marker,
+                          `<!-- zoo-code-mutation-report head:${report.headSha} blocking:0 advisories:0 -->`,
+                          '',
+                          '## Changed-code mutation testing',
+                          '',
+                          `No mutants survived the changed-code mutation run for head \`${report.headSha.slice(0, 12)}\`.`,
+                          '',
+                          `The \`changed-code-mutation-report\` artifact on this [workflow run](${process.env.TRIGGERING_RUN_URL}) contains the full reports.`,
+                          '',
+                        ].join('\n');
+                      }
+
+                      const comments = await github.paginate(github.rest.issues.listComments, {
+                        owner,
+                        repo,
+                        issue_number: prNumber,
+                        per_page: 100,
+                      });
+                      const existing = comments.find(comment =>
+                        comment.user?.login === 'github-actions[bot]' && comment.body?.includes(marker)
+                      );
+
+                      if (existing) {
+                        if (existing.body === body) {
+                          core.info(`PR #${prNumber}: mutation comment is already current`);
+                          return;
+                        }
+                        await github.rest.issues.updateComment({
+                          owner,
+                          repo,
+                          comment_id: existing.id,
+                          body,
+                        });
+                        core.info(`PR #${prNumber}: updated the mutation comment`);
+                      } else if (informative) {
+                        await github.rest.issues.createComment({
+                          owner,
+                          repo,
+                          issue_number: prNumber,
+                          body,
+                        });
+                        core.info(`PR #${prNumber}: created the mutation comment`);
+                      } else {
+                        core.info(`PR #${prNumber}: no surviving mutants and no existing comment; nothing posted`);
+                      }
