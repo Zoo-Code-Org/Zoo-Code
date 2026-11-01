@@ -11,6 +11,11 @@ export interface StoredMcpOAuthData {
 	 */
 	issuer?: string
 	/**
+	 * RFC 8707 resource used during authorization and token requests. This keeps
+	 * refresh requests consistent after the extension restarts.
+	 */
+	resource_indicator?: string
+	/**
 	 * Full DCR response from the auth server, persisted so that fields like
 	 * client_secret, grant_types, and token_endpoint_auth_method survive restarts.
 	 * Note: redirect_uris within this object may be stale (port changes between
@@ -21,8 +26,8 @@ export interface StoredMcpOAuthData {
 
 /**
  * Thin wrapper around VS Code SecretStorage for persisting MCP OAuth tokens.
- * Tokens are stored per-server (keyed by host) so different servers on the
- * same host share credentials, which is the common case for multi-path APIs.
+ * Tokens are stored per server path and optional static client ID. Dynamic
+ * registrations keep the legacy per-server key for backward compatibility.
  */
 export class SecretStorageService {
 	private readonly _storage: vscode.SecretStorage
@@ -32,16 +37,24 @@ export class SecretStorageService {
 		this._storage = context.secrets
 	}
 
-	private _key(serverUrl: string): string {
+	private _key(serverUrl: string, clientId?: string): string {
 		const url = new URL(serverUrl)
 		const normalizedPath = url.pathname.replace(/\/$/, "")
-		// Use base64url encoding to avoid collisions between paths like /a-b, /a_b, /a/b.
-		const pathSuffix = normalizedPath ? `.${Buffer.from(normalizedPath).toString("base64url")}` : ""
+		const encodedPath = Buffer.from(normalizedPath).toString("base64url")
+
+		if (clientId) {
+			const encodedClientId = Buffer.from(clientId).toString("base64url")
+			const encodedResource = Buffer.from(`${normalizedPath}${url.search}`).toString("base64url")
+			return `${this._namespace}${url.protocol}//${url.host}.p-${encodedResource}.c-${encodedClientId}.data`
+		}
+
+		// Dynamic registrations keep the legacy key for backward compatibility.
+		const pathSuffix = normalizedPath ? `.${encodedPath}` : ""
 		return `${this._namespace}${url.host}${pathSuffix}.data`
 	}
 
-	async getOAuthData(serverUrl: string): Promise<StoredMcpOAuthData | undefined> {
-		const raw = await this._storage.get(this._key(serverUrl))
+	async getOAuthData(serverUrl: string, clientId?: string): Promise<StoredMcpOAuthData | undefined> {
+		const raw = await this._storage.get(this._key(serverUrl, clientId))
 		if (!raw) return undefined
 		try {
 			return JSON.parse(raw) as StoredMcpOAuthData
@@ -50,17 +63,17 @@ export class SecretStorageService {
 		}
 	}
 
-	async saveOAuthData(serverUrl: string, data: StoredMcpOAuthData): Promise<void> {
-		await this._storage.store(this._key(serverUrl), JSON.stringify(data))
+	async saveOAuthData(serverUrl: string, data: StoredMcpOAuthData, clientId?: string): Promise<void> {
+		await this._storage.store(this._key(serverUrl, clientId), JSON.stringify(data))
 	}
 
-	async hasOAuthData(serverUrl: string): Promise<boolean> {
-		const raw = await this._storage.get(this._key(serverUrl))
+	async hasOAuthData(serverUrl: string, clientId?: string): Promise<boolean> {
+		const raw = await this._storage.get(this._key(serverUrl, clientId))
 		return raw !== undefined
 	}
 
-	async deleteOAuthData(serverUrl: string): Promise<void> {
-		await this._storage.delete(this._key(serverUrl))
+	async deleteOAuthData(serverUrl: string, clientId?: string): Promise<void> {
+		await this._storage.delete(this._key(serverUrl, clientId))
 	}
 
 	/**
@@ -70,8 +83,8 @@ export class SecretStorageService {
 	 *
 	 * @returns A dispose function — call it to stop listening.
 	 */
-	onDidChange(serverUrl: string, callback: () => void): () => void {
-		const key = this._key(serverUrl)
+	onDidChange(serverUrl: string, callback: () => void, clientId?: string): () => void {
+		const key = this._key(serverUrl, clientId)
 		const disposable = this._storage.onDidChange((e) => {
 			if (e.key === key) {
 				callback()

@@ -1,4 +1,8 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo, type ReasoningEffortExtended } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import { baseProviderSettingsShape, createModelIdAccessor, createProviderDefinition } from "./common.js"
 
 // Opencode "Go" plan — OpenAI-compatible gateway.
 // https://opencode.ai/docs/go/ · base URL: https://opencode.ai/zen/go/v1
@@ -275,6 +279,30 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		cacheReadsPrice: 0.08,
 		description:
 			"MiMo V2 Omni is Xiaomi's multimodal reasoning model with a 256k context window. Available via the Opencode Go plan.",
+	},
+	"mimo-v2.6-flash": {
+		maxTokens: 131_072,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: false,
+		preserveReasoning: true,
+		inputPrice: 0.14,
+		outputPrice: 0.28,
+		cacheReadsPrice: 0.0028,
+		description:
+			"MiMo V2.6 Flash is Xiaomi's fast full-modal model (text, image, audio, video) with 1M context and deep thinking. Available via the Opencode Go plan.",
+	},
+	"mimo-v2.6-pro": {
+		maxTokens: 131_072,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: false,
+		preserveReasoning: true,
+		inputPrice: 0.435,
+		outputPrice: 0.87,
+		cacheReadsPrice: 0.003625,
+		description:
+			"MiMo V2.6 Pro is Xiaomi's stronger full-modal reasoning model with 1M context and deep thinking. Available via the Opencode Go plan.",
 	},
 
 	// --- MiniMax ---
@@ -574,6 +602,9 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsMaxTokens: true,
+		// Temperature is accepted only with reasoning effort "none"; see
+		// OPENCODE_GO_TEMPERATURE_REASONING_EFFORTS.
+		supportsTemperature: false,
 		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
 		reasoningEffort: "medium",
 		inputPrice: 0.2,
@@ -596,8 +627,8 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsMaxTokens: true,
-		// The OpenCode Go Responses model silently drops `temperature`, so the
-		// UI temperature control would otherwise render as a dead control.
+		// Temperature is accepted only with reasoning effort "none"; see
+		// OPENCODE_GO_TEMPERATURE_REASONING_EFFORTS.
 		supportsTemperature: false,
 		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
 		reasoningEffort: "medium",
@@ -640,6 +671,7 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsMaxTokens: true,
+		supportsTemperature: true,
 		supportsReasoningEffort: ["low", "medium", "high", "xhigh"],
 		reasoningEffort: "high",
 		inputPrice: 2.0,
@@ -660,6 +692,7 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsMaxTokens: true,
+		supportsTemperature: true,
 		supportsReasoningEffort: ["minimal", "low", "medium", "high", "xhigh"],
 		reasoningEffort: "medium",
 		inputPrice: 0.1,
@@ -674,6 +707,7 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsMaxTokens: true,
+		supportsTemperature: true,
 		supportsReasoningEffort: ["minimal", "low", "medium", "high", "xhigh"],
 		reasoningEffort: "medium",
 		inputPrice: 0.1,
@@ -761,6 +795,54 @@ export function isOpencodeGoResponsesFormatModel(modelId: string): boolean {
 }
 
 /**
+ * Reasoning efforts for which a Responses-format model accepts `temperature`
+ * even though its registry entry declares `supportsTemperature: false`.
+ *
+ * Live probes of the Go gateway (Zoo-Code-Org/Zoo-Code#2006) found that the
+ * GPT Luna models accept every tested temperature (0–2) with reasoning effort
+ * `"none"`. With any other effort they return HTTP 400 "unsupported
+ * parameter" for every value except `1`. Temperature `1` is the OpenAI
+ * reasoning-model default, so accepting it does not show real support: the
+ * gateway allows only the default value. Temperature is therefore omitted for
+ * every effort other than `"none"`, including a request that would send `1`
+ * (Zoo-Code-Org/Zoo-Code#2055).
+ */
+export const OPENCODE_GO_TEMPERATURE_REASONING_EFFORTS: Readonly<Record<string, readonly ReasoningEffortExtended[]>> = {
+	"gpt-5.6-luna": ["none"],
+	"gpt-6-luna": ["none"],
+}
+
+/**
+ * Returns `true` when a Responses-format Go model accepts `temperature` for
+ * the effective reasoning effort that will be sent on the wire.
+ *
+ * Support is opt-in (Zoo-Code-Org/Zoo-Code#2055): a Responses model must
+ * declare `supportsTemperature: true` in the registry, or list the effort in
+ * {@link OPENCODE_GO_TEMPERATURE_REASONING_EFFORTS}. A model without either
+ * entry, or an unknown model ID, never receives `temperature`. Timeouts and
+ * HTTP 5xx results are not evidence for or against support.
+ *
+ * @param modelId - The Go model ID.
+ * @param reasoningEffort - The effective effort sent with the request, or
+ *   `undefined` when the request omits `reasoning.effort`.
+ */
+export function opencodeGoResponsesSupportsTemperature(
+	modelId: string,
+	reasoningEffort: ReasoningEffortExtended | undefined,
+): boolean {
+	if (!isOpencodeGoResponsesFormatModel(modelId)) {
+		return false
+	}
+
+	const efforts = OPENCODE_GO_TEMPERATURE_REASONING_EFFORTS[modelId]
+	if (efforts) {
+		return reasoningEffort !== undefined && efforts.includes(reasoningEffort)
+	}
+
+	return getOpencodeGoModelInfo(modelId)?.supportsTemperature === true
+}
+
+/**
  * Returns the native {@link ModelInfo} for a Go-plan model ID, or `undefined`
  * when the ID is not part of the curated registry. Callers should fall back to
  * {@link opencodeGoDefaultModelInfo} when this returns `undefined`.
@@ -768,3 +850,17 @@ export function isOpencodeGoResponsesFormatModel(modelId: string): boolean {
 export function getOpencodeGoModelInfo(modelId: string): ModelInfo | undefined {
 	return opencodeGoModels[modelId]
 }
+
+export const OPENCODE_GO_MODEL_ID_FIELD = "opencodeGoModelId"
+
+export const opencodeGoProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.opencodeGo,
+	modelIdKey: OPENCODE_GO_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(OPENCODE_GO_MODEL_ID_FIELD),
+	getDefaultModelId: () => opencodeGoDefaultModelId,
+	schema: {
+		...baseProviderSettingsShape,
+		opencodeGoApiKey: z.string().optional(),
+		[OPENCODE_GO_MODEL_ID_FIELD]: z.string().optional(),
+	},
+})

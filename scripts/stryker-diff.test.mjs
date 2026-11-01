@@ -254,8 +254,11 @@ describe("buildManifest", () => {
 		assert.equal(webview.runRoot, ".")
 		assert.equal(webview.discoverRelatedTests, true)
 		assert.equal(webview.vitestRelated, false)
-		assert.equal(extension.discoverRelatedTests, true)
-		assert.equal(extension.vitestRelated, false)
+		// The extension package deliberately uses plugin-side discovery (see the
+		// comment in PACKAGE_CONFIGS): stryker-js 10.0.0 mis-activates static mutants
+		// when an explicit STRYKER_TEST_FILES list is supplied.
+		assert.equal(extension.discoverRelatedTests, false)
+		assert.equal(extension.vitestRelated, true)
 		const types = manifest.packages.find(({ id }) => id === "types")
 		assert.equal(types.discoverRelatedTests, undefined)
 		assert.equal(types.vitestRelated, undefined)

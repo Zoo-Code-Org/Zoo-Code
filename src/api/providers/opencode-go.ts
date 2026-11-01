@@ -12,6 +12,7 @@ import {
 	OPENCODE_GO_DEFAULT_TEMPERATURE,
 	isOpencodeGoAnthropicFormatModel,
 	isOpencodeGoResponsesFormatModel,
+	opencodeGoResponsesSupportsTemperature,
 	providerIdentifiers,
 } from "@roo-code/types"
 
@@ -79,9 +80,9 @@ type OpencodeGoFormat = "anthropic" | "openai" | "responses"
  *   - Anthropic Messages (`/v1/messages`) — used by Qwen (qwen3.8-max,
  *     qwen3.7-max, qwen3.7-plus, qwen3.6-plus) and MiniMax (minimax-m3,
  *     minimax-m2.7, minimax-m2.5) models.
- *   - OpenAI Responses (`/v1/responses`) — used by `gpt-5.6-luna` and
- *     `gpt-6-luna`, whose chat-completions adapters are not supported by the
- *     Go gateway.
+ *   - OpenAI Responses (`/v1/responses`) — used by the models in
+ *     `OPENCODE_GO_RESPONSES_FORMAT_MODELS` (GPT Luna, Grok, and Muse Spark),
+ *     whose chat-completions adapters are not supported by the Go gateway.
  *
  * Sending an Anthropic-format model to the chat completions endpoint is
  * rejected with `401 Model <id> is not supported for format oa-compat`, so this
@@ -213,9 +214,9 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	 *
 	 * Anthropic-format models (Qwen/MiniMax) are streamed via
 	 * {@link streamAnthropicMessage} against `/v1/messages`; Responses-format
-	 * models (`gpt-5.6-luna` and `gpt-6-luna`) are streamed via {@link streamResponsesMessage}
-	 * against `/v1/responses`; all other models use the OpenAI-compatible chat
-	 * completions endpoint.
+	 * models ({@link isOpencodeGoResponsesFormatModel}) are streamed via
+	 * {@link streamResponsesMessage} against `/v1/responses`; all other models
+	 * use the OpenAI-compatible chat completions endpoint.
 	 *
 	 * For OpenAI-format models that require reasoning_content to be passed back
 	 * during multi-turn tool calls (`preserveReasoning`), messages are
@@ -239,7 +240,6 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			yield* this.streamResponsesMessage(
 				modelId,
 				info,
-				temperature,
 				maxTokens,
 				reasoningEffort,
 				systemPrompt,
@@ -319,8 +319,30 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	}
 
 	/**
+	 * Returns the `temperature` field for a Responses request, or an empty
+	 * object to omit it.
+	 *
+	 * Temperature is sent only when the user has set a custom value and the
+	 * model accepts it for the effective reasoning effort
+	 * ({@link opencodeGoResponsesSupportsTemperature}). The provider default is
+	 * never sent, which keeps the gateway's own default when no custom value
+	 * is set. A saved value for an unsupported configuration is kept in
+	 * settings but not sent (Zoo-Code-Org/Zoo-Code#2055).
+	 */
+	private getResponsesTemperature(
+		modelId: string,
+		reasoningEffort: ReasoningEffortExtended | undefined,
+	): { temperature?: number } {
+		const temperature = this.options.modelTemperature
+		return typeof temperature === "number" && opencodeGoResponsesSupportsTemperature(modelId, reasoningEffort)
+			? { temperature }
+			: {}
+	}
+
+	/**
 	 * Streams an OpenAI Responses-format completion for Go models that only
-	 * accept the `/v1/responses` endpoint (`gpt-5.6-luna` and `gpt-6-luna`).
+	 * accept the `/v1/responses` endpoint
+	 * ({@link isOpencodeGoResponsesFormatModel}).
 	 *
 	 * Follows the focused xAI handler pattern: the conversation is converted
 	 * with the shared {@link convertToResponsesApiInput} transform, the system
@@ -338,7 +360,6 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	private async *streamResponsesMessage(
 		modelId: string,
 		info: ModelInfo,
-		_temperature: number | undefined,
 		maxTokens: number | undefined,
 		reasoningEffort: ReasoningEffortExtended | undefined,
 		systemPrompt: string,
@@ -381,8 +402,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 						} as OpenAI.Responses.ResponseCreateParamsStreaming["reasoning"],
 					}
 				: {}),
-			// OpenCode Go Responses models currently reject temperature, even when
-			// the model metadata does not explicitly opt out of it.
+			...this.getResponsesTemperature(modelId, reasoningEffort),
 			// Honour the same includeMaxTokens/modelMaxTokens override logic as
 			// the chat-completions and Anthropic streaming paths.
 			...(maxTokens !== undefined
@@ -760,7 +780,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 						model: modelId,
 						input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
 						store: false,
-						// OpenCode Go Responses models currently reject temperature.
+						...this.getResponsesTemperature(modelId, reasoningEffort),
 						// Honour the same includeMaxTokens/modelMaxTokens override
 						// logic as the chat-completions path.
 						...(maxTokens !== undefined
