@@ -6,6 +6,7 @@ import React, {
 	useLayoutEffect,
 	useMemo,
 	useRef,
+	useReducer,
 	useState,
 } from "react"
 import {
@@ -143,14 +144,18 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const { currentApiConfigName, listApiConfigMeta, uriScheme, settingsImportedAt, mode } = extensionState
 
 	const [isDiscardDialogShow, setDiscardDialogShow] = useState(false)
-	const [isChangeDetected, setChangeDetected] = useState(false)
+	// How many changes the user has made since the form was last in step with the saved state (0: none). The flag is
+	// whether it is above 0. A save remembers the count it was made at, to tell whether the user edited again while it
+	// was in flight. (Not the identity of the state object: an automatic update of the state that is no edit, such as
+	// a settings page initialising itself, replaces that object too.)
+	const [changeCount, setChangeDetected] = useReducer(
+		(count: number, changed: boolean) => (changed ? count + 1 : 0),
+		0,
+	)
+	const isChangeDetected = changeCount > 0
 	// The save currently waiting for the host's answer. The "unsaved changes" flag stays on until it succeeds.
 	const [pendingSaveId, setPendingSaveId] = useState<string | undefined>(undefined)
-	// How many edits the user has made. The pending save remembers the count it was made at, to tell whether the user
-	// edited again while it was in flight. (Not the identity of the state object: an automatic update of the state that
-	// is no edit, such as a settings page initialising itself, replaces that object too.)
-	const editVersion = useRef(0)
-	const pendingSaveEditVersion = useRef(0)
+	const pendingSaveChangeCount = useRef(0)
 	// Appearance values that a successful save stored, until the live state shows them. The host reports a success even
 	// if refreshing the state failed afterwards, and then the live state is stale: comparing with it alone would take
 	// a later reset to the old value for "nothing changed" and not send it.
@@ -186,9 +191,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 	const [cachedState, setCachedState] = useState(() => extensionState)
 	const latestCachedState = useRef(cachedState)
+	const latestChangeCount = useRef(changeCount)
 	useEffect(() => {
 		latestCachedState.current = cachedState
-	}, [cachedState])
+		latestChangeCount.current = changeCount
+	}, [cachedState, changeCount])
 
 	const {
 		alwaysAllowReadOnly,
@@ -299,7 +306,6 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			}
 
 			if (field in APPEARANCE_SETTINGS) editedAppearance.current.add(field as AppearanceKey)
-			editVersion.current++
 			setChangeDetected(true)
 			return { ...prevState, [field]: value }
 		})
@@ -338,7 +344,6 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				const isAutomaticNoOpSync = !isUserAction && areValuesEqual(previousValue, value)
 
 				if (!isInitialSync && !isAutomaticNoOpSync) {
-					editVersion.current++
 					setChangeDetected(true)
 				}
 				return { ...prevState, apiConfiguration: { ...prevState.apiConfiguration, [field]: value } }
@@ -353,7 +358,6 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				return prevState
 			}
 
-			editVersion.current++
 			setChangeDetected(true)
 			return { ...prevState, experiments: { ...prevState.experiments, [id]: enabled } }
 		})
@@ -365,7 +369,6 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				return prevState
 			}
 
-			editVersion.current++
 			setChangeDetected(true)
 			return { ...prevState, telemetrySetting: setting }
 		})
@@ -377,7 +380,6 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				return prevState
 			}
 
-			editVersion.current++
 			setChangeDetected(true)
 			return { ...prevState, debug }
 		})
@@ -386,7 +388,6 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const setImageGenerationProvider = useCallback((provider: ImageGenerationProvider) => {
 		setCachedState((prevState) => {
 			if (prevState.imageGenerationProvider !== provider) {
-				editVersion.current++
 				setChangeDetected(true)
 			}
 
@@ -397,7 +398,6 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const setOpenRouterImageApiKey = useCallback((apiKey: string) => {
 		setCachedState((prevState) => {
 			if (prevState.openRouterImageApiKey !== apiKey) {
-				editVersion.current++
 				setChangeDetected(true)
 			}
 
@@ -408,7 +408,6 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const setImageGenerationSelectedModel = useCallback((model: string) => {
 		setCachedState((prevState) => {
 			if (prevState.openRouterImageGenerationSelectedModel !== model) {
-				editVersion.current++
 				setChangeDetected(true)
 			}
 
@@ -425,7 +424,6 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				return prevState
 			}
 
-			editVersion.current++
 			setChangeDetected(true)
 			return { ...prevState, customSupportPrompts: prompts }
 		})
@@ -452,7 +450,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			const appearanceEdited = Object.keys(changedAppearance).length > 0
 			const saveId = appearanceEdited ? nextSaveRequestId() : undefined
 			if (saveId) {
-				pendingSaveEditVersion.current = editVersion.current
+				pendingSaveChangeCount.current = changeCount
 				pendingAppearanceSent.current = changedAppearance
 				setPendingSaveId(saveId)
 			}
@@ -557,7 +555,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 		// The save is over: stored, failed, or not answered in time.
 		const settle = (success: boolean) => {
-			const editedAt = pendingSaveEditVersion.current
+			const editedAt = pendingSaveChangeCount.current
 			const sent = pendingAppearanceSent.current
 			pendingAppearanceSent.current = {}
 			setPendingSaveId(undefined)
@@ -573,7 +571,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			}
 
 			// An edit made while the save was in flight is not in what was sent: it stays unsaved.
-			const clean = success && editVersion.current === editedAt
+			const clean = success && latestChangeCount.current === editedAt
 			if (clean) setChangeDetected(false)
 
 			// A request to leave that came in meanwhile goes through the unsaved-changes check now: it proceeds if
