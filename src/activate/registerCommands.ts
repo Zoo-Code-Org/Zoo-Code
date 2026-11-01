@@ -435,10 +435,8 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 	// panel cannot clobber the replacement's ref.
 	newPanel.onDidDispose(
 		() => {
-			if (tabPanel === newPanel) {
-				// Stryker disable next-line StringLiteral: setPanel branches only on type === "sidebar", so any other literal routes to the identical tab-ref assignment
-				setPanel(undefined, "tab")
-			}
+			// A recovery may already have installed a replacement panel.
+			if (tabPanel === newPanel) setPanel(undefined, "tab")
 		},
 		null,
 		context.subscriptions, // Also register dispose listener

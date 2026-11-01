@@ -118,7 +118,7 @@ import { getWorkspaceGitInfo } from "../../utils/git"
 import { getWorkspacePath } from "../../utils/path"
 import { OrganizationAllowListViolationError } from "../../utils/errors"
 
-import { clearSidebarPanel, setPanel } from "../../activate/registerCommands"
+import { clearSidebarPanel, getPanel, setPanel } from "../../activate/registerCommands"
 
 import { t } from "../../i18n"
 
@@ -913,6 +913,19 @@ export class ClineProvider
 
 	private clearWebviewResources() {
 		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
+		this.stopWebviewWatchdog()
+		// Invalidate any recovery reload still awaiting its HTML so it cannot
+		// reassign webview.html on the disposed view.
+		this.webviewRecoveryEpoch++
+		// User-opened replacements get a fresh budget; recreating a failed host
+		// must preserve its incident budget so crash loops remain bounded.
+		if (!preservesRecoveryIncident(this.webviewHostRecoveryInProgress, this.pendingSidebarRecovery)) {
+			this.webviewRecoveryAttempts = 0
+			this.webviewRecoveryFailureReported = false
+			this.webviewRecoveryStopLogged = false
+		}
+		this.lastReceivedWebviewHeartbeatAt = undefined
+		this.webviewHealthySince = undefined
 		this.viewScopedDisposables.clear()
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()
@@ -1192,6 +1205,10 @@ export class ClineProvider
 					await this.dispose()
 				} else {
 					this.log("Clearing webview resources for sidebar view")
+					// Identity-checked: a view resolved after this one must keep the slot, and only
+					// this view's listeners are released so the replacement keeps its own.
+					clearSidebarPanel(webviewView)
+					this.clearViewScopedDisposables(webviewView)
 					this.view = undefined
 					this.clearWebviewResources()
 				}
@@ -1318,30 +1335,6 @@ export class ClineProvider
 
 			this.trackViewDisposable(webviewView, visibilityDisposable)
 		}
-
-		// Listen for when the view is disposed
-		// This happens when the user closes the view or when the view is closed programmatically
-		webviewView.onDidDispose(
-			async () => {
-				if (inTabMode) {
-					this.log("Disposing ClineProvider instance for tab view")
-					await this.dispose()
-				} else {
-					this.log("Clearing webview resources for sidebar view")
-					// Identity-checked: a view resolved after this one must keep the slot, and only
-					// this view's listeners are released so the replacement keeps its own.
-					clearSidebarPanel(webviewView)
-					if (this.view === webviewView) {
-						this.rejectPendingThemeFixtureProbes(
-							new Error("Webview was disposed before the theme fixture probe completed"),
-						)
-					}
-					this.clearViewScopedDisposables(webviewView)
-				}
-			},
-			null,
-			this.disposables,
-		)
 
 		// Listen for when color changes
 		const configDisposable = vscode.workspace.onDidChangeConfiguration(async (e) => {
@@ -1924,8 +1917,14 @@ export class ClineProvider
 	 * @param webviewView The view whose webview messages are listened to
 	 */
 	private setWebviewMessageListener(webview: vscode.Webview, view: vscode.WebviewView | vscode.WebviewPanel) {
-		const onReceiveMessage = async (message: WebviewMessage) =>
-			webviewMessageHandler(this, message, this.marketplaceManager)
+		const onReceiveMessage = async (message: WebviewMessage) => {
+			// Ignore messages from a view that is no longer the current view.
+			if (view !== this.view) {
+				return
+			}
+
+			await webviewMessageHandler(this, message, this.marketplaceManager)
+		}
 
 		const messageDisposable = webview.onDidReceiveMessage(onReceiveMessage)
 		this.trackViewDisposable(view, messageDisposable)
