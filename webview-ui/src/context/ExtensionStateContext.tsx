@@ -37,6 +37,11 @@ import { experimentDefault } from "@roo/experiments"
 import { vscode } from "@src/utils/vscode"
 import { convertTextMateToHljs } from "@src/utils/textMateToHljs"
 import { StringCache } from "@src/utils/stringCache"
+import {
+	recordDiagnosticsHydration,
+	recordDiagnosticsStateSequence,
+	recordDiagnosticsUnknownMessageUpdate,
+} from "@src/utils/diagnostics"
 
 export interface ExtensionStateContextType extends ExtensionState {
 	historyPreviewCollapsed?: boolean // Add the new state property
@@ -338,6 +343,8 @@ export const ExtensionStateContextProvider: React.FC<{
 		}
 		return mergedState
 	})
+	const stateRef = useRef(state)
+	stateRef.current = state
 
 	const [didHydrateState, setDidHydrateState] = useState(false)
 	const [showWelcome, setShowWelcome] = useState(false)
@@ -393,6 +400,7 @@ export const ExtensionStateContextProvider: React.FC<{
 			switch (message.type) {
 				case "state": {
 					const newState = message.state ?? {}
+					recordDiagnosticsStateSequence(newState.clineMessagesSeq, newState.clineMessages !== undefined)
 
 					const staleMessages = messagesAreStale(newState, clineMessagesSeqRef.current)
 
@@ -425,6 +433,7 @@ export const ExtensionStateContextProvider: React.FC<{
 					setState((prevState) => mergeExtensionState(prevState, newState))
 					setShowWelcome(!checkExistKey(newState.apiConfiguration, newState.zooCodeIsAuthenticated))
 					setDidHydrateState(true)
+					recordDiagnosticsHydration(true)
 					// Update alwaysAllowFollowupQuestions if present in state message
 					if ((newState as any).alwaysAllowFollowupQuestions !== undefined) {
 						setAlwaysAllowFollowupQuestions((newState as any).alwaysAllowFollowupQuestions)
@@ -486,6 +495,9 @@ export const ExtensionStateContextProvider: React.FC<{
 				}
 				case "messageUpdated": {
 					const clineMessage = message.clineMessage!
+					if (!stateRef.current.clineMessages.some((existing) => existing.ts === clineMessage.ts)) {
+						recordDiagnosticsUnknownMessageUpdate()
+					}
 					const messageIndex = findLastIndex(messagesRef.current, (item) => item.ts === clineMessage.ts)
 					if (messageIndex !== -1) {
 						messageCache.intern(clineMessage)

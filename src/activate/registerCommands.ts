@@ -13,6 +13,7 @@ import { handleNewTask } from "./handleTask"
 import { importSettingsWithFeedback } from "../core/config/importExport"
 import { MdmService } from "../services/mdm/MdmService"
 import { registerRipgrepDiagnosticCommand } from "../services/ripgrep/diagnostic"
+import { createDiagnosticsReport } from "../services/diagnostics"
 
 /**
  * Helper to get the visible ClineProvider instance or log if not found.
@@ -172,6 +173,12 @@ const getCommandsMap = ({
 			filePath,
 		)
 	},
+	createDiagnosticsReport: () =>
+		createDiagnosticsReport({
+			context,
+			outputChannel,
+			providers: ClineProvider.getAllInstances(),
+		}),
 	focusInput: async () => {
 		try {
 			await focusPanel(tabPanel, sidebarPanel)
