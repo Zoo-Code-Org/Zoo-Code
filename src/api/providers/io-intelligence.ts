@@ -23,6 +23,7 @@ import { RouterProvider } from "./router-provider"
 import { getIOIntelligenceModels } from "./fetchers/io-intelligence"
 import { handleProviderError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
 
 /**
  * IO Intelligence (io.net) provider.
@@ -201,8 +202,9 @@ export class IOIntelligenceHandler extends RouterProvider implements SingleCompl
 			if (options?.abortSignal !== undefined) {
 				completionOptions.signal = options.abortSignal
 			}
-			if (options?.timeoutMs !== undefined) {
-				completionOptions.timeout = options.timeoutMs
+			const timeoutMs = options?.timeoutMs
+			if (hasUsableTimeout(timeoutMs)) {
+				completionOptions.timeout = toSdkTimeoutMs(timeoutMs)
 			}
 			const hasCompletionOptions =
 				completionOptions.signal !== undefined || completionOptions.timeout !== undefined

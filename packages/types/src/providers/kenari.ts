@@ -1,4 +1,8 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import { baseProviderSettingsShape, createModelIdAccessor, createProviderDefinition } from "./common.js"
 
 // Kenari: Indonesian OpenAI-compatible AI gateway billed in Rupiah (IDR).
 // https://kenari.id/docs · base URL: https://kenari.id/v1
@@ -24,3 +28,17 @@ export const kenariDefaultModelInfo: ModelInfo = {
 }
 
 export const KENARI_DEFAULT_TEMPERATURE = 0
+
+const KENARI_MODEL_ID_FIELD = "kenariModelId"
+
+export const kenariProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.kenari,
+	modelIdKey: KENARI_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(KENARI_MODEL_ID_FIELD),
+	getDefaultModelId: () => kenariDefaultModelId,
+	schema: {
+		...baseProviderSettingsShape,
+		kenariApiKey: z.string().optional(),
+		[KENARI_MODEL_ID_FIELD]: z.string().optional(),
+	},
+})

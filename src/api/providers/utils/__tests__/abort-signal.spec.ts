@@ -1,11 +1,16 @@
 import {
+	bridgeExternalAbortSignal,
 	createAbortError,
+	detachOnAbort,
 	isRequestAborted,
 	mergeAbortSignalAndTimeout,
+	hasUsableTimeout,
 	mergeAbortSignals,
 	rejectOnAbort,
 	resolveModelWithAbort,
 	throwIfAborted,
+	MAX_TIMEOUT_MS,
+	toSdkTimeoutMs,
 } from "../abort-signal"
 import { withSettleGuard } from "../../../../test-utils/settle-guard"
 
@@ -123,6 +128,135 @@ describe("rejectOnAbort", () => {
 		expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
 		addSpy.mockRestore()
 		removeSpy.mockRestore()
+	})
+})
+
+describe("detachOnAbort", () => {
+	it("resolves with the pending value when it settles before the signal aborts", async () => {
+		const controller = new AbortController()
+
+		await expect(withSettleGuard(detachOnAbort(Promise.resolve("done"), controller.signal))).resolves.toBe("done")
+		expect(controller.signal.aborted).toBe(false)
+	})
+
+	it("rejects with the signal's own reason when the signal aborts first", async () => {
+		const controller = new AbortController()
+		const reason = new Error("caller gave up")
+		// Never settles: the wait must end purely via the abort.
+		const pending = new Promise<never>(() => {})
+		const wait = detachOnAbort(pending, controller.signal)
+		controller.abort(reason)
+
+		// Not createAbortError(): the caller's reason must surface unchanged.
+		await expect(withSettleGuard(wait)).rejects.toBe(reason)
+	})
+
+	it("rejects with the default AbortError reason when abort() carries no reason", async () => {
+		const controller = new AbortController()
+		const wait = detachOnAbort(new Promise<never>(() => {}), controller.signal)
+		controller.abort()
+
+		await expect(withSettleGuard(wait)).rejects.toMatchObject({ name: "AbortError" })
+	})
+
+	it("rejects immediately when the signal is already aborted", async () => {
+		const controller = new AbortController()
+		const reason = new Error("caller gave up")
+		controller.abort(reason)
+
+		// An already-aborted signal never fires its listener, so waiting would hang.
+		await expect(withSettleGuard(detachOnAbort(new Promise<never>(() => {}), controller.signal))).rejects.toBe(
+			reason,
+		)
+	})
+
+	it("does not attach a listener when the signal is already aborted", async () => {
+		const controller = new AbortController()
+		controller.abort()
+		const addSpy = vi.spyOn(controller.signal, "addEventListener")
+
+		await expect(withSettleGuard(detachOnAbort(Promise.resolve("done"), controller.signal))).rejects.toBeDefined()
+
+		expect(addSpy).not.toHaveBeenCalled()
+		addSpy.mockRestore()
+	})
+
+	it("does not leave a rejecting pending unhandled when the signal is already aborted", async () => {
+		// The pre-aborted branch never consumes `pending`, so it must still
+		// handle a rejection or it surfaces as unhandled.
+		const controller = new AbortController()
+		controller.abort()
+		const pending = Promise.reject(new Error("shared fetch failed"))
+
+		const unhandled: unknown[] = []
+		const onUnhandledRejection = (reason: unknown) => unhandled.push(reason)
+		process.on("unhandledRejection", onUnhandledRejection)
+		try {
+			await expect(withSettleGuard(detachOnAbort(pending, controller.signal))).rejects.toBeDefined()
+
+			// Node reports an unhandled rejection only after the microtask queue drains.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			expect(unhandled).toHaveLength(0)
+		} finally {
+			process.off("unhandledRejection", onUnhandledRejection)
+		}
+	})
+
+	it("propagates the pending rejection when the signal stays active", async () => {
+		const controller = new AbortController()
+		const boom = new Error("shared fetch failed")
+
+		await expect(withSettleGuard(detachOnAbort(Promise.reject(boom), controller.signal))).rejects.toBe(boom)
+	})
+
+	it("detaches the abort listener once the pending settles", async () => {
+		const controller = new AbortController()
+		const addSpy = vi.spyOn(controller.signal, "addEventListener")
+		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+
+		await expect(withSettleGuard(detachOnAbort(Promise.resolve("done"), controller.signal))).resolves.toBe("done")
+
+		// Must remove the exact registered listener, not just any function.
+		expect(addSpy).toHaveBeenCalledTimes(1)
+		const registeredListener = addSpy.mock.calls[0]?.[1] as EventListener | undefined
+		expect(typeof registeredListener).toBe("function")
+		expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+		addSpy.mockRestore()
+		removeSpy.mockRestore()
+	})
+
+	it("detaches the abort listener when the pending rejects", async () => {
+		const controller = new AbortController()
+		const addSpy = vi.spyOn(controller.signal, "addEventListener")
+		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+		const lookupError = new Error("shared fetch failed")
+
+		await expect(withSettleGuard(detachOnAbort(Promise.reject(lookupError), controller.signal))).rejects.toBe(
+			lookupError,
+		)
+
+		expect(addSpy).toHaveBeenCalledTimes(1)
+		const registeredListener = addSpy.mock.calls[0]?.[1] as EventListener | undefined
+		expect(typeof registeredListener).toBe("function")
+		expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+		addSpy.mockRestore()
+		removeSpy.mockRestore()
+	})
+
+	it("leaves the shared pending running after this waiter detaches", async () => {
+		// Aborting one caller must not cancel work other callers still await.
+		const controller = new AbortController()
+		let resolveShared: (value: string) => void = () => {}
+		const shared = new Promise<string>((resolve) => {
+			resolveShared = resolve
+		})
+		const wait = detachOnAbort(shared, controller.signal)
+		controller.abort(new Error("caller gave up"))
+
+		await expect(withSettleGuard(wait)).rejects.toThrow("caller gave up")
+
+		resolveShared("late value")
+		await expect(shared).resolves.toBe("late value")
 	})
 })
 
@@ -286,6 +420,19 @@ describe("abort-signal utilities", () => {
 			expect(mergeAbortSignalAndTimeout(controller.signal, Infinity)).toBe(controller.signal)
 		})
 
+		it("caps an overflowing timeoutMs instead of aborting immediately", async () => {
+			// Node clamps AbortSignal.timeout delays above 2^31-1 ms to 1 ms;
+			// the helper caps the delay so an overflowing timeout does not abort
+			// the request within the first millisecond.
+			const result = mergeAbortSignalAndTimeout(undefined, 2_147_483_648)
+
+			expect(result).toBeInstanceOf(AbortSignal)
+			expect(result?.aborted).toBe(false)
+
+			await new Promise((resolve) => setTimeout(resolve, 20))
+			expect(result?.aborted).toBe(false)
+		})
+
 		it("rounds a fractional timeoutMs up before scheduling", async () => {
 			// Node validates AbortSignal.timeout delays as uint32: 1.5 or 0.5
 			// would throw ERR_OUT_OF_RANGE. Pin the rounded delay that actually
@@ -311,19 +458,6 @@ describe("abort-signal utilities", () => {
 			expect(result?.aborted).toBe(false)
 			expect(tiny).toBeInstanceOf(AbortSignal)
 			await vi.waitFor(() => expect(result?.aborted).toBe(true))
-		})
-
-		it("caps an overflowing timeoutMs instead of aborting immediately", async () => {
-			// Node clamps AbortSignal.timeout delays above 2^31-1 ms to 1 ms;
-			// the helper caps the delay so an overflowing timeout does not abort
-			// the request within the first millisecond.
-			const result = mergeAbortSignalAndTimeout(undefined, 2_147_483_648)
-
-			expect(result).toBeInstanceOf(AbortSignal)
-			expect(result?.aborted).toBe(false)
-
-			await new Promise((resolve) => setTimeout(resolve, 20))
-			expect(result?.aborted).toBe(false)
 		})
 	})
 
@@ -464,5 +598,80 @@ describe("abort-signal utilities", () => {
 		it("returns a fresh error on each call", () => {
 			expect(createAbortError("X")).not.toBe(createAbortError("X"))
 		})
+	})
+})
+
+describe("bridgeExternalAbortSignal", () => {
+	it("returns an undefined signal and a noop dispose without an external signal", () => {
+		const { signal, dispose } = bridgeExternalAbortSignal()
+		expect(signal).toBeUndefined()
+		expect(() => dispose()).not.toThrow()
+	})
+
+	it("returns an already-aborted signal when the external signal is aborted", () => {
+		const controller = new AbortController()
+		controller.abort()
+		const { signal, dispose } = bridgeExternalAbortSignal(controller.signal)
+		expect(signal?.aborted).toBe(true)
+		expect(() => dispose()).not.toThrow()
+	})
+
+	it("aborts the per-request signal when the external signal aborts", () => {
+		const controller = new AbortController()
+		const { signal } = bridgeExternalAbortSignal(controller.signal)
+		expect(signal?.aborted).toBe(false)
+		controller.abort()
+		expect(signal?.aborted).toBe(true)
+	})
+
+	it("detaches the retained listener on dispose", () => {
+		const controller = new AbortController()
+		const addSpy = vitest.spyOn(controller.signal, "addEventListener")
+		const removeSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+		const { signal, dispose } = bridgeExternalAbortSignal(controller.signal)
+
+		expect(addSpy).toHaveBeenCalledTimes(1)
+		const [event, listener, opts] = addSpy.mock.calls[0]
+		expect(event).toBe("abort")
+		expect(opts).toEqual({ once: true })
+
+		dispose()
+		expect(removeSpy).toHaveBeenCalledTimes(1)
+		expect(removeSpy).toHaveBeenCalledWith("abort", listener)
+
+		// After dispose the bridge no longer forwards aborts: the per-request
+		// signal stays live, proving the exact retained callback was detached.
+		controller.abort()
+		expect(signal?.aborted).toBe(false)
+	})
+})
+
+describe("hasUsableTimeout", () => {
+	it("accepts only finite positive values", () => {
+		expect(hasUsableTimeout(1)).toBe(true)
+		expect(hasUsableTimeout(50)).toBe(true)
+		expect(hasUsableTimeout(12.5)).toBe(true)
+	})
+
+	it("rejects values the SDK timeout option cannot take", () => {
+		expect(hasUsableTimeout(undefined)).toBe(false)
+		expect(hasUsableTimeout(0)).toBe(false)
+		expect(hasUsableTimeout(-5)).toBe(false)
+		expect(hasUsableTimeout(Number.NaN)).toBe(false)
+		expect(hasUsableTimeout(Number.POSITIVE_INFINITY)).toBe(false)
+	})
+})
+
+describe("toSdkTimeoutMs", () => {
+	it("rounds fractional delays up", () => {
+		expect(toSdkTimeoutMs(1500.4)).toBe(1501)
+		expect(toSdkTimeoutMs(1)).toBe(1)
+	})
+
+	it("caps delays above the maximum Node timer delay", () => {
+		expect(toSdkTimeoutMs(MAX_TIMEOUT_MS)).toBe(MAX_TIMEOUT_MS)
+		expect(toSdkTimeoutMs(MAX_TIMEOUT_MS + 1)).toBe(MAX_TIMEOUT_MS)
+		expect(toSdkTimeoutMs(Number.MAX_SAFE_INTEGER)).toBe(MAX_TIMEOUT_MS)
 	})
 })

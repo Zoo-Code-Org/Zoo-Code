@@ -53,6 +53,7 @@ export const commandIds = [
 	"focusInput",
 	"acceptInput",
 	"focusPanel",
+	"retryWebviewRecovery",
 	"toggleAutoApprove",
 
 	"showRipgrepDiagnostic",

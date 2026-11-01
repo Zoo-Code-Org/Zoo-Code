@@ -39,13 +39,14 @@ describe("startCallbackServer", () => {
 	it("should start server and resolve with callback result", async () => {
 		const mockServer = createMockServer()
 
-		;(http.createServer as any).mockReturnValue(mockServer)
+		vi.mocked(http.createServer).mockReturnValue(mockServer as unknown as http.Server)
 
 		const promise = startCallbackServer()
 		const { server, port, result } = await promise
 
 		expect(port).toBe(3000)
 		expect(server).toBe(mockServer)
+		expect(mockServer.listen).toHaveBeenCalledWith(0, "127.0.0.1", expect.any(Function))
 
 		// Simulate callback request
 		const requestCall = mockServer.on.mock.calls.find((call) => call[0] === "request")
@@ -70,10 +71,40 @@ describe("startCallbackServer", () => {
 		expect(mockRes.end).toHaveBeenCalledWith(expect.stringContaining('<meta charset="utf-8">'))
 	})
 
+	it.each(["localhost", "127.0.0.1"] as const)("should bind to the configured loopback host %s", async (host) => {
+		const mockServer = createMockServer()
+
+		vi.mocked(http.createServer).mockReturnValue(mockServer as unknown as http.Server)
+
+		const { result, cancel } = await startCallbackServer(33418, undefined, host)
+		const cancellation = expect(result).rejects.toThrow("Callback cancelled")
+		cancel()
+
+		expect(mockServer.listen).toHaveBeenCalledWith(33418, host, expect.any(Function))
+		await cancellation
+	})
+
+	it("should resolve only on the configured callback path", async () => {
+		const mockServer = createMockServer()
+
+		vi.mocked(http.createServer).mockReturnValue(mockServer as unknown as http.Server)
+
+		const { result } = await startCallbackServer(19876, undefined, "127.0.0.1", "/mcp/oauth/callback")
+		const requestCall = mockServer.on.mock.calls.find((call) => call[0] === "request")
+		const requestHandler = requestCall ? requestCall[1] : vi.fn()
+
+		const defaultPathRes = createMockResponse()
+		requestHandler({ url: "/callback?code=wrong-path", method: "GET" }, defaultPathRes)
+		expect(defaultPathRes.writeHead).toHaveBeenCalledWith(404)
+
+		requestHandler({ url: "/mcp/oauth/callback?code=test-code", method: "GET" }, createMockResponse())
+		expect((await result).code).toBe("test-code")
+	})
+
 	it("should reject invalid state", async () => {
 		const mockServer = createMockServer()
 
-		;(http.createServer as any).mockReturnValue(mockServer)
+		vi.mocked(http.createServer).mockReturnValue(mockServer as unknown as http.Server)
 
 		const promise = startCallbackServer(undefined, "expected-state")
 		const { result } = await promise
@@ -106,7 +137,7 @@ describe("stopCallbackServer", () => {
 			close: vi.fn((callback) => callback()),
 		}
 
-		await stopCallbackServer(mockServer as any, () => {})
+		await stopCallbackServer(mockServer as unknown as http.Server, () => {})
 		expect(mockServer.close).toHaveBeenCalled()
 	})
 
@@ -116,7 +147,7 @@ describe("stopCallbackServer", () => {
 		}
 		const cancel = vi.fn()
 
-		await stopCallbackServer(mockServer as any, cancel)
+		await stopCallbackServer(mockServer as unknown as http.Server, cancel)
 		expect(cancel).toHaveBeenCalledTimes(1)
 		expect(mockServer.close).toHaveBeenCalled()
 	})
