@@ -17,7 +17,12 @@ const MOCK_TIMEOUT_MS = 300_000
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { providerIdentifiers, type ModelRecord } from "@roo-code/types"
+import {
+	OPENROUTER_DEFAULT_PROVIDER_NAME,
+	openRouterDefaultModelInfo,
+	providerIdentifiers,
+	type ModelRecord,
+} from "@roo-code/types"
 import type { ModelInfo } from "@roo-code/types"
 
 import { applyOpenRouterMoonshotK3Profile } from "../fetchers/openrouter"
@@ -3029,6 +3034,11 @@ describe("OpenRouterHandler", () => {
 				writable: true,
 			})
 
+			// The catalog loads lazily via ensureModelFetched(), so a fresh handler has not
+			// started a discovery lookup; the pre-abort guard must reject without starting one.
+			const { getModels } = await import("../fetchers/modelCache")
+			const lookupsBefore = vitest.mocked(getModels).mock.calls.length
+
 			const controller = new AbortController()
 			controller.abort()
 
@@ -3038,9 +3048,7 @@ describe("OpenRouterHandler", () => {
 				name: "AbortError",
 				message: "The OpenRouter request was aborted",
 			})
-			// The pre-abort guard rejects before any model lookup beyond the constructor's own.
-			const { getModels } = await import("../fetchers/modelCache")
-			expect(vitest.mocked(getModels).mock.calls.length).toBe(1)
+			expect(vitest.mocked(getModels).mock.calls.length).toBe(lookupsBefore)
 		})
 
 		it("rejects with AbortError when aborted mid-flight", async () => {

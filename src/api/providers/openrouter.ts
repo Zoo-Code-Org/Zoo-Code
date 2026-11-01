@@ -42,7 +42,7 @@ import type {
 	SingleCompletionHandler,
 } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
-import { createAbortError, mergeAbortSignalAndTimeout, rejectOnAbort } from "./utils/abort-signal"
+import { createAbortError, mergeAbortSignalAndTimeout, rejectOnAbort, toSdkTimeoutMs } from "./utils/abort-signal"
 import { generateImageWithProvider, ImageGenerationResult } from "./utils/image-generation"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 
@@ -731,7 +731,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		// signal side of the same option.
 		const perRequestTimeoutMs =
 			typeof options?.timeoutMs === "number" && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
-				? Math.min(Math.max(1, Math.ceil(options.timeoutMs)), 2_147_483_647)
+				? toSdkTimeoutMs(options.timeoutMs)
 				: undefined
 
 		const requestOptions: OpenAI.RequestOptions = {
