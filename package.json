@@ -10,7 +10,7 @@
 		"install": "node scripts/bootstrap.mjs",
 		"install:all": "node scripts/bootstrap.mjs",
 		"lint": "turbo lint --log-order grouped --output-logs new-only",
-		"check-types": "turbo check-types --log-order grouped --output-logs new-only",
+		"check-types": "tsc -p tsconfig.json --noEmit && turbo check-types --log-order grouped --output-logs new-only",
 		"test": "turbo test --log-order grouped --output-logs new-only",
 		"test:code-qa-ci": "node --test scripts/code-qa-workflow.test.mjs",
 		"solheim:smoke": "node --import tsx scripts/solheim-smoke/driver.mts",
@@ -21,13 +21,15 @@
 		"agent-evals:check-types": "tsc -p scripts/agent-evals/tsconfig.json",
 		"test:mutation-ci": "node --test scripts/stryker-diff.test.mjs",
 		"lifecycle:model-check": "tsx scripts/check-task-lifecycle.ts && tsx scripts/check-task-store-concurrency.ts && tsx scripts/check-provider-handoff-scheduler.ts && pnpm cleanup-protocol:model-check && pnpm parser-scope:model-check && tsx scripts/check-completion-persistence.ts && tsx scripts/check-delegated-mode-readers.ts && pnpm tool-turn:model-check",
+		"webview-recovery:model-check": "node --import tsx scripts/check-webview-recovery.ts",
+		"webview-recovery:check-types": "tsc -p scripts/tsconfig.webview-recovery.json",
 		"fanout-protocol:model-check": "tsx scripts/check-task-fanout-protocol.ts",
 		"cleanup-protocol:model-check": "tsx scripts/check-task-cleanup-protocol.ts",
 		"tool-turn:model-check": "tsx scripts/check-tool-turn-continuation.ts",
 		"parser-scope:model-check": "node scripts/run-native-tool-call-parser-scoping.mjs",
 		"mcp:integration-check": "tsx scripts/check-mcp-oauth-integration.ts",
 		"test:coverage": "turbo test:coverage --log-order grouped --output-logs new-only",
-		"format": "turbo format --log-order grouped --output-logs new-only",
+		"format": "prettier --write .",
 		"format:check": "prettier --check .",
 		"build": "turbo build --log-order grouped --output-logs new-only",
 		"bundle": "turbo bundle --log-order grouped --output-logs new-only",
@@ -36,9 +38,9 @@
 		"install:vsix": "pnpm install --frozen-lockfile && pnpm clean && pnpm vsix && node scripts/install-vsix.js",
 		"code-server:install": "node scripts/code-server.js",
 		"changeset:version": "cp CHANGELOG.md src/CHANGELOG.md && changeset version && cp -vf src/CHANGELOG.md .",
-		"knip": "knip",
+		"knip": "knip --treat-config-hints-as-errors",
 		"npm:publish:types": "pnpm --filter @roo-code/types npm:publish",
-		"knip:production": "knip --production",
+		"knip:production": "knip --production --treat-config-hints-as-errors",
 		"test:knip-policy": "node --test scripts/knip-policy.test.mjs"
 	},
 	"devDependencies": {
@@ -71,7 +73,7 @@
 		"webview-ui/src/**/*.{ts,tsx}": [
 			"pnpm --dir webview-ui exec eslint --max-warnings=0 --no-warn-ignored"
 		],
-		"apps/cli/src/**/*.ts": [
+		"apps/cli/src/**/*.{ts,tsx}": [
 			"pnpm --dir apps/cli exec eslint --max-warnings=0 --no-warn-ignored"
 		],
 		"apps/vscode-e2e/src/**/*.ts": [

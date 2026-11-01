@@ -20,8 +20,13 @@ const themeKinds: Record<string, vscode.ColorThemeKind> = {
 	"Default High Contrast": vscode.ColorThemeKind.HighContrast,
 }
 
-async function poll<T>(capture: () => Promise<T>, matches: (value: T) => boolean, description: string): Promise<T> {
-	const deadline = Date.now() + SCENE_TIMEOUT_MS
+async function poll<T>(
+	capture: () => Promise<T>,
+	matches: (value: T) => boolean,
+	description: string,
+	timeoutMs = SCENE_TIMEOUT_MS,
+): Promise<T> {
+	const deadline = Date.now() + timeoutMs
 	let latest: T | undefined
 
 	while (Date.now() < deadline) {
@@ -33,9 +38,10 @@ async function poll<T>(capture: () => Promise<T>, matches: (value: T) => boolean
 	throw new Error(`Timed out waiting for ${description}; latest value: ${JSON.stringify(latest)}`)
 }
 
-async function waitForFile(filePath: string) {
+async function waitForFile(filePath: string, probe?: () => Promise<void>) {
 	await poll(
 		async () => {
+			await probe?.()
 			try {
 				await fs.access(filePath)
 				return true
@@ -45,6 +51,7 @@ async function waitForFile(filePath: string) {
 		},
 		Boolean,
 		`file ${filePath}`,
+		10 * 60_000,
 	)
 }
 
@@ -138,6 +145,36 @@ export async function run(): Promise<void> {
 		landmark = result
 	}
 
-	await fs.writeFile(readyPath, `${JSON.stringify({ scene, themeId, landmark, themeFixture }, null, 2)}\n`, "utf8")
-	await waitForFile(donePath)
+	await fs.writeFile(
+		readyPath,
+		`${JSON.stringify({ scene, themeId, landmark, themeFixture, taskIds: api.getCurrentTaskStack() }, null, 2)}\n`,
+		"utf8",
+	)
+	// A request written by Playwright after recovery proves a fresh round trip
+	// through the real host and compares its task stack with the initial one.
+	await waitForFile(donePath, async () => {
+		const request = `${donePath}.probe`
+		try {
+			await fs.access(request)
+		} catch {
+			return
+		}
+		const resultPath = `${request}.result`
+		const temporaryResultPath = `${resultPath}.tmp`
+		try {
+			const fixture = await api.captureWebviewThemeFixture()
+			await fs.writeFile(
+				temporaryResultPath,
+				JSON.stringify({ fixture, taskIds: api.getCurrentTaskStack() }),
+				"utf8",
+			)
+			await fs.rename(temporaryResultPath, resultPath)
+			// Acknowledge only after publishing a complete result. Repeating this
+			// write after a failed acknowledgement is safe for this read-only probe.
+			await fs.unlink(request)
+		} catch (error) {
+			await fs.rm(temporaryResultPath, { force: true }).catch(() => undefined)
+			await log(`theme probe will retry: ${String(error)}`).catch(() => undefined)
+		}
+	})
 }

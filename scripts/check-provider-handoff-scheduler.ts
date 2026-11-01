@@ -495,5 +495,5 @@ function formatViolation(policy: Policy, violations: string[], trace: TraceStep[
 }
 
 function task(id: string, status: HistoryItem["status"], parentTaskId?: string): HistoryItem {
-	return { id, status, parentTaskId, task: id, ts: 1, tokensIn: 0, tokensOut: 0, totalCost: 0 }
+	return { id, status, parentTaskId, task: id, number: 1, ts: 1, tokensIn: 0, tokensOut: 0, totalCost: 0 }
 }

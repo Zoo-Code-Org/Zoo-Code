@@ -66,6 +66,8 @@ jobs:
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
             - name: Setup Node.js and pnpm
               uses: ./.github/actions/setup-node-pnpm
+              with:
+                  install-args: "--frozen-lockfile"
             - name: Verify all translations are complete
               run: node scripts/find-missing-translations.js
 
@@ -76,6 +78,8 @@ jobs:
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
             - name: Setup Node.js and pnpm
               uses: ./.github/actions/setup-node-pnpm
+              with:
+                  install-args: "--frozen-lockfile"
             - name: Verify Knip guardrails
               run: pnpm test:knip-policy
             - name: Run knip checks
@@ -90,6 +94,8 @@ jobs:
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
             - name: Setup Node.js and pnpm
               uses: ./.github/actions/setup-node-pnpm
+              with:
+                  install-args: "--frozen-lockfile"
             - name: Check formatting
               run: pnpm format:check
             - name: Lint
@@ -110,6 +116,8 @@ jobs:
               run: pnpm agent-evals:check-types
             - name: Model-check task lifecycle protocols
               run: pnpm lifecycle:model-check
+            - name: Model-check webview recovery
+              run: pnpm webview-recovery:check-types && pnpm webview-recovery:model-check
             - name: Validate MCP OAuth integration
               run: pnpm mcp:integration-check
 
@@ -163,6 +171,8 @@ jobs:
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
             - name: Setup Node.js and pnpm
               uses: ./.github/actions/setup-node-pnpm
+              with:
+                  install-args: "--frozen-lockfile"
             - name: Restore Turbo cache
               id: turbo-cache
               uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
