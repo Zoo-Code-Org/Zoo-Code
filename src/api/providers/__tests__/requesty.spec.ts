@@ -9,8 +9,10 @@ const MOCK_TIMEOUT_MS = 300_000
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
+import { providerIdentifiers, requestyDefaultModelInfo } from "@roo-code/types"
 import type { ModelRecord } from "@roo-code/types"
 
+import { getModels } from "../fetchers/modelCache"
 import { RequestyHandler } from "../requesty"
 import { Package } from "../../../shared/package"
 import { ApiHandlerCreateMessageMetadata } from "../../index"
