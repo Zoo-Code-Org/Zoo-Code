@@ -352,10 +352,10 @@
 		"title": "Zoo Code {{version}} est disponible",
 		"support": "Soutiens Zoo Code en nous donnant une étoile sur <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Nouveautés de Zoo Code v3.90.0",
-			"highlight1": "✨ Fournisseurs et modèles : GitHub Copilot est maintenant un fournisseur : connecte-toi et Zoo Code charge tes modèles Copilot. IO Intelligence est un fournisseur avec sa propre clé API. Gemini 4 Argon est sur Gemini et Vertex. GPT-6 Luna est sur OpenCode Go. Gemini 4 Argon et GPT-6 Luna sont aussi sur Zoo Gateway.",
-			"highlight2": "🧭 Exécution des outils : Répéter le même appel d'outil affiche un avertissement, puis Zoo Code arrête cette boucle. Désactiver attempt_completion ne laisse plus une tâche incapable de se terminer. Les messages en file passent les mêmes contrôles de protection des commandes que les commandes que tu envoies directement.",
-			"highlight3": "⚡ Raisonnement et streaming : Le raisonnement adaptatif d'Anthropic s'affiche dans le chat, et les thinking tokens sont comptés. L'option R1 conserve le raisonnement de llama.cpp, Ollama et LM Studio. Codex conserve le raisonnement chiffré avec le résumé que tu vois. Les streams du modèle de langage VS Code utilisent une récupération protégée quand un stream échoue."
+			"heading": "Nouveautés de Zoo Code v3.94.0",
+			"highlight1": "✨ Prise en charge plus large des modèles et fournisseurs : Utilise Claude Haiku 5.5 via Anthropic, envoie des images aux modèles VS Code LM compatibles, ajuste la température pour les modèles OpenCode Go Responses et annule les requêtes proprement chez plus de fournisseurs.",
+			"highlight2": "🔐 MCP OAuth plus flexible : Configure des paramètres statiques de client OAuth, utilise des chemins de callback personnalisés, découvre les détails d'authentification dans WWW-Authenticate et vois les échecs de callback avant de réessayer.",
+			"highlight3": "🧭 Chats et longues sessions plus fluides : Renomme les tâches dans l'historique, glisse des fichiers dans le chat sans maintenir Shift, réduis la mémoire conservée pendant les longues sessions et garde stables les liens de sous-tâches et les webviews remplacés."
 		},
 		"cloudAgents": {
 			"heading": "Nouveautés dans le Cloud :",

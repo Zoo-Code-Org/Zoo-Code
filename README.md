@@ -46,11 +46,11 @@ Zoo Code builds on the foundation created by Roo Code and continues to expand it
 - **More dependable terminal and editing workflows** — fixes for premature terminal completion, task-state races, context management, diff editing, and provider-specific tool use.
 - **More control over your workspace** — rules management, per-mode MCP restrictions, multi-root path controls, model reasoning options, and completion change review actions.
 
-## What's New in v3.90.0
+## What's New in v3.94.0
 
-- ✨ **Providers and models:** GitHub Copilot is now a provider: sign in and Zoo Code loads your Copilot models. IO Intelligence is a provider with its own API key. Gemini 4 Argon is on Gemini and Vertex. GPT-6 Luna is on OpenCode Go. Gemini 4 Argon and GPT-6 Luna are on Zoo Gateway as well.
-- 🧭 **Tool execution:** Repeating the same tool call gets a warning, then Zoo Code stops that loop. Disabling `attempt_completion` no longer leaves a task unable to finish. Queued messages run the same command-protection checks as commands you send directly.
-- ⚡ **Reasoning and streaming:** Anthropic adaptive thinking shows in chat, and thinking tokens are counted. The R1 toggle keeps reasoning from llama.cpp, Ollama, and LM Studio. Codex keeps encrypted reasoning with the summary you see. VS Code language-model streams use guarded recovery when a stream fails.
+- ✨ **Broader model and provider support:** Use Claude Haiku 5.5 through Anthropic, send images to compatible VS Code LM models, tune temperature for OpenCode Go Responses models, and cancel requests cleanly across more providers.
+- 🔐 **More flexible MCP OAuth:** Configure static OAuth client settings, use custom callback paths, discover authentication details from `WWW-Authenticate`, and see callback failures before retrying.
+- 🧭 **Smoother chats and long sessions:** Rename tasks in history, drag files into chat without holding Shift, reduce memory retained during long sessions, and keep subtask links and replaced webviews stable.
 
 <details>
   <summary>🌐 Available languages</summary>

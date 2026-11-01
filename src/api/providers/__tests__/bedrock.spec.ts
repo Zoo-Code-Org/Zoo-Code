@@ -138,37 +138,49 @@ describe("AwsBedrockHandler", () => {
 		},
 	)
 
-	it.each([
-		["anthropic.claude-sonnet-4-5-20250929-v1:0", 64_000],
-		["anthropic.claude-sonnet-4-6", 64_000],
-		["anthropic.claude-sonnet-5", 128_000],
-		["anthropic.claude-opus-4-7", 128_000],
-		["anthropic.claude-opus-4-8", 128_000],
-		["anthropic.claude-opus-5", 128_000],
-		["anthropic.claude-opus-5-5", 128_000],
-		["anthropic.claude-haiku-5-5", 128_000],
-	] as const)("exposes %s output ceiling without raising request defaults", async (apiModelId, ceiling) => {
-		for (const enableReasoningEffort of [true, false]) {
-			for (const modelMaxTokens of [undefined, ceiling]) {
-				const provider = new AwsBedrockHandler({ apiModelId, enableReasoningEffort, modelMaxTokens })
-				const modelInfo = provider.getModel().info
-				expect(modelInfo.maxTokens).toBe(ceiling)
-				provider["client"].send = vi.fn().mockResolvedValue({ stream: asyncStreamFrom([]) })
-				await collectStream(provider.createMessage("system", [{ role: "user", content: "hello" }]))
-				const expected =
-					modelMaxTokens && (enableReasoningEffort || modelInfo.supportsMaxTokens)
-						? ceiling
-						: enableReasoningEffort
-							? 16_384
-							: 8192
-				expect(mockConverseStreamCommand).toHaveBeenLastCalledWith(
-					expect.objectContaining({
-						inferenceConfig: expect.objectContaining({ maxTokens: expected }),
-					}),
-				)
-			}
-		}
-	})
+	it.each(
+		(
+			[
+				["anthropic.claude-sonnet-4-5-20250929-v1:0", 64_000],
+				["anthropic.claude-sonnet-4-6", 64_000],
+				["anthropic.claude-sonnet-5", 128_000],
+				["anthropic.claude-opus-4-7", 128_000],
+				["anthropic.claude-opus-4-8", 128_000],
+				["anthropic.claude-opus-5", 128_000],
+				["anthropic.claude-opus-5-5", 128_000],
+				["anthropic.claude-haiku-5-5", 128_000],
+			] as const
+		).flatMap(([apiModelId, ceiling]) =>
+			[true, false].flatMap((enableReasoningEffort) =>
+				[undefined, ceiling].map((modelMaxTokens) => ({
+					apiModelId,
+					ceiling,
+					enableReasoningEffort,
+					modelMaxTokens,
+				})),
+			),
+		),
+	)(
+		"exposes $apiModelId output ceiling without raising request defaults (reasoning effort: $enableReasoningEffort, modelMaxTokens: $modelMaxTokens)",
+		async ({ apiModelId, ceiling, enableReasoningEffort, modelMaxTokens }) => {
+			const provider = new AwsBedrockHandler({ apiModelId, enableReasoningEffort, modelMaxTokens })
+			const modelInfo = provider.getModel().info
+			expect(modelInfo.maxTokens).toBe(ceiling)
+			provider["client"].send = vi.fn().mockResolvedValue({ stream: asyncStreamFrom([]) })
+			await collectStream(provider.createMessage("system", [{ role: "user", content: "hello" }]))
+			const expected =
+				modelMaxTokens && (enableReasoningEffort || modelInfo.supportsMaxTokens)
+					? ceiling
+					: enableReasoningEffort
+						? 16_384
+						: 8192
+			expect(mockConverseStreamCommand).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					inferenceConfig: expect.objectContaining({ maxTokens: expected }),
+				}),
+			)
+		},
+	)
 
 	describe("getModel", () => {
 		it("should return the correct model info for a standard model", () => {

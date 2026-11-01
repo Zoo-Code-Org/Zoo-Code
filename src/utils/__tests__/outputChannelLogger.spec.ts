@@ -11,8 +11,9 @@ describe("outputChannelLogger", () => {
 	beforeEach(() => {
 		vitest.clearAllMocks()
 		// Clear console.log mock if it exists
-		if (vitest.isMockFunction(console.log)) {
-			;(console.log as any).mockClear()
+		const log = console.log
+		if (vitest.isMockFunction(log)) {
+			log.mockClear()
 		}
 	})
 
