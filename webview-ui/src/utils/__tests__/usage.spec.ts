@@ -574,8 +574,10 @@ describe("a time that Date cannot represent", () => {
 		})
 
 		it("neutralises a date written with a negative year, and leaves an ordinary date alone", () => {
-			const ordinary = usageToCsv([item({ task: "t", ts: NOW })], { range: "all", now: NOW }).split("\n")[1]
-			expect(ordinary.startsWith("2026-10-14T")).toBe(true)
+			// A fixed UTC time, not NOW (which is built in the machine's own zone, so its UTC date moves with it).
+			const fixed = Date.UTC(2026, 9, 14, 15, 0, 0)
+			const ordinary = usageToCsv([item({ task: "t", ts: fixed })], { range: "all", now: fixed }).split("\n")[1]
+			expect(ordinary.startsWith("2026-10-14T15:00:00.000Z,")).toBe(true)
 			expect(ordinary).not.toMatch(/^'/)
 
 			// A year before 0 is written with a leading "-": the earliest date is -271821-04-20T00:00:00.000Z.
