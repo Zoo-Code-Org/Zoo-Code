@@ -2585,6 +2585,17 @@ export class ClineProvider
 				}
 				// Direct private access: compile-time safe across sibling instances.
 				await instance._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+
+				// A sibling task running under this profile holds a handler built from the old
+				// settings: rebuild it so its next request does not use the stale credentials.
+				if (instance.getCurrentTask()?.taskApiConfigName === name) {
+					const {
+						name: _recordName,
+						id: _recordId,
+						...taskSettings
+					} = providerSettings as ProviderSettings & { name?: string; id?: string }
+					instance.updateTaskApiHandlerIfNeeded(taskSettings, { forceRebuild: true })
+				}
 			}
 
 			// Change the provider for the current task.
@@ -3940,7 +3951,13 @@ export class ClineProvider
 	private async _saveViewLocalStateFromMutation(
 		values: Partial<RooCodeSettings> & Partial<ExtensionState>,
 	): Promise<void> {
+		// Captured here, not in the setters: saveViewState() and the profile paths call this
+		// helper directly, so a reset during their durable write must skip the buffer half too.
+		const generation = this.viewLocalStateGeneration
 		await this._persistViewLocalStateFromMutation(values)
+		if (this.viewLocalStateGeneration !== generation) {
+			return
+		}
 		this._updateViewLocalStateFromMutation(values)
 	}
 
@@ -3999,13 +4016,21 @@ export class ClineProvider
 		// Clear view-local state cache so getState() falls back to ContextProxy defaults.
 		this._clearViewLocalState()
 
-		// Clear this view's persisted entry too, so the reset selections are not
-		// re-applied from the durable viewStates pin after a reload.
-		await this.clearPersistedViewState()
-
 		await this.providerSettingsManager.resetAllConfigs()
 		await this.customModesManager.resetCustomModes()
 		await this.removeClineFromStack()
+
+		// Clear this view's persisted entry last, and tolerate a storage failure: the shared
+		// stores, custom modes and the running task are already reset, so a viewStates write
+		// error must not abort the reset half-way or skip the state post below.
+		try {
+			await this.clearPersistedViewState()
+		} catch (error) {
+			this.log(
+				`[resetState] Failed to clear the persisted view state: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+
 		await this.postStateToWebview()
 		await this.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
 	}
@@ -4143,6 +4168,14 @@ export class ClineProvider
 		configuration: RooCodeSettings = {},
 	): Promise<Task> {
 		if (configuration) {
+			// Register the batch's custom modes before setValues validates `mode`: a mode
+			// selected in the same configuration is not known to the manager yet.
+			if (configuration.customModes?.length) {
+				for (const mode of configuration.customModes) {
+					await this.customModesManager.updateCustomMode(mode.slug, mode)
+				}
+			}
+
 			await this.setValues(configuration)
 
 			if (configuration.allowedCommands) {
@@ -4169,16 +4202,6 @@ export class ClineProvider
 
 			if (configuration.currentApiConfigName) {
 				await this.setProviderProfile(configuration.currentApiConfigName)
-			}
-
-			// Register custom modes so the CustomModesManager knows about them.
-			// setValues writes to global state, but the manager overwrites that
-			// when it merges .roomodes + global settings on refresh.  Persisting
-			// via updateCustomMode ensures modes survive the merge cycle.
-			if (configuration.customModes?.length) {
-				for (const mode of configuration.customModes) {
-					await this.customModesManager.updateCustomMode(mode.slug, mode)
-				}
 			}
 		}
 
