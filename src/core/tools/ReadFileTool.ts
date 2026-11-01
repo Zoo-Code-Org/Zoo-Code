@@ -364,7 +364,7 @@ ${result.content}`
 			// full-file replacement cannot be built from a clipped line.
 			output = `IMPORTANT: Some lines exceed ${MAX_LINE_LENGTH} characters and were clipped in this view. The file was read in full, but the clipped lines were not shown in full.
 ${result.content}`
-		} else if (result.returnedLines === 0) {
+		} else if (result.returnedLines === 0 && result.totalLines === 0) {
 			output = "Note: File is empty"
 		}
 

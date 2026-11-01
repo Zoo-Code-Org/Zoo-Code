@@ -201,7 +201,7 @@ async function _lockIdentityKey(absoluteFilePath: string): Promise<string> {
 		current = path.dirname(current)
 	}
 }
-async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJsonOptions): Promise<void> {
+async function safeWriteJson(filePath: string, data: unknown, options?: SafeWriteJsonOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 	// One release per lock acquired, kept in acquisition order and released in reverse below.
 	let releaseLocks: Array<() => Promise<void>> = []
