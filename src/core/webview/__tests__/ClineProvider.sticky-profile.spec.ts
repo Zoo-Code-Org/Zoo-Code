@@ -434,8 +434,27 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 				if (applies) {
 					expect(updateTaskHistorySpy).toHaveBeenCalledWith(stickyWrite)
 				} else {
-					expect(updateTaskHistorySpy).not.toHaveBeenCalledWith(stickyWrite)
+					expect(updateTaskHistorySpy).not.toHaveBeenCalled()
 				}
+			},
+		)
+
+		it.each([true, false])(
+			"writes the mode default only when persistModeConfig is %s",
+			async (persistModeConfig) => {
+				vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+					name: "new-profile",
+					id: "new-profile-id",
+					apiProvider: providerIdentifiers.anthropic,
+				})
+				const setModeConfigSpy = vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue()
+
+				await provider.activateProviderProfile(
+					{ name: "new-profile" },
+					{ persistModeConfig, expectedCurrentTaskId: "test-task-id" },
+				)
+
+				expect(setModeConfigSpy).toHaveBeenCalledTimes(persistModeConfig ? 1 : 0)
 			},
 		)
 
