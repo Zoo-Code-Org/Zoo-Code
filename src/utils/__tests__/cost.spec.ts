@@ -95,7 +95,7 @@ describe("Cost Utility", () => {
 			expect(result.totalOutputTokens).toBe(500)
 		})
 
-		it("bills cache tokens at the input price when the catalog omits cache prices", () => {
+		it("bills cache tokens at $0 when the catalog omits cache prices", () => {
 			const modelWithoutCachePrices: ModelInfo = {
 				...mockModelInfo,
 				cacheWritesPrice: undefined,
@@ -104,22 +104,22 @@ describe("Cost Utility", () => {
 
 			const result = calculateApiCostAnthropic(modelWithoutCachePrices, 1000, 500, 2000, 3000)
 
-			// A model that prices input but publishes no cache price still charges for
-			// the tokens it cached; the input price is the only rate it declares.
+			// A model that publishes no cache price declares no cache rate, so the
+			// cache buckets bill at $0 rather than borrowing the input price.
 			// Input cost: (3.0 / 1_000_000) * 1000 = 0.003
-			// Cache writes: (3.0 / 1_000_000) * 2000 = 0.006
-			// Cache reads: (3.0 / 1_000_000) * 3000 = 0.009
+			// Cache writes: 0 (no price declared)
+			// Cache reads: 0 (no price declared)
 			// Output cost: (15.0 / 1_000_000) * 500 = 0.0075
-			// Total: 0.003 + 0.006 + 0.009 + 0.0075 = 0.0255
-			expect(result.totalCost).toBeCloseTo(0.0255, 9)
+			// Total: 0.003 + 0 + 0 + 0.0075 = 0.0105
+			expect(result.totalCost).toBeCloseTo(0.0105, 9)
 			expect(result.totalInputTokens).toBe(6000) // 1000 + 2000 + 3000
 			expect(result.totalOutputTokens).toBe(500)
 		})
 
-		it("honors an explicit zero cache price instead of falling back to the input price", () => {
+		it("honors an explicit zero cache price instead of billing the input price", () => {
 			// A provider that publishes `cacheWritesPrice: 0` charges nothing for
-			// writes. Only a *missing* cache price falls back to the input price, so
-			// `??` is load-bearing here and `||` would silently re-price this row.
+			// writes. A zero is a price, not an absence, so the kernel must never
+			// re-price this row at the input price.
 			const modelWithFreeWrites: ModelInfo = {
 				...mockModelInfo,
 				cacheWritesPrice: 0,
@@ -239,7 +239,7 @@ describe("Cost Utility", () => {
 			expect(result.totalOutputTokens).toBe(500)
 		})
 
-		it("bills cache tokens at the input price when the catalog omits cache prices", () => {
+		it("bills cache tokens at $0 when the catalog omits cache prices", () => {
 			const modelWithoutCachePrices: ModelInfo = {
 				...mockModelInfo,
 				cacheWritesPrice: undefined,
@@ -250,18 +250,18 @@ describe("Cost Utility", () => {
 
 			// OpenAI usage counts cached tokens inside prompt_tokens, so the cache
 			// buckets are removed from the input pool and re-priced. With no cache
-			// price published, the input price is the only rate the model declares.
+			// price declared both buckets bill at $0.
 			// Uncached input: (3.0 / 1_000_000) * (6000 - 2000 - 3000) = 0.003
-			// Cache writes: (3.0 / 1_000_000) * 2000 = 0.006
-			// Cache reads: (3.0 / 1_000_000) * 3000 = 0.009
+			// Cache writes: 0 (no price declared)
+			// Cache reads: 0 (no price declared)
 			// Output cost: (15.0 / 1_000_000) * 500 = 0.0075
-			// Total: 0.003 + 0.006 + 0.009 + 0.0075 = 0.0255
-			expect(result.totalCost).toBeCloseTo(0.0255, 9)
+			// Total: 0.003 + 0 + 0 + 0.0075 = 0.0105
+			expect(result.totalCost).toBeCloseTo(0.0105, 9)
 			expect(result.totalInputTokens).toBe(6000) // Total already includes cache
 			expect(result.totalOutputTokens).toBe(500)
 		})
 
-		it("honors an explicit zero cache price instead of falling back to the input price", () => {
+		it("honors an explicit zero cache price instead of billing the input price", () => {
 			// friendli's GLM rows and every moonshot row publish `cacheWritesPrice: 0`
 			// on purpose. A zero is a price, not an absence, so those rows must not be
 			// re-priced at the input price.
@@ -289,6 +289,31 @@ describe("Cost Utility", () => {
 
 			expect(result.totalCost).toBe(0)
 			expect(Number.isNaN(result.totalCost)).toBe(false)
+		})
+
+		it("bills cache reads at $0 when cacheReadsPrice is missing", () => {
+			// The mistral invariant: reporting reads without a declared read price
+			// must not silently bill them at the input price. A missing read price
+			// bills $0, so this model's reads contribute nothing while its writes
+			// bill at their own declared price.
+			const modelWithoutReadsPrice: ModelInfo = {
+				...mockModelInfo,
+				cacheWritesPrice: 3.75,
+				cacheReadsPrice: undefined,
+			}
+
+			const result = calculateApiCostOpenAI(modelWithoutReadsPrice, 6000, 500, 2000, 3000)
+
+			// Uncached input: (3.0 / 1_000_000) * (6000 - 2000 - 3000) = 0.003
+			// Cache writes: (3.75 / 1_000_000) * 2000 = 0.0075
+			// Cache reads: 0 (no price declared)
+			// Output cost: (15.0 / 1_000_000) * 500 = 0.0075
+			// Total: 0.003 + 0.0075 + 0 + 0.0075 = 0.018
+			expect(result.totalCost).toBeCloseTo(0.018, 9)
+
+			// Re-symmetrizing the reads arm to the input price would bill
+			// (3.0 / 1_000_000) * 3000 = 0.009 for reads and total 0.027.
+			expect(result.totalCost).not.toBeCloseTo(0.027, 9)
 		})
 
 		it("stays byte-identical for the DeepSeek catalog, whose input price is zero by design", () => {
@@ -328,11 +353,12 @@ describe("Cost Utility", () => {
 			})
 		})
 
-		it("bills the miss share of a custom priced model instead of giving it away", () => {
+		it("keeps a custom model's miss tokens in the input pool instead of giving them away", () => {
 			// The defect this repairs: a custom OpenAI-compatible model that prices
 			// input but publishes no cache price. Miss tokens arrived as cache
 			// writes, were subtracted from the input pool, and were then priced at
-			// zero, so the user was billed for neither.
+			// zero, so the user was billed for neither. The repair keeps a miss in
+			// the input bucket, where the input price bills it.
 			const customModel: ModelInfo = {
 				maxTokens: 8192,
 				contextWindow: 200_000,
@@ -343,17 +369,19 @@ describe("Cost Utility", () => {
 			}
 
 			// 1000 prompt tokens: 400 missed the cache, 100 hit it, 500 were plain.
-			const result = calculateApiCostOpenAI(customModel, 1000, 500, 400, 100)
+			// A miss reaches this kernel as ordinary input, never as a cache write.
+			const result = calculateApiCostOpenAI(customModel, 1000, 500, 0, 100)
 
-			// Uncached input: (3.0 / 1_000_000) * 500 = 0.0015
-			// Cache writes: (3.0 / 1_000_000) * 400 = 0.0012 (input price, since none published)
+			// Uncached input: (3.0 / 1_000_000) * 900 = 0.0027
+			// Cache writes: 0 (none reported)
 			// Cache reads: (0.3 / 1_000_000) * 100 = 0.00003
 			// Output cost: (15.0 / 1_000_000) * 500 = 0.0075
-			// Total: 0.0015 + 0.0012 + 0.00003 + 0.0075 = 0.01023
+			// Total: 0.0027 + 0 + 0.00003 + 0.0075 = 0.01023
 			expect(result.totalCost).toBeCloseTo(0.01023, 9)
 
 			// The under-bill the defect produced, kept as the regression's own number:
-			// pricing the same 400 tokens at zero yields 0.00903, 11.7% short.
+			// folding the same 400 tokens onto an unpriced write bucket yields
+			// 0.00903, 11.7% short.
 			expect(result.totalCost).not.toBeCloseTo(0.00903, 9)
 		})
 
