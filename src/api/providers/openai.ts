@@ -21,6 +21,7 @@ import { TagMatcher } from "../../utils/tag-matcher"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { sanitizeSurrogates } from "../transform/sanitize-surrogates"
 import { convertToR1Format } from "../transform/r1-format"
+import { normalizeChatUsage } from "../transform/chat-usage-normalization"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 
@@ -317,7 +318,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			type: "usage",
 			inputTokens,
 			outputTokens: usage?.completion_tokens || 0,
-			cacheWriteTokens: usage?.cache_creation_input_tokens || undefined,
+			// Reads keep their provider-specific validation above; writes are
+			// plain counters, so the shared normalizer resolves them across the
+			// OpenAI-compatible write shapes instead of reading one field.
+			cacheWriteTokens: normalizeChatUsage(usage)?.cacheWriteTokens || undefined,
 			cacheReadTokens,
 		}
 	}

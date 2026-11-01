@@ -2,7 +2,10 @@
 
 import { Anthropic } from "@anthropic-ai/sdk"
 
+import type { ModelInfo } from "@roo-code/types"
+
 import { ApiHandlerOptions } from "../../../shared/api"
+import { calculateApiCostOpenAI } from "../../../shared/cost"
 import { OpenAiHandler } from "../openai"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
@@ -428,4 +431,125 @@ describe("OpenAiHandler with usage tracking fix", () => {
 			])
 		},
 	)
+
+	describe.each([true, false])("cache-write shape coverage with streaming=%s", (openAiStreamingEnabled) => {
+		const usageChunksFor = async (usage: Record<string, unknown>) => {
+			const cacheHandler = new OpenAiHandler({ ...mockOptions, openAiStreamingEnabled })
+			mockCreate.mockResolvedValueOnce(
+				openAiStreamingEnabled
+					? asyncStreamFrom([{ choices: [], usage }])
+					: { choices: [{ message: { content: "Response" } }], usage },
+			)
+
+			const chunks = await collectStream(cacheHandler.createMessage("system prompt", []))
+
+			return chunks.filter((chunk) => chunk.type === "usage")
+		}
+
+		it("reads the nested cache_write_tokens shape it previously ignored", async () => {
+			// This is the OpenAiHandler write gap K7 names: the handler read only
+			// the top-level Anthropic-style counter, so a proxy reporting writes
+			// under prompt_tokens_details billed them as zero.
+			expect(
+				await usageChunksFor({
+					prompt_tokens: 100,
+					completion_tokens: 5,
+					prompt_tokens_details: { cached_tokens: 20, cache_write_tokens: 30 },
+				}),
+			).toEqual([{ type: "usage", inputTokens: 100, outputTokens: 5, cacheWriteTokens: 30, cacheReadTokens: 20 }])
+		})
+
+		it("still reads the top-level cache_creation_input_tokens shape", async () => {
+			expect(
+				await usageChunksFor({
+					prompt_tokens: 100,
+					completion_tokens: 5,
+					cache_creation_input_tokens: 7,
+				}),
+			).toEqual([{ type: "usage", inputTokens: 100, outputTokens: 5, cacheWriteTokens: 7 }])
+		})
+
+		it("does not bill a top-level prompt_cache_miss_tokens counter as a cache write", async () => {
+			// A miss is a token that was looked up in the cache and not found, so it
+			// is ordinary input that prompt_tokens already covers. Reporting it as a
+			// write would move it off the input price line onto the cache-write line,
+			// where most catalogs charge nothing. openai-native.ts states the same
+			// rule: "missFromDetails is NOT used as fallback for cache writes".
+			expect(
+				await usageChunksFor({
+					prompt_tokens: 1000,
+					completion_tokens: 5,
+					prompt_cache_miss_tokens: 400,
+				}),
+			).toEqual([{ type: "usage", inputTokens: 1000, outputTokens: 5 }])
+		})
+
+		it("leaves the miss tokens in the input pool that Task.ts prices", async () => {
+			// This handler emits no totalCost; Task.ts recomputes it from the counters
+			// in the chunk. The chunk is therefore the contract, and the money is
+			// asserted against it so a label-only regression cannot pass.
+			const [chunk] = await usageChunksFor({
+				prompt_tokens: 1000,
+				completion_tokens: 5,
+				prompt_cache_miss_tokens: 400,
+			})
+
+			const customModel: ModelInfo = {
+				maxTokens: 8192,
+				contextWindow: 200_000,
+				supportsPromptCache: true,
+				inputPrice: 3.0,
+				outputPrice: 15.0,
+			}
+
+			const { totalCost } = calculateApiCostOpenAI(
+				customModel,
+				chunk.inputTokens,
+				chunk.outputTokens,
+				chunk.cacheWriteTokens,
+				chunk.cacheReadTokens,
+			)
+
+			// All 1000 prompt tokens bill at the input price, including the 400 misses:
+			// (3.0 / 1_000_000) * 1000 = 0.003
+			// Output: (15.0 / 1_000_000) * 5 = 0.000075
+			// Total: 0.003075
+			expect(totalCost).toBeCloseTo(0.003075, 9)
+
+			// The defect subtracted the 400 misses from the input pool and priced them
+			// at a cache-write rate the model never declared, billing 0.001875.
+			expect(totalCost).not.toBeCloseTo(0.001875, 9)
+		})
+
+		it("never sums two write shapes that report the same quantity", async () => {
+			// Every shape below describes the same 30 written tokens. Summing
+			// would bill 90 and is the additive-usage trap the wave forbids.
+			const chunks = await usageChunksFor({
+				prompt_tokens: 100,
+				completion_tokens: 5,
+				prompt_cache_miss_tokens: 30,
+				cache_creation_input_tokens: 30,
+				prompt_tokens_details: { cache_miss_tokens: 30, cache_write_tokens: 30 },
+			})
+
+			expect(chunks).toEqual([{ type: "usage", inputTokens: 100, outputTokens: 5, cacheWriteTokens: 30 }])
+		})
+
+		it("keeps a genuine write counter ahead of the Anthropic-style one", async () => {
+			expect(
+				await usageChunksFor({
+					prompt_tokens: 100,
+					completion_tokens: 5,
+					prompt_tokens_details: { cache_write_tokens: 30 },
+					cache_creation_input_tokens: 99,
+				}),
+			).toEqual([{ type: "usage", inputTokens: 100, outputTokens: 5, cacheWriteTokens: 30 }])
+		})
+
+		it("reports no write counter when the provider reports none", async () => {
+			expect(await usageChunksFor({ prompt_tokens: 100, completion_tokens: 5 })).toEqual([
+				{ type: "usage", inputTokens: 100, outputTokens: 5 },
+			])
+		})
+	})
 })

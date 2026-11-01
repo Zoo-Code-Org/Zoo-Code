@@ -4,7 +4,8 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import { LiteLLMHandler } from "../lite-llm"
 import { getModels } from "../fetchers/modelCache"
 import { ApiHandlerOptions } from "../../../shared/api"
-import { type ModelRecord, litellmDefaultModelId, litellmDefaultModelInfo } from "@roo-code/types"
+import type { ApiStreamUsageChunk } from "../../transform/stream"
+import { type ModelInfo, type ModelRecord, litellmDefaultModelId, litellmDefaultModelInfo } from "@roo-code/types"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
@@ -2257,6 +2258,160 @@ describe("LiteLLMHandler", () => {
 			// Assert the mapped usage values, not just the type: this branch maps
 			// prompt_tokens/completion_tokens onto the usage chunk (L365-366).
 			expect(chunks[0]).toMatchObject({ type: "usage", inputTokens: 5, outputTokens: 7 })
+		})
+	})
+
+	describe("cache token accounting", () => {
+		// The cache counters arrive in the shapes LiteLLM relays from the upstream
+		// provider: Anthropic-style top-level fields, OpenAI-style nested
+		// `prompt_tokens_details`, and DeepSeek-style top-level hit/miss counters.
+		// The handler must resolve each counter once through the shared normalizer
+		// and must never move a cache miss onto the cache-write line.
+		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
+
+		const streamWithUsage = (usage: Record<string, unknown>) => {
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({
+					data: asyncStreamFrom([{ choices: [{ delta: { content: "ok" } }], usage }]),
+				}),
+			})
+		}
+
+		const collectUsage = async (): Promise<ApiStreamUsageChunk> => {
+			const chunks = await collectStream(handler.createMessage("You are helpful", messages))
+			const usageChunk = chunks.find((chunk) => chunk.type === "usage")
+			expect(usageChunk).toBeDefined()
+			return usageChunk as ApiStreamUsageChunk
+		}
+
+		// A catalog row as LiteLLM's `/v1/model/info` relays it for a DeepSeek
+		// deployment: input and output are priced, reads are cheaper, and the
+		// upstream reports no cache-creation cost, so writes carry no price.
+		const relayedDeepSeekRow: ModelInfo = {
+			maxTokens: 8192,
+			contextWindow: 200_000,
+			supportsPromptCache: true,
+			inputPrice: 3.0,
+			outputPrice: 15.0,
+			cacheReadsPrice: 0.3,
+		}
+
+		beforeEach(() => {
+			handler = new LiteLLMHandler({ ...mockOptions, litellmModelId: "deepseek-chat" })
+			handler["models"] = { "deepseek-chat": relayedDeepSeekRow }
+		})
+
+		it("keeps DeepSeek-style cache misses out of the cache-write counter", async () => {
+			// 100 prompt tokens: 60 hit the cache, 40 missed it. A miss is ordinary
+			// input, so it must not be reported as a cache write.
+			streamWithUsage({
+				prompt_tokens: 100,
+				completion_tokens: 5,
+				prompt_cache_hit_tokens: 60,
+				prompt_cache_miss_tokens: 40,
+			})
+
+			const usage = await collectUsage()
+
+			expect(usage.cacheWriteTokens).toBeUndefined()
+			expect(usage.cacheReadTokens).toBe(60)
+			expect(usage.inputTokens).toBe(100)
+		})
+
+		it("bills a folded miss at zero when the relayed row prices writes at zero", async () => {
+			// This is the money case, and the row below is hand-built rather than
+			// fetched: `fetchers/litellm.ts` maps a numeric 0 through a truthiness
+			// test, so an upstream `cache_creation_input_token_cost: 0` arrives as
+			// `cacheWritesPrice: undefined`, never as an explicit zero. Explicit-zero
+			// rows arise outside that fetcher, from a hand-configured or
+			// differently-sourced catalog, and this test pins the kernel's behaviour
+			// for them: a folded miss is subtracted from the input pool and billed at
+			// the row's zero write price, so the user pays for neither the input nor
+			// the write. On a fetcher-shaped row the fold is economically neutral
+			// instead, because the kernel falls back to `inputPrice`; it still
+			// mis-reports `cacheWriteTokens`, which is the defect this change fixes.
+			handler["models"] = { "deepseek-chat": { ...relayedDeepSeekRow, cacheWritesPrice: 0 } }
+			streamWithUsage({
+				prompt_tokens: 100,
+				completion_tokens: 5,
+				prompt_cache_hit_tokens: 60,
+				prompt_cache_miss_tokens: 40,
+			})
+
+			const usage = await collectUsage()
+
+			// Misses stay in the input bucket: 40 * (3.0 / 1_000_000) = 0.00012
+			// Cache reads: 60 * (0.3 / 1_000_000) = 0.000018
+			// Output: 5 * (15.0 / 1_000_000) = 0.000075
+			// Total: 0.000213
+			expect(usage.totalCost).toBeCloseTo(0.000213, 9)
+
+			// The fold billed 0.000093 here: the 40 miss tokens were subtracted from
+			// the input pool and priced at the explicit zero write price, 56% short.
+			expect(usage.totalCost).not.toBeCloseTo(0.000093, 9)
+		})
+
+		it("reports a top-level Anthropic-shaped response unchanged", async () => {
+			streamWithUsage({
+				prompt_tokens: 100,
+				completion_tokens: 50,
+				cache_creation_input_tokens: 20,
+				cache_read_input_tokens: 30,
+			})
+
+			const usage = await collectUsage()
+
+			expect(usage).toMatchObject({
+				type: "usage",
+				inputTokens: 100,
+				outputTokens: 50,
+				cacheWriteTokens: 20,
+				cacheReadTokens: 30,
+			})
+		})
+
+		it("reports a nested OpenAI-shaped response unchanged", async () => {
+			streamWithUsage({
+				prompt_tokens: 100,
+				completion_tokens: 5,
+				prompt_tokens_details: { cached_tokens: 20, cache_write_tokens: 30 },
+			})
+
+			const usage = await collectUsage()
+
+			expect(usage).toMatchObject({
+				type: "usage",
+				inputTokens: 100,
+				outputTokens: 5,
+				cacheWriteTokens: 30,
+				cacheReadTokens: 20,
+			})
+		})
+
+		it("omits both cache counters when the response reports neither", async () => {
+			streamWithUsage({ prompt_tokens: 100, completion_tokens: 5 })
+
+			const usage = await collectUsage()
+
+			expect(usage.cacheWriteTokens).toBeUndefined()
+			expect(usage.cacheReadTokens).toBeUndefined()
+		})
+
+		it("falls through a malformed counter to the next alias", async () => {
+			// A proxy can relay a counter as a string. The normalizer discards it and
+			// keeps resolving instead of poisoning the total with NaN. The malformed
+			// value sits on the highest-priority alias so the discard is what the
+			// assertion depends on: without it the string would win and be reported.
+			streamWithUsage({
+				prompt_tokens: 100,
+				completion_tokens: 5,
+				prompt_tokens_details: { cached_tokens: "30" },
+				cache_read_input_tokens: 20,
+			})
+
+			const usage = await collectUsage()
+
+			expect(usage.cacheReadTokens).toBe(20)
 		})
 	})
 
