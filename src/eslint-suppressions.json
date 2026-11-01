@@ -446,7 +446,7 @@
 	},
 	"api/providers/xai.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 7
+			"count": 4
 		}
 	},
 	"api/transform/__tests__/ai-sdk.spec.ts": {
@@ -571,7 +571,7 @@
 	},
 	"core/assistant-message/__tests__/presentAssistantMessage-images.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 16
+			"count": 14
 		}
 	},
 	"core/assistant-message/__tests__/presentAssistantMessage-unknown-tool.spec.ts": {
@@ -1016,7 +1016,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 196
+			"count": 195
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
@@ -1617,71 +1617,6 @@
 	"shared/utils/__tests__/requesty.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
-		}
-	},
-	"utils/__tests__/autoImportSettings.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 15
-		}
-	},
-	"utils/__tests__/enhance-prompt.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 6
-		}
-	},
-	"utils/__tests__/git.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 95
-		}
-	},
-	"utils/__tests__/json-schema.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"utils/__tests__/migrateSettings.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"utils/__tests__/outputChannelLogger.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"utils/__tests__/safeWriteJson.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 27
-		}
-	},
-	"utils/__tests__/shell.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 35
-		}
-	},
-	"utils/__tests__/storage.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 25
-		}
-	},
-	"utils/__tests__/tiktoken.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"utils/config.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"utils/export.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"utils/safeWriteJson.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
 		}
 	},
 	"vitest.setup.ts": {
