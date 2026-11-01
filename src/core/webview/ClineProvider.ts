@@ -600,7 +600,8 @@ export class ClineProvider
 	}
 
 	/** Persist the non-secret selections through the serialized write queue. */
-	private async savePersistedViewState(values: Partial<PersistedViewState>): Promise<void> {
+	private async savePersistedViewState(values: Partial<PersistedViewState>): Promise<boolean> {
+		let landed = true
 		const resetGeneration = ClineProvider.viewStatesResetGeneration
 		// Capture the id at change time: a write belongs to the view that was active
 		// when the change was made, even if a newer id is registered while it is queued.
@@ -611,6 +612,8 @@ export class ClineProvider
 			// The reset cleared viewStates while this write was queued: storing the pre-reset
 			// value now would resurrect it on the next reload.
 			if (ClineProvider.viewStatesResetGeneration !== resetGeneration) {
+				// The caller must not apply the in-memory half of a mutation storage rejected.
+				landed = false
 				return
 			}
 
@@ -675,6 +678,8 @@ export class ClineProvider
 		if (mintedClaimToken) {
 			this.postViewStateClaimToWebview(viewStateId, mintedClaimToken)
 		}
+
+		return landed
 	}
 
 	/**
@@ -2562,6 +2567,9 @@ export class ClineProvider
 			// the new settings and a mode binding pointing at the new profile.
 			const previousList = this.contextProxy.getValue("listApiConfigMeta")
 			const previousName = this.contextProxy.getValue("currentApiConfigName")
+			const previousViewName = this.viewLocalState.currentApiConfigName
+			// This activation owns the shared selection until a newer write bumps the generation.
+			const expectedNameGeneration = this.contextProxy.getStateWriteGeneration("currentApiConfigName") + 1
 			const previousProviderSettings = this.contextProxy.getProviderSettings()
 			// Test doubles and older managers may not implement the read: absence means "no previous
 			// binding to restore", not a failed activation.
@@ -2581,6 +2589,16 @@ export class ClineProvider
 			)
 
 			if (failedActivation) {
+				// The mutation queue is per view, but ContextProxy is shared: another view may
+				// have activated a profile between the group and this rollback. Restoring then
+				// would overwrite that newer activation with our captured values.
+				if (this.contextProxy.getStateWriteGeneration("currentApiConfigName") !== expectedNameGeneration) {
+					this.log(
+						"[persistProviderProfile] Skipping the activation rollback: another view wrote the shared selection",
+					)
+					throw failedActivation.reason
+				}
+
 				const restoreFailures: string[] = []
 				const restore = async (label: string, action: () => Promise<unknown>) => {
 					try {
@@ -2593,7 +2611,10 @@ export class ClineProvider
 				}
 				await restore("profile list", () => this.contextProxy.setValue("listApiConfigMeta", previousList))
 				await restore("shared selection", () =>
-					this.contextProxy.setValue("currentApiConfigName", previousName ?? name),
+					this.contextProxy.setValue("currentApiConfigName", previousName),
+				)
+				await restore("view-local selection", () =>
+					this._saveViewLocalStateFromMutation({ currentApiConfigName: previousViewName }),
 				)
 				await restore("mode binding", () =>
 					this.providerSettingsManager.setModeConfig(mode, previousModeConfigId as string),
@@ -3953,14 +3974,19 @@ export class ClineProvider
 	private async _saveViewLocalStateFromMutation(
 		values: Partial<RooCodeSettings> & Partial<ExtensionState>,
 	): Promise<void> {
-		await this._persistViewLocalStateFromMutation(values)
+		const landed = await this._persistViewLocalStateFromMutation(values)
+		if (!landed) {
+			// A reset that beat this write cleared the buffer; applying the value now would
+			// leave the view reporting a selection a reload drops.
+			return
+		}
 		this._updateViewLocalStateFromMutation(values)
 	}
 
 	/** Write the durable subset of a mutation into this view's viewStates entry. */
 	private async _persistViewLocalStateFromMutation(
 		values: Partial<RooCodeSettings> & Partial<ExtensionState>,
-	): Promise<void> {
+	): Promise<boolean> {
 		const persistedValues: Partial<PersistedViewState> = {}
 
 		if ("mode" in values) {
@@ -3972,8 +3998,10 @@ export class ClineProvider
 		}
 
 		if ("mode" in persistedValues || "currentApiConfigName" in persistedValues) {
-			await this.savePersistedViewState(persistedValues)
+			return this.savePersistedViewState(persistedValues)
 		}
+
+		return true
 	}
 
 	/** Clear the buffer so getState() falls back to the shared values. */

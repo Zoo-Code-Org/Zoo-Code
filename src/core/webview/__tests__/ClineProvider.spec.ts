@@ -3668,6 +3668,44 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	describe("view state persistence across a reset", () => {
+		it("drops a queued view-state write when a reset clears viewStates, including the buffer half", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			await provider["setViewStateId"]("stable-sidebar-view")
+
+			// Hold the shared write queue so the save below is still queued when the reset
+			// generation advances, exactly like resetState() racing a save from the webview.
+			let releaseQueue!: () => void
+			const heldQueue = new Promise<void>((resolve) => {
+				releaseQueue = resolve
+			})
+			ClineProvider["persistedViewStateWriteQueue"] = heldQueue
+
+			const queuedSave = provider.saveViewState("mode", "ask")
+			// resetState() clears the durable map after bumping the generation (resetAllState
+			// then wipes the cache); the generation guard must reject the queued write.
+			ClineProvider["viewStatesResetGeneration"] += 1
+			await provider.contextProxy.setValue("viewStates", undefined)
+
+			releaseQueue()
+			await queuedSave
+
+			// The write started before the reset: storage stays cleared and the buffer does
+			// not keep a mode that a reload would drop.
+			expect(mockContext.globalState.get("viewStates")).toBeUndefined()
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+
+			await provider.dispose()
+		})
+	})
+
 	describe("view state claim binding", () => {
 		it("refuses a viewStateId bound by a concurrent registration through setViewStateId", async () => {
 			const provider = new ClineProvider(
