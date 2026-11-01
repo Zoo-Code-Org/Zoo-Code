@@ -650,15 +650,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 	// Once the live state shows an appearance value it is the one to compare with again (it may also be newer, if
 	// another webview changed it).
-	const { interfaceFontScale: liveScale, terminalFontSize: liveTerminal } = extensionState
-	const { editorFontSize: liveEditor, spacingScale: liveSpacing } = extensionState
 	const previousLive = useRef<Record<string, number | null | undefined>>({})
 	useEffect(() => {
 		for (const key of Object.keys(APPEARANCE_SETTINGS) as AppearanceKey[]) {
 			if (previousLive.current[key] !== extensionState[key]) delete appearanceSaved.current[key]
 			previousLive.current[key] = extensionState[key]
 		}
-	}, [liveScale, liveTerminal, liveEditor, liveSpacing])
+	}, [extensionState])
 
 	const checkUnsaveChanges = useCallback(
 		(then: () => void) => {
