@@ -103,6 +103,3 @@ export const getModelEndpoints = async (
 
 	return modelProviders ?? {}
 }
-
-export const flushModelProviders = async (router: RouterName, modelId: string) =>
-	memoryCache.del(getCacheKey(router, modelId))

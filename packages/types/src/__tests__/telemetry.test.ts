@@ -13,6 +13,8 @@ import {
 	ConsecutiveMistakeError,
 	isConsecutiveMistakeError,
 	extractConsecutiveMistakeErrorProperties,
+	rooCodeTelemetryEventSchema,
+	TelemetryEventName,
 } from "../telemetry.js"
 
 describe("telemetry error utilities", () => {
@@ -574,4 +576,80 @@ describe("telemetry error utilities", () => {
 			})
 		})
 	})
+})
+
+describe("rooCodeTelemetryEventSchema run-state events", () => {
+	const appProperties = {
+		appName: "zoo-code",
+		appVersion: "1.0.0",
+		vscodeVersion: "1.100.0",
+		platform: "linux",
+		editorName: "vscode",
+		language: "en",
+		mode: "code",
+	}
+	const runStateProperties = {
+		...appProperties,
+		taskId: "task-1",
+		kind: "rejection",
+		eventTag: "askStarted",
+		mismatched: [],
+		phase: "running",
+		streamTag: "none",
+		abort: true,
+	}
+
+	it.each([TelemetryEventName.RUN_STATE_DIVERGENCE, TelemetryEventName.RUN_STATE_KNOWN_RACE])(
+		"keeps the run-state properties of %s",
+		(type) => {
+			const result = rooCodeTelemetryEventSchema.safeParse({
+				type,
+				properties: { ...runStateProperties, raceId: "R-9", mismatched: ["abortReason"] },
+			})
+
+			expect(result.success).toBe(true)
+			expect(result.data?.properties).toMatchObject({
+				taskId: "task-1",
+				kind: "rejection",
+				raceId: "R-9",
+				eventTag: "askStarted",
+				mismatched: ["abortReason"],
+				phase: "running",
+				streamTag: "none",
+				abort: true,
+			})
+		},
+	)
+
+	it("accepts an event without a race ID", () => {
+		const result = rooCodeTelemetryEventSchema.safeParse({
+			type: TelemetryEventName.RUN_STATE_DIVERGENCE,
+			properties: runStateProperties,
+		})
+
+		expect(result.success).toBe(true)
+	})
+
+	it("rejects an unknown kind", () => {
+		const result = rooCodeTelemetryEventSchema.safeParse({
+			type: TelemetryEventName.RUN_STATE_DIVERGENCE,
+			properties: { ...runStateProperties, kind: "other" },
+		})
+
+		expect(result.success).toBe(false)
+	})
+
+	it.each(["taskId", "eventTag", "mismatched", "phase", "streamTag", "abort"])(
+		"rejects an event without %s",
+		(property) => {
+			const { [property]: _omitted, ...properties } = runStateProperties as Record<string, unknown>
+
+			const result = rooCodeTelemetryEventSchema.safeParse({
+				type: TelemetryEventName.RUN_STATE_KNOWN_RACE,
+				properties,
+			})
+
+			expect(result.success).toBe(false)
+		},
+	)
 })

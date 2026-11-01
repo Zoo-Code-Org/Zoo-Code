@@ -1,5 +1,7 @@
 import { render, screen, fireEvent } from "@/utils/test-utils"
 
+import { vscode } from "@src/utils/vscode"
+
 import TaskItem from "../TaskItem"
 
 vi.mock("@src/utils/vscode")
@@ -108,5 +110,40 @@ describe("TaskItem", () => {
 
 		const taskItem = screen.getByTestId("task-item-1")
 		expect(taskItem).toHaveClass("hover:text-vscode-foreground")
+	})
+
+	it("shows the custom title instead of the prompt when renamed", () => {
+		render(<TaskItem item={{ ...mockTask, title: "My title" }} variant="full" />)
+
+		expect(screen.getByText("My title")).toBeInTheDocument()
+		expect(screen.queryByText("Test task")).not.toBeInTheDocument()
+	})
+
+	it("opens an inline editor from the rename button without opening the task", () => {
+		render(<TaskItem item={mockTask} variant="full" />)
+
+		fireEvent.click(screen.getByTestId("rename-task-button"))
+
+		expect(screen.getByTestId("task-title-input")).toHaveValue("Test task")
+		fireEvent.click(screen.getByTestId("task-title-input"))
+		expect(vscode.postMessage).not.toHaveBeenCalled()
+	})
+
+	it("saves the new title on Enter and closes the editor", () => {
+		render(<TaskItem item={mockTask} variant="full" />)
+
+		fireEvent.click(screen.getByTestId("rename-task-button"))
+		const input = screen.getByTestId("task-title-input")
+		fireEvent.change(input, { target: { value: "  Renamed task  " } })
+		fireEvent.keyDown(input, { key: "Enter" })
+
+		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "renameTaskWithId", taskId: "1", text: "Renamed task" })
+		expect(screen.queryByTestId("task-title-input")).not.toBeInTheDocument()
+	})
+
+	it("does not show the rename button in the compact variant", () => {
+		render(<TaskItem item={mockTask} variant="compact" />)
+
+		expect(screen.queryByTestId("rename-task-button")).not.toBeInTheDocument()
 	})
 })

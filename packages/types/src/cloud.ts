@@ -77,6 +77,7 @@ export interface CloudOrganizationMembership {
 export const organizationAllowListSchema = z.object({
 	allowAll: z.boolean(),
 	providers: z.record(
+		z.string(),
 		z.object({
 			allowAll: z.boolean(),
 			models: z.array(z.string()).optional(),
