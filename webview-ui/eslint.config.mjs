@@ -4,6 +4,7 @@ import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types
 
 /** @type {import("eslint").Linter.Config} */
 export default [
+	{ ignores: ["playwright/.cache/**"] },
 	...reactConfig,
 	createProviderIdentifierConfig({ providerIdentifiers, retiredProviderIdentifiers }),
 	{
@@ -38,6 +39,14 @@ export default [
 		],
 		rules: {
 			"no-case-declarations": "off",
+		},
+	},
+	{
+		files: ["playwright/run-docker.mjs"],
+		languageOptions: {
+			globals: {
+				process: "readonly",
+			},
 		},
 	},
 	{

@@ -10,6 +10,7 @@
 		"./api-provider-hygiene": "./api-provider-hygiene.js"
 	},
 	"scripts": {
+		"lint": "eslint . --max-warnings=0",
 		"test": "node --test provider-identifiers.test.js api-provider-hygiene.test.js"
 	},
 	"devDependencies": {
