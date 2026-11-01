@@ -292,25 +292,18 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		setChangeDetected(false)
 	}, [settingsImportedAt, extensionState])
 
-	const markEdited = useCallback(() => {
-		editVersion.current += 1
-		setChangeDetected(true)
+	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback((field, value) => {
+		setCachedState((prevState) => {
+			if (prevState[field] === value) {
+				return prevState
+			}
+
+			if (field in APPEARANCE_SETTINGS) editedAppearance.current.add(field as AppearanceKey)
+			editVersion.current++
+			setChangeDetected(true)
+			return { ...prevState, [field]: value }
+		})
 	}, [])
-
-	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback(
-		(field, value) => {
-			setCachedState((prevState) => {
-				if (prevState[field] === value) {
-					return prevState
-				}
-
-				if (field in APPEARANCE_SETTINGS) editedAppearance.current.add(field as AppearanceKey)
-				markEdited()
-				return { ...prevState, [field]: value }
-			})
-		},
-		[markEdited],
-	)
 
 	const setApiConfigurationField = useCallback(
 		<K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K], isUserAction: boolean = true) => {
@@ -345,111 +338,98 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				const isAutomaticNoOpSync = !isUserAction && areValuesEqual(previousValue, value)
 
 				if (!isInitialSync && !isAutomaticNoOpSync) {
-					markEdited()
+					editVersion.current++
+					setChangeDetected(true)
 				}
 				return { ...prevState, apiConfiguration: { ...prevState.apiConfiguration, [field]: value } }
 			})
 		},
-		[markEdited],
+		[],
 	)
 
-	const setExperimentEnabled: SetExperimentEnabled = useCallback(
-		(id: ExperimentId, enabled: boolean) => {
-			setCachedState((prevState) => {
-				if (prevState.experiments?.[id] === enabled) {
-					return prevState
-				}
+	const setExperimentEnabled: SetExperimentEnabled = useCallback((id: ExperimentId, enabled: boolean) => {
+		setCachedState((prevState) => {
+			if (prevState.experiments?.[id] === enabled) {
+				return prevState
+			}
 
-				markEdited()
-				return { ...prevState, experiments: { ...prevState.experiments, [id]: enabled } }
-			})
-		},
-		[markEdited],
-	)
+			editVersion.current++
+			setChangeDetected(true)
+			return { ...prevState, experiments: { ...prevState.experiments, [id]: enabled } }
+		})
+	}, [])
 
-	const setTelemetrySetting = useCallback(
-		(setting: TelemetrySetting) => {
-			setCachedState((prevState) => {
-				if (prevState.telemetrySetting === setting) {
-					return prevState
-				}
+	const setTelemetrySetting = useCallback((setting: TelemetrySetting) => {
+		setCachedState((prevState) => {
+			if (prevState.telemetrySetting === setting) {
+				return prevState
+			}
 
-				markEdited()
-				return { ...prevState, telemetrySetting: setting }
-			})
-		},
-		[markEdited],
-	)
+			editVersion.current++
+			setChangeDetected(true)
+			return { ...prevState, telemetrySetting: setting }
+		})
+	}, [])
 
-	const setDebug = useCallback(
-		(debug: boolean) => {
-			setCachedState((prevState) => {
-				if (prevState.debug === debug) {
-					return prevState
-				}
+	const setDebug = useCallback((debug: boolean) => {
+		setCachedState((prevState) => {
+			if (prevState.debug === debug) {
+				return prevState
+			}
 
-				markEdited()
-				return { ...prevState, debug }
-			})
-		},
-		[markEdited],
-	)
+			editVersion.current++
+			setChangeDetected(true)
+			return { ...prevState, debug }
+		})
+	}, [])
 
-	const setImageGenerationProvider = useCallback(
-		(provider: ImageGenerationProvider) => {
-			setCachedState((prevState) => {
-				if (prevState.imageGenerationProvider !== provider) {
-					markEdited()
-				}
+	const setImageGenerationProvider = useCallback((provider: ImageGenerationProvider) => {
+		setCachedState((prevState) => {
+			if (prevState.imageGenerationProvider !== provider) {
+				editVersion.current++
+				setChangeDetected(true)
+			}
 
-				return { ...prevState, imageGenerationProvider: provider }
-			})
-		},
-		[markEdited],
-	)
+			return { ...prevState, imageGenerationProvider: provider }
+		})
+	}, [])
 
-	const setOpenRouterImageApiKey = useCallback(
-		(apiKey: string) => {
-			setCachedState((prevState) => {
-				if (prevState.openRouterImageApiKey !== apiKey) {
-					markEdited()
-				}
+	const setOpenRouterImageApiKey = useCallback((apiKey: string) => {
+		setCachedState((prevState) => {
+			if (prevState.openRouterImageApiKey !== apiKey) {
+				editVersion.current++
+				setChangeDetected(true)
+			}
 
-				return { ...prevState, openRouterImageApiKey: apiKey }
-			})
-		},
-		[markEdited],
-	)
+			return { ...prevState, openRouterImageApiKey: apiKey }
+		})
+	}, [])
 
-	const setImageGenerationSelectedModel = useCallback(
-		(model: string) => {
-			setCachedState((prevState) => {
-				if (prevState.openRouterImageGenerationSelectedModel !== model) {
-					markEdited()
-				}
+	const setImageGenerationSelectedModel = useCallback((model: string) => {
+		setCachedState((prevState) => {
+			if (prevState.openRouterImageGenerationSelectedModel !== model) {
+				editVersion.current++
+				setChangeDetected(true)
+			}
 
-				return { ...prevState, openRouterImageGenerationSelectedModel: model }
-			})
-		},
-		[markEdited],
-	)
+			return { ...prevState, openRouterImageGenerationSelectedModel: model }
+		})
+	}, [])
 
-	const setCustomSupportPromptsField = useCallback(
-		(prompts: Record<string, string | undefined>) => {
-			setCachedState((prevState) => {
-				const previousStr = JSON.stringify(prevState.customSupportPrompts)
-				const newStr = JSON.stringify(prompts)
+	const setCustomSupportPromptsField = useCallback((prompts: Record<string, string | undefined>) => {
+		setCachedState((prevState) => {
+			const previousStr = JSON.stringify(prevState.customSupportPrompts)
+			const newStr = JSON.stringify(prompts)
 
-				if (previousStr === newStr) {
-					return prevState
-				}
+			if (previousStr === newStr) {
+				return prevState
+			}
 
-				markEdited()
-				return { ...prevState, customSupportPrompts: prompts }
-			})
-		},
-		[markEdited],
-	)
+			editVersion.current++
+			setChangeDetected(true)
+			return { ...prevState, customSupportPrompts: prompts }
+		})
+	}, [])
 
 	const isSettingValid = !errorMessage
 
@@ -1119,7 +1099,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								terminalZshP10k={terminalZshP10k}
 								terminalZdotdir={terminalZdotdir}
 								terminalProfile={terminalProfile}
-								onTerminalProfilePickerOpened={() => markEdited()}
+								onTerminalProfilePickerOpened={() => setChangeDetected(true)}
 								setCachedStateField={setCachedStateField}
 							/>
 						)}
