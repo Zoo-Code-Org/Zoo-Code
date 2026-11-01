@@ -116,6 +116,15 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * ClineProvider.cleanupFailedHistoryTask()) never fires the TaskAborted cleanup and
 	 * this singleton would keep the disposed task and its diff-view provider.
 	 */
+	/**
+	 * The streaming failure retained for this task, if any. presentAssistantMessage's
+	 * missing-nativeArgs guard runs before handle(), so it must surface this error itself
+	 * before clearTaskState() releases the state that holds it.
+	 */
+	public getRetainedStreamError(task: Task): Error | undefined {
+		return this.taskPartialStreamState.get(this.getPartialStreamFailureKey(task))?.streamError
+	}
+
 	public clearTaskState(task: Task): void {
 		this.resetTaskPartialState(task)
 	}

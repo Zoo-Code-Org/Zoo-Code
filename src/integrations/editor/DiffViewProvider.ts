@@ -207,7 +207,12 @@ export class DiffViewProvider {
 					console.error(`Failed to close tab ${tab.label}`, err)
 				}
 			}
-			this.documentWasOpen = true
+			// Only a plain text tab means the file was open for the user: a TabInputTextDiff
+			// match is the previous diff session's own tab, and treating it as "was open"
+			// would make keepOrCloseEditedFile() open (and leave) a plain tab afterward.
+			if (tab.input instanceof vscode.TabInputText) {
+				this.documentWasOpen = true
+			}
 		}
 
 		// Snapshot unrelated preview tabs so we can restore them if opening the
@@ -640,7 +645,21 @@ export class DiffViewProvider {
 				}
 			}
 
-			await this.removeCreatedFile(absolutePath)
+			if (this.activeDiffEditor) {
+				await this.removeCreatedFile(absolutePath)
+			} else {
+				// open() failed before the diff editor existed, so the file is still the empty
+				// placeholder this edit created. Another process may have written the path in the
+				// meantime; an in-place write keeps the inode, so check the content instead and
+				// leave a non-empty file alone.
+				const stillEmptyPlaceholder = await fs
+					.stat(absolutePath)
+					.then((stats) => stats.size === 0)
+					.catch(() => false)
+				if (stillEmptyPlaceholder) {
+					await this.removeCreatedFile(absolutePath)
+				}
+			}
 
 			// Remove only the directories we created, in reverse order.
 			for (let i = this.createdDirs.length - 1; i >= 0; i--) {

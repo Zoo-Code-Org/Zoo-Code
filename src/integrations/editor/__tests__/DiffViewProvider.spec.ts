@@ -22,7 +22,9 @@ vi.mock("fs/promises", () => ({
 	writeFile: vi.fn().mockResolvedValue(undefined),
 	access: vi.fn().mockResolvedValue(undefined),
 	// revertChanges() rolls a new-file edit back by deleting the placeholder and the
-	// directories the edit created.
+	// directories the edit created. stat lets the editorless rollback check the placeholder
+	// is still empty before unlinking it (default: an empty placeholder).
+	stat: vi.fn().mockResolvedValue({ size: 0 }),
 	unlink: vi.fn().mockResolvedValue(undefined),
 	rmdir: vi.fn().mockResolvedValue(undefined),
 }))
@@ -983,6 +985,10 @@ describe("DiffViewProvider", () => {
 			// The shared document is clean, so nothing is written: the file already matches the
 			// buffer, which is just as irreversible. The caller stops rolling back here.
 			expect(onCommit).toHaveBeenCalledTimes(1)
+			// The stand-down flag revertChanges() relies on must be set by saveChanges(), not by
+			// the caller: remove this assignment in the provider and an abort-driven teardown
+			// would roll back an approved write.
+			expect((diffViewProvider as unknown as { writeCommitted: boolean })["writeCommitted"]).toBe(true)
 		})
 
 		it("does not signal the commit point when the document save rejects", async () => {
@@ -999,6 +1005,7 @@ describe("DiffViewProvider", () => {
 			// A rejected save leaves the file absent or holding the previous content: the caller has
 			// to keep the rollback available, so signalling here would lose the write's debris.
 			expect(onCommit).not.toHaveBeenCalled()
+			expect((diffViewProvider as unknown as { writeCommitted: boolean })["writeCommitted"]).toBe(false)
 		})
 
 		it("throws a typed write failure before any success bookkeeping when the save reports false", async () => {
@@ -1312,6 +1319,26 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(`${mockCwd}/mock-target-file.ts`)
 			expect(fs.rmdir).toHaveBeenNthCalledWith(1, createdDirs[1])
 			expect(fs.rmdir).toHaveBeenNthCalledWith(2, createdDirs[0])
+		})
+
+		it("revertChanges() keeps a file another process filled before the editorless rollback", async () => {
+			// open() failed before the diff editor existed, but another process wrote the path
+			// after the empty placeholder landed. An inode check cannot catch an in-place write,
+			// so the rollback inspects the size and must leave non-empty content alone.
+			const createdDirs = [`${mockCwd}/new-parent`]
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs,
+			})
+			vi.mocked(fs.stat).mockResolvedValueOnce({ size: 12 } as Awaited<ReturnType<typeof fs.stat>>)
+
+			await diffViewProvider.revertChanges()
+
+			expect(fs.unlink).not.toHaveBeenCalledWith(`${mockCwd}/mock-target-file.ts`)
+			expect(fs.rmdir).toHaveBeenCalledWith(createdDirs[0])
 		})
 
 		it("revertChanges() tolerates a placeholder that was never written", async () => {
