@@ -60,6 +60,8 @@ import type {
 	ApiStreamUsageChunk,
 } from "../../transform/stream"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
+import { mistralModels } from "@roo-code/types"
+import { calculateApiCostOpenAI } from "../../../shared/cost"
 
 describe("MistralHandler", () => {
 	let handler: MistralHandler
@@ -450,6 +452,216 @@ describe("MistralHandler", () => {
 			expect(results).toHaveLength(2)
 			expect(results[0]).toEqual({ type: "text", text: "Test response" })
 			expect(results[1]).toEqual({ type: "usage", inputTokens: 12, outputTokens: 34 })
+		})
+
+		it("reports cache reads from prompt_tokens_details.cached_tokens without inflating input tokens", async () => {
+			// Mistral's documented wire shape: prompt_tokens is the TOTAL input
+			// count and cached_tokens is the cached subset. The pinned SDK has no
+			// typed field for the details object, so it arrives under
+			// additionalProperties after the SDK parse.
+			mockCreate.mockImplementationOnce(async (_options) =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [{ delta: { content: "Test response" }, index: 0 }],
+						},
+					},
+					{
+						data: {
+							choices: [],
+							usage: {
+								promptTokens: 1013,
+								completionTokens: 30,
+								additionalProperties: { prompt_tokens_details: { cached_tokens: 1008 } },
+							},
+						},
+					},
+				]),
+			)
+
+			const results = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(results[1]).toEqual({
+				type: "usage",
+				inputTokens: 1013,
+				outputTokens: 30,
+				cacheReadTokens: 1008,
+			})
+		})
+
+		it("omits cacheReadTokens when the usage carries no cached_tokens detail", async () => {
+			mockCreate.mockImplementationOnce(async (_options) =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [],
+							usage: { promptTokens: 12, completionTokens: 34 },
+						},
+					},
+				]),
+			)
+
+			const results = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(results[0]).toEqual({ type: "usage", inputTokens: 12, outputTokens: 34 })
+		})
+
+		it("omits cacheReadTokens when cached_tokens is zero", async () => {
+			// Mistral reports 0 (or omits the field) when nothing was served from
+			// cache; a zero read must not become a reported cache-read chunk field.
+			mockCreate.mockImplementationOnce(async (_options) =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [],
+							usage: {
+								promptTokens: 1013,
+								completionTokens: 30,
+								additionalProperties: { prompt_tokens_details: { cached_tokens: 0 } },
+							},
+						},
+					},
+				]),
+			)
+
+			const results = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(results[0]).toEqual({ type: "usage", inputTokens: 1013, outputTokens: 30 })
+		})
+
+		it("ignores a non-integer cached_tokens value", async () => {
+			mockCreate.mockImplementationOnce(async (_options) =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [],
+							usage: {
+								promptTokens: 1013,
+								completionTokens: 30,
+								additionalProperties: { prompt_tokens_details: { cached_tokens: 100.5 } },
+							},
+						},
+					},
+				]),
+			)
+
+			const results = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(results[0]).toEqual({ type: "usage", inputTokens: 1013, outputTokens: 30 })
+		})
+
+		it("drops cached_tokens that exceed prompt_tokens instead of billing an impossible read", async () => {
+			// Subset guard, mirroring the OpenAI sibling that reads the same nested
+			// field (openai.ts:304-313): a malformed upstream count larger than the
+			// prompt total must not bill reads at 0.1x or surface cacheReads > tokensIn.
+			mockCreate.mockImplementationOnce(async (_options) =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [],
+							usage: {
+								promptTokens: 100,
+								completionTokens: 30,
+								additionalProperties: { prompt_tokens_details: { cached_tokens: 1008 } },
+							},
+						},
+					},
+				]),
+			)
+
+			const results = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(results[0]).toEqual({ type: "usage", inputTokens: 100, outputTokens: 30 })
+		})
+
+		it("keeps a cached_tokens value equal to prompt_tokens (inclusive subset bound)", async () => {
+			// The sibling guard is `<=`, not `<`: a fully cached prompt is valid.
+			mockCreate.mockImplementationOnce(async (_options) =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [],
+							usage: {
+								promptTokens: 1008,
+								completionTokens: 30,
+								additionalProperties: { prompt_tokens_details: { cached_tokens: 1008 } },
+							},
+						},
+					},
+				]),
+			)
+
+			const results = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(results[0]).toEqual({
+				type: "usage",
+				inputTokens: 1008,
+				outputTokens: 30,
+				cacheReadTokens: 1008,
+			})
+		})
+
+		it("bills a cached read at 0.1x and the uncached remainder at full input price", async () => {
+			// End-to-end cost proof for the coupled change: the reported usage
+			// chunk from the handler feeds calculateApiCostOpenAI, which subtracts
+			// the reported reads from prompt_tokens and bills them at cacheReadsPrice.
+			const info = mistralModels["mistral-large-latest"]
+			const inputTokens = 1013
+			const cachedTokens = 1008
+			const outputTokens = 30
+
+			mockCreate.mockImplementationOnce(async (_options) =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [],
+							usage: {
+								promptTokens: inputTokens,
+								completionTokens: outputTokens,
+								additionalProperties: { prompt_tokens_details: { cached_tokens: cachedTokens } },
+							},
+						},
+					},
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+			const usage = chunks.find((chunk) => chunk.type === "usage")
+			expect(usage).toMatchObject({ type: "usage", inputTokens, outputTokens, cacheReadTokens: cachedTokens })
+
+			const { totalCost } = calculateApiCostOpenAI(
+				info,
+				inputTokens,
+				outputTokens,
+				0,
+				usage?.type === "usage" ? usage.cacheReadTokens : undefined,
+			)
+
+			const uncachedCost = ((inputTokens - cachedTokens) / 1_000_000) * (info.inputPrice as number)
+			const cachedCost = (cachedTokens / 1_000_000) * (info.cacheReadsPrice as number)
+			const outputCost = (outputTokens / 1_000_000) * (info.outputPrice as number)
+
+			expect(totalCost).toBeCloseTo(uncachedCost + cachedCost + outputCost, 12)
+
+			// Pin the two wrong variants this PR pairs together, so neither can
+			// regress alone: reporting reads with no price bills them at $0, and
+			// billing the full prompt at inputPrice over-reports by 9x on the
+			// cached fraction.
+			const mappingWithoutPrice = calculateApiCostOpenAI(
+				{ ...info, cacheReadsPrice: undefined },
+				inputTokens,
+				outputTokens,
+				0,
+				cachedTokens,
+			)
+			expect(mappingWithoutPrice.totalCost).toBeLessThan(totalCost)
+
+			const noMapping = calculateApiCostOpenAI(info, inputTokens, outputTokens, 0, undefined)
+			expect(noMapping.totalCost).toBeGreaterThan(totalCost)
+			expect(noMapping.totalCost - totalCost).toBeCloseTo(
+				(cachedTokens / 1_000_000) * ((info.inputPrice as number) - (info.cacheReadsPrice as number)),
+				12,
+			)
 		})
 	})
 
@@ -922,8 +1134,13 @@ describe("MistralHandler", () => {
 				// the request. Both signals are already aborted when completePrompt's catch runs,
 				// so the test really pins the first-cause classification.
 				mockComplete.mockImplementation(
-					() =>
+					(_options: unknown, requestOptions?: { fetchOptions?: { signal?: AbortSignal } }) =>
 						new Promise<never>((_resolve, reject) => {
+							// Attach a listener the way a real fetch does: Node's composite
+							// AbortSignal.any materializes its first-cause reason at abort time
+							// only when something is listening, and reads the live source
+							// signals otherwise.
+							requestOptions?.fetchOptions?.signal?.addEventListener("abort", () => {}, { once: true })
 							rejectRequest = reject
 						}),
 				)
