@@ -1,8 +1,17 @@
-import { ANTHROPIC_API_PROTOCOL, OPENAI_API_PROTOCOL, providerIdentifiers, providerNames } from "../index.js"
+import {
+	ANTHROPIC_API_PROTOCOL,
+	OPENAI_API_PROTOCOL,
+	providerIdentifiers,
+	providerNames,
+	type ProviderSettings,
+} from "../index.js"
 import {
 	getApiProtocol,
+	getModelId,
+	getProviderDefaultModelId,
 	getProviderIsProxy,
 	getProviderLabel,
+	getProviderModelIdKey,
 	getProviderModels,
 	getProviderServiceUrl,
 	isProviderHidden,
@@ -147,6 +156,45 @@ describe("provider definition metadata", () => {
 		providerIdentifiers.ollama,
 	])("keeps the selectable provider %s visible in the settings UI", (provider) => {
 		expect(isProviderHidden(provider)).toBe(false)
+	})
+})
+
+describe("getProviderModelIdKey", () => {
+	it.each(
+		providerDefinitionList.flatMap((definition) =>
+			definition.modelIdKey ? [[definition.apiProvider, definition.modelIdKey] as const] : [],
+		),
+	)("returns the model ID field declared by the %s provider definition", (apiProvider, modelIdKey) => {
+		expect(getProviderModelIdKey(apiProvider)).toBe(modelIdKey)
+		expect(PROVIDER_SETTINGS_KEYS).toContain(modelIdKey)
+	})
+
+	it.each([providerIdentifiers.vscodeLm, providerIdentifiers.githubCopilot])(
+		"returns undefined for %s, which stores its selection in a nested selector",
+		(provider) => {
+			expect(getProviderModelIdKey(provider)).toBeUndefined()
+		},
+	)
+
+	it("returns undefined for an unregistered provider", () => {
+		expect(getProviderModelIdKey("unregistered-provider" as (typeof providerNames)[number])).toBeUndefined()
+	})
+
+	it("agrees with getModelId about where the selection is stored", () => {
+		const settings: ProviderSettings = {
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "vendor/model",
+		}
+		const modelIdKey = getProviderModelIdKey(providerIdentifiers.openrouter)
+
+		expect(modelIdKey).toBeDefined()
+		expect(settings[modelIdKey!]).toBe(getModelId(settings))
+	})
+
+	it("resolves the default through the same provider definition", () => {
+		expect(getProviderDefaultModelId(providerIdentifiers.anthropic, {})).toBe(
+			getProviderDefaultModelId(providerIdentifiers.anthropic, { apiProvider: providerIdentifiers.anthropic }),
+		)
 	})
 })
 

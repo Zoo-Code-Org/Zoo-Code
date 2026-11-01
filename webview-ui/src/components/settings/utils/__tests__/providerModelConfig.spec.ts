@@ -1,16 +1,7 @@
-import {
-	anthropicDefaultModelId,
-	ioIntelligenceDefaultModelId,
-	mainlandZAiDefaultModelId,
-	nanoGptDefaultModelId,
-	providerIdentifiers,
-} from "@roo-code/types"
+import { providerIdentifiers } from "@roo-code/types"
 
 import {
-	PROVIDER_DEFAULT_MODEL_IDS,
-	getProviderModelConfig,
 	getProviderDocsSlug,
-	getDefaultModelIdForProvider,
 	getStaticModelsForProvider,
 	isStaticModelProvider,
 	PROVIDERS_WITH_CUSTOM_MODEL_UI,
@@ -22,120 +13,6 @@ import {
 const appProfileArn = "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abcd1234efgh"
 
 describe("providerModelConfig", () => {
-	describe("PROVIDER_DEFAULT_MODEL_IDS", () => {
-		it("contains default model IDs for static providers", () => {
-			expect(PROVIDER_DEFAULT_MODEL_IDS[providerIdentifiers.anthropic]).toBeDefined()
-			expect(PROVIDER_DEFAULT_MODEL_IDS[providerIdentifiers.bedrock]).toBeDefined()
-			expect(PROVIDER_DEFAULT_MODEL_IDS[providerIdentifiers.gemini]).toBeDefined()
-			expect(PROVIDER_DEFAULT_MODEL_IDS[providerIdentifiers.openaiNative]).toBeDefined()
-		})
-	})
-
-	describe("getDefaultModelIdForProvider", () => {
-		it("returns default model ID for known provider", () => {
-			const defaultId = getDefaultModelIdForProvider(providerIdentifiers.anthropic)
-			expect(defaultId).toBeDefined()
-			expect(typeof defaultId).toBe("string")
-			expect(defaultId.length).toBeGreaterThan(0)
-		})
-
-		it("returns empty string for unknown provider", () => {
-			const defaultId = getDefaultModelIdForProvider("unknown" as any)
-			expect(defaultId).toBe("")
-		})
-
-		it("returns international default for Z.ai without apiConfiguration", () => {
-			const defaultId = getDefaultModelIdForProvider(providerIdentifiers.zai)
-			expect(defaultId).toBeDefined()
-			expect(typeof defaultId).toBe("string")
-			expect(defaultId.length).toBeGreaterThan(0)
-		})
-
-		it("returns mainland default for Z.ai with china_coding entrypoint", () => {
-			const defaultId = getDefaultModelIdForProvider(providerIdentifiers.zai, {
-				apiProvider: providerIdentifiers.zai,
-				zaiApiLine: "china_coding",
-			})
-			expect(defaultId).toBeDefined()
-			expect(typeof defaultId).toBe("string")
-			// Mainland model IDs should contain 'mainland' or be different from international
-			expect(defaultId.length).toBeGreaterThan(0)
-		})
-
-		it("returns mainland default for Z.ai with china_api entrypoint", () => {
-			expect(
-				getDefaultModelIdForProvider(providerIdentifiers.zai, {
-					apiProvider: providerIdentifiers.zai,
-					zaiApiLine: "china_api",
-				}),
-			).toBe(mainlandZAiDefaultModelId)
-		})
-
-		it("returns international default for Z.ai with international_coding entrypoint", () => {
-			const defaultId = getDefaultModelIdForProvider(providerIdentifiers.zai, {
-				apiProvider: providerIdentifiers.zai,
-				zaiApiLine: "international_coding",
-			})
-			expect(defaultId).toBeDefined()
-			expect(typeof defaultId).toBe("string")
-			expect(defaultId.length).toBeGreaterThan(0)
-		})
-
-		it("uses mainland or international defaults based on zaiApiLine setting", () => {
-			// Verify the function correctly routes to appropriate defaults
-			const chinaDefault = getDefaultModelIdForProvider(providerIdentifiers.zai, {
-				apiProvider: providerIdentifiers.zai,
-				zaiApiLine: "china_coding",
-			})
-			const internationalDefault = getDefaultModelIdForProvider(providerIdentifiers.zai, {
-				apiProvider: providerIdentifiers.zai,
-				zaiApiLine: "international_coding",
-			})
-			// Both should return valid model IDs (they may or may not be the same)
-			expect(chinaDefault).toBeDefined()
-			expect(internationalDefault).toBeDefined()
-			expect(chinaDefault.length).toBeGreaterThan(0)
-			expect(internationalDefault.length).toBeGreaterThan(0)
-		})
-	})
-
-	describe("getProviderModelConfig", () => {
-		it("selects the Z.ai default for the configured API line", () => {
-			const config = getProviderModelConfig(providerIdentifiers.zai, {
-				apiProvider: providerIdentifiers.zai,
-				zaiApiLine: "china_coding",
-			})
-
-			expect(config).toEqual({
-				field: "apiModelId",
-				default: mainlandZAiDefaultModelId,
-			})
-		})
-
-		it("returns undefined for a provider with no model config entry", () => {
-			expect(getProviderModelConfig("unknown-provider" as any)).toBeUndefined()
-		})
-
-		it("returns the static field config for a non-zai provider", () => {
-			const config = getProviderModelConfig(providerIdentifiers.anthropic)
-			expect(config).toEqual({ field: "apiModelId", default: anthropicDefaultModelId })
-		})
-
-		it("returns NanoGPT's dynamic model field and fallback", () => {
-			expect(getProviderModelConfig(providerIdentifiers.nanogpt)).toEqual({
-				field: "nanoGptModelId",
-				default: nanoGptDefaultModelId,
-			})
-		})
-
-		it("returns IO Intelligence's dynamic model field and fallback", () => {
-			expect(getProviderModelConfig(providerIdentifiers.ioIntelligence)).toEqual({
-				field: "ioIntelligenceModelId",
-				default: ioIntelligenceDefaultModelId,
-			})
-		})
-	})
-
 	describe("getProviderDocsSlug", () => {
 		it("uses NanoGPT's provider identifier as its external documentation slug", () => {
 			expect(getProviderDocsSlug(providerIdentifiers.nanogpt)).toBe("nanogpt")

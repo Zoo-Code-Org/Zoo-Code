@@ -343,6 +343,17 @@ export function getModelId(settings: ProviderSettings): string | undefined {
 }
 
 /**
+ * Get the settings key that stores the provider's model ID. This is the write
+ * counterpart of `getModelId()`. Providers that keep their selection in a nested
+ * field (VS Code LM and GitHub Copilot) return `undefined`.
+ */
+export function getProviderModelIdKey(provider: ProviderName): Extract<keyof ProviderSettings, string> | undefined {
+	// Every declared `modelIdKey` belongs to the provider's own settings shape, which
+	// `providerSettingsSchema` merges into `ProviderSettings`.
+	return providerDefinitions[provider]?.modelIdKey as Extract<keyof ProviderSettings, string> | undefined
+}
+
+/**
  * Get the provider's default model ID, ignoring any configured model selection.
  * Used as a fallback while provider models are still loading.
  */

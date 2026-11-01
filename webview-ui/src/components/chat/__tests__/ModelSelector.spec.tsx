@@ -360,17 +360,18 @@ describe("ModelSelector", () => {
 			expect(screen.getByText("common:ui.no_results")).toBeInTheDocument()
 		})
 
-		test("does not request router models for providers without a model field", () => {
-			render(
-				<ModelSelector apiConfiguration={{ apiProvider: providerIdentifiers.fakeAi }} title="Select model" />,
-			)
+		test.each([providerIdentifiers.fakeAi, providerIdentifiers.geminiCli])(
+			"does not offer a quick picker for the hidden provider %s",
+			(apiProvider) => {
+				render(<ModelSelector apiConfiguration={{ apiProvider }} title="Select model" />)
 
-			expect(routerModelsResult.calls.length).toBeGreaterThan(0)
-			expect(routerModelsResult.calls.every((opts) => (opts as { enabled: boolean }).enabled === false)).toBe(
-				true,
-			)
-			expect(screen.getByTestId("model-selector-unsupported-trigger")).toBeInTheDocument()
-		})
+				expect(routerModelsResult.calls.length).toBeGreaterThan(0)
+				expect(routerModelsResult.calls.every((opts) => (opts as { enabled: boolean }).enabled === false)).toBe(
+					true,
+				)
+				expect(screen.getByTestId("model-selector-unsupported-trigger")).toBeInTheDocument()
+			},
+		)
 	})
 
 	test("falls back to a degraded trigger for providers without a simple model list, and jumps to Settings on click", () => {

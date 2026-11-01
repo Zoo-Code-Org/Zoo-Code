@@ -7,7 +7,9 @@ import { ExternalLinkIcon } from "@radix-ui/react-icons"
 import {
 	type ProviderName,
 	type ProviderSettings,
+	getProviderDefaultModelId,
 	getProviderLabel,
+	getProviderModelIdKey,
 	getProviderModels,
 	getProviderServiceUrl,
 	isDynamicProvider,
@@ -24,9 +26,7 @@ import {
 } from "@roo-code/types"
 
 import {
-	getDefaultModelIdForProvider,
 	getProviderDocsSlug,
-	getProviderModelConfig,
 	getStaticModelsForProvider,
 	shouldUseGenericModelPicker,
 	handleModelChangeSideEffects,
@@ -366,13 +366,13 @@ const ApiOptions = ({
 				}
 			}
 
-			const config = getProviderModelConfig(value, apiConfiguration)
-			if (config) {
+			const modelIdKey = getProviderModelIdKey(value)
+			if (modelIdKey) {
 				validateAndResetModel(
 					value,
-					apiConfiguration[config.field] as string | undefined,
-					config.field,
-					config.default,
+					apiConfiguration[modelIdKey] as string | undefined,
+					modelIdKey,
+					getProviderDefaultModelId(value, apiConfiguration),
 				)
 			}
 		},
@@ -774,7 +774,7 @@ const ApiOptions = ({
 							<ModelPicker
 								apiConfiguration={apiConfiguration}
 								setApiConfigurationField={setApiConfigurationField}
-								defaultModelId={getDefaultModelIdForProvider(activeSelectedProvider, apiConfiguration)}
+								defaultModelId={getProviderDefaultModelId(activeSelectedProvider, apiConfiguration)}
 								models={getStaticModelsForProvider(
 									activeSelectedProvider,
 									t("settings:labels.useCustomArn"),
