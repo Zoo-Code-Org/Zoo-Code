@@ -252,6 +252,7 @@ function harness(
 		signals,
 		artifacts,
 		emit,
+		close,
 		interrupt: () => interrupt(),
 		get cleaned() {
 			return cleaned
@@ -1051,57 +1052,68 @@ describe("agent fixture controller", () => {
 		assert.equal(result.teardown.status, "ok")
 	})
 
-	it("holds teardown after the completion message for the requested window", async () => {
-		registerTestFixture("controller-hold")
-		const f = harness("no-events")
-		f.emit({
-			eventName: RooCodeEventName.Message,
-			payload: [
-				{
-					taskId: "root",
-					action: "created",
-					message: { ts: 1, type: "say", say: "completion_result", text: "synthetic final answer" },
-				},
-			],
-		})
-		f.emit({
-			eventName: RooCodeEventName.TaskCompleted,
-			payload: [
-				"root",
-				{ totalTokensIn: 7, totalTokensOut: 3, totalCost: 0, contextTokens: 9 },
-				{},
-				{
-					isSubtask: false,
-				},
-			],
-		})
-		const holdPauses: number[] = []
-		let closeTaskSeenDuringHold = false
-		const pause = f.runtime.pause
-		f.runtime.pause = async (ms) => {
-			if (ms === 3_000) {
-				holdPauses.push(ms)
-				closeTaskSeenDuringHold = f.commands.some(
-					(command) => command.commandName === TaskCommandName.CloseTask,
-				)
+	for (const hostExited of [false, true]) {
+		it(`holds teardown only while the completed host is live (exited=${hostExited})`, async () => {
+			const fixtureName = `controller-hold-${hostExited}`
+			registerTestFixture(fixtureName)
+			const f = harness("no-events")
+			f.emit({
+				eventName: RooCodeEventName.Message,
+				payload: [
+					{
+						taskId: "root",
+						action: "created",
+						message: { ts: 1, type: "say", say: "completion_result", text: "synthetic final answer" },
+					},
+				],
+			})
+			f.emit({
+				eventName: RooCodeEventName.TaskCompleted,
+				payload: [
+					"root",
+					{ totalTokensIn: 7, totalTokensOut: 3, totalCost: 0, contextTokens: 9 },
+					{},
+					{
+						isSubtask: false,
+					},
+				],
+			})
+			const holdPauses: number[] = []
+			let closeTaskSeenDuringHold = false
+			const pause = f.runtime.pause
+			f.runtime.pause = async (ms) => {
+				if (ms === 3_000) {
+					holdPauses.push(ms)
+					closeTaskSeenDuringHold = f.commands.some(
+						(command) => command.commandName === TaskCommandName.CloseTask,
+					)
+				}
+				await pause(ms)
 			}
-			await pause(ms)
-		}
-		const result = await runAgentFixture(f.runtime, {
-			fixtureName: "controller-hold",
-			credential: CREDENTIAL,
-			observers: { shouldStop: () => true },
-			holdBeforeTeardownMs: 3_000,
+			const result = await runAgentFixture(f.runtime, {
+				fixtureName,
+				credential: CREDENTIAL,
+				observers: {
+					onAcceptedEvent: (event) => {
+						if (hostExited && event.eventName === RooCodeEventName.TaskCompleted) f.close()
+					},
+					shouldStop: () => true,
+				},
+				holdBeforeTeardownMs: 3_000,
+			})
+			assert.equal(result.execution.code, "COMPLETED")
+			assert.equal(result.execution.completionMessageSeen, true)
+			assert.deepEqual(holdPauses, hostExited ? [] : [3_000])
+			// The hold runs before teardown, so CloseTask is sent only after it.
+			assert.equal(closeTaskSeenDuringHold, false)
+			assert.equal(f.commands.at(-1)?.commandName, TaskCommandName.CloseTask)
+			assert.equal(result.teardown.status, "ok")
+			assert.equal(result.teardown.hostExited, true)
+			const trace = writtenTrace(f)
+			// CloseTask exits immediately, so none of the recording hold belongs to teardown.
+			assert.equal(trace.execution.timings.teardownMs, 0)
 		})
-		assert.equal(result.execution.code, "COMPLETED")
-		assert.equal(result.execution.completionMessageSeen, true)
-		assert.deepEqual(holdPauses, [3_000])
-		// The hold runs before teardown, so CloseTask is sent only after it.
-		assert.equal(closeTaskSeenDuringHold, false)
-		assert.equal(f.commands.at(-1)?.commandName, TaskCommandName.CloseTask)
-		assert.equal(result.teardown.status, "ok")
-	})
-
+	}
 	it("skips the teardown hold without a completion message", async () => {
 		registerTestFixture("controller-hold-skipped", {
 			limits: {

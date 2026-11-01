@@ -67,7 +67,10 @@ describe("Solheim provider smoke workflow policy", () => {
 				.split("\n")
 				.map((line) => line.trim()),
 		)
-		assert.deepEqual(paths, [[output + "/verdict.json", output + "/trace.json"], [output + "/smoke.mp4"]])
+		assert.deepEqual(paths, [
+			[output + "/verdict.json", output + "/trace.json", output + "/sidebar-focus.json"],
+			[output + "/smoke.mp4"],
+		])
 		for (const step of uploads) {
 			assert.equal(
 				step.if,

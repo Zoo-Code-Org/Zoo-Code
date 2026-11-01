@@ -7,6 +7,7 @@
 // The IPC start path keeps focusSidebar: false; this module owns focus instead.
 
 const vscode = require("vscode")
+const fs = require("node:fs/promises")
 
 const EXTENSION_ID = "ZooCodeOrganization.zoo-code"
 const FOCUS_COMMAND = "zoo-code.SidebarProvider.focus"
@@ -27,13 +28,21 @@ async function focusSidebarWhenReady() {
 	}
 }
 
+async function writeStatus(status) {
+	const target = process.env.AGENT_EVALS_TESTS_DIAGNOSTICS_PATH
+	if (!target) return
+	// Fixed metadata only: extension errors can contain private host details.
+	await fs.writeFile(target, JSON.stringify({ status }))
+}
+
 exports.run = async () => {
 	try {
 		await focusSidebarWhenReady()
-	} catch (error) {
+		await writeStatus("ready")
+	} catch {
 		// Focus is best effort for the recording. A rejected run() would end
-		// the test host and cut the smoke short, so log and stay pending.
-		console.warn("[solheim-smoke] sidebar focus failed:", error && error.message ? error.message : error)
+		// the test host and cut the smoke short. Persist bounded evidence instead.
+		await writeStatus("failed").catch(() => {})
 	}
 	await new Promise(() => {})
 }

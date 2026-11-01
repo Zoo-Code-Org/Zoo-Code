@@ -20,6 +20,8 @@ export interface HostRuntimeOptions {
 	// Optional --extensionTestsPath module. The module's run() must never
 	// settle, because VS Code exits when it does. Off by default.
 	testsPath?: string
+	// Optional bounded status artifact written by the extension test module.
+	testsDiagnosticsPath?: string
 }
 
 const readCommit = async (root: string): Promise<MeasuredString> => {
@@ -94,7 +96,12 @@ export function createHostRuntime(options: HostRuntimeOptions): AgentRuntime {
 				process.env.DISPLAY ? args : ["-a", executable, ...args],
 				{
 					detached: true,
-					env: buildChildEnvironment(process.env, isolatedHome, socket),
+					env: {
+						...buildChildEnvironment(process.env, isolatedHome, socket),
+						...(options.testsDiagnosticsPath
+							? { AGENT_EVALS_TESTS_DIAGNOSTICS_PATH: options.testsDiagnosticsPath }
+							: {}),
+					},
 					stdio: "ignore",
 				},
 			)

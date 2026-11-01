@@ -74,6 +74,7 @@ jobs:
                   path: |
                       ${{ runner.temp }}/solheim-provider-smoke/verdict.json
                       ${{ runner.temp }}/solheim-provider-smoke/trace.json
+                      ${{ runner.temp }}/solheim-provider-smoke/sidebar-focus.json
                   if-no-files-found: error
                   retention-days: 7
 
