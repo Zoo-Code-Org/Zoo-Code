@@ -13,6 +13,7 @@
 	"deleteTaskTitle": "Excluir tarefa (Shift + Clique para pular confirmação)",
 	"copyPrompt": "Copiar prompt",
 	"exportTask": "Exportar tarefa",
+	"renameTask": "Renomear tarefa",
 	"deleteTask": "Excluir tarefa",
 	"deleteTaskMessage": "Tem certeza que deseja excluir esta tarefa? Esta ação não pode ser desfeita.",
 	"cancel": "Cancelar",
