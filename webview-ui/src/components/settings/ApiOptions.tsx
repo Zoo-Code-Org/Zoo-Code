@@ -7,6 +7,7 @@ import { ExternalLinkIcon } from "@radix-ui/react-icons"
 import {
 	type ProviderName,
 	type ProviderSettings,
+	getProviderModels,
 	isDynamicProvider,
 	isRetiredProvider,
 	providerIdentifiers,
@@ -93,7 +94,7 @@ import {
 	Mimo,
 } from "./providers"
 
-import { MODELS_BY_PROVIDER, PROVIDERS } from "./constants"
+import { PROVIDERS } from "./constants"
 import { inputEventTransform, noTransform } from "./transforms"
 import { ModelPicker } from "./ModelPicker"
 import { ApiErrorMessage } from "./ApiErrorMessage"
@@ -347,12 +348,12 @@ const ApiOptions = ({
 				// newly selected provider).
 				//
 				// Note: We only validate providers with static model lists.
-				const staticModels = MODELS_BY_PROVIDER[provider]
-				if (!staticModels) {
+				const staticModels = getProviderModels(provider)
+				if (Object.keys(staticModels).length === 0) {
 					return
 				}
 
-				// Bedrock has a special “custom-arn” pseudo-model that isn't part of MODELS_BY_PROVIDER.
+				// Bedrock has a special “custom-arn” pseudo-model that isn't part of the static catalog.
 				if (provider === providerIdentifiers.bedrock && modelId === "custom-arn") {
 					return
 				}
@@ -407,17 +408,17 @@ const ApiOptions = ({
 				return true
 			}
 
-			// Check if this is a static provider (has models in MODELS_BY_PROVIDER)
-			const staticModels = MODELS_BY_PROVIDER[value as ProviderName]
+			// Check if this is a static provider (ships a model catalog in its definition)
+			const staticModels = getProviderModels(value as ProviderName)
 
 			// If it's a static provider, check if it has any models after filtering
-			if (staticModels) {
+			if (Object.keys(staticModels).length > 0) {
 				const filteredModels = filterModels(staticModels, value as ProviderName, organizationAllowList)
 				// Hide the provider if it has no models after filtering
 				return filteredModels && Object.keys(filteredModels).length > 0
 			}
 
-			// If it's a dynamic provider (not in MODELS_BY_PROVIDER), always show it
+			// If it's a dynamic provider (no static catalog), always show it
 			// to avoid race conditions with async model fetching
 			return true
 		})

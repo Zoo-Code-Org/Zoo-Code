@@ -161,9 +161,11 @@ export const MINIMAX_DEFAULT_TEMPERATURE = 1.0
 
 export const minimaxProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.minimax,
+	label: "MiniMax",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => minimaxDefaultModelId,
+	models: minimaxModels,
 	schema: {
 		...apiModelIdProviderModelShape,
 		minimaxBaseUrl: z

@@ -1066,6 +1066,7 @@ const openAiExtraBodySchema = z
 
 export const openAiProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.openai,
+	label: "OpenAI Compatible",
 	modelIdKey: OPEN_AI_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(OPEN_AI_MODEL_ID_FIELD),
 	// OpenAI-compatible endpoints are fully user-configured, so there is no default.

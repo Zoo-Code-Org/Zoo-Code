@@ -16,8 +16,12 @@ const schema = {
 		.optional(),
 }
 
+// VS Code and Copilot report their available models at runtime, so neither
+// provider declares a static catalog. `vscodeLlmModels` is only a measured
+// baseline used to describe models once they are discovered.
 export const vsCodeLmProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.vscodeLm,
+	label: "VS Code LM API",
 	getModelId: (settings) => settings.vsCodeLmModelSelector?.id,
 	getDefaultModelId: () => vscodeLlmDefaultModelId,
 	schema,
@@ -25,6 +29,7 @@ export const vsCodeLmProviderDefinition = createProviderDefinition({
 
 export const githubCopilotProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.githubCopilot,
+	label: "GitHub Copilot",
 	getModelId: (settings) => settings.vsCodeLmModelSelector?.id,
 	getDefaultModelId: () => vscodeLlmDefaultModelId,
 	schema,

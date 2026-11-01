@@ -107,9 +107,11 @@ export const MISTRAL_DEFAULT_TEMPERATURE = 1
 
 export const mistralProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.mistral,
+	label: "Mistral",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => mistralDefaultModelId,
+	models: mistralModels,
 	schema: {
 		...apiModelIdProviderModelShape,
 		mistralApiKey: z.string().optional(),

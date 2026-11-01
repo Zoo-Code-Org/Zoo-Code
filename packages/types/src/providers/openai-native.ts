@@ -8,13 +8,15 @@ import {
 	createModelIdAccessor,
 	createProviderDefinition,
 } from "./common.js"
-import { openAiNativeDefaultModelId } from "./openai.js"
+import { openAiNativeDefaultModelId, openAiNativeModels } from "./openai.js"
 
 export const openAiNativeProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.openaiNative,
+	label: "OpenAI",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => openAiNativeDefaultModelId,
+	models: openAiNativeModels,
 	schema: {
 		...apiModelIdProviderModelShape,
 		openAiNativeApiKey: z.string().optional(),

@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { reasoningEffortSettingSchema, verbosityLevelsSchema } from "../model.js"
+import { reasoningEffortSettingSchema, verbosityLevelsSchema, type ModelInfo } from "../model.js"
 import { type ProviderIdentifier } from "../provider-identifiers.js"
 
 export const API_PROVIDER_FIELD = "apiProvider"
@@ -55,20 +55,26 @@ type TypedProviderModelIdAccessor<S extends z.ZodRawShape> = (settings: Provider
 
 type ProviderDefinitionInput<P extends ProviderIdentifier, S extends z.ZodRawShape> = {
 	apiProvider: P
+	// User-facing provider name, shared by the settings UI.
+	label: string
 	schema: S
 	modelIdKey?: Extract<keyof S, string>
 	getModelId: TypedProviderModelIdAccessor<S>
 	// Provider-specific default model data lives with the provider definition, mirroring `getModelId`.
 	getDefaultModelId: ProviderDefaultModelIdAccessor
+	// Static model catalog. Providers whose models are discovered at runtime omit it.
+	models?: Record<string, ModelInfo>
 }
 
 export type ProviderDefinition = {
 	apiProvider: ProviderIdentifier
+	label: string
 	settingsShape: z.ZodRawShape
 	modelIdKey?: string
 	schema: z.ZodObject
 	getModelId: ProviderModelIdAccessor
 	getDefaultModelId: ProviderDefaultModelIdAccessor
+	models: Record<string, ModelInfo>
 }
 
 export const createModelIdAccessor =
@@ -79,6 +85,7 @@ export const createModelIdAccessor =
 // `modelIdKey` supports deprecated exports. Remove it in favor of an accessor-only contract when those exports are removed.
 export const createProviderDefinition = <P extends ProviderIdentifier, S extends z.ZodRawShape>({
 	apiProvider,
+	label,
 	schema,
 	...modelIdDefinition
 }: ProviderDefinitionInput<P, S>) => {
@@ -90,6 +97,7 @@ export const createProviderDefinition = <P extends ProviderIdentifier, S extends
 
 	return {
 		apiProvider,
+		label,
 		settingsShape: schema,
 		modelIdKey: modelIdDefinition.modelIdKey,
 		schema: z.object({
@@ -98,5 +106,6 @@ export const createProviderDefinition = <P extends ProviderIdentifier, S extends
 		}),
 		getModelId,
 		getDefaultModelId: modelIdDefinition.getDefaultModelId,
+		models: modelIdDefinition.models ?? {},
 	}
 }

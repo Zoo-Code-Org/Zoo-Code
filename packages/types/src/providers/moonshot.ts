@@ -132,9 +132,11 @@ export const MOONSHOT_DEFAULT_TEMPERATURE = 0.6
 
 export const moonshotProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.moonshot,
+	label: "Moonshot",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => moonshotDefaultModelId,
+	models: moonshotModels,
 	schema: {
 		...apiModelIdProviderModelShape,
 		moonshotBaseUrl: z

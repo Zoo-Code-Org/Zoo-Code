@@ -8,6 +8,7 @@ export const LITELLM_MODEL_ID_FIELD = "litellmModelId"
 
 export const litellmProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.litellm,
+	label: "LiteLLM",
 	modelIdKey: LITELLM_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(LITELLM_MODEL_ID_FIELD),
 	getDefaultModelId: () => litellmDefaultModelId,

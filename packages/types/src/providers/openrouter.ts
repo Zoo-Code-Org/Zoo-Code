@@ -109,6 +109,7 @@ export const OPEN_ROUTER_MODEL_ID_FIELD = "openRouterModelId"
 
 export const openRouterProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.openrouter,
+	label: "OpenRouter",
 	modelIdKey: OPEN_ROUTER_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(OPEN_ROUTER_MODEL_ID_FIELD),
 	getDefaultModelId: () => openRouterDefaultModelId,

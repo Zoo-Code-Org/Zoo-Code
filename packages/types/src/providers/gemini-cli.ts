@@ -11,6 +11,7 @@ import {
 
 export const geminiCliProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.geminiCli,
+	label: "Gemini CLI",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	// Gemini CLI has no catalog of its own; it keeps the Anthropic fallback default.

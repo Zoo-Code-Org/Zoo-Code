@@ -1,6 +1,8 @@
 import { ANTHROPIC_API_PROTOCOL, OPENAI_API_PROTOCOL, providerIdentifiers, providerNames } from "../index.js"
 import {
 	getApiProtocol,
+	getProviderLabel,
+	getProviderModels,
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
 	parseOpenAiExtraBody,
 	PROVIDER_SETTINGS_KEYS,
@@ -8,6 +10,7 @@ import {
 	providerSettingsSchemaDiscriminated,
 } from "../provider-settings.js"
 import { OpenAiCodexServiceTier, OpenAiServiceTier } from "../model.js"
+import { anthropicModels } from "../providers/index.js"
 import { providerDefinitionList } from "../providers/index.js"
 
 describe("provider settings discriminated union", () => {
@@ -30,6 +33,43 @@ describe("provider settings discriminated union", () => {
 
 	it.each(providerNames)("accepts the %s provider branch", (apiProvider) => {
 		expect(providerSettingsSchemaDiscriminated.safeParse({ apiProvider }).success).toBe(true)
+	})
+})
+
+describe("provider definition metadata", () => {
+	it.each(providerDefinitionList.map((definition) => definition.apiProvider))(
+		"declares a non-empty label for %s",
+		(apiProvider) => {
+			expect(typeof getProviderLabel(apiProvider)).toBe("string")
+			expect(getProviderLabel(apiProvider).length).toBeGreaterThan(0)
+		},
+	)
+
+	it("returns the declared label rather than the raw identifier", () => {
+		expect(getProviderLabel(providerIdentifiers.anthropic)).toBe("Anthropic")
+		expect(getProviderLabel(providerIdentifiers.openaiCodex)).toBe("OpenAI - ChatGPT Plus/Pro")
+	})
+
+	it("falls back to the identifier for an unregistered provider", () => {
+		expect(getProviderLabel("unregistered-provider" as (typeof providerNames)[number])).toBe(
+			"unregistered-provider",
+		)
+	})
+
+	it("returns the provider's static catalog", () => {
+		expect(getProviderModels(providerIdentifiers.anthropic)).toBe(anthropicModels)
+		expect(getProviderModels(providerIdentifiers.anthropic)).toHaveProperty("claude-sonnet-4-5")
+	})
+
+	it.each([
+		providerIdentifiers.openrouter,
+		providerIdentifiers.ollama,
+		providerIdentifiers.lmstudio,
+		providerIdentifiers.openai,
+		providerIdentifiers.fakeAi,
+		providerIdentifiers.geminiCli,
+	])("returns an empty catalog for the runtime-discovered provider %s", (provider) => {
+		expect(getProviderModels(provider)).toEqual({})
 	})
 })
 

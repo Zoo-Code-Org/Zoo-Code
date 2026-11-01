@@ -170,9 +170,11 @@ export const basetenDefaultModelId = "zai-org/GLM-4.6" satisfies BasetenModelId
 
 export const basetenProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.baseten,
+	label: "Baseten",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => basetenDefaultModelId,
+	models: basetenModels,
 	schema: {
 		...apiModelIdProviderModelShape,
 		basetenApiKey: z.string().optional(),

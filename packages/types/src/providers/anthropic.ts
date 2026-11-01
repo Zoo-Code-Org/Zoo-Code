@@ -360,9 +360,11 @@ export const ANTHROPIC_DEFAULT_MAX_TOKENS = 8192
 
 export const anthropicProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.anthropic,
+	label: "Anthropic",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => anthropicDefaultModelId,
+	models: anthropicModels,
 	schema: {
 		...apiModelIdProviderModelShape,
 		apiKey: z.string().optional(),

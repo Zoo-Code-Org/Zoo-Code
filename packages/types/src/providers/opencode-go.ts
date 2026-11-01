@@ -855,6 +855,7 @@ export const OPENCODE_GO_MODEL_ID_FIELD = "opencodeGoModelId"
 
 export const opencodeGoProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.opencodeGo,
+	label: "Opencode Go",
 	modelIdKey: OPENCODE_GO_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(OPENCODE_GO_MODEL_ID_FIELD),
 	getDefaultModelId: () => opencodeGoDefaultModelId,

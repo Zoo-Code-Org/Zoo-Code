@@ -25,6 +25,7 @@ export const REQUESTY_MODEL_ID_FIELD = "requestyModelId"
 
 export const requestyProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.requesty,
+	label: "Requesty",
 	modelIdKey: REQUESTY_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(REQUESTY_MODEL_ID_FIELD),
 	getDefaultModelId: () => requestyDefaultModelId,

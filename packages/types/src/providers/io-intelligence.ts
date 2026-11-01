@@ -20,6 +20,7 @@ const IO_INTELLIGENCE_MODEL_ID_FIELD = "ioIntelligenceModelId"
 
 export const ioIntelligenceProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.ioIntelligence,
+	label: "IO Intelligence",
 	modelIdKey: IO_INTELLIGENCE_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(IO_INTELLIGENCE_MODEL_ID_FIELD),
 	getDefaultModelId: () => ioIntelligenceDefaultModelId,

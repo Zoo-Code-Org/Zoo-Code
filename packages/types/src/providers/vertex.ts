@@ -824,9 +824,11 @@ export const VERTEX_REGIONS = [
 
 export const vertexProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.vertex,
+	label: "GCP Vertex AI",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => vertexDefaultModelId,
+	models: vertexModels,
 	schema: {
 		...apiModelIdProviderModelShape,
 		vertexKeyFile: z.string().optional(),

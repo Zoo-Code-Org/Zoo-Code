@@ -33,9 +33,9 @@ import {
 	zooGatewayDefaultModelId,
 	getZAiModels,
 	getProviderDefaultModelId,
+	getProviderLabel,
+	getProviderModels,
 } from "@roo-code/types"
-
-import { MODELS_BY_PROVIDER } from "../constants"
 
 export interface ProviderServiceConfig {
 	serviceName: string
@@ -94,7 +94,7 @@ export const PROVIDER_DEFAULT_MODEL_IDS: Partial<Record<ProviderName, string>> =
 }
 
 export const getProviderServiceConfig = (provider: ProviderName): ProviderServiceConfig => {
-	return PROVIDER_SERVICE_CONFIG[provider] ?? { serviceName: provider, serviceUrl: "" }
+	return PROVIDER_SERVICE_CONFIG[provider] ?? { serviceName: getProviderLabel(provider), serviceUrl: "" }
 }
 
 export const getDefaultModelIdForProvider = (provider: ProviderName, apiConfiguration?: ProviderSettings): string => {
@@ -188,7 +188,7 @@ export const getStaticModelsForProvider = (
 		return getZAiModels(apiConfiguration?.zaiApiLine)
 	}
 
-	const models = MODELS_BY_PROVIDER[provider] ?? {}
+	const models = getProviderModels(provider)
 
 	// Add custom-arn option for Bedrock
 	if (provider === providerIdentifiers.bedrock) {
@@ -207,10 +207,10 @@ export const getStaticModelsForProvider = (
 }
 
 /**
- * Checks if a provider uses static models from MODELS_BY_PROVIDER
+ * Checks if a provider ships a static model catalog in its provider definition.
  */
 export const isStaticModelProvider = (provider: ProviderName): boolean => {
-	return provider in MODELS_BY_PROVIDER
+	return Object.keys(getProviderModels(provider)).length > 0
 }
 
 /**

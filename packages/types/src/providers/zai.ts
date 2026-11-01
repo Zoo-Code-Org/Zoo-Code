@@ -596,11 +596,13 @@ export function getZAiDefaultModelId(zaiApiLine: unknown, defaults: ZaiDefaultMo
 
 export const zaiProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.zai,
+	label: "Z.ai",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	// Z.ai serves separate model catalogs for mainland China and international
 	// endpoints, so the default depends on the configured API line.
 	getDefaultModelId: (settings) => getZAiDefaultModelId(settings.zaiApiLine),
+	models: internationalZAiModels,
 	schema: {
 		...apiModelIdProviderModelShape,
 		zaiApiKey: z.string().optional(),

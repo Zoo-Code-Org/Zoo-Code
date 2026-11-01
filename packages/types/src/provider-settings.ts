@@ -26,29 +26,11 @@ import {
 } from "./provider-identifiers.js"
 import {
 	anthropicDefaultModelId,
-	anthropicModels,
-	basetenModels,
-	bedrockModels,
-	deepSeekModels,
-	fireworksModels,
-	friendliModels,
-	geminiModels,
-	mistralModels,
-	moonshotModels,
-	openAiCodexModels,
-	openAiNativeModels,
-	qwenCodeModels,
-	sambaNovaModels,
-	vertexModels,
-	vscodeLlmModels,
-	xaiModels,
-	internationalZAiModels,
-	minimaxModels,
-	mimoModels,
 	isOpencodeGoAnthropicFormatModel,
 	ANTHROPIC_API_PROTOCOL,
 	OPENAI_API_PROTOCOL,
 } from "./providers/index.js"
+import type { ModelInfo } from "./model.js"
 
 /**
  * constants
@@ -369,6 +351,22 @@ export function getProviderDefaultModelId(provider: ProviderName, settings: Prov
 }
 
 /**
+ * Get the provider's user-facing label. Falls back to the raw identifier so an
+ * unregistered provider still renders something meaningful.
+ */
+export function getProviderLabel(provider: ProviderName): string {
+	return providerDefinitions[provider]?.label ?? provider
+}
+
+/**
+ * Get the provider's static model catalog. Providers whose models are discovered
+ * at runtime (dynamic, local, internal, and custom providers) return an empty map.
+ */
+export function getProviderModels(provider: ProviderName): Record<string, ModelInfo> {
+	return providerDefinitions[provider]?.models ?? {}
+}
+
+/**
  * ANTHROPIC_STYLE_PROVIDERS
  */
 
@@ -428,144 +426,4 @@ export const getApiProtocol = (provider: ProviderName | undefined, modelId?: str
 	}
 
 	return OPENAI_API_PROTOCOL
-}
-
-/**
- * MODELS_BY_PROVIDER
- */
-
-export const MODELS_BY_PROVIDER: Record<
-	Exclude<
-		ProviderName,
-		// OpenAI is custom-configured; Fake AI and Gemini CLI do not expose model lists.
-		typeof providerIdentifiers.fakeAi | typeof providerIdentifiers.geminiCli | typeof providerIdentifiers.openai
-	>,
-	{ id: ProviderName; label: string; models: string[] }
-> = {
-	[providerIdentifiers.anthropic]: {
-		id: providerIdentifiers.anthropic,
-		label: "Anthropic",
-		models: Object.keys(anthropicModels),
-	},
-	[providerIdentifiers.bedrock]: {
-		id: providerIdentifiers.bedrock,
-		label: "Amazon Bedrock",
-		models: Object.keys(bedrockModels),
-	},
-	[providerIdentifiers.deepseek]: {
-		id: providerIdentifiers.deepseek,
-		label: "DeepSeek",
-		models: Object.keys(deepSeekModels),
-	},
-	[providerIdentifiers.fireworks]: {
-		id: providerIdentifiers.fireworks,
-		label: "Fireworks",
-		models: Object.keys(fireworksModels),
-	},
-	[providerIdentifiers.friendli]: {
-		id: providerIdentifiers.friendli,
-		label: "Friendli",
-		models: Object.keys(friendliModels),
-	},
-	[providerIdentifiers.gemini]: {
-		id: providerIdentifiers.gemini,
-		label: "Google Gemini",
-		models: Object.keys(geminiModels),
-	},
-	[providerIdentifiers.mistral]: {
-		id: providerIdentifiers.mistral,
-		label: "Mistral",
-		models: Object.keys(mistralModels),
-	},
-	[providerIdentifiers.moonshot]: {
-		id: providerIdentifiers.moonshot,
-		label: "Moonshot",
-		models: Object.keys(moonshotModels),
-	},
-	[providerIdentifiers.kimiCode]: {
-		id: providerIdentifiers.kimiCode,
-		label: "Kimi Code",
-		models: [],
-	},
-	[providerIdentifiers.minimax]: {
-		id: providerIdentifiers.minimax,
-		label: "MiniMax",
-		models: Object.keys(minimaxModels),
-	},
-	[providerIdentifiers.mimo]: {
-		id: providerIdentifiers.mimo,
-		label: "Xiaomi MiMo",
-		models: Object.keys(mimoModels),
-	},
-	[providerIdentifiers.openaiCodex]: {
-		id: providerIdentifiers.openaiCodex,
-		label: "OpenAI - ChatGPT Plus/Pro",
-		models: Object.keys(openAiCodexModels),
-	},
-	[providerIdentifiers.openaiNative]: {
-		id: providerIdentifiers.openaiNative,
-		label: "OpenAI",
-		models: Object.keys(openAiNativeModels),
-	},
-	[providerIdentifiers.qwenCode]: {
-		id: providerIdentifiers.qwenCode,
-		label: "Qwen Code",
-		models: Object.keys(qwenCodeModels),
-	},
-	[providerIdentifiers.sambanova]: {
-		id: providerIdentifiers.sambanova,
-		label: "SambaNova",
-		models: Object.keys(sambaNovaModels),
-	},
-	[providerIdentifiers.vertex]: {
-		id: providerIdentifiers.vertex,
-		label: "GCP Vertex AI",
-		models: Object.keys(vertexModels),
-	},
-	[providerIdentifiers.vscodeLm]: {
-		id: providerIdentifiers.vscodeLm,
-		label: "VS Code LM API",
-		models: Object.keys(vscodeLlmModels),
-	},
-	[providerIdentifiers.githubCopilot]: {
-		id: providerIdentifiers.githubCopilot,
-		label: "GitHub Copilot",
-		models: Object.keys(vscodeLlmModels),
-	},
-	[providerIdentifiers.xai]: { id: providerIdentifiers.xai, label: "xAI (Grok)", models: Object.keys(xaiModels) },
-	[providerIdentifiers.zai]: {
-		id: providerIdentifiers.zai,
-		label: "Z.ai",
-		models: Object.keys(internationalZAiModels),
-	},
-	[providerIdentifiers.baseten]: {
-		id: providerIdentifiers.baseten,
-		label: "Baseten",
-		models: Object.keys(basetenModels),
-	},
-
-	// Dynamic providers; models pulled from remote APIs.
-	[providerIdentifiers.poe]: { id: providerIdentifiers.poe, label: "Poe", models: [] },
-	[providerIdentifiers.litellm]: { id: providerIdentifiers.litellm, label: "LiteLLM", models: [] },
-	[providerIdentifiers.openrouter]: { id: providerIdentifiers.openrouter, label: "OpenRouter", models: [] },
-	[providerIdentifiers.requesty]: { id: providerIdentifiers.requesty, label: "Requesty", models: [] },
-	[providerIdentifiers.unbound]: { id: providerIdentifiers.unbound, label: "Unbound", models: [] },
-	[providerIdentifiers.vercelAiGateway]: {
-		id: providerIdentifiers.vercelAiGateway,
-		label: "Vercel AI Gateway",
-		models: [],
-	},
-	[providerIdentifiers.opencodeGo]: { id: providerIdentifiers.opencodeGo, label: "Opencode Go", models: [] },
-	[providerIdentifiers.kenari]: { id: providerIdentifiers.kenari, label: "Kenari", models: [] },
-	[providerIdentifiers.ioIntelligence]: {
-		id: providerIdentifiers.ioIntelligence,
-		label: "IO Intelligence",
-		models: [],
-	},
-	[providerIdentifiers.nanogpt]: { id: providerIdentifiers.nanogpt, label: "NanoGPT", models: [] },
-	[providerIdentifiers.zooGateway]: { id: providerIdentifiers.zooGateway, label: "Zoo Gateway", models: [] },
-
-	// Local providers; models discovered from localhost endpoints.
-	[providerIdentifiers.lmstudio]: { id: providerIdentifiers.lmstudio, label: "LM Studio", models: [] },
-	[providerIdentifiers.ollama]: { id: providerIdentifiers.ollama, label: "Ollama", models: [] },
 }

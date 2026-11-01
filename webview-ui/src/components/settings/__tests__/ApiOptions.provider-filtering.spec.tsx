@@ -9,7 +9,6 @@ import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
 import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 
 import ApiOptions from "../ApiOptions"
-import { MODELS_BY_PROVIDER, PROVIDERS } from "../constants"
 
 // Mock the extension state context
 vi.mock("@src/context/ExtensionStateContext", () => ({
@@ -190,28 +189,6 @@ describe("ApiOptions Provider Filtering", () => {
 		expect(providerValues).toContain("ollama") // dynamic provider
 	})
 
-	it("should hide static providers with empty models", () => {
-		// Mock MODELS_BY_PROVIDER to have an empty provider
-		const _originalModels = { ...MODELS_BY_PROVIDER }
-		;(MODELS_BY_PROVIDER as any).emptyProvider = {}
-
-		// Add the empty provider to PROVIDERS
-		PROVIDERS.push({ value: "emptyProvider", label: "Empty Provider", proxy: false })
-
-		renderWithProviders()
-
-		const selectElement = screen.getByTestId("provider-select")
-		const options = JSON.parse(selectElement.getAttribute("data-options") || "[]")
-		const providerValues = options.map((opt: any) => opt.value)
-
-		// Should NOT include the empty static provider
-		expect(providerValues).not.toContain("emptyProvider")
-
-		// Cleanup
-		delete (MODELS_BY_PROVIDER as any).emptyProvider
-		PROVIDERS.pop()
-	})
-
 	it("should always show dynamic providers even if they have no models yet", () => {
 		renderWithProviders()
 
@@ -219,7 +196,7 @@ describe("ApiOptions Provider Filtering", () => {
 		const options = JSON.parse(selectElement.getAttribute("data-options") || "[]")
 		const providerValues = options.map((opt: any) => opt.value)
 
-		// Dynamic providers (not in MODELS_BY_PROVIDER) should always be shown
+		// Providers without a static catalog in their definition are always shown.
 		expect(providerValues).toContain("openrouter")
 		expect(providerValues).toContain("ollama")
 		expect(providerValues).toContain("lmstudio")
@@ -298,18 +275,15 @@ describe("ApiOptions Provider Filtering", () => {
 		expect(providerValues).toContain("anthropic")
 	})
 
-	it("should always show currently selected provider even if it has no models", () => {
-		// Add an empty static provider to test
-		;(MODELS_BY_PROVIDER as any).testEmptyProvider = {}
-		// Add the provider to the PROVIDERS list
-		PROVIDERS.push({ value: "testEmptyProvider", label: "Test Empty Provider", proxy: false })
-
-		// Create a mock organization allow list that allows the provider but no models
+	it("should always show currently selected provider even if its models are all filtered out", () => {
+		// Gemini ships a static catalog, but the allow list names a model it does not have,
+		// so every model is filtered out while the provider itself stays allowed.
 		const allowList: OrganizationAllowList = {
 			allowAll: false,
 			providers: {
-				testEmptyProvider: {
-					allowAll: true, // Allow the provider itself, but it has no models in MODELS_BY_PROVIDER
+				gemini: {
+					allowAll: false,
+					models: ["model-not-in-gemini-catalog"],
 				},
 				anthropic: {
 					allowAll: true, // Allow anthropic for comparison
@@ -322,19 +296,19 @@ describe("ApiOptions Provider Filtering", () => {
 			cloudIsAuthenticated: false,
 		} as any)
 
-		// Mock the selected model hook to return testEmptyProvider as the selected provider
+		// Mock the selected model hook to return gemini as the selected provider
 		;(useSelectedModel as any).mockReturnValue({
-			provider: "testEmptyProvider",
+			provider: providerIdentifiers.gemini,
 			id: undefined,
 			info: null,
 		})
 
-		// Render with testEmptyProvider as the selected provider
+		// Render with gemini as the selected provider
 		const props = {
 			...defaultProps,
 			apiConfiguration: {
 				...defaultProps.apiConfiguration,
-				apiProvider: "testEmptyProvider" as any,
+				apiProvider: providerIdentifiers.gemini,
 			} as ProviderSettings,
 		}
 
@@ -344,13 +318,9 @@ describe("ApiOptions Provider Filtering", () => {
 		const options = JSON.parse(selectElement.getAttribute("data-options") || "[]")
 		const providerValues = options.map((opt: any) => opt.value)
 
-		// Should include testEmptyProvider even though it has no models (empty object in MODELS_BY_PROVIDER), because it's currently selected
-		expect(providerValues).toContain("testEmptyProvider")
+		// Should include gemini even though none of its models are allowed, because it's currently selected
+		expect(providerValues).toContain("gemini")
 		// Should also include anthropic since it has allowAll: true
 		expect(providerValues).toContain("anthropic")
-
-		// Cleanup
-		delete (MODELS_BY_PROVIDER as any).testEmptyProvider
-		PROVIDERS.pop()
 	})
 })

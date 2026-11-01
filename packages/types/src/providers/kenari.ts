@@ -33,6 +33,7 @@ const KENARI_MODEL_ID_FIELD = "kenariModelId"
 
 export const kenariProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.kenari,
+	label: "Kenari",
 	modelIdKey: KENARI_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(KENARI_MODEL_ID_FIELD),
 	getDefaultModelId: () => kenariDefaultModelId,

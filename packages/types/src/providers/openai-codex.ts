@@ -362,9 +362,11 @@ export const OPEN_AI_CODEX_SERVICE_TIER_KEY = "openAiCodexServiceTier"
 
 export const openAiCodexProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.openaiCodex,
+	label: "OpenAI - ChatGPT Plus/Pro",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => openAiCodexDefaultModelId,
+	models: openAiCodexModels,
 	schema: {
 		...apiModelIdProviderModelShape,
 		// Codex "Fast" mode maps to the Responses API priority service tier.

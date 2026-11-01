@@ -38,6 +38,7 @@ export const LM_STUDIO_MODEL_ID_FIELD = "lmStudioModelId"
 
 export const lmStudioProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.lmstudio,
+	label: "LM Studio",
 	modelIdKey: LM_STUDIO_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(LM_STUDIO_MODEL_ID_FIELD),
 	// LM Studio models are discovered from the local server, so there is no default.
