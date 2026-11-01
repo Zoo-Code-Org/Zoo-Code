@@ -144,15 +144,18 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const { currentApiConfigName, listApiConfigMeta, uriScheme, settingsImportedAt, mode } = extensionState
 
 	const [isDiscardDialogShow, setDiscardDialogShow] = useState(false)
-	// How many changes the user has made since the form was last in step with the saved state (0: none). The flag is
-	// whether it is above 0. A save remembers the count it was made at, to tell whether the user edited again while it
-	// was in flight. (Not the identity of the state object: an automatic update of the state that is no edit, such as
-	// a settings page initialising itself, replaces that object too.)
-	const [changeCount, setChangeDetected] = useReducer(
-		(count: number, changed: boolean) => (changed ? count + 1 : 0),
-		0,
+	// Whether the form has unsaved changes, and how many changes the user has made in all. The count only goes up: a
+	// save remembers the count it was made at, to tell whether the user edited again while it was in flight, and a
+	// reset of the flag (an import, a profile switch) must not make a later edit look like no edit. (Not the identity
+	// of the state object: an automatic update of the state that is no edit, such as a settings page initialising
+	// itself, replaces that object too.)
+	const [{ count: changeCount, changed: isChangeDetected }, setChangeDetected] = useReducer(
+		(state: { count: number; changed: boolean }, changed: boolean) => ({
+			count: changed ? state.count + 1 : state.count,
+			changed,
+		}),
+		{ count: 0, changed: false },
 	)
-	const isChangeDetected = changeCount > 0
 	// The save currently waiting for the host's answer. The "unsaved changes" flag stays on until it succeeds.
 	const [pendingSaveId, setPendingSaveId] = useState<string | undefined>(undefined)
 	const pendingSaveChangeCount = useRef(0)
@@ -442,9 +445,14 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			// Only the appearance values this form changed are sent, and null (not undefined) for a reset so it
 			// survives JSON and clears the stored value. A save that changes none sends none of them, so it neither
 			// waits for the host nor puts an appearance value into the host's all-or-nothing save.
+			// A value whose earlier save was not answered is sent whatever it equals: that save may still store its value.
+			const unresolved = new Set([...timedOutSaves.current.values()].flatMap((sent) => Object.keys(sent)))
 			const changedAppearance: Record<string, number | null> = Object.fromEntries(
 				[...editedAppearance.current]
-					.filter((key) => (cachedState[key] ?? null) !== (savedAppearanceValue(key) ?? null))
+					.filter(
+						(key) =>
+							unresolved.has(key) || (cachedState[key] ?? null) !== (savedAppearanceValue(key) ?? null),
+					)
 					.map((key) => [key, cachedState[key] ?? null]),
 			)
 			const appearanceEdited = Object.keys(changedAppearance).length > 0
@@ -452,6 +460,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			if (saveId) {
 				pendingSaveChangeCount.current = changeCount
 				pendingAppearanceSent.current = changedAppearance
+				// This save is the newer word on these values: an earlier save's late answer must not overwrite them.
+				for (const sent of timedOutSaves.current.values()) for (const key in changedAppearance) delete sent[key]
 				setPendingSaveId(saveId)
 			}
 			vscode.postMessage({
@@ -642,8 +652,12 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	// another webview changed it).
 	const { interfaceFontScale: liveScale, terminalFontSize: liveTerminal } = extensionState
 	const { editorFontSize: liveEditor, spacingScale: liveSpacing } = extensionState
+	const previousLive = useRef<Record<string, number | null | undefined>>({})
 	useEffect(() => {
-		appearanceSaved.current = {}
+		for (const key of Object.keys(APPEARANCE_SETTINGS) as AppearanceKey[]) {
+			if (previousLive.current[key] !== extensionState[key]) delete appearanceSaved.current[key]
+			previousLive.current[key] = extensionState[key]
+		}
 	}, [liveScale, liveTerminal, liveEditor, liveSpacing])
 
 	const checkUnsaveChanges = useCallback(

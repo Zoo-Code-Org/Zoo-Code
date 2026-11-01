@@ -325,6 +325,35 @@ describe("SettingsView – which appearance values a save sends", () => {
 		expect(lastUpdatedSettings()).toHaveProperty("terminalFontSize", null)
 	})
 
+	it("keeps what a save stored for a value until that value's own live state changes, not another value's", async () => {
+		renderUiTab()
+		await makeAnEdit() // terminalFontSize 13
+		fireEvent.click(screen.getByTestId("save-button"))
+		answerSave(lastSaveRequestId(postMessage), { success: true }) // the live state never caught up
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+		liveStateChange({ spacingScale: 90 }) // a different value changes in the live state
+		postMessage.mockClear()
+
+		fireEvent.click(screen.getByTestId("appearance-terminalFontSize-reset"))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(lastUpdatedSettings()).toHaveProperty("terminalFontSize", null)
+	})
+
+	it("still sees an edit made after an import that happened while a save was waiting", async () => {
+		renderUiTab()
+		await makeAnEdit()
+		fireEvent.click(screen.getByTestId("save-button"))
+		liveStateChange({ settingsImportedAt: Date.now() }) // the import resets the form and the unsaved flag
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+
+		fireEvent.click(await screen.findByTestId("appearance-terminalFontSize-increment")) // one more edit
+		answerSave(lastSaveRequestId(postMessage), { success: true })
+
+		// That edit was not in the saved request: it stays unsaved.
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+	})
+
 	it("goes back to comparing with the live state once it has changed", async () => {
 		renderUiTab()
 		await makeAnEdit() // 13
@@ -602,6 +631,29 @@ describe("SettingsView – a save the host never answers", () => {
 			await makeAnOtherEdit()
 			fireEvent.click(screen.getByTestId("save-button"))
 			expect(lastUpdatedSettings()).not.toHaveProperty("terminalFontSize")
+		})
+
+		it("sends a reset to the live value while an earlier save of that value is unanswered, because it may still store", async () => {
+			await timeOutAfterAnEdit() // 13 sent, never answered; the live value is still unset
+			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-reset")) // back to unset, equal to the live value
+			postMessage.mockClear()
+
+			fireEvent.click(screen.getByTestId("save-button"))
+
+			expect(lastUpdatedSettings()).toHaveProperty("terminalFontSize", null)
+		})
+
+		it("does not let a late answer overwrite a value that a newer save has stored", async () => {
+			const first = await timeOutAfterAnEdit() // 13, unanswered
+			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // 14
+			fireEvent.click(screen.getByTestId("save-button"))
+			const second = lastSaveRequestId(postMessage)
+			expect(second).not.toBe(first)
+			answerSave(second, { success: true })
+
+			answerSave(first, { success: true }) // the old save answers last
+
+			expect((screen.getByTestId("appearance-terminalFontSize-input") as HTMLInputElement).value).toBe("14")
 		})
 
 		it("does nothing for a late answer that says the save failed, and stops saying the save may complete", async () => {
