@@ -182,20 +182,6 @@ export interface McpToolUse {
 	partial: boolean
 }
 
-/**
- * @public
- */
-export interface AttemptCompletionToolUse extends ToolUse<"attempt_completion"> {
-	name: "attempt_completion"
-	params: Partial<Pick<Record<ToolParamName, string>, "result">>
-}
-
-/** @internal Type used by tool-argument regression tests. */
-export interface WriteToFileToolUse extends ToolUse<"write_to_file"> {
-	name: "write_to_file"
-	params: Partial<Pick<Record<ToolParamName, string>, "path" | "content">>
-}
-
 // Define tool group configuration
 export type ToolGroupConfig = {
 	tools: readonly string[]
