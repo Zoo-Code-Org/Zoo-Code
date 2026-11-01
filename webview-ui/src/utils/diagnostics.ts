@@ -69,7 +69,7 @@ export const recordDiagnosticsExtensionState = (state: {
 	diagnosticsState.todoCount = state.todoCount
 }
 
-export const recordDiagnosticsStateSequence = (sequence: unknown, hasMessages: boolean) => {
+export const recordDiagnosticsStateSequence = (sequence: unknown, hasMessages: boolean, staleMessages: boolean) => {
 	if (typeof sequence !== "number" || !Number.isSafeInteger(sequence) || sequence < 0) {
 		return
 	}
@@ -79,10 +79,7 @@ export const recordDiagnosticsStateSequence = (sequence: unknown, hasMessages: b
 		return
 	}
 
-	if (
-		diagnosticsState.lastAppliedStateSequence !== undefined &&
-		sequence <= diagnosticsState.lastAppliedStateSequence
-	) {
+	if (staleMessages) {
 		diagnosticsState.staleStateRejectionCount = Math.min(
 			diagnosticsState.staleStateRejectionCount + 1,
 			Number.MAX_SAFE_INTEGER,

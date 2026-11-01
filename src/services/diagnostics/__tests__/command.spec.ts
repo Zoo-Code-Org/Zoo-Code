@@ -1,5 +1,4 @@
 const mocks = vi.hoisted(() => ({
-	writeFile: vi.fn(),
 	buildDiagnosticsReport: vi.fn(),
 	getStorageBasePath: vi.fn(),
 	openTextDocument: vi.fn(),
@@ -10,7 +9,6 @@ const mocks = vi.hoisted(() => ({
 	showErrorMessage: vi.fn(),
 }))
 
-vi.mock("fs/promises", () => ({ writeFile: mocks.writeFile }))
 vi.mock("../../../utils/storage", () => ({ getStorageBasePath: mocks.getStorageBasePath }))
 vi.mock("../report", () => ({ buildDiagnosticsReport: mocks.buildDiagnosticsReport }))
 vi.mock("vscode", () => ({
@@ -38,44 +36,43 @@ vi.mock("vscode", () => ({
 	},
 }))
 
-import type * as vscode from "vscode"
+import * as vscode from "vscode"
 
 import { createDiagnosticsReport } from "../command"
 
 describe("createDiagnosticsReport", () => {
-	const outputChannel = { appendLine: vi.fn() } as Pick<vscode.OutputChannel, "appendLine"> as vscode.OutputChannel
+	// The command uses only appendLine on the output channel.
+	const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+	// The command uses only globalStorageUri.fsPath from the extension context.
 	const context = {
 		globalStorageUri: { fsPath: "/private/storage/path" },
-	} as Pick<vscode.ExtensionContext, "globalStorageUri"> as vscode.ExtensionContext
+	} as unknown as vscode.ExtensionContext
 
 	beforeEach(() => {
 		vi.clearAllMocks()
 		mocks.getStorageBasePath.mockResolvedValue("/private/storage/path")
 		mocks.buildDiagnosticsReport.mockResolvedValue({ schemaVersion: 1, privacy: { uploaded: false } })
-		mocks.writeFile.mockResolvedValue(undefined)
 		mocks.openTextDocument.mockResolvedValue({})
 		mocks.showTextDocument.mockResolvedValue(undefined)
 		mocks.writeText.mockResolvedValue(undefined)
 	})
 
-	it("writes valid JSON to temp, opens it, and copies the same JSON without a provider", async () => {
+	it("opens an untitled JSON document and copies the same JSON without a provider", async () => {
 		await createDiagnosticsReport({ context, outputChannel, providers: [] })
 
 		expect(mocks.buildDiagnosticsReport).toHaveBeenCalledWith(expect.objectContaining({ providers: [] }))
-		expect(mocks.writeFile).toHaveBeenCalledWith(
-			expect.stringMatching(/zoo-code-diagnostics-\d+-[a-f0-9]{8}\.json$/),
-			expect.any(String),
-			"utf8",
-		)
-		const json = mocks.writeFile.mock.calls[0][1]
+		expect(mocks.openTextDocument).toHaveBeenCalledWith({
+			content: JSON.stringify({ schemaVersion: 1, privacy: { uploaded: false } }, null, 2),
+			language: "json",
+		})
+		const json = mocks.openTextDocument.mock.calls[0][0].content
 		expect(() => JSON.parse(json)).not.toThrow()
 		expect(mocks.writeText).toHaveBeenCalledWith(json)
-		expect(mocks.openTextDocument).toHaveBeenCalledWith(mocks.writeFile.mock.calls[0][0])
 		expect(mocks.showInformationMessage).toHaveBeenCalledWith(expect.stringContaining("No data was uploaded"))
 	})
 
 	it("reports only a sanitized failure category", async () => {
-		mocks.writeFile.mockRejectedValue(new Error("secret path /Users/person/report.json"))
+		mocks.buildDiagnosticsReport.mockRejectedValue(new Error("secret path /Users/person/report.json"))
 
 		await createDiagnosticsReport({ context, outputChannel, providers: [] })
 
@@ -92,5 +89,41 @@ describe("createDiagnosticsReport", () => {
 		expect(mocks.writeText).toHaveBeenCalledTimes(1)
 		expect(outputChannel.appendLine).toHaveBeenCalledWith("[createDiagnosticsReport] open failed")
 		expect(mocks.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("could not open or copy"))
+	})
+
+	it.each([
+		[1, "light"],
+		[2, "dark"],
+		[3, "highContrast"],
+		[4, "highContrastLight"],
+		[99, "unknown"],
+	] as const)("includes theme kind %s as %s", async (kind, expected) => {
+		// Include an unknown runtime enum value to exercise the forward-compatible fallback.
+		vi.spyOn(vscode.window, "activeColorTheme", "get").mockReturnValue({ kind: kind as vscode.ColorThemeKind })
+		try {
+			await createDiagnosticsReport({ context, outputChannel, providers: [] })
+			expect(mocks.buildDiagnosticsReport).toHaveBeenCalledWith(
+				expect.objectContaining({ environment: expect.objectContaining({ colorThemeKind: expected }) }),
+			)
+		} finally {
+			vi.restoreAllMocks()
+		}
+	})
+
+	it("opens the report even when the clipboard is unavailable", async () => {
+		mocks.writeText.mockRejectedValueOnce(new Error("private clipboard failure"))
+		await createDiagnosticsReport({ context, outputChannel, providers: [] })
+		expect(mocks.showTextDocument).toHaveBeenCalledTimes(1)
+		expect(outputChannel.appendLine).toHaveBeenCalledWith("[createDiagnosticsReport] copy failed")
+		expect(mocks.showWarningMessage).toHaveBeenCalledTimes(1)
+		expect(mocks.showInformationMessage).not.toHaveBeenCalled()
+	})
+
+	it("contains non-Error failures without exposing the rejected value", async () => {
+		mocks.getStorageBasePath.mockRejectedValueOnce("secret storage path")
+		await createDiagnosticsReport({ context, outputChannel, providers: [] })
+		expect(outputChannel.appendLine).toHaveBeenCalledWith("[createDiagnosticsReport] failed: UnknownError")
+		expect(mocks.openTextDocument).not.toHaveBeenCalled()
+		expect(mocks.showErrorMessage).toHaveBeenCalledTimes(1)
 	})
 })

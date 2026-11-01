@@ -1,7 +1,3 @@
-import * as fs from "fs/promises"
-import * as os from "os"
-import * as path from "path"
-import { randomBytes } from "crypto"
 import * as vscode from "vscode"
 
 import { Package } from "../../shared/package"
@@ -56,12 +52,9 @@ export async function createDiagnosticsReport(options: {
 			},
 		})
 		const json = JSON.stringify(report, null, 2)
-		const fileName = `zoo-code-diagnostics-${Date.now()}-${randomBytes(4).toString("hex")}.json`
-		const filePath = path.join(os.tmpdir(), fileName)
-		await fs.writeFile(filePath, json, "utf8")
 		const [openResult, copyResult] = await Promise.allSettled([
 			vscode.workspace
-				.openTextDocument(filePath)
+				.openTextDocument({ content: json, language: "json" })
 				.then((document) => vscode.window.showTextDocument(document, { preview: true })),
 			vscode.env.clipboard.writeText(json),
 		])

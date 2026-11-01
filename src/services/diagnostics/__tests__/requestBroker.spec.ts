@@ -1,6 +1,30 @@
 import { DiagnosticsRequestBroker } from "../requestBroker"
 
 describe("DiagnosticsRequestBroker", () => {
+	it("releases pending requests on disposal and rejects late responses", async () => {
+		const broker = new DiagnosticsRequestBroker()
+		const ids: string[] = []
+		const responses = [1, 2].map(() =>
+			broker.request(async (id) => {
+				ids.push(id)
+			}, 1_000),
+		)
+		broker.dispose()
+		await expect(Promise.all(responses)).resolves.toEqual([undefined, undefined])
+		for (const id of ids) expect(broker.resolve(id, { capturedAt: "now" })).toBe(false)
+	})
+
+	it("returns unavailable when sending fails and ignores a later response", async () => {
+		const broker = new DiagnosticsRequestBroker()
+		let requestId = ""
+		await expect(
+			broker.request(async (id) => {
+				requestId = id
+				throw new Error("disconnected")
+			}, 1_000),
+		).resolves.toBeUndefined()
+		expect(broker.resolve(requestId, { capturedAt: "now" })).toBe(false)
+	})
 	it("correlates a live webview response", async () => {
 		const broker = new DiagnosticsRequestBroker()
 		let requestId = ""

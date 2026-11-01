@@ -344,8 +344,6 @@ export const ExtensionStateContextProvider: React.FC<{
 		}
 		return mergedState
 	})
-	const stateRef = useRef(state)
-	stateRef.current = state
 
 	useEffect(() => {
 		recordDiagnosticsExtensionState({
@@ -410,9 +408,13 @@ export const ExtensionStateContextProvider: React.FC<{
 			switch (message.type) {
 				case "state": {
 					const newState = message.state ?? {}
-					recordDiagnosticsStateSequence(newState.clineMessagesSeq, newState.clineMessages !== undefined)
 
 					const staleMessages = messagesAreStale(newState, clineMessagesSeqRef.current)
+					recordDiagnosticsStateSequence(
+						newState.clineMessagesSeq,
+						newState.clineMessages !== undefined,
+						staleMessages,
+					)
 
 					if (!staleMessages && newState.clineMessages !== undefined) {
 						if (newState.currentTaskId !== currentTaskIdRef.current) {
@@ -505,10 +507,10 @@ export const ExtensionStateContextProvider: React.FC<{
 				}
 				case "messageUpdated": {
 					const clineMessage = message.clineMessage!
-					if (!stateRef.current.clineMessages.some((existing) => existing.ts === clineMessage.ts)) {
+					const messageIndex = findLastIndex(messagesRef.current, (item) => item.ts === clineMessage.ts)
+					if (messageIndex === -1) {
 						recordDiagnosticsUnknownMessageUpdate()
 					}
-					const messageIndex = findLastIndex(messagesRef.current, (item) => item.ts === clineMessage.ts)
 					if (messageIndex !== -1) {
 						messageCache.intern(clineMessage)
 						messagesRef.current = messagesRef.current.map((item, index) =>

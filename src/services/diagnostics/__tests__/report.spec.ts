@@ -3,9 +3,32 @@ import * as os from "os"
 import * as path from "path"
 
 import type { DiagnosticsProviderSource } from "../types"
-import { buildDiagnosticsReport } from "../report"
+import { buildDiagnosticsReport, sanitizeWebviewDiagnostics } from "../report"
 
 describe("buildDiagnosticsReport", () => {
+	it.each([
+		{ count: 0, token: "rgb(0, 0, 0)", expectedCount: 0, expectedToken: "rgb(0, 0, 0)" },
+		{ count: -1, token: "https://private.example", expectedCount: undefined, expectedToken: undefined },
+		{ count: Number.NaN, token: "secret<value>", expectedCount: undefined, expectedToken: undefined },
+	])("sanitizes viewport and theme metadata: $token", ({ count, token, expectedCount, expectedToken }) => {
+		const result = sanitizeWebviewDiagnostics(
+			{
+				capturedAt: "2026-01-01",
+				viewport: { width: count, height: count, devicePixelRatio: count },
+				theme: { bodyForeground: token, variables: { "--vscode-foreground": token } },
+			},
+			(id) => `redacted-${id}`,
+		)
+		expect(result.viewport).toEqual({
+			width: expectedCount,
+			height: expectedCount,
+			devicePixelRatio: expectedCount,
+		})
+		expect(result.theme).toMatchObject({
+			bodyForeground: expectedToken,
+			variables: expectedToken === undefined ? {} : { "--vscode-foreground": expectedToken },
+		})
+	})
 	it("produces bounded, pseudonymized, privacy-safe valid JSON", async () => {
 		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "zoo-report-test-"))
 		const provider: DiagnosticsProviderSource = {
