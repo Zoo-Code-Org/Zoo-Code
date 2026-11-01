@@ -55,6 +55,15 @@ describe("SubtaskRow", () => {
 			expect(screen.getByText("Leaf task content")).toBeInTheDocument()
 		})
 
+		it("shows the custom title instead of the original prompt when both are set", () => {
+			const node = createMockNode({ id: "leaf-2", task: "Original prompt", title: "Custom title" })
+
+			render(<SubtaskRow node={node} depth={1} onToggleExpand={vi.fn()} />)
+
+			expect(screen.getByText("Custom title")).toBeInTheDocument()
+			expect(screen.queryByText("Original prompt")).not.toBeInTheDocument()
+		})
+
 		it("renders with correct depth indentation", () => {
 			const node = createMockNode({ id: "leaf-1", task: "Indented task" })
 

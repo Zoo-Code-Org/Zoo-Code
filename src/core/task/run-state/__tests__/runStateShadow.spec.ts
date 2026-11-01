@@ -81,14 +81,16 @@ describe("applyRunEvent", () => {
 	it("returns the next state and records nothing when the kernel accepts the event", () => {
 		const rejections: RunRejection[] = []
 		const next = applyRunEvent(initialRunState, { tag: "initialized" }, rejections)
-		expect(next.phase).toBe("running")
+		expect(next.state.phase).toBe("running")
+		expect(next.rejected).toBe(false)
 		expect(rejections).toEqual([])
 	})
 
 	it("keeps the state and records the event and state when the kernel rejects the event", () => {
 		const rejections: RunRejection[] = []
 		const next = applyRunEvent(initialRunState, { tag: "streamEnded" }, rejections)
-		expect(next).toBe(initialRunState)
+		expect(next.state).toBe(initialRunState)
+		expect(next.rejected).toBe(true)
 		expect(rejections).toEqual([{ event: { tag: "streamEnded" }, state: initialRunState }])
 	})
 

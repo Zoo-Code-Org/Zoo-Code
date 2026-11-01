@@ -1,5 +1,6 @@
 // npx vitest run core/assistant-message/__tests__/presentAssistantMessage-auto-deny.spec.ts
 
+import { DispatchState, type PendingWork } from "../../task/dispatchState"
 import type { Anthropic } from "@anthropic-ai/sdk"
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { presentAssistantMessage } from "../presentAssistantMessage"
@@ -69,14 +70,15 @@ interface MockTask {
 	taskId: string
 	instanceId: string
 	abort: boolean
-	presentAssistantMessageLocked: boolean
-	presentAssistantMessageHasPendingUpdates: boolean
+	dispatchState: DispatchState
+	pendingWork: PendingWork | null
 	currentStreamingContentIndex: number
 	assistantMessageContent: unknown[]
 	userMessageContent: Anthropic.ToolResultBlockParam[]
 	didCompleteReadingStream: boolean
 	didRejectTool: boolean
 	didAlreadyUseTool: boolean
+	activeToolContexts: Map<string, unknown>
 	consecutiveMistakeCount: number
 	clineMessages: unknown[]
 	api: { getModel: () => { id: string; info: Record<string, unknown> } }
@@ -101,14 +103,15 @@ function buildMockTask(): MockTask {
 		taskId: "test-task-id",
 		instanceId: "test-instance",
 		abort: false,
-		presentAssistantMessageLocked: false,
-		presentAssistantMessageHasPendingUpdates: false,
+		dispatchState: DispatchState.IDLE,
+		pendingWork: null,
 		currentStreamingContentIndex: 0,
 		assistantMessageContent: [],
 		userMessageContent: [],
 		didCompleteReadingStream: true,
 		didRejectTool: false,
 		didAlreadyUseTool: false,
+		activeToolContexts: new Map(),
 		consecutiveMistakeCount: 0,
 		clineMessages: [],
 		api: {
@@ -600,6 +603,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 		expect(payload.message).toBe("The user denied this operation.")
 		expect(payload.type).toBeUndefined()
 		expect(mockTask.didRejectTool).toBe(true)
+		expect(mockTask.activeToolContexts.get("call_mcp")).toEqual({ toolCallId: "call_mcp", didReject: true })
 		expect(mockTask.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
 	})
 
@@ -664,6 +668,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 		expect(payload.rule_id).toBe("R-1")
 		expect(mcpApproval).toBe(false)
 		expect(mockTask.didRejectTool).toBe(false)
+		expect(mockTask.activeToolContexts.get("call_mcp")).toEqual({ toolCallId: "call_mcp", didReject: false })
 	})
 
 	it("denies dangerous_substitution with the fixed shell-expansion reason without aborting the turn", async () => {

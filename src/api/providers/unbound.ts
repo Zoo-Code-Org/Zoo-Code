@@ -99,6 +99,15 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 		return this.getModel()
 	}
 
+	async ensureModelFetched(signal?: AbortSignal): Promise<void> {
+		await this.ensureCatalogLoaded(async () => {
+			await this.fetchModel()
+			// fetchModel() returns model info, not the catalog, so report emptiness
+			// from the catalog it assigned: an empty response must stay retryable.
+			return Object.keys(this.models).length > 0
+		}, signal)
+	}
+
 	override getModel() {
 		const id = this.options.unboundModelId ?? unboundDefaultModelId
 		const cachedInfo = this.models[id] ?? unboundDefaultModelInfo

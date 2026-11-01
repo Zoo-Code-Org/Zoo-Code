@@ -55,10 +55,6 @@ export default defineConfig({
 			{ find: "@", replacement: path.resolve(webviewRoot, "src") },
 			{ find: "@src", replacement: path.resolve(webviewRoot, "src") },
 			{ find: "@roo", replacement: path.resolve(webviewRoot, "../src/shared") },
-			{
-				find: "@vscode/webview-ui-toolkit/react",
-				replacement: path.resolve(webviewRoot, "src/__mocks__/@vscode/webview-ui-toolkit/react.tsx"),
-			},
 			{ find: "vscode", replacement: path.resolve(webviewRoot, "../src/__mocks__/vscode.js") },
 		],
 	},
@@ -71,6 +67,10 @@ export default defineConfig({
 		"process.env.PKG_RELEASE_CHANNEL": JSON.stringify("stable"),
 	},
 	optimizeDeps: {
+		// Pre-bundle the real toolkit: every story now renders the same toolkit
+		// custom elements the extension uses. If Vite finds it during the first
+		// page load, it re-optimizes and reloads mid-test.
+		include: ["@vscode/webview-ui-toolkit/react"],
 		exclude: ["@vscode/codicons"],
 	},
 	publicDir: path.resolve(webviewRoot, "../src/assets/images"),

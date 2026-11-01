@@ -157,6 +157,7 @@ describe("newTaskTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "",
 		})
 
 		// Verify askApproval was called
@@ -192,6 +193,7 @@ describe("newTaskTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "",
 		})
 
 		expect(mockStartSubtask).toHaveBeenCalledWith(
@@ -217,6 +219,7 @@ describe("newTaskTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "",
 		})
 
 		expect(mockStartSubtask).toHaveBeenCalledWith(
@@ -242,6 +245,7 @@ describe("newTaskTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "",
 		})
 
 		expect(mockStartSubtask).toHaveBeenCalledWith(
@@ -267,6 +271,7 @@ describe("newTaskTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "",
 		})
 
 		// Should NOT error when todos is missing
@@ -297,6 +302,7 @@ describe("newTaskTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "",
 		})
 
 		// Should parse and include todos when provided
@@ -328,6 +334,7 @@ describe("newTaskTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "",
 		})
 
 		expect(mockSayAndCreateMissingParamError).toHaveBeenCalledWith("new_task", "mode")
@@ -351,6 +358,7 @@ describe("newTaskTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "",
 		})
 
 		expect(mockSayAndCreateMissingParamError).toHaveBeenCalledWith("new_task", "message")
@@ -374,6 +382,7 @@ describe("newTaskTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "",
 		})
 
 		expect(mockStartSubtask).toHaveBeenCalledWith(
@@ -410,6 +419,7 @@ describe("newTaskTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "",
 			})
 
 			// Should NOT error when todos is missing and setting is disabled
@@ -446,6 +456,7 @@ describe("newTaskTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "",
 			})
 
 			// Should error when todos is missing and setting is enabled
@@ -482,6 +493,7 @@ describe("newTaskTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "",
 			})
 
 			// Should NOT error when todos is provided and setting is enabled
@@ -524,6 +536,7 @@ describe("newTaskTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "",
 			})
 
 			// Should NOT error when todos is empty string and setting is enabled
@@ -558,6 +571,7 @@ describe("newTaskTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "",
 			})
 
 			// Verify that VSCode configuration was accessed with Package.name

@@ -54,6 +54,9 @@ Prefer the narrowest test layer that proves the behavior. This follows standard 
 - Use `apps/vscode-e2e` only when the behavior depends on the real VS Code extension host, VS Code workspace APIs, extension activation, webview/extension messaging, file watcher behavior, or a complete user workflow.
 - Keep e2e tests focused on high-value smoke coverage across boundaries. Avoid placing detailed protocol, parsing, storage, retry, or edge-case assertions in e2e when they can be covered reliably at a lower layer.
 - When fixing a regression, add the regression test at the lowest layer that would have failed for the bug. Add an e2e test only if lower-level tests cannot represent the failure mode.
+- For a guard or validator, test the accept path and the reject path through every public entry point. A test that only rejects bad input does not prove the guard still accepts good input.
+- Use `it.each` for repeated cases and share the setup in a helper. Do not copy a test body per input.
+- A `Stryker disable` comment states the reason in one sentence. ESLint `max-len` limits it to 300 characters.
 
 ## Task Lifecycle Changes
 

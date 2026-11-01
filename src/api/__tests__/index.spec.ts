@@ -45,7 +45,7 @@ import {
 
 import type { RouterName } from "../../shared/api"
 
-import { buildApiHandler } from "../index"
+import { buildApiHandler, disposeApiHandler, type ApiHandler } from "../index"
 import {
 	AnthropicHandler,
 	AnthropicVertexHandler,
@@ -56,6 +56,7 @@ import {
 	FireworksHandler,
 	FriendliHandler,
 	GeminiHandler,
+	IOIntelligenceHandler,
 	KenariHandler,
 	KimiCodeHandler,
 	LiteLLMHandler,
@@ -78,6 +79,7 @@ import {
 	VercelAiGatewayHandler,
 	VertexHandler,
 	VsCodeLmHandler,
+	GitHubCopilotHandler,
 	XAIHandler,
 	ZAiHandler,
 	ZooGatewayHandler,
@@ -103,6 +105,7 @@ const expectedHandlers = {
 	[providerIdentifiers.moonshot]: MoonshotHandler,
 	[providerIdentifiers.kimiCode]: KimiCodeHandler,
 	[providerIdentifiers.vscodeLm]: VsCodeLmHandler,
+	[providerIdentifiers.githubCopilot]: GitHubCopilotHandler,
 	[providerIdentifiers.mistral]: MistralHandler,
 	[providerIdentifiers.requesty]: RequestyHandler,
 	[providerIdentifiers.unbound]: UnboundHandler,
@@ -117,6 +120,7 @@ const expectedHandlers = {
 	[providerIdentifiers.vercelAiGateway]: VercelAiGatewayHandler,
 	[providerIdentifiers.opencodeGo]: OpencodeGoHandler,
 	[providerIdentifiers.kenari]: KenariHandler,
+	[providerIdentifiers.ioIntelligence]: IOIntelligenceHandler,
 	[providerIdentifiers.nanogpt]: NanoGptHandler,
 	[providerIdentifiers.zooGateway]: ZooGatewayHandler,
 	[providerIdentifiers.minimax]: MiniMaxHandler,
@@ -128,11 +132,34 @@ const expectedHandlerEntries = Object.entries(expectedHandlers) as Array<
 	[Exclude<ProviderName, typeof providerIdentifiers.vertex>, HandlerConstructor]
 >
 
+describe("disposeApiHandler", () => {
+	const baseHandler = () => buildApiHandler({ apiProvider: providerIdentifiers.fakeAi })
+
+	it("calls dispose on a handler that owns resources", () => {
+		const dispose = vi.fn()
+		const handler: ApiHandler = Object.assign(Object.create(baseHandler()), { dispose })
+
+		disposeApiHandler(handler)
+
+		expect(dispose).toHaveBeenCalledOnce()
+	})
+
+	it("ignores handlers without dispose, a non-function dispose, and a missing handler", () => {
+		expect(() => disposeApiHandler(undefined)).not.toThrow()
+		expect(() => disposeApiHandler(Object.create(baseHandler()))).not.toThrow()
+		expect(() => disposeApiHandler(Object.assign(Object.create(baseHandler()), { dispose: true }))).not.toThrow()
+	})
+})
+
 describe("buildApiHandler", () => {
 	it.each(expectedHandlerEntries)("returns the expected handler for %s", (apiProvider, Handler) => {
 		const handler = buildApiHandler({ apiProvider })
 
 		expect(handler).toBeInstanceOf(Handler)
+	})
+
+	it("keeps the generic VS Code LM provider free of Copilot-specific behavior", () => {
+		expect(buildApiHandler({ apiProvider: providerIdentifiers.vscodeLm })).not.toBeInstanceOf(GitHubCopilotHandler)
 	})
 
 	it.each([

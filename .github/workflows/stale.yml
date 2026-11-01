@@ -34,6 +34,12 @@ jobs:
 
                   exempt-pr-labels: "do-not-close,pinned,work-in-progress"
 
+                  # Issue #2076: stale labeling and closing moved to
+                  # label-pr-review-state.yml, which owns an author-activity clock
+                  # that bot updates cannot reset. Keep actions/stale in debug-only
+                  # mode until the new step is proven, then remove this workflow.
+                  debug-only: true
+
     stale-review-inactivity:
         name: 14-day author inactivity after requested changes
         runs-on: ubuntu-latest
@@ -58,3 +64,7 @@ jobs:
                       to reopen once the requested changes have been addressed.
 
                   exempt-pr-labels: "do-not-close,pinned,work-in-progress"
+
+                  # Issue #2076: debug-only while label-pr-review-state.yml owns the
+                  # author-activity clock (see the stale-inactivity job above).
+                  debug-only: true

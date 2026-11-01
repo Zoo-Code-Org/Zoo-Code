@@ -140,6 +140,15 @@
 	},
 	"selectMode": "選擇互動模式",
 	"selectApiConfig": "選取 API 設定",
+	"selectModel": "選擇模型",
+	"modelSelector": {
+		"title": "模型",
+		"settings": "模型設定",
+		"description": "選擇此 API 設定使用的模型。",
+		"searchPlaceholder": "搜尋模型...",
+		"unsupportedTooltip": "此供應商的模型需在設定中配置",
+		"loading": "正在載入模型..."
+	},
 	"lockApiConfigAcrossModes": "鎖定此工作區所有模式的 API 設定",
 	"unlockApiConfigAcrossModes": "此工作區所有模式的 API 設定已鎖定（點擊解鎖）",
 	"enhancePrompt": "使用額外內容強化提示詞",
@@ -365,10 +374,10 @@
 		"title": "Zoo Code {{version}} 已發布",
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
-			"heading": "Zoo Code v3.88.0 新功能",
-			"highlight1": "✨ Provider 與模型支援：使用 Grok Build 與改進後的自訂模型支援。本版本也修正了 Bedrock 模型上限，並傳送 Codex verbosity 設定。",
-			"highlight2": "🧭 工作可靠性：本版本修正了取消處理、tool turn 續行與工作訊息保存。",
-			"highlight3": "⚡ 更快的編輯與聊天：檔案寫入預設不再使用人為延遲。聊天訊息攜帶更少的檔案資料，程式碼動作會送達最近活動的聊天。"
+			"heading": "Zoo Code v3.94.0 新功能",
+			"highlight1": "✨ 更廣泛的模型與提供者支援：透過 Anthropic 使用 Claude Haiku 5.5，向相容的 VS Code LM 模型傳送圖片，為 OpenCode Go Responses 模型調整 temperature，並在更多提供者上順暢取消要求。",
+			"highlight2": "🔐 更靈活的 MCP OAuth：設定靜態 OAuth 用戶端設定，使用自訂回呼路徑，從 WWW-Authenticate 中探索驗證詳細資訊，並在重試前看到回呼失敗。",
+			"highlight3": "🧭 更流暢的聊天與長時間工作階段：在歷史記錄中重新命名任務，無需按住 Shift 即可將檔案拖入聊天，減少長時間工作階段保留的記憶體，並保持子任務連結和被取代的 webview 穩定。"
 		},
 		"cloudAgents": {
 			"heading": "雲端的新功能：",
@@ -478,6 +487,10 @@
 		"serversPart_other": "{{count}} 個 MCP 伺服器",
 		"messageTemplate": "您已啟用 {{tools}}（透過 {{servers}}）。這麼多的工具可能會混淆模型並導致錯誤。請嘗試保持在 {{threshold}} 以下。",
 		"openMcpSettings": "開啟 MCP 設定"
+	},
+	"ignoredDisabledTools": {
+		"title": "已忽略被停用的工具",
+		"messageTemplate": "以下工具無法被停用，因此它在 disabledTools 中的條目已被忽略：{{tools}}。"
 	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"

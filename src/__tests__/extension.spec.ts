@@ -477,6 +477,35 @@ describe("extension.ts", () => {
 		},
 	)
 
+	test("registers the Copilot model broadcast against every provider instance and the output channel", async () => {
+		vi.resetModules()
+		const disposable = { dispose: vi.fn() }
+		const registerCopilotModelBroadcast = vi.fn().mockReturnValue(disposable)
+		vi.doMock("../services/language-models/copilotModelBroadcast", () => ({ registerCopilotModelBroadcast }))
+		try {
+			const { ClineProvider } = await import("../core/webview/ClineProvider")
+			const vscode = await import("vscode")
+			const { activate } = await import("../extension")
+
+			await activate(mockContext)
+
+			expect(registerCopilotModelBroadcast).toHaveBeenCalledTimes(1)
+			const { getTargets, log } = registerCopilotModelBroadcast.mock.calls[0][0]
+
+			const instances = [{ id: "first" }, { id: "second" }]
+			vi.mocked(ClineProvider.getAllInstances).mockReturnValue(instances as never)
+			expect(getTargets()).toBe(instances)
+
+			const outputChannel = vi.mocked(vscode.window.createOutputChannel).mock.results[0].value
+			log("copilot broadcast message")
+			expect(outputChannel.appendLine).toHaveBeenCalledWith("copilot broadcast message")
+
+			expect(mockContext.subscriptions).toContain(disposable)
+		} finally {
+			vi.doUnmock("../services/language-models/copilotModelBroadcast")
+		}
+	})
+
 	test("does not call dotenv.config when optional .env does not exist", async () => {
 		vi.resetModules()
 		vi.clearAllMocks()

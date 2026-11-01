@@ -107,6 +107,7 @@ export const env = {
 	openExternal: () => Promise.resolve(),
 }
 
+export const ExtensionMode = { Production: 1, Development: 2, Test: 3 }
 export const Uri = mockUri
 export const Range = mockRange
 export const Position = mockPosition
