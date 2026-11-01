@@ -1,6 +1,6 @@
 import { create } from "zustand"
 
-import type { TokenUsage, ProviderSettings, TodoItem } from "@roo-code/types"
+import type { TokenUsage, TodoItem } from "@roo-code/types"
 
 import type { TUIMessage, PendingAsk, TaskHistoryItem } from "./types.js"
 import type { FileResult, SlashCommandResult, ModeResult } from "./components/autocomplete/index.js"
@@ -36,12 +36,6 @@ interface PendingStreamUpdate {
 
 const pendingStreamUpdates: Map<string, PendingStreamUpdate> = new Map()
 let streamingDebounceTimer: ReturnType<typeof setTimeout> | null = null
-
-/**
- * RouterModels type for context window lookup.
- * Simplified version - we only need contextWindow from ModelInfo.
- */
-export type RouterModels = Record<string, Record<string, { contextWindow?: number }>>
 
 /**
  * CLI application state.
@@ -82,9 +76,8 @@ interface CLIState {
 	// Token usage metrics (from getApiMetrics)
 	tokenUsage: TokenUsage | null
 
-	// Model info for context window lookup
-	routerModels: RouterModels | null
-	apiConfiguration: ProviderSettings | null
+	// Context window of the current model, as resolved by the extension
+	contextWindow: number | null
 
 	// Todo list tracking
 	currentTodos: TodoItem[]
@@ -124,8 +117,7 @@ interface CLIActions {
 
 	// Metrics actions
 	setTokenUsage: (usage: TokenUsage | null) => void
-	setRouterModels: (models: RouterModels | null) => void
-	setApiConfiguration: (config: ProviderSettings | null) => void
+	setContextWindow: (contextWindow: number | null) => void
 
 	// Todo actions
 	setTodos: (todos: TodoItem[]) => void
@@ -146,8 +138,7 @@ const initialState: CLIState = {
 	currentTaskId: null,
 	currentMode: null,
 	tokenUsage: null,
-	routerModels: null,
-	apiConfiguration: null,
+	contextWindow: null,
 	currentTodos: [],
 	previousTodos: [],
 }
@@ -273,8 +264,7 @@ export const useCLIStore = create<CLIState & CLIActions>((set, get) => ({
 			allSlashCommands: state.allSlashCommands,
 			fileSearchResults: state.fileSearchResults,
 			currentMode: state.currentMode,
-			routerModels: state.routerModels,
-			apiConfiguration: state.apiConfiguration,
+			contextWindow: state.contextWindow,
 		})),
 	setIsResumingTask: (isResuming) => set({ isResumingTask: isResuming }),
 	// Use shallow equality to prevent unnecessary re-renders when array content is the same
@@ -289,7 +279,6 @@ export const useCLIStore = create<CLIState & CLIActions>((set, get) => ({
 	setCurrentTaskId: (taskId) => set({ currentTaskId: taskId }),
 	setCurrentMode: (mode) => set({ currentMode: mode }),
 	setTokenUsage: (usage) => set({ tokenUsage: usage }),
-	setRouterModels: (models) => set({ routerModels: models }),
-	setApiConfiguration: (config) => set({ apiConfiguration: config }),
+	setContextWindow: (contextWindow) => set({ contextWindow }),
 	setTodos: (todos) => set((state) => ({ previousTodos: state.currentTodos, currentTodos: todos })),
 }))

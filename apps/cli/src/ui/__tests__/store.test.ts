@@ -1,6 +1,3 @@
-import { providerIdentifiers } from "@roo-code/types"
-import { RooCodeSettings } from "@roo-code/types"
-
 import { useCLIStore } from "../store.js"
 
 describe("useCLIStore", () => {
@@ -159,25 +156,12 @@ describe("useCLIStore", () => {
 			expect(useCLIStore.getState().currentMode).toBe("architect")
 		})
 
-		it("should PRESERVE routerModels", () => {
-			const models = { openai: { "gpt-4": { contextWindow: 128000 } } }
-			useCLIStore.getState().setRouterModels(models)
+		it("should PRESERVE contextWindow", () => {
+			useCLIStore.getState().setContextWindow(128_000)
 
 			useCLIStore.getState().resetForTaskSwitch()
 
-			expect(useCLIStore.getState().routerModels).toEqual(models)
-		})
-
-		it("should PRESERVE apiConfiguration", () => {
-			const config: RooCodeSettings = { apiProvider: providerIdentifiers.openai, apiModelId: "gpt-4" }
-
-			useCLIStore
-				.getState()
-				.setApiConfiguration(config as ReturnType<typeof useCLIStore.getState>["apiConfiguration"])
-
-			useCLIStore.getState().resetForTaskSwitch()
-
-			expect(useCLIStore.getState().apiConfiguration).toEqual(config)
+			expect(useCLIStore.getState().contextWindow).toBe(128_000)
 		})
 	})
 
