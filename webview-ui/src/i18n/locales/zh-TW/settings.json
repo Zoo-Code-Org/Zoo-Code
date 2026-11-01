@@ -23,7 +23,8 @@
 		"title": "未儲存的變更",
 		"description": "是否要取消變更並繼續？",
 		"cancelButton": "取消",
-		"discardButton": "取消變更"
+		"discardButton": "取消變更",
+		"saveMayComplete": "尚未得到回應的儲存可能在你離開後仍會完成。"
 	},
 	"sections": {
 		"providers": "供應商",

@@ -146,8 +146,18 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const [isChangeDetected, setChangeDetected] = useState(false)
 	// The save currently waiting for the host's answer. The "unsaved changes" flag stays on until it succeeds.
 	const [pendingSaveId, setPendingSaveId] = useState<string | undefined>(undefined)
-	// The state the pending save was made from, to tell whether the user edited again while it was in flight.
-	const pendingSaveEditedState = useRef<typeof cachedState | undefined>(undefined)
+	// How many edits the user has made. The pending save remembers the count it was made at, to tell whether the user
+	// edited again while it was in flight. (Not the identity of the state object: an automatic update of the state that
+	// is no edit, such as a settings page initialising itself, replaces that object too.)
+	const editVersion = useRef(0)
+	const pendingSaveEditVersion = useRef(0)
+	// Appearance values that a successful save stored, until the live state shows them. The host reports a success even
+	// if refreshing the state failed afterwards, and then the live state is stale: comparing with it alone would take
+	// a later reset to the old value for "nothing changed" and not send it.
+	const appearanceSaved = useRef<Record<string, number | null>>({})
+	// Saves that were not answered in time. Their outcome is unknown: the host may still store them.
+	const timedOutSaves = useRef(new Map<string, Record<string, number | null>>())
+	const [saveOutcomeUnknown, setSaveOutcomeUnknown] = useState(false)
 	// The appearance values this form has edited. A value that only differs from the live state because the live state
 	// changed (another webview, a reset from the host) is not an edit and is never sent. A ref, not state: it is read
 	// when saving and needs no render of its own.
@@ -282,17 +292,25 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		setChangeDetected(false)
 	}, [settingsImportedAt, extensionState])
 
-	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback((field, value) => {
-		setCachedState((prevState) => {
-			if (prevState[field] === value) {
-				return prevState
-			}
-
-			if (field in APPEARANCE_SETTINGS) editedAppearance.current.add(field as AppearanceKey)
-			setChangeDetected(true)
-			return { ...prevState, [field]: value }
-		})
+	const markEdited = useCallback(() => {
+		editVersion.current += 1
+		setChangeDetected(true)
 	}, [])
+
+	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback(
+		(field, value) => {
+			setCachedState((prevState) => {
+				if (prevState[field] === value) {
+					return prevState
+				}
+
+				if (field in APPEARANCE_SETTINGS) editedAppearance.current.add(field as AppearanceKey)
+				markEdited()
+				return { ...prevState, [field]: value }
+			})
+		},
+		[markEdited],
+	)
 
 	const setApiConfigurationField = useCallback(
 		<K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K], isUserAction: boolean = true) => {
@@ -327,92 +345,117 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				const isAutomaticNoOpSync = !isUserAction && areValuesEqual(previousValue, value)
 
 				if (!isInitialSync && !isAutomaticNoOpSync) {
-					setChangeDetected(true)
+					markEdited()
 				}
 				return { ...prevState, apiConfiguration: { ...prevState.apiConfiguration, [field]: value } }
 			})
 		},
-		[],
+		[markEdited],
 	)
 
-	const setExperimentEnabled: SetExperimentEnabled = useCallback((id: ExperimentId, enabled: boolean) => {
-		setCachedState((prevState) => {
-			if (prevState.experiments?.[id] === enabled) {
-				return prevState
-			}
+	const setExperimentEnabled: SetExperimentEnabled = useCallback(
+		(id: ExperimentId, enabled: boolean) => {
+			setCachedState((prevState) => {
+				if (prevState.experiments?.[id] === enabled) {
+					return prevState
+				}
 
-			setChangeDetected(true)
-			return { ...prevState, experiments: { ...prevState.experiments, [id]: enabled } }
-		})
-	}, [])
+				markEdited()
+				return { ...prevState, experiments: { ...prevState.experiments, [id]: enabled } }
+			})
+		},
+		[markEdited],
+	)
 
-	const setTelemetrySetting = useCallback((setting: TelemetrySetting) => {
-		setCachedState((prevState) => {
-			if (prevState.telemetrySetting === setting) {
-				return prevState
-			}
+	const setTelemetrySetting = useCallback(
+		(setting: TelemetrySetting) => {
+			setCachedState((prevState) => {
+				if (prevState.telemetrySetting === setting) {
+					return prevState
+				}
 
-			setChangeDetected(true)
-			return { ...prevState, telemetrySetting: setting }
-		})
-	}, [])
+				markEdited()
+				return { ...prevState, telemetrySetting: setting }
+			})
+		},
+		[markEdited],
+	)
 
-	const setDebug = useCallback((debug: boolean) => {
-		setCachedState((prevState) => {
-			if (prevState.debug === debug) {
-				return prevState
-			}
+	const setDebug = useCallback(
+		(debug: boolean) => {
+			setCachedState((prevState) => {
+				if (prevState.debug === debug) {
+					return prevState
+				}
 
-			setChangeDetected(true)
-			return { ...prevState, debug }
-		})
-	}, [])
+				markEdited()
+				return { ...prevState, debug }
+			})
+		},
+		[markEdited],
+	)
 
-	const setImageGenerationProvider = useCallback((provider: ImageGenerationProvider) => {
-		setCachedState((prevState) => {
-			if (prevState.imageGenerationProvider !== provider) {
-				setChangeDetected(true)
-			}
+	const setImageGenerationProvider = useCallback(
+		(provider: ImageGenerationProvider) => {
+			setCachedState((prevState) => {
+				if (prevState.imageGenerationProvider !== provider) {
+					markEdited()
+				}
 
-			return { ...prevState, imageGenerationProvider: provider }
-		})
-	}, [])
+				return { ...prevState, imageGenerationProvider: provider }
+			})
+		},
+		[markEdited],
+	)
 
-	const setOpenRouterImageApiKey = useCallback((apiKey: string) => {
-		setCachedState((prevState) => {
-			if (prevState.openRouterImageApiKey !== apiKey) {
-				setChangeDetected(true)
-			}
+	const setOpenRouterImageApiKey = useCallback(
+		(apiKey: string) => {
+			setCachedState((prevState) => {
+				if (prevState.openRouterImageApiKey !== apiKey) {
+					markEdited()
+				}
 
-			return { ...prevState, openRouterImageApiKey: apiKey }
-		})
-	}, [])
+				return { ...prevState, openRouterImageApiKey: apiKey }
+			})
+		},
+		[markEdited],
+	)
 
-	const setImageGenerationSelectedModel = useCallback((model: string) => {
-		setCachedState((prevState) => {
-			if (prevState.openRouterImageGenerationSelectedModel !== model) {
-				setChangeDetected(true)
-			}
+	const setImageGenerationSelectedModel = useCallback(
+		(model: string) => {
+			setCachedState((prevState) => {
+				if (prevState.openRouterImageGenerationSelectedModel !== model) {
+					markEdited()
+				}
 
-			return { ...prevState, openRouterImageGenerationSelectedModel: model }
-		})
-	}, [])
+				return { ...prevState, openRouterImageGenerationSelectedModel: model }
+			})
+		},
+		[markEdited],
+	)
 
-	const setCustomSupportPromptsField = useCallback((prompts: Record<string, string | undefined>) => {
-		setCachedState((prevState) => {
-			const previousStr = JSON.stringify(prevState.customSupportPrompts)
-			const newStr = JSON.stringify(prompts)
+	const setCustomSupportPromptsField = useCallback(
+		(prompts: Record<string, string | undefined>) => {
+			setCachedState((prevState) => {
+				const previousStr = JSON.stringify(prevState.customSupportPrompts)
+				const newStr = JSON.stringify(prompts)
 
-			if (previousStr === newStr) {
-				return prevState
-			}
+				if (previousStr === newStr) {
+					return prevState
+				}
 
-			setChangeDetected(true)
-			return { ...prevState, customSupportPrompts: prompts }
-		})
-	}, [])
+				markEdited()
+				return { ...prevState, customSupportPrompts: prompts }
+			})
+		},
+		[markEdited],
+	)
 
 	const isSettingValid = !errorMessage
+
+	// What the form compares an appearance value with: what a save stored, if the live state has not caught up yet.
+	const savedAppearanceValue = (key: AppearanceKey) =>
+		key in appearanceSaved.current ? appearanceSaved.current[key] : extensionState[key]
 
 	const handleSubmit = () => {
 		if (isSettingValid) {
@@ -423,13 +466,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			// waits for the host nor puts an appearance value into the host's all-or-nothing save.
 			const changedAppearance: Record<string, number | null> = Object.fromEntries(
 				[...editedAppearance.current]
-					.filter((key) => (cachedState[key] ?? null) !== (extensionState[key] ?? null))
+					.filter((key) => (cachedState[key] ?? null) !== (savedAppearanceValue(key) ?? null))
 					.map((key) => [key, cachedState[key] ?? null]),
 			)
 			const appearanceEdited = Object.keys(changedAppearance).length > 0
 			const saveId = appearanceEdited ? nextSaveRequestId() : undefined
 			if (saveId) {
-				pendingSaveEditedState.current = cachedState
+				pendingSaveEditVersion.current = editVersion.current
 				pendingAppearanceSent.current = changedAppearance
 				setPendingSaveId(saveId)
 			}
@@ -534,15 +577,15 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 		// The save is over: stored, failed, or not answered in time.
 		const settle = (success: boolean) => {
-			const editedState = pendingSaveEditedState.current
+			const editedAt = pendingSaveEditVersion.current
 			const sent = pendingAppearanceSent.current
-			pendingSaveEditedState.current = undefined
 			pendingAppearanceSent.current = {}
 			setPendingSaveId(undefined)
 
 			// What was stored is no longer an unsaved edit, unless the user changed that value again meanwhile.
 			if (success) {
 				for (const [key, value] of Object.entries(sent)) {
+					appearanceSaved.current[key] = value
 					if ((latestCachedState.current[key as AppearanceKey] ?? null) === value) {
 						editedAppearance.current.delete(key as AppearanceKey)
 					}
@@ -550,7 +593,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			}
 
 			// An edit made while the save was in flight is not in what was sent: it stays unsaved.
-			const clean = success && latestCachedState.current === editedState
+			const clean = success && editVersion.current === editedAt
 			if (clean) setChangeDetected(false)
 
 			// A request to leave that came in meanwhile goes through the unsaved-changes check now: it proceeds if
@@ -575,12 +618,55 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		}
 
 		window.addEventListener("message", onResult)
-		const timer = setTimeout(() => settle(false), SAVE_ANSWER_TIMEOUT_MS)
+		const timer = setTimeout(() => {
+			// No answer is not a failure: the host may still store it. Its answer is waited for further on, and the
+			// user is told if they leave meanwhile.
+			timedOutSaves.current.set(pendingSaveId, { ...pendingAppearanceSent.current })
+			setSaveOutcomeUnknown(true)
+			settle(false)
+		}, SAVE_ANSWER_TIMEOUT_MS)
 		return () => {
 			clearTimeout(timer)
 			window.removeEventListener("message", onResult)
 		}
 	}, [pendingSaveId])
+
+	// The answer to a save that was given up on. If it stored the values, the form is brought up to date with them: the
+	// values the user is not editing now take the stored value, and every value is compared with it from now on.
+	useEffect(() => {
+		const onLateResult = (event: MessageEvent) => {
+			const message = event.data
+			if (message?.type !== "settingsSaveResult") return
+			const sent = timedOutSaves.current.get(message.requestId)
+			if (!sent) return
+
+			timedOutSaves.current.delete(message.requestId)
+			setSaveOutcomeUnknown(timedOutSaves.current.size > 0)
+			if (message.success !== true) return
+
+			for (const [key, value] of Object.entries(sent)) appearanceSaved.current[key] = value
+			setCachedState((prev) => {
+				const next = { ...prev }
+				for (const [key, value] of Object.entries(sent)) {
+					if (!editedAppearance.current.has(key as AppearanceKey)) {
+						Object.assign(next, { [key]: value ?? undefined })
+					}
+				}
+				return next
+			})
+		}
+
+		window.addEventListener("message", onLateResult)
+		return () => window.removeEventListener("message", onLateResult)
+	}, [])
+
+	// Once the live state shows an appearance value it is the one to compare with again (it may also be newer, if
+	// another webview changed it).
+	const { interfaceFontScale: liveScale, terminalFontSize: liveTerminal } = extensionState
+	const { editorFontSize: liveEditor, spacingScale: liveSpacing } = extensionState
+	useEffect(() => {
+		appearanceSaved.current = {}
+	}, [liveScale, liveTerminal, liveEditor, liveSpacing])
 
 	const checkUnsaveChanges = useCallback(
 		(then: () => void) => {
@@ -1033,7 +1119,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								terminalZshP10k={terminalZshP10k}
 								terminalZdotdir={terminalZdotdir}
 								terminalProfile={terminalProfile}
-								onTerminalProfilePickerOpened={() => setChangeDetected(true)}
+								onTerminalProfilePickerOpened={() => markEdited()}
 								setCachedStateField={setCachedStateField}
 							/>
 						)}
@@ -1126,6 +1212,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 						</AlertDialogTitle>
 						<AlertDialogDescription>
 							{t("settings:unsavedChangesDialog.description")}
+							{saveOutcomeUnknown && (
+								<span className="block mt-2" data-testid="save-outcome-unknown">
+									{t("settings:unsavedChangesDialog.saveMayComplete")}
+								</span>
+							)}
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>

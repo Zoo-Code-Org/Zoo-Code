@@ -23,7 +23,8 @@
 		"title": "Niet-opgeslagen wijzigingen",
 		"description": "Wil je de wijzigingen negeren en doorgaan?",
 		"cancelButton": "Annuleren",
-		"discardButton": "Wijzigingen negeren"
+		"discardButton": "Wijzigingen negeren",
+		"saveMayComplete": "Een opslag die nog niet is beantwoord, kan na het verlaten alsnog worden voltooid."
 	},
 	"sections": {
 		"providers": "Providers",

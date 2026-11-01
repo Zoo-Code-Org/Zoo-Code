@@ -23,7 +23,8 @@
 		"title": "Niezapisane zmiany",
 		"description": "Czy chcesz odrzucić zmiany i kontynuować?",
 		"cancelButton": "Anuluj",
-		"discardButton": "Odrzuć zmiany"
+		"discardButton": "Odrzuć zmiany",
+		"saveMayComplete": "Zapis, na który nie ma jeszcze odpowiedzi, może zostać ukończony po wyjściu."
 	},
 	"sections": {
 		"providers": "Dostawcy",

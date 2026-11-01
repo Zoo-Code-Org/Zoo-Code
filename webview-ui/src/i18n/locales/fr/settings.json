@@ -23,7 +23,8 @@
 		"title": "Modifications non enregistrées",
 		"description": "Voulez-vous ignorer les modifications et continuer ?",
 		"cancelButton": "Annuler",
-		"discardButton": "Ignorer les modifications"
+		"discardButton": "Ignorer les modifications",
+		"saveMayComplete": "Un enregistrement qui n'a pas encore reçu de réponse peut encore aboutir après votre départ."
 	},
 	"sections": {
 		"providers": "Fournisseurs",

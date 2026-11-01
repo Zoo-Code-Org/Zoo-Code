@@ -23,7 +23,8 @@
 		"title": "Thay đổi chưa lưu",
 		"description": "Bạn có muốn hủy thay đổi và tiếp tục không?",
 		"cancelButton": "Hủy",
-		"discardButton": "Hủy thay đổi"
+		"discardButton": "Hủy thay đổi",
+		"saveMayComplete": "Một lần lưu chưa được phản hồi vẫn có thể hoàn tất sau khi bạn rời đi."
 	},
 	"sections": {
 		"providers": "Nhà cung cấp",

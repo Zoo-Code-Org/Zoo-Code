@@ -23,7 +23,8 @@
 		"title": "Alterações não salvas",
 		"description": "Deseja descartar as alterações e continuar?",
 		"cancelButton": "Cancelar",
-		"discardButton": "Descartar alterações"
+		"discardButton": "Descartar alterações",
+		"saveMayComplete": "Um salvamento que ainda não foi respondido pode ser concluído depois que você sair."
 	},
 	"sections": {
 		"providers": "Provedores",

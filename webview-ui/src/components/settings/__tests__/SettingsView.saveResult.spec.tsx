@@ -311,6 +311,38 @@ describe("SettingsView – which appearance values a save sends", () => {
 		expect(lastUpdatedSettings().terminalFontSize).toBe(14)
 	})
 
+	it("compares with what a save stored when the live state did not catch up, so a reset to the old value is still sent", async () => {
+		renderUiTab()
+		await makeAnEdit() // 13; the live state is unset and stays so: its refresh after the save never arrived
+		fireEvent.click(screen.getByTestId("save-button"))
+		answerSave(lastSaveRequestId(postMessage), { success: true })
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+		postMessage.mockClear()
+
+		fireEvent.click(screen.getByTestId("appearance-terminalFontSize-reset")) // back to unset, which is the stale live value
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(lastUpdatedSettings()).toHaveProperty("terminalFontSize", null)
+	})
+
+	it("goes back to comparing with the live state once it has changed", async () => {
+		renderUiTab()
+		await makeAnEdit() // 13
+		fireEvent.click(screen.getByTestId("save-button"))
+		answerSave(lastSaveRequestId(postMessage), { success: true })
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+		liveStateChange({ terminalFontSize: 20 }) // another webview stored 20
+		postMessage.mockClear()
+
+		fireEvent.change(screen.getByTestId("appearance-terminalFontSize-input"), { target: { value: "2" } })
+		fireEvent.change(screen.getByTestId("appearance-terminalFontSize-input"), { target: { value: "20" } })
+		fireEvent.blur(screen.getByTestId("appearance-terminalFontSize-input"))
+		await makeAnOtherEdit()
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(lastUpdatedSettings()).not.toHaveProperty("terminalFontSize") // 20 is what is stored: nothing to send
+	})
+
 	it("keeps the edit after a failed save, so a retry sends it again", async () => {
 		renderUiTab()
 		await makeAnEdit()
@@ -507,6 +539,91 @@ describe("SettingsView – a save the host never answers", () => {
 
 		expect(then).not.toHaveBeenCalled()
 		expect(await screen.findByText("settings:unsavedChangesDialog.title")).toBeInTheDocument()
+	})
+
+	describe("the outcome of a save that was not answered is unknown", () => {
+		const noteShown = () => screen.queryByTestId("save-outcome-unknown")
+
+		const timeOutAfterAnEdit = async () => {
+			renderUiTab()
+			await makeAnEdit() // 13
+			fireEvent.click(screen.getByTestId("save-button"))
+			const id = lastSaveRequestId(postMessage)
+			act(() => vi.advanceTimersByTime(SAVE_ANSWER_TIMEOUT_MS))
+			return id
+		}
+
+		it("tells the user in the discard dialog that the save may still complete", async () => {
+			await timeOutAfterAnEdit()
+
+			fireEvent.click(doneButton())
+
+			expect(await screen.findByText("settings:unsavedChangesDialog.title")).toBeInTheDocument()
+			expect(noteShown()).toHaveTextContent("settings:unsavedChangesDialog.saveMayComplete")
+		})
+
+		it("does not say that after a save that failed", async () => {
+			renderUiTab()
+			await makeAnEdit()
+			fireEvent.click(screen.getByTestId("save-button"))
+			answerSave(lastSaveRequestId(postMessage), { success: false, error: "nope" })
+			await waitFor(() => expect(doneButton()).toBeEnabled())
+
+			fireEvent.click(doneButton())
+
+			expect(await screen.findByText("settings:unsavedChangesDialog.title")).toBeInTheDocument()
+			expect(noteShown()).not.toBeInTheDocument()
+		})
+
+		it("brings the form up to date when the late answer says the save was stored, even after the edits were discarded", async () => {
+			const id = await timeOutAfterAnEdit()
+			fireEvent.click(doneButton())
+			fireEvent.click(await screen.findByText("settings:unsavedChangesDialog.discardButton"))
+			expect((screen.getByTestId("appearance-terminalFontSize-input") as HTMLInputElement).value).toBe("12") // discarded
+
+			answerSave(id, { success: true }) // the host stored 13 after all
+
+			await waitFor(() =>
+				expect((screen.getByTestId("appearance-terminalFontSize-input") as HTMLInputElement).value).toBe("13"),
+			)
+			expect(screen.getByTestId("save-button")).toBeDisabled() // nothing is unsaved
+		})
+
+		it("leaves a value the user is editing again as it is, but compares it with what was stored", async () => {
+			const id = await timeOutAfterAnEdit()
+			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // 14, edited after the save
+
+			answerSave(id, { success: true })
+
+			expect((screen.getByTestId("appearance-terminalFontSize-input") as HTMLInputElement).value).toBe("14")
+			expect(screen.getByTestId("save-button")).toBeEnabled()
+			postMessage.mockClear()
+			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-decrement")) // back to 13, which is stored now
+			await makeAnOtherEdit()
+			fireEvent.click(screen.getByTestId("save-button"))
+			expect(lastUpdatedSettings()).not.toHaveProperty("terminalFontSize")
+		})
+
+		it("does nothing for a late answer that says the save failed, and stops saying the save may complete", async () => {
+			const id = await timeOutAfterAnEdit()
+
+			answerSave(id, { success: false, error: "nope" })
+
+			expect((screen.getByTestId("appearance-terminalFontSize-input") as HTMLInputElement).value).toBe("13")
+			fireEvent.click(doneButton())
+			expect(await screen.findByText("settings:unsavedChangesDialog.title")).toBeInTheDocument()
+			expect(noteShown()).not.toBeInTheDocument()
+		})
+
+		it("ignores an answer to a request it never gave up on", async () => {
+			await timeOutAfterAnEdit()
+
+			answerSave("settings-save-never-issued", { success: true })
+
+			expect((screen.getByTestId("appearance-terminalFontSize-input") as HTMLInputElement).value).toBe("13")
+			fireEvent.click(doneButton())
+			expect(noteShown()).toBeInTheDocument() // still unknown
+		})
 	})
 
 	it("does nothing when the answer came in time and the wait would have ended later", async () => {

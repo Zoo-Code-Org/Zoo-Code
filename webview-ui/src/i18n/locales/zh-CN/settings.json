@@ -23,7 +23,8 @@
 		"title": "未保存的更改",
 		"description": "是否放弃更改并继续？",
 		"cancelButton": "取消",
-		"discardButton": "放弃更改"
+		"discardButton": "放弃更改",
+		"saveMayComplete": "尚未得到响应的保存可能在你离开后仍会完成。"
 	},
 	"sections": {
 		"providers": "提供商",

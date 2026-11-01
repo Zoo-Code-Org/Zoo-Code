@@ -23,7 +23,8 @@
 		"title": "Perubahan Belum Disimpan",
 		"description": "Apakah kamu ingin membuang perubahan dan melanjutkan?",
 		"cancelButton": "Batal",
-		"discardButton": "Buang perubahan"
+		"discardButton": "Buang perubahan",
+		"saveMayComplete": "Penyimpanan yang belum dijawab mungkin masih selesai setelah Anda keluar."
 	},
 	"sections": {
 		"providers": "Provider",

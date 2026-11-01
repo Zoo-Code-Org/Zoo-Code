@@ -23,7 +23,8 @@
 		"title": "Kaydedilmemiş Değişiklikler",
 		"description": "Değişiklikleri atmak ve devam etmek istiyor musunuz?",
 		"cancelButton": "İptal",
-		"discardButton": "Değişiklikleri At"
+		"discardButton": "Değişiklikleri At",
+		"saveMayComplete": "Henüz yanıtlanmamış bir kayıt, siz ayrıldıktan sonra yine de tamamlanabilir."
 	},
 	"sections": {
 		"providers": "Sağlayıcılar",

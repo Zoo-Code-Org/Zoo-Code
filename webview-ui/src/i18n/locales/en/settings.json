@@ -23,7 +23,8 @@
 		"title": "Unsaved Changes",
 		"description": "Do you want to discard changes and continue?",
 		"cancelButton": "Cancel",
-		"discardButton": "Discard changes"
+		"discardButton": "Discard changes",
+		"saveMayComplete": "A save that has not been answered yet may still complete after you leave."
 	},
 	"sections": {
 		"providers": "Providers",

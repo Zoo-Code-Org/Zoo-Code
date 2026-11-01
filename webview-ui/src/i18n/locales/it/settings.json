@@ -23,7 +23,8 @@
 		"title": "Modifiche non salvate",
 		"description": "Vuoi scartare le modifiche e continuare?",
 		"cancelButton": "Annulla",
-		"discardButton": "Scarta modifiche"
+		"discardButton": "Scarta modifiche",
+		"saveMayComplete": "Un salvataggio che non ha ancora ricevuto risposta potrebbe comunque completarsi dopo l'uscita."
 	},
 	"sections": {
 		"providers": "Fornitori",

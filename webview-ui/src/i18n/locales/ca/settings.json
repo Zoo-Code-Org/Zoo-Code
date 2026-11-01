@@ -23,7 +23,8 @@
 		"title": "Canvis no desats",
 		"description": "Voleu descartar els canvis i continuar?",
 		"cancelButton": "Cancel·lar",
-		"discardButton": "Descartar canvis"
+		"discardButton": "Descartar canvis",
+		"saveMayComplete": "Un desament que encara no ha rebut resposta pot completar-se després de sortir."
 	},
 	"sections": {
 		"providers": "Proveïdors",

@@ -23,7 +23,8 @@
 		"title": "Ungespeicherte Änderungen",
 		"description": "Möchtest du die Änderungen verwerfen und fortfahren?",
 		"cancelButton": "Abbrechen",
-		"discardButton": "Änderungen verwerfen"
+		"discardButton": "Änderungen verwerfen",
+		"saveMayComplete": "Ein Speichern, das noch nicht beantwortet wurde, kann nach dem Verlassen noch abgeschlossen werden."
 	},
 	"sections": {
 		"providers": "Anbieter",

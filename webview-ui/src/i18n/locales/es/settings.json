@@ -23,7 +23,8 @@
 		"title": "Cambios no guardados",
 		"description": "¿Desea descartar los cambios y continuar?",
 		"cancelButton": "Cancelar",
-		"discardButton": "Descartar cambios"
+		"discardButton": "Descartar cambios",
+		"saveMayComplete": "Un guardado que aún no ha recibido respuesta puede completarse después de salir."
 	},
 	"sections": {
 		"providers": "Proveedores",

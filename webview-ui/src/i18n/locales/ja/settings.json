@@ -23,7 +23,8 @@
 		"title": "未保存の変更",
 		"description": "変更を破棄して続行しますか？",
 		"cancelButton": "キャンセル",
-		"discardButton": "変更を破棄"
+		"discardButton": "変更を破棄",
+		"saveMayComplete": "まだ応答のない保存は、画面を離れた後に完了する可能性があります。"
 	},
 	"sections": {
 		"providers": "プロバイダー",
