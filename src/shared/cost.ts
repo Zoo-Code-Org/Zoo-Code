@@ -47,6 +47,10 @@ function calculateApiCostInternal(
 	totalInputTokens: number,
 	totalOutputTokens: number,
 ): ApiCostResult {
+	// A cache price the catalog does not declare bills at $0 by design: an
+	// undeclared read discount is never re-priced at the input price, and an
+	// unpriced model must not leak `undefined * 0` as `NaN`. A writes fallback
+	// needs its own kernel PR with catalog reachability evidence.
 	const cacheWritesCost = ((modelInfo.cacheWritesPrice || 0) / 1_000_000) * cacheCreationInputTokens
 	const cacheReadsCost = ((modelInfo.cacheReadsPrice || 0) / 1_000_000) * cacheReadInputTokens
 	const baseInputCost = ((modelInfo.inputPrice || 0) / 1_000_000) * inputTokens
