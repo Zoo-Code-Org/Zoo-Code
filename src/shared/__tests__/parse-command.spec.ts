@@ -1770,9 +1770,7 @@ describe("parseCommand", () => {
 		// The onset scan mirrors the remainder walk's frame stack byte for byte.
 		// Each row below fails if the scan's bookkeeping drifts on one
 		// construct: a wrong closer index, a frame that pops (or fails to pop)
-		// at the wrong byte, or a mismatched frame type. Each row was produced
-		// by applying a single-operator mutant of the scan and keeping an input
-		// whose result the mutant flips.
+		// at the wrong byte, or a mismatched frame type.
 		type OnsetFrameRow = {
 			name: string
 			input: string

@@ -903,7 +903,7 @@ function scanShellSyntax(text: string): ScanOutcome {
 						// the region without ending the word.
 						if (
 							j !== closerEnd &&
-							// Stryker disable next-line ConditionalExpression: the delimiter word absorbs `#`, so the remainder never starts with one and no reading of this disjunct can decide an onset.
+							// Stryker disable next-line ConditionalExpression: the delimiter word absorbs `#`, so the remainder never starts with one; the disjunct's false replacement cannot move an onset, and the line's other condition readings stay pinned by parse-command.spec.ts's onset rows.
 							(j === endIndex || /\s/.test(text[j - 1]) || /[;&()|<>]/.test(text[j - 1]))
 						) {
 							return j
