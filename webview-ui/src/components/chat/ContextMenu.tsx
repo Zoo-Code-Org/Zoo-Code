@@ -155,13 +155,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 				return (
 					<span
 						title={option.value}
-						style={{
-							lineHeight: "1.4",
-							whiteSpace: "nowrap",
-							overflow: "hidden",
-							textOverflow: "ellipsis",
-							minWidth: 0,
-						}}>
+						className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap leading-[1.4]">
 						{option.value?.replace(/\s+/g, " ").trim()}
 					</span>
 				)
