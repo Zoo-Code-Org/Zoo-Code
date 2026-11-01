@@ -309,7 +309,6 @@ export class ClineProvider
 	 * since deleted; a write that lands an entry lifts its tombstone.
 	 */
 	private static clearedViewStateIds = new Set<string>()
-	private disposables: vscode.Disposable[] = []
 	private webviewDisposables: vscode.Disposable[] = []
 	private pendingThemeFixtureProbes = new Map<
 		string,

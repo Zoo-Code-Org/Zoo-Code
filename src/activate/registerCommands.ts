@@ -421,9 +421,8 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 	// panel cannot clobber the replacement's ref.
 	newPanel.onDidDispose(
 		() => {
-			if (tabPanel === newPanel) {
-				setPanel(undefined, "tab")
-			}
+			// A recovery may already have installed a replacement panel.
+			if (tabPanel === newPanel) setPanel(undefined, "tab")
 		},
 		null,
 		context.subscriptions, // Also register dispose listener
