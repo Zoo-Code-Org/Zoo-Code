@@ -507,9 +507,7 @@ const createTabPanelUnlocked = async ({
 			context.subscriptions, // Register listener for disposal
 		)
 
-		// Handle panel closing events: clear the tracked ref only if this panel
-		// is still the tracked one, so a late disposal of an already-replaced
-		// panel cannot clobber the replacement's ref.
+		// Handle panel closing events.
 		newPanel.onDidDispose(
 			() => {
 				if (tabPanel === newPanel) {
