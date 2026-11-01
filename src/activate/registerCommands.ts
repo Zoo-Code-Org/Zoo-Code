@@ -184,6 +184,9 @@ const getCommandsMap = ({
 			outputChannel.appendLine(`Error focusing input: ${error}`)
 		}
 	},
+	retryWebviewRecovery: async () => {
+		await (ClineProvider.getVisibleInstance() ?? provider).retryWebviewRecovery()
+	},
 	focusPanel: async () => {
 		try {
 			await focusPanel(tabPanel, sidebarPanel)
@@ -295,7 +298,8 @@ export const openClineInNewTab = async ({ context, outputChannel, webviewFocusTr
 	// Handle panel closing events.
 	newPanel.onDidDispose(
 		() => {
-			setPanel(undefined, "tab")
+			// A recovery may already have installed a replacement panel.
+			if (tabPanel === newPanel) setPanel(undefined, "tab")
 		},
 		null,
 		context.subscriptions, // Also register dispose listener
