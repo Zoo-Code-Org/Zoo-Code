@@ -1708,6 +1708,214 @@ describe("parseCommand", () => {
 			expect(commands).toEqual([input])
 			expect(parseError?.quoteType).toBe("heredoc")
 		})
+
+		// The next rows pin how the comment-onset scan reads a `#` glued to a
+		// closer, and the delimiter's continuation rule. A `#` glued directly
+		// after the closer that ends a substitution frame continues the word:
+		// bash ends the region at its closer but not the word, so a comment
+		// there never starts and the text behind the `#` stays live syntax. A
+		// `)` that closes no frame is an operator token, and the next `#` is
+		// at a word start. Separately, bash removes a backslash-newline pair
+		// as a line continuation before tokenizing, so such a pair inside the
+		// delimiter word never quotes the body.
+		it("extracts a substitution behind a # glued to a $( … ) closer", () => {
+			// bash prints `ab#c` for `echo a$(echo b)#c`: the glued `#` is
+			// mid-word, so `$(zap y)` executes. Dropping the frame bookkeeping
+			// reads the `#` as a word-start comment and swallows the payload.
+			const { commands, parseError } = parseCommand("cat <<E $(echo x)#$(zap y)\nbody\nE")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["cat <<E\nbody\nE $ ( echo x ) #$ ( zap y )", "echo x", "zap y"])
+		})
+
+		it("extracts a substitution behind a # glued to a $(( )) closer", () => {
+			// bash prints `a2#c` for `echo a$((1+1))#c`: the arithmetic frame's
+			// second `)` empties the frames, so the glued `#` continues the
+			// word. A frame that closes at the first `)` lands the closer
+			// early and turns the `#` into a word-start comment.
+			const { commands, parseError } = parseCommand("cat <<E $((1+1))#$(zap y)\nbody\nE")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["cat <<E\nbody\nE $ ( ( 1+1 ) ) #$ ( zap y )", "zap y"])
+		})
+
+		it("extracts a substitution behind a # glued to a backtick closer", () => {
+			// bash prints `ab#c` for `` echo a`echo b`#c ``: a backtick closer
+			// ends the region, not the word, so the glued `#` is word content
+			// and the `$(zap y)` behind it stays live syntax. A backtick before
+			// the `#` is neither a blank nor an operator, so it is no word start.
+			const { commands, parseError } = parseCommand("cat <<E `echo a`#$(zap y)\nbody\nE")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["cat <<E\nbody\nE `echo a`#$ ( zap y )", "echo a", "zap y"])
+		})
+
+		it("extracts a substitution behind a # glued to a chained process-sub closer", () => {
+			// Each `>(…)` pops one frame; only the final `)` empties the stack,
+			// so that closer marks the word-continuation index and the glued
+			// `#$(zap y)` stays live. Marking an inner pop instead reads the
+			// chain's tail as a comment.
+			const { commands, parseError } = parseCommand("cat <<E >(a)>(b)#$(zap y)\nbody\nE")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["cat <<E\nbody\nE >( a ) >( b ) #$ ( zap y )", "a", "b", "zap y"])
+		})
+
+		it("keeps a # glued to a bare group closer as a comment onset", () => {
+			// bash balances the `; (echo x)` group before the `#`: the `)`
+			// closes no frame, so the glued `#` opens a comment and `$(zap y)`
+			// never runs. Treating every `)` as a word-continuation would
+			// extract a payload bash discards.
+			const { commands, parseError } = parseCommand("cat <<E ;(echo x)#$(zap y)\nbody\nE")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["cat <<E\nbody\nE", "( echo x )"])
+		})
+
+		// The onset scan mirrors the remainder walk's frame stack byte for byte.
+		// Each row below fails if the scan's bookkeeping drifts on one
+		// construct: a wrong closer index, a frame that pops (or fails to pop)
+		// at the wrong byte, or a mismatched frame type. Each row was produced
+		// by applying a single-operator mutant of the scan and keeping an input
+		// whose result the mutant flips.
+		type OnsetFrameRow = {
+			name: string
+			input: string
+			commands: string[]
+			error: "heredoc" | "backtick" | "command-substitution" | "process-substitution" | null
+		}
+		const onsetFrameRows: OnsetFrameRow[] = [
+			{
+				name: "reads a # inside an open backtick region as opaque region text",
+				input: "cat <<'E' ` #a`y\na`b\nE\n",
+				commands: ["cat <<'E'\na`b\nE `"],
+				error: null,
+			},
+			{
+				name: "keeps a word-start # inside a nested backtick region from cutting the remainder",
+				input: "cat <<'E' $( `a #b` )#c\na`b\nE\n",
+				commands: ["cat <<'E'\na`b\nE $ ( `a", "a"],
+				error: null,
+			},
+			{
+				name: "keeps the empty backtick region's closer from marking a later comment",
+				input: "cat <<'E' $( ``) #`\nbody\nE\n",
+				commands: ["cat <<'E'\nbody\nE $ ( `` )"],
+				error: null,
+			},
+			{
+				name: "fails closed on a quote that opens inside an unclosed frame",
+				input: "cat <<E $($()##'\nb'ody\nE\n",
+				commands: ["cat <<E $($()##'\nb'ody\nE\n"],
+				error: "command-substitution",
+			},
+			{
+				name: "extracts a payload behind a # glued to the group-balanced closer",
+				input: "cat <<'E' $( ((a)) )#$(zap)\nbody\nE\n",
+				commands: ["cat <<'E'\nbody\nE $ ( ( ( a ) ) ) #$ ( zap )", "( ( a ) )", "zap"],
+				error: null,
+			},
+			{
+				name: "keeps a brace mismatch from letting an inner closer end the frame",
+				input: "cat <<'E' $( $({a) ))#$(zap)\nbody\nE\n",
+				commands: ["cat <<'E'\nbody\nE $ ( $ ( {a ) ) )", "{a"],
+				error: null,
+			},
+			{
+				name: "keeps a # after a bare-dollar group closer from swallowing the tail",
+				input: "cat <<E $$()#`\nbody\nE\n",
+				commands: ["cat <<E $$()#`\nbody\nE\n"],
+				error: "backtick",
+			},
+			{
+				name: "fails closed on the opener the brace frame cannot balance",
+				input: "cat <<E $(${)#$[\nbody\nE\n",
+				commands: ["cat <<E $(${)#$[\nbody\nE\n"],
+				error: "command-substitution",
+			},
+			{
+				name: "extracts a payload behind a # glued to a bracket frame holding a group paren",
+				input: "cat <<'E' $( $[(] )#$(zap)\nbody\nE\n",
+				commands: ["cat <<'E'\nbody\nE $ ( $[ ( ] ) #$ ( zap )", "$[(]", "zap"],
+				error: null,
+			},
+			{
+				name: "reads the arithmetic opener from its own bytes inside a group frame",
+				input: "cat <<E $(($[(x]))#$(zap y)\nbody\nE\n",
+				commands: ["cat <<E\nbody\nE $ ( ( $[ ( x] ) ) #$ ( zap y )", "( $[(x] )", "zap y"],
+				error: null,
+			},
+			{
+				name: "keeps a # riding a closer after a brace mismatch from cutting the tail",
+				input: "cat <<'E' $( $({a) )#$(zap)\nbody\nE\n",
+				commands: ["cat <<'E'\nbody\nE $ ( $ ( {a ) ) #$ ( zap )", "{a", "zap"],
+				error: null,
+			},
+			{
+				name: "extracts a payload behind a # glued to the closer after a parameter expansion",
+				input: "cat <<'E' $( ${a} )#$(zap)\nbody\nE\n",
+				commands: ["cat <<'E'\nbody\nE $ (  ) #$ ( zap )", "${a}", "zap"],
+				error: null,
+			},
+			{
+				name: "fails closed on a word-start quote after a process-substitution closer",
+				input: "cat <<'E' <()#'\nb'ody\nE\n",
+				commands: ["cat <<'E' <()#'\nb'ody\nE\n"],
+				error: "heredoc",
+			},
+			{
+				name: "reads a # between a redirect and a paren as no process substitution",
+				input: "cat <<'E' <#(`\na`b\nE\n",
+				commands: ["cat <<'E'\na`b\nE <"],
+				error: null,
+			},
+			{
+				name: "fails closed on an unclosed process substitution before a word-start quote",
+				input: "cat <<'E' <(#'\nb'ody\nE\n",
+				commands: ["cat <<'E' <(#'\nb'ody\nE\n"],
+				error: "process-substitution",
+			},
+			{
+				name: "keeps a backslash-escaped delimiter opaque even with an empty word",
+				input: "cat <<\\E\na`b\nE\n",
+				commands: ["cat <<\\E\na`b\nE"],
+				error: null,
+			},
+		]
+
+		it.each(onsetFrameRows)("$name", ({ input, commands, error }) => {
+			const result = parseCommand(input)
+			expect(result.commands).toEqual(commands)
+			expect(result.parseError?.quoteType ?? null).toBe(error)
+		})
+
+		it("walks the body of a heredoc whose delimiter ends in a backslash-newline", () => {
+			// bash removes the backslash-newline pair as a line continuation
+			// before tokenizing, leaving an ordinary unquoted delimiter, so it
+			// expands `$(touch x)` in the body. Reading the backslash as a
+			// quoting construct masks the body and hides the payload.
+			const { commands, parseError } = parseCommand("cat <<E\\\n\n$(touch x)\nE")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["cat <<E\\\n\n$(touch x)\nE", "touch x"])
+		})
+
+		it("fails closed when a delimiter continuation swallows the body's first line", () => {
+			// One newline is consumed by the continuation, so bash joins
+			// `$(touch x)` onto the opener line: the body then has no first
+			// line before the substitution and no terminator can match. The
+			// parser cannot account for the joined bytes, so it fails closed.
+			const input = "cat <<E\\\n$(touch x)\nE"
+			const { commands, parseError } = parseCommand(input)
+			expect(commands).toEqual([input])
+			expect(parseError?.quoteType).toBe("heredoc")
+		})
+
+		it("fails closed when a delimiter backslash escapes a CR", () => {
+			// POSIX bash reads `\<CR>` as an escaped CR -- a quoting construct
+			// the msys read layer instead strips -- so the two models disagree
+			// on whether the body is quoted. A CR inside the region leaves the
+			// layers reading different bytes, and the heredoc fails closed
+			// without picking a model.
+			const input = "cat <<E\\\r\n$(touch x)\r\nE\r\n"
+			const { commands, parseError } = parseCommand(input)
+			expect(commands).toEqual([input])
+			expect(parseError?.quoteType).toBe("heredoc")
+		})
 	})
 
 	describe("fail-closed on unaccountable structure", () => {

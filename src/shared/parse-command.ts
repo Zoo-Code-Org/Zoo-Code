@@ -363,9 +363,12 @@ function isIdentChar(char: string): boolean {
  *   a model. The scan parses only heredocs whose region has no CR. There both
  *   models read byte-identical text. An unquoted-delimiter body is
  *   expansion-active. A substitution opened inside it is extracted and must
- *   balance before the terminator. A quoted or backslash-escaped delimiter
- *   suppresses expansion entirely in the body. The shell does not expand
- *   those. Such a body stays opaque and is never balance-checked. A body
+ *   balance before the terminator. A backslash-newline is a continuation the
+ *   shell removes before tokenizing; it does not quote the delimiter, so the
+ *   body stays expansion-active like any other unquoted body. A quoted or
+ *   backslash-escaped delimiter suppresses expansion entirely: the shell does
+ *   not expand those, and such a body stays opaque and is never
+ *   balance-checked. A body
  *   carries no comments and is not tokenized outside an expansion region. A
  *   `"` or `#` there is literal text. Inside an expansion region, quotes and
  *   word-initial `#` comments follow the shell's rules there. A comment ends
@@ -814,6 +817,17 @@ function scanShellSyntax(text: string): ScanOutcome {
 			// after the pair continues the word and cannot start a comment.
 			// Stryker disable next-line NumberLiteral: the operator's replacements for this -1 sentinel are 0 and 1, and every `j` compared against it starts at or past the index after a `<<` (>= 2), so no replacement can block a different `#`.
 			let escapedEnd = -1
+			// Mirrors the remainder walk's expansion state: the closers this
+			// scan must balance, and the index just past the most recent region
+			// closer that emptied the frames. The shell ends a region at its
+			// closer but not the surrounding word, so a `#` directly at that
+			// index continues the word instead of starting a comment. A `)`
+			// that closes no region (`case` pattern terminator, subshell group)
+			// pops nothing and leaves the index untouched, so a `#` glued after
+			// it still starts a comment.
+			const frames: RemainderFrame[] = []
+			// Stryker disable next-line NumberLiteral,UnaryOperator: the replacements for this -1 sentinel (0, 1, and +1) can never equal a `j`, which starts at or past the index after a `<<` (>= 2) and only advances past bytes this index gets assigned from.
+			let closerEnd = -1
 			while (j < remainderEnd) {
 				const char = text[j]
 				if (char === "\\" && quote !== "'") {
@@ -822,11 +836,76 @@ function scanShellSyntax(text: string): ScanOutcome {
 					continue
 				}
 				if (quote === null) {
+					const top = frames[frames.length - 1]
+					if (top?.backtick) {
+						// A backtick region is opaque except for its closer:
+						// backticks do not nest, so nothing inside one opens a
+						// frame that could take the closer's index.
+						if (char === "`") {
+							frames.pop()
+							// Stryker disable next-line ConditionalExpression,EqualityOperator,BlockStatement: only a `#` glued after the backtick reads this index, and a backtick is neither blank nor metacharacter, so it never starts a word and no reachable input changes the scan's return.
+							if (frames.length === 0) {
+								// Stryker disable next-line ArithmeticOperator: `j - 1` marks a byte the scan has already passed -- the only byte it can block sits behind the moving index, so no reachable remainder returns a different onset.
+								closerEnd = j + 1
+							}
+						}
+						j++
+						continue
+					}
+					if (top && char === top.closer) {
+						if (top.groupDepth > 0) {
+							// This closer matches an inner grouping paren, not
+							// the region's own opener.
+							top.groupDepth--
+						} else {
+							frames.pop()
+							if (frames.length === 0) {
+								closerEnd = j + 1
+							}
+						}
+						j++
+						continue
+					}
+					if (top?.closer === ")" && char === "(") {
+						// A bare `(` inside a `)`-closing region opens a group
+						// the shell balances before the region's closer, so the
+						// group's `)` cannot end the region.
+						top.groupDepth++
+						j++
+						continue
+					}
+					if (char === "$" && (text[j + 1] === "(" || text[j + 1] === "{" || text[j + 1] === "[")) {
+						// A `$((` region starts with one inner group pending,
+						// so it closes past its second `)`.
+						// Stryker disable next-line StringLiteral,ConditionalExpression: every reading that leaves `doubleArith` false re-counts the second `(` as an ordinary group paren at the same index and depth, so no reachable remainder moves the closer index.
+						const doubleArith = text[j + 1] === "(" && text[j + 2] === "("
+						const closer = text[j + 1] === "(" ? ")" : text[j + 1] === "[" ? "]" : "}"
+						frames.push({ closer, groupDepth: doubleArith ? 1 : 0, backtick: false })
+						j += doubleArith ? 3 : 2
+						continue
+					}
+					if (char === "`") {
+						// Stryker disable next-line StringLiteral: the frames stack consumes a backtick frame through the `backtick` flag's opaque branch, which matches the closer byte directly and never reads this string, so erasing it changes no pop.
+						frames.push({ closer: "`", groupDepth: 0, backtick: true })
+						j++
+						continue
+					}
+					if ((char === "<" || char === ">") && text[j + 1] === "(") {
+						frames.push({ closer: ")", groupDepth: 0, backtick: false })
+						j += 2
+						continue
+					}
 					if (char === "#" && j !== escapedEnd) {
 						// The word-start rule mirrors the live-text scan's
 						// comment branch: after a blank or a metacharacter, or
-						// at the very start of the remainder.
-						if (j === endIndex || /\s/.test(text[j - 1]) || /[;&()|<>]/.test(text[j - 1])) {
+						// at the very start of the remainder, and never
+						// directly at a region closer, where the shell ends
+						// the region without ending the word.
+						if (
+							j !== closerEnd &&
+							// Stryker disable next-line ConditionalExpression: the delimiter word absorbs `#`, so the remainder never starts with one and no reading of this disjunct can decide an onset.
+							(j === endIndex || /\s/.test(text[j - 1]) || /[;&()|<>]/.test(text[j - 1]))
+						) {
 							return j
 						}
 					} else if (char === "'" || char === '"') {
@@ -1862,7 +1941,9 @@ function scanShellSyntax(text: string): ScanOutcome {
  *   is empty for `<<''`, which bash terminates at the first blank body line.
  * - `endIndex`: index of the first character after the delimiter token.
  * - `quoted`: whether any quoting construct appeared. A quoted or escaped
- *   delimiter suppresses all expansion in the body.
+ *   delimiter suppresses all expansion in the body. A backslash-newline pair
+ *   is a continuation the shell removes before tokenizing the word, so it is
+ *   not a quoting construct and leaves the body expansion-active.
  * - `wordPresent`: whether any delimiter token appeared at all. A bare `<<`
  *   before end of line has none.
  * - `malformed`: whether the word reached end of input with a quote region
@@ -1918,14 +1999,22 @@ function parseHeredocDelimiter(
 			continue
 		}
 		if (char === "\\") {
-			quoted = true
 			if (i + 1 < command.length) {
+				// bash removes a backslash-newline pair as a line continuation
+				// before tokenizing, so the pair never quotes the delimiter
+				// word and leaves no byte of itself in the word.
 				if (command[i + 1] !== "\n") {
+					quoted = true
 					delimiter += command[i + 1]
 				}
 				i += 2
 				continue
 			}
+			// A backslash at end of input has nothing to escape: bash drops
+			// the dangling byte from the word as well, but the word is still
+			// an escaping construct, so the body stays opaque.
+			// Stryker disable next-line BooleanLiteral: this branch only runs when the backslash is the input's last byte, so no body or terminator can follow and the quoting flag cannot reach any observable.
+			quoted = true
 			i++
 			continue
 		}

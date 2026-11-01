@@ -293,6 +293,42 @@ describe("getCommandDecision — integration with dangerous substitution checks"
 		)
 	})
 
+	it("asks user for a substitution behind a # glued to a substitution closer on the opener line", () => {
+		// bash keeps `$(echo x)#$(zap y)` as one word, so the second
+		// substitution runs: `zap y` is its own segment and an allowlist
+		// covering the host must not carry it.
+		expect(getCommandDecision("cat <<E $(echo x)#$(zap y)\nbody\nE", ["cat", "echo"], [])).toBe("ask_user")
+	})
+
+	it("keeps the discarded tail of a bare-paren comment out of the segments", () => {
+		// bash balances the `(echo x)` group and starts a comment at the glued
+		// `#`, so `$(zap y)` never runs and never reaches the lists: the
+		// offending segment is the group alone, and a `zap` deny never sees
+		// the commented payload. Reading the bare `)` as a word continuation
+		// would extract `zap y` here and flip the deny to `auto_deny`: the
+		// deny call is the discriminator, the allow-only `ask_user` half on
+		// its own cannot tell the two readings apart.
+		const command = "cat <<E ;(echo x)#$(zap y)\nbody\nE"
+		const result = getCommandDecisionDetailed(command, ["cat", "echo"], [])
+		expect(result.decision).toBe("ask_user")
+		expect(result.offendingCommand).toBe("( echo x )")
+		expect(getCommandDecision(command, ["cat", "echo"], ["zap"])).toBe("ask_user")
+	})
+
+	it("asks user for a substitution in the body of a backslash-continuation delimiter", () => {
+		// bash removes the backslash-newline pair before tokenizing, leaving an
+		// ordinary unquoted delimiter, so it expands `$(touch x)` in the body
+		// and runs it. Allowing `cat` must not carry that command.
+		expect(getCommandDecision("cat <<E\\\n\n$(touch x)\nE", ["cat"], [])).toBe("ask_user")
+	})
+
+	it("auto-approves a genuinely quoted delimiter body (no over-ask)", () => {
+		// `<<'E'` is real quoting: bash never expands the body, so an
+		// allowlisted host keeps the approval. A delimiter rule that treated
+		// any escape-shaped byte as quoting would cost this a prompt.
+		expect(getCommandDecision("cat <<'E'\n$(touch x)\nE", ["cat"], [])).toBe("auto_approve")
+	})
+
 	it("asks user when a heredoc body with an unquoted delimiter contains a substitution", () => {
 		// The shell expands $(whoami) inside an unquoted-delimiter heredoc body.
 		// The inner command must therefore match the lists, even though the
