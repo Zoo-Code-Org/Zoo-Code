@@ -17,7 +17,7 @@ const MOCK_TIMEOUT_MS = 300_000
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { providerIdentifiers } from "@roo-code/types"
+import { OPENROUTER_DEFAULT_PROVIDER_NAME, openRouterDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
 import type { ModelInfo } from "@roo-code/types"
 
 import { applyOpenRouterMoonshotK3Profile } from "../fetchers/openrouter"
@@ -1040,6 +1040,109 @@ describe("OpenRouterHandler", () => {
 		it("reports its cache scope", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			expect(handler.getModelCacheScope()).toEqual({ urlScoped: false, keyScoped: false, authScoped: false })
+		})
+
+		it("does not fetch the catalog in the constructor", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+
+			new OpenRouterHandler(mockOptions)
+
+			expect(getModels).not.toHaveBeenCalled()
+			expect(mockGetModelEndpoints).not.toHaveBeenCalled()
+		})
+
+		it("populates models and endpoints when ensureModelFetched resolves", async () => {
+			mockGetModelEndpoints.mockResolvedValue({
+				moonshotai: {
+					maxTokens: 1000,
+					contextWindow: 2000,
+					supportsPromptCache: false,
+					description: "Moonshot endpoint",
+				},
+			})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterSpecificProvider: "moonshotai",
+				}),
+			)
+
+			// Before the pre-warm both catalogs are empty, so getModel() falls back
+			// to the hardcoded default info.
+			expect(handler.getModel().info).toBe(openRouterDefaultModelInfo)
+
+			await handler.ensureModelFetched()
+
+			// The endpoint catalog is populated and selected for the specific provider.
+			expect(handler.getModel().info.description).toBe("Moonshot endpoint")
+			expect(handler.getModel().info.contextWindow).toBe(2000)
+
+			// The model catalog is populated too: without a specific provider the
+			// fetched record (not the hardcoded default) is used.
+			const plainHandler = new OpenRouterHandler(mockOptions)
+			await plainHandler.ensureModelFetched()
+			expect(plainHandler.getModel().info.description).toBe("Claude 3.7 Sonnet")
+		})
+
+		it("retries while a selected provider's endpoint catalog is empty", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterSpecificProvider: "moonshotai",
+				}),
+			)
+
+			// The model-level catalog resolves, but the endpoint request produced
+			// nothing (e.g. it timed out). getModel() would fall back to the
+			// model-level record, so the load must stay retryable.
+			await handler.ensureModelFetched()
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(1)
+
+			await handler.ensureModelFetched()
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(2)
+
+			mockGetModelEndpoints.mockResolvedValue({
+				moonshotai: {
+					maxTokens: 1000,
+					contextWindow: 2000,
+					supportsPromptCache: false,
+					description: "Moonshot endpoint",
+				},
+			})
+
+			await handler.ensureModelFetched()
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(3)
+			expect(handler.getModel().info.description).toBe("Moonshot endpoint")
+
+			// Both catalogs are populated, so the load is now memoized.
+			await handler.ensureModelFetched()
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(3)
+		})
+
+		it("memoizes the default-provider load even when the endpoint catalog is empty", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+
+			await handler.ensureModelFetched()
+			await handler.ensureModelFetched()
+
+			// Without a selected provider the model-level catalog is what getModel()
+			// uses, so an empty endpoint response must not force a refetch.
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(1)
+		})
+
+		it("treats the [default] provider sentinel as the default provider", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterSpecificProvider: OPENROUTER_DEFAULT_PROVIDER_NAME,
+				}),
+			)
+
+			await handler.ensureModelFetched()
+			await handler.ensureModelFetched()
+
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(1)
 		})
 	})
 })
