@@ -30,6 +30,7 @@
 		"checkpoint_failed": "チェックポイントの復元に失敗しました。",
 		"checkpoint_restore_failed": "チェックポイントの復元中にエラーが発生しました: {{error}}",
 		"checkpoint_missing": "チェックポイント {{commitHash}} を復元できません。このチェックポイントはチェックポイントリポジトリに存在しなくなっています。ファイルは変更されていません。",
+		"checkpoint_invalid_hash": "チェックポイントを復元または比較できません。この参照はこのタスクの有効なチェックポイントではありません。ファイルは変更されていません。",
 		"git_not_installed": "チェックポイント機能にはGitが必要です。チェックポイントを有効にするにはGitをインストールしてください。",
 		"checkpoint_no_first": "比較する最初のチェックポイントがありません。",
 		"checkpoint_no_previous": "比較する前のチェックポイントがありません。",

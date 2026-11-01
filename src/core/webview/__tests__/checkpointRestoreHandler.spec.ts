@@ -116,7 +116,8 @@ function createFixture() {
 		checkpoint: { hash: "abc123" },
 		operation: "delete",
 	}
-	return { task, taskDouble, provider, providerDouble, historyItem, store, config }
+	const failure = new Error("Disk full")
+	return { task, taskDouble, provider, providerDouble, historyItem, store, config, failure }
 }
 
 describe("checkpointRestoreHandler", () => {
@@ -223,6 +224,34 @@ describe("checkpointRestoreHandler", () => {
 					expect.any(Object),
 				)
 			}
+		},
+	)
+
+	it.each([
+		{
+			step: "saving messages",
+			fail: (f: typeof fixture) => vi.mocked(saveTaskMessages).mockRejectedValueOnce(f.failure),
+		},
+		{
+			step: "loading history",
+			fail: (f: typeof fixture) => f.providerDouble.getTaskWithId.mockRejectedValueOnce(f.failure),
+		},
+		{
+			step: "rehydrating the task",
+			fail: (f: typeof fixture) => f.providerDouble.createTaskWithHistoryItem.mockRejectedValueOnce(f.failure),
+		},
+	])(
+		"delete restore that succeeds then fails while $step surfaces the error without a restart prompt",
+		async ({ fail }) => {
+			fail(fixture)
+			await expect(handleCheckpointRestoreOperation(fixture.config)).rejects.toBe(fixture.failure)
+			expect(fixture.taskDouble.checkpointRestore).toHaveBeenCalledOnce()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledExactlyOnceWith(
+				"common:errors.checkpoint_restore_failed: Disk full",
+			)
+			expect(console.error).toHaveBeenCalledWith("Error in checkpoint restore (delete):", fixture.failure)
+			expect(showWarningMessage).not.toHaveBeenCalled()
+			expect(fixture.providerDouble.restartTaskIfCurrent).not.toHaveBeenCalled()
 		},
 	)
 

@@ -34,6 +34,7 @@
 		"checkpoint_failed": "Ha fallat la restauració del punt de control.",
 		"checkpoint_restore_failed": "Error durant la restauració del punt de control: {{error}}",
 		"checkpoint_missing": "No es pot restaurar el punt de control {{commitHash}}: aquest punt de control ja no existeix al repositori de punts de control. No s'ha modificat cap fitxer.",
+		"checkpoint_invalid_hash": "No es pot restaurar ni comparar el punt de control: la referència no correspon a cap punt de control vàlid d'aquesta tasca. No s'ha modificat cap fitxer.",
 		"git_not_installed": "Git és necessari per a la funció de punts de control. Si us plau, instal·la Git per activar els punts de control.",
 		"checkpoint_no_first": "No hi ha un primer punt de control per comparar.",
 		"checkpoint_no_previous": "No hi ha un punt de control anterior per comparar.",

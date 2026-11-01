@@ -35,6 +35,7 @@
 		"checkpoint_failed": "恢复检查点失败。",
 		"checkpoint_restore_failed": "恢复存档点时出错：{{error}}",
 		"checkpoint_missing": "无法恢复存档点 {{commitHash}}：此存档点已不存在于存档点仓库中。未更改任何文件。",
+		"checkpoint_invalid_hash": "无法恢复或比较存档点：该引用不是此任务的有效存档点。未更改任何文件。",
 		"git_not_installed": "检查点功能需要 Git。请安装 Git 以启用检查点。",
 		"checkpoint_no_first": "没有第一个存档点可供比较。",
 		"checkpoint_no_previous": "没有上一个存档点可供比较。",

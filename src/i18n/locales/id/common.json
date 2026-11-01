@@ -30,6 +30,7 @@
 		"checkpoint_failed": "Gagal memulihkan checkpoint.",
 		"checkpoint_restore_failed": "Terjadi kesalahan saat memulihkan checkpoint: {{error}}",
 		"checkpoint_missing": "Tidak dapat memulihkan checkpoint {{commitHash}}: checkpoint ini sudah tidak ada di repositori checkpoint. Tidak ada file yang diubah.",
+		"checkpoint_invalid_hash": "Tidak dapat memulihkan atau membandingkan checkpoint: referensi ini bukan checkpoint yang valid untuk tugas ini. Tidak ada file yang diubah.",
 		"git_not_installed": "Git diperlukan untuk fitur checkpoint. Silakan instal Git untuk mengaktifkan checkpoint.",
 		"checkpoint_no_first": "Tidak ada checkpoint pertama untuk dibandingkan.",
 		"checkpoint_no_previous": "Tidak ada checkpoint sebelumnya untuk dibandingkan.",

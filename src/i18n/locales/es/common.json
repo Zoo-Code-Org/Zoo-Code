@@ -30,6 +30,7 @@
 		"checkpoint_failed": "Error al restaurar el punto de control.",
 		"checkpoint_restore_failed": "Error durante la restauración del punto de control: {{error}}",
 		"checkpoint_missing": "No se puede restaurar el punto de control {{commitHash}}: este punto de control ya no existe en el repositorio de puntos de control. No se ha modificado ningún archivo.",
+		"checkpoint_invalid_hash": "No se puede restaurar ni comparar el punto de control: la referencia no es un punto de control válido de esta tarea. No se ha modificado ningún archivo.",
 		"git_not_installed": "Git es necesario para la función de puntos de control. Por favor, instala Git para activar los puntos de control.",
 		"checkpoint_no_first": "No hay primer punto de control para comparar.",
 		"checkpoint_no_previous": "No hay punto de control anterior para comparar.",
