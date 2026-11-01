@@ -179,10 +179,14 @@ describe("registerCommands handlers", () => {
 		mockContext = makeExtensionContext()
 
 		mockVisibleProvider = {
+			retryWebviewRecovery: vi.fn().mockResolvedValue(undefined),
 			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
 		}
 
+		// The visible-provider double supplies message posting and explicit recovery retry.
+		mockVisibleProviderInstance = mockVisibleProvider as unknown as ClineProvider
 		mockProvider = {
+			retryWebviewRecovery: vi.fn().mockResolvedValue(undefined),
 			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
 			evictCurrentTask: vi.fn().mockResolvedValue(undefined),
 			refreshWorkspace: vi.fn().mockResolvedValue(undefined),
@@ -201,6 +205,13 @@ describe("registerCommands handlers", () => {
 			outputChannel: mockOutputChannel,
 			provider: mockProvider as unknown as ClineProvider,
 		})
+	})
+
+	it.each([false, true])("retries the appropriate provider when a visible provider exists: %s", async (visible) => {
+		vi.mocked(ClineProvider.getVisibleInstance).mockReturnValue(visible ? mockVisibleProviderInstance : undefined)
+		await handlers["zoo-code.retryWebviewRecovery"]()
+		expect(mockVisibleProvider.retryWebviewRecovery).toHaveBeenCalledTimes(visible ? 1 : 0)
+		expect(mockProvider.retryWebviewRecovery).toHaveBeenCalledTimes(visible ? 0 : 1)
 	})
 
 	afterEach(() => {
@@ -1443,6 +1454,25 @@ describe("openClineInNewTab initialization failure", () => {
 		setPanel(undefined, "tab")
 		__resetLiveTabPanelsForTests()
 	})
+
+	it.each([false, true])(
+		"clears a closed tab reference only if it is still current (replacement: %s)",
+		async (replaced) => {
+			await openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			})
+			const panel = vi.mocked(vscode.window.createWebviewPanel).mock.results[0].value
+			const onDispose = vi.mocked(panel.onDidDispose).mock.calls[0][0]
+			const replacement = { ...panel }
+			if (replaced) setPanel(replacement, "tab")
+
+			onDispose()
+
+			expect(getPanel()).toBe(replaced ? replacement : undefined)
+		},
+	)
 
 	it("creates a webview panel with title 'Zoo Code'", async () => {
 		// Pin the MdmService sentinel locally: the module mock's implementation leaks

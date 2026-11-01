@@ -46,8 +46,8 @@ export const Requesty = ({
 
 	// This ensures that the "Use custom URL" checkbox is hidden when the user deletes the URL.
 	useEffect(() => {
-		setRequestyEndpointSelected(!!apiConfiguration?.requestyBaseUrl)
-	}, [apiConfiguration?.requestyBaseUrl])
+		setRequestyEndpointSelected(!!apiConfiguration.requestyBaseUrl)
+	}, [apiConfiguration.requestyBaseUrl])
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(
@@ -72,14 +72,14 @@ export const Requesty = ({
 	return (
 		<>
 			<VSCodeTextField
-				value={apiConfiguration?.requestyApiKey || ""}
+				value={apiConfiguration.requestyApiKey || ""}
 				type="password"
 				onInput={handleInputChange("requestyApiKey")}
 				placeholder={t("settings:providers.getRequestyApiKey")}
 				className="w-full">
 				<div className="flex justify-between items-center mb-1">
 					<label className="block font-medium">{t("settings:providers.requestyApiKey")}</label>
-					{apiConfiguration?.requestyApiKey && (
+					{apiConfiguration.requestyApiKey && (
 						<RequestyBalanceDisplay
 							baseUrl={apiConfiguration.requestyBaseUrl}
 							apiKey={apiConfiguration.requestyApiKey}
@@ -118,7 +118,7 @@ export const Requesty = ({
 			</VSCodeCheckbox>
 			{requestyEndpointSelected && (
 				<VSCodeTextField
-					value={apiConfiguration?.requestyBaseUrl || ""}
+					value={apiConfiguration.requestyBaseUrl || ""}
 					type="text"
 					onInput={handleInputChange("requestyBaseUrl")}
 					placeholder={t("settings:providers.getRequestyBaseUrl")}
