@@ -1946,6 +1946,17 @@ describe("webviewMessageHandler - the display settings are saved all-or-nothing"
 		expect(stored.showRelativeTimes).toBeUndefined()
 	})
 
+	it.each(["experiments", "customSupportPrompts"])(
+		"stores nothing for an empty %s value, and still stores the display settings sent with it",
+		async (key) => {
+			await save({ [key]: undefined, timeFormat: "24h" })
+
+			expect(stored).not.toHaveProperty(key)
+			expect(stored.timeFormat).toBe("24h")
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		},
+	)
+
 	describe("the display language is validated before it is applied or stored", () => {
 		it.each([["xx-not-a-language"], ["en-US-garbage!"], [42], [""], [{}]])(
 			"refuses language = %j, and applies and stores nothing",
