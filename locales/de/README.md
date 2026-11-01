@@ -47,11 +47,11 @@ Zoo Code baut auf dem von Roo Code geschaffenen Fundament auf und erweitert es f
 - **Zuverlässigere Terminal- und Bearbeitungsabläufe** — Korrekturen für vorzeitige Terminalabschlüsse, Race Conditions beim Aufgabenstatus, Kontextverwaltung, diff-Bearbeitung und anbieterspezifische Tool-Nutzung.
 - **Mehr Kontrolle über deinen Workspace** — Regelverwaltung, MCP-Beschränkungen pro Modus, Pfadsteuerung für Multi-Root-Workspaces, Reasoning-Optionen für Modelle und Aktionen zur Prüfung von Änderungen nach Abschluss.
 
-## Neu in v3.90.0
+## Neu in v3.94.0
 
-- ✨ **Provider und Modelle:** GitHub Copilot ist jetzt ein Provider: Melde dich an, und Zoo Code lädt deine Copilot-Modelle. IO Intelligence ist ein Provider mit eigenem API-Schlüssel. Gemini 4 Argon gibt es bei Gemini und Vertex. GPT-6 Luna gibt es bei OpenCode Go. Gemini 4 Argon und GPT-6 Luna gibt es auch im Zoo Gateway.
-- 🧭 **Tool-Ausführung:** Wiederholst du denselben Tool-Aufruf, kommt eine Warnung, danach stoppt Zoo Code diese Schleife. `attempt_completion` auszuschalten lässt eine Aufgabe nicht mehr unfertig stecken. Nachrichten in der Warteschlange durchlaufen dieselben Befehlsschutzprüfungen wie Befehle, die du direkt sendest.
-- ⚡ **Reasoning und Streaming:** Adaptives Anthropic-Thinking erscheint im Chat, und Thinking-Tokens werden gezählt. Der R1-Schalter behält das Reasoning von llama.cpp, Ollama und LM Studio. Codex behält verschlüsseltes Reasoning zusammen mit der Zusammenfassung, die du siehst. VS-Code-Language-Model-Streams nutzen guarded recovery, wenn ein Stream fehlschlägt.
+- ✨ **Breitere Modell- und Providerunterstützung:** Nutze Claude Haiku 5.5 über Anthropic, schicke Bilder an kompatible VS Code LM-Modelle, stelle die Temperatur für OpenCode Go Responses-Modelle ein und brich Anfragen sauber bei mehr Providern ab.
+- 🔐 **Flexibleres MCP OAuth:** Konfiguriere statische OAuth-Client-Einstellungen, nutze eigene Callback-Pfade, ermittle Authentifizierungsdetails aus `WWW-Authenticate` und sieh Callback-Fehler, bevor du es erneut versuchst.
+- 🧭 **Flüssigere Chats und lange Sessions:** Benenne Aufgaben im Verlauf um, ziehe Dateien per Drag-and-drop in den Chat, ohne Shift gedrückt zu halten, reduziere den Speicherbedarf bei langen Sessions und halte Subtask-Links und ausgetauschte Webviews stabil.
 
 ## Was kann Zoo Code für DICH tun?
 

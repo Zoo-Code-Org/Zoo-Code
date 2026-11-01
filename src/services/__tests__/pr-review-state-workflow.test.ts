@@ -17,6 +17,7 @@ const resolveScript = workflow.jobs.resolve.steps[0].with.script as string
 const SHA = "a".repeat(40)
 const OLD_SHA = "b".repeat(40)
 const REVIEWED_AT = Date.parse("2026-08-29T15:02:00Z")
+const WORKFLOW_RUN_URL = "https://github.com/Zoo-Code-Org/Zoo-Code/actions/runs/123456"
 
 type ReviewState = "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED"
 
@@ -492,6 +493,8 @@ function buildReconcileHarness(options: HarnessOptions = {}) {
 	const context = {
 		eventName,
 		repo: { owner: "Zoo-Code-Org", repo: "Zoo-Code" },
+		runId: 123456,
+		serverUrl: "https://github.com",
 		payload,
 		runNumber: options.runNumber ?? 1,
 	}
@@ -1935,7 +1938,12 @@ describe("PR review-state workflow", () => {
 		const result = await runWorkflow()
 
 		expect(latestGateStatus(result)).toEqual(
-			expect.objectContaining({ context: "Zoo Code / PR review gate", sha: SHA, state: "pending" }),
+			expect.objectContaining({
+				context: "Zoo Code / PR review gate",
+				sha: SHA,
+				state: "pending",
+				target_url: WORKFLOW_RUN_URL,
+			}),
 		)
 	})
 
@@ -1953,6 +1961,27 @@ describe("PR review-state workflow", () => {
 
 		expect(result.createCommitStatus).not.toHaveBeenCalled()
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
+	})
+
+	it("publishes a changed review gate status with the workflow run URL", async () => {
+		const result = await runWorkflow({
+			gateStatuses: [
+				{
+					context: "Zoo Code / PR review gate",
+					state: "pending",
+					description: "Wait for the required CI checks to finish.",
+					targetUrl: "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1437",
+				},
+			],
+		})
+
+		expect(latestGateStatus(result)).toEqual(
+			expect.objectContaining({
+				state: "pending",
+				description: "Required CI passed. Waiting for automated review of the latest commit.",
+				target_url: WORKFLOW_RUN_URL,
+			}),
+		)
 	})
 
 	it("continues metadata reconciliation when gate publication fails", async () => {

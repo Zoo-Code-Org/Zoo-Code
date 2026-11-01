@@ -352,10 +352,10 @@
 		"title": "Zoo Code {{version}} publicado",
 		"support": "Apoya a Zoo Code dándonos una estrella en <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Novedades de Zoo Code v3.90.0",
-			"highlight1": "✨ Proveedores y modelos: GitHub Copilot ahora es un proveedor: inicia sesión y Zoo Code carga tus modelos de Copilot. IO Intelligence es un proveedor con su propia clave de API. Gemini 4 Argon está en Gemini y Vertex. GPT-6 Luna está en OpenCode Go. Gemini 4 Argon y GPT-6 Luna también están en Zoo Gateway.",
-			"highlight2": "🧭 Ejecución de herramientas: Repetir la misma llamada de herramienta muestra una advertencia y luego Zoo Code detiene ese bucle. Desactivar attempt_completion ya no deja una tarea sin poder terminar. Los mensajes en cola pasan las mismas comprobaciones de protección de comandos que los comandos que envías directamente.",
-			"highlight3": "⚡ Razonamiento y streaming: El pensamiento adaptativo de Anthropic se muestra en el chat y se cuentan los thinking tokens. El interruptor R1 conserva el razonamiento de llama.cpp, Ollama y LM Studio. Codex conserva el razonamiento cifrado junto al resumen que ves. Los streams del modelo de lenguaje de VS Code usan recuperación protegida cuando un stream falla."
+			"heading": "Novedades de Zoo Code v3.94.0",
+			"highlight1": "✨ Compatibilidad más amplia con modelos y proveedores: Usa Claude Haiku 5.5 a través de Anthropic, envía imágenes a modelos VS Code LM compatibles, ajusta la temperatura para los modelos OpenCode Go Responses y cancela solicitudes limpiamente en más proveedores.",
+			"highlight2": "🔐 MCP OAuth más flexible: Configura ajustes estáticos del cliente OAuth, usa rutas de callback personalizadas, descubre detalles de autenticación en WWW-Authenticate y ve los errores de callback antes de reintentarlo.",
+			"highlight3": "🧭 Chats y sesiones largas más fluidos: Renombra tareas en el historial, arrastra archivos al chat sin mantener Shift, reduce la memoria que se conserva durante las sesiones largas y mantén estables los enlaces de subtareas y los webviews reemplazados."
 		},
 		"cloudAgents": {
 			"heading": "Novedades en la Nube:",

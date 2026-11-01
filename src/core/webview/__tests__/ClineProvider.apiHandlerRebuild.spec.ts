@@ -224,8 +224,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				asWebviewUri: vi.fn(),
 			},
 			visible: true,
-			onDidDispose: vi.fn().mockImplementation((callback) => {
-				callback()
+			onDidDispose: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),
 			onDidChangeVisibility: vi.fn().mockImplementation(() => {

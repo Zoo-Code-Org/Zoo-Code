@@ -114,4 +114,20 @@ describe("TaskItemFooter", () => {
 
 		expect(screen.queryByTestId(/task-status-badge-/)).not.toBeInTheDocument()
 	})
+
+	it("shows rename button in full variant when onRename is provided", () => {
+		render(<TaskItemFooter item={mockItem} variant="full" onRename={vi.fn()} />)
+
+		expect(screen.getByTestId("rename-task-button")).toBeInTheDocument()
+	})
+
+	it.each([
+		["compact variant", { variant: "compact" as const, onRename: vi.fn() }],
+		["selection mode", { variant: "full" as const, onRename: vi.fn(), isSelectionMode: true }],
+		["no onRename", { variant: "full" as const }],
+	])("hides rename button in %s", (_label, props) => {
+		render(<TaskItemFooter item={mockItem} {...props} />)
+
+		expect(screen.queryByTestId("rename-task-button")).not.toBeInTheDocument()
+	})
 })
