@@ -194,7 +194,8 @@ function _declaredScopeRoot(confineTo: string | undefined, requestedPath: string
  * @param {SafeWriteJsonOptions} options - Optional configuration for JSON formatting.
  * @returns {Promise<void>}
  */
-async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJsonOptions): Promise<void> {
+
+async function safeWriteJson(filePath: string, data: unknown, options?: SafeWriteJsonOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 	let releaseLock = async () => {} // Initialized to a no-op
 
