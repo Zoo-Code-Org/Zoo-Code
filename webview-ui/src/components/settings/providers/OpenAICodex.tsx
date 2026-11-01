@@ -14,6 +14,7 @@ import { vscode } from "@src/utils/vscode"
 import { ModelPicker } from "../ModelPicker"
 import { OpenAICodexRateLimitDashboard } from "./OpenAICodexRateLimitDashboard"
 import { OpenAICodexSpeedSelector } from "./OpenAICodexSpeedSelector"
+import { OpenAICodexWebSocketToggle } from "./OpenAICodexWebSocketToggle"
 
 interface OpenAICodexProps {
 	apiConfiguration: ProviderSettings
@@ -76,6 +77,10 @@ export const OpenAICodex: React.FC<OpenAICodexProps> = ({
 			<OpenAICodexSpeedSelector
 				value={apiConfiguration[OPEN_AI_CODEX_SERVICE_TIER_KEY]}
 				onValueChange={(value) => setApiConfigurationField(OPEN_AI_CODEX_SERVICE_TIER_KEY, value)}
+			/>
+			<OpenAICodexWebSocketToggle
+				value={apiConfiguration.openAiCodexUseWebSocket}
+				onChange={(value) => setApiConfigurationField("openAiCodexUseWebSocket", value)}
 			/>
 		</div>
 	)

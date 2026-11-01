@@ -21,7 +21,9 @@ const themes = [
 ] as const
 
 for (const theme of themes) {
-	test(`renders both OpenAI Codex speeds in the VS Code ${theme.name} theme`, async ({ mount }) => {
+	test(`renders OpenAI Codex speed and WebSocket preferences in the VS Code ${theme.name} theme`, async ({
+		mount,
+	}) => {
 		const component = mountedStory(await mount("openai-codex"))
 		const selectors = component.getByTestId("openai-codex-service-tier")
 		const comboboxes = component.getByRole("combobox", { name: "Speed" })
@@ -29,6 +31,10 @@ for (const theme of themes) {
 
 		await expect(selectors).toHaveCount(2)
 		await expect(comboboxes).toHaveCount(2)
+		const checkboxes = component.getByRole("checkbox", { name: "Use WebSocket" })
+		await expect(checkboxes).toHaveCount(2)
+		await expect(checkboxes.first()).not.toBeChecked()
+		await expect(checkboxes.last()).toBeChecked()
 		await selector.evaluate((element, { bodyClass, themeId }) => {
 			const { document } = element.ownerDocument.defaultView!
 
