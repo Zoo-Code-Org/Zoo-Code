@@ -101,6 +101,14 @@ export interface SettingsViewRef {
 	checkUnsaveChanges: (then: () => void) => void
 }
 
+/**
+ * How long the form waits for the host to answer a save that changes an appearance value. The host always answers
+ * (success or failure), but a write that never settles would otherwise leave the form locked until the webview reloads.
+ * After this the save is treated as failed: the edits stay, Save and Done work again, and an answer that arrives
+ * later is ignored (the host refreshes the state after it saves, so the form is brought up to date by that).
+ */
+export const SAVE_ANSWER_TIMEOUT_MS = 20_000
+
 export const sectionNames = [
 	"providers",
 	"autoApprove",
@@ -146,6 +154,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const editedAppearance = useRef(new Set<AppearanceKey>())
 	// What the pending save sent for each appearance value, to tell which edits it has saved when it succeeds.
 	const pendingAppearanceSent = useRef<Record<string, number | null>>({})
+	// A request to leave the form (a tab switch, a command from the host) that came in while a save was pending. It is
+	// asked again, through the same unsaved-changes check, once the save has settled.
+	const heldNavigation = useRef<(() => void) | undefined>(undefined)
 	const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined)
 	const [activeTab, setActiveTab] = useState<SectionName>(
 		targetSection && sectionNames.includes(targetSection as SectionName)
@@ -521,10 +532,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	useEffect(() => {
 		if (!pendingSaveId) return
 
-		const onResult = (event: MessageEvent) => {
-			const message = event.data
-			if (message?.type !== "settingsSaveResult" || message.requestId !== pendingSaveId) return
-
+		// The save is over: stored, failed, or not answered in time.
+		const settle = (success: boolean) => {
 			const editedState = pendingSaveEditedState.current
 			const sent = pendingAppearanceSent.current
 			pendingSaveEditedState.current = undefined
@@ -532,7 +541,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			setPendingSaveId(undefined)
 
 			// What was stored is no longer an unsaved edit, unless the user changed that value again meanwhile.
-			if (message.success) {
+			if (success) {
 				for (const [key, value] of Object.entries(sent)) {
 					if ((latestCachedState.current[key as AppearanceKey] ?? null) === value) {
 						editedAppearance.current.delete(key as AppearanceKey)
@@ -541,19 +550,47 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			}
 
 			// An edit made while the save was in flight is not in what was sent: it stays unsaved.
-			if (message.success && latestCachedState.current === editedState) setChangeDetected(false)
+			const clean = success && latestCachedState.current === editedState
+			if (clean) setChangeDetected(false)
+
+			// A request to leave that came in meanwhile goes through the unsaved-changes check now: it proceeds if
+			// everything was stored, and otherwise (a failed save, or an edit made meanwhile) the user is asked.
+			const held = heldNavigation.current
+			heldNavigation.current = undefined
+			if (held) {
+				if (clean) {
+					held()
+				} else {
+					confirmDialogHandler.current = held
+					setDiscardDialogShow(true)
+				}
+			}
+		}
+
+		const onResult = (event: MessageEvent) => {
+			const message = event.data
+			if (message?.type !== "settingsSaveResult" || message.requestId !== pendingSaveId) return
+
+			settle(message.success === true)
 		}
 
 		window.addEventListener("message", onResult)
-		return () => window.removeEventListener("message", onResult)
+		const timer = setTimeout(() => settle(false), SAVE_ANSWER_TIMEOUT_MS)
+		return () => {
+			clearTimeout(timer)
+			window.removeEventListener("message", onResult)
+		}
 	}, [pendingSaveId])
 
 	const checkUnsaveChanges = useCallback(
 		(then: () => void) => {
 			// A save waiting for the host's answer keeps going whatever is chosen here, so leaving now (and offering
-			// to discard changes that are being stored) would say something untrue. The answer arrives, on success or
-			// failure, and the form can be left or the edits retried then.
-			if (pendingSaveId) return
+			// to discard changes that are being stored) would say something untrue. The request is kept, the latest
+			// one if there are several, and goes through this check again when the save has settled.
+			if (pendingSaveId) {
+				heldNavigation.current = then
+				return
+			}
 
 			if (isChangeDetected) {
 				confirmDialogHandler.current = then

@@ -1,12 +1,12 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 import { createRef } from "react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { renderWithExtensionState } from "@/utils/test-utils"
 import { vscode } from "@src/utils/vscode"
 
-import SettingsView, { type SettingsViewRef } from "../SettingsView"
+import SettingsView, { SAVE_ANSWER_TIMEOUT_MS, type SettingsViewRef } from "../SettingsView"
 import { answerSave, lastSaveRequestId } from "./saveAcknowledgement"
 
 vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
@@ -363,21 +363,161 @@ describe("SettingsView – leaving while an appearance save is pending", () => {
 		expect(doneButton()).toBeEnabled()
 	})
 
-	it("ignores a request to leave (a tab switch) while the save waits, without showing the dialog", async () => {
+	describe("a request to leave that comes in while the save waits", () => {
+		const renderWithRef = () => {
+			const ref = createRef<SettingsViewRef>()
+			renderWithExtensionState(<SettingsView ref={ref} onDone={vi.fn()} targetSection="ui" />)
+			return ref
+		}
+		const dialog = () => screen.queryByText("settings:unsavedChangesDialog.title")
+
+		it("is held, and goes ahead once the save was stored", async () => {
+			const ref = renderWithRef()
+			await makeAnEdit()
+			fireEvent.click(screen.getByTestId("save-button"))
+			const then = vi.fn()
+
+			act(() => ref.current?.checkUnsaveChanges(then))
+			expect(then).not.toHaveBeenCalled()
+			expect(dialog()).not.toBeInTheDocument()
+
+			answerSave(lastSaveRequestId(postMessage), { success: true })
+
+			expect(then).toHaveBeenCalledTimes(1)
+			expect(dialog()).not.toBeInTheDocument()
+		})
+
+		it("asks the user instead when the save failed, and goes ahead only if they discard", async () => {
+			const ref = renderWithRef()
+			await makeAnEdit()
+			fireEvent.click(screen.getByTestId("save-button"))
+			const then = vi.fn()
+			act(() => ref.current?.checkUnsaveChanges(then))
+
+			answerSave(lastSaveRequestId(postMessage), { success: false, error: "nope" })
+
+			expect(then).not.toHaveBeenCalled()
+			expect(await screen.findByText("settings:unsavedChangesDialog.title")).toBeInTheDocument()
+			fireEvent.click(screen.getByText("settings:unsavedChangesDialog.discardButton"))
+			expect(then).toHaveBeenCalledTimes(1)
+		})
+
+		it("asks the user when an edit was made meanwhile, because that edit was not saved", async () => {
+			const ref = renderWithRef()
+			await makeAnEdit()
+			fireEvent.click(screen.getByTestId("save-button"))
+			const then = vi.fn()
+			act(() => ref.current?.checkUnsaveChanges(then))
+			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // not in what was sent
+
+			answerSave(lastSaveRequestId(postMessage), { success: true })
+
+			expect(then).not.toHaveBeenCalled()
+			expect(await screen.findByText("settings:unsavedChangesDialog.title")).toBeInTheDocument()
+		})
+
+		it("keeps only the latest of several requests", async () => {
+			const ref = renderWithRef()
+			await makeAnEdit()
+			fireEvent.click(screen.getByTestId("save-button"))
+			const first = vi.fn()
+			const latest = vi.fn()
+			act(() => {
+				ref.current?.checkUnsaveChanges(first)
+				ref.current?.checkUnsaveChanges(latest)
+			})
+
+			answerSave(lastSaveRequestId(postMessage), { success: true })
+
+			expect(first).not.toHaveBeenCalled()
+			expect(latest).toHaveBeenCalledTimes(1)
+		})
+
+		it("goes ahead at once when no save is pending and nothing is unsaved", () => {
+			const ref = renderWithRef()
+			const then = vi.fn()
+
+			act(() => ref.current?.checkUnsaveChanges(then))
+
+			expect(then).toHaveBeenCalledTimes(1)
+		})
+	})
+})
+
+describe("SettingsView – a save the host never answers", () => {
+	beforeEach(() => {
+		postMessage.mockClear()
+		vi.useFakeTimers({ shouldAdvanceTime: true })
+	})
+	afterEach(() => vi.useRealTimers())
+
+	const doneButton = () => screen.getByRole("button", { name: "settings:common.done" })
+
+	it("unlocks the form after the wait, keeping the edits, so Save can be tried again", async () => {
+		renderUiTab()
+		await makeAnEdit()
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(screen.getByTestId("save-button")).toBeDisabled()
+		expect(doneButton()).toBeDisabled()
+
+		act(() => vi.advanceTimersByTime(SAVE_ANSWER_TIMEOUT_MS))
+
+		expect(screen.getByTestId("save-button")).toBeEnabled()
+		expect(doneButton()).toBeEnabled()
+		postMessage.mockClear()
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(lastUpdatedSettings().terminalFontSize).toBe(13) // the edit was kept, and is sent again
+	})
+
+	it("does not unlock the form before the wait is over", async () => {
+		renderUiTab()
+		await makeAnEdit()
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		act(() => vi.advanceTimersByTime(SAVE_ANSWER_TIMEOUT_MS - 1000))
+
+		expect(screen.getByTestId("save-button")).toBeDisabled()
+	})
+
+	it("ignores an answer that arrives after the wait, so it cannot complete a later save", async () => {
+		renderUiTab()
+		await makeAnEdit()
+		fireEvent.click(screen.getByTestId("save-button"))
+		const lateId = lastSaveRequestId(postMessage)
+		act(() => vi.advanceTimersByTime(SAVE_ANSWER_TIMEOUT_MS))
+
+		fireEvent.click(screen.getByTestId("save-button")) // tries again: a new request
+		expect(lastSaveRequestId(postMessage)).not.toBe(lateId)
+		answerSave(lateId, { success: true }) // the first save answers, late
+
+		expect(screen.getByTestId("save-button")).toBeDisabled() // the second save is still waiting
+		answerSave(lastSaveRequestId(postMessage), { success: true })
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled()) // saved: nothing left to save
+	})
+
+	it("treats a held request to leave as after a failed save, when the wait is over", async () => {
 		const ref = createRef<SettingsViewRef>()
 		renderWithExtensionState(<SettingsView ref={ref} onDone={vi.fn()} targetSection="ui" />)
 		await makeAnEdit()
 		fireEvent.click(screen.getByTestId("save-button"))
 		const then = vi.fn()
-
 		act(() => ref.current?.checkUnsaveChanges(then))
 
-		expect(then).not.toHaveBeenCalled()
-		expect(screen.queryByText("settings:unsavedChangesDialog.title")).not.toBeInTheDocument()
+		act(() => vi.advanceTimersByTime(SAVE_ANSWER_TIMEOUT_MS))
 
+		expect(then).not.toHaveBeenCalled()
+		expect(await screen.findByText("settings:unsavedChangesDialog.title")).toBeInTheDocument()
+	})
+
+	it("does nothing when the answer came in time and the wait would have ended later", async () => {
+		renderUiTab()
+		await makeAnEdit()
+		fireEvent.click(screen.getByTestId("save-button"))
 		answerSave(lastSaveRequestId(postMessage), { success: true })
-		await waitFor(() => expect(doneButton()).toBeEnabled())
-		act(() => ref.current?.checkUnsaveChanges(then)) // saved: nothing to discard, so it goes ahead
-		expect(then).toHaveBeenCalledTimes(1)
+
+		act(() => vi.advanceTimersByTime(SAVE_ANSWER_TIMEOUT_MS * 2))
+
+		expect(screen.queryByText("settings:unsavedChangesDialog.title")).not.toBeInTheDocument()
+		expect(screen.getByTestId("save-button")).toBeDisabled() // nothing unsaved
 	})
 })
