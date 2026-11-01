@@ -1270,16 +1270,14 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		}
 	})
 
-	it("repairs a child whose file mtime is at the unix epoch (kills '-' -> '%' mutant at the liveness subtraction)", async () => {
+	it("repairs a child whose file mtime is at the unix epoch", async () => {
 		// Files stamped 1970-01-01 (epoch-zero artifacts from misconfigured clocks,
 		// zip extraction, or container images) must be treated as stale orphans.
-		// Kills the ArithmeticOperator mutant `Date.now() - mtimeMs` ->
-		// `Date.now() % mtimeMs`: with the mocked mtimeMs = 1000, the real
-		// subtraction is ~56 years (stale -> repair), while FIXED_NOW % 1000 === 0
-		// would be read as live and skip the repair. The same mutant inside the
-		// skip-path log is never reached under the mutant because the guard
-		// already diverges. The exact 1000 ms stamp comes from the mocked
-		// `getChildFileMtimeMs`, so no filesystem millisecond precision is
+		// This is a behavioral regression pin, not a mutant kill: no Stryker mutant
+		// at this site is killed here, because the real ArithmeticOperator
+		// replacement is `-` -> `+` (never `%`), and a ~56-year epoch age is stale
+		// under `Date.now() + mtimeMs` too. The exact 1000 ms stamp comes from the
+		// mocked `getChildFileMtimeMs`, so no filesystem millisecond precision is
 		// assumed.
 		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
 		const logSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
@@ -1350,12 +1348,14 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		}
 	})
 
-	it("skips repair and renders 299s for a child file age of threshold-501ms (kills Math.ceil mutant)", async () => {
-		// Companion to the 299999 ms test: Math.round(299.499) = 299 while
-		// Math.ceil(299.499) = 300 and Math.floor(299.499) = 299. The 299999 ms
-		// test above covers the floor mutant (round = ceil = 300 there), and
-		// this one covers the ceil mutant. It also re-asserts the live side of
-		// the strict `<` boundary and the line-105 threshold mutants.
+	it("skips repair and renders 299s for a child file age of threshold-501ms (kills the skip-log '/ 1000' ArithmeticOperator mutant)", async () => {
+		// Companion to the 299999 ms test. The delivered kill is the render
+		// substitution in the skip log: `Math.round(ageMs / 1000)` -> `* 1000`
+		// makes the rendered age 299499000s instead of 299s, so the
+		// "(mtime 299s ago)" assertion below fails. The threshold-constant
+		// arithmetic mutants die here incidentally as well. There is no Math.ceil
+		// mutant to kill: no mutator targets Math.ceil and the function never
+		// existed in TaskHistoryStore.ts.
 		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
 		const logSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 		try {
@@ -3296,7 +3296,7 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		expect(ownedIds(s).has(parent.id)).toBe(false)
 	})
 
-	it("non-active runtime write DELETES local ownership (kills L569 CallExpression, L566 LogicalOperator)", async () => {
+	it("non-active runtime write DELETES local ownership (kills historical L569 CallExpression, L566 LogicalOperator; guard now at TaskHistoryStore.ts:721-722)", async () => {
 		// trackLocalSessionOwnership: `if ((written.status ?? "active") === "active") add else delete`.
 		// Observable under test: after an active runtime write registers ownership, a later NON-active
 		// runtime write must remove it (the else/`delete(id)` branch). If the delete is dropped (L569
@@ -3360,8 +3360,12 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		})
 
 		// Ownership was deleted by the completed write, so the orphan is repaired.
-		// (Under L566->true or L569 `;` it would remain owned and stay active.)
+		// The two always-DELETE mutants (Conditional->true, StringLiteral->"") delete for
+		// every status too, so this scenario repairs under them as well; the ADD-branch
+		// test below is what pins them.
 		expect(s.get(childId)?.status).toBe("interrupted")
+		// The repaired orphan is not re-claimed by the repair write itself.
+		expect(ownedIds(s).has(childId)).toBe(false)
 		expect(errorSpy).not.toHaveBeenCalled()
 		errorSpy.mockRestore()
 	})
@@ -3381,10 +3385,12 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		expect(ownedIds(s).has("own-add")).toBe(false)
 	})
 
-	it("active runtime write adds the id to locallyActiveTaskIds (kills L566 Conditional->true add-branch, LogicalOperator)", async () => {
-		// Complement: the add branch must actually insert. Under L566 LogicalOperator mutants
-		// (e.g. `written.status && "active"`), an explicit "active" status short-circuits to a
-		// truthy-but-not-"active" value, so `=== "active"` is false and the add is skipped.
+	it("active runtime write adds the id to locallyActiveTaskIds (kills L566 Conditional->true add-branch)", async () => {
+		// Complement: the add branch must actually insert. Under Conditional->true
+		// (forced delete branch) the explicit "active" write is deleted instead, so
+		// the set read below fails. The LogicalOperator->&& mutant is NOT killed
+		// here: `"active" && "active" === "active"`, so the add still runs. That
+		// mutant is killed by the DELETES-ownership test above.
 		const s = (store = new TaskHistoryStore(tmpDir))
 		await s.initialize()
 		await s.upsert(makeItem({ id: "add-explicit", status: "active" }))
@@ -3787,11 +3793,13 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		expect(passRan).toBe(false)
 	})
 
-	it("runPeriodicDelegationReconciliation runs the pass when NOT disposed and NOT already running (kills L1077 LogicalOperator->&&)", async () => {
+	it("runPeriodicDelegationReconciliation runs the pass when NOT disposed and NOT already running (kills L1077 Conditional->true)", async () => {
 		// Complement: with disposed=false and delegationTickRunning=false the guard must NOT fire,
-		// so the pass runs. Under LogicalOperator->&& the condition `disposed && tickRunning` is
-		// false here too... but Conditional->true (always skip) would suppress the run. Assert the
-		// pass executes in the normal case, pinning the guard's truth table from the other side.
+		// so the pass runs. The killed mutant is Conditional->true (always skip), which suppresses
+		// the run. LogicalOperator->&& is NOT killed here: `false && false` is false too, so the
+		// guard stays open and this test passes under it. That mutant is killed by the sibling
+		// "does not run the pass when disposed" test above, where disposed=true and
+		// tickRunning=false make `&&` open the guard.
 		const s = (store = new TaskHistoryStore(tmpDir))
 		await s.initialize()
 
