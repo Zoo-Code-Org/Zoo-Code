@@ -132,6 +132,7 @@ const mockClineProvider = {
 	getCurrentTask: vi.fn(),
 	getTaskWithId: vi.fn(),
 	createTaskWithHistoryItem: vi.fn(),
+	renameTaskWithId: vi.fn(),
 	getSkillsManager: vi.fn(),
 	cwd: "/mock/workspace",
 } as unknown as ClineProvider
@@ -3034,5 +3035,21 @@ describe("updateProfileModel", () => {
 		} as unknown as Parameters<typeof webviewMessageHandler>[1])
 
 		expect(updateProfileModel).not.toHaveBeenCalled()
+	})
+})
+
+describe("webviewMessageHandler - renameTaskWithId", () => {
+	beforeEach(() => {
+		vi.mocked(mockClineProvider.renameTaskWithId).mockClear()
+	})
+
+	it.each([
+		["forwards taskId and text", { taskId: "task-1", text: "New name" }, [["task-1", "New name"]]],
+		["forwards an empty title so the provider can clear it", { taskId: "task-1", text: "" }, [["task-1", ""]]],
+		["skips the call when taskId is missing", { text: "New name" }, []],
+	])("%s", async (_label, payload, expectedCalls) => {
+		await webviewMessageHandler(mockClineProvider, { type: "renameTaskWithId", ...payload })
+
+		expect(vi.mocked(mockClineProvider.renameTaskWithId).mock.calls).toEqual(expectedCalls)
 	})
 })
