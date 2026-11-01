@@ -67,7 +67,7 @@ export const BedrockCustomArn = ({ apiConfiguration, setApiConfigurationField }:
 	return (
 		<>
 			<VSCodeTextField
-				value={apiConfiguration?.awsCustomArn || ""}
+				value={apiConfiguration.awsCustomArn || ""}
 				onInput={(e) => onArnInput((e.target as HTMLInputElement).value)}
 				placeholder={t("settings:placeholders.customArn")}
 				className="w-full"

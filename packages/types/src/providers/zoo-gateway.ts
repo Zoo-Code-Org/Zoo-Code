@@ -1,4 +1,8 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import { baseProviderSettingsShape, createModelIdAccessor, createProviderDefinition } from "./common.js"
 
 // Zoo Gateway uses the same model ID format as Vercel AI Gateway (provider/model-name)
 export const zooGatewayDefaultModelId = "anthropic/claude-sonnet-4"
@@ -22,3 +26,18 @@ export const zooGatewayDefaultModelInfo: ModelInfo = {
 }
 
 export const ZOO_GATEWAY_DEFAULT_TEMPERATURE = 0.7
+
+export const ZOO_GATEWAY_MODEL_ID_FIELD = "zooGatewayModelId"
+
+export const zooGatewayProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.zooGateway,
+	modelIdKey: ZOO_GATEWAY_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(ZOO_GATEWAY_MODEL_ID_FIELD),
+	getDefaultModelId: () => zooGatewayDefaultModelId,
+	schema: {
+		...baseProviderSettingsShape,
+		zooSessionToken: z.string().optional(),
+		[ZOO_GATEWAY_MODEL_ID_FIELD]: z.string().optional(),
+		zooGatewayBaseUrl: z.string().optional(),
+	},
+})

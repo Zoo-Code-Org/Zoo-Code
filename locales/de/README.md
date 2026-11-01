@@ -47,11 +47,11 @@ Zoo Code baut auf dem von Roo Code geschaffenen Fundament auf und erweitert es f
 - **Zuverlässigere Terminal- und Bearbeitungsabläufe** — Korrekturen für vorzeitige Terminalabschlüsse, Race Conditions beim Aufgabenstatus, Kontextverwaltung, diff-Bearbeitung und anbieterspezifische Tool-Nutzung.
 - **Mehr Kontrolle über deinen Workspace** — Regelverwaltung, MCP-Beschränkungen pro Modus, Pfadsteuerung für Multi-Root-Workspaces, Reasoning-Optionen für Modelle und Aktionen zur Prüfung von Änderungen nach Abschluss.
 
-## Neu in v3.92.0
+## Neu in v3.94.0
 
-- ✨ **Schnellere Modellauswahl und bessere Modellunterstützung:** Wechsle das Modell direkt im Chat-Eingabefeld. Nutze Claude Haiku 5.5 auf Amazon Bedrock, profitiere von präziseren Kimi K3-Funktionen auf OpenRouter und verwende die korrigierten Limits für Gemini 4 Argon auf Vercel AI Gateway.
-- 🧭 **Zuverlässigere Workflows für Terminal, Bearbeitung, Chat und Remote-Umgebungen:** Lass Befehlsausgaben auf Wunsch standardmäßig einklappen, erhalte klarere Fehlermeldungen bei der Bearbeitung, halte Reasoning- und API-Zeilen sichtbar und vermeide Start- und Proxy-Probleme in Remote-Workspaces.
-- 🔌 **Erweiterter MCP Marketplace:** Verbinde Zoo Code über den MCP Marketplace mit AnySearch, Mailtea und Tradehand.
+- ✨ **Breitere Modell- und Providerunterstützung:** Nutze Claude Haiku 5.5 über Anthropic, schicke Bilder an kompatible VS Code LM-Modelle, stelle die Temperatur für OpenCode Go Responses-Modelle ein und brich Anfragen sauber bei mehr Providern ab.
+- 🔐 **Flexibleres MCP OAuth:** Konfiguriere statische OAuth-Client-Einstellungen, nutze eigene Callback-Pfade, ermittle Authentifizierungsdetails aus `WWW-Authenticate` und sieh Callback-Fehler, bevor du es erneut versuchst.
+- 🧭 **Flüssigere Chats und lange Sessions:** Benenne Aufgaben im Verlauf um, ziehe Dateien per Drag-and-drop in den Chat, ohne Shift gedrückt zu halten, reduziere den Speicherbedarf bei langen Sessions und halte Subtask-Links und ausgetauschte Webviews stabil.
 
 ## Was kann Zoo Code für DICH tun?
 
