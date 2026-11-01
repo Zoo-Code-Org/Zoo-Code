@@ -123,54 +123,47 @@ export async function collectPersistenceDiagnostics(options: {
 	}
 	const indexIds = new Set(indexEntries?.filter(isHistoryItem).map((item) => item.id) ?? [])
 
-	const tasks = await Promise.all(
-		relevant.map(async (item) => {
-			const taskPath = path.join(tasksPath, item.id)
-			const [historyItemResult, uiMessagesResult] = await Promise.all([
-				inspectJson(path.join(taskPath, GlobalFileNames.historyItem)),
-				inspectJson(path.join(taskPath, GlobalFileNames.uiMessages)),
-			])
-			const messages = Array.isArray(uiMessagesResult.value) ? uiMessagesResult.value : undefined
-			const timestamps = (messages ?? [])
-				.map((message) =>
-					message !== null && typeof message === "object" && "ts" in message && typeof message.ts === "number"
-						? message.ts
-						: undefined,
-				)
-				.filter((timestamp): timestamp is number => timestamp !== undefined)
-			const findings: string[] = []
-			for (const related of [
-				item.rootTaskId,
-				item.parentTaskId,
-				item.awaitingChildId,
-				...(item.childIds ?? []),
-			]) {
-				if (related && !byId.has(related)) findings.push("missingReferencedTask")
-			}
-			if (item.awaitingChildId && item.status !== "delegated") findings.push("awaitingChildStatusMismatch")
-			if (item.parentTaskId && !byId.get(item.parentTaskId)?.childIds?.includes(item.id)) {
-				findings.push("parentChildMismatch")
-			}
-			if (hasParentCycle(item, byId)) findings.push("parentCycle")
+	// Inspect sequentially to avoid retaining parsed histories for multiple tasks.
+	const tasks: DiagnosticsPersistenceReport["tasks"] = []
+	for (const item of relevant) {
+		const taskPath = path.join(tasksPath, item.id)
+		const historyItemResult = await inspectJson(path.join(taskPath, GlobalFileNames.historyItem))
+		const uiMessagesResult = await inspectJson(path.join(taskPath, GlobalFileNames.uiMessages))
+		const messages = Array.isArray(uiMessagesResult.value) ? uiMessagesResult.value : undefined
+		const timestamps = (messages ?? [])
+			.map((message) =>
+				message !== null && typeof message === "object" && "ts" in message && typeof message.ts === "number"
+					? message.ts
+					: undefined,
+			)
+			.filter((timestamp): timestamp is number => timestamp !== undefined)
+		const findings: string[] = []
+		for (const related of [item.rootTaskId, item.parentTaskId, item.awaitingChildId, ...(item.childIds ?? [])]) {
+			if (related && !byId.has(related)) findings.push("missingReferencedTask")
+		}
+		if (item.awaitingChildId && item.status !== "delegated") findings.push("awaitingChildStatusMismatch")
+		if (item.parentTaskId && !byId.get(item.parentTaskId)?.childIds?.includes(item.id)) {
+			findings.push("parentChildMismatch")
+		}
+		if (hasParentCycle(item, byId)) findings.push("parentCycle")
 
-			return {
-				id: pseudonymize(item.id),
-				rootTask: item.rootTaskId ? pseudonymize(item.rootTaskId) : undefined,
-				parentTask: item.parentTaskId ? pseudonymize(item.parentTaskId) : undefined,
-				children: (item.childIds ?? []).slice(0, MAX_TASKS).map(pseudonymize),
-				status: item.status,
-				number: item.number,
-				historyItem: historyItemResult.inspection,
-				uiMessages: {
-					...uiMessagesResult.inspection,
-					messageCount: messages?.length,
-					firstTimestamp: timestamps[0],
-					lastTimestamp: timestamps.at(-1),
-				},
-				integrityFindings: Array.from(new Set(findings)),
-			}
-		}),
-	)
+		tasks.push({
+			id: pseudonymize(item.id),
+			rootTask: item.rootTaskId ? pseudonymize(item.rootTaskId) : undefined,
+			parentTask: item.parentTaskId ? pseudonymize(item.parentTaskId) : undefined,
+			children: (item.childIds ?? []).slice(0, MAX_TASKS).map(pseudonymize),
+			status: item.status,
+			number: item.number,
+			historyItem: historyItemResult.inspection,
+			uiMessages: {
+				...uiMessagesResult.inspection,
+				messageCount: messages?.length,
+				firstTimestamp: timestamps[0],
+				lastTimestamp: timestamps.at(-1),
+			},
+			integrityFindings: Array.from(new Set(findings)),
+		})
+	}
 
 	return {
 		cacheEntryCount: history.length,

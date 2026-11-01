@@ -22,7 +22,6 @@ class ErrorBoundary extends Component<ErrorProps, ErrorState> {
 	}
 
 	static getDerivedStateFromError(error: unknown) {
-		recordDiagnosticsError("errorBoundary", error)
 		let errorMessage = ""
 
 		if (error instanceof Error) {
@@ -38,6 +37,7 @@ class ErrorBoundary extends Component<ErrorProps, ErrorState> {
 	}
 
 	async componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+		recordDiagnosticsError("errorBoundary", error)
 		const componentStack = errorInfo.componentStack || ""
 		const enhancedError = await enhanceErrorWithSourceMaps(error, componentStack)
 

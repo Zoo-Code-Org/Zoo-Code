@@ -6,6 +6,8 @@ import type { HistoryItem } from "@roo-code/types"
 
 import { collectPersistenceDiagnostics } from "../persistence"
 
+vi.mock("fs/promises", { spy: true })
+
 describe("collectPersistenceDiagnostics", () => {
 	let storagePath: string
 
@@ -14,6 +16,7 @@ describe("collectPersistenceDiagnostics", () => {
 	})
 
 	afterEach(async () => {
+		vi.restoreAllMocks()
 		await fs.rm(storagePath, { recursive: true, force: true })
 	})
 
@@ -72,6 +75,52 @@ describe("collectPersistenceDiagnostics", () => {
 		const serialized = JSON.stringify(result)
 		expect(serialized).not.toContain("PRIVATE")
 		expect(serialized).not.toContain("raw-child-id")
+	})
+
+	it("reads task files sequentially across the delegation tree", async () => {
+		const history: HistoryItem[] = Array.from({ length: 10 }, (_, index) => ({
+			id: `task-${index}`,
+			number: index,
+			ts: index,
+			task: "not reported",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+			childIds: index === 0 ? Array.from({ length: 9 }, (_, child) => `task-${child + 1}`) : [],
+		}))
+		for (const item of history) {
+			const taskPath = path.join(storagePath, "tasks", item.id)
+			await fs.mkdir(taskPath, { recursive: true })
+			await fs.writeFile(path.join(taskPath, "history_item.json"), JSON.stringify(item))
+			await fs.writeFile(path.join(taskPath, "ui_messages.json"), JSON.stringify([{ ts: 10 }, { ts: 20 }]))
+		}
+
+		const { readFile } = await vi.importActual<typeof fs>("fs/promises")
+		let activeReads = 0
+		let maxActiveReads = 0
+		const readSpy = vi.spyOn(fs, "readFile").mockImplementation(async (...args: Parameters<typeof fs.readFile>) => {
+			activeReads++
+			maxActiveReads = Math.max(maxActiveReads, activeReads)
+			try {
+				await new Promise((resolve) => setTimeout(resolve, 5))
+				return await readFile(...args)
+			} finally {
+				activeReads--
+			}
+		})
+
+		readSpy.mockClear()
+		const result = await collectPersistenceDiagnostics({
+			storagePath,
+			history,
+			currentTaskIds: ["task-0"],
+			pseudonymize: (value) => value,
+		})
+
+		expect(readSpy).toHaveBeenCalledTimes(20)
+		expect(maxActiveReads).toBe(1)
+		expect(result.tasks).toHaveLength(10)
+		expect(result.tasks.every((task) => task.uiMessages.messageCount === 2)).toBe(true)
 	})
 
 	it("reports corrupt and missing files without throwing", async () => {
