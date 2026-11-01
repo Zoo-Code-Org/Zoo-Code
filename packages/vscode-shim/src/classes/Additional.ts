@@ -112,6 +112,29 @@ export class LanguageModelTextPart {
 	constructor(public value: string) {}
 }
 
+export class LanguageModelDataPart {
+	constructor(
+		public data: Uint8Array,
+		public mimeType: string,
+	) {}
+
+	static image(data: Uint8Array, mimeType: string): LanguageModelDataPart {
+		return new LanguageModelDataPart(data, mimeType)
+	}
+
+	static text(value: string, mimeType: string = "text/plain"): LanguageModelDataPart {
+		return new LanguageModelDataPart(new TextEncoder().encode(value), mimeType)
+	}
+
+	static json(value: unknown, mimeType: string = "application/json"): LanguageModelDataPart {
+		const serialized = JSON.stringify(value)
+		if (serialized === undefined) {
+			throw new TypeError("LanguageModelDataPart.json: value is not JSON-serializable")
+		}
+		return new LanguageModelDataPart(new TextEncoder().encode(serialized), mimeType)
+	}
+}
+
 export class LanguageModelToolCallPart {
 	constructor(
 		public callId: string,

@@ -19,12 +19,14 @@ type CallbackHost = "localhost" | "127.0.0.1"
  * @param port Optional port to use (defaults to random available port)
  * @param expectedState Optional expected state for CSRF protection
  * @param host Loopback host used by the OAuth redirect URI
+ * @param callbackPath Path of the OAuth redirect URI that receives the authorization code
  * @returns Promise<{server: http.Server, port: number, result: Promise<CallbackResult>}>
  */
 export function startCallbackServer(
 	port?: number,
 	expectedState?: string,
 	host: CallbackHost = "127.0.0.1",
+	callbackPath = "/callback",
 ): Promise<{
 	server: http.Server
 	port: number
@@ -82,12 +84,17 @@ export function startCallbackServer(
 			}
 
 			server.on("request", (req: any, res: any) => {
-				if (resolved) return
+				if (resolved) {
+					// Answer late requests so that their connections can close when the server stops.
+					res.writeHead(404)
+					res.end("Not found")
+					return
+				}
 
 				const url = new URL(req.url || "", `http://localhost:${actualPort}`)
 				const pathname = url.pathname
 
-				if (pathname === "/callback") {
+				if (pathname === callbackPath) {
 					resolved = true
 					clearTimeout(timeout)
 
