@@ -44,6 +44,7 @@ export type KimiCodeAuthMethod = z.infer<typeof kimiCodeAuthMethodSchema>
 export const kimiCodeProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.kimiCode,
 	label: "Kimi Code",
+	serviceUrl: "https://www.kimi.com/code",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => kimiCodeDefaultModelId,

@@ -75,6 +75,7 @@ export const friendliModels = {
 export const friendliProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.friendli,
 	label: "Friendli",
+	serviceUrl: "https://friendli.ai",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => friendliDefaultModelId,

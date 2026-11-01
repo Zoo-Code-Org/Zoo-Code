@@ -37,6 +37,7 @@ export const OLLAMA_MODEL_ID_FIELD = "ollamaModelId"
 export const ollamaProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.ollama,
 	label: "Ollama",
+	serviceUrl: "https://ollama.ai",
 	// The user points the extension at their own Ollama endpoint.
 	isProxy: true,
 	modelIdKey: OLLAMA_MODEL_ID_FIELD,

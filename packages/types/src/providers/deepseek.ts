@@ -88,6 +88,7 @@ export const DEEP_SEEK_DEFAULT_TEMPERATURE = 0.0
 export const deepSeekProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.deepseek,
 	label: "DeepSeek",
+	serviceUrl: "https://platform.deepseek.com",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => deepSeekDefaultModelId,

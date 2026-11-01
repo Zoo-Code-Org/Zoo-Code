@@ -33,44 +33,8 @@ import {
 	zooGatewayDefaultModelId,
 	getZAiModels,
 	getProviderDefaultModelId,
-	getProviderLabel,
 	getProviderModels,
 } from "@roo-code/types"
-
-export interface ProviderServiceConfig {
-	serviceName: string
-	serviceUrl: string
-}
-
-export const PROVIDER_SERVICE_CONFIG: Partial<Record<ProviderName, ProviderServiceConfig>> = {
-	[providerIdentifiers.anthropic]: { serviceName: "Anthropic", serviceUrl: "https://console.anthropic.com" },
-	[providerIdentifiers.bedrock]: { serviceName: "Amazon Bedrock", serviceUrl: "https://aws.amazon.com/bedrock" },
-	[providerIdentifiers.deepseek]: { serviceName: "DeepSeek", serviceUrl: "https://platform.deepseek.com" },
-	[providerIdentifiers.moonshot]: { serviceName: "Moonshot", serviceUrl: "https://platform.moonshot.cn" },
-	[providerIdentifiers.kimiCode]: { serviceName: "Kimi Code", serviceUrl: "https://www.kimi.com/code" },
-	[providerIdentifiers.gemini]: { serviceName: "Google Gemini", serviceUrl: "https://ai.google.dev" },
-	[providerIdentifiers.mistral]: { serviceName: "Mistral", serviceUrl: "https://console.mistral.ai" },
-	[providerIdentifiers.openaiNative]: { serviceName: "OpenAI", serviceUrl: "https://platform.openai.com" },
-	[providerIdentifiers.qwenCode]: { serviceName: "Qwen Code", serviceUrl: "https://dashscope.console.aliyun.com" },
-	[providerIdentifiers.vertex]: {
-		serviceName: "GCP Vertex AI",
-		serviceUrl: "https://console.cloud.google.com/vertex-ai",
-	},
-	[providerIdentifiers.xai]: { serviceName: "xAI", serviceUrl: "https://x.ai" },
-	[providerIdentifiers.sambanova]: { serviceName: "SambaNova", serviceUrl: "https://sambanova.ai" },
-	[providerIdentifiers.zai]: { serviceName: "Z.ai", serviceUrl: "https://z.ai" },
-	[providerIdentifiers.fireworks]: { serviceName: "Fireworks AI", serviceUrl: "https://fireworks.ai" },
-	[providerIdentifiers.friendli]: { serviceName: "Friendli", serviceUrl: "https://friendli.ai" },
-	[providerIdentifiers.minimax]: { serviceName: "MiniMax", serviceUrl: "https://minimax.chat" },
-	[providerIdentifiers.mimo]: { serviceName: "Xiaomi MiMo", serviceUrl: "https://platform.xiaomimimo.com" },
-	[providerIdentifiers.baseten]: { serviceName: "Baseten", serviceUrl: "https://baseten.co" },
-	[providerIdentifiers.ollama]: { serviceName: "Ollama", serviceUrl: "https://ollama.ai" },
-	[providerIdentifiers.lmstudio]: { serviceName: "LM Studio", serviceUrl: "https://lmstudio.ai/docs" },
-	[providerIdentifiers.vscodeLm]: {
-		serviceName: "VS Code LM",
-		serviceUrl: "https://code.visualstudio.com/api/extension-guides/language-model",
-	},
-}
 
 export const PROVIDER_DEFAULT_MODEL_IDS: Partial<Record<ProviderName, string>> = {
 	[providerIdentifiers.anthropic]: anthropicDefaultModelId,
@@ -91,10 +55,6 @@ export const PROVIDER_DEFAULT_MODEL_IDS: Partial<Record<ProviderName, string>> =
 	[providerIdentifiers.minimax]: minimaxDefaultModelId,
 	[providerIdentifiers.mimo]: mimoDefaultModelId,
 	[providerIdentifiers.baseten]: basetenDefaultModelId,
-}
-
-export const getProviderServiceConfig = (provider: ProviderName): ProviderServiceConfig => {
-	return PROVIDER_SERVICE_CONFIG[provider] ?? { serviceName: getProviderLabel(provider), serviceUrl: "" }
 }
 
 export const getDefaultModelIdForProvider = (provider: ProviderName, apiConfiguration?: ProviderSettings): string => {

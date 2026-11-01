@@ -387,6 +387,7 @@ export const geminiModels = {
 export const geminiProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.gemini,
 	label: "Google Gemini",
+	serviceUrl: "https://ai.google.dev",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => geminiDefaultModelId,

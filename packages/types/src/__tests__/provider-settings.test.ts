@@ -4,6 +4,7 @@ import {
 	getProviderIsProxy,
 	getProviderLabel,
 	getProviderModels,
+	getProviderServiceUrl,
 	isProviderHidden,
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
 	parseOpenAiExtraBody,
@@ -48,6 +49,21 @@ describe("provider definition metadata", () => {
 		},
 	)
 
+	it.each(providerDefinitionList.map((definition) => definition.apiProvider))(
+		"declares a string service URL for %s",
+		(apiProvider) => {
+			expect(typeof getProviderServiceUrl(apiProvider)).toBe("string")
+		},
+	)
+
+	it("declares an absolute service URL whenever one is provided", () => {
+		for (const definition of providerDefinitionList) {
+			if (definition.serviceUrl) {
+				expect(definition.serviceUrl).toMatch(/^https:\/\//)
+			}
+		}
+	})
+
 	it("returns the declared label rather than the raw identifier", () => {
 		expect(getProviderLabel(providerIdentifiers.anthropic)).toBe("Anthropic")
 		expect(getProviderLabel(providerIdentifiers.openaiCodex)).toBe("OpenAI - ChatGPT Plus/Pro")
@@ -57,6 +73,23 @@ describe("provider definition metadata", () => {
 		expect(getProviderLabel("unregistered-provider" as (typeof providerNames)[number])).toBe(
 			"unregistered-provider",
 		)
+	})
+
+	it("returns the declared service URL rather than a UI-side registry", () => {
+		expect(getProviderServiceUrl(providerIdentifiers.anthropic)).toBe("https://console.anthropic.com")
+		expect(getProviderServiceUrl(providerIdentifiers.bedrock)).toBe("https://aws.amazon.com/bedrock")
+		expect(getProviderServiceUrl(providerIdentifiers.vscodeLm)).toBe(
+			"https://code.visualstudio.com/api/extension-guides/language-model",
+		)
+	})
+
+	it("returns an empty service URL for a provider without a console", () => {
+		expect(getProviderServiceUrl(providerIdentifiers.openai)).toBe("")
+		expect(getProviderServiceUrl(providerIdentifiers.openrouter)).toBe("")
+	})
+
+	it("returns an empty service URL for an unregistered provider", () => {
+		expect(getProviderServiceUrl("unregistered-provider" as (typeof providerNames)[number])).toBe("")
 	})
 
 	it("returns the provider's static catalog", () => {

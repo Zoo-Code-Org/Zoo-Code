@@ -7,9 +7,7 @@ import {
 } from "@roo-code/types"
 
 import {
-	PROVIDER_SERVICE_CONFIG,
 	PROVIDER_DEFAULT_MODEL_IDS,
-	getProviderServiceConfig,
 	getProviderModelConfig,
 	getProviderDocsSlug,
 	getDefaultModelIdForProvider,
@@ -24,62 +22,6 @@ import {
 const appProfileArn = "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abcd1234efgh"
 
 describe("providerModelConfig", () => {
-	describe("PROVIDER_SERVICE_CONFIG", () => {
-		it("uses canonical provider identifiers as registry keys", () => {
-			expect(PROVIDER_SERVICE_CONFIG[providerIdentifiers.openaiNative]?.serviceName).toBe("OpenAI")
-			expect(PROVIDER_SERVICE_CONFIG[providerIdentifiers.vscodeLm]?.serviceName).toBe("VS Code LM")
-		})
-
-		it("contains service config for anthropic", () => {
-			expect(PROVIDER_SERVICE_CONFIG.anthropic).toEqual({
-				serviceName: "Anthropic",
-				serviceUrl: "https://console.anthropic.com",
-			})
-		})
-
-		it("contains service config for bedrock", () => {
-			expect(PROVIDER_SERVICE_CONFIG.bedrock).toEqual({
-				serviceName: "Amazon Bedrock",
-				serviceUrl: "https://aws.amazon.com/bedrock",
-			})
-		})
-
-		it("contains service config for ollama", () => {
-			expect(PROVIDER_SERVICE_CONFIG.ollama).toEqual({
-				serviceName: "Ollama",
-				serviceUrl: "https://ollama.ai",
-			})
-		})
-
-		it("contains service config for lmstudio", () => {
-			expect(PROVIDER_SERVICE_CONFIG.lmstudio).toEqual({
-				serviceName: "LM Studio",
-				serviceUrl: "https://lmstudio.ai/docs",
-			})
-		})
-
-		it("contains service config for vscode-lm", () => {
-			expect(PROVIDER_SERVICE_CONFIG[providerIdentifiers.vscodeLm]).toEqual({
-				serviceName: "VS Code LM",
-				serviceUrl: "https://code.visualstudio.com/api/extension-guides/language-model",
-			})
-		})
-	})
-
-	describe("getProviderServiceConfig", () => {
-		it("returns correct config for known provider", () => {
-			const config = getProviderServiceConfig(providerIdentifiers.gemini)
-			expect(config.serviceName).toBe("Google Gemini")
-			expect(config.serviceUrl).toBe("https://ai.google.dev")
-		})
-
-		it("returns fallback config for unknown provider", () => {
-			const config = getProviderServiceConfig("unknown-provider" as any)
-			expect(config.serviceName).toBe("unknown-provider")
-			expect(config.serviceUrl).toBe("")
-		})
-	})
-
 	describe("PROVIDER_DEFAULT_MODEL_IDS", () => {
 		it("contains default model IDs for static providers", () => {
 			expect(PROVIDER_DEFAULT_MODEL_IDS[providerIdentifiers.anthropic]).toBeDefined()

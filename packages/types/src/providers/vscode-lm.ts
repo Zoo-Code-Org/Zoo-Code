@@ -22,6 +22,7 @@ const schema = {
 export const vsCodeLmProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.vscodeLm,
 	label: "VS Code LM API",
+	serviceUrl: "https://code.visualstudio.com/api/extension-guides/language-model",
 	getModelId: (settings) => settings.vsCodeLmModelSelector?.id,
 	getDefaultModelId: () => vscodeLlmDefaultModelId,
 	schema,

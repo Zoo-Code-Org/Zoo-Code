@@ -39,6 +39,7 @@ export const LM_STUDIO_MODEL_ID_FIELD = "lmStudioModelId"
 export const lmStudioProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.lmstudio,
 	label: "LM Studio",
+	serviceUrl: "https://lmstudio.ai/docs",
 	// The user points the extension at their own LM Studio endpoint.
 	isProxy: true,
 	modelIdKey: LM_STUDIO_MODEL_ID_FIELD,

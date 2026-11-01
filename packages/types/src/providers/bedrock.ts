@@ -829,6 +829,7 @@ export const resolveBedrockCustomArnBaseModelId = (
 export const bedrockProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.bedrock,
 	label: "Amazon Bedrock",
+	serviceUrl: "https://aws.amazon.com/bedrock",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => bedrockDefaultModelId,

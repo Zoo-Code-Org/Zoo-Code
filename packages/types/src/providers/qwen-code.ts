@@ -41,6 +41,7 @@ export const qwenCodeModels = {
 export const qwenCodeProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.qwenCode,
 	label: "Qwen Code",
+	serviceUrl: "https://dashscope.console.aliyun.com",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => qwenCodeDefaultModelId,

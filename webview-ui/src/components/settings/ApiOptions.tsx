@@ -7,7 +7,9 @@ import { ExternalLinkIcon } from "@radix-ui/react-icons"
 import {
 	type ProviderName,
 	type ProviderSettings,
+	getProviderLabel,
 	getProviderModels,
+	getProviderServiceUrl,
 	isDynamicProvider,
 	isRetiredProvider,
 	providerIdentifiers,
@@ -22,7 +24,6 @@ import {
 } from "@roo-code/types"
 
 import {
-	getProviderServiceConfig,
 	getDefaultModelIdForProvider,
 	getProviderDocsSlug,
 	getProviderModelConfig,
@@ -780,8 +781,8 @@ const ApiOptions = ({
 									apiConfiguration,
 								)}
 								modelIdKey="apiModelId"
-								serviceName={getProviderServiceConfig(activeSelectedProvider).serviceName}
-								serviceUrl={getProviderServiceConfig(activeSelectedProvider).serviceUrl}
+								serviceName={getProviderLabel(activeSelectedProvider)}
+								serviceUrl={getProviderServiceUrl(activeSelectedProvider)}
 								organizationAllowList={organizationAllowList}
 								errorMessage={modelValidationError}
 								simplifySettings={fromWelcomeView}

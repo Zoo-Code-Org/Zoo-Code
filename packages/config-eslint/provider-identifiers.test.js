@@ -75,7 +75,7 @@ ruleTester.run("no-raw-provider-identifiers provider-like values", rule, {
 		"const provider = providerIdentifiers.openrouter",
 		"const provider = configuredProvider || providerIdentifiers.openrouter",
 		"const apiProvider = useGemini ? providerIdentifiers.gemini : providerIdentifiers.openrouter",
-		"getProviderServiceConfig(providerIdentifiers.gemini)",
+		"getProviderServiceUrl(providerIdentifiers.gemini)",
 		"const provider = getProvider(providerIdentifiers.openrouter)",
 		"const schema = { imageGenerationProvider: z.enum([...knownValues, ...[providerIdentifiers.openrouter]]) }",
 		'if (config?.protocol === "gemini") {}',
@@ -192,7 +192,7 @@ ruleTester.run("no-raw-provider-identifiers provider-like values", rule, {
 			],
 		},
 		{
-			code: 'getProviderServiceConfig("gemini")',
+			code: 'getProviderServiceUrl("gemini")',
 			errors: [
 				{
 					messageId: "useCanonical",
@@ -201,7 +201,7 @@ ruleTester.run("no-raw-provider-identifiers provider-like values", rule, {
 			],
 		},
 		{
-			code: '(getProviderServiceConfig<string>)("gemini")',
+			code: '(getProviderServiceUrl<string>)("gemini")',
 			errors: [
 				{
 					messageId: "useCanonical",

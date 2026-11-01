@@ -359,6 +359,15 @@ export function getProviderLabel(provider: ProviderName): string {
 }
 
 /**
+ * Get the provider's console or documentation URL. Providers without a public
+ * console (proxies, local servers, hidden providers) return an empty string, so
+ * callers can treat a falsy value as "no link to show".
+ */
+export function getProviderServiceUrl(provider: ProviderName): string {
+	return providerDefinitions[provider]?.serviceUrl ?? ""
+}
+
+/**
  * Get the provider's static model catalog. Providers whose models are discovered
  * at runtime (dynamic, local, internal, and custom providers) return an empty map.
  */

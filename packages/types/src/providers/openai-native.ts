@@ -13,6 +13,7 @@ import { openAiNativeDefaultModelId, openAiNativeModels } from "./openai.js"
 export const openAiNativeProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.openaiNative,
 	label: "OpenAI",
+	serviceUrl: "https://platform.openai.com",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => openAiNativeDefaultModelId,

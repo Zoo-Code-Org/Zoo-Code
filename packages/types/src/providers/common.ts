@@ -57,6 +57,9 @@ type ProviderDefinitionInput<P extends ProviderIdentifier, S extends z.ZodRawSha
 	apiProvider: P
 	// User-facing provider name, shared by the settings UI.
 	label: string
+	// Console or documentation URL for the provider, shown next to the model picker.
+	// Providers without a public console (proxies, local servers) omit it.
+	serviceUrl?: string
 	schema: S
 	modelIdKey?: Extract<keyof S, string>
 	getModelId: TypedProviderModelIdAccessor<S>
@@ -74,6 +77,7 @@ type ProviderDefinitionInput<P extends ProviderIdentifier, S extends z.ZodRawSha
 export type ProviderDefinition = {
 	apiProvider: ProviderIdentifier
 	label: string
+	serviceUrl: string
 	settingsShape: z.ZodRawShape
 	modelIdKey?: string
 	schema: z.ZodObject
@@ -93,6 +97,7 @@ export const createModelIdAccessor =
 export const createProviderDefinition = <P extends ProviderIdentifier, S extends z.ZodRawShape>({
 	apiProvider,
 	label,
+	serviceUrl,
 	schema,
 	...modelIdDefinition
 }: ProviderDefinitionInput<P, S>) => {
@@ -105,6 +110,7 @@ export const createProviderDefinition = <P extends ProviderIdentifier, S extends
 	return {
 		apiProvider,
 		label,
+		serviceUrl: serviceUrl ?? "",
 		settingsShape: schema,
 		modelIdKey: modelIdDefinition.modelIdKey,
 		schema: z.object({
