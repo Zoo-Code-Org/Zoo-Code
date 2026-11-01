@@ -1366,7 +1366,7 @@ export class ClineProvider
 							if (hasActualSettings) {
 								await this.activateProviderProfile(
 									{ name: profile.name },
-									{ expectedCurrentTaskId: historyItem.id },
+									{ persistModeConfig: false, expectedCurrentTaskId: historyItem.id },
 								)
 							} else {
 								// The task will continue with the current/default configuration.

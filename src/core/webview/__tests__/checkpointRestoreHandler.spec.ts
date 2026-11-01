@@ -247,6 +247,8 @@ describe("checkpointRestoreHandler", () => {
 		{ name: "no task remains current", replacement: "none" },
 	] as const)("restart skips replacement and scheduling when $name during setup", async ({ replacement }) => {
 		const newerTask = { taskId: "newer-task", abortTask: vi.fn<Task["abortTask"]>() }
+		const constructedTask = { taskId: fixture.task.taskId, abortTask: vi.fn<Task["abortTask"]>(async () => {}) }
+		constructTask.mockReturnValueOnce(constructedTask)
 		const registry = fixture.providerDouble.taskRegistry
 		fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(new Error("Missing commit"))
 		showWarningMessage.mockResolvedValueOnce("common:checkpoints.restart")
@@ -256,7 +258,8 @@ describe("checkpointRestoreHandler", () => {
 		})
 		await expect(handleCheckpointRestoreOperation(fixture.config)).rejects.toThrow("Missing commit")
 		expect(Task).toHaveBeenCalledOnce()
-		expect(fixture.taskDouble.abortTask).toHaveBeenLastCalledWith(true)
+		expect(constructedTask.abortTask).toHaveBeenCalledExactlyOnceWith(true)
+		expect(fixture.taskDouble.abortTask).not.toHaveBeenCalledWith(true)
 		expect(newerTask.abortTask).not.toHaveBeenCalled()
 		expect(registry.replace).not.toHaveBeenCalled()
 		expect(fixture.providerDouble.taskScheduler.schedule).not.toHaveBeenCalled()
