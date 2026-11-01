@@ -448,13 +448,18 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 					apiProvider: providerIdentifiers.anthropic,
 				})
 				const setModeConfigSpy = vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue()
+				await provider.contextProxy.setValue("mode", "architect")
 
 				await provider.activateProviderProfile(
 					{ name: "new-profile" },
 					{ persistModeConfig, expectedCurrentTaskId: "test-task-id" },
 				)
 
-				expect(setModeConfigSpy).toHaveBeenCalledTimes(persistModeConfig ? 1 : 0)
+				if (persistModeConfig) {
+					expect(setModeConfigSpy).toHaveBeenCalledExactlyOnceWith("architect", "new-profile-id")
+				} else {
+					expect(setModeConfigSpy).not.toHaveBeenCalled()
+				}
 			},
 		)
 
