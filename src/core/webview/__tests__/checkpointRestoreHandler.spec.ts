@@ -93,6 +93,7 @@ function createFixture() {
 		setPendingEditOperation: vi.fn<ClineProvider["setPendingEditOperation"]>(),
 		clearPendingEditOperation: vi.fn<ClineProvider["clearPendingEditOperation"]>(),
 		getPendingEditOperation: ClineProvider.prototype["getPendingEditOperation"],
+		removeTaskEventListeners: ClineProvider.prototype["removeTaskEventListeners"],
 		getState: vi.fn(async () => ({ apiConfiguration: {} })),
 		contextProxy: { globalStorageUri: { fsPath: "/test/storage" } },
 		taskScheduler: { schedule: vi.fn<(task: Task, run: () => Promise<void>) => Promise<void>>(async () => {}) },
@@ -278,6 +279,9 @@ describe("checkpointRestoreHandler", () => {
 		const newerTask = { taskId: "newer-task", abortTask: vi.fn<Task["abortTask"]>() }
 		const constructedTask = { taskId: fixture.task.taskId, abortTask: vi.fn<Task["abortTask"]>(async () => {}) }
 		constructTask.mockReturnValueOnce(constructedTask)
+		const listenerCleanup = vi.fn()
+		const orphanTask = constructedTask as unknown as Task // Map key only; identity is what matters.
+		fixture.providerDouble.taskEventListeners.set(orphanTask, [listenerCleanup])
 		const registry = fixture.providerDouble.taskRegistry
 		fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(new Error("Missing commit"))
 		showWarningMessage.mockResolvedValueOnce("common:checkpoints.restart")
@@ -292,6 +296,8 @@ describe("checkpointRestoreHandler", () => {
 		expect(newerTask.abortTask).not.toHaveBeenCalled()
 		expect(registry.replace).not.toHaveBeenCalled()
 		expect(fixture.providerDouble.taskScheduler.schedule).not.toHaveBeenCalled()
+		expect(listenerCleanup).toHaveBeenCalledOnce()
+		expect(fixture.providerDouble.taskEventListeners.has(orphanTask)).toBe(false)
 	})
 
 	it.each([

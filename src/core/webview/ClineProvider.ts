@@ -634,6 +634,14 @@ export class ClineProvider
 		}
 	}
 
+	private removeTaskEventListeners(task: Task): void {
+		const cleanupFunctions = this.taskEventListeners.get(task)
+		if (cleanupFunctions) {
+			cleanupFunctions.forEach((cleanup) => cleanup())
+			this.taskEventListeners.delete(task)
+		}
+	}
+
 	private async cleanupFailedHistoryTask(task: Task, error: unknown): Promise<void> {
 		if (!(error instanceof PendingActionSettlementError)) {
 			return
@@ -646,11 +654,7 @@ export class ClineProvider
 		this.taskRegistry.remove(task.taskId)
 		task.emit(RooCodeEventName.TaskUnfocused)
 
-		const cleanupFunctions = this.taskEventListeners.get(task)
-		if (cleanupFunctions) {
-			cleanupFunctions.forEach((cleanup) => cleanup())
-			this.taskEventListeners.delete(task)
-		}
+		this.removeTaskEventListeners(task)
 
 		try {
 			await task.dispose()
@@ -1455,6 +1459,7 @@ export class ClineProvider
 
 			// The current task may have changed or been removed during the awaits above; never touch it.
 			if (oldTask?.taskId !== task.taskId) {
+				this.removeTaskEventListeners(task)
 				await task.abortTask(true).catch(() => {})
 				return task
 			}
@@ -1469,12 +1474,7 @@ export class ClineProvider
 					)
 				}
 
-				// Remove event listeners from the old task
-				const cleanupFunctions = this.taskEventListeners.get(oldTask)
-				if (cleanupFunctions) {
-					cleanupFunctions.forEach((cleanup) => cleanup())
-					this.taskEventListeners.delete(oldTask)
-				}
+				this.removeTaskEventListeners(oldTask)
 
 				// Replace in-place: preserves stack index and current pointer
 				this.taskRegistry.replace(oldTask.taskId, task)
