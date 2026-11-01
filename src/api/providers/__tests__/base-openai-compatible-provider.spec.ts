@@ -400,9 +400,13 @@ describe("BaseOpenAiCompatibleProvider", () => {
 				expect(chunk.cacheWriteTokens).toBeUndefined()
 
 				// TEST_MODEL_INFO prices input at 0.5 and output at 1.5 with no cache
-				// prices, so both the 80 uncached tokens and the 20 reads bill at the
-				// input price: (100 * 0.5 + 50 * 1.5) / 1e6.
-				expect(chunk.totalCost).toBeCloseTo(0.000125, 9)
+				// prices, so the 80 uncached tokens bill at the input price and the 20
+				// reads bill at $0: (80 * 0.5 + 50 * 1.5) / 1e6.
+				expect(chunk.totalCost).toBeCloseTo(0.000115, 9)
+
+				// Folding the 30 misses onto the unpriced write bucket would subtract
+				// them from the input pool and bill them nowhere: 0.0001.
+				expect(chunk.totalCost).not.toBeCloseTo(0.0001, 9)
 			})
 
 			it("never sums two shapes that report the same quantity", async () => {
