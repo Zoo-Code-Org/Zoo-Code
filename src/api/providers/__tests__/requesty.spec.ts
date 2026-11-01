@@ -1031,5 +1031,47 @@ describe("RequestyHandler", () => {
 			const handler = new RequestyHandler(mockOptions)
 			expect(handler.getModelCacheScope()).toEqual({ urlScoped: true, keyScoped: true, authScoped: false })
 		})
+
+		it("populates this.models so getModel() stops returning the default info", async () => {
+			const handler = new RequestyHandler(mockOptions)
+
+			expect(handler.getModel().info.description).toBe(requestyDefaultModelInfo.description)
+
+			await handler.ensureModelFetched()
+
+			expect(handler.getModel().info.description).toBe("Claude 4 Sonnet")
+			expect(handler.getModel().info.contextWindow).toBe(200000)
+		})
+
+		it("fetches the catalog with the configured API key", async () => {
+			// Requesty enforces per-key model allowlists, so an unauthenticated fetch would
+			// both miss the key's models and write a URL-only cache entry that another key
+			// could then be served from.
+			const handler = new RequestyHandler(mockOptions)
+
+			await handler.ensureModelFetched()
+
+			expect(getModels).toHaveBeenCalledWith(
+				{
+					provider: providerIdentifiers.requesty,
+					apiKey: "test-key",
+					baseUrl: "https://router.requesty.ai/v1",
+				},
+				handler,
+			)
+		})
+
+		it("fetches the catalog with each handler's own API key", async () => {
+			// Two handlers on the same server must resolve different key-scoped cache
+			// entries, which is only possible if each passes its own key to getModels().
+			const handlerA = new RequestyHandler(makeApiHandlerOptions({ requestyApiKey: "key-a" }))
+			const handlerB = new RequestyHandler(makeApiHandlerOptions({ requestyApiKey: "key-b" }))
+
+			await handlerA.ensureModelFetched()
+			await handlerB.ensureModelFetched()
+
+			const apiKeys = vitest.mocked(getModels).mock.calls.map(([options]) => options.apiKey)
+			expect(apiKeys).toEqual(["key-a", "key-b"])
+		})
 	})
 })
