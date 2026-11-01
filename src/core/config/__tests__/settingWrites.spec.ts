@@ -6,6 +6,7 @@ import {
 	isTrackedSetting,
 	noteSettingStored,
 	performSettingWrite,
+	settingWriteBookkeepingSize,
 	undoSettingWrite,
 } from "../settingWrites"
 import type { ContextProxy } from "../ContextProxy"
@@ -111,6 +112,42 @@ describe("settingWrites", () => {
 			expect(stored.get("timeFormat")).toBe("24h")
 		})
 
+		it("keeps nothing at all about a key once its writes are over, including stores by others and restores", async () => {
+			const first = beginSettingWrite("timeFormat", "auto", "12h")
+			await performSettingWrite(contextProxy, first)
+			await contextProxy.setValue("timeFormat" as never, "9h" as never) // recorded while a write is pending
+			const second = beginSettingWrite("timeFormat", "9h", "24h")
+			await performSettingWrite(contextProxy, second)
+
+			const pending = settingWriteBookkeepingSize()
+			expect(pending.latestWrites).toBe(1)
+			expect(pending.othersStores).toBe(1)
+
+			await undoSettingWrite(contextProxy, second) // a restore waits and runs
+			await undoSettingWrite(contextProxy, first)
+
+			expect(settingWriteBookkeepingSize()).toEqual({
+				latestWrites: 0,
+				queuedKeys: 0,
+				pendingRestores: 0,
+				othersStores: 0,
+			})
+		})
+
+		it("keeps nothing about stores by others after the writes finished", async () => {
+			const write = beginSettingWrite("timeFormat", "auto", "24h")
+			await performSettingWrite(contextProxy, write)
+			await contextProxy.setValue("timeFormat" as never, "9h" as never)
+			finishSettingWrites([write])
+
+			expect(settingWriteBookkeepingSize()).toEqual({
+				latestWrites: 0,
+				queuedKeys: 0,
+				pendingRestores: 0,
+				othersStores: 0,
+			})
+		})
+
 		it("keeps the key pending until every waiting restore has run", async () => {
 			const first = beginSettingWrite("timeFormat", "auto", "12h")
 			await performSettingWrite(contextProxy, first)
@@ -158,6 +195,32 @@ describe("settingWrites", () => {
 
 			await contextProxy.setValue("soundEnabled" as never, true as never)
 			await undoSettingWrite(contextProxy, write)
+
+			expect(stored.get("timeFormat")).toBe("auto")
+		})
+
+		it("keeps an outside store of the same value when a later write fails, then the earlier one does", async () => {
+			const first = beginSettingWrite("timeFormat", "auto", "24h")
+			await performSettingWrite(contextProxy, first)
+			await contextProxy.setValue("timeFormat" as never, "24h" as never) // the API stores the same value
+			const second = beginSettingWrite("timeFormat", "24h", "12h")
+			await performSettingWrite(contextProxy, second) // starts, reads 24h
+
+			await undoSettingWrite(contextProxy, second) // fails: its restore puts 24h back
+			await undoSettingWrite(contextProxy, first) // then the first fails
+
+			// The restore of the second must not hide the API's store from the first's rollback.
+			expect(stored.get("timeFormat")).toBe("24h")
+		})
+
+		it("still puts the first write back after a later one failed, when nobody else stored the key", async () => {
+			const first = beginSettingWrite("timeFormat", "auto", "24h")
+			await performSettingWrite(contextProxy, first)
+			const second = beginSettingWrite("timeFormat", "24h", "12h")
+			await performSettingWrite(contextProxy, second)
+
+			await undoSettingWrite(contextProxy, second)
+			await undoSettingWrite(contextProxy, first)
 
 			expect(stored.get("timeFormat")).toBe("auto")
 		})

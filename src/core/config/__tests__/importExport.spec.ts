@@ -494,7 +494,12 @@ describe("importExport", () => {
 
 				expect(result).toMatchObject({ success: true })
 				expect(stored.get("timeFormat")).toBe("24h")
-				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+				expect(settingWriteBookkeepingSize()).toEqual({
+					latestWrites: 0,
+					queuedKeys: 0,
+					pendingRestores: 0,
+					othersStores: 0,
+				})
 			})
 		})
 

@@ -2078,7 +2078,12 @@ describe("webviewMessageHandler - the display settings are saved all-or-nothing"
 			await save({ timeFormat: "24h", dateFormat: "ymd" })
 			await settled()
 
-			expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			expect(settingWriteBookkeepingSize()).toEqual({
+				latestWrites: 0,
+				queuedKeys: 0,
+				pendingRestores: 0,
+				othersStores: 0,
+			})
 		})
 
 		it("after a save that failed and was rolled back", async () => {
@@ -2087,7 +2092,12 @@ describe("webviewMessageHandler - the display settings are saved all-or-nothing"
 			await save({ timeFormat: "24h", showRelativeTimes: false })
 			await settled()
 
-			expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			expect(settingWriteBookkeepingSize()).toEqual({
+				latestWrites: 0,
+				queuedKeys: 0,
+				pendingRestores: 0,
+				othersStores: 0,
+			})
 		})
 	})
 

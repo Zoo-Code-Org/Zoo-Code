@@ -140,6 +140,8 @@ const queuedSettingWrite = (key: TrackedSettingKey, write: () => Promise<unknown
 export const settingWriteBookkeepingSize = () => ({
 	latestWrites: lastWriteOfSetting.size,
 	queuedKeys: settingWriteQueues.size,
+	pendingRestores: pendingRestores.size,
+	othersStores: othersStores.size,
 })
 
 /**
@@ -225,8 +227,11 @@ export const undoSettingWrite = async (contextProxy: ContextProxy, write: Settin
 				const restored = storeHere(key, () =>
 					contextProxy.setValue(key as keyof RooCodeSettings, write.previous as never),
 				)
-				// The write before this one is the owner of the value again.
-				if (prev && !prev.done) prev.generation = storeClock()
+				// The write before this one is the owner of the value again, but only if nobody else stored the key
+				// since it stored: a store by someone else (even of the same value) must stay visible to its rollback.
+				if (prev && !prev.done && prev.generation !== undefined && !othersStoredSince(key, prev.generation)) {
+					prev.generation = storeClock()
+				}
 				await restored
 			}
 		})
