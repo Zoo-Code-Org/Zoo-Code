@@ -399,7 +399,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 			const viewWasFull = offset0 === 0
 			output = `IMPORTANT: Some lines exceed ${MAX_LINE_LENGTH} characters and were clipped in this view. ${viewWasFull ? "The file was read in full, but the clipped lines were not shown in full." : `The view starts at line ${offset0 + 1}, so lines 1-${offset0} were not shown and the file was not read in full.`}
 	${result.content}`
-		} else if (result.returnedLines === 0) {
+		} else if (result.returnedLines === 0 && result.totalLines === 0) {
 			output = "Note: File is empty"
 		}
 
