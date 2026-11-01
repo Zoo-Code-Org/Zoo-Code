@@ -1795,8 +1795,13 @@ export const webviewMessageHandler = async (
 
 				try {
 					await provider.getCurrentTask()?.checkpointRestore(result.data)
-				} catch {
-					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
+				} catch (error) {
+					console.error("[checkpointRestore] checkpointRestore failed:", error)
+					void vscode.window.showErrorMessage(
+						t("common:errors.checkpoint_restore_failed", {
+							error: error instanceof Error ? error.message : String(error),
+						}),
+					)
 				}
 			}
 
@@ -1846,7 +1851,11 @@ export const webviewMessageHandler = async (
 					})
 				} catch (error) {
 					console.error("[completionCheckpointRestore] checkpointRestore failed:", error)
-					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
+					void vscode.window.showErrorMessage(
+						t("common:errors.checkpoint_restore_failed", {
+							error: error instanceof Error ? error.message : String(error),
+						}),
+					)
 				}
 			}
 

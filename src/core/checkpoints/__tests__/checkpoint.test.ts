@@ -30,32 +30,10 @@ vi.mock("@roo-code/telemetry", () => ({
 	},
 }))
 
-vi.mock("../../../utils/path", () => ({
-	getWorkspacePath: vi.fn(() => "/test/workspace"),
-}))
-
-vi.mock("../../../utils/git", () => ({
-	checkGitInstalled: vi.fn().mockResolvedValue(true),
-}))
-
-vi.mock("../../../i18n", () => ({
-	t: vi.fn((key: string, options?: Record<string, any>) => {
-		if (key === "common:errors.wait_checkpoint_long_time") {
-			return `Checkpoint initialization is taking longer than ${options?.timeout} seconds...`
-		}
-		if (key === "common:errors.init_checkpoint_fail_long_time") {
-			return `Checkpoint initialization failed after ${options?.timeout} seconds`
-		}
-		return key
-	}),
-}))
-
 // Mock p-wait-for to control timeout behavior
 vi.mock("p-wait-for", () => ({
 	default: vi.fn(),
 }))
-
-vi.mock("../../../services/checkpoints")
 
 describe("Checkpoint functionality", () => {
 	let mockProvider: any
@@ -63,6 +41,21 @@ describe("Checkpoint functionality", () => {
 	let mockCheckpointService: any
 
 	beforeEach(async () => {
+		const pathModule = await import("../../../utils/path")
+		const gitModule = await import("../../../utils/git")
+		const i18nModule = await import("../../../i18n")
+		vi.spyOn(pathModule, "getWorkspacePath").mockReturnValue("/test/workspace")
+		vi.spyOn(gitModule, "checkGitInstalled").mockResolvedValue(true)
+		vi.spyOn(i18nModule, "t").mockImplementation((key: string, options?: Record<string, unknown>) => {
+			if (key === "common:errors.wait_checkpoint_long_time") {
+				return `Checkpoint initialization is taking longer than ${options?.timeout} seconds...`
+			}
+			if (key === "common:errors.init_checkpoint_fail_long_time") {
+				return `Checkpoint initialization failed after ${options?.timeout} seconds`
+			}
+			return key
+		})
+
 		// Create mock checkpoint service
 		mockCheckpointService = {
 			isInitialized: true,
@@ -105,11 +98,12 @@ describe("Checkpoint functionality", () => {
 
 		// Update the mock to return our mockCheckpointService
 		const checkpointsModule = await import("../../../services/checkpoints")
-		vi.mocked(checkpointsModule.RepoPerTaskCheckpointService.create).mockReturnValue(mockCheckpointService)
+		vi.spyOn(checkpointsModule.RepoPerTaskCheckpointService, "create").mockReturnValue(mockCheckpointService)
 	})
 
 	afterEach(() => {
 		vi.clearAllMocks()
+		vi.restoreAllMocks()
 	})
 
 	describe("checkpointSave", () => {
@@ -280,18 +274,34 @@ describe("Checkpoint functionality", () => {
 			expect(mockCheckpointService.restoreCheckpoint).not.toHaveBeenCalled()
 		})
 
-		it("should disable checkpoints on error", async () => {
-			mockCheckpointService.restoreCheckpoint.mockRejectedValue(new Error("Restore failed"))
+		it.each(["delete", "edit"] as const)(
+			"propagates restore failures for %s without rewinding",
+			async (operation) => {
+				const restoreError = new Error("Restore failed")
+				mockCheckpointService.restoreCheckpoint.mockRejectedValueOnce(restoreError)
+				const messagesBeforeRestore = [...mockTask.clineMessages]
+				const historyBeforeRestore = [...mockTask.apiConversationHistory]
 
-			await checkpointRestore(mockTask, {
-				ts: 2,
-				commitHash: "abc123",
-				mode: "restore",
-			})
+				await expect(
+					checkpointRestore(mockTask, {
+						ts: 2,
+						commitHash: "abc123",
+						mode: "restore",
+						operation,
+					}),
+				).rejects.toBe(restoreError)
 
-			expect(mockTask.enableCheckpoints).toBe(false)
-			expect(mockProvider.log).toHaveBeenCalledWith("[checkpointRestore] disabling checkpoints for this task")
-		})
+				expect(mockTask.enableCheckpoints).toBe(true)
+				expect(mockTask.clineMessages).toEqual(messagesBeforeRestore)
+				expect(mockTask.apiConversationHistory).toEqual(historyBeforeRestore)
+				expect(mockTask.overwriteClineMessages).not.toHaveBeenCalled()
+				expect(mockTask.overwriteApiConversationHistory).not.toHaveBeenCalled()
+				expect(mockTask.say).not.toHaveBeenCalled()
+				expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+				expect(mockProvider.cancelTask).not.toHaveBeenCalled()
+				expect(mockProvider.log).toHaveBeenCalledWith("[checkpointRestore] failed to restore checkpoint")
+			},
+		)
 	})
 
 	describe("checkpointDiff", () => {
@@ -426,7 +436,7 @@ describe("Checkpoint functionality", () => {
 			mockTask.checkpointService = undefined
 			mockTask.checkpointServiceInitializing = false
 
-			getCheckpointService(mockTask)
+			await getCheckpointService(mockTask)
 
 			const checkpointsModule = await import("../../../services/checkpoints")
 			expect(vi.mocked(checkpointsModule.RepoPerTaskCheckpointService.create)).toHaveBeenCalledWith({
@@ -439,7 +449,7 @@ describe("Checkpoint functionality", () => {
 
 		it("should disable checkpoints if workspace path is not found", async () => {
 			const pathModule = await import("../../../utils/path")
-			vi.mocked(pathModule.getWorkspacePath).mockReturnValue(null as any)
+			vi.mocked(pathModule.getWorkspacePath).mockReturnValue("")
 
 			mockTask.checkpointService = undefined
 			mockTask.checkpointServiceInitializing = false

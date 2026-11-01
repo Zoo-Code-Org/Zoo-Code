@@ -10,6 +10,8 @@ import { simpleGit, SimpleGit } from "simple-git"
 import { fileExistsAtPath } from "../../../utils/fs"
 import * as fileSearch from "../../../services/search/file-search"
 
+import * as i18n from "../../../i18n"
+
 import { RepoPerTaskCheckpointService } from "../RepoPerTaskCheckpointService"
 import { BLOCKED_ENV_KEYS } from "../ShadowCheckpointService"
 
@@ -335,9 +337,13 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				service.on("restore", restoreHandler)
 				const checkpointsBeforeRestore = service.getCheckpoints()
 				const missingCommitHash = "0".repeat(40)
-				const expectedMessage = `Cannot restore checkpoint ${missingCommitHash}: this checkpoint no longer exists in the checkpoint repository. No files were changed.`
+				const translateSpy = vi.spyOn(i18n, "t").mockReturnValueOnce("Localized missing checkpoint")
+				const expectedMessage = "Localized missing checkpoint"
 
 				await expect(service.restoreCheckpoint(missingCommitHash)).rejects.toThrow(expectedMessage)
+				expect(translateSpy).toHaveBeenCalledWith("common:errors.checkpoint_missing", {
+					commitHash: missingCommitHash,
+				})
 
 				expect(await fs.readFile(untrackedFile, "utf-8")).toBe("Unsaved user work")
 				expect(await fs.readFile(testFile, "utf-8")).toBe("Uncommitted edit")
@@ -348,6 +354,44 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				})
 				expect(restoreHandler).not.toHaveBeenCalled()
 			})
+
+			it.each(["missing", "tree", "blob"] as const)(
+				"preserves the original error without an error listener for a %s object",
+				async (objectType) => {
+					await fs.writeFile(testFile, "Checkpointed content")
+					const commit = await service.saveCheckpoint("Checkpoint")
+					const git = service["git"]!
+					const objectHash =
+						objectType === "missing"
+							? "0".repeat(40)
+							: (
+									await git.raw([
+										"rev-parse",
+										`${commit!.commit}${objectType === "tree" ? "^{tree}" : ":test.txt"}`,
+									])
+								).trim()
+					const checkpointsBeforeRestore = service.getCheckpoints()
+					const untrackedFile = path.join(service.workspaceDir, "precious-untracked.txt")
+					await fs.writeFile(untrackedFile, "Unsaved user work")
+					await fs.writeFile(testFile, "Uncommitted edit")
+					const cleanSpy = vi.spyOn(git, "clean")
+					const resetSpy = vi.spyOn(git, "reset")
+					const restoreHandler = vi.fn()
+					service.on("restore", restoreHandler)
+					expect(service.listenerCount("error")).toBe(0)
+
+					await expect(service.restoreCheckpoint(objectHash)).rejects.toEqual(
+						new Error(i18n.t("common:errors.checkpoint_missing", { commitHash: objectHash })),
+					)
+
+					expect(await fs.readFile(untrackedFile, "utf-8")).toBe("Unsaved user work")
+					expect(await fs.readFile(testFile, "utf-8")).toBe("Uncommitted edit")
+					expect(service.getCheckpoints()).toEqual(checkpointsBeforeRestore)
+					expect(cleanSpy).not.toHaveBeenCalled()
+					expect(resetSpy).not.toHaveBeenCalled()
+					expect(restoreHandler).not.toHaveBeenCalled()
+				},
+			)
 
 			it("still restores normally to a valid commit", async () => {
 				await fs.writeFile(testFile, "Checkpointed content")
@@ -387,7 +431,7 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				await fs.writeFile(untrackedFile, "Unsaved user work")
 
 				await expect(service.restoreCheckpoint(savedHash)).rejects.toThrow(
-					`Cannot restore checkpoint ${savedHash}: this checkpoint no longer exists`,
+					i18n.t("common:errors.checkpoint_missing", { commitHash: savedHash }),
 				)
 				expect(await fs.readFile(untrackedFile, "utf-8")).toBe("Unsaved user work")
 			})
@@ -399,10 +443,11 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				await fs.writeFile(untrackedFile, "Unsaved user work")
 
 				const git = service["git"]!
-				vitest.spyOn(git, "raw").mockRejectedValueOnce(new Error("fatal: unable to read index"))
+				const gitError = new Error("fatal: unable to read index")
+				vitest.spyOn(git, "raw").mockRejectedValueOnce(gitError)
 				const cleanSpy = vitest.spyOn(git, "clean")
 
-				await expect(service.restoreCheckpoint(commit!.commit)).rejects.toThrow("fatal: unable to read index")
+				await expect(service.restoreCheckpoint(commit!.commit)).rejects.toBe(gitError)
 				expect(cleanSpy).not.toHaveBeenCalled()
 				expect(await fs.readFile(untrackedFile, "utf-8")).toBe("Unsaved user work")
 				vitest.restoreAllMocks()

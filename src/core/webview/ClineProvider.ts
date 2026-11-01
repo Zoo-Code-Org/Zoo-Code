@@ -810,7 +810,7 @@ export class ClineProvider
 	/**
 	 * Clears a specific pending edit operation
 	 */
-	private clearPendingEditOperation(operationId: string): boolean {
+	public clearPendingEditOperation(operationId: string): boolean {
 		return this.pendingEditOperations.clear(operationId)
 	}
 

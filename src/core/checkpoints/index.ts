@@ -295,9 +295,9 @@ export async function checkpointRestore(
 		// task flow and the communication between the webview and the
 		// `Task` instance.
 		provider?.cancelTask()
-	} catch {
-		provider?.log("[checkpointRestore] disabling checkpoints for this task")
-		task.enableCheckpoints = false
+	} catch (error) {
+		provider?.log("[checkpointRestore] failed to restore checkpoint")
+		throw error
 	}
 }
 
