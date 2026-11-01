@@ -209,6 +209,14 @@ type GetStateOptions = {
 	includeTaskHistory?: boolean
 }
 
+function removeTaskEventListeners(listeners: WeakMap<Task, Array<() => void>>, task: Task): void {
+	const cleanupFunctions = listeners.get(task)
+	if (cleanupFunctions) {
+		cleanupFunctions.forEach((cleanup) => cleanup())
+		listeners.delete(task)
+	}
+}
+
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
 	implements vscode.WebviewViewProvider, TelemetryPropertiesProvider, TaskProviderLike
@@ -634,14 +642,6 @@ export class ClineProvider
 		}
 	}
 
-	private removeTaskEventListeners(task: Task): void {
-		const cleanupFunctions = this.taskEventListeners.get(task)
-		if (cleanupFunctions) {
-			cleanupFunctions.forEach((cleanup) => cleanup())
-			this.taskEventListeners.delete(task)
-		}
-	}
-
 	private async cleanupFailedHistoryTask(task: Task, error: unknown): Promise<void> {
 		if (!(error instanceof PendingActionSettlementError)) {
 			return
@@ -654,7 +654,7 @@ export class ClineProvider
 		this.taskRegistry.remove(task.taskId)
 		task.emit(RooCodeEventName.TaskUnfocused)
 
-		this.removeTaskEventListeners(task)
+		removeTaskEventListeners(this.taskEventListeners, task)
 
 		try {
 			await task.dispose()
@@ -1459,7 +1459,7 @@ export class ClineProvider
 
 			// The current task may have changed or been removed during the awaits above; never touch it.
 			if (oldTask?.taskId !== task.taskId) {
-				this.removeTaskEventListeners(task)
+				removeTaskEventListeners(this.taskEventListeners, task)
 				await task.abortTask(true).catch(() => {})
 				return task
 			}
@@ -1474,7 +1474,7 @@ export class ClineProvider
 					)
 				}
 
-				this.removeTaskEventListeners(oldTask)
+				removeTaskEventListeners(this.taskEventListeners, oldTask)
 
 				// Replace in-place: preserves stack index and current pointer
 				this.taskRegistry.replace(oldTask.taskId, task)

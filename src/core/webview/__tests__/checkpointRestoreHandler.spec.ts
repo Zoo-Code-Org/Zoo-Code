@@ -93,7 +93,6 @@ function createFixture() {
 		setPendingEditOperation: vi.fn<ClineProvider["setPendingEditOperation"]>(),
 		clearPendingEditOperation: vi.fn<ClineProvider["clearPendingEditOperation"]>(),
 		getPendingEditOperation: ClineProvider.prototype["getPendingEditOperation"],
-		removeTaskEventListeners: ClineProvider.prototype["removeTaskEventListeners"],
 		getState: vi.fn(async () => ({ apiConfiguration: {} })),
 		contextProxy: { globalStorageUri: { fsPath: "/test/storage" } },
 		taskScheduler: { schedule: vi.fn<(task: Task, run: () => Promise<void>) => Promise<void>>(async () => {}) },
