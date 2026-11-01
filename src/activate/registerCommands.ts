@@ -78,11 +78,10 @@ export const registerCommands = (options: RegisterCommandOptions) => {
 //
 // Callback shape mirrors VS Code's own `commands.registerCommand` signature
 // (`(...args: any[]) => any`), with the return narrowed to `unknown` so
-// callers must inspect before using. `any[]` for args is unavoidable: the
-// callbacks here are heterogeneous (`importSettings` takes an optional
-// `filePath?: string`, others take none) and VS Code dispatches positional
-// args dynamically.
-type CommandCallback = (...args: any[]) => unknown
+// callers must inspect before using. `never[]` permits the heterogeneous
+// callbacks here (`importSettings` takes an optional `filePath?: string`,
+// others take none) while VS Code dispatches positional args dynamically.
+type CommandCallback = (...args: never[]) => unknown
 const getCommandsMap = ({
 	context,
 	outputChannel,

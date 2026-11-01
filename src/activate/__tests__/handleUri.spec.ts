@@ -17,10 +17,10 @@ const {
 		handleOpenRouterCallback: vi.fn(),
 		handleRequestyCallback: vi.fn(),
 		handleZooCodeCallback: vi.fn(),
-	} as any
+	} as unknown as ClineProvider
 
 	return {
-		mockGetVisibleInstance: vi.fn(() => mockVisibleProvider),
+		mockGetVisibleInstance: vi.fn((): ClineProvider | null => mockVisibleProvider),
 		mockGetAllInstances: vi.fn(() => [mockVisibleProvider]),
 		mockHandleZooCodeAuthCallback: vi.fn(),
 		mockSetZooCodeUserInfo: vi.fn(),
@@ -41,6 +41,9 @@ vi.mock("../../services/zoo-code-auth", () => ({
 }))
 
 import { handleUri } from "../handleUri"
+import type { ClineProvider } from "../../core/webview/ClineProvider"
+
+const makeUri = (uri: Pick<vscode.Uri, "path" | "query">): vscode.Uri => uri as vscode.Uri
 
 describe("handleUri", () => {
 	beforeEach(() => {
@@ -50,10 +53,12 @@ describe("handleUri", () => {
 	})
 
 	it("ignores legacy cloud auth callback", async () => {
-		await handleUri({
-			path: "/auth/clerk/callback",
-			query: "code=test-code&state=test-state&organizationId=test-org",
-		} as any)
+		await handleUri(
+			makeUri({
+				path: "/auth/clerk/callback",
+				query: "code=test-code&state=test-state&organizationId=test-org",
+			}),
+		)
 
 		expect(mockVisibleProvider.handleOpenRouterCallback).not.toHaveBeenCalled()
 		expect(mockVisibleProvider.handleRequestyCallback).not.toHaveBeenCalled()
@@ -67,10 +72,12 @@ describe("handleUri", () => {
 		mockGetAllInstances.mockReturnValue([])
 		mockHandleZooCodeAuthCallback.mockResolvedValue(true)
 
-		await handleUri({
-			path: "/auth-callback",
-			query: "token=zoo_ext_test_token&name=Jane%20Doe&email=jane%40example.com&image=https%3A%2F%2Fexample.com%2Favatar.png",
-		} as any)
+		await handleUri(
+			makeUri({
+				path: "/auth-callback",
+				query: "token=zoo_ext_test_token&name=Jane%20Doe&email=jane%40example.com&image=https%3A%2F%2Fexample.com%2Favatar.png",
+			}),
+		)
 
 		expect(mockHandleZooCodeAuthCallback).toHaveBeenCalledWith("zoo_ext_test_token")
 		expect(mockSetZooCodeUserInfo).toHaveBeenCalledWith({
@@ -85,10 +92,12 @@ describe("handleUri", () => {
 	it("refreshes the visible provider after a successful auth callback", async () => {
 		mockHandleZooCodeAuthCallback.mockResolvedValue(true)
 
-		await handleUri({
-			path: "/auth-callback",
-			query: "token=zoo_ext_test_token",
-		} as any)
+		await handleUri(
+			makeUri({
+				path: "/auth-callback",
+				query: "token=zoo_ext_test_token",
+			}),
+		)
 
 		// When no user info is provided, null values are passed to clear stale data
 		expect(mockSetZooCodeUserInfo).toHaveBeenCalledWith({
@@ -103,10 +112,12 @@ describe("handleUri", () => {
 		mockHandleZooCodeAuthCallback.mockResolvedValue(true)
 
 		// Re-auth with only name - email and image should be cleared
-		await handleUri({
-			path: "/auth-callback",
-			query: "token=zoo_ext_test_token&name=John%20Doe",
-		} as any)
+		await handleUri(
+			makeUri({
+				path: "/auth-callback",
+				query: "token=zoo_ext_test_token&name=John%20Doe",
+			}),
+		)
 
 		expect(mockSetZooCodeUserInfo).toHaveBeenCalledWith({
 			name: "John Doe",
@@ -118,10 +129,12 @@ describe("handleUri", () => {
 	it("does not persist user info when auth callback validation fails", async () => {
 		mockHandleZooCodeAuthCallback.mockResolvedValue(false)
 
-		await handleUri({
-			path: "/auth-callback",
-			query: "token=zoo_ext_test_token&name=Jane%20Doe",
-		} as any)
+		await handleUri(
+			makeUri({
+				path: "/auth-callback",
+				query: "token=zoo_ext_test_token&name=Jane%20Doe",
+			}),
+		)
 
 		expect(mockSetZooCodeUserInfo).not.toHaveBeenCalled()
 		expect(mockVisibleProvider.handleZooCodeCallback).not.toHaveBeenCalled()
@@ -133,14 +146,16 @@ describe("handleUri", () => {
 		// stayed unauthenticated until reload.
 		mockHandleZooCodeAuthCallback.mockResolvedValue(true)
 
-		const hiddenProvider = { handleZooCodeCallback: vi.fn() } as any
-		const secondHidden = { handleZooCodeCallback: vi.fn() } as any
+		const hiddenProvider = { handleZooCodeCallback: vi.fn() } as unknown as ClineProvider
+		const secondHidden = { handleZooCodeCallback: vi.fn() } as unknown as ClineProvider
 		mockGetAllInstances.mockReturnValue([mockVisibleProvider, hiddenProvider, secondHidden])
 
-		await handleUri({
-			path: "/auth-callback",
-			query: "token=zoo_ext_test_token",
-		} as any)
+		await handleUri(
+			makeUri({
+				path: "/auth-callback",
+				query: "token=zoo_ext_test_token",
+			}),
+		)
 
 		expect(mockHandleZooCodeAuthCallback).toHaveBeenCalledWith("zoo_ext_test_token")
 		expect(mockSetZooCodeUserInfo).toHaveBeenCalled()
@@ -164,16 +179,18 @@ describe("handleUri", () => {
 					await new Promise((resolve) => setTimeout(resolve, 0))
 					order.push(`${name}:end`)
 				}),
-			}) as any
+			}) as unknown as ClineProvider
 
 		const a = makeProvider("a")
 		const b = makeProvider("b")
 		mockGetAllInstances.mockReturnValue([a, b])
 
-		await handleUri({
-			path: "/auth-callback",
-			query: "token=zoo_ext_test_token",
-		} as any)
+		await handleUri(
+			makeUri({
+				path: "/auth-callback",
+				query: "token=zoo_ext_test_token",
+			}),
+		)
 
 		expect(order).toEqual(["a:start", "a:end", "b:start", "b:end"])
 	})
@@ -185,14 +202,16 @@ describe("handleUri", () => {
 			handleZooCodeCallback: vi.fn(async () => {
 				throw new Error("profile store unavailable")
 			}),
-		} as any
-		const healthyProvider = { handleZooCodeCallback: vi.fn() } as any
+		} as unknown as ClineProvider
+		const healthyProvider = { handleZooCodeCallback: vi.fn() } as unknown as ClineProvider
 		mockGetAllInstances.mockReturnValue([failingProvider, healthyProvider])
 
-		await handleUri({
-			path: "/auth-callback",
-			query: "token=zoo_ext_test_token",
-		} as any)
+		await handleUri(
+			makeUri({
+				path: "/auth-callback",
+				query: "token=zoo_ext_test_token",
+			}),
+		)
 
 		expect(failingProvider.handleZooCodeCallback).toHaveBeenCalledWith("zoo_ext_test_token")
 		expect(healthyProvider.handleZooCodeCallback).toHaveBeenCalledWith("zoo_ext_test_token")

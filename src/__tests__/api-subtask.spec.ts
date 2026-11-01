@@ -2,6 +2,8 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { EventEmitter } from "events"
+import type { OutputChannel } from "vscode"
+import type { ClineProvider } from "../core/webview/ClineProvider"
 
 vi.mock("vscode", () => ({
 	workspace: { workspaceFolders: [] },
@@ -64,7 +66,7 @@ describe("API.clearCurrentTask()", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		provider = makeProviderMock()
-		api = new API({} as any, provider as any, makeClineProviderFactory())
+		api = new API({} as OutputChannel, provider as unknown as ClineProvider, makeClineProviderFactory())
 	})
 
 	it("calls evictCurrentTask then postStateToWebview on sidebarProvider", async () => {
@@ -85,7 +87,7 @@ describe("API.abandonSubtask()", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		provider = makeProviderMock()
-		api = new API({} as any, provider as any, makeClineProviderFactory())
+		api = new API({} as OutputChannel, provider as unknown as ClineProvider, makeClineProviderFactory())
 	})
 
 	it("delegates to sidebarProvider.abandonSubtask and returns its result", async () => {

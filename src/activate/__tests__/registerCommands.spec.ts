@@ -136,7 +136,12 @@ describe("getVisibleProviderOrLog", () => {
 describe("registerCommands handlers", () => {
 	let mockOutputChannel: vscode.OutputChannel
 	let mockContext: vscode.ExtensionContext
-	let mockVisibleProvider: { postMessageToWebview: Mock; retryWebviewRecovery: Mock<() => Promise<void>> }
+	let mockVisibleProvider: {
+		postMessageToWebview: Mock
+		retryWebviewRecovery: Mock<() => Promise<void>>
+		evictCurrentTask?: Mock
+		refreshWorkspace?: Mock
+	}
 	let mockProvider: {
 		postMessageToWebview: Mock
 		webviewFocusTracker: WebviewFocusTracker
@@ -426,8 +431,8 @@ describe("registerCommands handlers", () => {
 	it("plusButtonClicked calls evictCurrentTask on the visible provider", async () => {
 		const evictCurrentTask = vi.fn().mockResolvedValue(undefined)
 		const refreshWorkspace = vi.fn().mockResolvedValue(undefined)
-		;(mockVisibleProvider as any).evictCurrentTask = evictCurrentTask
-		;(mockVisibleProvider as any).refreshWorkspace = refreshWorkspace
+		mockVisibleProvider.evictCurrentTask = evictCurrentTask
+		mockVisibleProvider.refreshWorkspace = refreshWorkspace
 
 		await handlers["zoo-code.plusButtonClicked"]()
 
