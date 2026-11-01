@@ -607,10 +607,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const results = this.userMessageContent.filter(
 			(block): block is Anthropic.ToolResultBlockParam => block.type === "tool_result",
 		)
-		if (results.length !== this.userMessageContent.length) {
-			const others = this.userMessageContent.filter((block) => block.type !== "tool_result")
-			this.userMessageContent.splice(0, this.userMessageContent.length, ...results, ...others)
-		}
+		const others = this.userMessageContent.filter((block) => block.type !== "tool_result")
+		this.userMessageContent.splice(0, this.userMessageContent.length, ...results, ...others)
 
 		return true
 	}
