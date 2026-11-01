@@ -718,6 +718,78 @@ describe("ChatTextArea", () => {
 				expect(setInputValue).not.toHaveBeenCalledWith("Third prompt")
 			})
 
+			it("should send on Ctrl+Enter instead of selecting a picker row", () => {
+				const onSend = vi.fn()
+				const setInputValue = vi.fn()
+				const { container } = render(
+					<ChatTextArea {...defaultProps} onSend={onSend} setInputValue={setInputValue} inputValue="" />,
+				)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!thi", selectionStart: 4 } })
+				expect(container.textContent).toContain("Third prompt")
+
+				fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true })
+
+				expect(setInputValue).not.toHaveBeenCalledWith("Third prompt")
+				expect(onSend).toHaveBeenCalledTimes(1)
+			})
+
+			it("should not select a picker row on Shift+Enter", () => {
+				const onSend = vi.fn()
+				const setInputValue = vi.fn()
+				const { container } = render(
+					<ChatTextArea {...defaultProps} onSend={onSend} setInputValue={setInputValue} inputValue="" />,
+				)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!thi", selectionStart: 4 } })
+				fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true })
+
+				// Shift+Enter is a newline, so it neither selects nor sends.
+				expect(setInputValue).not.toHaveBeenCalledWith("Third prompt")
+				expect(onSend).not.toHaveBeenCalled()
+			})
+
+			it("should not select a picker row on a composing Enter", () => {
+				const onSend = vi.fn()
+				const setInputValue = vi.fn()
+				const { container } = render(
+					<ChatTextArea {...defaultProps} onSend={onSend} setInputValue={setInputValue} inputValue="" />,
+				)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!thi", selectionStart: 4 } })
+				fireEvent.keyDown(textarea, { key: "Enter", isComposing: true })
+
+				expect(setInputValue).not.toHaveBeenCalledWith("Third prompt")
+				expect(onSend).not.toHaveBeenCalled()
+			})
+
+			it("should reopen the picker after the controlled value is reset", () => {
+				const { container, rerender } = render(<ChatTextArea {...defaultProps} inputValue="" />)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!", selectionStart: 1 } })
+				expect(container.textContent).toContain("Third prompt")
+
+				// Dismiss the picker with the value still in the box.
+				rerender(<ChatTextArea {...defaultProps} inputValue="!" />)
+				fireEvent.keyDown(textarea, { key: "Escape" })
+				expect(container.textContent).not.toContain("Third prompt")
+
+				// The parent clears the value without an input event (e.g. after send).
+				rerender(<ChatTextArea {...defaultProps} inputValue="" />)
+
+				// Typing "!" again must reopen the picker, not stay suppressed.
+				fireEvent.change(textarea, { target: { value: "!", selectionStart: 1 } })
+				expect(container.textContent).toContain("Third prompt")
+			})
+
 			it("should reset history navigation when sending message", () => {
 				const onSend = vi.fn()
 				const setInputValue = vi.fn()

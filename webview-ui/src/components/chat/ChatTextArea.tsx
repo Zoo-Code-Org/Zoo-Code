@@ -237,6 +237,14 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		// pop the picker back open on the very next keystroke.
 		const suppressedHistoryRef = useRef<string | null>(null)
 
+		// A controlled reset (for example sending the message) does not go through
+		// handleInputChange, so clear the dismissal once the input is empty again.
+		useEffect(() => {
+			if (!normalizedInputValue) {
+				suppressedHistoryRef.current = null
+			}
+		}, [normalizedInputValue])
+
 		// Use custom hook for prompt history navigation
 		const { handleHistoryNavigation, resetHistoryNavigation, resetOnInputChange, promptHistory } = usePromptHistory(
 			{
@@ -448,6 +456,8 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 		const handleKeyDown = useCallback(
 			(event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+				const isComposing = event.nativeEvent?.isComposing ?? false
+
 				if (showContextMenu) {
 					if (event.key === "Escape") {
 						// Dismiss the menu outright. `!` is easy to type by
@@ -502,7 +512,17 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						})
 						return
 					}
-					if ((event.key === "Enter" || event.key === "Tab") && selectedMenuIndex !== -1) {
+					// Only a plain Enter/Tab commits a row. Shift+Enter, Ctrl/Cmd+Enter
+					// and an IME-composed Enter stay on their normal newline/send path.
+					const isRowSelectKey =
+						(event.key === "Enter" || event.key === "Tab") &&
+						!event.shiftKey &&
+						!event.ctrlKey &&
+						!event.metaKey &&
+						!event.altKey &&
+						!isComposing
+
+					if (isRowSelectKey && selectedMenuIndex !== -1) {
 						const selectedOption = getContextMenuOptions(
 							searchQuery,
 							selectedType,
@@ -523,13 +543,15 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							return
 						}
 
-						// Nothing selectable (e.g. "No results"). Do not swallow the
-						// key: fall through so Enter still sends the message instead
-						// of leaving the composer unresponsive.
+						// Nothing selectable (e.g. "No results"). A history query is the
+						// whole message, so let Enter send it. Other menus keep their
+						// previous behavior and absorb the key.
+						if (!isHistoryTrigger(searchQuery)) {
+							event.preventDefault()
+							return
+						}
 					}
 				}
-
-				const isComposing = event.nativeEvent?.isComposing ?? false
 
 				// Handle prompt history navigation using custom hook
 				if (handleHistoryNavigation(event, showContextMenu, isComposing)) {
