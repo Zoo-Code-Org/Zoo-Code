@@ -25,7 +25,7 @@ const locales = [
 ]
 
 interface CheckpointTranslations {
-	errors: { checkpoint_restore_failed: string; checkpoint_missing: string }
+	errors: { checkpoint_restore_failed: string; checkpoint_missing: string; checkpoint_invalid_hash: string }
 	checkpoints: { restart_after_restore_failure: string; restart: string }
 }
 
@@ -52,6 +52,11 @@ describe("checkpoint translations", () => {
 				english.errors.checkpoint_restore_failed,
 			],
 			["errors.checkpoint_missing", translations.errors.checkpoint_missing, english.errors.checkpoint_missing],
+			[
+				"errors.checkpoint_invalid_hash",
+				translations.errors.checkpoint_invalid_hash,
+				english.errors.checkpoint_invalid_hash,
+			],
 			[
 				"checkpoints.restart_after_restore_failure",
 				translations.checkpoints.restart_after_restore_failure,

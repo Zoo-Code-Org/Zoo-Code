@@ -431,6 +431,21 @@ describe("Checkpoint functionality", () => {
 			expect(vscode.commands.executeCommand).not.toHaveBeenCalled()
 		})
 
+		it("should show diff for a recorded SHA-256 checkpoint hash", async () => {
+			const sha256Hash = "d".repeat(64)
+			mockTask.clineMessages.push({ ts: 5, say: "checkpoint_saved", text: sha256Hash })
+			mockCheckpointService.getDiff.mockResolvedValue([
+				{
+					paths: { absolute: "/test/file.ts", relative: "file.ts" },
+					content: { before: "old content", after: "new content" },
+				},
+			])
+
+			await checkpointDiff(mockTask, { ts: 5, commitHash: sha256Hash, mode: "to-current" })
+
+			expect(mockCheckpointService.getDiff).toHaveBeenCalledWith({ from: sha256Hash, to: undefined })
+		})
+
 		it.each([
 			["a malformed hash", "HEAD~1"],
 			["a well-formed but unrecorded hash", "b".repeat(40)],
@@ -439,6 +454,7 @@ describe("Checkpoint functionality", () => {
 			await checkpointDiff(mockTask, { commitHash: commitHash as string, mode: "to-current" })
 
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.checkpoint_invalid_hash")
+			expect(RepoPerTaskCheckpointService.create).not.toHaveBeenCalled()
 			expect(mockCheckpointService.getDiff).not.toHaveBeenCalled()
 			expect(mockTask.enableCheckpoints).toBe(true)
 		})
