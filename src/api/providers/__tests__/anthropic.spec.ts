@@ -1,14 +1,13 @@
 // npx vitest run src/api/providers/__tests__/anthropic.spec.ts
 
-import { type ApiStreamUsageChunk } from "../../../api/transform/stream"
 import { AnthropicHandler } from "../anthropic"
 import { MAX_TIMEOUT_MS } from "../utils/abort-signal"
 import { ApiHandlerOptions } from "../../../shared/api"
-import { calculateApiCostAnthropic } from "../../../shared/cost"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
-import type { ApiStreamChunk } from "../../../api/transform/stream"
+import type { ApiStreamChunk, ApiStreamUsageChunk } from "../../../api/transform/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { calculateApiCostAnthropic } from "../../../shared/cost"
 
 // Mock TelemetryService
 vitest.mock("@roo-code/telemetry", () => ({
@@ -1096,6 +1095,103 @@ describe("AnthropicHandler", () => {
 				"fine-grained-tool-streaming-2025-05-14,prompt-caching-2024-07-31",
 			)
 		})
+
+		it("should surface the 1h cache-write split from cache_creation", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 10,
+								output_tokens: 0,
+								cache_creation_input_tokens: 100_000,
+								cache_creation: {
+									ephemeral_5m_input_tokens: 40_000,
+									ephemeral_1h_input_tokens: 60_000,
+								},
+								cache_read_input_tokens: 0,
+							},
+						},
+					},
+				]),
+			)
+
+			const stream = handler.createMessage(systemPrompt, [{ role: "user", content: "Hello" }])
+			const chunks: ApiStreamChunk[] = await collectStream(stream)
+
+			const usageChunk = chunks.find(
+				(chunk): chunk is ApiStreamUsageChunk => chunk.type === "usage" && chunk.cacheWriteTokens !== undefined,
+			)
+			expect(usageChunk?.cacheWriteTokens).toBe(100_000)
+			expect(usageChunk?.cacheWrite1hTokens).toBe(60_000)
+		})
+
+		it("should leave the 1h split undefined when cache_creation is absent", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 10,
+								output_tokens: 0,
+								cache_creation_input_tokens: 20,
+								cache_read_input_tokens: 0,
+							},
+						},
+					},
+				]),
+			)
+
+			const stream = handler.createMessage(systemPrompt, [{ role: "user", content: "Hello" }])
+			const chunks: ApiStreamChunk[] = await collectStream(stream)
+
+			const usageChunk = chunks.find(
+				(chunk): chunk is ApiStreamUsageChunk => chunk.type === "usage" && chunk.cacheWriteTokens !== undefined,
+			)
+			expect(usageChunk?.cacheWriteTokens).toBe(20)
+			expect(usageChunk?.cacheWrite1hTokens).toBeUndefined()
+		})
+
+		it("should price a 1h write at the 1h rate in the final cost chunk", async () => {
+			// claude-sonnet-4-5: input 3.0, cacheWritesPrice 3.75, cacheWritesPrice1h 6.0.
+			const sonnetHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-sonnet-4-5",
+			})
+
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 0,
+								output_tokens: 0,
+								cache_creation_input_tokens: 100_000,
+								cache_creation: {
+									ephemeral_5m_input_tokens: 0,
+									ephemeral_1h_input_tokens: 100_000,
+								},
+								cache_read_input_tokens: 0,
+							},
+						},
+					},
+				]),
+			)
+
+			const stream = sonnetHandler.createMessage(systemPrompt, [{ role: "user", content: "Hello" }])
+			const chunks: ApiStreamChunk[] = await collectStream(stream)
+
+			const costChunk = chunks.find(
+				(chunk): chunk is ApiStreamUsageChunk => chunk.type === "usage" && chunk.totalCost !== undefined,
+			)
+			// 1h writes: (6.0 / 1_000_000) * 100_000 = 0.6
+			// The pre-split behaviour charged the 5m rate: 0.375 (37.5% low).
+			expect(costChunk?.totalCost).toBeCloseTo(0.6, 9)
+			expect(costChunk?.totalCost).not.toBeCloseTo(0.375, 9)
+		})
 	})
 
 	describe("completePrompt", () => {
@@ -1490,6 +1586,38 @@ describe("AnthropicHandler", () => {
 			expect(model.info.contextWindow).toBe(1000000)
 			expect(model.info.inputPrice).toBe(6.0)
 			expect(model.info.outputPrice).toBe(22.5)
+		})
+
+		it("carries the tier's own cacheWritesPrice1h when the 1M context tier applies", () => {
+			// glm P2: the tier merge overrode inputPrice but not the TTL rate, so the
+			// entry-level 1h rate (derived from the 200K input price) survived and a
+			// 1M-context 1h write billed 6.0 instead of the tier's 12.0 (50% under).
+			const handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-sonnet-4-5",
+				anthropicBeta1MContext: true,
+			})
+			const model = handler.getModel()
+
+			// Tier input price 6.0 => 1h rate must be 2x that, not the 200K entry's 6.0.
+			expect(model.info.cacheWritesPrice1h).toBe(12.0)
+			expect(model.info.cacheWritesPrice1h).not.toBe(6.0)
+		})
+
+		it("bills a 1M-context 1h cache write at the tier rate, not the 200K rate", () => {
+			const handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-sonnet-4-5",
+				anthropicBeta1MContext: true,
+			})
+			const model = handler.getModel()
+
+			const { totalCost } = calculateApiCostAnthropic(model.info, 0, 0, 100_000, 0, 100_000)
+
+			// Tier 1h rate 12.0: (12.0 / 1_000_000) * 100_000 = 1.2
+			// The pre-fix behaviour billed the 200K 1h rate: 0.6 (50% under).
+			expect(totalCost).toBeCloseTo(1.2, 9)
+			expect(totalCost).not.toBeCloseTo(0.6, 9)
 		})
 
 		it("should honor a custom/unrecognized model ID instead of silently falling back to anthropicDefaultModelId", () => {
