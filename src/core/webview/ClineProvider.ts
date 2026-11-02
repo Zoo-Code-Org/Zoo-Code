@@ -10,6 +10,20 @@ import axios from "axios"
 import debounce from "lodash.debounce"
 import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
+import {
+	WEBVIEW_RECOVERY_LIMITS,
+	preservesRecoveryIncident,
+	resolutionFailureAction,
+	canCommitRecovery,
+	nextRecoveryAttempt,
+	releaseRecoveryOwner,
+	pendingSidebarAfterCommandFailure,
+	recordRecoveryFailure,
+	recoveryHealth,
+	recoveryWarningAction,
+	isRecoveryGenerationCurrent,
+	beginExplicitRecovery,
+} from "./webviewRecoveryPolicy"
 
 import {
 	type TaskProviderLike,
@@ -40,6 +54,7 @@ import {
 	type ExtensionMessage,
 	type ExtensionState,
 	type WebviewThemeFixture,
+	type WebviewDiagnosticsSnapshot,
 	type MarketplaceInstalledMetadata,
 	RooCodeEventName,
 	requestyDefaultModelId,
@@ -98,6 +113,11 @@ import { CodeIndexManagerRegistry } from "../../services/code-index/code-index-m
 import type { CodeIndexWorkspaceScope } from "../../services/code-index/code-index-workspace-scope"
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
+import {
+	DiagnosticsRecorder,
+	DiagnosticsRequestBroker,
+	type DiagnosticsProviderSourceSnapshot,
+} from "../../services/diagnostics"
 
 import { fileExistsAtPath } from "../../utils/fs"
 import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
@@ -105,7 +125,7 @@ import { getWorkspaceGitInfo } from "../../utils/git"
 import { getWorkspacePath } from "../../utils/path"
 import { OrganizationAllowListViolationError } from "../../utils/errors"
 
-import { setPanel } from "../../activate/registerCommands"
+import { getPanel, setPanel } from "../../activate/registerCommands"
 
 import { t } from "../../i18n"
 
@@ -141,18 +161,7 @@ import { validateAndFixToolResultIds } from "../task/validateToolResultIds"
 import { PendingEditOperationStore, type PendingEditOperationInput } from "./PendingEditOperationStore"
 
 type PersistedViewState = NonNullable<GlobalState["viewStates"]>[string]
-
-/**
- * Values that can be held in a view-local state buffer (in-memory) and, for the
- * non-secret subset, persisted durably per stable view id.
- */
 type ViewLocalStateValues = Partial<RooCodeSettings> & Partial<ExtensionState>
-
-/**
- * The subset of view-local values that has a durable per-view record. `saveViewState`
- * and the mutation path handle exactly these keys, so the generic stays narrow enough
- * for the compiler to reject e.g. `writeDelayMs`.
- */
 type PersistedViewStateValues = Pick<ViewLocalStateValues, "mode" | "currentApiConfigName" | "apiConfiguration">
 
 /**
@@ -265,6 +274,40 @@ export class ClineProvider
 	private taskEventListeners: WeakMap<Task, Array<() => void>> = new WeakMap()
 	private currentWorkspacePath: string | undefined
 	private _disposed = false
+	private lastWebviewHeartbeatAt = 0
+	// Bumped on every heartbeat or grace reset, including events in the same
+	// millisecond; pending recovery must yield to either sign of renewed grace.
+	private webviewHeartbeatRevision = 0
+	private webviewRecoveryAttempts = 0
+	private webviewRecoveryConfirmation: ReturnType<typeof setTimeout> | undefined
+	private webviewHostRecoveryInProgress = false
+	// VS Code may resolve the focused sidebar after our bounded wait expires.
+	// Keep that repair distinct from a user-opened view until it arrives.
+	private pendingSidebarRecovery = false
+	private webviewRecoveryFailureReported = false
+	private webviewRecoveryStopLogged = false
+	private lastReceivedWebviewHeartbeatAt: number | undefined
+	private webviewHeartbeatCount = 0
+	private webviewHealthySince: number | undefined
+	private static readonly WEBVIEW_RECOVERY_CONFIRM_MS = 10_000
+	private static readonly WEBVIEW_RECOVERY_ATTEMPT_LIMIT = WEBVIEW_RECOVERY_LIMITS.attempts
+	private webviewWatchdogInterval: ReturnType<typeof setInterval> | null = null
+	// Bumped to invalidate an in-flight recovery reload when the provider or
+	// the watched view is disposed; the reload must not reassign webview.html
+	// afterwards.
+	private webviewRecoveryEpoch = 0
+	private webviewRecoveryRequestGeneration = 0
+	// Epoch that owns an in-flight recovery reload, if any. Only a recovery
+	// from the same epoch is blocked, so disposing/replacing the view (which
+	// bumps webviewRecoveryEpoch) never makes the replacement wait on the
+	// stale recovery's completion.
+	private webviewRecoveryInFlightEpoch: number | undefined = undefined
+	// Wall-clock reading of the previous watchdog tick; a tick arriving far
+	// later than scheduled means the host slept, so the grace window restarts
+	// instead of counting the suspended interval against a live renderer.
+	private lastWebviewWatchdogTickAt = 0
+	private static readonly WEBVIEW_WATCHDOG_TICK_MS = 60_000
+	private static readonly WEBVIEW_HEARTBEAT_STALE_MS = WEBVIEW_RECOVERY_LIMITS.staleMs
 	private readonly _postStateToWebviewThrottled = debounce(
 		async () => {
 			try {
@@ -280,6 +323,8 @@ export class ClineProvider
 		500,
 		{ leading: true, trailing: true, maxWait: 1000 },
 	)
+	private readonly diagnosticsRecorder = new DiagnosticsRecorder(200)
+	private readonly diagnosticsRequestBroker = new DiagnosticsRequestBroker()
 	private readonly rateLimitClock: RateLimitClock = createRateLimitClock()
 
 	private recentTasksCache?: string[]
@@ -379,7 +424,7 @@ export class ClineProvider
 	public readonly viewId: string
 
 	/** Stable id for persisted per-view state keys, bound by the host-minted claim. */
-	private viewStateId: string
+	private viewStateId: string = ""
 
 	/**
 	 * Whether this instance wrote an entry under its own session-local temporary id.
@@ -406,7 +451,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "oct-2026-v3.92.0-models-reliability-mcp" // v3.92.0 models, workflow reliability, and MCP marketplace
+	public readonly latestAnnouncementId = "oct-2026-v3.94.0-models-oauth-chat" // v3.94.0 model support, MCP OAuth, and chat reliability
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -419,16 +464,17 @@ export class ClineProvider
 		mdmService?: MdmService,
 	) {
 		super()
-		// Initialize viewId based on renderContext and monotonically increasing instance identifier for uniqueness.
-		// activeInstances is used for visibility/iteration checks, so we keep tracking instances separately.
-		this.viewId = `${renderContext}-${ClineProvider.nextViewId++}`
-		this.viewStateId = this.viewId
-		ClineProvider.activeInstances.add(this)
 		this.currentWorkspacePath = getWorkspacePath()
 		this.pendingEditOperations = new PendingEditOperationStore(
 			ClineProvider.PENDING_OPERATION_TIMEOUT_MS,
 			(message) => this.log(message),
 		)
+
+		// Derive the per-instance view id and bind the persisted view-state key to it.
+		this.viewId = `${renderContext}-${ClineProvider.nextViewId++}`
+		this.viewStateId = this.viewId
+		ClineProvider.activeInstances.add(this)
+		this.diagnosticsRecorder.record({ boundary: "provider", phase: "success", type: "created" })
 
 		this.mdmService = mdmService
 		void this.updateGlobalState("codebaseIndexModels", EMBEDDING_MODEL_PROFILES)
@@ -453,9 +499,6 @@ export class ClineProvider
 		this.customModesManager = new CustomModesManager(this.context, async () => {
 			await this.postStateToWebviewWithoutClineMessages()
 		})
-
-		// Load initial state from global state into viewLocalState buffer after dependencies used by getState are ready.
-		void this.loadViewState()
 
 		// Initialize MCP Hub through the singleton manager
 		McpServerManager.getInstance(this.context, this)
@@ -554,6 +597,8 @@ export class ClineProvider
 	 * Initialize the TaskHistoryStore and migrate from globalState if needed.
 	 */
 	private async initializeTaskHistoryStore(): Promise<void> {
+		const startedAt = Date.now()
+		this.diagnosticsRecorder.record({ boundary: "task-history", phase: "start", type: "initialize" })
 		try {
 			await this.taskHistoryStore.initialize()
 
@@ -574,7 +619,19 @@ export class ClineProvider
 			}
 
 			this.taskHistoryStoreInitialized = true
+			this.diagnosticsRecorder.record({
+				boundary: "task-history",
+				phase: "success",
+				type: "initialize",
+				elapsedMs: Date.now() - startedAt,
+			})
 		} catch (error) {
+			this.diagnosticsRecorder.record({
+				boundary: "task-history",
+				phase: "failure",
+				type: "initialize",
+				elapsedMs: Date.now() - startedAt,
+			})
 			this.log(`[initializeTaskHistoryStore] Error: ${error instanceof Error ? error.message : String(error)}`)
 		}
 	}
@@ -1313,6 +1370,19 @@ export class ClineProvider
 	*/
 	private clearWebviewResources() {
 		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
+		this.stopWebviewWatchdog()
+		// Invalidate any recovery reload still awaiting its HTML so it cannot
+		// reassign webview.html on the disposed view.
+		this.webviewRecoveryEpoch++
+		// User-opened replacements get a fresh budget; recreating a failed host
+		// must preserve its incident budget so crash loops remain bounded.
+		if (!preservesRecoveryIncident(this.webviewHostRecoveryInProgress, this.pendingSidebarRecovery)) {
+			this.webviewRecoveryAttempts = 0
+			this.webviewRecoveryFailureReported = false
+			this.webviewRecoveryStopLogged = false
+		}
+		this.lastReceivedWebviewHeartbeatAt = undefined
+		this.webviewHealthySince = undefined
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()
 			if (x) {
@@ -1326,8 +1396,8 @@ export class ClineProvider
 	 * view because the view was disposed or replaced (or the provider itself was
 	 * disposed) while the resolve was awaiting HTML or state hydration.
 	 */
-	private isStaleViewResolve(webviewView: vscode.WebviewView | vscode.WebviewPanel): boolean {
-		return this._disposed || this.view !== webviewView
+	private isStaleViewResolve(webviewView: vscode.WebviewView | vscode.WebviewPanel, epoch: number): boolean {
+		return this._disposed || this.view !== webviewView || epoch !== this.webviewRecoveryEpoch
 	}
 
 	/** Drain one task's memoized cleanup without preventing the remaining provider shutdown work. */
@@ -1340,6 +1410,7 @@ export class ClineProvider
 			)
 		}
 	}
+
 	async dispose() {
 		if (this._disposed) {
 			return
@@ -1347,6 +1418,8 @@ export class ClineProvider
 
 		this._disposed = true
 		this._postStateToWebviewThrottled.cancel()
+		this.stopWebviewWatchdog()
+		this.diagnosticsRecorder.record({ boundary: "provider", phase: "start", type: "dispose" })
 		this.log("Disposing ClineProvider...")
 
 		// Reject any tasks still waiting for a scheduler permit so they don't
@@ -1396,6 +1469,7 @@ export class ClineProvider
 		this.taskHistoryStore.dispose()
 		this.log("Disposed all disposables")
 		ClineProvider.activeInstances.delete(this)
+		this.diagnosticsRequestBroker.dispose()
 
 		// Clean up any event listeners attached to this provider
 		this.removeAllListeners()
@@ -1514,14 +1588,52 @@ export class ClineProvider
 	}
 
 	async resolveWebviewView(webviewView: vscode.WebviewView | vscode.WebviewPanel) {
+		const generation = this.webviewRecoveryRequestGeneration
+		// Capture intent before yielding: host recovery can time out while this
+		// resolve is still generating HTML or hydrating state.
+		const recoveringHost = preservesRecoveryIncident(
+			this.webviewHostRecoveryInProgress,
+			this.pendingSidebarRecovery,
+		)
+		try {
+			await this.initializeWebviewView(webviewView, recoveringHost)
+		} catch (error) {
+			if (!isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration)) return
+			const action = resolutionFailureAction({
+				recoveringHost,
+				disposed: this._disposed,
+				isCurrent: this.view === webviewView,
+			})
+			if (action === "propagate") throw error
+			if (action === "ignore") return
+			// VS Code invokes sidebar resolution itself, outside the focus command's
+			// promise. Handle both host types here so failed initialization retains
+			// its task, disposal subscription, and remaining recovery attempts.
+			const host = "onDidChangeViewState" in webviewView ? "tab" : "sidebar"
+			this.reportWebviewRecoveryFailure(`Failed to initialize replacement ${host}: ${String(error)}`, false)
+			this.startWebviewWatchdog()
+		}
+	}
+
+	private async initializeWebviewView(
+		webviewView: vscode.WebviewView | vscode.WebviewPanel,
+		recoveringHost: boolean,
+	): Promise<void> {
 		// A different view replaces the current one: dispose its subscriptions so
 		// the replaced view can no longer dispatch messages or refresh provider state.
 		if (this.view !== webviewView) {
 			this.clearWebviewResources()
 		}
 
+		const epoch = this.webviewRecoveryEpoch
+		this.pendingSidebarRecovery = false
 		this.view = webviewView
 		const inTabMode = "onDidChangeViewState" in webviewView
+		this.diagnosticsRecorder.record({
+			boundary: "provider",
+			phase: "success",
+			type: "view-resolved",
+		})
 
 		// Register disposal before awaiting HTML or state so closing the view during
 		// either load invalidates this resolve and prevents later listener installation.
@@ -1534,6 +1646,7 @@ export class ClineProvider
 				}
 
 				if (inTabMode) {
+					if (getPanel() === webviewView) setPanel(undefined, "tab")
 					this.log("Disposing ClineProvider instance for tab view")
 					await this.dispose()
 				} else {
@@ -1567,15 +1680,11 @@ export class ClineProvider
 			localResourceRoots: resourceRoots,
 		}
 
-		const html =
-			this.contextProxy.extensionMode === vscode.ExtensionMode.Development &&
-			process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1"
-				? await this.getHMRHtmlContent(webviewView.webview)
-				: await this.getHtmlContent(webviewView.webview)
+		const html = await this.getWebviewHtml(webviewView.webview)
 
 		// The HTML load above can finish after the view was disposed or replaced.
 		// A stale resolve must not assign HTML to a view the provider no longer owns.
-		if (this.isStaleViewResolve(webviewView)) {
+		if (this.isStaleViewResolve(webviewView, epoch)) {
 			return
 		}
 
@@ -1597,6 +1706,7 @@ export class ClineProvider
 				ttsEnabled,
 				ttsSpeed,
 			}) => {
+				if (this.isStaleViewResolve(webviewView, epoch)) return
 				Terminal.setShellIntegrationTimeout(terminalShellIntegrationTimeout)
 				Terminal.setShellIntegrationDisabled(terminalShellIntegrationDisabled)
 				Terminal.setCommandDelay(terminalCommandDelay)
@@ -1613,7 +1723,7 @@ export class ClineProvider
 
 		// State hydration can also finish after the view was disposed or replaced.
 		// A stale resolve must not install listeners on a view the provider no longer owns.
-		if (this.isStaleViewResolve(webviewView)) {
+		if (this.isStaleViewResolve(webviewView, epoch)) {
 			return
 		}
 
@@ -1621,6 +1731,9 @@ export class ClineProvider
 		// and executes code based on the message that is received.
 		this.setWebviewMessageListener(webviewView)
 		this.webviewDisposables.push(this.webviewFocusTracker.init(this, webviewView))
+
+		// Detect a dead webview renderer process (gray screen) via heartbeat timeout.
+		this.startWebviewWatchdog()
 
 		// Listen for when the panel becomes visible.
 		// https://github.com/microsoft/vscode-discussions/discussions/840
@@ -1633,7 +1746,15 @@ export class ClineProvider
 					return
 				}
 
+				this.diagnosticsRecorder.record({
+					boundary: "provider",
+					phase: "success",
+					type: this.view?.visible ? "view-visible" : "view-hidden",
+				})
 				if (this.view?.visible) {
+					// Hidden webviews throttle timers, so grant a fresh grace
+					// window instead of counting throttled heartbeats as a crash.
+					this.resetWebviewHeartbeatGrace()
 					void this.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
 				} else {
 					this.logWebviewHiddenDiagnostics()
@@ -1649,7 +1770,15 @@ export class ClineProvider
 					return
 				}
 
+				this.diagnosticsRecorder.record({
+					boundary: "provider",
+					phase: "success",
+					type: this.view?.visible ? "view-visible" : "view-hidden",
+				})
 				if (this.view?.visible) {
+					// Hidden webviews throttle timers, so grant a fresh grace
+					// window instead of counting throttled heartbeats as a crash.
+					this.resetWebviewHeartbeatGrace()
 					void this.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
 				} else {
 					this.logWebviewHiddenDiagnostics()
@@ -1676,7 +1805,9 @@ export class ClineProvider
 		// If the extension is starting a new session, clear previous task state.
 		// But don't clear if there's already an active task (e.g., resumed via IPC/bridge).
 		const currentTask = this.getCurrentTask()
-		if (!currentTask || currentTask.abandoned || currentTask.abort) {
+		// Host recreation is a UI repair, including when the displayed task is
+		// interrupted. It must not evict or resume that task as a side effect.
+		if (!recoveringHost && (!currentTask || currentTask.abandoned || currentTask.abort)) {
 			await this.removeClineFromStack()
 		}
 
@@ -1760,6 +1891,7 @@ export class ClineProvider
 		)
 		return run
 	}
+
 	private async createTaskWithHistoryItemUnlocked(
 		historyItem: HistoryItem & { rootTask?: Task; parentTask?: Task },
 		options?: { startTask?: boolean },
@@ -1996,14 +2128,50 @@ export class ClineProvider
 
 		return task
 	}
+
 	public async postMessageToWebview(message: ExtensionMessage) {
+		const startedAt = Date.now()
+		const taskId = this.getCurrentTask()?.taskId
+		this.diagnosticsRecorder.record({
+			boundary: "webview-out",
+			phase: "start",
+			type: message.type,
+			action: message.action,
+			stateSequence: message.type === "state" ? message.state?.clineMessagesSeq : undefined,
+			taskId,
+		})
 		if (this._disposed) {
+			this.diagnosticsRecorder.record({
+				boundary: "webview-out",
+				phase: "failure",
+				type: message.type,
+				action: message.action,
+				elapsedMs: Date.now() - startedAt,
+				taskId,
+			})
 			return
 		}
 
 		try {
-			await this.view?.webview.postMessage(omitOriginalContentFromExtensionMessage(message))
+			const delivered = await this.view?.webview.postMessage(omitOriginalContentFromExtensionMessage(message))
+			this.diagnosticsRecorder.record({
+				boundary: "webview-out",
+				phase: delivered ? "success" : "failure",
+				type: message.type,
+				action: message.action,
+				elapsedMs: Date.now() - startedAt,
+				stateSequence: message.type === "state" ? message.state?.clineMessagesSeq : undefined,
+				taskId,
+			})
 		} catch {
+			this.diagnosticsRecorder.record({
+				boundary: "webview-out",
+				phase: "failure",
+				type: message.type,
+				action: message.action,
+				elapsedMs: Date.now() - startedAt,
+				taskId,
+			})
 			// View disposed, drop message silently
 		}
 	}
@@ -2045,6 +2213,34 @@ export class ClineProvider
 		this.pendingThemeFixtureProbes.clear()
 	}
 
+	public getDiagnosticsSnapshot(): DiagnosticsProviderSourceSnapshot {
+		const currentTask = this.getCurrentTask()
+		const events = this.diagnosticsRecorder.snapshot(100)
+		return {
+			renderContext: this.renderContext,
+			disposed: this._disposed,
+			viewPresent: Boolean(this.view),
+			visible: this.view?.visible === true,
+			launched: this.isViewLaunched,
+			taskHistoryInitialized: this.taskHistoryStoreInitialized,
+			taskCount: this.taskRegistry.length,
+			currentTaskId: currentTask?.taskId,
+			currentMessageCount: currentTask?.clineMessages.length ?? 0,
+			currentTodoCount: currentTask?.todoList?.length ?? 0,
+			history: this.taskHistoryStore.getAll(),
+			events: events.events,
+			eventsTruncated: events.truncated,
+		}
+	}
+
+	public requestWebviewDiagnostics(timeoutMs = 1_000): Promise<WebviewDiagnosticsSnapshot | undefined> {
+		if (this._disposed || !this.view) return Promise.resolve(undefined)
+		return this.diagnosticsRequestBroker.request(
+			(requestId) => this.postMessageToWebview({ type: "diagnosticsRequest", requestId }),
+			timeoutMs,
+		)
+	}
+
 	private async getHMRHtmlContent(webview: vscode.Webview): Promise<string> {
 		let localPort = "5173"
 
@@ -2069,9 +2265,12 @@ export class ClineProvider
 
 		// Check if local dev server is running.
 		try {
-			await axios.get(`http://${localServerUrl}`)
-		} catch {
-			vscode.window.showErrorMessage(t("common:errors.hmr_not_running"))
+			await axios.get(`http://${localServerUrl}`, { timeout: 5_000 })
+		} catch (error) {
+			const timedOut = axios.isAxiosError(error) && (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT")
+			void vscode.window.showErrorMessage(
+				t(timedOut ? "common:errors.hmr_probe_timeout" : "common:errors.hmr_not_running"),
+			)
 			return this.getHtmlContent(webview)
 		}
 
@@ -2239,7 +2438,29 @@ export class ClineProvider
 				return
 			}
 
-			await webviewMessageHandler(this, message, this.marketplaceManager)
+			const startedAt = Date.now()
+			this.diagnosticsRecorder.record({ boundary: "webview-in", phase: "start", type: message.type })
+			try {
+				if (message.type === "diagnosticsResponse" && message.requestId) {
+					this.diagnosticsRequestBroker.resolve(message.requestId, message.diagnostics)
+				} else {
+					await webviewMessageHandler(this, message, this.marketplaceManager)
+				}
+				this.diagnosticsRecorder.record({
+					boundary: "webview-in",
+					phase: "success",
+					type: message.type,
+					elapsedMs: Date.now() - startedAt,
+				})
+			} catch (error) {
+				this.diagnosticsRecorder.record({
+					boundary: "webview-in",
+					phase: "failure",
+					type: message.type,
+					elapsedMs: Date.now() - startedAt,
+				})
+				throw error
+			}
 		}
 
 		const messageDisposable = webviewView.webview.onDidReceiveMessage(onReceiveMessage)
@@ -2257,6 +2478,7 @@ export class ClineProvider
 			this.handleModeSwitchUnlocked(newMode, targetTask, signal),
 		)
 	}
+
 	private async handleModeSwitchUnlocked(
 		newMode: Mode,
 		targetTask: Task | null | undefined,
@@ -2579,8 +2801,7 @@ export class ClineProvider
 
 			const activationResults = await Promise.allSettled([
 				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
-				// Route through setValue so the buffer tracks the activated profile.
-				this.setValue("currentApiConfigName", name),
+				this.updateGlobalState("currentApiConfigName", name),
 				this.providerSettingsManager.setModeConfig(mode, id),
 				this.contextProxy.setProviderSettings(providerSettings),
 			])
@@ -2664,16 +2885,6 @@ export class ClineProvider
 			await this.persistStickyProviderProfileToCurrentTask(name)
 		} else {
 			await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
-
-			// A non-activating save still changes the profile's settings: refresh the views
-			// that buffered a copy, or their getState() keeps the pre-save values.
-			if (this.pinnedProfileName === name) {
-				await this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
-				// Only rebuild a task that actually runs under the saved profile.
-				if (this.getCurrentTask()?.taskApiConfigName === name) {
-					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
-				}
-			}
 		}
 
 		if (signal.aborted) return id
@@ -2681,6 +2892,7 @@ export class ClineProvider
 		await this.postStateToWebview()
 		return id
 	}
+
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
 		const globalSettings = this.contextProxy.getValues()
 		let profileToActivate: string | undefined = globalSettings.currentApiConfigName
@@ -2746,6 +2958,7 @@ export class ClineProvider
 			this.activateProviderProfileUnlocked(args, options, signal),
 		)
 	}
+
 	private async activateProviderProfileUnlocked(
 		args: { name: string } | { id: string },
 		options?: {
@@ -2868,6 +3081,9 @@ export class ClineProvider
 
 		await this.upsertProviderProfile(currentApiConfigName, newConfiguration)
 	}
+
+	// Zoo Code Auth
+
 	async handleZooCodeCallback(token: string) {
 		// Auth mutation (token storage, subscription check, success toast) was already
 		// performed by handleAuthCallback() in handleUri.ts before this method was called.
@@ -3043,13 +3259,39 @@ export class ClineProvider
 	}
 
 	async showTaskWithId(id: string) {
-		if (id !== this.getCurrentTask()?.taskId) {
-			// Non-current task.
-			const { historyItem } = await this.getTaskWithId(id)
-			await this.createTaskWithHistoryItem(historyItem) // Clears existing task.
-		}
+		const startedAt = Date.now()
+		this.diagnosticsRecorder.record({
+			boundary: "task-navigation",
+			phase: "start",
+			type: "show-task",
+			taskId: id,
+		})
+		try {
+			if (id !== this.getCurrentTask()?.taskId) {
+				// Non-current task.
+				const { historyItem } = await this.getTaskWithId(id)
+				await this.createTaskWithHistoryItem(historyItem) // Clears existing task.
+			}
 
-		await this.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
+			await this.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
+			this.diagnosticsRecorder.record({
+				boundary: "task-navigation",
+				phase: "success",
+				type: "show-task",
+				taskId: id,
+				elapsedMs: Date.now() - startedAt,
+				messageCount: this.getCurrentTask()?.clineMessages.length ?? 0,
+			})
+		} catch (error) {
+			this.diagnosticsRecorder.record({
+				boundary: "task-navigation",
+				phase: "failure",
+				type: "show-task",
+				taskId: id,
+				elapsedMs: Date.now() - startedAt,
+			})
+			throw error
+		}
 	}
 
 	async exportTaskWithId(id: string) {
@@ -3977,8 +4219,9 @@ export class ClineProvider
 	}
 
 	public getValues() {
-		return { ...this.contextProxy.getValues(), ...this.viewLocalState }
+		return this.contextProxy.getValues()
 	}
+
 	public async setValues(values: RooCodeSettings) {
 		await this.contextProxy.setValues(values)
 	}
@@ -4131,6 +4374,394 @@ export class ClineProvider
 				`  timestamp:    ${new Date().toISOString()}\n` +
 				`If the panel appears gray after this, share this log with support@zoocode.dev`,
 		)
+	}
+
+	/** A heartbeat confirms liveness; only sustained health replenishes recovery attempts. */
+	public updateWebviewHeartbeat(): void {
+		const now = Date.now()
+		const health = recoveryHealth(
+			{
+				attempts: this.webviewRecoveryAttempts,
+				lastHeartbeatAt: this.lastReceivedWebviewHeartbeatAt,
+				healthySince: this.webviewHealthySince,
+			},
+			now,
+		)
+		this.webviewHealthySince = health.healthySince
+		this.lastReceivedWebviewHeartbeatAt = now
+		this.webviewHeartbeatCount++
+		// A new heartbeat invalidates the old warning action. Allow a fresh warning
+		// if this renderer stalls again, without replenishing its retry budget.
+		this.webviewRecoveryFailureReported = false
+		this.webviewRecoveryStopLogged = false
+		if (this.webviewRecoveryConfirmation) {
+			this.log("[Zoo Code] Webview heartbeat returned after recovery")
+		}
+		this.resetWebviewHeartbeatGrace()
+		if (health.attempts === 0 && this.webviewRecoveryAttempts > 0) {
+			this.log("[Zoo Code] Webview recovery confirmed by sustained heartbeats")
+		}
+		this.webviewRecoveryAttempts = health.attempts
+	}
+
+	/** Restarts the grace window and invalidates pending recovery without recording a heartbeat. */
+	private resetWebviewHeartbeatGrace(): void {
+		this.clearWebviewRecoveryConfirmation()
+		this.lastWebviewHeartbeatAt = Date.now()
+		this.webviewHeartbeatRevision++
+	}
+
+	/**
+	 * Starts (or restarts) the watchdog that detects a dead webview renderer
+	 * process. Hidden webviews throttle timers, so becoming visible resets the
+	 * grace window instead of counting throttled heartbeats as a crash.
+	 */
+	private startWebviewWatchdog(): void {
+		this.resetWebviewHeartbeatGrace()
+		this.lastWebviewWatchdogTickAt = Date.now()
+		if (this.webviewWatchdogInterval) {
+			clearInterval(this.webviewWatchdogInterval)
+		}
+		this.webviewWatchdogInterval = setInterval(() => {
+			const now = Date.now()
+			const tickGap = now - this.lastWebviewWatchdogTickAt
+			this.lastWebviewWatchdogTickAt = now
+			// A tick far later than scheduled means the host was suspended or
+			// blocked; the wall clock jumped while both timers were paused.
+			// Grant a fresh grace window instead of reloading a live renderer.
+			if (tickGap > ClineProvider.WEBVIEW_WATCHDOG_TICK_MS * 1.5) {
+				this.resetWebviewHeartbeatGrace()
+				return
+			}
+			if (this.view?.visible !== true) {
+				return
+			}
+			if (now - this.lastWebviewHeartbeatAt <= ClineProvider.WEBVIEW_HEARTBEAT_STALE_MS) return
+			if (this.webviewRecoveryAttempts >= ClineProvider.WEBVIEW_RECOVERY_ATTEMPT_LIMIT) {
+				// Let the final attempt finish generating HTML before declaring recovery stopped.
+				if (this.webviewRecoveryInFlightEpoch !== this.webviewRecoveryEpoch) {
+					this.reportWebviewRecoveryFailure("Recovery attempt limit reached without sustained heartbeats")
+				}
+				return
+			}
+			this.log("[Zoo Code] Webview heartbeat stale while visible; attempting recovery")
+			void this.reloadWebviewForRecovery()
+		}, ClineProvider.WEBVIEW_WATCHDOG_TICK_MS)
+	}
+
+	/** Stops the renderer heartbeat watchdog; the webview it watches is gone. */
+	private stopWebviewWatchdog(): void {
+		this.clearWebviewRecoveryConfirmation()
+		if (this.webviewWatchdogInterval) {
+			clearInterval(this.webviewWatchdogInterval)
+			this.webviewWatchdogInterval = null
+		}
+	}
+
+	/**
+	 * First attempt: regenerate this view's HTML. A missing heartbeat escalates
+	 * to host recreation because HTML delivery cannot restart a dead renderer.
+	 */
+	private async reloadWebviewForRecovery(): Promise<void> {
+		const view = this.view
+		if (!view?.webview || this.webviewRecoveryAttempts >= ClineProvider.WEBVIEW_RECOVERY_ATTEMPT_LIMIT) {
+			return
+		}
+		// Capture the epoch so a disposal or view replacement can invalidate
+		// this operation while the HTML is being generated.
+		const epoch = this.webviewRecoveryEpoch
+		// A recovery already awaiting its HTML generation owns this view; a
+		// second one would only pile another forced reload onto it. Ownership
+		// is scoped to the epoch so a stale recovery (its view disposed or
+		// replaced, epoch bumped) never blocks the replacement view's recovery.
+		const attempt = nextRecoveryAttempt(this.webviewRecoveryAttempts, this.webviewRecoveryInFlightEpoch === epoch)
+		if (attempt === undefined) return
+		this.webviewRecoveryInFlightEpoch = epoch
+		// Count the whole attempt, including HTML-generation failures.
+		this.webviewRecoveryAttempts = attempt
+		this.lastReceivedWebviewHeartbeatAt = undefined
+		this.webviewHealthySince = undefined
+		// A heartbeat that arrives while the HTML is being generated means the
+		// renderer is alive again; comparing revisions (not timestamps) lets the
+		// post-await check catch heartbeats that land in the same millisecond.
+		const heartbeatRevision = this.webviewHeartbeatRevision
+		try {
+			const html = await this.getWebviewHtml(view.webview)
+			// The await yields; assigning html now that the provider is disposed,
+			// the watched view was disposed/replaced, the renderer heartbeat
+			// recovered, or the view hid again would either touch a dead or
+			// unrelated webview or reload one that no longer needs recovery.
+			if (
+				!canCommitRecovery({
+					disposed: this._disposed,
+					isCurrent: this.view === view,
+					epochMatches: this.webviewRecoveryEpoch === epoch,
+					heartbeatMatches: this.webviewHeartbeatRevision === heartbeatRevision,
+					visible: view.visible === true,
+				})
+			) {
+				return
+			}
+			view.webview.html = html
+			this.resetWebviewHeartbeatGrace()
+			const revision = this.webviewHeartbeatRevision
+			const requestedAt = Date.now()
+			this.webviewRecoveryConfirmation = setTimeout(() => {
+				this.webviewRecoveryConfirmation = undefined
+				// A late confirmation timer can be a host suspend, just like a
+				// late watchdog tick. Let renderer timers resume before escalating.
+				if (Date.now() - requestedAt > ClineProvider.WEBVIEW_RECOVERY_CONFIRM_MS * 1.5) {
+					this.resetWebviewHeartbeatGrace()
+					return
+				}
+				if (
+					this._disposed ||
+					this.view !== view ||
+					this.webviewRecoveryEpoch !== epoch ||
+					this.webviewHeartbeatRevision !== revision ||
+					!view.visible
+				)
+					return
+				void this.recreateWebviewHostForRecovery(view).catch((error: unknown) => {
+					this.reportWebviewRecoveryFailure(
+						`Host recreation failed: ${error instanceof Error ? error.message : String(error)}`,
+					)
+				})
+			}, ClineProvider.WEBVIEW_RECOVERY_CONFIRM_MS)
+		} catch (error) {
+			this.log(`[Zoo Code] Failed to reload webview: ${error instanceof Error ? error.message : String(error)}`)
+		} finally {
+			// Clear ownership only while this completion still holds it; a
+			// stale recovery must not release the replacement's in-flight state.
+			this.webviewRecoveryInFlightEpoch = releaseRecoveryOwner(this.webviewRecoveryInFlightEpoch, epoch)
+		}
+	}
+
+	private clearWebviewRecoveryConfirmation(): void {
+		if (this.webviewRecoveryConfirmation) clearTimeout(this.webviewRecoveryConfirmation)
+		this.webviewRecoveryConfirmation = undefined
+	}
+
+	/** Recreate the host/transport: sending more HTML cannot revive its dead renderer. */
+	private async recreateWebviewHostForRecovery(view: vscode.WebviewView | vscode.WebviewPanel): Promise<void> {
+		if (this.webviewHostRecoveryInProgress || this._disposed || this.view !== view || !view.visible) return
+		const revision = this.webviewHeartbeatRevision
+		const generation = this.webviewRecoveryRequestGeneration
+		let started = false
+		let sidebarFocused = false
+		try {
+			let commands: string[] | undefined
+			if (!("onDidChangeViewState" in view)) {
+				// Generated VS Code view commands are not an extension API contract.
+				// Check availability and cover them against the pinned real host in E2E.
+				commands = await vscode.commands.getCommands(true)
+			}
+			if (
+				!isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration) ||
+				this.webviewHostRecoveryInProgress ||
+				this._disposed ||
+				this.view !== view ||
+				!view.visible ||
+				this.webviewHeartbeatRevision !== revision
+			)
+				return
+			if (
+				commands &&
+				(!commands.includes(`${ClineProvider.sideBarId}.removeView`) ||
+					!commands.includes(`${ClineProvider.sideBarId}.focus`))
+			) {
+				throw new Error("VS Code does not provide the scoped sidebar recreation commands")
+			}
+			this.webviewHostRecoveryInProgress = true
+			started = true
+			this.log("[Zoo Code] No heartbeat after HTML reload; recreating this webview host")
+			if ("onDidChangeViewState" in view) {
+				const replacement = vscode.window.createWebviewPanel(
+					ClineProvider.tabPanelId,
+					view.title,
+					{ viewColumn: view.viewColumn ?? vscode.ViewColumn.Active, preserveFocus: true },
+					{ ...view.options, ...view.webview.options },
+				)
+				replacement.iconPath = view.iconPath
+				// Resolve publishes the replacement before yielding. The old view's
+				// disposal must see it no longer owns this provider and its tasks.
+				const resolved = this.resolveWebviewView(replacement)
+				if (this.view === replacement) view.dispose()
+				else replacement.dispose()
+				await resolved
+			} else {
+				this.pendingSidebarRecovery = true
+				await vscode.commands.executeCommand(`${ClineProvider.sideBarId}.removeView`)
+				if (this._disposed || !isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration))
+					return
+				await vscode.commands.executeCommand(`${ClineProvider.sideBarId}.focus`, { preserveFocus: true })
+				sidebarFocused = true
+				if (!isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration)) return
+				await this.waitForRecoveryView(view, generation)
+			}
+		} catch (error) {
+			if (!isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration)) return
+			// Only a successful focus can leave a delayed replacement pending.
+			// Command failures must not mark a later manual open as recovery.
+			this.pendingSidebarRecovery = pendingSidebarAfterCommandFailure({
+				started,
+				focusSucceeded: sidebarFocused,
+				pending: this.pendingSidebarRecovery,
+			})
+			// A late discovery failure must not stop a recovered/replaced view.
+			// Once recreation starts, disposal of the old view is expected.
+			if (
+				this._disposed ||
+				(!started && (this.view !== view || this.webviewHeartbeatRevision !== revision || !view.visible))
+			)
+				return
+			if (started && this.lastReceivedWebviewHeartbeatAt !== undefined) return
+			// A published replacement may still be initializing after the wait
+			// expires. Its resolver will restore the watchdog on failure; keep the
+			// remaining attempts available instead of turning this into a dead end.
+			const replacementPublished = this.view !== undefined && this.view !== view
+			this.reportWebviewRecoveryFailure(
+				`Host recreation failed: ${error instanceof Error ? error.message : String(error)}`,
+				!replacementPublished,
+			)
+		} finally {
+			if (started && isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration))
+				this.webviewHostRecoveryInProgress = false
+		}
+	}
+
+	private async waitForRecoveryView(
+		previous: vscode.WebviewView | vscode.WebviewPanel | undefined,
+		generation: number,
+	): Promise<void> {
+		await pWaitFor(
+			() =>
+				this._disposed ||
+				!isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration) ||
+				(this.view !== undefined && this.view !== previous && this.webviewWatchdogInterval !== null),
+			{ interval: 50, timeout: 10_000 },
+		)
+	}
+
+	/** An explicit user action, unlike an ambiguous VS Code resolve callback. */
+	public async retryWebviewRecovery(expectedGeneration = this.webviewRecoveryRequestGeneration): Promise<void> {
+		if (this._disposed || !isRecoveryGenerationCurrent(expectedGeneration, this.webviewRecoveryRequestGeneration))
+			return
+		const fresh = beginExplicitRecovery(this.webviewRecoveryRequestGeneration)
+		const generation = fresh.generation
+		this.webviewRecoveryRequestGeneration = generation
+		const view = this.view
+		if (!view || !("onDidChangeViewState" in view)) this.pendingSidebarRecovery = true
+		this.webviewRecoveryEpoch++
+		this.webviewRecoveryInFlightEpoch = undefined
+		this.webviewHostRecoveryInProgress = false
+		// Count this user-requested attempt in its fresh, bounded incident.
+		this.webviewRecoveryAttempts = fresh.attempts
+		this.webviewRecoveryFailureReported = fresh.reported
+		this.webviewRecoveryStopLogged = fresh.stopLogged
+		this.lastReceivedWebviewHeartbeatAt = undefined
+		this.webviewHealthySince = undefined
+		this.resetWebviewHeartbeatGrace()
+		let focused = false
+		try {
+			if (view) {
+				if ("onDidChangeViewState" in view) view.reveal(view.viewColumn ?? vscode.ViewColumn.Active, true)
+				else view.show(true)
+				await pWaitFor(
+					() =>
+						this._disposed ||
+						!isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration) ||
+						this.view !== view ||
+						view.visible,
+					{ interval: 50, timeout: 10_000 },
+				)
+				if (
+					this._disposed ||
+					!isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration) ||
+					this.view !== view
+				)
+					return
+				await this.recreateWebviewHostForRecovery(view)
+			} else {
+				// The earlier timeout may have removed the only sidebar. The next
+				// resolve, whatever triggered it, repairs this explicitly renewed incident.
+				this.pendingSidebarRecovery = true
+				this.webviewHostRecoveryInProgress = true
+				await vscode.commands.executeCommand(`${ClineProvider.sideBarId}.focus`, { preserveFocus: true })
+				focused = true
+				if (!isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration)) return
+				await this.waitForRecoveryView(undefined, generation)
+			}
+		} catch (error) {
+			if (this._disposed || !isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration))
+				return
+			this.pendingSidebarRecovery = pendingSidebarAfterCommandFailure({
+				started: true,
+				focusSucceeded: focused,
+				pending: this.pendingSidebarRecovery,
+			})
+			const replacementPublished = this.view !== undefined && this.view !== view
+			this.reportWebviewRecoveryFailure(
+				`Explicit interface recovery failed: ${String(error)}`,
+				!replacementPublished,
+			)
+		} finally {
+			if (isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration))
+				this.webviewHostRecoveryInProgress = false
+		}
+	}
+
+	private reportWebviewRecoveryFailure(reason: string, stopRecovery = true): void {
+		if (this._disposed) return
+		// A terminal failure still stops retries if an earlier retryable failure
+		// already showed the notification for this incident.
+		const failure = recordRecoveryFailure(
+			{
+				attempts: this.webviewRecoveryAttempts,
+				reported: this.webviewRecoveryFailureReported,
+				stopLogged: this.webviewRecoveryStopLogged,
+			},
+			stopRecovery,
+		)
+		this.webviewRecoveryAttempts = failure.attempts
+		this.webviewRecoveryFailureReported = failure.reported
+		this.webviewRecoveryStopLogged = failure.stopLogged
+		if (failure.log) this.log(`[Zoo Code] Webview recovery ${stopRecovery ? "stopped" : "will retry"}: ${reason}`)
+		if (!failure.notify) return
+		const heartbeatCount = this.webviewHeartbeatCount
+		const generation = this.webviewRecoveryRequestGeneration
+		void Promise.resolve(
+			vscode.window.showWarningMessage(
+				"Zoo Code's interface is not responding. Retry interface recovery without restarting running tasks. Reloading the VS Code window will restart extensions and may interrupt running tasks.",
+				"Retry Interface Recovery",
+				"Reload Window",
+				"Show Logs",
+			),
+		)
+			.then(async (choice) => {
+				const action = recoveryWarningAction(
+					choice,
+					this._disposed,
+					this.webviewHeartbeatCount === heartbeatCount,
+					isRecoveryGenerationCurrent(generation, this.webviewRecoveryRequestGeneration),
+				)
+				if (action === "retry") await this.retryWebviewRecovery(generation)
+				if (action === "reload") {
+					await vscode.commands.executeCommand("workbench.action.reloadWindow")
+				}
+				if (action === "logs") this.outputChannel.show()
+			})
+			.then(undefined, (error: unknown) => {
+				this.log(`[Zoo Code] Recovery notification failed: ${String(error)}`)
+			})
+	}
+
+	/** Builds the webview HTML using the same path as resolveWebviewView (HMR in development). */
+	private async getWebviewHtml(webview: vscode.Webview): Promise<string> {
+		return this.contextProxy.extensionMode === vscode.ExtensionMode.Development &&
+			process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1"
+			? await this.getHMRHtmlContent(webview)
+			: await this.getHtmlContent(webview)
 	}
 
 	public getRecentTasks(): string[] {

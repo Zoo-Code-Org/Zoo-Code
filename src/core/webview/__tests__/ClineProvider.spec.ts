@@ -74,9 +74,11 @@ vi.mock("axios", () => ({
 	default: {
 		get: vi.fn().mockResolvedValue({ data: { data: [] } }),
 		post: vi.fn(),
+		isAxiosError: vi.fn().mockReturnValue(true),
 	},
 	get: vi.fn().mockResolvedValue({ data: { data: [] } }),
 	post: vi.fn(),
+	isAxiosError: vi.fn().mockReturnValue(true),
 }))
 
 vi.mock("../../../utils/safeWriteJson")
@@ -1191,7 +1193,7 @@ describe("ClineProvider", () => {
 			// Pin the health-check URL itself: the mock resolves for any URL, so only
 			// this assertion keeps the probe from silently drifting back to
 			// `localhost` (the IPv6 resolution failure this branch fixes).
-			expect(axios.get).toHaveBeenCalledWith("http://127.0.0.1:5173")
+			expect(axios.get).toHaveBeenCalledWith("http://127.0.0.1:5173", { timeout: 5_000 })
 
 			const html = mockWebviewView.webview.html
 			// The dev server URL must be baked into the module script tag and CSP directives.
