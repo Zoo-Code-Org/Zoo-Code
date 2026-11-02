@@ -34,6 +34,10 @@ vi.mock("@src/utils/vscode", () => ({
 
 const TestComponent = () => {
 	const {
+		taskHistory,
+		currentTaskItem,
+		clineMessages,
+		currentTaskId,
 		allowedCommands,
 		setAllowedCommands,
 		soundEnabled,
