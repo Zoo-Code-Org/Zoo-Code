@@ -455,6 +455,14 @@ export type ExtensionState = Pick<
 	 * (captured during async getStateToPostToWebview) from overwriting newer messages.
 	 */
 	clineMessagesSeq?: number
+
+	/**
+	 * Monotonically increasing sequence number for every state push, taken together with the host's read
+	 * of its settings. The frontend applies the appearance values (font sizes, spacing) of a push only if its
+	 * seq is greater than the last applied one, so an older push that arrives late cannot restore
+	 * values a newer push has already replaced.
+	 */
+	appearanceSeq?: number
 }
 
 export interface Command {

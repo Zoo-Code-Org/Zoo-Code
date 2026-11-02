@@ -3400,6 +3400,44 @@ describe("ClineProvider", () => {
 		expect(statePostSettled).toBe(true)
 	})
 
+	test("numbers every state push, including those without clineMessages, in the order they start", async () => {
+		const first = await provider.getStateToPostToWebview({ includeTaskHistory: false })
+		const second = await provider.getStateToPostToWebview({ includeTaskHistory: false })
+		expect(first.appearanceSeq).toBeDefined()
+		expect(second.appearanceSeq).toBe(first.appearanceSeq! + 1)
+
+		const [older, newer] = await Promise.all([
+			provider.getStateToPostToWebview({ includeTaskHistory: false }),
+			provider.getStateToPostToWebview({ includeTaskHistory: false }),
+		])
+		expect(newer.appearanceSeq).toBe(older.appearanceSeq! + 1)
+	})
+
+	test("numbers a push by when its settings were read, not by when it finishes", async () => {
+		let stored = 1
+		vi.spyOn(provider.contextProxy, "getValues").mockImplementation(() => ({ spacingScale: stored }))
+		let releaseFirst: () => void = () => {}
+		let firstHasRead: () => void = () => {}
+		const hasRead = new Promise<void>((resolve) => (firstHasRead = resolve))
+		vi.spyOn(provider.customModesManager, "getCustomModes")
+			.mockImplementationOnce(() => {
+				firstHasRead() // the settings are read by now, and this push waits
+				return new Promise((resolve) => (releaseFirst = () => resolve([])))
+			})
+			.mockResolvedValue([])
+
+		const older = provider.getStateToPostToWebview({ includeTaskHistory: false }) // reads 1, then waits
+		await hasRead
+		stored = 2
+		const newer = await provider.getStateToPostToWebview({ includeTaskHistory: false }) // reads 2, finishes first
+		releaseFirst()
+		const olderState = await older
+
+		expect(newer.spacingScale).toBe(2)
+		expect(olderState.spacingScale).toBe(1)
+		expect(newer.appearanceSeq).toBeGreaterThan(olderState.appearanceSeq!)
+	})
+
 	test.each([
 		["postStateToWebview", (currentProvider: ClineProvider) => currentProvider.postStateToWebview()],
 		[

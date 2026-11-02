@@ -420,6 +420,49 @@ describe("ExtensionStateContext", () => {
 		expect(cache?.size).toBe(0)
 	})
 
+	it("keeps the appearance values of a newer push when an older push arrives late", () => {
+		const initial = {
+			...createInitialExtensionState(),
+			chatFontSize: 16,
+			interfaceFontScale: 1.2,
+			terminalFontSize: 14,
+			editorFontSize: 15,
+			spacingScale: 1.1,
+			appearanceSeq: 5,
+		}
+		const older = {
+			chatFontSize: 12,
+			interfaceFontScale: 1,
+			terminalFontSize: 10,
+			editorFontSize: 11,
+			spacingScale: 0.9,
+			appearanceSeq: 4,
+			soundEnabled: true,
+		}
+		const merged = mergeExtensionState(initial, older)
+		expect(merged).toMatchObject({
+			chatFontSize: 16,
+			interfaceFontScale: 1.2,
+			terminalFontSize: 14,
+			editorFontSize: 15,
+			spacingScale: 1.1,
+			appearanceSeq: 5,
+		})
+		// Only the appearance values are held back; the rest of the push still applies.
+		expect(merged.soundEnabled).toBe(true)
+
+		const newer = mergeExtensionState(initial, { ...older, appearanceSeq: 6 })
+		expect(newer).toMatchObject({ chatFontSize: 12, interfaceFontScale: 1, spacingScale: 0.9, appearanceSeq: 6 })
+	})
+
+	it("applies the appearance values of a push that has no sequence number", () => {
+		const initial = { ...createInitialExtensionState(), spacingScale: 1.1, appearanceSeq: 5 }
+		expect(mergeExtensionState(initial, { spacingScale: 0.9 }).spacingScale).toBe(0.9)
+		expect(
+			mergeExtensionState(createInitialExtensionState(), { spacingScale: 0.9, appearanceSeq: 1 }),
+		).toMatchObject({ spacingScale: 0.9, appearanceSeq: 1 })
+	})
+
 	it("clears a serialized absent task id and preserves task identity on stale snapshots", () => {
 		const initial = { ...createInitialExtensionState(), currentTaskId: "task-a", clineMessagesSeq: 5 }
 		// JSON serialization intentionally drops undefined, reproducing the extension transport.

@@ -176,6 +176,17 @@ const messagesAreStale = (incoming: Partial<ExtensionState>, currentSequence: nu
 	currentSequence !== undefined &&
 	incoming.clineMessagesSeq <= currentSequence
 
+const APPEARANCE_KEYS = [
+	"chatFontSize",
+	"interfaceFontScale",
+	"terminalFontSize",
+	"editorFontSize",
+	"spacingScale",
+] as const satisfies readonly (keyof ExtensionState)[]
+
+const appearanceIsStale = (incoming: Partial<ExtensionState>, currentSequence: number | undefined): boolean =>
+	incoming.appearanceSeq !== undefined && currentSequence !== undefined && incoming.appearanceSeq <= currentSequence
+
 function internMessages(messages: ClineMessage[], previousMessages: ClineMessage[], cache: StringCache): void {
 	const previousByTimestamp = new Map(previousMessages.map((item) => [item.ts, item]))
 	for (const message of messages) {
@@ -229,6 +240,15 @@ export const mergeExtensionState = (prevState: ExtensionState, newState: Partial
 		rest.currentTaskId = prevState.currentTaskId
 	} else {
 		rest.currentTaskId = newState.currentTaskId
+	}
+
+	// The appearance values are read from a settings snapshot taken before the push is posted, so a stale
+	// push can carry old font sizes or spacing. Apply them only from a push newer than the last applied one.
+	if (appearanceIsStale(newState, prevState.appearanceSeq)) {
+		for (const key of APPEARANCE_KEYS) {
+			;(rest as Record<string, unknown>)[key] = prevState[key]
+		}
+		rest.appearanceSeq = prevState.appearanceSeq
 	}
 
 	// Note that we completely replace the previous apiConfiguration and customSupportPrompts objects

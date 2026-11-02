@@ -406,6 +406,12 @@ export class ClineProvider
 	 */
 	private clineMessagesSeq = 0
 
+	/**
+	 * Sequence number for every state push (including those without clineMessages), used by the
+	 * frontend to ignore the appearance values of a push that arrives after a newer one.
+	 */
+	private appearanceSeq = 0
+
 	public isViewLaunched = false
 	public settingsImportedAt?: number
 	public readonly latestAnnouncementId = "oct-2026-v3.94.0-models-oauth-chat" // v3.94.0 model support, MCP OAuth, and chat reliability
@@ -3054,6 +3060,10 @@ export class ClineProvider
 		// Ensure the store is initialized before reading task history
 		await this.taskHistoryStore.initialized
 
+		// Taken in the same synchronous step as getState() starts, which reads the settings before its first await.
+		// So a higher number always means a newer snapshot, however long the rest of the push takes.
+		const appearanceSeq = ++this.appearanceSeq
+
 		const {
 			apiConfiguration,
 			lastShownAnnouncementId,
@@ -3307,6 +3317,7 @@ export class ClineProvider
 			terminalFontSize,
 			editorFontSize,
 			spacingScale,
+			appearanceSeq,
 			enterBehavior: enterBehavior ?? "send",
 			cloudUserInfo,
 			cloudIsAuthenticated: cloudIsAuthenticated ?? false,
