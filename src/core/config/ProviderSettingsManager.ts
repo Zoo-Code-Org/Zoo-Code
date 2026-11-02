@@ -1,4 +1,7 @@
+import * as crypto from "node:crypto"
+import * as path from "node:path"
 import { ExtensionContext } from "vscode"
+import * as vscode from "vscode"
 import { z, ZodError } from "zod"
 import deepEqual from "fast-deep-equal"
 
@@ -20,6 +23,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { Mode, modes } from "../../shared/modes"
 import { buildApiHandler } from "../../api"
 import { disposeApiHandler } from "../../api/dispose-api-handler"
+import { Package } from "../../shared/package"
 import { downgradeLegacyRooConfig } from "./routerRemoval"
 
 // Type-safe model migrations mapping
@@ -57,7 +61,9 @@ export type ProviderProfiles = z.infer<typeof providerProfilesSchema>
 
 export class ProviderSettingsManager {
 	private static readonly SCOPE_PREFIX = "roo_cline_config_"
+	private static readonly LEGACY_SECRET_STORAGE_KEY = `${ProviderSettingsManager.SCOPE_PREFIX}api_config`
 	private readonly defaultConfigId = this.generateId()
+	private readonly customStoragePath: string
 
 	private readonly defaultModeApiConfigs: Record<string, string> = Object.fromEntries(
 		modes.map((mode) => [mode.slug, this.defaultConfigId]),
@@ -80,8 +86,11 @@ export class ProviderSettingsManager {
 
 	private readonly context: ExtensionContext
 
-	constructor(context: ExtensionContext) {
+	constructor(context: ExtensionContext, customStoragePath?: string) {
 		this.context = context
+		this.customStoragePath = ProviderSettingsManager.normalizeCustomStoragePath(
+			customStoragePath ?? ProviderSettingsManager.getConfiguredCustomStoragePath(),
+		)
 
 		// TODO: We really shouldn't have async methods in the constructor.
 		this.initialize().catch(console.error)
@@ -653,12 +662,88 @@ export class ProviderSettingsManager {
 		})
 	}
 
+	private static getConfiguredCustomStoragePath(): string {
+		try {
+			const configuration = vscode.workspace.getConfiguration(Package.name)
+			return configuration.get<string>("customStoragePath", "") ?? ""
+		} catch {
+			return ""
+		}
+	}
+
+	private static normalizeCustomStoragePath(customStoragePath?: string): string {
+		const value = customStoragePath?.trim() ?? ""
+		if (!value) {
+			return ""
+		}
+
+		const isWindowsLike = value.includes("\\") || /^[A-Za-z]:[\\/]/.test(value)
+		const normalized = isWindowsLike ? path.win32.normalize(value).replace(/\\/g, "/") : path.normalize(value)
+		const absolute = isWindowsLike
+			? path.win32.isAbsolute(value)
+				? path.win32.normalize(value)
+				: path.win32.resolve(value)
+			: path.isAbsolute(normalized)
+				? normalized
+				: path.resolve(normalized)
+
+		if (isWindowsLike) {
+			return absolute.replace(/\\/g, "/").replace(/^([A-Za-z]):/, (_, drive: string) => `${drive.toLowerCase()}:`)
+		}
+
+		return absolute
+	}
+
+	private get isCustomStorageScoped() {
+		return Boolean(this.customStoragePath)
+	}
+
+	private get migrationMarkerKey() {
+		return `${this.secretsKey}:migration-complete`
+	}
+
+	private get legacySecretsKey() {
+		return ProviderSettingsManager.LEGACY_SECRET_STORAGE_KEY
+	}
+
 	private get secretsKey() {
-		return `${ProviderSettingsManager.SCOPE_PREFIX}api_config`
+		if (!this.customStoragePath) {
+			return this.legacySecretsKey
+		}
+
+		return `${ProviderSettingsManager.SCOPE_PREFIX}api_config_${crypto
+			.createHash("sha256")
+			.update(this.customStoragePath)
+			.digest("hex")}`
+	}
+
+	private async ensureStorageScopeMigration() {
+		if (!this.isCustomStorageScoped) {
+			return
+		}
+
+		const migrationComplete = await this.context.globalState.get<boolean>(this.migrationMarkerKey)
+		if (migrationComplete === true) {
+			return
+		}
+
+		const scopedConfig = await this.context.secrets.get(this.secretsKey)
+		if (scopedConfig) {
+			await this.context.globalState.update(this.migrationMarkerKey, true)
+			return
+		}
+
+		const legacyConfig = await this.context.secrets.get(this.legacySecretsKey)
+		if (legacyConfig) {
+			await this.context.secrets.store(this.secretsKey, legacyConfig)
+		}
+
+		await this.context.globalState.update(this.migrationMarkerKey, true)
 	}
 
 	private async load(): Promise<ProviderProfiles> {
 		try {
+			await this.ensureStorageScopeMigration()
 			const content = await this.context.secrets.get(this.secretsKey)
 
 			if (!content) {
