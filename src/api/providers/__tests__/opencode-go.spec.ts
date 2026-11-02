@@ -2609,6 +2609,40 @@ describe("OpencodeGoHandler", () => {
 			})
 		})
 
+		it.each([
+			["anthropic", { opencodeGoApiKey: "test-key", opencodeGoModelId: "qwen3.7-max" }, mockAnthropicCreate],
+			["responses", { opencodeGoApiKey: "test-key", opencodeGoModelId: "gpt-5.6-luna" }, mockResponsesCreate],
+			["openai", { opencodeGoApiKey: "test-key", opencodeGoModelId: "glm-5.1" }, mockCreate],
+		] as const)(
+			"completePrompt pins the caller signal and rejects with AbortError for the %s format",
+			async (_format, options, requestMock) => {
+				vitest.clearAllMocks()
+				const controller = new AbortController()
+				const pending = new Promise<never>((_resolve, reject) => {
+					controller.signal.addEventListener(
+						"abort",
+						() => reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+						{ once: true },
+					)
+				})
+				requestMock.mockReturnValue(pending)
+				const handler = new OpencodeGoHandler(options)
+				const completion = handler.completePrompt("ping", { abortSignal: controller.signal })
+
+				await vitest.waitFor(() => expect(requestMock).toHaveBeenCalled())
+				const requestOptions = requestMock.mock.calls[0][1] as { signal?: AbortSignal } | undefined
+				// With no timeoutMs the merged signal is the caller signal itself.
+				expect(requestOptions?.signal).toBe(controller.signal)
+
+				controller.abort()
+				expect(requestOptions?.signal?.aborted).toBe(true)
+				await expect(completion).rejects.toMatchObject({
+					name: "AbortError",
+					message: "The Opencode Go request was aborted",
+				})
+			},
+		)
+
 		it("completePrompt calls responses.create and returns output_text", async () => {
 			mockResponsesCreate.mockResolvedValue({ output_text: "Hello!" })
 			const handler = new OpencodeGoHandler(lunaOptions)
