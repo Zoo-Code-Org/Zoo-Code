@@ -64,13 +64,13 @@ const TestComponent = () => {
 	)
 }
 
-const expectMessages = (messages: ClineMessage[]) => {
+const _expectMessages = (messages: ClineMessage[]) => {
 	expect(JSON.parse(screen.getByTestId("cline-messages").textContent!)).toEqual(messages)
 }
 
 type InternSpy = { mock: { contexts: readonly unknown[] } }
 
-const cacheFor = (spy: InternSpy, kind: "message" | "history"): StringCache => {
+const _cacheFor = (spy: InternSpy, kind: "message" | "history"): StringCache => {
 	const cache = spy.mock.contexts.find(
 		(value) => value instanceof StringCache && (value["shouldIntern"] !== undefined) === (kind === "message"),
 	)
