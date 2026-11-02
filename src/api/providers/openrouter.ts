@@ -453,9 +453,15 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 					// signal before processing each chunk. The yields below are synchronous (there
 					// is no await between this check and them), so nothing is emitted once the
 					// signal aborts.
-					if (controller.signal.aborted) {
-						break
+					// A yield suspends this generator: the consumer can abort while it is paused
+					// and we would resume without re-checking. One SDK chunk can yield several
+					// events, so every yield below is guarded, not just the loop entry.
+					const abortIfSignalled = () => {
+						if (controller.signal.aborted) {
+							throw createAbortError("OpenRouter")
+						}
 					}
+					abortIfSignalled()
 
 					// OpenRouter returns an error object instead of the OpenAI SDK throwing an error.
 					if ("error" in chunk) {
@@ -492,14 +498,16 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 								const existing = reasoningDetailsAccumulator.get(key)
 
 								if (existing) {
-									// Accumulate text/summary/data for existing reasoning detail
-									if (detail.text !== undefined) {
+									// Accumulate text/summary/data for existing reasoning detail. Only
+									// strings accumulate: a non-string fragment would coerce the stored
+									// value (e.g. "x[object Object]") and be replayed in later requests.
+									if (typeof detail.text === "string") {
 										existing.text = (existing.text || "") + detail.text
 									}
-									if (detail.summary !== undefined) {
+									if (typeof detail.summary === "string") {
 										existing.summary = (existing.summary || "") + detail.summary
 									}
-									if (detail.data !== undefined) {
+									if (typeof detail.data === "string") {
 										existing.data = (existing.data || "") + detail.data
 									}
 									// Update other fields if provided
@@ -510,9 +518,9 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 									// Start new reasoning detail accumulation
 									reasoningDetailsAccumulator.set(key, {
 										type: detail.type,
-										text: detail.text,
-										summary: detail.summary,
-										data: detail.data,
+										text: typeof detail.text === "string" ? detail.text : undefined,
+										summary: typeof detail.summary === "string" ? detail.summary : undefined,
+										data: typeof detail.data === "string" ? detail.data : undefined,
 										id: detail.id,
 										format: detail.format,
 										signature: detail.signature,
@@ -532,6 +540,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 								if (reasoningText) {
 									hasYieldedReasoningFromDetails = true
+									abortIfSignalled()
 									yield { type: "reasoning", text: reasoningText }
 								}
 							}
@@ -541,6 +550,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 						// Skip if we've already yielded from reasoning_details to avoid duplicate display.
 						if ("reasoning" in delta && delta.reasoning && typeof delta.reasoning === "string") {
 							if (!hasYieldedReasoningFromDetails) {
+								abortIfSignalled()
 								yield { type: "reasoning", text: delta.reasoning }
 							}
 						}
@@ -551,6 +561,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 								if (toolCall.id) {
 									activeToolCallIds.add(toolCall.id)
 								}
+								abortIfSignalled()
 								yield {
 									type: "tool_call_partial",
 									index: toolCall.index,
@@ -562,6 +573,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 						}
 
 						if (delta.content) {
+							abortIfSignalled()
 							yield { type: "text", text: delta.content }
 						}
 					}
@@ -572,6 +584,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 					// This ensures tool calls are finalized even if the stream doesn't properly close
 					if (finishReason === "tool_calls") {
 						for (const id of activeToolCallIds) {
+							abortIfSignalled()
 							yield { type: "tool_call_end", id }
 						}
 						activeToolCallIds.clear()

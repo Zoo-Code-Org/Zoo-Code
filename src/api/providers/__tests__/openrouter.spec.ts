@@ -1248,6 +1248,80 @@ describe("OpenRouterHandler", () => {
 			expect(handler.getReasoningDetails()).toBeUndefined()
 		})
 
+		it("stops yielding a chunk's remaining events when the consumer aborts between them", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "1",
+						choices: [
+							{
+								delta: {
+									reasoning_details: [{ index: 0, type: "reasoning.text", text: "thinking" }],
+									content: "answer",
+								},
+							},
+						],
+					},
+				]),
+			)
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const controller = new AbortController()
+			const iterator = handler
+				.createMessage("system", [{ role: "user" as const, content: "hi" }], {
+					taskId: "task",
+					abortSignal: controller.signal,
+				})
+				[Symbol.asyncIterator]()
+
+			// One SDK chunk yields reasoning BEFORE text: abort while the generator is paused
+			// between the two yields, so the text must not be emitted.
+			expect((await iterator.next()).value).toEqual({ type: "reasoning", text: "thinking" })
+			controller.abort()
+			await expect(iterator.next()).rejects.toMatchObject({ name: "AbortError" })
+		})
+
+		it("skips non-string reasoning detail fragments instead of coercing them", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "1",
+						choices: [
+							{
+								delta: {
+									reasoning_details: [
+										{ index: 0, type: "reasoning.text", text: { not: "a string" } },
+										{ index: 0, type: "reasoning.text", text: "ok" },
+									],
+								},
+							},
+							{ id: "2", choices: [{ delta: { content: "answer" } }] },
+						],
+					},
+				]),
+			)
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			await collectStream(handler.createMessage("system", [{ role: "user" as const, content: "hi" }]))
+			const details = handler.getReasoningDetails()
+			const text = details?.find((d) => d.type === "reasoning.text")?.text
+			// The object fragment is skipped and the later string accumulates from empty.
+			expect(text).toBe("ok")
+			expect(text).not.toContain("[object Object]")
+		})
+
 		it("excludes reasoning for Gemini 2.5 Pro models by default", async () => {
 			const handler = new OpenRouterHandler(
 				makeApiHandlerOptions({
