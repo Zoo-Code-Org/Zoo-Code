@@ -1,6 +1,4 @@
 {
-	"title": "모드",
-	"done": "완료",
 	"modes": {
 		"title": "모드",
 		"createNewMode": "새 모드 만들기",
@@ -53,9 +51,7 @@
 	},
 	"exportMode": {
 		"title": "모드 내보내기",
-		"description": "이 모드를 모든 규칙이 포함된 YAML 파일로 내보내어 다른 사람들과 쉽게 공유할 수 있습니다.",
-		"export": "모드 내보내기",
-		"exporting": "내보내는 중..."
+		"export": "모드 내보내기"
 	},
 	"importMode": {
 		"selectLevel": "이 모드를 가져올 위치를 선택하세요:",
@@ -81,7 +77,6 @@
 		"title": "시스템 프롬프트 ({{modeName}} 모드)"
 	},
 	"supportPrompts": {
-		"title": "지원 프롬프트",
 		"resetPrompt": "{{promptType}} 프롬프트를 기본값으로 재설정",
 		"prompt": "프롬프트",
 		"enhance": {
@@ -93,11 +88,6 @@
 			"testEnhancement": "향상 테스트",
 			"includeTaskHistory": "작업 기록을 컨텍스트로 포함",
 			"includeTaskHistoryDescription": "활성화하면 현재 대화의 마지막 10개 메시지가 프롬프트 향상 시 컨텍스트로 포함되어 더 관련성 높고 컨텍스트를 인식하는 제안을 생성하는 데 도움이 됩니다."
-		},
-		"condense": {
-			"apiConfiguration": "컨텍스트 압축을 위한 API 구성",
-			"apiConfigDescription": "컨텍스트 압축 작업에 사용할 API 구성을 선택합니다. 현재 활성 구성을 사용하려면 선택하지 않은 상태로 둡니다.",
-			"useCurrentConfig": "현재 선택된 API 구성 사용"
 		},
 		"types": {
 			"ENHANCE": {
@@ -196,7 +186,6 @@
 		"title": "모드 삭제",
 		"message": "\"{{modeName}}\" 모드를 삭제하시겠습니까?",
 		"rulesFolder": "이 모드에는 {{folderPath}}에 규칙 폴더가 있으며 함께 삭제됩니다.",
-		"descriptionNoRules": "이 사용자 정의 모드를 삭제하시겠습니까?",
 		"confirm": "삭제",
 		"cancel": "취소"
 	}

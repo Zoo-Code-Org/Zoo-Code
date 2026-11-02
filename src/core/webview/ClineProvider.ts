@@ -56,6 +56,7 @@ import {
 	type ExtensionMessage,
 	type ExtensionState,
 	type WebviewThemeFixture,
+	type WebviewDiagnosticsSnapshot,
 	type MarketplaceInstalledMetadata,
 	RooCodeEventName,
 	requestyDefaultModelId,
@@ -113,6 +114,11 @@ import { CodeIndexManagerRegistry } from "../../services/code-index/code-index-m
 import type { CodeIndexWorkspaceScope } from "../../services/code-index/code-index-workspace-scope"
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
+import {
+	DiagnosticsRecorder,
+	DiagnosticsRequestBroker,
+	type DiagnosticsProviderSourceSnapshot,
+} from "../../services/diagnostics"
 
 import { fileExistsAtPath } from "../../utils/fs"
 import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
@@ -383,6 +389,8 @@ export class ClineProvider
 		500,
 		{ leading: true, trailing: true, maxWait: 1000 },
 	)
+	private readonly diagnosticsRecorder = new DiagnosticsRecorder(200)
+	private readonly diagnosticsRequestBroker = new DiagnosticsRequestBroker()
 	private readonly rateLimitClock: RateLimitClock = createRateLimitClock()
 
 	private recentTasksCache?: string[]
@@ -551,6 +559,9 @@ export class ClineProvider
 			(message) => this.log(message),
 		)
 
+		ClineProvider.activeInstances.add(this)
+		this.diagnosticsRecorder.record({ boundary: "provider", phase: "success", type: "created" })
+
 		this.mdmService = mdmService
 		void this.updateGlobalState("codebaseIndexModels", EMBEDDING_MODEL_PROFILES)
 
@@ -675,6 +686,8 @@ export class ClineProvider
 	 * Initialize the TaskHistoryStore and migrate from globalState if needed.
 	 */
 	private async initializeTaskHistoryStore(): Promise<void> {
+		const startedAt = Date.now()
+		this.diagnosticsRecorder.record({ boundary: "task-history", phase: "start", type: "initialize" })
 		try {
 			await this.taskHistoryStore.initialize()
 
@@ -695,7 +708,19 @@ export class ClineProvider
 			}
 
 			this.taskHistoryStoreInitialized = true
+			this.diagnosticsRecorder.record({
+				boundary: "task-history",
+				phase: "success",
+				type: "initialize",
+				elapsedMs: Date.now() - startedAt,
+			})
 		} catch (error) {
+			this.diagnosticsRecorder.record({
+				boundary: "task-history",
+				phase: "failure",
+				type: "initialize",
+				elapsedMs: Date.now() - startedAt,
+			})
 			this.log(`[initializeTaskHistoryStore] Error: ${error instanceof Error ? error.message : String(error)}`)
 		}
 	}
@@ -1521,6 +1546,7 @@ export class ClineProvider
 		this._disposed = true
 		this._postStateToWebviewThrottled.cancel()
 		this.stopWebviewWatchdog()
+		this.diagnosticsRecorder.record({ boundary: "provider", phase: "start", type: "dispose" })
 		this.log("Disposing ClineProvider...")
 
 		// Reject any tasks still waiting for a scheduler permit so they don't
@@ -1559,6 +1585,18 @@ export class ClineProvider
 			CloudService.instance.off("settings-updated", this.handleCloudSettingsUpdate)
 		}
 
+		this._workspaceTracker?.dispose()
+		this._workspaceTracker = undefined
+		await this.mcpHub?.unregisterClient()
+		this.mcpHub = undefined
+		await this.skillsManager?.dispose()
+		this.skillsManager = undefined
+		await this.marketplaceManager?.cleanup()
+		this.customModesManager?.dispose()
+		this.taskHistoryStore.dispose()
+		this.log("Disposed all disposables")
+		ClineProvider.activeInstances.delete(this)
+		this.diagnosticsRequestBroker.dispose()
 		while (this.disposables.length) {
 			const x = this.disposables.pop()
 
@@ -1754,6 +1792,11 @@ export class ClineProvider
 		this.pendingSidebarRecovery = false
 		this.view = webviewView
 		const inTabMode = "onDidChangeViewState" in webviewView
+		this.diagnosticsRecorder.record({
+			boundary: "provider",
+			phase: "success",
+			type: "view-resolved",
+		})
 
 		// Register disposal before awaiting HTML or state so closing the view during
 		// either load invalidates this resolve and prevents later listener installation.
@@ -1866,6 +1909,11 @@ export class ClineProvider
 					return
 				}
 
+				this.diagnosticsRecorder.record({
+					boundary: "provider",
+					phase: "success",
+					type: this.view?.visible ? "view-visible" : "view-hidden",
+				})
 				if (this.view?.visible) {
 					// Hidden webviews throttle timers, so grant a fresh grace
 					// window instead of counting throttled heartbeats as a crash.
@@ -1885,6 +1933,11 @@ export class ClineProvider
 					return
 				}
 
+				this.diagnosticsRecorder.record({
+					boundary: "provider",
+					phase: "success",
+					type: this.view?.visible ? "view-visible" : "view-hidden",
+				})
 				if (this.view?.visible) {
 					// Hidden webviews throttle timers, so grant a fresh grace
 					// window instead of counting throttled heartbeats as a crash.
@@ -2243,7 +2296,25 @@ export class ClineProvider
 	}
 
 	public async postMessageToWebview(message: ExtensionMessage) {
+		const startedAt = Date.now()
+		const taskId = this.getCurrentTask()?.taskId
+		this.diagnosticsRecorder.record({
+			boundary: "webview-out",
+			phase: "start",
+			type: message.type,
+			action: message.action,
+			stateSequence: message.type === "state" ? message.state?.clineMessagesSeq : undefined,
+			taskId,
+		})
 		if (this._disposed) {
+			this.diagnosticsRecorder.record({
+				boundary: "webview-out",
+				phase: "failure",
+				type: message.type,
+				action: message.action,
+				elapsedMs: Date.now() - startedAt,
+				taskId,
+			})
 			return
 		}
 
@@ -2303,6 +2374,34 @@ export class ClineProvider
 			pending.reject(error)
 		}
 		this.pendingThemeFixtureProbes.clear()
+	}
+
+	public getDiagnosticsSnapshot(): DiagnosticsProviderSourceSnapshot {
+		const currentTask = this.getCurrentTask()
+		const events = this.diagnosticsRecorder.snapshot(100)
+		return {
+			renderContext: this.renderContext,
+			disposed: this._disposed,
+			viewPresent: Boolean(this.view),
+			visible: this.view?.visible === true,
+			launched: this.isViewLaunched,
+			taskHistoryInitialized: this.taskHistoryStoreInitialized,
+			taskCount: this.taskRegistry.length,
+			currentTaskId: currentTask?.taskId,
+			currentMessageCount: currentTask?.clineMessages.length ?? 0,
+			currentTodoCount: currentTask?.todoList?.length ?? 0,
+			history: this.taskHistoryStore.getAll(),
+			events: events.events,
+			eventsTruncated: events.truncated,
+		}
+	}
+
+	public requestWebviewDiagnostics(timeoutMs = 1_000): Promise<WebviewDiagnosticsSnapshot | undefined> {
+		if (this._disposed || !this.view) return Promise.resolve(undefined)
+		return this.diagnosticsRequestBroker.request(
+			(requestId) => this.postMessageToWebview({ type: "diagnosticsRequest", requestId }),
+			timeoutMs,
+		)
 	}
 
 	private async getHMRHtmlContent(webview: vscode.Webview): Promise<string> {
@@ -2502,7 +2601,29 @@ export class ClineProvider
 				return
 			}
 
-			await webviewMessageHandler(this, message, this.marketplaceManager)
+			const startedAt = Date.now()
+			this.diagnosticsRecorder.record({ boundary: "webview-in", phase: "start", type: message.type })
+			try {
+				if (message.type === "diagnosticsResponse" && message.requestId) {
+					this.diagnosticsRequestBroker.resolve(message.requestId, message.diagnostics)
+				} else {
+					await webviewMessageHandler(this, message, this.marketplaceManager)
+				}
+				this.diagnosticsRecorder.record({
+					boundary: "webview-in",
+					phase: "success",
+					type: message.type,
+					elapsedMs: Date.now() - startedAt,
+				})
+			} catch (error) {
+				this.diagnosticsRecorder.record({
+					boundary: "webview-in",
+					phase: "failure",
+					type: message.type,
+					elapsedMs: Date.now() - startedAt,
+				})
+				throw error
+			}
 		}
 
 		const messageDisposable = webviewView.webview.onDidReceiveMessage(onReceiveMessage)
@@ -3968,13 +4089,39 @@ export class ClineProvider
 	}
 
 	async showTaskWithId(id: string) {
-		if (id !== this.getCurrentTask()?.taskId) {
-			// Non-current task.
-			const { historyItem } = await this.getTaskWithId(id)
-			await this.createTaskWithHistoryItem(historyItem) // Clears existing task.
-		}
+		const startedAt = Date.now()
+		this.diagnosticsRecorder.record({
+			boundary: "task-navigation",
+			phase: "start",
+			type: "show-task",
+			taskId: id,
+		})
+		try {
+			if (id !== this.getCurrentTask()?.taskId) {
+				// Non-current task.
+				const { historyItem } = await this.getTaskWithId(id)
+				await this.createTaskWithHistoryItem(historyItem) // Clears existing task.
+			}
 
-		await this.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
+			await this.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
+			this.diagnosticsRecorder.record({
+				boundary: "task-navigation",
+				phase: "success",
+				type: "show-task",
+				taskId: id,
+				elapsedMs: Date.now() - startedAt,
+				messageCount: this.getCurrentTask()?.clineMessages.length ?? 0,
+			})
+		} catch (error) {
+			this.diagnosticsRecorder.record({
+				boundary: "task-navigation",
+				phase: "failure",
+				type: "show-task",
+				taskId: id,
+				elapsedMs: Date.now() - startedAt,
+			})
+			throw error
+		}
 	}
 
 	async exportTaskWithId(id: string) {
