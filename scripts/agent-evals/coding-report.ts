@@ -138,6 +138,11 @@ const costCell = (cost: CostPerSuccessfulTask): string =>
 		? `$${cost.usd?.toFixed(4)} over ${cost.correctRuns} correct run(s), ${cost.excludedRuns} excluded`
 		: `unavailable (${cost.reason ?? "unavailable"}; ${cost.excludedRuns} excluded)`
 
+const deltaCell = (diff: { meanDelta?: number; standardError?: number }): string =>
+	diff.meanDelta === undefined
+		? "unavailable"
+		: `${diff.meanDelta.toPrecision(4)} (SE ${diff.standardError === undefined ? "unavailable: fewer than two pairs" : diff.standardError.toPrecision(4)})`
+
 // Self-contained Markdown rendering of the JSON report.
 export function renderMarkdownReport(report: ComparisonReport): string {
 	const lines: string[] = []
@@ -172,6 +177,9 @@ export function renderMarkdownReport(report: ComparisonReport): string {
 		`- ${report.repetitions} repetitions per fixture per commit (default ${STATISTICAL_POLICY.repetitionsDefault}).`,
 	)
 	lines.push(`- ${report.statisticalPolicy.method}.`)
+	lines.push(
+		"- SE is the sample standard error of the mean candidate-minus-baseline paired delta; unavailable with fewer than two measured pairs. Small samples can give unstable estimates, including zero SE.",
+	)
 	lines.push(`- ${report.statisticalPolicy.significanceClaim}`)
 	lines.push(
 		`- Partial-data policy: ${report.partialDataPolicy}. Runs with incomplete cost accounting are flagged and excluded from cost aggregates.`,
@@ -179,11 +187,13 @@ export function renderMarkdownReport(report: ComparisonReport): string {
 	lines.push("")
 	lines.push("## Results per fixture")
 	lines.push("")
-	lines.push("| Fixture | Baseline | Candidate | Paired (improved/regressed/unchanged) |")
-	lines.push("| --- | --- | --- | --- |")
+	lines.push(
+		"| Fixture | Baseline | Candidate | Paired (improved/regressed/unchanged) | Outcome delta (SE) | Duration delta ms (SE) | Cost delta USD (SE) |",
+	)
+	lines.push("| --- | --- | --- | --- | --- | --- | --- |")
 	for (const row of report.fixtures)
 		lines.push(
-			`| ${row.fixtureName} | ${rateCell(row.baseline)} | ${rateCell(row.candidate)} | ${row.pairedOutcomes.improved}/${row.pairedOutcomes.regressed}/${row.pairedOutcomes.unchanged} |`,
+			`| ${row.fixtureName} | ${rateCell(row.baseline)} | ${rateCell(row.candidate)} | ${row.pairedOutcomes.improved}/${row.pairedOutcomes.regressed}/${row.pairedOutcomes.unchanged} | ${deltaCell(row.pairedOutcomes)} | ${deltaCell(row.pairedDurations)} | ${deltaCell(row.pairedCosts)} |`,
 		)
 	lines.push("")
 	lines.push("## Cost per successful task")

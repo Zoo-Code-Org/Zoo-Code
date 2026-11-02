@@ -174,8 +174,12 @@ const removePreparedTree = async (): Promise<void> => {
 	await execFileAsync("git", ["worktree", "remove", "--force", evaluatedWorktree], {
 		cwd: evaluatedRoot,
 		timeout: WORKTREE_REMOVE_TIMEOUT_MS,
-	}).catch(() => {})
-	await fs.rm(sideScratch, { recursive: true, force: true }).catch(() => {})
+	}).catch((error: unknown) => {
+		console.error(`coding-evals side: failed to remove worktree ${evaluatedWorktree}: ${String(error)}`)
+	})
+	await fs.rm(sideScratch, { recursive: true, force: true }).catch((error: unknown) => {
+		console.error(`coding-evals side: failed to remove scratch directory ${sideScratch}: ${String(error)}`)
+	})
 }
 
 const projection = CODING_FIXTURE_BUNDLES[0]?.fixture.settingsProjection ?? {}

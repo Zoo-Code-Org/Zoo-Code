@@ -214,3 +214,46 @@ describe("local subprocess runtime failure paths", () => {
 		}
 	})
 })
+
+it("kills a stubborn descendant before returning a local grader timeout", async () => {
+	const scratch = await tmpdir()
+	try {
+		const base = await job(scratch)
+		// Both processes share the driver's group. The test child ignores
+		// SIGTERM, so only group escalation can stop its heartbeat.
+		const descendant = path.join(scratch, "descendant.cjs")
+		await fs.writeFile(
+			descendant,
+			`
+			const fs = require("node:fs")
+			process.on("SIGTERM", () => {})
+			fs.writeFileSync(process.argv[2], "started")
+			setInterval(() => fs.appendFileSync(process.argv[2], "."), 10)
+		`,
+		)
+		const heartbeat = path.join(scratch, "heartbeat")
+		const driverPath = await writeDriver(
+			scratch,
+			`
+			import { spawn } from "node:child_process"
+			import path from "node:path"
+			const scratch = path.dirname(process.argv[2]) + "/.."
+			spawn(process.execPath, [path.join(scratch, "descendant.cjs"), path.join(scratch, "heartbeat")], { stdio: "ignore" })
+			setInterval(() => {}, 1000)
+		`,
+		)
+		const verdict = await createLocalSubprocessGradingRuntime().run({
+			...base,
+			driverPath,
+			resources: { ...base.resources, timeoutMs: 1000 },
+		})
+		assert.deepEqual(verdict, { kind: "grading-failure", isolation: "local-subprocess", reason: "graderTimeout" })
+		const before = await fs.readFile(heartbeat, "utf8")
+		assert.ok(before.startsWith("started"))
+		await new Promise((resolve) => setTimeout(resolve, 100))
+		assert.equal(await fs.readFile(heartbeat, "utf8"), before)
+		await assert.rejects(fs.access(path.join(scratch, "grading-out")))
+	} finally {
+		await fs.rm(scratch, { recursive: true, force: true })
+	}
+})

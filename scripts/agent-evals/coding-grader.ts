@@ -1,3 +1,4 @@
+import { createSideProcessGuard } from "./side-process-guard.ts"
 import { spawn } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import fs from "node:fs/promises"
@@ -9,7 +10,7 @@ import type { Measured } from "./trace.ts"
 
 // The grader version is a pinned comparison input. Any change to the driver,
 // the image, or the verdict rules must bump it.
-export const GRADER_VERSION = "coding-grader-v3"
+export const GRADER_VERSION = "coding-grader-v4"
 
 export interface GraderResources {
 	timeoutMs: number
@@ -121,15 +122,32 @@ export function createLocalSubprocessGradingRuntime(nodeExecutable = process.exe
 						const value = process.env[name]
 						if (value !== undefined) env[name] = value
 					}
+					const guard = createSideProcessGuard(100)
+					let timedOut = false
+					let cleanup: Promise<unknown> | undefined
 					const child = spawn(nodeExecutable, [job.driverPath, resultPath, "test"], {
 						cwd: job.gradingDir,
 						env,
 						stdio: "ignore",
-						timeout: job.resources.timeoutMs,
-						killSignal: "SIGKILL",
+						detached: true,
 					})
-					child.once("error", () => resolve("error"))
-					child.once("close", (code, signal) => resolve(signal === "SIGKILL" ? "timeout" : (code ?? "error")))
+					guard.track(child.pid)
+					const timer = setTimeout(() => {
+						timedOut = true
+						cleanup = guard.interrupt()
+					}, job.resources.timeoutMs)
+					child.once("error", () => {
+						clearTimeout(timer)
+						resolve("error")
+					})
+					child.once("close", (code) => {
+						clearTimeout(timer)
+						// Reap leftover test descendants even when the driver exits first.
+						void (async () => {
+							await (cleanup ?? guard.interrupt())
+							resolve(timedOut ? "timeout" : (code ?? "error"))
+						})()
+					})
 				})
 				if (exit === "timeout")
 					return { kind: "grading-failure", isolation: "local-subprocess", reason: "graderTimeout" }

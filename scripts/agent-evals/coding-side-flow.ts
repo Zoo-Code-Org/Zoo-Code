@@ -80,13 +80,23 @@ export async function executeSideFlow(inputs: SideFlowInputs): Promise<SideFlowO
 	// The completion marker must never exist for an interrupted side, so the
 	// publication stays gated even when the loop itself finished.
 	if (inputs.isInterrupted()) return { runs, completed: false }
+	const abortPublication = async (): Promise<SideFlowOutcome> => {
+		await fs.rm(path.join(inputs.out, "side-results.json"), { force: true })
+		await fs.rm(path.join(inputs.out, "artifacts"), { recursive: true, force: true })
+		return { runs, completed: false }
+	}
 	// Per-run artifacts are published atomically as each record exists.
 	for (const record of runs) {
 		if (!record.trace) continue
 		const artifactDir = path.join(inputs.out, "artifacts", `${record.fixtureName}-rep${record.repIndex}`)
 		await fs.mkdir(artifactDir, { recursive: true })
+		if (inputs.isInterrupted()) return abortPublication()
 		await writeJsonAtomic(path.join(artifactDir, "run-record.json"), record)
+		if (inputs.isInterrupted()) return abortPublication()
 	}
-	await writeJsonAtomic(path.join(inputs.out, "side-results.json"), await inputs.buildResult(runs))
+	const result = await inputs.buildResult(runs)
+	if (inputs.isInterrupted()) return abortPublication()
+	await writeJsonAtomic(path.join(inputs.out, "side-results.json"), result)
+	if (inputs.isInterrupted()) return abortPublication()
 	return { runs, completed: true }
 }

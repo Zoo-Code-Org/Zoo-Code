@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process"
 import fs from "node:fs/promises"
 import path from "node:path"
+import os from "node:os"
 import { promisify } from "node:util"
 import type { SidePins } from "./coding-pins.ts"
 import { buildComparisonReport, renderMarkdownReport, type ComparisonReport, type SideResult } from "./coding-report.ts"
@@ -69,44 +70,50 @@ export const runBoundedPreparation = async (
 	timeoutMs: number,
 ): Promise<void> => {
 	if (isInterrupted()) throw new Error(`interrupted before ${command} started`)
-	await new Promise<void>((resolve, reject) => {
-		const child = spawn(command, [...args], {
-			cwd,
-			stdio: ["ignore", "ignore", "pipe"],
-			detached: true,
-			env: buildWorktreeEnvironment(process.env),
+	const preparationHome = await fs.mkdtemp(path.join(os.tmpdir(), "coding-preparation-home-"))
+	try {
+		if (isInterrupted()) throw new Error(`interrupted before ${command} started`)
+		await new Promise<void>((resolve, reject) => {
+			const child = spawn(command, [...args], {
+				cwd,
+				stdio: ["ignore", "ignore", "pipe"],
+				detached: true,
+				env: buildWorktreeEnvironment(process.env, preparationHome),
+			})
+			guard.track(child.pid)
+			let stderr = ""
+			child.stderr?.on("data", (chunk: Buffer) => {
+				if (stderr.length >= STDERR_LIMIT_BYTES) return
+				stderr += chunk.toString()
+			})
+			let timedOut = false
+			const timer = setTimeout(() => {
+				timedOut = true
+				try {
+					if (child.pid) process.kill(-child.pid, "SIGKILL")
+				} catch {
+					child.kill("SIGKILL")
+				}
+			}, timeoutMs)
+			child.once("error", (error) => {
+				clearTimeout(timer)
+				guard.track(undefined)
+				reject(error)
+			})
+			child.once("exit", (code, signal) => {
+				clearTimeout(timer)
+				guard.track(undefined)
+				if (code === 0) {
+					resolve()
+					return
+				}
+				const reason = timedOut ? "its time bound expired" : code === null ? `signal ${signal}` : `code ${code}`
+				reject(new Error([`${command} failed: ${reason}`, stderr].filter(Boolean).join("\n")))
+			})
 		})
-		guard.track(child.pid)
-		let stderr = ""
-		child.stderr?.on("data", (chunk: Buffer) => {
-			if (stderr.length >= STDERR_LIMIT_BYTES) return
-			stderr += chunk.toString()
-		})
-		let timedOut = false
-		const timer = setTimeout(() => {
-			timedOut = true
-			try {
-				if (child.pid) process.kill(-child.pid, "SIGKILL")
-			} catch {
-				child.kill("SIGKILL")
-			}
-		}, timeoutMs)
-		child.once("error", (error) => {
-			clearTimeout(timer)
-			guard.track(undefined)
-			reject(error)
-		})
-		child.once("exit", (code, signal) => {
-			clearTimeout(timer)
-			guard.track(undefined)
-			if (code === 0) {
-				resolve()
-				return
-			}
-			const reason = timedOut ? "its time bound expired" : code === null ? `signal ${signal}` : `code ${code}`
-			reject(new Error([`${command} failed: ${reason}`, stderr].filter(Boolean).join("\n")))
-		})
-	})
+	} finally {
+		await fs.rm(preparationHome, { recursive: true, force: true })
+	}
 }
 
 // The worktree removals in the flow cleanup are best effort and bounded.
