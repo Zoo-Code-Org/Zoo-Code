@@ -900,7 +900,7 @@ replacement content here
 			expect(error).toContain("No sufficiently similar match found")
 			expect(error).toContain("at line: 999")
 			expect(error).toContain("Search Range: starting at line 999")
-			expect(error).toContain("Best Match Found:\n(no match)")
+			expect(error).toContain("Best Match Location: none")
 			expect(error).toContain("Levenshtein Distance: N/A")
 			expect(error).toContain("Best Match Length: 0 characters")
 		})
@@ -928,7 +928,7 @@ replacement content here
 			expect(error).toContain("Tip: The SEARCH block must contain complete, whole lines")
 		})
 
-		it("should include scoped original content when search fails with start_line that has a low-score match", async () => {
+		it("reports only numeric diagnostics when search fails with start_line that has a low-score match", async () => {
 			const originalContent = "function existing() {\n    return 42;\n}\n"
 			const diffContent = `test.ts
 <<<<<<< SEARCH
@@ -954,8 +954,9 @@ function newVersion() {
 			expect(error).toContain("No sufficiently similar match found")
 			expect(error).toContain("at line: 1")
 			expect(error).toContain("Search Range: starting at line 1")
-			expect(error).toContain("Best Match Found:")
-			expect(error).toContain("Original Content:\n1 | function existing()")
+			expect(error).toContain("Best Match Location: lines 1-")
+			expect(error).not.toContain("function existing()")
+			expect(error).not.toContain("function different()")
 		})
 
 		it("should include best-match debug info when unscoped search is below threshold", async () => {
@@ -984,7 +985,9 @@ function processUsers(data) {
 			expect(error).toContain("Levenshtein Distance:")
 			expect(error).toContain("characters")
 			expect(error).toContain("Best Match Length:")
-			expect(error).toContain("Best Match Found:\n1 | function processUsers(data)")
+			expect(error).toContain("Best Match Location: lines 1-3")
+			expect(error).not.toContain("user.username")
+			expect(error).not.toContain("user.name")
 		})
 
 		it("should include zero-match info when unscoped search finds no similarity at all", async () => {
@@ -1007,11 +1010,24 @@ aaaaaa
 					: ""
 			expect(error).toContain("No sufficiently similar match found")
 			expect(error).toContain("Search Range: start to end")
-			expect(error).toContain("Best Match Found:\n(no match)")
+			expect(error).toContain("Best Match Location: none")
 			expect(error).toContain("Levenshtein Distance: N/A")
 			expect(error).toContain("Best Match Length: 0 characters")
-			expect(error).toContain("Original Content:")
-			expect(error).toContain("1 | xxxxxx")
+			expect(error).not.toContain("xxxxxx")
+			expect(error).not.toContain("!!!!!!")
+		})
+
+		it("never echoes search, best-match or surrounding file text in failure diagnostics", async () => {
+			const originalContent = "const a = 1\nAPI_KEY=FILE-SECRET-1\nconst b = 2\nAPI_KEY=FILE-SECRET-2\n"
+			const diffContent =
+				"<<<<<<< SEARCH\n:start_line:2\n-------\nAPI_KEY=SEARCH-SECRET-0\n=======\nAPI_KEY=x\n>>>>>>> REPLACE"
+
+			const result = await strategy.applyDiff(originalContent, diffContent)
+			const serialized = JSON.stringify(result)
+
+			expect(result.success).toBe(false)
+			expect(serialized).toContain("No sufficiently similar match found")
+			expect(serialized).not.toMatch(/FILE-SECRET|SEARCH-SECRET/)
 		})
 
 		it("should match content with extra whitespace", async () => {
@@ -1610,7 +1626,7 @@ function sum(a, b) {
 			expect(failedPart).toHaveProperty("error")
 			const errorMsg = (failedPart as { error: string }).error
 			expect(errorMsg).toContain("No sufficiently similar match found")
-			expect(errorMsg).toContain("Best Match Found:")
+			expect(errorMsg).toContain("Best Match Location:")
 			expect(errorMsg).toContain("Levenshtein Distance:")
 			expect(errorMsg).toContain("Search Range: start to end")
 		})

@@ -9,6 +9,7 @@ import { nanoGptDefaultModelId, providerIdentifiers } from "@roo-code/types"
 
 import { buildApiHandler } from "../../index"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 import { createReadFileTool } from "../../../core/prompts/tools/native-tools/read_file"
 import { NanoGptHandler } from "../nanogpt"
 import { getModels } from "../fetchers/modelCache"
@@ -45,7 +46,7 @@ const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "H
 
 describe("NanoGptHandler", () => {
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		vi.mocked(getModels).mockResolvedValue({
 			"model:thinking": {
 				maxTokens: 128000,
@@ -772,6 +773,42 @@ describe("NanoGptHandler", () => {
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: null } }] })
 			expect(await handler.completePrompt("prompt")).toBe("")
 		})
+
+		it("forwards no request options without a signal or timeout", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			await new NanoGptHandler({ nanoGptModelId: "model:thinking" }).completePrompt("prompt")
+			expect(mockCreate.mock.calls[0][1]).toBeUndefined()
+		})
+
+		it("forwards the abort signal", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			const { signal } = new AbortController()
+			await new NanoGptHandler({ nanoGptModelId: "model:thinking" }).completePrompt("prompt", {
+				abortSignal: signal,
+			})
+			expect(mockCreate.mock.calls[0][1]).toEqual({ signal })
+		})
+
+		it.each([
+			{ label: "a whole-number", input: 3000, forwarded: 3000 },
+			{ label: "a fractional", input: 12.5, forwarded: 13 },
+			{ label: "an over-cap", input: 2_147_483_648, forwarded: 2_147_483_647 },
+		])("forwards $label timeoutMs as $forwarded", async ({ input, forwarded }) => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			await new NanoGptHandler({ nanoGptModelId: "model:thinking" }).completePrompt("prompt", {
+				timeoutMs: input,
+			})
+			expect(mockCreate.mock.calls[0][1]).toEqual({ timeout: forwarded })
+		})
+
+		it.each([0, -5, Number.NaN, Number.POSITIVE_INFINITY])(
+			"does not forward an unusable timeoutMs (%s)",
+			async (timeoutMs) => {
+				mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+				await new NanoGptHandler({ nanoGptModelId: "model:thinking" }).completePrompt("prompt", { timeoutMs })
+				expect(mockCreate.mock.calls[0][1]).toBeUndefined()
+			},
+		)
 
 		it("preserves completion error metadata without leaking the API key", async () => {
 			const errorDetails = [{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "20s" }]
