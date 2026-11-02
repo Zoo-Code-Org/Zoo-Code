@@ -1,25 +1,21 @@
 {
-	"greeting": "Welkom bij Zoo Code!",
 	"task": {
 		"title": "Taak",
 		"expand": "Taak uitvouwen",
 		"collapse": "Taak samenvouwen",
 		"seeMore": "Meer weergeven",
-		"seeLess": "Minder weergeven",
 		"tokens": "Tokens",
 		"cache": "Cache",
 		"apiCost": "API-kosten",
 		"size": "Grootte",
 		"contextWindow": "Contextlengte",
-		"closeAndStart": "Taak sluiten en een nieuwe starten",
 		"export": "Taakgeschiedenis exporteren",
 		"delete": "Taak verwijderen (Shift + Klik om bevestiging over te slaan)",
 		"condenseContext": "Context intelligent samenvatten",
 		"openApiHistory": "API-geschiedenis openen",
 		"openUiHistory": "UI-geschiedenis openen",
 		"backToParentTask": "Bovenliggende taak",
-		"waitingOnSubtask": "Wacht op subtaak",
-		"goToSubtask": "Ga naar subtaak"
+		"waitingOnSubtask": "Wacht op subtaak"
 	},
 	"unpin": "Losmaken",
 	"pin": "Vastmaken",
@@ -88,19 +84,16 @@
 		"tooltip": "Beëindig de huidige taak"
 	},
 	"stop": {
-		"title": "Stoppen",
-		"tooltip": "Stop de huidige taak"
+		"title": "Stoppen"
 	},
 	"cancel": {
-		"title": "Annuleren",
-		"tooltip": "Annuleer de huidige bewerking"
+		"title": "Annuleren"
 	},
 	"enqueueMessage": "Bericht aan de wachtrij toevoegen (wordt verzonden nadat de huidige taak is voltooid)",
 	"scrollToBottom": "Scroll naar onderaan de chat",
 	"scrollToLatestCheckpoint": "Scroll naar het vorige checkpoint",
 	"about": "Zoo Code is een heel AI-ontwikkelteam in je editor.",
 	"docs": "Bekijk onze <DocsLink>documentatie</DocsLink> voor meer informatie.",
-	"onboarding": "Je takenlijst in deze werkruimte is leeg.",
 	"rooTips": {
 		"customizableModes": {
 			"title": "Aanpasbare modi",
@@ -135,7 +128,6 @@
 		"noResults": "Geen resultaten gevonden"
 	},
 	"addImages": "Afbeeldingen toevoegen aan bericht",
-	"sendMessage": "Bericht verzenden",
 	"pressToSend": "Druk op {{keyCombination}} om te verzenden",
 	"stopTts": "Stop tekst-naar-spraak",
 	"typeMessage": "Typ een bericht...",
@@ -145,7 +137,6 @@
 	"dragFilesImages": "houd shift ingedrukt om bestanden/afbeeldingen te slepen",
 	"errorReadingFile": "Fout bij het lezen van bestand",
 	"noValidImages": "Er zijn geen geldige afbeeldingen verwerkt",
-	"separator": "Scheidingsteken",
 	"edit": "Bewerken...",
 	"forNextMode": "voor volgende modus",
 	"forPreviousMode": "voor vorige modus",
@@ -173,7 +164,6 @@
 	},
 	"checkpoint": {
 		"regular": "Checkpoint",
-		"initializingWarning": "Checkpoint wordt nog steeds geïnitialiseerd... Als dit te lang duurt, kun je checkpoints uitschakelen in de <settingsLink>instellingen</settingsLink> en je taak opnieuw starten.",
 		"menu": {
 			"viewDiff": "Bekijk verschil",
 			"more": "Meer opties",
@@ -200,10 +190,8 @@
 		"wantsToEdit": "Zoo wil dit bestand bewerken",
 		"wantsToEditOutsideWorkspace": "Zoo wil dit bestand buiten de werkruimte bewerken",
 		"wantsToEditProtected": "Zoo wil een beveiligd configuratiebestand bewerken",
-		"wantsToCreate": "Zoo wil een nieuw bestand aanmaken",
 		"wantsToSearchReplace": "Zoo wil zoeken en vervangen in dit bestand",
 		"didSearchReplace": "Zoo heeft zoeken en vervangen uitgevoerd op dit bestand",
-		"wantsToInsert": "Zoo wil inhoud invoegen in dit bestand",
 		"wantsToInsertWithLineNumber": "Zoo wil inhoud invoegen in dit bestand op regel {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo wil inhoud toevoegen aan het einde van dit bestand",
 		"wantsToReadAndXMore": "Zoo wil dit bestand en nog {{count}} andere lezen",
@@ -226,14 +214,11 @@
 		"wantsToViewTopLevelOutsideWorkspace": "Zoo wil de bovenliggende bestanden in deze map (buiten werkruimte) bekijken",
 		"didViewTopLevelOutsideWorkspace": "Zoo heeft de bovenliggende bestanden in deze map (buiten werkruimte) bekeken",
 		"wantsToViewRecursiveOutsideWorkspace": "Zoo wil alle bestanden in deze map (buiten werkruimte) recursief bekijken",
-		"didViewRecursiveOutsideWorkspace": "Zoo heeft alle bestanden in deze map (buiten werkruimte) recursief bekeken",
-		"wantsToViewMultipleDirectories": "Zoo wil meerdere mappen bekijken"
+		"didViewRecursiveOutsideWorkspace": "Zoo heeft alle bestanden in deze map (buiten werkruimte) recursief bekeken"
 	},
-	"commandOutput": "Commando-uitvoer",
 	"commandExecution": {
 		"running": "Lopend",
 		"abort": "Afbreken",
-		"pid": "PID: {{pid}}",
 		"exitStatus": "Afgesloten met status {{exitCode}}",
 		"malformedCommand": "Ongeldig commando: shell syntaxisfout",
 		"manageCommands": "Automatisch goedgekeurde commando's",
@@ -241,15 +226,8 @@
 		"addToAllowed": "Toevoegen aan toegestane lijst",
 		"removeFromAllowed": "Verwijderen van toegestane lijst",
 		"addToDenied": "Toevoegen aan geweigerde lijst",
-		"removeFromDenied": "Verwijderen van geweigerde lijst",
-		"abortCommand": "Commando-uitvoering afbreken",
-		"expandOutput": "Uitvoer uitvouwen",
-		"collapseOutput": "Uitvoer samenvouwen",
-		"expandManagement": "Beheersectie voor commando's uitvouwen",
-		"collapseManagement": "Beheersectie voor commando's samenvouwen"
+		"removeFromDenied": "Verwijderen van geweigerde lijst"
 	},
-	"response": "Antwoord",
-	"arguments": "Argumenten",
 	"text": {
 		"rooSaid": "Zoo zei"
 	},
@@ -269,10 +247,8 @@
 	"subtasks": {
 		"wantsToCreate": "Zoo wil een nieuwe subtaak aanmaken in {{mode}} modus",
 		"wantsToFinish": "Zoo wil deze subtaak voltooien",
-		"newTaskContent": "Subtaak-instructies",
 		"completionContent": "Subtaak voltooid",
 		"resultContent": "Subtaakresultaten",
-		"defaultResult": "Ga verder met de volgende taak.",
 		"completionInstructions": "Subtaak voltooid! Je kunt de resultaten bekijken en eventuele correcties of volgende stappen voorstellen. Als alles goed is, bevestig dan om het resultaat terug te sturen naar de hoofdtaak.",
 		"goToSubtask": "Taak weergeven"
 	},
@@ -300,9 +276,6 @@
 		"diagnostics": "Gedetailleerde foutinformatie ophalen",
 		"proxyProvider": "Je lijkt een proxy-gebaseerde provider te gebruiken. Zorg ervoor dat je de logs controleert en dat het geen Zoo-verzoeken herschrijft."
 	},
-	"powershell": {
-		"issues": "Het lijkt erop dat je problemen hebt met Windows PowerShell, zie deze"
-	},
 	"autoApprove": {
 		"tooltipManage": "Beheer instellingen voor automatische goedkeuring",
 		"tooltipStatus": "Automatische goedkeuring ingeschakeld voor: {{toggles}}",
@@ -311,9 +284,6 @@
 		"all": "Alles",
 		"none": "Geen",
 		"description": "Voer deze acties uit zonder om toestemming te vragen. Schakel dit alleen in voor acties die je volledig vertrouwt.",
-		"selectOptionsFirst": "Selecteer hieronder minstens één optie om automatische goedkeuring in te schakelen",
-		"toggleAriaLabel": "Automatische goedkeuring in-/uitschakelen",
-		"disabledAriaLabel": "Automatische goedkeuring uitgeschakeld - selecteer eerst opties",
 		"triggerLabelOff": "Automatisch goedkeuren uit",
 		"triggerLabelOffShort": "Uit",
 		"triggerLabel_zero": "0 automatisch goedgekeurd",
@@ -329,12 +299,6 @@
 			"highlight1": "✨ Bredere model- en providerondersteuning: Gebruik Claude Haiku 5.5 via Anthropic, stuur afbeeldingen naar compatibele VS Code LM-modellen, pas de temperatuur aan voor OpenCode Go Responses-modellen en annuleer verzoeken netjes bij meer providers.",
 			"highlight2": "🔐 Flexibeler MCP OAuth: Configureer statische OAuth-clientinstellingen, gebruik aangepaste callback-paden, ontdek authenticatiedetails uit WWW-Authenticate en zie callback-fouten voordat je het opnieuw probeert.",
 			"highlight3": "🧭 Vloeiendere chats en lange sessies: Hernoem taken in de geschiedenis, sleep bestanden in de chat zonder Shift ingedrukt te houden, verminder het geheugen dat tijdens lange sessies wordt vastgehouden en houd subtaaklinks en vervangen webviews stabiel."
-		},
-		"cloudAgents": {
-			"heading": "Nieuw in de Cloud:",
-			"specialized": "Introductie van <bold>Explainer</bold>, <bold>Planner</bold> en <bold>Coder</bold> - drie gespecialiseerde cloud-agents om je workflows te verbeteren.",
-			"description": "De agents werken samen in de cloud en kunnen worden geactiveerd vanaf het web of via Slack.",
-			"tryButton": "Probeer Cloud-agents"
 		}
 	},
 	"reasoning": {
@@ -444,28 +408,8 @@
 	"editMessage": {
 		"placeholder": "Bewerk je bericht..."
 	},
-	"command": {
-		"triggerDescription": "Activeer de {{name}} opdracht"
-	},
 	"slashCommands": {
-		"tooltip": "Slash-opdrachten beheren",
-		"title": "Slash-opdrachten",
-		"description": "Gebruik ingebouwde slash-opdrachten of maak aangepaste voor snelle toegang tot veelgebruikte prompts en workflows. <DocsLink>Documentatie</DocsLink>",
-		"manageCommands": "Beheer slash-opdrachten in instellingen",
-		"builtInCommands": "Ingebouwde Opdrachten",
-		"globalCommands": "Globale Opdrachten",
-		"workspaceCommands": "Werkruimte Opdrachten",
-		"globalCommand": "Globale opdracht",
-		"editCommand": "Opdracht bewerken",
-		"deleteCommand": "Opdracht verwijderen",
-		"newGlobalCommandPlaceholder": "Nieuwe globale opdracht...",
-		"newWorkspaceCommandPlaceholder": "Nieuwe werkruimte opdracht...",
-		"deleteDialog": {
-			"title": "Opdracht Verwijderen",
-			"description": "Weet je zeker dat je de opdracht \"{{name}}\" wilt verwijderen? Deze actie kan niet ongedaan worden gemaakt.",
-			"cancel": "Annuleren",
-			"confirm": "Verwijderen"
-		}
+		"manageCommands": "Beheer slash-opdrachten in instellingen"
 	},
 	"contextMenu": {
 		"noResults": "Geen resultaten",
@@ -484,9 +428,7 @@
 	"todo": {
 		"partial": "{{completed}} van {{total}} to-do's voltooid",
 		"complete": "{{total}} to-do's voltooid",
-		"updated": "De to-do-lijst is bijgewerkt",
-		"completed": "Voltooid",
-		"started": "Gestart"
+		"updated": "De to-do-lijst is bijgewerkt"
 	},
 	"tooManyTools": {
 		"title": "Te veel tools ingeschakeld",
