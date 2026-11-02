@@ -1,6 +1,4 @@
 {
-	"title": "Modes",
-	"done": "Fet",
 	"modes": {
 		"title": "Modes",
 		"createNewMode": "Crear nou mode",
@@ -53,9 +51,7 @@
 	},
 	"exportMode": {
 		"title": "Exportar mode",
-		"description": "Exporta aquest mode a un fitxer YAML amb totes les regles incloses per compartir fàcilment amb altres.",
-		"export": "Exportar mode",
-		"exporting": "Exportant..."
+		"export": "Exportar mode"
 	},
 	"importMode": {
 		"selectLevel": "Tria on importar aquest mode:",
@@ -81,7 +77,6 @@
 		"title": "Prompt del sistema (mode {{modeName}})"
 	},
 	"supportPrompts": {
-		"title": "Prompts de suport",
 		"resetPrompt": "Restablir el prompt {{promptType}} a valors predeterminats",
 		"prompt": "Prompt",
 		"enhance": {
@@ -93,11 +88,6 @@
 			"testEnhancement": "Prova la millora",
 			"includeTaskHistory": "Inclou l'historial de tasques com a context",
 			"includeTaskHistoryDescription": "Quan està activat, els últims 10 missatges de la conversa actual s'inclouran com a context en millorar els prompts, ajudant a generar suggeriments més rellevants i conscients del context."
-		},
-		"condense": {
-			"apiConfiguration": "Configuració de l'API per a la condensació de context",
-			"apiConfigDescription": "Seleccioneu quina configuració d'API voleu utilitzar per a les operacions de condensació de context. Deixeu-ho sense seleccionar per utilitzar la configuració activa actual.",
-			"useCurrentConfig": "Utilitza la configuració de l'API seleccionada actualment"
 		},
 		"types": {
 			"ENHANCE": {
@@ -196,7 +186,6 @@
 		"title": "Suprimeix el mode",
 		"message": "Estàs segur que vols suprimir el mode \"{{modeName}}\"?",
 		"rulesFolder": "Aquest mode té una carpeta de regles a {{folderPath}} que també se suprimirà.",
-		"descriptionNoRules": "Esteu segur que voleu suprimir aquest mode personalitzat?",
 		"confirm": "Suprimeix",
 		"cancel": "Cancel·la"
 	}

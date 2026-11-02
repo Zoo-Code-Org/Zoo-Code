@@ -432,12 +432,8 @@ export const stories: Record<string, Story> = {
 		return <UISettingsStory />
 	},
 	"ui-settings-long-locale": async () => {
-		const [{ UISettingsStory }, { default: i18next }] = await Promise.all([
-			import("@/components/settings/__tests__/UISettings.visual.fixture"),
-			import("@/i18n/setup"),
-		])
-		await i18next.changeLanguage("ru")
-		return <UISettingsStory />
+		const { UISettingsStory } = await import("@/components/settings/__tests__/UISettings.visual.fixture")
+		return <UISettingsStory initialState={{ language: "ru" }} />
 	},
 	welcome: async () => {
 		const [{ AppProviders }, { WelcomeLanding }] = await Promise.all([
