@@ -164,7 +164,15 @@ async function _ancestorIdentities(root: string, targetParent: string): Promise<
 	}
 	const pinned: AncestorIdentity[] = []
 	for (const dir of chain) {
-		const stat = await fs.stat(dir, { bigint: true }).catch(() => undefined)
+		// A missing ancestor has no identity to pin, but any other stat failure means the
+		// walk could not verify the chain: dropping it would let a swapped-in directory
+		// escape the confine check, so fail closed instead of skipping the pin.
+		const stat = await fs.stat(dir, { bigint: true }).catch((error: unknown) => {
+			if (typeof error === "object" && error !== null && (error as { code?: unknown }).code === "ENOENT") {
+				return undefined
+			}
+			throw error
+		})
 		if (stat) {
 			pinned.push({ dir, dev: stat.dev, ino: stat.ino })
 		}
