@@ -4185,6 +4185,14 @@ export class ClineProvider
 		configuration: RooCodeSettings = {},
 	): Promise<Task> {
 		if (configuration) {
+			// Capture the modes this batch overrides before registering them: a later failure
+			// must restore a previously installed mode instead of leaving the batch's copy.
+			const savedCustomModes = configuration.customModes?.length
+				? (await this.customModesManager.getCustomModes()).filter((mode) =>
+						configuration.customModes!.some((candidate) => candidate.slug === mode.slug),
+					)
+				: []
+
 			// Register the batch's custom modes before setValues validates `mode`: a mode
 			// selected in the same configuration is not known to the manager yet.
 			if (configuration.customModes?.length) {
@@ -4193,32 +4201,48 @@ export class ClineProvider
 				}
 			}
 
-			await this.setValues(configuration)
+			try {
+				await this.setValues(configuration)
 
-			if (configuration.allowedCommands) {
-				await vscode.workspace
-					.getConfiguration(Package.name)
-					.update("allowedCommands", configuration.allowedCommands, vscode.ConfigurationTarget.Global)
-			}
+				if (configuration.allowedCommands) {
+					await vscode.workspace
+						.getConfiguration(Package.name)
+						.update("allowedCommands", configuration.allowedCommands, vscode.ConfigurationTarget.Global)
+				}
 
-			if (configuration.deniedCommands) {
-				await vscode.workspace
-					.getConfiguration(Package.name)
-					.update("deniedCommands", configuration.deniedCommands, vscode.ConfigurationTarget.Global)
-			}
+				if (configuration.deniedCommands) {
+					await vscode.workspace
+						.getConfiguration(Package.name)
+						.update("deniedCommands", configuration.deniedCommands, vscode.ConfigurationTarget.Global)
+				}
 
-			if (configuration.commandExecutionTimeout !== undefined) {
-				await vscode.workspace
-					.getConfiguration(Package.name)
-					.update(
-						"commandExecutionTimeout",
-						configuration.commandExecutionTimeout,
-						vscode.ConfigurationTarget.Global,
-					)
-			}
+				if (configuration.commandExecutionTimeout !== undefined) {
+					await vscode.workspace
+						.getConfiguration(Package.name)
+						.update(
+							"commandExecutionTimeout",
+							configuration.commandExecutionTimeout,
+							vscode.ConfigurationTarget.Global,
+						)
+				}
 
-			if (configuration.currentApiConfigName) {
-				await this.setProviderProfile(configuration.currentApiConfigName)
+				if (configuration.currentApiConfigName) {
+					await this.setProviderProfile(configuration.currentApiConfigName)
+				}
+			} catch (error) {
+				// A failure after the registration must not leave the batch's modes installed;
+				// restore the ones that already existed. Newly added slugs cannot be deleted
+				// through the manager, so they are only reported.
+				for (const savedMode of savedCustomModes) {
+					await this.customModesManager.updateCustomMode(savedMode.slug, savedMode).catch((restoreError) => {
+						this.log(
+							`[createTask] Failed to restore custom mode '${savedMode.slug}' after the task creation failed: ${
+								restoreError instanceof Error ? restoreError.message : String(restoreError)
+							}`,
+						)
+					})
+				}
+				throw error
 			}
 		}
 
