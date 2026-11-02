@@ -1522,7 +1522,7 @@ describe("OpencodeGoHandler", () => {
 			}
 
 			beforeEach(() => {
-				vitest.clearAllMocks()
+				clearAllMocks()
 			})
 
 			it("completePrompt returns text for OpenAI path", async () => {
@@ -2616,7 +2616,7 @@ describe("OpencodeGoHandler", () => {
 		] as const)(
 			"completePrompt pins the caller signal and rejects with AbortError for the %s format",
 			async (_format, options, requestMock) => {
-				vitest.clearAllMocks()
+				clearAllMocks()
 				const controller = new AbortController()
 				const pending = new Promise<never>((_resolve, reject) => {
 					controller.signal.addEventListener(
