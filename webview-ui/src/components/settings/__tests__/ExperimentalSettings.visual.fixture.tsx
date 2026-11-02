@@ -20,6 +20,7 @@ export function ExperimentalSettingsStory() {
 				className="w-[488px] max-w-full rounded-lg border border-vscode-panel-border bg-vscode-editor-background p-4 text-vscode-editor-foreground">
 				<ExperimentalSettings
 					experiments={experiments}
+					apiConfiguration={{}}
 					setExperimentEnabled={(id, enabled) => setExperiments((current) => ({ ...current, [id]: enabled }))}
 				/>
 			</div>
