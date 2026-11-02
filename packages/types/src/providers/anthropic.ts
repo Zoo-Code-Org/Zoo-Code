@@ -1,4 +1,13 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 // https://docs.anthropic.com/en/docs/about-claude/models
 // https://platform.claude.com/docs/en/about-claude/pricing
@@ -348,3 +357,17 @@ export const anthropicModels = {
 } as const satisfies Record<string, ModelInfo>
 
 export const ANTHROPIC_DEFAULT_MAX_TOKENS = 8192
+
+export const anthropicProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.anthropic,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => anthropicDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		apiKey: z.string().optional(),
+		anthropicBaseUrl: z.string().optional(),
+		anthropicUseAuthToken: z.boolean().optional(),
+		anthropicBeta1MContext: z.boolean().optional(), // Enable 'context-1m-2025-08-07' beta for 1M context window.
+	},
+})

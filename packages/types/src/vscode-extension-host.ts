@@ -111,8 +111,15 @@ export interface ExtensionMessage {
 		| "originalContent"
 		| "rooHistoryImportProgress"
 		| "themeFixtureProbeRequest"
+		| "diagnosticsRequest"
 		| "viewStateClaim"
 	text?: string
+	/**
+	 * For `viewStateClaim`: the durable `viewStates` key the delivered claim governs.
+	 */
+	viewStateId?: string
+	/** For `viewStateClaim`: the host-minted token the webview stores and echoes on launch. */
+	viewStateClaim?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
 	/** For originalContent: the pre-edit file content of the requested tool message (null when unavailable) */
@@ -170,14 +177,8 @@ export interface ExtensionMessage {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	values?: Record<string, any>
 	requestId?: string
-	/**
-	 * For `viewStateClaim`: the durable `viewStates` key the delivered claim governs. The
-	 * message is only ever sent to the webview that key belongs to.
-	 */
-	viewStateId?: string
-	/** For `viewStateClaim`: the host-minted token the webview stores and echoes on launch. */
-	viewStateClaim?: string
 	themeFixture?: WebviewThemeFixture
+	diagnostics?: WebviewDiagnosticsSnapshot
 	promptText?: string
 	results?:
 		| { path: string; type: "file" | "folder"; label?: string }[]
@@ -475,6 +476,40 @@ export type ClineAskResponse = "yesButtonClicked" | "noButtonClicked" | "message
 
 export type AudioType = "notification" | "celebration" | "progress_loop"
 
+export interface WebviewDiagnosticsSnapshot {
+	capturedAt: string
+	didHydrateState?: boolean
+	documentReadyState?: "loading" | "interactive" | "complete"
+	documentVisibilityState?: "hidden" | "visible" | "prerender"
+	activeView?: string
+	rootMounted?: boolean
+	rootChildCount?: number
+	lastReceivedStateSequence?: number
+	lastAppliedStateSequence?: number
+	staleStateRejectionCount?: number
+	unknownMessageUpdateCount?: number
+	currentTaskId?: string
+	chatMessageCount?: number
+	historyItemCount?: number
+	todoCount?: number
+	viewport?: { width: number; height: number; devicePixelRatio: number }
+	theme?: {
+		kind?: number
+		identifier?: string
+		bodyForeground?: string
+		bodyBackground?: string
+		rootForeground?: string
+		rootBackground?: string
+		variables?: Record<string, string>
+	}
+	error?: {
+		name?: string
+		message?: string
+		fingerprint?: string
+		stackLocations?: string[]
+	}
+}
+
 export interface UpdateTodoListPayload {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	todos: any[]
@@ -497,6 +532,7 @@ export interface WebviewMessage {
 		| "getListApiConfiguration"
 		| "customInstructions"
 		| "webviewDidLaunch"
+		| "webviewHeartbeat"
 		| "webviewDidFocus"
 		| "newTask"
 		| "askResponse"
@@ -677,10 +713,8 @@ export interface WebviewMessage {
 		| "openRuleFile"
 		| "openRulesDirectory"
 		| "themeFixtureProbeResponse"
+		| "diagnosticsResponse"
 	text?: string
-	viewStateId?: string
-	/** For `webviewDidLaunch`: the claim delivered for `viewStateId`, enforced by setViewStateId. */
-	viewStateClaim?: string
 	taskId?: string
 	editedMessageContent?: string
 	tab?: "settings" | "history" | "mcp" | "modes" | "chat" | "marketplace" | "cloud"
@@ -727,9 +761,11 @@ export interface WebviewMessage {
 	newSkillModeSlugs?: string[] // For updateSkillModes (new mode restrictions)
 	requestId?: string
 	themeFixture?: WebviewThemeFixture
+	diagnostics?: WebviewDiagnosticsSnapshot
 	ids?: string[]
 	terminalOperation?: "continue" | "abort"
 	messageTs?: number
+	timestamp?: number // For webviewHeartbeat
 	messageId?: string
 	restoreCheckpoint?: boolean
 	historyPreviewCollapsed?: boolean
