@@ -1355,9 +1355,11 @@ describe("OpencodeGoHandler", () => {
 			const controller = new AbortController()
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			await handler.completePrompt("ping", { abortSignal: controller.signal })
-			// Resolution and the request share the merged deadline signal, not the caller signal.
+			// With no timeoutMs, mergeAbortSignalAndTimeout returns the caller's signal unchanged:
+			// pin the identity so forwarding a freshly-wrapped signal (or dropping the caller's)
+			// cannot pass.
 			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
-				signal: expect.any(AbortSignal),
+				signal: controller.signal,
 			})
 		})
 
