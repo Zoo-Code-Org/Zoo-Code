@@ -33,16 +33,16 @@ vi.mock("fs/promises", async () => {
 	// or have their implementations changed in tests.
 	// This ensures that other fs.promises functions used by the SUT
 	// (like proper-lockfile's internals) will use their actual implementations.
-	mockedFs.writeFile = vi.fn(actual.writeFile) as any
-	mockedFs.readFile = vi.fn(actual.readFile) as any
-	mockedFs.rename = vi.fn(actual.rename) as any
-	mockedFs.unlink = vi.fn(actual.unlink) as any
+	mockedFs.writeFile = vi.fn(actual.writeFile) as unknown as typeof mockedFs.writeFile
+	mockedFs.readFile = vi.fn(actual.readFile) as unknown as typeof mockedFs.readFile
+	mockedFs.rename = vi.fn(actual.rename) as unknown as typeof mockedFs.rename
+	mockedFs.unlink = vi.fn(actual.unlink) as unknown as typeof mockedFs.unlink
 	mockedFs.copyFile = vi.fn(actual.copyFile)
-	mockedFs.access = vi.fn(actual.access) as any
-	mockedFs.mkdtemp = vi.fn(actual.mkdtemp) as any
-	mockedFs.rm = vi.fn(actual.rm) as any
-	mockedFs.readdir = vi.fn(actual.readdir) as any
-	mockedFs.mkdir = vi.fn(actual.mkdir) as any
+	mockedFs.access = vi.fn(actual.access) as unknown as typeof mockedFs.access
+	mockedFs.mkdtemp = vi.fn(actual.mkdtemp) as unknown as typeof mockedFs.mkdtemp
+	mockedFs.rm = vi.fn(actual.rm) as unknown as typeof mockedFs.rm
+	mockedFs.readdir = vi.fn(actual.readdir) as unknown as typeof mockedFs.readdir
+	mockedFs.mkdir = vi.fn(actual.mkdir) as unknown as typeof mockedFs.mkdir
 	// fs.stat and fs.lstat will be available via { ...actual }
 
 	return mockedFs
@@ -53,7 +53,7 @@ vi.mock("fs", async () => {
 	const actualFs = await vi.importActual<typeof import("fs")>("fs")
 	return {
 		...actualFs, // Spread actual implementations
-		createWriteStream: vi.fn(actualFs.createWriteStream) as any, // Default to actual, but mockable
+		createWriteStream: vi.fn(actualFs.createWriteStream) as unknown as typeof actualFs.createWriteStream, // Default to actual, but mockable
 		// Wrapped so a test can fail the parent-directory fsync that follows the commit rename.
 		fsync: vi.fn(actualFs.fsync),
 	}

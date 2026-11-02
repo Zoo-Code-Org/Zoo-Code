@@ -51,7 +51,7 @@ export interface SafeWriteJsonOptions {
  * @param {SafeWriteJsonOptions} options - Optional configuration for JSON formatting.
  * @returns {Promise<void>}
  */
-async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJsonOptions): Promise<void> {
+async function safeWriteJson(filePath: string, data: unknown, options?: SafeWriteJsonOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 	let releaseLock = async () => {} // Initialized to a no-op
 
@@ -198,7 +198,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
  * @param prettyPrint Whether to format the JSON with indentation.
  * @returns Promise<void>
  */
-async function _streamDataToFile(targetPath: string, data: any, prettyPrint = false, mode?: number): Promise<void> {
+async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint = false, mode?: number): Promise<void> {
 	// Stream data to avoid high memory usage for large JSON objects.
 	// mode is explicit because createWriteStream defaults to 0o666 (& ~umask): the
 	// staged file is readable by others until the commit renames it onto the target.
