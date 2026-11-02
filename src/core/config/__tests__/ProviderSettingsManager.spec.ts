@@ -12,7 +12,7 @@ import {
 } from "@roo-code/types"
 
 import { clearAllMocks } from "../../../test-utils/reset"
-import { makeExtensionContext } from "../../../test-utils/vscode"
+import { makeEventEmitter, makeExtensionContext } from "../../../test-utils/vscode"
 
 import { ProviderSettingsManager, ProviderProfiles } from "../ProviderSettingsManager"
 
@@ -97,24 +97,27 @@ const makeCustomStorageContext = ({
 	secrets?: Map<string, string>
 	globalState?: Map<string, unknown>
 } = {}) => {
+	const secretStorage: vscode.SecretStorage = {
+		get: vi.fn(async (key: string) => secrets.get(key)),
+		store: vi.fn(async (key: string, value: string) => {
+			secrets.set(key, value)
+		}),
+		delete: vi.fn(async (key: string) => {
+			secrets.delete(key)
+		}),
+		onDidChange: makeEventEmitter<vscode.SecretStorageChangeEvent>().event,
+	}
+	const testGlobalState: vscode.Memento & { setKeysForSync: (keys: readonly string[]) => void } = {
+		get: vi.fn(<T>(key: string) => globalState.get(key) as T | undefined),
+		update: vi.fn(async (key: string, value: unknown) => {
+			globalState.set(key, value)
+		}),
+		keys: vi.fn(() => [...globalState.keys()]),
+		setKeysForSync: vi.fn(),
+	}
 	const context = makeExtensionContext({
-		secrets: {
-			get: vi.fn(async (key: string) => secrets.get(key) ?? null),
-			store: vi.fn(async (key: string, value: string) => {
-				secrets.set(key, value)
-			}),
-			delete: vi.fn(async (key: string) => {
-				secrets.delete(key)
-			}),
-			onDidChange: new Map(),
-		},
-		globalState: {
-			get: vi.fn((key: string) => globalState.get(key)),
-			update: vi.fn(async (key: string, value: unknown) => {
-				globalState.set(key, value)
-			}),
-			keys: vi.fn(() => [...globalState.keys()]),
-		},
+		secrets: secretStorage,
+		globalState: testGlobalState,
 	})
 
 	vi.spyOn(vscode.workspace, "getConfiguration").mockReturnValue(
