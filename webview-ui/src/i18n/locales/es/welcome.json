@@ -1,8 +1,7 @@
 {
 	"landing": {
 		"greeting": "¡Bienvenido a Zoo Code!",
-		"introduction": "Con una variedad de Modos integrados y extensibles, Zoo Code te permite planificar, arquitectar, codificar, depurar y aumentar tu productividad como nunca antes.",
-		"getStarted": "Elige tu proveedor"
+		"introduction": "Con una variedad de Modos integrados y extensibles, Zoo Code te permite planificar, arquitectar, codificar, depurar y aumentar tu productividad como nunca antes."
 	},
 	"providerSignup": {
 		"heading": "Elige tu proveedor",
