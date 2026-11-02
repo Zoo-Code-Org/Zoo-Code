@@ -273,9 +273,13 @@ describe("checkpointRestoreHandler", () => {
 
 	it.each([
 		{ name: "a different task became current", replacement: "newer" },
+		{ name: "a newer instance with the same id became current", replacement: "sameId" },
 		{ name: "no task remains current", replacement: "none" },
 	] as const)("restart skips replacement and scheduling when $name during setup", async ({ replacement }) => {
-		const newerTask = { taskId: "newer-task", abortTask: vi.fn<Task["abortTask"]>() }
+		const newerTask = {
+			taskId: replacement === "sameId" ? fixture.task.taskId : "newer-task",
+			abortTask: vi.fn<Task["abortTask"]>(),
+		}
 		const constructedTask = { taskId: fixture.task.taskId, abortTask: vi.fn<Task["abortTask"]>(async () => {}) }
 		constructTask.mockReturnValueOnce(constructedTask)
 		const listenerCleanup = vi.fn()
@@ -285,7 +289,7 @@ describe("checkpointRestoreHandler", () => {
 		fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(new Error("Missing commit"))
 		showWarningMessage.mockResolvedValueOnce("common:checkpoints.restart")
 		fixture.providerDouble.getState.mockImplementationOnce(async () => {
-			registry.current = replacement === "newer" ? newerTask : undefined
+			registry.current = replacement === "none" ? undefined : newerTask
 			return { apiConfiguration: {} }
 		})
 		await expect(handleCheckpointRestoreOperation(fixture.config)).rejects.toThrow("Missing commit")

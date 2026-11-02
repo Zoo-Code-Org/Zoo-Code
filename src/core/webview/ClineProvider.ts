@@ -1458,7 +1458,7 @@ export class ClineProvider
 			const oldTask = this.taskRegistry.current
 
 			// The current task may have changed or been removed during the awaits above; never touch it.
-			if (oldTask?.taskId !== task.taskId) {
+			if (oldTask !== currentTask) {
 				removeTaskEventListeners(this.taskEventListeners, task)
 				await task.abortTask(true).catch(() => {})
 				return task

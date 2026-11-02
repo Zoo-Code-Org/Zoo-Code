@@ -36,6 +36,8 @@ vi.mock("../../../i18n", () => ({
 	),
 }))
 
+const LATEST_CHECKPOINT = "b".repeat(40)
+
 function createFixture() {
 	const taskDouble = {
 		taskId: "test-task-123",
@@ -45,7 +47,7 @@ function createFixture() {
 			{ ts: 1, type: "say", say: "text", text: "Initial task" },
 			{ ts: 2, type: "say", say: "checkpoint_saved", text: "initial-checkpoint" },
 			{ ts: 3, type: "say", say: "user_feedback", text: "Latest prompt" },
-			{ ts: 4, type: "say", say: "checkpoint_saved", text: "latest-prompt-checkpoint" },
+			{ ts: 4, type: "say", say: "checkpoint_saved", text: LATEST_CHECKPOINT },
 			{ ts: 5, type: "say", say: "completion_result", text: "Task complete" },
 			{ ts: 6, type: "ask", ask: "completion_result", text: "", partial: false },
 		] satisfies Task["clineMessages"],
@@ -167,7 +169,7 @@ describe("webviewMessageHandler - checkpoint operations", () => {
 		expect(taskDouble.abortTask).toHaveBeenCalledOnce()
 		expect(taskDouble.checkpointRestore).toHaveBeenCalledWith({
 			ts: 3,
-			commitHash: "latest-prompt-checkpoint",
+			commitHash: LATEST_CHECKPOINT,
 			mode: "restore",
 			operation: "delete",
 		})
@@ -227,7 +229,7 @@ describe("webviewMessageHandler - checkpoint operations", () => {
 
 		expect(taskDouble.checkpointRestore).toHaveBeenCalledExactlyOnceWith({
 			ts: 3,
-			commitHash: "latest-prompt-checkpoint",
+			commitHash: LATEST_CHECKPOINT,
 			mode: "restore",
 			operation: "edit",
 		})
@@ -290,14 +292,14 @@ describe("webviewMessageHandler - checkpoint operations", () => {
 		fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(failure)
 		const message: WebviewMessage =
 			type === "checkpointRestore"
-				? { type, payload: { ts: 4, commitHash: "latest-prompt-checkpoint", mode: "restore" } }
+				? { type, payload: { ts: 4, commitHash: LATEST_CHECKPOINT, mode: "restore" } }
 				: { type }
 		await webviewMessageHandler(fixture.provider, message)
 
 		expect(fixture.providerDouble.cancelTask).toHaveBeenCalledOnce()
 		expect(fixture.taskDouble.checkpointRestore).toHaveBeenCalledWith({
 			ts: 4,
-			commitHash: "latest-prompt-checkpoint",
+			commitHash: LATEST_CHECKPOINT,
 			mode: "restore",
 		})
 		expect(console.error).toHaveBeenCalledWith(`[${type}] checkpointRestore failed:`, failure)
@@ -309,12 +311,41 @@ describe("webviewMessageHandler - checkpoint operations", () => {
 		expectUnchanged(messages, history)
 	})
 
+	it.each([
+		{ name: "malformed", commitHash: "HEAD~1" },
+		{ name: "unrecorded", commitHash: "c".repeat(40) },
+	])("checkpointRestore rejects a $name hash without cancelling the task", async ({ commitHash }) => {
+		const messages = structuredClone(fixture.task.clineMessages)
+		const history = structuredClone(fixture.task.apiConversationHistory)
+		await webviewMessageHandler(fixture.provider, {
+			type: "checkpointRestore",
+			payload: { ts: 4, commitHash, mode: "restore" },
+		})
+
+		expect(fixture.providerDouble.cancelTask).not.toHaveBeenCalled()
+		expect(fixture.taskDouble.checkpointRestore).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledExactlyOnceWith(
+			"common:errors.checkpoint_restore_failed: common:errors.checkpoint_invalid_hash",
+		)
+		expectUnchanged(messages, history)
+	})
+
+	it("checkpointRestore cancels before restoring a recorded hash", async () => {
+		await webviewMessageHandler(fixture.provider, {
+			type: "checkpointRestore",
+			payload: { ts: 4, commitHash: LATEST_CHECKPOINT, mode: "restore" },
+		})
+		expect(fixture.providerDouble.cancelTask.mock.invocationCallOrder[0]).toBeLessThan(
+			fixture.taskDouble.checkpointRestore.mock.invocationCallOrder[0],
+		)
+	})
+
 	describe("completion checkpoint actions", () => {
 		it("diffs the checkpoint created after the latest prompt", async () => {
 			await webviewMessageHandler(fixture.provider, { type: "completionCheckpointDiff" })
 			expect(fixture.taskDouble.checkpointDiff).toHaveBeenCalledWith({
 				ts: 4,
-				commitHash: "latest-prompt-checkpoint",
+				commitHash: LATEST_CHECKPOINT,
 				mode: "to-current",
 			})
 		})
@@ -323,7 +354,7 @@ describe("webviewMessageHandler - checkpoint operations", () => {
 			await webviewMessageHandler(fixture.provider, { type: "completionCheckpointRestore" })
 			expect(fixture.taskDouble.checkpointRestore).toHaveBeenCalledWith({
 				ts: 4,
-				commitHash: "latest-prompt-checkpoint",
+				commitHash: LATEST_CHECKPOINT,
 				mode: "restore",
 			})
 			expect(fixture.providerDouble.cancelTask.mock.invocationCallOrder[0]).toBeLessThan(
