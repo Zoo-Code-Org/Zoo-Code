@@ -123,6 +123,52 @@ describe("collectPersistenceDiagnostics", () => {
 		expect(result.tasks.every((task) => task.uiMessages.messageCount === 2)).toBe(true)
 	})
 
+	it.each([true, false])("inspects an uncached navigation target with files present: %s", async (filesPresent) => {
+		const id = "uncached-target"
+		if (filesPresent) {
+			const taskPath = path.join(storagePath, "tasks", id)
+			await fs.mkdir(taskPath, { recursive: true })
+			await fs.writeFile(path.join(taskPath, "history_item.json"), JSON.stringify({ id, task: "PRIVATE" }))
+			await fs.writeFile(path.join(taskPath, "ui_messages.json"), JSON.stringify([{ ts: 10, text: "PRIVATE" }]))
+		}
+
+		const result = await collectPersistenceDiagnostics({
+			storagePath,
+			history: [],
+			currentTaskIds: [id],
+			pseudonymize: () => "task-pseudonym",
+		})
+
+		expect(result.tasks).toHaveLength(1)
+		expect(result.tasks[0]).toMatchObject({
+			id: "task-pseudonym",
+			historyItem: { exists: filesPresent },
+			uiMessages: { exists: filesPresent },
+			integrityFindings: ["missingCachedHistoryItem"],
+		})
+		if (filesPresent) {
+			expect(result.tasks[0].historyItem.parseStatus).toBe("valid")
+			expect(result.tasks[0].uiMessages).toMatchObject({
+				parseStatus: "valid",
+				messageCount: 1,
+				firstTimestamp: 10,
+			})
+		}
+		expect(result.tasks[0].status).toBeUndefined()
+		expect(JSON.stringify(result)).not.toContain(id)
+		expect(JSON.stringify(result)).not.toContain("PRIVATE")
+	})
+
+	it.each(["../outside", "/absolute", "", "a".repeat(129)])("skips unsafe navigation target %s", async (id) => {
+		const result = await collectPersistenceDiagnostics({
+			storagePath,
+			history: [],
+			currentTaskIds: [id],
+			pseudonymize: () => "task-pseudonym",
+		})
+		expect(result.tasks).toEqual([])
+	})
+
 	it("reports corrupt and missing files without throwing", async () => {
 		const history: HistoryItem[] = [
 			{

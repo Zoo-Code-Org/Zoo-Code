@@ -79,7 +79,7 @@ function hasParentCycle(item: HistoryItem, byId: Map<string, HistoryItem>): bool
 	return false
 }
 
-function selectRelevant(history: HistoryItem[], currentIds: string[]): HistoryItem[] {
+function selectRelevant(history: HistoryItem[], currentIds: string[]): string[] {
 	const byId = new Map(history.map((item) => [item.id, item]))
 	const selected = new Set<string>()
 	const queue = [...currentIds]
@@ -87,7 +87,7 @@ function selectRelevant(history: HistoryItem[], currentIds: string[]): HistoryIt
 
 	while (queue.length > 0 && selected.size < MAX_TASKS) {
 		const id = queue.shift()
-		if (!id || selected.has(id)) continue
+		if (!id || !isSafeTaskId(id) || selected.has(id)) continue
 		selected.add(id)
 		const item = byId.get(id)
 		if (!item) continue
@@ -96,9 +96,7 @@ function selectRelevant(history: HistoryItem[], currentIds: string[]): HistoryIt
 		}
 	}
 
-	return Array.from(selected, (id) => byId.get(id)).filter(
-		(item): item is HistoryItem => item !== undefined && isSafeTaskId(item.id),
-	)
+	return Array.from(selected)
 }
 
 export async function collectPersistenceDiagnostics(options: {
@@ -110,7 +108,7 @@ export async function collectPersistenceDiagnostics(options: {
 	const { storagePath, history, currentTaskIds, pseudonymize } = options
 	const tasksPath = path.join(storagePath, "tasks")
 	const relevant = selectRelevant(history, currentTaskIds)
-	const relevantIds = new Set(relevant.map((item) => item.id))
+	const relevantIds = new Set(relevant)
 	const byId = new Map(history.map((item) => [item.id, item]))
 	const indexResult = await inspectJson(path.join(tasksPath, LEGACY_HISTORY_INDEX_FILE))
 
@@ -125,8 +123,9 @@ export async function collectPersistenceDiagnostics(options: {
 
 	// Inspect sequentially to avoid retaining parsed histories for multiple tasks.
 	const tasks: DiagnosticsPersistenceReport["tasks"] = []
-	for (const item of relevant) {
-		const taskPath = path.join(tasksPath, item.id)
+	for (const id of relevant) {
+		const item = byId.get(id)
+		const taskPath = path.join(tasksPath, id)
 		const historyItemResult = await inspectJson(path.join(taskPath, GlobalFileNames.historyItem))
 		const uiMessagesResult = await inspectJson(path.join(taskPath, GlobalFileNames.uiMessages))
 		const messages = Array.isArray(uiMessagesResult.value) ? uiMessagesResult.value : undefined
@@ -138,22 +137,31 @@ export async function collectPersistenceDiagnostics(options: {
 			)
 			.filter((timestamp): timestamp is number => timestamp !== undefined)
 		const findings: string[] = []
-		for (const related of [item.rootTaskId, item.parentTaskId, item.awaitingChildId, ...(item.childIds ?? [])]) {
-			if (related && !byId.has(related)) findings.push("missingReferencedTask")
+		if (item) {
+			for (const related of [
+				item.rootTaskId,
+				item.parentTaskId,
+				item.awaitingChildId,
+				...(item.childIds ?? []),
+			]) {
+				if (related && !byId.has(related)) findings.push("missingReferencedTask")
+			}
+			if (item.awaitingChildId && item.status !== "delegated") findings.push("awaitingChildStatusMismatch")
+			if (item.parentTaskId && !byId.get(item.parentTaskId)?.childIds?.includes(item.id)) {
+				findings.push("parentChildMismatch")
+			}
+			if (hasParentCycle(item, byId)) findings.push("parentCycle")
+		} else {
+			findings.push("missingCachedHistoryItem")
 		}
-		if (item.awaitingChildId && item.status !== "delegated") findings.push("awaitingChildStatusMismatch")
-		if (item.parentTaskId && !byId.get(item.parentTaskId)?.childIds?.includes(item.id)) {
-			findings.push("parentChildMismatch")
-		}
-		if (hasParentCycle(item, byId)) findings.push("parentCycle")
 
 		tasks.push({
-			id: pseudonymize(item.id),
-			rootTask: item.rootTaskId ? pseudonymize(item.rootTaskId) : undefined,
-			parentTask: item.parentTaskId ? pseudonymize(item.parentTaskId) : undefined,
-			children: (item.childIds ?? []).slice(0, MAX_TASKS).map(pseudonymize),
-			status: item.status,
-			number: item.number,
+			id: pseudonymize(id),
+			rootTask: item?.rootTaskId ? pseudonymize(item.rootTaskId) : undefined,
+			parentTask: item?.parentTaskId ? pseudonymize(item.parentTaskId) : undefined,
+			children: (item?.childIds ?? []).slice(0, MAX_TASKS).map(pseudonymize),
+			status: item?.status,
+			number: item?.number,
 			historyItem: historyItemResult.inspection,
 			uiMessages: {
 				...uiMessagesResult.inspection,
