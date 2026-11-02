@@ -1172,6 +1172,51 @@ describe("summarizeConversation", () => {
 
 		// Non-destructive: the full stored history (hidden messages included) is preserved for rewind.
 		expect(result.messages).toHaveLength(messages.length + 1)
+		expect(result.messages[1]).toMatchObject({
+			content: "Hidden assistant message",
+			truncationParent: truncationId,
+		})
+		expect(result.messages[2]).toMatchObject({
+			content: "Hidden tool result",
+			truncationParent: truncationId,
+		})
+	})
+
+	it("should build the summarization request from the effective history when a prior summary exists", async () => {
+		const condenseId = "condense-1"
+		const truncationId = "trunc-2"
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Pre-summary task", ts: 1, condenseParent: condenseId },
+			{ role: "assistant", content: "Pre-summary assistant", ts: 2, condenseParent: condenseId },
+			{ role: "user", content: "## Conversation Summary\nPrior summary", ts: 3, isSummary: true, condenseId },
+			{ role: "assistant", content: "Hidden post-summary assistant", ts: 4, truncationParent: truncationId },
+			{
+				role: "user",
+				content: "[Sliding window truncation: 1 messages hidden to reduce context]",
+				ts: 5,
+				isTruncationMarker: true,
+				truncationId,
+			},
+			{ role: "user", content: "Visible post-summary user message", ts: 6 },
+		]
+
+		await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+		})
+
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1]
+		const requestContents = requestMessages.map(({ content }) =>
+			typeof content === "string" ? content : JSON.stringify(content),
+		)
+		expect(requestContents).toEqual([
+			"## Conversation Summary\nPrior summary",
+			"[Sliding window truncation: 1 messages hidden to reduce context]",
+			"Visible post-summary user message",
+			expect.stringContaining("detailed summary of the conversation"),
+		])
 	})
 })
 
