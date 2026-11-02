@@ -4,7 +4,7 @@
  *
  * Usage: node scripts/check-i18n-interpolation.js
  *
- * Only calls with a string-literal key and no second argument or an object-literal one are checked.
+ * Only calls with a string-literal key and an object-literal second argument are checked.
  * A spread in the object skips the call.
  */
 
@@ -30,7 +30,7 @@ const files = execFileSync(
 const resources = {}
 function getResource(pkg, ns) {
 	// A namespace is a locale file name. Reject anything that could leave the locale directory.
-	if (!/^[\w-]+$/.test(ns)) return undefined
+	if (!/^[\w.-]+$/.test(ns)) return undefined
 	const id = `${pkg}:${ns}`
 	if (!(id in resources)) {
 		const file = path.join(ROOT, pkg === "src" ? "src" : "webview-ui/src", "i18n/locales/en", `${ns}.json`)
