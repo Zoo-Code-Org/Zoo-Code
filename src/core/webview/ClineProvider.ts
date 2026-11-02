@@ -2577,26 +2577,7 @@ export class ClineProvider
 
 			if (signal.aborted) return id
 
-			// Refresh other live views pinned to this profile so their buffered overlay cannot
-			// keep serving the pre-save settings under the same profile name.
-			for (const instance of ClineProvider.getAllInstances()) {
-				if (instance === this || instance._disposed || instance.pinnedProfileName !== name) {
-					continue
-				}
-				// Direct private access: compile-time safe across sibling instances.
-				await instance._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
-
-				// A sibling task running under this profile holds a handler built from the old
-				// settings: rebuild it so its next request does not use the stale credentials.
-				if (instance.getCurrentTask()?.taskApiConfigName === name) {
-					const {
-						name: _recordName,
-						id: _recordId,
-						...taskSettings
-					} = providerSettings as ProviderSettings & { name?: string; id?: string }
-					instance.updateTaskApiHandlerIfNeeded(taskSettings, { forceRebuild: true })
-				}
-			}
+			await this.refreshSiblingsAfterProfileSave(name, providerSettings)
 
 			// Change the provider for the current task.
 			// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
@@ -2607,8 +2588,9 @@ export class ClineProvider
 		} else {
 			await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 
-			// A non-activating save still changes the profile's settings: refresh the views
-			// that buffered a copy, or their getState() keeps the pre-save values.
+			// A non-activating save still changes the profile's settings: refresh every view
+			// that buffered a copy (pinned siblings included), or their getState() keeps the
+			// pre-save values.
 			if (this.pinnedProfileName === name) {
 				await this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
 				// Only rebuild a task that actually runs under the saved profile.
@@ -2616,6 +2598,7 @@ export class ClineProvider
 					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
 				}
 			}
+			await this.refreshSiblingsAfterProfileSave(name, providerSettings)
 		}
 
 		if (signal.aborted) return id
@@ -2623,6 +2606,33 @@ export class ClineProvider
 		await this.postStateToWebview()
 		return id
 	}
+	/**
+	 * Refresh the buffered overlay of every live sibling pinned to a saved profile and rebuild
+	 * any task that follows it. The handler rebuild is independent of the pin: a task restored
+	 * from history can follow profile A while its view pins profile B.
+	 */
+	private async refreshSiblingsAfterProfileSave(name: string, providerSettings: ProviderSettings): Promise<void> {
+		for (const instance of ClineProvider.getAllInstances()) {
+			if (instance === this || instance._disposed || instance.pinnedProfileName !== name) {
+				continue
+			}
+			// Direct private access: compile-time safe across sibling instances.
+			await instance._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+		}
+
+		const {
+			name: _recordName,
+			id: _recordId,
+			...taskSettings
+		} = providerSettings as ProviderSettings & { name?: string; id?: string }
+		for (const instance of ClineProvider.getAllInstances()) {
+			if (instance._disposed || instance.getCurrentTask()?.taskApiConfigName !== name) {
+				continue
+			}
+			instance.updateTaskApiHandlerIfNeeded(taskSettings, { forceRebuild: true })
+		}
+	}
+
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
 		const globalSettings = this.contextProxy.getValues()
 		let profileToActivate: string | undefined = globalSettings.currentApiConfigName
@@ -4013,8 +4023,13 @@ export class ClineProvider
 
 		await this.contextProxy.resetAllState()
 
-		// Clear view-local state cache so getState() falls back to ContextProxy defaults.
-		this._clearViewLocalState()
+		// Clear every live view's buffer, not just this view's: a sibling's getConfiguration()
+		// would otherwise keep serving pre-reset selections.
+		for (const instance of ClineProvider.getAllInstances()) {
+			if (!instance._disposed) {
+				instance._clearViewLocalState()
+			}
+		}
 
 		await this.providerSettingsManager.resetAllConfigs()
 		await this.customModesManager.resetCustomModes()
@@ -4024,7 +4039,9 @@ export class ClineProvider
 		// stores, custom modes and the running task are already reset, so a viewStates write
 		// error must not abort the reset half-way or skip the state post below.
 		try {
-			await this.clearPersistedViewState()
+			// Serialize with profile saves: a save queued during the reset must not write this
+			// view's entry after it is cleared.
+			await this.enqueueProviderProfileMutation(() => this.clearPersistedViewState())
 		} catch (error) {
 			this.log(
 				`[resetState] Failed to clear the persisted view state: ${error instanceof Error ? error.message : String(error)}`,
