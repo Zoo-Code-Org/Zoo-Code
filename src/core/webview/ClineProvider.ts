@@ -2590,14 +2590,11 @@ export class ClineProvider
 
 			if (failedActivation) {
 				// The mutation queue is per view, but ContextProxy is shared: another view may
-				// have activated a profile between the group and this rollback. Restoring then
-				// would overwrite that newer activation with our captured values.
-				if (this.contextProxy.getStateWriteGeneration("currentApiConfigName") !== expectedNameGeneration) {
-					this.log(
-						"[persistProviderProfile] Skipping the activation rollback: another view wrote the shared selection",
-					)
-					throw failedActivation.reason
-				}
+				// have activated a profile between the group and this rollback. Only the stores
+				// that view now owns (profile list, shared selection) may be skipped - the mode
+				// binding and provider settings this activation wrote must still be undone.
+				const ownsSharedSelection = () =>
+					this.contextProxy.getStateWriteGeneration("currentApiConfigName") === expectedNameGeneration
 
 				const restoreFailures: string[] = []
 				const restore = async (label: string, action: () => Promise<unknown>) => {
@@ -2609,10 +2606,15 @@ export class ClineProvider
 						)
 					}
 				}
-				await restore("profile list", () => this.contextProxy.setValue("listApiConfigMeta", previousList))
-				await restore("shared selection", () =>
-					this.contextProxy.setValue("currentApiConfigName", previousName),
-				)
+				await restore("profile list", async () => {
+					if (!ownsSharedSelection()) {
+						this.log(
+							"[persistProviderProfile] Skipping the profile-list restore: another view wrote the shared selection",
+						)
+						return
+					}
+					await this.contextProxy.setValue("listApiConfigMeta", previousList)
+				})
 				await restore("view-local selection", () =>
 					this._saveViewLocalStateFromMutation({ currentApiConfigName: previousViewName }),
 				)
@@ -2622,6 +2624,17 @@ export class ClineProvider
 				await restore("shared provider settings", () =>
 					this.contextProxy.setProviderSettings(previousProviderSettings),
 				)
+				// Recheck immediately before the write: the restores above await storage, so
+				// another view may have written the shared selection since the group failed.
+				await restore("shared selection", async () => {
+					if (!ownsSharedSelection()) {
+						this.log(
+							"[persistProviderProfile] Skipping the shared-selection restore: another view wrote it",
+						)
+						return
+					}
+					await this.contextProxy.setValue("currentApiConfigName", previousName)
+				})
 
 				if (restoreFailures.length > 0) {
 					const original = failedActivation.reason
@@ -4034,6 +4047,11 @@ export class ClineProvider
 		await ClineProvider.persistedViewStateWriteQueue.catch(() => undefined)
 		ClineProvider.viewStatesResetGeneration += 1
 		await this.contextProxy.resetAllState()
+
+		// The reset cleared the shared store: drop this view's buffered selections too, or
+		// getValues()/getConfiguration() keep serving pre-reset values.
+		this.viewLocalState = {}
+
 		await this.providerSettingsManager.resetAllConfigs()
 		await this.customModesManager.resetCustomModes()
 		await this.removeClineFromStack()
