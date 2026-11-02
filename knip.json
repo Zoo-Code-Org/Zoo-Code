@@ -17,7 +17,9 @@
 	"playwright-ct": false,
 	"workspaces": {
 		"src": {
-			"entry": ["extension.ts!", "extension/api.ts!", "workers/countTokens.ts!"],
+			// core/tools/guardedWrite.ts is consumed by the wiring unit, not yet by this unit's runtime:
+			// declaring it an entry keeps both knip modes from reporting it as unused.
+			"entry": ["extension.ts!", "extension/api.ts!", "workers/countTokens.ts!", "core/tools/guardedWrite.ts!"],
 			"project": [
 				"**/*.ts!",
 				"!**/__tests__/**!",
