@@ -219,7 +219,7 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	// symlink alias and its referent share one lock. The key must be computable
 	// while a peer writer is mid-commit (backup mode renames the referent away and
 	// back), so the walk tolerates a dangling link instead of rejecting it here.
-	const lockKey = await resolveLockKey(absoluteFilePath)
+	let lockKey = await resolveLockKey(absoluteFilePath)
 
 	// Confinement, if the caller declared a scope, is checked BEFORE the lock is
 	// Also before the parent-directory creation below: an out-of-scope target with a
@@ -256,6 +256,31 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// must stay inside the protected block, otherwise a rejection here leaves the
 		// advisory lock held until the stale timeout for every other writer.
 		resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
+
+		// The key was computed before the lock was taken, but the publish target is resolved
+		// under it: a symlink retargeted in between means this writer holds the OLD referent's
+		// lock and would merge into the new one. Re-derive the key and move to it before
+		// staging, so every writer through the current referent queues behind the same lock.
+		for (let attempt = 0; attempt < 3; attempt++) {
+			const recomputedLockKey = await resolveLockKey(absoluteFilePath)
+			if (recomputedLockKey === lockKey) {
+				break
+			}
+			if (confinementRoot !== undefined) {
+				const scopeRoot = await _resolveScopeRoot(confinementRoot)
+				_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(recomputedLockKey), scopeRoot)
+			}
+			await releaseLock()
+			releaseLock = async () => {}
+			lockKey = recomputedLockKey
+			releaseLock = await acquireFileLock(lockKey)
+			resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
+		}
+		if ((await resolveLockKey(absoluteFilePath)) !== lockKey) {
+			throw new Error(
+				`safeWriteJson: refusing to publish ${absoluteFilePath}: the resolved target kept changing while acquiring the lock`,
+			)
+		}
 
 		// Confinement, if the caller declared a scope. Both sides are canonicalized the
 		// same way: the publish target is resolved through symlinks, and a target that
