@@ -32,5 +32,5 @@ export function getI18nDotKeySelectors(config) {
 
 function i18nDotKeySelectors(dotKey) {
 	const call = "CallExpression:matches([callee.name='t'], [callee.property.name='t'])"
-	return [`${call}[arguments.0.value=${dotKey}]`, `${call}[arguments.0.quasis.0.value.raw=${dotKey}]`]
+	return [`${call}[arguments.0.value=${dotKey}]`, `${call}[arguments.0.quasis.0.value.cooked=${dotKey}]`]
 }

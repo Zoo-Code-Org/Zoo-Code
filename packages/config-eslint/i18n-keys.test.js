@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
+import { URL } from "node:url"
 
 import { Linter } from "eslint"
 import typescriptEslint from "typescript-eslint"
@@ -20,6 +21,7 @@ describe("i18n dot-form keys", () => {
 		't("chat.commandExecution.exitStatus", { exitCode })',
 		'i18next.t("settings.autoApprove.title")',
 		"t(`chat.errors.${name}`)",
+		"t(`chat\\u002ecommandExecution.exitStatus`)",
 	]) {
 		it(`flags: ${code}`, () => {
 			assert.equal(lint(code).length, 1)

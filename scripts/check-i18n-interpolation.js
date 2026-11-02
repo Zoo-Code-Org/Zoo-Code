@@ -91,7 +91,7 @@ for (const rel of files) {
 						),
 					)
 					// A plural key lives under key_one, key_other, and so on.
-					const values = [keyPath, `${keyPath}_one`, `${keyPath}_other`]
+					const values = [keyPath, `${keyPath}_zero`, `${keyPath}_one`, `${keyPath}_other`]
 						.map((k) => lookup(resource, k))
 						.filter((v) => typeof v === "string")
 					const missing = new Set(values.flatMap(placeholders).filter((name) => !passed.has(name)))
