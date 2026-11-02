@@ -23,6 +23,7 @@ import { useAddNonInteractiveClickListener } from "./components/ui/hooks/useNonI
 import { TooltipProvider } from "./components/ui/tooltip"
 import { STANDARD_TOOLTIP_DELAY } from "./components/ui/standard-tooltip"
 import { useThemeFixtureProbe } from "./utils/useThemeFixtureProbe"
+import { recordDiagnosticsActiveTab } from "./utils/diagnostics"
 
 type Tab = "settings" | "history" | "chat" | "marketplace"
 
@@ -167,6 +168,8 @@ const App = () => {
 	)
 
 	useEvent("message", onMessage)
+
+	useEffect(() => recordDiagnosticsActiveTab(tab), [tab])
 
 	useEffect(() => {
 		if (shouldShowAnnouncement && tab === "chat") {
