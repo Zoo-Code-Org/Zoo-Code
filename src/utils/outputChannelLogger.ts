@@ -22,7 +22,7 @@ export function createOutputChannelLogger(outputChannel: vscode.OutputChannel): 
 					outputChannel.appendLine(
 						JSON.stringify(
 							arg,
-							(key, value) => {
+							(_key, value) => {
 								if (typeof value === "bigint") return `BigInt(${value})`
 								if (typeof value === "function") return `Function: ${value.name || "anonymous"}`
 								if (typeof value === "symbol") return value.toString()
@@ -31,7 +31,7 @@ export function createOutputChannelLogger(outputChannel: vscode.OutputChannel): 
 							2,
 						),
 					)
-				} catch (error) {
+				} catch {
 					outputChannel.appendLine(`[Non-serializable object: ${Object.prototype.toString.call(arg)}]`)
 				}
 			}

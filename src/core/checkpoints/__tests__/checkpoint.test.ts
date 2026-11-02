@@ -1,6 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach, Mock } from "vitest"
-import { Task } from "../../task/Task"
-import { ClineProvider } from "../../webview/ClineProvider"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { checkpointSave, checkpointRestore, checkpointDiff, getCheckpointService } from "../index"
 import { MessageManager } from "../../message-manager"
 import * as vscode from "vscode"
@@ -14,7 +12,7 @@ vi.mock("vscode", () => ({
 	},
 	Uri: {
 		file: vi.fn((path: string) => ({ fsPath: path })),
-		parse: vi.fn((uri: string) => ({ with: vi.fn(() => ({})) })),
+		parse: vi.fn((_uri: string) => ({ with: vi.fn(() => ({})) })),
 	},
 	commands: {
 		executeCommand: vi.fn(),
@@ -428,7 +426,7 @@ describe("Checkpoint functionality", () => {
 			mockTask.checkpointService = undefined
 			mockTask.checkpointServiceInitializing = false
 
-			const service = getCheckpointService(mockTask)
+			getCheckpointService(mockTask)
 
 			const checkpointsModule = await import("../../../services/checkpoints")
 			expect(vi.mocked(checkpointsModule.RepoPerTaskCheckpointService.create)).toHaveBeenCalledWith({

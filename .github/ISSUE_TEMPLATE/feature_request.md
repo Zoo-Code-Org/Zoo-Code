@@ -1,21 +1,22 @@
 ---
 name: Feature request
 about: What do you want to add to zoo?
-title: ''
+title: ""
 labels: enhancement
-assignees: ''
+assignees: ""
 type: Feature
-
 ---
 
+<!-- Writing style: write in Simplified Technical English (ASD-STE100): short sentences, plain words, active voice, one idea per sentence, no contractions. Keep the title short and specific. -->
+
 **Is your feature request related to a problem? Please describe.**
-A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
+Describe the problem in one or two sentences. For example: I always have to [...]
 
 **Describe the solution you'd like**
-A clear and concise description of what you want to happen.
+Describe what you want to happen.
 
-**Describe alternatives you've considered**
-A clear and concise description of any alternative solutions or features you've considered.
+**Describe alternatives you considered**
+Describe any other solutions you considered.
 
 **Additional context**
-Add any other context or screenshots about the feature request here.
+Add any other facts or screenshots.

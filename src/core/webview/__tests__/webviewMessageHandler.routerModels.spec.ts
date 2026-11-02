@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
 import {
 	kimiCodeAuthMethodSchema,
@@ -62,6 +62,35 @@ vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 	flushModels: (...args: any[]) => flushModelsMock(...args),
 }))
 
+// Real handlers eagerly fetch models in their constructors, so use lightweight doubles.
+// One double per provider lets tests assert each call receives its own provider's handler.
+const { handlersByProvider } = vi.hoisted(() => ({
+	handlersByProvider: new Map<string | undefined, { providerName: string | undefined }>(),
+}))
+
+vi.mock("../../../api", () => ({
+	buildApiHandler: vi.fn((configuration: { apiProvider?: string }) => {
+		const providerName = configuration.apiProvider
+		let handler = handlersByProvider.get(providerName)
+		if (!handler) {
+			handler = {
+				providerName,
+				getModel: vi.fn().mockReturnValue({ id: "claude-3-sonnet" }),
+			} as { providerName: string | undefined }
+			handlersByProvider.set(providerName, handler)
+		}
+		return handler
+	}),
+}))
+
+const handlerForProvider = (providerName: string) => {
+	const handler = handlersByProvider.get(providerName)
+	if (!handler) {
+		throw new Error(`buildApiHandler was never called for provider "${providerName}"`)
+	}
+	return handler
+}
+
 describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 	let mockProvider: ClineProvider & {
 		postMessageToWebview: ReturnType<typeof vi.fn>
@@ -70,8 +99,19 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		log: ReturnType<typeof vi.fn>
 	}
 
+	afterEach(() => {
+		// Every model-cache call must receive its own provider's handler.
+		for (const [options, handler] of getModelsMock.mock.calls) {
+			expect(handler).toBe(handlerForProvider(options.provider))
+		}
+		for (const [options, handler] of flushModelsMock.mock.calls) {
+			expect(handler).toBe(handlerForProvider(options.provider))
+		}
+	})
+
 	beforeEach(() => {
 		vi.clearAllMocks()
+		handlersByProvider.clear()
 
 		mockProvider = {
 			// Only methods used by this code path
@@ -94,6 +134,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.ioIntelligence:
+					return { "io/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -136,9 +178,11 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(routerModels.moonshot).toEqual({})
 		expect(getModelsMock).not.toHaveBeenCalledWith(
 			expect.objectContaining({ provider: providerIdentifiers.deepseek }),
+			expect.anything(),
 		)
 		expect(getModelsMock).not.toHaveBeenCalledWith(
 			expect.objectContaining({ provider: providerIdentifiers.moonshot }),
+			expect.anything(),
 		)
 	})
 
@@ -162,6 +206,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.ioIntelligence:
+					return { "io/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -176,11 +222,14 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			} as any,
 		)
 
-		expect(getModelsMock).toHaveBeenCalledWith({
-			provider: providerIdentifiers.deepseek,
-			apiKey: "stored-deepseek-key",
-			baseUrl: "https://deepseek.example.com",
-		})
+		expect(getModelsMock).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.deepseek,
+				apiKey: "stored-deepseek-key",
+				baseUrl: "https://deepseek.example.com",
+			},
+			handlerForProvider(providerIdentifiers.deepseek),
+		)
 
 		const call = (mockProvider.postMessageToWebview as any).mock.calls.find(
 			(c: any[]) => c[0]?.type === RouterModelsMessageType.routerModels,
@@ -210,6 +259,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.ioIntelligence:
+					return { "io/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -259,6 +310,7 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 
 		const providersCalled = getModelsMock.mock.calls.map((c: any[]) => c[0]?.provider)
 		expect(providersCalled).toEqual([providerIdentifiers.openrouter])
+		expect(getModelsMock.mock.calls[0][1]).toBe(handlerForProvider(providerIdentifiers.openrouter))
 	})
 
 	it("filters to Kimi Code and dispatches an explicit API key without reading the OAuth token", async () => {
@@ -276,10 +328,13 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 
 		expect(getKimiCodeAccessTokenMock).not.toHaveBeenCalled()
 		expect(getModelsMock).toHaveBeenCalledTimes(1)
-		expect(getModelsMock).toHaveBeenCalledWith({
-			provider: providerIdentifiers.kimiCode,
-			apiKey: "preview-kimi-api-key",
-		})
+		expect(getModelsMock).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.kimiCode,
+				apiKey: "preview-kimi-api-key",
+			},
+			handlerForProvider(providerIdentifiers.kimiCode),
+		)
 
 		const response = mockProvider.postMessageToWebview.mock.calls.find(
 			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
@@ -302,10 +357,13 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 
 		expect(getKimiCodeAccessTokenMock).toHaveBeenCalledTimes(1)
 		expect(getModelsMock).toHaveBeenCalledTimes(1)
-		expect(getModelsMock).toHaveBeenCalledWith({
-			provider: providerIdentifiers.kimiCode,
-			apiKey: "kimi-oauth-token",
-		})
+		expect(getModelsMock).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.kimiCode,
+				apiKey: "kimi-oauth-token",
+			},
+			handlerForProvider(providerIdentifiers.kimiCode),
+		)
 	})
 
 	it("excludes Kimi Code from model fetching when OAuth has no access token", async () => {
@@ -346,6 +404,7 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		// flushModels should have been called for litellm with refresh=true and credentials
 		expect(flushModelsMock).toHaveBeenCalledWith(
 			{ provider: providerIdentifiers.litellm, apiKey: "test-api-key", baseUrl: "http://localhost:4000" },
+			handlerForProvider(providerIdentifiers.litellm),
 			true,
 		)
 
@@ -359,6 +418,7 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			apiKey: "test-api-key",
 			baseUrl: "http://localhost:4000",
 		})
+		expect(litellmCalls[0][1]).toBe(handlerForProvider(providerIdentifiers.litellm))
 	})
 
 	it("does not flush cache when using stored LiteLLM credentials", async () => {
@@ -414,8 +474,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			apiKey: "new-poe-key",
 			baseUrl: "https://poe.example.com/v1",
 		}
-		expect(flushModelsMock).toHaveBeenCalledWith(poeOptions, true)
-		expect(getModelsMock).toHaveBeenCalledWith(poeOptions)
+		expect(flushModelsMock).toHaveBeenCalledWith(poeOptions, handlerForProvider(providerIdentifiers.poe), true)
+		expect(getModelsMock).toHaveBeenCalledWith(poeOptions, handlerForProvider(providerIdentifiers.poe))
 
 		const response = mockProvider.postMessageToWebview.mock.calls.find(
 			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
@@ -443,8 +503,109 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			apiKey: "stored-deepseek-key",
 			baseUrl: "https://preview.deepseek.example.com",
 		}
-		expect(flushModelsMock).toHaveBeenCalledWith(deepSeekOptions, true)
-		expect(getModelsMock).toHaveBeenCalledWith(deepSeekOptions)
+		expect(flushModelsMock).toHaveBeenCalledWith(
+			deepSeekOptions,
+			handlerForProvider(providerIdentifiers.deepseek),
+			true,
+		)
+		expect(getModelsMock).toHaveBeenCalledWith(deepSeekOptions, handlerForProvider(providerIdentifiers.deepseek))
+	})
+
+	// One catalog per IO Intelligence key, so a fetch made with the wrong key publishes the wrong catalog.
+	const ioIntelligenceCatalogs: Record<
+		string,
+		Record<string, { contextWindow: number; supportsPromptCache: boolean }>
+	> = {
+		"stored-io-key": { "io/stored-key-model": { contextWindow: 8192, supportsPromptCache: false } },
+		"unsaved-io-key": { "io/unsaved-key-model": { contextWindow: 8192, supportsPromptCache: false } },
+		"": { "io/public-model": { contextWindow: 8192, supportsPromptCache: false } },
+	}
+
+	const mockIoIntelligenceCatalogsByKey = () => {
+		const baseGetModels = getModelsMock.getMockImplementation()
+		getModelsMock.mockImplementation(async (options) =>
+			options?.provider === providerIdentifiers.ioIntelligence
+				? ioIntelligenceCatalogs[options.apiKey]
+				: baseGetModels?.(options),
+		)
+	}
+
+	const expectPublishedIoIntelligenceCatalog = (apiKey: string) => {
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: RouterModelsMessageType.routerModels,
+				routerModels: expect.objectContaining({
+					[providerIdentifiers.ioIntelligence]: ioIntelligenceCatalogs[apiKey],
+				}),
+			}),
+		)
+	}
+
+	it("fetches IO Intelligence models with the stored key and does not flush the cache", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: { ioIntelligenceApiKey: "stored-io-key" },
+		})
+		mockIoIntelligenceCatalogsByKey()
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+		})
+
+		const ioFlushCalls = flushModelsMock.mock.calls.filter(
+			(c) => c[0]?.provider === providerIdentifiers.ioIntelligence,
+		)
+		expect(ioFlushCalls.length).toBe(0)
+
+		const ioCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.ioIntelligence)
+		expect(ioCalls.length).toBe(1)
+		expect(ioCalls[0][0]).toEqual({ provider: providerIdentifiers.ioIntelligence, apiKey: "stored-io-key" })
+		expectPublishedIoIntelligenceCatalog("stored-io-key")
+	})
+
+	it("flushes IO Intelligence models with an unsaved key from message values instead of the stored key", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: { ioIntelligenceApiKey: "stored-io-key" },
+		})
+		mockIoIntelligenceCatalogsByKey()
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { ioIntelligenceApiKey: "unsaved-io-key" },
+		})
+
+		const ioFlushCalls = flushModelsMock.mock.calls.filter(
+			(c) => c[0]?.provider === providerIdentifiers.ioIntelligence,
+		)
+		expect(ioFlushCalls.length).toBe(1)
+		expect(ioFlushCalls[0][0]).toEqual({ provider: providerIdentifiers.ioIntelligence, apiKey: "unsaved-io-key" })
+
+		const ioCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.ioIntelligence)
+		expect(ioCalls.length).toBe(1)
+		expect(ioCalls[0][0]).toEqual({ provider: providerIdentifiers.ioIntelligence, apiKey: "unsaved-io-key" })
+		expectPublishedIoIntelligenceCatalog("unsaved-io-key")
+	})
+
+	it("treats an explicitly empty unsaved IO Intelligence key as the public catalog, not the stored key", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: { ioIntelligenceApiKey: "stored-io-key" },
+		})
+		mockIoIntelligenceCatalogsByKey()
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { ioIntelligenceApiKey: "" },
+		})
+
+		const ioFlushCalls = flushModelsMock.mock.calls.filter(
+			(c) => c[0]?.provider === providerIdentifiers.ioIntelligence,
+		)
+		expect(ioFlushCalls.length).toBe(1)
+		expect(ioFlushCalls[0][0]).toEqual({ provider: providerIdentifiers.ioIntelligence, apiKey: "" })
+
+		const ioCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.ioIntelligence)
+		expect(ioCalls.length).toBe(1)
+		expect(ioCalls[0][0]).toEqual({ provider: providerIdentifiers.ioIntelligence, apiKey: "" })
+		expectPublishedIoIntelligenceCatalog("")
 	})
 
 	it("fetches Moonshot models when stored Moonshot credentials exist", async () => {
@@ -467,6 +628,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.ioIntelligence:
+					return { "io/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -481,11 +644,14 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			} as any,
 		)
 
-		expect(getModelsMock).toHaveBeenCalledWith({
-			provider: providerIdentifiers.moonshot,
-			apiKey: "stored-moonshot-key",
-			baseUrl: "https://api.moonshot.ai/v1",
-		})
+		expect(getModelsMock).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.moonshot,
+				apiKey: "stored-moonshot-key",
+				baseUrl: "https://api.moonshot.ai/v1",
+			},
+			handlerForProvider(providerIdentifiers.moonshot),
+		)
 
 		const call = (mockProvider.postMessageToWebview as any).mock.calls.find(
 			(c: any[]) => c[0]?.type === RouterModelsMessageType.routerModels,
@@ -554,6 +720,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.ioIntelligence:
+					return { "io/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:
@@ -605,6 +773,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.vercelAiGateway:
 					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.ioIntelligence:
+					return { "io/model": { contextWindow: 8192, supportsPromptCache: false } }
 				case providerIdentifiers.litellm:
 					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
 				default:

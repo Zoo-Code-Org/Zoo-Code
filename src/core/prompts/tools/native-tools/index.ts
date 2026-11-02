@@ -70,6 +70,3 @@ export function getNativeTools(options: NativeToolsOptions = {}): OpenAI.Chat.Ch
 		writeToFile,
 	] satisfies OpenAI.Chat.ChatCompletionTool[]
 }
-
-// Backward compatibility: export default tools with line ranges enabled
-export const nativeTools = getNativeTools()

@@ -3,6 +3,7 @@ import * as path from "path"
 import * as diff from "diff"
 import { RooIgnoreController, LOCK_TEXT_SYMBOL } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
+import { getImageMimeType, isSupportedImageMimeType } from "../../utils/imageMime"
 
 export const formatResponse = {
 	toolDenied: () =>
@@ -226,14 +227,19 @@ Otherwise, if you have not completed the task and do not need additional informa
 // to avoid circular dependency
 const formatImagesIntoBlocks = (images?: string[]): Anthropic.ImageBlockParam[] => {
 	return images
-		? images.map((dataUrl) => {
+		? images.map((dataUrl): Anthropic.ImageBlockParam => {
 				// data:image/png;base64,base64string
-				const [rest, base64] = dataUrl.split(",")
-				const mimeType = rest.split(":")[1].split(";")[0]
+				const mimeType = getImageMimeType(dataUrl)
+				if (!isSupportedImageMimeType(mimeType)) {
+					throw new Error(
+						`Unsupported image MIME type: ${mimeType ?? "unknown"}. Use JPEG, PNG, GIF, or WebP.`,
+					)
+				}
+				const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1)
 				return {
 					type: "image",
 					source: { type: "base64", media_type: mimeType, data: base64 },
-				} as Anthropic.ImageBlockParam
+				}
 			})
 		: []
 }

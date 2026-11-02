@@ -98,6 +98,12 @@ export function makeDisposable(overrides: Partial<vscode.Disposable> = {}): vsco
 	return { dispose: vi.fn(), ...overrides }
 }
 
+export function makeCompositeDisposable(...subscriptions: vscode.Disposable[]): vscode.Disposable {
+	return makeDisposable({
+		dispose: () => subscriptions.splice(0).forEach((subscription) => subscription?.dispose()),
+	})
+}
+
 export function makeEventEmitter<T>(): vscode.EventEmitter<T> {
 	const listeners = new Set<(value: T) => unknown>()
 	const event = ((listener: (value: T) => unknown) => {

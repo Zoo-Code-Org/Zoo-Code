@@ -1,3 +1,4 @@
+import { WebviewFocusTracker } from "../../webview/WebviewFocusTracker"
 // npx vitest core/task/__tests__/grace-retry-errors.spec.ts
 
 import * as os from "os"
@@ -96,7 +97,7 @@ vi.mock("vscode", () => {
 				stat: vi.fn().mockResolvedValue({ type: 1 }),
 			},
 			onDidSaveTextDocument: vi.fn(() => mockDisposable),
-			getConfiguration: vi.fn(() => ({ get: (key: string, defaultValue: any) => defaultValue })),
+			getConfiguration: vi.fn(() => ({ get: (_key: string, defaultValue: any) => defaultValue })),
 		},
 		env: {
 			uriScheme: "vscode",
@@ -199,6 +200,7 @@ describe("Grace Retry Error Handling", () => {
 			mockOutputChannel,
 			"sidebar",
 			new ContextProxy(mockExtensionContext),
+			new WebviewFocusTracker(),
 		) as any
 
 		mockApiConfig = {

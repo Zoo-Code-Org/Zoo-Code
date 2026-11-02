@@ -70,11 +70,6 @@ describe("getMcpServerTools", () => {
 	})
 
 	it("should deduplicate tools when same server exists in both global and project configs", () => {
-		const globalServer = createMockServer(
-			"context7",
-			[createMockTool("resolve-library-id", "Global description")],
-			"global",
-		)
 		const projectServer = createMockServer(
 			"context7",
 			[createMockTool("resolve-library-id", "Project description")],

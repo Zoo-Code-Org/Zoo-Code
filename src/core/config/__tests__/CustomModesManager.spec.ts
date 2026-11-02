@@ -198,7 +198,7 @@ describe("CustomModesManager", () => {
 			const firstResult = await manager.getCustomModes()
 
 			// Reset mock to verify it's not called again
-			vi.clearAllMocks()
+			clearAllMocks()
 
 			// Setup mocks again for second call
 			;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => {
@@ -236,7 +236,7 @@ describe("CustomModesManager", () => {
 			await manager.getCustomModes()
 
 			// Reset mocks to track new calls
-			vi.clearAllMocks()
+			clearAllMocks()
 
 			// Update a mode
 			const updatedMode: ModeConfig = {
@@ -260,7 +260,7 @@ describe("CustomModesManager", () => {
 			await manager.updateCustomMode("mode1", updatedMode)
 
 			// Reset mocks again
-			vi.clearAllMocks()
+			clearAllMocks()
 
 			// Next call should read from file again (cache invalidated)
 			await manager.getCustomModes()
@@ -282,7 +282,7 @@ describe("CustomModesManager", () => {
 			await manager.getCustomModes()
 
 			// Reset mocks to track new calls
-			vi.clearAllMocks()
+			clearAllMocks()
 
 			// Delete a mode
 			await manager.deleteCustomMode("mode1")
@@ -296,7 +296,7 @@ describe("CustomModesManager", () => {
 			})
 
 			// Reset mocks again
-			vi.clearAllMocks()
+			clearAllMocks()
 
 			// Next call should read from file again (cache invalidated)
 			await manager.getCustomModes()
@@ -321,7 +321,7 @@ describe("CustomModesManager", () => {
 			await manager.getCustomModes()
 
 			// Reset mocks to track new calls
-			vi.clearAllMocks()
+			clearAllMocks()
 
 			// Setup for update
 			const updatedMode: ModeConfig = {
@@ -346,7 +346,7 @@ describe("CustomModesManager", () => {
 			await manager.updateCustomMode("mode1", updatedMode)
 
 			// Reset mocks again
-			vi.clearAllMocks()
+			clearAllMocks()
 
 			// Setup mocks again
 			;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => {
@@ -387,7 +387,7 @@ describe("CustomModesManager", () => {
 				await manager.getCustomModes()
 
 				// Reset mock to verify it's not called again
-				vi.clearAllMocks()
+				clearAllMocks()
 
 				// Setup mocks again for second call
 				;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => {
@@ -408,7 +408,7 @@ describe("CustomModesManager", () => {
 				currentTime += 11000
 
 				// Reset mocks again
-				vi.clearAllMocks()
+				clearAllMocks()
 
 				// Setup mocks again for third call
 				;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => {

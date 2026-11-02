@@ -1,7 +1,7 @@
 import type { MockedClass, MockedFunction } from "vitest"
 import { OpenAI } from "openai"
 import { OpenAICompatibleEmbedder } from "../openai-compatible"
-import { MAX_ITEM_TOKENS, INITIAL_RETRY_DELAY_MS } from "../../constants"
+import { MAX_ITEM_TOKENS } from "../../constants"
 import { clearAllMocks, restoreGlobals } from "../../../../test-utils/reset"
 
 // Mock the OpenAI SDK

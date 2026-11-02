@@ -89,6 +89,7 @@ describe("generateImageTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Should not process anything when partial
@@ -118,6 +119,7 @@ describe("generateImageTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Should not process anything when partial
@@ -158,6 +160,7 @@ describe("generateImageTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Should process the complete block
@@ -204,6 +207,7 @@ describe("generateImageTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Check that cline.say was called with image data containing cache-busting parameter
@@ -242,6 +246,7 @@ describe("generateImageTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockCline.consecutiveMistakeCount).toBe(1)
@@ -267,6 +272,7 @@ describe("generateImageTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockCline.consecutiveMistakeCount).toBe(1)
@@ -303,6 +309,7 @@ describe("generateImageTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith(
@@ -337,6 +344,7 @@ describe("generateImageTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockCline.say).toHaveBeenCalledWith("error", expect.stringContaining("Input image not found"))
@@ -364,6 +372,7 @@ describe("generateImageTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockCline.say).toHaveBeenCalledWith("error", expect.stringContaining("Unsupported image format"))
@@ -399,6 +408,7 @@ describe("generateImageTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			const expectedMessage = t("tools:generateImage.openRouterApiKeyRequired")

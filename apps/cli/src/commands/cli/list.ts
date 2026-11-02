@@ -110,7 +110,6 @@ async function createListHost(options: BaseListOptions, hostOptions: ListHostOpt
 	const extensionHostOptions: ExtensionHostOptions = {
 		mode: "code",
 		reasoningEffort: undefined,
-		user: null,
 		provider: providerIdentifiers.openrouter,
 		model: openRouterDefaultModelId,
 		apiKey,

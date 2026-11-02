@@ -1,4 +1,4 @@
-import { RateLimitClock, createRateLimitClock } from "../RateLimitClock"
+import { createRateLimitClock } from "../RateLimitClock"
 
 describe("RateLimitClock", () => {
 	it("returns undefined when no request has been recorded", () => {

@@ -91,7 +91,6 @@ const mockCline = {
 	emit: mockEmit,
 	recordToolError: mockRecordToolError,
 	consecutiveMistakeCount: 0,
-	isPaused: false,
 	pausedModeSlug: "ask",
 	taskId: "mock-parent-task-id",
 	enableCheckpoints: false,
@@ -135,7 +134,6 @@ describe("newTaskTool", () => {
 			groups: ["command", "read", "edit"],
 		}) // Default valid mode
 		mockCline.consecutiveMistakeCount = 0
-		mockCline.isPaused = false
 		// Default: VSCode setting is disabled
 		const mockGet = vi.fn().mockReturnValue(false)
 		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
@@ -159,6 +157,7 @@ describe("newTaskTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "",
 		})
 
 		// Verify askApproval was called
@@ -178,7 +177,7 @@ describe("newTaskTool", () => {
 		expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Delegated to child task"))
 	})
 
-	it("should not un-escape single escaped \@", async () => {
+	it("should not un-escape single escaped @", async () => {
 		const block: ToolUse<"new_task"> = {
 			type: "tool_use", // Add required 'type' property
 			name: "new_task", // Correct property name
@@ -194,6 +193,7 @@ describe("newTaskTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "",
 		})
 
 		expect(mockStartSubtask).toHaveBeenCalledWith(
@@ -219,6 +219,7 @@ describe("newTaskTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "",
 		})
 
 		expect(mockStartSubtask).toHaveBeenCalledWith(
@@ -244,6 +245,7 @@ describe("newTaskTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "",
 		})
 
 		expect(mockStartSubtask).toHaveBeenCalledWith(
@@ -269,6 +271,7 @@ describe("newTaskTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "",
 		})
 
 		// Should NOT error when todos is missing
@@ -299,6 +302,7 @@ describe("newTaskTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "",
 		})
 
 		// Should parse and include todos when provided
@@ -330,6 +334,7 @@ describe("newTaskTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "",
 		})
 
 		expect(mockSayAndCreateMissingParamError).toHaveBeenCalledWith("new_task", "mode")
@@ -353,6 +358,7 @@ describe("newTaskTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "",
 		})
 
 		expect(mockSayAndCreateMissingParamError).toHaveBeenCalledWith("new_task", "message")
@@ -376,6 +382,7 @@ describe("newTaskTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "",
 		})
 
 		expect(mockStartSubtask).toHaveBeenCalledWith(
@@ -412,6 +419,7 @@ describe("newTaskTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "",
 			})
 
 			// Should NOT error when todos is missing and setting is disabled
@@ -448,6 +456,7 @@ describe("newTaskTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "",
 			})
 
 			// Should error when todos is missing and setting is enabled
@@ -484,6 +493,7 @@ describe("newTaskTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "",
 			})
 
 			// Should NOT error when todos is provided and setting is enabled
@@ -526,6 +536,7 @@ describe("newTaskTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "",
 			})
 
 			// Should NOT error when todos is empty string and setting is enabled
@@ -560,6 +571,7 @@ describe("newTaskTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "",
 			})
 
 			// Verify that VSCode configuration was accessed with Package.name
@@ -593,7 +605,6 @@ describe("newTaskTool delegation flow", () => {
 			emit: localEmit,
 			recordToolError: mockRecordToolError,
 			consecutiveMistakeCount: 0,
-			isPaused: false,
 			pausedModeSlug: "ask",
 			taskId: "mock-parent-task-id",
 			setPendingTaskAction: vi.fn(),

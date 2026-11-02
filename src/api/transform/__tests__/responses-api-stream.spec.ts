@@ -434,7 +434,7 @@ describe("createUsageNormalizer", () => {
 	})
 
 	it("should compute totalCost when calculateCost is provided", () => {
-		const calculateCost = (input: number, output: number, cached: number) => 0.42
+		const calculateCost = (_input: number, _output: number, _cached: number) => 0.42
 		const normalize = createUsageNormalizer(calculateCost)
 
 		const result = normalize({ input_tokens: 100, output_tokens: 50 })

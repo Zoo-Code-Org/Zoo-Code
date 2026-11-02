@@ -4,12 +4,10 @@ import { I18nextProvider } from "react-i18next"
 import { providerIdentifiers } from "@roo-code/types"
 
 import { ExtensionStateContextProvider } from "@/context/ExtensionStateContext"
-import { TranslationProvider } from "@/i18n/TranslationContext"
-import i18next, { loadTranslations } from "@/i18n/setup"
+import TranslationProvider from "@/i18n/TranslationContext"
+import i18next from "@/i18n/setup"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { TranslationContext as PlaywrightTranslationContext } from "@src/i18n/TranslationContext"
-
-loadTranslations()
 
 type InitialState = NonNullable<React.ComponentProps<typeof ExtensionStateContextProvider>["initialState"]>
 

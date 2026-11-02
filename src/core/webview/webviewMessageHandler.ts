@@ -11,8 +11,8 @@ import {
 	type GlobalState,
 	type ClineMessage,
 	type TelemetrySetting,
-	type UserSettingsConfig,
 	type ModelRecord,
+	type ProviderSettings,
 	type Command as SlashCommand,
 	type WebviewMessage,
 	type EditQueuedMessagePayload,
@@ -40,6 +40,7 @@ import { saveTaskMessages } from "../task-persistence"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
+import { findOriginalContent } from "./stripOriginalContent"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
 import { generateErrorDiagnostics } from "./diagnosticsHandler"
 import {
@@ -88,12 +89,20 @@ import { searchCommits } from "../../utils/git"
 import { exportSettings, importSettingsWithFeedback } from "../config/importExport"
 import { getOpenAiModels } from "../../api/providers/openai"
 import { getVsCodeLmModels } from "../../api/providers/vscode-lm"
+import { getGitHubCopilotViewState } from "../../services/language-models/copilotViewState"
+import {
+	connectGitHubCopilot,
+	getGitHubCopilotAccount,
+	getGitHubCopilotModels,
+	openGitHubAccountManagement,
+} from "../../api/providers/github-copilot"
 import { openMention } from "../mentions"
 import { resolveImageMentions } from "../mentions/resolveImageMentions"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { getWorkspacePath } from "../../utils/path"
 import { isPathOutsideWorkspace, decodeUntrustedPathToStable, isRealPathOutsideWorkspace } from "../../utils/pathUtils"
 import { Mode, defaultModeSlug } from "../../shared/modes"
+import { buildApiHandler, type ApiHandler } from "../../api"
 import { getModels, flushModels } from "../../api/providers/fetchers/modelCache"
 import { GetModelsOptions } from "../../shared/api"
 import { generateSystemPrompt } from "./generateSystemPrompt"
@@ -126,6 +135,9 @@ import {
 	handleCreateWorktreeInclude,
 	handleCheckoutBranch,
 } from "./worktree"
+
+const handlerFor = (apiConfiguration: ProviderSettings, provider: RouterName): ApiHandler =>
+	buildApiHandler({ ...apiConfiguration, apiProvider: provider })
 
 export const webviewMessageHandler = async (
 	provider: ClineProvider,
@@ -697,6 +709,10 @@ export const webviewMessageHandler = async (
 
 			provider.isViewLaunched = true
 			break
+		case "webviewHeartbeat":
+			// Confirm renderer liveness and advance the watchdog recovery health window.
+			provider.updateWebviewHeartbeat()
+			break
 		case "newTask":
 			// Initializing new instance of Cline will make sure that any
 			// agentically running promises in old instance don't affect our new
@@ -1092,6 +1108,11 @@ export const webviewMessageHandler = async (
 		case "exportTaskWithId":
 			await provider.exportTaskWithId(message.text!)
 			break
+		case "renameTaskWithId":
+			if (message.taskId) {
+				await provider.renameTaskWithId(message.taskId, message.text)
+			}
+			break
 		case "getTaskWithAggregatedCosts": {
 			try {
 				const taskId = message.text
@@ -1223,12 +1244,18 @@ export const webviewMessageHandler = async (
 		case "resetState":
 			await provider.resetState()
 			break
-		case RouterModelsMessageType.flushRouterModels:
+		case RouterModelsMessageType.flushRouterModels: {
+			const { apiConfiguration } = await provider.getState()
 			const routerNameFlush: RouterName = toRouterName(message.text)
 			// Note: flushRouterModels is a generic flush without credentials
 			// For providers that need credentials, use their specific handlers
-			await flushModels({ provider: routerNameFlush } as GetModelsOptions, true)
+			await flushModels(
+				{ provider: routerNameFlush } as GetModelsOptions,
+				handlerFor(apiConfiguration, routerNameFlush),
+				true,
+			)
 			break
+		}
 		case RouterModelsMessageType.requestRouterModels: {
 			const { apiConfiguration } = await provider.getState()
 
@@ -1255,13 +1282,14 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.moonshot]: {},
 						[providerIdentifiers.opencodeGo]: {},
 						[providerIdentifiers.kenari]: {},
+						[providerIdentifiers.ioIntelligence]: {},
 						[providerIdentifiers.nanogpt]: {},
 						[providerIdentifiers.kimiCode]: {},
 					}
 
-			const safeGetModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
+			const safeGetModels = async (options: GetModelsOptions, handler: ApiHandler): Promise<ModelRecord> => {
 				try {
-					return await getModels(options)
+					return await getModels(options, handler)
 				} catch (error) {
 					console.error(
 						`Failed to fetch models in webviewMessageHandler requestRouterModels for ${options.provider}:`,
@@ -1319,6 +1347,7 @@ export const webviewMessageHandler = async (
 				if (message?.values?.litellmApiKey || message?.values?.litellmBaseUrl) {
 					await flushModels(
 						{ provider: providerIdentifiers.litellm, apiKey: litellmApiKey, baseUrl: litellmBaseUrl },
+						handlerFor(apiConfiguration, providerIdentifiers.litellm),
 						true,
 					)
 				}
@@ -1337,6 +1366,7 @@ export const webviewMessageHandler = async (
 				if (message?.values?.poeApiKey || message?.values?.poeBaseUrl) {
 					await flushModels(
 						{ provider: providerIdentifiers.poe, apiKey: poeApiKey, baseUrl: poeBaseUrl },
+						handlerFor(apiConfiguration, providerIdentifiers.poe),
 						true,
 					)
 				}
@@ -1355,6 +1385,7 @@ export const webviewMessageHandler = async (
 				if (message?.values?.deepSeekApiKey || message?.values?.deepSeekBaseUrl) {
 					await flushModels(
 						{ provider: providerIdentifiers.deepseek, apiKey: deepSeekApiKey, baseUrl: deepSeekBaseUrl },
+						handlerFor(apiConfiguration, providerIdentifiers.deepseek),
 						true,
 					)
 				}
@@ -1377,6 +1408,7 @@ export const webviewMessageHandler = async (
 				if (message?.values?.moonshotApiKey || message?.values?.moonshotBaseUrl) {
 					await flushModels(
 						{ provider: providerIdentifiers.moonshot, apiKey: moonshotApiKey, baseUrl: moonshotBaseUrl },
+						handlerFor(apiConfiguration, providerIdentifiers.moonshot),
 						true,
 					)
 				}
@@ -1400,7 +1432,11 @@ export const webviewMessageHandler = async (
 
 			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
 			if (message?.values?.opencodeGoApiKey) {
-				await flushModels({ provider: providerIdentifiers.opencodeGo, apiKey: opencodeGoApiKey }, true)
+				await flushModels(
+					{ provider: providerIdentifiers.opencodeGo, apiKey: opencodeGoApiKey },
+					handlerFor(apiConfiguration, providerIdentifiers.opencodeGo),
+					true,
+				)
 			}
 
 			candidates.push({
@@ -1417,7 +1453,11 @@ export const webviewMessageHandler = async (
 
 			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
 			if (message?.values?.kenariApiKey) {
-				await flushModels({ provider: providerIdentifiers.kenari, apiKey: kenariApiKey }, true)
+				await flushModels(
+					{ provider: providerIdentifiers.kenari, apiKey: kenariApiKey },
+					handlerFor(apiConfiguration, providerIdentifiers.kenari),
+					true,
+				)
 			}
 
 			candidates.push({
@@ -1425,12 +1465,32 @@ export const webviewMessageHandler = async (
 				options: { provider: providerIdentifiers.kenari, apiKey: kenariApiKey },
 			})
 
+			// IO Intelligence's /models catalog is public; an optional key can scope
+			// the visible model set. Prefer an explicitly supplied unsaved key.
+			const ioIntelligenceApiKey = message?.values?.ioIntelligenceApiKey ?? apiConfiguration.ioIntelligenceApiKey
+			if (message?.values?.ioIntelligenceApiKey !== undefined) {
+				await flushModels(
+					{ provider: providerIdentifiers.ioIntelligence, apiKey: ioIntelligenceApiKey },
+					handlerFor(apiConfiguration, providerIdentifiers.ioIntelligence),
+					true,
+				)
+			}
+
+			candidates.push({
+				key: providerIdentifiers.ioIntelligence,
+				options: { provider: providerIdentifiers.ioIntelligence, apiKey: ioIntelligenceApiKey },
+			})
+
 			// NanoGPT's detailed catalog is public, while an optional key can expose a
 			// different allowlist. Prefer an explicitly supplied unsaved key and use the
 			// same key-scoped options for refresh and retrieval.
 			const nanoGptApiKey = message?.values?.nanoGptApiKey ?? apiConfiguration.nanoGptApiKey
 			if (message?.values?.nanoGptApiKey !== undefined) {
-				await flushModels({ provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey }, true)
+				await flushModels(
+					{ provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey },
+					handlerFor(apiConfiguration, providerIdentifiers.nanogpt),
+					true,
+				)
 			}
 
 			candidates.push({
@@ -1462,12 +1522,12 @@ export const webviewMessageHandler = async (
 			// If refresh flag is set and we have a specific provider, flush its cache first
 			if (shouldRefresh && providerFilter && modelFetchPromises.length > 0) {
 				const targetCandidate = modelFetchPromises[0]
-				await flushModels(targetCandidate.options, true)
+				await flushModels(targetCandidate.options, handlerFor(apiConfiguration, targetCandidate.key), true)
 			}
 
 			const results = await Promise.allSettled(
 				modelFetchPromises.map(async ({ key, options }) => {
-					const models = await safeGetModels(options)
+					const models = await safeGetModels(options, handlerFor(apiConfiguration, key))
 					return { key, models } // The key is `ProviderName` here.
 				}),
 			)
@@ -1517,11 +1577,12 @@ export const webviewMessageHandler = async (
 				baseUrl,
 				apiKey,
 			}
+			const handler = handlerFor(ollamaApiConfig, providerIdentifiers.ollama)
 			try {
 				// Refresh the cache before reading the models. Keep this error
 				// separate from the read below so diagnostics identify which
 				// cache operation failed.
-				await flushModels(ollamaOptions, true)
+				await flushModels(ollamaOptions, handler, true)
 			} catch (error) {
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				provider.log(`[requestOllamaModels] Failed to refresh model cache for ${logBaseUrl}: ${errorMsg}`)
@@ -1534,7 +1595,7 @@ export const webviewMessageHandler = async (
 			}
 
 			try {
-				const ollamaModels = await getModels(ollamaOptions)
+				const ollamaModels = await getModels(ollamaOptions, handler)
 
 				// Always post a response so the webview refresh status can
 				// transition out of "loading" — even when no models are found.
@@ -1564,9 +1625,10 @@ export const webviewMessageHandler = async (
 						provider: providerIdentifiers.lmstudio,
 						baseUrl: lmStudioApiConfig.lmStudioBaseUrl,
 					}
+					const handler = handlerFor(lmStudioApiConfig, providerIdentifiers.lmstudio)
 					// Flush cache and refresh to ensure fresh models.
-					await flushModels(lmStudioOptions, true)
-					lmStudioModels = await getModels(lmStudioOptions)
+					await flushModels(lmStudioOptions, handler, true)
+					lmStudioModels = await getModels(lmStudioOptions, handler)
 				}
 
 				if (Object.keys(lmStudioModels).length > 0) {
@@ -1602,11 +1664,77 @@ export const webviewMessageHandler = async (
 			}
 
 			break
-		case VsCodeLmModelsMessageType.requestVsCodeLmModels:
-			const vsCodeLmModels = await getVsCodeLmModels()
-			// TODO: Cache like we do for OpenRouter, etc?
-			await provider.postMessageToWebview({ type: VsCodeLmModelsMessageType.vsCodeLmModels, vsCodeLmModels })
+		case VsCodeLmModelsMessageType.githubCopilotSignIn:
+		case VsCodeLmModelsMessageType.githubCopilotReconnect: {
+			// Plain sign-in and Reconnect run as separate attempts, so an older one can finish after a newer one.
+			// Only the latest request may publish, or its account and model list would overwrite newer state.
+			const viewState = getGitHubCopilotViewState(provider)
+			const requestId = ++viewState.signInId
+			viewState.changes++
+			const isLatest = () => viewState.signInId === requestId
+			try {
+				const { models, account } = await connectGitHubCopilot(async (githubCopilotAccount: string) => {
+					if (!isLatest()) return
+					await provider.postMessageToWebview({
+						type: VsCodeLmModelsMessageType.githubCopilotModels,
+						githubCopilotAccount,
+					})
+				}, message.type === VsCodeLmModelsMessageType.githubCopilotReconnect)
+				if (!isLatest()) break
+				await provider.postMessageToWebview({
+					type: VsCodeLmModelsMessageType.githubCopilotSignInResult,
+					vsCodeLmModels: models,
+					githubCopilotAccount: account,
+				})
+			} catch (error) {
+				if (!isLatest()) break
+				await provider.postMessageToWebview({
+					type: VsCodeLmModelsMessageType.githubCopilotSignInResult,
+					error: error instanceof Error ? error.message : String(error),
+				})
+			} finally {
+				if (isLatest()) viewState.changes++
+			}
 			break
+		}
+		case VsCodeLmModelsMessageType.githubCopilotManageAccount:
+			try {
+				await openGitHubAccountManagement()
+			} catch (error) {
+				provider.log(
+					`Could not open VS Code account management: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+			break
+		case VsCodeLmModelsMessageType.requestVsCodeLmModels: {
+			if (message.apiConfiguration?.apiProvider !== providerIdentifiers.githubCopilot) {
+				const vsCodeLmModels = await getVsCodeLmModels()
+				// TODO: Cache like we do for OpenRouter, etc?
+				await provider.postMessageToWebview({ type: VsCodeLmModelsMessageType.vsCodeLmModels, vsCodeLmModels })
+				break
+			}
+			const viewState = getGitHubCopilotViewState(provider)
+			const changesAtStart = viewState.changes
+			const refreshId = ++viewState.refreshId
+			const isOutOfDate = () => viewState.changes !== changesAtStart || viewState.refreshId !== refreshId
+			try {
+				const githubCopilotAccount = await getGitHubCopilotAccount()
+				const vsCodeLmModels = await getGitHubCopilotModels()
+				if (isOutOfDate()) break
+				await provider.postMessageToWebview({
+					type: VsCodeLmModelsMessageType.githubCopilotModels,
+					vsCodeLmModels,
+					githubCopilotAccount: githubCopilotAccount ?? null,
+				})
+			} catch (error) {
+				if (isOutOfDate()) break
+				await provider.postMessageToWebview({
+					type: VsCodeLmModelsMessageType.githubCopilotModels,
+					error: error instanceof Error ? error.message : String(error),
+				})
+			}
+			break
+		}
 		case "openImage":
 			await openImage(message.text!, { values: message.values })
 			break
@@ -1740,6 +1868,29 @@ export const webviewMessageHandler = async (
 			}
 			break
 		}
+		case "readOriginalContent": {
+			const ts = message.messageTs
+
+			if (typeof ts !== "number") {
+				break
+			}
+
+			const task = provider.getCurrentTask()
+			// A request made for another task must not be answered from the current one.
+			const isRequestedTask = message.taskId === undefined || message.taskId === task?.taskId
+			const id = { messageId: message.messageId, ts }
+
+			await provider.postMessageToWebview({
+				type: "originalContent",
+				originalContentInfo: {
+					ts,
+					messageId: message.messageId,
+					taskId: message.taskId,
+					content: isRequestedTask ? findOriginalContent(task?.clineMessages, id) : null,
+				},
+			})
+			break
+		}
 		case "openMention":
 			await openMention(getCurrentCwd(), message.text)
 			break
@@ -1764,14 +1915,14 @@ export const webviewMessageHandler = async (
 
 				try {
 					await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, { timeout: 3_000 })
-				} catch (error) {
+				} catch {
 					vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
 					return
 				}
 
 				try {
 					await provider.getCurrentTask()?.checkpointRestore(result.data)
-				} catch (error) {
+				} catch {
 					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
 				}
 			}
@@ -1802,7 +1953,7 @@ export const webviewMessageHandler = async (
 
 				try {
 					await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, { timeout: 3_000 })
-				} catch (error) {
+				} catch {
 					vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
 					return
 				}
@@ -2374,6 +2525,20 @@ export const webviewMessageHandler = async (
 				await provider.upsertProviderProfile(message.text, message.apiConfiguration)
 			}
 			break
+		case "updateProfileModel": {
+			const { expectedProvider, patch } = message.values ?? {}
+
+			if (
+				message.text &&
+				typeof expectedProvider === "string" &&
+				patch &&
+				typeof patch === "object" &&
+				!Array.isArray(patch)
+			) {
+				await provider.updateProfileModel(message.text, expectedProvider, patch)
+			}
+			break
+		}
 		case "renameApiConfiguration":
 			if (message.values && message.apiConfiguration) {
 				try {
@@ -2556,7 +2721,7 @@ export const webviewMessageHandler = async (
 							}
 						}
 					}
-				} catch (error) {
+				} catch {
 					// Error already shown to user by updateCustomMode
 					// Just prevent unhandled rejection and skip state updates
 				}

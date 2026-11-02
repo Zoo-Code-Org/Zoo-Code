@@ -271,7 +271,7 @@ describe("Task dispose method", () => {
 		// Add some event listeners using type assertion to bypass strict typing for testing
 		const listener1 = vi.fn(() => {})
 		const listener2 = vi.fn(() => {})
-		const listener3 = vi.fn((taskId: string) => {})
+		const listener3 = vi.fn((_taskId: string) => {})
 
 		task.on(RooCodeEventName.TaskStarted, listener1)
 		task.on(RooCodeEventName.TaskAborted, listener2)

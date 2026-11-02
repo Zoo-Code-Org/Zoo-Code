@@ -71,7 +71,7 @@ describe("Rust Source Code Definition Tests", () => {
 		expect(parseResult).toMatch(/\d+--\d+ \| macro_rules! test_macro_definition/)
 		expect(parseResult).toMatch(/\d+--\d+ \| #\[derive\(/)
 
-		debugLog("Macro declarations:", parseResult.match(/(?:macro_rules!|#\[derive)[\s\S]*?[}|\)]/g))
+		debugLog("Macro declarations:", parseResult.match(/(?:macro_rules!|#\[derive)[\s\S]*?[}|)]/g))
 	})
 
 	it("should parse type aliases", () => {

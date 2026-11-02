@@ -56,7 +56,7 @@ class Dog extends Animal with Runner {
 
   @override
   String speak() {
-    return "\$name barks";
+    return "$name barks";
   }
 }
 

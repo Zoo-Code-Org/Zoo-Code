@@ -1,4 +1,3 @@
-import * as path from "path"
 import * as fs from "fs"
 import { listFiles } from "../list-files"
 
@@ -103,13 +102,11 @@ describe("listFiles limit handling for large projects", () => {
 		// The key test: this should complete without throwing a stack overflow error
 		let error: Error | null = null
 		let results: string[] = []
-		let limitReached = false
 
 		try {
-			const [res, didHitLimit] = await listFiles("/test/large-project", true, limit)
+			const [res] = await listFiles("/test/large-project", true, limit)
 
 			results = res
-			limitReached = didHitLimit
 		} catch (e) {
 			error = e as Error
 		}

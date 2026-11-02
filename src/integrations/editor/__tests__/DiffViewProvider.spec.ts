@@ -1,7 +1,7 @@
 import { DiffViewProvider, DIFF_VIEW_URI_SCHEME, DIFF_VIEW_LABEL_CHANGES } from "../DiffViewProvider"
 import * as vscode from "vscode"
-import * as path from "path"
 import delay from "delay"
+import { DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 
 import { makeRange, makeTextDocument, makeTextEditor, makeUri } from "../../../test-utils/vscode"
 
@@ -117,7 +117,7 @@ vi.mock("vscode", () => ({
 	TabInputTextDiff: class TabInputTextDiff {},
 	Uri: {
 		file: vi.fn((path) => ({ fsPath: path })),
-		parse: vi.fn((uri) => ({ with: vi.fn(() => ({})) })),
+		parse: vi.fn((_uri) => ({ with: vi.fn(() => ({})) })),
 	},
 }))
 
@@ -242,7 +242,7 @@ describe("DiffViewProvider", () => {
 			const callOrder: string[] = []
 
 			// Mock showTextDocument to track when it's called
-			vi.mocked(vscode.window.showTextDocument).mockImplementation(async (uri, options) => {
+			vi.mocked(vscode.window.showTextDocument).mockImplementation(async (_uri, options) => {
 				callOrder.push("showTextDocument")
 				expect(options).toEqual({ preview: false, viewColumn: vscode.ViewColumn.Active, preserveFocus: true })
 				return mockEditor as any
@@ -918,10 +918,16 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveChanges()
 
-			// Verify default behavior (enabled=true, delay=2000ms)
-			expect(mockDelay).toHaveBeenCalledWith(1000)
+			// Verify default behavior (enabled=true, delay falls back to DEFAULT_WRITE_DELAY_MS)
+			expect(mockDelay).toHaveBeenCalledWith(0)
 			expect(vscode.languages.getDiagnostics).toHaveBeenCalled()
 			expect(result.newProblemsMessage).toBe("")
+		})
+
+		it("pins the default write delay to zero", () => {
+			// The tests above compare against the constant, so they would still pass if the
+			// default were changed back to 1000. Pin the value the write path actually uses.
+			expect(DEFAULT_WRITE_DELAY_MS).toBe(0)
 		})
 
 		it("should handle custom delay values", async () => {
@@ -931,7 +937,7 @@ describe("DiffViewProvider", () => {
 			// Mock closeAllDiffViews
 			;(diffViewProvider as any).closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
 
-			const result = await diffViewProvider.saveChanges(true, 5000)
+			await diffViewProvider.saveChanges(true, 5000)
 
 			// Verify custom delay was used
 			expect(mockDelay).toHaveBeenCalledWith(5000)

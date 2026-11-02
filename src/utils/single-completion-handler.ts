@@ -1,6 +1,6 @@
 import type { ProviderSettings } from "@roo-code/types"
 
-import { buildApiHandler, SingleCompletionHandler, type CompletePromptOptions } from "../api"
+import { buildApiHandler, disposeApiHandler, SingleCompletionHandler, type CompletePromptOptions } from "../api"
 
 /**
  * Enhances a prompt using the configured API without creating a full Cline instance or task history.
@@ -20,10 +20,15 @@ export async function singleCompletionHandler(
 
 	const handler = buildApiHandler(apiConfiguration)
 
-	// Check if handler supports single completions
-	if (!("completePrompt" in handler)) {
-		throw new Error("The selected API provider does not support prompt enhancement")
-	}
+	try {
+		// Check if handler supports single completions
+		if (!("completePrompt" in handler)) {
+			throw new Error("The selected API provider does not support prompt enhancement")
+		}
 
-	return (handler as SingleCompletionHandler).completePrompt(promptText, options)
+		return await (handler as SingleCompletionHandler).completePrompt(promptText, options)
+	} finally {
+		// Handlers such as VS Code LM / GitHub Copilot hold listeners that must be released.
+		disposeApiHandler(handler)
+	}
 }

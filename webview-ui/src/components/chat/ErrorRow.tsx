@@ -74,7 +74,7 @@ export interface ErrorRowProps {
 /**
  * Unified error display component for all error types in the chat
  */
-export const ErrorRow = memo(
+const ErrorRow = memo(
 	({
 		type,
 		title,

@@ -60,7 +60,7 @@ describe("checkpointRestoreHandler", () => {
 		}
 
 		// Mock pWaitFor to resolve immediately
-		;(pWaitFor as any).mockImplementation(async (condition: () => boolean) => {
+		;(pWaitFor as any).mockImplementation(async (_condition: () => boolean) => {
 			// Simulate the condition being met
 			return Promise.resolve()
 		})

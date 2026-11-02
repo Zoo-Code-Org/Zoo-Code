@@ -45,6 +45,10 @@ const fragments = {
 	B: ['{"path":"scope-', 'b.ts"}'],
 } satisfies Record<ScopeId, readonly [string, string]>
 
+const STREAMING_TOOL_NAME = "read_file"
+const streamingKey = (scopeId: ScopeId): string =>
+	NativeToolCallParser.makeStreamingKey(callIds[scopeId], STREAMING_TOOL_NAME)
+
 const expectedActions = new Set<LocalAction>(localActions)
 const reachedActions = new Set<LocalAction>()
 const reachedLandmarks = new Set<string>()
@@ -125,10 +129,12 @@ function replayAction(state: ReplayState, scheduled: ScheduledAction): void {
 					{ index: RAW_TOOL_INDEX, arguments: fragment },
 					scope,
 				)
-				assert.deepEqual(events, [{ type: "tool_call_delta", id: callIds[scopeId], delta: fragment }])
+				assert.deepEqual(events, [
+					{ type: "tool_call_delta", id: callIds[scopeId], name: "read_file", delta: fragment },
+				])
 				appendOwnedEvents(state, scopeId, events)
 				assert.notEqual(
-					NativeToolCallParser.processStreamingChunk(callIds[scopeId], fragment, scope),
+					NativeToolCallParser.processStreamingChunk(streamingKey(scopeId), fragment, scope),
 					null,
 					`${scopeId}'s fragment was not accepted by its streaming accumulator`,
 				)
@@ -138,7 +144,7 @@ function replayAction(state: ReplayState, scheduled: ScheduledAction): void {
 		case "finalize-raw-call": {
 			const scope = requireScope(state, scopeId)
 			const events = NativeToolCallParser.finalizeRawChunks(scope)
-			assert.deepEqual(events, [{ type: "tool_call_end", id: callIds[scopeId] }])
+			assert.deepEqual(events, [{ type: "tool_call_end", id: callIds[scopeId], name: STREAMING_TOOL_NAME }])
 			appendOwnedEvents(state, scopeId, events)
 			scopeState.rawEndCount += events.length
 			assert.deepEqual(
@@ -150,7 +156,7 @@ function replayAction(state: ReplayState, scheduled: ScheduledAction): void {
 		}
 		case "finalize-streaming-call-and-cleanup": {
 			const scope = requireScope(state, scopeId)
-			const result = NativeToolCallParser.finalizeStreamingToolCall(callIds[scopeId], scope)
+			const result = NativeToolCallParser.finalizeStreamingToolCall(streamingKey(scopeId), scope)
 			assert.equal(result?.type, "tool_use")
 			if (result?.type !== "tool_use" || result.name !== "read_file") {
 				throw new Error(`${scopeId}'s streaming result was not a read_file tool use`)
@@ -161,7 +167,7 @@ function replayAction(state: ReplayState, scheduled: ScheduledAction): void {
 			assert.equal(result.nativeArgs?.path, paths[scopeId], `${scopeId}'s arguments crossed request scopes`)
 			scopeState.streamFinalizationCount += 1
 			assert.equal(
-				NativeToolCallParser.finalizeStreamingToolCall(callIds[scopeId], scope),
+				NativeToolCallParser.finalizeStreamingToolCall(streamingKey(scopeId), scope),
 				null,
 				`${scopeId} finalized its streaming call twice`,
 			)
@@ -174,7 +180,7 @@ function replayAction(state: ReplayState, scheduled: ScheduledAction): void {
 				scope,
 			)
 			const streamingResult = NativeToolCallParser.processStreamingChunk(
-				callIds[scopeId],
+				streamingKey(scopeId),
 				`late-${scopeId}`,
 				scope,
 			)

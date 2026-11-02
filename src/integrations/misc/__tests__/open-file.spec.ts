@@ -58,7 +58,7 @@ vi.mock("../../utils/path", () => {
 
 // Mock i18n
 vi.mock("../../i18n", () => ({
-	t: vi.fn((key: string, params?: any) => {
+	t: vi.fn((key: string, _params?: any) => {
 		// Return the key without namespace prefix to match actual behavior
 		if (key.startsWith("common:")) {
 			return key.replace("common:", "")

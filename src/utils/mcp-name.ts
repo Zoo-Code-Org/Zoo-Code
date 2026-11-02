@@ -50,9 +50,9 @@ export function normalizeMcpToolName(toolName: string): string {
 		// Find the pattern: mcp{sep}server{sep}tool where sep is -- or __
 		// We need to convert the separators while preserving the rest
 
-		// First, try to parse assuming all separators are underscores
-		// Pattern: mcp__server__tool or mcp__server__tool_with_underscores
-		const parts = toolName.split(/__|--/)
+		// Prefer the canonical separator when present: a raw "--" can only be a
+		// separator, while "__" may be part of a legal server or tool name
+		const parts = toolName.includes(MCP_TOOL_SEPARATOR) ? toolName.split(MCP_TOOL_SEPARATOR) : toolName.split("__")
 
 		if (parts.length >= 3 && parts[0].toLowerCase() === "mcp") {
 			// Reconstruct with proper -- separators
@@ -96,7 +96,7 @@ export function sanitizeMcpName(name: string): string {
 	let sanitized = name.replace(/\s+/g, "_")
 
 	// Only allow alphanumeric, underscores, and hyphens
-	sanitized = sanitized.replace(/[^a-zA-Z0-9_\-]/g, "")
+	sanitized = sanitized.replace(/[^a-zA-Z0-9_-]/g, "")
 
 	// Replace any double-hyphen sequences with single hyphen to avoid separator conflicts
 	sanitized = sanitized.replace(/--+/g, "-")

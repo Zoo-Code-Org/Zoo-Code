@@ -1,6 +1,7 @@
 import React from "react"
 import { render, screen } from "@testing-library/react"
 import ErrorBoundary from "../components/ErrorBoundary"
+import { recordDiagnosticsError } from "@src/utils/diagnostics"
 import { EXTERNAL_LINKS } from "../constants/externalLinks"
 
 // Mock telemetry client
@@ -10,19 +11,18 @@ vi.mock("@src/utils/TelemetryClient", () => ({
 	},
 }))
 
-// Mock translation function
-vi.mock("react-i18next", () => {
-	const tFunction = (key: string) => key
-	return {
-		withTranslation: () => (Component: any) => {
-			const MockedComponent = (props: any) => {
-				return <Component t={tFunction} i18n={{ t: tFunction }} tReady {...props} />
-			}
-			MockedComponent.displayName = `withTranslation(${Component.displayName || Component.name || "Component"})`
+vi.mock("react-i18next", () => ({
+	withTranslation:
+		() => (Component: React.ComponentType<{ children: React.ReactNode; t: (key: string) => string }>) => {
+			const MockedComponent = (props: { children: React.ReactNode }) => <Component {...props} t={(key) => key} />
 			return MockedComponent
 		},
-	}
-})
+}))
+
+vi.mock("@src/utils/diagnostics", () => ({ recordDiagnosticsError: vi.fn() }))
+vi.mock("@src/utils/sourceMapUtils", () => ({
+	enhanceErrorWithSourceMaps: vi.fn(async (error: Error) => error),
+}))
 
 // Test component that can throw errors on demand
 const ErrorThrower = ({ shouldThrow = false, message = "Test error" }: { shouldThrow?: boolean; message?: string }) => {
@@ -36,6 +36,7 @@ describe("ErrorBoundary", () => {
 	// Suppress console errors during tests
 	beforeEach(() => {
 		vi.spyOn(console, "error").mockImplementation(() => {})
+		vi.mocked(recordDiagnosticsError).mockClear()
 	})
 
 	afterEach(() => {
@@ -51,6 +52,19 @@ describe("ErrorBoundary", () => {
 
 		expect(screen.getByTestId("test-child")).toBeInTheDocument()
 		expect(screen.getByText("Test Content")).toBeInTheDocument()
+	})
+
+	it("records a caught error once under StrictMode", () => {
+		render(
+			<React.StrictMode>
+				<ErrorBoundary>
+					<ErrorThrower shouldThrow message="StrictMode error" />
+				</ErrorBoundary>
+			</React.StrictMode>,
+		)
+
+		expect(recordDiagnosticsError).toHaveBeenCalledTimes(1)
+		expect(recordDiagnosticsError).toHaveBeenCalledWith("errorBoundary", expect.any(Error))
 	})
 
 	it("renders error UI when a child component throws", () => {

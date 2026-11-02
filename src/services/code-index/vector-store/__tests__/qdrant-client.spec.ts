@@ -94,7 +94,7 @@ describe("QdrantVectorStore", () => {
 		expect((vectorStore as any).vectorSize).toBe(mockVectorSize)
 	})
 	it("should handle constructor with default URL when none provided", () => {
-		const vectorStoreWithDefaults = new QdrantVectorStore(mockWorkspacePath, undefined as any, mockVectorSize)
+		new QdrantVectorStore(mockWorkspacePath, undefined as any, mockVectorSize)
 
 		expect(QdrantClient).toHaveBeenLastCalledWith({
 			host: "localhost",
@@ -108,7 +108,7 @@ describe("QdrantVectorStore", () => {
 	})
 
 	it("should handle constructor without API key", () => {
-		const vectorStoreWithoutKey = new QdrantVectorStore(mockWorkspacePath, mockQdrantUrl, mockVectorSize)
+		new QdrantVectorStore(mockWorkspacePath, mockQdrantUrl, mockVectorSize)
 
 		expect(QdrantClient).toHaveBeenLastCalledWith({
 			host: "mock-qdrant",
@@ -986,9 +986,7 @@ describe("QdrantVectorStore", () => {
 
 	it("should return true when collection exists", async () => {
 		mockQdrantClientInstance.getCollection.mockResolvedValue({
-			config: {
-				/* collection data */
-			},
+			config: {/* collection data */},
 		} as any)
 
 		const result = await vectorStore.collectionExists()

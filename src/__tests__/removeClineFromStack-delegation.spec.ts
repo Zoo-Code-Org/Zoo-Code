@@ -1,16 +1,10 @@
 // npx vitest run __tests__/removeClineFromStack-delegation.spec.ts
 
-import { describe, it, expect, vi, type MockedFunction } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { TaskRegistry } from "../core/task/TaskRegistry"
 import { PendingActionSettlementError, type Task } from "../core/task/Task"
 import { makeProviderStub } from "./helpers/provider-stub"
-
-type MockTask = Pick<Task, "taskId" | "instanceId"> &
-	Partial<Pick<Task, "parentTaskId" | "abort" | "abandoned">> & {
-		emit: ReturnType<typeof vi.fn>
-		abortTask: ReturnType<typeof vi.fn>
-	}
 
 type PrivateClineProviderMethods = {
 	removeClineFromStack: (this: ClineProvider) => ReturnType<ClineProvider["removeClineFromStack"]>
@@ -686,18 +680,6 @@ describe("onTaskCompleted callback — writes completed status before re-emittin
 		// Wire up the real taskCreationCallback by calling the closure that ClineProvider
 		// sets on `this.taskCreationCallback` during construction. We extract it from the
 		// prototype's init code by calling the relevant portion directly.
-		const listeners: Record<string, ((...args: unknown[]) => unknown)[]> = {}
-		const fakeTask = {
-			taskId: "task-1",
-			on: vi.fn((event: string, fn: (...args: unknown[]) => unknown) => {
-				listeners[event] = listeners[event] || []
-				listeners[event].push(fn)
-			}),
-			emit: vi.fn((event: string, ...args: unknown[]) => {
-				listeners[event]?.forEach((fn) => fn(...args))
-			}),
-		}
-
 		const provider = makeProviderStub({
 			taskHistoryStore: { get: taskHistoryStoreGet },
 			updateTaskHistory,

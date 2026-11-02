@@ -46,11 +46,11 @@ Zoo Code builds on the foundation created by Roo Code and continues to expand it
 - **More dependable terminal and editing workflows** — fixes for premature terminal completion, task-state races, context management, diff editing, and provider-specific tool use.
 - **More control over your workspace** — rules management, per-mode MCP restrictions, multi-root path controls, model reasoning options, and completion change review actions.
 
-## What's New in v3.86.0
+## What's New in v3.94.0
 
-- ✨ **New model support:** Use GPT-6.1 Sol, get the corrected Claude Opus 5.5 output budget, and select DeepSeek V4.1 Flash on OpenCode Go.
-- 🧭 **Reliable task aborts and interruptions:** Preserve the first abort reason, reset stream-abort state for each request, and stop interrupted tasks from replaying rejected subtasks.
-- 🛠️ **Dependable tools, prompts, and UI streaming:** Keep streamed tool arguments intact, enforce MCP tool policy, prevent invented line numbers, and smooth chat updates.
+- ✨ **Broader model and provider support:** Use Claude Haiku 5.5 through Anthropic, send images to compatible VS Code LM models, tune temperature for OpenCode Go Responses models, and cancel requests cleanly across more providers.
+- 🔐 **More flexible MCP OAuth:** Configure static OAuth client settings, use custom callback paths, discover authentication details from `WWW-Authenticate`, and see callback failures before retrying.
+- 🧭 **Smoother chats and long sessions:** Rename tasks in history, drag files into chat without holding Shift, reduce memory retained during long sessions, and keep subtask links and replaced webviews stable.
 
 <details>
   <summary>🌐 Available languages</summary>

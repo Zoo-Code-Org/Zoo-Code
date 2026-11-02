@@ -1,62 +1,64 @@
 name: Marketplace Feedback
-description: Report issues or suggest improvements for marketplace items (custom modes and MCP servers)
+description: Report a problem or suggest an improvement for marketplace items (custom modes and MCP servers)
 labels: ["marketplace"]
 body:
-  - type: markdown
-    attributes:
-      value: |
-        **Thanks for your feedback!** Please check existing issues first: https://github.com/Zoo-Code-Org/Zoo-Code/issues
+    - type: markdown
+      attributes:
+          value: |
+              **Thank you for your feedback.** First, check the existing issues: https://github.com/Zoo-Code-Org/Zoo-Code/issues
 
-  - type: dropdown
-    id: feedback-type
-    attributes:
-      label: What kind of feedback?
-      options:
-        - Problem with existing marketplace item
-        - Suggestion for new custom mode
-        - Suggestion for new MCP server
-        - General marketplace issue
-    validations:
-      required: true
+              Write in Simplified Technical English (ASD-STE100): short sentences, plain words, active voice, one idea per sentence, no contractions. Keep the title short and specific.
 
-  - type: dropdown
-    id: item-type
-    attributes:
-      label: Item Type (if applicable)
-      options:
-        - Custom Mode
-        - MCP Server
-        - Marketplace UI/Functionality
-        - Not Applicable
-    validations:
-      required: false
-
-  - type: input
-    id: item-name
-    attributes:
-      label: Item Name (if applicable)
-      placeholder: e.g., "Debug Mode", "Weather API Server", "Code Formatter"
-
-  - type: textarea
-    id: description
-    attributes:
-      label: Description
-      description: What's the issue or what would you like to see?
-      placeholder: Clear description of the problem or suggestion
-    validations:
-      required: true
-
-  - type: textarea
-    id: additional-info
-    attributes:
-      label: Additional Details (optional)
-      description: Steps to reproduce, expected behavior, screenshots, etc.
-      placeholder: Any other helpful information
-
-  - type: checkboxes
-    id: checklist
-    attributes:
-      label: Checklist
-      options:
-        - label: I've searched existing issues for duplicates
+    - type: dropdown
+      id: feedback-type
+      attributes:
+          label: What kind of feedback?
+          options:
+              - Problem with existing marketplace item
+              - Suggestion for new custom mode
+              - Suggestion for new MCP server
+              - General marketplace issue
+      validations:
           required: true
+
+    - type: dropdown
+      id: item-type
+      attributes:
+          label: Item Type (if applicable)
+          options:
+              - Custom Mode
+              - MCP Server
+              - Marketplace UI/Functionality
+              - Not Applicable
+      validations:
+          required: false
+
+    - type: input
+      id: item-name
+      attributes:
+          label: Item Name (if applicable)
+          placeholder: For example, "Debug Mode", "Weather API Server", "Code Formatter"
+
+    - type: textarea
+      id: description
+      attributes:
+          label: Description
+          description: What is the problem, or what do you want to see?
+          placeholder: Describe the problem or the suggestion
+      validations:
+          required: true
+
+    - type: textarea
+      id: additional-info
+      attributes:
+          label: Additional Details (optional)
+          description: Add steps to reproduce, expected behavior, screenshots, and so on.
+          placeholder: Any other helpful facts
+
+    - type: checkboxes
+      id: checklist
+      attributes:
+          label: Checklist
+          options:
+              - label: I searched the existing issues for duplicates
+                required: true

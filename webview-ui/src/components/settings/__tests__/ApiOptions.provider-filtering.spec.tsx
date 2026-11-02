@@ -130,6 +130,15 @@ describe("ApiOptions Provider Filtering", () => {
 		expect(useRouterModels).toHaveBeenCalledWith({ enabled: false, provider: undefined })
 	})
 
+	it("shows GitHub Copilot in the provider dropdown", () => {
+		vi.mocked(useExtensionState).mockReturnValue({
+			...useExtensionState(),
+			organizationAllowList: { allowAll: true, providers: {} },
+		})
+		renderWithProviders()
+		expect(screen.getByTestId(`option-${providerIdentifiers.githubCopilot}`)).toHaveTextContent("GitHub Copilot")
+	})
+
 	it("requests router models only for the selected dynamic provider", () => {
 		vi.mocked(useSelectedModel).mockReturnValue({
 			provider: providerIdentifiers.kenari,
@@ -215,6 +224,7 @@ describe("ApiOptions Provider Filtering", () => {
 		expect(providerValues).toContain("ollama")
 		expect(providerValues).toContain("lmstudio")
 		expect(providerValues).toContain("litellm")
+		expect(providerValues).toContain("io-intelligence")
 		expect(providerValues).toContain("requesty")
 	})
 

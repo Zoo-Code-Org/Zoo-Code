@@ -221,7 +221,7 @@ export async function handleGetAvailableBranches(provider: ClineProvider): Promi
 	return worktreeService.getAvailableBranches(cwd, true)
 }
 
-export async function handleGetWorktreeDefaults(provider: ClineProvider): Promise<WorktreeDefaultsResponse> {
+export async function handleGetWorktreeDefaults(_provider: ClineProvider): Promise<WorktreeDefaultsResponse> {
 	const suffix = generateRandomSuffix()
 	const workspaceFolders = vscode.workspace.workspaceFolders
 	const projectName = workspaceFolders?.[0]?.name || "project"

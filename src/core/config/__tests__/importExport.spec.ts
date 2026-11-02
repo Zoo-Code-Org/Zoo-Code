@@ -5,7 +5,6 @@ import * as path from "path"
 
 import * as vscode from "vscode"
 
-import type { ProviderName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { clearAllMocks } from "../../../test-utils/reset"
@@ -349,7 +348,10 @@ describe("importExport", () => {
 				customModesManager: mockCustomModesManager,
 			})
 
-			expect(result).toEqual({ success: false, error: "[providerProfiles.currentApiConfigName]: Required" })
+			expect(result).toEqual({
+				success: false,
+				error: "[providerProfiles.currentApiConfigName]: Invalid input: expected string, received undefined",
+			})
 			expect(fs.readFile).toHaveBeenCalledWith("/mock/path/settings.json", "utf-8")
 			expect(mockProviderSettingsManager.import).not.toHaveBeenCalled()
 			expect(mockContextProxy.setValues).not.toHaveBeenCalled()

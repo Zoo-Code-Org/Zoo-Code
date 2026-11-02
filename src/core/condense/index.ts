@@ -329,7 +329,6 @@ export async function summarizeConversation(options: SummarizeConversationOption
 
 	let summary = ""
 	let cost = 0
-	let outputTokens = 0
 
 	try {
 		const stream = apiHandler.createMessage(promptToUse, requestMessages, metadata)
@@ -340,7 +339,6 @@ export async function summarizeConversation(options: SummarizeConversationOption
 			} else if (chunk.type === "usage") {
 				// Record final usage chunk only
 				cost = chunk.totalCost ?? 0
-				outputTokens = chunk.outputTokens ?? 0
 			}
 		}
 	} catch (error) {

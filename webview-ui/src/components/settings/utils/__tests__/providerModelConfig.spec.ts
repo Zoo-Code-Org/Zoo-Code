@@ -1,5 +1,6 @@
 import {
 	anthropicDefaultModelId,
+	ioIntelligenceDefaultModelId,
 	mainlandZAiDefaultModelId,
 	nanoGptDefaultModelId,
 	providerIdentifiers,
@@ -17,7 +18,10 @@ import {
 	PROVIDERS_WITH_CUSTOM_MODEL_UI,
 	shouldUseGenericModelPicker,
 	handleModelChangeSideEffects,
+	toBedrockModelId,
 } from "../providerModelConfig"
+
+const appProfileArn = "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abcd1234efgh"
 
 describe("providerModelConfig", () => {
 	describe("PROVIDER_SERVICE_CONFIG", () => {
@@ -181,6 +185,13 @@ describe("providerModelConfig", () => {
 				default: nanoGptDefaultModelId,
 			})
 		})
+
+		it("returns IO Intelligence's dynamic model field and fallback", () => {
+			expect(getProviderModelConfig(providerIdentifiers.ioIntelligence)).toEqual({
+				field: "ioIntelligenceModelId",
+				default: ioIntelligenceDefaultModelId,
+			})
+		})
 	})
 
 	describe("getProviderDocsSlug", () => {
@@ -292,6 +303,8 @@ describe("providerModelConfig", () => {
 			handleModelChangeSideEffects(providerIdentifiers.bedrock, "anthropic.claude", setApiConfigurationField)
 
 			expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArn", "")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArnBaseModelId", "")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("awsModelContextWindow", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxThinkingTokens", undefined)
@@ -303,6 +316,11 @@ describe("providerModelConfig", () => {
 			handleModelChangeSideEffects(providerIdentifiers.bedrock, "custom-arn", setApiConfigurationField)
 
 			expect(setApiConfigurationField).not.toHaveBeenCalledWith("awsCustomArn", expect.anything())
+			expect(
+				setApiConfigurationField.mock.calls.filter(
+					([field]) => field === "awsCustomArnBaseModelId" || field === "awsModelContextWindow",
+				),
+			).toHaveLength(0)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxThinkingTokens", undefined)
@@ -317,6 +335,40 @@ describe("providerModelConfig", () => {
 			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxThinkingTokens", undefined)
+		})
+
+		it("stores a pasted ARN as the Bedrock custom ARN, trimmed", () => {
+			const setApiConfigurationField = vi.fn()
+
+			handleModelChangeSideEffects(providerIdentifiers.bedrock, ` ${appProfileArn}\n`, setApiConfigurationField)
+
+			expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArn", appProfileArn)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArnBaseModelId", "")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("awsModelContextWindow", undefined)
+			expect(setApiConfigurationField).not.toHaveBeenCalledWith("awsCustomArn", "")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
+		})
+
+		it("does not treat an ARN as a custom ARN for non-Bedrock providers", () => {
+			const setApiConfigurationField = vi.fn()
+
+			handleModelChangeSideEffects(providerIdentifiers.anthropic, appProfileArn, setApiConfigurationField)
+
+			expect(setApiConfigurationField).not.toHaveBeenCalledWith("awsCustomArn", expect.anything())
+		})
+	})
+
+	describe("toBedrockModelId", () => {
+		it("maps a pasted ARN to the custom-arn pseudo-model", () => {
+			expect(toBedrockModelId(appProfileArn)).toBe("custom-arn")
+			expect(toBedrockModelId(`  ${appProfileArn}`)).toBe("custom-arn")
+		})
+
+		it("keeps regular model IDs unchanged", () => {
+			expect(toBedrockModelId("anthropic.claude-sonnet-4-5-20250929-v1:0")).toBe(
+				"anthropic.claude-sonnet-4-5-20250929-v1:0",
+			)
+			expect(toBedrockModelId("custom-arn")).toBe("custom-arn")
 		})
 	})
 })

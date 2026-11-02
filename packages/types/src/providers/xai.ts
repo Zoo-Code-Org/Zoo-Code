@@ -1,4 +1,13 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 // https://docs.x.ai/docs/api-reference
 export type XAIModelId = keyof typeof xaiModels
@@ -45,6 +54,19 @@ export const xaiModels = {
 		cacheWritesPrice: 0.02,
 		cacheReadsPrice: 0.02,
 		description: "xAI's Grok Code Fast model with 256K context window",
+		includedTools: ["search_replace"],
+		excludedTools: ["apply_diff"],
+	},
+	"grok-build-0.1": {
+		maxTokens: 65_536,
+		contextWindow: 256_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 1.0,
+		outputPrice: 2.0,
+		cacheWritesPrice: 0.2,
+		cacheReadsPrice: 0.2,
+		description: "xAI's Grok Build 0.1 agentic coding model with 256K context window",
 		includedTools: ["search_replace"],
 		excludedTools: ["apply_diff"],
 	},
@@ -146,3 +168,14 @@ export const xaiModels = {
 		excludedTools: ["apply_diff"],
 	},
 } as const satisfies Record<string, ModelInfo>
+
+export const xaiProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.xai,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => xaiDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		xaiApiKey: z.string().optional(),
+	},
+})

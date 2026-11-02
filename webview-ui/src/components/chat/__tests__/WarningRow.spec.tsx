@@ -1,7 +1,7 @@
 import { render, screen, fireEvent } from "@/utils/test-utils"
 import { vscode } from "@/utils/vscode"
 
-import { WarningRow } from "../WarningRow"
+import WarningRow from "../WarningRow"
 
 // Mock vscode webview messaging
 vi.mock("@/utils/vscode", () => ({

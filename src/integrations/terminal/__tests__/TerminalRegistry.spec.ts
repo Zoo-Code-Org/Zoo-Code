@@ -22,7 +22,7 @@ describe("TerminalRegistry", () => {
 		TerminalRegistry["terminals"] = []
 		Terminal.setTerminalProfile(undefined)
 		mockCreateTerminal = vi.spyOn(vscode.window, "createTerminal").mockImplementation(
-			(...args: any[]) =>
+			(..._args: any[]) =>
 				({
 					exitStatus: undefined,
 					name: "Zoo Code",

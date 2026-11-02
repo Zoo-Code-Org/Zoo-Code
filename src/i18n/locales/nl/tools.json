@@ -1,29 +1,19 @@
 {
 	"readFile": {
-		"linesRange": " (regels {{start}}-{{end}})",
-		"definitionsOnly": " (alleen definities)",
-		"maxLines": " (max {{max}} regels)",
 		"imageTooLarge": "Afbeeldingsbestand is te groot ({{size}} MB). De maximaal toegestane grootte is {{max}} MB.",
 		"imageWithSize": "Afbeeldingsbestand ({{size}} KB)"
 	},
 	"toolRepetitionLimitReached": "Zoo lijkt vast te zitten in een lus, waarbij hij herhaaldelijk dezelfde actie ({{toolName}}) probeert. Dit kan duiden op een probleem met de huidige strategie. Overweeg de taak te herformuleren, specifiekere instructies te geven of Zoo naar een andere aanpak te leiden.",
+	"toolRepetitionSoftBlock": "De tool '{{toolName}}' is geblokkeerd omdat deze zojuist met identieke parameters is aangeroepen. Exact dezelfde aanroep herhalen levert waarschijnlijk geen ander resultaat op. Als je deze echt opnieuw moet aanroepen, leg dan eerst uit waarom de herhaalde aanroep nodig is en wat je deze keer anders verwacht. Probeer anders een andere aanpak.",
 	"unknownToolError": "Zoo probeerde een onbekende tool te gebruiken: \"{{toolName}}\". Opnieuw proberen...",
 	"missingToolParameter": "Zoo probeerde {{toolName}} te gebruiken zonder waarde voor de vereiste parameter '{{paramName}}'. Opnieuw proberen...",
 	"missingToolParameterWithPath": "Zoo probeerde {{toolName}} te gebruiken voor '{{relPath}}' zonder waarde voor de vereiste parameter '{{paramName}}'. Opnieuw proberen...",
-	"codebaseSearch": {
-		"approval": "Zoeken naar '{{query}}' in codebase..."
-	},
 	"executeCommand": {
 		"destructiveCommandGuard": {
 			"blocked": "Destructive Command Guard heeft deze opdracht geblokkeerd.",
 			"blockedWithReason": "Destructive Command Guard heeft deze opdracht geblokkeerd. Bericht van DCG: {{reason}}",
 			"blockedWithRule": "Destructive Command Guard heeft deze opdracht geblokkeerd. (Regel: {{ruleId}})",
 			"blockedWithReasonAndRule": "Destructive Command Guard heeft deze opdracht geblokkeerd. Bericht van DCG: {{reason}} (Regel: {{ruleId}})"
-		}
-	},
-	"newTask": {
-		"errors": {
-			"policy_restriction": "Kan geen nieuwe taak aanmaken vanwege beleidsbeperkingen."
 		}
 	},
 	"generateImage": {
@@ -33,9 +23,6 @@
 		"noImageGenerated": "Er is geen afbeelding gegenereerd in het antwoord",
 		"invalidImageData": "Ongeldige afbeeldingsgegevens in het antwoord",
 		"invalidImageFormat": "Ongeldig afbeeldingsformaat ontvangen",
-		"unknownError": "Er is een onbekende fout opgetreden",
-		"roo": {
-			"authRequired": "Zoo Code Cloud-authenticatie is vereist voor het genereren van afbeeldingen. Log in bij Zoo Code Cloud."
-		}
+		"unknownError": "Er is een onbekende fout opgetreden"
 	}
 }

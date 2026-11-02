@@ -1,3 +1,4 @@
+import { WebviewFocusTracker } from "../../webview/WebviewFocusTracker"
 // cd src && npx vitest run core/task/__tests__/Task.persistence.spec.ts
 
 import * as os from "os"
@@ -19,7 +20,7 @@ import { ClineProvider } from "../../webview/ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import { attemptCompletionTool, type AttemptCompletionCallbacks } from "../../tools/AttemptCompletionTool"
-import type { AttemptCompletionToolUse } from "../../../shared/tools"
+import type { ToolUse } from "../../../shared/tools"
 
 type TaskPersistenceAccess = {
 	addToApiConversationHistory: (message: Anthropic.MessageParam) => Promise<void>
@@ -285,6 +286,7 @@ describe("Task persistence", () => {
 			mockOutputChannel,
 			"sidebar",
 			new ContextProxy(mockExtensionContext),
+			new WebviewFocusTracker(),
 		) as ClineProvider & Record<string, any>
 
 		mockApiConfig = {
@@ -531,7 +533,7 @@ describe("Task persistence", () => {
 					completionEmitted = true
 				})
 
-				const block: AttemptCompletionToolUse = {
+				const block: ToolUse<"attempt_completion"> = {
 					type: "tool_use",
 					id: completionCallId,
 					name: "attempt_completion",

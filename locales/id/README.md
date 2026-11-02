@@ -46,11 +46,11 @@ Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memper
 - **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
 - **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
 
-## Yang Baru di v3.86.0
+## Yang Baru di v3.94.0
 
-- ✨ **Dukungan model baru:** Gunakan GPT-6.1 Sol, manfaatkan batas output Claude Opus 5.5 yang telah diperbaiki, dan pilih DeepSeek V4.1 Flash di OpenCode Go.
-- 🧭 **Pembatalan dan interupsi task yang andal:** Pertahankan alasan pembatalan pertama, reset status pembatalan stream pada setiap request, dan cegah task yang terinterupsi menjalankan ulang subtask yang ditolak.
-- 🛠️ **Tools, prompts, dan streaming UI yang andal:** Jaga argumen tool yang diterima melalui stream tetap utuh, terapkan kebijakan tool MCP, cegah nomor baris rekaan, dan buat pembaruan chat lebih lancar.
+- ✨ **Dukungan model dan provider lebih luas:** Gunakan Claude Haiku 5.5 lewat Anthropic, kirim gambar ke model VS Code LM yang kompatibel, atur temperature untuk model OpenCode Go Responses, dan batalkan permintaan dengan rapi di lebih banyak provider.
+- 🔐 **OAuth MCP lebih fleksibel:** Atur pengaturan klien OAuth statis, gunakan jalur callback khusus, temukan detail autentikasi dari `WWW-Authenticate`, dan lihat kegagalan callback sebelum mencoba ulang.
+- 🧭 **Chat dan sesi panjang yang lebih lancar:** Ubah nama task di riwayat, seret file ke chat tanpa menahan Shift, kurangi memori yang disimpan selama sesi panjang, dan jaga tautan subtask serta webview yang diganti tetap stabil.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 

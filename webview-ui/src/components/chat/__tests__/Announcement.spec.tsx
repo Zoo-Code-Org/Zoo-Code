@@ -14,7 +14,7 @@ vi.mock("@src/utils/vscode", () => ({
 
 vi.mock("@roo/package", () => ({
 	Package: {
-		version: "3.84.0",
+		version: "3.90.0",
 	},
 }))
 
@@ -32,13 +32,13 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({
 		t: (key: string, options?: { version?: string }) => {
 			const translations: Record<string, string> = {
-				"chat:announcement.release.heading": "What's New:",
+				"chat:announcement.release.heading": "What is new in Zoo Code v3.90.0",
 				"chat:announcement.release.highlight1":
-					"✨ New SOTA models added: Use GPT-6 Sol, GPT-6 Luna, and Claude Opus 5.5 across supported providers.",
+					"✨ Providers and models: GitHub Copilot is now a provider: sign in and Zoo Code loads your Copilot models. IO Intelligence is a provider with its own API key. Gemini 4 Argon is on Gemini and Vertex. GPT-6 Luna is on OpenCode Go. Gemini 4 Argon and GPT-6 Luna are on Zoo Gateway as well.",
 				"chat:announcement.release.highlight2":
-					"🧭 More reliable tasks and subtasks: Keep delegated modes isolated, preserve subtask links after repeated stops, and protect orchestrator settings when slash commands switch modes.",
+					"🧭 Tool execution: Repeating the same tool call gets a warning, then Zoo Code stops that loop. Disabling attempt_completion no longer leaves a task unable to finish. Queued messages run the same command-protection checks as commands you send directly.",
 				"chat:announcement.release.highlight3":
-					"🛠️ More dependable terminal, provider, and code-search behavior: Improve terminal behavior across Windows and non-English environments, strengthen provider responses and cancellation, and make code search use the correct workspace more consistently.",
+					"⚡ Reasoning and streaming: Anthropic adaptive thinking shows in chat, and thinking tokens are counted. The R1 toggle keeps reasoning from llama.cpp, Ollama, and LM Studio. Codex keeps encrypted reasoning with the summary you see. VS Code language-model streams use guarded recovery when a stream fails.",
 			}
 
 			if (key === "chat:announcement.title") {
@@ -54,20 +54,21 @@ describe("Announcement", () => {
 	it("renders the announcement title and highlights", () => {
 		render(<Announcement hideAnnouncement={vi.fn()} />)
 
-		expect(screen.getByText("Zoo Code 3.84.0 Released")).toBeInTheDocument()
+		expect(screen.getByText("Zoo Code 3.90.0 Released")).toBeInTheDocument()
+		expect(screen.getByText("What is new in Zoo Code v3.90.0")).toBeInTheDocument()
 		expect(
 			screen.getByText(
-				"✨ New SOTA models added: Use GPT-6 Sol, GPT-6 Luna, and Claude Opus 5.5 across supported providers.",
+				"✨ Providers and models: GitHub Copilot is now a provider: sign in and Zoo Code loads your Copilot models. IO Intelligence is a provider with its own API key. Gemini 4 Argon is on Gemini and Vertex. GPT-6 Luna is on OpenCode Go. Gemini 4 Argon and GPT-6 Luna are on Zoo Gateway as well.",
 			),
 		).toBeInTheDocument()
 		expect(
 			screen.getByText(
-				"🧭 More reliable tasks and subtasks: Keep delegated modes isolated, preserve subtask links after repeated stops, and protect orchestrator settings when slash commands switch modes.",
+				"🧭 Tool execution: Repeating the same tool call gets a warning, then Zoo Code stops that loop. Disabling attempt_completion no longer leaves a task unable to finish. Queued messages run the same command-protection checks as commands you send directly.",
 			),
 		).toBeInTheDocument()
 		expect(
 			screen.getByText(
-				"🛠️ More dependable terminal, provider, and code-search behavior: Improve terminal behavior across Windows and non-English environments, strengthen provider responses and cancellation, and make code search use the correct workspace more consistently.",
+				"⚡ Reasoning and streaming: Anthropic adaptive thinking shows in chat, and thinking tokens are counted. The R1 toggle keeps reasoning from llama.cpp, Ollama, and LM Studio. Codex keeps encrypted reasoning with the summary you see. VS Code language-model streams use guarded recovery when a stream fails.",
 			),
 		).toBeInTheDocument()
 	})

@@ -38,7 +38,6 @@ interface OpenRouterEmbeddingResponse {
 export class OpenRouterEmbedder implements IEmbedder {
 	private embeddingsClient: OpenAI
 	private readonly defaultModelId: string
-	private readonly apiKey: string
 	private readonly maxItemTokens: number
 	private readonly baseUrl: string = "https://openrouter.ai/api/v1"
 	private readonly specificProvider?: string
@@ -65,7 +64,6 @@ export class OpenRouterEmbedder implements IEmbedder {
 			throw new Error(t("embeddings:validation.apiKeyRequired"))
 		}
 
-		this.apiKey = apiKey
 		// Only set specificProvider if it's not the default value
 		this.specificProvider =
 			specificProvider && specificProvider !== OPENROUTER_DEFAULT_PROVIDER_NAME ? specificProvider : undefined
@@ -381,7 +379,7 @@ export class OpenRouterEmbedder implements IEmbedder {
 	/**
 	 * Updates global rate limit state when a 429 error occurs
 	 */
-	private async updateGlobalRateLimitState(error: HttpError): Promise<void> {
+	private async updateGlobalRateLimitState(_error: HttpError): Promise<void> {
 		const release = await OpenRouterEmbedder.globalRateLimitState.mutex.acquire()
 		try {
 			const state = OpenRouterEmbedder.globalRateLimitState

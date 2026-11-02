@@ -20,6 +20,7 @@ vi.mock("../../../utils/safeWriteJson", () => ({
 
 // Import after mocks
 import { saveTaskMessages, readTaskMessages } from "../taskMessages"
+import { formatErrorDetail } from "../readFileWithMissingRetry"
 
 let tmpBaseDir: string
 
@@ -99,6 +100,23 @@ describe("taskMessages.saveTaskMessages", () => {
 			expect.objectContaining({ ts: 2, text: "incoming" }),
 		])
 	})
+
+	it("propagates a forced write failure without swallowing or replacing it", async () => {
+		// Fault injection: simulate an interrupted/failed final write (e.g. the
+		// extension host quitting mid-save or the disk refusing the write). The
+		// save must reject with the original error so callers never treat the
+		// messages as durably persisted, and the underlying code stays visible.
+		const writeFailure = Object.assign(new Error("no space left on device"), { code: "ENOSPC" })
+		hoisted.safeWriteJsonMock.mockRejectedValueOnce(writeFailure)
+
+		await expect(
+			saveTaskMessages({
+				messages: [{ ts: 1, type: "say", say: "text", text: "unsaved" }],
+				taskId: "task-write-failure",
+				globalStoragePath: tmpBaseDir,
+			}),
+		).rejects.toBe(writeFailure)
+	})
 })
 
 describe("taskMessages.readTaskMessages", () => {
@@ -151,24 +169,63 @@ describe("taskMessages.readTaskMessages", () => {
 		expect(hoisted.readFileMock).toHaveBeenCalledTimes(2)
 	})
 
-	it("throws when the missing-file retry also fails", async () => {
+	it("throws with the underlying error code when the missing-file retry also fails", async () => {
 		vi.spyOn(Math, "random").mockReturnValue(0)
 		const missing = Object.assign(new Error("missing"), { code: "ENOENT" })
 		hoisted.readFileMock.mockRejectedValue(missing)
 
-		await expect(
-			readTaskMessages({ taskId: "task-still-missing", globalStoragePath: tmpBaseDir }),
-		).rejects.toMatchObject({ kind: "not_found" })
+		const error = await readTaskMessages({ taskId: "task-still-missing", globalStoragePath: tmpBaseDir }).catch(
+			(caught: unknown) => caught,
+		)
+		expect(error).toMatchObject({
+			kind: "not_found",
+			originalError: missing,
+			message: expect.stringContaining("(code: ENOENT)"),
+		})
 		expect(hoisted.readFileMock).toHaveBeenCalledTimes(2)
 	})
 
-	it("does not retry non-ENOENT read failures", async () => {
+	it("does not retry non-ENOENT read failures and surfaces the underlying code", async () => {
 		const denied = Object.assign(new Error("denied"), { code: "EACCES" })
 		hoisted.readFileMock.mockRejectedValueOnce(denied)
 
-		await expect(readTaskMessages({ taskId: "task-denied", globalStoragePath: tmpBaseDir })).rejects.toMatchObject({
-			kind: "io_error",
-		})
+		const error = await readTaskMessages({ taskId: "task-denied", globalStoragePath: tmpBaseDir }).catch(
+			(caught: unknown) => caught,
+		)
+		expect(error).toMatchObject({ kind: "io_error" })
+		expect((error as Error).message).toContain("(code: EACCES)")
 		expect(hoisted.readFileMock).toHaveBeenCalledTimes(1)
+	})
+
+	it("surfaces the parse error detail for a torn (half-written) file", async () => {
+		// Fault injection: a truncated/torn write leaves invalid JSON on disk.
+		// The read error must identify the parse failure (not a missing file)
+		// so a torn write is distinguishable from a late write in the logs.
+		const taskId = "task-torn-write"
+		const taskDir = path.join(tmpBaseDir, "tasks", taskId)
+		await fs.mkdir(taskDir, { recursive: true })
+		await fs.writeFile(path.join(taskDir, "ui_messages.json"), '[{"ts":1,"type":"sa', "utf8")
+
+		const error = await readTaskMessages({ taskId, globalStoragePath: tmpBaseDir }).catch(
+			(caught: unknown) => caught,
+		)
+		expect(error).toMatchObject({ kind: "invalid" })
+		expect((error as Error).message).toContain("SyntaxError")
+	})
+})
+
+describe("readFileWithMissingRetry formatErrorDetail", () => {
+	it("prefers the filesystem error code when present", () => {
+		expect(formatErrorDetail(Object.assign(new Error("missing"), { code: "ENOENT" }))).toBe(" (code: ENOENT)")
+	})
+
+	it("falls back to the error name and message", () => {
+		expect(formatErrorDetail(new SyntaxError("Unexpected end of JSON input"))).toBe(
+			" (SyntaxError: Unexpected end of JSON input)",
+		)
+	})
+
+	it("stringifies non-error causes", () => {
+		expect(formatErrorDetail("boom")).toBe(" (boom)")
 	})
 })

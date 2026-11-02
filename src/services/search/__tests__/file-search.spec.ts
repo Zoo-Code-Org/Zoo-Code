@@ -83,7 +83,7 @@ describe("file-search", () => {
 		it("should use default limit when configuration is not provided", async () => {
 			const { Package } = await import("../../../shared/package")
 			const mockRooConfig = {
-				get: vi.fn((key: string, defaultValue: number) => defaultValue),
+				get: vi.fn((_key: string, defaultValue: number) => defaultValue),
 			}
 
 			;(vscode.workspace.getConfiguration as any).mockImplementation((section: string) => {

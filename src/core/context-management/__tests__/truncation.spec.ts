@@ -276,7 +276,6 @@ describe("Non-Destructive Sliding Window Truncation", () => {
 			const firstTruncation = truncateConversation(messages, 0.5, "task-1")
 
 			// Step 2: Get effective history and simulate more messages being added
-			const effectiveAfterFirst = getEffectiveApiHistory(firstTruncation.messages)
 			const moreMessages: ApiMessage[] = [
 				...firstTruncation.messages,
 				{ role: "user", content: "New message 1", ts: 3000 },
@@ -319,7 +318,6 @@ describe("Non-Destructive Sliding Window Truncation", () => {
 
 			// Step 2: Add more messages AFTER getting effective history
 			// This simulates real usage where we only send effective messages to API
-			const effectiveAfterFirst = getEffectiveApiHistory(firstTruncation.messages)
 			const moreMessages: ApiMessage[] = [
 				...firstTruncation.messages, // Keep full history with tagged messages
 				{ role: "user", content: "New message 1", ts: 3000 },
