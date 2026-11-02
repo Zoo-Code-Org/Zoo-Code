@@ -61,6 +61,11 @@ async function runCreate(api: RooCodeAPI): Promise<void> {
 		const createdTaskId: string = taskId
 		await waitFor(() => api.hasTaskUiMessageText(createdTaskId, MARKER))
 
+		// history_item.json is written outside the ui_messages.json flush as well: wait for
+		// the task to be visible in history before quitting, or the verify phase can assert
+		// on a task that only ever existed in memory.
+		await waitFor(() => api.isTaskInHistory(createdTaskId))
+
 		const result: PhaseResult = {
 			version: PHASE_RESULT_VERSION,
 			phase: "create",
