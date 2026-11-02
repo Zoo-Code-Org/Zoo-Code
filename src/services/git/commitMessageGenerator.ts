@@ -1,4 +1,3 @@
-import path from "path"
 import * as vscode from "vscode"
 import type { ProviderSettings } from "@roo-code/types"
 
@@ -149,7 +148,11 @@ export function resolveGitRepository(git: GitAPI, context?: unknown): GitReposit
 	if (activeDocUri) {
 		const matchingRepos = git.repositories.filter((r) => {
 			const root = r.rootUri.fsPath
-			return activeDocUri.fsPath === root || activeDocUri.fsPath.startsWith(root + path.sep)
+			return (
+				activeDocUri.fsPath === root ||
+				activeDocUri.fsPath.startsWith(root + "/") ||
+				activeDocUri.fsPath.startsWith(root + "\\")
+			)
 		})
 		if (matchingRepos.length > 0) {
 			matchingRepos.sort((a, b) => b.rootUri.fsPath.length - a.rootUri.fsPath.length)
