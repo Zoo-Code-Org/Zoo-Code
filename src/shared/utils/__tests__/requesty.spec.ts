@@ -99,12 +99,14 @@ describe("toRequestyServiceUrl", () => {
 		})
 
 		it("should handle null baseUrl gracefully", () => {
-			const result = toRequestyServiceUrl(null as any)
+			const result = toRequestyServiceUrl(null)
 			expect(result).toBe("https://router.requesty.ai/v1")
 		})
 
 		it("should handle non-string baseUrl gracefully", () => {
-			const result = toRequestyServiceUrl(123 as any)
+			// Exercise the runtime fallback for a persisted value with an invalid type.
+			const invalidBaseUrl = 123 as unknown as string
+			const result = toRequestyServiceUrl(invalidBaseUrl)
 			expect(result).toBe("https://router.requesty.ai/v1")
 		})
 	})
