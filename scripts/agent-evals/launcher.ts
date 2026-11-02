@@ -33,8 +33,6 @@ export interface HostRuntimeOptions {
 
 const readCommit = async (root: string): Promise<MeasuredString> => {
 	try {
-		const fromCi = process.env.GITHUB_SHA
-		if (fromCi && /^[0-9a-f]{40}$/i.test(fromCi)) return { available: true, value: fromCi }
 		const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: root, timeout: 5_000 })
 		const sha = stdout.trim()
 		return /^[0-9a-f]{40}$/i.test(sha)
@@ -94,9 +92,16 @@ export async function readWorkspaceFiles(workspaceRoot: string): Promise<FinalWo
 				truncated = true
 				continue
 			}
-			const content = await fs.readFile(full, "utf8")
-			totalBytes += stat.size
-			files.push({ path: relativePath, content })
+			const bytes = await fs.readFile(full)
+			if (
+				bytes.byteLength > FINAL_WORKSPACE_MAX_FILE_BYTES ||
+				totalBytes + bytes.byteLength > FINAL_WORKSPACE_MAX_TOTAL_BYTES
+			) {
+				truncated = true
+				continue
+			}
+			totalBytes += bytes.byteLength
+			files.push({ path: relativePath, content: bytes.toString("utf8") })
 		}
 	}
 	await visit(workspaceRoot, "")

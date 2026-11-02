@@ -103,6 +103,10 @@ describe("side execution flow", () => {
 				isInterrupted: () => interrupted,
 				runRepetition: async (repetition) => {
 					executed.push(repetition.repIndex)
+					// The live substrate writes artifacts during the repetition.
+					const artifactDir = path.join(dir, "artifacts", "clamp-range-rep0")
+					await fs.mkdir(artifactDir, { recursive: true })
+					await fs.writeFile(path.join(artifactDir, "trace.json"), "{}")
 					// The signal lands during the first repetition.
 					interrupted = true
 					return record(repetition, true)

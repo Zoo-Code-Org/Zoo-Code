@@ -43,3 +43,10 @@ export function comparePins(baseline: SidePins, candidate: SidePins): PinCompari
 			differences.push(`runnerEnvironment.${field}`)
 	return { compatible: differences.length === 0, differences }
 }
+
+// A side cannot publish a single image pin for runs graded with different images.
+export function sideGraderImageDigest(runs: readonly { graderImageDigest?: string }[]): string {
+	const digests = new Set(runs.flatMap((run) => (run.graderImageDigest === undefined ? [] : [run.graderImageDigest])))
+	if (digests.size > 1) throw new Error("grader image digest changed within the side")
+	return digests.values().next().value ?? "unavailable"
+}

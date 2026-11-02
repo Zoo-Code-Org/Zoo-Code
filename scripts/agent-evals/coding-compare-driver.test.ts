@@ -319,3 +319,52 @@ describe("comparison flow outcome and cleanup", () => {
 		}
 	})
 })
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+	it(`does not publish a report when ${signal} arrives as the candidate returns`, async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "compare-final-interrupt-"))
+		try {
+			const flag = createInterruptFlag()
+			const out = path.join(dir, "out")
+			await fs.mkdir(out)
+			const outcome = await executeComparisonFlow(
+				flowWiring({
+					flag,
+					out,
+					scratchDir: path.join(dir, "scratch"),
+					runSide: async (side) => {
+						if (side === "candidate") flag.signal(signal)
+						return record(side, COMMIT)
+					},
+				}),
+			)
+			assert.deepEqual(outcome, { status: "interrupted", signal })
+			assert.deepEqual(await fs.readdir(out), [])
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}
+
+it("removes a published generation when interrupted during final cleanup", async () => {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "compare-cleanup-interrupt-"))
+	try {
+		const flag = createInterruptFlag()
+		const out = path.join(dir, "out")
+		await fs.mkdir(out)
+		const wiring = flowWiring({
+			flag,
+			out,
+			scratchDir: path.join(dir, "scratch"),
+			runSide: async (side) => record(side, COMMIT),
+		})
+		wiring.interruptKill = async () => {
+			assert.ok(await publishedComparisonGeneration(out))
+			flag.signal("SIGINT")
+		}
+		assert.deepEqual(await executeComparisonFlow(wiring), { status: "interrupted", signal: "SIGINT" })
+		assert.deepEqual(await fs.readdir(out), [])
+	} finally {
+		await fs.rm(dir, { recursive: true, force: true })
+	}
+})

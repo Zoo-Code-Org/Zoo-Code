@@ -61,3 +61,45 @@ it("preparation children use isolated home and npm configuration without registr
 		await fs.rm(dir, { recursive: true, force: true })
 	}
 })
+
+it("kills background preparation workers after their parent succeeds", async () => {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "preparation-worker-"))
+	const heartbeat = path.join(dir, "heartbeat")
+	const pidFile = path.join(dir, "worker-pid")
+	try {
+		const worker =
+			"const fs = require('node:fs'); const file = process.argv[1]; fs.writeFileSync(file, 'x'); process.stdout.write('ready'); setInterval(() => fs.appendFileSync(file, 'x'), 20)"
+		await runBoundedPreparation(
+			createSideProcessGuard(100),
+			() => false,
+			process.execPath,
+			[
+				"-e",
+				`const { spawn } = require('node:child_process');
+			const fs = require('node:fs');
+			const [worker, heartbeat, pidFile] = process.argv.slice(1);
+			const child = spawn(process.execPath, ['-e', worker, heartbeat], { stdio: ['ignore', 'pipe', 'ignore'] });
+			fs.writeFileSync(pidFile, String(child.pid));
+			child.stdout.once('data', () => process.exit(0));`,
+				worker,
+				heartbeat,
+				pidFile,
+			],
+			dir,
+			5000,
+		)
+		const before = (await fs.stat(heartbeat)).size
+		await new Promise((resolve) => setTimeout(resolve, 200))
+		assert.equal((await fs.stat(heartbeat)).size, before)
+	} finally {
+		const pid = await fs.readFile(pidFile, "utf8").then(Number, () => undefined)
+		if (pid !== undefined) {
+			try {
+				process.kill(pid, "SIGKILL")
+			} catch {
+				/* Already exited. */
+			}
+		}
+		await fs.rm(dir, { recursive: true, force: true })
+	}
+})

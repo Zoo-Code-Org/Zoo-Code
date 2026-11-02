@@ -88,8 +88,12 @@ export function buildComparisonReport(inputs: ComparisonInputs): ComparisonRepor
 				candidateRuns.map((run) => run.durationMs),
 			),
 			pairedCosts: pairedNumericDiffs(
-				baselineRuns.map((run) => (run.cost.estimated.available ? run.cost.estimated.usd : undefined)),
-				candidateRuns.map((run) => (run.cost.estimated.available ? run.cost.estimated.usd : undefined)),
+				baselineRuns.map((run) =>
+					run.cost.accountingComplete && run.cost.estimated.available ? run.cost.estimated.usd : undefined,
+				),
+				candidateRuns.map((run) =>
+					run.cost.accountingComplete && run.cost.estimated.available ? run.cost.estimated.usd : undefined,
+				),
 			),
 		})
 	}
@@ -162,6 +166,9 @@ export function renderMarkdownReport(report: ComparisonReport): string {
 	lines.push(`- Model: ${report.pins.baseline.modelIdentifier} / ${report.pins.candidate.modelIdentifier}`)
 	lines.push(`- Grader version: ${report.pins.baseline.graderVersion} / ${report.pins.candidate.graderVersion}`)
 	lines.push(
+		`- Grader image digest: \`${report.pins.baseline.graderImageDigest}\` / \`${report.pins.candidate.graderImageDigest}\``,
+	)
+	lines.push(
 		`- Runner environment: ${report.pins.baseline.runnerEnvironment.os}, node ${report.pins.baseline.runnerEnvironment.nodeVersion}, vscode ${report.pins.baseline.runnerEnvironment.vscodeTarget} / ${report.pins.candidate.runnerEnvironment.os}, node ${report.pins.candidate.runnerEnvironment.nodeVersion}, vscode ${report.pins.candidate.runnerEnvironment.vscodeTarget}`,
 	)
 	lines.push("")
@@ -200,7 +207,9 @@ export function renderMarkdownReport(report: ComparisonReport): string {
 	lines.push("")
 	lines.push(`- Baseline: ${costCell(report.costSummary.baseline)}`)
 	lines.push(`- Candidate: ${costCell(report.costSummary.candidate)}`)
-	lines.push(`- Price table: recorded per run with identifier and date; cache reads and writes priced separately.`)
+	lines.push(
+		`- Price table: identifier and date are recorded per run in the JSON report; cache reads and writes priced separately.`,
+	)
 	lines.push("")
 	lines.push("## Unavailable telemetry")
 	lines.push("")

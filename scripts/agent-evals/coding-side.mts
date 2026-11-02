@@ -20,12 +20,12 @@ import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 import { createHostRuntime } from "./launcher.ts"
 import { createContainerGradingRuntime } from "./container-runtime.ts"
-import { runCodingFixtureOnce } from "./coding-run.ts"
+import { runCodingFixtureOnce, type CodingRunRecord } from "./coding-run.ts"
 import { CODING_FIXTURE_BUNDLES } from "./coding-fixtures.ts"
 import { CODING_SUITE_ID, codingSuiteDigest, ensureCodingSuiteRegistered } from "./coding-suite.ts"
 import { GRADER_VERSION } from "./coding-grader.ts"
 import { digestValue } from "./coding-digest.ts"
-import type { SidePins } from "./coding-pins.ts"
+import { sideGraderImageDigest, type SidePins } from "./coding-pins.ts"
 import { invalidateSideArtifacts, runBoundedPreparation } from "./coding-compare.ts"
 import {
 	assertCommitsApproved,
@@ -195,8 +195,7 @@ const repetitions: SideRepetition[] = CODING_FIXTURE_BUNDLES.flatMap((bundle) =>
 // Pins are recorded when the side publishes, so they describe what actually
 // executed: the approved evaluated commit and, when the container runtime
 // resolved one, the immutable grader image identity.
-const buildPins = async (): Promise<SidePins> => {
-	const digest = gradingRuntime.imageDigest ? await gradingRuntime.imageDigest() : undefined
+const buildPins = async (runs: CodingRunRecord[]): Promise<SidePins> => {
 	return {
 		side: sideLabel,
 		commit: evaluatedCommit,
@@ -205,7 +204,7 @@ const buildPins = async (): Promise<SidePins> => {
 		settingsDigest: digestValue(projection),
 		modelIdentifier: typeof projection["openAiModelId"] === "string" ? projection["openAiModelId"] : "unavailable",
 		graderVersion: GRADER_VERSION,
-		graderImageDigest: digest?.available === true ? digest.value : "unavailable",
+		graderImageDigest: sideGraderImageDigest(runs),
 		runnerEnvironment: {
 			os: process.platform,
 			nodeVersion: process.version,
@@ -283,7 +282,7 @@ try {
 		// so a reader that sees the file sees a complete side of the current
 		// run. A missing file means an interrupted side; consumers must treat
 		// it as a failed side and never pair partial output.
-		buildResult: async (runs) => ({ pins: await buildPins(), runs }),
+		buildResult: async (runs) => ({ pins: await buildPins(runs), runs }),
 	})
 
 	if (!completed) {
