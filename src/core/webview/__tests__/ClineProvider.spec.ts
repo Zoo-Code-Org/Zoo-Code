@@ -784,6 +784,44 @@ describe("ClineProvider", () => {
 			expect(tab.postMessage).not.toHaveBeenCalled()
 		})
 
+		it.each([
+			{
+				message: {
+					type: "diagnosticsResponse",
+					requestId: "request-1",
+					diagnostics: { capturedAt: "2026-11-01T00:00:00.000Z" },
+				},
+				routed: true,
+			},
+			{
+				message: { type: "diagnosticsResponse", diagnostics: { capturedAt: "2026-11-01T00:00:00.000Z" } },
+				routed: false,
+			},
+			{ message: { type: "themeFixtureProbeResponse", requestId: "request-1" }, routed: false },
+		] satisfies { message: WebviewMessage; routed: boolean }[])(
+			"routes $message to the diagnostics broker only when addressed",
+			async ({ message, routed }) => {
+				const handler = vi
+					.spyOn(await import("../webviewMessageHandler"), "webviewMessageHandler")
+					.mockResolvedValue(undefined)
+				const resolve = vi.spyOn(provider["diagnosticsRequestBroker"], "resolve")
+				try {
+					sidebar.messages.fire(message)
+					if (routed) {
+						expect(resolve).toHaveBeenCalledExactlyOnceWith("request-1", message.diagnostics)
+						expect(handler).not.toHaveBeenCalled()
+					} else {
+						expect(resolve).not.toHaveBeenCalled()
+						expect(handler).toHaveBeenCalledOnce()
+						expect(handler.mock.calls[0].slice(0, 2)).toEqual([provider, message])
+					}
+				} finally {
+					handler.mockRestore()
+					resolve.mockRestore()
+				}
+			},
+		)
+
 		test("background messages reach the provider handler without changing the last focused chat", async () => {
 			sidebar.messages.fire({ type: "webviewDidFocus" })
 			const handler = vi

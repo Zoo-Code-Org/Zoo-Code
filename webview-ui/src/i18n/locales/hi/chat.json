@@ -1,25 +1,21 @@
 {
-	"greeting": "Zoo Code में आपका स्वागत है!",
 	"task": {
 		"title": "कार्य",
 		"expand": "कार्य विस्तृत करें",
 		"collapse": "कार्य संक्षिप्त करें",
 		"seeMore": "अधिक देखें",
-		"seeLess": "कम देखें",
 		"tokens": "Tokens",
 		"cache": "कैश",
 		"apiCost": "API लागत",
 		"size": "आकार",
 		"contextWindow": "संदर्भ लंबाई",
-		"closeAndStart": "कार्य बंद करें और नया शुरू करें",
 		"export": "कार्य इतिहास निर्यात करें",
 		"delete": "कार्य हटाएं (पुष्टि को छोड़ने के लिए Shift + क्लिक)",
 		"condenseContext": "संदर्भ को बुद्धिमानी से संघनित करें",
 		"openApiHistory": "API इतिहास खोलें",
 		"openUiHistory": "UI इतिहास खोलें",
 		"backToParentTask": "मूल कार्य",
-		"waitingOnSubtask": "उपकार्य की प्रतीक्षा",
-		"goToSubtask": "उपकार्य पर जाएं"
+		"waitingOnSubtask": "उपकार्य की प्रतीक्षा"
 	},
 	"unpin": "पिन करें",
 	"pin": "अवपिन करें",
@@ -88,19 +84,16 @@
 		"tooltip": "वर्तमान कार्य समाप्त करें"
 	},
 	"stop": {
-		"title": "रोकें",
-		"tooltip": "वर्तमान कार्य रोकें"
+		"title": "रोकें"
 	},
 	"cancel": {
-		"title": "रद्द करें",
-		"tooltip": "वर्तमान ऑपरेशन रद्द करें"
+		"title": "रद्द करें"
 	},
 	"enqueueMessage": "संदेश को कतार में जोड़ें (वर्तमान कार्य पूरा होने के बाद भेजा जाएगा)",
 	"scrollToBottom": "चैट के निचले हिस्से तक स्क्रॉल करें",
 	"scrollToLatestCheckpoint": "पिछले चेकपॉइंट तक स्क्रॉल करें",
 	"about": "Zoo Code आपके संपादक में एक पूरी AI देव टीम है।",
 	"docs": "और जानने के लिए हमारे <DocsLink>दस्तावेज़</DocsLink> देखें।",
-	"onboarding": "इस कार्यक्षेत्र में आपकी कार्य सूची खाली है।",
 	"rooTips": {
 		"customizableModes": {
 			"title": "अनुकूलन योग्य मोड",
@@ -126,7 +119,6 @@
 	"unlockApiConfigAcrossModes": "इस कार्यक्षेत्र में सभी मोड के लिए API कॉन्फ़िगरेशन लॉक है (अनलॉक करने के लिए क्लिक करें)",
 	"enhancePrompt": "अतिरिक्त संदर्भ के साथ प्रॉम्प्ट बढ़ाएँ",
 	"addImages": "संदेश में चित्र जोड़ें",
-	"sendMessage": "संदेश भेजें",
 	"pressToSend": "भेजने के लिए {{keyCombination}} दबाएं",
 	"stopTts": "टेक्स्ट-टू-स्पीच बंद करें",
 	"typeMessage": "एक संदेश लिखें...",
@@ -145,7 +137,6 @@
 	},
 	"errorReadingFile": "फ़ाइल पढ़ने में त्रुटि",
 	"noValidImages": "कोई मान्य चित्र प्रोसेस नहीं किया गया",
-	"separator": "विभाजक",
 	"edit": "संपादित करें...",
 	"forNextMode": "अगले मोड के लिए",
 	"forPreviousMode": "पिछले मोड के लिए",
@@ -178,7 +169,6 @@
 	},
 	"checkpoint": {
 		"regular": "चेकपॉइंट",
-		"initializingWarning": "चेकपॉइंट अभी भी आरंभ हो रहा है... अगर यह बहुत समय ले रहा है, तो आप <settingsLink>सेटिंग्स</settingsLink> में चेकपॉइंट को अक्षम कर सकते हैं और अपने कार्य को पुनः आरंभ कर सकते हैं।",
 		"menu": {
 			"viewDiff": "अंतर देखें",
 			"more": "अधिक विकल्प",
@@ -205,10 +195,8 @@
 		"wantsToEdit": "Zoo इस फ़ाइल को संपादित करना चाहता है",
 		"wantsToEditOutsideWorkspace": "Zoo कार्यक्षेत्र के बाहर इस फ़ाइल को संपादित करना चाहता है",
 		"wantsToEditProtected": "Zoo एक सुरक्षित कॉन्फ़िगरेशन फ़ाइल को संपादित करना चाहता है",
-		"wantsToCreate": "Zoo एक नई फ़ाइल बनाना चाहता है",
 		"wantsToSearchReplace": "Zoo इस फ़ाइल में खोज और प्रतिस्थापन करना चाहता है",
 		"didSearchReplace": "Zoo ने इस फ़ाइल में खोज और प्रतिस्थापन किया",
-		"wantsToInsert": "Zoo इस फ़ाइल में सामग्री डालना चाहता है",
 		"wantsToInsertWithLineNumber": "Zoo इस फ़ाइल की {{lineNumber}} लाइन पर सामग्री डालना चाहता है",
 		"wantsToInsertAtEnd": "Zoo इस फ़ाइल के अंत में सामग्री जोड़ना चाहता है",
 		"wantsToReadAndXMore": "Zoo इस फ़ाइल को और {{count}} अन्य को पढ़ना चाहता है",
@@ -231,14 +219,11 @@
 		"wantsToViewTopLevelOutsideWorkspace": "Zoo इस निर्देशिका (कार्यक्षेत्र के बाहर) में शीर्ष स्तर की फ़ाइलें देखना चाहता है",
 		"didViewTopLevelOutsideWorkspace": "Zoo ने इस निर्देशिका (कार्यक्षेत्र के बाहर) में शीर्ष स्तर की फ़ाइलें देखीं",
 		"wantsToViewRecursiveOutsideWorkspace": "Zoo इस निर्देशिका (कार्यक्षेत्र के बाहर) में सभी फ़ाइलों को पुनरावर्ती रूप से देखना चाहता है",
-		"didViewRecursiveOutsideWorkspace": "Zoo ने इस निर्देशिका (कार्यक्षेत्र के बाहर) में सभी फ़ाइलों को पुनरावर्ती रूप से देखा",
-		"wantsToViewMultipleDirectories": "Zoo कई डायरेक्ट्रीज़ देखना चाहता है"
+		"didViewRecursiveOutsideWorkspace": "Zoo ने इस निर्देशिका (कार्यक्षेत्र के बाहर) में सभी फ़ाइलों को पुनरावर्ती रूप से देखा"
 	},
-	"commandOutput": "कमांड आउटपुट",
 	"commandExecution": {
 		"abort": "रद्द करें",
 		"running": "चल रहा है",
-		"pid": "पीआईडी: {{pid}}",
 		"exitStatus": "{{exitCode}} स्थिति के साथ बाहर निकल गया",
 		"malformedCommand": "गलत कमांड: shell सिंटैक्स त्रुटि",
 		"manageCommands": "स्वतः-अनुमोदित कमांड",
@@ -246,15 +231,8 @@
 		"addToAllowed": "अनुमत सूची में जोड़ें",
 		"removeFromAllowed": "अनुमत सूची से हटाएँ",
 		"addToDenied": "अस्वीकृत सूची में जोड़ें",
-		"removeFromDenied": "अस्वीकृत सूची से हटाएँ",
-		"abortCommand": "कमांड निष्पादन रद्द करें",
-		"expandOutput": "आउटपुट का विस्तार करें",
-		"collapseOutput": "आउटपुट संक्षिप्त करें",
-		"expandManagement": "कमांड प्रबंधन अनुभाग का विस्तार करें",
-		"collapseManagement": "कमांड प्रबंधन अनुभाग संक्षिप्त करें"
+		"removeFromDenied": "अस्वीकृत सूची से हटाएँ"
 	},
-	"response": "प्रतिक्रिया",
-	"arguments": "आर्ग्युमेंट्स",
 	"text": {
 		"rooSaid": "Zoo ने कहा"
 	},
@@ -274,10 +252,8 @@
 	"subtasks": {
 		"wantsToCreate": "Zoo <code>{{mode}}</code> मोड में एक नया उपकार्य बनाना चाहता है",
 		"wantsToFinish": "Zoo इस उपकार्य को समाप्त करना चाहता है",
-		"newTaskContent": "उपकार्य निर्देश",
 		"completionContent": "उपकार्य पूर्ण",
 		"resultContent": "उपकार्य परिणाम",
-		"defaultResult": "कृपया अगले कार्य पर जारी रखें।",
 		"completionInstructions": "उपकार्य पूर्ण! आप परिणामों की समीक्षा कर सकते हैं और सुधार या अगले चरण सुझा सकते हैं। यदि सब कुछ ठीक लगता है, तो मुख्य कार्य को परिणाम वापस करने के लिए पुष्टि करें।",
 		"goToSubtask": "कार्य देखें"
 	},
@@ -300,9 +276,6 @@
 		"diagnostics": "विस्तृत त्रुटि जानकारी प्राप्त करें",
 		"proxyProvider": "ऐसा लगता है कि आप एक प्रॉक्सी-आधारित प्रदाता का उपयोग कर रहे हैं। इसके लॉग की जांच करना सुनिश्चित करें और सुनिश्चित करें कि यह Zoo के अनुरोधों को नहीं फिर से लिख रहा है।"
 	},
-	"powershell": {
-		"issues": "ऐसा लगता है कि आपको Windows PowerShell के साथ समस्याएँ हो रही हैं, कृपया इसे देखें"
-	},
 	"autoApprove": {
 		"tooltipManage": "स्वतः-अनुमोदन सेटिंग्स प्रबंधित करें",
 		"tooltipStatus": "स्वतः-अनुमोदन इनके लिए सक्षम है: {{toggles}}",
@@ -311,9 +284,6 @@
 		"all": "सभी",
 		"none": "कोई नहीं",
 		"description": "अनुमति मांगे बिना इन क्रियाओं को चलाएं। इसे केवल उन क्रियाओं के लिए सक्षम करें जिन पर आपको पूरा भरोसा है।",
-		"selectOptionsFirst": "स्वतः-अनुमोदन सक्षम करने के लिए नीचे से कम से कम एक विकल्प चुनें",
-		"toggleAriaLabel": "स्वतः-अनुमोदन टॉगल करें",
-		"disabledAriaLabel": "स्वतः-अनुमोदन अक्षम है - पहले विकल्प चुनें",
 		"triggerLabelOff": "स्वतः-अनुमोदन बंद",
 		"triggerLabelOffShort": "बंद",
 		"triggerLabel_zero": "0 स्वतः-अनुमोदन",
@@ -356,12 +326,6 @@
 			"highlight1": "✨ और ज़्यादा models और providers का support: Anthropic के ज़रिए Claude Haiku 5.5 इस्तेमाल करें, संगत VS Code LM models को images भेजें, OpenCode Go Responses models के लिए temperature tune करें और ज़्यादा providers पर requests को cleanly cancel करें।",
 			"highlight2": "🔐 ज़्यादा लचीला MCP OAuth: Static OAuth client settings configure करें, custom callback paths इस्तेमाल करें, WWW-Authenticate से authentication details जानें और retry करने से पहले callback failures देखें।",
 			"highlight3": "🧭 बेहतर chats और लंबे sessions: History में tasks का नाम बदलें, बिना Shift दबाए files को chat में drag करें, लंबे sessions में retain होने वाली memory घटाएं और subtask links तथा replaced webviews को stable रखें।"
-		},
-		"cloudAgents": {
-			"heading": "क्लाउड में नया:",
-			"specialized": "<bold>Explainer</bold>, <bold>Planner</bold>, और <bold>Coder</bold> की शुरुआत - तीन विशेष क्लाउड एजेंट आपके वर्कफ़्लो को बेहतर बनाने के लिए।",
-			"description": "एजेंट क्लाउड में एक साथ काम करते हैं और web या Slack के माध्यम से ट्रिगर किए जा सकते हैं।",
-			"tryButton": "क्लाउड एजेंट आज़माएं"
 		}
 	},
 	"costs": {
@@ -444,28 +408,8 @@
 	"editMessage": {
 		"placeholder": "अपना संदेश संपादित करें..."
 	},
-	"command": {
-		"triggerDescription": "{{name}} कमांड को ट्रिगर करें"
-	},
 	"slashCommands": {
-		"tooltip": "स्लैश कमांड प्रबंधित करें",
-		"title": "स्लैश कमांड",
-		"description": "बिल्ट-इन स्लैश कमांड का उपयोग करें या बार-बार उपयोग किए जाने वाले प्रॉम्प्ट और वर्कफ़्लो तक त्वरित पहुंच के लिए कस्टम स्लैश कमांड बनाएं। <DocsLink>दस्तावेज़</DocsLink>",
-		"manageCommands": "सेटिंग्स में स्लैश कमांड प्रबंधित करें",
-		"builtInCommands": "बिल्ट-इन कमांड",
-		"globalCommands": "वैश्विक कमांड",
-		"workspaceCommands": "कार्यक्षेत्र कमांड",
-		"globalCommand": "वैश्विक कमांड",
-		"editCommand": "कमांड संपादित करें",
-		"deleteCommand": "कमांड हटाएं",
-		"newGlobalCommandPlaceholder": "नया वैश्विक कमांड...",
-		"newWorkspaceCommandPlaceholder": "नया कार्यक्षेत्र कमांड...",
-		"deleteDialog": {
-			"title": "कमांड हटाएं",
-			"description": "क्या आप वाकई \"{{name}}\" कमांड को हटाना चाहते हैं? यह क्रिया पूर्ववत नहीं की जा सकती।",
-			"cancel": "रद्द करें",
-			"confirm": "हटाएं"
-		}
+		"manageCommands": "सेटिंग्स में स्लैश कमांड प्रबंधित करें"
 	},
 	"contextMenu": {
 		"noResults": "कोई परिणाम नहीं",
@@ -484,9 +428,7 @@
 	"todo": {
 		"partial": "{{total}} में से {{completed}} टू-डू हो गए",
 		"complete": "{{total}} टू-डू हो गए",
-		"updated": "टू-डू सूची अपडेट की गई",
-		"completed": "पूरा हुआ",
-		"started": "शुरू हुआ"
+		"updated": "टू-डू सूची अपडेट की गई"
 	},
 	"tooManyTools": {
 		"title": "बहुत सारे उपकरण सक्षम हैं",
