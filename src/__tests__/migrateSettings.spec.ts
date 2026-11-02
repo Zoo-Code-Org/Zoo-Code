@@ -51,7 +51,7 @@ describe("Settings Migration", () => {
 		} as unknown as vscode.ExtensionContext
 
 		// Set global outputChannel for all tests
-		;(global as any).outputChannel = mockOutputChannel
+		Object.assign(global, { outputChannel: mockOutputChannel })
 	})
 
 	it("should migrate custom modes file if old file exists and new file doesn't", async () => {
@@ -147,7 +147,7 @@ describe("Settings Migration", () => {
 		const mockUnlink = vitest.mocked(fs.unlink).mockResolvedValue(undefined)
 
 		// Mock file read to return JSON content
-		vitest.mocked(fs.readFile).mockImplementation(async (path: any) => {
+		vitest.mocked(fs.readFile).mockImplementation(async (path) => {
 			if (path === legacyCustomModesJson) {
 				return testJsonContent
 			}
@@ -185,7 +185,7 @@ describe("Settings Migration", () => {
 		const mockUnlink = vitest.mocked(fs.unlink).mockResolvedValue(undefined)
 
 		// Mock file read to return corrupt JSON
-		vitest.mocked(fs.readFile).mockImplementation(async (path: any) => {
+		vitest.mocked(fs.readFile).mockImplementation(async (path) => {
 			if (path === legacyCustomModesJson) {
 				return "{ invalid json content" // This will cause an error when parsed
 			}
@@ -222,7 +222,7 @@ describe("Settings Migration", () => {
 		const mockUnlink = vitest.mocked(fs.unlink).mockResolvedValue(undefined)
 
 		// Mock file read
-		vitest.mocked(fs.readFile).mockImplementation(async (path: any) => {
+		vitest.mocked(fs.readFile).mockImplementation(async (path) => {
 			if (path === legacyCustomModesJson) {
 				return JSON.stringify({ customModes: [] })
 			}
