@@ -11,6 +11,9 @@ import OpenAI from "openai"
 
 import type { ModelRecord } from "@roo-code/types"
 
+import { providerIdentifiers, requestyDefaultModelInfo } from "@roo-code/types"
+
+import { getModels } from "../fetchers/modelCache"
 import { RequestyHandler } from "../requesty"
 import { Package } from "../../../shared/package"
 import { ApiHandlerCreateMessageMetadata } from "../../index"
