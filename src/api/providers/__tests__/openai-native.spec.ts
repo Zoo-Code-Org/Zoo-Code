@@ -1194,7 +1194,7 @@ describe("OpenAiNativeHandler", () => {
 				expect(mockCaptureException).not.toHaveBeenCalled()
 			})
 
-			it("should not convert a non-abort stream error into an AbortError", async () => {
+			it("should not convert a non-abort stream error into an AbortError and keeps the full wrapper", async () => {
 				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
 				const mockFetch = vitest.fn().mockImplementation(() => {
 					const body = new ReadableStream<Uint8Array>({
@@ -1204,8 +1204,10 @@ describe("OpenAiNativeHandler", () => {
 				})
 				global.fetch = mockFetch as typeof fetch
 
+				// A status-less stream failure takes the wrapping path: pin the full message so a
+				// mutation that skips the wrapper (e.g. forcing hasNumericHttpStatus() to true) fails.
 				await expect(collectStream(handler.createMessage(systemPrompt, messages))).rejects.toThrow(
-					"Error processing response stream: socket hang up",
+					"Failed to connect to Responses API: Error processing response stream: socket hang up",
 				)
 			})
 
