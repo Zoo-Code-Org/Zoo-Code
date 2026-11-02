@@ -647,7 +647,7 @@ describe("ProviderSettingsManager", () => {
 				.mockReturnValue(makeProviderWorkspaceConfiguration({ customStoragePath: "" }))
 			const manager = new ProviderSettingsManager(mockContext)
 
-			expect((manager as unknown as { secretsKey: string }).secretsKey).toBe(legacySecretKey)
+			expect(manager["secretsKey"]).toBe(legacySecretKey)
 			expect(configSpy).toHaveBeenCalledWith("zoo-code")
 		})
 
@@ -655,18 +655,14 @@ describe("ProviderSettingsManager", () => {
 			const managerA = new ProviderSettingsManager(mockContext, "C:\\Projects\\A\\.vscode\\zoo-code")
 			const managerB = new ProviderSettingsManager(mockContext, "C:\\Projects\\B\\.vscode\\zoo-code")
 
-			expect((managerA as unknown as { secretsKey: string }).secretsKey).not.toBe(
-				(managerB as unknown as { secretsKey: string }).secretsKey,
-			)
+			expect(managerA["secretsKey"]).not.toBe(managerB["secretsKey"])
 		})
 
 		it("uses the same secret key for the same normalized custom storage path", () => {
 			const managerA = new ProviderSettingsManager(mockContext, "C:/Projects/A/.vscode/zoo-code")
 			const managerB = new ProviderSettingsManager(mockContext, "c:\\Projects\\A\\.vscode\\zoo-code")
 
-			expect((managerA as unknown as { secretsKey: string }).secretsKey).toBe(
-				(managerB as unknown as { secretsKey: string }).secretsKey,
-			)
+			expect(managerA["secretsKey"]).toBe(managerB["secretsKey"])
 		})
 
 		it("keeps provider configurations isolated across differently scoped managers", async () => {
@@ -733,7 +729,7 @@ describe("ProviderSettingsManager", () => {
 
 			await manager.initialize()
 
-			const scopedKey = (manager as unknown as { secretsKey: string }).secretsKey
+			const scopedKey = manager["secretsKey"]
 			expect(secrets.get(scopedKey)).toBeTruthy()
 			expect(parseStoredProfiles(secrets.get(scopedKey))).toMatchObject({
 				currentApiConfigName: "legacy-default",
@@ -785,18 +781,14 @@ describe("ProviderSettingsManager", () => {
 			})
 			secrets.set(legacySecretKey, JSON.stringify(legacyProfiles))
 			secrets.set(
-				(
-					new ProviderSettingsManager(context, "C:/Projects/A/.vscode/zoo-code") as unknown as {
-						secretsKey: string
-					}
-				).secretsKey,
+				new ProviderSettingsManager(context, "C:/Projects/A/.vscode/zoo-code")["secretsKey"],
 				JSON.stringify(scopedProfiles),
 			)
 
 			const manager = new ProviderSettingsManager(context, "C:/Projects/A/.vscode/zoo-code")
 			await manager.initialize()
 
-			const current = parseStoredProfiles(secrets.get((manager as unknown as { secretsKey: string }).secretsKey))
+			const current = parseStoredProfiles(secrets.get(manager["secretsKey"]))
 			expect(current?.currentApiConfigName).toBe("scoped")
 			expect(parseStoredProfiles(secrets.get(legacySecretKey))?.currentApiConfigName).toBe("legacy")
 		})
@@ -831,7 +823,7 @@ describe("ProviderSettingsManager", () => {
 			await manager.initialize()
 			await manager.resetAllConfigs()
 
-			const scopedKey = (manager as unknown as { secretsKey: string }).secretsKey
+			const scopedKey = manager["secretsKey"]
 			expect(secrets.has(scopedKey)).toBe(false)
 			expect(secrets.get(legacySecretKey)).toBe(JSON.stringify(legacyProfiles))
 			expect(globalState.get(`${scopedKey}:migration-complete`)).toBe(true)
@@ -863,7 +855,7 @@ describe("ProviderSettingsManager", () => {
 
 			await managerA.resetAllConfigs()
 
-			expect(secretsA.get((managerA as unknown as { secretsKey: string }).secretsKey)).toBeUndefined()
+			expect(secretsA.get(managerA["secretsKey"])).toBeUndefined()
 			expect(await managerB.hasConfig("profile-b")).toBe(true)
 		})
 	})
