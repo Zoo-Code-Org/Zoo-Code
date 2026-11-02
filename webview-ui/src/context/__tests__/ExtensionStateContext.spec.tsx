@@ -1,5 +1,6 @@
 import { providerIdentifiers } from "@roo-code/types"
 import { render, screen, act } from "@/utils/test-utils"
+import { StringCache } from "@src/utils/stringCache"
 import React from "react"
 
 import {
