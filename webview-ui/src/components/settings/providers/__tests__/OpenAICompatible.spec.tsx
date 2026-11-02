@@ -420,6 +420,7 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 
 			const thinkingBudgetProps = mockThinkingBudget.mock.calls[0][0]
 			expect(thinkingBudgetProps.modelInfo.supportsReasoningEffort).toEqual([
+				"none",
 				"low",
 				"medium",
 				"high",
