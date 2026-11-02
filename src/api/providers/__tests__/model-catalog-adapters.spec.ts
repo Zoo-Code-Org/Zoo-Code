@@ -179,6 +179,7 @@ const cases: AdapterCase[] = [
 		scope: { urlScoped: false, keyScoped: true, authScoped: true },
 		expectedArgs: [API_KEY],
 		forwardsSignal: true,
+		prewarms: false,
 	},
 	{
 		name: "LiteLLM",
