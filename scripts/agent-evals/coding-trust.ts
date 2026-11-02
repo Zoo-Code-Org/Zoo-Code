@@ -101,6 +101,36 @@ export async function assertEvaluatedTreeClean(root: string): Promise<void> {
 		.map((line) => line.trim())
 		.filter((line) => line.length > 0)
 	if (entries.length > 0) throw new DirtyEvaluatedTreeError(entries)
+	// Compare raw bytes to HEAD, bypassing both the index stat cache and
+	// clean filters. A symlink can reference unapproved bytes outside this tree.
+	const { stdout: tree } = await promisify(execFile)("git", ["ls-tree", "-rz", "HEAD"], {
+		cwd: root,
+		maxBuffer: 16 * 1024 * 1024,
+	})
+	const blobs: { file: string; object: string }[] = []
+	for (const entry of tree.split("\0").filter(Boolean)) {
+		const tab = entry.indexOf("\t")
+		const [mode, , object] = entry.slice(0, tab).split(" ")
+		const file = entry.slice(tab + 1)
+		if (mode === "120000") throw new DirtyEvaluatedTreeError([`symlink: ${file}`])
+		if (mode === "160000") continue // Submodule dirtiness is checked above.
+		if (!object) throw new Error("invalid approved tree entry")
+		blobs.push({ file, object })
+	}
+	// Bounded batches avoid one Git process per source file and argv limits.
+	for (let offset = 0; offset < blobs.length; offset += 128) {
+		const batch = blobs.slice(offset, offset + 128)
+		const { stdout: hashes } = await promisify(execFile)(
+			"git",
+			["hash-object", "--no-filters", "--", ...batch.map((blob) => blob.file)],
+			{ cwd: root, timeout: 30_000 },
+		)
+		const actual = hashes.trim().split("\n")
+		for (const [index, blob] of batch.entries()) {
+			if (actual[index] !== blob.object)
+				throw new DirtyEvaluatedTreeError([`content differs from approved tree: ${blob.file}`])
+		}
+	}
 }
 
 // Provider credential variables this framework supports. The side script and
@@ -155,24 +185,32 @@ export function buildSideEnvironment(
 
 // Environment for the worktree install and build processes. These children
 // inherit neither the driver's secrets nor the provider credential. They get
-// the shared process locations plus the explicitly approved pnpm variables a
-// frozen-lockfile install and a build need to locate their store, cache, and
-// registry.
-const WORKTREE_ENV_ALLOWLIST = [
-	...PROCESS_ENV_ALLOWLIST,
-	"PNPM_HOME",
-	"XDG_DATA_HOME",
-	"XDG_CACHE_HOME",
-	"XDG_CONFIG_HOME",
-	"XDG_STATE_HOME",
-	"npm_config_registry",
-] as const
-
-export function buildWorktreeEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+// process executable locations and an isolated home. Parent package-manager
+// configuration and registry URLs never cross this boundary.
+export function buildWorktreeEnvironment(env: NodeJS.ProcessEnv, home?: string): NodeJS.ProcessEnv {
 	const child: NodeJS.ProcessEnv = {}
-	for (const name of WORKTREE_ENV_ALLOWLIST) {
+	for (const name of [
+		"PATH",
+		"LANG",
+		"LC_ALL",
+		"TMPDIR",
+		"TMP",
+		"TEMP",
+		"SYSTEMROOT",
+		"WINDIR",
+		"COMSPEC",
+		"PATHEXT",
+	] as const) {
 		const value = env[name]
 		if (value !== undefined) child[name] = value
+	}
+	if (home) {
+		child["HOME"] = home
+		child["USERPROFILE"] = home
+		for (const name of ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"])
+			child[name] = `${home}/${name.toLowerCase()}`
+		child["npm_config_userconfig"] = `${home}/.npmrc`
+		child["npm_config_globalconfig"] = `${home}/global-npmrc`
 	}
 	return child
 }

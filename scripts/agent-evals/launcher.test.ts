@@ -4,7 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import { describe, it } from "node:test"
 import { fileURLToPath } from "node:url"
-import { createHostRuntime } from "./launcher.ts"
+import { createHostRuntime, readWorkspaceFiles } from "./launcher.ts"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 
@@ -63,3 +63,35 @@ describe("host runtime", () => {
 		}
 	})
 })
+
+it("rejects final workspace capture before launch", async () => {
+	const runtime = createHostRuntime({ root: repoRoot, artifactsDir: os.tmpdir() })
+	assert.ok(runtime.readFinalWorkspace)
+	await assert.rejects(runtime.readFinalWorkspace(), /workspace not created/)
+})
+
+for (const scenario of ["nested", "oversized", "total", "count"] as const) {
+	it(`captures bounded final workspace files: ${scenario}`, async () => {
+		const dir = await tempDir("workspace-capture-")
+		try {
+			if (scenario === "nested") {
+				for (const name of ["nested", "node_modules", ".git"]) {
+					await fs.mkdir(path.join(dir, name))
+					await fs.writeFile(path.join(dir, name, "file.js"), name)
+				}
+			} else {
+				const count = scenario === "count" ? 4097 : scenario === "total" ? 9 : 1
+				const content = scenario === "count" ? "x" : "x".repeat(scenario === "oversized" ? 1048577 : 1048576)
+				await Promise.all(
+					Array.from({ length: count }, (_, index) => fs.writeFile(path.join(dir, `${index}.js`), content)),
+				)
+			}
+			const result = await readWorkspaceFiles(dir)
+			assert.equal(result.truncated, scenario !== "nested")
+			if (scenario === "nested") assert.deepEqual(result.files, [{ path: "nested/file.js", content: "nested" }])
+			else assert.equal(result.files.length, scenario === "count" ? 4096 : scenario === "total" ? 8 : 0)
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}

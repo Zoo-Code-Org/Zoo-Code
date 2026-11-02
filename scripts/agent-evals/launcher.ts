@@ -67,7 +67,7 @@ const FINAL_WORKSPACE_SKIPPED_DIRS = new Set(["node_modules", ".git"])
 // directories, caps file count and size, and reports truncation instead of
 // reading unbounded agent-written trees. Paths stay relative and forward
 // slashed, matching the fixture workspace file shape.
-async function readWorkspaceFiles(workspaceRoot: string): Promise<FinalWorkspaceSnapshot> {
+export async function readWorkspaceFiles(workspaceRoot: string): Promise<FinalWorkspaceSnapshot> {
 	const files: AgentFixtureWorkspaceFile[] = []
 	let truncated = false
 	let totalBytes = 0

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import fs from "node:fs/promises"
+import { existsSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { describe, it } from "node:test"
@@ -232,3 +233,36 @@ describe("side execution flow", () => {
 		}
 	})
 })
+
+// Inject the interrupt at each publication boundary, including after the
+// marker write. The observed filesystem state proves each await has finished.
+for (const boundary of ["directory", "record", "pins", "marker"] as const) {
+	it(`removes partial publication when interrupted after ${boundary}`, async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "side-publication-"))
+		let interrupted = false
+		try {
+			const exists = (relative: string): boolean => existsSync(path.join(dir, relative))
+			const outcome = await executeSideFlow({
+				repetitions: plan(1),
+				out: dir,
+				isInterrupted: () => {
+					if (boundary === "directory" && exists("artifacts/clamp-range-rep0")) interrupted = true
+					if (boundary === "record" && exists("artifacts/clamp-range-rep0/run-record.json"))
+						interrupted = true
+					if (boundary === "marker" && exists("side-results.json")) interrupted = true
+					return interrupted
+				},
+				runRepetition: async (repetition) => record(repetition, true),
+				buildResult: async (runs) => {
+					if (boundary === "pins") interrupted = true
+					return { pins: pins(), runs }
+				},
+			})
+			assert.equal(interrupted, true)
+			assert.equal(outcome.completed, false)
+			assert.deepEqual(await fs.readdir(dir), [])
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}

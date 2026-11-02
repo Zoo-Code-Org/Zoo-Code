@@ -409,13 +409,7 @@ describe("worktree process environment", () => {
 			OTHER_SECRET: "leak-me-too",
 			NODE_OPTIONS: "--require /tmp/never",
 		})
-		assert.deepEqual(child, {
-			PATH: "/usr/bin",
-			HOME: "/home/dev",
-			PNPM_HOME: "/home/dev/.local/share/pnpm",
-			XDG_DATA_HOME: "/home/dev/.local/share",
-			npm_config_registry: "https://registry.example",
-		})
+		assert.deepEqual(child, { PATH: "/usr/bin" })
 	})
 
 	it("never carries the provider credential into install or build", () => {
@@ -423,3 +417,37 @@ describe("worktree process environment", () => {
 		assert.equal(child["SOLHEIM_API_KEY"], undefined)
 	})
 })
+
+for (const kind of ["symlink", "filter"] as const) {
+	it(`rejects unpinned ${kind} content even when git status is clean`, async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "coding-trust-bytes-"))
+		try {
+			const repo = await makeRepo(dir)
+			if (kind === "symlink") {
+				await fs.writeFile(path.join(dir, "outside"), "unapproved")
+				await fs.symlink(path.join(dir, "outside"), path.join(repo, "entry"))
+			} else {
+				await fs.writeFile(path.join(repo, "entry"), "approved\n")
+				await fs.writeFile(path.join(repo, ".gitattributes"), "entry filter=fixture\n")
+			}
+			await commitAll(repo, "entry")
+			let checked = repo
+			if (kind === "filter") {
+				await execFileAsync("git", ["config", "filter.fixture.smudge", "sed s/approved/unpinned/"], {
+					cwd: repo,
+				})
+				await execFileAsync("git", ["config", "filter.fixture.clean", "sed s/unpinned/approved/"], {
+					cwd: repo,
+				})
+				checked = path.join(dir, "checked")
+				await execFileAsync("git", ["worktree", "add", "--detach", checked, "HEAD"], { cwd: repo })
+				assert.equal(await fs.readFile(path.join(checked, "entry"), "utf8"), "unpinned\n")
+			}
+			const { stdout } = await execFileAsync("git", ["status", "--porcelain"], { cwd: checked })
+			assert.equal(stdout, "")
+			await assert.rejects(assertEvaluatedTreeClean(checked), DirtyEvaluatedTreeError)
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}

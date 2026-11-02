@@ -7,7 +7,7 @@ export const UNCERTAINTY_Z = 1.96
 export const DEFAULT_REPETITIONS = 3
 
 export const STATISTICAL_POLICY = {
-	method: "success-rate-with-wilson-95-percent-interval-and-paired-deltas",
+	method: "success-rate-with-wilson-95-percent-interval-and-paired-deltas-with-sample-standard-errors",
 	significanceClaim: "none. Three repetitions can show large regressions. They cannot show small improvements.",
 	repetitionsDefault: DEFAULT_REPETITIONS,
 } as const
@@ -45,7 +45,17 @@ export function successRate(outcomes: readonly CodingRunOutcome[]): SuccessRate 
 	}
 }
 
+// Sample standard error of the mean paired delta. Undefined for fewer than
+// two observations; this descriptive estimate makes no significance claim.
+export function pairedStandardError(deltas: readonly number[]): number | undefined {
+	if (deltas.length < 2) return undefined
+	const mean = deltas.reduce((sum, delta) => sum + delta, 0) / deltas.length
+	return Math.sqrt(deltas.reduce((sum, delta) => sum + (delta - mean) ** 2, 0) / (deltas.length - 1) / deltas.length)
+}
+
 export interface PairedOutcomeDiff {
+	meanDelta?: number
+	standardError?: number
 	pairs: number
 	improved: number
 	regressed: number
@@ -72,6 +82,13 @@ export function pairedOutcomeDiffs(
 		else regressed++
 	}
 	return {
+		meanDelta: pairs ? (improved - regressed) / pairs : undefined,
+		standardError: pairedStandardError(
+			Array.from(
+				{ length: pairs },
+				(_, index) => Number(candidate[index] === "correct") - Number(baseline[index] === "correct"),
+			),
+		),
 		pairs,
 		improved,
 		regressed,
@@ -81,6 +98,7 @@ export function pairedOutcomeDiffs(
 }
 
 export interface PairedNumericDiff {
+	standardError?: number
 	pairs: { baseline: number; candidate: number; delta: number }[]
 	missingPairs: number
 	meanDelta?: number
@@ -111,6 +129,7 @@ export function pairedNumericDiffs(
 	return {
 		pairs,
 		missingPairs,
+		standardError: pairedStandardError(deltas),
 		meanDelta: deltas.reduce((sum, delta) => sum + delta, 0) / deltas.length,
 		minDelta: Math.min(...deltas),
 		maxDelta: Math.max(...deltas),

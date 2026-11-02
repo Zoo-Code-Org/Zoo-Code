@@ -3,6 +3,7 @@ import { describe, it } from "node:test"
 import {
 	DEFAULT_REPETITIONS,
 	STATISTICAL_POLICY,
+	pairedStandardError,
 	pairedNumericDiffs,
 	pairedOutcomeDiffs,
 	successRate,
@@ -59,4 +60,17 @@ describe("statistics", () => {
 		const empty = pairedNumericDiffs([], [])
 		assert.equal(empty.meanDelta, undefined)
 	})
+})
+
+it("reports paired sample standard errors, including insufficient samples", () => {
+	assert.equal(pairedStandardError([]), undefined)
+	assert.equal(pairedStandardError([2]), undefined)
+	assert.equal(pairedStandardError([2, 4]), 1)
+	assert.equal(pairedNumericDiffs([1, 2], [3, 6]).standardError, 1)
+	assert.equal(pairedNumericDiffs([1, undefined], [3, 6]).standardError, undefined)
+	const outcomes = pairedOutcomeDiffs(["correct", "incorrect"], ["incorrect", "correct"])
+	assert.equal(outcomes.meanDelta, 0)
+	assert.equal(outcomes.standardError, 1)
+	assert.equal(pairedOutcomeDiffs([], []).standardError, undefined)
+	assert.equal(pairedOutcomeDiffs(["correct"], ["correct"]).standardError, undefined)
 })

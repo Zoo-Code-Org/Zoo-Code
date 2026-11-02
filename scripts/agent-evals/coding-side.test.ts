@@ -7,6 +7,10 @@ import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 import { describe, it } from "node:test"
 
+import { CODING_FIXTURE_BUNDLES } from "./coding-fixtures.ts"
+
+const shellQuote = (value: string): string => "'" + value.replace(/'/g, "'\\''") + "'"
+
 const execFileAsync = promisify(execFile)
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 
@@ -229,7 +233,7 @@ type InstallBehavior = "succeed" | "fail" | "hang" | "ignore-term"
 const writePnpmShim = async (dir: string, install: InstallBehavior): Promise<string> => {
 	const shimDir = path.join(dir, "bin")
 	await fs.mkdir(shimDir)
-	const log = (name: string): string => JSON.stringify(path.join(dir, name))
+	const log = (name: string): string => shellQuote(path.join(dir, name))
 	const lines = [
 		"#!/bin/sh",
 		`printf '%s\\n' "$*" >> ${log("pnpm-args.log")}`,
@@ -244,12 +248,12 @@ const writePnpmShim = async (dir: string, install: InstallBehavior): Promise<str
 			script,
 			[
 				'const fs = require("node:fs")',
-				`process.on("SIGTERM", () => fs.writeFileSync(${log("install-term")}, "received"))`,
-				`fs.writeFileSync(${log("install-pid")}, String(process.pid))`,
+				'process.on("SIGTERM", () => fs.writeFileSync(require("node:path").join(process.argv[2], "install-term"), "received"))',
+				'fs.writeFileSync(require("node:path").join(process.argv[2], "install-pid"), String(process.pid))',
 				"setInterval(() => {}, 1000)",
 			].join("\n"),
 		)
-		lines.push(`    exec ${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`)
+		lines.push(`    exec ${shellQuote(process.execPath)} ${shellQuote(script)} ${shellQuote(dir)}`)
 	}
 	if (install === "hang") lines.push("    sleep 30")
 	if (install === "fail") lines.push("    exit 1")
@@ -273,9 +277,9 @@ const writePnpmShim = async (dir: string, install: InstallBehavior): Promise<str
 const preparedEnv = (dir: string, shimDir: string): NodeJS.ProcessEnv =>
 	minimalEnv({ SOLHEIM_API_KEY: "sk-test", PATH: `${shimDir}:${process.env["PATH"] ?? ""}` })
 
-const preparedArgs = (dir: string, repo: string, trustFile: string): string[] => [
+const preparedArgs = (dir: string, repo: string, trustFile: string, reps = 1): string[] => [
 	"--reps",
-	"1",
+	String(reps),
 	"--out",
 	path.join(dir, "out"),
 	"--trust-file",
@@ -284,9 +288,9 @@ const preparedArgs = (dir: string, repo: string, trustFile: string): string[] =>
 	repo,
 ]
 
-const runPreparedSide = async (dir: string, repo: string, trustFile: string): Promise<RunOutcome> => {
+const runPreparedSide = async (dir: string, repo: string, trustFile: string, reps = 1): Promise<RunOutcome> => {
 	const shimDir = await writePnpmShim(dir, "succeed")
-	return runSideScript(preparedArgs(dir, repo, trustFile), preparedEnv(dir, shimDir))
+	return runSideScript(preparedArgs(dir, repo, trustFile, reps), preparedEnv(dir, shimDir))
 }
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
@@ -332,15 +336,20 @@ const assertPreparationRanInFreshTree = async (dir: string, repo: string, commit
 
 interface SideResultsFile {
 	pins: { commit: string }
-	runs: { outcome: { outcome: string } }[]
+	runs: { fixtureName: string; repIndex: number; outcome: { outcome: string } }[]
 }
 
 // The launch fails deterministically because the fixture has no host entry,
 // so every repetition is a non-correct record and the side still publishes.
-const assertPublishedFailedRuns = async (dir: string, commit: string): Promise<void> => {
+const assertPublishedFailedRuns = async (dir: string, commit: string, reps = 1): Promise<void> => {
 	const results = JSON.parse(await fs.readFile(path.join(dir, "out", "side-results.json"), "utf8")) as SideResultsFile
 	assert.equal(results.pins.commit, commit)
-	assert.ok(results.runs.length >= 1)
+	assert.deepEqual(
+		results.runs.map((run) => `${run.fixtureName}#${run.repIndex}`).sort(),
+		CODING_FIXTURE_BUNDLES.flatMap((bundle) =>
+			Array.from({ length: reps }, (_, repIndex) => `${bundle.fixture.identity.name}#${repIndex}`),
+		).sort(),
+	)
 	for (const run of results.runs) assert.notEqual(run.outcome.outcome, "correct")
 }
 
@@ -354,6 +363,7 @@ describe("coding side evaluated tree preparation", () => {
 				const { repo, commit } = await makeFixtureCommit(dir, {
 					".gitignore": "src/dist\nnode_modules\n",
 					"tracked.txt": "committed",
+					"src/package.json": JSON.stringify({ version: "1.2.3" }),
 				})
 				const trustFile = await writePolicy(dir, [commit])
 				// Everything planted below stays outside the approval. The
@@ -362,6 +372,7 @@ describe("coding side evaluated tree preparation", () => {
 				// executable artifacts a real build may never overwrite. If
 				// any of them ran, its marker file would exist.
 				await fs.writeFile(path.join(repo, "tracked.txt"), "tampered")
+				await fs.writeFile(path.join(repo, "src/package.json"), JSON.stringify({ version: "9.9.9" }))
 				await fs.writeFile(path.join(repo, "untracked.txt"), "untracked")
 				const plantedEntry = `require("node:fs").writeFileSync(${JSON.stringify(path.join(repo, "planted-entry-marker"))}, "executed")\n`
 				await fs.mkdir(path.join(repo, "src/dist"), { recursive: true })
@@ -369,7 +380,7 @@ describe("coding side evaluated tree preparation", () => {
 				await fs.mkdir(path.join(repo, "node_modules/.bin"), { recursive: true })
 				await fs.writeFile(
 					path.join(repo, "node_modules/.bin/evil"),
-					`#!/bin/sh\nprintf executed > ${JSON.stringify(path.join(repo, "planted-bin-marker"))}\n`,
+					`#!/bin/sh\nprintf executed > ${shellQuote(path.join(repo, "planted-bin-marker"))}\n`,
 					{ mode: 0o755 },
 				)
 				const outcome = await runPreparedSide(dir, repo, trustFile)
@@ -392,6 +403,13 @@ describe("coding side evaluated tree preparation", () => {
 				// The pins record the approved commit, and the preparation
 				// children never saw the credential.
 				await assertPublishedFailedRuns(dir, commit)
+				const published = JSON.parse(await fs.readFile(path.join(dir, "out/side-results.json"), "utf8")) as {
+					runs: { trace: { run: { identity: { extensionVersion: unknown } } } }[]
+				}
+				for (const run of published.runs) {
+					assert.deepEqual(run.trace.run.identity.extensionVersion, { available: true, value: "1.2.3" })
+				}
+
 				const envLog = await fs.readFile(path.join(dir, "pnpm-env.log"), "utf8")
 				assert.ok(!envLog.includes("SOLHEIM_API_KEY="))
 			} finally {
@@ -523,3 +541,21 @@ describe("coding side evaluated tree preparation", () => {
 			},
 		)
 })
+
+it(
+	"preserves literal shell metacharacters in shim paths and publishes every repetition",
+	{ timeout: 240_000 },
+	async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "coding-side-$HOME-`pwd`-'-"))
+		try {
+			const { repo, commit } = await makeFixtureCommit(dir, { ".gitignore": "src/dist\n" })
+			const trustFile = await writePolicy(dir, [commit])
+			const outcome = await runPreparedSide(dir, repo, trustFile, 2)
+			assert.equal(outcome.code, 0, outcome.stderr)
+			await assertPreparationRanInFreshTree(dir, repo, commit)
+			await assertPublishedFailedRuns(dir, commit, 2)
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	},
+)

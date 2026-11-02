@@ -100,6 +100,16 @@ describe("comparison report", () => {
 		// The report serializes cleanly: a self-contained result.
 		const parsed = JSON.parse(JSON.stringify(report)) as typeof report
 		assert.equal(parsed.fixtures.length, report.fixtures.length)
+		assert.equal(parsed.fixtures[0]?.pairedDurations.standardError, 0)
+		assert.equal(parsed.fixtures[0]?.pairedCosts.standardError, 0)
+		assert.ok((parsed.fixtures[0]?.pairedOutcomes.standardError ?? 0) > 0)
+		const markdown = renderMarkdownReport(report)
+		assert.match(markdown, /Outcome delta \(SE\)/)
+		assert.match(markdown, /Duration delta ms \(SE\)/)
+		assert.match(markdown, /Cost delta USD \(SE\)/)
+		assert.ok(markdown.includes("-0.05000 (SE 0.000)"))
+		assert.match(markdown, /unavailable/)
+		assert.match(markdown, /sample standard error/)
 	})
 
 	it("flags incompatible pairs when pinned inputs differ", () => {
