@@ -8,8 +8,7 @@
 		"src/integrations/misc/__tests__/performance/**",
 		"src/integrations/terminal/__tests__/setupTerminalTests.ts",
 		"src/integrations/terminal/__tests__/streamUtils/index.ts",
-		"src/services/tree-sitter/__tests__/helpers.ts",
-		"src/core/tools/guardedWrite.ts"
+		"src/services/tree-sitter/__tests__/helpers.ts"
 	],
 	"ignoreDependencies": ["lint-staged"],
 	"ignoreBinaries": ["dotenvx"],
