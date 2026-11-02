@@ -3,11 +3,24 @@ import i18next, { loadLanguage } from "../setup"
 // A dynamic import that rejects is what a 404 or a chunk missing from the
 // deployed manifest looks like at runtime. One namespace is enough: `loadLanguage`
 // registers a language only after every namespace resolves.
+const loader = vi.hoisted(() => ({ calls: 0, fail: true }))
+
 vi.mock("../locales/ja/common.json", () => {
-	throw new Error("Failed to fetch dynamically imported module")
+	loader.calls++
+
+	if (loader.fail) {
+		throw new Error("Failed to fetch dynamically imported module")
+	}
+
+	return { default: { errorBoundary: { title: "問題が発生しました" } } }
 })
 
 describe("i18n setup locale load failure", () => {
+	beforeEach(() => {
+		loader.calls = 0
+		loader.fail = true
+	})
+
 	afterEach(() => {
 		vi.restoreAllMocks()
 	})
@@ -29,7 +42,10 @@ describe("i18n setup locale load failure", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
 
 		await loadLanguage("ja")
+		expect(loader.calls).toBe(1)
+
 		await loadLanguage("ja")
+		expect(loader.calls).toBe(2)
 
 		// `loadedLanguages` is only updated on success and `pendingLanguages` is
 		// cleared in `finally`, so a transient failure must not be memoized.
@@ -38,5 +54,17 @@ describe("i18n setup locale load failure", () => {
 		// VS Code webview) can still reject the second import from that cache
 		// without re-requesting the chunk.
 		expect(warn).toHaveBeenCalledTimes(2)
+	})
+
+	it("registers the bundles when a later attempt succeeds", async () => {
+		vi.spyOn(console, "warn").mockImplementation(() => undefined)
+
+		await loadLanguage("ja")
+		expect(i18next.hasResourceBundle("ja", "common")).toBe(false)
+
+		loader.fail = false
+		await loadLanguage("ja")
+
+		expect(i18next.t("common:errorBoundary.title", { lng: "ja" })).toBe("問題が発生しました")
 	})
 })
