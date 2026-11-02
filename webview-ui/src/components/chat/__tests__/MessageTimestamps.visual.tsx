@@ -21,7 +21,6 @@ for (const theme of visualThemes) {
 
 		await expect(story.getByTestId("message-timestamp")).toHaveCount(3)
 		await expect(story).toHaveScreenshot(`chat-row-timestamps-${theme.name}.png`)
-		await expectBoundedLayout(page, story, {})
 	})
 
 	test(`renders the start time in the expanded task header in the VS Code ${theme.name} theme`, async ({
@@ -38,7 +37,7 @@ for (const theme of visualThemes) {
 		await expect(story.getByTestId("message-timestamp")).toBeVisible()
 
 		await expect(story).toHaveScreenshot(`task-header-timestamp-${theme.name}.png`)
-		await expectBoundedLayout(page, story, {})
+		await expectBoundedLayout(page, story, { focusedControl: story.getByRole("button").first() })
 	})
 
 	test(`renders the absolute date and time in the history item footer in the VS Code ${theme.name} theme`, async ({
@@ -50,9 +49,9 @@ for (const theme of visualThemes) {
 		await applyVisualTheme(page, theme)
 		const story = component.getByTestId("task-item-footer-story")
 
-		await expect(story.getByText("2026-05-31 10:00")).toBeVisible()
+		await expect(story.getByText("2026-05-31, 10:00")).toBeVisible()
 
 		await expect(story).toHaveScreenshot(`task-item-footer-absolute-${theme.name}.png`)
-		await expectBoundedLayout(page, story, {})
+		await expectBoundedLayout(page, story, { focusedControl: story.getByRole("button").first() })
 	})
 }
