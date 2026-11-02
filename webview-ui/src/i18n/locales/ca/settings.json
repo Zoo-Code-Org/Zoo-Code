@@ -1193,10 +1193,6 @@
 		"configureModes": "Disponibilitat del mode",
 		"modeAny": "Qualsevol mode",
 		"modeCount": "{{count}} modes",
-		"diagnostics": {
-			"title": "No s'han pogut carregar algunes skills",
-			"description": "Corrigeu el frontmatter YAML dels fitxers SKILL.md esmentats i, a continuació, torneu a obrir o actualitzar aquesta pàgina."
-		},
 		"deleteDialog": {
 			"title": "Eliminar Skill",
 			"description": "Estàs segur que vols eliminar la skill \"{{name}}\"? Aquesta acció no es pot desfer.",
@@ -1236,6 +1232,10 @@
 			"descriptionRequired": "La descripció és obligatòria",
 			"descriptionTooLong": "La descripció ha de tenir com a màxim 1024 caràcters"
 		},
-		"footer": "Crea les teves pròpies skills amb el mode Skill Writer, disponible al <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+		"footer": "Crea les teves pròpies skills amb el mode Skill Writer, disponible al <MarketplaceLink>Modes Marketplace</MarketplaceLink>.",
+		"diagnostics": {
+			"title": "No s'han pogut carregar algunes skills",
+			"description": "Corrigeu el frontmatter YAML dels fitxers SKILL.md esmentats i, a continuació, torneu a obrir o actualitzar aquesta pàgina."
+		}
 	}
 }

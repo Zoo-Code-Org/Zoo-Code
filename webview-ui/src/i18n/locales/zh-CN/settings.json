@@ -1193,10 +1193,6 @@
 		"configureModes": "模式可用性",
 		"modeAny": "任意模式",
 		"modeCount": "{{count}} 种模式",
-		"diagnostics": {
-			"title": "部分技能加载失败",
-			"description": "请修复所列 SKILL.md 文件中的 YAML frontmatter，然后重新打开或刷新此页面。"
-		},
 		"deleteDialog": {
 			"title": "删除技能",
 			"description": "您确定要删除技能\"{{name}}\"吗？此操作无法撤销。",
@@ -1236,6 +1232,10 @@
 			"descriptionRequired": "描述为必填项",
 			"descriptionTooLong": "描述不得超过1024个字符"
 		},
-		"footer": "使用技能编写器模式创建您自己的技能，可在 <MarketplaceLink>模式市集</MarketplaceLink> 中获得。"
+		"footer": "使用技能编写器模式创建您自己的技能，可在 <MarketplaceLink>模式市集</MarketplaceLink> 中获得。",
+		"diagnostics": {
+			"title": "部分技能加载失败",
+			"description": "请修复所列 SKILL.md 文件中的 YAML frontmatter，然后重新打开或刷新此页面。"
+		}
 	}
 }

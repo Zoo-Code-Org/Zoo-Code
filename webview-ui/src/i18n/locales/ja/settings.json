@@ -1193,10 +1193,6 @@
 		"configureModes": "モード可用性",
 		"modeAny": "任意のモード",
 		"modeCount": "{{count}} モード",
-		"diagnostics": {
-			"title": "一部のスキルを読み込めませんでした",
-			"description": "該当する SKILL.md ファイルの YAML フロントマターを修正してから、このページを再表示してください。"
-		},
 		"deleteDialog": {
 			"title": "スキルを削除",
 			"description": "スキル「{{name}}」を削除してもよろしいですか？この操作は元に戻せません。",
@@ -1236,6 +1232,10 @@
 			"descriptionRequired": "説明は必須です",
 			"descriptionTooLong": "説明は1024文字以内である必要があります"
 		},
-		"footer": "スキルライターモードで独自のスキルを作成します。<MarketplaceLink>モードマーケットプレイス</MarketplaceLink>で入手可能です。"
+		"footer": "スキルライターモードで独自のスキルを作成します。<MarketplaceLink>モードマーケットプレイス</MarketplaceLink>で入手可能です。",
+		"diagnostics": {
+			"title": "一部のスキルを読み込めませんでした",
+			"description": "該当する SKILL.md ファイルの YAML フロントマターを修正してから、このページを再表示してください。"
+		}
 	}
 }

@@ -1193,10 +1193,6 @@
 		"configureModes": "모드 가용성",
 		"modeAny": "모든 모드",
 		"modeCount": "{{count}} 모드",
-		"diagnostics": {
-			"title": "일부 스킬을 불러오지 못했습니다",
-			"description": "열거된 SKILL.md 파일의 YAML frontmatter를 수정한 후, 이 페이지를 다시 열거나 새로고침해 주세요."
-		},
 		"deleteDialog": {
 			"title": "스킬 삭제",
 			"description": "스킬 \"{{name}}\"을(를) 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
@@ -1236,6 +1232,10 @@
 			"descriptionRequired": "설명은 필수입니다",
 			"descriptionTooLong": "설명은 1024자 이하여야 합니다"
 		},
-		"footer": "스킬 작성자 모드로 자신만의 스킬을 만들 수 있습니다. <MarketplaceLink>모드 마켓플레이스</MarketplaceLink>에서 사용 가능합니다."
+		"footer": "스킬 작성자 모드로 자신만의 스킬을 만들 수 있습니다. <MarketplaceLink>모드 마켓플레이스</MarketplaceLink>에서 사용 가능합니다.",
+		"diagnostics": {
+			"title": "일부 스킬을 불러오지 못했습니다",
+			"description": "열거된 SKILL.md 파일의 YAML frontmatter를 수정한 후, 이 페이지를 다시 열거나 새로고침해 주세요."
+		}
 	}
 }

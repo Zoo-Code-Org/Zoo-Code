@@ -176,10 +176,6 @@
 		"configureModes": "Mode availability",
 		"modeAny": "Any mode",
 		"modeCount": "{{count}} modes",
-		"diagnostics": {
-			"title": "Some skills could not be loaded",
-			"description": "Fix the YAML frontmatter in the listed SKILL.md files, then reopen or refresh this page."
-		},
 		"deleteDialog": {
 			"title": "Delete Skill",
 			"description": "Are you sure you want to delete the skill \"{{name}}\"? This action cannot be undone.",
@@ -219,7 +215,11 @@
 			"descriptionRequired": "Description is required",
 			"descriptionTooLong": "Description must be 1024 characters or less"
 		},
-		"footer": "Create your own skills with the Skill Writer mode, available in the <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+		"footer": "Create your own skills with the Skill Writer mode, available in the <MarketplaceLink>Modes Marketplace</MarketplaceLink>.",
+		"diagnostics": {
+			"title": "Some skills could not be loaded",
+			"description": "Fix the YAML frontmatter in the listed SKILL.md files, then reopen or refresh this page."
+		}
 	},
 	"ui": {
 		"collapseThinking": {

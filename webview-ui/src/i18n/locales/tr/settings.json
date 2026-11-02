@@ -1193,10 +1193,6 @@
 		"configureModes": "Mod Kullanılabilirliği",
 		"modeAny": "Herhangi bir mod",
 		"modeCount": "{{count}} mod",
-		"diagnostics": {
-			"title": "Bazı skill'ler yüklenemedi",
-			"description": "Listelenen SKILL.md dosyalarındaki YAML frontmatter'ını düzeltin, ardından bu sayfayı yeniden açın veya yenileyin."
-		},
 		"deleteDialog": {
 			"title": "Beceriyi Sil",
 			"description": "\"{{name}}\" becerisini silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.",
@@ -1236,6 +1232,10 @@
 			"descriptionRequired": "Açıklama gereklidir",
 			"descriptionTooLong": "Açıklama en fazla 1024 karakter olmalıdır"
 		},
-		"footer": "Skill Writer modu ile kendi becerilerinizi oluşturun. <MarketplaceLink>Modes Marketplace</MarketplaceLink>'de mevcut."
+		"footer": "Skill Writer modu ile kendi becerilerinizi oluşturun. <MarketplaceLink>Modes Marketplace</MarketplaceLink>'de mevcut.",
+		"diagnostics": {
+			"title": "Bazı skill'ler yüklenemedi",
+			"description": "Listelenen SKILL.md dosyalarındaki YAML frontmatter'ını düzeltin, ardından bu sayfayı yeniden açın veya yenileyin."
+		}
 	}
 }

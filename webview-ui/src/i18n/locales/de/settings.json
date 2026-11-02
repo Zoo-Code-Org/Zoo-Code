@@ -1193,10 +1193,6 @@
 		"configureModes": "Modverfügbarkeit",
 		"modeAny": "Beliebiger Modus",
 		"modeCount": "{{count}} Modi",
-		"diagnostics": {
-			"title": "Einige Skills konnten nicht geladen werden",
-			"description": "Korrigiere das YAML-Frontmatter in den aufgeführten SKILL.md-Dateien und öffne diese Seite anschließend erneut oder aktualisiere sie."
-		},
 		"deleteDialog": {
 			"title": "Skill löschen",
 			"description": "Bist du sicher, dass du den Skill \"{{name}}\" löschen möchtest? Diese Aktion kann nicht rückgängig gemacht werden.",
@@ -1236,6 +1232,10 @@
 			"descriptionRequired": "Beschreibung ist erforderlich",
 			"descriptionTooLong": "Beschreibung muss 1024 Zeichen oder weniger sein"
 		},
-		"footer": "Erstelle deine eigenen Skills mit dem Skill Writer Modus, verfügbar im <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+		"footer": "Erstelle deine eigenen Skills mit dem Skill Writer Modus, verfügbar im <MarketplaceLink>Modes Marketplace</MarketplaceLink>.",
+		"diagnostics": {
+			"title": "Einige Skills konnten nicht geladen werden",
+			"description": "Korrigiere das YAML-Frontmatter in den aufgeführten SKILL.md-Dateien und öffne diese Seite anschließend erneut oder aktualisiere sie."
+		}
 	}
 }
