@@ -178,7 +178,9 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 
 		const diff = await getRepositoryDiff(repository)
 		if (!diff) {
-			vscode.window.showInformationMessage("No staged or working directory changes found to generate commit message.")
+			vscode.window.showInformationMessage(
+				"No staged or working directory changes found to generate commit message.",
+			)
 			return
 		}
 
