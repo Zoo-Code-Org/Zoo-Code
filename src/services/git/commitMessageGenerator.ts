@@ -65,7 +65,7 @@ Guidelines:
 
 const SENSITIVE_PATTERNS = [
 	/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
-	/(?:api[_-]?key|auth[_-]?token|bearer|secret|password)[\s]*[=:]\s*['"]?([a-zA-Z0-9_\-\.]{8,})['"]?/gi,
+	/(?:api[_-]?key|auth[_-]?token|bearer|secret|password)[\s]*[=:]\s*['"]?([a-zA-Z0-9_\-.]{8,})['"]?/gi,
 ]
 
 /**
@@ -240,22 +240,6 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 			return
 		}
 
-		const diff = await getRepositoryDiff(repository)
-		if (!diff) {
-			vscode.window.showInformationMessage(
-				"No staged or working directory changes found to generate commit message.",
-			)
-			return
-		}
-
-		const { apiConfiguration } = await provider.getState()
-		if (!apiConfiguration || !apiConfiguration.apiProvider) {
-			vscode.window.showErrorMessage(
-				"No valid API provider configured. Please configure an API provider in Zoo Code settings.",
-			)
-			return
-		}
-
 		await vscode.window.withProgress(
 			{
 				location: vscode.ProgressLocation.Notification,
@@ -269,6 +253,22 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 				})
 
 				try {
+					const diff = await getRepositoryDiff(repository)
+					if (!diff) {
+						vscode.window.showInformationMessage(
+							"No staged or working directory changes found to generate commit message.",
+						)
+						return
+					}
+
+					const { apiConfiguration } = await provider.getState()
+					if (!apiConfiguration || !apiConfiguration.apiProvider) {
+						vscode.window.showErrorMessage(
+							"No valid API provider configured. Please configure an API provider in Zoo Code settings.",
+						)
+						return
+					}
+
 					const prompt = buildCommitMessagePrompt(diff)
 					const rawMessage = await singleCompletionHandler(apiConfiguration as ProviderSettings, prompt, {
 						abortSignal: abortController.signal,
