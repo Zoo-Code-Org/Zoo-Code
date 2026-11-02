@@ -665,7 +665,8 @@ export class ProviderSettingsManager {
 	private static getConfiguredCustomStoragePath(): string {
 		try {
 			const configuration = vscode.workspace.getConfiguration(Package.name)
-			return configuration.get<string>("customStoragePath", "") ?? ""
+			const customStoragePath = configuration.get<unknown>("customStoragePath", "")
+			return typeof customStoragePath === "string" ? customStoragePath : ""
 		} catch {
 			return ""
 		}
