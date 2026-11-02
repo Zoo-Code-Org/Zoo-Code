@@ -117,7 +117,7 @@ export const registerCommands = (options: RegisterCommandOptions) => {
 // callbacks here are heterogeneous (`importSettings` takes an optional
 // `filePath?: string`, others take none) and VS Code dispatches positional
 // args dynamically.
-type CommandCallback = (...args: any[]) => unknown
+type CommandCallback = (...args: never[]) => unknown
 
 // Posts each action in order to the target instance. Failures are logged
 // (not thrown) with the handler-specific prefix so a failed post stays
