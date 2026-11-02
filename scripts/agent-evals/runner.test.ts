@@ -1,8 +1,9 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import { RooCodeEventName, TaskCommandName, type TaskCommand, type TaskEvent } from "@roo-code/types"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import { registerFixture } from "./registry.ts"
-import { runAgentFixture, type AgentRuntime, type AgentRunResult } from "./runner.ts"
+import { runAgentFixture, type AgentRuntime } from "./runner.ts"
 import { digestProjection, type AgentTrace } from "./trace.ts"
 import type { AgentFixture } from "./contract.ts"
 
@@ -42,7 +43,7 @@ function registerTestFixture(name: string, overrides: Partial<AgentFixture> = {}
 		},
 		settingsProjection: { provider: "test", model: `model-${name}` },
 		buildConfiguration: () => ({
-			apiProvider: "openai",
+			apiProvider: providerIdentifiers.openai,
 			openAiApiKey: CREDENTIAL,
 			mode: "test",
 			customModes: [{ slug: "test", name: "Test", roleDefinition: "Run one synthetic task.", groups: [] }],
