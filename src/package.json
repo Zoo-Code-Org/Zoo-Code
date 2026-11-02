@@ -191,6 +191,11 @@
 				"category": "%configuration.title%"
 			},
 			{
+				"command": "zoo-code.createDiagnosticsReport",
+				"title": "%command.createDiagnosticsReport.title%",
+				"category": "%configuration.title%"
+			},
+			{
 				"command": "zoo-code.toggleAutoApprove",
 				"title": "%command.toggleAutoApprove.title%",
 				"category": "%configuration.title%"
