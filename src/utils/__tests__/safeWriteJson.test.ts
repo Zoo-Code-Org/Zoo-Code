@@ -1,4 +1,5 @@
 import * as fsSyncActual from "fs"
+import type { PathLike } from "fs"
 import { Writable } from "stream"
 import * as path from "path"
 import * as os from "os"
@@ -315,26 +316,31 @@ describe("safeWriteJson", () => {
 
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
-		// fs.unlink is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
-		vi.mocked(fs.unlink).mockImplementation(async (filePath: any) => {
-			if (filePath.toString().includes("safeWriteText.bak_")) {
-				throw new Error("Backup deletion failed")
-			}
-			return fsPromisesActuals.unlink!(filePath)
-		})
+		// fs.unlink is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn.
+		// PathLike covers both toString() and the passthrough to the real unlink.
+		try {
+			vi.mocked(fs.unlink).mockImplementation(async (filePath: PathLike) => {
+				if (filePath.toString().includes("safeWriteText.bak_")) {
+					throw new Error("Backup deletion failed")
+				}
+				return fsPromisesActuals.unlink!(filePath)
+			})
 
-		// The write must still succeed: backup cleanup is best-effort inside
-		// safeWriteText and never masks the committed content.
-		await safeWriteJson(currentTestFilePath, newData)
+			// The write must still succeed: backup cleanup is best-effort inside
+			// safeWriteText and never masks the committed content.
+			await safeWriteJson(currentTestFilePath, newData)
 
-		const content = await readFileContent(currentTestFilePath)
-		expect(content).toEqual(newData)
+			const content = await readFileContent(currentTestFilePath)
+			expect(content).toEqual(newData)
 
-		// The orphaned backup is still on disk because its deletion failed.
-		const entries = await fs.readdir(tempDir)
-		expect(entries.some((entry) => entry.includes("safeWriteText.bak_"))).toBe(true)
-
-		vi.mocked(fs.unlink).mockRestore()
+			// The orphaned backup is still on disk because its deletion failed.
+			const entries = await fs.readdir(tempDir)
+			expect(entries.some((entry) => entry.includes("safeWriteText.bak_"))).toBe(true)
+		} finally {
+			// Restore even when an assertion fails: a leaked rejecting unlink would break the
+			// next test's backup-absence assertion.
+			vi.mocked(fs.unlink).mockRestore()
+		}
 	})
 
 	// The expected error message might need to change if the mock behaves differently.

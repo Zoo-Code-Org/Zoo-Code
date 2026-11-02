@@ -1619,11 +1619,6 @@
 			"count": 2
 		}
 	},
-	"utils/__tests__/safeWriteJson.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"vitest.setup.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
