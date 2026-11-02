@@ -4,7 +4,6 @@
 		"save": "Zapisz",
 		"done": "Gotowe",
 		"cancel": "Anuluj",
-		"reset": "Resetuj",
 		"select": "Wybierz",
 		"add": "Dodaj nagłówek",
 		"remove": "Usuń"
@@ -171,8 +170,6 @@
 		"title": "Indeksowanie kodu",
 		"enableLabel": "Włącz indeksowanie kodu",
 		"enableDescription": "Włącz indeksowanie kodu, aby poprawić wyszukiwanie i zrozumienie kontekstu",
-		"providerLabel": "Dostawca osadzania",
-		"selectProviderPlaceholder": "Wybierz dostawcę",
 		"openaiProvider": "OpenAI",
 		"ollamaProvider": "Ollama",
 		"geminiProvider": "Gemini",
@@ -201,18 +198,11 @@
 		"openAiCompatibleBaseUrlLabel": "Bazowy URL",
 		"openAiCompatibleApiKeyLabel": "Klucz API",
 		"openAiCompatibleApiKeyPlaceholder": "Wprowadź swój klucz API",
-		"openAiCompatibleModelDimensionLabel": "Wymiar Embeddingu:",
 		"modelDimensionLabel": "Wymiar modelu",
-		"openAiCompatibleModelDimensionPlaceholder": "np., 1536",
-		"openAiCompatibleModelDimensionDescription": "Wymiar embeddingu (rozmiar wyjściowy) dla twojego modelu. Sprawdź dokumentację swojego dostawcy, aby uzyskać tę wartość. Typowe wartości: 384, 768, 1536, 3072.",
 		"modelLabel": "Model",
-		"selectModelPlaceholder": "Wybierz model",
-		"ollamaUrlLabel": "URL Ollama:",
 		"qdrantUrlLabel": "URL Qdrant",
-		"qdrantKeyLabel": "Klucz Qdrant:",
 		"startIndexingButton": "Rozpocznij",
 		"clearIndexDataButton": "Wyczyść indeks",
-		"unsavedSettingsMessage": "Zapisz swoje ustawienia przed rozpoczęciem procesu indeksowania.",
 		"clearDataDialog": {
 			"title": "Czy jesteś pewien?",
 			"description": "Tej akcji nie można cofnąć. Spowoduje to trwałe usunięcie danych indeksu Twojego kodu.",
@@ -221,8 +211,6 @@
 		},
 		"description": "Skonfiguruj ustawienia indeksowania bazy kodu, aby włączyć wyszukiwanie semantyczne w swoim projekcie. <0>Dowiedz się więcej</0>",
 		"statusTitle": "Status",
-		"settingsTitle": "Ustawienia indeksowania",
-		"disabledMessage": "Indeksowanie bazy kodu jest obecnie wyłączone. Włącz je w ustawieniach globalnych, aby skonfigurować opcje indeksowania.",
 		"embedderProviderLabel": "Dostawca Embeddera",
 		"modelPlaceholder": "Wprowadź nazwę modelu",
 		"selectModel": "Wybierz model",
@@ -236,7 +224,6 @@
 		"qdrantUrlPlaceholder": "http://localhost:6333",
 		"saveError": "Nie udało się zapisać ustawień",
 		"modelDimensions": "({{dimension}} wymiarów)",
-		"saveSuccess": "Ustawienia zapisane pomyślnie",
 		"saving": "Zapisywanie...",
 		"saveSettings": "Zapisz",
 		"indexingStatuses": {
@@ -245,7 +232,6 @@
 			"indexed": "Zaindeksowane",
 			"error": "Błąd"
 		},
-		"close": "Zamknij",
 		"validation": {
 			"invalidQdrantUrl": "Nieprawidłowy URL Qdrant",
 			"invalidOllamaUrl": "Nieprawidłowy URL Ollama",
@@ -260,17 +246,14 @@
 			"mistralApiKeyRequired": "Klucz API Mistral jest wymagany",
 			"vercelAiGatewayApiKeyRequired": "Klucz API Vercel AI Gateway jest wymagany",
 			"bedrockRegionRequired": "Region AWS jest wymagany",
-			"bedrockProfileRequired": "Profil AWS jest wymagany",
 			"ollamaBaseUrlRequired": "Wymagany jest bazowy adres URL Ollama",
 			"baseUrlRequired": "Wymagany jest bazowy adres URL",
-			"modelDimensionMinValue": "Wymiar modelu musi być większy niż 0",
 			"openRouterApiKeyRequired": "Wymagany jest klucz API OpenRouter"
 		},
 		"optional": "opcjonalny",
 		"advancedConfigLabel": "Konfiguracja zaawansowana",
 		"searchMinScoreLabel": "Próg wyniku wyszukiwania",
 		"searchMinScoreDescription": "Minimalny wynik podobieństwa (0.0-1.0) wymagany dla wyników wyszukiwania. Niższe wartości zwracają więcej wyników, ale mogą być mniej trafne. Wyższe wartości zwracają mniej wyników, ale bardziej trafnych.",
-		"searchMinScoreResetTooltip": "Zresetuj do wartości domyślnej (0.4)",
 		"searchMaxResultsLabel": "Maksymalna liczba wyników wyszukiwania",
 		"searchMaxResultsDescription": "Maksymalna liczba wyników wyszukiwania zwracanych podczas zapytania do indeksu bazy kodu. Wyższe wartości zapewniają więcej kontekstu, ale mogą zawierać mniej istotne wyniki.",
 		"resetToDefault": "Przywróć domyślne",
@@ -286,7 +269,6 @@
 		"description": "Pozwól Zoo na automatyczne wykonywanie operacji bez wymagania zatwierdzenia. Włącz te ustawienia tylko jeśli w pełni ufasz AI i rozumiesz związane z tym zagrożenia bezpieczeństwa.",
 		"enabled": "Auto-zatwierdzanie włączone",
 		"toggleAriaLabel": "Przełącz automatyczne zatwierdzanie",
-		"disabledAriaLabel": "Automatyczne zatwierdzanie wyłączone - najpierw wybierz opcje",
 		"readOnly": {
 			"label": "Odczyt",
 			"description": "Gdy włączone, Zoo automatycznie będzie wyświetlać zawartość katalogów i czytać pliki bez konieczności klikania przycisku Zatwierdź.",
@@ -298,7 +280,6 @@
 		"write": {
 			"label": "Zapis",
 			"description": "Automatycznie twórz i edytuj pliki bez konieczności zatwierdzania",
-			"delayLabel": "Opóźnienie po zapisach, aby umożliwić diagnostyce wykrycie potencjalnych problemów",
 			"outsideWorkspace": {
 				"label": "Uwzględnij pliki poza obszarem roboczym",
 				"description": "Pozwól Zoo na tworzenie i edycję plików poza bieżącym obszarem roboczym bez konieczności zatwierdzania."
@@ -356,14 +337,12 @@
 			"deniedCommandsDescription": "Prefiksy poleceń, które będą automatycznie odrzucane bez pytania o zatwierdzenie. W przypadku konfliktów z dozwolonymi poleceniami, najdłuższe dopasowanie prefiksu ma pierwszeństwo. Dodaj * aby odrzucić wszystkie polecenia.",
 			"commandPlaceholder": "Wprowadź prefiks polecenia (np. 'git ')",
 			"deniedCommandPlaceholder": "Wprowadź prefiks polecenia do odrzucenia (np. 'rm -rf')",
-			"addButton": "Dodaj",
-			"autoDenied": "Polecenia z prefiksem `{{prefix}}` zostały zabronione przez użytkownika. Nie obchodź tego ograniczenia uruchamiając inne polecenie."
+			"addButton": "Dodaj"
 		},
 		"apiRequestLimit": {
 			"title": "Maksymalna liczba żądań",
 			"unlimited": "Bez limitu"
 		},
-		"selectOptionsFirst": "Wybierz co najmniej jedną opcję poniżej, aby włączyć automatyczne zatwierdzanie",
 		"apiCostLimit": {
 			"title": "Maksymalny koszt",
 			"unlimited": "Bez limitu"
@@ -373,12 +352,10 @@
 		}
 	},
 	"providers": {
-		"providerDocumentation": "Dokumentacja {{provider}}",
 		"configProfile": "Profil konfiguracji",
 		"description": "Zapisz różne konfiguracje API, aby szybko przełączać się między dostawcami i ustawieniami.",
 		"apiProvider": "Dostawca API",
 		"apiProviderDocs": "Dokumentacja dostawcy",
-		"model": "Model",
 		"nameEmpty": "Nazwa nie może być pusta",
 		"nameExists": "Profil o tej nazwie już istnieje",
 		"deleteProfile": "Usuń profil",
@@ -470,7 +447,6 @@
 		},
 		"useCustomBaseUrl": "Użyj niestandardowego URL bazowego",
 		"useReasoning": "Włącz rozumowanie",
-		"useHostHeader": "Użyj niestandardowego nagłówka Host",
 		"customHeaders": "Niestandardowe nagłówki",
 		"headerName": "Nazwa nagłówka",
 		"headerValue": "Wartość nagłówka",
@@ -482,7 +458,6 @@
 		"requestyApiKey": "Klucz API Requesty",
 		"refreshModels": {
 			"label": "Odśwież modele",
-			"hint": "Proszę ponownie otworzyć ustawienia, aby zobaczyć najnowsze modele.",
 			"loading": "Odświeżanie listy modeli...",
 			"success": "Lista modeli została pomyślnie odświeżona!",
 			"error": "Nie udało się odświeżyć listy modeli. Spróbuj ponownie."
@@ -571,11 +546,8 @@
 		"awsGlobalInference": "Użyj globalnej inferencji (automatyczny wybór optymalnego regionu AWS)",
 		"awsServiceTier": "Warstwa usługi",
 		"awsServiceTierStandard": "Standard",
-		"awsServiceTierStandardDesc": "Zrównoważona wydajność i koszt",
 		"awsServiceTierFlex": "Flex (50% zniżka)",
-		"awsServiceTierFlexDesc": "Niższy koszt, wyższe opóźnienie dla zadań niekrytycznych",
 		"awsServiceTierPriority": "Priority (75% premia)",
-		"awsServiceTierPriorityDesc": "Najszybsza wydajność dla aplikacji krytycznych",
 		"awsServiceTierNote": "Warstwy usługi wpływają na ceny i wydajność. Flex oferuje 50% zniżkę z wyższym opóźnieniem, Priority oferuje 25% lepszą wydajność z 75% premią.",
 		"awsBedrockVpc": {
 			"useCustomVpcEndpoint": "Użyj niestandardowego punktu końcowego VPC",
@@ -610,17 +582,13 @@
 		"googleCloudRegion": "Region Google Cloud",
 		"lmStudio": {
 			"baseUrl": "URL bazowy (opcjonalnie)",
-			"modelId": "ID modelu",
 			"speculativeDecoding": "Włącz dekodowanie spekulacyjne",
 			"draftModelId": "ID modelu szkicu",
 			"draftModelDesc": "Aby dekodowanie spekulacyjne działało poprawnie, model szkicu musi pochodzić z tej samej rodziny modeli.",
-			"selectDraftModel": "Wybierz model szkicu",
-			"noModelsFound": "Nie znaleziono modeli szkicu. Upewnij się, że LM Studio jest uruchomione z włączonym trybem serwera.",
 			"description": "LM Studio pozwala na lokalne uruchamianie modeli na twoim komputerze. Aby rozpocząć, zapoznaj się z ich <a>przewodnikiem szybkiego startu</a>. Będziesz również musiał uruchomić funkcję <b>serwera lokalnego</b> LM Studio, aby używać go z tym rozszerzeniem. <span>Uwaga:</span> Zoo Code używa złożonych podpowiedzi i działa najlepiej z modelami Claude. Modele o niższych możliwościach mogą nie działać zgodnie z oczekiwaniami."
 		},
 		"ollama": {
 			"baseUrl": "URL bazowy (opcjonalnie)",
-			"modelId": "ID modelu",
 			"apiKey": "Klucz API Ollama",
 			"apiKeyHelp": "Opcjonalny klucz API dla instancji Ollama, które wymagają uwierzytelnienia, lub dla usług chmurowych. Zoo Code wysyła klucz tylko do punktów końcowych HTTPS lub loopback. Zdalny punkt końcowy HTTP nie dostaje klucza, ponieważ klucz byłby przesłany jawnym tekstem. Użyj HTTPS dla zdalnej instancji, która wymaga klucza. Dla instalacji lokalnej pozostaw to pole puste.",
 			"numCtx": "Rozmiar okna kontekstu (num_ctx)",
@@ -650,10 +618,6 @@
 			"imageSupport": {
 				"label": "Obsługa obrazów",
 				"description": "Czy model jest w stanie przetwarzać i rozumieć obrazy?"
-			},
-			"computerUse": {
-				"label": "Użycie komputera",
-				"description": "Czy model jest w stanie wchodzić w interakcję z przeglądarką?"
 			},
 			"promptCache": {
 				"label": "Buforowanie podpowiedzi",
@@ -711,13 +675,6 @@
 			"description": "Kontroluje, jak szczegółowe są odpowiedzi modelu. Niska szczegółowość generuje zwięzłe odpowiedzi, podczas gdy wysoka szczegółowość dostarcza dokładnych wyjaśnień."
 		},
 		"setReasoningLevel": "Włącz wysiłek rozumowania",
-		"claudeCode": {
-			"pathLabel": "Ścieżka Claude Code",
-			"description": "Opcjonalna ścieżka do Twojego CLI Claude Code. Domyślnie 'claude', jeśli nie ustawiono.",
-			"placeholder": "Domyślnie: claude",
-			"maxTokensLabel": "Maksymalna liczba tokenów wyjściowych",
-			"maxTokensDescription": "Maksymalna liczba tokenów wyjściowych dla odpowiedzi Claude Code. Domyślnie 8000."
-		},
 		"zooGateway": {
 			"account": "Konto Zoo Code",
 			"signInButton": "Zaloguj się do Zoo Code",
@@ -750,25 +707,8 @@
 	},
 	"contextManagement": {
 		"description": "Kontroluj, jakie informacje są zawarte w oknie kontekstu AI, wpływając na zużycie token i jakość odpowiedzi",
-		"autoCondenseContextPercent": {
-			"label": "Próg wyzwalający inteligentną kondensację kontekstu",
-			"description": "Gdy okno kontekstu osiągnie ten próg, Zoo automatycznie je skondensuje."
-		},
-		"condensingApiConfiguration": {
-			"label": "Konfiguracja API dla kondensacji kontekstu",
-			"description": "Wybierz, którą konfigurację API używać do operacji kondensacji kontekstu. Pozostaw niewybrane, aby użyć aktualnej aktywnej konfiguracji.",
-			"useCurrentConfig": "Domyślna"
-		},
-		"customCondensingPrompt": {
-			"label": "Niestandardowy monit kondensacji kontekstu",
-			"description": "Niestandardowy monit systemowy dla kondensacji kontekstu. Pozostaw puste, aby użyć domyślnego monitu.",
-			"placeholder": "Wprowadź tutaj swój niestandardowy monit kondensacji...\n\nMożesz użyć tej samej struktury co domyślny monit:\n- Poprzednia rozmowa\n- Aktualna praca\n- Kluczowe koncepcje techniczne\n- Istotne pliki i kod\n- Rozwiązywanie problemów\n- Oczekujące zadania i następne kroki",
-			"reset": "Przywróć domyślne",
-			"hint": "Puste = użyj domyślnego monitu"
-		},
 		"autoCondenseContext": {
-			"name": "Automatycznie wyzwalaj inteligentną kondensację kontekstu",
-			"description": "Gdy włączone, Zoo automatycznie skondensuje kontekst po osiągnięciu progu. Gdy wyłączone, nadal możesz ręcznie wyzwolić kondensację kontekstu."
+			"name": "Automatycznie wyzwalaj inteligentną kondensację kontekstu"
 		},
 		"openTabs": {
 			"label": "Limit kontekstu otwartych kart",
@@ -781,16 +721,6 @@
 		"rooignore": {
 			"label": "Pokaż pliki .rooignore na listach i w wyszukiwaniach",
 			"description": "Gdy włączone, pliki pasujące do wzorców w .rooignore będą pokazywane na listach z symbolem kłódki. Gdy wyłączone, te pliki będą całkowicie ukryte z list plików i wyszukiwań."
-		},
-		"maxReadFile": {
-			"label": "Próg automatycznego skracania odczytu pliku",
-			"description": "Zoo odczytuje tę liczbę linii, gdy model nie określa wartości początkowej/końcowej. Jeśli ta liczba jest mniejsza niż całkowita liczba linii pliku, Zoo generuje indeks numerów linii definicji kodu. Przypadki specjalne: -1 nakazuje Zoo odczytać cały plik (bez indeksowania), a 0 nakazuje nie czytać żadnych linii i dostarczyć tylko indeksy linii dla minimalnego kontekstu. Niższe wartości minimalizują początkowe użycie kontekstu, umożliwiając późniejsze precyzyjne odczyty zakresów linii. Jawne żądania początku/końca nie są ograniczone tym ustawieniem.",
-			"lines": "linii",
-			"always_full_read": "Zawsze czytaj cały plik"
-		},
-		"maxConcurrentFileReads": {
-			"label": "Limit jednoczesnych odczytów",
-			"description": "Maksymalna liczba plików, które narzędzie 'read_file' może przetwarzać jednocześnie. Wyższe wartości mogą przyspieszyć odczyt wielu małych plików, ale zwiększają zużycie pamięci."
 		},
 		"diagnostics": {
 			"includeMessages": {
@@ -820,7 +750,6 @@
 			"defaultProfile": "Globalny domyślny (wszystkie profile)",
 			"defaultDescription": "Gdy kontekst osiągnie ten procent, zostanie automatycznie skondensowany dla wszystkich profili, chyba że mają niestandardowe ustawienia",
 			"profileDescription": "Niestandardowy próg tylko dla tego profilu (zastępuje globalny domyślny)",
-			"inheritDescription": "Ten profil dziedziczy globalny domyślny próg ({{threshold}}%)",
 			"usesGlobal": "(używa globalnego {{threshold}}%)"
 		},
 		"maxImageFileSize": {
@@ -856,20 +785,11 @@
 			"description": "Wyniki poleceń, także z terminala wbudowanego, są początkowo zwinięte. Można je ręcznie rozwinąć. Nie zmienia to sposobu wykonywania poleceń."
 		},
 		"basic": {
-			"label": "Ustawienia terminala: Podstawowe",
-			"description": "Podstawowe ustawienia terminala"
+			"label": "Ustawienia terminala: Podstawowe"
 		},
 		"advanced": {
 			"label": "Ustawienia terminala: Zaawansowane",
 			"description": "Te ustawienia mają zastosowanie tylko gdy 'Użyj terminala wbudowanego' jest wyłączone. Dotyczą tylko terminala VS Code i mogą wymagać ponownego uruchomienia IDE."
-		},
-		"outputLineLimit": {
-			"label": "Limit wyjścia terminala",
-			"description": "Zachowuje pierwsze i ostatnie linie i odrzuca środkowe, aby zmieścić się w limicie. Zmniejsz, aby oszczędzać tokeny; zwiększ, aby dać Zoo więcej szczegółów ze środka. Zoo widzi symbol zastępczy tam, gdzie treść jest pomijana.<0>Dowiedz się więcej</0>"
-		},
-		"outputCharacterLimit": {
-			"label": "Limit znaków terminala",
-			"description": "Zastępuje limit linii, aby zapobiec problemom z pamięcią, narzucając twardy limit rozmiaru wyjścia. W przypadku przekroczenia zachowuje początek i koniec i pokazuje symbol zastępczy Zoo tam, gdzie treść jest pomijana. <0>Dowiedz się więcej</0>"
 		},
 		"outputPreviewSize": {
 			"label": "Rozmiar podglądu wyjścia polecenia",
@@ -928,23 +848,6 @@
 		"title": "Ustawienia zaawansowane"
 	},
 	"advanced": {
-		"diff": {
-			"label": "Włącz edycję przez różnice",
-			"description": "Gdy włączone, Zoo będzie w stanie edytować pliki szybciej i automatycznie odrzuci obcięte pełne zapisy plików",
-			"strategy": {
-				"label": "Strategia diff",
-				"options": {
-					"standard": "Standardowa (Pojedynczy blok)",
-					"multiBlock": "Eksperymentalna: Diff wieloblokowy",
-					"unified": "Eksperymentalna: Diff ujednolicony"
-				},
-				"descriptions": {
-					"standard": "Standardowa strategia diff stosuje zmiany do jednego bloku kodu na raz.",
-					"unified": "Strategia diff ujednoliconego stosuje wiele podejść do zastosowania różnic i wybiera najlepsze podejście.",
-					"multiBlock": "Strategia diff wieloblokowego pozwala na aktualizację wielu bloków kodu w pliku w jednym żądaniu."
-				}
-			}
-		},
 		"todoList": {
 			"label": "Włącz narzędzie listy zadań",
 			"description": "Po włączeniu Zoo może tworzyć i zarządzać listami zadań do śledzenia postępu zadań. Pomaga to organizować złożone zadania w łatwe do zarządzania kroki."
@@ -1011,10 +914,6 @@
 			"refreshError": "Nie udało się odświeżyć narzędzi",
 			"toolParameters": "Parametry"
 		}
-	},
-	"promptCaching": {
-		"label": "Wyłącz buforowanie promptów",
-		"description": "Po zaznaczeniu, Zoo nie będzie używać buforowania promptów dla tego modelu."
 	},
 	"temperature": {
 		"useCustom": "Użyj niestandardowej temperatury",
@@ -1085,7 +984,6 @@
 			"reservedKeys": "Dodatkowa treść nie może nadpisywać pól zarządzanych przez Zoo Code: {{keys}}."
 		},
 		"arn": {
-			"invalidFormat": "Nieprawidłowy format ARN. Sprawdź wymagania dotyczące formatu.",
 			"regionMismatch": "Ostrzeżenie: Region w Twoim ARN ({{arnRegion}}) nie zgadza się z wybranym regionem ({{region}}). Może to powodować problemy z dostępem. Dostawca użyje regionu z ARN."
 		},
 		"modelAvailability": "Podane ID modelu ({{modelId}}) jest niedostępne. Wybierz inny model.",
@@ -1107,11 +1005,6 @@
 		"projectId": "Wprowadź ID projektu...",
 		"customArn": "Wprowadź ARN (np. arn:aws:bedrock:us-east-1:123456789012:foundation-model/my-model)",
 		"baseUrl": "Wprowadź podstawowy URL...",
-		"modelId": {
-			"lmStudio": "np. meta-llama-3.1-8b-instruct",
-			"lmStudioDraft": "np. lmstudio-community/llama-3.2-1b-instruct",
-			"ollama": "np. llama3.1"
-		},
 		"numbers": {
 			"maxTokens": "np. 4096",
 			"contextWindow": "np. 128000",
@@ -1131,9 +1024,6 @@
 	},
 	"includeMaxOutputTokens": "Uwzględnij maksymalne tokeny wyjściowe",
 	"includeMaxOutputTokensDescription": "Wyślij parametr maksymalnych tokenów wyjściowych w żądaniach API. Niektórzy dostawcy mogą tego nie obsługiwać.",
-	"limitMaxTokensDescription": "Ogranicz maksymalną liczbę tokenów w odpowiedzi",
-	"maxOutputTokensLabel": "Maksymalne tokeny wyjściowe",
-	"maxTokensGenerateDescription": "Maksymalne tokeny do wygenerowania w odpowiedzi",
 	"openAiCodexSpeed": {
 		"label": "Szybkość",
 		"tooltip": "Tryb szybki korzysta z priorytetowego przetwarzania Codex, zapewniając około 1,5 raza większą szybkość i zużywając więcej limitu subskrypcji.",
@@ -1141,8 +1031,6 @@
 		"fast": "Szybki (1,5 raza szybciej, większe użycie)"
 	},
 	"serviceTier": {
-		"label": "Poziom usług",
-		"tooltip": "Aby szybciej przetwarzać żądania API, wypróbuj priorytetowy poziom usług. Aby uzyskać niższe ceny przy wyższej latencji, wypróbuj elastyczny poziom usług.",
 		"standard": "Standardowy",
 		"flex": "Elastyczny",
 		"priority": "Priorytetowy",
@@ -1191,8 +1079,6 @@
 		"editSkill": "Edytuj umiejętność",
 		"deleteSkill": "Usuń umiejętność",
 		"configureModes": "Dostępność trybu",
-		"modeAny": "Dowolny tryb",
-		"modeCount": "{{count}} tryby",
 		"deleteDialog": {
 			"title": "Usuń Umiejętność",
 			"description": "Czy na pewno chcesz usunąć umiejętność \"{{name}}\"? Tej akcji nie można cofnąć.",
@@ -1201,7 +1087,6 @@
 		},
 		"modeDialog": {
 			"title": "Konfiguruj tryby umiejętności",
-			"description": "Wybierz, które tryby mogą korzystać z tej umiejętności",
 			"intro": "Aby utrzymać lekki kontekst, zalecamy udostępnienie umiejętności tylko trybom, które ich potrzebują.",
 			"anyMode": "Dowolny tryb (dostępny wszędzie)",
 			"save": "Zapisz",
@@ -1211,13 +1096,9 @@
 			"title": "Utwórz Nową Umiejętność",
 			"nameLabel": "Nazwa",
 			"namePlaceholder": "moja-nazwa-umiejetnosci",
-			"descriptionLabel": "Opis",
 			"descriptionPlaceholder": "Opisz, kiedy ta umiejętność powinna być użyta...",
 			"sourceLabel": "Lokalizacja",
 			"modeLabel": "Tryb (opcjonalnie)",
-			"modePlaceholder": "Dowolny tryb",
-			"modeHint": "Ogranicz tę umiejętność do określonego trybu",
-			"modeAny": "Dowolny tryb",
 			"create": "Utwórz",
 			"cancel": "Anuluj"
 		},

@@ -4,7 +4,6 @@
 		"save": "儲存",
 		"done": "完成",
 		"cancel": "取消",
-		"reset": "重設",
 		"select": "選擇",
 		"add": "新增標頭",
 		"remove": "移除"
@@ -200,11 +199,7 @@
 		"statusTitle": "狀態",
 		"enableLabel": "啟用程式碼庫索引",
 		"enableDescription": "啟用程式碼索引以改進搜尋和上下文理解",
-		"settingsTitle": "索引設定",
-		"disabledMessage": "程式碼庫索引目前已停用。請在全域設定中啟用以設定索引選項。",
-		"providerLabel": "嵌入供應商",
 		"embedderProviderLabel": "嵌入器供應商",
-		"selectProviderPlaceholder": "選擇供應商",
 		"openaiProvider": "OpenAI",
 		"ollamaProvider": "Ollama",
 		"geminiProvider": "Gemini",
@@ -233,31 +228,23 @@
 		"openAiCompatibleBaseUrlLabel": "基礎 URL",
 		"openAiCompatibleApiKeyLabel": "API 金鑰",
 		"openAiCompatibleApiKeyPlaceholder": "輸入您的 API 金鑰",
-		"openAiCompatibleModelDimensionLabel": "嵌入維度：",
 		"modelDimensionLabel": "模型維度",
-		"openAiCompatibleModelDimensionPlaceholder": "例如，1536",
-		"openAiCompatibleModelDimensionDescription": "模型的嵌入維度（輸出大小）。請查閱供應商說明文件以取得此值。常見值：384、768、1536、3072。",
 		"modelLabel": "模型",
 		"modelPlaceholder": "輸入模型名稱",
 		"selectModel": "選擇模型",
-		"selectModelPlaceholder": "選擇模型",
-		"ollamaUrlLabel": "Ollama URL:",
 		"ollamaBaseUrlLabel": "Ollama 基礎 URL",
 		"qdrantUrlLabel": "Qdrant URL",
-		"qdrantKeyLabel": "Qdrant 金鑰：",
 		"qdrantApiKeyLabel": "Qdrant API 金鑰",
 		"qdrantApiKeyPlaceholder": "輸入您的 Qdrant API 金鑰（選用）",
 		"setupConfigLabel": "設定",
 		"advancedConfigLabel": "進階設定",
 		"searchMinScoreLabel": "搜尋分數閾值",
 		"searchMinScoreDescription": "搜尋結果所需的最低相似度分數（0.0-1.0）。較低的值會傳回更多結果，但可能較不相關。較高的值會傳回較少但更相關的結果。",
-		"searchMinScoreResetTooltip": "重設為預設值 (0.4)",
 		"searchMaxResultsLabel": "最大搜尋結果數",
 		"searchMaxResultsDescription": "查詢程式碼庫索引時傳回的最大搜尋結果數。較高的值提供更多上下文，但可能包含相關性較低的結果。",
 		"resetToDefault": "重設為預設值",
 		"startIndexingButton": "開始索引",
 		"clearIndexDataButton": "清除索引資料",
-		"unsavedSettingsMessage": "請先儲存設定再開始索引程序。",
 		"clearDataDialog": {
 			"title": "確定要繼續嗎？",
 			"description": "此操作無法復原。這將永久刪除您的程式碼庫索引資料。",
@@ -270,7 +257,6 @@
 		"qdrantUrlPlaceholder": "http://localhost:6333",
 		"saveError": "無法儲存設定",
 		"modelDimensions": "（{{dimension}} 維度）",
-		"saveSuccess": "設定已成功儲存",
 		"saving": "儲存中...",
 		"saveSettings": "儲存",
 		"indexingStatuses": {
@@ -279,7 +265,6 @@
 			"indexed": "已索引",
 			"error": "錯誤"
 		},
-		"close": "關閉",
 		"validation": {
 			"qdrantUrlRequired": "需要 Qdrant URL",
 			"invalidQdrantUrl": "無效的 Qdrant URL",
@@ -294,11 +279,9 @@
 			"mistralApiKeyRequired": "需要 Mistral API 金鑰",
 			"vercelAiGatewayApiKeyRequired": "需要 Vercel AI Gateway API 金鑰",
 			"bedrockRegionRequired": "AWS 區域必填",
-			"bedrockProfileRequired": "AWS Profile 必填",
 			"openRouterApiKeyRequired": "OpenRouter API 金鑰必填",
 			"ollamaBaseUrlRequired": "需要 Ollama 基礎 URL",
-			"baseUrlRequired": "需要基礎 URL",
-			"modelDimensionMinValue": "模型維度必須大於 0"
+			"baseUrlRequired": "需要基礎 URL"
 		},
 		"optional": "選用",
 		"stopIndexingButton": "停止索引",
@@ -323,7 +306,6 @@
 		"write": {
 			"label": "寫入",
 			"description": "無需核准即可自動建立與編輯檔案",
-			"delayLabel": "寫入後延遲一小段時間，以便診斷工具偵測潛在問題",
 			"outsideWorkspace": {
 				"label": "包含工作區外的檔案",
 				"description": "允許 Zoo 在目前工作區外建立與編輯檔案且無需核准。"
@@ -381,8 +363,7 @@
 			"deniedCommandsDescription": "將自動拒絕且不詢問核准的命令前綴。若與允許的命令衝突，將以最長前綴比對優先。新增 * 可拒絕所有命令。",
 			"commandPlaceholder": "輸入命令前綴（例如 'git '）",
 			"deniedCommandPlaceholder": "輸入要拒絕的命令前綴（例如 'rm -rf'）",
-			"addButton": "新增",
-			"autoDenied": "前綴為 `{{prefix}}` 的命令已被使用者禁止。請勿透過執行其他命令來繞過此限制。"
+			"addButton": "新增"
 		},
 		"apiRequestLimit": {
 			"title": "請求次數上限",
@@ -395,17 +376,13 @@
 		"maxLimits": {
 			"description": "在達到這些限制之前自動發送請求，超過後將詢問核准以繼續。"
 		},
-		"toggleAriaLabel": "切換自動核准狀態",
-		"disabledAriaLabel": "自動核准已停用 - 請先選取下方選項",
-		"selectOptionsFirst": "請先選取下方至少一個選項以啟用自動核准"
+		"toggleAriaLabel": "切換自動核准狀態"
 	},
 	"providers": {
-		"providerDocumentation": "{{provider}} 說明文件",
 		"configProfile": "設定檔",
 		"description": "儲存不同的 API 設定以快速切換供應商和設定。",
 		"apiProvider": "API 供應商",
 		"apiProviderDocs": "供應商說明文件",
-		"model": "模型",
 		"nameEmpty": "名稱不能為空",
 		"nameExists": "已存在同名的設定檔",
 		"deleteProfile": "刪除設定檔",
@@ -497,7 +474,6 @@
 		},
 		"useCustomBaseUrl": "使用自訂基礎 URL",
 		"useReasoning": "啟用推理",
-		"useHostHeader": "使用自訂 Host 標頭",
 		"customHeaders": "自訂標頭",
 		"headerName": "標頭名稱",
 		"headerValue": "標頭值",
@@ -509,7 +485,6 @@
 		"requestyApiKey": "Requesty API 金鑰",
 		"refreshModels": {
 			"label": "重新整理模型",
-			"hint": "請重新開啟設定以查看最新模型。",
 			"loading": "正在重新整理模型列表...",
 			"success": "模型列表重新整理成功！",
 			"error": "重新整理模型列表失敗。請再試一次。"
@@ -598,11 +573,8 @@
 		"awsGlobalInference": "使用全域推論（自動選取最佳 AWS 區域）",
 		"awsServiceTier": "服務層級",
 		"awsServiceTierStandard": "Standard",
-		"awsServiceTierStandardDesc": "效能和成本均衡",
 		"awsServiceTierFlex": "Flex（50% 折扣）",
-		"awsServiceTierFlexDesc": "低成本，非關鍵工作的延遲較高",
 		"awsServiceTierPriority": "Priority（75% 溢價）",
-		"awsServiceTierPriorityDesc": "為關鍵業務應用提供最快效能",
 		"awsServiceTierNote": "服務層級會影響定價和效能。Flex 提供 50% 折扣但延遲較高，Priority 提供 25% 更好的效能但費用溢價 75%。",
 		"awsBedrockVpc": {
 			"useCustomVpcEndpoint": "使用自訂 VPC 端點",
@@ -637,17 +609,13 @@
 		"googleCloudRegion": "Google Cloud 區域",
 		"lmStudio": {
 			"baseUrl": "基礎 URL（選用）",
-			"modelId": "模型 ID",
 			"speculativeDecoding": "啟用預測性解碼",
 			"draftModelId": "草稿模型 ID",
 			"draftModelDesc": "草稿模型必須來自相同模型系列才能正確運作。",
-			"selectDraftModel": "選擇草稿模型",
-			"noModelsFound": "未找到草稿模型。請確保 LM Studio 以伺服器模式執行。",
 			"description": "LM Studio 允許您在本機電腦執行模型。詳細資訊請參閱快速入門指南。您需要啟動 LM Studio 的本機伺服器功能才能與此擴充功能搭配使用。<span>注意：</span> Zoo Code 使用複雜提示詞，與 Claude 模型搭配最佳。功能較弱的模型可能無法正常運作。"
 		},
 		"ollama": {
 			"baseUrl": "基礎 URL（選用）",
-			"modelId": "模型 ID",
 			"apiKey": "Ollama API 金鑰",
 			"apiKeyHelp": "選用的 API 金鑰,用於需要驗證的 Ollama 執行個體或雲端服務。Zoo Code 只把金鑰傳送到 HTTPS 或迴路端點。遠端 HTTP 端點不會收到金鑰,因為金鑰會以明文傳輸。需要金鑰的遠端執行個體請使用 HTTPS。本機安裝請留空。",
 			"numCtx": "上下文視窗大小（num_ctx）",
@@ -677,10 +645,6 @@
 			"imageSupport": {
 				"label": "影像支援",
 				"description": "此模型是否能夠處理和理解影像？"
-			},
-			"computerUse": {
-				"label": "電腦使用",
-				"description": "此模型是否能夠與瀏覽器互動？（例如 Claude Sonnet）"
 			},
 			"promptCache": {
 				"label": "提示快取",
@@ -738,13 +702,6 @@
 			"description": "控制模型回應的詳細程度。低詳細度產生簡潔的回答，而高詳細度提供詳盡的解釋。"
 		},
 		"setReasoningLevel": "啟用推理強度",
-		"claudeCode": {
-			"pathLabel": "Claude Code 路徑",
-			"description": "選用的 Claude Code CLI 路徑。若未設定，預設為 'claude'。",
-			"placeholder": "預設：claude",
-			"maxTokensLabel": "最大輸出 Token",
-			"maxTokensDescription": "Claude Code 回應的最大輸出 Token 數量。預設為 8000。"
-		},
 		"zooGateway": {
 			"account": "Zoo Code 帳戶",
 			"signInButton": "登入 Zoo Code",
@@ -777,25 +734,8 @@
 	},
 	"contextManagement": {
 		"description": "控制 AI 上下文視窗中要包含哪些資訊，會影響 Token 用量和回應品質",
-		"autoCondenseContextPercent": {
-			"label": "觸發智慧上下文壓縮的閾值",
-			"description": "當上下文視窗達到此閾值時，Zoo 將自動壓縮它。"
-		},
-		"condensingApiConfiguration": {
-			"label": "上下文壓縮的 API 設定",
-			"description": "選擇用於上下文壓縮操作的 API 設定。留空則使用目前啟用的設定。",
-			"useCurrentConfig": "預設"
-		},
-		"customCondensingPrompt": {
-			"label": "自訂上下文壓縮提示",
-			"description": "自訂用於上下文壓縮的系統提示。留空則使用預設提示。",
-			"placeholder": "請在此輸入您的自訂上下文壓縮提示...\n\n您可以參考預設提示的結構：\n- 先前對話\n- 目前工作\n- 主要技術概念\n- 相關檔案與程式碼\n- 問題解決\n- 未完成的任務與後續步驟",
-			"reset": "重設為預設值",
-			"hint": "留空 = 使用預設提示"
-		},
 		"autoCondenseContext": {
-			"name": "自動觸發智慧上下文壓縮",
-			"description": "啟用時，Zoo 會在達到閾值時自動壓縮上下文。停用時，您仍可手動觸發上下文壓縮。"
+			"name": "自動觸發智慧上下文壓縮"
 		},
 		"openTabs": {
 			"label": "開啟分頁的上下文限制",
@@ -808,16 +748,6 @@
 		"rooignore": {
 			"label": "在清單和搜尋中顯示被 .rooignore 排除的檔案",
 			"description": "啟用後，符合 .rooignore 規則的檔案會在清單中顯示並標示鎖定圖示。停用後，這些檔案將完全從檔案清單和搜尋結果中隱藏。"
-		},
-		"maxConcurrentFileReads": {
-			"label": "並行檔案讀取限制",
-			"description": "read_file 工具可以同時處理的最大檔案數。較高的值可能會加快讀取多個小檔案的速度，但會增加記憶體使用量。"
-		},
-		"maxReadFile": {
-			"label": "檔案讀取自動截斷閾值",
-			"description": "當模型未指定起始/結束值時，Zoo 讀取的行數。如果此數值小於檔案總行數，Zoo 將產生程式碼定義的行號索引。特殊情況：-1 指示 Zoo 讀取整個檔案（不建立索引），0 指示不讀取任何行並僅提供行索引以取得最小上下文。較低的值可最小化初始上下文使用，允許後續精確的行範圍讀取。明確指定起始/結束的請求不受此設定限制。 <0>了解更多</0>",
-			"lines": "行",
-			"always_full_read": "始終讀取整個檔案"
 		},
 		"maxImageFileSize": {
 			"label": "最大圖片檔案大小",
@@ -857,7 +787,6 @@
 			"defaultProfile": "全域預設（所有設定檔）",
 			"defaultDescription": "當上下文達到此百分比時，除非有自訂設定，所有設定檔都會自動壓縮。",
 			"profileDescription": "僅此設定檔的自訂閾值（覆寫全域預設）",
-			"inheritDescription": "此設定檔沿用全域預設閾值（{{threshold}}%）",
 			"usesGlobal": "（使用全域 {{threshold}}%）"
 		},
 		"includeCurrentTime": {
@@ -883,20 +812,11 @@
 			"description": "預設摺疊命令輸出，包括內嵌終端機輸出。需要時可手動展開。此設定不會變更命令執行方式。"
 		},
 		"basic": {
-			"label": "終端機設定：基本",
-			"description": "基本終端機設定"
+			"label": "終端機設定：基本"
 		},
 		"advanced": {
 			"label": "終端機設定：進階",
 			"description": "這些設定僅在「使用內嵌終端機」停用時適用。僅影響 VS Code 終端機，可能需要重啟 IDE。"
-		},
-		"outputLineLimit": {
-			"label": "終端機輸出限制",
-			"description": "保留首尾行並丟棄中間行以保持在限制內。降低可節省 Token；提高可為 Zoo 提供更多中間細節。Zoo 看到內容被跳過的佔位符。<0>了解更多</0>"
-		},
-		"outputCharacterLimit": {
-			"label": "終端機字元限制",
-			"description": "透過強制限制輸出大小來覆寫行限制以防止記憶體問題。如果超出，保留開頭和結尾並向 Zoo 顯示內容被跳過的佔位符。<0>了解更多</0>"
 		},
 		"outputPreviewSize": {
 			"label": "命令輸出預覽大小",
@@ -955,23 +875,6 @@
 		"title": "進階設定"
 	},
 	"advanced": {
-		"diff": {
-			"label": "透過差異比對編輯",
-			"description": "啟用後，Zoo 可更快速地編輯檔案，並自動拒絕不完整的整檔覆寫",
-			"strategy": {
-				"label": "差異比對策略",
-				"options": {
-					"standard": "標準（單一區塊）",
-					"multiBlock": "實驗性：多區塊差異",
-					"unified": "實驗性：統一差異"
-				},
-				"descriptions": {
-					"standard": "標準策略一次只修改一個程式碼區塊。",
-					"unified": "統一差異策略會嘗試多種比對方式，並選擇最佳方案。",
-					"multiBlock": "多區塊策略可在單一請求中更新檔案內的多個程式碼區塊。"
-				}
-			}
-		},
 		"todoList": {
 			"label": "啟用待辦事項清單工具",
 			"description": "啟用後，Zoo 可以建立和管理待辦事項清單來追蹤任務進度。這有助於將複雜任務組織成可管理的步驟。"
@@ -1038,10 +941,6 @@
 			"refreshError": "工具重新整理失敗",
 			"toolParameters": "參數"
 		}
-	},
-	"promptCaching": {
-		"label": "停用提示詞快取",
-		"description": "勾選後，Zoo 將不會為此模型使用提示詞快取。"
 	},
 	"temperature": {
 		"useCustom": "使用自訂溫度",
@@ -1112,7 +1011,6 @@
 			"reservedKeys": "附加請求本文無法覆寫由 Zoo Code 管理的欄位：{{keys}}。"
 		},
 		"arn": {
-			"invalidFormat": "ARN 格式無效，請檢查格式要求。",
 			"regionMismatch": "警告：您 ARN 中的區域 ({{arnRegion}}) 與您選擇的區域 ({{region}}) 不符，可能導致存取問題。系統將使用 ARN 中指定的區域。"
 		},
 		"modelAvailability": "您指定的模型 ID ({{modelId}}) 目前無法使用，請選擇其他模型。",
@@ -1134,11 +1032,6 @@
 		"projectId": "請輸入專案 ID...",
 		"customArn": "請輸入 ARN（例：arn:aws:bedrock:us-east-1:123456789012:foundation-model/my-model）",
 		"baseUrl": "請輸入基礎 URL...",
-		"modelId": {
-			"lmStudio": "例：meta-llama-3.1-8b-instruct",
-			"lmStudioDraft": "例：lmstudio-community/llama-3.2-1b-instruct",
-			"ollama": "例：llama3.1"
-		},
 		"numbers": {
 			"maxTokens": "例：4096",
 			"contextWindow": "例：128000",
@@ -1158,9 +1051,6 @@
 	},
 	"includeMaxOutputTokens": "包含最大輸出 Token 數",
 	"includeMaxOutputTokensDescription": "在 API 請求中傳送最大輸出 Token 參數。某些供應商可能不支援此功能。",
-	"limitMaxTokensDescription": "限制回應中的最大 Token 數量",
-	"maxOutputTokensLabel": "最大輸出 Token 數",
-	"maxTokensGenerateDescription": "回應中產生的最大 Token 數",
 	"openAiCodexSpeed": {
 		"label": "速度",
 		"tooltip": "快速模式使用 Codex 優先處理，速度約為 1.5 倍，但會消耗更多訂閱配額。",
@@ -1168,8 +1058,6 @@
 		"fast": "快速（1.5 倍速度，用量增加）"
 	},
 	"serviceTier": {
-		"label": "服務層級",
-		"tooltip": "若需更快的 API 請求處理，請嘗試優先處理服務層級。若需較低價格但延遲較高，請嘗試彈性處理層級。",
 		"standard": "標準",
 		"flex": "彈性",
 		"priority": "優先",
@@ -1191,8 +1079,6 @@
 		"editSkill": "編輯技能",
 		"deleteSkill": "刪除技能",
 		"configureModes": "模式可用性",
-		"modeAny": "任意模式",
-		"modeCount": "{{count}} 種模式",
 		"deleteDialog": {
 			"title": "刪除技能",
 			"description": "您確定要刪除技能「{{name}}」嗎？此動作無法復原。",
@@ -1201,7 +1087,6 @@
 		},
 		"modeDialog": {
 			"title": "設定技能模式",
-			"description": "選擇哪些模式可以使用此技能",
 			"intro": "為了保持您的上下文簡潔，我們建議只在需要的模式中提供技能。",
 			"anyMode": "任何模式（隨處可用）",
 			"save": "儲存",
@@ -1211,13 +1096,9 @@
 			"title": "建立新技能",
 			"nameLabel": "名稱",
 			"namePlaceholder": "my-skill-name",
-			"descriptionLabel": "說明",
 			"descriptionPlaceholder": "描述何時應使用此技能...",
 			"sourceLabel": "位置",
 			"modeLabel": "模式（選填）",
-			"modePlaceholder": "任何模式",
-			"modeHint": "將此技能限制為特定模式",
-			"modeAny": "任何模式",
 			"create": "建立",
 			"cancel": "取消"
 		},
