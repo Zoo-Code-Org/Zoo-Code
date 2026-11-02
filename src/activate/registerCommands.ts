@@ -1,5 +1,6 @@
 import * as vscode from "vscode"
 import delay from "delay"
+import { createDiagnosticsReport } from "../services/diagnostics"
 
 import type { CommandId, ExtensionMessage } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -140,6 +141,12 @@ const getCommandsMap = ({
 	provider,
 }: RegisterCommandOptions): Record<Exclude<CommandId, "showRipgrepDiagnostic">, CommandCallback> => ({
 	activationCompleted: () => {},
+	createDiagnosticsReport: () =>
+		createDiagnosticsReport({
+			context,
+			outputChannel,
+			providers: ClineProvider.getAllInstances(),
+		}),
 	// The `view/title` menu is scoped to the sidebar view, so the click
 	// origin of these handlers is the sidebar provider wired in at
 	// activation (`provider`). Target it directly instead of the
