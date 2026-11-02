@@ -651,6 +651,15 @@ describe("ProviderSettingsManager", () => {
 			expect(configSpy).toHaveBeenCalledWith("zoo-code")
 		})
 
+		it("uses the legacy global key when customStoragePath is not a string", () => {
+			vi.spyOn(vscode.workspace, "getConfiguration").mockReturnValue(
+				makeProviderWorkspaceConfiguration({ customStoragePath: [] }),
+			)
+			const manager = new ProviderSettingsManager(mockContext)
+
+			expect(manager["secretsKey"]).toBe(legacySecretKey)
+		})
+
 		it("uses different secret keys for different custom storage paths", () => {
 			const managerA = new ProviderSettingsManager(mockContext, "C:\\Projects\\A\\.vscode\\zoo-code")
 			const managerB = new ProviderSettingsManager(mockContext, "C:\\Projects\\B\\.vscode\\zoo-code")
