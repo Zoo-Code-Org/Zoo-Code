@@ -493,6 +493,17 @@ describe("commitMessageGenerator", () => {
 					getAPI: () => mockGitApi,
 				},
 			})
+
+			// Default withProgress mock: runs the callback immediately with a non-cancelled token.
+			// Individual tests may override this for cancellation or error scenarios.
+			;(vscode.window.withProgress as Mock).mockImplementation((_opts, callback) => {
+				const progress = { report: vi.fn() }
+				const token = {
+					isCancellationRequested: false,
+					onCancellationRequested: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+				}
+				return callback(progress, token)
+			})
 		})
 
 		it("shows error if git extension is unavailable", async () => {
