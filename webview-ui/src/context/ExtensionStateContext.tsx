@@ -448,11 +448,8 @@ export const ExtensionStateContextProvider: React.FC<{
 					setState((prevState) => mergeExtensionState(prevState, newState))
 					setShowWelcome(!checkExistKey(newState.apiConfiguration, newState.zooCodeIsAuthenticated))
 					setDidHydrateState(true)
-<<<<<<< HEAD
 					setViewStateLoaded(true)
-=======
 					recordDiagnosticsHydration(true)
->>>>>>> upstream/main
 					// Update alwaysAllowFollowupQuestions if present in state message
 					if ((newState as any).alwaysAllowFollowupQuestions !== undefined) {
 						setAlwaysAllowFollowupQuestions((newState as any).alwaysAllowFollowupQuestions)

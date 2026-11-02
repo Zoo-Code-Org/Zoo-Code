@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import * as vscode from "vscode"
+import { makeClineProviderFactory } from "../test-utils/provider"
 
 import { API } from "../api"
 import { ClineProvider } from "../../core/webview/ClineProvider"
@@ -36,13 +37,8 @@ describe("API - DeleteQueuedMessage Command", () => {
 
 		mockLog = vi.fn()
 
-<<<<<<< HEAD
-		api = new API(mockOutputChannel, mockProvider, undefined, true)
-		;(api as any).log = mockLog
-=======
 		api = new API(mockOutputChannel, mockProvider, makeClineProviderFactory(), undefined, true)
 		Object.assign(api, { log: mockLog })
->>>>>>> upstream/main
 	})
 
 	it("should remove a queued message by id", () => {
