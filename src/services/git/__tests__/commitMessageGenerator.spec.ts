@@ -8,6 +8,7 @@ import {
 	generateCommitMessage,
 	getGitApi,
 	getRepositoryDiff,
+	redactSensitiveInformation,
 	resolveGitRepository,
 	type GitAPI,
 	type GitRepository,
@@ -27,7 +28,12 @@ vi.mock("vscode", () => ({
 		activeTextEditor: undefined,
 		showErrorMessage: vi.fn(),
 		showInformationMessage: vi.fn(),
+		showWarningMessage: vi.fn(),
 		withProgress: vi.fn(),
+	},
+	Uri: {
+		file: (path: string) => makeUri(path),
+		parse: (uri: string) => makeUri(uri),
 	},
 }))
 
@@ -38,6 +44,7 @@ vi.mock("../../../utils/single-completion-handler", () => ({
 describe("commitMessageGenerator", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		;(vscode.window as unknown as { activeTextEditor?: vscode.TextEditor }).activeTextEditor = undefined
 	})
 
 	describe("cleanCommitMessage", () => {
@@ -56,11 +63,38 @@ describe("commitMessageGenerator", () => {
 		})
 	})
 
+	describe("redactSensitiveInformation", () => {
+		it("redacts private keys", () => {
+			const content =
+				"-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0...\n-----END RSA PRIVATE KEY-----\nother text"
+			expect(redactSensitiveInformation(content)).toBe("[REDACTED_SECRET]\nother text")
+		})
+
+		it("redacts api keys and secrets", () => {
+			const content = 'apiKey: "super-secret-key-12345"\npassword=mysecretpassword123\nother_config=123'
+			const redacted = redactSensitiveInformation(content)
+			expect(redacted).toContain('apiKey: "[REDACTED]"')
+			expect(redacted).toContain("password=[REDACTED]")
+			expect(redacted).toContain("other_config=123")
+		})
+
+		it("leaves normal diff content unchanged", () => {
+			const content = "diff --git a/src/app.ts b/src/app.ts\n+console.log('hello world')"
+			expect(redactSensitiveInformation(content)).toBe(content)
+		})
+	})
+
 	describe("buildCommitMessagePrompt", () => {
 		it("includes diff and instructions", () => {
 			const prompt = buildCommitMessagePrompt("diff --git a/file b/file\n+test")
 			expect(prompt).toContain("diff --git a/file b/file\n+test")
 			expect(prompt).toContain("Conventional Commits")
+		})
+
+		it("redacts sensitive information in the prompt", () => {
+			const prompt = buildCommitMessagePrompt("apiKey: 'secret_token_12345678'")
+			expect(prompt).not.toContain("secret_token_12345678")
+			expect(prompt).toContain("[REDACTED]")
 		})
 	})
 
@@ -104,6 +138,22 @@ describe("commitMessageGenerator", () => {
 			const git: GitAPI = { repositories: [repo] }
 
 			expect(resolveGitRepository(git, repo)).toBe(repo)
+		})
+
+		it("resolves from bare vscode.Uri context", () => {
+			const repo1: GitRepository = {
+				rootUri: makeUri("/workspace/repo1"),
+				inputBox: { value: "" },
+				diff: vi.fn(),
+			}
+			const repo2: GitRepository = {
+				rootUri: makeUri("/workspace/repo2"),
+				inputBox: { value: "" },
+				diff: vi.fn(),
+			}
+			const git: GitAPI = { repositories: [repo1, repo2] }
+
+			expect(resolveGitRepository(git, makeUri("/workspace/repo2"))).toBe(repo2)
 		})
 
 		it("resolves from scm context with rootUri", () => {
@@ -173,6 +223,123 @@ describe("commitMessageGenerator", () => {
 
 			expect(resolveGitRepository(git)).toBe(repo2)
 		})
+
+		it("falls through if bare vscode.Uri context does not match any repository", () => {
+			const repo1: GitRepository = {
+				rootUri: makeUri("/workspace/repo1"),
+				inputBox: { value: "" },
+				diff: vi.fn(),
+			}
+			const repo2: GitRepository = {
+				rootUri: makeUri("/workspace/repo2"),
+				inputBox: { value: "" },
+				diff: vi.fn(),
+			}
+			const git: GitAPI = { repositories: [repo1, repo2] }
+
+			expect(resolveGitRepository(git, makeUri("/workspace/unknown"))).toBe(repo1)
+		})
+
+		it("falls through if scm context rootUri does not match any repository", () => {
+			const repo1: GitRepository = {
+				rootUri: makeUri("/workspace/repo1"),
+				inputBox: { value: "" },
+				diff: vi.fn(),
+			}
+			const repo2: GitRepository = {
+				rootUri: makeUri("/workspace/repo2"),
+				inputBox: { value: "" },
+				diff: vi.fn(),
+			}
+			const git: GitAPI = { repositories: [repo1, repo2] }
+
+			expect(resolveGitRepository(git, { rootUri: makeUri("/workspace/unknown") })).toBe(repo1)
+		})
+
+		it("falls through if scm context inputBox does not match any repository", () => {
+			const repo1: GitRepository = {
+				rootUri: makeUri("/workspace/repo1"),
+				inputBox: { value: "" },
+				diff: vi.fn(),
+			}
+			const repo2: GitRepository = {
+				rootUri: makeUri("/workspace/repo2"),
+				inputBox: { value: "" },
+				diff: vi.fn(),
+			}
+			const git: GitAPI = { repositories: [repo1, repo2] }
+
+			expect(resolveGitRepository(git, { inputBox: { value: "other" } })).toBe(repo1)
+		})
+
+		it("falls back to first repository when active editor does not match any repository", () => {
+			const repo1: GitRepository = {
+				rootUri: makeUri("/workspace/repo1"),
+				inputBox: { value: "" },
+				diff: vi.fn(),
+			}
+			const repo2: GitRepository = {
+				rootUri: makeUri("/workspace/repo2"),
+				inputBox: { value: "" },
+				diff: vi.fn(),
+			}
+			const git: GitAPI = { repositories: [repo1, repo2] }
+
+			const mutableWindow = vscode.window as unknown as { activeTextEditor?: vscode.TextEditor }
+			mutableWindow.activeTextEditor = {
+				document: {
+					uri: makeUri("/workspace/other/file.ts"),
+				},
+			} as unknown as vscode.TextEditor // Structural test double providing document.uri
+
+			expect(resolveGitRepository(git)).toBe(repo1)
+		})
+
+		it("distinguishes repository roots on path segment boundaries", () => {
+			const repo1: GitRepository = {
+				rootUri: makeUri("/workspace/repo"),
+				inputBox: { value: "" },
+				diff: vi.fn(),
+			}
+			const repo2: GitRepository = {
+				rootUri: makeUri("/workspace/repo-other"),
+				inputBox: { value: "" },
+				diff: vi.fn(),
+			}
+			const git: GitAPI = { repositories: [repo1, repo2] }
+
+			const mutableWindow = vscode.window as unknown as { activeTextEditor?: vscode.TextEditor }
+			mutableWindow.activeTextEditor = {
+				document: {
+					uri: makeUri("/workspace/repo-other/file.ts"),
+				},
+			} as unknown as vscode.TextEditor
+
+			expect(resolveGitRepository(git)).toBe(repo2)
+		})
+
+		it("matches longest root when repositories are nested", () => {
+			const parentRepo: GitRepository = {
+				rootUri: makeUri("/workspace/monorepo"),
+				inputBox: { value: "" },
+				diff: vi.fn(),
+			}
+			const childRepo: GitRepository = {
+				rootUri: makeUri("/workspace/monorepo/packages/nested"),
+				inputBox: { value: "" },
+				diff: vi.fn(),
+			}
+			const git: GitAPI = { repositories: [parentRepo, childRepo] }
+
+			const mutableWindow = vscode.window as unknown as { activeTextEditor?: vscode.TextEditor }
+			mutableWindow.activeTextEditor = {
+				document: {
+					uri: makeUri("/workspace/monorepo/packages/nested/src/index.ts"),
+				},
+			} as unknown as vscode.TextEditor
+
+			expect(resolveGitRepository(git)).toBe(childRepo)
+		})
 	})
 
 	describe("getRepositoryDiff", () => {
@@ -207,11 +374,76 @@ describe("commitMessageGenerator", () => {
 			expect(repo.diff).toHaveBeenCalledWith(false)
 		})
 
+		it("falls back to working tree diff if staged diff throws", async () => {
+			const repo: GitRepository = {
+				rootUri: makeUri("/workspace/repo"),
+				inputBox: { value: "" },
+				diff: vi.fn().mockImplementation((cached?: boolean) => {
+					if (cached) return Promise.reject(new Error("Git diff staged failed"))
+					return Promise.resolve("working diff fallback")
+				}),
+			}
+
+			const diff = await getRepositoryDiff(repo)
+			expect(diff).toBe("working diff fallback")
+			expect(repo.diff).toHaveBeenCalledWith(true)
+			expect(repo.diff).toHaveBeenCalledWith(false)
+		})
+
 		it("returns undefined if both staged and working diffs are empty", async () => {
 			const repo: GitRepository = {
 				rootUri: makeUri("/workspace/repo"),
 				inputBox: { value: "" },
 				diff: vi.fn().mockResolvedValue(""),
+			}
+
+			const diff = await getRepositoryDiff(repo)
+			expect(diff).toBeUndefined()
+		})
+
+		it("returns undefined if working diff throws after empty staged diff", async () => {
+			const repo: GitRepository = {
+				rootUri: makeUri("/workspace/repo"),
+				inputBox: { value: "" },
+				diff: vi.fn().mockImplementation((cached?: boolean) => {
+					if (cached) return Promise.resolve("")
+					return Promise.reject(new Error("Git working tree diff failed"))
+				}),
+			}
+
+			const diff = await getRepositoryDiff(repo)
+			expect(diff).toBeUndefined()
+		})
+
+		it("surfaces untracked files when both diffs are empty", async () => {
+			const repo: GitRepository = {
+				rootUri: makeUri("/workspace/repo"),
+				inputBox: { value: "" },
+				diff: vi.fn().mockResolvedValue(""),
+				state: {
+					workingTreeChanges: [
+						{ uri: makeUri("/workspace/repo/new-file.ts"), status: 7 }, // UNTRACKED
+						{ uri: makeUri("/workspace/repo/modified.ts"), status: 5 }, // MODIFIED
+					],
+				},
+			}
+
+			const diff = await getRepositoryDiff(repo)
+			expect(diff).toContain("Untracked files:")
+			expect(diff).toContain("new-file.ts")
+			expect(diff).not.toContain("modified.ts")
+		})
+
+		it("returns undefined when both diffs are empty and no untracked files exist", async () => {
+			const repo: GitRepository = {
+				rootUri: makeUri("/workspace/repo"),
+				inputBox: { value: "" },
+				diff: vi.fn().mockResolvedValue(""),
+				state: {
+					workingTreeChanges: [
+						{ uri: makeUri("/workspace/repo/modified.ts"), status: 5 }, // MODIFIED (not untracked)
+					],
+				},
 			}
 
 			const diff = await getRepositoryDiff(repo)
@@ -324,7 +556,7 @@ describe("commitMessageGenerator", () => {
 				const progress = { report: vi.fn() }
 				const token = {
 					isCancellationRequested: false,
-					onCancellationRequested: vi.fn(),
+					onCancellationRequested: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 				}
 				return callback(progress, token)
 			})
@@ -364,6 +596,115 @@ describe("commitMessageGenerator", () => {
 			})
 
 			expect(mockRepo.inputBox.value).toBe("")
+		})
+
+		it("aborts when token triggers cancellation callback", async () => {
+			let cancellationHandler: (() => void) | undefined
+			;(vscode.window.withProgress as Mock).mockImplementation((_opts, callback) => {
+				const progress = { report: vi.fn() }
+				const token = {
+					isCancellationRequested: false,
+					onCancellationRequested: vi.fn((fn: () => void) => {
+						cancellationHandler = fn
+						return { dispose: vi.fn() }
+					}),
+				}
+				return callback(progress, token)
+			})
+			;(singleCompletionHandler as Mock).mockImplementation(async (_config, _prompt, options) => {
+				cancellationHandler?.()
+				expect(options.abortSignal.aborted).toBe(true)
+				return ""
+			})
+
+			await generateCommitMessage({
+				provider: mockProvider,
+				outputChannel: mockOutputChannel,
+			})
+
+			expect(mockRepo.inputBox.value).toBe("")
+		})
+
+		it("aborts the in-flight provider request when cancellation is requested", async () => {
+			let cancelHandler: () => void = () => {}
+			let capturedSignal: AbortSignal | undefined
+			;(singleCompletionHandler as Mock).mockImplementation((_config, _prompt, options) => {
+				capturedSignal = options.abortSignal as AbortSignal
+				cancelHandler()
+				return Promise.resolve("feat: should be cancelled")
+			})
+			;(vscode.window.withProgress as Mock).mockImplementation((_opts, callback) => {
+				const progress = { report: vi.fn() }
+				const token = {
+					isCancellationRequested: false,
+					onCancellationRequested: vi.fn((fn: () => void) => {
+						cancelHandler = fn
+						return { dispose: vi.fn() }
+					}),
+				}
+				return callback(progress, token)
+			})
+
+			await generateCommitMessage({
+				provider: mockProvider,
+				outputChannel: mockOutputChannel,
+			})
+
+			expect(capturedSignal?.aborted).toBe(true)
+			expect(mockRepo.inputBox.value).toBe("")
+		})
+
+		it("does not update inputBox and shows warning if generated message is empty", async () => {
+			mockRepo.inputBox.value = "preserved value"
+			const mockDisposable = { dispose: vi.fn() }
+			;(singleCompletionHandler as Mock).mockResolvedValue("   ")
+			;(vscode.window.withProgress as Mock).mockImplementation((_opts, callback) => {
+				const progress = { report: vi.fn() }
+				const token = {
+					isCancellationRequested: false,
+					onCancellationRequested: vi.fn().mockReturnValue(mockDisposable),
+				}
+				return callback(progress, token)
+			})
+
+			await generateCommitMessage({
+				provider: mockProvider,
+				outputChannel: mockOutputChannel,
+			})
+
+			expect(mockRepo.inputBox.value).toBe("preserved value")
+			expect(mockDisposable.dispose).toHaveBeenCalled()
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledWith("No commit message generated.")
+		})
+
+		it("ignores AbortError without showing an error message", async () => {
+			const abortError = new Error("This operation was aborted")
+			abortError.name = "AbortError"
+			;(vscode.window.withProgress as Mock).mockRejectedValue(abortError)
+
+			await generateCommitMessage({
+				provider: mockProvider,
+				outputChannel: mockOutputChannel,
+			})
+
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+			expect(mockOutputChannel.appendLine).not.toHaveBeenCalled()
+		})
+
+		it("handles non-Error objects gracefully and shows error message", async () => {
+			;(vscode.window.withProgress as Mock).mockRejectedValue("String-based error")
+
+			await generateCommitMessage({
+				provider: mockProvider,
+				outputChannel: mockOutputChannel,
+			})
+
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining("[generateGitCommitMessage] failed: String-based error"),
+			)
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+				"Failed to generate commit message: String-based error",
+			)
 		})
 
 		it("handles errors gracefully and shows error message", async () => {

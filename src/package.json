@@ -21,9 +21,6 @@
 		"url": "https://github.com/Zoo-Code-Org/Zoo-Code"
 	},
 	"homepage": "https://zoocode.dev",
-	"enabledApiProposals": [
-		"contribSourceControlInputBoxMenu"
-	],
 	"categories": [
 		"AI",
 		"Chat",
@@ -194,7 +191,7 @@
 				{
 					"command": "zoo-code.generateGitCommitMessage",
 					"group": "inline",
-					"when": "scmRepository"
+					"when": "scmRepository && scmProvider == git"
 				}
 			],
 			"editor/context": [

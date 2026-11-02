@@ -10,17 +10,13 @@
 			"type": "extensionHost",
 			"request": "launch",
 			"runtimeExecutable": "${execPath}",
-			"args": [
-				"--extensionDevelopmentPath=${workspaceFolder}/src",
-				"--enable-proposed-api=ZooCodeOrganization.zoo-code",
-				"--disable-extensions"
-			],
+			"args": ["--extensionDevelopmentPath=${workspaceFolder}/src", "--disable-extensions"],
 			"sourceMaps": true,
 			"outFiles": ["${workspaceFolder}/src/dist/**/*.js"],
+			"preLaunchTask": "${defaultBuildTask}",
 			"env": {
 				"NODE_ENV": "development",
-				"VSCODE_DEBUG_MODE": "true",
-				"ROO_CODE_THEME_FIXTURE_PROBE": "1"
+				"VSCODE_DEBUG_MODE": "true"
 			},
 			"resolveSourceMapLocations": ["${workspaceFolder}/**", "!**/node_modules/**"],
 			"presentation": {

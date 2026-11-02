@@ -1,3 +1,4 @@
+import path from "path"
 import * as vscode from "vscode"
 import type { ProviderSettings } from "@roo-code/types"
 
@@ -5,11 +6,21 @@ import { ClineProvider } from "../../core/webview/ClineProvider"
 import { truncateOutput } from "../../integrations/misc/extract-text"
 import { singleCompletionHandler } from "../../utils/single-completion-handler"
 
+export interface GitRepositoryChange {
+	readonly uri: vscode.Uri
+	readonly status: number
+}
+
+export interface GitRepositoryState {
+	readonly workingTreeChanges?: ReadonlyArray<GitRepositoryChange>
+}
+
 export interface GitRepository {
 	readonly rootUri: vscode.Uri
 	readonly inputBox: {
 		value: string
 	}
+	readonly state?: GitRepositoryState
 	diff(cached?: boolean): Promise<string>
 }
 
@@ -49,7 +60,29 @@ Guidelines:
 3. Use imperative, present tense ("add" not "added", "fix" not "fixes").
 4. Keep the subject line within 72 characters and do not end with a period.
 5. If the changes warrant explanation, include a blank line followed by a concise body or bullet points detailing what changed and why.
-6. Return ONLY the commit message. Do NOT include markdown code blocks, quotes, or any introductory or concluding text.`
+6. Return ONLY the commit message. Do NOT include markdown code blocks, quotes, or any introductory or concluding text.
+7. Never output secrets, passwords, or personal identifiable information in commit messages.`
+
+const SENSITIVE_PATTERNS = [
+	/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+	/(?:api[_-]?key|auth[_-]?token|bearer|secret|password)[\s]*[=:]\s*['"]?([a-zA-Z0-9_\-\.]{8,})['"]?/gi,
+]
+
+/**
+ * Redacts secrets, private keys, and credential tokens from content before sending to an LLM.
+ */
+export function redactSensitiveInformation(content: string): string {
+	let redacted = content
+	for (const pattern of SENSITIVE_PATTERNS) {
+		redacted = redacted.replace(pattern, (match, captured) => {
+			if (captured) {
+				return match.replace(captured, "[REDACTED]")
+			}
+			return "[REDACTED_SECRET]"
+		})
+	}
+	return redacted
+}
 
 /**
  * Accesses the VS Code Git extension API.
@@ -74,6 +107,17 @@ export function resolveGitRepository(git: GitAPI, context?: unknown): GitReposit
 	}
 
 	if (context && typeof context === "object") {
+		// Bare vscode.Uri or URI-like object passed from scm/inputBox menu
+		if ("scheme" in context && "fsPath" in context) {
+			const uri = context as vscode.Uri
+			const found = git.repositories.find(
+				(r) => r.rootUri.toString() === uri.toString() || r.rootUri.fsPath === uri.fsPath,
+			)
+			if (found) {
+				return found
+			}
+		}
+
 		const candidate = context as Partial<GitRepository>
 		if (typeof candidate.diff === "function" && candidate.inputBox && typeof candidate.inputBox === "object") {
 			return candidate as GitRepository
@@ -81,7 +125,9 @@ export function resolveGitRepository(git: GitAPI, context?: unknown): GitReposit
 
 		const sc = context as { rootUri?: vscode.Uri; inputBox?: unknown }
 		if (sc.rootUri) {
-			const found = git.repositories.find((r) => r.rootUri.toString() === sc.rootUri?.toString())
+			const found = git.repositories.find(
+				(r) => r.rootUri.toString() === sc.rootUri?.toString() || r.rootUri.fsPath === sc.rootUri?.fsPath,
+			)
 			if (found) {
 				return found
 			}
@@ -101,9 +147,13 @@ export function resolveGitRepository(git: GitAPI, context?: unknown): GitReposit
 
 	const activeDocUri = vscode.window.activeTextEditor?.document.uri
 	if (activeDocUri) {
-		const found = git.repositories.find((r) => activeDocUri.fsPath.startsWith(r.rootUri.fsPath))
-		if (found) {
-			return found
+		const matchingRepos = git.repositories.filter((r) => {
+			const root = r.rootUri.fsPath
+			return activeDocUri.fsPath === root || activeDocUri.fsPath.startsWith(root + path.sep)
+		})
+		if (matchingRepos.length > 0) {
+			matchingRepos.sort((a, b) => b.rootUri.fsPath.length - a.rootUri.fsPath.length)
+			return matchingRepos[0]
 		}
 	}
 
@@ -130,7 +180,20 @@ export async function getRepositoryDiff(repository: GitRepository): Promise<stri
 	}
 
 	const trimmed = diff ? diff.trim() : ""
-	return trimmed.length > 0 ? trimmed : undefined
+	if (trimmed.length > 0) {
+		return trimmed
+	}
+
+	// `git diff` omits untracked files; surface them as a plain listing so the
+	// LLM can still generate an "initial commit" or "add files" message.
+	const UNTRACKED_STATUS = 7 // vscode.git Status.UNTRACKED
+	const untracked = repository.state?.workingTreeChanges?.filter((c) => c.status === UNTRACKED_STATUS)
+	if (untracked && untracked.length > 0) {
+		const fileList = untracked.map((c) => c.uri.fsPath).join("\n")
+		return `Untracked files:\n${fileList}`
+	}
+
+	return undefined
 }
 
 /**
@@ -153,7 +216,8 @@ export function cleanCommitMessage(message: string): string {
  * Builds the full prompt to generate a commit message from a git diff.
  */
 export function buildCommitMessagePrompt(diff: string): string {
-	const truncatedDiff = truncateOutput(diff, 1000, 50000)
+	const sanitizedDiff = redactSensitiveInformation(diff)
+	const truncatedDiff = truncateOutput(sanitizedDiff, 1000, 50000)
 	return `${COMMIT_MESSAGE_SYSTEM_PROMPT}\n\nDiff:\n\`\`\`diff\n${truncatedDiff}\n\`\`\`\n\nCommit Message:`
 }
 
@@ -200,22 +264,28 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 			},
 			async (_progress, token) => {
 				const abortController = new AbortController()
-				token.onCancellationRequested(() => {
+				const cancellationListener = token.onCancellationRequested(() => {
 					abortController.abort()
 				})
 
-				const prompt = buildCommitMessagePrompt(diff)
-				const rawMessage = await singleCompletionHandler(apiConfiguration as ProviderSettings, prompt, {
-					abortSignal: abortController.signal,
-				})
+				try {
+					const prompt = buildCommitMessagePrompt(diff)
+					const rawMessage = await singleCompletionHandler(apiConfiguration as ProviderSettings, prompt, {
+						abortSignal: abortController.signal,
+					})
 
-				if (token.isCancellationRequested || abortController.signal.aborted) {
-					return
-				}
+					if (token.isCancellationRequested || abortController.signal.aborted) {
+						return
+					}
 
-				const commitMessage = cleanCommitMessage(rawMessage)
-				if (commitMessage) {
-					repository.inputBox.value = commitMessage
+					const commitMessage = cleanCommitMessage(rawMessage)
+					if (commitMessage) {
+						repository.inputBox.value = commitMessage
+					} else {
+						vscode.window.showWarningMessage("No commit message generated.")
+					}
+				} finally {
+					cancellationListener?.dispose()
 				}
 			},
 		)
