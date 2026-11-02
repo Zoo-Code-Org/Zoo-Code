@@ -72,9 +72,12 @@ export const MIMO_DEFAULT_TEMPERATURE = 1.0
 
 export const mimoProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.mimo,
+	label: "Xiaomi MiMo",
+	serviceUrl: "https://platform.xiaomimimo.com",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => mimoDefaultModelId,
+	models: mimoModels,
 	schema: {
 		...apiModelIdProviderModelShape,
 		mimoBaseUrl: z

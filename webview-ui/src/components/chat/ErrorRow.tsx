@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next"
 import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
 import { BookOpenText, MessageCircleWarning, Copy, Check, Microscope, Info } from "lucide-react"
 
+import { getProviderIsProxy, isProviderName } from "@roo-code/types"
+
 import { useCopyToClipboard } from "@src/utils/clipboard"
 import { vscode } from "@src/utils/vscode"
 import CodeBlock from "../common/CodeBlock"
@@ -10,7 +12,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "../ui"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
-import { PROVIDERS } from "../settings/constants"
 
 /**
  * Unified error display component for all error types in the chat.
@@ -98,7 +99,7 @@ const ErrorRow = memo(
 		const { version, apiConfiguration } = useExtensionState()
 		const { provider, id: modelId } = useSelectedModel(apiConfiguration)
 
-		const usesProxy = PROVIDERS.find((p) => p.value === provider)?.proxy ?? false
+		const usesProxy = isProviderName(provider) ? getProviderIsProxy(provider) : false
 
 		// Format error details with metadata prepended
 		const formattedErrorDetails = useMemo(() => {

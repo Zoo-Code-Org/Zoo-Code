@@ -1,13 +1,29 @@
-import { ANTHROPIC_API_PROTOCOL, OPENAI_API_PROTOCOL, providerIdentifiers, providerNames } from "../index.js"
+import {
+	ANTHROPIC_API_PROTOCOL,
+	OPENAI_API_PROTOCOL,
+	providerIdentifiers,
+	providerNames,
+	type ProviderSettings,
+} from "../index.js"
 import {
 	getApiProtocol,
+	getModelId,
+	getProviderDefaultModelId,
+	getProviderIsProxy,
+	getProviderLabel,
+	getProviderModelIdKey,
+	getProviderModels,
+	getProviderServiceUrl,
+	isProviderHidden,
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
 	parseOpenAiExtraBody,
 	PROVIDER_SETTINGS_KEYS,
 	providerSettingsSchema,
 	providerSettingsSchemaDiscriminated,
+	selectableProviders,
 } from "../provider-settings.js"
 import { OpenAiCodexServiceTier, OpenAiServiceTier } from "../model.js"
+import { anthropicModels } from "../providers/index.js"
 import { providerDefinitionList } from "../providers/index.js"
 
 describe("provider settings discriminated union", () => {
@@ -30,6 +46,196 @@ describe("provider settings discriminated union", () => {
 
 	it.each(providerNames)("accepts the %s provider branch", (apiProvider) => {
 		expect(providerSettingsSchemaDiscriminated.safeParse({ apiProvider }).success).toBe(true)
+	})
+})
+
+describe("provider definition metadata", () => {
+	it.each(providerDefinitionList.map((definition) => definition.apiProvider))(
+		"declares a non-empty label for %s",
+		(apiProvider) => {
+			expect(typeof getProviderLabel(apiProvider)).toBe("string")
+			expect(getProviderLabel(apiProvider).length).toBeGreaterThan(0)
+		},
+	)
+
+	it.each(providerDefinitionList.map((definition) => definition.apiProvider))(
+		"declares a string service URL for %s",
+		(apiProvider) => {
+			expect(typeof getProviderServiceUrl(apiProvider)).toBe("string")
+		},
+	)
+
+	it("declares an absolute service URL whenever one is provided", () => {
+		for (const definition of providerDefinitionList) {
+			if (definition.serviceUrl) {
+				expect(definition.serviceUrl).toMatch(/^https:\/\//)
+			}
+		}
+	})
+
+	it("returns the declared label rather than the raw identifier", () => {
+		expect(getProviderLabel(providerIdentifiers.anthropic)).toBe("Anthropic")
+		expect(getProviderLabel(providerIdentifiers.openaiCodex)).toBe("OpenAI - ChatGPT Plus/Pro")
+	})
+
+	it("falls back to the identifier for an unregistered provider", () => {
+		expect(getProviderLabel("unregistered-provider" as (typeof providerNames)[number])).toBe(
+			"unregistered-provider",
+		)
+	})
+
+	it("returns the declared service URL rather than a UI-side registry", () => {
+		expect(getProviderServiceUrl(providerIdentifiers.anthropic)).toBe("https://console.anthropic.com")
+		expect(getProviderServiceUrl(providerIdentifiers.bedrock)).toBe("https://aws.amazon.com/bedrock")
+		expect(getProviderServiceUrl(providerIdentifiers.vscodeLm)).toBe(
+			"https://code.visualstudio.com/api/extension-guides/language-model",
+		)
+	})
+
+	it("returns an empty service URL for a provider without a console", () => {
+		expect(getProviderServiceUrl(providerIdentifiers.openai)).toBe("")
+		expect(getProviderServiceUrl(providerIdentifiers.openrouter)).toBe("")
+	})
+
+	it("returns an empty service URL for an unregistered provider", () => {
+		expect(getProviderServiceUrl("unregistered-provider" as (typeof providerNames)[number])).toBe("")
+	})
+
+	it("returns the provider's static catalog", () => {
+		expect(getProviderModels(providerIdentifiers.anthropic)).toBe(anthropicModels)
+		expect(getProviderModels(providerIdentifiers.anthropic)).toHaveProperty("claude-sonnet-4-5")
+	})
+
+	it.each([
+		providerIdentifiers.openrouter,
+		providerIdentifiers.ollama,
+		providerIdentifiers.lmstudio,
+		providerIdentifiers.openai,
+		providerIdentifiers.fakeAi,
+		providerIdentifiers.geminiCli,
+	])("returns an empty catalog for the runtime-discovered provider %s", (provider) => {
+		expect(getProviderModels(provider)).toEqual({})
+	})
+
+	it.each([
+		providerIdentifiers.openai,
+		providerIdentifiers.litellm,
+		providerIdentifiers.ollama,
+		providerIdentifiers.lmstudio,
+	])("marks the user-configured proxy provider %s as a proxy", (provider) => {
+		expect(getProviderIsProxy(provider)).toBe(true)
+	})
+
+	it.each([
+		providerIdentifiers.anthropic,
+		providerIdentifiers.openrouter,
+		providerIdentifiers.gemini,
+		providerIdentifiers.bedrock,
+	])("does not mark the vendor-hosted provider %s as a proxy", (provider) => {
+		expect(getProviderIsProxy(provider)).toBe(false)
+	})
+
+	it("treats an unregistered provider as neither a proxy nor hidden", () => {
+		const unregistered = "unregistered-provider" as (typeof providerNames)[number]
+
+		expect(getProviderIsProxy(unregistered)).toBe(false)
+		expect(isProviderHidden(unregistered)).toBe(false)
+	})
+
+	it.each([providerIdentifiers.geminiCli, providerIdentifiers.fakeAi])(
+		"hides the non-selectable provider %s from the settings UI",
+		(provider) => {
+			expect(isProviderHidden(provider)).toBe(true)
+		},
+	)
+
+	it.each([
+		providerIdentifiers.anthropic,
+		providerIdentifiers.openrouter,
+		providerIdentifiers.openai,
+		providerIdentifiers.ollama,
+	])("keeps the selectable provider %s visible in the settings UI", (provider) => {
+		expect(isProviderHidden(provider)).toBe(false)
+	})
+})
+
+describe("getProviderModelIdKey", () => {
+	it.each(
+		providerDefinitionList.flatMap((definition) =>
+			definition.modelIdKey ? [[definition.apiProvider, definition.modelIdKey] as const] : [],
+		),
+	)("returns the model ID field declared by the %s provider definition", (apiProvider, modelIdKey) => {
+		expect(getProviderModelIdKey(apiProvider)).toBe(modelIdKey)
+		expect(PROVIDER_SETTINGS_KEYS).toContain(modelIdKey)
+	})
+
+	it.each([providerIdentifiers.vscodeLm, providerIdentifiers.githubCopilot])(
+		"returns undefined for %s, which stores its selection in a nested selector",
+		(provider) => {
+			expect(getProviderModelIdKey(provider)).toBeUndefined()
+		},
+	)
+
+	it("returns undefined for an unregistered provider", () => {
+		expect(getProviderModelIdKey("unregistered-provider" as (typeof providerNames)[number])).toBeUndefined()
+	})
+
+	it("agrees with getModelId about where the selection is stored", () => {
+		const settings: ProviderSettings = {
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "vendor/model",
+		}
+		const modelIdKey = getProviderModelIdKey(providerIdentifiers.openrouter)
+
+		expect(modelIdKey).toBeDefined()
+		expect(settings[modelIdKey!]).toBe(getModelId(settings))
+	})
+
+	it("resolves the default through the same provider definition", () => {
+		expect(getProviderDefaultModelId(providerIdentifiers.anthropic, {})).toBe(
+			getProviderDefaultModelId(providerIdentifiers.anthropic, { apiProvider: providerIdentifiers.anthropic }),
+		)
+	})
+})
+
+describe("selectableProviders", () => {
+	it("offers exactly the non-hidden provider definitions", () => {
+		const expected = providerDefinitionList
+			.filter((definition) => !definition.hidden)
+			.map((definition) => definition.apiProvider)
+			.sort()
+
+		expect(selectableProviders.map(({ value }) => value).sort()).toEqual(expected)
+	})
+
+	it.each([providerIdentifiers.geminiCli, providerIdentifiers.fakeAi])("omits the hidden provider %s", (provider) => {
+		expect(selectableProviders.map(({ value }) => value)).not.toContain(provider)
+	})
+
+	it("sorts providers by label", () => {
+		const labels = selectableProviders.map(({ label }) => label)
+
+		expect(labels).toEqual([...labels].sort((a, b) => a.localeCompare(b)))
+	})
+
+	it("derives every label and proxy flag from the provider definition", () => {
+		for (const { value, label, isProxy } of selectableProviders) {
+			expect(label).toBe(getProviderLabel(value))
+			expect(isProxy).toBe(getProviderIsProxy(value))
+		}
+	})
+
+	it("marks only the user-configured proxy providers as proxy", () => {
+		const proxyValues = selectableProviders.filter(({ isProxy }) => isProxy).map(({ value }) => value)
+
+		expect(new Set(proxyValues)).toEqual(
+			new Set([
+				providerIdentifiers.openai,
+				providerIdentifiers.lmstudio,
+				providerIdentifiers.ollama,
+				providerIdentifiers.litellm,
+			]),
+		)
 	})
 })
 

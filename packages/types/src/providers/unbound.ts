@@ -23,6 +23,7 @@ export const UNBOUND_MODEL_ID_FIELD = "unboundModelId"
 
 export const unboundProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.unbound,
+	label: "Unbound",
 	modelIdKey: UNBOUND_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(UNBOUND_MODEL_ID_FIELD),
 	getDefaultModelId: () => unboundDefaultModelId,

@@ -15,6 +15,7 @@ export type { PoeDefaultModelInfo } from "ai-sdk-provider-poe/code"
 
 export const poeProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.poe,
+	label: "Poe",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => poeDefaultModelId,

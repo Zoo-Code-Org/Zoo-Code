@@ -7,6 +7,8 @@ import {
 	type ProviderName,
 	type ModelInfo,
 	providerIdentifiers,
+	getProviderModelIdKey,
+	isProviderHidden,
 	isRetiredProvider,
 } from "@roo-code/types"
 
@@ -22,7 +24,6 @@ import { useExtensionState } from "@/context/ExtensionStateContext"
 import {
 	isStaticModelProvider,
 	getStaticModelsForProvider,
-	getProviderModelConfig,
 	handleModelChangeSideEffects,
 } from "@/components/settings/utils/providerModelConfig"
 import { filterModels } from "@/components/settings/utils/organizationFilters"
@@ -44,7 +45,13 @@ const UNSUPPORTED_QUICK_PICK_PROVIDERS: ProviderName[] = [
 ]
 
 function getModelIdField(provider: ProviderName): string | undefined {
-	return getProviderModelConfig(provider)?.field
+	// Hidden providers (Fake AI, Gemini CLI) are never offered in the settings UI,
+	// so the quick picker must not treat them as selectable either.
+	if (isProviderHidden(provider)) {
+		return undefined
+	}
+
+	return getProviderModelIdKey(provider)
 }
 
 function useModelListForProvider(provider: ProviderName | undefined, apiConfiguration: ProviderSettings) {

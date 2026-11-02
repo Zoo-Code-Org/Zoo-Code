@@ -332,9 +332,12 @@ export const fireworksModels = {
 
 export const fireworksProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.fireworks,
+	label: "Fireworks AI",
+	serviceUrl: "https://fireworks.ai",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => fireworksDefaultModelId,
+	models: fireworksModels,
 	schema: {
 		...apiModelIdProviderModelShape,
 		fireworksApiKey: z.string().optional(),

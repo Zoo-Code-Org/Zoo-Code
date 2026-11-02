@@ -171,9 +171,12 @@ export const xaiModels = {
 
 export const xaiProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.xai,
+	label: "xAI (Grok)",
+	serviceUrl: "https://x.ai",
 	modelIdKey: API_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
 	getDefaultModelId: () => xaiDefaultModelId,
+	models: xaiModels,
 	schema: {
 		...apiModelIdProviderModelShape,
 		xaiApiKey: z.string().optional(),

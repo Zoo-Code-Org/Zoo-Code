@@ -7,9 +7,15 @@ import { ExternalLinkIcon } from "@radix-ui/react-icons"
 import {
 	type ProviderName,
 	type ProviderSettings,
+	getProviderDefaultModelId,
+	getProviderLabel,
+	getProviderModelIdKey,
+	getProviderModels,
+	getProviderServiceUrl,
 	isDynamicProvider,
 	isRetiredProvider,
 	providerIdentifiers,
+	selectableProviders,
 	DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
 	OllamaModelsMessageType,
 	OpenAiModelsMessageType,
@@ -20,10 +26,7 @@ import {
 } from "@roo-code/types"
 
 import {
-	getProviderServiceConfig,
-	getDefaultModelIdForProvider,
 	getProviderDocsSlug,
-	getProviderModelConfig,
 	getStaticModelsForProvider,
 	shouldUseGenericModelPicker,
 	handleModelChangeSideEffects,
@@ -93,7 +96,6 @@ import {
 	Mimo,
 } from "./providers"
 
-import { MODELS_BY_PROVIDER, PROVIDERS } from "./constants"
 import { inputEventTransform, noTransform } from "./transforms"
 import { ModelPicker } from "./ModelPicker"
 import { ApiErrorMessage } from "./ApiErrorMessage"
@@ -347,12 +349,12 @@ const ApiOptions = ({
 				// newly selected provider).
 				//
 				// Note: We only validate providers with static model lists.
-				const staticModels = MODELS_BY_PROVIDER[provider]
-				if (!staticModels) {
+				const staticModels = getProviderModels(provider)
+				if (Object.keys(staticModels).length === 0) {
 					return
 				}
 
-				// Bedrock has a special “custom-arn” pseudo-model that isn't part of MODELS_BY_PROVIDER.
+				// Bedrock has a special “custom-arn” pseudo-model that isn't part of the static catalog.
 				if (provider === providerIdentifiers.bedrock && modelId === "custom-arn") {
 					return
 				}
@@ -364,13 +366,13 @@ const ApiOptions = ({
 				}
 			}
 
-			const config = getProviderModelConfig(value, apiConfiguration)
-			if (config) {
+			const modelIdKey = getProviderModelIdKey(value)
+			if (modelIdKey) {
 				validateAndResetModel(
 					value,
-					apiConfiguration[config.field] as string | undefined,
-					config.field,
-					config.default,
+					apiConfiguration[modelIdKey] as string | undefined,
+					modelIdKey,
+					getProviderDefaultModelId(value, apiConfiguration),
 				)
 			}
 		},
@@ -382,7 +384,7 @@ const ApiOptions = ({
 	}, [apiConfiguration, routerModels, organizationAllowList])
 
 	const docs = useMemo(() => {
-		const provider = PROVIDERS.find(({ value }) => value === selectedProvider)
+		const provider = selectableProviders.find(({ value }) => value === selectedProvider)
 		if (!provider) {
 			return undefined
 		}
@@ -397,7 +399,7 @@ const ApiOptions = ({
 	// Convert providers to SearchableSelect options
 	const providerOptions = useMemo(() => {
 		// First filter by organization allow list
-		const allowedProviders = filterProviders(PROVIDERS, organizationAllowList)
+		const allowedProviders = filterProviders(selectableProviders, organizationAllowList)
 
 		// Then filter out static providers that have no models (unless currently selected)
 		const providersWithModels = allowedProviders.filter(({ value }) => {
@@ -407,17 +409,17 @@ const ApiOptions = ({
 				return true
 			}
 
-			// Check if this is a static provider (has models in MODELS_BY_PROVIDER)
-			const staticModels = MODELS_BY_PROVIDER[value as ProviderName]
+			// Check if this is a static provider (ships a model catalog in its definition)
+			const staticModels = getProviderModels(value as ProviderName)
 
 			// If it's a static provider, check if it has any models after filtering
-			if (staticModels) {
+			if (Object.keys(staticModels).length > 0) {
 				const filteredModels = filterModels(staticModels, value as ProviderName, organizationAllowList)
 				// Hide the provider if it has no models after filtering
 				return filteredModels && Object.keys(filteredModels).length > 0
 			}
 
-			// If it's a dynamic provider (not in MODELS_BY_PROVIDER), always show it
+			// If it's a dynamic provider (no static catalog), always show it
 			// to avoid race conditions with async model fetching
 			return true
 		})
@@ -772,15 +774,15 @@ const ApiOptions = ({
 							<ModelPicker
 								apiConfiguration={apiConfiguration}
 								setApiConfigurationField={setApiConfigurationField}
-								defaultModelId={getDefaultModelIdForProvider(activeSelectedProvider, apiConfiguration)}
+								defaultModelId={getProviderDefaultModelId(activeSelectedProvider, apiConfiguration)}
 								models={getStaticModelsForProvider(
 									activeSelectedProvider,
 									t("settings:labels.useCustomArn"),
 									apiConfiguration,
 								)}
 								modelIdKey="apiModelId"
-								serviceName={getProviderServiceConfig(activeSelectedProvider).serviceName}
-								serviceUrl={getProviderServiceConfig(activeSelectedProvider).serviceUrl}
+								serviceName={getProviderLabel(activeSelectedProvider)}
+								serviceUrl={getProviderServiceUrl(activeSelectedProvider)}
 								organizationAllowList={organizationAllowList}
 								errorMessage={modelValidationError}
 								simplifySettings={fromWelcomeView}

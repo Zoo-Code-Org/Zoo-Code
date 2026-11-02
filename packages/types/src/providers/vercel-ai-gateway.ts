@@ -131,6 +131,7 @@ export const VERCEL_AI_GATEWAY_MODEL_ID_FIELD = "vercelAiGatewayModelId"
 
 export const vercelAiGatewayProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.vercelAiGateway,
+	label: "Vercel AI Gateway",
 	modelIdKey: VERCEL_AI_GATEWAY_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(VERCEL_AI_GATEWAY_MODEL_ID_FIELD),
 	getDefaultModelId: () => vercelAiGatewayDefaultModelId,

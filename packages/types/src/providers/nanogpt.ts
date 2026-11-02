@@ -69,6 +69,7 @@ export const nanoGptDefaultRoutingPreference: NanoGptRoutingPreference = "auto"
 
 export const nanoGptProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.nanogpt,
+	label: "NanoGPT",
 	modelIdKey: NANOGPT_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(NANOGPT_MODEL_ID_FIELD),
 	getDefaultModelId: () => nanoGptDefaultModelId,

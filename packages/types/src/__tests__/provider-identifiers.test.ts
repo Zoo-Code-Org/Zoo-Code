@@ -2,6 +2,8 @@ import {
 	customProviders,
 	dynamicProviders,
 	fauxProviders,
+	getProviderLabel,
+	getProviderModels,
 	internalProviders,
 	isCustomProvider,
 	isDynamicProvider,
@@ -11,7 +13,6 @@ import {
 	isProviderName,
 	isRetiredProvider,
 	localProviders,
-	MODELS_BY_PROVIDER,
 	providerIdentifiers,
 	providerNames,
 	providerNamesSchema,
@@ -121,10 +122,16 @@ describe("provider identifiers", () => {
 		expect(fauxProviders).toEqual([providerIdentifiers.fakeAi])
 	})
 
-	it("keeps model provider ids aligned with their keys", () => {
-		for (const [identifier, providerModels] of Object.entries(MODELS_BY_PROVIDER)) {
-			expect(providerModels.id).toBe(identifier)
+	it("exposes a non-empty label for every provider", () => {
+		for (const identifier of providerNames) {
+			expect(getProviderLabel(identifier)).toBeTruthy()
 		}
+	})
+
+	it("exposes a static model catalog only for providers that ship one", () => {
+		expect(Object.keys(getProviderModels(providerIdentifiers.anthropic)).length).toBeGreaterThan(0)
+		expect(Object.keys(getProviderModels(providerIdentifiers.openrouter))).toHaveLength(0)
+		expect(Object.keys(getProviderModels(providerIdentifiers.ollama))).toHaveLength(0)
 	})
 
 	it("preserves provider category type guards", () => {

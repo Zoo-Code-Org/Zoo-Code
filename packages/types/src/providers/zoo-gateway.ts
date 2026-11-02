@@ -31,6 +31,7 @@ export const ZOO_GATEWAY_MODEL_ID_FIELD = "zooGatewayModelId"
 
 export const zooGatewayProviderDefinition = createProviderDefinition({
 	apiProvider: providerIdentifiers.zooGateway,
+	label: "Zoo Gateway",
 	modelIdKey: ZOO_GATEWAY_MODEL_ID_FIELD,
 	getModelId: createModelIdAccessor(ZOO_GATEWAY_MODEL_ID_FIELD),
 	getDefaultModelId: () => zooGatewayDefaultModelId,
