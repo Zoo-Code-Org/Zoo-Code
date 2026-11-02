@@ -3065,6 +3065,10 @@ describe("updateSettings with the display settings", () => {
 		vi.clearAllMocks()
 	})
 
+	afterEach(() => {
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockReset().mockResolvedValue(undefined)
+	})
+
 	it.each([
 		["timeFormat", "auto"],
 		["timeFormat", "12h"],
@@ -3121,6 +3125,38 @@ describe("updateSettings with the display settings", () => {
 		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith("timeFormat", expect.anything())
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("dateFormat", "ymd")
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("soundEnabled", true)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	it("is not a transaction: if a write fails, the earlier ones stay, the later ones are not written, and the error is thrown", async () => {
+		const failure = new Error("storage unavailable")
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(async (key) => {
+			if (key === "dateFormat") throw failure
+		})
+
+		await expect(save({ timeFormat: "24h", dateFormat: "ymd", showRelativeTimes: false })).rejects.toBe(failure)
+
+		const written = vi.mocked(mockClineProvider.contextProxy.setValue).mock.calls.map(([key]) => key)
+		expect(written).toEqual(["timeFormat", "dateFormat"])
+		expect(mockClineProvider.postStateToWebview).not.toHaveBeenCalled()
+	})
+
+	it("completes a partial save when the same values are saved again", async () => {
+		let failOnce = true
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(async (key) => {
+			if (key === "dateFormat" && failOnce) {
+				failOnce = false
+				throw new Error("storage unavailable")
+			}
+		})
+		const values = { timeFormat: "24h", dateFormat: "ymd", showRelativeTimes: false }
+
+		await expect(save(values)).rejects.toThrow("storage unavailable")
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockClear()
+		await save(values)
+
+		const written = vi.mocked(mockClineProvider.contextProxy.setValue).mock.calls.map(([key]) => key)
+		expect(written).toEqual(["timeFormat", "dateFormat", "showRelativeTimes"])
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
 	})
 

@@ -762,6 +762,10 @@ export const webviewMessageHandler = async (
 					}
 				}
 
+				// The settings are written one at a time, in the order sent, and not as a transaction. If a write fails, the
+				// error is thrown: the ones before it stay stored, the ones after it are not written, and the webview is not
+				// refreshed. The display settings only change how times are shown, so a partial save is harmless, and saving
+				// again completes it.
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
 					// An invalid display value is ignored, before anything is done for it.
 					if (isInvalidDisplayValue(key, value)) {
