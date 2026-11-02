@@ -21,16 +21,26 @@ export const bedrockDefaultPromptRouterModelId: BedrockModelId = "anthropic.clau
 // https://aws.amazon.com/bedrock/pricing, including older models that are part
 // of the default prompt routers AWS enabled for GA of the promot router
 // feature.
+//
+// `promptCacheTtlSupport` marks the models whose Converse cache points accept an
+// explicit `ttl` (ADR-0006 PR-C7). The 1h boundary is not a version rule: Opus 4.1
+// and Opus 4 are 5m-only while Opus 4.6/4.7/4.8 are 1h-capable, so the flag is set
+// per exact model id from the AWS "Supported TTL" table and never inferred from a
+// pattern. Rows without it are 5m-only, which makes Bedrock reject an explicit ttl
+// (ValidationException), so absence must stay the fail-closed default.
+// https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html
 export const bedrockModels = {
 	"anthropic.claude-sonnet-4-5-20250929-v1:0": {
 		maxTokens: 64_000,
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		inputPrice: 3.0,
 		outputPrice: 15.0,
 		cacheWritesPrice: 3.75,
+		cacheWritesPrice1h: 6, // $6.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.3,
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -41,10 +51,12 @@ export const bedrockModels = {
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		inputPrice: 3.0, // $3 per million input tokens (≤200K context)
 		outputPrice: 15.0, // $15 per million output tokens (≤200K context)
 		cacheWritesPrice: 3.75, // $3.75 per million tokens
+		cacheWritesPrice1h: 6, // $6.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.3, // $0.30 per million tokens
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -56,6 +68,7 @@ export const bedrockModels = {
 				inputPrice: 6.0, // $6 per million input tokens (>200K context)
 				outputPrice: 22.5, // $22.50 per million output tokens (>200K context)
 				cacheWritesPrice: 7.5, // $7.50 per million tokens (>200K context)
+				cacheWritesPrice1h: 12, // $12.00 per million tokens (2x tier input price, 1h cache writes)
 				cacheReadsPrice: 0.6, // $0.60 per million tokens (>200K context)
 			},
 		],
@@ -66,12 +79,14 @@ export const bedrockModels = {
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
 		supportsTemperature: false,
 		inputPrice: 2.0, // $2 per million input tokens (introductory pricing through Aug 31, 2026)
 		outputPrice: 10.0, // $10 per million output tokens (introductory pricing through Aug 31, 2026)
 		cacheWritesPrice: 2.5, // $2.50 per million tokens (introductory pricing through Aug 31, 2026)
+		cacheWritesPrice1h: 4, // $4.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.2, // $0.20 per million tokens (introductory pricing through Aug 31, 2026)
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -152,6 +167,7 @@ export const bedrockModels = {
 		inputPrice: 3.0,
 		outputPrice: 15.0,
 		cacheWritesPrice: 3.75,
+		cacheWritesPrice1h: 6, // $6.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.3,
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -166,6 +182,7 @@ export const bedrockModels = {
 		inputPrice: 15.0,
 		outputPrice: 75.0,
 		cacheWritesPrice: 18.75,
+		cacheWritesPrice1h: 30, // $30.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 1.5,
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -176,10 +193,12 @@ export const bedrockModels = {
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		inputPrice: 5.0, // $5 per million input tokens (≤200K context)
 		outputPrice: 25.0, // $25 per million output tokens (≤200K context)
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
+		cacheWritesPrice1h: 10, // $10.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -191,6 +210,7 @@ export const bedrockModels = {
 				inputPrice: 10.0, // $10 per million input tokens (>200K context)
 				outputPrice: 37.5, // $37.50 per million output tokens (>200K context)
 				cacheWritesPrice: 12.5, // $12.50 per million tokens (>200K context)
+				cacheWritesPrice1h: 20, // $20.00 per million tokens (2x tier input price, 1h cache writes)
 				cacheReadsPrice: 1.0, // $1.00 per million tokens (>200K context)
 			},
 		],
@@ -200,10 +220,12 @@ export const bedrockModels = {
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		inputPrice: 5.0, // $5 per million input tokens (≤200K context) — verify against Bedrock console
 		outputPrice: 25.0, // $25 per million output tokens (≤200K context) — verify against Bedrock console
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
+		cacheWritesPrice1h: 10, // $10.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -215,6 +237,7 @@ export const bedrockModels = {
 				inputPrice: 10.0, // $10 per million input tokens (>200K context)
 				outputPrice: 37.5, // $37.50 per million output tokens (>200K context)
 				cacheWritesPrice: 12.5, // $12.50 per million tokens (>200K context)
+				cacheWritesPrice1h: 20, // $20.00 per million tokens (2x tier input price, 1h cache writes)
 				cacheReadsPrice: 1.0, // $1.00 per million tokens (>200K context)
 			},
 		],
@@ -224,10 +247,12 @@ export const bedrockModels = {
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		inputPrice: 5.0, // $5 per million input tokens (≤200K context) — verify against Bedrock console
 		outputPrice: 25.0, // $25 per million output tokens (≤200K context) — verify against Bedrock console
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
+		cacheWritesPrice1h: 10, // $10.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -241,6 +266,7 @@ export const bedrockModels = {
 				inputPrice: 10.0, // $10 per million input tokens (>200K context)
 				outputPrice: 37.5, // $37.50 per million output tokens (>200K context)
 				cacheWritesPrice: 12.5, // $12.50 per million tokens (>200K context)
+				cacheWritesPrice1h: 20, // $20.00 per million tokens (2x tier input price, 1h cache writes)
 				cacheReadsPrice: 1.0, // $1.00 per million tokens (>200K context)
 			},
 		],
@@ -251,12 +277,14 @@ export const bedrockModels = {
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
 		supportsTemperature: false,
 		inputPrice: 5.0, // $5 per million input tokens
 		outputPrice: 25.0, // $25 per million output tokens
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
+		cacheWritesPrice1h: 10, // $10.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -271,12 +299,14 @@ export const bedrockModels = {
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
 		supportsTemperature: false,
 		inputPrice: 4.0, // $4 per million input tokens
 		outputPrice: 20.0, // $20 per million output tokens
 		cacheWritesPrice: 5.0, // $5 per million tokens
+		cacheWritesPrice1h: 8, // $8.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.2, // $0.20 per million tokens
 		// The same Bedrock model card lists 512 as the minimum tokens per cache
 		// checkpoint for Opus 5.5 (matching the Fable 5.1 entry below).
@@ -295,6 +325,7 @@ export const bedrockModels = {
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
 		supportsTemperature: false,
@@ -306,6 +337,7 @@ export const bedrockModels = {
 		inputPrice: 0.1, // $0.10 per million input tokens
 		outputPrice: 0.5, // $0.50 per million output tokens
 		cacheWritesPrice: 0.125, // $0.125 per million tokens (5m cache writes)
+		cacheWritesPrice1h: 0.2, // $0.20 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.01, // $0.01 per million tokens (cache hits / refreshes)
 		// The same Bedrock model card lists 512 as the minimum tokens per cache
 		// checkpoint for Haiku 5.5 (matching the Opus 5.5 entry above).
@@ -320,12 +352,14 @@ export const bedrockModels = {
 		contextWindow: 1_000_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
 		supportsTemperature: false,
 		inputPrice: 10.0,
 		outputPrice: 50.0,
 		cacheWritesPrice: 12.5,
+		cacheWritesPrice1h: 20, // $20.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.25,
 		minTokensPerCachePoint: 512,
 		maxCachePoints: 4,
@@ -338,12 +372,14 @@ export const bedrockModels = {
 		contextWindow: 1_000_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
 		supportsTemperature: false,
 		inputPrice: 10.0,
 		outputPrice: 50.0,
 		cacheWritesPrice: 12.5,
+		cacheWritesPrice1h: 20, // $20.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 1.0,
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -356,10 +392,12 @@ export const bedrockModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		inputPrice: 5.0,
 		outputPrice: 25.0,
 		cacheWritesPrice: 6.25,
+		cacheWritesPrice1h: 10, // $10.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.5,
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -374,6 +412,7 @@ export const bedrockModels = {
 		inputPrice: 15.0,
 		outputPrice: 75.0,
 		cacheWritesPrice: 18.75,
+		cacheWritesPrice1h: 30, // $30.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 1.5,
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -388,6 +427,7 @@ export const bedrockModels = {
 		inputPrice: 3.0,
 		outputPrice: 15.0,
 		cacheWritesPrice: 3.75,
+		cacheWritesPrice1h: 6, // $6.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.3,
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -401,6 +441,7 @@ export const bedrockModels = {
 		inputPrice: 3.0,
 		outputPrice: 15.0,
 		cacheWritesPrice: 3.75,
+		cacheWritesPrice1h: 6, // $6.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.3,
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -414,6 +455,7 @@ export const bedrockModels = {
 		inputPrice: 0.8,
 		outputPrice: 4.0,
 		cacheWritesPrice: 1.0,
+		cacheWritesPrice1h: 1.6, // $1.60 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.08,
 		minTokensPerCachePoint: 2048,
 		maxCachePoints: 4,
@@ -424,10 +466,12 @@ export const bedrockModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		inputPrice: 1.0,
 		outputPrice: 5.0,
 		cacheWritesPrice: 1.25, // 5m cache writes
+		cacheWritesPrice1h: 2, // $2.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.1, // cache hits / refreshes
 		minTokensPerCachePoint: 2048,
 		maxCachePoints: 4,

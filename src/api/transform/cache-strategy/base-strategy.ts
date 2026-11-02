@@ -48,10 +48,21 @@ export abstract class CacheStrategy {
 	}
 
 	/**
-	 * Create a cache point content block
+	 * Create a cache point content block.
+	 *
+	 * `ttl` is omitted, not set to "5m", when no TTL was resolved: AWS documents
+	 * omitting the field as the way to get the default 5-minute behaviour, and an
+	 * explicit "5m" would change the bytes of every existing request.
+	 *
+	 * Public so the provider's message-level emitter can reuse it instead of
+	 * building its own literal: one factory means one TTL per request (I4) and
+	 * makes a mixed-TTL request unrepresentable rather than merely unlikely.
 	 */
-	protected createCachePoint(): ContentBlock {
-		return { cachePoint: { type: "default" } } as unknown as ContentBlock
+	public createCachePoint(): ContentBlock {
+		const { cacheTtl } = this.config
+		return {
+			cachePoint: cacheTtl ? { type: "default", ttl: cacheTtl } : { type: "default" },
+		} as ContentBlock
 	}
 
 	/**

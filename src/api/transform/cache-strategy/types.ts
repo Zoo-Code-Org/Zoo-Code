@@ -1,5 +1,6 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import { SystemContentBlock, Message } from "@aws-sdk/client-bedrock-runtime"
+import type { PromptCacheTtl } from "@roo-code/types"
 
 /**
  * Information about a model's capabilities and constraints
@@ -57,4 +58,12 @@ export interface CacheStrategyConfig {
 	usePromptCache: boolean
 	/** Previous cache point placements (for maintaining consistency across consecutive messages) */
 	previousCachePointPlacements?: CachePointPlacement[]
+	/**
+	 * Cache TTL every cache point in this request carries, already resolved against
+	 * the model's catalog capability. One value per request is the point: Bedrock
+	 * Converse rejects a shorter TTL appearing before a longer one across
+	 * tools -> system -> messages, so a per-point TTL would be a 400 waiting for the
+	 * first mixed placement. Leaving it unset omits `ttl` from the wire entirely.
+	 */
+	cacheTtl?: PromptCacheTtl
 }

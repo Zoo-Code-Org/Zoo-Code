@@ -3,12 +3,13 @@ import {
 	ConverseStreamCommand,
 	ConverseCommand,
 	BedrockRuntimeClientConfig,
-	ContentBlock,
 	Message,
 	SystemContentBlock,
 	Tool,
 	ToolConfiguration,
 	ToolChoice,
+	CacheTTL,
+	type CacheDetail,
 } from "@aws-sdk/client-bedrock-runtime"
 import { NodeHttpHandler } from "@smithy/node-http-handler"
 import OpenAI from "openai"
@@ -22,6 +23,7 @@ import {
 	type ProviderSettings,
 	type BedrockModelId,
 	type BedrockServiceTier,
+	type PromptCacheTtl,
 	bedrockDefaultModelId,
 	bedrockModels,
 	bedrockDefaultPromptRouterModelId,
@@ -47,6 +49,7 @@ import { logger } from "../../utils/logging"
 import { Package } from "../../shared/package"
 import { MultiPointStrategy } from "../transform/cache-strategy/multi-point-strategy"
 import { ModelInfo as CacheModelInfo } from "../transform/cache-strategy/types"
+import { resolveCacheTtl } from "../transform/caching/ttl"
 import { convertToBedrockConverseMessages as sharedConverter } from "../transform/bedrock-converse-format"
 import { getModelParams } from "../transform/model-params"
 import { shouldUseReasoningBudget } from "../../shared/api"
@@ -179,6 +182,9 @@ export interface StreamEvent {
 			cacheWriteInputTokens?: number
 			cacheReadInputTokenCount?: number
 			cacheWriteInputTokenCount?: number
+			// Per-TTL split of the cache writes. Converse returns one entry per TTL
+			// class that received writes, longest TTL first.
+			cacheDetails?: CacheDetail[]
 		}
 		metrics?: {
 			latencyMs: number
@@ -210,6 +216,25 @@ export type UsageType = {
 	cacheWriteInputTokens?: number
 	cacheReadInputTokenCount?: number
 	cacheWriteInputTokenCount?: number
+	cacheDetails?: CacheDetail[]
+}
+
+/**
+ * Read the 1h share of a Converse `cacheDetails` split.
+ *
+ * Best effort by construction: the field is optional in the pinned SDK and absent
+ * on every pre-1h response, so a missing split means "no long-lived write was
+ * reported" and the cost layer prices the whole aggregate at the 5m rate. The
+ * counts are a decomposition of `cacheWriteInputTokens`, never an addition to it,
+ * so the value is clamped to the aggregate to keep a malformed response from
+ * billing more writes than were reported.
+ */
+function readCacheWrite1hTokens(usage: UsageType, cacheWriteTokens: number): number | undefined {
+	const oneHour = usage.cacheDetails?.find((detail) => detail.ttl === CacheTTL.ONE_HOUR)?.inputTokens
+	if (!oneHour || oneHour <= 0) {
+		return undefined
+	}
+	return Math.min(oneHour, cacheWriteTokens)
 }
 
 /************************************************************************************
@@ -448,6 +473,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			usePromptCache,
 			modelConfig.info,
 			conversationId,
+			resolveCacheTtl(this.options, modelConfig.info),
 		)
 
 		let additionalModelRequestFields: BedrockAdditionalModelFields | undefined
@@ -642,6 +668,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 						outputTokens: usage.outputTokens || 0,
 						cacheReadTokens: cacheReadTokens,
 						cacheWriteTokens: cacheWriteTokens,
+						cacheWrite1hTokens: readCacheWrite1hTokens(usage, cacheWriteTokens),
 					}
 					continue
 				}
@@ -974,7 +1001,11 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	}
 
 	/**
-	 * Convert Anthropic messages to Bedrock Converse format
+	 * Convert Anthropic messages to Bedrock Converse format.
+	 *
+	 * `cacheTtl` is resolved once by the caller and threaded into the strategy, so
+	 * both cache-point emitters in this method (the strategy's system/message
+	 * blocks and the message-level literal below) carry the same value.
 	 */
 	private convertToBedrockConverseMessages(
 		anthropicMessages: Anthropic.Messages.MessageParam[] | { role: string; content: string }[],
@@ -982,6 +1013,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		usePromptCache: boolean = false,
 		modelInfo?: any,
 		conversationId?: string, // Optional conversation ID to track cache points across messages
+		cacheTtl?: PromptCacheTtl,
 	): { system: SystemContentBlock[]; messages: Message[] } {
 		// First convert messages using shared converter for proper image handling
 		const convertedMessages = sharedConverter(anthropicMessages as Anthropic.Messages.MessageParam[])
@@ -1017,6 +1049,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			messages: anthropicMessages as Anthropic.Messages.MessageParam[],
 			usePromptCache,
 			previousCachePointPlacements: previousPlacements,
+			cacheTtl,
 		}
 
 		// Get cache point placements
@@ -1028,13 +1061,15 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			this.previousCachePointPlacements[conversationId] = cacheResult.messageCachePointPlacements
 		}
 
-		// Apply cache points to the properly converted messages
+		// Apply cache points to the properly converted messages. The strategy owns the
+		// cache-point shape, so the message-level emitter asks it rather than repeating
+		// the literal: that is what keeps both emitters on one TTL.
 		const messagesWithCache = convertedMessages.map((msg, index) => {
 			const placement = cacheResult.messageCachePointPlacements?.find((p) => p.index === index)
 			if (placement) {
 				return {
 					...msg,
-					content: [...(msg.content || []), { cachePoint: { type: "default" } } as ContentBlock],
+					content: [...(msg.content || []), strategy.createCachePoint()],
 				}
 			}
 			return msg
@@ -1212,13 +1247,15 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		} else {
 			// Use heuristics for model info, then allow overrides from ProviderSettings
 			const guessed = this.guessModelInfoFromId(modelId)
-			model = {
-				id: bedrockDefaultModelId,
-				info: {
-					...JSON.parse(JSON.stringify(bedrockModels[bedrockDefaultModelId])),
-					...guessed,
-				},
+			const info: ModelInfo = {
+				...JSON.parse(JSON.stringify(bedrockModels[bedrockDefaultModelId])),
+				...guessed,
 			}
+			// The default row is 1h-capable, but an id we cannot resolve is not. Inheriting
+			// the capability would send `ttl: "1h"` to a model that may reject it with a
+			// ValidationException that kills the turn, so an unlisted id fails closed (I2).
+			delete info.promptCacheTtlSupport
+			model = { id: bedrockDefaultModelId, info }
 		}
 
 		// Always allow user to override detected/guessed maxTokens and contextWindow
@@ -1295,6 +1332,10 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				inputPrice: tier?.inputPrice ?? modelConfig.info.inputPrice,
 				outputPrice: tier?.outputPrice ?? modelConfig.info.outputPrice,
 				cacheWritesPrice: tier?.cacheWritesPrice ?? modelConfig.info.cacheWritesPrice,
+				// Carry the tier's own TTL rate; the entry-level one was derived from the
+				// 200K input price and would halve a 1M-context 1h write.
+				cacheWritesPrice1h: tier?.cacheWritesPrice1h ?? modelConfig.info.cacheWritesPrice1h,
+				cacheWritesPrice12h: tier?.cacheWritesPrice12h ?? modelConfig.info.cacheWritesPrice12h,
 				cacheReadsPrice: tier?.cacheReadsPrice ?? modelConfig.info.cacheReadsPrice,
 			}
 		}
