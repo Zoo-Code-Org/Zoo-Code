@@ -15,6 +15,7 @@ import {
 	type ClineMessage,
 	type ExtensionMessage,
 	type ExtensionState,
+	type RooCodeSettings,
 	type WebviewMessage,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
@@ -4038,6 +4039,39 @@ describe("ClineProvider", () => {
 			expect((await provider.getStateToPostToWebview()).apiConfiguration).toMatchObject(configuration)
 		},
 	)
+
+	describe("display settings written through setValues and a task's configuration", () => {
+		const hand = (values: Record<string, unknown>) => values as unknown as RooCodeSettings
+
+		it("stores valid values as they are", async () => {
+			const setValues = vi.spyOn(provider.contextProxy, "setValues").mockResolvedValue(undefined)
+
+			await provider.setValues({ timeFormat: "24h", dateFormat: "ymd", showRelativeTimes: false })
+
+			expect(setValues).toHaveBeenCalledWith({ timeFormat: "24h", dateFormat: "ymd", showRelativeTimes: false })
+		})
+
+		it("ignores an invalid value, keeps the others, and logs which", async () => {
+			const setValues = vi.spyOn(provider.contextProxy, "setValues").mockResolvedValue(undefined)
+			const log = vi.spyOn(provider, "log").mockImplementation(() => {})
+
+			await provider.setValues(hand({ timeFormat: "13h", dateFormat: "dmy", mode: "code" }))
+
+			expect(setValues).toHaveBeenCalledWith({ dateFormat: "dmy", mode: "code" })
+			expect(log).toHaveBeenCalledWith("[setValues] Ignored an invalid value for timeFormat")
+		})
+
+		it("applies the same check to the configuration of a new task", async () => {
+			const setValues = vi.spyOn(provider.contextProxy, "setValues").mockResolvedValue(undefined)
+			vi.spyOn(provider, "log").mockImplementation(() => {})
+
+			await provider
+				.createTask("hello", undefined, undefined, {}, hand({ showRelativeTimes: "yes", mode: "code" }))
+				.catch(() => undefined) // what happens after the configuration is written is not under test
+
+			expect(setValues).toHaveBeenCalledWith({ mode: "code" })
+		})
+	})
 
 	test("getState returns the saved destructive command guard setting", async () => {
 		await provider.contextProxy.setValue("destructiveCommandGuardEnabled", true)

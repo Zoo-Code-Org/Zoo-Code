@@ -132,6 +132,7 @@ import { buildApiHandler } from "../../api"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/providers/fetchers/lmstudio"
 
 import { ContextProxy } from "../config/ContextProxy"
+import { withoutInvalidDisplaySettings } from "../config/displaySettings"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
 import { PendingActionSettlementError, Task } from "../task/Task"
@@ -3667,7 +3668,9 @@ export class ClineProvider
 	}
 
 	public async setValues(values: RooCodeSettings) {
-		await this.contextProxy.setValues(values)
+		await this.contextProxy.setValues(
+			withoutInvalidDisplaySettings(values, (key) => this.log(`[setValues] Ignored an invalid value for ${key}`)),
+		)
 	}
 
 	// dev

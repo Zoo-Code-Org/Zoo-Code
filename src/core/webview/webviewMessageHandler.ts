@@ -29,7 +29,6 @@ import {
 	OpenAiModelsMessageType,
 	RouterModelsMessageType,
 	VsCodeLmModelsMessageType,
-	globalSettingsSchema,
 	isTelemetryOptedIn,
 } from "@roo-code/types"
 import { customToolRegistry } from "@roo-code/core"
@@ -38,6 +37,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import { type ApiMessage } from "../task-persistence/apiMessages"
 import { saveTaskMessages } from "../task-persistence"
+import { isInvalidDisplayValue } from "../config/displaySettings"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
@@ -130,17 +130,6 @@ import {
 
 const handlerFor = (apiConfiguration: ProviderSettings, provider: RouterName): ApiHandler =>
 	buildApiHandler({ ...apiConfiguration, apiProvider: provider })
-
-/**
- * What the webview may send for the display settings and the display language: the schema each is defined with. The
- * webview's own controls do not bind a message that was written by hand, and these values reach the formatters.
- */
-const DISPLAY_VALUE_SCHEMAS = new Map<string, { safeParse(value: unknown): { success: boolean } }>([
-	["timeFormat", globalSettingsSchema.shape.timeFormat],
-	["dateFormat", globalSettingsSchema.shape.dateFormat],
-	["showRelativeTimes", globalSettingsSchema.shape.showRelativeTimes],
-	["language", globalSettingsSchema.shape.language.nullish()],
-])
 
 export const webviewMessageHandler = async (
 	provider: ClineProvider,
@@ -775,7 +764,7 @@ export const webviewMessageHandler = async (
 
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
 					// An invalid display value is ignored, before anything is done for it.
-					if (DISPLAY_VALUE_SCHEMAS.get(key)?.safeParse(value).success === false) {
+					if (isInvalidDisplayValue(key, value)) {
 						provider.log(`[updateSettings] Ignored an invalid value for ${key}`)
 						continue
 					}
