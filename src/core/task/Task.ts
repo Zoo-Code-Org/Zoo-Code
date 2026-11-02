@@ -1445,6 +1445,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/** Cancels the current persistence generation before creating the next assistant-turn boundary. */
 	private resetAssistantMessagePersistence(): void {
 		this.cancelAssistantMessagePersistence()
+		// A disposed task can no longer restore its dirty buffer: drop the fail-closed marker.
+		writeToFileTool.releaseTaskRollbackFailure(this)
 		this.assistantMessagePersistencePromise = new Promise<AssistantMessagePersistenceResult>((resolve) => {
 			this.resolveAssistantMessagePersistence = resolve
 		})

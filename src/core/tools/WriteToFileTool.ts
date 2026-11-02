@@ -87,6 +87,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * the failure, or when the task is torn down.
 	 */
 	private taskRollbackFailures = new Map<string, Error>()
+	private reportedRollbackFailures = new WeakSet<Error>()
 
 	private getPartialStreamFailureKey(task: Task): string {
 		return `${task.taskId}.${task.instanceId}`
@@ -131,6 +132,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * ClineProvider.cleanupFailedHistoryTask()) never fires the TaskAborted cleanup and
 	 * this singleton would keep the disposed task and its diff-view provider.
 	 */
+	/** Release the refused-rollback marker for a task that is being torn down. */
+	public releaseTaskRollbackFailure(task: Task): void {
+		this.taskRollbackFailures.delete(this.getPartialStreamFailureKey(task))
+	}
+
 	public clearTaskState(task: Task): void {
 		// The per-stream state is per request, but a refused rollback left the dirty buffer in
 		// place: taskRollbackFailures is intentionally NOT cleared here so the retry request
@@ -243,6 +249,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		// actionable report. These are two distinct failures, so reporting both does not break the
 		// single-report rule.
 		if (rollbackError) {
+			this.reportedRollbackFailures.add(rollbackError)
 			if (state.streamError) {
 				await callbacks.handleError(
 					"writing file",
@@ -293,11 +300,14 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		const rollbackFailure = this.taskRollbackFailures.get(this.getPartialStreamFailureKey(task))
 		const streamState = this.taskPartialStreamState.get(this.getPartialStreamFailureKey(task))
 		if (rollbackFailure || streamState?.rollbackFailure) {
-			// Reported once here: delete both markers so a later retry can run, and so the
-			// parse-failure teardown cannot report the same failure a second time.
+			const reported = rollbackFailure ?? streamState?.rollbackFailure
 			this.taskRollbackFailures.delete(this.getPartialStreamFailureKey(task))
 			this.resetTaskPartialState(task)
-			await handleError("writing file", streamState?.rollbackFailure ?? rollbackFailure!)
+			// The parse-failure teardown may already have reported this exact failure: keep the
+			// fail-closed refusal but do not report the same Error twice.
+			if (!(reported && this.reportedRollbackFailures.has(reported))) {
+				await handleError("writing file", reported!)
+			}
 			return
 		}
 
