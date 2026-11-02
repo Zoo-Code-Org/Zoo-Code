@@ -276,7 +276,7 @@ vi.mock("../../../integrations/workspace/WorkspaceTracker", () => {
 })
 
 vi.mock("../../task/Task", () => ({
-	Task: vi.fn().mockImplementation(function (options: any) {
+	Task: vi.fn().mockImplementation(function (options: TaskOptions) {
 		return {
 			api: undefined,
 			abortTask: vi.fn(),
