@@ -1,7 +1,7 @@
 import * as vscode from "vscode"
 import delay from "delay"
 
-import type { CommandId, ExtensionMessage } from "@roo-code/types"
+import type { CommandId } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { getCommand } from "../utils/commands"
