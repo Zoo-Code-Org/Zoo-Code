@@ -302,7 +302,9 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// reading them here keeps the comparison independent of serialization details.
 		let stagedBytes: Buffer | undefined
 		if (confinementRoot !== undefined) {
-			stagedBytes = await fs.readFile(actualTempNewFilePath).catch(() => undefined)
+			// A read failure must abort the write: publishing without the bytes would make
+			// the post-commit escape undo unable to verify (and remove) an escaped file.
+			stagedBytes = await fs.readFile(actualTempNewFilePath)
 		}
 
 		// Step 2: Delegate backup + commit + rollback to safeWriteText with the
