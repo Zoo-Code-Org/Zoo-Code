@@ -843,50 +843,24 @@ Output:
 
 	describe("exit status tooltip", () => {
 		// The tooltip key must be written in i18next's namespace form ("ns:path").
-		// A dot-form key ("chat.commandExecution.exitStatus") carries no namespace
-		// separator, so i18next looks for a "chat.commandExecution.exitStatus" key
-		// inside the default namespace, misses, and renders the raw key to the user.
-		it("resolves the exit-status copy instead of rendering the raw key", async () => {
-			const instance = i18next.createInstance()
-			await instance.init({
-				lng: "en",
-				fallbackLng: "en",
-				resources: { en: { chat: enChat } },
-				interpolation: { escapeValue: false },
-			})
-
-			const resolved = instance.t("chat:commandExecution.exitStatus", { exitCode: 0 })
-			expect(resolved).toBe("Exited with status 0")
-			expect(resolved).not.toContain("chat:commandExecution")
-		})
-
-		it("does not resolve the dot form, which is why the namespace separator matters", async () => {
-			const instance = i18next.createInstance()
-			await instance.init({
-				lng: "en",
-				fallbackLng: "en",
-				resources: { en: { chat: enChat } },
-				interpolation: { escapeValue: false },
-			})
-
-			expect(instance.t("chat.commandExecution.exitStatus", { exitCode: 0 })).toBe(
-				"chat.commandExecution.exitStatus",
-			)
-		})
-
-		// The two tests above only exercise a standalone i18next instance, so they
-		// would keep passing if CommandExecution used the wrong key or dropped the
-		// exitCode interpolation. This one renders the real exited branch and reads
-		// the tooltip the user actually sees.
-		it("renders the interpolated exit-status tooltip for an exited command", async () => {
-			const user = userEvent.setup()
-
+		// A dot-form key carries no namespace separator, so i18next misses and renders
+		// the raw key. This test renders the real exited branch and reads the tooltip
+		// the user sees, so a wrong key or a dropped exitCode interpolation fails it.
+		beforeAll(async () => {
 			await i18next.init({
 				lng: "en",
 				fallbackLng: "en",
 				resources: { en: { chat: enChat } },
 				interpolation: { escapeValue: false },
 			})
+		})
+
+		afterAll(() => {
+			i18next.removeResourceBundle("en", "chat")
+		})
+
+		it("renders the interpolated exit-status tooltip for an exited command", async () => {
+			const user = userEvent.setup()
 
 			render(
 				<TooltipProvider delayDuration={0}>

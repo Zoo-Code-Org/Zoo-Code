@@ -4,6 +4,7 @@ import {
 	apiProviderTestSelectors,
 	apiSpecTsIgnoreConfig,
 } from "@roo-code/config-eslint/api-provider-hygiene"
+import { createI18nDotKeyConfig, getI18nDotKeySelectors } from "@roo-code/config-eslint/i18n-keys"
 import { createProviderIdentifierConfig } from "@roo-code/config-eslint/provider-identifiers"
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
@@ -27,11 +28,25 @@ const testPathTraversalSelectors = [
 	},
 ]
 
+const i18nDotKeyConfig = createI18nDotKeyConfig(`${import.meta.dirname}/i18n/locales/en`)
+
 /** @type {import("eslint").Linter.Config} */
 export default [
 	...config,
 	createProviderIdentifierConfig({ providerIdentifiers, retiredProviderIdentifiers }),
+	i18nDotKeyConfig,
 	apiProviderHygieneConfig,
+	{
+		// A later block replaces no-restricted-syntax for the same files, so repeat the i18n selectors.
+		...apiProviderHygieneConfig,
+		rules: {
+			"no-restricted-syntax": [
+				"error",
+				...apiProviderHygieneConfig.rules["no-restricted-syntax"].slice(1),
+				...getI18nDotKeySelectors(i18nDotKeyConfig),
+			],
+		},
+	},
 	{
 		rules: {
 			"prefer-const": ["error", { destructuring: "all" }],
