@@ -141,12 +141,16 @@ describe("coding run orchestration", () => {
 			repIndex: 0,
 			credential: "sk-test",
 			runtime,
-			gradingRuntime: createLocalSubprocessGradingRuntime(),
+			gradingRuntime: {
+				...createLocalSubprocessGradingRuntime(),
+				imageDigest: async () => ({ available: true, value: "sha256:run-image" }),
+			},
 			scratchDir: await scratch(),
 		})
 		assert.equal(record.outcome.outcome, "correct")
 		assert.equal(record.executionCode, "COMPLETED")
 		assert.equal(record.grading?.kind, "passed")
+		assert.equal(record.graderImageDigest, "sha256:run-image")
 		assert.equal(record.metrics.outcome.outcome, "correct")
 		// Usage lacks cache counts, so cost accounting stays incomplete.
 		assert.equal(record.metrics.cost.accountingComplete, false)

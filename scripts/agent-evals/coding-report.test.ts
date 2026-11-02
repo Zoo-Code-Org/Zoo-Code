@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import fs from "node:fs/promises"
+import { existsSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { describe, it } from "node:test"
@@ -554,3 +555,54 @@ describe("side artifact invalidation", () => {
 		}
 	})
 })
+
+for (const incompleteSide of ["baseline", "candidate"] as const) {
+	it(`excludes an available estimate with incomplete ${incompleteSide} accounting`, () => {
+		const baseline = metrics("clamp-range", 0, "correct", 0.1)
+		const candidate = metrics("clamp-range", 0, "correct", 0.05)
+		const incomplete = incompleteSide === "baseline" ? baseline : candidate
+		incomplete.cost.accountingComplete = false
+		const report = buildComparisonReport({
+			baseline: sideResult("baseline", "a".repeat(40), [baseline]),
+			candidate: sideResult("candidate", "b".repeat(40), [candidate]),
+		})
+		const row = report.fixtures.find((fixture) => fixture.fixtureName === "clamp-range")!
+		assert.equal(row.pairedCosts.missingPairs, 1)
+		assert.deepEqual(row.pairedCosts.pairs, [])
+		const markdown = renderMarkdownReport(report)
+		assert.ok(
+			markdown.includes(
+				`Grader image digest: \`${report.pins.baseline.graderImageDigest}\` / \`${report.pins.candidate.graderImageDigest}\``,
+			),
+		)
+		assert.match(markdown, /identifier and date are recorded per run in the JSON report/)
+	})
+}
+
+for (const boundary of ["before", "json", "markdown", "marker"] as const) {
+	it(`removes report publication interrupted at ${boundary}`, async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "compare-publication-"))
+		try {
+			const report = buildComparisonReport({
+				baseline: sideResult("baseline", "a".repeat(40), []),
+				candidate: sideResult("candidate", "b".repeat(40), []),
+			})
+			const names = {
+				json: "comparison-report.json",
+				markdown: "comparison-report.md",
+				marker: "comparison-report.complete",
+			}
+			await assert.rejects(
+				publishComparisonReport(
+					dir,
+					report,
+					() => boundary === "before" || existsSync(path.join(dir, names[boundary])),
+				),
+				/publication interrupted/,
+			)
+			assert.deepEqual(await fs.readdir(dir), [])
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}

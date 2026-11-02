@@ -48,10 +48,16 @@ const describeRepetitionError = (error: unknown): string =>
 
 export async function executeSideFlow(inputs: SideFlowInputs): Promise<SideFlowOutcome> {
 	const runs: CodingRunRecord[] = []
+	const abortPublication = async (): Promise<SideFlowOutcome> => {
+		await fs.rm(path.join(inputs.out, "side-results.json"), { force: true })
+		await fs.rm(path.join(inputs.out, "artifacts"), { recursive: true, force: true })
+		return { runs, completed: false }
+	}
+
 	for (const repetition of inputs.repetitions) {
 		// An interrupt stops the loop before the next repetition starts. The
 		// in-flight repetition is left to the substrate's own teardown.
-		if (inputs.isInterrupted()) return { runs, completed: false }
+		if (inputs.isInterrupted()) return abortPublication()
 		try {
 			runs.push(await inputs.runRepetition(repetition))
 		} catch (error) {
@@ -79,12 +85,7 @@ export async function executeSideFlow(inputs: SideFlowInputs): Promise<SideFlowO
 	}
 	// The completion marker must never exist for an interrupted side, so the
 	// publication stays gated even when the loop itself finished.
-	if (inputs.isInterrupted()) return { runs, completed: false }
-	const abortPublication = async (): Promise<SideFlowOutcome> => {
-		await fs.rm(path.join(inputs.out, "side-results.json"), { force: true })
-		await fs.rm(path.join(inputs.out, "artifacts"), { recursive: true, force: true })
-		return { runs, completed: false }
-	}
+	if (inputs.isInterrupted()) return abortPublication()
 	// Per-run artifacts are published atomically as each record exists.
 	for (const record of runs) {
 		if (!record.trace) continue

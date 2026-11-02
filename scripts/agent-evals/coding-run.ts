@@ -20,6 +20,7 @@ export interface CodingRunRecord {
 	outcome: ClassifiedOutcome
 	executionCode?: string
 	trace?: AgentTrace
+	graderImageDigest?: string
 	grading?: {
 		kind: GraderVerdict["kind"]
 		isolation?: string
@@ -131,6 +132,7 @@ export async function runCodingFixtureOnce(inputs: CodingRunInputs): Promise<Cod
 	const snapshot = getSnapshot()
 	const finalWorkspaceAvailable = snapshot !== undefined
 	let grading: GraderVerdict | undefined
+	let graderImageDigest: string | undefined
 	const code = result.execution.code
 	// A truncated capture is incomplete harness data. The grader never sees
 	// it, so missing files can never become an incorrect verdict. Complete
@@ -140,7 +142,17 @@ export async function runCodingFixtureOnce(inputs: CodingRunInputs): Promise<Cod
 			finalFiles: snapshot.files,
 			hiddenTests: bundle.grading.hiddenTests,
 			resources: bundle.grading.resources,
-			runtime: inputs.gradingRuntime,
+			runtime: {
+				isolation: inputs.gradingRuntime.isolation,
+				run: async (job) => {
+					try {
+						return await inputs.gradingRuntime.run(job)
+					} finally {
+						const digest = await inputs.gradingRuntime.imageDigest?.()
+						graderImageDigest = digest?.available ? digest.value : "unavailable"
+					}
+				},
+			},
 			scratchDir: inputs.scratchDir,
 		})
 	}
@@ -167,6 +179,7 @@ export async function runCodingFixtureOnce(inputs: CodingRunInputs): Promise<Cod
 		executionCode: code,
 		trace,
 		grading: grading ? serializeVerdict(grading) : undefined,
+		graderImageDigest,
 		finalWorkspaceTruncated: snapshot?.truncated,
 		metrics,
 	}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { comparePins, type SidePins } from "./coding-pins.ts"
+import { sideGraderImageDigest, comparePins, type SidePins } from "./coding-pins.ts"
 
 const pins = (side: "baseline" | "candidate", overrides: Partial<SidePins> = {}): SidePins => ({
 	side,
@@ -45,4 +45,20 @@ describe("pinned comparison inputs", () => {
 		const result = comparePins(pins("baseline"), pins("candidate", { commit: "c".repeat(40) }))
 		assert.equal(result.compatible, true)
 	})
+})
+
+it("pins one recorded image and rejects image changes within a side", () => {
+	assert.equal(sideGraderImageDigest([]), "unavailable")
+	assert.equal(
+		sideGraderImageDigest([{ graderImageDigest: "sha256:a" }, {}, { graderImageDigest: "sha256:a" }]),
+		"sha256:a",
+	)
+	assert.throws(
+		() => sideGraderImageDigest([{ graderImageDigest: "sha256:a" }, { graderImageDigest: "sha256:b" }]),
+		/changed within the side/,
+	)
+	assert.throws(
+		() => sideGraderImageDigest([{ graderImageDigest: "sha256:a" }, { graderImageDigest: "unavailable" }]),
+		/changed within the side/,
+	)
 })

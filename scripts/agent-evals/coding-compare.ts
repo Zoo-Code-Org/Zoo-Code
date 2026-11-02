@@ -102,6 +102,14 @@ export const runBoundedPreparation = async (
 			})
 			child.once("exit", (code, signal) => {
 				clearTimeout(timer)
+				// The group may still contain workers after its leader exits.
+				if (child.pid) {
+					try {
+						process.kill(-child.pid, "SIGKILL")
+					} catch {
+						// The group has already exited.
+					}
+				}
 				guard.track(undefined)
 				if (code === 0) {
 					resolve()
@@ -266,7 +274,9 @@ export const executeComparisonFlow = async (wiring: ComparisonFlowWiring): Promi
 		// published as one generation with a completion marker; any failure
 		// above or during publication leaves no complete report generation
 		// behind.
-		await publishComparisonReport(wiring.out, report)
+		if (!wiring.interruptedSignal()) {
+			await publishComparisonReport(wiring.out, report, () => wiring.interruptedSignal() !== undefined)
+		}
 		completed = report
 	} catch (error) {
 		// Deferred, not swallowed: the cleanup below runs first, then the
@@ -287,7 +297,10 @@ export const executeComparisonFlow = async (wiring: ComparisonFlowWiring): Promi
 		await fs.rm(wiring.scratchDir, { recursive: true, force: true }).catch(() => {})
 	}
 	const signal = wiring.interruptedSignal()
-	if (signal === "SIGINT" || signal === "SIGTERM") return { status: "interrupted", signal }
+	if (signal === "SIGINT" || signal === "SIGTERM") {
+		await removeComparisonReport(wiring.out)
+		return { status: "interrupted", signal }
+	}
 	if (failure !== undefined) throw failure
 	if (completed === undefined) throw new Error("comparison ended without a report or a failure")
 	return { status: "completed", report: completed }
@@ -380,16 +393,32 @@ const COMPARISON_REPORT_COMPLETE = "comparison-report.complete"
 // instead of a mixed one. A thrown failure rolls both files back, so a failed
 // comparison leaves no report files behind. Consumers must require the
 // completion marker and match its generation against the report files.
-export async function publishComparisonReport(outDir: string, report: ComparisonReport): Promise<void> {
+export async function removeComparisonReport(outDir: string): Promise<void> {
+	for (const name of [COMPARISON_REPORT_COMPLETE, COMPARISON_REPORT_JSON, COMPARISON_REPORT_MD])
+		await fs.rm(path.join(outDir, name), { force: true })
+}
+
+export async function publishComparisonReport(
+	outDir: string,
+	report: ComparisonReport,
+	isInterrupted: () => boolean = () => false,
+): Promise<void> {
 	const generation = report.generatedAt
 	const jsonPath = path.join(outDir, COMPARISON_REPORT_JSON)
 	const markdownPath = path.join(outDir, COMPARISON_REPORT_MD)
 	const markerPath = path.join(outDir, COMPARISON_REPORT_COMPLETE)
 	await fs.rm(markerPath, { force: true })
+	const checkInterrupted = (): void => {
+		if (isInterrupted()) throw new Error("comparison report publication interrupted")
+	}
 	try {
+		checkInterrupted()
 		await writeJsonAtomic(jsonPath, { ...report, generation })
+		checkInterrupted()
 		await writeFileAtomic(markdownPath, renderMarkdownReport(report))
+		checkInterrupted()
 		await writeFileAtomic(markerPath, `${generation}\n`)
+		checkInterrupted()
 	} catch (error) {
 		await fs.rm(jsonPath, { force: true }).catch(() => {})
 		await fs.rm(markdownPath, { force: true }).catch(() => {})

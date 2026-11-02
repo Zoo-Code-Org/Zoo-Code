@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
 import assert from "node:assert/strict"
 import fs from "node:fs/promises"
 import os from "node:os"
@@ -91,6 +93,44 @@ for (const scenario of ["nested", "oversized", "total", "count"] as const) {
 			if (scenario === "nested") assert.deepEqual(result.files, [{ path: "nested/file.js", content: "nested" }])
 			else assert.equal(result.files.length, scenario === "count" ? 4096 : scenario === "total" ? 8 : 0)
 		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}
+
+it("reads commit identity from the evaluated root despite an inherited GITHUB_SHA", async () => {
+	const dir = await tempDir("identity-ci-")
+	const saved = process.env.GITHUB_SHA
+	try {
+		process.env.GITHUB_SHA = "f".repeat(40)
+		const { stdout } = await promisify(execFile)("git", ["rev-parse", "HEAD"], { cwd: repoRoot })
+		const identity = await createHostRuntime({ root: repoRoot, artifactsDir: dir }).readIdentity?.()
+		assert.deepEqual(identity?.commit, { available: true, value: stdout.trim() })
+	} finally {
+		if (saved === undefined) delete process.env.GITHUB_SHA
+		else process.env.GITHUB_SHA = saved
+		await fs.rm(dir, { recursive: true, force: true })
+	}
+})
+
+for (const scenario of ["file", "total"] as const) {
+	it(`checks actual workspace bytes after stale ${scenario} stat results`, async (t) => {
+		const dir = await tempDir("workspace-growth-")
+		const stat = fs.stat
+		try {
+			const count = scenario === "file" ? 1 : 9
+			for (let index = 0; index < count; index++)
+				await fs.writeFile(path.join(dir, `${index}.js`), "x".repeat(scenario === "file" ? 1048577 : 1048576))
+			t.mock.method(fs, "stat", async (file: string) => {
+				const entry = await stat(file)
+				entry.size = 0
+				return entry
+			})
+			const snapshot = await readWorkspaceFiles(dir)
+			assert.equal(snapshot.truncated, true)
+			assert.equal(snapshot.files.length, scenario === "file" ? 0 : 8)
+		} finally {
+			t.mock.restoreAll()
 			await fs.rm(dir, { recursive: true, force: true })
 		}
 	})
