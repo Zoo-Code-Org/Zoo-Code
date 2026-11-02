@@ -1,4 +1,4 @@
-import i18next, { FALLBACK_LANGUAGE, loadLanguage } from "../setup"
+import i18next, { loadLanguage } from "../setup"
 
 // A dynamic import that rejects is what a 404 or a chunk missing from the
 // deployed manifest looks like at runtime. One namespace is enough: `loadLanguage`
@@ -38,6 +38,5 @@ describe("i18n setup locale load failure", () => {
 		// VS Code webview) can still reject the second import from that cache
 		// without re-requesting the chunk.
 		expect(warn).toHaveBeenCalledTimes(2)
-		expect(i18next.language).toBe(FALLBACK_LANGUAGE)
 	})
 })

@@ -20,7 +20,7 @@ type LocaleModule = { default?: LocaleResources } & LocaleResources
 const LOCALE_PATH_PATTERN = /\.\/locales\/([^/]+)\/([^/]+)\.json$/
 
 const eagerLocaleFiles = import.meta.glob<LocaleModule>("./locales/en/*.json", { eager: true })
-const lazyLocaleFiles = import.meta.glob<LocaleModule>("./locales/**/*.json")
+const lazyLocaleFiles = import.meta.glob<LocaleModule>(["./locales/**/*.json", "!./locales/en/*.json"])
 
 const pendingLanguages = new Map<string, Promise<void>>()
 const loadedLanguages = new Set<string>([FALLBACK_LANGUAGE])
@@ -67,27 +67,19 @@ export function loadLanguage(language: string): Promise<void> {
 		return pending
 	}
 
-	const loaders = Object.entries(lazyLocaleFiles)
-		.filter(([path]) => parseLocalePath(path)?.language === language)
-		.map(([path, load]) => load().then((module) => ({ path, module })))
+	const loaders = Object.entries(lazyLocaleFiles).flatMap(([path, load]) => {
+		const parsed = parseLocalePath(path)
 
-	// Unknown language: leave the fallback bundles in place so i18next resolves
-	// every key through `fallbackLng`.
-	if (loaders.length === 0) {
-		loadedLanguages.add(language)
-		return Promise.resolve()
-	}
+		return parsed?.language === language ? [load().then((module) => ({ namespace: parsed.namespace, module }))] : []
+	})
 
+	// An unknown language has no loaders, so `Promise.all` resolves at once and
+	// the fallback bundles stay in place: i18next resolves every key through
+	// `fallbackLng`.
 	const promise = Promise.all(loaders)
 		.then((modules) => {
-			modules.forEach(({ path, module }) => {
-				const parsed = parseLocalePath(path)
-
-				if (!parsed) {
-					return
-				}
-
-				i18next.addResourceBundle(parsed.language, parsed.namespace, module.default || module, true, true)
+			modules.forEach(({ namespace, module }) => {
+				i18next.addResourceBundle(language, namespace, module.default || module, true, true)
 			})
 
 			loadedLanguages.add(language)
@@ -110,8 +102,7 @@ i18next.use(initReactI18next).init({
 	lng: FALLBACK_LANGUAGE, // Default language (will be overridden)
 	fallbackLng: FALLBACK_LANGUAGE,
 	debug: false,
-	// Handed to `init` rather than added afterwards so the first render already
-	// resolves keys; `addResourceBundle` before init settles would be dropped.
+	// Handed to `init` so the first render already resolves keys.
 	resources: collectLocaleResources(eagerLocaleFiles),
 	interpolation: {
 		escapeValue: false, // React already escapes by default
