@@ -5,6 +5,9 @@ export { buildChildEnvironment, buildLaunchArgs } from "../agent-evals/isolation
 export const SOLHEIM_BASE_URL = "https://api.solheim.ai/v1"
 export const SOLHEIM_MODEL = "qwen3.8-27b"
 export const SMOKE_TIMEOUT_MS = 120_000
+// Keeps the finished task on screen before teardown clears it, so the
+// recording ends on the completed chat.
+export const SMOKE_TEARDOWN_HOLD_MS = 3_000
 export const SMOKE_PROMPT =
 	"This is a provider connectivity smoke test, not a code review. Call attempt_completion once with the result: Provider smoke completed. Do not read files, use other tools, delegate, or judge code."
 
