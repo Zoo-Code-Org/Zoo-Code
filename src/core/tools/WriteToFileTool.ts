@@ -300,9 +300,22 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		const rollbackFailure = this.taskRollbackFailures.get(this.getPartialStreamFailureKey(task))
 		const streamState = this.taskPartialStreamState.get(this.getPartialStreamFailureKey(task))
 		if (rollbackFailure || streamState?.rollbackFailure) {
+			const failureKey = this.getPartialStreamFailureKey(task)
 			const reported = rollbackFailure ?? streamState?.rollbackFailure
-			this.taskRollbackFailures.delete(this.getPartialStreamFailureKey(task))
 			this.resetTaskPartialState(task)
+			// Keep the marker until the dirty buffer is actually restored: a later write to the
+			// same path would otherwise call open() and save the unapproved content. A rollback
+			// that succeeds here clears it; one that fails keeps the fail-closed refusal.
+			let restored = false
+			try {
+				await task.diffViewProvider.revertChanges()
+				restored = true
+			} catch (rollbackError) {
+				console.error("Error restoring the refused write_to_file rollback:", rollbackError)
+			}
+			if (restored) {
+				this.taskRollbackFailures.delete(failureKey)
+			}
 			// The parse-failure teardown may already have reported this exact failure: keep the
 			// fail-closed refusal but do not report the same Error twice.
 			if (!(reported && this.reportedRollbackFailures.has(reported))) {
@@ -620,6 +633,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		}
 
 		if (newContent) {
+			// A refused rollback left the streamed document dirty: opening it here would save
+			// that unapproved buffer before approval. Skip the preview; execute() owns the refusal.
+			if (this.taskRollbackFailures.has(this.getPartialStreamFailureKey(task))) {
+				this.resetTaskPartialState(task)
+				return
+			}
 			try {
 				if (!task.diffViewProvider.isEditing) {
 					await task.diffViewProvider.open(relPath!)

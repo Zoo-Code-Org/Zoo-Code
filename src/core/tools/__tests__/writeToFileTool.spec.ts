@@ -1212,8 +1212,9 @@ describe("writeToFileTool", () => {
 			const writeCalls = mockHandleError.mock.calls.filter(([context]) => context === "writing file")
 			expect(writeCalls).toHaveLength(1)
 			expect(writeCalls[0][1]).toBeInstanceOf(Error)
-			// Reported once: the marker is released so a later retry can run.
-			expect(writeToFileTool["taskRollbackFailures"].size).toBe(0)
+			// The rollback is still refused, so the dirty buffer remains: the marker stays set
+			// to keep the next write fail-closed until a rollback succeeds.
+			expect(writeToFileTool["taskRollbackFailures"].size).toBe(1)
 		})
 
 		it("reports only the execute() failure when the write is retried after a failed stream", async () => {
