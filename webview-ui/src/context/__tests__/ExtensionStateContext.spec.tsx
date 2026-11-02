@@ -455,6 +455,31 @@ describe("ExtensionStateContext", () => {
 		expect(newer).toMatchObject({ chatFontSize: 12, interfaceFontScale: 1, spacingScale: 0.9, appearanceSeq: 6 })
 	})
 
+	it("clears an appearance value that a newer numbered push does not carry (it was reset to unset)", () => {
+		const initial = {
+			...createInitialExtensionState(),
+			chatFontSize: 16,
+			terminalFontSize: 14,
+			spacingScale: 1.1,
+			appearanceSeq: 5,
+		}
+		// JSON serialization drops an undefined value, as the extension transport does.
+		const pushed = JSON.parse(JSON.stringify({ chatFontSize: 16, terminalFontSize: undefined, appearanceSeq: 6 }))
+
+		const merged = mergeExtensionState(initial, pushed)
+
+		expect(merged.terminalFontSize).toBeUndefined()
+		expect(merged.spacingScale).toBeUndefined()
+		expect(merged).toMatchObject({ chatFontSize: 16, appearanceSeq: 6 })
+	})
+
+	it("does not clear the appearance values for a push with no sequence number, or a stale one", () => {
+		const initial = { ...createInitialExtensionState(), terminalFontSize: 14, appearanceSeq: 5 }
+
+		expect(mergeExtensionState(initial, { soundEnabled: true }).terminalFontSize).toBe(14)
+		expect(mergeExtensionState(initial, { soundEnabled: true, appearanceSeq: 4 }).terminalFontSize).toBe(14)
+	})
+
 	it("applies the appearance values of a push that has no sequence number", () => {
 		const initial = { ...createInitialExtensionState(), spacingScale: 1.1, appearanceSeq: 5 }
 		expect(mergeExtensionState(initial, { spacingScale: 0.9 }).spacingScale).toBe(0.9)

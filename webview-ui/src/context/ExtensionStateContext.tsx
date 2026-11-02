@@ -244,11 +244,17 @@ export const mergeExtensionState = (prevState: ExtensionState, newState: Partial
 
 	// The appearance values are read from a settings snapshot taken before the push is posted, so a stale
 	// push can carry old font sizes or spacing. Apply them only from a push newer than the last applied one.
+	// A numbered push is a whole snapshot: a value it does not carry is unset (JSON drops an undefined one), so
+	// the previous value is cleared rather than kept.
 	if (appearanceIsStale(newState, prevState.appearanceSeq)) {
 		for (const key of APPEARANCE_KEYS) {
 			;(rest as Record<string, unknown>)[key] = prevState[key]
 		}
 		rest.appearanceSeq = prevState.appearanceSeq
+	} else if (newState.appearanceSeq !== undefined) {
+		for (const key of APPEARANCE_KEYS) {
+			;(rest as Record<string, unknown>)[key] = newState[key]
+		}
 	}
 
 	// Note that we completely replace the previous apiConfiguration and customSupportPrompts objects
