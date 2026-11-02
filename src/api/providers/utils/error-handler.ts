@@ -12,6 +12,7 @@
 import { APIUserAbortError } from "openai"
 
 import i18n from "../../../i18n/setup"
+import { createAbortError } from "./abort-signal"
 
 /**
  * Handles API provider errors and transforms them into user-friendly messages
@@ -158,9 +159,7 @@ export function handleOpenAIRequestError(
 		abortSignal?.aborted ||
 		(error instanceof Error && (error.name === "AbortError" || error instanceof APIUserAbortError))
 	) {
-		const aborted = new Error(`${providerName} request aborted`, { cause: error })
-		aborted.name = "AbortError"
-		return aborted
+		return createAbortError(providerName)
 	}
 	return handleOpenAIError(error, providerName)
 }

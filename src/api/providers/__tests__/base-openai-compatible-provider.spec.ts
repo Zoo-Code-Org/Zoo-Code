@@ -420,7 +420,7 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			// The SDK error has name "Error" and a message ending in a period; the
 			// provider must rethrow the Task.ts contract shape instead.
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("TestProvider request aborted")
+			expect(result.message).toBe("The TestProvider request was aborted")
 			expect(result.message.endsWith("aborted")).toBe(true)
 		})
 
@@ -440,7 +440,7 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			)
 
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("TestProvider request aborted")
+			expect(result.message).toBe("The TestProvider request was aborted")
 		})
 
 		it("should normalize a rejected-Promise abort from an overriding createStream that does not await", async () => {
@@ -463,7 +463,7 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			)
 
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("TestProvider request aborted")
+			expect(result.message).toBe("The TestProvider request was aborted")
 		})
 
 		it("should normalize an abort error raised during stream iteration into the abort contract", async () => {
@@ -485,7 +485,7 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			// The iterator rejects after the first chunk; the provider must normalize
 			// it to the Task.ts contract shape (name + message ending in "aborted").
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("TestProvider request aborted")
+			expect(result.message).toBe("The TestProvider request was aborted")
 			expect(result.message.endsWith("aborted")).toBe(true)
 		})
 
@@ -532,7 +532,7 @@ describe("BaseOpenAiCompatibleProvider", () => {
 
 			expect(leaked).toEqual([])
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("TestProvider request aborted")
+			expect(result.message).toBe("The TestProvider request was aborted")
 			expect(result.message.endsWith("aborted")).toBe(true)
 		})
 
@@ -771,7 +771,7 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			const result = await captureError(handler.completePrompt("test prompt"))
 
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("TestProvider request aborted")
+			expect(result.message).toBe("The TestProvider request was aborted")
 		})
 	})
 

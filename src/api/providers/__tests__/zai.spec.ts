@@ -676,7 +676,7 @@ describe("ZAiHandler", () => {
 			)
 
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("Z.ai request aborted")
+			expect(result.message).toBe("Z.The ai request was aborted")
 			expect(result.message.endsWith("aborted")).toBe(true)
 		})
 
@@ -699,7 +699,7 @@ describe("ZAiHandler", () => {
 			)
 
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("Z.ai request aborted")
+			expect(result.message).toBe("Z.The ai request was aborted")
 		})
 
 		it("createMessage should normalize an abort error raised during stream iteration on the thinking path", async () => {
@@ -726,7 +726,7 @@ describe("ZAiHandler", () => {
 			// The thinking path inherits stream iteration from the base provider; a
 			// mid-stream abort must normalize to the Task.ts contract shape.
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("Z.ai request aborted")
+			expect(result.message).toBe("Z.The ai request was aborted")
 			expect(result.message.endsWith("aborted")).toBe(true)
 		})
 
@@ -761,7 +761,7 @@ describe("ZAiHandler", () => {
 			const result = await captureError(handler.completePrompt("test prompt"))
 
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("Z.ai request aborted")
+			expect(result.message).toBe("Z.The ai request was aborted")
 		})
 
 		it("glm-5.3 completePrompt should cancel the in-flight request when the caller signal aborts", async () => {
@@ -791,7 +791,7 @@ describe("ZAiHandler", () => {
 
 			const result = await captureError(requestPromise)
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("Z.ai request aborted")
+			expect(result.message).toBe("Z.The ai request was aborted")
 
 			const requestCall = mockCreate.mock.calls.at(-1)
 			expect(requestCall?.[0]).toEqual(
@@ -818,7 +818,7 @@ describe("ZAiHandler", () => {
 			const result = await captureError(h53.completePrompt("prompt"))
 
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("Z.ai request aborted")
+			expect(result.message).toBe("Z.The ai request was aborted")
 		})
 
 		it("glm-5.3 completePrompt should omit the request timeout when timeoutMs is zero", async () => {

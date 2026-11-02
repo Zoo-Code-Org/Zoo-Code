@@ -369,7 +369,7 @@ describe("handleOpenAIRequestError (abort awareness)", () => {
 
 		expect(result).not.toBe(original)
 		expect(result.name).toBe("AbortError")
-		expect(result.message).toBe("OpenAI request aborted")
+		expect(result.message).toBe("The OpenAI request was aborted")
 		expect((result as Error & { cause?: unknown }).cause).toBe(original)
 	})
 
@@ -377,7 +377,7 @@ describe("handleOpenAIRequestError (abort awareness)", () => {
 		const result = handleOpenAIRequestError(new APIUserAbortError(), "Zai")
 
 		expect(result.name).toBe("AbortError")
-		expect(result.message).toBe("Zai request aborted")
+		expect(result.message).toBe("The Zai request was aborted")
 	})
 
 	it("keeps a timeout-triggered SDK abort classified as a timeout when the caller did not abort", () => {
@@ -403,7 +403,7 @@ describe("handleOpenAIRequestError (abort awareness)", () => {
 		)
 
 		expect(result.name).toBe("AbortError")
-		expect(result.message).toBe("OpenAI request aborted")
+		expect(result.message).toBe("The OpenAI request was aborted")
 	})
 	it("keeps a caller cancellation classified as an abort even when the request signal timed out", () => {
 		const controller = new AbortController()
@@ -413,7 +413,7 @@ describe("handleOpenAIRequestError (abort awareness)", () => {
 		const result = handleOpenAIRequestError(new APIUserAbortError(), "OpenAI", controller.signal, requestSignal)
 
 		expect(result.name).toBe("AbortError")
-		expect(result.message).toBe("OpenAI request aborted")
+		expect(result.message).toBe("The OpenAI request was aborted")
 	})
 
 	it("normalizes a native fetch-level AbortError when no signal was passed", () => {
@@ -423,7 +423,7 @@ describe("handleOpenAIRequestError (abort awareness)", () => {
 		)
 
 		expect(result.name).toBe("AbortError")
-		expect(result.message).toBe("Fireworks request aborted")
+		expect(result.message).toBe("The Fireworks request was aborted")
 	})
 
 	it("keeps the provider-prefix wrap for a non-abort failure", () => {

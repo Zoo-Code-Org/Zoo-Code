@@ -1249,7 +1249,7 @@ describe("OpenAiHandler", () => {
 			// The SDK error has name "Error" and a message ending in a period; the
 			// provider must rethrow the Task.ts contract shape instead.
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("OpenAI request aborted")
+			expect(result.message).toBe("The OpenAI request was aborted")
 			expect(result.message.endsWith("aborted")).toBe(true)
 		})
 
@@ -1273,7 +1273,7 @@ describe("OpenAiHandler", () => {
 			// The iterator rejects after the first chunk; the provider must normalize
 			// it to the Task.ts contract shape instead of leaking the raw SDK error.
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("OpenAI request aborted")
+			expect(result.message).toBe("The OpenAI request was aborted")
 			expect(result.message.endsWith("aborted")).toBe(true)
 		})
 
@@ -1320,7 +1320,7 @@ describe("OpenAiHandler", () => {
 
 			expect(leaked).toEqual([])
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("OpenAI request aborted")
+			expect(result.message).toBe("The OpenAI request was aborted")
 			expect(result.message.endsWith("aborted")).toBe(true)
 		})
 
@@ -1364,7 +1364,7 @@ describe("OpenAiHandler", () => {
 
 			expect(leaked).toEqual([])
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("OpenAI request aborted")
+			expect(result.message).toBe("The OpenAI request was aborted")
 			expect(result.message.endsWith("aborted")).toBe(true)
 		})
 
@@ -1396,7 +1396,7 @@ describe("OpenAiHandler", () => {
 			})
 			const result = await captureError(handler.completePrompt("test prompt"))
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("OpenAI request aborted")
+			expect(result.message).toBe("The OpenAI request was aborted")
 		})
 
 		it("should normalize a fetch-level AbortError from completePrompt into the abort contract", async () => {
@@ -1407,7 +1407,7 @@ describe("OpenAiHandler", () => {
 			})
 			const result = await captureError(handler.completePrompt("test prompt"))
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("OpenAI request aborted")
+			expect(result.message).toBe("The OpenAI request was aborted")
 			expect(result.cause).toBe(fetchAbort)
 		})
 
@@ -1424,7 +1424,7 @@ describe("OpenAiHandler", () => {
 				})(),
 			)
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("OpenAI request aborted")
+			expect(result.message).toBe("The OpenAI request was aborted")
 		})
 
 		it("should normalize the SDK APIUserAbortError from the o3-family streaming path", async () => {
@@ -1440,7 +1440,7 @@ describe("OpenAiHandler", () => {
 				})(),
 			)
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("OpenAI request aborted")
+			expect(result.message).toBe("The OpenAI request was aborted")
 		})
 
 		it("should normalize an abort error raised during o3-family stream iteration into the abort contract", async () => {
@@ -1462,7 +1462,7 @@ describe("OpenAiHandler", () => {
 			// handleStreamResponse consumes the iterator; a mid-stream abort must be
 			// normalized to the Task.ts contract shape, not leak as the raw SDK error.
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("OpenAI request aborted")
+			expect(result.message).toBe("The OpenAI request was aborted")
 		})
 
 		it("should normalize the SDK APIUserAbortError from the o3-family non-streaming path", async () => {
@@ -1482,7 +1482,7 @@ describe("OpenAiHandler", () => {
 				})(),
 			)
 			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("OpenAI request aborted")
+			expect(result.message).toBe("The OpenAI request was aborted")
 		})
 
 		it("should still wrap non-abort completion errors with the provider prefix", async () => {

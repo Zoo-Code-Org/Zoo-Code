@@ -531,6 +531,6 @@ describe("KimiCodeHandler", () => {
 		)
 
 		expect(result.name).toBe("AbortError")
-		expect(result.message).toBe("OpenAI request aborted")
+		expect(result.message).toBe("The OpenAI request was aborted")
 	})
 })
