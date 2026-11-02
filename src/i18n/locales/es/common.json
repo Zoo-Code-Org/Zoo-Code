@@ -38,6 +38,7 @@
 		"list_api_config": "Error al obtener la lista de configuraciones de API",
 		"update_server_timeout": "Error al actualizar el tiempo de espera del servidor",
 		"hmr_not_running": "El servidor de desarrollo local no está en ejecución, HMR no funcionará. Por favor, ejecuta 'npm run dev' antes de lanzar la extensión para habilitar HMR.",
+		"hmr_probe_timeout": "El servidor de desarrollo local no respondió en 5 segundos. Se usará la interfaz compilada de la extensión sin HMR.",
 		"retrieve_current_mode": "Error al recuperar el modo actual del estado.",
 		"custom_storage_path_unusable": "La ruta de almacenamiento personalizada \"{{path}}\" no es utilizable, se usará la ruta predeterminada",
 		"cannot_access_path": "No se puede acceder a la ruta {{path}}: {{error}}",

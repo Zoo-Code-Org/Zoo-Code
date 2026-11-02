@@ -43,6 +43,7 @@
 		"list_api_config": "获取API配置列表失败",
 		"update_server_timeout": "更新服务器超时设置失败",
 		"hmr_not_running": "本地开发服务器未运行，HMR将不起作用。请在启动扩展前运行'npm run dev'以启用HMR。",
+		"hmr_probe_timeout": "本地开发服务器未在 5 秒内响应。将使用已构建的扩展界面，不启用 HMR。",
 		"retrieve_current_mode": "从状态中检索当前模式失败。",
 		"custom_storage_path_unusable": "自定义存储路径 \"{{path}}\" 不可用，将使用默认路径",
 		"cannot_access_path": "无法访问路径 {{path}}：{{error}}",

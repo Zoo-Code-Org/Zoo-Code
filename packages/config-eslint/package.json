@@ -11,6 +11,7 @@
 		"./i18n-keys": "./i18n-keys.js"
 	},
 	"scripts": {
+		"lint": "eslint . --max-warnings=0",
 		"test": "node --test provider-identifiers.test.js api-provider-hygiene.test.js i18n-keys.test.js"
 	},
 	"devDependencies": {

@@ -38,6 +38,7 @@
 		"list_api_config": "Gagal mendapatkan daftar konfigurasi api",
 		"update_server_timeout": "Gagal memperbarui timeout server",
 		"hmr_not_running": "Server pengembangan lokal tidak berjalan, HMR tidak akan bekerja. Silakan jalankan 'npm run dev' sebelum meluncurkan ekstensi untuk mengaktifkan HMR.",
+		"hmr_probe_timeout": "Server pengembangan lokal tidak merespons dalam 5 detik. Menggunakan UI ekstensi yang telah dibangun tanpa HMR.",
 		"retrieve_current_mode": "Error: gagal mengambil mode saat ini dari state.",
 		"custom_storage_path_unusable": "Path penyimpanan kustom \"{{path}}\" tidak dapat digunakan, akan menggunakan path default",
 		"cannot_access_path": "Tidak dapat mengakses path {{path}}: {{error}}",

@@ -38,6 +38,7 @@
 		"list_api_config": "Ophalen van lijst met API-configuraties mislukt",
 		"update_server_timeout": "Bijwerken van server-timeout mislukt",
 		"hmr_not_running": "Lokale ontwikkelserver draait niet, HMR werkt niet. Voer 'npm run dev' uit voordat je de extensie start om HMR in te schakelen.",
+		"hmr_probe_timeout": "De lokale ontwikkelserver heeft niet binnen 5 seconden gereageerd. De gebouwde extensie-interface wordt zonder HMR gebruikt.",
 		"retrieve_current_mode": "Fout: ophalen van huidige modus uit status mislukt.",
 		"custom_storage_path_unusable": "Aangepast opslagpad \"{{path}}\" is onbruikbaar, standaardpad wordt gebruikt",
 		"cannot_access_path": "Kan pad {{path}} niet openen: {{error}}",

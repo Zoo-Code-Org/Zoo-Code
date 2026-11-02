@@ -38,6 +38,7 @@
 		"list_api_config": "Errore durante l'ottenimento dell'elenco delle configurazioni API",
 		"update_server_timeout": "Errore durante l'aggiornamento del timeout del server",
 		"hmr_not_running": "Il server di sviluppo locale non è in esecuzione, l'HMR non funzionerà. Esegui 'npm run dev' prima di avviare l'estensione per abilitare l'HMR.",
+		"hmr_probe_timeout": "Il server di sviluppo locale non ha risposto entro 5 secondi. Verrà usata l’interfaccia compilata dell’estensione senza HMR.",
 		"retrieve_current_mode": "Errore durante il recupero della modalità corrente dallo stato.",
 		"custom_storage_path_unusable": "Il percorso di archiviazione personalizzato \"{{path}}\" non è utilizzabile, verrà utilizzato il percorso predefinito",
 		"cannot_access_path": "Impossibile accedere al percorso {{path}}: {{error}}",
