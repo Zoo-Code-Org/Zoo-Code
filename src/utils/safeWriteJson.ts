@@ -165,8 +165,18 @@ export async function undoEscapedPublish(publishedPath: string, expectedBytes: B
 	if (expectedBytes === undefined) {
 		return
 	}
+	const before = await fs.stat(publishedPath, { bigint: true }).catch(() => undefined)
+	if (!before) {
+		return
+	}
 	const actualBytes = await fs.readFile(publishedPath).catch(() => undefined)
 	if (actualBytes === undefined || !actualBytes.equals(expectedBytes)) {
+		return
+	}
+	// Re-stat immediately before the unlink: a peer may have replaced the file between
+	// the read and the delete, and unlinking it would remove that peer's content.
+	const after = await fs.stat(publishedPath, { bigint: true }).catch(() => undefined)
+	if (!after || after.dev !== before.dev || after.ino !== before.ino || after.size !== before.size) {
 		return
 	}
 	await fs.unlink(publishedPath).catch(() => {})
