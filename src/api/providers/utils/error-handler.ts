@@ -159,7 +159,7 @@ export function handleOpenAIRequestError(
 		abortSignal?.aborted ||
 		(error instanceof Error && (error.name === "AbortError" || error instanceof APIUserAbortError))
 	) {
-		return createAbortError(providerName)
+		return createAbortError(providerName, error)
 	}
 	return handleOpenAIError(error, providerName)
 }
