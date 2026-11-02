@@ -15,6 +15,10 @@ vi.mock("@roo-code/telemetry", () => ({
 vi.mock("fs/promises", () => ({
 	default: {
 		readFile: vi.fn().mockResolvedValue(""),
+		// The tool stats around its read to capture the observed version. A rejected stat
+		// means "no observable version", which keeps these failure-reporting cases on the
+		// pre-observation path instead of throwing an unhandled TypeError on Windows.
+		stat: vi.fn().mockRejectedValue(Object.assign(new Error("stat unavailable"), { code: "ENOENT" })),
 	},
 }))
 
