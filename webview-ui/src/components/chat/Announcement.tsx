@@ -1,11 +1,11 @@
 import { memo, type MouseEvent, type ReactNode, useState } from "react"
 import { Trans } from "react-i18next"
-import { SiDiscord, SiReddit, SiX } from "react-icons/si"
 
 import { Package } from "@roo/package"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { vscode } from "@src/utils/vscode"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@src/components/ui"
+import { DiscordIcon, RedditIcon, XIcon } from "@src/components/common/BrandIcons"
 import { EXTERNAL_LINKS } from "@src/constants/externalLinks"
 
 interface AnnouncementProps {
@@ -54,17 +54,17 @@ const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 					<div className="mt-4 text-sm text-center text-vscode-descriptionForeground">
 						<div className="flex items-center justify-center gap-4">
 							<SocialLink
-								icon={<SiX className="w-4 h-4" aria-hidden />}
+								icon={<XIcon className="w-4 h-4" aria-hidden />}
 								label="X"
 								href="https://x.com/ZooCodeDev"
 							/>
 							<SocialLink
-								icon={<SiDiscord className="w-4 h-4" aria-hidden />}
+								icon={<DiscordIcon className="w-4 h-4" aria-hidden />}
 								label="Discord"
 								href="https://discord.gg/VxfP4Vx3gX"
 							/>
 							<SocialLink
-								icon={<SiReddit className="w-4 h-4" aria-hidden />}
+								icon={<RedditIcon className="w-4 h-4" aria-hidden />}
 								label="Reddit"
 								href="https://www.reddit.com/r/ZooCode/"
 							/>
