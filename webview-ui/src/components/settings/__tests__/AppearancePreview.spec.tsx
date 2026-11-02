@@ -79,6 +79,55 @@ describe("AppearancePreview", () => {
 		expect(root().getAttribute("style")).not.toContain("background")
 	})
 
+	describe("isolation from the page root", () => {
+		const rootCssVars = [
+			"--zoo-terminal-font-size",
+			"--zoo-editor-font-size",
+			"--zoo-ui-scale",
+			"--zoo-spacing-scale",
+			"--zoo-chat-font-size",
+		]
+		const rootState = () => ({
+			style: document.documentElement.getAttribute("style"),
+			className: document.documentElement.className,
+			vars: rootCssVars.map((cssVar) => document.documentElement.style.getPropertyValue(cssVar)),
+		})
+
+		beforeEach(() => {
+			rootCssVars.forEach((cssVar, index) =>
+				document.documentElement.style.setProperty(cssVar, `${index + 10}px`),
+			)
+			document.documentElement.classList.add("zoo-editor-font-set")
+		})
+
+		afterEach(() => {
+			rootCssVars.forEach((cssVar) => document.documentElement.style.removeProperty(cssVar))
+			document.documentElement.classList.remove("zoo-editor-font-set")
+		})
+
+		it("leaves the root variables and the editor font class as they were, for set values, a reset and an unmount", () => {
+			const before = rootState()
+			expect(before.vars).toEqual(["10px", "11px", "12px", "13px", "14px"])
+
+			const { rerender, unmount } = render(
+				<AppearancePreview
+					values={{ terminalFontSize: 18, editorFontSize: 20, interfaceFontScale: 120, spacingScale: 150 }}
+					chatFontSize={16}
+				/>,
+			)
+			expect(root().style.getPropertyValue("--zoo-terminal-font-size")).toBe("18px")
+			expect(rootState()).toEqual(before)
+
+			rerender(<AppearancePreview values={{}} />)
+			expect(root().style.getPropertyValue("--zoo-terminal-font-size")).toBe("initial")
+			expect(rootState()).toEqual(before)
+
+			unmount()
+			expect(rootState()).toEqual(before)
+			expect(document.documentElement.classList.contains("zoo-editor-font-set")).toBe(true)
+		})
+	})
+
 	it("sizes the editor sample like the live code block when no editor size is set (0.95em of the chat text)", () => {
 		const { container } = render(<AppearancePreview values={{}} />)
 		const sample = container.querySelector("pre")!
