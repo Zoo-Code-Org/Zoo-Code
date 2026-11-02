@@ -1131,6 +1131,48 @@ describe("summarizeConversation", () => {
 		expect(lastMessage.isSummary).toBe(true)
 		expect(lastMessage.role).toBe("user")
 	})
+
+	it("should exclude messages hidden by sliding-window truncation from the summarization request", async () => {
+		const truncationId = "trunc-1"
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Initial task", ts: 1 },
+			{ role: "assistant", content: "Hidden assistant message", ts: 2, truncationParent: truncationId },
+			{ role: "user", content: "Hidden tool result", ts: 3, truncationParent: truncationId },
+			{
+				role: "user",
+				content: "[Sliding window truncation: 2 messages hidden to reduce context]",
+				ts: 4,
+				isTruncationMarker: true,
+				truncationId,
+			},
+			{ role: "assistant", content: "Visible assistant message", ts: 5 },
+			{ role: "user", content: "Visible user message", ts: 6 },
+		]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+		})
+
+		// Exact wire selection: first + truncation marker + visible post-truncation messages +
+		// final condense instruction. Hidden messages must not be resurrected; visible ones kept.
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1]
+		const requestContents = requestMessages.map(({ content }) =>
+			typeof content === "string" ? content : JSON.stringify(content),
+		)
+		expect(requestContents).toEqual([
+			"Initial task",
+			"[Sliding window truncation: 2 messages hidden to reduce context]",
+			"Visible assistant message",
+			"Visible user message",
+			expect.stringContaining("detailed summary of the conversation"),
+		])
+
+		// Non-destructive: the full stored history (hidden messages included) is preserved for rewind.
+		expect(result.messages).toHaveLength(messages.length + 1)
+	})
 })
 
 describe("summarizeConversation with custom settings", () => {
