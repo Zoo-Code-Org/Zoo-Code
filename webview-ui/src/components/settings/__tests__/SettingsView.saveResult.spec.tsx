@@ -633,6 +633,37 @@ describe("SettingsView – a save the host never answers", () => {
 			expect(lastUpdatedSettings()).not.toHaveProperty("terminalFontSize")
 		})
 
+		it("clears the unsaved flag when a late success stores the edit that was kept, and nothing else changed", async () => {
+			const id = await timeOutAfterAnEdit() // 13 kept in the form, unanswered
+
+			answerSave(id, { success: true })
+
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+			fireEvent.click(doneButton())
+			expect(screen.queryByText("settings:unsavedChangesDialog.title")).not.toBeInTheDocument()
+		})
+
+		it("keeps the unsaved flag when something else was changed after that save was sent", async () => {
+			const id = await timeOutAfterAnEdit()
+			fireEvent.click(await screen.findByTestId("collapse-thinking-checkbox")) // another change, after the save
+
+			answerSave(id, { success: true })
+
+			expect(screen.getByTestId("save-button")).toBeEnabled()
+		})
+
+		it("stops counting the stored value as an edit after a late success, so a later save does not send it again", async () => {
+			const id = await timeOutAfterAnEdit()
+			answerSave(id, { success: true })
+			liveStateChange({ terminalFontSize: 20 }) // another webview stores 20 later
+			postMessage.mockClear()
+
+			await makeAnOtherEdit()
+			fireEvent.click(screen.getByTestId("save-button"))
+
+			expect(lastUpdatedSettings()).not.toHaveProperty("terminalFontSize")
+		})
+
 		it("sends a reset to the live value while an earlier save of that value is unanswered, because it may still store", async () => {
 			await timeOutAfterAnEdit() // 13 sent, never answered; the live value is still unset
 			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-reset")) // back to unset, equal to the live value

@@ -164,7 +164,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	// a later reset to the old value for "nothing changed" and not send it.
 	const appearanceSaved = useRef<Record<string, number | null>>({})
 	// Saves that were not answered in time. Their outcome is unknown: the host may still store them.
-	const timedOutSaves = useRef(new Map<string, Record<string, number | null>>())
+	const timedOutSaves = useRef(new Map<string, { sent: Record<string, number | null>; changeCount: number }>())
 	const [saveOutcomeUnknown, setSaveOutcomeUnknown] = useState(false)
 	// The appearance values this form has edited. A value that only differs from the live state because the live state
 	// changed (another webview, a reset from the host) is not an edit and is never sent. A ref, not state: it is read
@@ -446,7 +446,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			// survives JSON and clears the stored value. A save that changes none sends none of them, so it neither
 			// waits for the host nor puts an appearance value into the host's all-or-nothing save.
 			// A value whose earlier save was not answered is sent whatever it equals: that save may still store its value.
-			const unresolved = new Set([...timedOutSaves.current.values()].flatMap((sent) => Object.keys(sent)))
+			const unresolved = new Set([...timedOutSaves.current.values()].flatMap(({ sent }) => Object.keys(sent)))
 			const changedAppearance: Record<string, number | null> = Object.fromEntries(
 				[...editedAppearance.current]
 					.filter(
@@ -461,7 +461,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				pendingSaveChangeCount.current = changeCount
 				pendingAppearanceSent.current = changedAppearance
 				// This save is the newer word on these values: an earlier save's late answer must not overwrite them.
-				for (const sent of timedOutSaves.current.values()) for (const key in changedAppearance) delete sent[key]
+				for (const { sent } of timedOutSaves.current.values())
+					for (const key in changedAppearance) delete sent[key]
 				setPendingSaveId(saveId)
 			}
 			vscode.postMessage({
@@ -609,7 +610,10 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		const timer = setTimeout(() => {
 			// No answer is not a failure: the host may still store it. Its answer is waited for further on, and the
 			// user is told if they leave meanwhile.
-			timedOutSaves.current.set(pendingSaveId, { ...pendingAppearanceSent.current })
+			timedOutSaves.current.set(pendingSaveId, {
+				sent: { ...pendingAppearanceSent.current },
+				changeCount: pendingSaveChangeCount.current,
+			})
 			setSaveOutcomeUnknown(true)
 			settle(false)
 		}, SAVE_ANSWER_TIMEOUT_MS)
@@ -625,14 +629,23 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		const onLateResult = (event: MessageEvent) => {
 			const message = event.data
 			if (message?.type !== "settingsSaveResult") return
-			const sent = timedOutSaves.current.get(message.requestId)
-			if (!sent) return
+			const late = timedOutSaves.current.get(message.requestId)
+			if (!late) return
 
 			timedOutSaves.current.delete(message.requestId)
 			setSaveOutcomeUnknown(timedOutSaves.current.size > 0)
 			if (message.success !== true) return
 
-			for (const [key, value] of Object.entries(sent)) appearanceSaved.current[key] = value
+			const { sent, changeCount: sentAt } = late
+			for (const [key, value] of Object.entries(sent)) {
+				appearanceSaved.current[key] = value
+				// An edit that was kept and now equals what was stored is no longer an unsaved edit.
+				if ((latestCachedState.current[key as AppearanceKey] ?? null) === value) {
+					editedAppearance.current.delete(key as AppearanceKey)
+				}
+			}
+			// Nothing else was changed since that save was sent: there is nothing left unsaved.
+			if (latestChangeCount.current === sentAt) setChangeDetected(false)
 			setCachedState((prev) => {
 				const next = { ...prev }
 				for (const [key, value] of Object.entries(sent)) {
