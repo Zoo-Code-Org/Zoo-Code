@@ -1,25 +1,21 @@
 {
-	"greeting": "Welcome to Zoo Code!",
 	"task": {
 		"title": "Task",
 		"expand": "Expand task",
 		"collapse": "Collapse task",
 		"seeMore": "See more",
-		"seeLess": "See less",
 		"tokens": "Tokens",
 		"cache": "Cache",
 		"apiCost": "API Cost",
 		"size": "Size",
 		"condenseContext": "Intelligently condense context",
 		"contextWindow": "Context Length",
-		"closeAndStart": "Close task and start a new one",
 		"export": "Export task history",
 		"delete": "Delete Task (Shift + Click to skip confirmation)",
 		"openApiHistory": "Open API History",
 		"openUiHistory": "Open UI History",
 		"backToParentTask": "Parent task",
-		"waitingOnSubtask": "Waiting on subtask",
-		"goToSubtask": "Go to subtask"
+		"waitingOnSubtask": "Waiting on subtask"
 	},
 	"unpin": "Unpin",
 	"pin": "Pin",
@@ -112,12 +108,10 @@
 		"tooltip": "Start a new task"
 	},
 	"cancel": {
-		"title": "Cancel",
-		"tooltip": "Cancel the current operation"
+		"title": "Cancel"
 	},
 	"stop": {
-		"title": "Stop",
-		"tooltip": "Stop the current task"
+		"title": "Stop"
 	},
 	"enqueueMessage": "Add message to queue (will be sent after current task completes)",
 	"editMessage": {
@@ -127,7 +121,6 @@
 	"scrollToLatestCheckpoint": "Scroll to previous checkpoint",
 	"about": "Zoo is a whole AI dev team in your editor",
 	"docs": "Check our <DocsLink>docs</DocsLink> to get started",
-	"onboarding": "What would you like to do?",
 	"rooTips": {
 		"customizableModes": {
 			"title": "Customizable modes that don't swerve",
@@ -162,7 +155,6 @@
 	},
 	"enhancePromptDescription": "The 'Enhance Prompt' button helps improve your prompt by providing additional context, clarification, or rephrasing. Try typing a prompt in here and clicking the button again to see how it works.",
 	"addImages": "Add images to message",
-	"sendMessage": "Send message",
 	"pressToSend": "Press {{keyCombination}} to send",
 	"stopTts": "Stop text-to-speech",
 	"typeMessage": "Type a message...",
@@ -172,7 +164,6 @@
 	"dragFilesImages": "hold shift to drag in files/images",
 	"errorReadingFile": "Error reading file",
 	"noValidImages": "No valid images were processed",
-	"separator": "Separator",
 	"edit": "Edit...",
 	"forNextMode": "for next mode",
 	"forPreviousMode": "for previous mode",
@@ -200,7 +191,6 @@
 	},
 	"checkpoint": {
 		"regular": "Checkpoint",
-		"initializingWarning": "Still initializing checkpoint... If this takes too long, you can disable checkpoints in <settingsLink>settings</settingsLink> and restart your task.",
 		"menu": {
 			"viewDiff": "View Diff",
 			"viewDiffFromInit": "View All Changes",
@@ -250,8 +240,6 @@
 		"wantsToGenerateImageOutsideWorkspace": "Zoo wants to generate an image outside of the workspace",
 		"wantsToGenerateImageProtected": "Zoo wants to generate an image in a protected location",
 		"didGenerateImage": "Zoo generated an image",
-		"wantsToCreate": "Zoo wants to create a new file",
-		"wantsToInsert": "Zoo wants to insert content into this file",
 		"wantsToInsertWithLineNumber": "Zoo wants to insert content into this file at line {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo wants to append content to the end of this file"
 	},
@@ -264,7 +252,6 @@
 		"didViewRecursive": "Zoo recursively viewed all files in this directory",
 		"wantsToViewRecursiveOutsideWorkspace": "Zoo wants to recursively view all files in this directory (outside workspace)",
 		"didViewRecursiveOutsideWorkspace": "Zoo recursively viewed all files in this directory (outside workspace)",
-		"wantsToViewMultipleDirectories": "Zoo wants to view multiple directories",
 		"wantsToSearch": "Zoo wants to search this directory for <code>{{regex}}</code>",
 		"didSearch": "Zoo searched this directory for <code>{{regex}}</code>",
 		"wantsToSearchOutsideWorkspace": "Zoo wants to search this directory (outside workspace) for <code>{{regex}}</code>",
@@ -277,11 +264,9 @@
 		"didSearch_other": "Found {{count}} results",
 		"resultTooltip": "Similarity score: {{score}} (click to open file)"
 	},
-	"commandOutput": "Command Output",
 	"commandExecution": {
 		"abort": "Abort",
 		"running": "Running",
-		"pid": "PID: {{pid}}",
 		"exitStatus": "Exited with status {{exitCode}}",
 		"malformedCommand": "Malformed command: shell syntax error",
 		"manageCommands": "Auto-approved commands",
@@ -289,15 +274,8 @@
 		"addToAllowed": "Add to allowed list",
 		"removeFromAllowed": "Remove from allowed list",
 		"addToDenied": "Add to denied list",
-		"removeFromDenied": "Remove from denied list",
-		"abortCommand": "Abort command execution",
-		"expandOutput": "Expand output",
-		"collapseOutput": "Collapse output",
-		"expandManagement": "Expand command management section",
-		"collapseManagement": "Collapse command management section"
+		"removeFromDenied": "Remove from denied list"
 	},
-	"response": "Response",
-	"arguments": "Arguments",
 	"text": {
 		"rooSaid": "Zoo said"
 	},
@@ -317,9 +295,7 @@
 	"subtasks": {
 		"wantsToCreate": "Zoo wants to create a new subtask in {{mode}} mode",
 		"wantsToFinish": "Zoo wants to mark this as completed",
-		"newTaskContent": "Subtask Instructions",
 		"resultContent": "Subtask completed",
-		"defaultResult": "Please continue to the next task.",
 		"completionInstructions": "You can review the results and suggest any corrections or next steps. If everything looks good, confirm to return the result to the parent task.",
 		"goToSubtask": "View task"
 	},
@@ -347,9 +323,6 @@
 		"title": "Edit Unsuccessful"
 	},
 	"troubleMessage": "Zoo is having trouble...",
-	"powershell": {
-		"issues": "It seems like you're having Windows PowerShell issues, please see this"
-	},
 	"autoApprove": {
 		"tooltipManage": "Manage auto-approval settings",
 		"tooltipStatus": "Auto-approval enabled for: {{toggles}}",
@@ -357,9 +330,6 @@
 		"all": "All",
 		"none": "None",
 		"description": "Run these actions without asking for permission. Only enable for actions you fully trust.",
-		"selectOptionsFirst": "Select at least one option below to enable auto-approval",
-		"toggleAriaLabel": "Toggle auto-approval",
-		"disabledAriaLabel": "Auto-approval disabled - select options first",
 		"triggerLabelOff": "Auto-approve off",
 		"triggerLabelOffShort": "Off",
 		"triggerLabel_zero": "0 auto-approve",
@@ -375,12 +345,6 @@
 			"highlight1": "✨ Broader model and provider support: Use Claude Haiku 5.5 through Anthropic, send images to compatible VS Code LM models, tune temperature for OpenCode Go Responses models, and cancel requests cleanly across more providers.",
 			"highlight2": "🔐 More flexible MCP OAuth: Configure static OAuth client settings, use custom callback paths, discover authentication details from WWW-Authenticate, and see callback failures before retrying.",
 			"highlight3": "🧭 Smoother chats and long sessions: Rename tasks in history, drag files into chat without holding Shift, reduce memory retained during long sessions, and keep subtask links and replaced webviews stable."
-		},
-		"cloudAgents": {
-			"heading": "New in the Cloud:",
-			"specialized": "Introducing <bold>Explainer</bold>, <bold>Planner</bold>, and <bold>Coder</bold> - three specialized cloud agents to enhance your workflows.",
-			"description": "The agents work together in the cloud and can be triggered from the web or through Slack.",
-			"tryButton": "Try Cloud Agents"
 		}
 	},
 	"reasoning": {
@@ -432,28 +396,8 @@
 	"versionIndicator": {
 		"ariaLabel": "Version {{version}} - Click to view release notes"
 	},
-	"command": {
-		"triggerDescription": "Trigger the {{name}} command"
-	},
 	"slashCommands": {
-		"tooltip": "Manage slash commands",
-		"title": "Slash Commands",
-		"description": "Use built-in slash commands or create custom ones for quick access to frequently used prompts and workflows. <DocsLink>Docs</DocsLink>",
-		"manageCommands": "Manage slash commands in settings",
-		"builtInCommands": "Built-in Commands",
-		"globalCommands": "Global Commands",
-		"workspaceCommands": "Workspace Commands",
-		"globalCommand": "Global command",
-		"editCommand": "Edit command",
-		"deleteCommand": "Delete command",
-		"newGlobalCommandPlaceholder": "New global command...",
-		"newWorkspaceCommandPlaceholder": "New workspace command...",
-		"deleteDialog": {
-			"title": "Delete Command",
-			"description": "Are you sure you want to delete the command \"{{name}}\"? This action cannot be undone.",
-			"cancel": "Cancel",
-			"confirm": "Delete"
-		}
+		"manageCommands": "Manage slash commands in settings"
 	},
 	"slashCommand": {
 		"wantsToRun": "Zoo wants to run a slash command",
@@ -472,9 +416,7 @@
 	"todo": {
 		"partial": "{{completed}} of {{total}} to-dos done",
 		"complete": "{{total}} to-dos done",
-		"updated": "Updated the to-do list",
-		"completed": "Completed",
-		"started": "Started"
+		"updated": "Updated the to-do list"
 	},
 	"tooManyTools": {
 		"title": "Too many tools enabled",
