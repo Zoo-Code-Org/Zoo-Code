@@ -1307,7 +1307,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				throw error
 			}
 			if (requestController.signal.aborted) {
-				throw new DOMException(`The ${this.providerName} request was aborted`, "AbortError")
+				throw createAbortError(this.providerName)
 			}
 
 			// No captureException here: the makeResponsesApiRequest catch captures
