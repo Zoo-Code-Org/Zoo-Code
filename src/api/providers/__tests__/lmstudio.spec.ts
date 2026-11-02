@@ -146,8 +146,9 @@ describe("LmStudioHandler", () => {
 			const collected = collectStream(stream).catch((error: unknown) => error)
 
 			// The stream is still open, so the abort can only reach the request signal through
-			// the bridge: the provider's finally block has not run yet.
-			await new Promise((resolve) => setTimeout(resolve, 20))
+			// the bridge: the provider's finally block has not run yet. Wait for the create()
+			// call instead of a fixed sleep, so a slow CI runner cannot race the assertion.
+			await vi.waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
 			const options = mockCreate.mock.calls[0][1] as { signal?: AbortSignal }
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({ stream: true }),
