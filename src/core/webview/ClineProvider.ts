@@ -172,6 +172,7 @@ type PersistedViewState = NonNullable<GlobalState["viewStates"]>[string]
  * non-secret subset, persisted durably per stable view id.
  */
 type ViewLocalStateValues = Partial<RooCodeSettings> & Partial<ExtensionState>
+type PersistedViewLocalStateKey = "mode" | "currentApiConfigName" | "apiConfiguration"
 
 /**
  * The keys the view-local mutation helper actually applies. A wider key would update
