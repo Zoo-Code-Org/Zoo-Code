@@ -1,8 +1,7 @@
 {
 	"landing": {
 		"greeting": "歡迎使用 Zoo Code！",
-		"introduction": "Zoo Code 提供一系列內建和可擴充的模式，讓您以前所未有的方式規劃專案、設計架構、編寫程式碼、除錯並提升工作效率。",
-		"getStarted": "選擇供應商"
+		"introduction": "Zoo Code 提供一系列內建和可擴充的模式，讓您以前所未有的方式規劃專案、設計架構、編寫程式碼、除錯並提升工作效率。"
 	},
 	"providerSignup": {
 		"heading": "選擇供應商",
