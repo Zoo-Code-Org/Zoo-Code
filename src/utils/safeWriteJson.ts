@@ -5,6 +5,8 @@ import { JsonStreamStringify } from "json-stream-stringify"
 
 import { acquireFileLock } from "./fileLock"
 import {
+	DaclRestoreError,
+	PostCommitDurabilityError,
 	resolveLockKey,
 	resolvePublishTarget,
 	safeWriteText,
@@ -318,7 +320,26 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			backup: true,
 		}
 
-		await safeWriteText(resolvedTargetPath, "", textOptions)
+		try {
+			await safeWriteText(resolvedTargetPath, "", textOptions)
+		} catch (committedWriteError) {
+			// Only the post-commit teardown errors published the staged file. Other failures
+			// (e.g. StagingPathError) never renamed, and must keep their own error type.
+			const isPostCommit =
+				committedWriteError instanceof DaclRestoreError ||
+				committedWriteError instanceof PostCommitDurabilityError
+			if (isPostCommit && confinementRoot !== undefined) {
+				const publishedPath = await _resolveScopeRoot(resolvedTargetPath)
+				const scopeRoot = await _resolveScopeRoot(confinementRoot)
+				try {
+					_assertWithinScope(absoluteFilePath, publishedPath, scopeRoot)
+				} catch (escapeError) {
+					await undoEscapedPublish(publishedPath, stagedBytes)
+					throw escapeError
+				}
+			}
+			throw committedWriteError
+		}
 
 		// Fail-closed confinement re-check. The check above decides the target as it
 		// resolves at check time; publication takes a path and re-resolves the tree
