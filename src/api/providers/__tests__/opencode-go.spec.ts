@@ -1306,7 +1306,7 @@ describe("OpencodeGoHandler", () => {
 			}
 
 			beforeEach(() => {
-				vitest.clearAllMocks()
+				clearAllMocks()
 			})
 
 			it("completePrompt returns text for OpenAI path", async () => {
