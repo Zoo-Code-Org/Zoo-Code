@@ -125,8 +125,9 @@ export function findLongestPrefixMatch(command: string, prefixes: string[]): str
  * the shell tokenizer rejecting the masked command also produce this
  * outcome. No approval may use a partial decomposition
  * of the command.
- * A shell never parses delimiters inside quoted regions, so unbalanced
- * delimiters there do not qualify.
+ * The parser does not extract substitutions inside double quotes, so an
+ * unbalanced delimiter there does not qualify. This is a parser
+ * limitation: a shell still expands `$(...)` inside double quotes.
  */
 export type CommandDecision = "auto_approve" | "auto_deny" | "ask_user" | "malformed_command"
 
@@ -155,9 +156,10 @@ export type CommandDecision = "auto_approve" | "auto_deny" | "ask_user" | "malfo
  *   NUL byte, substitution nesting deeper than the parser's re-scan depth
  *   cap, or the shell tokenizer rejecting the masked command. The parser
  *   must not approve a command whose structure is unproven
- *   based on a partial decomposition. A shell never parses delimiter
- *   characters inside quoted regions, so unbalanced delimiters there stay
- *   parseable.
+ *   based on a partial decomposition. Unbalanced delimiters inside double
+ *   quotes stay parseable because the parser does not extract
+ *   substitutions there. A shell still expands `$(...)` inside double
+ *   quotes.
  *
  * **Examples:**
  * ```typescript

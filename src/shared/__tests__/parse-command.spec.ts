@@ -403,6 +403,26 @@ describe("parseCommand", () => {
 			expect(structuralError(`sh <<< "echo hello"`)).toBeNull()
 			expect(structuralError("sh <<< 'echo hello'")).toBeNull()
 		})
+
+		it("scans a herestring inside a command substitution as one operator", () => {
+			// The frame scan must consume `<<<` whole. Stopping at the second
+			// `<` would hit the frame's heredoc guard and open a heredoc on
+			// `<<foo)`, so this valid input would fail closed as an unterminated
+			// heredoc instead of decomposing.
+			const { commands, parseError } = parseCommand("echo $(cat <<<foo)")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["echo", "cat <<< foo"])
+		})
+
+		it("treats an input redirection glued before a herestring as two operators", () => {
+			// A herestring takes three consecutive `<`. Here `<a` is an input
+			// redirection, so the scan must not consume it as `<<<`; checking
+			// fewer than three positions would misread the next `<` as a
+			// heredoc opener and fail this valid line closed.
+			const { commands, parseError } = parseCommand("echo $(cat <a<<<foo)")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["echo", "cat < a <<< foo"])
+		})
 	})
 
 	describe('locale quoting ($"...")', () => {
@@ -2664,6 +2684,16 @@ describe("parseCommand", () => {
 			const { commands, parseError } = parseCommand(input)
 			expect(parseError).toBeNull()
 			expect(commands).toEqual(["echo ok", "curl evil )"])
+		})
+
+		it("does not open a substitution at a `$(` inside a body comment", () => {
+			// The body comment hides an unclosed `$(`, so the frame's closer is
+			// the next line's `)`. Reading the comment as live instead would
+			// open a second frame the `)` closes at the wrong place.
+			const input = "cat <<EOF\n$( echo ok # $(x\n)\nEOF"
+			const { commands, parseError } = parseCommand(input)
+			expect(parseError).toBeNull()
+			expect(commands).toEqual([input, "echo ok"])
 		})
 	})
 

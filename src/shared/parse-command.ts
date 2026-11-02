@@ -1613,6 +1613,14 @@ function scanShellSyntax(text: string): ScanOutcome {
 			// the heredoc scan. The shell tokenizes those as command contexts,
 			// and a heredoc opened there is real. Quote and backtick frames are
 			// opaque before this point.
+			if (char === "<" && text[i + 1] === "<" && text[i + 2] === "<") {
+				// A herestring (<<<) is one operator, never a heredoc opener.
+				// Consume all three characters: stopping at the second `<`
+				// would pass the heredoc guard below and open a heredoc on the
+				// herestring word.
+				i += 3
+				continue
+			}
 			if (char === "<" && text[i + 1] === "<" && text[i + 2] !== "<" && top.kind !== "parameter-expansion") {
 				const result = skipHeredoc(i, stack)
 				if ("error" in result) {
