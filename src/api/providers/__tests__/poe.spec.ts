@@ -846,7 +846,7 @@ describe("PoeHandler", () => {
 			expect(callArgs.abortSignal).not.toBe(controller.signal)
 		})
 
-		it("completePrompt rejects with AbortError when the per-request timeout expires before the response", async () => {
+		it("completePrompt rejects with TimeoutError when the per-request timeout expires before the response", async () => {
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
 			// Emulate a slow response: the generation settles only once the merged abort
 			// signal (which embeds the per-request timeout) fires.
