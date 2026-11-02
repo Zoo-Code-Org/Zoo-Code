@@ -641,6 +641,16 @@ export async function safeWriteText(
 			}
 
 			// -- Step 4: atomic rename temp -> target ---------------------
+			// A symlink can be retargeted while the temp file is being written: re-resolve
+			// immediately before the commit rename so the locked resolution cannot publish
+			// onto a sibling file that replaced the referent mid-write.
+			const recomputedTargetPath = await resolvePublishTarget(absoluteFilePath)
+			if (recomputedTargetPath !== targetPath) {
+				throw new Error(
+					`safeWriteText: refusing to commit ${absoluteFilePath}: the resolved target changed from ${targetPath} to ${recomputedTargetPath} while the write was in progress`,
+				)
+			}
+
 			await fs.rename(tempPath, targetPath)
 			committed = true
 
