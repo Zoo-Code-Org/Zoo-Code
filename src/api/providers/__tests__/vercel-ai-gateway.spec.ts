@@ -1157,6 +1157,57 @@ describe("VercelAiGatewayHandler", () => {
 			expect((error as Error).message).toBe("The Vercel AI Gateway request was aborted")
 		})
 
+		it.each(["mid-stream throw", "rejected create()", "early gen.return()"] as const)(
+			"detaches the bridged abort listener on %s",
+			async (mode) => {
+				const controller = new AbortController()
+				const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
+				const removeListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+
+				if (mode === "rejected create()") {
+					mockCreate.mockRejectedValueOnce(new Error("boom"))
+				} else if (mode === "mid-stream throw") {
+					mockCreate.mockImplementationOnce(async () =>
+						(async function* () {
+							yield { choices: [{ delta: { content: "p" }, index: 0 }], index: 0 }
+							throw new Error("boom")
+						})(),
+					)
+				} else {
+					mockCreate.mockImplementationOnce(async () =>
+						(async function* () {
+							yield { choices: [{ delta: { content: "p" }, index: 0 }], index: 0 }
+							await new Promise<void>(() => {})
+						})(),
+					)
+				}
+
+				const handler = new VercelAiGatewayHandler(mockOptions)
+				const iterator = handler
+					.createMessage(
+						"prompt",
+						[{ role: "user", content: "hello" }],
+						makeCreateMessageMetadata({ abortSignal: controller.signal }),
+					)
+					[Symbol.asyncIterator]()
+
+				if (mode === "early gen.return()") {
+					await iterator.next()
+					await iterator.return?.(undefined)
+				} else {
+					await iterator.next().catch(() => undefined)
+					await iterator.next().catch(() => undefined)
+					await iterator.return?.(undefined)
+				}
+
+				const abortAddCalls = addEventListenerSpy.mock.calls.filter(([event]) => event === "abort")
+				const abortRemoveCalls = removeListenerSpy.mock.calls.filter(([event]) => event === "abort")
+				const bridgeListener = abortAddCalls.at(-1)?.[1]
+				expect(abortAddCalls.length).toBeGreaterThan(0)
+				expect(abortRemoveCalls.some(([, listener]) => listener === bridgeListener)).toBe(true)
+			},
+		)
+
 		it("detaches the bridged abort listener when the request completes normally", async () => {
 			// The listener is added with { once: true }, so it only detaches on
 			// abort. A task-scoped signal spanning many requests must not
