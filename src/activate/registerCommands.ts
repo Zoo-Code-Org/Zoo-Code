@@ -298,6 +298,10 @@ type OpenClineInNewTabOptions = {
 	context: vscode.ExtensionContext
 	outputChannel: vscode.OutputChannel
 	webviewFocusTracker: WebviewFocusTracker
+	// `startNewTask({ newTab: true })` asks for a tab because it has just closed the editors; the
+	// title-bar buttons ask for one only to reveal what is already there. Only the first must
+	// bypass the tracked-panel reuse, so the caller states it instead of the factory guessing.
+	forceNew?: boolean
 }
 
 export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
@@ -335,10 +339,17 @@ export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
 
 // The unserialized tab-creation body. Only openClineInNewTab may call it,
 // after it has stored the shared in-flight promise.
-const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTracker }: OpenClineInNewTabOptions) => {
+const createTabPanelUnlocked = async ({
+	context,
+	outputChannel,
+	webviewFocusTracker,
+	forceNew,
+}: OpenClineInNewTabOptions) => {
 	// Reuse the tracked tab instead of opening a second one: a repeated
-	// "Open in editor" click reveals the existing tab's panel.
-	if (tabPanel) {
+	// "Open in editor" click reveals the existing tab's panel. A caller that
+	// needs a genuinely new tab (startNewTask closes the editors first) passes
+	// `forceNew` and skips the reveal.
+	if (tabPanel && !forceNew) {
 		const existingProvider = ClineProvider.getInstanceForView(tabPanel)
 		if (existingProvider) {
 			await tabPanel.reveal()
