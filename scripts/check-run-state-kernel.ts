@@ -15,6 +15,7 @@ interface ModelState {
 	askCount: number
 	completionAsks: number[]
 	lastEndedStreamFailedAndCleaned: boolean
+	currentStreamFailed: boolean
 }
 
 interface ModelEvent {
@@ -294,6 +295,7 @@ function initialState(): ModelState {
 		askCount: 0,
 		completionAsks: [],
 		lastEndedStreamFailedAndCleaned: false,
+		currentStreamFailed: false,
 	}
 }
 
@@ -439,9 +441,12 @@ function apply(options: Options, state: ModelState, { event }: ModelEvent): Appl
 		next.askCount = event.ask.askTs
 		if (event.ask.tag === "completion") next.completionAsks = [...state.completionAsks, event.ask.askTs]
 	}
+	if (event.tag === "reasonSet" && event.reason === "streaming_failed" && state.run.stream.tag === "live") {
+		next.currentStreamFailed = state.currentStreamFailed || state.run.latches.reason === undefined
+	}
 	if (event.tag === "streamEnded" && state.run.stream.tag === "live") {
-		next.lastEndedStreamFailedAndCleaned =
-			state.run.stream.cleanupFinished && state.run.latches.reason === "streaming_failed"
+		next.lastEndedStreamFailedAndCleaned = state.run.stream.cleanupFinished && state.currentStreamFailed
+		next.currentStreamFailed = false
 	}
 	return { next, accepted, problems }
 }
