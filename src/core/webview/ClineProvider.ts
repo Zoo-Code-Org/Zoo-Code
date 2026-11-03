@@ -75,6 +75,7 @@ import {
 	modelIdKeys,
 	providerIdentifiers,
 	PROVIDER_SETTINGS_KEYS,
+	isSecretStateKey,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
@@ -718,7 +719,7 @@ export class ClineProvider
 				wroteEntry = true
 			}
 
-			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states, viewStateId))
 			// Authorship is recorded only after the durable write lands: a failed persistence
 			// must not mark the temporary id as owned, or a later load would adopt an entry
 			// that was never actually stored.
@@ -768,7 +769,7 @@ export class ClineProvider
 				return
 			}
 			states[viewStateId] = { claimToken, updatedAt: Date.now() }
-			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states, viewStateId))
 			rebound = true
 		})
 
@@ -790,13 +791,33 @@ export class ClineProvider
 	/**
 	 * Keeps only the most recently updated entries of the persisted view states map,
 	 * bounded by MAX_PERSISTED_VIEW_STATES so the global key cannot grow unboundedly.
+	 *
+	 * `protectedKey` is the entry the calling writer just stored. Retention ranks entries by
+	 * `updatedAt`, and a wall clock that moved backwards - a corrected system clock, a VM
+	 * restored to an earlier time - leaves the whole retained window stamped later than
+	 * `Date.now()`, so the entry written right now ranks below the limit and would be dropped
+	 * while the write still reports success. The protected entry takes the oldest retained slot
+	 * instead; it sorts below every retained entry by construction, so the ordering of the
+	 * others is untouched.
 	 */
-	private prunePersistedViewStates(states: Record<string, PersistedViewState>): Record<string, PersistedViewState> {
-		return Object.fromEntries(
-			Object.entries(states)
-				.sort(([, a], [, b]) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-				.slice(0, ClineProvider.MAX_PERSISTED_VIEW_STATES),
-		)
+	private prunePersistedViewStates(
+		states: Record<string, PersistedViewState>,
+		protectedKey?: string,
+	): Record<string, PersistedViewState> {
+		const entries = Object.entries(states)
+		const retained = entries
+			.sort(([, a], [, b]) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+			.slice(0, ClineProvider.MAX_PERSISTED_VIEW_STATES)
+
+		if (protectedKey !== undefined && !retained.some(([key]) => key === protectedKey)) {
+			const protectedEntry = entries.find(([key]) => key === protectedKey)
+
+			if (protectedEntry) {
+				retained[retained.length - 1] = protectedEntry
+			}
+		}
+
+		return Object.fromEntries(retained)
 	}
 
 	/** Re-key this instance's authored pre-launch entry to the stable id. */
@@ -835,7 +856,7 @@ export class ClineProvider
 				}
 			}
 
-			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states, nextViewStateId))
 
 			// Only a successful write clears authorship: a failed attempt leaves the entry
 			// under the temporary name, and a retry must still be able to re-key it.
@@ -2793,6 +2814,10 @@ export class ClineProvider
 			// This activation owns the shared selection until a newer write bumps the generation.
 			const expectedNameGeneration = this.contextProxy.getStateWriteGeneration("currentApiConfigName") + 1
 			const previousProviderSettings = this.contextProxy.getProviderSettings()
+			// Ownership signal for the provider-settings store, independent of the shared name:
+			// this activation's `setProviderSettings` writes `apiProvider` exactly once, so those
+			// settings are still ours while that key holds the generation the write produced.
+			const expectedApiProviderGeneration = this.contextProxy.getStateWriteGeneration("apiProvider") + 1
 			// Test doubles and older managers may not implement the read: absence means "no previous
 			// binding to restore", not a failed activation.
 			const previousModeConfigId = this.providerSettingsManager.getModeConfigId
@@ -2810,10 +2835,16 @@ export class ClineProvider
 			)
 
 			if (failedActivation) {
-				// The mutation queue is per view, but ContextProxy is shared: another view may
-				// have activated a profile between the group and this rollback. Only the stores
-				// that view now owns (profile list, shared selection) may be skipped - the mode
-				// binding and provider settings this activation wrote must still be undone.
+				// The mutation queue is per view, but ContextProxy is shared: another view may have
+				// activated a profile between the group and this rollback. Every store is undone
+				// only while this activation still owns it, and each store has its own signal -
+				// gating all of them on the shared-name generation would skip undoing this
+				// activation's mode binding and settings whenever another view changed only the
+				// shared name, which leaves the failed activation's values in place.
+				//   * profile list + shared selection: the generation of the shared name,
+				//   * mode binding: the binding still points at this activation's profile id,
+				//   * shared provider settings: the generation of `apiProvider`, which this group
+				//     writes exactly once.
 				const ownsSharedSelection = () =>
 					this.contextProxy.getStateWriteGeneration("currentApiConfigName") === expectedNameGeneration
 
@@ -2839,12 +2870,33 @@ export class ClineProvider
 				await restore("view-local selection", () =>
 					this._saveViewLocalStateFromMutation({ currentApiConfigName: previousViewName }),
 				)
-				await restore("mode binding", () =>
-					this.providerSettingsManager.setModeConfig(mode, previousModeConfigId as string),
-				)
-				await restore("shared provider settings", () =>
-					this.contextProxy.setProviderSettings(previousProviderSettings),
-				)
+				await restore("mode binding", async () => {
+					// A newer activation from another view re-pointed this mode: its binding wins.
+					// When this activation's own binding write is what failed, the binding never
+					// moved and there is nothing to undo.
+					const currentModeConfigId = this.providerSettingsManager.getModeConfigId
+						? await this.providerSettingsManager.getModeConfigId(mode)
+						: previousModeConfigId
+
+					if (currentModeConfigId !== id) {
+						this.log(
+							"[persistProviderProfile] Skipping the mode-binding restore: the mode no longer points at this activation's profile",
+						)
+						return
+					}
+
+					await this.providerSettingsManager.setModeConfig(mode, previousModeConfigId as string)
+				})
+				await restore("shared provider settings", async () => {
+					if (this.contextProxy.getStateWriteGeneration("apiProvider") !== expectedApiProviderGeneration) {
+						this.log(
+							"[persistProviderProfile] Skipping the shared-settings restore: another view wrote the provider settings",
+						)
+						return
+					}
+
+					await this.contextProxy.setProviderSettings(previousProviderSettings)
+				})
 				// Recheck immediately before the write: the restores above await storage, so
 				// another view may have written the shared selection since the group failed.
 				await restore("shared selection", async () => {
@@ -4218,8 +4270,57 @@ export class ClineProvider
 		return this.contextProxy.getValue(key)
 	}
 
-	public getValues() {
-		return this.contextProxy.getValues()
+	/**
+	 * This view's own values over the shared store.
+	 *
+	 * The buffered profile name and the settings that were loaded for it are overlaid as one
+	 * unit. Overlaying the name on its own would hand a consumer this view's profile name
+	 * carrying whichever profile the shared store currently holds. `loadViewState` records the
+	 * name before it resolves the profile and keeps it when the lookup fails, so a buffered name
+	 * with no settings behind it is overlaid only when the shared selection is that same profile -
+	 * the case where the shared settings genuinely belong to it. Otherwise this view reads the
+	 * shared name and settings pair until its profile resolves; it never gets one half of a pair.
+	 */
+	public getValues(): RooCodeSettings {
+		return { ...this.contextProxy.getValues(), ...this._viewLocalValuesOverlay() }
+	}
+
+	/** The view buffer flattened onto the shared key set, ready to overlay `getValues()`. */
+	private _viewLocalValuesOverlay(): RooCodeSettings {
+		const { mode, currentApiConfigName, apiConfiguration } = this.viewLocalState
+		const overlay: RooCodeSettings = {}
+
+		if (mode !== undefined) {
+			overlay.mode = mode
+		}
+
+		if (currentApiConfigName === undefined) {
+			return overlay
+		}
+
+		if (apiConfiguration === undefined) {
+			if (currentApiConfigName === this.contextProxy.getValue("currentApiConfigName")) {
+				overlay.currentApiConfigName = currentApiConfigName
+			}
+
+			return overlay
+		}
+
+		overlay.currentApiConfigName = currentApiConfigName
+
+		// Flattened with the same key set as `ContextProxy.getProviderSettings()`, and with the
+		// same exclusion: secrets live in the shared secret state, not in a per-view overlay.
+		// Every other provider key - including the ones this profile does not carry - comes from
+		// this view's profile, so the name above never travels with another profile's settings.
+		for (const key of PROVIDER_SETTINGS_KEYS) {
+			if (isSecretStateKey(key)) {
+				continue
+			}
+
+			;(overlay as Record<string, unknown>)[key] = apiConfiguration[key]
+		}
+
+		return overlay
 	}
 
 	public async setValues(values: RooCodeSettings) {
