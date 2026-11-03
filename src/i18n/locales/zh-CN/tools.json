@@ -1,8 +1,5 @@
 {
 	"readFile": {
-		"linesRange": " (第 {{start}}-{{end}} 行)",
-		"definitionsOnly": " (仅定义)",
-		"maxLines": " (最多 {{max}} 行)",
 		"imageTooLarge": "图片文件过大 ({{size}} MB)。允许的最大大小为 {{max}} MB。",
 		"imageWithSize": "图片文件 ({{size}} KB)"
 	},
@@ -11,20 +8,12 @@
 	"unknownToolError": "Zoo 尝试使用未知工具：\"{{toolName}}\"。正在重试...",
 	"missingToolParameter": "Zoo 尝试使用 {{toolName}} 但未提供必需参数 '{{paramName}}' 的值。正在重试...",
 	"missingToolParameterWithPath": "Zoo 尝试对 '{{relPath}}' 使用 {{toolName}} 但未提供必需参数 '{{paramName}}' 的值。正在重试...",
-	"codebaseSearch": {
-		"approval": "正在搜索代码库中的 '{{query}}'..."
-	},
 	"executeCommand": {
 		"destructiveCommandGuard": {
 			"blocked": "Destructive Command Guard 已拦截此命令。",
 			"blockedWithReason": "Destructive Command Guard 已拦截此命令。来自 DCG 的消息：{{reason}}",
 			"blockedWithRule": "Destructive Command Guard 已拦截此命令。（规则：{{ruleId}}）",
 			"blockedWithReasonAndRule": "Destructive Command Guard 已拦截此命令。来自 DCG 的消息：{{reason}}（规则：{{ruleId}}）"
-		}
-	},
-	"newTask": {
-		"errors": {
-			"policy_restriction": "由于策略限制，无法创建新任务。"
 		}
 	},
 	"generateImage": {
@@ -34,9 +23,6 @@
 		"noImageGenerated": "响应中未生成图像",
 		"invalidImageData": "响应中的图像数据无效",
 		"invalidImageFormat": "收到的图像格式无效",
-		"unknownError": "发生未知错误",
-		"roo": {
-			"authRequired": "图像生成需要 Zoo Code Cloud 认证。请登录 Zoo Code Cloud。"
-		}
+		"unknownError": "发生未知错误"
 	}
 }

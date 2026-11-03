@@ -84,3 +84,36 @@ export * from "@testing-library/react"
 
 // override render method
 export { customRender as render }
+
+type TransportCall = { url: string; method: string; headers: Record<string, string> }
+type TransportResult = { status: number; body: unknown; jsonRejects?: Error }
+
+// Stubs global fetch and records the calls.
+export const stubTransport = (handler: (call: TransportCall) => TransportResult | Promise<TransportResult>) => {
+	const calls: TransportCall[] = []
+
+	vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+		const request = typeof input === "object" && "url" in input ? input : undefined
+		const call: TransportCall = {
+			url: request?.url ?? String(input),
+			method: init?.method ?? request?.method ?? "GET",
+			headers: Object.fromEntries(new Headers(init?.headers ?? request?.headers).entries()),
+		}
+		calls.push(call)
+		const result = await handler(call)
+
+		// The hooks consume only ok, status, and json from this response double.
+		return {
+			ok: result.status >= 200 && result.status < 300,
+			status: result.status,
+			json: async () => {
+				if (result.jsonRejects) {
+					throw result.jsonRejects
+				}
+				return result.body
+			},
+		} as Response
+	})
+
+	return { calls }
+}

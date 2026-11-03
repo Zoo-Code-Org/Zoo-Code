@@ -1,4 +1,3 @@
-import axios from "axios"
 import { z } from "zod"
 import { useQuery, UseQueryOptions } from "@tanstack/react-query"
 
@@ -48,8 +47,13 @@ async function getOpenRouterProvidersForModel(modelId: string, baseUrl?: string)
 
 	try {
 		const apiBaseUrl = baseUrl || "https://openrouter.ai/api/v1"
-		const response = await axios.get(`${apiBaseUrl}/models/${modelId}/endpoints`)
-		const result = openRouterEndpointsSchema.safeParse(response.data)
+		const response = await fetch(`${apiBaseUrl}/models/${modelId}/endpoints`, { method: "GET" })
+
+		if (!response.ok) {
+			throw new Error(`Request failed with status code ${response.status}`)
+		}
+
+		const result = openRouterEndpointsSchema.safeParse(await response.json())
 
 		if (!result.success) {
 			console.error("OpenRouter API response validation failed:", result.error)
@@ -86,11 +90,7 @@ async function getOpenRouterProvidersForModel(modelId: string, baseUrl?: string)
 			models[providerName] = modelInfo
 		}
 	} catch (error) {
-		if (error instanceof z.ZodError) {
-			console.error(`OpenRouter API response validation failed:`, error.issues)
-		} else {
-			console.error(`Error fetching OpenRouter providers:`, error)
-		}
+		console.error(`Error fetching OpenRouter providers:`, error)
 	}
 
 	return models
