@@ -154,18 +154,20 @@ describe("webviewMessageHandler – requestProviderQuotas", () => {
 		})
 
 		it("keeps nothing for a request that finished, so a later disposal aborts nothing", async () => {
+			const signals: AbortSignal[] = []
+			quotas.getProviderQuotas.mockImplementation((_profiles: unknown, options: { signal: AbortSignal }) => {
+				signals.push(options.signal)
+				return Promise.resolve([])
+			})
 			const provider = makeProvider()
 			await webviewMessageHandler(provider, { type: "requestProviderQuotas" })
 			await webviewMessageHandler(provider, { type: "requestProviderQuotas", requestId: "done" })
+			expect(signals).toHaveLength(2)
 
-			let signal: AbortSignal | undefined
-			quotas.getProviderQuotas.mockImplementation((_profiles: unknown, options: { signal: AbortSignal }) => {
-				signal = options.signal
-				return Promise.resolve([])
-			})
 			abortProviderQuotaRequests(provider)
 
-			expect(signal).toBeUndefined()
+			// Both requests finished before the disposal: neither is still held, so neither signal was aborted.
+			expect(signals.map((signal) => signal.aborted)).toEqual([false, false])
 		})
 
 		it("does nothing for a provider with no requests in flight", () => {

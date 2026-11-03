@@ -97,6 +97,8 @@ test("wraps overlong task, provider and model text and large totals without clip
 	await expect(story.getByTestId("usage-top-tasks")).toBeVisible()
 	await expect(story.getByText(/ThisIsAnExtremelyLongComponentNameThatHasNoSpacesAtAll/).first()).toBeVisible()
 
+	await expect(story).toHaveScreenshot("usage-settings-long-text.png")
+
 	// At the story width and at the 320px reflow width with WCAG text spacing: nothing is clipped, and nothing
 	// pushes the page sideways.
 	await expectBoundedLayout(page, story, { focusedControl: story.getByTestId("usage-export-csv") })
