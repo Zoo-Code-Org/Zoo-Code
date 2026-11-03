@@ -1004,6 +1004,16 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		expect(mockClineProvider.saveViewState).toHaveBeenCalledWith("currentApiConfigName", "shared-profile")
 		expect(mockClineProvider.saveViewState).not.toHaveBeenCalledWith("currentApiConfigName", "first-listed")
 		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
+		// The re-pin changes this view's selection, so the merged state must be posted after the
+		// list refresh: the webview otherwise keeps rendering the profile that no longer resolves.
+		const postMessageOrders = vi.mocked(mockClineProvider.postMessageToWebview).mock.invocationCallOrder
+		const listConfigIndex = vi
+			.mocked(mockClineProvider.postMessageToWebview)
+			.mock.calls.findIndex(([message]) => (message as { type?: string } | undefined)?.type === "listApiConfig")
+		const statePostOrders = vi.mocked(mockClineProvider.postStateToWebview).mock.invocationCallOrder
+		// The repair's post must be the LAST state post, after the list refresh.
+		expect(statePostOrders.length).toBeGreaterThan(0)
+		expect(statePostOrders[statePostOrders.length - 1]).toBeGreaterThan(postMessageOrders[listConfigIndex])
 	})
 
 	it("clears the stale overlay before persisting the re-pin so a failed pin stays retryable", async () => {

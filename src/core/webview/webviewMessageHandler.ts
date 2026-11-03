@@ -680,6 +680,7 @@ export const webviewMessageHandler = async (
 						}
 					}
 
+					let repairedViewPin = false
 					const currentState = await provider.getState()
 					const currentConfigName = currentState.currentApiConfigName
 
@@ -696,6 +697,10 @@ export const webviewMessageHandler = async (
 							const name = listApiConfig[0]?.name
 
 							if (globalStillValid && globalConfigName) {
+								// The re-pin changes this view's selection, so the merged state has to be posted
+								// once the list is refreshed: otherwise the webview keeps rendering the profile
+								// that no longer resolves.
+								repairedViewPin = true
 								// Re-pin this view to the still-valid shared global selection (not the
 								// first listed profile) so the view adopts the shared choice; the
 								// global selection itself is left untouched.
@@ -724,6 +729,10 @@ export const webviewMessageHandler = async (
 						await updateGlobalState("listApiConfigMeta", listApiConfig),
 						await provider.postMessageToWebview({ type: "listApiConfig", listApiConfig }),
 					])
+
+					if (repairedViewPin) {
+						await provider.postStateToWebview()
+					}
 				})
 				.catch((error) =>
 					provider.log(
