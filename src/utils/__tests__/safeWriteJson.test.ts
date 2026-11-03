@@ -307,7 +307,9 @@ describe("safeWriteJson", () => {
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
 		// fs.unlink is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
-		vi.mocked(fs.unlink).mockImplementation(async (filePath: any) => {
+		// PathLike from the mocked fs/promises signature (string | Buffer | URL); every
+		// member has toString(), so no explicit any is needed.
+		vi.mocked(fs.unlink).mockImplementation(async (filePath) => {
 			if (filePath.toString().includes("safeWriteText.bak_")) {
 				throw new Error("Backup deletion failed")
 			}

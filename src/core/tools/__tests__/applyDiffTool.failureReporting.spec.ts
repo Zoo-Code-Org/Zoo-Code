@@ -15,6 +15,11 @@ vi.mock("@roo-code/telemetry", () => ({
 vi.mock("fs/promises", () => ({
 	default: {
 		readFile: vi.fn().mockResolvedValue(""),
+		// ApplyDiffTool stats around its read so the guarded publish is authorized against the
+		// version the diff was computed from; one shared stats object means the file did not
+		// change underneath the read. This spec is about failure reporting, but the read still
+		// runs before the diff strategy is asked.
+		stat: vi.fn().mockResolvedValue({ dev: 1n, ino: 2n, size: 22n, mtimeNs: 100n, ctimeNs: 100n }),
 	},
 }))
 
