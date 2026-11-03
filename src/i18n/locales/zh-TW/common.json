@@ -17,6 +17,9 @@
 		"could_not_open_file_generic": "無法開啟檔案！",
 		"checkpoint_timeout": "嘗試恢復檢查點時超時。",
 		"checkpoint_failed": "恢復檢查點失敗。",
+		"checkpoint_restore_failed": "還原存檔點時發生錯誤：{{error}}",
+		"checkpoint_missing": "無法還原存檔點 {{commitHash}}：此存檔點已不存在於存檔點儲存庫中。未變更任何檔案。",
+		"checkpoint_invalid_hash": "無法還原或比較存檔點：此參照不是此工作的有效存檔點。未變更任何檔案。",
 		"git_not_installed": "存檔點功能需要 Git。請安裝 Git 以啟用存檔點。",
 		"checkpoint_no_first": "沒有第一個存檔點可供比較。",
 		"checkpoint_no_previous": "沒有上一個存檔點可供比較。",
@@ -112,6 +115,10 @@
 			"completionError": "OpenAI Codex completion error: {{message}}"
 		},
 		"rooHistoryImport": "匯入 Roo Code 歷史記錄失敗：{{error}}"
+	},
+	"checkpoints": {
+		"restart_after_restore_failure": "存檔點還原失敗，工作已停止。要重新啟動工作嗎？",
+		"restart": "重新啟動"
 	},
 	"warnings": {
 		"no_terminal_content": "沒有選擇終端機內容",
