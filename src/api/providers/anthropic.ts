@@ -1,6 +1,7 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import { Stream as AnthropicStream } from "@anthropic-ai/sdk/streaming"
 import { CacheControlEphemeral } from "@anthropic-ai/sdk/resources"
+import { withFinallyCleanup } from "./stream-cleanup"
 
 import {
 	type ModelInfo,
@@ -18,8 +19,10 @@ import { ApiStream } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 import { filterNonAnthropicBlocks } from "../transform/anthropic-filter"
 import { getAnthropicProviderReasoning } from "../transform/reasoning"
+import { cacheControl, resolveCacheTtl } from "../transform/caching/ttl"
 
 import { BaseProvider } from "./base-provider"
+import { bridgeExternalAbortSignal, hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { calculateApiCostAnthropic } from "../../shared/cost"
 import {
@@ -30,7 +33,7 @@ import {
 // Pre-sorted list of known Anthropic model IDs (lowercased) by length (descending) for case-insensitive substring matching.
 const ANTHROPIC_MODEL_IDS_SORTED_LOWER = (Object.keys(anthropicModels) as AnthropicModelId[])
 	.map((id) => id.toLowerCase())
-	.sort((a, b) => b.length - a.length) as string[]
+	.sort((a, b) => b.length - a.length)
 
 // Original-case mapping: lowercase key → original AnthropicModelId for lookup.
 const ANTHROPIC_MODEL_ID_LOWER_TO_ORIGINAL = Object.fromEntries(
@@ -62,7 +65,6 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		let stream: AnthropicStream<Anthropic.Messages.RawMessageStreamEvent>
-		const cacheControl: CacheControlEphemeral = { type: "ephemeral" }
 		const {
 			id: modelId,
 			betas = ["fine-grained-tool-streaming-2025-05-14"],
@@ -76,6 +78,11 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			reasoningBudget,
 			settings: this.options,
 		})
+
+		// One TTL for the whole request (ADR-0006 I4): every marker below reuses
+		// this single object, so a mixed-TTL request is unrepresentable.
+		const cacheTtl = resolveCacheTtl(this.options, info)
+		const marker: CacheControlEphemeral = cacheControl(cacheTtl)
 
 		// Filter out non-Anthropic blocks (reasoning, thoughtSignature, etc.) before sending to the API
 		const sanitizedMessages = filterNonAnthropicBlocks(messages)
@@ -111,6 +118,15 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			tool_choice: toolChoice,
 		}
 
+		// Bridge the external abort signal from request metadata into a per-request
+		// controller so the SDK call is cancelled when the owning request is aborted
+		// (or when the signal is already aborted). Without an external signal the
+		// client-level timeout configured in the constructor remains the only
+		// cancellation mechanism, preserving the existing behavior.
+		const externalAbortSignal = metadata?.abortSignal
+		const { signal: abortSignal, dispose: removeExternalAbortListener } =
+			bridgeExternalAbortSignal(externalAbortSignal)
+
 		switch (modelId) {
 			case "claude-sonnet-5":
 			case "claude-sonnet-4-6":
@@ -121,6 +137,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			case "claude-opus-4-8":
 			case "claude-opus-5":
 			case "claude-opus-5-5":
+			case "claude-haiku-5-5":
 			case "claude-fable-5-1":
 			case "claude-fable-5":
 			case "claude-opus-4-5-20251101":
@@ -157,17 +174,17 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 						temperature,
 						thinking,
 						// Setting cache breakpoint for system prompt so new tasks can reuse it.
-						system: [{ text: systemPrompt, type: "text", cache_control: cacheControl }],
+						system: [{ text: systemPrompt, type: "text", cache_control: marker }],
 						messages: sanitizedMessages.map((message, index) => {
 							if (index === lastUserMsgIndex || index === secondLastMsgUserIndex) {
 								return {
 									...message,
 									content:
 										typeof message.content === "string"
-											? [{ type: "text", text: message.content, cache_control: cacheControl }]
+											? [{ type: "text", text: message.content, cache_control: marker }]
 											: message.content.map((content, contentIndex) =>
 													contentIndex === message.content.length - 1
-														? { ...content, cache_control: cacheControl }
+														? { ...content, cache_control: marker }
 														: content,
 												),
 								}
@@ -177,41 +194,19 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 						stream: true,
 						...nativeToolParams,
 					}
+					// prompt caching: https://x.com/alexalbert__/status/1823751995901272068
+					// https://github.com/anthropics/anthropic-sdk-typescript?tab=readme-ov-file#default-headers
+					// https://github.com/anthropics/anthropic-sdk-typescript/commit/c920b77fc67bd839bfeb6716ceab9d7c9bbe7393
+					// Every model that reaches this branch supports prompt caching, so the
+					// beta applies to all of them.
+					betas.push("prompt-caching-2024-07-31")
+					const requestOptions: Anthropic.RequestOptions = {
+						headers: { "anthropic-beta": betas.join(",") },
+						...(abortSignal && { signal: abortSignal }),
+					}
 					stream = await this.client.messages.create(
 						requestParams as Anthropic.Messages.MessageCreateParamsStreaming,
-						(() => {
-							// prompt caching: https://x.com/alexalbert__/status/1823751995901272068
-							// https://github.com/anthropics/anthropic-sdk-typescript?tab=readme-ov-file#default-headers
-							// https://github.com/anthropics/anthropic-sdk-typescript/commit/c920b77fc67bd839bfeb6716ceab9d7c9bbe7393
-
-							// Then check for models that support prompt caching
-							switch (modelId) {
-								case "claude-sonnet-5":
-								case "claude-sonnet-4-6":
-								case "claude-sonnet-4-5":
-								case "claude-sonnet-4-20250514":
-								case "claude-opus-4-6":
-								case "claude-opus-4-7":
-								case "claude-opus-4-8":
-								case "claude-opus-5":
-								case "claude-opus-5-5":
-								case "claude-fable-5-1":
-								case "claude-fable-5":
-								case "claude-opus-4-5-20251101":
-								case "claude-opus-4-1-20250805":
-								case "claude-opus-4-20250514":
-								case "claude-3-7-sonnet-20250219":
-								case "claude-3-5-sonnet-20241022":
-								case "claude-3-5-haiku-20241022":
-								case "claude-3-opus-20240229":
-								case "claude-haiku-4-5-20251001":
-								case "claude-3-haiku-20240307":
-									betas.push("prompt-caching-2024-07-31")
-									return { headers: { "anthropic-beta": betas.join(",") } }
-								default:
-									return undefined
-							}
-						})(),
+						requestOptions,
 					)
 				} catch (error) {
 					TelemetryService.instance.captureException(
@@ -222,6 +217,9 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 							"createMessage",
 						),
 					)
+					// The request failed before streaming: detach the bridged listener so
+					// it cannot outlive this request.
+					removeExternalAbortListener?.()
 					throw error
 				}
 				break
@@ -240,6 +238,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 					}
 					stream = (await this.client.messages.create(
 						requestParams as Anthropic.Messages.MessageCreateParamsStreaming,
+						abortSignal ? { signal: abortSignal } : undefined,
 					)) as any
 				} catch (error) {
 					TelemetryService.instance.captureException(
@@ -250,6 +249,9 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 							"createMessage",
 						),
 					)
+					// The request failed before streaming: detach the bridged listener so
+					// it cannot outlive this request.
+					removeExternalAbortListener?.()
 					throw error
 				}
 				break
@@ -259,9 +261,10 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		let inputTokens = 0
 		let outputTokens = 0
 		let cacheWriteTokens = 0
+		let cacheWrite1hTokens = 0
 		let cacheReadTokens = 0
 
-		for await (const chunk of stream) {
+		for await (const chunk of withFinallyCleanup(stream, removeExternalAbortListener)) {
 			switch (chunk.type) {
 				case "message_start": {
 					// Tells us cache reads/writes/input/output.
@@ -269,8 +272,13 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 						input_tokens = 0,
 						output_tokens = 0,
 						cache_creation_input_tokens,
+						cache_creation,
 						cache_read_input_tokens,
 					} = chunk.message.usage
+
+					// The per-TTL breakdown decomposes `cache_creation_input_tokens`; it is
+					// absent for providers that do not report it, which leaves the split at 0.
+					const startCacheWrite1hTokens = cache_creation?.ephemeral_1h_input_tokens
 
 					// `output_tokens_details.thinking_tokens` decomposes the billed
 					// output into internal reasoning tokens (0 ⇒ the model skipped
@@ -283,6 +291,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 						inputTokens: input_tokens,
 						outputTokens: output_tokens,
 						cacheWriteTokens: cache_creation_input_tokens || undefined,
+						cacheWrite1hTokens: startCacheWrite1hTokens || undefined,
 						cacheReadTokens: cache_read_input_tokens || undefined,
 						...(typeof startThinkingTokens === "number" ? { reasoningTokens: startThinkingTokens } : {}),
 					}
@@ -290,6 +299,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 					inputTokens += input_tokens
 					outputTokens += output_tokens
 					cacheWriteTokens += cache_creation_input_tokens || 0
+					cacheWrite1hTokens += startCacheWrite1hTokens || 0
 					cacheReadTokens += cache_read_input_tokens || 0
 
 					break
@@ -300,6 +310,10 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 					// Carries the final `thinking_tokens` decomposition for the
 					// whole message (the `message_start` snapshot typically has none).
 					const deltaThinkingTokens = chunk.usage.output_tokens_details?.thinking_tokens
+
+					// The API reports the cumulative output token count, so adopt
+					// it rather than adding it to the message_start seed value.
+					outputTokens = chunk.usage.output_tokens || outputTokens
 
 					yield {
 						type: "usage",
@@ -384,6 +398,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 				outputTokens,
 				cacheWriteTokens,
 				cacheReadTokens,
+				cacheWrite1hTokens,
 			)
 
 			yield {
@@ -404,7 +419,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			return anthropicModels[anthropicDefaultModelId]
 		}
 
-		const originalId = ANTHROPIC_MODEL_ID_LOWER_TO_ORIGINAL[matchedLower] as AnthropicModelId
+		const originalId = ANTHROPIC_MODEL_ID_LOWER_TO_ORIGINAL[matchedLower]
 		return anthropicModels[originalId]
 	}
 
@@ -436,6 +451,11 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 					inputPrice: tier.inputPrice,
 					outputPrice: tier.outputPrice,
 					cacheWritesPrice: tier.cacheWritesPrice,
+					// The tier's own TTL rate must come along: the entry-level rate was
+					// derived from the 200K input price, so keeping it here would bill a
+					// 1M-context 1h write at half its tier rate.
+					cacheWritesPrice1h: tier.cacheWritesPrice1h ?? info.cacheWritesPrice1h,
+					cacheWritesPrice12h: tier.cacheWritesPrice12h ?? info.cacheWritesPrice12h,
 					cacheReadsPrice: tier.cacheReadsPrice,
 				}
 			}
@@ -461,19 +481,35 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions) {
+	async completePrompt(prompt: string, options?: CompletePromptOptions) {
 		const { id: model, temperature } = this.getModel()
 
 		let message
 		try {
-			message = await this.client.messages.create({
-				model,
-				max_tokens: ANTHROPIC_DEFAULT_MAX_TOKENS,
-				thinking: undefined,
-				temperature,
-				messages: [{ role: "user", content: prompt }],
-				stream: false,
-			})
+			// Build request options with both abortSignal and timeout handling
+			const requestOptions: Anthropic.RequestOptions = {}
+			if (options?.abortSignal) {
+				requestOptions.signal = options.abortSignal
+			}
+			const timeoutMs = options?.timeoutMs
+			// Only a usable finite positive timeout may be forwarded: the SDKs treat
+			// timeout: 0 as an immediate abort and throw on negative/non-finite values.
+			// Fractional delays are rounded up, matching mergeAbortSignalAndTimeout.
+			if (hasUsableTimeout(timeoutMs)) {
+				requestOptions.timeout = toSdkTimeoutMs(timeoutMs)
+			}
+
+			message = await this.client.messages.create(
+				{
+					model,
+					max_tokens: ANTHROPIC_DEFAULT_MAX_TOKENS,
+					thinking: undefined,
+					temperature,
+					messages: [{ role: "user", content: prompt }],
+					stream: false,
+				},
+				Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
+			)
 		} catch (error) {
 			TelemetryService.instance.captureException(
 				new ApiProviderError(

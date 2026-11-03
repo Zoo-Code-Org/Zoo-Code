@@ -23,9 +23,9 @@ name: Weekly release kickoff
 
 on:
     schedule:
-        # Friday at 7:00pm ET (23:00 UTC during daylight saving time).
-        # This fixed UTC cron fires at 6:00pm ET while the US is on EST.
-        - cron: "0 23 * * 5"
+        # Friday at 12:00pm EST (17:00 UTC).
+        # This fixed UTC cron fires at 1:00pm ET while the US is on EDT.
+        - cron: "0 17 * * 5"
     workflow_dispatch:
 
 permissions: {}

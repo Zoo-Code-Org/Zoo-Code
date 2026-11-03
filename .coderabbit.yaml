@@ -96,6 +96,19 @@ reviews:
               a call-count check. For code with fallback behavior, verify both the cold-start case
               (no prior state) and the warm case (prior state exists) are covered, as they exercise
               different branches.
+              A test double must not re-implement production logic. If a mock, stub, or inline helper
+              copies a predicate, filter, sort, or transform that also exists in production code, a
+              change to the production copy cannot fail the test. Bind the real function instead, for
+              example with `vi.importActual` or `vi.spyOn`, and replace only the external boundary
+              (network, filesystem, VS Code API).
+              For code that filters, groups, reorders, or deduplicates a collection, require a test
+              with mixed input, such as interleaved item types and repeated items, that asserts the
+              full output array. A test that uses only one item type cannot fail when the production
+              predicate becomes narrower. Ask for the case that fails when the predicate covers a
+              subset of the intended items.
+              When Stryker reports a surviving mutant on changed code, prefer a test that kills it.
+              If the mutant is equivalent, prefer to delete the redundant branch before adding a
+              `Stryker disable` comment.
 
         - path: "apps/vscode-e2e/**"
           instructions: >-

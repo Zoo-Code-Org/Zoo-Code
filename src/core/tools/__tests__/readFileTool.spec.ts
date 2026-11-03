@@ -12,6 +12,7 @@
  * - Output structure formatting
  */
 
+import os from "os"
 import path from "path"
 
 import type { ToolUse } from "../../../shared/tools"
@@ -581,7 +582,72 @@ describe("ReadFileTool", () => {
 
 			await readFileTool.execute({ path: "empty.ts" }, mockTask as any, callbacks)
 
-			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("empty"))
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Note: File is empty"))
+		})
+
+		it("should propagate beyond-EOF error instead of reporting file as empty", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("line1\nline2\nline3\nline4\nline5"))
+			mockedReadWithSlice.mockReturnValue({
+				content: "Error: offset 100 is beyond file end (5 lines)",
+				returnedLines: 0,
+				totalLines: 5,
+				wasTruncated: false,
+				includedRanges: [],
+			})
+
+			await readFileTool.execute(
+				{ path: "test.ts", mode: "slice", offset: 100 },
+				mockTask as unknown as Task,
+				callbacks,
+			)
+
+			expect(mockedReadWithSlice).toHaveBeenCalledWith(expect.any(String), 99, expect.any(Number))
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("beyond file end"))
+			expect(callbacks.pushToolResult).not.toHaveBeenCalledWith(expect.stringContaining("Note: File is empty"))
+		})
+
+		// Integration counterpart to the mocked case above: the real readWithSlice
+		// producer runs against a real file, so the error text and its 1-based
+		// offset are proven end-to-end instead of being asserted against a stub.
+		it("should propagate the real beyond-EOF error from the producer for a real file", async () => {
+			const realFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+			const realPath = await vi.importActual<typeof import("path")>("path")
+			const tempDir = await realFs.mkdtemp(realPath.join(os.tmpdir(), "read-file-beyond-eof-"))
+			const fileName = "sample.txt"
+			await realFs.writeFile(realPath.join(tempDir, fileName), "line1\nline2\nline3\nline4\nline5", "utf8")
+
+			vi.doUnmock("fs/promises")
+			vi.doUnmock("path")
+			vi.doUnmock("isbinaryfile")
+			vi.doUnmock("../../../integrations/misc/indentation-reader")
+			vi.resetModules()
+
+			try {
+				const { ReadFileTool } = await import("../ReadFileTool")
+				const mockTask = { ...createMockTask(), cwd: tempDir }
+				const callbacks = createMockCallbacks()
+
+				await new ReadFileTool().execute(
+					{ path: fileName, mode: "slice", offset: 100 },
+					mockTask as unknown as Task,
+					callbacks,
+				)
+
+				expect(mockedReadWithSlice).not.toHaveBeenCalled()
+				expect(callbacks.pushToolResult).toHaveBeenCalledTimes(1)
+				expect(callbacks.pushToolResult).toHaveBeenCalledWith(
+					expect.stringContaining("Error: offset 100 is beyond file end (5 lines)"),
+				)
+				expect(callbacks.pushToolResult).not.toHaveBeenCalledWith(
+					expect.stringContaining("Note: File is empty"),
+				)
+			} finally {
+				vi.resetModules()
+				await realFs.rm(tempDir, { recursive: true, force: true }).catch(() => {})
+			}
 		})
 	})
 
