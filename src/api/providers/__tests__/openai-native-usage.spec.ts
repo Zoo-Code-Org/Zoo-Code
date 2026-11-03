@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest"
+import { createHash } from "crypto"
 import { OpenAiNativeHandler } from "../openai-native"
-import { OpenAiServiceTier, openAiNativeModels } from "@roo-code/types"
+import { OpenAiServiceTier, openAiNativeModels, type ModelInfo } from "@roo-code/types"
+import type { ApiStreamUsageChunk } from "../../transform/stream"
 
 describe("OpenAiNativeHandler - normalizeUsage", () => {
 	let handler: OpenAiNativeHandler
@@ -440,6 +442,72 @@ describe("OpenAiNativeHandler - normalizeUsage", () => {
 		})
 	})
 
+	describe("OpenAiNativeHandler - prompt cache key", () => {
+		let handler: OpenAiNativeHandler
+
+		beforeEach(() => {
+			handler = new OpenAiNativeHandler({
+				openAiNativeApiKey: "test-key",
+			})
+		})
+
+		const buildRequestBody = (modelId: string, taskId?: string) => {
+			handler["options"].apiModelId = modelId
+			const model = handler.getModel()
+			const metadata = taskId === undefined ? undefined : { taskId }
+			return handler["buildRequestBody"](model, [], "", model.verbosity, undefined, metadata)
+		}
+
+		it("should send the task id as the body prompt_cache_key", () => {
+			const body = buildRequestBody("gpt-5.1", "task-abc")
+			expect(body.prompt_cache_key).toBe("task-abc")
+		})
+
+		it("should keep the key stable across turns of the same task", () => {
+			const firstTurn = buildRequestBody("gpt-5.1", "task-stable")
+			const secondTurn = buildRequestBody("gpt-5.1", "task-stable")
+			expect(firstTurn.prompt_cache_key).toBe("task-stable")
+			expect(secondTurn.prompt_cache_key).toBe(firstTurn.prompt_cache_key)
+		})
+
+		it("should give distinct keys to distinct tasks", () => {
+			const first = buildRequestBody("gpt-5.1", "task-one")
+			const second = buildRequestBody("gpt-5.1", "task-two")
+			expect(first.prompt_cache_key).toBe("task-one")
+			expect(second.prompt_cache_key).toBe("task-two")
+			expect(first.prompt_cache_key).not.toBe(second.prompt_cache_key)
+		})
+
+		it("should fall back to the handler session id when no task id is supplied", () => {
+			const body = buildRequestBody("gpt-5.1")
+			expect(body.prompt_cache_key).toBe(handler["sessionId"])
+			expect(body.prompt_cache_key).toEqual(expect.any(String))
+		})
+
+		it("should omit the key when the model does not support prompt caching", () => {
+			const modelId = "codex-mini-latest"
+			expect(openAiNativeModels[modelId as keyof typeof openAiNativeModels].supportsPromptCache).toBe(false)
+
+			const body = buildRequestBody(modelId, "task-abc")
+			expect(body.prompt_cache_key).toBeUndefined()
+		})
+
+		it("should clamp an over-length task id to OpenAI's 64-character limit", () => {
+			const longTaskId = "t".repeat(80)
+			const body = buildRequestBody("gpt-5.1", longTaskId)
+			expect(body.prompt_cache_key).toHaveLength(64)
+			// A hash, not a slice: truncation would collapse ids that share a prefix.
+			expect(body.prompt_cache_key).toBe(createHash("sha256").update(longTaskId).digest("hex"))
+			expect(body.prompt_cache_key).not.toBe(longTaskId.slice(0, 64))
+		})
+
+		it("should keep prompt_cache_retention alongside the key for 24h models", () => {
+			const body = buildRequestBody("gpt-5.1", "task-abc")
+			expect(body.prompt_cache_key).toBe("task-abc")
+			expect(body.prompt_cache_retention).toBe("24h")
+		})
+	})
+
 	describe("cost calculation", () => {
 		it.each([
 			{ tier: OpenAiServiceTier.Default, expectedCost: 4.525 },
@@ -460,6 +528,35 @@ describe("OpenAiNativeHandler - normalizeUsage", () => {
 			)
 
 			if (!result) throw new Error("Expected usage")
+			expect(result.totalCost).toBeCloseTo(expectedCost, 6)
+		})
+
+		it.each([
+			// gpt-6-astra: default input 10.0 / 12h 25.0; flex input 5.0; priority input 20.0.
+			// The 12h rate must follow the tier's own input price (2.5x), not the
+			// standard-tier 12h rate, or a flex/priority 12h write is mis-billed.
+			{ tier: OpenAiServiceTier.Default, expectedCost: 2.5 },
+			{ tier: OpenAiServiceTier.Flex, expectedCost: 1.25 },
+			{ tier: OpenAiServiceTier.Priority, expectedCost: 5.0 },
+		])("derives the 12h rate from the $tier tier's own input price", ({ tier, expectedCost }) => {
+			handler = new OpenAiNativeHandler({
+				openAiNativeApiKey: "test-key",
+				openAiNativeServiceTier: tier,
+			})
+			const result = handler["normalizeUsage"](
+				{
+					input_tokens: 100_000,
+					output_tokens: 0,
+					input_tokens_details: {
+						cache_write_tokens: 100_000,
+						cache_write_tokens_details: { ttl_12h_tokens: 100_000 },
+					},
+				},
+				getGpt6AstraModel(),
+			)
+
+			if (!result) throw new Error("Expected usage")
+			// All input is consumed by the write, so the whole cost is the 12h class.
 			expect(result.totalCost).toBeCloseTo(expectedCost, 6)
 		})
 
@@ -549,6 +646,148 @@ describe("OpenAiNativeHandler - normalizeUsage", () => {
 				cacheReadTokens: 100_000,
 			})
 			expect(result.totalCost).toBeCloseTo(1.08, 6)
+		})
+	})
+
+	describe("cache-write TTL split (Responses API)", () => {
+		// `normalizeUsage` is private. A narrow structural cast keeps the call typed
+		// without widening the handler to `any`; the return is asserted non-null because
+		// every call site below passes a usage object that yields a chunk.
+		const normalizeUsage = (
+			h: OpenAiNativeHandler,
+			usage: unknown,
+			model: { id: string; info: ModelInfo },
+		): ApiStreamUsageChunk => {
+			const result = (
+				h as unknown as {
+					normalizeUsage(u: unknown, m: { id: string; info: ModelInfo }): ApiStreamUsageChunk | undefined
+				}
+			).normalizeUsage(usage, model)
+			expect(result).toBeDefined()
+			return result as ApiStreamUsageChunk
+		}
+
+		it("should read ttl_12h_tokens and bill it at the 12h rate", () => {
+			// gpt-5.6-sol: input 4.0, cacheWritesPrice 5.0 (30m class), cacheWritesPrice12h 10.0.
+			const model = getGpt6AstraModel()
+			const usage = {
+				input_tokens: 100_000,
+				output_tokens: 0,
+				input_tokens_details: {
+					cache_write_tokens: 100_000,
+					cache_write_tokens_details: {
+						ttl_30m_tokens: 0,
+						ttl_12h_tokens: 100_000,
+					},
+				},
+			}
+
+			const result = normalizeUsage(handler, usage, model)
+
+			expect(result).toMatchObject({
+				type: "usage",
+				cacheWriteTokens: 100_000,
+				cacheWrite12hTokens: 100_000,
+			})
+
+			// gpt-6-astra: input 10.0, 12h rate 25.0.
+			// Base input: (10.0 / 1_000_000) * (100_000 - 100_000) = 0
+			// 12h writes: (25.0 / 1_000_000) * 100_000 = 2.5
+			// The pre-split behaviour charged the 30m rate: 12.5 * 0.1 = 1.25 (50% low).
+			expect(result.totalCost).toBeCloseTo(2.5, 6)
+			expect(result.totalCost).not.toBeCloseTo(1.25, 6)
+		})
+
+		it("should split a mixed 30m/12h write total without double counting", () => {
+			const model = getGpt6AstraModel()
+			const usage = {
+				input_tokens: 100_000,
+				output_tokens: 0,
+				input_tokens_details: {
+					cache_write_tokens: 100_000,
+					cache_write_tokens_details: {
+						ttl_30m_tokens: 60_000,
+						ttl_12h_tokens: 40_000,
+					},
+				},
+			}
+
+			const result = normalizeUsage(handler, usage, model)
+
+			expect(result).toMatchObject({
+				cacheWriteTokens: 100_000,
+				cacheWrite12hTokens: 40_000,
+			})
+
+			// 30m remainder: 60_000 at 12.5 => 0.75
+			// 12h: 40_000 at 25.0 => 1.0
+			// Total: 1.75
+			expect(result.totalCost).toBeCloseTo(1.75, 6)
+		})
+
+		it("should leave the split undefined when the response omits it", () => {
+			const model = getGpt6AstraModel()
+			const usage = {
+				input_tokens: 100_000,
+				output_tokens: 0,
+				input_tokens_details: {
+					cache_write_tokens: 100_000,
+				},
+			}
+
+			const result = normalizeUsage(handler, usage, model)
+
+			expect(result.cacheWrite12hTokens).toBeUndefined()
+			// All writes bill at the 30m rate: (12.5 / 1_000_000) * 100_000 = 1.25
+			expect(result.totalCost).toBeCloseTo(1.25, 6)
+		})
+
+		it("should clamp a 12h split that exceeds the write total", () => {
+			const model = getGpt6AstraModel()
+			const usage = {
+				input_tokens: 100_000,
+				output_tokens: 0,
+				input_tokens_details: {
+					cache_write_tokens: 50_000,
+					cache_write_tokens_details: {
+						ttl_12h_tokens: 80_000,
+					},
+				},
+			}
+
+			const result = normalizeUsage(handler, usage, model)
+
+			// Clamped to the write total so no more 12h tokens are billed than written.
+			expect(result.cacheWrite12hTokens).toBe(50_000)
+			// Base input: (10.0 / 1_000_000) * (100_000 - 50_000) = 0.5
+			// 12h writes: (25.0 / 1_000_000) * 50_000 = 1.25
+			// Total: 0.5 + 1.25 = 1.75
+			expect(result.totalCost).toBeCloseTo(1.75, 6)
+		})
+
+		it("should clamp a negative 12h split at zero instead of emitting a negative count", () => {
+			// A misbehaving gateway can report a negative ttl_12h_tokens. Math.min alone
+			// leaves it negative, so the negative count reaches the Task accumulator and
+			// the webview. Shared costing clamps, but the emitted chunk must not lie.
+			const model = getGpt6AstraModel()
+			const usage = {
+				input_tokens: 100_000,
+				output_tokens: 0,
+				input_tokens_details: {
+					cache_write_tokens: 100_000,
+					cache_write_tokens_details: {
+						ttl_12h_tokens: -40_000,
+					},
+				},
+			}
+
+			const result = normalizeUsage(handler, usage, model)
+
+			// A zero split is indistinguishable from "no split", so the field stays unset.
+			expect(result.cacheWrite12hTokens).toBeUndefined()
+			expect(result.cacheWrite12hTokens ?? 0).toBeGreaterThanOrEqual(0)
+			// All 100k writes bill at the 30m rate: (12.5 / 1_000_000) * 100_000 = 1.25
+			expect(result.totalCost).toBeCloseTo(1.25, 6)
 		})
 	})
 })
