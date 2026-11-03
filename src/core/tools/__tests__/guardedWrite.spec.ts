@@ -423,6 +423,9 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			})
 			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
 			mockedComputeVersionToken.mockResolvedValue("v1")
+			// The lock key resolves the same way the containment check does, so the
+			// canonical target it authorizes is the target the lock is held on.
+			mockedResolveLockKey.mockResolvedValue("/real/workspace/nested/in.txt")
 			const task = createMockTask()
 
 			await guardedWrite(task, "nested/in.txt", "data", "create")
@@ -448,6 +451,8 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			})
 			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
 			mockedComputeVersionToken.mockResolvedValue("v1")
+			// resolveLockKey follows the same link, so the lock key is the referent.
+			mockedResolveLockKey.mockResolvedValue(referent)
 			const task = createMockTask()
 
 			await guardedWrite(task, "link.txt", "data", "create")
@@ -1116,6 +1121,22 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			expect(mockedResolveLockKey).toHaveBeenCalledWith(abs("link.txt"))
 			expect(mockedWithFileLock).toHaveBeenCalledWith(referent, expect.any(Function))
+		})
+
+		it("refuses to publish when the lock key no longer names the bound target", async () => {
+			// The lock is acquired on a key computed before the wait. A path repointed while
+			// the call waited would otherwise publish to a target whose lock is not held, so a
+			// direct writer to that target could race it past the absence check.
+			mockedResolveLockKey
+				.mockResolvedValueOnce(abs("old-target.json"))
+				.mockResolvedValueOnce(abs("new-target.json"))
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+
+			await expect(createIfAbsent(abs("link.txt"), "hello", "link.txt")).rejects.toBeInstanceOf(
+				GuardRejectedError,
+			)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
 
 		it("reads the post-publish token inside the lock, before releasing it", async () => {

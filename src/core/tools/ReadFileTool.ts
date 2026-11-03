@@ -359,10 +359,14 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				output += `\nNote: Some lines in this view exceed ${MAX_LINE_LENGTH} characters and were clipped in this view.`
 			}
 		} else if (result.hasClippedLines) {
-			// Every line was returned, so there is no later offset to read: report the
-			// clipping without a next-offset hint, and keep the read incomplete so a
-			// full-file replacement cannot be built from a clipped line.
-			output = `IMPORTANT: Some lines exceed ${MAX_LINE_LENGTH} characters and were clipped in this view. The file was read in full, but the clipped lines were not shown in full.
+			// The slice reached the end of the file, so there is no later offset to read: report
+			// the clipping without a next-offset hint, and keep the read incomplete so a full-file
+			// replacement cannot be built from a clipped line. "Read in full" is only true from the
+			// requested offset onward, and a model that reads it literally would think the lines
+			// before that offset were included.
+			const coverage =
+				offset0 === 0 ? "The file was read in full" : `The file was read from line ${offset1} onward`
+			output = `IMPORTANT: Some lines exceed ${MAX_LINE_LENGTH} characters and were clipped in this view. ${coverage}, but the clipped lines were not shown in full.
 				${result.content}`
 		} else if (result.returnedLines === 0 && result.totalLines === 0) {
 			// Only a truly empty file is reported as empty. A slice that starts past the last line

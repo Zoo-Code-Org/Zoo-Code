@@ -189,12 +189,25 @@ export async function createIfAbsent(
 ): Promise<string | undefined> {
 	// Lock the key every other writer to this file uses: the resolved publish
 	// target, so a symlink alias and its referent share one lock.
-	return withFileLock(await resolveLockKey(absolutePath), async () => {
+	const lockKey = await resolveLockKey(absolutePath)
+	return withFileLock(lockKey, async () => {
 		cancelledBeforePublish(absolutePath, displayPath, isCancelled)
 		// Bind the publish to the target the authorization check covers: the
 		// re-check runs first and returns the canonical path it authorized, and
 		// every step below acts on that fixed target.
 		const boundTarget = (await verifyTarget?.()) ?? absolutePath
+		// The lock is held on a key computed BEFORE it was acquired, and the target is
+		// bound inside it. If the path was repointed while this call waited, the bound
+		// target no longer belongs to the held lock: a direct writer to that target takes
+		// a different lock, both can pass the absence check below, and the later rename
+		// replaces the earlier file. Re-derive the key with the same canonicalization
+		// that produced it and refuse the publish when it no longer matches.
+		if ((await resolveLockKey(boundTarget)) !== lockKey) {
+			throw new GuardRejectedError(
+				"Path changed while this write waited for the lock -- re-read the file, then retry.",
+				displayPath,
+			)
+		}
 		try {
 			await fs.access(boundTarget)
 		} catch (error: unknown) {
