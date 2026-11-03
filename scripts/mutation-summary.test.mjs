@@ -155,6 +155,19 @@ test("normalizes paths against the report projectRoot, including backslash separ
 	assert.equal(normalizeReportPath("../sibling.ts", projectRoot, root), "sibling.ts")
 	assert.equal(normalizeReportPath("..\\..\\escape.ts", projectRoot, root), undefined)
 	assert.equal(normalizeReportPath("..", projectRoot, root), undefined)
+	// The mutation-diff runner is POSIX, where a doubled backslash is part of one file name
+	// inside the package, so path.relative renders it as a traversal-looking string - the
+	// shape that slipped past a startsWith("../") check in CI. Pinned with
+	// path.posix so it is checked on any runner OS, not only the one that shipped the bug.
+	const posixRendered = path.posix
+		.relative("/w", path.posix.resolve("/w/pkg", "..\\..\\escape.ts"))
+		.replaceAll("\\", "/")
+	assert.equal(posixRendered, "pkg/../../escape.ts")
+	// ...and the exact rule that now rejects it: a ".." component in the rendered
+	// string. The old startsWith("../") check let this through on a POSIX runner.
+	assert.ok(!posixRendered.startsWith("../"))
+	assert.ok(posixRendered.split("/").includes(".."))
+	assert.equal(normalizeReportPath("..\\..\\escape.ts", "/w/pkg", "/w"), undefined)
 })
 
 test("rejects a non-string projectRoot instead of resolving against it", (t) => {

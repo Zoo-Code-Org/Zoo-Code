@@ -36,8 +36,8 @@ function renderReportName(name) {
 
 /**
  * Return the normalised repo-relative path for one report entry, or undefined when the entry
- * cannot be shown: non-string, empty, absolute, escaping the working directory through a ".."
- * component, or containing a character a source path would not have.
+ * cannot be shown: non-string, empty, absolute, carrying a ".." component under either separator
+ * convention, or containing a character a source path would not have.
  */
 export function normalizeReportPath(filePath, projectRoot, cwd) {
 	if (typeof filePath !== "string" || filePath.length === 0) return undefined
@@ -45,8 +45,12 @@ export function normalizeReportPath(filePath, projectRoot, cwd) {
 	if (filePath.includes("\u0000")) return undefined
 	const absolute = path.resolve(projectRoot ?? cwd, filePath)
 	const relative = path.relative(cwd, absolute).replaceAll("\\", "/")
-	// A leading ".." component only: a file legitimately named "..foo.ts" stays a file.
-	if (relative.length === 0 || relative === ".." || relative.startsWith("../") || path.isAbsolute(relative)) {
+	// Reject a rendered path that is empty, absolute, or still carries a ".." component. That
+	// covers a real escape ("../outside") and the POSIX shape where "..\\..\\x" is one file name
+	// inside the package and would otherwise render as "pkg/../../x". A file named "..x.ts" has
+	// no ".." component and stays a file, and a package sibling that resolves inside the working
+	// directory ("../sibling.ts" -> "sibling.ts") stays a repo path.
+	if (relative.length === 0 || path.isAbsolute(relative) || relative.split("/").includes("..")) {
 		return undefined
 	}
 	if (!SAFE_RELATIVE_PATH.test(relative)) return undefined
