@@ -462,6 +462,15 @@ export class ClineProvider
 	private viewLocalStateWriteVersions = { mode: 0, currentApiConfigName: 0, apiConfiguration: 0 }
 
 	/**
+	 * View ids whose persisted selections failed to load. A load failure must not be
+	 * indistinguishable from a successful one, because the unchanged-id guard in
+	 * setViewStateId would then swallow every later registration of that id. A pending
+	 * id is retried (claim check included) and removed from this set only after a load
+	 * that ran to completion.
+	 */
+	private pendingViewStateRestorations = new Set<string>()
+
+	/**
 	 * This view's pinned profile name from the view-local buffer. Exposed for
 	 * sibling-instance inspection (getAllInstances() filtering): `viewLocalState`
 	 * is private and must not be reached through bracket access.
@@ -674,8 +683,20 @@ export class ClineProvider
 
 		// Copy onto a null prototype. A view id that names an Object.prototype key
 		// ("constructor", "toString", "valueOf", ...) must not resolve through the
-		// prototype chain and be mistaken for a persisted entry.
-		return Object.assign(Object.create(null), viewStates)
+		// prototype chain and be mistaken for a persisted entry. Entries that are not
+		// objects are dropped as well: a corrupt or hand-edited `viewStates` record can
+		// hold a null or primitive value under a key, and prunePersistedViewStates reads
+		// `updatedAt` from every entry it is given - one such entry rejects the queued
+		// write and loses the selection this writer was about to store.
+		const states: Record<string, PersistedViewState> = Object.create(null)
+
+		for (const [viewStateId, entry] of Object.entries(viewStates)) {
+			if (entry && typeof entry === "object") {
+				states[viewStateId] = entry
+			}
+		}
+
+		return states
 	}
 
 	/** Persist the non-secret selections through the serialized write queue. */
@@ -871,9 +892,15 @@ export class ClineProvider
 
 		const normalizedViewStateId = viewStateId.trim().replace(/[^A-Za-z0-9_-]/g, "_")
 
+		// A load that failed leaves the id adopted (the re-key already moved the entry to the
+		// stable name) with the selections unrestored, so the unchanged-id guard must not
+		// swallow the retry: while a restoration is pending for this exact id the
+		// registration continues, and the claim check below still has to pass.
+		const restorationPending = this.pendingViewStateRestorations.has(normalizedViewStateId)
+
 		if (
 			!normalizedViewStateId ||
-			normalizedViewStateId === this.viewStateId ||
+			(normalizedViewStateId === this.viewStateId && !restorationPending) ||
 			// Reject "__proto__" and any other prototype-chain key. The map is copied
 			// onto a null prototype, so these names can no longer resolve through the
 			// chain, but they are still rejected as ids so a caller cannot store an
@@ -6027,8 +6054,16 @@ export class ClineProvider
 			}
 
 			this.viewLocalState = mergedState
+			this.pendingViewStateRestorations.delete(loadedForViewId)
 			this.log(`[loadViewState] Loaded state for viewId ${this.viewId}`)
 		} catch (error) {
+			// The load aborted, and `setViewStateId` keeps the id it adopted because the
+			// entry is already stored under the stable name. Record that this id is unrestored
+			// so the next registration of the same id is not swallowed by the unchanged-id
+			// guard; a completed load above clears it.
+			if (this.viewStateId === loadedForViewId) {
+				this.pendingViewStateRestorations.add(loadedForViewId)
+			}
 			this.log(
 				`[loadViewState] Error loading state for viewId ${this.viewId}: ${error instanceof Error ? error.message : String(error)}`,
 			)

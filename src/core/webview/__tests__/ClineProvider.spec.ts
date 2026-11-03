@@ -15,6 +15,7 @@ import {
 	type ClineMessage,
 	type ExtensionMessage,
 	type ExtensionState,
+	type GlobalState,
 	type WebviewMessage,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
@@ -5682,6 +5683,115 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	describe("persisted viewStates record hygiene", () => {
+		it("drops non-object entries so a corrupt record cannot reject a save", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// Test data only, hence the assertion: a null or primitive entry is exactly what the
+			// persisted schema forbids and what a half-written or hand-edited record can still hold.
+			const corruptStates = {
+				"corrupt-view": null,
+				"primitive-view": "not-an-entry",
+				"healthy-view": { claimToken: "host-token", mode: "code", updatedAt: 5 },
+			} as unknown as GlobalState["viewStates"]
+			await provider.contextProxy.setValue("viewStates", corruptStates)
+
+			// Both read paths filter: the ContextProxy-cached copy (loadViewState reads it) and the
+			// fresh storage copy every serialized writer reads.
+			expect(provider["getPersistedViewStates"]()).not.toHaveProperty("corrupt-view")
+			expect(provider["getPersistedViewStates"]()).not.toHaveProperty("primitive-view")
+			expect(provider["getPersistedViewStates"]({ fresh: true })["corrupt-view"]).toBeUndefined()
+			expect(provider["getPersistedViewStates"]({ fresh: true })["healthy-view"]).toMatchObject({
+				claimToken: "host-token",
+				mode: "code",
+			})
+
+			// Before the filter this rejects: prunePersistedViewStates sorts every entry by
+			// `updatedAt`, and reading it from a null entry throws inside the queued write.
+			await provider["savePersistedViewState"]({ mode: "architect", updatedAt: 10 })
+
+			const stored = mockContext.globalState.get<Record<string, { mode?: string }>>("viewStates") ?? {}
+			expect(stored[provider["viewStateId"]]).toMatchObject({ mode: "architect" })
+			expect(stored).not.toHaveProperty("corrupt-view")
+			expect(stored).not.toHaveProperty("primitive-view")
+
+			await provider.dispose()
+		})
+	})
+
+	describe("view state restoration retry", () => {
+		const createProvider = () =>
+			new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+		it("reloads the selections of a view whose load failed when the same id is registered again", async () => {
+			const provider = createProvider()
+			await provider.contextProxy.setValue("viewStates", {
+				"retry-view": {
+					claimToken: "host-token",
+					mode: "architect",
+					currentApiConfigName: "cfg-a",
+					updatedAt: 1,
+				},
+			})
+			const getCustomModesSpy = vi
+				.spyOn(provider["customModesManager"], "getCustomModes")
+				.mockRejectedValue(new Error("custom modes read failed"))
+
+			await provider["setViewStateId"]("retry-view", "host-token")
+
+			// The id stays adopted: only the load aborted, and the entry is already stored under
+			// the stable name, so rolling back here would strand it under the temporary id.
+			expect(provider["viewStateId"]).toBe("retry-view")
+			expect(provider["viewLocalState"]).toStrictEqual({})
+			expect(provider["pendingViewStateRestorations"].has("retry-view")).toBe(true)
+
+			getCustomModesSpy.mockResolvedValue([])
+
+			// Same id, restoration still pending: the registration runs again, claim check included.
+			await provider["setViewStateId"]("retry-view", "host-token")
+
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("cfg-a")
+			expect(provider["pendingViewStateRestorations"].has("retry-view")).toBe(false)
+
+			getCustomModesSpy.mockRestore()
+			await provider.dispose()
+		})
+
+		it("keeps the same-id guard closed once a restoration completed", async () => {
+			const provider = createProvider()
+			await provider.contextProxy.setValue("viewStates", {
+				"loaded-view": { claimToken: "host-token", mode: "architect", updatedAt: 1 },
+			})
+
+			await provider["setViewStateId"]("loaded-view", "host-token")
+
+			expect(provider["viewLocalState"].mode).toBe("architect")
+
+			// Change what is persisted behind this view's back; a completed restoration is not
+			// re-run by a repeated registration, so the buffer keeps the loaded selection.
+			await provider.contextProxy.setValue("viewStates", {
+				"loaded-view": { claimToken: "host-token", mode: "code", updatedAt: 2 },
+			})
+			await provider["setViewStateId"]("loaded-view", "host-token")
+
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(provider["pendingViewStateRestorations"].size).toBe(0)
+
+			await provider.dispose()
+		})
+	})
 	describe("view state claim binding", () => {
 		it("refuses a viewStateId bound by a concurrent registration through setViewStateId", async () => {
 			const provider = new ClineProvider(
