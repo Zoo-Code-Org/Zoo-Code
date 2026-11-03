@@ -26,6 +26,8 @@ import {
 	parseVitestTestFiles,
 	preferDirectTestFiles,
 	parseStackedMap,
+	readStackedMap,
+	summarizeReinstallFailure,
 	dependencyManifestDrift,
 	alignExecutionTree,
 	resolveCiInvocation,
@@ -67,7 +69,12 @@ describe("mutation testing workflow", () => {
 		assert.ok(
 			workflow.includes('PR_HEAD_SHA="$(git rev-parse "$HEAD_SHA^2" 2>/dev/null || git rev-parse "$HEAD_SHA")"'),
 		)
-		assert.ok(workflow.includes('--stacked-map "$STACKED_MAP"'))
+		// The map crosses jobs as a file, never as an argument or an environment string: Linux caps one
+		// argument/env string at 128 KiB (MAX_ARG_STRLEN), and a map past that cap makes the step
+		// unstartable rather than merely large.
+		assert.ok(workflow.includes("--stacked-map-file .mutation/stacked-map.json"))
+		assert.ok(!workflow.includes('--stacked-map "$STACKED_MAP"'))
+		assert.ok(workflow.includes("name: mutation-stacked-map"))
 		assert.ok(workflow.includes('--pr-head "$PR_HEAD_SHA"'))
 		// The open pull request map must cover every page, otherwise a parent unit beyond the first
 		// page is missing and the gate charges the whole unmerged chain again.
@@ -97,20 +104,27 @@ describe("mutation testing workflow", () => {
 		// in a job that never checks out or runs pull-request code; only the filtered map crosses over.
 		const gateJob = workflow.slice(workflow.indexOf("    mutation-diff:"))
 		assert.ok(!gateJob.includes("GH_TOKEN"))
-		assert.ok(workflow.includes("STACKED_MAP: ${{ needs.stacked_map.outputs.stacked_map }}"))
+		// The map arrives from the artifact the map job publishes, into the job that runs the gate.
+		assert.ok(gateJob.includes("uses: actions/download-artifact@"))
+		assert.ok(gateJob.includes("name: mutation-stacked-map"))
+		assert.ok(!workflow.includes("needs.stacked_map.outputs.stacked_map"))
 		const mapJob = workflow.slice(workflow.indexOf("    stacked_map:"), workflow.indexOf("    mutation-diff:"))
 		assert.ok(mapJob.includes("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}"))
 		assert.ok(!mapJob.includes("actions/checkout"))
 		assert.ok(!mapJob.includes("setup-node-pnpm"))
 		assert.ok(!mapJob.includes("pnpm test:mutation-ci"))
 		assert.ok(workflow.includes("needs: stacked_map"))
-		// The job output is only real if the step it reads from carries that id; without it the map is
-		// always an empty string and the gate silently falls back to the event base.
-		assert.ok(mapJob.includes("id: read_map"))
-		// Publish as one record from a validated value, and do not continue past a failed write.
-		assert.ok(mapJob.includes("printf 'stacked_map<<EOF"))
-		assert.ok(!mapJob.includes("Could not publish the stacked map"))
-		assert.equal(workflow.match(/continue-on-error: true/g)?.length, 1)
+		// The map is validated before it is written, and the write is a plain file in the job that
+		// uploads it: no step output, no job output, and no argument for the gate to receive.
+		assert.ok(mapJob.includes(`printf '%s\\n' "$STACKED_MAP" > stacked-map.json`))
+		assert.ok(mapJob.includes("path: stacked-map.json"))
+		assert.ok(mapJob.includes("if-no-files-found: error"))
+		assert.ok(!mapJob.includes("GITHUB_OUTPUT"))
+		// Both jobs need actions:write - one to publish the map, one to read it and publish the reports.
+		assert.equal(workflow.match(/actions: write/g)?.length, 2)
+		// A missing map artifact degrades to the event base inside the script, so the download step must
+		// not fail the job; the report upload keeps its own tolerance.
+		assert.equal(workflow.match(/continue-on-error: true/g)?.length, 2)
 		assert.equal(workflow.match(/Could not write the job summary/g)?.length, 2)
 		const script = fs.readFileSync(path.join(repositoryRoot, "scripts/stryker-diff.mjs"), "utf8")
 		assert.ok(script.includes("appendSummary([], manifest.advisories, manifest)"))
@@ -454,6 +468,100 @@ describe("stacked unit base resolution", () => {
 			])
 		} finally {
 			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+
+	it("matches a stacked parent by base branch when another pull request shares its head", () => {
+		// Two open pull requests can point at the same commit while targeting different branches. Stopping
+		// at the first head-SHA match rejects that parent for the wrong reason and falls back to the event
+		// base, charging this unit every unmerged ancestor of a branch it is not merging into.
+		const { repository, eventBaseSha, parentSha, childSha } = createSyntheticStack()
+
+		try {
+			const map = [
+				{ number: 9, headSha: parentSha, baseRef: "feature/other" },
+				{ number: 1, headSha: parentSha, baseRef: "main" },
+			]
+
+			const unitOnMain = resolveStackedUnitBase(repository, eventBaseSha, childSha, map, "main")
+			assert.equal(unitOnMain.baseSha, parentSha)
+			assert.equal(unitOnMain.stackedOn, 1)
+
+			// The same map read by a unit that targets the feature branch picks the other pull request,
+			// which is the only parent whose own gate measured against this unit's base.
+			const unitOnFeature = resolveStackedUnitBase(repository, eventBaseSha, childSha, map, "feature/other")
+			assert.equal(unitOnFeature.baseSha, parentSha)
+			assert.equal(unitOnFeature.stackedOn, 9)
+
+			// A map whose entries match no base still degrades instead of guessing.
+			const noMatch = resolveStackedUnitBase(repository, eventBaseSha, childSha, map, "release/none")
+			assert.equal(noMatch.baseSha, eventBaseSha)
+			assert.equal(noMatch.stackedOn, null)
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+
+	it("reads the stacked map from the artifact file the workflow publishes", () => {
+		const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stacked-map-"))
+		try {
+			fs.writeFileSync(
+				path.join(directory, "stacked-map.json"),
+				'[{ "number": 1, "headSha": "' + "a".repeat(40) + '", "draft": false, "baseRef": "main" }]',
+			)
+			const fromFile = parseStackedMap(readStackedMap(directory, "[]", "stacked-map.json"))
+			assert.deepEqual(fromFile, [{ number: 1, headSha: "a".repeat(40), draft: false, baseRef: "main" }])
+
+			// The inline form stays available for local runs, where no artifact exists.
+			const inline = parseStackedMap(
+				readStackedMap(
+					directory,
+					'[{ "number": 2, "headSha": "' + "b".repeat(40) + '", "draft": false, "baseRef": "main" }]',
+					undefined,
+				),
+			)
+			assert.deepEqual(inline, [{ number: 2, headSha: "b".repeat(40), draft: false, baseRef: "main" }])
+
+			// A missing artifact must not stop the gate. Falling back to the event base charges this unit
+			// every unmerged ancestor - stricter than the intended measurement, never looser - and the
+			// warning records which case ran.
+			const warnings = []
+			const warn = console.warn
+			console.warn = (message) => warnings.push(message)
+			try {
+				assert.equal(readStackedMap(directory, '[{ "number": 3 }]', "absent.json"), "")
+			} finally {
+				console.warn = warn
+			}
+			assert.equal(warnings.length, 1)
+			assert.ok(warnings[0].includes("the artifact was not published"))
+			assert.deepEqual(parseStackedMap(""), [])
+		} finally {
+			fs.rmSync(directory, { recursive: true, force: true })
+		}
+	})
+
+	it("reports the stacked base in the job summary when the aligned reinstall fails", () => {
+		const directory = fs.mkdtempSync(path.join(os.tmpdir(), "reinstall-summary-"))
+		const summaryPath = path.join(directory, "step-summary.md")
+		const previous = process.env.GITHUB_STEP_SUMMARY
+		process.env.GITHUB_STEP_SUMMARY = summaryPath
+		const warnings = []
+		const warn = console.warn
+		console.warn = (message) => warnings.push(message)
+		try {
+			summarizeReinstallFailure(7, ["src/package.json", "pnpm-lock.yaml"], new Error("pnpm install exited 1"))
+			const summary = fs.readFileSync(summaryPath, "utf8")
+			// The whole point of the summary here: which base this unit was measured against.
+			assert.ok(summary.includes("Stacked unit: measured against the head of parent PR #7"))
+			assert.ok(summary.includes("src/package.json, pnpm-lock.yaml"))
+			assert.ok(summary.includes("pnpm install exited 1"))
+			assert.equal(warnings.length, 1)
+		} finally {
+			console.warn = warn
+			if (previous === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previous
+			fs.rmSync(directory, { recursive: true, force: true })
 		}
 	})
 

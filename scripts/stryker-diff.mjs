@@ -313,15 +313,22 @@ export function resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPu
 	// request, not here - no branch ruleset requires the mutation-diff check upstream, so requiring a
 	// green parent would turn an advisory measurement into a hard dependency between two units, and a
 	// unit would be charged its parent's unrelated findings on top of its own.
-	const parent = openPullRequests.find((pr) => pr.draft !== true && String(pr.headSha).toLowerCase() === parentSha)
+	// The base-ref test belongs inside the find. Two open pull requests can share one head SHA while
+	// targeting different branches (the same commit pushed to two branches), and stopping at the first
+	// SHA match would fall back to the event base even when a later entry targets the branch this unit
+	// lands on - charging the unit every unmerged ancestor of a branch it is not merging into.
+	// A parent whose base is a feature branch is measured against that feature branch by its own run, so
+	// measuring this unit against its head hides the parent's feature-branch delta from the changed-line
+	// cap while merging this unit lands that delta on main. Without either base ref the comparison cannot
+	// be made, and the unit keeps the event base.
+	const parent = openPullRequests.find(
+		(pr) =>
+			pr.draft !== true &&
+			String(pr.headSha).toLowerCase() === parentSha &&
+			Boolean(childBaseRef) &&
+			(typeof pr.baseRef === "string" ? pr.baseRef : "") === childBaseRef,
+	)
 	if (!parent) return { baseSha: eventBaseSha, stackedOn: null }
-	// The gate measures a unit against its parent head only when the parent is a pull request against
-	// the very branch this unit targets. A parent whose base is a feature branch would be measured
-	// against that feature branch by its own run, so measuring this unit against its head hides the
-	// parent's feature-branch delta from the changed-line cap while merging this unit lands that delta
-	// on main. Without either base ref the comparison cannot be made, and the unit keeps the event base.
-	const parentBaseRef = typeof parent.baseRef === "string" ? parent.baseRef : ""
-	if (!childBaseRef || parentBaseRef !== childBaseRef) return { baseSha: eventBaseSha, stackedOn: null }
 	return { baseSha: parentSha, stackedOn: parent.number }
 }
 
@@ -794,6 +801,21 @@ export function appendSummary(rows, advisories, manifest) {
 	}
 }
 
+/**
+ * A failed dependency reinstall aborts the gate before any manifest exists, so without this the only
+ * trace of the run is a step log: the author cannot see which base the gate chose, which is the fact
+ * that explains a stacked unit's numbers. The caller rethrows - this only makes the failure visible.
+ */
+export function summarizeReinstallFailure(stackedOn, driftedManifests, error) {
+	appendSummary(
+		[],
+		[
+			`Dependency reinstall failed for the aligned tree (${driftedManifests.join(", ")}): ${error.message} The gate measured nothing; fix the lockfile drift and re-run.`,
+		],
+		{ stackedOn },
+	)
+}
+
 export function evaluateReport(report, packageEntry) {
 	const counts = mutantCounts(report)
 	const advisories = []
@@ -924,6 +946,28 @@ function argument(name) {
 // emits one array per page, so the map can be a stream of arrays rather than one document; accept
 // both shapes. An unparsable map must not change the gate's base, so it degrades to the event base
 // instead of throwing.
+/**
+ * The stacked map arrives either as an inline argument (local runs) or as a file written by the
+ * stacked_map job. The file is the CI path on purpose: Linux caps one argument or environment string
+ * (MAX_ARG_STRLEN, 128 KiB), so a map past that cap would make the gate step unstartable instead of
+ * merely large. A map that cannot be read falls back to the event base, which charges this unit every
+ * unmerged ancestor - stricter than the intended measurement, never looser - and says so in the log.
+ */
+export function readStackedMap(repoRoot, stackedMapArg, stackedMapFile) {
+	if (!stackedMapFile) return stackedMapArg ?? ""
+	const mapPath = path.resolve(repoRoot, stackedMapFile)
+	try {
+		return fs.readFileSync(mapPath, "utf8")
+	} catch (error) {
+		const reason =
+			error instanceof Error && error.code === "ENOENT" ? "the artifact was not published" : error.message
+		console.warn(
+			`::warning title=Stacked unit base::Could not read the stacked map from ${stackedMapFile} (${reason}); measuring against the event base.`,
+		)
+		return ""
+	}
+}
+
 export function parseStackedMap(value) {
 	if (!value) return []
 	// gh api --paginate emits one JSON array per page, so the input is a stream of arrays rather
@@ -983,7 +1027,7 @@ function main() {
 	const command = process.argv[2]
 	if (command !== "ci")
 		throw new Error(
-			"Usage: node scripts/stryker-diff.mjs ci --base <sha> --head <sha> [--pr-head <sha>] [--reports <path>] [--stacked-map <json>] [--pr-base-ref <ref>]",
+			"Usage: node scripts/stryker-diff.mjs ci --base <sha> --head <sha> [--pr-head <sha>] [--reports <path>] [--stacked-map <json> | --stacked-map-file <path>] [--pr-base-ref <ref>]",
 		)
 
 	const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
@@ -991,7 +1035,9 @@ function main() {
 	const headSha = argument("--head")
 	if (!baseSha || !headSha) throw new Error("--base and --head are required")
 
-	const openPullRequests = parseStackedMap(argument("--stacked-map"))
+	const openPullRequests = parseStackedMap(
+		readStackedMap(repoRoot, argument("--stacked-map"), argument("--stacked-map-file")),
+	)
 	// --pr-head is the pull request head itself. The workflow runs on GitHub's merge commit, whose
 	// first parent is the base tip, so the merge commit cannot identify the stacked unit; its second
 	// parent can. A plain pull request keeps the merge commit as the diff head; a stacked unit
@@ -1010,7 +1056,14 @@ function main() {
 			`Aligned the working tree to the diff head ${invocation.diffHead.slice(0, 12)} so selection, source reads, and mutation run on the same tree.`,
 		)
 		const driftedManifests = dependencyManifestDrift(repoRoot, headSha, invocation.diffHead)
-		if (driftedManifests.length > 0) reinstallAlignedDependencies(repoRoot, driftedManifests)
+		if (driftedManifests.length > 0) {
+			try {
+				reinstallAlignedDependencies(repoRoot, driftedManifests)
+			} catch (error) {
+				summarizeReinstallFailure(invocation.stackedOn, driftedManifests, error)
+				throw error
+			}
+		}
 	}
 
 	const reportRoot = path.resolve(repoRoot, argument("--reports") ?? "reports/mutation")
