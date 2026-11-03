@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process"
+import { buildWorktreeEnvironment } from "./coding-trust.ts"
 import { randomUUID } from "node:crypto"
 import fs from "node:fs/promises"
 import path from "node:path"
@@ -42,10 +43,34 @@ const defaultDetect = async (): Promise<ContainerExecutable | undefined> => {
 	return undefined
 }
 
-const probeExecutable = (candidate: ContainerExecutable): Promise<boolean> =>
+// Never search the caller's PATH while the side holds a provider credential.
+// These are administrator-controlled installation locations.
+const containerPath = async (candidate: ContainerExecutable): Promise<string | undefined> => {
+	for (const directory of ["/usr/bin", "/usr/local/bin", "/bin"]) {
+		const executable = path.join(directory, candidate)
+		try {
+			await fs.access(executable, 1)
+			return executable
+		} catch {
+			// Try the next trusted installation location.
+		}
+	}
+	return undefined
+}
+
+const probeExecutable = async (candidate: ContainerExecutable): Promise<boolean> => {
+	const executable = await containerPath(candidate)
+	if (!executable) return false
+	return probePath(executable)
+}
+
+const probePath = (candidate: string): Promise<boolean> =>
 	new Promise((resolve) => {
 		try {
-			const child = spawn(candidate, ["--version"], { stdio: "ignore" })
+			const child = spawn(candidate, ["--version"], {
+				stdio: "ignore",
+				env: buildWorktreeEnvironment(process.env),
+			})
 			const timer = setTimeout(() => {
 				child.kill("SIGKILL")
 				resolve(false)
@@ -81,6 +106,7 @@ export const exec = (
 		try {
 			const child = spawn(file, [...args], {
 				stdio: ["ignore", "pipe", "pipe"],
+				env: buildWorktreeEnvironment(process.env),
 				timeout: timeoutMs,
 				killSignal: "SIGKILL",
 			})
@@ -108,23 +134,27 @@ const IMAGE_INSPECT_TIMEOUT_MS = 30_000
 const containerGone = (stderr: string): boolean => /no such container/i.test(stderr)
 
 export function createDefaultContainerCli(executable: ContainerExecutable): ContainerCli {
+	const resolved = containerPath(executable)
+	const invoke = async (args: readonly string[], timeoutMs: number) => {
+		const file = await resolved
+		return file ? exec(file, args, timeoutMs) : { code: "error" as const, stdout: "", stderr: "" }
+	}
 	return {
 		async pull(image) {
-			const outcome = await exec(executable, ["pull", "-q", image], IMAGE_PULL_TIMEOUT_MS)
+			const outcome = await invoke(["pull", "-q", image], IMAGE_PULL_TIMEOUT_MS)
 			return outcome.code === 0 ? "ok" : "failed"
 		},
 		run(args, timeoutMs) {
-			return exec(executable, args, timeoutMs).then((outcome) => outcome.code)
+			return invoke(args, timeoutMs).then((outcome) => outcome.code)
 		},
 		async remove(name) {
-			const outcome = await exec(executable, ["rm", "--force", name], CONTAINER_REMOVE_TIMEOUT_MS)
+			const outcome = await invoke(["rm", "--force", name], CONTAINER_REMOVE_TIMEOUT_MS)
 			if (outcome.code === 0) return "removed"
 			if (outcome.code !== "timeout" && containerGone(outcome.stderr)) return "absent"
 			return "failed"
 		},
 		async imageDigest(image) {
-			const repoDigest = await exec(
-				executable,
+			const repoDigest = await invoke(
 				["image", "inspect", "--format", "{{index .RepoDigests 0}}", image],
 				IMAGE_INSPECT_TIMEOUT_MS,
 			)
@@ -134,11 +164,7 @@ export function createDefaultContainerCli(executable: ContainerExecutable): Cont
 			}
 			// A locally built image has no repo digest. The engine image ID is
 			// still an immutable local identity.
-			const imageId = await exec(
-				executable,
-				["image", "inspect", "--format", "{{.Id}}", image],
-				IMAGE_INSPECT_TIMEOUT_MS,
-			)
+			const imageId = await invoke(["image", "inspect", "--format", "{{.Id}}", image], IMAGE_INSPECT_TIMEOUT_MS)
 			return imageId.code === 0 ? imageId.stdout.trim() || undefined : undefined
 		},
 	}

@@ -1,3 +1,4 @@
+import { buildWorktreeEnvironment } from "./coding-trust.ts"
 import { execFile, spawn } from "node:child_process"
 import fs from "node:fs/promises"
 import os from "node:os"
@@ -31,7 +32,11 @@ export interface HostRuntimeOptions {
 
 const readCommit = async (root: string): Promise<MeasuredString> => {
 	try {
-		const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: root, timeout: 5_000 })
+		const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+			cwd: root,
+			timeout: 5_000,
+			env: buildWorktreeEnvironment(process.env),
+		})
 		const sha = stdout.trim()
 		return /^[0-9a-f]{40}$/i.test(sha)
 			? { available: true, value: sha }

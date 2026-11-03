@@ -50,6 +50,7 @@ export const resolveCommit = async (ref: string, root: string): Promise<string> 
 	const { promisify } = await import("node:util")
 	const { stdout } = await promisify(execFile)("git", ["rev-parse", `${ref}^{commit}`], {
 		cwd: root,
+		env: buildWorktreeEnvironment(process.env),
 		timeout: 30_000,
 	})
 	const sha = stdout.trim().toLowerCase()
@@ -93,6 +94,7 @@ export async function assertEvaluatedTreeClean(root: string): Promise<void> {
 		["status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"],
 		{
 			cwd: root,
+			env: buildWorktreeEnvironment(process.env),
 			timeout: 30_000,
 		},
 	)
@@ -105,6 +107,7 @@ export async function assertEvaluatedTreeClean(root: string): Promise<void> {
 	// clean filters. A symlink can reference unapproved bytes outside this tree.
 	const { stdout: tree } = await promisify(execFile)("git", ["ls-tree", "-rz", "HEAD"], {
 		cwd: root,
+		env: buildWorktreeEnvironment(process.env),
 		maxBuffer: 16 * 1024 * 1024,
 	})
 	const blobs: { file: string; object: string }[] = []
@@ -123,7 +126,7 @@ export async function assertEvaluatedTreeClean(root: string): Promise<void> {
 		const { stdout: hashes } = await promisify(execFile)(
 			"git",
 			["hash-object", "--no-filters", "--", ...batch.map((blob) => blob.file)],
-			{ cwd: root, timeout: 30_000 },
+			{ cwd: root, env: buildWorktreeEnvironment(process.env), timeout: 30_000 },
 		)
 		const actual = hashes.trim().split("\n")
 		for (const [index, blob] of batch.entries()) {
