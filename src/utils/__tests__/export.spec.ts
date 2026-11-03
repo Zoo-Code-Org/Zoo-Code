@@ -29,7 +29,7 @@ vi.mock("vscode", () => ({
 // `utils/export` checks the target directory with the named fs/promises
 // exports, so the mock has to expose them as named exports too.
 vi.mock("fs/promises", () => {
-	const fsPromises = { stat: mocks.stat, access: mocks.access, constants: { F_OK: 0, R_OK: 4, W_OK: 2 } }
+	const fsPromises = { stat: mocks.stat, access: mocks.access, constants: { F_OK: 0, R_OK: 4, W_OK: 2, X_OK: 1 } }
 	return { ...fsPromises, default: fsPromises }
 })
 
@@ -70,14 +70,14 @@ describe("resolveDefaultSaveUri", () => {
 
 		expect(resolved).toBe(REMEMBERED)
 		expect(mocks.stat).toHaveBeenCalledWith(REMEMBERED_DIR)
-		expect(mocks.access).toHaveBeenCalledWith(REMEMBERED_DIR, constants.W_OK)
+		expect(mocks.access).toHaveBeenCalledWith(REMEMBERED_DIR, constants.W_OK | constants.X_OK)
 	})
 
 	it("checks write permission instead of existence alone", async () => {
 		await resolveWith(REMEMBERED, { useWorkspace: false })
 
-		expect(mocks.access).toHaveBeenCalledWith(REMEMBERED_DIR, constants.W_OK)
-		expect(mocks.access).not.toHaveBeenCalledWith(REMEMBERED_DIR, constants.R_OK)
+		expect(mocks.access).toHaveBeenCalledWith(REMEMBERED_DIR, constants.W_OK | constants.X_OK)
+		expect(mocks.access).not.toHaveBeenCalledWith(REMEMBERED_DIR, constants.R_OK | constants.X_OK)
 	})
 
 	it("falls back when the remembered directory no longer exists", async () => {
@@ -117,7 +117,7 @@ describe("resolveDefaultSaveUri", () => {
 	it("keeps a read-only remembered directory when the caller only reads from it", async () => {
 		// A read-only volume: write access fails, read access succeeds.
 		mocks.access.mockImplementation((_dir: string, mode: number) =>
-			mode === constants.W_OK
+			(mode & constants.W_OK) === constants.W_OK
 				? Promise.reject(Object.assign(new Error("EACCES"), { code: "EACCES" }))
 				: Promise.resolve(),
 		)
@@ -129,7 +129,8 @@ describe("resolveDefaultSaveUri", () => {
 		})
 
 		expect(resolved).toBe(REMEMBERED)
-		expect(mocks.access).toHaveBeenCalledWith(REMEMBERED_DIR, constants.R_OK)
+		// Traversal is part of the check even when only reading is required.
+		expect(mocks.access).toHaveBeenCalledWith(REMEMBERED_DIR, constants.R_OK | constants.X_OK)
 	})
 
 	it("falls back when the remembered directory cannot be read either", async () => {

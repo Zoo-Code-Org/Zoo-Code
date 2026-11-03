@@ -358,18 +358,19 @@ export const exportSettings = async ({ providerSettingsManager, contextProxy }: 
 		return
 	}
 
-	// The file is on disk: confirm it before anything that can still fail.
-	await vscode.window.showInformationMessage(t("common:info.settings_exported", { path: uri.fsPath }))
-
 	// Remember only a location that actually received the file, so a failed export
-	// cannot steer the next dialog either. Failing to remember is not a failed
-	// export, so it must not swallow the confirmation above or escape into the
+	// cannot steer the next dialog either. It runs before the confirmation because
+	// `showInformationMessage` only resolves once the notification is dismissed, and
+	// it is guarded because failing to remember a location is not a failed export:
+	// the confirmation must still appear and the rejection must not escape into the
 	// unawaited message handler.
 	try {
 		await saveLastExportPath(contextProxy, "lastSettingsExportPath", uri)
 	} catch (e) {
 		console.error("Failed to remember the export location:", e)
 	}
+
+	await vscode.window.showInformationMessage(t("common:info.settings_exported", { path: uri.fsPath }))
 }
 
 /**

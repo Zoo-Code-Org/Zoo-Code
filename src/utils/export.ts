@@ -44,9 +44,11 @@ async function isUsableSaveDirectory(dirPath: string, accessMode: number): Promi
 		if (!stats.isDirectory()) {
 			return false
 		}
-		// The access mode is the property that matters: a readable-but-read-only volume
-		// cannot receive an export, while an open dialog only reads from it.
-		await access(dirPath, accessMode)
+		// The access bits are what matter: a readable-but-read-only volume cannot
+		// receive an export, while an open dialog only reads from it. X_OK is ORed in
+		// because R_OK/W_OK alone do not test traversal, and a directory that cannot be
+		// searched cannot resolve a file inside it. Node ignores X_OK on Windows.
+		await access(dirPath, accessMode | constants.X_OK)
 		return true
 	} catch {
 		return false

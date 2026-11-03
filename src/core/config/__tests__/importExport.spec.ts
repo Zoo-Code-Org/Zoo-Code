@@ -59,7 +59,7 @@ const fsMocks = vi.hoisted(() => {
 	const writeFile = vi.fn()
 	const access = vi.fn()
 	const stat = vi.fn()
-	const constants = { F_OK: 0, R_OK: 4, W_OK: 2 }
+	const constants = { F_OK: 0, R_OK: 4, W_OK: 2, X_OK: 1 }
 	return { readFile, mkdir, writeFile, access, stat, constants }
 })
 
@@ -318,7 +318,7 @@ describe("importExport", () => {
 			// A read-only volume: write access fails, read access succeeds. An open
 			// dialog only reads, so this folder must stay the default.
 			fsMocks.access.mockImplementation((_dir: string, mode: number) =>
-				mode === fsMocks.constants.W_OK
+				(mode & fsMocks.constants.W_OK) === fsMocks.constants.W_OK
 					? Promise.reject(Object.assign(new Error("EACCES"), { code: "EACCES" }))
 					: Promise.resolve(),
 			)
@@ -330,7 +330,10 @@ describe("importExport", () => {
 				customModesManager: mockCustomModesManager,
 			})
 
-			expect(fs.access).toHaveBeenCalledWith(path.dirname(remembered), fsMocks.constants.R_OK)
+			expect(fs.access).toHaveBeenCalledWith(
+				path.dirname(remembered),
+				fsMocks.constants.R_OK | fsMocks.constants.X_OK,
+			)
 			expect(vscode.window.showOpenDialog).toHaveBeenCalledWith(
 				expect.objectContaining({
 					defaultUri: expect.objectContaining({ fsPath: path.join("/usb", "zoo-code-settings.json") }),
@@ -1832,6 +1835,12 @@ describe("importExport", () => {
 				"lastSettingsExportPath",
 				"/usb/zoo-code-settings.json",
 			)
+			// The location is remembered before the toast is shown:
+			// showInformationMessage only resolves once the notification is dismissed,
+			// so a later export has to see this folder straight away.
+			expect(mockContextProxy.setValue.mock.invocationCallOrder[0]).toBeLessThan(
+				(vscode.window.showInformationMessage as Mock).mock.invocationCallOrder[0],
+			)
 			// The toast must name the file that actually received the export.
 			expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
 				expect.stringContaining("info.settings_exported"),
@@ -1938,8 +1947,11 @@ describe("importExport", () => {
 				contextProxy: mockContextProxy,
 			})
 
-			// W_OK is the property that matters for an export target.
-			expect(fs.access).toHaveBeenCalledWith(path.dirname(remembered), fsMocks.constants.W_OK)
+			// W_OK (plus traversal) is the property that matters for an export target.
+			expect(fs.access).toHaveBeenCalledWith(
+				path.dirname(remembered),
+				fsMocks.constants.W_OK | fsMocks.constants.X_OK,
+			)
 			expect(vscode.window.showSaveDialog).not.toHaveBeenCalledWith(
 				expect.objectContaining({
 					defaultUri: expect.objectContaining({ fsPath: path.join("/usb", "zoo-code-settings.json") }),
