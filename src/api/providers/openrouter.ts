@@ -672,7 +672,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		// published: writing them would silently roll model metadata (pricing,
 		// limits, endpoint records) back to an older fetch. The stale lookup still
 		// returns the handler's current model, which is what its caller observes.
-		if (sequence > this.publishedModelSequence) {
+		if (sequence > this.publishedModelSequence && Object.keys(models).length > 0) {
 			this.publishedModelSequence = sequence
 			this.models = models
 			// The endpoint lookup answers an empty map when the request failed. Publishing that would
