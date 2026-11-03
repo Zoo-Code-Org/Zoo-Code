@@ -35,6 +35,7 @@ import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, Complete
 import { isMcpTool } from "../../utils/mcp-name"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 import { createAbortError, isRequestAborted, mergeAbortSignalAndTimeout } from "./utils/abort-signal"
+import { createTimeoutError } from "./utils/request-timeout"
 import { hasNumericHttpStatus } from "./utils/error-handler"
 
 export type OpenAiNativeModel = ReturnType<OpenAiNativeHandler["getModel"]>
@@ -1886,6 +1887,13 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			// satisfy the Task's abort contract, so it is normalized instead of
 			// rethrown; terminal errors keep the telemetry + wrapping below.
 			if (isRequestAborted(error)) {
+				// A deadline that fired is not a caller cancellation, and the merged signal keeps the
+				// TimeoutError reason when its own timeout aborted first: report that as a timeout so
+				// callers can tell a deadline from a stop.
+				const abortReason = requestSignal?.reason as { name?: string } | undefined
+				if (abortReason?.name === "TimeoutError") {
+					throw createTimeoutError(this.providerName, "completion request")
+				}
 				throw createAbortError(this.providerName)
 			}
 
