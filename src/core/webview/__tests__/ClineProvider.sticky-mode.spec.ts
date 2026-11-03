@@ -392,6 +392,28 @@ describe("ClineProvider - Sticky Mode", () => {
 			await provider.resolveWebviewView(mockWebviewView)
 		})
 
+		it("rolls the view pin back and skips the shared write when the switch is cancelled while the pin write is in flight", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			// Seed both the shared mode and the view pin so the rollback has a value to restore.
+			await provider.setValue("mode", "code")
+			await provider.saveViewState("mode", "code")
+
+			const controller = new AbortController()
+			const originalSaveViewState = provider.saveViewState.bind(provider)
+			vi.spyOn(provider, "saveViewState").mockImplementation(async (key, value) => {
+				await originalSaveViewState(key, value)
+				// The mutation is cancelled right after the pin landed and before the shared
+				// write: a late shared write would overwrite the mode a newer switch commits.
+				controller.abort()
+			})
+
+			// A background-task switch (no current task) is the view-scoped path that pins.
+			await provider["handleModeSwitchUnlocked"]("architect", undefined, controller.signal)
+
+			expect(provider.getValue("mode")).toBe("code")
+			expect(provider["viewLocalState"].mode).toBe("code")
+		})
+
 		it("should save mode to task metadata when switching modes", async () => {
 			// Create a mock task
 			const mockTask = new Task({

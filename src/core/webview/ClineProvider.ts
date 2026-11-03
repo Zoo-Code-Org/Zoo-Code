@@ -2822,6 +2822,15 @@ export class ClineProvider
 				await this.saveViewState("mode", newMode)
 				pinLanded = true
 
+				// The mutation can be cancelled or time out while the pin write was in flight:
+				// restore the writes this switch already landed and stop before the shared
+				// write, so a late shared mode cannot overwrite the one a newer switch has
+				// committed (the queue advanced when the timeout fired).
+				if (signal?.aborted) {
+					await reconcileSwitchWrites()
+					return
+				}
+
 				// setValue (not the deprecated updateGlobalState) so the in-memory viewLocalState
 				// buffer stays in sync with the durable global write: getValues() merges
 				// viewLocalState on top of the ContextProxy values, so an unsynced stale
