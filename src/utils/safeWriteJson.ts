@@ -122,10 +122,37 @@ function _ancestorChainUnderScope(scopeRoot: string, parent: string): string[] {
 	return chain
 }
 
+/**
+ * The spelling the lexical chain has to be measured from. _resolveScopeRoot answers with realpath's
+ * spelling of the scope root, and that is not always the spelling the caller named: a scope root
+ * reached through a link - a Windows profile or temp directory that is itself a link - canonicalizes
+ * to another path, and comparing the caller's path against THAT spelling gives a relative path that
+ * climbs out of the scope. _ancestorChainUnderScope then collapses the chain to the root alone, so
+ * the alias the write actually walked through is never pinned, which is the hole this chain exists
+ * to close. Take whichever spelling the lexical parent is genuinely under; fall back to the canonical
+ * one, the spelling the scope check itself compared.
+ */
+function _lexicalScopeRootFor(lexicalScopeRoot: string, scopeRoot: string, lexicalParent: string): string {
+	for (const candidate of [lexicalScopeRoot, scopeRoot]) {
+		const relative = path.relative(candidate, lexicalParent)
+		if (
+			relative &&
+			relative !== "." &&
+			relative !== ".." &&
+			!relative.startsWith(".." + path.sep) &&
+			!path.isAbsolute(relative)
+		) {
+			return candidate
+		}
+	}
+	return scopeRoot
+}
+
 async function _confinedAncestorIdentities(
 	scopeRoot: string,
 	target: string,
 	lexicalTarget: string,
+	lexicalScopeRoot: string,
 ): Promise<DirectoryIdentity[]> {
 	// Two spellings of the same walk, both pinned.
 	// - The canonical chain holds for the target the scope check authorized.
@@ -134,9 +161,12 @@ async function _confinedAncestorIdentities(
 	//   this call creates on the way down sits under the ALIAS component the caller named. Pin only
 	//   the canonical chain and the alias itself is unchecked - repointing it after the scope check
 	//   moves both the created directories and the commit, while every recorded identity still matches.
+	// The lexical chain is measured from the spelling that chain actually walked; see
+	// _lexicalScopeRootFor for why realpath's spelling of the root is not enough.
+	const lexicalRoot = _lexicalScopeRootFor(lexicalScopeRoot, scopeRoot, path.dirname(lexicalTarget))
 	const chains = [
 		_ancestorChainUnderScope(scopeRoot, path.dirname(target)),
-		_ancestorChainUnderScope(scopeRoot, path.dirname(lexicalTarget)),
+		_ancestorChainUnderScope(lexicalRoot, path.dirname(lexicalTarget)),
 	]
 	const pinned: DirectoryIdentity[] = []
 	const pinnedDirs = new Set<string>()
@@ -422,7 +452,12 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			_assertWithinScope(absoluteFilePath, confinedTarget, scopeRoot)
 			// Both spellings: the canonical target the scope check authorized, and the path the caller
 			// was given (the alias chain the staging and any created directories actually sit under).
-			confinedAncestors = await _confinedAncestorIdentities(scopeRoot, confinedTarget, absoluteFilePath)
+			confinedAncestors = await _confinedAncestorIdentities(
+				scopeRoot,
+				confinedTarget,
+				absoluteFilePath,
+				path.resolve(confineTo),
+			)
 		}
 
 		// If a merge callback was provided, read the current file under the lock

@@ -243,6 +243,7 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		await fs.symlink(inside, aliasDir, linkType)
 		// The merge callback is synchronous, and it runs while this write holds its locks and before
 		// anything is staged - which is exactly the window the swap has to land in.
+		let swapObserved: string | undefined
 		const swapAlias = (): void => {
 			if (process.platform === "win32") {
 				fsSync.rmdirSync(aliasDir)
@@ -250,27 +251,111 @@ describe("safeWriteJson lock key under a peer commit", () => {
 				fsSync.unlinkSync(aliasDir)
 			}
 			fsSync.symlinkSync(outside, aliasDir, linkType)
+			swapObserved = fsSync.realpathSync(aliasDir)
 		}
 
 		const missingTarget = path.join(aliasDir, "nested", "mcp.json")
 
-		await expect(
-			safeWriteJson(
-				missingTarget,
-				{ mcpServers: { swapped: { url: "http://localhost" } } },
-				{
-					confineTo: projectDir,
-					merge: (_existing, incoming) => {
-						// The alias is repointed AFTER the scope check and after the resolution under the
-						// lock, and before anything is committed.
-						swapAlias()
-						return incoming
-					},
+		const rejection = await safeWriteJson(
+			missingTarget,
+			{ mcpServers: { swapped: { url: "http://localhost" } } },
+			{
+				confineTo: projectDir,
+				merge: (_existing, incoming) => {
+					// The alias is repointed AFTER the scope check and after the resolution under the
+					// lock, and before anything is committed.
+					swapAlias()
+					return incoming
 				},
-			),
-		).rejects.toThrow(AncestorReplacedError)
+			},
+		).then(
+			() => undefined,
+			(error: unknown) => error,
+		)
+		// The swap has to land on this host, or this test says nothing about the pin: name that first.
+		expect(swapObserved, "the alias was never repointed while the write held its locks").toBe(
+			fsSync.realpathSync(outside),
+		)
+		if (rejection === undefined) {
+			throw new Error("the confined write published through the repointed alias instead of refusing it")
+		}
+		expect(rejection).toBeInstanceOf(AncestorReplacedError)
 
 		// Nothing was committed through the repointed alias, on either side of it.
+		await expect(fs.stat(path.join(inside, "nested", "mcp.json"))).rejects.toThrow()
+		await expect(fs.stat(path.join(outside, "nested", "mcp.json"))).rejects.toThrow()
+	})
+
+	// The same walk with the SCOPE ROOT named through a link. realpath canonicalizes the root, so
+	// measuring the caller's path against the canonical spelling makes the chain climb out of the
+	// scope and collapse to the root alone: the alias the write actually walked through is then
+	// unpinned even though the pin claims to cover both spellings. A Windows host produces this
+	// shape whenever the directory the scope is declared in is itself reached through a link.
+	it("refuses a confined write whose scope root is named through a link when a link below it is repointed", async () => {
+		const actualFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+		mockedRealpath.mockImplementation(actualFs.realpath)
+		mockedLstat.mockImplementation(actualFs.lstat)
+		mockedReadlink.mockImplementation(actualFs.readlink)
+
+		const projectDir = await makeDir("lockkey-rootalias-")
+		const realRoot = path.join(projectDir, "realroot")
+		const otherRoot = path.join(projectDir, "otherroot")
+		const inside = path.join(realRoot, "inside")
+		const outside = path.join(realRoot, "outside")
+		for (const dir of [realRoot, otherRoot, inside, outside]) {
+			await fs.mkdir(dir)
+		}
+		// A junction is the Windows spelling of a directory alias; POSIX uses a directory symlink.
+		const linkType = process.platform === "win32" ? "junction" : "dir"
+		// The scope root the caller names is a link, so _resolveScopeRoot answers with a DIFFERENT
+		// spelling from the one every path of this call was built from.
+		const rootAlias = path.join(projectDir, "rootalias")
+		await fs.symlink(realRoot, rootAlias, linkType)
+		// The confined target sits under a second link, below that one.
+		const aliasDir = path.join(realRoot, "aliasdir")
+		await fs.symlink(inside, aliasDir, linkType)
+
+		let swapObserved: string | undefined
+		const swapAlias = (): void => {
+			if (process.platform === "win32") {
+				fsSync.rmdirSync(aliasDir)
+			} else {
+				fsSync.unlinkSync(aliasDir)
+			}
+			fsSync.symlinkSync(outside, aliasDir, linkType)
+			// Report where the alias points now, so a passing write cannot be read as a pin that
+			// worked against a swap that never happened.
+			swapObserved = fsSync.realpathSync(aliasDir)
+		}
+
+		const missingTarget = path.join(rootAlias, "aliasdir", "nested", "mcp.json")
+
+		const rejection = await safeWriteJson(
+			missingTarget,
+			{ mcpServers: { swapped: { url: "http://localhost" } } },
+			{
+				confineTo: rootAlias,
+				merge: (_existing, incoming) => {
+					swapAlias()
+					return incoming
+				},
+			},
+		).then(
+			() => undefined,
+			(error: unknown) => error,
+		)
+
+		expect(swapObserved, "the alias was never repointed while the write held its locks").toBe(
+			fsSync.realpathSync(outside),
+		)
+		if (rejection === undefined) {
+			throw new Error(
+				"the confined write published through the link named by the scope root instead of refusing it",
+			)
+		}
+		expect(rejection).toBeInstanceOf(AncestorReplacedError)
+
+		// Nothing was committed on either side of the repointed link.
 		await expect(fs.stat(path.join(inside, "nested", "mcp.json"))).rejects.toThrow()
 		await expect(fs.stat(path.join(outside, "nested", "mcp.json"))).rejects.toThrow()
 	})
