@@ -1,6 +1,7 @@
 // npx vitest core/webview/__tests__/webviewMessageHandler.spec.ts
 
 import type { Mock } from "vitest"
+import { defaultModeSlug } from "../../../shared/modes"
 
 // Mock dependencies - must come before imports
 vi.mock("../../../api/providers/fetchers/modelCache")
@@ -118,6 +119,8 @@ const mockClineProvider = {
 		extensionPath: "/mock/extension/path",
 		globalStorageUri: { fsPath: "/mock/global/storage" },
 	},
+	// The per-view write path; deleteCustomMode routes its mode reset through it.
+	setValue: vi.fn(),
 	contextProxy: {
 		context: {
 			extensionPath: "/mock/extension/path",
@@ -1713,6 +1716,11 @@ describe("webviewMessageHandler - deleteCustomMode", () => {
 		expect(vscode.window.showInformationMessage).not.toHaveBeenCalled()
 		expect(mockClineProvider.customModesManager.deleteCustomMode).toHaveBeenCalledWith(slug)
 		expect(fs.rm).toHaveBeenCalledWith(rulesFolderPath, { recursive: true, force: true })
+		// The reset back to the default mode has to go through the provider's per-view write
+		// path. The deprecated ContextProxy helper it replaces skips the view-local buffer, so a
+		// view that pinned the deleted mode keeps it in getState() and in any task it starts.
+		expect(mockClineProvider.setValue).toHaveBeenCalledWith("mode", defaultModeSlug)
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
 	})
 
 	it("should delete a global mode and its rules folder", async () => {

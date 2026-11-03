@@ -296,6 +296,9 @@ type ProfileActivationSnapshot = {
 type ProviderManagerSnapshot = {
 	previousRecord: ProviderSettingsWithId | undefined
 	recordExisted: boolean | undefined
+	// True only when a read actually failed, so a caller can tell "absent" from
+	// "could not tell" without re-reading the store.
+	recordUnreadable: boolean
 	previousCurrentProfileName: string | undefined
 	claimedCreate: boolean
 }
@@ -2658,6 +2661,10 @@ export class ClineProvider
 
 	private async handleModeSwitchUnlocked(newMode: Mode, targetTask: Task | null | undefined): Promise<void> {
 		const task = targetTask
+		// Captured before any write so the persistence failure below can undo the task-side
+		// commits instead of leaving them pointing at the rejected mode.
+		const previousTaskMode = task?.taskMode
+		const previousHistoryMode = task ? this.getTaskHistoryItem(task.taskId)?.mode : undefined
 
 		if (task) {
 			TelemetryService.instance.captureModeSwitch(task.taskId, newMode)
@@ -2696,6 +2703,29 @@ export class ClineProvider
 		try {
 			await this.setValue("mode", newMode)
 		} catch (error) {
+			// The task-history write and the task's own mode committed before this write
+			// rejected. Roll them back too, or the view reverts to the previous mode while the
+			// task and its history item keep the rejected one and the webview shows a failed
+			// switch on top of a task that still runs the new mode.
+			if (task) {
+				const historyItem = this.getTaskHistoryItem(task.taskId)
+				if (historyItem && previousHistoryMode !== historyItem.mode) {
+					try {
+						await this.updateTaskHistory({ ...historyItem, mode: previousHistoryMode })
+					} catch (rollbackError) {
+						this.log(
+							`[handleModeSwitch] Failed to restore task history mode after persistence failure: ${
+								rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+							}`,
+						)
+					}
+				}
+				if (previousTaskMode !== undefined && task.taskMode !== previousTaskMode) {
+					// Task has no public mode setter (see the commit above); bracket access keeps
+					// the rollback off the suppression list.
+					task["_taskMode"] = previousTaskMode
+				}
+			}
 			try {
 				await this.contextProxy.setValue("mode", previousMode)
 			} catch (rollbackError) {
@@ -2938,13 +2968,20 @@ export class ClineProvider
 	private async _snapshotProviderManagerState(name: string): Promise<ProviderManagerSnapshot> {
 		let previousRecord: ProviderSettingsWithId | undefined
 		let recordExisted: boolean | undefined
+		let recordUnreadable = false
 		let claimedCreate = false
+		// Presence is tracked separately from the record: a store that cannot answer the
+		// presence question at all stays best-effort (nothing was proven to be there), while
+		// "present, but the record itself cannot be read" is the case a caller must refuse.
+		let presenceEstablished: boolean | undefined
 		try {
 			// hasConfig distinguishes a confirmed absence from a read failure; the
 			// generic wrapper getProfile throws for a missing record cannot, because
 			// the manager does not type its not-found rejections.
-			recordExisted = await this.providerSettingsManager.hasConfig(name)
-			if (recordExisted) {
+			const exists = await this.providerSettingsManager.hasConfig(name)
+			presenceEstablished = typeof exists === "boolean" ? exists : undefined
+			recordExisted = presenceEstablished
+			if (presenceEstablished) {
 				const { name: _name, ...record } = await this.providerSettingsManager.getProfile({ name })
 				previousRecord = record as ProviderSettingsWithId
 			} else {
@@ -2955,8 +2992,11 @@ export class ClineProvider
 				claimedCreate = true
 			}
 		} catch {
-			// Unreadable: the restore must not delete what it cannot see.
+			// The restore must not delete what it cannot see. When hasConfig already proved
+			// the record was there, only the record read failed, and that is the case the
+			// caller must refuse instead of overwriting.
 			recordExisted = undefined
+			recordUnreadable = presenceEstablished === true
 		}
 		let previousCurrentProfileName: string | undefined
 		try {
@@ -2964,7 +3004,7 @@ export class ClineProvider
 		} catch {
 			// Best-effort: the selection restore is skipped when unreadable.
 		}
-		return { previousRecord, recordExisted, previousCurrentProfileName, claimedCreate }
+		return { previousRecord, recordExisted, recordUnreadable, previousCurrentProfileName, claimedCreate }
 	}
 
 	/**
@@ -2978,7 +3018,13 @@ export class ClineProvider
 		} catch {
 			// Best-effort: the selection restore is skipped when unreadable.
 		}
-		return { previousRecord: undefined, recordExisted: undefined, claimedCreate: false, previousCurrentProfileName }
+		return {
+			previousRecord: undefined,
+			recordExisted: undefined,
+			recordUnreadable: false,
+			claimedCreate: false,
+			previousCurrentProfileName,
+		}
 	}
 
 	/**
@@ -3152,6 +3198,15 @@ export class ClineProvider
 		// group compensates the manager store too, not just its ContextProxy
 		// copies. The shared/per-view snapshot is taken at the same point.
 		const managerSnapshot = await this._snapshotProviderManagerState(name)
+		if (managerSnapshot.recordUnreadable) {
+			// The pre-save read could not establish whether the record existed, so neither
+			// restore branch of the compensation can decide what a landed record means. Stop
+			// before saveConfig instead of writing a replacement that a later failure would
+			// leave stored under the profile's name.
+			throw new Error(
+				`Provider profile '${name}' could not be inspected before saving; the save was not attempted`,
+			)
+		}
 		const preWriteSnapshot = this._snapshotProfileActivationState()
 		let id: string
 		try {
@@ -3211,7 +3266,7 @@ export class ClineProvider
 				// Sibling views pinned to other profiles must keep their own
 				// settings: the shared write below replaces the shared store, so
 				// pin their profile's settings into their overlays first.
-				await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(name)
+				await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(name, { requireResolvablePins: true })
 
 				try {
 					priorModeConfigId = await this.providerSettingsManager.getModeConfigId(mode)
@@ -3573,8 +3628,16 @@ export class ClineProvider
 	 */
 	private async snapshotSiblingOverlaysBeforeSharedSettingsWrite(
 		writtenProfileName: string,
-		options?: { includeSelf?: boolean },
+		options?: { includeSelf?: boolean; requireResolvablePins?: boolean },
 	): Promise<void> {
+		// requireResolvablePins is for the callers that are about to replace the shared
+		// settings: a sibling whose pinned profile cannot be read would keep reporting that
+		// pin while its tasks run the new profile's credentials, so the activation must fail
+		// before the shared write instead of proceeding without the snapshot. The deletion
+		// caller keeps tolerating unresolvable pins because there the pin is the profile being
+		// deleted and the same helper re-points such views.
+		const requireResolvablePins = options?.requireResolvablePins === true
+		const unresolvablePins: unknown[] = []
 		const affected = ClineProvider.getAllInstances().filter(
 			(instance) =>
 				(instance !== this || options?.includeSelf === true) &&
@@ -3598,17 +3661,28 @@ export class ClineProvider
 					await instance._saveViewLocalStateFromMutation({ apiConfiguration: settings as ProviderSettings })
 					await instance.postStateToWebview()
 				} catch (error) {
-					// If the pinned profile cannot be resolved, leave the overlay as is:
-					// the deletion path re-points such views, and a wrong snapshot is
-					// worse than the pre-write shared values.
-					this.log(
-						`[snapshotSiblingOverlaysBeforeSharedSettingsWrite] Unable to resolve profile '${pinName}': ${
-							error instanceof Error ? error.message : String(error)
-						}`,
-					)
+					// A pin that names a profile the store no longer has is the tolerated case in
+					// every caller: the deletion path re-points such views and there is no correct
+					// snapshot to take for a profile that is gone. Any other read failure means the
+					// sibling's settings are unknown, and unknown settings must not be guessed from
+					// the shared store the caller is about to replace - that is the case the
+					// activation callers fail on. Same discrimination as the deletion path above.
+					if (requireResolvablePins && !(error instanceof ProviderSettingsNotFoundError)) {
+						unresolvablePins.push(error)
+					} else {
+						this.log(
+							`[snapshotSiblingOverlaysBeforeSharedSettingsWrite] Unable to resolve profile '${pinName}': ${
+								error instanceof Error ? error.message : String(error)
+							}`,
+						)
+					}
 				}
 			}),
 		)
+
+		if (unresolvablePins.length > 0) {
+			throw unresolvablePins[0]
+		}
 	}
 
 	async activateProviderProfile(
@@ -3652,10 +3726,10 @@ export class ClineProvider
 			// Sibling views pinned to other profiles must keep their own settings:
 			// the shared write below replaces the shared store, so pin their
 			// profile's settings into their overlays first.
-			await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(name)
-
 			const activationSnapshot = this._snapshotProfileActivationState()
 			try {
+				await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(name, { requireResolvablePins: true })
+
 				// `allSettled` so the compensation below never races a write still in flight.
 				const activationResults = await Promise.allSettled([
 					this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig()),

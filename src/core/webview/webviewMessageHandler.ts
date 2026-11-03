@@ -2791,8 +2791,11 @@ export const webviewMessageHandler = async (
 					}
 				}
 
-				// Switch back to default mode after deletion
-				await updateGlobalState("mode", defaultModeSlug)
+				// Switch back to default mode after deletion. Route through provider.setValue so
+				// the per-view mutation path mirrors the shared write: a view that pinned the
+				// deleted mode would otherwise keep it in its own buffer (getState() and any new
+				// task created there) while the shared store says default.
+				await provider.setValue("mode", defaultModeSlug)
 				await provider.postStateToWebview()
 			}
 			break

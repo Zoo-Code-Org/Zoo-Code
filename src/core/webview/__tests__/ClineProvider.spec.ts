@@ -4795,6 +4795,39 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("refuses to save when the existing profile record cannot be read", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				// The store proves the record is there and then cannot hand it over. Neither
+				// restore branch of the compensation can tell a landed record from an absent
+				// one in that state, so the save must not start.
+				vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockRejectedValue(
+					new Error("profile record unreadable"),
+				)
+				const saveSpy = vi.spyOn(provider.providerSettingsManager, "saveConfig")
+				const deleteSpy = vi.spyOn(provider.providerSettingsManager, "deleteConfig")
+				const activateSpy = vi.spyOn(provider.providerSettingsManager, "activateProfile")
+
+				const id = await provider.upsertProviderProfile("unreadable-profile", {
+					apiProvider: providerIdentifiers.anthropic,
+				})
+
+				expect(id).toBeUndefined()
+				expect(saveSpy).not.toHaveBeenCalled()
+				expect(deleteSpy).not.toHaveBeenCalled()
+				expect(activateSpy).not.toHaveBeenCalled()
+				expect(provider.getValues().currentApiConfigName).not.toBe("unreadable-profile")
+			} finally {
+				await provider.dispose()
+			}
+		})
 		it("should sync the view-local buffer when deleting the current profile", async () => {
 			const provider = new ClineProvider(
 				mockContext,
@@ -5294,6 +5327,111 @@ describe("ClineProvider", () => {
 				// viewStates mutation goes through, so queued persistence finishes
 				// while the console spies are still installed and teardown has no
 				// pending writes.
+				await ClineProvider["persistedViewStateWriteQueue"]
+			} finally {
+				await sibling.dispose()
+				await provider.dispose()
+			}
+		})
+
+		it("refuses the shared settings write when a sibling's pinned profile cannot be read", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				const targetProfile: ProviderSettingsEntry = {
+					name: "target-profile",
+					id: "target-id",
+					apiProvider: providerIdentifiers.openrouter,
+				}
+				await provider.contextProxy.setValue("listApiConfigMeta", [targetProfile])
+				await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+				// The sibling is pinned to a profile the activation does not touch.
+				sibling["viewLocalState"].currentApiConfigName = "keeper-profile"
+				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue(targetProfile)
+				vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([targetProfile])
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (args) => {
+					if ("name" in args && args.name === "keeper-profile") {
+						throw new Error("pinned profile unreadable")
+					}
+					return { name: "target-profile", id: "target-id", apiProvider: providerIdentifiers.openrouter }
+				})
+				const sharedSettingsWrite = vi.spyOn(provider.contextProxy, "setProviderSettings")
+
+				await expect(provider.activateProviderProfile({ name: "target-profile" })).rejects.toThrow(
+					"pinned profile unreadable",
+				)
+
+				// Proceeding would replace the shared store while the sibling still names its
+				// own profile in getState(), so its tasks would run the activated profile's
+				// credentials under the wrong name. Only the compensation may have written the
+				// prior settings back.
+				expect(sharedSettingsWrite).not.toHaveBeenCalledWith(
+					expect.objectContaining({ apiProvider: providerIdentifiers.openrouter }),
+				)
+				expect(sibling["viewLocalState"].apiConfiguration).toBeUndefined()
+				expect(provider.getValues().currentApiConfigName).toBe("keeper-profile")
+				await ClineProvider["persistedViewStateWriteQueue"]
+			} finally {
+				await sibling.dispose()
+				await provider.dispose()
+			}
+		})
+
+		it("keeps tolerating a sibling pin that names an already deleted profile", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				const targetProfile: ProviderSettingsEntry = {
+					name: "target-profile",
+					id: "target-id",
+					apiProvider: providerIdentifiers.openrouter,
+				}
+				await provider.contextProxy.setValue("listApiConfigMeta", [targetProfile])
+				await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+				sibling["viewLocalState"].currentApiConfigName = "deleted-profile"
+				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue(targetProfile)
+				vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([targetProfile])
+				vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(false)
+				const getProfileSpy = vi
+					.spyOn(provider.providerSettingsManager, "getProfile")
+					.mockImplementation(async () => {
+						throw new ProviderSettingsNotFoundError("Config with name 'deleted-profile' not found")
+					})
+
+				await provider.activateProviderProfile({ name: "target-profile" })
+
+				// A gone profile has no correct snapshot; failing here would let one stale view
+				// block every later activation in the host.
+				expect(getProfileSpy).toHaveBeenCalledWith({ name: "deleted-profile" })
+				expect(provider.getValues().currentApiConfigName).toBe("target-profile")
 				await ClineProvider["persistedViewStateWriteQueue"]
 			} finally {
 				await sibling.dispose()
@@ -8540,6 +8678,54 @@ describe("ClineProvider", () => {
 			// Verify state was posted to webview
 			expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
 		})
+	})
+
+	it("restores the task mode and its history entry when the shared mode write fails", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		class TaskDouble {
+			// Mirrors Task: taskMode is a getter over the private field the provider writes,
+			// which has no public setter.
+			_taskMode = "code"
+			taskId = "mode-fail-task"
+			emit = vi.fn()
+			get taskMode() {
+				return this._taskMode
+			}
+		}
+		const task = new TaskDouble()
+
+		provider.taskHistoryStore["cache"].set(task.taskId, {
+			id: task.taskId,
+			task: "mode switch",
+			ts: Date.now(),
+			number: 1,
+			mode: "code",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		})
+		const updateHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockImplementation(async (item) => {
+			provider.taskHistoryStore["cache"].set(item.id, item)
+			return []
+		})
+		vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+		vi.spyOn(provider, "setValue").mockRejectedValue(new Error("mode write unavailable"))
+
+		// The double mirrors only the two Task members this path touches, so it cannot
+		// satisfy the full structural type.
+		await expect(
+			provider.handleModeSwitch("architect", task as unknown as Parameters<typeof provider.handleModeSwitch>[1]),
+		).rejects.toThrow("mode write unavailable")
+
+		// The history write and the task's own mode committed before the shared write
+		// rejected. Leaving them at the rejected mode shows a failed switch on top of a
+		// task that still runs the new mode.
+		expect(task.taskMode).toBe("code")
+		expect(provider.taskHistoryStore["cache"].get(task.taskId)).toMatchObject({ mode: "code" })
+		expect(updateHistorySpy).toHaveBeenCalledTimes(2)
+		expect(updateHistorySpy.mock.calls[1]?.[0]).toMatchObject({ id: task.taskId, mode: "code" })
+		await provider.dispose()
 	})
 
 	describe("createTaskWithHistoryItem mode validation", () => {
