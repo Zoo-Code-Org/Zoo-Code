@@ -62,7 +62,7 @@ Prefer the narrowest test layer that proves the behavior. This follows standard 
 
 The `mutation-diff` job publishes the changed-code mutation report in two places:
 
-- The job summary (`mutation-diff` → Summary tab) lists every mutated file with its `Survived` and `NoCoverage` counts, worst file first. Use the `changed-code-mutation-report` artifact to inspect each surviving or uncovered mutant's line, mutator, and replacement.
+- The job summary (`mutation-diff` → Summary tab) lists every file with counted mutants (a file whose mutants are all `Ignored` or `CompileError` gets no row), worst file first, capped at the 40 worst rows with the rest counted in a pointer to the artifact. Use the `changed-code-mutation-report` artifact to inspect each surviving or uncovered mutant's line, mutator, and replacement.
 - The report is uploaded as the `changed-code-mutation-report` artifact (`reports/mutation/<package>/mutation.json` and `mutation.html`, retained 7 days) for a browsable view.
 
 Close a listed mutant by adding or strengthening a focused test that fails under the mutation. If a suppression is genuinely unavoidable, follow the existing `Stryker disable` reason rule under Test Placement Guidelines above.

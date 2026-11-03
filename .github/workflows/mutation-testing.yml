@@ -57,8 +57,9 @@ jobs:
             - name: Summarize per-file mutation results
               if: always() && github.event_name == 'pull_request'
               # The summary logic lives in scripts/mutation-summary.mjs so it is unit-tested;
-              # the script validates the Stryker report shape, rejects unsafe path keys and
-              # escapes Markdown before writing the table.
+              # the script reads counts from the Stryker JSON report (StrykerJS has no Markdown
+              # reporter), rejects report paths that are not repo-relative source names, and
+              # renders at most the 40 worst rows so the step summary stays under its size cap.
               run: node scripts/mutation-summary.mjs
 
             - name: Upload mutation reports

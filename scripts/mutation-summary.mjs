@@ -6,55 +6,38 @@ import { pathToFileURL } from "node:url"
  * Build the per-file mutation summary that the mutation-testing workflow appends to the job
  * summary.
  *
- * The Stryker JSON reports are untrusted input for this script: report.files keys are file
- * paths and they are rendered into a Markdown table. Every path is therefore validated
- * (normalised repo-relative form, safe characters) and Markdown-escaped before insertion, and
- * the report shape is checked rather than assumed.
+ * StrykerJS has no Markdown reporter (its reporters are progress, dots, clear-text, dashboard
+ * and json, plus html as a plugin), so the counts are read from the mutation.json report this
+ * job already writes and the table is rendered here.
+ *
+ * Report contents are data, not text to display: a string reaches the summary only if it
+ * passed REPORT_NAME or SAFE_RELATIVE_PATH, so no Markdown table or link character can be
+ * rendered from a report, and a path that resolves outside the working directory is rejected
+ * rather than shown.
  */
 
 const REPORT_DIRECTORY = "reports/mutation"
 const VALID_STATUSES = new Set(["Killed", "Survived", "NoCoverage", "Timeout"])
-// Repo-relative paths only: letters, digits and the separators/characters a source path
-// normally uses. Anything else (backticks, pipes, control characters, drive letters, ...)
-// is rejected instead of rendered into the summary.
+// Repo-relative source paths only: letters, digits and the separators a source path uses.
+// A key carrying anything else (pipe, backtick, brackets, control characters, drive letters,
+// leading ".." component) is rejected instead of rendered.
 const SAFE_RELATIVE_PATH = /^[A-Za-z0-9._@+/-]+$/
-const BACKSLASH = String.fromCharCode(92)
-const BACKTICK = String.fromCharCode(96)
+// Package directory names in reports/mutation/<package> are simple slugs.
+const REPORT_NAME = /^[A-Za-z0-9._@+-]+$/
+// GitHub caps a step's job summary at 1 MiB and fails the summary upload above it, so the
+// table shows the worst rows and counts the rest instead of risking the whole summary.
+const MAX_SUMMARY_ROWS = 40
+const BACKTICK = "`"
 
-/** Escape the Markdown table metacharacters and line breaks a file path could carry. */
-export function escapeMarkdownCell(value) {
-	return String(value)
-		.split(BACKSLASH)
-		.join(BACKSLASH + BACKSLASH)
-		.split("|")
-		.join(BACKSLASH + "|")
-		.split(BACKTICK)
-		.join(BACKSLASH + BACKTICK)
-		.split("[")
-		.join(BACKSLASH + "[")
-		.split("]")
-		.join(BACKSLASH + "]")
-		.split("(")
-		.join(BACKSLASH + "(")
-		.split(")")
-		.join(BACKSLASH + ")")
-		.split("\r")
-		.join(BACKSLASH + "r")
-		.split("\n")
-		.join(BACKSLASH + "n")
-}
-
-/**
- * Render a report directory name for diagnostics. Package directory names are simple slugs; a
- * name that does not match that shape is not rendered verbatim.
- */
+/** Return a report directory name for a diagnostic, or a fixed label when it is not slug-shaped. */
 function renderReportName(name) {
-	return /^[A-Za-z0-9._@+-]+$/.test(name) ? name : "report"
+	return REPORT_NAME.test(name) ? name : "report"
 }
 
 /**
  * Return the normalised repo-relative path for one report entry, or undefined when the entry
- * cannot be trusted for display.
+ * cannot be shown: non-string, empty, absolute, escaping the working directory through a ".."
+ * component, or containing a character a source path would not have.
  */
 export function normalizeReportPath(filePath, projectRoot, cwd) {
 	if (typeof filePath !== "string" || filePath.length === 0) return undefined
@@ -62,18 +45,25 @@ export function normalizeReportPath(filePath, projectRoot, cwd) {
 	if (filePath.includes("\u0000")) return undefined
 	const absolute = path.resolve(projectRoot ?? cwd, filePath)
 	const relative = path.relative(cwd, absolute).replaceAll("\\", "/")
-	if (relative.length === 0 || path.isAbsolute(relative) || relative.startsWith("..")) return undefined
+	// A leading ".." component only: a file legitimately named "..foo.ts" stays a file.
+	if (relative.length === 0 || relative === ".." || relative.startsWith("../") || path.isAbsolute(relative)) {
+		return undefined
+	}
 	if (!SAFE_RELATIVE_PATH.test(relative)) return undefined
 	return relative
 }
 
 /**
- * Collect per-file mutation counts from every report under reportRoot.
+ * Count per-file mutants from every reports/mutation/<package>/mutation.json under reportRoot.
  *
- * Returns the Markdown lines for the summary (including the header when any row exists) and
- * the list of unreadable reports that were skipped.
+ * Returns the Markdown lines for the summary (header included when any row is rendered), the
+ * sorted rows, and the fixed diagnostics of reports that were skipped.
  */
-export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = process.cwd() } = {}) {
+export function summarizeMutationReports({
+	reportRoot = REPORT_DIRECTORY,
+	cwd = process.cwd(),
+	maxRows = MAX_SUMMARY_ROWS,
+} = {}) {
 	const rows = []
 	const unreadable = []
 	let directories = []
@@ -81,7 +71,7 @@ export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = 
 	try {
 		directories = fs.existsSync(reportRoot) ? fs.readdirSync(reportRoot, { withFileTypes: true }) : []
 	} catch {
-		// Raw filesystem error text is untrusted input for the summary; keep a fixed diagnostic.
+		// Raw filesystem error text is not summary content; keep a fixed diagnostic.
 		unreadable.push("reports/mutation: directory could not be read")
 	}
 
@@ -119,6 +109,7 @@ export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = 
 				if (mutant.status === "NoCoverage") counts.noCoverage += 1
 				if (mutant.status === "Timeout") counts.timeout += 1
 			}
+			// Files with no counted mutants (Ignored, CompileError, net-only) have no row.
 			if (counts.mutants === 0) continue
 			const relative = normalizeReportPath(filePath, report.projectRoot, cwd)
 			if (relative === undefined) {
@@ -152,14 +143,14 @@ export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = 
 			"| File | Mutants | Killed | Survived | NoCoverage | Score |",
 			"| --- | ---: | ---: | ---: | ---: | ---: |",
 		)
-		for (const row of rows) {
+		for (const row of rows.slice(0, maxRows)) {
 			// Stryker counts a Timeout mutant as detected, so the mutation score numerator is
 			// Killed + Timeout (the table's Killed column stays Killed-only).
 			const score = (((row.killed + row.timeout) / row.mutants) * 100).toFixed(1)
 			lines.push(
 				"| " +
 					BACKTICK +
-					escapeMarkdownCell(row.file) +
+					row.file +
 					BACKTICK +
 					" | " +
 					row.mutants +
@@ -174,55 +165,29 @@ export function summarizeMutationReports({ reportRoot = REPORT_DIRECTORY, cwd = 
 					"% |",
 			)
 		}
+		if (rows.length > maxRows) {
+			lines.push(
+				"",
+				"and " +
+					(rows.length - maxRows) +
+					" more file" +
+					(rows.length - maxRows === 1 ? "" : "s") +
+					"; see the " +
+					BACKTICK +
+					"changed-code-mutation-report" +
+					BACKTICK +
+					" artifact.",
+			)
+		}
 		lines.push(
 			"",
 			"Close a surviving or uncovered mutant with a focused test that fails under the mutation; the artifact does not need to be downloaded to read this table.",
 		)
 	}
 
-	if (unreadable.length > 0) lines.push("", "Unreadable report(s): " + unreadable.map(escapeMarkdownCell).join("; "))
+	if (unreadable.length > 0) lines.push("", "Unreadable report(s): " + unreadable.join("; "))
 
 	return { lines, rows, unreadable }
-}
-
-/**
- * Append through a crash-safe path: read the existing summary, write the combined content to a
- * temporary file in the same directory, then rename it over the target. A partial append would
- * leave the job summary truncated; the rename is atomic within one filesystem.
- */
-function appendSummaryAtomically(outputFile, summary) {
-	const existing = fs.existsSync(outputFile) ? fs.readFileSync(outputFile, "utf8") : ""
-	const directory = path.dirname(outputFile)
-	const baseName = path.basename(outputFile)
-	const temporary = path.join(directory, "." + baseName + "." + process.pid + "." + Date.now() + ".tmp")
-	let renamed = false
-	try {
-		fs.writeFileSync(temporary, existing + summary)
-		fs.renameSync(temporary, outputFile)
-		renamed = true
-	} finally {
-		if (!renamed) {
-			try {
-				fs.unlinkSync(temporary)
-			} catch {
-				// Best effort: the caller is already failing the write.
-			}
-		}
-	}
-	// A cancelled earlier run can leave its temp file beside the summary; clean those up.
-	try {
-		for (const entry of fs.readdirSync(directory)) {
-			if (entry.startsWith("." + baseName + ".") && entry.endsWith(".tmp")) {
-				try {
-					fs.unlinkSync(path.join(directory, entry))
-				} catch {
-					// Another writer may own it; never fail the summary for the sweep.
-				}
-			}
-		}
-	} catch {
-		// The directory sweep is best effort.
-	}
 }
 
 /** Entry point used by the workflow: append the summary to GITHUB_STEP_SUMMARY (or stdout). */
@@ -234,7 +199,10 @@ export function writeMutationSummary({
 	const { lines } = summarizeMutationReports({ reportRoot, cwd })
 	const summary = lines.join("\n") + "\n"
 	try {
-		if (outputFile) appendSummaryAtomically(outputFile, summary)
+		// The runner gives each step its own summary file and reads it after the step, so a
+		// plain append is the whole contract here - same shape as appendSummary() in
+		// scripts/stryker-diff.mjs.
+		if (outputFile) fs.appendFileSync(outputFile, summary)
 		else process.stdout.write(summary)
 	} catch (error) {
 		console.log(

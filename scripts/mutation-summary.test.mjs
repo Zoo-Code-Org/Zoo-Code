@@ -1,17 +1,15 @@
 import assert from "node:assert/strict"
+import { execFileSync } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { test } from "node:test"
+import { fileURLToPath } from "node:url"
 
-import {
-	escapeMarkdownCell,
-	normalizeReportPath,
-	summarizeMutationReports,
-	writeMutationSummary,
-} from "./mutation-summary.mjs"
+import { normalizeReportPath, summarizeMutationReports, writeMutationSummary } from "./mutation-summary.mjs"
 
-const BACKTICK = String.fromCharCode(96)
+const SCRIPT_PATH = fileURLToPath(new URL("./mutation-summary.mjs", import.meta.url))
+const BACKTICK = "`"
 
 function makeRoot(t) {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "mutation-summary-"))
@@ -32,23 +30,23 @@ function mutants(...statuses) {
 test("counts valid statuses including Timeout and skips unknown ones", (t) => {
 	const root = makeRoot(t)
 	writeReport(root, "pkg", {
-		files: { "src/a.ts": { mutants: mutants("Killed", "Survived", "NoCoverage", "Timeout", "Exploded") } },
+		files: {
+			"src/a.ts": { mutants: mutants("Killed", "Survived", "Survived", "NoCoverage", "Timeout", "Exploded") },
+		},
 	})
 	const { lines: summaryLines, rows } = summarizeMutationReports({ reportRoot: root, cwd: root })
 	assert.equal(rows.length, 1)
-	assert.deepEqual(
-		{
-			mutants: rows[0].mutants,
-			killed: rows[0].killed,
-			survived: rows[0].survived,
-			noCoverage: rows[0].noCoverage,
-		},
-		{ mutants: 4, killed: 1, survived: 1, noCoverage: 1 },
-	)
-	const text = summaryLines.join("\n")
-	assert.match(text, /src\/a\.ts/)
-	// Stryker counts the Timeout mutant as detected: (1 killed + 1 timeout) / 4 mutants = 50%.
-	assert.match(text, /50\.0%/)
+	assert.deepEqual(rows[0], {
+		file: "src/a.ts",
+		mutants: 5,
+		killed: 1,
+		survived: 2,
+		noCoverage: 1,
+		timeout: 1,
+	})
+	// The whole row, with distinct Survived and NoCoverage counts, so a swapped column pair
+	// cannot pass: (1 killed + 1 timeout) / 5 mutants = 40.0%.
+	assert.ok(summaryLines.join("\n").includes("| " + BACKTICK + "src/a.ts" + BACKTICK + " | 5 | 1 | 2 | 1 | 40.0% |"))
 })
 
 test("sorts by Survived + NoCoverage, worst first, then by path", (t) => {
@@ -65,6 +63,27 @@ test("sorts by Survived + NoCoverage, worst first, then by path", (t) => {
 	assert.deepEqual(
 		rows.map((row) => row.file),
 		["src/a.ts", "src/b.ts", "src/d.ts", "src/c.ts"],
+	)
+})
+
+test("renders at most maxRows rows and counts the rest toward the artifact", (t) => {
+	const root = makeRoot(t)
+	const files = {}
+	for (let index = 0; index < 45; index += 1) {
+		const name = "src/" + String(index).padStart(2, "0") + ".ts"
+		files[name] = { mutants: mutants("Killed", "Survived") }
+	}
+	writeReport(root, "pkg", { files })
+	const { lines: summaryLines, rows } = summarizeMutationReports({ reportRoot: root, cwd: root, maxRows: 3 })
+	assert.equal(rows.length, 45)
+	const text = summaryLines.join("\n")
+	const renderedRows = text.split("\n").filter((line) => line.startsWith("| ") && !line.startsWith("| ---"))
+	// Header row plus the three worst files only.
+	assert.equal(renderedRows.length, 4)
+	assert.ok(
+		text.includes(
+			"and 42 more files; see the " + BACKTICK + "changed-code-mutation-report" + BACKTICK + " artifact.",
+		),
 	)
 })
 
@@ -99,28 +118,43 @@ test("rejects reports whose files map is missing or not an object", (t) => {
 	assert.equal(unreadable.filter((entry) => /no files map/.test(entry)).length, 2)
 })
 
-test("rejects unsafe report paths instead of rendering them", (t) => {
+test("rejects report paths that could break the table or escape the repo", (t) => {
 	const root = makeRoot(t)
-	writeReport(root, "pkg", {
-		files: {
-			"src/ok.ts": { mutants: mutants("Killed") },
-			"injected|path": { mutants: mutants("Killed") },
-			"../outside.ts": { mutants: mutants("Killed") },
-		},
-	})
+	const files = {
+		"src/ok.ts": { mutants: mutants("Killed") },
+		// Characters that would break out of a Markdown table cell or link.
+		"injected|path": { mutants: mutants("Killed") },
+		"[link](path)": { mutants: mutants("Killed") },
+		"with space.ts": { mutants: mutants("Killed") },
+		// Paths that leave the working directory, in either platform separator.
+		"../outside.ts": { mutants: mutants("Killed") },
+		"..\\outside.ts": { mutants: mutants("Killed") },
+		// A leading dot-dot is a file name, not a parent-directory hop.
+		"..weird.ts": { mutants: mutants("Killed") },
+		"..foo.ts": { mutants: mutants("Killed") },
+	}
+	files["injected" + BACKTICK + "path"] = { mutants: mutants("Killed") }
+	files["C:/abs/path.ts"] = { mutants: mutants("Killed") }
+	writeReport(root, "pkg", { files })
 	const { rows, unreadable } = summarizeMutationReports({ reportRoot: root, cwd: root })
-	assert.deepEqual(
-		rows.map((row) => row.file),
-		["src/ok.ts"],
-	)
-	assert.equal(unreadable.filter((entry) => /rejected unsafe report path/.test(entry)).length, 2)
+	assert.deepEqual(rows.map((row) => row.file).sort(), ["..foo.ts", "..weird.ts", "src/ok.ts"])
+	// pipe, bracket/link, space, both outside paths, backtick key and the absolute key.
+	assert.equal(unreadable.filter((entry) => /rejected unsafe report path/.test(entry)).length, 7)
 })
 
-test("escapes Markdown metacharacters in rendered cells", (t) => {
-	assert.equal(escapeMarkdownCell("a|b"), "a\\|b")
-	assert.equal(escapeMarkdownCell("a" + BACKTICK + "b"), "a\\" + BACKTICK + "b")
-	assert.equal(escapeMarkdownCell("[x](y)"), "\\[x\\]\\(y\\)")
-	assert.equal(escapeMarkdownCell("a\r\nb"), "a\\r\\nb")
+test("normalizes paths against the report projectRoot, including backslash separators", (t) => {
+	const root = makeRoot(t)
+	const projectRoot = path.join(root, "pkg")
+	assert.equal(normalizeReportPath(path.join(projectRoot, "src", "x.ts"), projectRoot, root), "pkg/src/x.ts")
+	assert.equal(normalizeReportPath("src/x.ts", projectRoot, root), "pkg/src/x.ts")
+	// Stryker can emit platform separators; they normalize to one repo-relative path.
+	assert.equal(normalizeReportPath("src\\sub\\x.ts", projectRoot, root), "pkg/src/sub/x.ts")
+	// Two levels up leaves the working directory and is rejected; one level up resolves to a
+	// path that is still inside it, so it is a repo path rather than an escape.
+	assert.equal(normalizeReportPath("../../escape.ts", projectRoot, root), undefined)
+	assert.equal(normalizeReportPath("../sibling.ts", projectRoot, root), "sibling.ts")
+	assert.equal(normalizeReportPath("..\\..\\escape.ts", projectRoot, root), undefined)
+	assert.equal(normalizeReportPath("..", projectRoot, root), undefined)
 })
 
 test("rejects a non-string projectRoot instead of resolving against it", (t) => {
@@ -136,15 +170,7 @@ test("rejects a non-string projectRoot instead of resolving against it", (t) => 
 	assert.equal(unreadable.filter((entry) => /rejected unsafe report path/.test(entry)).length, 1)
 })
 
-test("normalizes a project-root-relative report path against the working directory", (t) => {
-	const root = makeRoot(t)
-	const projectRoot = path.join(root, "pkg")
-	assert.equal(normalizeReportPath(path.join(projectRoot, "src", "x.ts"), projectRoot, root), "pkg/src/x.ts")
-	assert.equal(normalizeReportPath("src/x.ts", projectRoot, root), "pkg/src/x.ts")
-	assert.equal(normalizeReportPath("../../escape.ts", projectRoot, root), undefined)
-})
-
-test("writeMutationSummary appends to the configured file atomically", (t) => {
+test("writeMutationSummary appends to the configured file", (t) => {
 	const root = makeRoot(t)
 	const reportRoot = path.join(root, "reports", "mutation")
 	writeReport(reportRoot, "pkg", { files: { "src/a.ts": { mutants: mutants("Killed") } } })
@@ -154,14 +180,9 @@ test("writeMutationSummary appends to the configured file atomically", (t) => {
 	const summary = writeMutationSummary({ reportRoot, cwd: root, outputFile })
 
 	const content = fs.readFileSync(outputFile, "utf8")
-	assert.match(content, /existing summary/)
-	assert.match(content, /Per-file mutation results/)
+	assert.ok(content.startsWith("existing summary\n"))
 	assert.ok(content.endsWith(summary))
-	// The atomic append leaves no temporary sibling behind.
-	assert.deepEqual(
-		fs.readdirSync(root).filter((entry) => entry.includes(".tmp")),
-		[],
-	)
+	assert.match(content, /Per-file mutation results/)
 })
 
 test("writeMutationSummary writes to stdout when no output file is configured", (t) => {
@@ -197,64 +218,48 @@ test("writeMutationSummary warns instead of throwing when the output cannot be w
 		console.log = originalLog
 	})
 
-	// The directory does not exist, so the atomic write must fail and be reported.
+	// The directory does not exist, so the append fails and has to be reported.
 	assert.doesNotThrow(() =>
 		writeMutationSummary({ reportRoot, cwd: root, outputFile: path.join(root, "missing", "summary.md") }),
 	)
 	assert.match(logs.join("\n"), /Could not write the per-file mutation summary/)
 })
 
-test("writeMutationSummary removes a stale summary temp sibling", (t) => {
+test("running the script as a step writes GITHUB_STEP_SUMMARY", (t) => {
 	const root = makeRoot(t)
-	const reportRoot = path.join(root, "reports", "mutation")
-	writeReport(reportRoot, "pkg", { files: { "src/a.ts": { mutants: mutants("Killed") } } })
+	writeReport(path.join(root, "reports", "mutation"), "pkg", {
+		files: { "src/a.ts": { mutants: mutants("Killed", "Survived") } },
+	})
 	const outputFile = path.join(root, "summary.md")
-	fs.writeFileSync(outputFile, "existing summary\n", "utf8")
-	const stale = path.join(root, ".summary.md.other.123.tmp")
-	fs.writeFileSync(stale, "stale", "utf8")
+	fs.writeFileSync(outputFile, "### Gate summary\n", "utf8")
 
-	writeMutationSummary({ reportRoot, cwd: root, outputFile })
-
-	assert.equal(fs.existsSync(stale), false)
-	assert.deepEqual(
-		fs.readdirSync(root).filter((entry) => entry.includes(".tmp")),
-		[],
-	)
-})
-
-test("writeMutationSummary cleans its temp file when the rename fails", (t) => {
-	const root = makeRoot(t)
-	const reportRoot = path.join(root, "reports", "mutation")
-	writeReport(reportRoot, "pkg", { files: { "src/a.ts": { mutants: mutants("Killed") } } })
-	// A regular existing file is the target, so the initial read succeeds and the write really
-	// reaches the rename step; the rename itself then fails.
-	const outputFile = path.join(root, "summary.md")
-	fs.writeFileSync(outputFile, "existing summary\n", "utf8")
-	const logs = []
-	const originalLog = console.log
-	const originalRename = fs.renameSync
-	let renameAttempts = 0
-	console.log = (message) => {
-		logs.push(String(message))
-	}
-	fs.renameSync = () => {
-		renameAttempts += 1
-		throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" })
-	}
-	t.after(() => {
-		console.log = originalLog
-		fs.renameSync = originalRename
+	const stdout = execFileSync(process.execPath, [SCRIPT_PATH], {
+		cwd: root,
+		env: { ...process.env, GITHUB_STEP_SUMMARY: outputFile },
+		encoding: "utf8",
 	})
 
-	assert.doesNotThrow(() => writeMutationSummary({ reportRoot, cwd: root, outputFile }))
+	const content = fs.readFileSync(outputFile, "utf8")
+	assert.match(content, /Per-file mutation results/)
+	assert.match(content, /\| `src\/a\.ts` \| 2 \| 1 \| 1 \| 0 \| 50\.0% \|/)
+	// The summary is the deliverable; the step must not duplicate it on stdout.
+	assert.equal(stdout.trim(), "")
+})
 
-	// The write got past the read and the temp write, and the temp file was cleaned up.
-	assert.equal(renameAttempts, 1)
-	assert.match(logs.join("\n"), /Could not write the per-file mutation summary: EIO/)
-	assert.deepEqual(
-		fs.readdirSync(root).filter((entry) => entry.includes(".tmp")),
-		[],
-	)
-	// The failed rename left the existing summary untouched.
-	assert.equal(fs.readFileSync(outputFile, "utf8"), "existing summary\n")
+test("running the script with an unwritable GITHUB_STEP_SUMMARY still exits 0", (t) => {
+	const root = makeRoot(t)
+	writeReport(path.join(root, "reports", "mutation"), "pkg", {
+		files: { "src/a.ts": { mutants: mutants("Killed") } },
+	})
+	const unwritable = path.join(root, "missing-dir", "summary.md")
+
+	// execFileSync throws when the child exits non-zero, so a throw here is the failure.
+	const stdout = execFileSync(process.execPath, [SCRIPT_PATH], {
+		cwd: root,
+		env: { ...process.env, GITHUB_STEP_SUMMARY: unwritable },
+		encoding: "utf8",
+	})
+
+	assert.match(stdout, /::warning title=Mutation test advisory::Could not write the per-file mutation summary/)
+	assert.equal(fs.existsSync(unwritable), false)
 })
