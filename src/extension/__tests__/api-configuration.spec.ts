@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
 import type * as vscode from "vscode"
 
+import type { RooCodeSettings } from "@roo-code/types"
+
 import { API } from "../api"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
 import { makeClineProviderFactory } from "../../test-utils/provider"
