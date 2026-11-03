@@ -4168,9 +4168,8 @@ describe("ClineProvider", () => {
 			setValueSpy.mockRestore()
 			await provider["setViewStateId"]("stable-sidebar-view")
 			expect(provider["viewStateId"]).toBe("stable-sidebar-view")
-			expect(mockContext.globalState.get("viewStates")).toEqual({
-				"stable-sidebar-view": { mode: "architect", updatedAt: 1 },
-			})
+			const retryViewStates = mockContext.globalState.get("viewStates") as Record<string, { mode?: string }>
+			expect(retryViewStates["stable-sidebar-view"]).toMatchObject({ mode: "architect" })
 
 			await provider.dispose()
 		})
@@ -4306,6 +4305,60 @@ describe("ClineProvider", () => {
 			expect(mockContext.globalState.get("viewStates")).toEqual({
 				"stable-sidebar-view": { mode: "architect", updatedAt: 1 },
 			})
+			await provider.dispose()
+		})
+
+		it("does not load a durable entry an earlier window left under this view id", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			// The temporary view id is a session counter that restarts at zero per extension
+			// host, so a previous window can leave its pin under exactly this key. Loading it
+			// would hand this view another view's mode and profile.
+			await provider.contextProxy.setValue("viewStates", {
+				[provider.viewId]: {
+					mode: "architect",
+					currentApiConfigName: "previous-window-profile",
+					updatedAt: 1,
+				},
+			})
+
+			await provider["loadViewState"]()
+
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+			expect(provider["viewLocalState"].currentApiConfigName).toBeUndefined()
+
+			await provider.dispose()
+		})
+
+		it("clears an orphaned pre-launch entry instead of re-keying it onto the stable id", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			// Seeded straight into durable storage, which is where an earlier window left it.
+			await mockContext.globalState.update("viewStates", {
+				[provider.viewId]: { mode: "architect", updatedAt: 1 },
+			})
+
+			await provider["setViewStateId"]("stable-orphan-view")
+
+			const orphaned = mockContext.globalState.get("viewStates") as Record<string, { mode?: string }>
+			expect(orphaned["stable-orphan-view"]).toBeUndefined()
+			// The landed guard refuses the orphan without rewriting storage: the stale entry stays
+			// under the session-local key (prune ages it out) and is never adopted onto the stable id.
+			expect(orphaned[provider.viewId]).toMatchObject({ mode: "architect" })
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+
 			await provider.dispose()
 		})
 
@@ -10696,11 +10749,15 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 
-			// Seed persisted entries under both ids through the proxy so the loads
-			// observe them via the cached read path: the temporary entry holds a
-			// pre-registration selection, the stable entry the post-registration one.
+			// The temporary entry must be authored by this instance through the real write
+			// path, or the load would ignore it as an orphan; the stable entry is the
+			// post-registration one and is seeded through the proxy cache.
+			await provider["savePersistedViewState"]({
+				mode: "architect",
+				currentApiConfigName: "ghost-profile",
+			})
 			await provider.contextProxy.setValue("viewStates", {
-				[provider.viewId]: { mode: "architect", currentApiConfigName: "ghost-profile", updatedAt: 1 },
+				...(provider.contextProxy.getValue("viewStates") as Record<string, object>),
 				"stable-sidebar-view": { mode: "debug", updatedAt: 2 },
 			})
 

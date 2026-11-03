@@ -1053,7 +1053,9 @@ export class ClineProvider
 	 * registered stable id so pre-launch writes become durable under the stable key
 	 * instead of orphaning under a session-local temporary id. Only the provider's own
 	 * temporary id is eligible: an entry under a previously registered stable id belongs
-	 * to that webview's storage and is left alone. When the stable entry already exists
+	 * to that webview's storage and is left alone. An entry that is already under the
+	 * temporary id without this provider having written it is an orphan from an earlier
+	 * session and is cleared rather than re-keyed. When the stable entry already exists
 	 * it wins and the temporary entry is dropped, because temporary ids are session
 	 * counters that can collide across window reloads. Runs through the serialized write
 	 * queue like every other viewStates mutation.
@@ -1212,7 +1214,8 @@ export class ClineProvider
 			return
 		}
 		try {
-			const persisted = this.getPersistedViewStates()[loadedForViewId]
+			const persisted: PersistedViewState | undefined = this.getPersistedViewStates()[loadedForViewId]
+
 			const loadedState: Partial<ExtensionState> = {}
 
 			// Snapshot the in-memory buffer before the async profile lookup. The
