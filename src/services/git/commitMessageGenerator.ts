@@ -65,6 +65,7 @@ Guidelines:
 const SENSITIVE_PATTERNS = [
 	/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
 	/(?:api[_-]?key|auth[_-]?token|bearer|secret|password)[\s]*[=:]\s*['"]?([a-zA-Z0-9_\-.]{8,})['"]?/gi,
+	/\bBearer\s+([a-zA-Z0-9_\-.~+/]{8,}=*)/gi,
 ]
 
 /**
@@ -106,15 +107,13 @@ export function resolveGitRepository(git: GitAPI, context?: unknown): GitReposit
 	}
 
 	if (context && typeof context === "object") {
-		// Bare vscode.Uri or URI-like object passed from scm/inputBox menu
+		// Bare vscode.Uri or URI-like object passed from scm/inputBox menu.
+		// Return undefined (not first repo) when it doesn't match any repository.
 		if ("scheme" in context && "fsPath" in context) {
 			const uri = context as vscode.Uri
-			const found = git.repositories.find(
+			return git.repositories.find(
 				(r) => r.rootUri.toString() === uri.toString() || r.rootUri.fsPath === uri.fsPath,
 			)
-			if (found) {
-				return found
-			}
 		}
 
 		const candidate = context as Partial<GitRepository>
@@ -123,20 +122,16 @@ export function resolveGitRepository(git: GitAPI, context?: unknown): GitReposit
 		}
 
 		const sc = context as { rootUri?: vscode.Uri; inputBox?: unknown }
+		// When an explicit SCM rootUri or inputBox is provided but matches no repository,
+		// return undefined rather than silently falling through to a different repository.
 		if (sc.rootUri) {
-			const found = git.repositories.find(
+			return git.repositories.find(
 				(r) => r.rootUri.toString() === sc.rootUri?.toString() || r.rootUri.fsPath === sc.rootUri?.fsPath,
 			)
-			if (found) {
-				return found
-			}
 		}
 
 		if (sc.inputBox) {
-			const found = git.repositories.find((r) => r.inputBox === sc.inputBox)
-			if (found) {
-				return found
-			}
+			return git.repositories.find((r) => r.inputBox === sc.inputBox)
 		}
 	}
 
@@ -264,6 +259,10 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 						return
 					}
 
+					if (token.isCancellationRequested) {
+						return
+					}
+	
 					const { apiConfiguration } = await provider.getState()
 					if (!apiConfiguration || !apiConfiguration.apiProvider) {
 						vscode.window.showErrorMessage(
@@ -272,6 +271,10 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 						return
 					}
 
+					if (token.isCancellationRequested) {
+						return
+					}
+	
 					const prompt = buildCommitMessagePrompt(diff)
 					const rawMessage = await singleCompletionHandler(apiConfiguration as ProviderSettings, prompt, {
 						abortSignal: abortController.signal,

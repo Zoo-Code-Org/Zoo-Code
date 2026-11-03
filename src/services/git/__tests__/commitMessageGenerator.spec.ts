@@ -78,6 +78,15 @@ describe("commitMessageGenerator", () => {
 			expect(redacted).toContain("other_config=123")
 		})
 
+		it("redacts Bearer tokens in Authorization headers", () => {
+			const content =
+				"+Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature\n+other: value"
+			const redacted = redactSensitiveInformation(content)
+			expect(redacted).not.toContain("eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature")
+			expect(redacted).toContain("[REDACTED]")
+			expect(redacted).toContain("+other: value")
+		})
+
 		it("leaves normal diff content unchanged", () => {
 			const content = "diff --git a/src/app.ts b/src/app.ts\n+console.log('hello world')"
 			expect(redactSensitiveInformation(content)).toBe(content)
@@ -224,7 +233,7 @@ describe("commitMessageGenerator", () => {
 			expect(resolveGitRepository(git)).toBe(repo2)
 		})
 
-		it("falls through if bare vscode.Uri context does not match any repository", () => {
+		it("returns undefined if bare vscode.Uri context does not match any repository", () => {
 			const repo1: GitRepository = {
 				rootUri: makeUri("/workspace/repo1"),
 				inputBox: { value: "" },
@@ -237,10 +246,10 @@ describe("commitMessageGenerator", () => {
 			}
 			const git: GitAPI = { repositories: [repo1, repo2] }
 
-			expect(resolveGitRepository(git, makeUri("/workspace/unknown"))).toBe(repo1)
+			expect(resolveGitRepository(git, makeUri("/workspace/unknown"))).toBeUndefined()
 		})
 
-		it("falls through if scm context rootUri does not match any repository", () => {
+		it("returns undefined if scm context rootUri does not match any repository", () => {
 			const repo1: GitRepository = {
 				rootUri: makeUri("/workspace/repo1"),
 				inputBox: { value: "" },
@@ -253,10 +262,10 @@ describe("commitMessageGenerator", () => {
 			}
 			const git: GitAPI = { repositories: [repo1, repo2] }
 
-			expect(resolveGitRepository(git, { rootUri: makeUri("/workspace/unknown") })).toBe(repo1)
+			expect(resolveGitRepository(git, { rootUri: makeUri("/workspace/unknown") })).toBeUndefined()
 		})
 
-		it("falls through if scm context inputBox does not match any repository", () => {
+		it("returns undefined if scm context inputBox does not match any repository", () => {
 			const repo1: GitRepository = {
 				rootUri: makeUri("/workspace/repo1"),
 				inputBox: { value: "" },
@@ -269,7 +278,7 @@ describe("commitMessageGenerator", () => {
 			}
 			const git: GitAPI = { repositories: [repo1, repo2] }
 
-			expect(resolveGitRepository(git, { inputBox: { value: "other" } })).toBe(repo1)
+			expect(resolveGitRepository(git, { inputBox: { value: "other" } })).toBeUndefined()
 		})
 
 		it("falls back to first repository when active editor does not match any repository", () => {
@@ -431,6 +440,27 @@ describe("commitMessageGenerator", () => {
 			const diff = await getRepositoryDiff(repo)
 			expect(diff).toContain("Untracked files:")
 			expect(diff).toContain("new-file.ts")
+			expect(diff).not.toContain("modified.ts")
+		})
+
+		it("surfaces all untracked files when mixed with tracked changes", async () => {
+			const repo: GitRepository = {
+				rootUri: makeUri("/workspace/repo"),
+				inputBox: { value: "" },
+				diff: vi.fn().mockResolvedValue(""),
+				state: {
+					workingTreeChanges: [
+						{ uri: makeUri("/workspace/repo/new-a.ts"), status: 7 }, // UNTRACKED
+						{ uri: makeUri("/workspace/repo/new-b.ts"), status: 7 }, // UNTRACKED
+						{ uri: makeUri("/workspace/repo/modified.ts"), status: 5 }, // MODIFIED (not untracked)
+					],
+				},
+			}
+
+			const diff = await getRepositoryDiff(repo)
+			expect(diff).toContain("Untracked files:")
+			expect(diff).toContain("new-a.ts")
+			expect(diff).toContain("new-b.ts")
 			expect(diff).not.toContain("modified.ts")
 		})
 
@@ -606,6 +636,33 @@ describe("commitMessageGenerator", () => {
 				outputChannel: mockOutputChannel,
 			})
 
+			expect(mockRepo.inputBox.value).toBe("")
+		})
+
+		it("skips LLM call when cancelled between diff fetch and provider state read", async () => {
+			let isCancelled = false
+			;(vscode.window.withProgress as Mock).mockImplementation((_opts, callback) => {
+				const progress = { report: vi.fn() }
+				const token = {
+					get isCancellationRequested() {
+						return isCancelled
+					},
+					onCancellationRequested: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+				}
+				return callback(progress, token)
+			})
+			// Set cancelled = true inside getState so the guard after getState fires
+			mockProvider.getState = vi.fn().mockImplementation(async () => {
+				isCancelled = true
+				return { apiConfiguration: { apiProvider: providerIdentifiers.openai, apiKey: "sk-test" } }
+			})
+
+			await generateCommitMessage({
+				provider: mockProvider,
+				outputChannel: mockOutputChannel,
+			})
+
+			expect(singleCompletionHandler).not.toHaveBeenCalled()
 			expect(mockRepo.inputBox.value).toBe("")
 		})
 
