@@ -4226,6 +4226,32 @@ describe("ClineProvider", () => {
 			expect(mockContext.globalState.get("viewStates")).toEqual(previous)
 			await provider.dispose()
 		})
+		it("re-reads the stored map at rollback time so a concurrent writer's entry survives", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const staleMap = { "view-a": { mode: "code" } }
+			const newerMap = { "view-a": { mode: "code" }, "view-b": { mode: "architect" } }
+			// The pre-write snapshot read sees the stale map; by the time the rejected write is
+			// compensated, another view has persisted its own entry.
+			const getSpy = vi.spyOn(provider.context.globalState, "get")
+			getSpy.mockReturnValueOnce(staleMap as never)
+			getSpy.mockReturnValue(newerMap as never)
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
+			setValueSpy.mockRejectedValueOnce(new Error("storage write failed"))
+			setValueSpy.mockResolvedValue(undefined as never)
+
+			await expect(provider["writePersistedViewStates"](staleMap as never)).rejects.toThrow(
+				"storage write failed",
+			)
+
+			expect(setValueSpy).toHaveBeenLastCalledWith("viewStates", newerMap)
+			await provider.dispose()
+		})
 		it("restores the freshly persisted map instead of a stale cache when the write rejects", async () => {
 			const provider = new ClineProvider(
 				mockContext,

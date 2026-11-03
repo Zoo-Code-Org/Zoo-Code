@@ -821,9 +821,14 @@ export class ClineProvider
 			await this.contextProxy.setValue("viewStates", states)
 		} catch (error) {
 			try {
-				// setValue restores storage AND the cache together, so the cache cannot keep the
+				// Re-read storage at rollback time instead of replaying the pre-write snapshot:
+				// another view can persist its own map between the snapshot above and this
+				// rejection, and writing the snapshot back would delete that entry from the cache
+				// and the store. The read still bypasses the cache, which currently holds the
 				// phantom map the rejected write put there.
-				await this.contextProxy.setValue("viewStates", previousPersisted)
+				const currentPersisted =
+					this.context.globalState.get<GlobalState["viewStates"]>("viewStates") ?? previousPersisted
+				await this.contextProxy.setValue("viewStates", currentPersisted)
 			} catch (rollbackError) {
 				this.log(
 					`[ClineProvider] Failed to restore the persisted viewStates after a rejected write: ${
