@@ -148,13 +148,17 @@ describe("getVisibleProviderOrLog", () => {
 describe("registerCommands handlers", () => {
 	let mockOutputChannel: vscode.OutputChannel
 	let mockContext: vscode.ExtensionContext
-	let mockVisibleProvider: { postMessageToWebview: Mock }
+	let mockVisibleProvider: {
+		postMessageToWebview: Mock
+		retryWebviewRecovery: Mock<() => Promise<void>>
+	}
 	let mockProvider: {
 		postMessageToWebview: Mock
 		evictCurrentTask: Mock
 		refreshWorkspace: Mock
 		webviewFocusTracker: WebviewFocusTracker
 	}
+	let mockVisibleProviderInstance: ClineProvider
 	let handlers: Record<string, (...args: unknown[]) => unknown>
 
 	beforeEach(() => {
