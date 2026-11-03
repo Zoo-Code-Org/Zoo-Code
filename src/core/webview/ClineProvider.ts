@@ -1501,8 +1501,6 @@ export class ClineProvider
 			// A disposed provider will never register a stable view state id: release
 			// any API-driven task creation that is awaiting viewStateReadiness.
 			this.viewStateReadinessResolve()
-			this._postStateToWebviewThrottled.cancel()
-			this.log("Disposing ClineProvider...")
 
 			// Reject any tasks still waiting for a scheduler permit so they don't
 			// hold the event loop after the provider is torn down.
