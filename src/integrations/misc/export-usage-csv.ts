@@ -4,6 +4,12 @@ import * as vscode from "vscode"
 
 const USAGE_RANGES: readonly string[] = ["today", "7d", "30d", "all"]
 
+/**
+ * What starts a cell that a spreadsheet may evaluate: = + - @, a tab or a carriage return, and the same after
+ * invisible characters that an application may skip (a byte order mark, zero-width characters).
+ */
+const FORMULA_START = /^[\uFEFF\u200B-\u200D\u2060]*[=+\-@\t\r]/
+
 /** The most text the host writes for an export: ten years of daily tasks is far below it, a runaway message is not. */
 const MAX_USAGE_CSV_LENGTH = 20_000_000
 
@@ -65,7 +71,7 @@ export function neutralizeCsvFormulas(csv: string): string | undefined {
 		.map((cells) =>
 			cells
 				.map((cell) => {
-					const safe = /^[=+\-@\t\r]/.test(cell.value) ? `'${cell.value}` : cell.value
+					const safe = FORMULA_START.test(cell.value) ? `'${cell.value}` : cell.value
 					return cell.quoted || /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe
 				})
 				.join(","),
