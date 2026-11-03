@@ -7691,6 +7691,110 @@ describe("ClineProvider", () => {
 			await failingSibling.dispose()
 		})
 
+		it("restores every sibling's sticky profile even when one restore rejects", async () => {
+			// One failing history restore used to abort the whole stickiness loop, so every later
+			// sibling's persisted apiConfigName kept the replacement profile the deletion was
+			// rolling back. Each restore is now awaited on its own, the way the pin restores above
+			// already are.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const healthySibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const failingSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await healthySibling["setViewStateId"]("stickiness-sibling-b")
+			await failingSibling["setViewStateId"]("stickiness-sibling-c")
+			await healthySibling.saveViewState("currentApiConfigName", "doomed-profile")
+			await failingSibling.saveViewState("currentApiConfigName", "doomed-profile")
+			await provider.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ id: "doomed-id", name: "doomed-profile", apiProvider: providerIdentifiers.anthropic },
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn().mockImplementation(async ({ name }: { name?: string }) =>
+					name === "doomed-profile"
+						? { name: "doomed-profile", id: "doomed-id", apiProvider: providerIdentifiers.anthropic }
+						: {
+								name: "replacement-profile",
+								id: "replacement-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterBaseUrl: "repl-url",
+							},
+				),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("doomed-id"),
+			}
+			// Both siblings' tasks exist and have a history item, so each snapshot really has
+			// something to restore.
+			// The pre-deletion sticky name is the deleted profile: that is the value the
+			// compensation has to put back.
+			const makeTaskDouble = (taskId: string) => ({
+				taskId,
+				taskApiConfigName: "doomed-profile",
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+				updateApiConfiguration: vi.fn(),
+				setTaskApiConfigName: vi.fn(),
+			})
+			const bTask = makeTaskDouble("stickiness-task-b")
+			const cTask = makeTaskDouble("stickiness-task-c")
+			// Structural cast: the double only carries the members the rebuild and sticky paths touch.
+			vi.spyOn(healthySibling, "getCurrentTask").mockReturnValue(bTask as unknown as Task)
+			vi.spyOn(failingSibling, "getCurrentTask").mockReturnValue(cTask as unknown as Task)
+			vi.spyOn(provider.taskHistoryStore, "get").mockImplementation(
+				(id: string) =>
+					({ id, ts: 1, task: "test", mode: "code" }) as unknown as ReturnType<
+						typeof provider.taskHistoryStore.get
+					>,
+			)
+			// The first sibling's history restore rejects; the second must still be attempted.
+			const updateTaskHistorySpy = vi
+				.spyOn(provider, "updateTaskHistory")
+				.mockRejectedValueOnce(new Error("history restore down"))
+
+			// Fail the deletion after the stickiness snapshot: the failing sibling's re-pin write
+			// rejects, so the compensation path (which owns the stickiness loop) runs.
+			const siblingC = failingSibling as unknown as {
+				_saveViewLocalStateFromMutation: (values: unknown) => Promise<void>
+			}
+			vi.spyOn(siblingC, "_saveViewLocalStateFromMutation").mockRejectedValueOnce(
+				new Error("sibling re-pin failed"),
+			)
+
+			await expect(
+				provider.deleteProviderProfile({
+					id: "doomed-id",
+					name: "doomed-profile",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+			).rejects.toThrow(/task stickiness|sibling re-pin failed/)
+
+			// Both restores ran and both tasks are back on the deleted profile, and the incomplete
+			// restore is reported rather than swallowed.
+			expect(updateTaskHistorySpy).toHaveBeenCalledTimes(2)
+			expect(bTask.setTaskApiConfigName).toHaveBeenCalledWith("doomed-profile")
+			expect(cTask.setTaskApiConfigName).toHaveBeenCalledWith("doomed-profile")
+			await provider.dispose()
+			await healthySibling.dispose()
+			await failingSibling.dispose()
+		})
+
 		it("refreshes a live sibling but leaves one that has started disposing", async () => {
 			// dispose() unregisters at its start, so a disposed sibling is normally not enumerated at all;
 			// this pins the second line of defence the row asks for. The live sibling is the positive
