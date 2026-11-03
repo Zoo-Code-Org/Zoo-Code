@@ -779,6 +779,14 @@ export class SkillsManager {
 				// ancestor) can change between the caller's resolution and this publish.
 				await validateTarget?.(filePath)
 				if (this.isDisposed) throw new Error("SkillsManager is disposed")
+				// rename replaces the target's inode, so the replacement must carry the target's
+				// permission bits: a user-restricted SKILL.md (e.g. 0600) would otherwise come back
+				// with the process default mode and become readable by other local users. A target
+				// that does not exist yet (createSkill) has no mode to preserve and keeps the default.
+				const existingTarget = await fs.stat(filePath).catch(() => undefined)
+				if (existingTarget && typeof existingTarget.mode === "number") {
+					await fs.chmod(temporaryPath, existingTarget.mode & 0o777)
+				}
 				await fs.rename(temporaryPath, filePath)
 			} catch (error) {
 				// Best effort: a partial temp file must not be left behind, but an EEXIST failure

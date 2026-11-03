@@ -20,6 +20,7 @@ const {
 	mockLstat,
 	mockSymlink,
 	mockUnlink,
+	mockChmod,
 } = vi.hoisted(() => ({
 	mockReadlink: vi.fn(),
 	mockCp: vi.fn(),
@@ -38,6 +39,7 @@ const {
 	mockRmdir: vi.fn(),
 	mockSymlink: vi.fn(),
 	mockUnlink: vi.fn(),
+	mockChmod: vi.fn(),
 }))
 
 // Platform-agnostic test paths
@@ -73,6 +75,7 @@ vi.mock("fs/promises", () => ({
 		readlink: mockReadlink,
 		symlink: mockSymlink,
 		unlink: mockUnlink,
+		chmod: mockChmod,
 	},
 	stat: mockStat,
 	readFile: mockReadFile,
@@ -88,6 +91,7 @@ vi.mock("fs/promises", () => ({
 	readlink: mockReadlink,
 	symlink: mockSymlink,
 	unlink: mockUnlink,
+	chmod: mockChmod,
 }))
 
 // Mock os module
@@ -2571,6 +2575,49 @@ Body here.`
 			const parsed2 = matter(rewritten2)
 			expect(parsed2.data.modeSlugs).toBeUndefined()
 			expect(parsed2.data.description).toBe(description)
+		})
+
+		it("preserves the existing SKILL.md permission bits through the atomic rewrite", async () => {
+			// rename replaces the target's inode: without an explicit chmod the new file gets
+			// the process default mode, so a user-restricted SKILL.md (0600) would come back
+			// readable by other local users after an unrelated mode-restriction edit.
+			const skillDir = p(globalSkillsDir, "mode-preserved-skill")
+			const skillMd = p(skillDir, "SKILL.md")
+			const originalContent = `---
+name: mode-preserved-skill
+description: 'Mode preserved'
+---
+
+Body.`
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) =>
+				dir === globalSkillsDir ? ["mode-preserved-skill"] : [],
+			)
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === skillDir) {
+					return { isDirectory: () => true }
+				}
+				if (pathArg === skillMd) {
+					// 0600 regular file: the mode the rewrite must keep.
+					return { isDirectory: () => false, mode: 0o100600 }
+				}
+				throw new Error("Not found")
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === skillMd)
+			mockReadFile.mockResolvedValue(originalContent)
+			mockWriteFile.mockResolvedValue(undefined)
+
+			await skillsManager.discoverSkills()
+			expect(skillsManager.getAllSkills()).toHaveLength(1)
+			await skillsManager.updateSkillModes("mode-preserved-skill", "global", ["code"])
+
+			const temporaryPath = mockWriteFile.mock.calls[0][0] as string
+			expect(mockChmod).toHaveBeenCalledWith(temporaryPath, 0o600)
+			// The mode has to be in place before the rename publishes the file.
+			expect(mockChmod.mock.invocationCallOrder[0]).toBeLessThan(mockRename.mock.invocationCallOrder[0])
+			expect(mockRename).toHaveBeenCalledWith(temporaryPath, skillMd)
 		})
 
 		it("propagates a realpath failure instead of writing through the unresolved path", async () => {

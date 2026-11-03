@@ -298,7 +298,7 @@
 		"write": {
 			"label": "写入",
 			"description": "自动创建和编辑文件，无需二次确认",
-			"delayLabel": "延迟一段时间再自动批准写入，可以在期间检查模型输出是否有问题",
+			"delayLabel": "写入后延迟一小段时间，以便诊断工具检测潜在问题",
 			"outsideWorkspace": {
 				"label": "包含工作区外的文件",
 				"description": "允许 Zoo 创建和编辑当前工作区外的文件，无需批准。"
