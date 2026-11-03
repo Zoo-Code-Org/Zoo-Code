@@ -1,89 +1,4 @@
 {
-	"__mocks__/fs/promises.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"__tests__/ClineProvider.delegation.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 9
-		}
-	},
-	"__tests__/ClineProvider.history-resume-delegation.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 70
-		}
-	},
-	"__tests__/abandonSubtask.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 20
-		}
-	},
-	"__tests__/api-subtask.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"__tests__/delegation-concurrent.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 6
-		}
-	},
-	"__tests__/delegation-events.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 6
-		}
-	},
-	"__tests__/migrateSettings.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"__tests__/nested-delegation-resume.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 19
-		}
-	},
-	"__tests__/new-task-delegation.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 8
-		}
-	},
-	"activate/CodeActionProvider.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"activate/__tests__/CodeActionProvider.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 10
-		}
-	},
-	"activate/__tests__/handleUri.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 14
-		}
-	},
-	"activate/__tests__/registerCommands.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"activate/registerCodeActions.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"activate/registerCommands.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"activate/registerTerminalActions.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"api/providers/__tests__/anthropic-vertex.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 31
@@ -436,7 +351,7 @@
 	},
 	"api/providers/xai.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 7
+			"count": 4
 		}
 	},
 	"api/transform/__tests__/ai-sdk.spec.ts": {
@@ -561,7 +476,7 @@
 	},
 	"core/assistant-message/__tests__/presentAssistantMessage-images.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 16
+			"count": 14
 		}
 	},
 	"core/assistant-message/__tests__/presentAssistantMessage-unknown-tool.spec.ts": {
@@ -581,7 +496,7 @@
 	},
 	"core/checkpoints/__tests__/checkpoint.test.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 5
+			"count": 3
 		}
 	},
 	"core/checkpoints/index.ts": {
@@ -1006,7 +921,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 196
+			"count": 195
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
@@ -1022,11 +937,6 @@
 	"core/webview/__tests__/ClineProvider.taskHistory.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 12
-		}
-	},
-	"core/webview/__tests__/checkpointRestoreHandler.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
 		}
 	},
 	"core/webview/__tests__/diagnosticsHandler.spec.ts": {
@@ -1047,11 +957,6 @@
 	"core/webview/__tests__/telemetrySettingsTracking.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 4
-		}
-	},
-	"core/webview/__tests__/webviewMessageHandler.checkpoint.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
 		}
 	},
 	"core/webview/__tests__/webviewMessageHandler.cloudAuth.spec.ts": {
@@ -1102,31 +1007,6 @@
 	"core/webview/webviewMessageHandler.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 5
-		}
-	},
-	"extension/__tests__/api-delete-queued-message.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"extension/__tests__/api-send-message.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
-		}
-	},
-	"extension/api.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 9
-		}
-	},
-	"i18n/index.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"i18n/setup.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
 		}
 	},
 	"integrations/editor/DiffViewProvider.ts": {
@@ -1557,126 +1437,6 @@
 	"services/tree-sitter/__tests__/markdownParser.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
-		}
-	},
-	"shared/__tests__/api.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 8
-		}
-	},
-	"shared/__tests__/embeddingModels.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"shared/__tests__/modes-empty-prompt-component.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"shared/api.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"shared/checkExistApiConfig.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"shared/cost.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"shared/parse-command.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"shared/support-prompt.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"shared/tools.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"shared/utils/__tests__/requesty.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"utils/__tests__/autoImportSettings.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 15
-		}
-	},
-	"utils/__tests__/enhance-prompt.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 6
-		}
-	},
-	"utils/__tests__/git.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 95
-		}
-	},
-	"utils/__tests__/json-schema.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"utils/__tests__/migrateSettings.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"utils/__tests__/outputChannelLogger.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"utils/__tests__/safeWriteJson.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 27
-		}
-	},
-	"utils/__tests__/shell.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 35
-		}
-	},
-	"utils/__tests__/storage.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 25
-		}
-	},
-	"utils/__tests__/tiktoken.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"utils/config.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"utils/export.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"utils/safeWriteJson.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"vitest.setup.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
 		}
 	}
 }

@@ -1,6 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { QueryClientProvider } from "@tanstack/react-query"
 
 import {
 	providerIdentifiers,
@@ -10,7 +9,7 @@ import {
 } from "@roo-code/types"
 
 import { vscode } from "@src/utils/vscode"
-import { createTestQueryClient } from "@src/utils/test-utils"
+import { render } from "@src/utils/test-utils"
 
 import { Unbound } from "../Unbound"
 import { VercelAiGateway } from "../VercelAiGateway"
@@ -48,8 +47,7 @@ vi.mock("../../ModelPicker", () => ({ ModelPicker: modelPickerMock }))
 vi.mock("@src/components/common/VSCodeButtonLink", () => ({ VSCodeButtonLink: () => null }))
 
 // The Copilot model list lives in the shared query cache, so every render needs a client.
-const renderWithQuery = (ui: React.ReactElement) =>
-	render(<QueryClientProvider client={createTestQueryClient()}>{ui}</QueryClientProvider>)
+const renderWithQuery = (ui: React.ReactElement) => render(ui)
 
 describe("provider model routing", () => {
 	const organizationAllowList: OrganizationAllowList = { allowAll: true, providers: {} }

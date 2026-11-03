@@ -15,7 +15,7 @@ import { ContextProxy } from "../../../core/config/ContextProxy"
 import { getCacheDirectoryPath } from "../../../utils/storage"
 import type { RouterName } from "../../../shared/api"
 
-import { mergeAbortSignals, throwIfAborted } from "../utils/abort-signal"
+import { createAbortError, mergeAbortSignals, throwIfAborted } from "../utils/abort-signal"
 
 import { GetModelsOptions } from "../../../shared/api"
 
@@ -389,9 +389,7 @@ function joinFlight(cacheKey: string, record: FlightRecord, callerSignal?: Abort
 			// abort must release the entry synchronously, so a caller issuing a new fetch right
 			// after abort() provably observes a fresh flight, not the doomed one.
 			detach()
-			const abortError = new Error("This operation was aborted")
-			abortError.name = "AbortError"
-			reject(abortError)
+			reject(createAbortError("model catalog"))
 		}
 		if (view.aborted) {
 			rejectAbort()
