@@ -942,6 +942,30 @@ describe("getProviderQuotas", () => {
 		expect(seen!.aborted).toBe(true)
 	})
 
+	it("does not try the next MiniMax URL once the lookup was cancelled", async () => {
+		const fetchSpy = vi.fn(
+			(_url: RequestInfo | URL, init?: RequestInit) =>
+				new Promise<Response>((_resolve, reject) => {
+					const cancelled = () => reject(new DOMException("Aborted", "AbortError"))
+					if (init?.signal?.aborted) cancelled()
+					init?.signal?.addEventListener("abort", cancelled)
+				}),
+		)
+		const controller = new AbortController()
+		const result = getProviderQuotas(
+			[{ apiProvider: providerIdentifiers.minimax, minimaxApiKey: "k" } as never],
+			{ signal: controller.signal },
+			fetchSpy,
+		)
+		await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
+
+		controller.abort()
+		await expect(result).rejects.toMatchObject({ name: "AbortError" })
+
+		// Only the first URL was asked: the fallback is not tried for a lookup nobody waits for.
+		expect(fetchSpy).toHaveBeenCalledTimes(1)
+	})
+
 	it("keeps the shared request running until its last caller leaves", async () => {
 		let seen: AbortSignal | undefined
 		let release: (r: Response) => void = () => {}

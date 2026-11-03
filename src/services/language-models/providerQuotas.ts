@@ -536,11 +536,13 @@ async function fetchKeyed(
 		let windows: ProviderQuotaWindow[] | undefined
 		let lastError: unknown
 		for (const [index, url] of urls.entries()) {
+			// A cancelled lookup stops here: it does not go on to the next URL.
+			if (signal.aborted) throw new Error("Cancelled")
 			try {
 				windows = provider.parse(await getJson(fetchImpl, url, apiKey, signal), index)
 				if (windows?.length) break
 			} catch (error) {
-				if (error instanceof AuthError) throw error
+				if (error instanceof AuthError || signal.aborted) throw error
 				lastError = error
 			}
 		}

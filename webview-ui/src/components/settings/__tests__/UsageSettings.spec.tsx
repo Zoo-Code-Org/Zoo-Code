@@ -227,6 +227,17 @@ describe("UsageSettings", () => {
 			expect(ranges.map((el) => el.getAttribute("aria-checked"))).toEqual(["false", "true", "false", "false"])
 		})
 
+		it("selects the range that receives focus, as the arrow keys move it, and keeps the selected one when it is focused", () => {
+			render(<UsageSettings />)
+
+			fireEvent.focus(screen.getByTestId("usage-range-30d"))
+			expect(screen.getByTestId("usage-range-30d").getAttribute("aria-checked")).toBe("true")
+			expect(screen.getByTestId("usage-range-7d").getAttribute("aria-checked")).toBe("false")
+
+			fireEvent.focus(screen.getByTestId("usage-range-30d")) // already selected
+			expect(screen.getByTestId("usage-range-30d").getAttribute("aria-checked")).toBe("true")
+		})
+
 		it("changes the range", () => {
 			state.taskHistory = [priced(1), priced(5, { ts: NOW - 20 * 24 * 60 * 60 * 1000 })]
 			render(<UsageSettings />)
