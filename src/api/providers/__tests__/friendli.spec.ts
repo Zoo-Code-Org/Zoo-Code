@@ -181,6 +181,32 @@ describe("FriendliHandler", () => {
 		expect(result).toBe(expectedResponse)
 	})
 
+	it("completePrompt should forward the abort signal", async () => {
+		mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
+		const { signal } = new AbortController()
+		await handler.completePrompt("test prompt", { abortSignal: signal })
+		expect(mockCreate).toHaveBeenLastCalledWith(expect.anything(), { signal })
+	})
+
+	it.each([
+		{ label: "a whole-number", input: 3000, forwarded: 3000 },
+		{ label: "a fractional", input: 12.5, forwarded: 13 },
+		{ label: "an over-cap", input: 2_147_483_648, forwarded: 2_147_483_647 },
+	])("completePrompt should forward $label timeoutMs as $forwarded", async ({ input, forwarded }) => {
+		mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
+		await handler.completePrompt("test prompt", { timeoutMs: input })
+		expect(mockCreate).toHaveBeenLastCalledWith(expect.anything(), { timeout: forwarded })
+	})
+
+	it.each([0, -5, Number.NaN, Number.POSITIVE_INFINITY])(
+		"completePrompt should not forward an unusable timeoutMs (%s)",
+		async (timeoutMs) => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
+			await handler.completePrompt("test prompt", { timeoutMs })
+			expect(mockCreate).toHaveBeenLastCalledWith(expect.anything(), undefined)
+		},
+	)
+
 	it("should handle errors in completePrompt", async () => {
 		const errorMessage = "Friendli API error"
 		mockCreate.mockRejectedValueOnce(new Error(errorMessage))

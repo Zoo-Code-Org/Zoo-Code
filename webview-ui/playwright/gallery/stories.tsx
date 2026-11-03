@@ -168,6 +168,43 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"history-rename": async () => {
+		const [{ AppProviders }, { default: HistoryView }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/history/HistoryView"),
+		])
+		// The visual test freezes the clock at this time so "time ago" labels stay stable.
+		const now = new Date("2026-06-01T12:00:00Z").getTime()
+		const workspace = "/workspace/demo"
+		const baseItem = { tokensIn: 1200, tokensOut: 800, totalCost: 0.12, workspace }
+		return (
+			<AppProviders
+				initialState={{
+					cwd: workspace,
+					taskHistory: [
+						{
+							...baseItem,
+							id: "task-renamed",
+							number: 2,
+							ts: now - 2 * 60 * 60 * 1000,
+							task: "Refactor the authentication middleware to use the new session store",
+							title: "Auth refactor",
+						},
+						{
+							...baseItem,
+							id: "task-original",
+							number: 1,
+							ts: now - 26 * 60 * 60 * 1000,
+							task: "Write unit tests for the billing service",
+						},
+					],
+				}}>
+				<div className="h-[640px] w-[480px] max-w-full bg-vscode-editor-background">
+					<HistoryView onDone={() => undefined} />
+				</div>
+			</AppProviders>
+		)
+	},
 	"ignored-disabled-tools-warning": async () => {
 		const [{ AppProviders }, { ChatRowContent }] = await Promise.all([
 			import("../AppProviders"),
@@ -275,6 +312,11 @@ export const stories: Record<string, Story> = {
 			await import("@/components/settings/providers/__tests__/OpenAICompatible.visual.fixture")
 		return <OpenAICompatibleExtraBodyFixture />
 	},
+	"opencode-go-temperature": async () => {
+		const { OpencodeGoTemperatureFixture } =
+			await import("@/components/settings/__tests__/OpencodeGoTemperature.visual.fixture")
+		return <OpencodeGoTemperatureFixture />
+	},
 	"rendered-content-contrast": async () => {
 		const [{ AppProviders }, { RenderedContentContrastFixture }] = await Promise.all([
 			import("../AppProviders"),
@@ -373,17 +415,43 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"anthropic-settings": async () => {
+		const [{ AppProviders }, { Anthropic }, { providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/providers/Anthropic"),
+			import("@roo-code/types"),
+		])
+		function AnthropicSettings() {
+			const [config, setConfig] = useState<import("@roo-code/types").ProviderSettings>({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "sk-ant-example-key",
+			})
+			return (
+				<div data-testid="anthropic-settings-story" className="w-[420px] p-4 bg-vscode-editor-background">
+					<div className="flex flex-col gap-3">
+						<Anthropic
+							apiConfiguration={config}
+							setApiConfigurationField={(field, value) =>
+								setConfig((previous) => ({ ...previous, [field]: value }))
+							}
+						/>
+					</div>
+				</div>
+			)
+		}
+		return (
+			<AppProviders>
+				<AnthropicSettings />
+			</AppProviders>
+		)
+	},
 	"ui-settings": async () => {
 		const { UISettingsStory } = await import("@/components/settings/__tests__/UISettings.visual.fixture")
 		return <UISettingsStory />
 	},
 	"ui-settings-long-locale": async () => {
-		const [{ UISettingsStory }, { default: i18next }] = await Promise.all([
-			import("@/components/settings/__tests__/UISettings.visual.fixture"),
-			import("@/i18n/setup"),
-		])
-		await i18next.changeLanguage("ru")
-		return <UISettingsStory />
+		const { UISettingsStory } = await import("@/components/settings/__tests__/UISettings.visual.fixture")
+		return <UISettingsStory initialState={{ language: "ru" }} />
 	},
 	welcome: async () => {
 		const [{ AppProviders }, { WelcomeLanding }] = await Promise.all([

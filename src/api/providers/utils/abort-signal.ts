@@ -1,8 +1,35 @@
 /**
+ * Whether a timeout value is usable as an SDK `timeout` option: a finite
+ * number greater than zero.
+ *
+ * The value `0` means "no explicit timeout" across this series (the SDKs turn
+ * `timeout: 0` into an immediate abort), and negative, `NaN`, `Infinity` and
+ * fractional values make the SDK's own validation throw — so none of them may
+ * be forwarded.
+ */
+export function hasUsableTimeout(timeoutMs?: number): timeoutMs is number {
+	return typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
+}
+
+/** Maximum delay a Node timer (and therefore an SDK timeout option) accepts. */
+export const MAX_TIMEOUT_MS = 2_147_483_647
+
+/**
+ * Convert a validated timeout to the value forwarded to an SDK or Node timer:
+ * round fractions up (uint32 validation rejects them) and cap at the maximum
+ * delay (Node clamps larger values to 1 ms otherwise).
+ */
+export function toSdkTimeoutMs(timeoutMs: number): number {
+	return Math.min(Math.max(1, Math.ceil(timeoutMs)), MAX_TIMEOUT_MS)
+}
+
+/**
  * Merge an optional external abort signal with an optional timeout.
  *
  * Timeout values <= 0 and non-finite values are treated as disabled; finite
- * delays above 2^31-1 ms are capped (Node clamps them to 1 ms otherwise). The timeout is created via the
+ * delays are rounded up and capped at 2^31-1 ms (Node clamps larger delays
+ * to 1 ms and rejects non-integer ones). The timeout is created via the
+
  * native AbortSignal.timeout() API, which self-manages its timer — callers do
  * not need to (and cannot) clear it manually.
  */
@@ -12,13 +39,13 @@ export function mergeAbortSignalAndTimeout(externalSignal?: AbortSignal, timeout
 	// abort almost immediately; treat non-finite values as "no timeout",
 	// round fractional delays up to whole milliseconds (uint32 validation
 	// throws for 1500.5), and cap the rest.
-	const hasTimeout = typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
+	const hasTimeout = hasUsableTimeout(timeoutMs)
 
 	if (!hasTimeout) {
 		return externalSignal
 	}
 
-	const timeoutSignal = AbortSignal.timeout(Math.min(Math.max(1, Math.ceil(timeoutMs)), 2_147_483_647))
+	const timeoutSignal = AbortSignal.timeout(toSdkTimeoutMs(timeoutMs))
 
 	if (!externalSignal) {
 		return timeoutSignal
@@ -40,6 +67,45 @@ export function mergeAbortSignals(primarySignal: AbortSignal, secondarySignal?: 
 	}
 
 	return AbortSignal.any([primarySignal, secondarySignal])
+}
+
+/**
+ * Bridge an optional caller-owned (external) abort signal to a per-request
+ * signal, with an explicit detach handle.
+ *
+ * The returned `signal` aborts together with the external signal (immediately
+ * if it is already aborted). Callers must invoke `dispose()` once the request
+ * ends - on completion, failure, and early generator exit alike: the listener
+ * is registered on the caller's long-lived signal, and an anonymous listener
+ * left attached would outlive the request and retain the per-request
+ * controller for every completed request.
+ *
+ * With no external signal, returns `{ signal: undefined, dispose: noop }` so
+ * the client-level timeout remains the only cancellation mechanism.
+ */
+export function bridgeExternalAbortSignal(externalSignal?: AbortSignal): {
+	signal?: AbortSignal
+	dispose: () => void
+} {
+	if (!externalSignal) {
+		return { signal: undefined, dispose: () => {} }
+	}
+
+	const controller = new AbortController()
+	if (externalSignal.aborted) {
+		controller.abort()
+		return { signal: controller.signal, dispose: () => {} }
+	}
+
+	// Retain the callback so the listener can be detached once this request
+	// ends: an anonymous listener on a long-lived external signal would
+	// outlive the request and retain the per-request controller.
+	const onExternalAbort = () => controller.abort()
+	externalSignal.addEventListener("abort", onExternalAbort, { once: true })
+	return {
+		signal: controller.signal,
+		dispose: () => externalSignal.removeEventListener("abort", onExternalAbort),
+	}
 }
 
 /**
@@ -91,38 +157,61 @@ export function createAbortError(providerName: string): Error {
 }
 
 /**
- * Await `pending` but reject with the provider's abort error when `signal`
- * aborts first. For async phases that have no native signal support (model
- * discovery) yet must still settle promptly on cancellation. The underlying
- * promise keeps running (its settlement is ignored) — cancellation is
- * cooperative at this boundary.
+ * Await `pending` but settle early with `abortError` when `signal` aborts.
  *
- * The abort listener is detached once `pending` settles (success or
- * failure), so repeated calls on one signal do not accumulate listeners.
+ * The underlying promise keeps running (its settlement is ignored) —
+ * cancellation is cooperative at this boundary. The abort listener is detached
+ * once `pending` settles (success or failure), so repeated waits on one
+ * long-lived signal do not accumulate listeners.
+ *
+ * An already-aborted signal rejects without attaching a listener: it would
+ * never fire, so the wait would hang.
  */
-export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, providerName: string): Promise<T> {
+function raceAbort<T>(pending: Promise<T>, signal: AbortSignal, abortError: () => unknown): Promise<T> {
 	if (signal.aborted) {
-		// The caller has already cancelled, so this branch never consumes `pending`;
-		// attach a handler anyway so a rejecting `pending` cannot surface as an
-		// unhandled rejection.
+		// This branch never consumes `pending`; attach a handler anyway so a
+		// rejecting `pending` cannot surface as an unhandled rejection.
 		void pending.catch(() => {})
-		return Promise.reject(createAbortError(providerName))
+		return Promise.reject(abortError())
 	}
+
 	return new Promise<T>((resolve, reject) => {
-		const onAbort = () => reject(createAbortError(providerName))
-		// Stryker disable next-line ObjectLiteral,BooleanLiteral: a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable
+		const onAbort = () => reject(abortError())
 		signal.addEventListener("abort", onAbort, { once: true })
 		void pending.then(
 			(value) => {
 				signal.removeEventListener("abort", onAbort)
 				resolve(value)
 			},
-			(error) => {
+			(error: unknown) => {
 				signal.removeEventListener("abort", onAbort)
 				reject(error)
 			},
 		)
 	})
+}
+
+/**
+ * Await `pending` but reject with the provider's abort error when `signal`
+ * aborts first. For async phases that have no native signal support (model
+ * discovery) yet must still settle promptly on cancellation.
+ *
+ * Use {@link detachOnAbort} instead when the awaited work is shared with other
+ * callers and the caller's own abort reason must propagate unchanged.
+ */
+export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, providerName: string): Promise<T> {
+	return raceAbort(pending, signal, () => createAbortError(providerName))
+}
+
+/**
+ * Await `pending` but detach this waiter when `signal` aborts, rejecting with
+ * `signal.reason`. The shared work keeps running for other callers.
+ *
+ * Unlike {@link rejectOnAbort}, the caller's own reason is preserved instead of
+ * being normalized to `createAbortError(providerName)`.
+ */
+export function detachOnAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+	return raceAbort(pending, signal, () => signal.reason)
 }
 
 /**

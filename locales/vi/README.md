@@ -46,11 +46,11 @@ Zoo Code phát triển trên nền tảng do Roo Code tạo ra và tiếp tục 
 - **Workflow terminal và chỉnh sửa đáng tin cậy hơn** — sửa lỗi terminal hoàn tất quá sớm, xung đột trạng thái tác vụ, quản lý ngữ cảnh, chỉnh sửa diff và sử dụng công cụ riêng của từng provider.
 - **Kiểm soát workspace tốt hơn** — quản lý quy tắc, giới hạn MCP theo từng chế độ, kiểm soát đường dẫn multi-root, tùy chọn reasoning của model và thao tác xem lại thay đổi khi hoàn tất.
 
-## Điểm mới trong v3.90.0
+## Điểm mới trong v3.94.0
 
-- ✨ **Provider và model:** GitHub Copilot giờ là một provider: đăng nhập và Zoo Code tải model Copilot của bạn. IO Intelligence là provider với API key riêng. Gemini 4 Argon có trên Gemini và Vertex. GPT-6 Luna có trên OpenCode Go. Gemini 4 Argon và GPT-6 Luna cũng có trên Zoo Gateway.
-- 🧭 **Thực thi tool:** Lặp lại cùng một tool call sẽ có cảnh báo, rồi Zoo Code dừng vòng lặp đó. Tắt `attempt_completion` không còn để task không thể hoàn thành. Tin nhắn trong hàng đợi chạy cùng kiểm tra bảo vệ lệnh như lệnh bạn gửi trực tiếp.
-- ⚡ **Suy luận và streaming:** Adaptive thinking của Anthropic hiện trong chat và thinking token được đếm. Công tắc R1 giữ suy luận từ llama.cpp, Ollama và LM Studio. Codex giữ suy luận đã mã hóa cùng bản tóm tắt bạn thấy. Stream language model của VS Code dùng guarded recovery khi stream lỗi.
+- ✨ **Hỗ trợ model và provider rộng hơn:** Dùng Claude Haiku 5.5 qua Anthropic, gửi hình ảnh tới các model VS Code LM tương thích, chỉnh temperature cho các model OpenCode Go Responses và hủy request gọn gàng trên nhiều provider hơn.
+- 🔐 **MCP OAuth linh hoạt hơn:** Cấu hình cài đặt OAuth client tĩnh, dùng đường dẫn callback tùy chỉnh, tìm hiểu chi tiết xác thực từ `WWW-Authenticate` và xem lỗi callback trước khi thử lại.
+- 🧭 **Chat mượt mà và phiên dài hơn:** Đổi tên task trong lịch sử, kéo file vào chat mà không cần giữ Shift, giảm bộ nhớ giữ lại trong các phiên dài và giữ ổn định các liên kết subtask cùng webview đã thay thế.
 
 ## Zoo Code có thể làm gì cho BẠN?
 

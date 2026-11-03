@@ -3,7 +3,7 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"lint": "eslint src --ext=ts,tsx --max-warnings=0 --cache --cache-strategy content --cache-location node_modules/.cache/eslint/.eslintcache",
+		"lint": "eslint src playwright playwright-ct.config.ts --ext=ts,tsx,mjs --max-warnings=0 --cache --cache-strategy content --cache-location node_modules/.cache/eslint/.eslintcache",
 		"check-types": "tsc --noEmit",
 		"pretest": "turbo run bundle --cwd ..",
 		"test": "vitest run",
@@ -38,12 +38,10 @@
 		"@vscode/codicons": "^0.0.45",
 		"@vscode/webview-ui-toolkit": "^1.4.0",
 		"ansi-to-html": "^0.7.2",
-		"axios": "^1.18.1",
 		"class-variance-authority": "^0.7.1",
 		"clsx": "^2.1.1",
 		"cmdk": "^1.0.0",
 		"date-fns": "^4.1.0",
-		"debounce": "^2.1.1",
 		"diff": "^5.2.0",
 		"fast-deep-equal": "^3.1.3",
 		"fzf": "^0.5.2",
@@ -84,7 +82,7 @@
 		"zod": "^4.0.0"
 	},
 	"devDependencies": {
-		"@playwright/test": "1.62.1",
+		"@playwright/test": "1.64.1",
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
 		"@testing-library/jest-dom": "6.9.1",
@@ -93,19 +91,19 @@
 		"@types/diff": "5.2.3",
 		"@types/jest": "29.5.14",
 		"@types/katex": "0.16.7",
-		"@types/node": "22.20.1",
+		"@types/node": "catalog:",
 		"@types/react": "18.3.31",
 		"@types/react-dom": "18.3.7",
 		"@types/stacktrace-js": "2.0.3",
 		"@types/vscode-webview": "1.57.5",
 		"@tailwindcss/vite": "4.3.3",
 		"@vitejs/plugin-react": "5.2.0",
-		"@vitest/coverage-v8": "4.1.11",
-		"@vitest/ui": "4.1.11",
+		"@vitest/coverage-v8": "catalog:",
+		"@vitest/ui": "catalog:",
 		"babel-plugin-react-compiler": "1.0.0",
 		"jsdom": "26.1.0",
 		"monocart-reporter": "2.12.2",
-		"vite": "8.3.4",
-		"vitest": "4.1.11"
+		"vite": "catalog:",
+		"vitest": "catalog:"
 	}
 }
