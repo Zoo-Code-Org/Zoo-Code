@@ -2881,6 +2881,17 @@ export class ClineProvider
 					// A newer activation from another view re-pointed this mode: its binding wins.
 					// When this activation's own binding write is what failed, the binding never
 					// moved and there is nothing to undo.
+					//
+					// The profile id alone cannot answer that: another view can activate the same
+					// profile, in which case the binding still reads as ours and restoring it would
+					// overwrite the other view's selection. The shared-selection generation is the
+					// ownership signal for "this write is still mine to undo".
+					if (!ownsSharedSelection()) {
+						this.log(
+							"[persistProviderProfile] Skipping the mode-binding restore: another view wrote the shared selection",
+						)
+						return
+					}
 					const currentModeConfigId = this.providerSettingsManager.getModeConfigId
 						? await this.providerSettingsManager.getModeConfigId(mode)
 						: previousModeConfigId
