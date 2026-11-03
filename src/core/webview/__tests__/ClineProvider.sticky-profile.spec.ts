@@ -1278,6 +1278,12 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 				}),
 			).rejects.toThrow("Cannot delete the last remaining configuration")
 
+			// The refusal must leave the stored record alone. The message, the selection, and the
+			// list all stay the same when a regression deletes the record first and then throws
+			// this exact error, so the store has to be read directly.
+			await expect(provider.providerSettingsManager.getProfile({ name: "default" })).resolves.toBeDefined()
+			expect((await provider.providerSettingsManager.listConfig()).map(({ name }) => name)).toEqual(["default"])
+
 			// Nothing was repointed or pruned.
 			const values = provider.contextProxy.getValues()
 			expect(values.currentApiConfigName).toBe("default")
