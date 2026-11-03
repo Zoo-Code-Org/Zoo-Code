@@ -10,7 +10,14 @@ import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, withFileLock } from "../../utils/fileLock"
 import { safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
-import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
+import {
+	assertValidTransition,
+	DELEGATED_PARENT_REPAIR_FIELDS,
+	isDelegatedChildLive,
+	isLivenessSignalFresh,
+	settleRejectedCreateSubtaskAction,
+	type HistoryItemStatus,
+} from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
 
 export { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
@@ -25,9 +32,44 @@ function mergeWithDisk(delta: Partial<HistoryItem>): (existing: unknown, incomin
 }
 
 /**
+ * Control-flow signal: a liveness heartbeat merged under the per-file
+ * advisory lock found the disk record absent, non-active, or already current.
+ * The beat must skip (never recreate or rewrite), so the merge aborts the
+ * write by throwing; `recordTaskActivity` catches this class and stays quiet.
+ */
+class HeartbeatSkipError extends Error {}
+
+/**
+ * Control-flow signal: an administrative repair write re-validated its
+ * preconditions under the target file's advisory lock (via a safeWriteJson
+ * merge callback) and found a peer had changed the record mid-repair. The
+ * write aborts by throwing; the repair paths catch this class, leave the
+ * durable intent in place, and report "not repaired".
+ */
+class RepairAbortedError extends Error {}
+
+/**
+ * Administrative repairs write a delta, never a whole record: the repair
+ * decision comes from this store's cache, but the disk record is shared, so a
+ * peer window can write other fields of the same task (pending action, token
+ * and cost totals, `childIds`, `apiConfigName`) before the advisory lock.
+ *
+ * `PARENT_REPAIR_DELTA` is the shared `DELEGATED_PARENT_REPAIR_FIELDS` from
+ * `taskLifecycle`, so this store and the lifecycle model checker cannot drift
+ * on what the missing-child repair produces.
+ */
+const CHILD_REPAIR_DELTA: Partial<HistoryItem> = { status: "interrupted" }
+
+const PARENT_REPAIR_DELTA: Partial<HistoryItem> = DELEGATED_PARENT_REPAIR_FIELDS
+
+/**
  * Durable intent for the one repair that spans an active delegated child and
  * its parent. Task files remain authoritative; this file only records the
  * guarded target transition that must be completed after a crash.
+ *
+ * The target names the child half only. The repair never writes the parent:
+ * leaving it `delegated` with `awaitingChildId` intact is what keeps a resumed
+ * child's result routable, and it is the state `cancelTask` already produces.
  */
 interface DelegationRepairIntent {
 	version: 1
@@ -48,7 +90,6 @@ interface DelegationRepairIntent {
 	}
 	target: {
 		childStatus: "interrupted"
-		parentStatus: "active"
 	}
 }
 
@@ -86,6 +127,33 @@ export class TaskHistoryStore {
 	private writeLock: Promise<void> = Promise.resolve()
 	private fsWatcher: fsSync.FSWatcher | null = null
 	private reconcileTimer: ReturnType<typeof setTimeout> | null = null
+	/**
+	 * Serializes the periodic delegation-reconciliation step across ticks. The
+	 * store lock already prevents interleaved mutations, but overlapping ticks
+	 * would queue stale passes behind each other; skipping a tick instead lets
+	 * the next interval retry with fresher data.
+	 */
+	private delegationTickRunning = false
+	/**
+	 * Task ids this store instance itself persisted with an `active` status.
+	 * Their task sessions live in this window, so periodic delegation
+	 * reconciliation must exclude them from orphan-repair candidates. The set
+	 * is per-instance by design: after a host restart the new store has no
+	 * entries, so startup reconciliation keeps repairing genuine crash orphans.
+	 */
+	private readonly locallyActiveTaskIds = new Set<string>()
+	/**
+	 * Ids whose local ownership was explicitly released (Task.dispose,
+	 * scheduler rejection, delegation rollback) AFTER an active-status write
+	 * had claimed them. `trackLocalSessionOwnership` must not re-add these from
+	 * late teardown writes (an in-flight heartbeat beat or final save that
+	 * preserves "active" status): the session is gone, and a ghost re-claim
+	 * would suppress in-window orphan repair for the window's lifetime. An
+	 * explicit `markLocallyActive` (a new session's eager claim) clears the
+	 * entry, so resumes and re-delegations re-claim normally; any non-active
+	 * status write clears it too (the record then proves no live session).
+	 */
+	private readonly releasedLocalOwnershipIds = new Set<string>()
 	private disposed = false
 
 	/**
@@ -97,6 +165,13 @@ export class TaskHistoryStore {
 
 	/** Periodic reconciliation interval in milliseconds. */
 	private static readonly RECONCILE_INTERVAL_MS = 5 * 60 * 1000
+
+	/**
+	 * Maximum age (in ms) of a child's history file mtime for the child to be
+	 * considered live in another window. Kept at least as long as the reconcile
+	 * interval so live tasks with sparse writes are not misjudged as orphans.
+	 */
+	private static readonly LIVE_CHILD_MTIME_THRESHOLD_MS = 5 * 60 * 1000 // 5 minutes
 
 	constructor(globalStoragePath: string, options?: TaskHistoryStoreOptions) {
 		this.globalStoragePath = globalStoragePath
@@ -123,7 +198,7 @@ export class TaskHistoryStore {
 			// as an orphaned active child in the same startup pass.
 			const persistedActiveIds = this.getPersistedActiveIds()
 
-			// 2. Complete any two-record repair interrupted after its intent was durable.
+			// 2. Complete any child-half repair interrupted after its intent was durable.
 			try {
 				await this.replayDelegationRepairIntent()
 			} catch (error) {
@@ -251,6 +326,12 @@ export class TaskHistoryStore {
 
 		// Update in-memory cache with what was actually persisted
 		this.cache.set(written.id, written)
+		// Only runtime writes (not `skipTransitionCheck` administrative repairs)
+		// prove a live task session runs in THIS window; repairs go through the
+		// same core but must not suppress future orphan reconciliation.
+		if (!options.skipTransitionCheck) {
+			this.trackLocalSessionOwnership(written)
+		}
 
 		const all = this.getAll()
 
@@ -276,6 +357,8 @@ export class TaskHistoryStore {
 		return this.withLock(async () => {
 			this.cache.delete(taskId)
 			this.taskFileMtimes.delete(taskId)
+			this.locallyActiveTaskIds.delete(taskId)
+			this.releasedLocalOwnershipIds.delete(taskId)
 
 			// Remove per-task file (best-effort)
 			try {
@@ -304,6 +387,8 @@ export class TaskHistoryStore {
 			for (const taskId of taskIds) {
 				this.cache.delete(taskId)
 				this.taskFileMtimes.delete(taskId)
+				this.locallyActiveTaskIds.delete(taskId)
+				this.releasedLocalOwnershipIds.delete(taskId)
 
 				// Remove per-task file (best-effort)
 				try {
@@ -391,6 +476,10 @@ export class TaskHistoryStore {
 				if (!liveIds.has(taskId)) {
 					this.cache.delete(taskId)
 					this.taskFileMtimes.delete(taskId)
+					// The record is gone (e.g. removed by a peer window), so any
+					// local-ownership claim for it is stale too.
+					this.locallyActiveTaskIds.delete(taskId)
+					this.releasedLocalOwnershipIds.delete(taskId)
 				}
 			}
 		})
@@ -399,8 +488,9 @@ export class TaskHistoryStore {
 	/**
 	 * Repair delegation inconsistencies left by a crash mid-transition.
 	 *
-	 * Called once from `initialize()` after `reconcile()`. Runs inside `withLock` to
-	 * prevent interleaving with watcher-triggered reconcile() calls. Iterates until
+	 * Called from `initialize()` and from each periodic reconciliation tick,
+	 * always after `reconcile()`. Runs inside `withLock` to prevent interleaving
+	 * with watcher-triggered reconcile() calls. Iterates until
 	 * convergence so that one-level chained delegations visible at startup are resolved.
 	 *
 	 * Must NOT be called from within `withLock` — `withLock` is non-reentrant (promise
@@ -413,11 +503,28 @@ export class TaskHistoryStore {
 	 * - Parent `delegated` with no `awaitingChildId` → parent → `active` (invalid state)
 	 * - Parent `delegated`, child not found → parent → `active` (orphaned delegation)
 	 * - Parent `delegated`, child `completed` → parent → `active` (interrupted handoff)
-	 * - Parent `delegated`, child `active` → child → `interrupted`, parent → `active`
+	 * - Parent `delegated`, child `active` → child → `interrupted` (the parent keeps its link)
 	 *
 	 * A parent awaiting an `interrupted` or `delegated` child is left as-is — the child is
-	 * resumable. An `active` child is treated as orphaned during startup recovery because
-	 * no live task session exists to own it.
+	 * resumable. An `active` child is repaired only when it shows NO sign of life: its
+	 * history file mtime is stale (or absent) AND its persisted `lastActivityAt`
+	 * heartbeat is stale, per the shared `isDelegatedChildLive` predicate. An
+	 * unreadable mtime is NOT evidence of absence: `getChildFileMtimeMs` reports the
+	 * transient-stat sentinel (`now + threshold - 1`), which counts as life and defers
+	 * repair to a later tick. A child that is fresh on either signal is owned by a live
+	 * session (another window, or this one before a restart dropped its claim) and keeps
+	 * its delegation link.
+	 *
+	 * The active-child repair stops at the child half. It must not clear the parent's
+	 * `awaitingChildId`: the two records are written under separate per-file advisory
+	 * locks, so a peer window can resume the child between them, and the parent-only
+	 * under-lock guard cannot see that. Unlinking in that gap makes
+	 * `reopenParentFromDelegation` abort on the `awaitingChildId` mismatch, dropping the
+	 * resumed child's result. Leaving the parent `delegated` awaiting the now-interrupted
+	 * child is the state `cancelTask` already produces mid-session, and every
+	 * interleaving then routes: the child resumes and completes into the intact link, the
+	 * parent is re-delegated over an interrupted awaited child, the child record is
+	 * deleted (the missing-child branch above), or the user cancels.
 	 */
 	private async reconcileDelegationState(persistedActiveIds: ReadonlySet<string>): Promise<void> {
 		return this.withLock(() => this.reconcileDelegationStateCore(persistedActiveIds))
@@ -465,29 +572,109 @@ export class TaskHistoryStore {
 					const child = byId.get(item.awaitingChildId)
 
 					if (!child) {
-						await this.upsertCore(
-							{
-								...item,
-								status: "active",
-								awaitingChildId: undefined,
-								delegatedToId: undefined,
-							},
-							{ skipTransitionCheck: true },
-						)
+						// A brand-new delegation persists the parent as "delegated"
+						// BEFORE the child's first history write (and before the
+						// scheduler admits the child run). Repairing immediately in
+						// that gap severs a healthy link, so two grace signals apply:
+						//  1. an eager local ownership claim for the awaited child id
+						//     (installed by the delegating window) means a session in
+						//     THIS window is still starting the child — skip;
+						//  2. a freshly written parent record means the delegation
+						//     transition itself just landed (including from a peer
+						//     window this store cannot claim for) — skip while the
+						//     parent's own history file is fresh.
+						// A genuinely orphaned delegation outlives both signals: the
+						// claim is released with the session and the parent file goes
+						// quiet, so the next pass repairs it. An unreadable/absent
+						// parent mtime stays conservative and repairs immediately.
+						if (this.locallyActiveTaskIds.has(item.awaitingChildId)) {
+							console.warn(
+								`[TaskHistoryStore] Skipping repair for delegation ${item.id}: child ${item.awaitingChildId} claimed by a live session in this window`,
+							)
+							continue
+						}
+						const parentMtimeMs = await this.getChildFileMtimeMs(item.id)
+						if (
+							isLivenessSignalFresh(
+								parentMtimeMs,
+								Date.now(),
+								TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS,
+							)
+						) {
+							console.warn(
+								`[TaskHistoryStore] Skipping repair for delegation ${item.id}: parent record freshly written (child ${item.awaitingChildId} may still be starting)`,
+							)
+							continue
+						}
+						// The repair write re-validates under the parent's advisory lock
+						// (same cross-process guard as the active-child repair): the parent
+						// must still be delegated to the same child, and the child's file
+						// must still be absent — a peer that landed the child record in the
+						// gap wins. `item` is the cache-derived base; PARENT_REPAIR_DELTA
+						// supplies the lifecycle fields under the lock.
+						const childFilePath = await this.getTaskFilePath(item.awaitingChildId!)
+						let committedParent: HistoryItem
+						try {
+							committedParent = await this.writeAdministrativeRepair(
+								{ ...item, ...PARENT_REPAIR_DELTA },
+								PARENT_REPAIR_DELTA,
+								(existing) => this.assertMissingChildRepairPreconditions(existing, childFilePath, item),
+							)
+						} catch (error) {
+							if (!(error instanceof RepairAbortedError)) throw error
+							console.warn(
+								`[TaskHistoryStore] Aborting repair for delegation ${item.id}: repair raced a peer write`,
+							)
+							continue
+						}
+						this.cache.set(committedParent.id, committedParent)
+						if (this.onWrite) {
+							await this.onWrite(this.getAll())
+						}
 						console.warn(
 							`[TaskHistoryStore] Reconciled orphaned delegation: task ${item.id} → active (child ${item.awaitingChildId} not found)`,
 						)
 						repairsInThisPass++
 					} else if ((child.status ?? "active") === "active" && persistedActiveIds.has(child.id)) {
-						// An active child persisted across startup cannot have a live task session
-						// behind it. Mark it interrupted before releasing the parent's delegation
-						// link so the normal resume/re-delegate flow can take over. This is an
-						// administrative recovery, not a runtime delegation transition.
-						await this.repairActiveDelegation(item, child)
-						console.warn(
-							`[TaskHistoryStore] Reconciled orphaned active child: child ${child.id} → interrupted, task ${item.id} → active`,
+						// Cross-instance liveness guard: a child whose history file was written
+						// recently, or whose owning session heartbeats a fresh `lastActivityAt`,
+						// is owned by a live window — not a crash orphan.
+						const mtimeMs = await this.getChildFileMtimeMs(child.id)
+						const isLiveElsewhere = isDelegatedChildLive(
+							child,
+							Date.now(),
+							TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS,
+							mtimeMs,
 						)
-						repairsInThisPass++
+						if (isLiveElsewhere) {
+							console.warn(
+								`[TaskHistoryStore] Skipping repair for live child ${child.id} ` +
+									`(${this.describeLivenessSignal(child, mtimeMs)}) — owned by another window`,
+							)
+							continue
+						}
+						// Re-check local ownership after the async stat await: the
+						// persistedActiveIds snapshot predates it, and ClineProvider can
+						// claim the child for a live session in THIS window while the probe
+						// was in flight, so the child is no longer a crash orphan.
+						if (this.locallyActiveTaskIds.has(child.id)) {
+							console.warn(
+								`[TaskHistoryStore] Skipping repair for live child ${child.id} ` +
+									`(claimed by this window during reconciliation)`,
+							)
+							continue
+						}
+						// An active child persisted across startup cannot have a live task session
+						// behind it. Mark it interrupted so the normal resume/re-delegate flow can
+						// take over, leaving the parent delegated with its link intact. This is an
+						// administrative recovery, not a runtime delegation transition.
+						const repaired = await this.repairActiveDelegation(item, child)
+						if (repaired) {
+							console.warn(
+								`[TaskHistoryStore] Reconciled orphaned active child: child ${child.id} → interrupted, task ${item.id} stays delegated`,
+							)
+							repairsInThisPass++
+						}
 					} else if (child.status === "completed") {
 						await this.upsertCore(
 							{
@@ -523,10 +710,146 @@ export class TaskHistoryStore {
 	}
 
 	/**
+	 * Maintain the set of task ids whose live session runs in THIS window.
+	 * A record this store persisted as active belongs to a task running here,
+	 * so the periodic delegation pass must never treat it as a crash orphan —
+	 * its history-file mtime can legitimately go quiet for minutes while the
+	 * task streams a long model turn or waits on a user prompt. Any non-active
+	 * status write ends that ownership.
+	 */
+	private trackLocalSessionOwnership(written: HistoryItem): void {
+		if ((written.status ?? "active") !== "active") {
+			this.locallyActiveTaskIds.delete(written.id)
+			this.releasedLocalOwnershipIds.delete(written.id)
+			return
+		}
+		// A released id must not be re-claimed by late teardown writes from its disposed
+		// session; only an explicit markLocallyActive clears the release.
+		if (!this.releasedLocalOwnershipIds.has(written.id)) {
+			this.locallyActiveTaskIds.add(written.id)
+		}
+	}
+
+	/**
+	 * Mark a task id as owned by a live session in THIS window before its first
+	 * runtime write settles. Resumed tasks only enter `locallyActiveTaskIds` via
+	 * `trackLocalSessionOwnership` when Task.run() persists an active item; the
+	 * async gap before that write lets the periodic delegation pass see the task
+	 * as a quiet, unowned disk record and repair it mid-resume. Registering the
+	 * id eagerly closes that window; a later non-active write still removes it.
+	 * The eager claim also clears any prior ownership release, so a resumed or
+	 * re-delegated session re-claims an id its predecessor released at dispose.
+	 */
+	public markLocallyActive(taskId: string): void {
+		this.releasedLocalOwnershipIds.delete(taskId)
+		this.locallyActiveTaskIds.add(taskId)
+	}
+
+	/**
+	 * Release a task id claimed by `markLocallyActive` when its session did not
+	 * start (preparation failure, scheduler rejection, startTask disabled) or
+	 * has been torn down (Task.dispose). Re-running reconciliation for the id
+	 * is safe: without local ownership the periodic pass treats it like any
+	 * other persisted record. The release is remembered so a late active-status
+	 * write from the dead session cannot ghost-reclaim the id.
+	 */
+	public markLocallyInactive(taskId: string): void {
+		this.locallyActiveTaskIds.delete(taskId)
+		this.releasedLocalOwnershipIds.add(taskId)
+	}
+
+	/**
+	 * Persist a liveness heartbeat for a live task session: bump the record's
+	 * `lastActivityAt` so a delegated child quiet for minutes while running a
+	 * long tool call, streaming a long turn, or awaiting a user ask is still
+	 * recognized as alive by reconciliation in another window or after an
+	 * extension-host restart.
+	 *
+	 * Callers are expected to throttle (see Task's liveness heartbeat, one
+	 * beat per minute over the whole active lifetime). The write is scoped to
+	 * the periodic refresh path: a record whose cached status is not active
+	 * (or is unknown) writes NOTHING — a completed, interrupted, or delegated
+	 * task must not have history_item.json and globalState rewritten every
+	 * minute while it lingers before disposal. Under the per-file advisory
+	 * lock the merge re-validates the disk record and NEVER recreates a file
+	 * another host deleted (a heartbeat is a refresh, not a creation — the
+	 * normal task-start write path still creates files). Best-effort by
+	 * design: a missing record, a non-active status, or a transient write
+	 * failure never rejects — a heartbeat must never disturb the turn it
+	 * reports on.
+	 */
+	public async recordTaskActivity(taskId: string, at: number = Date.now()): Promise<void> {
+		try {
+			const cached = this.cache.get(taskId)
+			if (!cached || (cached.status ?? "active") !== "active") return
+			await this.withLock(async () => {
+				const filePath = await this.getTaskFilePath(taskId)
+				let written: HistoryItem | undefined
+				try {
+					await safeWriteJson(filePath, cached, {
+						merge: (existing) => {
+							if (!existing || typeof existing !== "object" || !("id" in existing)) {
+								// Confirmed absent under the lock: a peer deleted the
+								// record. A heartbeat must never recreate it — that
+								// ghost would carry fresh liveness signals and
+								// suppress orphan repair. Drop the stale cache and
+								// claim with it.
+								this.cache.delete(taskId)
+								this.locallyActiveTaskIds.delete(taskId)
+								this.releasedLocalOwnershipIds.delete(taskId)
+								throw new HeartbeatSkipError(`record ${taskId} deleted by another host`)
+							}
+							const disk = existing as HistoryItem
+							if ((disk.status ?? "active") !== "active") {
+								this.cache.set(taskId, disk)
+								throw new HeartbeatSkipError(`record ${taskId} no longer active on disk`)
+							}
+							if (this.releasedLocalOwnershipIds.has(taskId)) {
+								throw new HeartbeatSkipError(`record ${taskId} ownership released`)
+							}
+							if (disk.lastActivityAt === at) {
+								this.cache.set(taskId, disk)
+								throw new HeartbeatSkipError(`record ${taskId} already at ${at}`)
+							}
+							written = { ...disk, lastActivityAt: at }
+							return written
+						},
+					})
+				} catch (error) {
+					if (!(error instanceof HeartbeatSkipError)) throw error
+					// Only the deleted-record case is worth a log line; the other skips are expected.
+					if (error.message.includes("deleted by another host")) {
+						console.warn(`[TaskHistoryStore] Skipping liveness heartbeat for ${taskId}: ${error.message}`)
+					}
+					return
+				}
+				if (written) {
+					this.cache.set(taskId, written)
+					if (this.onWrite) await this.onWrite(this.getAll())
+				}
+			})
+		} catch (error) {
+			console.warn(`[TaskHistoryStore] Failed to record activity heartbeat for ${taskId}:`, error)
+		}
+	}
+
+	/**
 	 * Replay the durable active-child repair intent, if one was left by a crash.
-	 * The expected fields are guards: an intent may update only the missing side
-	 * when the other side is already at its target, or when both records still
-	 * describe the original delegated handoff.
+	 * The expected fields are guards: an intent may update the child only when it
+	 * is still at its expected state, or when it already reached the target.
+	 *
+	 * The repair is the child half alone. The parent is never written: it must
+	 * still be delegated to the same child for the intent to be meaningful, and an
+	 * intent whose parent no longer matches is stale (the old code unlinked it, or
+	 * a peer completed/re-delegated it) and gets quarantined. Because the parent is
+	 * untouched, "parent still delegated with the link intact" IS the completed
+	 * state, so a crash after the child write leaves nothing for the replay to
+	 * finish beyond removing the journal.
+	 *
+	 * Before writing the child, the same cross-window liveness guard as
+	 * `reconcileDelegationStateCore` applies: a child whose history file was
+	 * touched recently belongs to another live window, so the stale intent is
+	 * quarantined instead of replayed.
 	 *
 	 * This method acquires the store's non-reentrant promise-chain lock. It must be
 	 * called outside an existing `withLock` callback; locked callers must use the
@@ -550,33 +873,57 @@ export class TaskHistoryStore {
 			}
 
 			const childAtTarget = child.status === intent.target.childStatus
-			const parentMatchesTargetState =
-				parent.status === intent.target.parentStatus &&
-				parent.awaitingChildId === undefined &&
-				parent.delegatedToId === undefined
 			const childMatchesExpected = this.matchesDelegationRepairChildPreconditions(intent, child)
+			// The parent is never written, so "matches its expected delegation" is the
+			// terminal condition: the link the repair exists to preserve is still there.
 			const parentMatchesExpected = this.matchesDelegationRepairParentPreconditions(intent, parent)
 
-			if ((!childAtTarget && !childMatchesExpected) || (!parentMatchesTargetState && !parentMatchesExpected)) {
+			if ((!childAtTarget && !childMatchesExpected) || !parentMatchesExpected) {
 				await this.quarantineDelegationRepairIntent(intent, "task state no longer matches its guards")
 				return
 			}
 
-			const repairedChild = childAtTarget ? child : { ...child, status: intent.target.childStatus }
-			const repairedParent = parentMatchesTargetState
-				? parent
-				: {
-						...parent,
-						status: intent.target.parentStatus,
-						awaitingChildId: undefined,
-						delegatedToId: undefined,
+			// Cross-instance liveness guard (same convention as reconcileDelegationStateCore): if this window crashed mid-repair and another window restarted the same child, the child's history file is being actively persisted there. Replaying the stale intent would overwrite the live child as "interrupted", so quarantine it instead. Only enforced when the replay would actually write the child record: a child already at its target needs no write. A fresh mtime OR a fresh `lastActivityAt` heartbeat quarantines the intent; a transient stat failure reports the near-future sentinel (see `getChildFileMtimeMs`), which also counts as life and lets a later tick retry.
+			if (!childAtTarget) {
+				const mtimeMs = await this.getChildFileMtimeMs(child.id)
+				if (isDelegatedChildLive(child, Date.now(), TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS, mtimeMs)) {
+					await this.quarantineDelegationRepairIntent(
+						intent,
+						`child live in another window (${this.describeLivenessSignal(child, mtimeMs)})`,
+					)
+					return
+				}
+			}
+
+			// Same guarded write as the in-pass repair: preconditions re-validate
+			// under the child's advisory lock and again in `preCommit` right before
+			// the commit, so a peer write or a local claim aborts the stale replay
+			// (the journal stays for a later pass). Cache publication uses the
+			// committed record, so a child already at target keeps a peer's write.
+			let committedChild: HistoryItem = child
+			if (!childAtTarget) {
+				try {
+					committedChild = await this.writeAdministrativeRepair(
+						{ ...child, ...CHILD_REPAIR_DELTA },
+						CHILD_REPAIR_DELTA,
+						(existing, filePath) => this.assertChildRepairPreconditions(existing, filePath, child.id),
+					)
+				} catch (error) {
+					if (error instanceof RepairAbortedError) {
+						// A peer changed the record between the pre-write liveness
+						// check and the lock. The replay is stale: quarantine the
+						// intent rather than stomping the peer's write.
+						await this.quarantineDelegationRepairIntent(
+							intent,
+							`repair raced a peer write (${error.message})`,
+						)
+						return
 					}
+					throw error
+				}
+			}
 
-			if (!childAtTarget) await this.writeTaskFile(repairedChild)
-			if (!parentMatchesTargetState) await this.writeTaskFile(repairedParent)
-
-			this.cache.set(repairedChild.id, repairedChild)
-			this.cache.set(repairedParent.id, repairedParent)
+			this.cache.set(committedChild.id, committedChild)
 
 			// The journal is retained until the write-through callback succeeds.
 			if (this.onWrite) {
@@ -588,9 +935,12 @@ export class TaskHistoryStore {
 
 	/**
 	 * Start and complete a guarded active-child repair while already holding the
-	 * store lock. The intent is durable before either task file is touched.
+	 * store lock. The intent is durable before the task file is touched.
+	 * Returns false when a last-moment liveness re-check (see
+	 * `applyDelegationRepairIntent`) shows the child is alive again — no write
+	 * happened and the durable intent is removed.
 	 */
-	private async repairActiveDelegation(parent: HistoryItem, child: HistoryItem): Promise<void> {
+	private async repairActiveDelegation(parent: HistoryItem, child: HistoryItem): Promise<boolean> {
 		const intent: DelegationRepairIntent = {
 			version: 1,
 			operationId: crypto.randomUUID(),
@@ -608,36 +958,208 @@ export class TaskHistoryStore {
 					rootTaskId: child.rootTaskId,
 				},
 			},
-			target: { childStatus: "interrupted", parentStatus: "active" },
+			target: { childStatus: "interrupted" },
 		}
 
 		await this.writeDelegationRepairIntent(intent)
-		await this.applyDelegationRepairIntent(intent, child, parent)
+		return this.applyDelegationRepairIntent(intent, child)
 	}
 
-	private async applyDelegationRepairIntent(
-		intent: DelegationRepairIntent,
-		child: HistoryItem,
-		parent: HistoryItem,
-	): Promise<void> {
-		const repairedChild = { ...child, status: intent.target.childStatus }
-		const repairedParent = {
-			...parent,
-			status: intent.target.parentStatus,
-			awaitingChildId: undefined,
-			delegatedToId: undefined,
+	private async applyDelegationRepairIntent(intent: DelegationRepairIntent, child: HistoryItem): Promise<boolean> {
+		// Pre-write liveness re-check (cheap early-out): the repair decision at the call
+		// site came from an unlocked stat, and a peer window can resume the child while
+		// the intent journal was being written.
+		if (this.locallyActiveTaskIds.has(child.id)) {
+			await this.removeDelegationRepairIntent()
+			console.warn(
+				`[TaskHistoryStore] Aborting repair for child ${child.id}: claimed by a live session in this window`,
+			)
+			return false
+		}
+		const mtimeMs = await this.getChildFileMtimeMs(child.id)
+		if (isDelegatedChildLive(child, Date.now(), TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS, mtimeMs)) {
+			await this.removeDelegationRepairIntent()
+			console.warn(
+				`[TaskHistoryStore] Aborting repair for live child ${child.id} (${this.describeLivenessSignal(child, mtimeMs)}) — owned by another window`,
+			)
+			return false
 		}
 
-		await this.writeTaskFile(repairedChild)
-		await this.writeTaskFile(repairedParent)
+		// The child write carries an under-lock re-validation: the merge callback
+		// runs inside the child file's advisory lock (the same cross-process guard
+		// pattern as clearPendingActionIfMatching), so a peer write that lands in
+		// the gap before the lock is observed and the stale repair aborts instead of
+		// stomping it. The parent is deliberately never written (see
+		// `reconcileDelegationStateCore`): its delegation link is what keeps a
+		// resumed child's result routable, so the repair publishes the parent
+		// unchanged. The delta supplies the lifecycle field under the lock; cache
+		// publication uses the committed record so peer-written fields merged there
+		// stay visible in this window.
+		let committedChild: HistoryItem
+		try {
+			committedChild = await this.writeAdministrativeRepair(
+				{ ...child, ...CHILD_REPAIR_DELTA },
+				CHILD_REPAIR_DELTA,
+				(existing, filePath) => this.assertChildRepairPreconditions(existing, filePath, child.id),
+			)
+		} catch (error) {
+			if (!(error instanceof RepairAbortedError)) throw error
+			console.warn(`[TaskHistoryStore] Aborting repair for child ${child.id}: ${error.message}`)
+			return false
+		}
 
-		this.cache.set(repairedChild.id, repairedChild)
-		this.cache.set(repairedParent.id, repairedParent)
+		this.cache.set(committedChild.id, committedChild)
 
 		if (this.onWrite) {
 			await this.onWrite(this.getAll())
 		}
 		await this.removeDelegationRepairIntent()
+		return true
+	}
+
+	/**
+	 * Write one administrative repair record with its precondition re-validated
+	 * UNDER the target file's advisory lock: the `guard` runs inside
+	 * safeWriteJson's merge callback, which reads the current disk record after
+	 * the lock is acquired. Throwing `RepairAbortedError` aborts the write
+	 * (nothing is committed); any other error propagates.
+	 *
+	 * `delta` carries only the lifecycle fields the repair owns. It is applied
+	 * to the record read under the lock, so fields a peer wrote while this
+	 * store's cache was stale survive the repair. Returns the record actually
+	 * committed, which callers publish to the cache instead of their own
+	 * cache-derived copy; publishing the copy would re-introduce the stale
+	 * fields in this window even though the disk write merged them correctly.
+	 *
+	 * Every repair write is an administrative one: it must never interrupt a
+	 * session that claimed the record while the repair was deciding. The store
+	 * lock does not cover `markLocallyActive`, so the ownership predicate runs
+	 * again in safeWriteJson's `preCommit`, synchronously and immediately before
+	 * the commit rename. That window is the only one that can still change: the
+	 * merge above already ran under the target's advisory lock, so no peer can
+	 * write, and only an in-process claim can land.
+	 *
+	 * What an abort leaves behind depends on the half. A claim on the child
+	 * aborts with NOTHING committed, so the live session keeps its record, its
+	 * claim, and its delegation link. A claim on the parent aborts only the
+	 * parent half, after the child half already committed as `interrupted`: the
+	 * delegation link survives, which is what keeps the resumed parent's session
+	 * recoverable. The active-child repair no longer writes a parent half at all
+	 * (see `reconcileDelegationStateCore`); only the missing-child repair does.
+	 */
+	private async writeAdministrativeRepair(
+		target: HistoryItem,
+		delta: Partial<HistoryItem>,
+		guard: (existing: unknown, filePath: string) => void,
+	): Promise<HistoryItem> {
+		const filePath = await this.getTaskFilePath(target.id)
+		const merge = mergeWithDisk(delta)
+		let committed: HistoryItem = target
+		let locked: unknown
+		await safeWriteJson(filePath, target, {
+			merge: (existing, incoming) => {
+				guard(existing, filePath)
+				locked = existing
+				return (committed = merge(existing, incoming) as HistoryItem)
+			},
+			preCommit: () => {
+				guard(locked, filePath)
+				this.assertNotClaimedLocally(target.id)
+			},
+		})
+		// No cache update here: multi-file repairs must publish cache state
+		// atomically after ALL writes commit (see applyDelegationRepairIntent).
+		return committed
+	}
+
+	/**
+	 * Under-lock preconditions for the child half of an orphan repair. A peer
+	 * write in the gap before the advisory lock is observed here and aborts:
+	 * - no record under the lock means a peer deleted the child after this
+	 *   store's cache snapshot, so the repair has no live record to interrupt
+	 *   and would otherwise resurrect the deleted child from its stale cache
+	 *   copy through `mergeHistoryDelta`;
+	 * - a child record whose status is no longer active was transitioned by a
+	 *   peer (resume/completion/abandonment);
+	 * - a fresh child mtime means a peer is persisting the child again;
+	 * - an in-window ownership claim landed mid-repair.
+	 * An unreadable mtime PROCEEDS, matching the established
+	 * conservative-repair contract (undefined mtime is not evidence of life).
+	 */
+	private assertChildRepairPreconditions(existing: unknown, filePath: string, childId: string): void {
+		if (!existing || typeof existing !== "object" || !("id" in existing)) {
+			throw new RepairAbortedError("child record deleted under lock")
+		}
+		const disk = existing as HistoryItem
+		if ((disk.status ?? "active") !== "active") {
+			throw new RepairAbortedError(`child status already ${disk.status ?? "active"}`)
+		}
+		const mtimeMs = this.statChildFileMtimeMsSync(filePath)
+		if (
+			mtimeMs !== undefined &&
+			isLivenessSignalFresh(mtimeMs, Date.now(), TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS)
+		) {
+			throw new RepairAbortedError("child mtime became fresh under lock (peer resumed)")
+		}
+		this.assertNotClaimedLocally(childId)
+	}
+
+	/**
+	 * The in-window ownership predicate, shared by the under-lock guard and
+	 * safeWriteJson's `preCommit`. A claim landing after the guard but before the
+	 * commit must abort the write, not be compensated for after it.
+	 */
+	private assertNotClaimedLocally(taskId: string): void {
+		if (this.locallyActiveTaskIds.has(taskId)) {
+			throw new RepairAbortedError(`record ${taskId} claimed by this window during repair`)
+		}
+	}
+
+	/**
+	 * Synchronous mtime read used by the under-lock repair guards. Extracted so
+	 * tests can inject the same deterministic ages as the async
+	 * `getChildFileMtimeMs` probe. Returns undefined when the file is absent or
+	 * unreadable; the child guard treats that as "no mtime signal" and still
+	 * requires the locked disk record to exist, while the parent guard uses it
+	 * only to prove the awaited child's file has not appeared.
+	 */
+	private statChildFileMtimeMsSync(filePath: string): number | undefined {
+		try {
+			return fsSync.statSync(filePath).mtimeMs
+		} catch {
+			return undefined
+		}
+	}
+
+	/**
+	 * Under-lock preconditions for the parent half of the missing-child repair:
+	 * the record must still exist and still be delegated to the same child (a
+	 * peer may have completed, abandoned, or re-delegated it in the gap).
+	 *
+	 * Only the missing-child repair writes a parent half. The active-child repair
+	 * deliberately does not, so this guard no longer has a second caller.
+	 */
+	private assertParentRepairPreconditions(existing: unknown, childId: string): void {
+		const disk = existing as HistoryItem | undefined
+		if (!disk || typeof disk !== "object" || !("id" in disk)) {
+			throw new RepairAbortedError("parent record deleted under lock")
+		}
+		if (disk.status !== "delegated" || disk.awaitingChildId !== childId) {
+			throw new RepairAbortedError(`parent no longer delegated to child (status ${disk.status ?? "active"})`)
+		}
+	}
+
+	/**
+	 * Under-lock preconditions for the missing-child repair: the parent must
+	 * still be delegated to the same (still absent) child. A child file that
+	 * appears under the lock means a peer landed the record in the gap — the
+	 * awaited child now exists, so severing the link would orphan a live child.
+	 */
+	private assertMissingChildRepairPreconditions(existing: unknown, childFilePath: string, item: HistoryItem): void {
+		this.assertParentRepairPreconditions(existing, item.awaitingChildId!)
+		if (this.statChildFileMtimeMsSync(childFilePath) !== undefined) {
+			throw new RepairAbortedError("child record appeared under lock (peer landed it)")
+		}
 	}
 
 	private matchesDelegationRepairParentPreconditions(intent: DelegationRepairIntent, parent: HistoryItem): boolean {
@@ -709,8 +1231,7 @@ export class TaskHistoryStore {
 			(expectedChild.parentTaskId === undefined || typeof expectedChild.parentTaskId === "string") &&
 			(expectedChild.rootTaskId === undefined || typeof expectedChild.rootTaskId === "string") &&
 			!!targetRecord &&
-			targetRecord.childStatus === "interrupted" &&
-			targetRecord.parentStatus === "active"
+			targetRecord.childStatus === "interrupted"
 		)
 	}
 
@@ -766,19 +1287,40 @@ export class TaskHistoryStore {
 
 	/**
 	 * Invalidate a single task's cache entry (re-read from disk on next access).
+	 * Only a CONFIRMED absence (ENOENT) drops the cache entry together with any
+	 * local ownership claim: a session cannot own a record that no longer
+	 * exists. Transient read errors (EBUSY/EACCES/...) and malformed content
+	 * keep both the cache entry and the claim — readTaskFile maps every failure
+	 * to null, but a live session's ownership must not be dropped because ONE
+	 * locked or corrupt read could not prove absence. This mirrors the
+	 * cross-instance convention in `getChildFileMtimeMs` (transient stat
+	 * failure = evidence of life).
 	 */
 	async invalidate(taskId: string): Promise<void> {
 		return this.withLock(async () => {
+			let raw: string
 			try {
-				const item = await this.readTaskFile(taskId)
-				if (item) {
-					this.cache.set(taskId, item)
-				} else {
+				raw = await fs.readFile(await this.getTaskFilePath(taskId), "utf8")
+			} catch (error) {
+				// Only confirmed absence (ENOENT) proves the record is gone, so only that
+				// drops the cache entry and the ownership claim; a transient read error
+				// keeps both and the next access retries.
+				if (this.isFileNotFoundError(error)) {
 					this.cache.delete(taskId)
+					this.taskFileMtimes.delete(taskId)
+					this.locallyActiveTaskIds.delete(taskId)
+					this.releasedLocalOwnershipIds.delete(taskId)
 				}
-				this.taskFileMtimes.delete(taskId)
+				return
+			}
+			try {
+				const parsed: unknown = JSON.parse(raw)
+				if (parsed && typeof parsed === "object" && "id" in parsed && (parsed as HistoryItem).id) {
+					this.cache.set(taskId, parsed as HistoryItem)
+					this.taskFileMtimes.delete(taskId)
+				}
 			} catch {
-				this.cache.delete(taskId)
+				// Malformed content: keep the cache entry and the claim (see above).
 			}
 		})
 	}
@@ -949,6 +1491,13 @@ export class TaskHistoryStore {
 	/**
 	 * Start periodic reconciliation as a defensive fallback for platforms
 	 * where fs.watch is unreliable.
+	 *
+	 * Each tick refreshes disk→cache via `reconcile()` and then re-runs the same
+	 * delegation repair `initialize()` performs, so a child that skipped repair
+	 * at startup (recent mtime = live in another window) but crashes afterwards
+	 * is caught within one interval instead of waiting for the next extension
+	 * host restart. Intent replay is intentionally NOT part of the tick: the
+	 * durable repair journal is replayed at startup by design.
 	 */
 	private startPeriodicReconciliation(): void {
 		if (this.disposed) {
@@ -964,8 +1513,50 @@ export class TaskHistoryStore {
 			} catch (err) {
 				console.error("[TaskHistoryStore] Periodic reconciliation failed:", err)
 			}
+			try {
+				await this.runPeriodicDelegationReconciliation()
+			} catch (err) {
+				console.error("[TaskHistoryStore] Periodic delegation reconciliation failed:", err)
+			}
 			this.startPeriodicReconciliation()
 		}, TaskHistoryStore.RECONCILE_INTERVAL_MS)
+	}
+
+	/**
+	 * One delegation-reconciliation pass for a periodic tick.
+	 *
+	 * Mirrors the `initialize()` sequence: capture which active task ids exist
+	 * in persisted state (the cache was just refreshed from disk by
+	 * `reconcile()` and no repair has mutated statuses yet), then run the
+	 * reconciliation against that snapshot. The child-mtime liveness guard
+	 * inside `reconcileDelegationStateCore` protects children actively written
+	 * by another window, so ticking is safe for multi-window workspaces.
+	 *
+	 * One mid-session-only refinement over the startup snapshot: ids this
+	 * window itself persisted as active are excluded. At startup no local
+	 * sessions exist, so an active child on disk implies a previous host
+	 * crashed; mid-session, an active child that THIS store wrote belongs to a
+	 * live task here, and a quiet-but-live mtime (long model turn, user
+	 * deliberating over an ask) must not cause it to be repaired away from
+	 * under its own runner. Genuine crashes of this window take the tick with
+	 * them and are handled by the next startup pass instead.
+	 *
+	 * `reconcileDelegationState` acquires the non-reentrant `withLock` chain
+	 * itself (same entry point `initialize()` uses); this method never holds
+	 * the lock. The running flag only guards snapshot→pass adjacency and skips
+	 * (rather than queues) a tick whose previous pass is still in flight.
+	 */
+	private async runPeriodicDelegationReconciliation(): Promise<void> {
+		if (this.disposed || this.delegationTickRunning) return
+		this.delegationTickRunning = true
+		const persistedActiveIds = new Set(
+			Array.from(this.getPersistedActiveIds()).filter((id) => !this.locallyActiveTaskIds.has(id)),
+		)
+		try {
+			await this.reconcileDelegationState(persistedActiveIds)
+		} finally {
+			this.delegationTickRunning = false
+		}
 	}
 
 	// ────────────────────────────── Atomic read-modify-write ──────────────────────────────
@@ -1058,12 +1649,15 @@ export class TaskHistoryStore {
 				// First record is committed on disk. Update cache so it
 				// reflects disk state before propagating the error.
 				this.cache.set(firstId, writtenFirst)
+				this.trackLocalSessionOwnership(writtenFirst)
 				throw error
 			}
 
 			// Both disk writes succeeded — now update the cache.
 			this.cache.set(firstId, writtenFirst)
 			this.cache.set(secondId, writtenSecond)
+			this.trackLocalSessionOwnership(writtenFirst)
+			this.trackLocalSessionOwnership(writtenSecond)
 
 			const all = this.getAll()
 			if (this.onWrite) {
@@ -1114,6 +1708,8 @@ export class TaskHistoryStore {
 							missingDiskRecord = true
 							this.cache.delete(taskId)
 							this.taskFileMtimes.delete(taskId)
+							this.locallyActiveTaskIds.delete(taskId)
+							this.releasedLocalOwnershipIds.delete(taskId)
 							throw new Error(
 								`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} not found in cache`,
 							)
@@ -1122,12 +1718,15 @@ export class TaskHistoryStore {
 						// task-history schema (#1726). Settlement must not
 						// rewrite malformed data and must not clear the action
 						// on a record persisted under a different task ID, so
-						// both cases drop the stale cache entry and fail
-						// closed without touching the disk record.
+						// both cases drop the stale cache entry (and any local
+						// ownership claim — the record no longer exists) and
+						// fail closed without touching the disk record.
 						const parsed = historyItemSchema.safeParse(existing)
 						if (!parsed.success) {
 							this.cache.delete(taskId)
 							this.taskFileMtimes.delete(taskId)
+							this.locallyActiveTaskIds.delete(taskId)
+							this.releasedLocalOwnershipIds.delete(taskId)
 							throw new Error(
 								`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} has an invalid disk record`,
 							)
@@ -1135,6 +1734,8 @@ export class TaskHistoryStore {
 						if (parsed.data.id !== taskId) {
 							this.cache.delete(taskId)
 							this.taskFileMtimes.delete(taskId)
+							this.locallyActiveTaskIds.delete(taskId)
+							this.releasedLocalOwnershipIds.delete(taskId)
 							throw new Error(
 								`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} has a disk record with mismatched id ${parsed.data.id}`,
 							)
@@ -1191,5 +1792,60 @@ export class TaskHistoryStore {
 	private async getTaskFilePath(taskId: string): Promise<string> {
 		const tasksDir = await this.getTasksDir()
 		return path.join(tasksDir, taskId, GlobalFileNames.historyItem)
+	}
+
+	/**
+	 * Returns the mtime (ms epoch) of the child's history_item.json, or undefined
+	 * only when the file is genuinely absent (ENOENT with no fresh advisory lock).
+	 * A recent mtime means another live extension host is actively persisting this
+	 * child, so startup repair must not treat it as a crash orphan. Any OTHER stat
+	 * failure (EMFILE, EACCES, EIO, ...) is not evidence of absence: the child is
+	 * reported with a future mtime so every liveness guard holds, repair is
+	 * skipped, and a later reconciliation tick retries instead.
+	 *
+	 * The sentinel sits one millisecond INSIDE the bounded future window that
+	 * `isLivenessSignalFresh` accepts. Exactly `now + threshold` would be
+	 * rejected by the strict `<` bound, and anything further ahead is
+	 * indistinguishable from a clock-rollback record that must not count as
+	 * life, so the sentinel stays as close to the boundary as the bound allows.
+	 */
+	private async getChildFileMtimeMs(childId: string): Promise<number | undefined> {
+		const liveMarker = Date.now() + TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS - 1
+		try {
+			return (await fs.stat(await this.getTaskFilePath(childId))).mtimeMs
+		} catch (error) {
+			// Any stat failure other than ENOENT is not evidence of absence: report a
+			// threshold-shifted future mtime so every liveness guard holds and a later
+			// tick retries.
+			if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") return liveMarker
+			// ENOENT can still fall inside safeWriteJson's rename window, which holds the
+			// advisory lock: a fresh .lock file means a write is in progress, so treat the
+			// child as live (same convention as reconcile()).
+			try {
+				const lockStat = await fs.stat((await this.getTaskFilePath(childId)) + ".lock")
+				if (Date.now() - lockStat.mtimeMs < LOCK_STALE_MS) return liveMarker
+			} catch {
+				// No lock file — the record is genuinely absent.
+			}
+			return undefined
+		}
+	}
+
+	/**
+	 * Renders the signal that keeps a delegated child from being repaired as a
+	 * crash orphan: the freshest of the history-file mtime and the persisted
+	 * `lastActivityAt` heartbeat. Called only when `isDelegatedChildLive` held,
+	 * so at least one signal is fresh; the mtime label wins when the file mtime
+	 * is itself fresh, preserving the historical skip-log shape.
+	 */
+	private describeLivenessSignal(child: HistoryItem, mtimeMs: number | undefined): string {
+		const now = Date.now()
+		if (
+			mtimeMs !== undefined &&
+			isLivenessSignalFresh(mtimeMs, now, TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS)
+		) {
+			return `mtime ${Math.round((now - mtimeMs) / 1000)}s ago`
+		}
+		return `heartbeat ${Math.round((now - (child.lastActivityAt ?? 0)) / 1000)}s ago`
 	}
 }
