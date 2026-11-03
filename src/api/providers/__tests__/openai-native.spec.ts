@@ -461,7 +461,7 @@ describe("OpenAiNativeHandler", () => {
 			}).rejects.toThrow("OpenAI service error")
 		})
 
-		it("should reject with AbortError when the external abortSignal is already aborted (fallback path)", async () => {
+		it("does not start the fallback POST when the abort signal is already aborted", async () => {
 			const mockFetch = vitest.fn().mockImplementation((_url: string, options?: RequestInit) => {
 				if (options?.signal?.aborted) {
 					const error = new Error("This operation was aborted")
@@ -484,6 +484,9 @@ describe("OpenAiNativeHandler", () => {
 			)
 
 			await expect(collectStream(stream)).rejects.toMatchObject({ name: "AbortError" })
+			// The pre-aborted signal must be honoured before the fallback request is attempted:
+			// no POST is issued at all, and the caller sees the provider's abort contract.
+			expect(mockFetch).not.toHaveBeenCalled()
 		})
 
 		it("should abort the fallback fetch when the external abortSignal is aborted mid-request", async () => {
