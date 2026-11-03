@@ -214,18 +214,21 @@ jobs:
                       // budget. Sweep triggers already hold the full open list, so the map costs them
                       // no extra read.
                       //
-                      // The map only describes which commits are open pull request heads, so it can
-                      // only change when a pull request's head is (re)published: opened, reopened, or
-                      // synchronize. Reviews, comments, workflow_run completions, and manual dispatch
-                      // cannot change it, so they skip the paginated read entirely and pass a sentinel
-                      // that tells shards the label was not evaluated. Reading it on every direct event
-                      // would add one full open-PR listing to each review and status-comment run.
+                      // The map describes which commits are open pull request heads. It can change when a
+                      // head is (re)published (opened, reopened, synchronize), and a labeled/unlabeled
+                      // run is included for a different reason: it shares this PR's concurrency group,
+                      // so it can replace a pending synchronize run for the same PR. A replacement run
+                      // that skipped the map would skip the stacked label for the new head and leave it
+                      // stale until the hourly sweep. Reviews, comments, workflow_run completions, and
+                      // manual dispatch cannot change it (and cannot displace a synchronize run in a way
+                      // that leaves the label stale), so they skip the paginated read entirely and pass
+                      // a sentinel that tells shards the label was not evaluated.
                       //
                       // An empty output means the map was unavailable this run; shards then skip the
                       // stacked label rather than deciding from an empty map.
                       const stackMayHaveChanged =
                         context.eventName === 'pull_request_target' &&
-                        ['opened', 'reopened', 'synchronize'].includes(context.payload.action);
+                        ['opened', 'reopened', 'synchronize', 'labeled', 'unlabeled'].includes(context.payload.action);
                       let openPrHeadsOutput = '';
                       if (prNumbers.length > 0 && (openPrsCache || stackMayHaveChanged)) {
                         try {
@@ -360,7 +363,7 @@ jobs:
                         {
                           name: 'stacked',
                           color: 'c2c2c2',
-                          description: 'Head commit sits on another open PR, so its diff is only this unit',
+                          description: 'Head commit also sits on another open PR (detected from the commit graph)',
                         },
                       ];
                       const guideMarker = '<!-- zoo-code-pr-review-process -->';

@@ -1082,7 +1082,7 @@ describe("PR review-state workflow", () => {
 			expect.objectContaining({
 				name: "stacked",
 				color: "c2c2c2",
-				description: "Head commit sits on another open PR, so its diff is only this unit",
+				description: "Head commit also sits on another open PR (detected from the commit graph)",
 			}),
 		)
 	})
@@ -2713,8 +2713,11 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 
-	it.each(["opened", "reopened", "synchronize"])(
-		"reads the head map on a %s event, which can publish a head commit",
+	// labeled/unlabeled are here because such a run shares the PR's concurrency group: it can
+	// replace a pending synchronize run for the same PR, and a replacement that skipped the map
+	// would leave the stacked label stale until the hourly sweep.
+	it.each(["opened", "reopened", "synchronize", "labeled", "unlabeled"])(
+		"reads the head map on a %s event, which can publish a head commit or replace the run that would",
 		async (action) => {
 			const resolution = await runResolve({ eventName: "pull_request_target", action })
 
