@@ -1,6 +1,5 @@
 import { providerIdentifiers } from "@roo-code/types"
 import { render, screen, act } from "@/utils/test-utils"
-import { StringCache } from "@src/utils/stringCache"
 import React from "react"
 
 import {
@@ -8,7 +7,6 @@ import {
 	type ExperimentId,
 	type ExtensionState,
 	type ClineMessage,
-	type ExtensionMessage,
 	type MarketplaceItem,
 	type MarketplaceInstalledMetadata,
 	type RouterModels,
@@ -68,20 +66,6 @@ const TestComponent = () => {
 			</button>
 		</div>
 	)
-}
-
-const expectMessages = (messages: ClineMessage[]) => {
-	expect(JSON.parse(screen.getByTestId("cline-messages").textContent!)).toEqual(messages)
-}
-
-type InternSpy = { mock: { contexts: readonly unknown[] } }
-
-const cacheFor = (spy: InternSpy, kind: "message" | "history"): StringCache => {
-	const cache = spy.mock.contexts.find(
-		(value) => value instanceof StringCache && (value["shouldIntern"] !== undefined) === (kind === "message"),
-	)
-	if (!(cache instanceof StringCache)) throw new Error(`Missing ${kind} cache`)
-	return cache
 }
 
 const RulesTestComponent = () => {
