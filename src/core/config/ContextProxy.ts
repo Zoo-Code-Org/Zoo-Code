@@ -96,6 +96,11 @@ export class ContextProxy {
 			try {
 				// Revert to original assignment
 				this.stateCache[key] = this.originalContext.globalState.get(key)
+				// Storage is the baseline of the rollback path: without this entry, a failed write
+				// on a key that has never been written through this proxy falls back to the
+				// previous cached value - which an overlapping write may have made its own
+				// unpersisted one.
+				this.statePersistedCache.set(key, this.stateCache[key])
 			} catch (error) {
 				logger.error(`Error loading global ${key}: ${error instanceof Error ? error.message : String(error)}`)
 			}

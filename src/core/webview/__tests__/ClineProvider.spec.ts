@@ -5647,6 +5647,137 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 		})
+
+		it("clears the settings overlay of a view re-pinned when the survivor's settings cannot be resolved", async () => {
+			const contextProxy = new ContextProxy(mockContext)
+			const deleter = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				contextProxy,
+				new WebviewFocusTracker(),
+			)
+			const pinned = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const profileToDelete: ProviderSettingsEntry = { name: "deleted", id: "deleted-id" }
+			const deletedSettings = { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "deleted-model" }
+
+			await contextProxy.setValue("listApiConfigMeta", [
+				{ name: "deleted", id: "deleted-id" },
+				{ name: "survivor", id: "survivor-id" },
+			])
+			await contextProxy.setValue("currentApiConfigName", "deleted")
+			await contextProxy.setProviderSettings(deletedSettings)
+
+			for (const view of [deleter, pinned]) {
+				await view.saveViewState("currentApiConfigName", "deleted")
+				// The buffer a completed loadViewState leaves behind: this view serves the deleted
+				// profile's configuration.
+				await view["_saveViewLocalStateFromMutation"]({ apiConfiguration: deletedSettings })
+			}
+
+			vi.spyOn(deleter["providerSettingsManager"], "deleteConfig").mockResolvedValue(undefined)
+			vi.spyOn(deleter["providerSettingsManager"], "activateProfile").mockResolvedValue({
+				name: "survivor",
+				id: "survivor-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			vi.spyOn(deleter["providerSettingsManager"], "getProfile").mockRejectedValue(
+				new Error("profile store unavailable"),
+			)
+
+			await deleter.deleteProviderProfile(profileToDelete)
+
+			// Both views are re-pointed at the survivor, so neither may keep serving the deleted
+			// profile's configuration under the survivor's name.
+			expect(deleter["viewLocalState"].currentApiConfigName).toBe("survivor")
+			expect(deleter["viewLocalState"]).not.toHaveProperty("apiConfiguration")
+			expect(pinned["viewLocalState"].currentApiConfigName).toBe("survivor")
+			expect(pinned["viewLocalState"]).not.toHaveProperty("apiConfiguration")
+
+			await deleter.dispose()
+			await pinned.dispose()
+		})
+
+		it("rebuilds a live task that still runs on the deleted profile, in this view and in a sibling view", async () => {
+			const contextProxy = new ContextProxy(mockContext)
+			const deleter = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				contextProxy,
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const profileToDelete: ProviderSettingsEntry = { name: "deleted", id: "deleted-id" }
+			const survivingSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "survivor-key" }
+
+			await contextProxy.setValue("listApiConfigMeta", [
+				{ name: "deleted", id: "deleted-id" },
+				{ name: "survivor", id: "survivor-id" },
+			])
+			await contextProxy.setValue("currentApiConfigName", "deleted")
+
+			const views = [deleter, sibling]
+			const tasks = views.map((view) => {
+				// The double only backs the calls the delete path makes on a live task.
+				const task = new Task(defaultTaskOptions)
+				Object.defineProperty(task, "taskId", { value: `task-of-${view.viewId}`, writable: true })
+				Object.defineProperty(task, "taskApiConfigName", { value: "deleted", writable: true })
+				Object.defineProperty(task, "apiConfiguration", {
+					value: { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "deleted-model" },
+					writable: true,
+				})
+				task.setTaskApiConfigName = vi.fn()
+				task.updateApiConfiguration = vi.fn()
+				return task
+			})
+
+			for (const [index, view] of views.entries()) {
+				await view.saveViewState("currentApiConfigName", "deleted")
+				await view.addClineToStack(tasks[index])
+			}
+
+			vi.spyOn(deleter["providerSettingsManager"], "deleteConfig").mockResolvedValue(undefined)
+			vi.spyOn(deleter["providerSettingsManager"], "activateProfile").mockResolvedValue({
+				name: "survivor",
+				id: "survivor-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			vi.spyOn(deleter["providerSettingsManager"], "getProfile").mockResolvedValue({
+				name: "survivor",
+				id: "survivor-id",
+				...survivingSettings,
+			})
+
+			await deleter.deleteProviderProfile(profileToDelete)
+
+			// Re-pointing the view is not enough: a task that still names the deleted profile runs on a
+			// handler built from its settings and keeps it as its sticky profile until it is rebuilt.
+			for (const task of tasks) {
+				expect(task.updateApiConfiguration).toHaveBeenCalledWith(
+					expect.objectContaining({
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "survivor-key",
+					}),
+				)
+				expect(task.setTaskApiConfigName).toHaveBeenCalledWith("survivor")
+			}
+
+			await deleter.dispose()
+			await sibling.dispose()
+		})
 	})
 
 	describe("createTaskWithHistoryItem mode validation", () => {
@@ -7293,6 +7424,64 @@ describe("ClineProvider", () => {
 		await provider.dispose()
 	})
 
+	it("should not roll back a shared key that a newer write replaced during a partial setValues", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		await provider.contextProxy.setValue("mode", "architect")
+		await provider.contextProxy.setValue("currentApiConfigName", "current-config")
+		const originalUpdate = mockContext.globalState.update
+		let rejectConfig: (error: Error) => void = () => {}
+		mockContext.globalState.update = vi.fn().mockImplementation((key: string) => {
+			if (key === "currentApiConfigName") {
+				return new Promise<void>((_, reject) => (rejectConfig = reject))
+			}
+			return Promise.resolve()
+		})
+
+		// The mode write commits while the profile-name write is still in flight.
+		const attempt = provider.setValues({ mode: "code", currentApiConfigName: "other-config" })
+		await vi.waitFor(() => expect(provider.getValue("mode")).toBe("code"))
+		// A newer write for the already committed key lands before the rollback runs.
+		await provider.setValue("mode", "plan")
+		rejectConfig(new Error("storage unavailable"))
+		await expect(attempt).rejects.toThrow("storage unavailable")
+
+		// A rollback may only undo keys that still hold the value this attempt wrote; replaying
+		// every captured value would clobber the newer write for every view that reads shared state.
+		expect(provider.getValue("mode")).toBe("plan")
+		expect(provider.getValue("currentApiConfigName")).toBe("current-config")
+
+		mockContext.globalState.update = originalUpdate
+		await provider.dispose()
+	})
+
+	it("should serve this view's restored mode through getState()", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		await provider.contextProxy.setValue("mode", "architect")
+		await provider["setViewStateId"]("mode-view")
+		// A history or profile restore writes the mode into this view's buffer only; the shared store
+		// keeps the mode the last committing view chose.
+		await provider.saveViewState("mode", "code")
+
+		expect(provider.getValue("mode")).toBe("architect")
+		// getState() is what task creation and getStateToPostToWebview read, so the restored mode has
+		// to be visible there and not only through getValues().
+		expect((await provider.getState()).mode).toBe("code")
+
+		await provider.dispose()
+	})
+
 	describe("viewId uniqueness", () => {
 		it("should assign unique viewId to each instance", async () => {
 			const provider1 = new ClineProvider(
@@ -7411,12 +7600,11 @@ describe("ClineProvider", () => {
 		resolveProfile({ name: "cfg-a", apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-x" })
 		await load
 
-		// The in-flight selection wins over the loaded state.
+		// The in-flight selection wins over the loaded state, and cfg-a's settings are not parked
+		// under cfg-b's name: a name this view changed on its own pins no settings, so reads fall back
+		// to the shared store until an activation resolves cfg-b together with its configuration.
 		expect(provider["viewLocalState"].currentApiConfigName).toBe("cfg-b")
-		expect(provider["viewLocalState"].apiConfiguration).toEqual({
-			apiProvider: providerIdentifiers.openrouter,
-			openRouterModelId: "model-x",
-		})
+		expect(provider["viewLocalState"]).not.toHaveProperty("apiConfiguration")
 		expect(provider["viewLocalState"]).not.toHaveProperty("mode")
 		await provider.dispose()
 	})

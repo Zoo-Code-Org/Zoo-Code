@@ -190,6 +190,41 @@ describe("ContextProxy", () => {
 			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
 		})
 
+		it("should restore the loaded value when overlapping writes reject with no prior write", async () => {
+			// Cold start: storage holds the value but nothing has been written through this
+			// proxy yet, so the persisted-value map has no entry for the key.
+			mockGlobalState.get.mockImplementation((key: string) => (key === "apiProvider" ? "openai" : undefined))
+			const coldProxy = new ContextProxy(mockContext)
+			await coldProxy.initialize()
+			expect(coldProxy.getGlobalState("apiProvider")).toBe("openai")
+
+			mockGlobalState.update.mockReset()
+			let rejectFirst: (error: Error) => void = () => {}
+			let rejectSecond: (error: Error) => void = () => {}
+			mockGlobalState.update
+				.mockReturnValueOnce(
+					new Promise<void>((_, reject) => {
+						rejectFirst = reject
+					}),
+				)
+				.mockReturnValueOnce(
+					new Promise<void>((_, reject) => {
+						rejectSecond = reject
+					}),
+				)
+
+			const firstWrite = coldProxy.updateGlobalState("apiProvider", "openrouter")
+			const secondWrite = coldProxy.updateGlobalState("apiProvider", "deepseek")
+			rejectSecond(new Error("second failed"))
+			await expect(secondWrite).rejects.toThrow("second failed")
+			rejectFirst(new Error("first failed"))
+			await expect(firstWrite).rejects.toThrow("first failed")
+
+			// The second write's `previousCachedValue` is the first write's pending value, so the
+			// fallback branch would leave a value that storage never accepted.
+			expect(coldProxy.getGlobalState("apiProvider")).toBe("openai")
+		})
+
 		it("should bypass cache for pass-through state keys", async () => {
 			// Setup mock return value
 			mockGlobalState.get.mockReturnValue("pass-through-value")

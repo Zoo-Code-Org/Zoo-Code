@@ -1127,6 +1127,19 @@ export class ClineProvider
 				}
 			}
 
+			// The profile name and the settings it resolved to are one pair: the configuration loaded
+			// above belongs to the profile the lookup asked for, so it must not stay parked under a
+			// name this view changed while the lookup was in flight. A name this view changed on its
+			// own pins nothing - reads fall back to the shared settings, exactly as every other
+			// name-only write behaves.
+			if (
+				loadedState.apiConfiguration !== undefined &&
+				Object.is(preLoadBuffer.apiConfiguration, postLoadBuffer.apiConfiguration) &&
+				mergedState.currentApiConfigName !== loadedState.currentApiConfigName
+			) {
+				delete mergedState.apiConfiguration
+			}
+
 			// A reset/import may have cleared the buffer while the lookup was in flight:
 			// republishing here would restore the pre-reset selection over the cleared state.
 			if (this.viewLocalStateGeneration !== loadedGeneration) {
@@ -3187,18 +3200,33 @@ export class ClineProvider
 			await this.contextProxy.setValue("currentApiConfigName", profileToActivate)
 		}
 
-		if ((deletedWasGlobal || viewWasPinnedToDeleted) && survivingSettings) {
-			// The deleted profile was the active one (globally, or for this view), so
-			// the shared provider keys still carry its settings; replace them so
-			// getState() reports the surviving profile's configuration.
-			await this.contextProxy.setProviderSettings(survivingSettings)
+		if (deletedWasGlobal || viewWasPinnedToDeleted) {
+			if (survivingSettings) {
+				// The deleted profile was the active one (globally, or for this view), so
+				// the shared provider keys still carry its settings; replace them so
+				// getState() reports the surviving profile's configuration.
+				await this.contextProxy.setProviderSettings(survivingSettings)
 
-			if (viewWasPinnedToDeleted) {
-				// This view's nested overlay (viewLocalState.apiConfiguration, seeded
-				// by loadViewState) still serves the deleted profile's configuration:
-				// replace it with the survivor's so the re-pointed pin serves matching
-				// settings. A view pinned to another profile keeps its own overlay.
-				await this._saveViewLocalStateFromMutation({ apiConfiguration: survivingSettings })
+				if (viewWasPinnedToDeleted) {
+					// This view's nested overlay (viewLocalState.apiConfiguration, seeded
+					// by loadViewState) still serves the deleted profile's configuration:
+					// replace it with the survivor's so the re-pointed pin serves matching
+					// settings. A view pinned to another profile keeps its own overlay.
+					await this._saveViewLocalStateFromMutation({ apiConfiguration: survivingSettings })
+				}
+
+				// A live task of this view that runs under the deleted profile keeps the handler
+				// built from its settings and the deleted sticky name until it is rebuilt - the same
+				// rule the activating-save branch applies.
+				if (this.getCurrentTask()?.taskApiConfigName === profileToDelete.name) {
+					this.updateTaskApiHandlerIfNeeded(survivingSettings, { forceRebuild: true })
+					await this.persistStickyProviderProfileToCurrentTask(profileToActivate)
+				}
+			} else if (viewWasPinnedToDeleted) {
+				// The survivor's settings never resolved: this view's pin now names the survivor, so
+				// its overlay must stop serving the deleted profile's configuration and fall back to
+				// the shared settings instead.
+				await this._saveViewLocalStateFromMutation({ apiConfiguration: undefined })
 			}
 		}
 
@@ -3211,12 +3239,19 @@ export class ClineProvider
 			}
 			const values: Partial<RooCodeSettings> & Partial<ExtensionState> = {
 				currentApiConfigName: profileToActivate,
-			}
-			if (survivingSettings) {
-				values.apiConfiguration = survivingSettings
+				// Either the survivor's settings or an explicit clear: a view re-pointed away from the
+				// deleted profile must not keep serving that profile's configuration.
+				apiConfiguration: survivingSettings,
 			}
 			// Direct private access: compile-time safe across sibling instances.
 			await instance._saveViewLocalStateFromMutation(values)
+			// The re-pinned buffer alone does not reach a live task in that view: it still runs on a
+			// handler built from the deleted profile's settings and still names the deleted profile as
+			// its sticky profile.
+			if (survivingSettings && instance.getCurrentTask()?.taskApiConfigName === profileToDelete.name) {
+				instance.updateTaskApiHandlerIfNeeded(survivingSettings, { forceRebuild: true })
+				await instance.persistStickyProviderProfileToCurrentTask(profileToActivate)
+			}
 			await instance.postStateToWebview().catch((postError: unknown) => {
 				this.log(
 					`[deleteProviderProfile] failed to post re-pinned state to a sibling view: ${
@@ -4420,7 +4455,10 @@ export class ClineProvider
 			terminalZshP10k: stateValues.terminalZshP10k ?? false,
 			terminalZdotdir: stateValues.terminalZdotdir ?? false,
 			terminalProfile: stateValues.terminalProfile,
-			mode: stateValues.mode ?? defaultModeSlug,
+			// A per-view restored or edited mode lives in this view's buffer, and getState() is
+			// what task creation and getStateToPostToWebview read: the shared store only carries the
+			// mode the last committing view chose.
+			mode: this.viewLocalState.mode ?? stateValues.mode ?? defaultModeSlug,
 			language: stateValues.language ?? formatLanguage(vscode.env.language),
 			mcpEnabled: stateValues.mcpEnabled ?? true,
 			mcpServers: this.mcpHub?.getAllServers() ?? [],
@@ -4623,16 +4661,10 @@ export class ClineProvider
 			await this.contextProxy.setValues(sanitizedValues)
 		} catch (error) {
 			// A multi-key write can commit some keys before another rejects: put the captured
-			// previous values back so shared state does not stay half-applied.
-			try {
-				await this.contextProxy.setValues(previousSharedValues)
-			} catch (rollbackError) {
-				this.log(
-					`[ClineProvider#setValues] Failed to roll back a partially applied write: ${
-						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-					}`,
-				)
-			}
+			// previous values back so shared state does not stay half-applied. Route through the
+			// same guarded restore the failed per-view write below uses - a key that a concurrent
+			// provider has since written must not be clobbered by this rollback.
+			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues, sanitizedValues, writeGenerations)
 			throw error
 		}
 		try {
