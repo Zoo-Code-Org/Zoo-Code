@@ -344,6 +344,52 @@ describe("OpenRouterHandler", () => {
 			expect(result.reasoningEffort).toBe("high")
 			expect(result.reasoning).toEqual({ effort: "high" })
 		})
+
+		it("keeps the newest lookup's records when an older lookup settles last", async () => {
+			// Two lookups overlap (a second request, or a lookup whose request was
+			// cancelled). The first started but settles last; publishing its records
+			// would roll pricing and limits back to an older fetch.
+			const { getModels } = await import("../fetchers/modelCache")
+			const mockedGetModels = vitest.mocked(getModels)
+			let releaseFirst!: () => void
+			let releaseSecond!: () => void
+			const firstGate = new Promise<void>((resolve) => {
+				releaseFirst = resolve
+			})
+			const secondGate = new Promise<void>((resolve) => {
+				releaseSecond = resolve
+			})
+			mockedGetModels
+				.mockImplementationOnce(async () => {
+					await firstGate
+					return {
+						"anthropic/claude-sonnet-4": { ...openRouterDefaultModelInfo, maxTokens: 111 },
+					}
+				})
+				.mockImplementationOnce(async () => {
+					await secondGate
+					return {
+						"anthropic/claude-sonnet-4": { ...openRouterDefaultModelInfo, maxTokens: 222 },
+					}
+				})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-sonnet-4",
+				}),
+			)
+
+			const first = handler.fetchModel()
+			const second = handler.fetchModel()
+
+			releaseSecond()
+			await second
+			releaseFirst()
+			await first
+
+			expect(handler.getModel().info.maxTokens).toBe(222)
+		})
 	})
 
 	describe("applyOpenRouterMoonshotK3Profile", () => {

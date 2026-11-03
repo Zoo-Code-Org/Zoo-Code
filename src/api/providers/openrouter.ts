@@ -142,6 +142,10 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 	protected endpoints: ModelRecord = {}
 	private readonly providerName = "OpenRouter"
 	private currentReasoningDetails: any[] = []
+	// Monotonic id for model lookups. Overlapping lookups (two requests, or an
+	// abandoned lookup whose request was cancelled) can settle in any order, and
+	// only the newest one may publish the records it fetched.
+	private fetchModelSequence = 0
 
 	constructor(options: ApiHandlerOptions) {
 		super()
@@ -645,6 +649,9 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 	}
 
 	public async fetchModel() {
+		// Claim the lookup id before the first await so a lookup that starts later
+		// always outranks an earlier one when both are in flight.
+		const sequence = ++this.fetchModelSequence
 		const [models, endpoints] = await Promise.all([
 			getModels({ provider: providerIdentifiers.openrouter }, this),
 			getModelEndpoints(
@@ -657,8 +664,14 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			),
 		])
 
-		this.models = models
-		this.endpoints = endpoints
+		// A slower earlier lookup must not overwrite records a newer lookup already
+		// published: writing them would silently roll model metadata (pricing,
+		// limits, endpoint records) back to an older fetch. The stale lookup still
+		// returns the handler's current model, which is what its caller observes.
+		if (sequence === this.fetchModelSequence) {
+			this.models = models
+			this.endpoints = endpoints
+		}
 
 		return this.getModel()
 	}
