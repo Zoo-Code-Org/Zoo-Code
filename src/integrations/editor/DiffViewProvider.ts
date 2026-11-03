@@ -544,14 +544,22 @@ export class DiffViewProvider {
 		}
 	}
 
-	async revertChanges(): Promise<void> {
+	/**
+	 * Rolls the streamed edit back and reports whether a rollback was actually performed.
+	 *
+	 * The boolean is the caller's evidence: a resolved promise alone cannot tell a fail-closed caller
+	 * whether the dirty buffer was restored or whether this provider simply had no edit in progress to
+	 * restore. WriteToFileTool keeps its refused-rollback marker on the false return.
+	 */
+	async revertChanges(): Promise<boolean> {
 		// Both guards are required. relPath survives a completed edit, so without isEditing a later
 		// teardown would take the new-file branch for the PREVIOUS edit's target and unlink an
 		// existing user file - permanently. isEditing alone is not enough: open() sets it before the
 		// first await, and that is exactly the state a failed open() leaves behind, where the
 		// placeholder and the created directories still have to be rolled back.
 		if (!this.relPath || !this.isEditing) {
-			return
+			// Nothing to restore, and nothing was restored.
+			return false
 		}
 
 		const fileExists = this.editType === "modify"
@@ -596,7 +604,8 @@ export class DiffViewProvider {
 			// Only reachable after a successful open(), so the editor exists.
 			const updatedDocument = this.activeDiffEditor?.document
 			if (!updatedDocument) {
-				return
+				// The editor vanished: the existing file was left exactly as the stream left it.
+				return false
 			}
 
 			// Revert the document through the same contract the new-file rollback uses, so a
@@ -637,6 +646,7 @@ export class DiffViewProvider {
 
 		// Edit is done.
 		await this.reset()
+		return true
 	}
 
 	private async closeAllDiffViews(): Promise<void> {

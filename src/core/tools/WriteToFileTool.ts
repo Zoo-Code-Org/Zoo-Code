@@ -304,12 +304,14 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			const reported = rollbackFailure ?? streamState?.rollbackFailure
 			this.resetTaskPartialState(task)
 			// Keep the marker until the dirty buffer is actually restored: a later write to the
-			// same path would otherwise call open() and save the unapproved content. A rollback
-			// that succeeds here clears it; one that fails keeps the fail-closed refusal.
+			// same path would otherwise call open() and save the unapproved content. revertChanges()
+			// reports whether it performed a rollback - it resolves without touching anything when
+			// this provider no longer has an edit in progress, which is the state reset() leaves
+			// behind after a refused restore. Only a confirmed rollback clears the marker; a
+			// rejection and a no-op both keep the fail-closed refusal.
 			let restored = false
 			try {
-				await task.diffViewProvider.revertChanges()
-				restored = true
+				restored = await task.diffViewProvider.revertChanges()
 			} catch (rollbackError) {
 				console.error("Error restoring the refused write_to_file rollback:", rollbackError)
 			}
@@ -636,6 +638,10 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// A refused rollback left the streamed document dirty: opening it here would save
 			// that unapproved buffer before approval. Skip the preview; execute() owns the refusal.
 			if (this.taskRollbackFailures.has(this.getPartialStreamFailureKey(task))) {
+				// The ask above is already on screen and this return is the last thing the delta
+				// does: finalize it, or the spinner and Save/Reject buttons stay live for a preview
+				// that will never be opened. execute() owns the refusal report.
+				await this.finalizePartialToolAskAfterFailure(task, partialMessage)
 				this.resetTaskPartialState(task)
 				return
 			}

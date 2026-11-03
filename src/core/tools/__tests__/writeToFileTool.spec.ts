@@ -169,7 +169,10 @@ describe("writeToFileTool", () => {
 			open: vi.fn().mockResolvedValue(undefined),
 			update: vi.fn().mockResolvedValue(undefined),
 			reset: vi.fn().mockResolvedValue(undefined),
-			revertChanges: vi.fn().mockResolvedValue(undefined),
+			// A diff view that has an edit in progress: revertChanges() reports the rollback it
+			// performed. Tests that need the no-op case - an edit already cleared by reset() - return
+			// false instead.
+			revertChanges: vi.fn().mockResolvedValue(true),
 			saveChanges: vi.fn().mockResolvedValue({
 				newProblemsMessage: "",
 				userEdits: null,
@@ -1215,6 +1218,91 @@ describe("writeToFileTool", () => {
 			// The rollback is still refused, so the dirty buffer remains: the marker stays set
 			// to keep the next write fail-closed until a rollback succeeds.
 			expect(writeToFileTool["taskRollbackFailures"].size).toBe(1)
+		})
+
+		it("keeps the refused-rollback marker when revertChanges() resolves without restoring anything", async () => {
+			// execute() tries the restore once more before it reports the refusal. revertChanges()
+			// resolves without touching the document when this provider no longer has an edit in
+			// progress - exactly the state reset() leaves behind after a refused restore - so a resolved
+			// promise is not evidence that the dirty buffer came back. Treating it as one clears the
+			// marker, and the next write to this path calls open(), which saves the unapproved streamed
+			// content before approval.
+			mockCline.diffViewProvider.update.mockRejectedValue(
+				Object.assign(new Error("EROFS: read-only file system, write '/ro/test.py'"), { code: "EROFS" }),
+			)
+			// The stream's rollback is refused; execute()'s retry resolves having done nothing.
+			mockCline.diffViewProvider.revertChanges
+				.mockRejectedValueOnce(Object.assign(new Error("EACCES: rollback failed"), { code: "EACCES" }))
+				.mockResolvedValueOnce(false)
+
+			// First delta pins the path, second hits the refused rollback, then the final block arrives.
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({})
+
+			// Still fail closed: no second open(), no approval asked, one report, marker kept.
+			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockAskApproval).not.toHaveBeenCalled()
+			expect(mockPushToolResult).not.toHaveBeenCalled()
+			const writeCalls = mockHandleError.mock.calls.filter(([context]) => context === "writing file")
+			expect(writeCalls).toHaveLength(1)
+			expect(writeToFileTool["taskRollbackFailures"].size).toBe(1)
+		})
+
+		it("releases the refused-rollback marker when the retried rollback restores the buffer", async () => {
+			// The other half of the contract: a rollback that reports completion lifts the refusal, and
+			// the following write may open the diff view again.
+			mockCline.diffViewProvider.update.mockRejectedValue(
+				Object.assign(new Error("EROFS: read-only file system, write '/ro/test.py'"), { code: "EROFS" }),
+			)
+			mockCline.diffViewProvider.revertChanges
+				.mockRejectedValueOnce(Object.assign(new Error("EACCES: rollback failed"), { code: "EACCES" }))
+				.mockResolvedValueOnce(true)
+
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({})
+
+			expect(writeToFileTool["taskRollbackFailures"].size).toBe(0)
+			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
+			const writeCalls = mockHandleError.mock.calls.filter(([context]) => context === "writing file")
+			expect(writeCalls).toHaveLength(1)
+
+			// The next write is no longer refused: the buffer is back, so the preview may open again.
+			mockCline.diffViewProvider.update.mockResolvedValue(undefined)
+			await executeWriteFileTool({})
+			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(2)
+			expect(mockAskApproval).toHaveBeenCalledTimes(1)
+			expect(mockPushToolResult).toHaveBeenCalled()
+		})
+
+		it("finalizes the partial tool ask when a refused rollback suppresses the preview", async () => {
+			// A parse-failure teardown with a failed rollback sets the refused-rollback marker. The next
+			// partial delta of this request streams its tool ask before it reaches that guard, and then
+			// returns without ever opening the diff view: the ask has to be finalized here, or the
+			// spinner and Save/Reject buttons stay live for a preview that will never be shown.
+			await executeWriteFileTool({}, { isPartial: true })
+
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.revertChanges.mockRejectedValue(
+				Object.assign(new Error("EACCES: rollback failed"), { code: "EACCES" }),
+			)
+			await writeToFileTool.releaseStreamStateOnParseFailure(mockCline, { handleError: mockHandleError })
+			expect(writeToFileTool["taskRollbackFailures"].size).toBe(1)
+
+			// The teardown released this task's stream state, so the next deltas re-register it: one to
+			// pin the path, one to stream the ask and hit the guard.
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+
+			// The ask was streamed, then finalized with the exact payload it was opened with.
+			expect(mockCline.ask).toHaveBeenCalledWith("tool", expectedPartialToolMessage, true)
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expectedPartialToolMessage)
+			// No preview was opened, and execute() still owns the refusal.
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskRollbackFailures"].size).toBe(1)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
 
 		it("reports only the execute() failure when the write is retried after a failed stream", async () => {

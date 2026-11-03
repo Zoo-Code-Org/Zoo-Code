@@ -6361,6 +6361,31 @@ describe("Cline", () => {
 			expect(task.cachedStreamingModel?.id).toBe(mockApiConfig.apiModelId)
 		})
 
+		it("keeps the refused-rollback marker across a new assistant turn and releases it on disposal", async () => {
+			// The marker means a dirty streamed buffer survived a refused restore. The per-request
+			// persistence reset (recursivelyMakeClineRequests -> resetAssistantMessagePersistence) must
+			// not drop it: releasing it there lets the retried stream call open() on the still-dirty
+			// document, which saves unapproved streamed content before approval. Disposal is the one
+			// path allowed to drop it, because a disposed task can no longer re-open anything.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const markerKey = `${task.taskId}.${task.instanceId}`
+			writeToFileTool["taskRollbackFailures"].set(markerKey, new Error("write_to_file rollback failed"))
+
+			getTaskTestAccess(task).resetAssistantMessagePersistence()
+			expect(writeToFileTool["taskRollbackFailures"].has(markerKey)).toBe(true)
+			// The per-request tool-state clear keeps it as well.
+			writeToFileTool.clearTaskState(task)
+			expect(writeToFileTool["taskRollbackFailures"].has(markerKey)).toBe(true)
+
+			await task.dispose()
+			expect(writeToFileTool["taskRollbackFailures"].has(markerKey)).toBe(false)
+		})
+
 		it("stays silent when the api handler lacks ensureModelFetched", async () => {
 			const task = new Task({
 				provider: mockProvider,

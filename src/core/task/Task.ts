@@ -1445,8 +1445,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/** Cancels the current persistence generation before creating the next assistant-turn boundary. */
 	private resetAssistantMessagePersistence(): void {
 		this.cancelAssistantMessagePersistence()
-		// A disposed task can no longer restore its dirty buffer: drop the fail-closed marker.
-		writeToFileTool.releaseTaskRollbackFailure(this)
+		// The refused-rollback marker is deliberately NOT released here. This runs at the start of
+		// every API request (and once in the constructor), and a marker means the dirty streamed
+		// buffer is still on disk: releasing it here lets the retried stream call open() on that
+		// still-dirty document, which saves unapproved content before approval. disposeOnce() is the
+		// only path that may drop it, because only there is the task unable to restore anything.
 		this.assistantMessagePersistencePromise = new Promise<AssistantMessagePersistenceResult>((resolve) => {
 			this.resolveAssistantMessagePersistence = resolve
 		})
@@ -3628,6 +3631,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
 		this.cancelAssistantMessagePersistence()
 
+		// Disposal is the one place a refused-rollback marker may be dropped: this task will never
+		// serve another request, so it can no longer re-open the dirty buffer it refused to restore,
+		// and a marker left behind would outlive the task in the tool's per-task map.
+		writeToFileTool.releaseTaskRollbackFailure(this)
+
 		// Release handler-owned host resources (e.g. VS Code configuration listeners).
 		// This is the fallback for leases that never settle; later lease releases
 		// find nothing retired and so cannot dispose twice.
@@ -3720,7 +3728,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		try {
 			// If we're not streaming then `abortStream` won't be called.
 			if (this.isStreaming && this.diffViewProvider.isEditing) {
-				this.diffReversionPromise = this.diffViewProvider.revertChanges().catch(console.error)
+				// The field records that the reversion settled. Whether a rollback actually ran is
+				// revertChanges()'s own report, and a disposing task has nothing left to act on either way.
+				this.diffReversionPromise = this.diffViewProvider
+					.revertChanges()
+					.then(() => undefined)
+					.catch(console.error)
 			}
 		} catch (error) {
 			console.error("Error reverting diff changes:", error)

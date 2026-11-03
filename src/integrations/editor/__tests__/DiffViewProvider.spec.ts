@@ -1213,7 +1213,7 @@ describe("DiffViewProvider", () => {
 				createdDirs: [`${mockCwd}/new-parent`],
 			})
 
-			await diffViewProvider.revertChanges()
+			await expect(diffViewProvider.revertChanges()).resolves.toBe(false)
 
 			expect(fs.unlink).not.toHaveBeenCalled()
 			expect(fs.rmdir).not.toHaveBeenCalled()
@@ -1239,7 +1239,8 @@ describe("DiffViewProvider", () => {
 			})
 			vi.mocked(fs.unlink).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
 
-			await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
+			// The rollback ran, so it reports a performed rollback even though the delete hit ENOENT.
+			await expect(diffViewProvider.revertChanges()).resolves.toBe(true)
 
 			// The rollback still attempted the delete - the tolerance is about not
 			// aborting the rest of the cleanup, not about skipping it.
@@ -1258,7 +1259,9 @@ describe("DiffViewProvider", () => {
 				createdDirs: [],
 			})
 
-			await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
+			// No editor means no document to restore: the stream's content is still on disk, and the
+			// caller has to be able to tell that apart from a completed rollback.
+			await expect(diffViewProvider.revertChanges()).resolves.toBe(false)
 
 			expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
 			expect(fs.unlink).not.toHaveBeenCalled()
@@ -1278,11 +1281,30 @@ describe("DiffViewProvider", () => {
 			})
 			vi.mocked(fs.rmdir).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
 
-			await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
+			await expect(diffViewProvider.revertChanges()).resolves.toBe(true)
 
 			expect(fs.rmdir).toHaveBeenCalledTimes(2)
 			expect(fs.rmdir).toHaveBeenNthCalledWith(1, createdDirs[1])
 			expect(fs.rmdir).toHaveBeenNthCalledWith(2, createdDirs[0])
+		})
+
+		it("revertChanges() reports whether a rollback was performed", async () => {
+			// The return value is the caller's evidence. WriteToFileTool keeps its refused-rollback
+			// marker unless revertChanges() confirms a rollback, because a resolved promise also covers
+			// the case where this provider no longer has an edit in progress to restore - and that is
+			// exactly the state a fail-closed caller must not read as "the buffer was restored".
+			Object.assign(diffViewProvider, {
+				isEditing: false,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs: [],
+			})
+			await expect(diffViewProvider.revertChanges()).resolves.toBe(false)
+
+			Object.assign(diffViewProvider, { isEditing: true })
+			await expect(diffViewProvider.revertChanges()).resolves.toBe(true)
+			expect(fs.unlink).toHaveBeenCalledWith(`${mockCwd}/mock-target-file.ts`)
 		})
 
 		it("revertChanges() surfaces a non-ENOENT directory failure instead of swallowing it", async () => {
