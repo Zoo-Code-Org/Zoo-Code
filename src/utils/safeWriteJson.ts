@@ -167,15 +167,12 @@ async function _ancestorIdentities(root: string, targetParent: string): Promise<
 		// A missing ancestor has no identity to pin, but any other stat failure means the
 		// walk could not verify the chain: dropping it would let a swapped-in directory
 		// escape the confine check, so fail closed instead of skipping the pin.
-		const stat = await fs.stat(dir, { bigint: true }).catch((error: unknown) => {
-			if (typeof error === "object" && error !== null && (error as { code?: unknown }).code === "ENOENT") {
-				return undefined
-			}
-			throw error
-		})
-		if (stat) {
-			pinned.push({ dir, dev: stat.dev, ino: stat.ino })
-		}
+		// The publish creates the target's parent before it takes the lock and pins the ancestors
+		// after the lock is held, so a component that is missing here was removed during the publish.
+		// Skipping it would leave the chain unverified, and a symlink placed at that path before the
+		// staging write sends both the staged file and the commit rename outside the confine.
+		const stat = await fs.stat(dir, { bigint: true })
+		pinned.push({ dir, dev: stat.dev, ino: stat.ino })
 	}
 	return pinned
 }
