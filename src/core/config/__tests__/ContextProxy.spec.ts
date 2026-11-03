@@ -288,6 +288,11 @@ describe("ContextProxy", () => {
 			rejectFirst(new Error("globalState write failed"))
 			await expect(first).rejects.toThrow("globalState write failed")
 
+			// Read the cache while the newer write is still in flight. Reading only after
+			// it settles would also pass an implementation that clobbered the key here and
+			// wrote it again on success.
+			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
+
 			resolveSecond(undefined)
 			await second
 
