@@ -4732,6 +4732,7 @@ describe("ClineProvider", () => {
 				activateProfile: vi.fn().mockResolvedValue(profile),
 				listConfig: vi.fn().mockResolvedValue([profile]),
 				setModeConfig: vi.fn(),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				getProfile: vi.fn().mockResolvedValue({
 					name: "old-profile",
 					id: "old-id",
@@ -5477,6 +5478,72 @@ describe("ClineProvider", () => {
 				// because the manager record is back.
 				expect(states["closed-view"]?.currentApiConfigName).toBe("gone-profile")
 				await ClineProvider["persistedViewStateWriteQueue"]
+			} finally {
+				await sibling.dispose()
+				await provider.dispose()
+			}
+		})
+		it("does not undo a newer shared write when the per-view write fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider.setValue("mode", "architect")
+			// Another view commits a newer value for the same key while this view's per-view
+			// write is still in flight.
+			// @ts-ignore - Spy on the private per-view write to fail it after the newer write.
+			vi.spyOn(provider, "_saveViewLocalStateFromMutation").mockImplementation(async () => {
+				await provider.contextProxy.setValue("mode", "code")
+				throw new Error("per-view write failed")
+			})
+
+			await expect(provider.setValue("mode", "debug")).rejects.toThrow("per-view write failed")
+
+			// The rollback only reverts a key whose shared value is still the one this call
+			// wrote: the newer write from the other view survives instead of being clobbered by
+			// the pre-mutation snapshot.
+			expect(provider.contextProxy.getValue("mode")).toBe("code")
+			await provider.dispose()
+		})
+
+		it("clears the view-local overlay of every live webview on reset", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				sibling["viewLocalState"].mode = "architect"
+				sibling["viewLocalState"].currentApiConfigName = "sibling-profile"
+				sibling["viewLocalState"].apiConfiguration = {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "sibling-secret",
+				}
+				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider, "removeClineFromStack").mockResolvedValue(undefined)
+				vi.spyOn(provider.providerSettingsManager, "resetAllConfigs").mockResolvedValue(undefined)
+				vi.spyOn(provider.customModesManager, "resetCustomModes").mockResolvedValue(undefined)
+				vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)
+
+				await provider.resetState()
+
+				// A reset must not leave another live webview serving its pre-reset mode and
+				// profile out of its own overlay.
+				expect(sibling["viewLocalState"]).toEqual({})
+				expect(sibling.pinnedProfileName).toBeUndefined()
 			} finally {
 				await sibling.dispose()
 				await provider.dispose()
@@ -6738,6 +6805,7 @@ describe("ClineProvider", () => {
 						{ name: "profile-b", id: "profile-b-id", apiProvider: providerIdentifiers.anthropic },
 					]),
 				setModeConfig: vi.fn().mockResolvedValue(undefined),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
@@ -12238,6 +12306,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 					}),
 					listConfig: vi.fn().mockResolvedValue([]),
 					setModeConfig: vi.fn(),
+					getModeConfigId: vi.fn().mockResolvedValue(undefined),
 					getProfile: vi
 						.fn()
 						.mockImplementation(async ({ name }: { name: string }) =>

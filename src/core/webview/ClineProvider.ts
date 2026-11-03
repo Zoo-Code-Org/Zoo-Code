@@ -3813,14 +3813,41 @@ export class ClineProvider
 
 			// Other live views may have buffered this profile's settings earlier;
 			// refresh them so their getState() cannot report the activated profile's
-			// name with stale settings.
-			await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
+			// name with stale settings. Compensated on failure like the writes above: a
+			// sibling refresh that throws must not leave the activation half applied.
+			try {
+				await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
+			} catch (error) {
+				await this._restoreProviderManagerSelection(managerSelectionSnapshot)
+				await this._restoreProfileActivationState(activationSnapshot)
+				throw error
+			}
 		}
 
 		const { mode } = await this.getState()
 
 		if (id && persistModeConfig) {
-			await this.providerSettingsManager.setModeConfig(mode, id)
+			// The mode mapping is one more write that can fail after the selection and the
+			// shared state already moved. Snapshot the prior mapping so the failure restores it
+			// instead of leaving the activated profile bound to the mode.
+			const previousModeConfigId = await this.providerSettingsManager.getModeConfigId(mode)
+			try {
+				await this.providerSettingsManager.setModeConfig(mode, id)
+			} catch (error) {
+				if (previousModeConfigId) {
+					try {
+						await this.providerSettingsManager.setModeConfig(mode, previousModeConfigId)
+					} catch (restoreError) {
+						this.log(
+							`[activateProviderProfile] Failed to restore the mode mapping for '${mode}': ${
+								restoreError instanceof Error ? restoreError.message : String(restoreError)
+							}`,
+						)
+					}
+				}
+				await this._restoreProviderManagerSelection(managerSelectionSnapshot)
+				throw error
+			}
 		}
 
 		// Change the provider for the current task.
@@ -5208,7 +5235,9 @@ export class ClineProvider
 		} catch (error) {
 			// The per-view record did not land: restore the prior shared value so the two
 			// persistence layers cannot diverge, then surface the original failure.
-			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues)
+			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues, {
+				[key]: value,
+			} as RooCodeSettings)
 			throw error
 		}
 	}
@@ -5217,10 +5246,32 @@ export class ClineProvider
 	 * Restore shared values captured before a setter wrote them, used when the paired
 	 * per-view persistence failed so the shared store cannot move ahead of the per-view
 	 * record. A failed rollback is logged; the original failure is what callers see.
+	 *
+	 * A key is restored only while the shared store still holds the value this call
+	 * wrote: another view may have committed a newer value for that key in the window
+	 * between the two writes, and writing the pre-mutation snapshot back would undo it.
 	 */
-	private async _restoreSharedValuesAfterFailedViewWrite(previous: RooCodeSettings): Promise<void> {
+	private async _restoreSharedValuesAfterFailedViewWrite(
+		previous: RooCodeSettings,
+		written: RooCodeSettings,
+	): Promise<void> {
+		const restore = Object.fromEntries(
+			Object.entries(previous).filter(([key]) =>
+				Object.is(
+					this.contextProxy.getValue(key as keyof RooCodeSettings),
+					written[key as keyof RooCodeSettings],
+				),
+			),
+		) as RooCodeSettings
+
+		if (Object.keys(restore).length === 0) {
+			// Every key was superseded by a newer write: there is nothing left of this call to
+			// undo.
+			return
+		}
+
 		try {
-			await this.contextProxy.setValues(previous)
+			await this.contextProxy.setValues(restore)
 		} catch (rollbackError) {
 			this.log(
 				`[ClineProvider] Shared-state rollback after failed per-view write failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
@@ -5260,7 +5311,7 @@ export class ClineProvider
 		} catch (error) {
 			// The per-view record did not land: restore the prior shared values so the two
 			// persistence layers cannot diverge, then surface the original failure.
-			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues)
+			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues, sanitizedValues)
 			throw error
 		}
 	}
@@ -5378,6 +5429,27 @@ export class ClineProvider
 		// Clear this view's persisted entry too, so the reset selections are not
 		// re-applied from the durable viewStates pin after a reload.
 		await this.clearPersistedViewState()
+
+		// Other live webviews hold their own overlay and their own durable pin: a reset in
+		// one view would otherwise leave the others serving their pre-reset mode and profile
+		// in getState() until their next mutation. Direct private access: compile-time safe
+		// across sibling instances.
+		for (const instance of ClineProvider.getAllInstances()) {
+			if (instance === this) {
+				continue
+			}
+			instance._clearViewLocalState()
+			try {
+				await instance.clearPersistedViewState()
+			} catch (error) {
+				instance.log(
+					`[resetState] Failed to clear a sibling view's persisted state: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+			}
+			await instance.postStateToWebview()
+		}
 
 		await this.providerSettingsManager.resetAllConfigs()
 		await this.customModesManager.resetCustomModes()
