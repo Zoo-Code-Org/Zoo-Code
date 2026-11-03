@@ -11221,6 +11221,54 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("should discard a stale loadViewState when the view id changes during the second profile lookup", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			await provider["setViewStateId"]("stable-sidebar-view")
+			await provider.contextProxy.setValue("viewStates", {
+				"stable-sidebar-view": {
+					mode: "debugger",
+					currentApiConfigName: "profile-a",
+					updatedAt: 1,
+				},
+			})
+			// Start from an empty buffer so what the load publishes is unambiguous.
+			provider["viewLocalState"] = {}
+
+			let lookups = 0
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(
+				async (params: { name: string } | { id: string }) => {
+					const name = "name" in params ? params.name : params.id
+					lookups += 1
+					if (lookups === 1) {
+						// A mutation changes the buffer's profile name while the first lookup is in
+						// flight and leaves the overlay alone, which is what sends the load into the
+						// second (re-resolving) lookup below.
+						provider["viewLocalState"].currentApiConfigName = "profile-b"
+						return { name, id: "a-id", apiProvider: providerIdentifiers.anthropic }
+					}
+					// A newer view id registers during that second lookup.
+					provider["viewStateId"] = "newer-view-id"
+					return { name, id: "b-id", apiProvider: providerIdentifiers.anthropic }
+				},
+			)
+
+			await provider["loadViewState"]()
+
+			// The superseded load must not publish the state it read for the old id.
+			expect(lookups).toBe(2)
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
+
+			await provider.dispose()
+		})
+
 		it("should discard a stale loadViewState when a newer view id is registered during the load", async () => {
 			const provider = new ClineProvider(
 				mockContext,
