@@ -3393,6 +3393,9 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 			expect.stringContaining("Rename compensation failed after delete rejection"),
 		)
 		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
+		// A log line is not something the user can act on: when the compensation fails the views
+		// and the stored records can disagree, so the failure is surfaced as well.
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("rename"))
 	})
 
 	it("leaves a newer save under the new name alone when the rename compensates", async () => {

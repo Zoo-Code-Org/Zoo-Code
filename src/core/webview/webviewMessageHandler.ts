@@ -2669,6 +2669,9 @@ export const webviewMessageHandler = async (
 							await provider.repointViewLocalStateAfterProfileRename(newName, oldName, previousRecord)
 							await removeOwnRenameRecord()
 						} catch (compensationError) {
+							// The reverse re-point failed too: the views and the stored records can now
+							// disagree, and a log line is not something the user can act on.
+							vscode.window.showWarningMessage(t("common:errors.rename_api_config"))
 							provider.log(
 								`Rename compensation failed after re-point rejection: ${JSON.stringify(compensationError, Object.getOwnPropertyNames(compensationError), 2)}`,
 							)
@@ -2690,6 +2693,8 @@ export const webviewMessageHandler = async (
 							await provider.repointViewLocalStateAfterProfileRename(newName, oldName, previousRecord)
 							await removeOwnRenameRecord()
 						} catch (compensationError) {
+							// Same inconsistent state as above, reached from the delete step.
+							vscode.window.showWarningMessage(t("common:errors.rename_api_config"))
 							provider.log(
 								`Rename compensation failed after delete rejection: ${JSON.stringify(compensationError, Object.getOwnPropertyNames(compensationError), 2)}`,
 							)
