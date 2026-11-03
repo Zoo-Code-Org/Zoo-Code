@@ -414,8 +414,9 @@ describe("importExport", () => {
 			expect(result.globalSettings).not.toHaveProperty("lastModeExportPath")
 			expect(result.globalSettings).not.toHaveProperty("lastImageSavePath")
 			// Dropped silently: every export contains these keys, so warning on each
-			// import would report nothing the user can act on.
-			expect(result.warnings ?? []).not.toEqual(expect.arrayContaining([expect.stringContaining("last")]))
+			// import would report nothing the user can act on. The whole warning list is
+			// the assertion here — this import has nothing to report.
+			expect(result.warnings).toBeUndefined()
 		})
 
 		it("should import settings successfully from a valid file", async () => {
