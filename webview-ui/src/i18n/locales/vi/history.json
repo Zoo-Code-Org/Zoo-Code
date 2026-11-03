@@ -13,6 +13,7 @@
 	"deleteTaskTitle": "Xóa nhiệm vụ (Shift + Click để bỏ qua xác nhận)",
 	"copyPrompt": "Sao chép lời nhắc",
 	"exportTask": "Xuất nhiệm vụ",
+	"renameTask": "Đổi tên nhiệm vụ",
 	"deleteTask": "Xóa nhiệm vụ",
 	"deleteTaskMessage": "Bạn có chắc chắn muốn xóa nhiệm vụ này không? Hành động này không thể hoàn tác.",
 	"cancel": "Hủy",

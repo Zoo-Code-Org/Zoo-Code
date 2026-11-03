@@ -13,6 +13,7 @@ import {
 	type ProviderSettings,
 	type ProviderSettingsEntry,
 	type TaskEvent,
+	type TaskStartResponse,
 	type CreateTaskOptions,
 	type TaskApiConversationHistorySequence,
 	type WebviewThemeFixture,
@@ -21,7 +22,10 @@ import {
 	isSecretStateKey,
 	IpcOrigin,
 	IpcMessageType,
+	TASK_START_FAILURE_ERROR_CODE,
+	TASK_START_FAILURE_ERROR_MESSAGE,
 } from "@roo-code/types"
+
 import { IpcServer } from "@roo-code/ipc"
 
 import { Package } from "../shared/package"
@@ -81,12 +85,45 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				}
 
 				switch (command.commandName) {
-					case TaskCommandName.StartNewTask:
-						this.log(
-							`[API] StartNewTask -> ${command.data.text}, ${JSON.stringify(command.data.configuration)}`,
-						)
-						await this.startNewTask(command.data)
+					case TaskCommandName.StartNewTask: {
+						// Neither prompt nor settings values enter the log.
+						this.log("[API] StartNewTask", {
+							promptLength: command.data.text.length,
+							imageCount: command.data.images?.length ?? 0,
+							newTab: command.data.newTab === true,
+							requestId: command.data.requestId,
+						})
+
+						const { requestId } = command.data
+
+						if (requestId === undefined) {
+							await this.startNewTask(command.data, { focusSidebar: false })
+							break
+						}
+
+						// Exactly one sanitized, client-scoped response per
+						// correlated start. The reply never echoes the failure.
+						// Await actual startup, including configuration writes.
+						// The smoke controller owns its timeout and terminates
+						// its isolated host; shared-profile writes are not raced.
+						let response: TaskStartResponse
+						try {
+							const taskId = await this.startNewTask(command.data, {
+								focusSidebar: false,
+							})
+							response = { requestId, success: true, taskId }
+						} catch {
+							this.log("[API] StartNewTask failed", { requestId })
+							response = {
+								requestId,
+								success: false,
+								errorCode: TASK_START_FAILURE_ERROR_CODE,
+								errorMessage: TASK_START_FAILURE_ERROR_MESSAGE,
+							}
+						}
+						sendResponse(RooCodeEventName.TaskStartResponse, [response])
 						break
+					}
 					case TaskCommandName.CancelTask:
 						this.log(`[API] CancelTask`)
 						await this.cancelCurrentTask()
@@ -169,17 +206,20 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		return super.emit(eventName, ...args)
 	}
 
-	public async startNewTask({
-		configuration,
-		text,
-		images,
-		newTab,
-	}: {
-		configuration: RooCodeSettings
-		text?: string
-		images?: string[]
-		newTab?: boolean
-	}) {
+	public async startNewTask(
+		{
+			configuration,
+			text,
+			images,
+			newTab,
+		}: {
+			configuration: RooCodeSettings
+			text?: string
+			images?: string[]
+			newTab?: boolean
+		},
+		startOptions?: { focusSidebar?: boolean },
+	) {
 		let provider: ClineProvider
 
 		if (newTab) {
@@ -189,7 +229,11 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			provider = await this.providerFactory.createInNewTab()
 			this.registerListeners(provider)
 		} else {
-			await vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`)
+			// IPC callers omit focus: executeCommand cannot be cancelled and a
+			// stalled webview launch would block the whole start.
+			if (startOptions?.focusSidebar ?? true) {
+				await vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`)
+			}
 
 			provider = this.sidebarProvider
 		}
@@ -470,16 +514,16 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				this.emit(RooCodeEventName.TaskSpawned, task.taskId, childTaskId)
 			})
 
-			task.on(RooCodeEventName.TaskDelegated as any, (childTaskId: string) => {
-				;(this.emit as any)(RooCodeEventName.TaskDelegated, task.taskId, childTaskId)
+			task.on(RooCodeEventName.TaskDelegated, (childTaskId: string) => {
+				this.emit(RooCodeEventName.TaskDelegated, task.taskId, childTaskId)
 			})
 
-			task.on(RooCodeEventName.TaskDelegationCompleted as any, (childTaskId: string, summary: string) => {
-				;(this.emit as any)(RooCodeEventName.TaskDelegationCompleted, task.taskId, childTaskId, summary)
+			task.on(RooCodeEventName.TaskDelegationCompleted, (childTaskId: string, summary: string) => {
+				this.emit(RooCodeEventName.TaskDelegationCompleted, task.taskId, childTaskId, summary)
 			})
 
-			task.on(RooCodeEventName.TaskDelegationResumed as any, (childTaskId: string) => {
-				;(this.emit as any)(RooCodeEventName.TaskDelegationResumed, task.taskId, childTaskId)
+			task.on(RooCodeEventName.TaskDelegationResumed, (childTaskId: string) => {
+				this.emit(RooCodeEventName.TaskDelegationResumed, task.taskId, childTaskId)
 			})
 
 			// Task Execution
@@ -521,13 +565,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 		// Delegation events are emitted by the provider, not by individual task instances.
 		provider.on(RooCodeEventName.TaskDelegated, (parentTaskId, childTaskId) => {
-			;(this.emit as any)(RooCodeEventName.TaskDelegated, parentTaskId, childTaskId)
+			this.emit(RooCodeEventName.TaskDelegated, parentTaskId, childTaskId)
 		})
 		provider.on(RooCodeEventName.TaskDelegationCompleted, (parentTaskId, childTaskId, summary) => {
-			;(this.emit as any)(RooCodeEventName.TaskDelegationCompleted, parentTaskId, childTaskId, summary)
+			this.emit(RooCodeEventName.TaskDelegationCompleted, parentTaskId, childTaskId, summary)
 		})
 		provider.on(RooCodeEventName.TaskDelegationResumed, (parentTaskId, childTaskId) => {
-			;(this.emit as any)(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
+			this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
 		})
 	}
 

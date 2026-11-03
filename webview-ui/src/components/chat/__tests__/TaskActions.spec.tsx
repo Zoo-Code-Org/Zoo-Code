@@ -83,6 +83,21 @@ describe("TaskActions", () => {
 		expect(screen.queryByTestId("share-button")).not.toBeInTheDocument()
 	})
 
+	it("calls onRename when the rename button is clicked", () => {
+		const onRename = vi.fn()
+		render(<TaskActions item={mockItem} buttonsDisabled={false} onRename={onRename} />)
+
+		fireEvent.click(screen.getByLabelText("history:renameTask"))
+
+		expect(onRename).toHaveBeenCalledTimes(1)
+	})
+
+	it("does not render the rename button without onRename", () => {
+		render(<TaskActions item={mockItem} buttonsDisabled={false} />)
+
+		expect(screen.queryByTestId("rename-current-task-button")).not.toBeInTheDocument()
+	})
+
 	it("renders export button", () => {
 		render(<TaskActions item={mockItem} buttonsDisabled={false} />)
 

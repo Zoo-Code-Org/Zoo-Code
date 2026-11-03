@@ -16,6 +16,7 @@ import { DIFF_VIEW_URI_SCHEME } from "../../integrations/editor/DiffViewProvider
 
 import { CheckpointServiceOptions, RepoPerTaskCheckpointService } from "../../services/checkpoints"
 
+import { assertRecordedCheckpoint } from "./recordedCheckpoint"
 import { appendChanges } from "./changeJournal"
 import { buildChangeCardPayload } from "./changeCard"
 
@@ -494,6 +495,8 @@ export async function checkpointRestore(
 	task: Task,
 	{ ts, commitHash, mode, operation = "delete" }: CheckpointRestoreOptions,
 ) {
+	assertRecordedCheckpoint(task, commitHash)
+
 	const service = await getCheckpointService(task)
 
 	if (!service) {
@@ -551,9 +554,12 @@ export async function checkpointRestore(
 		// task flow and the communication between the webview and the
 		// `Task` instance.
 		provider?.cancelTask()
-	} catch {
-		provider?.log("[checkpointRestore] disabling checkpoints for this task")
-		disableCheckpointsAfterFailure(task)
+	} catch (error) {
+		// Upstream #2269: a restore failure is rethrown so the restore handler can
+		// report it and offer a restart. Checkpoints stay enabled for this task;
+		// disableCheckpointsAfterFailure still guards the init/save/journal paths.
+		provider?.log("[checkpointRestore] failed to restore checkpoint")
+		throw error
 	}
 }
 
@@ -571,6 +577,13 @@ export type CheckpointDiffOptions = {
 }
 
 export async function checkpointDiff(task: Task, { commitHash, mode }: CheckpointDiffOptions) {
+	try {
+		assertRecordedCheckpoint(task, commitHash)
+	} catch (error) {
+		void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error))
+		return
+	}
+
 	const service = await getCheckpointService(task)
 
 	if (!service) {
