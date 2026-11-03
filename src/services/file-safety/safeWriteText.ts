@@ -117,6 +117,18 @@ function _fsyncFile(fd: number): void {
 	fsSync.fsyncSync(fd)
 }
 
+/**
+ * Upper bound for the Windows DACL child processes, in milliseconds. execFile without a timeout
+ * waits for the child indefinitely: a icacls blocked on a reparse point, a network share, or an
+ * interception filter would hold the caller's write open forever, and for a safeWriteJson caller it
+ * would hold the per-file advisory lock while every other writer of the same file exhausts its
+ * retries (src/utils/fileLock.ts: 5 retries, 100ms..1s backoff) and fails. A timeout lands on the
+ * path this module already has for a failing icacls - skip DACL handling, commit the write, report
+ * the warning - and it stays below LOCK_STALE_MS (31_000) so a hung helper cannot outlive the
+ * staleness window the lock protocol is written around.
+ */
+const DACL_COMMAND_TIMEOUT_MS = 20_000
+
 /** Save the DACL of *srcPath* to a dump file on Windows.
  * Returns true when the dump was written successfully; false otherwise.
  * Never throws — callers treat failure as "skip DACL handling". */
@@ -124,8 +136,11 @@ async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunne
 	const runner = execFileRunner ?? execFile
 	try {
 		await new Promise<void>((resolve, reject) => {
-			runner("icacls", [srcPath, "/save", dumpPath, "/T"], { windowsHide: true }, (err) =>
-				err ? reject(err) : resolve(),
+			runner(
+				"icacls",
+				[srcPath, "/save", dumpPath, "/T"],
+				{ timeout: DACL_COMMAND_TIMEOUT_MS, windowsHide: true },
+				(err) => (err ? reject(err) : resolve()),
 			)
 		})
 		return true
@@ -144,8 +159,11 @@ async function _restoreDaclWindows(
 	const runner = execFileRunner ?? execFile
 	try {
 		await new Promise<void>((resolve, reject) => {
-			runner("icacls", [dirPath, "/restore", dumpPath], { windowsHide: true }, (err) =>
-				err ? reject(err) : resolve(),
+			runner(
+				"icacls",
+				[dirPath, "/restore", dumpPath],
+				{ timeout: DACL_COMMAND_TIMEOUT_MS, windowsHide: true },
+				(err) => (err ? reject(err) : resolve()),
 			)
 		})
 		return true
@@ -270,10 +288,6 @@ export async function safeWriteText(
 	const targetPath = await resolvePublishTarget(absoluteFilePath)
 	const dirPath = path.dirname(targetPath)
 
-	// Ensure parent directory exists (mirrors safeWriteJson behaviour).
-	await fs.mkdir(dirPath, { recursive: true })
-	await fs.access(dirPath)
-
 	// Create the staging directory only when we generate the temp file there;
 	// callers supplying their own tempPath (e.g. safeWriteJson) must not be left
 	// with an empty .file-safety-staging directory behind. Track the directory this
@@ -335,6 +349,14 @@ export async function safeWriteText(
 		stagingDir = _stagingDir(dirPath)
 		tempPath = _tempName(stagingDir, "safeWriteText")
 	}
+
+	// The parent directory is created only after the staging path this write will actually use has
+	// been accepted (mirrors safeWriteJson behaviour). mkdir -p ahead of the caller-supplied checks
+	// let a *rejected* write create a directory in the target's own tree before anything was
+	// validated. A self-staged write has already created it through _stagingDir's
+	// mkdirSync(recursive:true).
+	await fs.mkdir(dirPath, { recursive: true })
+	await fs.access(dirPath)
 
 	let backupPath: string | null = null
 	let releaseBackupOnSuccess = false

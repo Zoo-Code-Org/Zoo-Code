@@ -60,6 +60,21 @@ export class ConfinedPathEscapeError extends Error {
 }
 
 /**
+ * Thrown when the advisory lock this write holds no longer names the path it is about to
+ * publish. The lock key is resolved before the lock is taken and the publish target is
+ * resolved under it, so an alias repointed in between would otherwise let this writer commit
+ * onto a file whose lock belongs to another writer. Nothing is staged when this rejects.
+ */
+class LockKeyDriftError extends Error {
+	constructor(requestedPath: string, lockKey: string, publishTarget: string) {
+		super(
+			`Refusing to publish ${publishTarget}: the advisory lock was taken for ${lockKey}, which is no longer the file this write resolves to (requested ${requestedPath}). Retry the write.`,
+		)
+		this.name = "LockKeyDriftError"
+	}
+}
+
+/**
  * Canonicalize the directory a write is confined to. The publish target is fully
  * resolved through symlinks, so the scope has to be resolved the same way or a
  * scope path that itself runs through a symlink (macOS /var -> /private/var is the
@@ -202,6 +217,17 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// must stay inside the protected block, otherwise a rejection here leaves the
 		// advisory lock held until the stale timeout for every other writer.
 		resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
+
+		// The lock above was chosen from the path as it looked before the lock was taken, and the
+		// publish target is resolved under the lock - after a peer committed, and after the alias
+		// itself may have been repointed. If the two no longer name the same file, this writer is
+		// holding the lock of a path it is not about to publish while some other writer can hold
+		// the lock of the one it is about to publish, which is two commits onto one file each
+		// believing it owned it. Nothing has been staged or merged yet, so rejecting here leaves
+		// every file untouched and the caller can retry against the key it resolves to now.
+		if ((await resolveLockKey(resolvedTargetPath)) !== lockKey) {
+			throw new LockKeyDriftError(absoluteFilePath, lockKey, resolvedTargetPath)
+		}
 
 		// Confinement, if the caller declared a scope. Both sides are canonicalized the
 		// same way: the publish target is resolved through symlinks, and a target that

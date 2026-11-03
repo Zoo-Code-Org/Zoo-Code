@@ -359,10 +359,21 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				output += `\nNote: Some lines in this view exceed ${MAX_LINE_LENGTH} characters and were clipped in this view.`
 			}
 		} else if (result.hasClippedLines) {
-			// Every line was returned, so there is no later offset to read: report the
-			// clipping without a next-offset hint, and keep the read incomplete so a
-			// full-file replacement cannot be built from a clipped line.
-			output = `IMPORTANT: Some lines exceed ${MAX_LINE_LENGTH} characters and were clipped in this view. The file was read in full, but the clipped lines were not shown in full.
+			// Nothing was omitted, so there is no later offset to read: report the clipping
+			// without a next-offset hint, and keep the read incomplete so a full-file
+			// replacement cannot be built from a clipped line. "In full" is only true when the
+			// slice covered the whole file - a slice that started past line 1 and stopped at the
+			// last line is not truncated, but it is not the file either, and saying "read in
+			// full" would hide the lines before the offset from the reader.
+			const covered = result.includedRanges.map(([start, end]) => `${start}-${end}`).join(", ")
+			const coversWholeFile =
+				result.includedRanges.length > 0 &&
+				result.includedRanges[0][0] === 1 &&
+				result.includedRanges[result.includedRanges.length - 1][1] === result.totalLines
+			const scope = coversWholeFile
+				? "The file was read in full, but the clipped lines were not shown in full."
+				: `Lines ${covered} of ${result.totalLines} total lines were shown, and the clipped lines were not shown in full.`
+			output = `IMPORTANT: Some lines exceed ${MAX_LINE_LENGTH} characters and were clipped in this view. ${scope}
 				${result.content}`
 		} else if (result.returnedLines === 0 && result.totalLines === 0) {
 			output = "Note: File is empty"
