@@ -3035,6 +3035,15 @@ export class ClineProvider
 				this.contextProxy.setValue("currentApiConfigName", name),
 				this.contextProxy.setProviderSettings(providerSettings),
 			])
+
+			// Mirror the activation into this view's buffer and durable pin: the shared writes above
+			// bypass the per-view mutation path, so getValues() would keep overlaying the previous
+			// profile's name and settings - getConfiguration() then reports the previous profile
+			// while the shared selection already holds the new one.
+			await this._saveViewLocalStateFromMutation({
+				currentApiConfigName: name,
+				apiConfiguration: providerSettings,
+			})
 		}
 
 		const { mode } = await this.getState()
