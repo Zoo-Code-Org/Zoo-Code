@@ -2,6 +2,8 @@
 
 import * as vscode from "vscode"
 
+import type { RooCodeSettings } from "@roo-code/types"
+
 import { GLOBAL_STATE_KEYS, SECRET_STATE_KEYS, GLOBAL_SECRET_KEYS } from "@roo-code/types"
 
 import { clearAllMocks } from "../../../test-utils/reset"
@@ -778,6 +780,57 @@ Output only the summary of the conversation so far, without any additional comme
 				(call: any[]) => call[0] === "customSupportPrompts",
 			)
 			expect(customSupportPromptsUpdateCalls.length).toBe(0)
+		})
+	})
+
+	describe("payload-shaped state keys", () => {
+		it("should refuse a prototype key carried by a parsed payload", async () => {
+			// JSON.parse gives an object an own "__proto__" key, and `setValues` iterates own keys.
+			// Accepting it would re-point the state cache's prototype instead of storing a setting,
+			// and every later read of a real key could then resolve through that prototype.
+			const payload = JSON.parse('{"__proto__":{"polluted":true},"mode":"code"}') as RooCodeSettings
+
+			await proxy.setValues(payload)
+
+			expect(proxy.getValue("mode")).toBe("code")
+			const stateCache = proxy["stateCache"] as Record<string, unknown>
+			expect(Object.getPrototypeOf(stateCache)).toBe(Object.prototype)
+			expect(stateCache["polluted"]).toBeUndefined()
+			expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+			expect(mockGlobalState.update.mock.calls.some((call: unknown[]) => call[0] === "__proto__")).toBe(false)
+		})
+
+		it("should refuse the same key on the global-state write path", async () => {
+			// `updateGlobalState` is the function that performs the computed assignment, so it
+			// rejects the key itself rather than relying on its callers.
+			await proxy.updateGlobalState("__proto__" as never, { polluted: true } as never)
+			await proxy.updateGlobalState("constructor" as never, { polluted: true } as never)
+
+			const stateCache = proxy["stateCache"] as Record<string, unknown>
+			expect(Object.getPrototypeOf(stateCache)).toBe(Object.prototype)
+			expect(stateCache["polluted"]).toBeUndefined()
+			expect(mockGlobalState.update).not.toHaveBeenCalledWith("__proto__", expect.anything())
+		})
+	})
+
+	describe("state write generations", () => {
+		it("should report the generation the next global-state write produces", async () => {
+			expect(proxy.beginStateWriteGeneration("writeDelayMs")).toBe(1)
+
+			await proxy.setValue("writeDelayMs", 10)
+
+			expect(proxy.getStateWriteGeneration("writeDelayMs")).toBe(1)
+			expect(proxy.beginStateWriteGeneration("writeDelayMs")).toBe(2)
+		})
+
+		it("should record no generation for keys that bypass the state cache", () => {
+			// Secrets live in ExtensionContext.secrets and `taskHistory` is written straight
+			// through to global state. Neither path advances a generation, so a rollback of such a
+			// write keeps the value-only check instead of claiming a token it cannot honour.
+			expect(proxy.beginStateWriteGeneration("apiKey")).toBeUndefined()
+			expect(proxy.getStateWriteGeneration("apiKey")).toBeUndefined()
+			expect(proxy.beginStateWriteGeneration("taskHistory")).toBeUndefined()
+			expect(proxy.getStateWriteGeneration("taskHistory")).toBeUndefined()
 		})
 	})
 

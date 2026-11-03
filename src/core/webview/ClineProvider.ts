@@ -4156,13 +4156,21 @@ export class ClineProvider
 
 	public async setValue<K extends keyof RooCodeSettings>(key: K, value: RooCodeSettings[K]) {
 		const previousSharedValues = { [key]: this.contextProxy.getValue(key) } as RooCodeSettings
+		// Sampled before the write is awaited: this write produces the next generation for the
+		// key, and a write that starts during the await produces the one after it. A key whose
+		// write path records no generation yields undefined and keeps the value-only check.
+		const writeGeneration = this.contextProxy.beginStateWriteGeneration(key as never)
 		await this.contextProxy.setValue(key, value)
 		try {
 			await this._saveViewLocalStateFromMutation({ [key]: value } as ViewLocalStateValues)
 		} catch (error) {
-			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues, {
-				[key]: value,
-			} as RooCodeSettings)
+			await this._restoreSharedValuesAfterFailedViewWrite(
+				previousSharedValues,
+				{
+					[key]: value,
+				} as RooCodeSettings,
+				{ [key]: writeGeneration },
+			)
 			throw error
 		}
 	}
@@ -4221,18 +4229,37 @@ export class ClineProvider
 	 * Restore shared values captured before a setter wrote them, used when the paired
 	 * per-view persistence failed so the shared store cannot move ahead of the per-view
 	 * record. A failed rollback is logged; the original failure is what callers see.
+	 *
+	 * `generations` carries the generation this attempt produced for each key it wrote. It is
+	 * optional: a caller writing through a path that records no generation rolls back on the
+	 * value check alone.
 	 */
 	private async _restoreSharedValuesAfterFailedViewWrite(
 		previous: RooCodeSettings,
 		attempted: RooCodeSettings,
+		generations: Record<string, number | undefined> = {},
 	): Promise<void> {
-		// Roll back only the keys this attempt wrote and that still hold the value it wrote.
-		// A concurrent provider may have written a newer value in the meantime; restoring the
-		// captured previous value would then clobber it for every view that reads shared state.
+		// Roll back only the keys this attempt wrote, that still hold the value it wrote, and
+		// whose write generation is still the one this attempt produced. The value check alone is
+		// not enough: another provider can write the *same* value while this attempt's per-view
+		// save is in flight, and restoring the captured previous value would silently undo that
+		// newer write for every view that reads shared state.
 		const rollback: RooCodeSettings = {} as RooCodeSettings
 
-		for (const key of Object.keys(attempted) as (keyof RooCodeSettings)[]) {
-			if (this.contextProxy.getValue(key) === attempted[key]) {
+		for (const keyName of Object.keys(attempted)) {
+			// `attempted` can originate in a parsed payload, and a parsed payload can carry
+			// "__proto__". Assigning that through a computed key would modify Object.prototype
+			// instead of recording a rollback entry.
+			if (keyName === "__proto__" || keyName === "constructor" || keyName === "prototype") {
+				continue
+			}
+
+			const key = keyName as keyof RooCodeSettings
+			const generation = generations[keyName]
+			const ownsThisWrite =
+				generation === undefined || this.contextProxy.getStateWriteGeneration(key) === generation
+
+			if (ownsThisWrite && this.contextProxy.getValue(key) === attempted[key]) {
 				;(rollback as Record<string, unknown>)[key] = previous[key]
 			}
 		}
@@ -4276,13 +4303,20 @@ export class ClineProvider
 		const previousSharedValues = Object.fromEntries(
 			Object.keys(sanitizedValues).map((key) => [key, this.contextProxy.getValue(key as keyof RooCodeSettings)]),
 		) as RooCodeSettings
+		// Per-key generations sampled before the batch is awaited: the batch produces the next
+		// generation for every key it writes, so a key another view writes - during the batch or
+		// during the per-view save below - ends up holding a later one.
+		const writeGenerations = Object.fromEntries(
+			Object.keys(sanitizedValues).map((key) => [key, this.contextProxy.beginStateWriteGeneration(key as never)]),
+		) as Record<string, number | undefined>
 		await this.contextProxy.setValues(sanitizedValues)
 		try {
 			await this._saveViewLocalStateFromMutation(sanitizedValues)
 		} catch (error) {
 			// The per-view record did not land: restore the prior shared values so the two
-			// persistence layers cannot diverge, then surface the original failure.
-			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues, sanitizedValues)
+			// persistence layers cannot diverge, then surface the original failure. Only keys this
+			// batch still owns are restored.
+			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues, sanitizedValues, writeGenerations)
 			throw error
 		}
 	}
@@ -4948,14 +4982,32 @@ export class ClineProvider
 					await this.setProviderProfile(configuration.currentApiConfigName)
 				}
 			} catch (error) {
-				// A failure after the registration must not leave the batch's modes installed;
-				// restore the ones that already existed. Newly added slugs cannot be deleted
-				// through the manager, so they are only reported.
+				// A failure after the registration must not leave the batch's modes installed:
+				// a slug that already existed is restored to its earlier definition, and a slug this
+				// batch introduced has no earlier definition to restore.
 				for (const savedMode of savedCustomModes) {
 					await this.customModesManager.updateCustomMode(savedMode.slug, savedMode).catch((restoreError) => {
 						this.log(
 							`[createTask] Failed to restore custom mode '${savedMode.slug}' after the task creation failed: ${
 								restoreError instanceof Error ? restoreError.message : String(restoreError)
+							}`,
+						)
+					})
+				}
+
+				// Removal uses `removeCustomModeEntry`, not `deleteCustomMode`: the public delete also
+				// removes `.roo/rules-<slug>` (`~/.roo/rules-<slug>` for a global mode) without knowing
+				// whether that folder predates this batch, and a rollback must not destroy rules the
+				// user wrote earlier.
+				for (const mode of configuration.customModes ?? []) {
+					if (savedCustomModes.some((saved) => saved.slug === mode.slug)) {
+						continue
+					}
+
+					await this.customModesManager.removeCustomModeEntry(mode.slug).catch((removeError) => {
+						this.log(
+							`[createTask] Failed to remove the custom mode '${mode.slug}' registered by the failed task creation: ${
+								removeError instanceof Error ? removeError.message : String(removeError)
 							}`,
 						)
 					})

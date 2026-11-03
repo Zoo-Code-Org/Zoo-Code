@@ -554,6 +554,44 @@ export class CustomModesManager {
 	}
 
 	/**
+	 * Removes a mode's entry from the mode files and refreshes the merged state, without
+	 * touching its rules folder. Rollback paths need this variant: `deleteCustomMode` also
+	 * deletes `.roo/rules-<slug>` (or `~/.roo/rules-<slug>`), and a rollback cannot know
+	 * whether that folder predates the batch whose registration it is undoing - deleting it
+	 * would discard rules the user wrote earlier.
+	 *
+	 * Returns whether an entry was actually removed so a caller can report a miss instead of
+	 * assuming cleanup happened. Errors propagate; rollback callers decide how loud to be.
+	 */
+	public async removeCustomModeEntry(slug: string): Promise<boolean> {
+		const settingsPath = await this.getCustomModesFilePath()
+		const roomodesPath = await this.getWorkspaceRoomodes()
+		const projectModes = roomodesPath ? await this.loadModesFromFile(roomodesPath) : []
+		const settingsModes = await this.loadModesFromFile(settingsPath)
+		const inProjectFile = projectModes.some((mode) => mode.slug === slug)
+		const inSettingsFile = settingsModes.some((mode) => mode.slug === slug)
+
+		if (!inProjectFile && !inSettingsFile) {
+			return false
+		}
+
+		await this.queueWrite(async () => {
+			if (roomodesPath && inProjectFile) {
+				await this.updateModesInFile(roomodesPath, (modes) => modes.filter((m) => m.slug !== slug))
+			}
+
+			if (inSettingsFile) {
+				await this.updateModesInFile(settingsPath, (modes) => modes.filter((m) => m.slug !== slug))
+			}
+
+			this.clearCache()
+			await this.refreshMergedState()
+		})
+
+		return true
+	}
+
+	/**
 	 * Deletes the rules folder for a specific mode
 	 * @param slug - The mode slug
 	 * @param mode - The mode configuration to determine the scope

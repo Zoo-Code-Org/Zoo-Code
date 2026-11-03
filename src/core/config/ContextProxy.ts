@@ -32,6 +32,13 @@ const PASS_THROUGH_STATE_KEYS = ["taskHistory"]
 
 export const isPassThroughStateKey = (key: string) => PASS_THROUGH_STATE_KEYS.includes(key)
 
+// A parsed payload can carry these as own keys. Writing one through a computed assignment
+// re-points the target object's prototype instead of storing a setting, so they are never
+// accepted as state keys.
+const UNSAFE_STATE_KEYS = ["__proto__", "constructor", "prototype"]
+
+export const isUnsafeStateKey = (key: string) => UNSAFE_STATE_KEYS.includes(key)
+
 const globalSettingsExportSchema = globalSettingsSchema.omit({
 	taskHistory: true,
 	listApiConfigMeta: true,
@@ -365,6 +372,10 @@ export class ContextProxy {
 	}
 
 	async updateGlobalState<K extends GlobalStateKey>(key: K, value: GlobalState[K]) {
+		if (isUnsafeStateKey(key)) {
+			return Promise.resolve()
+		}
+
 		if (isPassThroughStateKey(key)) {
 			return this.originalContext.globalState.update(key, value)
 		}
@@ -384,6 +395,32 @@ export class ContextProxy {
 			}
 			throw error
 		}
+	}
+
+	/**
+	 * The write generation the next `setValue`/`setValues` of this key will produce, or
+	 * `undefined` when the key's write path records no generation at all - a secret, or a
+	 * pass-through key that bypasses the state cache. Capture it before awaiting the write.
+	 */
+	public beginStateWriteGeneration<K extends RooCodeSettingsKey>(key: K): number | undefined {
+		if (!this.recordsWriteGeneration(key)) {
+			return undefined
+		}
+
+		return (this.stateWriteGenerations.get(key as GlobalStateKey) ?? 0) + 1
+	}
+
+	/**
+	 * Current write generation for a key, or `undefined` when its write path records none. A
+	 * caller that may have to undo its own write compares it against the value captured from
+	 * `beginStateWriteGeneration`: a newer write for the same key has already advanced it.
+	 */
+	public getStateWriteGeneration<K extends RooCodeSettingsKey>(key: K): number | undefined {
+		return this.recordsWriteGeneration(key) ? this.stateWriteGenerations.get(key as GlobalStateKey) : undefined
+	}
+
+	private recordsWriteGeneration<K extends RooCodeSettingsKey>(key: K): boolean {
+		return !isSecretStateKey(key) && !isPassThroughStateKey(key)
 	}
 
 	private getAllGlobalState(): GlobalState {

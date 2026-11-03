@@ -6706,6 +6706,156 @@ describe("ClineProvider", () => {
 		mockContext.globalState.update = originalUpdate
 		await provider.dispose()
 	})
+
+	it("should leave a shared value alone when another view wrote the same value meanwhile", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		await provider.contextProxy.setValue("mode", "architect")
+		const originalUpdate = mockContext.globalState.update
+		mockContext.globalState.update = vi.fn().mockImplementation(async (key: string) => {
+			if (key === "viewStates") {
+				// Another view selects the same mode while this provider's per-view save is in
+				// flight: the value matches this attempt, but the write does not belong to it.
+				await provider.contextProxy.setValue("mode", "code")
+				throw new Error("storage unavailable")
+			}
+			return Promise.resolve()
+		})
+
+		await expect(provider.setValue("mode", "code")).rejects.toThrow("storage unavailable")
+
+		// The newer write stands. Restoring the captured "architect" would undo the other
+		// view's successful selection in every view that reads shared state.
+		expect(provider.getValue("mode")).toBe("code")
+
+		mockContext.globalState.update = originalUpdate
+		await provider.dispose()
+	})
+	it("should still roll back its own shared write when no newer write exists", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		await provider.contextProxy.setValue("mode", "architect")
+		const originalUpdate = mockContext.globalState.update
+		mockContext.globalState.update = vi.fn().mockImplementation((key: string) => {
+			if (key === "viewStates") {
+				return Promise.reject(new Error("storage unavailable"))
+			}
+			return Promise.resolve()
+		})
+
+		await expect(provider.setValue("mode", "code")).rejects.toThrow("storage unavailable")
+
+		// The ownership token must not become a reason to skip a rollback this provider owns.
+		expect(provider.getValue("mode")).toBe("architect")
+
+		mockContext.globalState.update = originalUpdate
+		await provider.dispose()
+	})
+	it("should roll back only the batch keys it still owns after a failed per-view save", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		await provider.contextProxy.setValue("mode", "architect")
+		await provider.contextProxy.setValue("currentApiConfigName", "current-config")
+		const originalUpdate = mockContext.globalState.update
+		mockContext.globalState.update = vi.fn().mockImplementation(async (key: string) => {
+			if (key === "viewStates") {
+				await provider.contextProxy.setValue("mode", "code")
+				throw new Error("storage unavailable")
+			}
+			return Promise.resolve()
+		})
+
+		await expect(provider.setValues({ mode: "code", currentApiConfigName: "other-config" })).rejects.toThrow(
+			"storage unavailable",
+		)
+
+		// Key-level ownership, not batch-level: the mode a newer view selected survives, while the
+		// profile name this batch still owns is restored.
+		expect(provider.getValue("mode")).toBe("code")
+		expect(provider.getValue("currentApiConfigName")).toBe("current-config")
+
+		mockContext.globalState.update = originalUpdate
+		await provider.dispose()
+	})
+	it("should remove a custom mode the batch registered when the batch fails", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const existingMode = { slug: "existing-mode", name: "Existing", roleDefinition: "r", groups: ["read" as const] }
+		const newMode = { slug: "new-mode", name: "New", roleDefinition: "r", groups: ["read" as const] }
+		const manager = provider["customModesManager"]
+		Object.assign(manager, {
+			getCustomModes: vi.fn().mockResolvedValue([existingMode]),
+			updateCustomMode: vi.fn().mockResolvedValue(undefined),
+			removeCustomModeEntry: vi.fn().mockResolvedValue(true),
+		})
+		vi.spyOn(provider, "setValues").mockRejectedValue(new Error("configuration write failed"))
+
+		await expect(
+			provider.createTask("text", undefined, undefined, {}, { customModes: [existingMode, newMode] }),
+		).rejects.toThrow("configuration write failed")
+
+		// The slug that already existed is restored to its earlier definition; the slug this batch
+		// introduced is removed, and only through the rules-folder-safe path.
+		expect(manager.updateCustomMode).toHaveBeenCalledWith("existing-mode", existingMode)
+		expect(manager.removeCustomModeEntry).toHaveBeenCalledWith("new-mode")
+		expect(manager.removeCustomModeEntry).not.toHaveBeenCalledWith("existing-mode")
+
+		await provider.dispose()
+	})
+
+	it("should keep a prototype key carried by a payload out of the rollback write", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		await provider.contextProxy.setValue("mode", "code")
+		// A payload-shaped value can carry an own "__proto__" next to the settings it names, and both
+		// maps handed to the rollback are built from those same keys.
+		const attempted = Object.fromEntries([
+			["__proto__", { polluted: true }],
+			["mode", "code"],
+		]) as RooCodeSettings
+		const previous = Object.fromEntries([
+			["__proto__", { polluted: true }],
+			["mode", "architect"],
+		]) as RooCodeSettings
+		const rollbackWrite = vi.spyOn(provider["contextProxy"], "setValues")
+
+		await provider["_restoreSharedValuesAfterFailedViewWrite"](previous, attempted)
+
+		expect(rollbackWrite).toHaveBeenCalledTimes(1)
+		const written = rollbackWrite.mock.calls[0][0] as Record<string, unknown>
+		expect(Object.keys(written)).toEqual(["mode"])
+		expect(Object.getPrototypeOf(written)).toBe(Object.prototype)
+		expect(written["polluted"]).toBeUndefined()
+		expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+		expect(provider.getValue("mode")).toBe("architect")
+
+		await provider.dispose()
+	})
 })
 
 describe("webviewMessageHandler no-floating-promises coverage", () => {
