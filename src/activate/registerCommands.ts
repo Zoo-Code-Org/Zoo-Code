@@ -493,6 +493,21 @@ const createTabPanelUnlocked = async ({
 
 		const targetCol = hasVisibleEditors ? Math.max(lastCol + 1, 1) : vscode.ViewColumn.Two
 
+		// Recheck the tracked tab before creating another one: the awaits above (the proxy instance
+		// and the new group command) leave a window in which the API path or a sidebar-to-tab move
+		// can install a tracked panel, and creating here would replace it instead of reusing it.
+		// The provider built above never receives a panel on this path, so it has to be disposed or
+		// it stays registered with its listeners attached.
+		if (reuseTrackedPanel && tabPanel) {
+			const racedProvider = ClineProvider.getInstanceForView(tabPanel)
+			if (racedProvider) {
+				await tabPanel.reveal()
+				await racedProvider.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
+				await tabProvider.dispose()
+				return racedProvider
+			}
+		}
+
 		newPanel = vscode.window.createWebviewPanel(ClineProvider.tabPanelId, "Zoo Code", targetCol, {
 			enableScripts: true,
 			retainContextWhenHidden: true,

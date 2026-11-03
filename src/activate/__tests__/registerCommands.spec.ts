@@ -759,6 +759,41 @@ describe("openClineInNewTab", () => {
 		},
 	)
 
+	it("reuses a tab that appeared while the panel was being created", async () => {
+		const trackedPanel = {
+			reveal: vi.fn().mockResolvedValue(undefined),
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+		}
+		const trackedProvider = {
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn().mockResolvedValue(undefined),
+		}
+		// The provider construction is the await in the middle of the creation window: install a
+		// tracked tab there, as the API path or a sidebar-to-tab move would.
+		const constructed = vi.mocked(ClineProvider)
+		// A plain function, not an arrow: the production code calls this with `new`.
+		constructed.mockImplementationOnce(function () {
+			setPanel(trackedPanel as never, "tab")
+			;(ClineProvider.getInstanceForView as Mock).mockReturnValue(trackedProvider)
+			return { dispose: vi.fn().mockResolvedValue(undefined) }
+		} as never)
+
+		await openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		})
+
+		// A tab that appeared in the window is reused instead of replaced, and the provider that
+		// never received a panel is disposed so it does not stay registered with listeners.
+		expect(vscode.window.createWebviewPanel).not.toHaveBeenCalled()
+		expect(trackedProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "action",
+			action: "didBecomeVisible",
+		})
+	})
 	it("creates a webview panel with title 'Zoo Code'", async () => {
 		const webviewFocusTracker = new WebviewFocusTracker()
 		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel, webviewFocusTracker })
