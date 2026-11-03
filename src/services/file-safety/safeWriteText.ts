@@ -58,6 +58,17 @@ export interface SafeWriteTextOptions {
 	 * caller would never learn that its bytes landed somewhere else.
 	 */
 	publishOverLink?: boolean
+
+	/**
+	 * The caller already resolved this path to its publish target AND holds that target's lock
+	 * (guardedWrite fixes and locks a retained publish target under its own advisory lock).
+	 * The publish then acts on exactly the path given, without resolving it again: a second
+	 * resolution happens after the caller's authorization and version check, so a link planted or
+	 * retargeted in that gap would send bytes the caller verified for one file into a different
+	 * file - one the caller never checked and, in the guard's case, does not hold the lock of.
+	 * Only a caller that verified the path's identity under a lock may set this.
+	 */
+	retainedTarget?: boolean
 }
 
 /**
@@ -456,6 +467,39 @@ export async function resolveLinkPathLockKey(absoluteFilePath: string): Promise<
 	return await canonicalDirKey(path.resolve(absoluteFilePath))
 }
 
+/**
+ * The mode the staged file has to carry so that publishing it does not change who can read
+ * the entry being replaced. Returns undefined when there is nothing to carry over.
+ *
+ * lstat, not stat: for a publish-over-link write the target entry IS a symlink, and stat would
+ * hand back the REFERENT's mode. Copying that onto the staged file would file a regular file
+ * with the referent's access rights in the LINK's directory - a 0o666 referent would become a
+ * 0o666 plain file beside the link, visible to readers the link never exposed. A link carries
+ * no mode worth preserving, so such a publish keeps the fresh-file default, exactly like a
+ * target that does not exist yet.
+ *
+ * A failure to stat is NOT "nothing to carry over": only ENOENT (no entry) is treated that
+ * way; any other errno propagates, because publishing with the default mode could widen a
+ * restrictive target this call could not read.
+ */
+function _carriedTargetMode(targetPath: string): number | undefined {
+	try {
+		const entry = fsSync.lstatSync(targetPath)
+		if (entry.isSymbolicLink()) {
+			// The entry being replaced is an alias. Its referent's mode belongs to a file this
+			// publish does not replace, so it must not be transferred onto the staged file.
+			return undefined
+		}
+		return entry.mode & 0o777
+	} catch (error: unknown) {
+		if (errorCode(error) !== "ENOENT") {
+			throw error
+		}
+		// No entry yet: the fresh-target default is the intended mode.
+		return undefined
+	}
+}
+
 export async function safeWriteText(
 	filePath: string,
 	content: string | Uint8Array,
@@ -463,10 +507,19 @@ export async function safeWriteText(
 ): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 
-	// Resolve the symlink referent (see resolvePublishTarget), unless the caller asked to
-	// replace the link instead of writing through it. The link is then the target, so a referent
-	// outside the caller's view cannot receive these bytes.
-	const targetPath = options?.publishOverLink ? absoluteFilePath : await resolvePublishTarget(absoluteFilePath)
+	// Which path the commit rename lands on, decided by who authorized it:
+	// - publishOverLink: the caller declared the requested path ITSELF the destination (replace
+	//   the link entry, never follow it).
+	// - retainedTarget: the caller resolved this path to its publish target and holds that
+	//   target's lock, so the publish acts on the path it was handed. Resolving it a second time
+	//   here would resolve it AFTER the caller's authorization and version check - a link planted
+	//   or retargeted in that gap would move these bytes to a file the caller never authorized.
+	// - default: follow the referent, which is what a caller that resolved the path itself expects
+	//   to receive the bytes.
+	const targetPath =
+		options?.publishOverLink || options?.retainedTarget
+			? absoluteFilePath
+			: await resolvePublishTarget(absoluteFilePath)
 	const dirPath = path.dirname(targetPath)
 
 	// Ensure parent directory exists (mirrors safeWriteJson behaviour).
@@ -484,6 +537,10 @@ export async function safeWriteText(
 	// the name belongs to whatever is filed under it next, and a caller-supplied
 	// staging name is reused by the next write to the same target.
 	let stagingCommitted = false
+	// The identity this call verified for the caller-supplied staging entry, kept so the open and the
+	// commit rename can prove they still touch THAT file rather than an entry swapped in after the
+	// validation below. Only recorded when the filesystem reported a real bigint identity.
+	let validatedStagingIdentity: { dev: bigint; ino: bigint } | null = null
 	if (options?.tempPath) {
 		// A caller-supplied staging file is only safe when it is the file this
 		// write is staging, not an arbitrary path. Two properties are checked:
@@ -533,6 +590,9 @@ export async function safeWriteText(
 		) {
 			throw new StagingPathError("Staging file must not be the target itself", supplied)
 		}
+		if (typeof stagingStat.ino === "bigint" && typeof stagingStat.dev === "bigint") {
+			validatedStagingIdentity = { dev: stagingStat.dev, ino: stagingStat.ino }
+		}
 		// The caller's own path is used as given; only the check is canonical.
 		tempPath = options.tempPath
 	} else {
@@ -558,15 +618,11 @@ export async function safeWriteText(
 			// covers the legacy code pages Node cannot represent) are published
 			// unchanged.
 			const buffer = Buffer.from(content)
-			let targetMode = 0o644 // default for a fresh target
-			let targetExists = false
-			try {
-				targetMode = fsSync.statSync(targetPath).mode & 0o777
-				targetExists = true
-			} catch (error: unknown) {
-				if (errorCode(error) !== "ENOENT") throw error
-				// target does not exist yet - keep the default
-			}
+			// undefined when the target entry is absent or is a link: either there is no mode to
+			// carry, or the mode belongs to a file this publish does not replace.
+			const carriedMode = _carriedTargetMode(targetPath)
+			const targetMode = carriedMode ?? 0o644 // default for a fresh target
+			const targetExists = carriedMode !== undefined
 			// openSync's creation mode is narrowed by the process umask, so an
 			// existing 0o664 target would be published as 0o644 through the
 			// rename. Apply the existing target's exact mode on the fd, as the
@@ -611,19 +667,35 @@ export async function safeWriteText(
 			// The mode is applied with fchmodSync on the open fd (AFTER openSync):
 			// chmodSync on the path before the open would make a read-only target
 			// (0o400/0o444) fail openSync(tempPath, "r+") with EACCES.
-			let targetMode: number | null = null
-			try {
-				targetMode = fsSync.statSync(targetPath).mode & 0o777
-			} catch (error: unknown) {
-				if (errorCode(error) !== "ENOENT") throw error
-				// target does not exist yet - keep the temp's default mode
-			}
+			// null means "nothing to carry over": an absent target keeps the temp's own mode, and
+			// so does a target entry that is a link, whose referent's mode must not be copied onto
+			// a regular file filed in the link's directory.
+			const targetMode: number | null = _carriedTargetMode(targetPath) ?? null
 			// Same ownership model as the self-staged branch above: the close is retried and
 			// reported through _closeDescriptor rather than replacing the write's own failure.
 			let stagedFd: number | undefined
 			try {
 				const handle = fsSync.openSync(tempPath, "r+")
 				stagedFd = handle
+				// Bind the descriptor to the entry the validation above checked. open(2) follows a symlink,
+				// so an entry replaced with a link in the shared target directory between the lstat and the
+				// open would hand this call a descriptor for SOME OTHER FILE - and the fchmod below would
+				// then change that file's mode. fstat describes what the descriptor actually refers to; a
+				// different identity rejects before fchmod or fsync touches it, and the catch below closes
+				// the descriptor.
+				const openedIdentity = fsSync.fstatSync(handle, { bigint: true })
+				if (
+					validatedStagingIdentity !== null &&
+					typeof openedIdentity.ino === "bigint" &&
+					typeof openedIdentity.dev === "bigint" &&
+					(openedIdentity.ino !== validatedStagingIdentity.ino ||
+						openedIdentity.dev !== validatedStagingIdentity.dev)
+				) {
+					throw new StagingPathError(
+						"Staging file changed identity between validation and the open: refusing to chmod or fsync through it",
+						tempPath,
+					)
+				}
 				if (targetMode !== null) {
 					fsSync.fchmodSync(handle, targetMode)
 				}
@@ -810,6 +882,35 @@ export async function safeWriteText(
 			}
 
 			// -- Step 4: atomic rename temp -> target ---------------------
+			// A caller-supplied staging file sits in the shared target directory, where another
+			// principal can replace the NAME between the validation above and this rename. Renaming a
+			// symlink onto the target files whatever the link points at, so the entry is checked again
+			// immediately before the commit: still the same file this call created and validated, and
+			// not a link. rename(2) takes a path, so a swap AFTER this check is not detectable from the
+			// inside - only a staging directory other principals cannot write removes that window (the
+			// self-staged path above uses a 0o700 private directory for exactly that reason). What this
+			// does close is the open-to-commit gap, which is the window the mode change was reached through.
+			if (options?.tempPath) {
+				const stagingBeforeCommit = await fs.lstat(tempPath, { bigint: true })
+				if (stagingBeforeCommit.isSymbolicLink()) {
+					throw new StagingPathError(
+						"Staging file became a symlink before the commit rename: refusing to publish what it points at",
+						tempPath,
+					)
+				}
+				if (
+					validatedStagingIdentity !== null &&
+					typeof stagingBeforeCommit.ino === "bigint" &&
+					typeof stagingBeforeCommit.dev === "bigint" &&
+					(stagingBeforeCommit.ino !== validatedStagingIdentity.ino ||
+						stagingBeforeCommit.dev !== validatedStagingIdentity.dev)
+				) {
+					throw new StagingPathError(
+						"Staging file is no longer the entry this write created: refusing the commit rename",
+						tempPath,
+					)
+				}
+			}
 			await fs.rename(tempPath, targetPath)
 			stagingCommitted = true
 

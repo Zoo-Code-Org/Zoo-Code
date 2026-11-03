@@ -66,6 +66,30 @@ export class ConfinedPathEscapeError extends Error {
 }
 
 /**
+ * Thrown when the publish target this call resolved UNDER its advisory lock is not the file
+ * whose lock it holds. Both lock keys are derived from the caller's path BEFORE the lock is
+ * acquired; a peer that replaces a symlink alias in that window - while this call queues behind
+ * another writer - leaves this call holding the old referent's lock while the file it is about to
+ * replace is a different one, whose lock belongs to somebody else. Publishing there would race
+ * that writer outright, so the write stops, releases what it holds, and reports the move instead
+ * of writing an unlocked file. The caller re-issues the write; on the next attempt the keys are
+ * derived from where the alias points now.
+ */
+export class PublishTargetMovedError extends Error {
+	constructor(
+		readonly requestedPath: string,
+		readonly movedToPath: string,
+		readonly heldLockKey: string,
+	) {
+		super(
+			`Refusing to write ${movedToPath}: the target moved to a file this write does not hold the ` +
+				`lock for (requested ${requestedPath}, locked ${heldLockKey}). Re-read the path and retry.`,
+		)
+		this.name = "PublishTargetMovedError"
+	}
+}
+
+/**
  * Canonicalize the directory a write is confined to. The publish target is fully
  * resolved through symlinks, so the scope has to be resolved the same way or a
  * scope path that itself runs through a symlink (macOS /var -> /private/var is the
@@ -201,6 +225,25 @@ async function _lockIdentityKey(absoluteFilePath: string): Promise<string> {
 		current = path.dirname(current)
 	}
 }
+/**
+ * Whether a lock acquisition failed because the lock ENTRY has nowhere to live - the directory
+ * beside the lock key is missing - as opposed to a competing holder.
+ *
+ * proper-lockfile reports the mkdir failure with ENOENT, sometimes wrapped in its own retry error,
+ * so the code is read through the cause chain rather than only off the top-level error.
+ */
+function _lockFailedForMissingDirectory(error: unknown): boolean {
+	let current: unknown = error
+	for (let depth = 0; depth < 6 && current !== null && typeof current === "object"; depth++) {
+		const candidate = current as { code?: unknown; cause?: unknown }
+		if (candidate.code === "ENOENT") {
+			return true
+		}
+		current = candidate.cause
+	}
+	return false
+}
+
 async function safeWriteJson(filePath: string, data: unknown, options?: SafeWriteJsonOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 	// One release per lock acquired, kept in acquisition order and released in reverse below.
@@ -294,7 +337,24 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	const acquired: Array<() => Promise<void>> = []
 	try {
 		for (const key of lockKeys) {
-			acquired.push(await acquireFileLock(key))
+			try {
+				acquired.push(await acquireFileLock(key))
+			} catch (keyLockError: unknown) {
+				// The referent lock is the EXTRA lock a publish-over-link (unconfined) write takes, to
+				// serialize this alias against a writer that names the referent directly. proper-lockfile
+				// stores ${key}.lock BESIDE the key, so a referent whose directory does not exist has no
+				// place for that entry and the acquisition fails with ENOENT before it locks anything.
+				// That is not contention: no writer of that referent can hold a lock inside a directory
+				// that is not there. Aborting would refuse a write the caller is entitled to make - a link
+				// pointing into a directory that has not been created yet, or into one this caller may not
+				// create - and the publish replaces the LINK, which is the entry this write actually
+				// modifies. So the extra lock is dropped and the write proceeds. An EACCES on an EXISTING
+				// referent directory is a real serialization problem and is never swallowed.
+				if (publishOverLink && key !== linkPathLockKey && _lockFailedForMissingDirectory(keyLockError)) {
+					continue
+				}
+				throw keyLockError
+			}
 		}
 	} catch (lockError) {
 		for (const release of [...acquired].reverse()) {
@@ -320,6 +380,22 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// link itself, as this primitive did before it resolved links at all.
 		// Same decision as publishOverLink, read from the same value.
 		resolvedTargetPath = publishOverLink ? absoluteFilePath : await resolvePublishTarget(absoluteFilePath)
+
+		if (!publishOverLink) {
+			// A confined write publishes THROUGH the referent, and the only lock it holds is the one it
+			// derived from the alias BEFORE acquiring (lockKeys above). This is the first moment the
+			// alias has been resolved while that lock is held, so it is where a move can be detected:
+			// re-derive the lock key of the file this call is about to replace and compare it with the
+			// identity it locked. Different identities mean the alias was retargeted while this write
+			// was queueing - publishing now would write a file whose lock belongs to another writer,
+			// next to an alias this call authorized. The write stops here; the finally below releases
+			// what was held, and the caller re-issues with keys derived from the alias's current
+			// referent.
+			const resolvedLockKey = await resolveLockKey(resolvedTargetPath)
+			if (referentLockIdentity !== (await _lockIdentityKey(resolvedLockKey))) {
+				throw new PublishTargetMovedError(absoluteFilePath, resolvedTargetPath, referentLockKey)
+			}
+		}
 
 		// Confinement, if the caller declared a scope. Both sides are canonicalized the
 		// same way: the publish target is resolved through symlinks, and a target that

@@ -33,6 +33,7 @@ vi.mock("fs/promises", () => ({
 // class stub so tests can build minimal Stats stand-ins via its prototype.
 vi.mock("fs", () => ({
 	openSync: vi.fn(),
+	fstatSync: vi.fn(),
 	writeSync: vi.fn(),
 	closeSync: vi.fn(),
 	mkdirSync: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock("fs", () => ({
 	chmodSync: vi.fn(),
 	fchmodSync: vi.fn(),
 	statSync: vi.fn(),
+	lstatSync: vi.fn(),
 	Stats: class Stats {},
 }))
 
@@ -90,14 +92,21 @@ function mockDefaults(): void {
 	vi.mocked(fs.unlink).mockResolvedValue(undefined)
 	vi.mocked(fs.rmdir).mockResolvedValue(undefined)
 	// Existing-target default: a regular 0o644 file.
-	vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o644))
+	vi.mocked(fsSync.lstatSync).mockReturnValue(_stats(0o644))
+	// The descriptor default: fstat describes the entry the open landed on. Tests that want an
+	// identity mismatch re-arm this beside an armed fs.lstat.
+	vi.mocked(fsSync.fstatSync).mockReturnValue(_fileStatsWithIdentity(1n, 1n))
 	// Staged-file default: a regular file, not a link, so a caller-supplied
 	// tempPath passes the location and file-type check by default.
 	vi.mocked(fs.lstat).mockResolvedValue(_fileStats(false))
 }
-function _stats(mode: number): fsSync.Stats {
+function _stats(mode: number, isLink = false): fsSync.Stats {
 	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
 	Object.assign(s, { mode })
+	// The mode-carry decision lstats the target entry, so the stand-in has to answer the link
+	// question as well: a link's mode must not be carried onto the staged file.
+	s.isSymbolicLink = () => isLink
+	s.isFile = () => !isLink
 	return s
 }
 
@@ -133,7 +142,7 @@ describe("safeWriteText", () => {
 			expect(fsSync.chmodSync).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), 0o700)
 
 			// temp file was opened for writing with the existing target's mode
-			// (default 0o644 from the statSync default mock)
+			// (default 0o644 from the lstatSync default mock)
 			expect(fsSync.openSync).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), "w", 0o644)
 
 			// content was written as a buffer (partial-write loop, full write)
@@ -1321,7 +1330,7 @@ describe("safeWriteText", () => {
 		it("applies the existing target's mode to a caller-supplied tempPath before publishing", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o600))
+			vi.mocked(fsSync.lstatSync).mockReturnValue(_stats(0o600))
 			vi.mocked(fsSync.openSync).mockReturnValue(2)
 
 			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
@@ -1339,7 +1348,7 @@ describe("safeWriteText", () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
-			vi.mocked(fsSync.statSync).mockImplementation(() => {
+			vi.mocked(fsSync.lstatSync).mockImplementation(() => {
 				throw enoent
 			})
 			vi.mocked(fsSync.openSync).mockReturnValue(2)
@@ -1357,7 +1366,7 @@ describe("safeWriteText", () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			const eacces = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
-			vi.mocked(fsSync.statSync).mockImplementation(() => {
+			vi.mocked(fsSync.lstatSync).mockImplementation(() => {
 				throw eacces
 			})
 			vi.mocked(fsSync.openSync).mockReturnValue(2)
@@ -1377,7 +1386,7 @@ describe("safeWriteText", () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			const eio = Object.assign(new Error("EIO: i/o error"), { code: "EIO" })
-			vi.mocked(fsSync.statSync).mockImplementation(() => {
+			vi.mocked(fsSync.lstatSync).mockImplementation(() => {
 				throw eio
 			})
 
@@ -1391,7 +1400,7 @@ describe("safeWriteText", () => {
 		it("opens the temp before applying a read-only target's mode (0o444 does not block the open)", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o444))
+			vi.mocked(fsSync.lstatSync).mockReturnValue(_stats(0o444))
 			vi.mocked(fsSync.openSync).mockReturnValue(3)
 
 			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
@@ -1411,7 +1420,7 @@ describe("safeWriteText", () => {
 		it("applies the existing target's exact mode to the self-staged temp (umask must not narrow it)", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o664))
+			vi.mocked(fsSync.lstatSync).mockReturnValue(_stats(0o664))
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 
 			await safeWriteText(targetPath, "data", { platform: "linux" })
@@ -1430,7 +1439,7 @@ describe("safeWriteText", () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
-			vi.mocked(fsSync.statSync).mockImplementation(() => {
+			vi.mocked(fsSync.lstatSync).mockImplementation(() => {
 				throw enoent
 			})
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -1438,6 +1447,113 @@ describe("safeWriteText", () => {
 			await safeWriteText(targetPath, "data", { platform: "linux" })
 
 			// Nothing exists to preserve: the default creation mode is the intended one.
+			expect(fsSync.fchmodSync).not.toHaveBeenCalled()
+		})
+
+		// CWE-732, the link shape: for a publish-over-link write the target ENTRY is a symlink.
+		// stat() would report the REFERENT's mode, and copying it onto the staged file would file a
+		// regular file with the referent's access rights in the link's directory - visible to every
+		// reader the link never exposed. The SUT lstats the entry instead.
+		it("keeps the fresh-file default mode when the target entry is a link (self-staged)", async () => {
+			const linkPath = "/tmp/links/link.txt"
+			// A symlink entry: POSIX reports 0o777 for the link itself. The mock's statSync stays
+			// armed with the referent's wide 0o666 so a link-following stat would show up.
+			vi.mocked(fsSync.lstatSync).mockReturnValue(_stats(0o777, true))
+			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o666))
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(linkPath, "data", { publishOverLink: true, platform: "linux" })
+
+			// No carried mode, so no fchmod, and the creation mode is the fresh-file default.
+			expect(fsSync.fchmodSync).not.toHaveBeenCalled()
+			expect(fsSync.openSync).toHaveBeenCalledWith(expect.any(String), "w", 0o644)
+			// The entry was inspected without following it.
+			expect(fsSync.statSync).not.toHaveBeenCalled()
+			// The publish still replaced the link, not whatever it pointed at. A publish-over-link
+			// write never calls realpath, so the SUT's own path.resolve is the spelling to compare to.
+			expect(fs.rename).toHaveBeenCalledWith(expect.any(String), path.resolve(linkPath))
+		})
+
+		it("keeps the caller-staged temp's own mode when the target entry is a link", async () => {
+			const linkPath = "/tmp/links/link.txt"
+			const customTempPath = "/tmp/links/custom-temp.tmp"
+			vi.mocked(fsSync.lstatSync).mockReturnValue(_stats(0o777, true))
+			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o666))
+			vi.mocked(fsSync.openSync).mockReturnValue(2)
+
+			await safeWriteText(linkPath, "", {
+				tempPath: customTempPath,
+				publishOverLink: true,
+				platform: "linux",
+			})
+
+			expect(fsSync.fchmodSync).not.toHaveBeenCalled()
+			expect(fsSync.statSync).not.toHaveBeenCalled()
+			expect(fs.rename).toHaveBeenCalledWith(customTempPath, path.resolve(linkPath))
+		})
+
+		// A caller-supplied staging file lives in the SHARED target directory. The validation lstats
+		// the entry, and open(2) then follows whatever answers to that name when the open runs. Without
+		// binding the descriptor to the validated identity, the fchmodSync below would change the mode of
+		// whatever file the swapped-in link points at.
+		it("refuses to chmod or fsync a caller-staged file whose identity changed after validation", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			// Keyed on the resolved spelling: the validation checks path.resolve(tempPath), and on Windows
+			// that differs from the literal given above.
+			const stagingKey = path.resolve(customTempPath)
+			vi.mocked(fs.lstat).mockImplementation(async (p) =>
+				path.resolve(String(p)) === stagingKey
+					? _fileStatsWithIdentity(7n, 7n)
+					: _fileStatsWithIdentity(11n, 11n),
+			)
+			// The descriptor the open produced refers to a different file than the validated entry.
+			vi.mocked(fsSync.fstatSync).mockReturnValue(_fileStatsWithIdentity(9n, 9n))
+			vi.mocked(fsSync.lstatSync).mockReturnValue(_stats(0o600))
+			vi.mocked(fsSync.openSync).mockReturnValue(2)
+
+			await expect(
+				safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" }),
+			).rejects.toBeInstanceOf(StagingPathError)
+
+			// Nothing was chmod'd or fsync'd through a descriptor that belongs to another file...
+			expect(fsSync.fchmodSync).not.toHaveBeenCalled()
+			expect(fsSync.fsyncSync).not.toHaveBeenCalled()
+			expect(fs.rename).not.toHaveBeenCalled()
+			// ...and the descriptor was closed on the way out rather than left open.
+			expect(fsSync.closeSync).toHaveBeenCalledWith(2)
+		})
+
+		// rename(2) takes a PATH: an entry replaced with a link between the open and the commit would be
+		// moved onto the target. The entry is therefore re-checked immediately before the rename.
+		it("refuses the commit rename when the staging entry became a symlink", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(2)
+			vi.mocked(fsSync.fstatSync).mockReturnValue(_fileStatsWithIdentity(7n, 7n))
+			// No target entry: nothing to carry a mode from, so no fchmod either - the only thing left to
+			// stop is the rename itself.
+			vi.mocked(fsSync.lstatSync).mockImplementation(() => {
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			})
+			// The write looks at the staging entry twice: once to validate it, once immediately before the
+			// commit rename. The second look is the one that finds a link.
+			const stagingKey = path.resolve(customTempPath)
+			let stagingLooks = 0
+			vi.mocked(fs.lstat).mockImplementation(async (p) => {
+				if (path.resolve(String(p)) === stagingKey) {
+					stagingLooks++
+					return stagingLooks === 1 ? _fileStatsWithIdentity(7n, 7n) : _fileStats(true)
+				}
+				return _fileStatsWithIdentity(11n, 11n)
+			})
+
+			await expect(
+				safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" }),
+			).rejects.toBeInstanceOf(StagingPathError)
+			expect(fs.rename).not.toHaveBeenCalled()
 			expect(fsSync.fchmodSync).not.toHaveBeenCalled()
 		})
 	})
@@ -1475,6 +1591,39 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), resolvedFallback)
 		})
 
+		// retainedTarget: the caller resolved this path to its publish target AND holds that target's
+		// lock (guardedWrite does exactly that). Resolving it a second time here resolves it AFTER the
+		// caller's authorization and version check, so a link planted in that gap moves the bytes to a
+		// file the caller never checked. The publish must act on the path it was handed.
+		it("publishes the retained target the caller locked instead of a link planted after the lock", async () => {
+			const lockedTarget = "/tmp/links/locked.txt"
+			const plantedReferent = "/tmp/outside/secret.txt"
+			// The entry that was locked when the caller resolved it is now a link pointing elsewhere.
+			vi.mocked(fs.realpath).mockResolvedValue(plantedReferent)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(lockedTarget, "data", { retainedTarget: true, platform: "linux" })
+
+			// No second resolution at all: the caller's decision is not re-litigated after its locks.
+			expect(fs.realpath).not.toHaveBeenCalled()
+			expect(fs.rename).toHaveBeenCalledWith(expect.any(String), path.resolve(lockedTarget))
+			expect(fs.rename).not.toHaveBeenCalledWith(expect.any(String), plantedReferent)
+		})
+
+		it("follows the referent when the caller did not declare a retained target", async () => {
+			// The documented default, kept as the contrast case: a caller that resolved the path itself
+			// expects the bytes to land on the referent.
+			const lockedTarget = "/tmp/links/locked.txt"
+			const plantedReferent = "/tmp/outside/secret.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(plantedReferent)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(lockedTarget, "data", { platform: "linux" })
+
+			expect(fs.realpath).toHaveBeenCalledWith(path.resolve(lockedTarget))
+			expect(fs.rename).toHaveBeenCalledWith(expect.any(String), plantedReferent)
+		})
+
 		it("propagates a dangling symlink instead of writing through the link path", async () => {
 			// realpath resolves the referent, so a link whose target is missing reports
 			// ENOENT. Falling back to the link path would replace the symlink with a
@@ -1499,7 +1648,7 @@ describe("safeWriteText", () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
-			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o600))
+			vi.mocked(fsSync.lstatSync).mockReturnValue(_stats(0o600))
 			// a pre-existing staging dir may fail its best-effort permission repair
 			vi.mocked(fsSync.chmodSync).mockImplementationOnce(() => {
 				throw new Error("EACCES")
@@ -1516,7 +1665,7 @@ describe("safeWriteText", () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
-			vi.mocked(fsSync.statSync).mockImplementation(() => {
+			vi.mocked(fsSync.lstatSync).mockImplementation(() => {
 				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
 			})
 

@@ -193,6 +193,29 @@ async function fixedPublishTarget(absolutePath: string): Promise<string> {
 }
 
 /**
+ * How many times a guarded write re-takes its locks when a peer retargets the alias while
+ * this write holds them. Three acquisitions cover a protocol writer that swaps the link once
+ * and a second writer that queues behind it; a target that keeps moving is a livelock, and
+ * the write reports it as a guard rejection instead of looping.
+ */
+const MAX_LOCK_REACQUISITIONS = 3
+
+/**
+ * Internal signal: the retained publish target names a file whose lock this write does not
+ * hold. Thrown only from the innermost lock, so withFileLock unwinds and releases every held
+ * lock before the retry, and never escapes withBothIdentityLocks.
+ */
+class TargetOutsideHeldLocksError extends Error {
+	constructor(
+		readonly targetKey: string,
+		readonly heldKeys: readonly string[],
+	) {
+		super(`publish target ${targetKey} is not covered by the held locks ${heldKeys.join(", ")}`)
+		this.name = "TargetOutsideHeldLocksError"
+	}
+}
+
+/**
  * Acquire the advisory locks covering BOTH identities of a guarded write:
  * the resolved referent key every writer to the file uses, and the alias
  * entry key (resolveLinkPathLockKey: canonical parent, final component never
@@ -201,15 +224,60 @@ async function fixedPublishTarget(absolutePath: string): Promise<string> {
  * taken in sorted order, the shared order of that path, so two guarded
  * writes can never deadlock, and withFileLock's own unwinding releases them
  * inner-first.
+ *
+ * The publish target is fixed INSIDE those locks and handed to the operation, which must
+ * write exactly that path: the version comparison and the publish act on one target, so a
+ * symlink retargeted after the caller's allowlist check cannot send the write to a file that
+ * check never covered.
+ *
+ * The key of THAT target is then re-derived under the same locks. Both keys above were
+ * computed from the alias before any lock was held, so a peer that replaces the alias while
+ * this write is queued - or while it waits behind the FIFO chain - leaves this write holding
+ * the OLD referent's lock and the alias entry's lock, while the target it is about to publish
+ * is a different file whose lock belongs to some other writer. Writing it would race that
+ * writer outright and ship bytes into a path the caller's authorization never covered. When
+ * that happens the helper unwinds (inner lock first), takes the locks again against the
+ * alias's CURRENT referent, and re-runs the check; after MAX_LOCK_REACQUISITIONS it rejects
+ * the write rather than chasing a moving target.
  */
-async function withBothIdentityLocks<T>(absolutePath: string, operation: () => Promise<T>): Promise<T> {
-	const referentKey = await resolveLockKey(absolutePath)
-	const aliasKey = await resolveLinkPathLockKey(absolutePath)
-	if (aliasKey === referentKey) {
-		return withFileLock(referentKey, operation)
+async function withBothIdentityLocks<T>(
+	absolutePath: string,
+	operation: (retainedTarget: string) => Promise<T>,
+): Promise<T> {
+	for (let attempt = 1; ; attempt++) {
+		const referentKey = await resolveLockKey(absolutePath)
+		const aliasKey = await resolveLinkPathLockKey(absolutePath)
+		const heldKeys = aliasKey === referentKey ? [referentKey] : [aliasKey, referentKey]
+		const lockOrder = [...heldKeys].sort()
+
+		const runUnderLocks = async (index: number): Promise<T> => {
+			if (index === lockOrder.length) {
+				const retainedTarget = await fixedPublishTarget(absolutePath)
+				const retainedKey = await resolveLockKey(retainedTarget)
+				if (!heldKeys.includes(retainedKey)) {
+					throw new TargetOutsideHeldLocksError(retainedKey, heldKeys)
+				}
+				return operation(retainedTarget)
+			}
+			return withFileLock(lockOrder[index], () => runUnderLocks(index + 1))
+		}
+
+		try {
+			return await runUnderLocks(0)
+		} catch (error: unknown) {
+			if (!(error instanceof TargetOutsideHeldLocksError)) {
+				throw error
+			}
+			if (attempt >= MAX_LOCK_REACQUISITIONS) {
+				throw new GuardRejectedError(
+					"File was retargeted while this write was queued -- nothing was published; re-read " +
+						absolutePath +
+						" and retry.",
+					absolutePath,
+				)
+			}
+		}
 	}
-	const [first, second] = aliasKey < referentKey ? [aliasKey, referentKey] : [referentKey, aliasKey]
-	return withFileLock(first, () => withFileLock(second, operation))
 }
 
 export async function createIfAbsent(
@@ -229,9 +297,10 @@ export async function createIfAbsent(
 	// Lock both identities of the write: the resolved referent every other
 	// writer to this file uses, and the alias entry a link-swapping protocol
 	// writer holds.
-	return withBothIdentityLocks(absolutePath, async () => {
+	return withBothIdentityLocks(absolutePath, async (publishTarget) => {
 		cancelledBeforePublish(absolutePath, displayPath, isCancelled)
-		const publishTarget = await fixedPublishTarget(absolutePath)
+		// publishTarget is the retained target the helper fixed under the held locks and verified
+		// those locks cover.
 		authorizeTarget?.(publishTarget)
 		try {
 			await fs.access(publishTarget)
@@ -243,7 +312,9 @@ export async function createIfAbsent(
 			// Immediately before publication starts.
 			cancelledBeforePublish(absolutePath, displayPath, isCancelled)
 			try {
-				await safeWriteText(publishTarget, content)
+				// The retained target was resolved under the held locks: the publish acts on it as given
+				// rather than resolving the alias a second time.
+				await safeWriteText(publishTarget, content, { retainedTarget: true })
 			} catch (error: unknown) {
 				// A rename that landed before the durability check failed still placed the
 				// bytes at the target: hand the token up before the error leaves the lock.
@@ -302,13 +373,12 @@ export async function replaceIfVersion(
 	// Lock both identities of the write: the resolved referent every other
 	// writer to this file uses, and the alias entry a link-swapping protocol
 	// writer holds.
-	return withBothIdentityLocks(absolutePath, async () => {
+	return withBothIdentityLocks(absolutePath, async (publishTarget) => {
 		cancelledBeforePublish(absolutePath, displayPath, isCancelled)
-		// Resolve and retain the publish target inside the lock: the version
-		// comparison and the publish below both act on this fixed target, so a
-		// symlink retargeted after the caller's allowlist check cannot send the
-		// write to a file the version check never covered.
-		const publishTarget = await fixedPublishTarget(absolutePath)
+		// publishTarget is fixed under the held locks and verified to be covered by them: the
+		// version comparison and the publish below both act on this one target, so a symlink
+		// retargeted after the caller's allowlist check cannot send the write to a file the
+		// version check never covered.
 		authorizeTarget?.(publishTarget)
 		let currentVersion: string
 		try {
@@ -339,7 +409,9 @@ export async function replaceIfVersion(
 			// Immediately before publication starts.
 			cancelledBeforePublish(absolutePath, displayPath, isCancelled)
 			try {
-				await safeWriteText(publishTarget, content)
+				// The retained target was resolved under the held locks: the publish acts on it as given
+				// rather than resolving the alias a second time.
+				await safeWriteText(publishTarget, content, { retainedTarget: true })
 			} catch (error: unknown) {
 				// A rename that landed before the durability check failed still placed the
 				// bytes at the target: hand the token up before the error leaves the lock.

@@ -1065,7 +1065,7 @@ describe("DiffViewProvider", () => {
 
 			// Verify file was written via safeWriteText
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { retainedTarget: true })
 
 			// Verify file was opened without focus
 			expect(vscode.window.showTextDocument).toHaveBeenCalledWith(
@@ -1088,7 +1088,7 @@ describe("DiffViewProvider", () => {
 
 			// Verify file was written via safeWriteText
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { retainedTarget: true })
 
 			// Verify file was NOT opened
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
@@ -1121,7 +1121,7 @@ describe("DiffViewProvider", () => {
 
 			// Verify file was written via safeWriteText
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { retainedTarget: true })
 
 			// Verify delay was NOT called
 			expect(mockDelay).not.toHaveBeenCalled()
@@ -1167,7 +1167,9 @@ describe("DiffViewProvider", () => {
 
 				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
 
-				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {
+					retainedTarget: true,
+				})
 			})
 
 			it("forwards a caller-supplied completeness through the direct publish", async () => {
@@ -1218,7 +1220,9 @@ describe("DiffViewProvider", () => {
 
 				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
 
-				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {
+					retainedTarget: true,
+				})
 			})
 
 			it("fails closed when the owning task has been collected", async () => {
@@ -1483,7 +1487,9 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveChanges(false)
 
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"))
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"), {
+				retainedTarget: true,
+			})
 			expect(result.newProblemsMessage).toBe("")
 		})
 
@@ -1616,7 +1622,9 @@ describe("DiffViewProvider", () => {
 			await openPreview()
 
 			await diffViewProvider.saveChanges(false, 0, "edit")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.txt`, Buffer.from("new content"))
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.txt`, Buffer.from("new content"), {
+				retainedTarget: true,
+			})
 		})
 
 		it("publishes the accepted content in the document's own encoding", async () => {
@@ -1644,6 +1652,7 @@ describe("DiffViewProvider", () => {
 			expect(safeWriteText).toHaveBeenCalledWith(
 				`${mockCwd}/test.ts`,
 				Buffer.concat([Buffer.from("\uFEFF"), Buffer.from("new content")]),
+				{ retainedTarget: true },
 			)
 		})
 
@@ -1689,7 +1698,9 @@ describe("DiffViewProvider", () => {
 
 			await diffViewProvider.saveChanges(false, 0, "edit")
 
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"))
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"), {
+				retainedTarget: true,
+			})
 		})
 
 		it("fails closed when the owning task has been collected", async () => {
@@ -2031,7 +2042,9 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveChanges(false)
 
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"))
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"), {
+				retainedTarget: true,
+			})
 			expect(result.newProblemsMessage).toBe("")
 		})
 
@@ -2098,7 +2111,9 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveChanges(false)
 
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"))
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"), {
+				retainedTarget: true,
+			})
 			// the revert activates the exact document with the exact options:
 			// preserveFocus keeps the user's focus, preview: false pins the tab
 			// the target is activated so the revert command is scoped to this document
@@ -2359,7 +2374,9 @@ describe("DiffViewProvider", () => {
 
 			await diffViewProvider.saveChanges(false)
 
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"))
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"), {
+				retainedTarget: true,
+			})
 			expect(vi.mocked(vscode.commands.executeCommand)).not.toHaveBeenCalledWith("workbench.action.files.revert")
 			expect(vi.mocked(vscode.window.showTextDocument)).not.toHaveBeenCalled()
 		})
@@ -4787,6 +4804,86 @@ describe("DiffViewProvider", () => {
 
 			expect(restorePreviewTabs).toHaveBeenCalledTimes(2)
 			expect(reset).toHaveBeenCalledTimes(1)
+		})
+
+		// A cancellation that lands while the owning pass is finalizing must join it. The claim used to
+		// be released before the owner ran its own preview-tab restore and finalization, so a second
+		// revertChanges() in that window started a SECOND rollback pass: a second guarded publish over
+		// the same target and, for a create, a RollbackConflictError that abortStream() - which awaits
+		// revertChanges() with no catch - turns into a skipped partial-save report.
+		it("revertChanges() joins a teardown whose owner is still finalizing instead of rolling back twice", async () => {
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			let releaseRollback: () => void = () => {}
+			const rollbackGate = new Promise<void>((resolve) => {
+				releaseRollback = resolve
+			})
+			let rollbackEntered = false
+			vi.mocked(safeWriteText).mockImplementation(async () => {
+				rollbackEntered = true
+				await rollbackGate
+			})
+
+			let releaseFinalize: () => void = () => {}
+			const finalizeGate = new Promise<void>((resolve) => {
+				releaseFinalize = resolve
+			})
+			let finalizeEntered = false
+			const restorePreviewTabs = vi.fn(async () => {
+				finalizeEntered = true
+				await finalizeGate
+			})
+			// The guard sits on the public reset(), so the stub stands in for the teardown it guards:
+			// what must happen exactly once is the finalization, not the call.
+			const performFinalReset = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
+			diffViewProvider["performFinalReset"] = performFinalReset
+			diffViewProvider["closeOwnDiffView"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({
+				document: makeTextDocument({
+					uri: makeUri(mockTargetPath),
+					getText: vi.fn().mockReturnValue("content"),
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				}),
+			})
+
+			const first = diffViewProvider.revertChanges()
+			while (!rollbackEntered) {
+				await new Promise((resolve) => setImmediate(resolve))
+			}
+			releaseRollback()
+			while (!finalizeEntered) {
+				await new Promise((resolve) => setImmediate(resolve))
+			}
+
+			// The owner sits between its rollback and its finalization: the claim is still held, so this
+			// second cancellation must wait for the pass instead of publishing a rollback of its own.
+			const second = diffViewProvider.revertChanges()
+			await new Promise((resolve) => setImmediate(resolve))
+			expect(vi.mocked(safeWriteText)).toHaveBeenCalledTimes(1)
+
+			releaseFinalize()
+			let publishCalls = 0
+			try {
+				await Promise.all([first, second])
+				publishCalls = vi.mocked(safeWriteText).mock.calls.length
+			} finally {
+				// The gated double belongs to this test only; the rest of the file expects the plain
+				// resolving default.
+				vi.mocked(safeWriteText).mockReset()
+				vi.mocked(safeWriteText).mockResolvedValue(undefined)
+			}
+
+			expect(publishCalls).toBe(1)
+			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
+			expect(performFinalReset).toHaveBeenCalledTimes(1)
 		})
 
 		it("two concurrent resets finalize the session exactly once", async () => {
