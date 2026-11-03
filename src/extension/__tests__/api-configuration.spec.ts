@@ -100,6 +100,19 @@ describe("API - configuration", () => {
 			expect(log).not.toHaveBeenCalled()
 		})
 
+		it("rejects when a setting cannot be stored, and writes nothing after the settings", async () => {
+			const { api, setValues } = setup()
+			setValues.mockRejectedValue(new Error("storage unavailable"))
+			const provider = api["sidebarProvider"]
+
+			await expect(api.setConfiguration({ timeFormat: "24h", currentApiConfigName: "default" })).rejects.toThrow(
+				"storage unavailable",
+			)
+
+			expect(provider.providerSettingsManager.saveConfig).not.toHaveBeenCalled()
+			expect(provider.postStateToWebview).not.toHaveBeenCalled()
+		})
+
 		it.each([
 			["timeFormat", "13h"],
 			["dateFormat", "dd/mm"],

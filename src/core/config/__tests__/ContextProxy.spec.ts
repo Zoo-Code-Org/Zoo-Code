@@ -287,6 +287,31 @@ describe("ContextProxy", () => {
 			expect(proxy.getGlobalState("mode")).toBe("test-mode")
 		})
 
+		it("is not a transaction: if one store rejects, it rejects with that failure and the other stores stay", async () => {
+			const failure = new Error("storage unavailable")
+			mockGlobalState.update.mockImplementation(async (key: string) => {
+				if (key === "dateFormat") throw failure
+			})
+
+			await expect(
+				proxy.setValues({ timeFormat: "24h", dateFormat: "ymd", showRelativeTimes: false }),
+			).rejects.toBe(failure)
+
+			// Every store was started, and the ones that did not fail were not undone.
+			const stores = mockGlobalState.update.mock.calls.map(([key, value]: [string, unknown]) => [key, value])
+			expect(stores).toEqual(
+				expect.arrayContaining([
+					["timeFormat", "24h"],
+					["dateFormat", "ymd"],
+					["showRelativeTimes", false],
+				]),
+			)
+			expect(stores).toHaveLength(3)
+			// The cache holds the attempted value of the key that failed, until storage is read again.
+			expect(proxy.getGlobalState("timeFormat")).toBe("24h")
+			expect(proxy.getGlobalState("dateFormat")).toBe("ymd")
+		})
+
 		it("should handle both secret and global state keys", async () => {
 			// Spy on storeSecret and updateGlobalState
 			const storeSecretSpy = vi.spyOn(proxy, "storeSecret")

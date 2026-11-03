@@ -555,6 +555,12 @@ export class ContextProxy {
 		return { ...globalState, ...secretState }
 	}
 
+	/**
+	 * Writes every value at once. This is not a transaction, for any setting: each key is stored on its own. If a
+	 * store rejects, `setValues` rejects with the first failure, the other stores are not undone (they may have
+	 * completed), and the cache holds the value that was attempted for the key that failed until storage is read again.
+	 * Callers that need more than this, such as a rollback, must provide it themselves.
+	 */
 	public async setValues(values: RooCodeSettings) {
 		const entries = Object.entries(values) as [RooCodeSettingsKey, unknown][]
 		await Promise.all(entries.map(([key, value]) => this.setValue(key, value)))

@@ -212,6 +212,20 @@ describe("formatMessageTime", () => {
 	const fmt = (ts: number, opts: Parameters<typeof formatMessageTime>[1] = {}) =>
 		formatMessageTime(ts, { now: NOW, timeFormat: "12h", ...opts })
 
+	it.each([
+		["tomorrow", at(2026, 9, 15, 9, 5), /^Oct 15, 9:05\s?AM$/],
+		["three days ahead", at(2026, 9, 17, 9, 5), /^Oct 17, 9:05\s?AM$/],
+		["a month ahead", at(2026, 10, 14, 9, 5), /^Nov 14, 9:05\s?AM$/],
+		["next year", at(2027, 9, 14, 9, 5), /^Oct 14, 2027, 9:05\s?AM$/],
+	])("shows the date, not Today, Yesterday or a weekday, for a time %s", (_label, ts, expected) => {
+		// A time after `now` (a clock that was set wrong, or a skewed host) is not "ago": it is dated.
+		expect(fmt(ts)).toMatch(expected)
+	})
+
+	it("writes a future time with the chosen date order", () => {
+		expect(fmt(at(2026, 9, 15, 9, 5), { timeFormat: "24h", dateFormat: "ymd" })).toBe("2026-10-15, 09:05")
+	})
+
 	it("says Today for the same calendar day", () => {
 		expect(fmt(at(2026, 9, 14, 9, 5))).toMatch(/^Today 9:05\s?AM$/)
 	})

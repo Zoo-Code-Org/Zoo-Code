@@ -2,6 +2,16 @@ import { render, screen } from "@/utils/test-utils"
 
 import { MessageTimestamp } from "../MessageTimestamp"
 
+// Renders the tooltip's content as an attribute, so what it says can be asserted without hovering.
+vi.mock("../../ui/standard-tooltip", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../ui/standard-tooltip")>()),
+	StandardTooltip: ({ children, content }: { children: React.ReactNode; content: string }) => (
+		<div data-testid="tooltip" data-content={content}>
+			{children}
+		</div>
+	),
+}))
+
 const at = (y: number, m: number, d: number, h: number, min = 0) => new Date(y, m, d, h, min).getTime()
 
 describe("MessageTimestamp", () => {
@@ -45,6 +55,26 @@ describe("MessageTimestamp", () => {
 	it("honours the date order for older messages", () => {
 		render(<MessageTimestamp ts={at(2019, 0, 2, 9, 5)} timeFormat="24h" dateFormat="ymd" />)
 		expect(screen.getByTestId("message-timestamp").textContent).toContain("2019-01-02, 09:05")
+	})
+
+	it.each([
+		["24h", "ymd", /^2019-01-02, 09:05$/],
+		["24h", "dmy", /^02\/01\/2019, 09:05$/],
+		["12h", "mdy", /^01\/02\/2019, 9:05\s?AM$/],
+	] as const)("gives the full date and time in the tooltip (%s, %s)", (timeFormat, dateFormat, expected) => {
+		render(<MessageTimestamp ts={at(2019, 0, 2, 9, 5)} timeFormat={timeFormat} dateFormat={dateFormat} />)
+
+		expect(screen.getByTestId("tooltip").getAttribute("data-content")).toMatch(expected)
+	})
+
+	it("gives the full date in the tooltip even when the label says Today", () => {
+		const d = new Date()
+		d.setHours(14, 41, 0, 0)
+		render(<MessageTimestamp ts={d.getTime()} timeFormat="24h" dateFormat="ymd" />)
+
+		const tooltip = screen.getByTestId("tooltip").getAttribute("data-content")!
+		expect(tooltip).toMatch(/^\d{4}-\d{2}-\d{2}, 14:41$/)
+		expect(screen.getByTestId("message-timestamp").textContent).toContain("Today")
 	})
 
 	it("needs no provider or context: it is purely presentational", () => {
