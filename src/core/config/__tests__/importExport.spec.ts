@@ -1187,6 +1187,11 @@ describe("importExport", () => {
 					{ name: "valid-profile", id: "valid-id", apiProvider: providerIdentifiers.openai },
 				])
 
+				// The broadcast is held open until the test releases it: recording the call
+				// synchronously would let an import that never awaits the broadcast reach
+				// the state post before the assertion runs, which is the failure this test
+				// claims to catch.
+				const broadcastGate = createDeferred<void>()
 				const callOrder: string[] = []
 				const mockProvider = {
 					settingsImportedAt: 0,
@@ -1195,10 +1200,11 @@ describe("importExport", () => {
 					}),
 					broadcastResetToAllInstances: vi.fn().mockImplementation(async () => {
 						callOrder.push("broadcast")
+						await broadcastGate.promise
 					}),
 				}
 
-				await importSettingsWithFeedback(
+				const importRun = importSettingsWithFeedback(
 					{
 						providerSettingsManager: mockProviderSettingsManager,
 						contextProxy: mockContextProxy,
@@ -1207,6 +1213,17 @@ describe("importExport", () => {
 					},
 					filePath,
 				)
+
+				// While the broadcast is still in flight, the initiating provider's webview
+				// post must not have run yet. Asserting in the middle of the await proves
+				// the ordering happens during the call, not just in the final call order.
+				await vi.waitFor(() => {
+					expect(callOrder).toEqual(["broadcast"])
+				})
+				expect(mockProvider.postStateToWebview).not.toHaveBeenCalled()
+
+				broadcastGate.resolve()
+				await importRun
 
 				// The broadcast clears the durable view state, so the initiating provider's
 				// webview post must run after it — otherwise the webview keeps the stale
@@ -1271,7 +1288,70 @@ describe("importExport", () => {
 				}
 			})
 
-			it("should keep successful import result when broadcastResetToAllInstances throws", async () => {
+			it("retries the view-state clear once and keeps the success toast when the retry clears it", async () => {
+				const filePath = "/mock/path/settings.json"
+				const mockFileContent = JSON.stringify({
+					providerProfiles: {
+						currentApiConfigName: "valid-profile",
+						apiConfigs: {
+							"valid-profile": {
+								apiProvider: providerIdentifiers.openai,
+								apiKey: "test-key",
+								id: "valid-id",
+							},
+						},
+					},
+					globalSettings: { mode: "code" },
+				})
+
+				;(fs.readFile as Mock).mockResolvedValue(mockFileContent)
+				;(fs.access as Mock).mockResolvedValue(undefined)
+				mockProviderSettingsManager.export.mockResolvedValue({
+					currentApiConfigName: "default",
+					apiConfigs: { default: { apiProvider: providerIdentifiers.anthropic, id: "default-id" } },
+				})
+				mockProviderSettingsManager.listConfig.mockResolvedValue([
+					{ name: "valid-profile", id: "valid-id", apiProvider: providerIdentifiers.openai },
+				])
+
+				const mockProvider = {
+					settingsImportedAt: 0,
+					postStateToWebview: vi.fn().mockResolvedValue(undefined),
+					broadcastResetToAllInstances: vi
+						.fn()
+						.mockRejectedValueOnce(new Error("transient viewStates write failure"))
+						.mockResolvedValue(undefined),
+				}
+				const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+				try {
+					await importSettingsWithFeedback(
+						{
+							providerSettingsManager: mockProviderSettingsManager,
+							contextProxy: mockContextProxy,
+							customModesManager: mockCustomModesManager,
+							provider: mockProvider,
+						},
+						filePath,
+					)
+
+					// A transient failure of the durable clear is retried instead of being
+					// folded into the success message.
+					expect(mockProvider.broadcastResetToAllInstances).toHaveBeenCalledTimes(2)
+					expect(consoleWarnSpy).toHaveBeenCalledWith(
+						expect.stringContaining("Failed to broadcast reset after settings import (attempt 1/2)"),
+					)
+					expect(mockProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+					expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+					expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+						expect.stringContaining("settings_imported"),
+					)
+					expect(mockProvider.settingsImportedAt).toBeUndefined()
+				} finally {
+					consoleWarnSpy.mockRestore()
+				}
+			})
+
+			it("surfaces a view-state clear that fails both attempts in the warning toast", async () => {
 				const filePath = "/mock/path/settings.json"
 				const mockFileContent = JSON.stringify({
 					providerProfiles: {
@@ -1316,15 +1396,24 @@ describe("importExport", () => {
 					)
 
 					expect(mockProvider.postStateToWebview).toHaveBeenCalledTimes(1)
-					expect(mockProvider.broadcastResetToAllInstances).toHaveBeenCalledTimes(1)
+					// Both attempts are made before the failure is reported.
+					expect(mockProvider.broadcastResetToAllInstances).toHaveBeenCalledTimes(2)
 					expect(consoleWarnSpy).toHaveBeenCalledWith(
-						expect.stringContaining("Failed to broadcast reset after settings import"),
+						expect.stringContaining("Failed to broadcast reset after settings import (attempt 2/2)"),
 					)
-					expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-						expect.stringContaining("settings_imported"),
+					// The imported settings are persisted, so the import still reports success -
+					// but the uncleared per-view selections turn the clean success toast into a
+					// warning, and the detail reaches the console log.
+					expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+						expect.stringContaining("info.settings_imported"),
 					)
+					expect(consoleWarnSpy).toHaveBeenCalledWith(
+						"Settings import completed with warnings:",
+						expect.arrayContaining([expect.stringContaining("could not be cleared")]),
+					)
+					expect(vscode.window.showInformationMessage).not.toHaveBeenCalled()
 					// The rejected broadcast must not leave the import timestamp dangling: the
-					// guarded catch falls through to the cleanup reset.
+					// finally-equivalent cleanup reset still runs.
 					expect(mockProvider.settingsImportedAt).toBeUndefined()
 				} finally {
 					// Restore even when an assertion above throws, so a leftover spy

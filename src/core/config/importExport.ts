@@ -400,22 +400,44 @@ export const importSettingsWithFeedback = async (
 		// Broadcast invalidation to all other live ClineProvider instances first, so the
 		// initiating provider's post below reflects the cleared view state rather than the
 		// stale pre-import per-view mode/profile.
-		try {
-			if (provider.broadcastResetToAllInstances) {
-				await provider.broadcastResetToAllInstances()
+		//
+		// The clear is retried once. A transient failure of the durable viewStates write
+		// leaves the per-view pins in place, and the next view load then restores the
+		// pre-import mode/profile; a second attempt recovers that case. A failure that
+		// survives the retry is reported to the user through the warning toast below
+		// rather than the success message: the imported settings are persisted either way,
+		// but the user must learn that their per-view selections were not cleared.
+		const resetAttempts = 2
+		let resetClearFailed = false
+
+		for (let attempt = 1; attempt <= resetAttempts; attempt++) {
+			try {
+				if (provider.broadcastResetToAllInstances) {
+					await provider.broadcastResetToAllInstances()
+				}
+				resetClearFailed = false
+				break
+			} catch (error) {
+				resetClearFailed = true
+				console.warn(
+					`Failed to broadcast reset after settings import (attempt ${attempt}/${resetAttempts}): ${error}`,
+				)
 			}
-		} catch (error) {
-			// Log but do not fail the import if broadcast fails — the import itself succeeded.
-			console.warn(`Failed to broadcast reset after settings import: ${error}`)
 		}
 
 		await provider.postStateToWebview()
 
 		provider.settingsImportedAt = undefined
-		const warnings = "warnings" in result ? result.warnings : undefined
+		const importWarnings = "warnings" in result ? result.warnings : undefined
+		const warnings: string[] = [
+			...(importWarnings ?? []),
+			...(resetClearFailed
+				? ["The per-view mode and profile selections could not be cleared after the import."]
+				: []),
+		]
 
 		// Show warnings if any profiles had issues but were still imported (with modifications)
-		if (warnings && warnings.length > 0) {
+		if (warnings.length > 0) {
 			// Log full details to the console for debugging
 			console.warn("Settings import completed with warnings:", warnings)
 
