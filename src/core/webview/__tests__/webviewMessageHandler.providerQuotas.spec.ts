@@ -131,6 +131,43 @@ describe("webviewMessageHandler – requestProviderQuotas", () => {
 			expect(provider.postMessageToWebview).not.toHaveBeenCalled()
 		})
 
+		it("also aborts a request that was sent without a request id", async () => {
+			let signal: AbortSignal | undefined
+			quotas.getProviderQuotas.mockImplementation(
+				(_profiles: unknown, options: { signal: AbortSignal }) =>
+					new Promise((_resolve, reject) => {
+						signal = options.signal
+						options.signal.addEventListener("abort", () =>
+							reject(new DOMException("Aborted", "AbortError")),
+						)
+					}),
+			)
+			const provider = makeProvider()
+			const handling = webviewMessageHandler(provider, { type: "requestProviderQuotas" })
+			await vi.waitFor(() => expect(signal).toBeDefined())
+
+			abortProviderQuotaRequests(provider)
+			await handling
+
+			expect(signal?.aborted).toBe(true)
+			expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+		})
+
+		it("keeps nothing for a request that finished, so a later disposal aborts nothing", async () => {
+			const provider = makeProvider()
+			await webviewMessageHandler(provider, { type: "requestProviderQuotas" })
+			await webviewMessageHandler(provider, { type: "requestProviderQuotas", requestId: "done" })
+
+			let signal: AbortSignal | undefined
+			quotas.getProviderQuotas.mockImplementation((_profiles: unknown, options: { signal: AbortSignal }) => {
+				signal = options.signal
+				return Promise.resolve([])
+			})
+			abortProviderQuotaRequests(provider)
+
+			expect(signal).toBeUndefined()
+		})
+
 		it("does nothing for a provider with no requests in flight", () => {
 			expect(() => abortProviderQuotaRequests(makeProvider())).not.toThrow()
 		})

@@ -126,12 +126,47 @@ function FakeHost({ quotas }: { quotas: ProviderQuota[] }) {
 	return null
 }
 
-export type UsageStoryVariant = "populated" | "degraded" | "empty"
+/** Deliberately overlong text with no break opportunity, as a pasted path or a long model id would have. */
+const LONG_WORD = "src/components/settings/providers/ThisIsAnExtremelyLongComponentNameThatHasNoSpacesAtAll.tsx"
+const longTextHistory: HistoryItem[] = [
+	task(1, 0, {
+		task: `Rename ${LONG_WORD} and every import of it`,
+		tokensIn: 5_200_000_000,
+		tokensOut: 410_000_000,
+		totalCost: 123456.78,
+		usageByModel: used(
+			providerIdentifiers.anthropic,
+			"claude-sonnet-5-with-an-unreasonably-long-model-identifier-that-keeps-going-and-going",
+			5_200_000_000,
+			410_000_000,
+			123456.78,
+		),
+	}),
+	task(2, 1, {
+		task: LONG_WORD,
+		tokensIn: 91_000,
+		tokensOut: 8_800,
+		totalCost: 3.27,
+		usageByModel: used(
+			providerIdentifiers.githubCopilot,
+			"gpt-5-with-another-very-long-model-id-without-breaks",
+			91_000,
+			8_800,
+			0,
+		),
+	}),
+]
+
+export type UsageStoryVariant = "populated" | "degraded" | "empty" | "long-text"
 
 export function UsageSettingsStory({ variant = "populated" }: { variant?: UsageStoryVariant }) {
 	const quotas = variant === "degraded" ? degradedQuotas : variant === "empty" ? [] : healthyQuotas
 	return (
-		<AppProviders initialState={{ taskHistory: variant === "empty" ? [] : history, cwd: WORKSPACE }}>
+		<AppProviders
+			initialState={{
+				taskHistory: variant === "empty" ? [] : variant === "long-text" ? longTextHistory : history,
+				cwd: WORKSPACE,
+			}}>
 			<FakeHost quotas={quotas} />
 			<div
 				data-testid="usage-story"

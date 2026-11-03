@@ -423,6 +423,10 @@ export const stories: Record<string, Story> = {
 		const { UsageSettingsStory } = await import("@/components/settings/__tests__/UsageSettings.visual.fixture")
 		return <UsageSettingsStory variant="degraded" />
 	},
+	"usage-settings-long-text": async () => {
+		const { UsageSettingsStory } = await import("@/components/settings/__tests__/UsageSettings.visual.fixture")
+		return <UsageSettingsStory variant="long-text" />
+	},
 	"usage-settings-empty": async () => {
 		const { UsageSettingsStory } = await import("@/components/settings/__tests__/UsageSettings.visual.fixture")
 		return <UsageSettingsStory variant="empty" />

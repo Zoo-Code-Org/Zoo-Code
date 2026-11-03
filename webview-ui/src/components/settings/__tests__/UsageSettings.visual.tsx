@@ -84,3 +84,20 @@ test("the time range is one tab stop and the arrow keys move between the ranges 
 	await page.keyboard.press("Tab")
 	for (const name of ["today", "7d", "30d", "all"] as const) await expect(range(name)).not.toBeFocused()
 })
+
+test("wraps overlong task, provider and model text and large totals without clipping or overflow", async ({
+	mount,
+	page,
+}) => {
+	await page.clock.setFixedTime(NOW)
+	const component = mountedStory(await mount("usage-settings-long-text"))
+	await applyVisualTheme(page, visualThemes[0])
+	const story = component.getByTestId("usage-story")
+
+	await expect(story.getByTestId("usage-top-tasks")).toBeVisible()
+	await expect(story.getByText(/ThisIsAnExtremelyLongComponentNameThatHasNoSpacesAtAll/).first()).toBeVisible()
+
+	// At the story width and at the 320px reflow width with WCAG text spacing: nothing is clipped, and nothing
+	// pushes the page sideways.
+	await expectBoundedLayout(page, story, { focusedControl: story.getByTestId("usage-export-csv") })
+})

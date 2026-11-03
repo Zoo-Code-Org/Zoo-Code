@@ -134,20 +134,25 @@ const handlerFor = (apiConfiguration: ProviderSettings, provider: RouterName): A
 	buildApiHandler({ ...apiConfiguration, apiProvider: provider })
 
 /**
- * In-flight `requestProviderQuotas` work, so a cancel message can abort it. Each ClineProvider (sidebar,
- * editor tab) has its own map: the webviews number their requests independently, so a shared map keyed by
- * request id alone would let one webview cancel, or overwrite, another's request.
+ * In-flight `requestProviderQuotas` work, so a cancel message and a disposal can abort it. Each ClineProvider
+ * (sidebar, editor tab) has its own entry: the webviews number their requests independently, so a shared map keyed
+ * by request id alone would let one webview cancel, or overwrite, another's request. `all` holds every request,
+ * including one sent without an id (which a cancel message cannot name, but a disposal must still stop); `byId`
+ * is how a cancel message finds its request.
  */
-const pendingProviderQuotaRequests = new WeakMap<ClineProvider, Map<string, AbortController>>()
+const pendingProviderQuotaRequests = new WeakMap<
+	ClineProvider,
+	{ all: Set<AbortController>; byId: Map<string, AbortController> }
+>()
 /** Stops the provider-limit requests still in flight for a provider, e.g. when it is disposed. */
 export const abortProviderQuotaRequests = (provider: ClineProvider) => {
-	for (const controller of pendingProviderQuotaRequests.get(provider)?.values() ?? []) controller.abort()
+	for (const controller of pendingProviderQuotaRequests.get(provider)?.all ?? []) controller.abort()
 	pendingProviderQuotaRequests.delete(provider)
 }
 
 const pendingQuotaFor = (provider: ClineProvider) => {
 	let pending = pendingProviderQuotaRequests.get(provider)
-	if (!pending) pendingProviderQuotaRequests.set(provider, (pending = new Map()))
+	if (!pending) pendingProviderQuotaRequests.set(provider, (pending = { all: new Set(), byId: new Map() }))
 	return pending
 }
 
@@ -1600,7 +1605,7 @@ export const webviewMessageHandler = async (
 		}
 		case VsCodeLmModelsMessageType.cancelProviderQuotas:
 			// The Usage tab was closed (or the request superseded): stop the profile load and any fetches.
-			if (message.requestId) pendingQuotaFor(provider).get(message.requestId)?.abort()
+			if (message.requestId) pendingQuotaFor(provider).byId.get(message.requestId)?.abort()
 			break
 		case VsCodeLmModelsMessageType.requestProviderQuotas: {
 			// Always answer (unless cancelled): the webview shows a spinner until a response arrives and
@@ -1608,7 +1613,8 @@ export const webviewMessageHandler = async (
 			// carries the request's id so the webview can ignore one that has been superseded.
 			const requestId = message.requestId
 			const controller = new AbortController()
-			if (requestId) pendingQuotaFor(provider).set(requestId, controller)
+			pendingQuotaFor(provider).all.add(controller)
+			if (requestId) pendingQuotaFor(provider).byId.set(requestId, controller)
 			let providerQuotas: ProviderQuota[] = []
 			let providerQuotasFailed = false
 			try {
@@ -1633,8 +1639,9 @@ export const webviewMessageHandler = async (
 				}
 			} finally {
 				// Only remove our own entry: a newer request with the same id from this webview owns the slot now.
-				if (requestId && pendingQuotaFor(provider).get(requestId) === controller) {
-					pendingQuotaFor(provider).delete(requestId)
+				pendingQuotaFor(provider).all.delete(controller)
+				if (requestId && pendingQuotaFor(provider).byId.get(requestId) === controller) {
+					pendingQuotaFor(provider).byId.delete(requestId)
 				}
 			}
 			// Nobody is waiting for a cancelled request: skip the post.
