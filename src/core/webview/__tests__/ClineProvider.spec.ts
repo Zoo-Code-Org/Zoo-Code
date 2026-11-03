@@ -5483,6 +5483,57 @@ describe("ClineProvider", () => {
 				await provider.dispose()
 			}
 		})
+		it("does not overwrite a newer save from another view when the upsert rolls back", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const saveSpy = vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("p-id")
+			// getProfile is called three times on this path: the pre-save snapshot, the post-save
+			// read-back (which becomes the record this mutation wrote), and the rollback guard.
+			// By the guard's turn another view has saved the same profile.
+			vi.spyOn(provider.providerSettingsManager, "getProfile")
+				.mockResolvedValueOnce({
+					name: "p",
+					id: "p-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "prior-key",
+				})
+				.mockResolvedValueOnce({
+					name: "p",
+					id: "p-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "raw-key",
+				})
+				.mockResolvedValue({
+					name: "p",
+					id: "p-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "other-view-key",
+				})
+			vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockResolvedValue("p")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+			// The activation write after the record save fails, so the mutation has to compensate.
+			vi.spyOn(provider["contextProxy"], "setValue").mockRejectedValue(new Error("shared write failed"))
+
+			await expect(
+				provider["persistProviderProfile"](
+					"p",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "raw-key" },
+					true,
+				),
+			).rejects.toThrow()
+
+			// Only this mutation's own save; the rollback must not replay the prior record over the
+			// newer save from the other view.
+			expect(saveSpy).toHaveBeenCalledTimes(1)
+			await provider.dispose()
+		})
 		it("does not undo a newer shared write when the per-view write fails", async () => {
 			const provider = new ClineProvider(
 				mockContext,

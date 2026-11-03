@@ -3032,9 +3032,21 @@ export class ClineProvider
 	 * landed. A record the mutation created is deleted; a deletion that refuses
 	 * (last remaining configuration) is logged and leaves the record behind.
 	 */
-	private async _restoreProviderManagerRecord(name: string, snapshot: ProviderManagerSnapshot): Promise<void> {
+	private async _restoreProviderManagerRecord(
+		name: string,
+		snapshot: ProviderManagerSnapshot,
+		written?: ProviderSettings,
+	): Promise<void> {
 		try {
 			if (snapshot.recordExisted === true && snapshot.previousRecord) {
+				if (written && !(await this._managerRecordStillHolds(name, written))) {
+					// A save of the same profile from another view landed after this mutation's
+					// write: replaying the pre-mutation record would discard that newer save.
+					this.log(
+						`[ClineProvider] skipping the provider-manager record rollback for '${name}': the stored record was superseded`,
+					)
+					return
+				}
 				await this.providerSettingsManager.saveConfig(name, snapshot.previousRecord)
 			} else if (snapshot.recordExisted === false) {
 				// Delete only when this mutation owns the last create claim for the
@@ -3054,6 +3066,40 @@ export class ClineProvider
 			this.log(
 				`[ClineProvider] profile-mutation rollback failed for the provider-manager record: ${error instanceof Error ? error.message : String(error)}`,
 			)
+		}
+	}
+
+	/**
+	 * Whether the stored record still holds exactly the settings this mutation wrote. A store
+	 * that cannot answer keeps the previous behaviour (restore), and a record that is now gone
+	 * counts as superseded. Settings are compared through a canonical key/value serialisation so
+	 * key order cannot fake a difference.
+	 */
+	private async _managerRecordStillHolds(name: string, written: ProviderSettings): Promise<boolean> {
+		try {
+			const current = await this.providerSettingsManager.getProfile({ name })
+			const {
+				name: _currentName,
+				id: _currentId,
+				...currentSettings
+			} = current as ProviderSettings & {
+				name?: string
+				id?: string
+			}
+			const canonical = (settings: Record<string, unknown>) =>
+				JSON.stringify(
+					Object.keys(settings)
+						.sort()
+						.map((key) => [key, settings[key]]),
+				)
+			return (
+				canonical(currentSettings as Record<string, unknown>) === canonical(written as Record<string, unknown>)
+			)
+		} catch (error) {
+			if (error instanceof ProviderSettingsNotFoundError) {
+				return false
+			}
+			return true
 		}
 	}
 
@@ -3344,7 +3390,7 @@ export class ClineProvider
 			// truth that the profile list and the shared settings are derived
 			// from), then the mode mapping, then the shared and per-view state.
 			// The original failure is re-thrown for the caller.
-			await this._restoreProviderManagerRecord(name, managerSnapshot)
+			await this._restoreProviderManagerRecord(name, managerSnapshot, normalizedSettings)
 			await this._restoreProviderManagerSelection(managerSnapshot)
 			if (activationMode !== undefined) {
 				try {
