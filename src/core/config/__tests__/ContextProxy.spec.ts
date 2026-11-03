@@ -299,7 +299,7 @@ describe("ContextProxy", () => {
 			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
 		})
 
-		it("repairs the cache when an older write lands after a newer one failed", async () => {
+		it("drops a rejected write from the cache and repairs it when an older one lands", async () => {
 			await proxy.updateGlobalState("apiProvider", "deepseek")
 
 			let settleFirst: (value: undefined) => void = () => {}
@@ -312,10 +312,12 @@ describe("ContextProxy", () => {
 			)
 			const second = proxy.updateGlobalState("apiProvider", "anthropic")
 
-			// The newer write fails while the older one is still in flight, so for a moment
-			// the cache holds only the failed write's value.
+			// The newer write is the one storage would have ended up with, so its rejection
+			// is rolled back to the newest value that persisted even while the older write
+			// is still running.
 			failSecond(new Error("globalState write failed"))
 			await expect(second).rejects.toThrow("globalState write failed")
+			expect(proxy.getGlobalState("apiProvider")).toBe("deepseek")
 
 			// The older write lands afterwards, so it is what storage holds and what the
 			// cache has to report once nothing is in flight.
@@ -629,6 +631,53 @@ describe("ContextProxy", () => {
 			)
 
 			expect(proxy.getGlobalState("lastSettingsExportPath")).toBeUndefined()
+		})
+
+		it("ignores a write issued before the reset when it lands afterwards", async () => {
+			let settlePending: (value: undefined) => void = () => {}
+			mockGlobalState.update.mockImplementationOnce(() => new Promise((resolve) => (settlePending = resolve)))
+			const pending = proxy.updateGlobalState("apiProvider", "openai")
+
+			await proxy.resetAllState()
+
+			settlePending(undefined)
+			await pending
+
+			// The write belongs to storage state the reset discarded. Landing late must not
+			// put its value back into the cache or into the rollback record.
+			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
+
+			mockGlobalState.update.mockRejectedValueOnce(new Error("globalState write failed"))
+			await expect(proxy.updateGlobalState("apiProvider", "anthropic")).rejects.toThrow(
+				"globalState write failed",
+			)
+
+			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
+		})
+
+		it("keeps a rejected pre-reset write from rolling back a write issued after the reset", async () => {
+			let failPending: (error: Error) => void = () => {}
+			mockGlobalState.update.mockImplementationOnce(
+				() => new Promise((_resolve, reject) => (failPending = reject)),
+			)
+			const preReset = proxy.updateGlobalState("apiProvider", "openai")
+
+			await proxy.resetAllState()
+
+			// A write issued after the reset reuses this key's first sequence number, so a
+			// late rejection of the pre-reset write must not be mistaken for it.
+			let settlePostReset: (value: undefined) => void = () => {}
+			mockGlobalState.update.mockImplementationOnce(() => new Promise((resolve) => (settlePostReset = resolve)))
+			const postReset = proxy.updateGlobalState("apiProvider", "anthropic")
+
+			failPending(new Error("globalState write failed"))
+			await expect(preReset).rejects.toThrow("globalState write failed")
+
+			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
+
+			settlePostReset(undefined)
+			await postReset
+			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
 		})
 	})
 
