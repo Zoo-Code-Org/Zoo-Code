@@ -4,7 +4,7 @@ import { renderWithExtensionState, screen, fireEvent, within, waitFor } from "@/
 import { act } from "@testing-library/react"
 
 import { vscode } from "@/utils/vscode"
-import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, type ProviderSettings } from "@roo-code/types"
+import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, type ExtensionState, type ProviderSettings } from "@roo-code/types"
 import { experimentDefault } from "@roo/experiments"
 import type { ApiOptionsProps } from "../ApiOptions"
 
@@ -343,7 +343,7 @@ const renderSettingsView = (initialState: any = {}) => {
 // defaults, which is fine for rendering checks but cannot show a persisted value surviving a
 // save. These tests need the state to arrive first, which is the order the extension host
 // actually produces it in: state is hydrated long before the user opens Settings.
-const renderHydratedSettingsView = async (initialState: any) => {
+const renderHydratedSettingsView = async (initialState: Partial<ExtensionState>) => {
 	const onDone = vi.fn()
 	const result = renderWithExtensionState(<div />)
 	// window.postMessage reaches the context listener on a later task, so the hydration has
