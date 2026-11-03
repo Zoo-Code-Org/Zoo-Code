@@ -3722,15 +3722,18 @@ export class ClineProvider
 					// save never committed.
 					landed.viewOverlay = true
 					await this._saveViewLocalStateFromMutation({ apiConfiguration: normalizedSettings })
-					// Only rebuild when the task actually runs under the saved profile: a
-					// view pinned to this profile can hold a task that follows a different
-					// sticky profile, and the forced rebuild would silently switch that
-					// conversation to the saved profile's settings.
-					if (this.getCurrentTask()?.taskApiConfigName === name) {
-						this.updateTaskApiHandlerIfNeeded(normalizedSettings, { forceRebuild: true })
-					}
 				}
 				await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings)
+				// Rebuild only after the sibling refresh landed, as the activating branch above does:
+				// a rebuilt task handler is not one of the durable stores the compensation can put back,
+				// so rebuilding before a write that can still fail leaves the running task sending
+				// requests with settings the rolled-back save never committed.
+				// Only rebuild when the task actually runs under the saved profile: a view pinned to this
+				// profile can hold a task that follows a different sticky profile, and the forced rebuild
+				// would silently switch that conversation to the saved profile's settings.
+				if (this.pinnedProfileName === name && this.getCurrentTask()?.taskApiConfigName === name) {
+					this.updateTaskApiHandlerIfNeeded(normalizedSettings, { forceRebuild: true })
+				}
 			}
 
 			await this.postStateToWebview()
