@@ -3048,6 +3048,16 @@ export class ClineProvider
 
 		if (!skipCurrentTaskRebuild) {
 			// See `upsertProviderProfile` for a description of what this is doing.
+			// Capture the shared values this group is about to replace: the per-view mirror below is the
+			// last step, and its rejection must not leave the shared selection and settings naming a
+			// profile the view buffer and the durable pin do not follow.
+			const sharedValuesBeforeActivation = {
+				list: this.contextProxy.getValue("listApiConfigMeta"),
+				name: this.contextProxy.getValue("currentApiConfigName"),
+				nameGeneration: this.contextProxy.getStateWriteGeneration("currentApiConfigName") + 1,
+				settings: this.contextProxy.getProviderSettings(),
+				apiProviderGeneration: this.contextProxy.getStateWriteGeneration("apiProvider") + 1,
+			}
 			await Promise.all([
 				this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
 				this.contextProxy.setValue("currentApiConfigName", name),
@@ -3058,10 +3068,47 @@ export class ClineProvider
 			// bypass the per-view mutation path, so getValues() would keep overlaying the previous
 			// profile's name and settings - getConfiguration() then reports the previous profile
 			// while the shared selection already holds the new one.
-			await this._saveViewLocalStateFromMutation({
-				currentApiConfigName: name,
-				apiConfiguration: providerSettings,
-			})
+			try {
+				await this._saveViewLocalStateFromMutation({
+					currentApiConfigName: name,
+					apiConfiguration: providerSettings,
+				})
+			} catch (mirrorError) {
+				// The shared writes already landed. Put them back while this activation still owns them,
+				// so the shared selection cannot name a profile the view buffer does not follow.
+				if (
+					this.contextProxy.getStateWriteGeneration("currentApiConfigName") ===
+					sharedValuesBeforeActivation.nameGeneration
+				) {
+					await this.contextProxy
+						.setValue("currentApiConfigName", sharedValuesBeforeActivation.name)
+						.catch((restoreError: unknown) =>
+							this.log(
+								`[activateProviderProfile] Failed to restore the shared selection after a rejected view mirror: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+							),
+						)
+					await this.contextProxy
+						.setValue("listApiConfigMeta", sharedValuesBeforeActivation.list)
+						.catch((restoreError: unknown) =>
+							this.log(
+								`[activateProviderProfile] Failed to restore the profile list after a rejected view mirror: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+							),
+						)
+				}
+				if (
+					this.contextProxy.getStateWriteGeneration("apiProvider") ===
+					sharedValuesBeforeActivation.apiProviderGeneration
+				) {
+					await this.contextProxy
+						.setProviderSettings(sharedValuesBeforeActivation.settings)
+						.catch((restoreError: unknown) =>
+							this.log(
+								`[activateProviderProfile] Failed to restore the shared provider settings after a rejected view mirror: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+							),
+						)
+				}
+				throw mirrorError
+			}
 		}
 
 		const { mode } = await this.getState()

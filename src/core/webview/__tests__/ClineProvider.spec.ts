@@ -4608,6 +4608,37 @@ describe("ClineProvider", () => {
 			vi.spyOn(provider, "getState").mockResolvedValue({ mode: "code" } as never)
 		}
 
+		it("restores the shared writes when the per-view mirror rejects", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const priorEntry = { name: "prior-profile", id: "prior-id", apiProvider: providerIdentifiers.anthropic }
+			const nextEntry = { name: "next-profile", id: "next-id", apiProvider: providerIdentifiers.openrouter }
+			await provider.contextProxy.setValue("listApiConfigMeta", [priorEntry, nextEntry])
+			await provider.contextProxy.setValue("currentApiConfigName", "prior-profile")
+			provider["viewLocalState"].currentApiConfigName = "prior-profile"
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				...nextEntry,
+				apiKey: "next-key",
+			} as never)
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([priorEntry, nextEntry])
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(undefined)
+			// @ts-ignore - fail only the per-view mirror, after the shared writes landed.
+			vi.spyOn(provider, "_saveViewLocalStateFromMutation").mockRejectedValue(new Error("mirror failed"))
+
+			await expect(provider.activateProviderProfile({ name: "next-profile" })).rejects.toThrow("mirror failed")
+
+			// The shared selection must not name a profile the view buffer does not follow.
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("prior-profile")
+			await provider.dispose()
+		})
 		it("mirrors the activated profile into the view buffer and durable pin", async () => {
 			const provider = new ClineProvider(
 				mockContext,
