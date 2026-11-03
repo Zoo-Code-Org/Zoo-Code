@@ -2560,8 +2560,24 @@ export const webviewMessageHandler = async (
 					}
 
 					// Re-activate to update the global settings related to the
-					// currently activated provider profile.
-					await provider.activateProviderProfile({ name: newName })
+					// currently activated provider profile. The rename has already committed by
+					// now (the new record is stored, the old name is deleted, and every live
+					// view was re-pointed), and activateProviderProfile restores the selection
+					// it replaced - which is the deleted oldName. Point the shared selection at
+					// the stored newName instead, so the failure cannot leave consumers
+					// resolving a profile that no longer exists.
+					try {
+						await provider.activateProviderProfile({ name: newName })
+					} catch (error) {
+						try {
+							await provider.setValue("currentApiConfigName", newName)
+						} catch (selectionError) {
+							provider.log(
+								`Rename activation failed and the shared selection could not be re-pointed at '${newName}': ${JSON.stringify(selectionError, Object.getOwnPropertyNames(selectionError), 2)}`,
+							)
+						}
+						throw error
+					}
 				} catch (error) {
 					provider.log(
 						`Error rename api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,

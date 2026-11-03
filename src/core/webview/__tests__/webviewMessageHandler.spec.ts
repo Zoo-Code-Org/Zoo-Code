@@ -2685,6 +2685,28 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		expect(order).toEqual(["repoint", "delete"])
 	})
 
+	it("points the shared selection at the renamed profile when the activation fails", async () => {
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		provider.repointViewLocalStateAfterProfileRename = vi.fn().mockResolvedValue(undefined)
+		provider.activateProviderProfile = vi.fn().mockRejectedValue(new Error("activation failed"))
+		vi.mocked(mockClineProvider.setValue).mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// The rename is committed at this point (new record stored, old name deleted), so
+		// activation's own rollback restores the deleted old name: the shared selection has
+		// to be re-pointed at the stored record instead.
+		expect(mockClineProvider.setValue).toHaveBeenCalledWith("currentApiConfigName", "new-profile")
+	})
 	it("rolls the new profile back when the re-point fails", async () => {
 		provider.providerSettingsManager = {
 			hasConfig: vi.fn().mockResolvedValue(false),
