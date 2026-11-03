@@ -2840,8 +2840,10 @@ export const webviewMessageHandler = async (
 					break
 				}
 
-				// Delete the mode
-				await provider.customModesManager.deleteCustomMode(message.slug)
+				// Delete the mode through the provider-profile mutation queue: a queued mode
+				// switch must not read the mode list first and then persist a slug this
+				// deletion removed while it waited.
+				await provider.deleteCustomMode(message.slug)
 
 				// Delete the rules folder if it exists
 				if (rulesFolderExists) {

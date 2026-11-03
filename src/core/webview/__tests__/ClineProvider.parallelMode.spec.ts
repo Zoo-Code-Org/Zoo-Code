@@ -1735,6 +1735,113 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.dispose()
 		})
 
+		it("should ignore a custom mode deleted while the switch waits for the mutation queue", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["resolveWebviewView"](createMockWebviewView())
+			await provider["setViewStateId"]("deleted-mode-view")
+			await provider.setValue("mode", "code")
+			const logSpy = vi.spyOn(provider, "log")
+
+			// The file-level getModeBySlug mock ignores its customModes argument (and returns
+			// null for unknown slugs), so make the lookup custom-mode aware for this test.
+			const modesModule = vi.mocked(await import("../../../shared/modes"))
+			const originalGetModeBySlug = modesModule.getModeBySlug.getMockImplementation()
+			type TestMode = { slug: string; name: string; roleDefinition: string; groups: string[] }
+			let customModes: TestMode[] = [
+				{ slug: "ephemeral-mode", name: "Ephemeral Mode", roleDefinition: "Test Role", groups: [] },
+			]
+			modesModule.getModeBySlug.mockImplementation(
+				((slug: string, custom?: TestMode[]) =>
+					custom?.find((mode) => mode.slug === slug) ??
+					modesModule.modes.find((mode) => mode.slug === slug) ??
+					null) as typeof modesModule.getModeBySlug,
+			)
+			const getCustomModesSpy = vi
+				.spyOn(provider.customModesManager, "getCustomModes")
+				.mockImplementation(async () => customModes as never)
+
+			try {
+				// Hold the queue so the switch is queued while the mode is still present.
+				let releaseQueue!: () => void
+				const queueGate = new Promise<void>((resolve) => {
+					releaseQueue = resolve
+				})
+				const queueHolder = provider["enqueueProviderProfileMutation"](
+					async () => {
+						await queueGate
+					},
+					{ runToCompletion: true },
+				)
+
+				const switchRun = provider.handleModeSwitch("ephemeral-mode", null)
+
+				// The mode is deleted while the switch is still waiting for the queue: the re-read
+				// inside the queued callback is what notices, a pre-queue check cannot.
+				customModes = []
+				releaseQueue()
+				await queueHolder
+				await switchRun
+
+				expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('ignoring unknown mode "ephemeral-mode"'))
+				// Nothing was pinned or written for the deleted slug.
+				expect(provider["viewLocalState"].mode).toBe("code")
+				expect(provider.getValue("mode")).toBe("code")
+			} finally {
+				getCustomModesSpy.mockRestore()
+
+				if (originalGetModeBySlug) {
+					modesModule.getModeBySlug.mockImplementation(originalGetModeBySlug)
+				}
+			}
+
+			await provider.dispose()
+		})
+
+		it("should route a custom-mode deletion through the mutation queue", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["resolveWebviewView"](createMockWebviewView())
+			// The CustomModesManager double in this file has no deleteCustomMode member, so it is
+			// installed on the instance instead of spied.
+			const deleteSpy = vi.fn().mockResolvedValue(undefined)
+			Object.assign(provider.customModesManager, { deleteCustomMode: deleteSpy })
+
+			// Hold the queue: a deletion that bypasses it would run here, while a queued
+			// mode switch is still pending.
+			let releaseQueue!: () => void
+			const queueGate = new Promise<void>((resolve) => {
+				releaseQueue = resolve
+			})
+			const queueHolder = provider["enqueueProviderProfileMutation"](
+				async () => {
+					await queueGate
+				},
+				{ runToCompletion: true },
+			)
+
+			const deletion = provider.deleteCustomMode("ephemeral-mode")
+			await Promise.resolve()
+			expect(deleteSpy).not.toHaveBeenCalled()
+
+			releaseQueue()
+			await queueHolder
+			await deletion
+			expect(deleteSpy).toHaveBeenCalledWith("ephemeral-mode")
+
+			await provider.dispose()
+		})
+
 		// K1: a no-task switch captures its target before any task is focused; a task gains
 		// focus before the queued mutation runs. The view-level durable write and the
 		// ModeChanged broadcast belong to the view and must still happen.

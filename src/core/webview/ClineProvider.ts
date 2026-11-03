@@ -402,6 +402,22 @@ export class ClineProvider
 	}
 
 	/**
+	 * Deletes a custom mode through the provider-profile mutation queue. Without it a queued
+	 * mode switch can read the mode list, wait while this deletion removes the slug, and then
+	 * persist it - deletion would bypass the queue that orders exactly those two mutations.
+	 * The switch's own re-checks cover the reverse order (a deletion that lands while the
+	 * switch is executing).
+	 */
+	public async deleteCustomMode(slug: string): Promise<void> {
+		return this.enqueueProviderProfileMutation(
+			async () => this.customModesManager.deleteCustomMode(slug),
+			// The deletion must run to completion: a timeout that advanced the queue while the
+			// mode files were being rewritten would let the next switch read a partial list.
+			{ runToCompletion: true },
+		)
+	}
+
+	/**
 	 * Resolves once the currently queued provider-profile mutation (and everything queued
 	 * before it) has settled. A caller that timed out on a run-to-completion mutation waits
 	 * on this before acting on state that mutation can still change.
@@ -411,6 +427,20 @@ export class ClineProvider
 			() => undefined,
 			() => undefined,
 		)
+	}
+
+	/**
+	 * Whether a mode slug still resolves, as read inside a queued mutation. Built-in slugs are
+	 * answered without a store read: they cannot be deleted, so a queued callback does not need
+	 * to re-read the custom-mode list for them (a custom mode shadowing a built-in keeps
+	 * resolving to the built-in once the custom definition is gone).
+	 */
+	private async modeSlugResolves(slug: Mode): Promise<boolean> {
+		if (getModeBySlug(slug)) {
+			return true
+		}
+
+		return !!getModeBySlug(slug, await this.customModesManager.getCustomModes())
 	}
 
 	private withProviderProfileMutationTimeout<T>(operation: Promise<T>, onTimeout: () => void): Promise<T> {
@@ -2620,15 +2650,19 @@ export class ClineProvider
 	 * "mode" message sends message.text as Mode) cannot persist invalid modes.
 	 */
 	public async handleModeSwitch(newMode: Mode, targetTask: Task | null | undefined = this.getCurrentTask()) {
-		const targetMode = getModeBySlug(newMode, await this.customModesManager.getCustomModes())
-
-		if (!targetMode) {
-			this.log(`[ClineProvider#handleModeSwitch] ignoring unknown mode "${newMode}"`)
-			return
-		}
-
 		return this.enqueueProviderProfileMutation(
-			(signal) => this.handleModeSwitchUnlocked(newMode, targetTask, signal),
+			async (signal) => {
+				// The existence check runs inside the queued callback, not before the switch joins
+				// the queue: a custom mode can be deleted while this switch waits its turn, and a
+				// pre-queue check would then pin a slug that no longer resolves to the view, the
+				// shared mode and the task history.
+				if (!(await this.modeSlugResolves(newMode))) {
+					this.log(`[ClineProvider#handleModeSwitch] ignoring unknown mode "${newMode}"`)
+					return
+				}
+
+				return this.handleModeSwitchUnlocked(newMode, targetTask, signal)
+			},
 			// The switch and its nested activation must own the queue until every
 			// write - including compensation - settles: a timeout must not let the
 			// next queued mutation overlap writes that are still in flight.
@@ -2727,6 +2761,28 @@ export class ClineProvider
 		// A cancelled or timed-out switch must not write the mode or emit
 		// ModeChanged: check the mutation signal right before the durable write.
 		if (signal?.aborted) {
+			return
+		}
+
+		// The task writes above await (the history write first), so a custom mode can be deleted
+		// inside that window even while this switch owns the queue. Re-check before the first
+		// durable write so a slug that no longer resolves is never pinned to the view or written
+		// to the shared mode, and undo the task-side writes that already landed.
+		if (!(await this.modeSlugResolves(newMode))) {
+			this.log(`[ClineProvider#handleModeSwitch] ignoring mode "${newMode}" deleted while the switch was pending`)
+
+			if (rollbackTaskWrites) {
+				try {
+					await rollbackTaskWrites()
+				} catch (rollbackError) {
+					this.log(
+						`[handleModeSwitch] Failed to roll back task mode writes after the mode was deleted: ${
+							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+						}`,
+					)
+				}
+			}
+
 			return
 		}
 
