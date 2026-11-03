@@ -674,6 +674,25 @@ describe("SettingsView – a save the host never answers", () => {
 			expect(lastUpdatedSettings()).toHaveProperty("terminalFontSize", null)
 		})
 
+		it("shows a value as unset when the late success is for a reset", async () => {
+			renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="ui" />, {
+				state: { terminalFontSize: 20 },
+				queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+			})
+			fireEvent.click(await screen.findByTestId("appearance-terminalFontSize-reset"))
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+			fireEvent.click(screen.getByTestId("save-button"))
+			const id = lastSaveRequestId(postMessage)
+			expect(lastUpdatedSettings()).toHaveProperty("terminalFontSize", null)
+			act(() => vi.advanceTimersByTime(SAVE_ANSWER_TIMEOUT_MS))
+
+			answerSave(id, { success: true })
+
+			// Stored as unset (null on the wire): the field is empty again, and nothing is left unsaved.
+			expect((screen.getByTestId("appearance-terminalFontSize-input") as HTMLInputElement).value).not.toBe("20")
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+		})
+
 		it("keeps a value the user edited again after the save was sent when its late success arrives", async () => {
 			const id = await timeOutAfterAnEdit() // 13 sent, unanswered
 			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // 14, an edit made after the send
