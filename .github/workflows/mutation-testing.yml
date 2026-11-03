@@ -16,9 +16,9 @@ concurrency:
 jobs:
     # The open pull request map is read in a job that never checks out or runs pull-request
     # code, so the token cannot reach anything the contributor controls. Only the filtered map
-    # crosses into the job that runs the gate. Each entry carries the draft flag: a draft pull
-    # request is not gated, so the gate refuses its head as a stacked base and measures the unit
-    # against the event base instead.
+    # crosses into the job that runs the gate. Each entry carries the draft flag and the base ref: a
+    # draft pull request is not gated, and a pull request whose base is another branch is not the
+    # branch this unit lands on, so either one makes the gate measure against the event base instead.
     stacked_map:
         name: Resolve the stacked parent
         runs-on: ubuntu-latest
@@ -39,7 +39,9 @@ jobs:
                   # measuring against the event base.
                   # --jq runs once per page, so a paginated call emits one JSON array per page; the
                   # gate reads that stream, not a single array.
-                  STACKED_MAP="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" --jq '[.[] | {number: .number, headSha: .head.sha, draft: (.draft == true)}]')" || STACKED_MAP="$(printf '[]')"
+                  # The base ref travels with every entry: the gate only measures a unit against a parent
+                  # that targets the branch the unit itself targets.
+                  STACKED_MAP="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" --jq '[.[] | {number: .number, headSha: .head.sha, draft: (.draft == true), baseRef: .base.ref}]')" || STACKED_MAP="$(printf '[]')"
                   # Publish the whole value as one record from a validated string, and let a failed
                   # write abort the job: a truncated or skipped output would leave the gate measuring
                   # against the event base while still reporting success.
@@ -89,13 +91,14 @@ jobs:
               if: github.event_name == 'pull_request'
               env:
                   HEAD_SHA: ${{ github.sha }}
+                  PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
               run: |
                   BASE_SHA="$(git rev-parse "$HEAD_SHA^1")"
                   # The merge commit's second parent is the pull request head. When that head's own
                   # parent is another open pull request's head, this PR is a stacked unit, so the gate
                   # measures only this unit's delta instead of every unmerged ancestor.
                   PR_HEAD_SHA="$(git rev-parse "$HEAD_SHA^2" 2>/dev/null || git rev-parse "$HEAD_SHA")"
-                  node scripts/stryker-diff.mjs ci --base "$BASE_SHA" --head "$HEAD_SHA" --pr-head "$PR_HEAD_SHA" --stacked-map "$STACKED_MAP"
+                  node scripts/stryker-diff.mjs ci --base "$BASE_SHA" --head "$HEAD_SHA" --pr-head "$PR_HEAD_SHA" --pr-base-ref "$PR_BASE_REF" --stacked-map "$STACKED_MAP"
 
             - name: Upload mutation reports
               id: mutation_report

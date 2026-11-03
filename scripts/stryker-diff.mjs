@@ -285,8 +285,10 @@ export function resolvePullRequestBase(repoRoot, baseSha, headSha) {
 // attributes every unmerged ancestor to this pull request. When the head commit's first parent is the
 // head of another open pull request, that parent is the unit's real base and the diff contains only
 // this unit's delta. A pull request whose parent is not another pull request's head keeps the event
-// base, so a multi-commit pull request is never charged only its last commit.
-export function resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPullRequests = []) {
+// base, so a multi-commit pull request is never charged only its last commit. The parent must also be
+// a pull request against the same branch this unit targets, so a parent stacked from a feature branch
+// cannot lend its unmeasured feature-branch delta to a unit that lands on main.
+export function resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPullRequests = [], childBaseRef) {
 	validateSha(eventBaseSha, "base SHA")
 	validateSha(prHeadSha, "pull request head SHA")
 	const parents = git(repoRoot, ["rev-list", "--parents", "-n", "1", prHeadSha]).trim().split(/\s+/).slice(1)
@@ -300,9 +302,20 @@ export function resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPu
 	// runs), so its head cannot be the base this unit is measured against: the unit would be charged
 	// only its own delta while the draft's content rides into the base through the unit that merges
 	// it. Such a unit keeps the event base, so that content is charged to the pull request that would
-	// actually land it. Anyone reading a "stacked" base here can assume the parent was gated.
+	// actually land it. A parent that reaches this point was gated: the workflow ran the gate on that
+	// pull request against its own base. Whether that run passed is enforced on the parent's own pull
+	// request, not here - no branch ruleset requires the mutation-diff check upstream, so requiring a
+	// green parent would turn an advisory measurement into a hard dependency between two units, and a
+	// unit would be charged its parent's unrelated findings on top of its own.
 	const parent = openPullRequests.find((pr) => pr.draft !== true && String(pr.headSha).toLowerCase() === parentSha)
 	if (!parent) return { baseSha: eventBaseSha, stackedOn: null }
+	// The gate measures a unit against its parent head only when the parent is a pull request against
+	// the very branch this unit targets. A parent whose base is a feature branch would be measured
+	// against that feature branch by its own run, so measuring this unit against its head hides the
+	// parent's feature-branch delta from the changed-line cap while merging this unit lands that delta
+	// on main. Without either base ref the comparison cannot be made, and the unit keeps the event base.
+	const parentBaseRef = typeof parent.baseRef === "string" ? parent.baseRef : ""
+	if (!childBaseRef || parentBaseRef !== childBaseRef) return { baseSha: eventBaseSha, stackedOn: null }
 	return { baseSha: parentSha, stackedOn: parent.number }
 }
 
@@ -310,8 +323,15 @@ export function resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPu
 // to, and which commit to diff against. A stacked unit diffs against its own pull request head,
 // because the merge commit also carries whatever main advanced since the parent unit. A plain
 // pull request keeps the merge commit as the diff head.
-export function resolveCiInvocation(repoRoot, eventBaseSha, mergeCommitSha, prHeadSha, openPullRequests = []) {
-	const resolved = resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPullRequests)
+export function resolveCiInvocation(
+	repoRoot,
+	eventBaseSha,
+	mergeCommitSha,
+	prHeadSha,
+	openPullRequests = [],
+	childBaseRef,
+) {
+	const resolved = resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPullRequests, childBaseRef)
 	return {
 		baseSha: resolved.baseSha,
 		diffHead: resolved.stackedOn ? prHeadSha : mergeCommitSha,
@@ -330,6 +350,40 @@ export function alignExecutionTree(repoRoot, diffHeadSha) {
 	if (current === wanted) return false
 	git(repoRoot, ["checkout", "--quiet", wanted])
 	return true
+}
+
+// The workflow installs dependencies from the merge commit it checks out, and a stacked unit then moves
+// the working tree to the pull request head. When the two trees declare different dependencies, the
+// installed Vitest and Stryker belong to the merge tree while selection, source reads, and mutation run
+// against the unit head, so the toolchain has to be reinstalled from the aligned tree before it runs.
+// Every dependency declaration the workspace installs from is listed here: the lockfile, the workspace
+// membership, and each package's manifest.
+export const DEPENDENCY_MANIFEST_PATHS = [
+	":(glob)**/pnpm-lock.yaml",
+	":(glob)**/pnpm-workspace.yaml",
+	":(glob)**/package.json",
+]
+
+export function dependencyManifestDrift(repoRoot, installedSha, alignedSha) {
+	const changed = git(repoRoot, [
+		"diff",
+		"--name-only",
+		`${installedSha}..${alignedSha}`,
+		"--",
+		...DEPENDENCY_MANIFEST_PATHS,
+	])
+	return changed.trim().split(/\n+/).filter(Boolean)
+}
+
+function reinstallAlignedDependencies(repoRoot, driftedManifests) {
+	console.log(
+		`Reinstalling dependencies from the aligned tree: ${driftedManifests.join(", ")} differ from the tree they were installed from.`,
+	)
+	const result = spawnSync("pnpm", ["install", "--frozen-lockfile"], { cwd: repoRoot, encoding: "utf8" })
+	if (result.error || result.status !== 0) {
+		const detail = result.error?.message ?? result.stderr?.trim() ?? `exit ${result.status}`
+		throw new Error(`The aligned tree changed ${driftedManifests.join(", ")} and the reinstall failed: ${detail}`)
+	}
 }
 
 export function selectFromGit(repoRoot, baseSha, headSha, options = {}) {
@@ -678,13 +732,19 @@ export function formatSummary(rows, advisories, manifest = {}) {
 	}
 
 	if (manifest.baseSha && manifest.headSha) {
+		// A stacked unit was measured against its parent head with the working tree aligned to the pull
+		// request head. From a merge-commit checkout the same command would select the unit's lines but
+		// mutate whatever main advanced, so the checkout belongs in the reproduction.
 		lines.push(
 			"",
 			"### Reproduce locally",
 			"",
-			"From a full checkout containing both commits:",
+			manifest.stackedOn
+				? "From a full checkout containing both commits, checked out at the pull request head:"
+				: "From a full checkout containing both commits:",
 			"",
 			"```bash",
+			...(manifest.stackedOn ? [`git checkout ${manifest.headSha}`] : []),
 			"pnpm install --frozen-lockfile",
 			`node scripts/stryker-diff.mjs ci --base ${manifest.baseSha} --head ${manifest.headSha}`,
 			"```",
@@ -917,7 +977,7 @@ function main() {
 	const command = process.argv[2]
 	if (command !== "ci")
 		throw new Error(
-			"Usage: node scripts/stryker-diff.mjs ci --base <sha> --head <sha> [--pr-head <sha>] [--reports <path>] [--stacked-map <json>]",
+			"Usage: node scripts/stryker-diff.mjs ci --base <sha> --head <sha> [--pr-head <sha>] [--reports <path>] [--stacked-map <json>] [--pr-base-ref <ref>]",
 		)
 
 	const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
@@ -931,7 +991,10 @@ function main() {
 	// parent can. A plain pull request keeps the merge commit as the diff head; a stacked unit
 	// uses its own head, and the working tree is aligned to that head below.
 	const prHeadSha = argument("--pr-head") ?? headSha
-	const invocation = resolveCiInvocation(repoRoot, baseSha, headSha, prHeadSha, openPullRequests)
+	// The branch this pull request targets. A stacked parent is only accepted when it targets the same
+	// branch, so the parent's own gate and this unit's gate measure against the same base.
+	const prBaseRef = argument("--pr-base-ref")
+	const invocation = resolveCiInvocation(repoRoot, baseSha, headSha, prHeadSha, openPullRequests, prBaseRef)
 	if (invocation.stackedOn)
 		console.log(
 			`Stacked unit: measured against the head of parent PR #${invocation.stackedOn}, not the event base.`,
@@ -940,6 +1003,8 @@ function main() {
 		console.log(
 			`Aligned the working tree to the diff head ${invocation.diffHead.slice(0, 12)} so selection, source reads, and mutation run on the same tree.`,
 		)
+		const driftedManifests = dependencyManifestDrift(repoRoot, headSha, invocation.diffHead)
+		if (driftedManifests.length > 0) reinstallAlignedDependencies(repoRoot, driftedManifests)
 	}
 
 	const reportRoot = path.resolve(repoRoot, argument("--reports") ?? "reports/mutation")
