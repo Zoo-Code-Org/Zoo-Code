@@ -1920,6 +1920,31 @@ describe("importExport", () => {
 			expect(mockContextProxy.setValue).not.toHaveBeenCalledWith("lastSettingsExportPath", expect.anything())
 		})
 
+		it("writes nothing when no provider profile is configured", async () => {
+			;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
+				fsPath: "/mock/path/zoo-code-settings.json",
+			})
+			mockProviderSettingsManager.export.mockResolvedValue(undefined)
+			mockContextProxy.export.mockResolvedValue({ mode: "code" })
+
+			await exportSettings({
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: mockContextProxy,
+			})
+
+			// Deliberate behaviour, pinned rather than changed: `importSettings` cannot
+			// consume a file with no provider profiles, so a profile-less export writes
+			// nothing at all. The guard sits after both collect calls, so it must not
+			// reach the disk, the toasts, or the remembered location.
+			expect(mockContextProxy.export).toHaveBeenCalled()
+			expect(fs.mkdir).not.toHaveBeenCalled()
+			expect(safeWriteJson).not.toHaveBeenCalled()
+			expect(vscode.window.showInformationMessage).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+			expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+			expect(mockContextProxy.setValue).not.toHaveBeenCalledWith("lastSettingsExportPath", expect.anything())
+		})
+
 		it("should persist and report the location that received the exported file", async () => {
 			;(fs.mkdir as Mock).mockResolvedValue(undefined)
 			;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
