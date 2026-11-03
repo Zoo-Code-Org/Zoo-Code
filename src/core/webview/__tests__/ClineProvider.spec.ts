@@ -4608,6 +4608,41 @@ describe("ClineProvider", () => {
 			vi.spyOn(provider, "getState").mockResolvedValue({ mode: "code" } as never)
 		}
 
+		it("mirrors the activated profile into the view buffer and durable pin", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const priorEntry = { name: "prior-profile", id: "prior-id", apiProvider: providerIdentifiers.anthropic }
+			const nextEntry = { name: "next-profile", id: "next-id", apiProvider: providerIdentifiers.openrouter }
+			await provider.contextProxy.setValue("listApiConfigMeta", [priorEntry, nextEntry])
+			await provider.contextProxy.setValue("currentApiConfigName", "prior-profile")
+			provider["viewLocalState"].currentApiConfigName = "prior-profile"
+			provider["viewLocalState"].apiConfiguration = {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "prior-key",
+			}
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				...nextEntry,
+				apiKey: "next-key",
+			} as never)
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([priorEntry, nextEntry])
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(undefined)
+
+			await provider.activateProviderProfile({ name: "next-profile" })
+
+			// getValues() overlays the view buffer over the shared store: without the mirror the
+			// previous profile's name and settings shadow the selection that was just activated.
+			expect(provider.getValues().currentApiConfigName).toBe("next-profile")
+			expect(provider["viewLocalState"].apiConfiguration?.apiKey).toBe("next-key")
+			await provider.dispose()
+		})
 		it("should undo this activation's mode binding and settings while it still owns them", async () => {
 			const provider = new ClineProvider(
 				mockContext,
