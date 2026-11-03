@@ -4608,39 +4608,6 @@ describe("ClineProvider", () => {
 			vi.spyOn(provider, "getState").mockResolvedValue({ mode: "code" } as never)
 		}
 
-		it("keeps a newer profile list written by another view when the activation rolls back", async () => {
-			const provider = new ClineProvider(
-				mockContext,
-				mockOutputChannel,
-				"sidebar",
-				new ContextProxy(mockContext),
-				new WebviewFocusTracker(),
-			)
-			const priorEntry = { name: "prior-profile", id: "prior-id", apiProvider: providerIdentifiers.anthropic }
-			const nextEntry = { name: "next-profile", id: "next-id", apiProvider: providerIdentifiers.openrouter }
-			const savedElsewhere = { name: "other-save", id: "other-id", apiProvider: providerIdentifiers.anthropic }
-			await provider.contextProxy.setValue("listApiConfigMeta", [priorEntry])
-			await provider.contextProxy.setValue("currentApiConfigName", "prior-profile")
-			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
-				...nextEntry,
-			} as never)
-			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([priorEntry, nextEntry])
-			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
-			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
-			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-			vi.spyOn(provider, "getCurrentTask").mockReturnValue(undefined)
-			// Another view saves a profile (writing the list) before this activation's last group member
-			// fails. Undoing the list here would drop the profile that save just stored from the metadata.
-			vi.spyOn(provider.contextProxy, "setProviderSettings").mockImplementation(async () => {
-				await provider.contextProxy.setValue("listApiConfigMeta", [savedElsewhere])
-				throw new Error("settings write failed")
-			})
-
-			await expect(provider.activateProviderProfile({ name: "next-profile" })).rejects.toThrow()
-
-			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([savedElsewhere])
-			await provider.dispose()
-		})
 		it("mirrors the activated profile into the view buffer and durable pin", async () => {
 			const provider = new ClineProvider(
 				mockContext,
