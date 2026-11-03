@@ -774,8 +774,13 @@ describe("webviewMessageHandler - theme fixture probes", () => {
 
 import { t } from "../../../i18n"
 import { exportUsageCsv } from "../../../integrations/misc/export-usage-csv"
+import { exportSettings } from "../../config/importExport"
 
 vi.mock("../../../integrations/misc/export-usage-csv", () => ({ exportUsageCsv: vi.fn() }))
+vi.mock("../../config/importExport", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../config/importExport")>()),
+	exportSettings: vi.fn(),
+}))
 
 vi.mock("vscode", () => {
 	const showInformationMessage = vi.fn()
@@ -3076,5 +3081,16 @@ describe("exportUsageCsv", () => {
 		await webviewMessageHandler(mockClineProvider, { type: "exportUsageCsv", text: "a" })
 
 		expect(exportUsageCsv).toHaveBeenCalledExactlyOnceWith("a", undefined)
+	})
+})
+
+describe("exportSettings", () => {
+	it("exports the settings with the provider's managers", async () => {
+		await webviewMessageHandler(mockClineProvider, { type: "exportSettings" })
+
+		expect(exportSettings).toHaveBeenCalledExactlyOnceWith({
+			providerSettingsManager: mockClineProvider.providerSettingsManager,
+			contextProxy: mockClineProvider.contextProxy,
+		})
 	})
 })
