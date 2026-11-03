@@ -748,5 +748,35 @@ describe("mergeExtensionState", () => {
 			expect(result.clineMessages).toBe(newMessages)
 			expect(result.clineMessagesSeq).toBe(1)
 		})
+
+		it("keeps the displayed task id when a stale push names another task", () => {
+			const prevState: ExtensionState = {
+				...baseState,
+				clineMessages: [makeMessage(1, "hello")],
+				clineMessagesSeq: 5,
+				currentTaskId: "task-a",
+			}
+
+			const result = mergeExtensionState(prevState, {
+				// A push that lost the seq race cannot establish task identity either.
+				clineMessagesSeq: 4,
+				currentTaskId: "old",
+			})
+
+			expect(result.currentTaskId).toBe("task-a")
+		})
+
+		it("keeps the displayed task id when a message-free push names another task", () => {
+			const prevState: ExtensionState = {
+				...baseState,
+				clineMessages: [makeMessage(1, "hello")],
+				clineMessagesSeq: 5,
+				currentTaskId: "task-a",
+			}
+
+			const result = mergeExtensionState(prevState, { currentTaskId: "old" })
+
+			expect(result.currentTaskId).toBe("task-a")
+		})
 	})
 })
