@@ -75,36 +75,90 @@ export class ConfinedPathEscapeError extends Error {
  * existing ancestor is resolved and the remainder re-appended.
  */
 /**
+ * Thrown when the publish target this call resolved UNDER its advisory lock is not the file
+ * whose lock it holds. Both lock keys are derived from the caller's path BEFORE the lock is
+ * acquired; a peer that replaces a symlink alias in that window - while this call queues behind
+ * another writer - leaves this call holding the old referent's lock while the file it is about to
+ * replace is a different one, whose lock belongs to somebody else. Publishing there would race
+ * that writer outright, so the write stops, releases what it holds, and reports the move instead
+ * of writing an unlocked file. The caller re-issues the write; on the next attempt the keys are
+ * derived from where the alias points now.
+ */
+export class PublishTargetMovedError extends Error {
+	constructor(
+		readonly requestedPath: string,
+		readonly movedToPath: string,
+		readonly heldLockKey: string,
+	) {
+		super(
+			`Refusing to write ${movedToPath}: the target moved to a file this write does not hold the ` +
+				`lock for (requested ${requestedPath}, locked ${heldLockKey}). Re-read the path and retry.`,
+		)
+		this.name = "PublishTargetMovedError"
+	}
+}
+
+/**
  * The identity (dev, ino) of every EXISTING directory between the confined scope root
  * and the authorized target's parent. These are the directories the confinement walk
  * went through; a later swap of any one of them sends the commit somewhere the scope
  * check never looked, so the publish re-checks them.
  */
-async function _confinedAncestorIdentities(scopeRoot: string, target: string): Promise<DirectoryIdentity[]> {
-	const parent = path.dirname(target)
+/**
+ * The directories one confined walk went through, from the scope root down to the parent of
+ * `parent`. Components below a root the path does not share are not part of the walk, so they are
+ * not listed.
+ */
+function _ancestorChainUnderScope(scopeRoot: string, parent: string): string[] {
 	const relative = path.relative(scopeRoot, parent)
 	const chain: string[] = [scopeRoot]
-	if (relative && relative !== "." && !relative.startsWith(".." + path.sep)) {
+	if (relative && relative !== "." && !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative)) {
 		let cursor = scopeRoot
 		for (const segment of relative.split(path.sep)) {
 			cursor = path.join(cursor, segment)
 			chain.push(cursor)
 		}
 	}
+	return chain
+}
+
+async function _confinedAncestorIdentities(
+	scopeRoot: string,
+	target: string,
+	lexicalTarget: string,
+): Promise<DirectoryIdentity[]> {
+	// Two spellings of the same walk, both pinned.
+	// - The canonical chain holds for the target the scope check authorized.
+	// - The LEXICAL chain holds for the path the caller was actually given. It is the one a missing
+	//   target needs: nothing is resolved for a file that does not exist yet, and every directory
+	//   this call creates on the way down sits under the ALIAS component the caller named. Pin only
+	//   the canonical chain and the alias itself is unchecked - repointing it after the scope check
+	//   moves both the created directories and the commit, while every recorded identity still matches.
+	const chains = [
+		_ancestorChainUnderScope(scopeRoot, path.dirname(target)),
+		_ancestorChainUnderScope(scopeRoot, path.dirname(lexicalTarget)),
+	]
 	const pinned: DirectoryIdentity[] = []
-	for (const dir of chain) {
-		// Only ENOENT may drop a directory from the pin: a directory that is not there
-		// cannot be swapped, and the commit re-check (_statDirectoryIdentity, which
-		// reports ENOENT as AncestorReplacedError) plus the rename itself cover that
-		// case. EACCES, EIO or ELOOP means the identity is UNKNOWN - leaving it out
-		// pins fewer directories than the walk passed through and fails the re-check
-		// open, the exact hole the pin exists to close.
-		const stat = await fs.stat(dir, { bigint: true }).catch((error: unknown) => {
-			if (_scopeErrorCode(error) === "ENOENT") return undefined
-			throw error
-		})
-		if (stat) {
-			pinned.push({ dir, dev: stat.dev, ino: stat.ino })
+	const pinnedDirs = new Set<string>()
+	for (const chain of chains) {
+		for (const dir of chain) {
+			if (pinnedDirs.has(dir)) {
+				continue
+			}
+			pinnedDirs.add(dir)
+			// Only ENOENT may drop a directory from the pin: a directory that is not there
+			// cannot be swapped, and the commit re-check (_statDirectoryIdentity, which
+			// reports ENOENT as AncestorReplacedError) plus the rename itself cover that
+			// case. EACCES, EIO or ELOOP means the identity is UNKNOWN - leaving it out
+			// pins fewer directories than the walk passed through and fails the re-check
+			// open, the exact hole the pin exists to close.
+			const stat = await fs.stat(dir, { bigint: true }).catch((error: unknown) => {
+				if (_scopeErrorCode(error) === "ENOENT") return undefined
+				throw error
+			})
+			if (stat) {
+				pinned.push({ dir, dev: stat.dev, ino: stat.ino })
+			}
 		}
 	}
 	return pinned
@@ -335,6 +389,22 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// link itself, as this primitive did before it resolved links at all.
 		resolvedTargetPath = publishOverLink ? absoluteFilePath : await resolvePublishTarget(absoluteFilePath)
 
+		if (!publishOverLink) {
+			// A confined write publishes THROUGH the referent, and the only lock it holds is the key it
+			// derived from the caller's path BEFORE acquiring (lockKeys above). This is the first moment
+			// the alias is resolved while that lock is held, so it is where a move has to be caught:
+			// re-derive the lock key of the file this call is about to replace and compare identities with
+			// the one it locked. Different identities mean the alias was repointed while this write was
+			// queueing - the file about to be merged and committed is one whose lock another writer holds,
+			// and the two merge reads would overwrite each other. The write stops here; the finally below
+			// releases what was held, and the caller re-issues with keys derived from where the alias
+			// points now.
+			const resolvedLockKey = await resolveLockKey(resolvedTargetPath)
+			if (referentLockIdentity !== (await _lockIdentityKey(resolvedLockKey))) {
+				throw new PublishTargetMovedError(absoluteFilePath, resolvedTargetPath, lockKey)
+			}
+		}
+
 		// Confinement, if the caller declared a scope. Both sides are canonicalized the
 		// same way: the publish target is resolved through symlinks, and a target that
 		// does not exist yet still carries the alias components of the path it was
@@ -350,7 +420,9 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			const scopeRoot = await _resolveScopeRoot(confineTo)
 			confinedTarget = await _resolveScopeRoot(resolvedTargetPath)
 			_assertWithinScope(absoluteFilePath, confinedTarget, scopeRoot)
-			confinedAncestors = await _confinedAncestorIdentities(scopeRoot, confinedTarget)
+			// Both spellings: the canonical target the scope check authorized, and the path the caller
+			// was given (the alias chain the staging and any created directories actually sit under).
+			confinedAncestors = await _confinedAncestorIdentities(scopeRoot, confinedTarget, absoluteFilePath)
 		}
 
 		// If a merge callback was provided, read the current file under the lock

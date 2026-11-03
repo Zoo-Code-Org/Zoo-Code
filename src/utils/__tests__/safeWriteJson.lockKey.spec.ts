@@ -1,12 +1,13 @@
 // npx vitest run utils/__tests__/safeWriteJson.lockKey.spec.ts
 
+import * as fsSync from "fs"
 import * as os from "os"
 import path from "path"
 import type { BigIntStats } from "fs"
 import * as fs from "fs/promises"
 import { acquireFileLock } from "../fileLock"
-import { safeWriteJson } from "../safeWriteJson"
-import { resolveLockKey } from "../../services/file-safety/safeWriteText"
+import { PublishTargetMovedError, safeWriteJson } from "../safeWriteJson"
+import { AncestorReplacedError, resolveLockKey } from "../../services/file-safety/safeWriteText"
 
 vi.mock("../fileLock", () => ({
 	acquireFileLock: vi.fn(async () => async () => {}),
@@ -167,6 +168,108 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// The strict rejection is reached through the ENOENT + symlink branch, not
 		// through a synchronous throw that skips it.
 		expect(order).toEqual(["lstat", "lock", "lstat", "release"])
+	})
+
+	// Both lock keys come from the caller's path BEFORE the lock is held. The confined publish
+	// target is resolved for the first time while that lock is held, so this is where a peer that
+	// repointed the alias mid-queue has to be caught: the file about to be merged and committed would
+	// be one whose lock belongs to another writer.
+	it("refuses a confined write whose target moved to a file it does not hold the lock for", async () => {
+		const dir = await makeDir("lockkey-")
+		const lockedReferent = path.join(dir, "locked.json")
+		const movedReferent = path.join(dir, "moved.json")
+		currentLink = path.join(dir, "link.json")
+
+		// Pre-lock key derivation follows the alias to lockedReferent - the lock this call takes. The
+		// resolution UNDER the lock follows it to movedReferent: a peer replaced the alias while this
+		// write was queueing for the lock.
+		let resolutions = 0
+		mockedRealpath.mockImplementation(async (target) => {
+			if (target === currentLink) {
+				resolutions++
+				return resolutions === 1 ? lockedReferent : movedReferent
+			}
+			return String(target)
+		})
+		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
+		mockedReadlink.mockImplementation(async (target) =>
+			target === currentLink
+				? resolutions === 1
+					? lockedReferent
+					: movedReferent
+				: Promise.reject(new Error("not a link")),
+		)
+		const lockedKeys: string[] = []
+		mockedAcquireFileLock.mockImplementation(async (key) => {
+			lockedKeys.push(String(key))
+			return async () => {}
+		})
+
+		await expect(safeWriteJson(currentLink, { id: "task-1" }, { confineTo: dir })).rejects.toThrow(
+			PublishTargetMovedError,
+		)
+
+		// The write held the lock it derived before the queue and published nothing at either candidate:
+		// the moved file is left to whoever holds ITS lock.
+		expect(lockedKeys).toEqual([lockedReferent])
+		await expect(fs.readFile(lockedReferent, "utf8")).rejects.toThrow()
+		await expect(fs.readFile(movedReferent, "utf8")).rejects.toThrow()
+		await expect(fs.readFile(currentLink, "utf8")).rejects.toThrow()
+	})
+
+	// A confined write to a target that does not exist yet never resolves the alias above it: every
+	// directory the write creates on the way down sits under the ALIAS spelling the caller named. If
+	// only canonical directories are pinned, repointing that alias after the scope check moves the
+	// commit and the created directories while every recorded identity still matches.
+	it("refuses a missing confined target when the alias directory above it is repointed before the commit", async () => {
+		const actualFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+		// This scenario needs a real directory tree and a real alias, so the doubles this file arms by
+		// default are pointed at the real implementations.
+		mockedRealpath.mockImplementation(actualFs.realpath)
+		mockedLstat.mockImplementation(actualFs.lstat)
+		mockedReadlink.mockImplementation(actualFs.readlink)
+
+		const projectDir = await makeDir("lockkey-alias-")
+		const inside = path.join(projectDir, "inside")
+		const outside = path.join(projectDir, "outside")
+		await fs.mkdir(inside)
+		await fs.mkdir(outside)
+		const aliasDir = path.join(projectDir, "aliasdir")
+		// A junction is the Windows spelling of a directory alias; POSIX uses a directory symlink.
+		const linkType = process.platform === "win32" ? "junction" : "dir"
+		await fs.symlink(inside, aliasDir, linkType)
+		// The merge callback is synchronous, and it runs while this write holds its locks and before
+		// anything is staged - which is exactly the window the swap has to land in.
+		const swapAlias = (): void => {
+			if (process.platform === "win32") {
+				fsSync.rmdirSync(aliasDir)
+			} else {
+				fsSync.unlinkSync(aliasDir)
+			}
+			fsSync.symlinkSync(outside, aliasDir, linkType)
+		}
+
+		const missingTarget = path.join(aliasDir, "nested", "mcp.json")
+
+		await expect(
+			safeWriteJson(
+				missingTarget,
+				{ mcpServers: { swapped: { url: "http://localhost" } } },
+				{
+					confineTo: projectDir,
+					merge: (_existing, incoming) => {
+						// The alias is repointed AFTER the scope check and after the resolution under the
+						// lock, and before anything is committed.
+						swapAlias()
+						return incoming
+					},
+				},
+			),
+		).rejects.toThrow(AncestorReplacedError)
+
+		// Nothing was committed through the repointed alias, on either side of it.
+		await expect(fs.stat(path.join(inside, "nested", "mcp.json"))).rejects.toThrow()
+		await expect(fs.stat(path.join(outside, "nested", "mcp.json"))).rejects.toThrow()
 	})
 
 	it("canonicalizes the parent directory when the file itself is not there yet", async () => {

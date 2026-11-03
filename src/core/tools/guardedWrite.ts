@@ -368,9 +368,16 @@ export async function guardedWrite(
 			// needs no prior read and stays allowed.
 			const absent = kind === "create" && (await fileIsAbsent(absolutePath))
 			if (!absent && obs !== undefined && obs.complete === false) {
+				// A read that reported a line clipped by the per-line length cap cannot be cleared by a
+				// re-read - the same cap clips the same line again - so the remediation has to name the route
+				// that does exist for that file. The registry carries only WHETHER the view was complete, not
+				// why, so both routes are named here.
 				throw new GuardRejectedError(
 					"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
-						"a full-file replacement needs the complete content; re-read the whole file, then retry.",
+						"a full-file replacement needs the complete content; re-read the whole file, then retry. " +
+						"If the read reported lines clipped by the per-line length cap, re-reading shows them " +
+						"clipped again: that file cannot be replaced in full, so make a targeted edit of the text " +
+						"you can see instead.",
 					displayPath,
 				)
 			}

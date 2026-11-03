@@ -293,10 +293,21 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			mockedComputeVersionToken.mockResolvedValue("v1")
 			const task = createMockTask({ observationRegistry: reg })
 
-			await expect(guardedWrite(task, "doc.txt", "new content", "update")).rejects.toThrow(
+			const rejection = await guardedWrite(task, "doc.txt", "new content", "update").then(
+				() => {
+					throw new Error("expected the partial-observation guard to reject")
+				},
+				(error: unknown) => error as Error,
+			)
+			expect(rejection.message).toContain(
 				"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
 					"a full-file replacement needs the complete content; re-read the whole file, then retry.",
 			)
+			// The clipped-line case cannot be cleared by a re-read - the per-line cap clips the same line
+			// again - so the rejection must also name the route that exists: a targeted edit of the visible
+			// text. Without it the guard refuses a retry that can never succeed.
+			expect(rejection.message).toContain("cannot be replaced in full")
+			expect(rejection.message).toContain("make a targeted edit")
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 			expect(mockedComputeVersionToken).not.toHaveBeenCalled()
 			expect(mockedFsAccess).not.toHaveBeenCalled()
