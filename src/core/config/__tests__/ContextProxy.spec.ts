@@ -712,6 +712,32 @@ describe("ContextProxy", () => {
 
 			expect(proxy.getGlobalState("apiProvider")).toBe("openrouter")
 		})
+
+		it("restores the write that landed after the reset when a newer one is rejected", async () => {
+			await proxy.resetAllState()
+
+			let settleOlder: (value: undefined) => void = () => {}
+			let failNewer: (error: Error) => void = () => {}
+			mockGlobalState.update.mockImplementationOnce(() => new Promise((resolve) => (settleOlder = resolve)))
+			const older = proxy.updateGlobalState("apiProvider", "anthropic")
+			mockGlobalState.update.mockImplementationOnce(() => new Promise((_resolve, reject) => (failNewer = reject)))
+			const newer = proxy.updateGlobalState("apiProvider", "openrouter")
+
+			settleOlder(undefined)
+			await older
+
+			// The newer write is still in flight, so the mirror still holds its value.
+			expect(proxy.getGlobalState("apiProvider")).toBe("openrouter")
+
+			failNewer(new Error("globalState write failed"))
+			await expect(newer).rejects.toThrow("globalState write failed")
+
+			// The reset emptied both the mirror and the rollback record, so the landing of
+			// the older write is the only thing storage holds - the rejected newer write
+			// falls back to it, not to nothing.
+			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
+			expect(proxy.getValues().apiProvider).toBe("anthropic")
+		})
 	})
 
 	describe("invalid apiProvider migration", () => {
