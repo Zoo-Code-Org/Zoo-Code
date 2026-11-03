@@ -365,8 +365,21 @@ export class ContextProxy {
 			return this.originalContext.globalState.update(key, value)
 		}
 
+		const previousValue = this.stateCache[key]
 		this.stateCache[key] = value
-		return this.originalContext.globalState.update(key, value)
+
+		// The cache is globalState's in-memory mirror, so a value that never reached
+		// disk must not stay in the mirror: readers would report a setting that the
+		// next restart will not reproduce. Roll the key back to what is on disk and
+		// let the rejection reach the caller. Memento.update is only specified as a
+		// Thenable, so its result is normalized before a rejection handler is hung
+		// off it.
+		const update = Promise.resolve(this.originalContext.globalState.update(key, value))
+
+		return update.then(undefined, (error) => {
+			this.stateCache[key] = previousValue
+			throw error
+		})
 	}
 
 	private getAllGlobalState(): GlobalState {

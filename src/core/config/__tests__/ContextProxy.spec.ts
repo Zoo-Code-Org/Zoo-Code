@@ -194,6 +194,30 @@ describe("ContextProxy", () => {
 			expect(storedValue).toBe(historyItems)
 			expect(mockGlobalState.get).toHaveBeenCalledWith("taskHistory")
 		})
+
+		it("keeps the value that is actually on disk when an update is rejected", async () => {
+			await proxy.updateGlobalState("apiProvider", "deepseek")
+			mockGlobalState.update.mockRejectedValueOnce(new Error("globalState write failed"))
+
+			await expect(proxy.updateGlobalState("apiProvider", "openai")).rejects.toThrow("globalState write failed")
+
+			// The rejected value never reached disk, so it must not live in the cache;
+			// the value that is on disk must survive the failed write next to it.
+			expect(proxy.getGlobalState("apiProvider")).toBe("deepseek")
+		})
+
+		it("leaves a key unset when its first update is rejected", async () => {
+			mockGlobalState.update.mockRejectedValueOnce(new Error("globalState write failed"))
+
+			await expect(proxy.setValue("lastSettingsExportPath", "/usb/zoo-code-settings.json")).rejects.toThrow(
+				"globalState write failed",
+			)
+
+			// Nothing was remembered: the export dialog default stays where the user
+			// last left it instead of pointing at a location that was never stored.
+			expect(proxy.getValue("lastSettingsExportPath")).toBeUndefined()
+			expect(mockGlobalState.update).toHaveBeenCalledWith("lastSettingsExportPath", "/usb/zoo-code-settings.json")
+		})
 	})
 
 	describe("getSecret", () => {
