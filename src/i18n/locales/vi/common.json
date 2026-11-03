@@ -124,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "Không có nội dung terminal được chọn",
 		"auto_import_failed": "Không thể tự động nhập cài đặt ZooCode: {{error}}",
+		"settings_export_location_not_remembered": "Cài đặt đã được xuất tới {{path}}, nhưng không thể ghi nhớ vị trí cho lần xuất tiếp theo: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "Không tìm thấy lịch sử nhiệm vụ Roo Code nào để nhập từ {{domain}}.",
 			"alreadyImported_one": "{{count}} lịch sử nhiệm vụ Roo Code đã được nhập vào Zoo Code.",

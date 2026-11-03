@@ -124,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "कोई टर्मिनल सामग्री चयनित नहीं",
 		"auto_import_failed": "ZooCode सेटिंग्स का स्वचालित आयात विफल: {{error}}",
+		"settings_export_location_not_remembered": "सेटिंग्स {{path}} में निर्यात की गईं, लेकिन अगले निर्यात के लिए स्थान याद नहीं रखा जा सका: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "{{domain}} से आयात करने के लिए कोई Roo Code कार्य इतिहास नहीं मिला।",
 			"alreadyImported_one": "सभी {{count}} Roo Code कार्य इतिहास पहले से ही Zoo Code में आयात किया जा चुका है।",

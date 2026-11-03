@@ -124,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "Nessun contenuto del terminale selezionato",
 		"auto_import_failed": "Importazione automatica delle impostazioni ZooCode fallita: {{error}}",
+		"settings_export_location_not_remembered": "Impostazioni esportate in {{path}}, ma la posizione non è stata memorizzata per l'esportazione successiva: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "Nessuna cronologia di attività Roo Code trovata da importare da {{domain}}.",
 			"alreadyImported_one": "La cronologia di {{count}} attività Roo Code è già stata importata in Zoo Code.",

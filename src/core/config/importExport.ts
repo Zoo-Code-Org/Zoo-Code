@@ -78,6 +78,21 @@ function formatZodIssues(error: ZodError): string {
 	return error.issues.map((issue) => `[${issue.path.join(".") || "value"}]: ${issue.message}`).join(", ")
 }
 
+/**
+ * Save and open dialogs remember an absolute directory per machine, so these
+ * settings are host-local state rather than configuration. An exported settings
+ * file must not be able to install another machine's folder layout into this
+ * one: the dialogs would then probe, and default to, a path nobody picked on
+ * this machine. They are dropped on import and re-established by the next dialog
+ * choice.
+ */
+const hostLocalPathKeys = new Set([
+	"lastSettingsExportPath",
+	"lastTaskExportPath",
+	"lastModeExportPath",
+	"lastImageSavePath",
+])
+
 function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
 	sanitizedGlobalSettings: GlobalSettings
 	warnings: string[]
@@ -102,6 +117,12 @@ function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
 
 		if (!schema) {
 			warnings.push(`Setting "${path}" was skipped: Unknown setting.`)
+			continue
+		}
+
+		if (hostLocalPathKeys.has(key)) {
+			// Deliberately silent: every settings export contains these keys, so warning
+			// on each import would report nothing the user can act on.
 			continue
 		}
 
@@ -362,12 +383,19 @@ export const exportSettings = async ({ providerSettingsManager, contextProxy }: 
 	// cannot steer the next dialog either. It runs before the confirmation because
 	// `showInformationMessage` only resolves once the notification is dismissed, and
 	// it is guarded because failing to remember a location is not a failed export:
-	// the confirmation must still appear and the rejection must not escape into the
-	// unawaited message handler.
+	// the export is still reported, just as the partial result it is, and the
+	// rejection must not escape into the unawaited message handler.
 	try {
 		await saveLastExportPath(contextProxy, "lastSettingsExportPath", uri)
 	} catch (e) {
+		const reason = e instanceof Error ? e.message : String(e)
 		console.error("Failed to remember the export location:", e)
+		// The file was written: report that part plainly, and report the part that
+		// did not happen instead of pretending the export was complete.
+		await vscode.window.showWarningMessage(
+			t("common:warnings.settings_export_location_not_remembered", { path: uri.fsPath, error: reason }),
+		)
+		return
 	}
 
 	await vscode.window.showInformationMessage(t("common:info.settings_exported", { path: uri.fsPath }))

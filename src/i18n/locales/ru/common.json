@@ -124,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "Не выбрано содержимое терминала",
 		"auto_import_failed": "Не удалось автоматически импортировать настройки ZooCode: {{error}}",
+		"settings_export_location_not_remembered": "Настройки экспортированы в {{path}}, но расположение не удалось запомнить для следующего экспорта: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "История задач Roo Code для импорта из {{domain}} не найдена.",
 			"alreadyImported_one": "{{count}} история задач Roo Code уже импортирована в Zoo Code.",

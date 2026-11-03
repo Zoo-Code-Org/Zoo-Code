@@ -124,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "Seçili terminal içeriği yok",
 		"auto_import_failed": "ZooCode ayarları otomatik olarak içe aktarılamadı: {{error}}",
+		"settings_export_location_not_remembered": "Ayarlar {{path}} konumuna dışa aktarıldı, ancak sonraki dışa aktarma için konum hatırlanamadı: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "{{domain}} kaynağından içe aktarılacak Roo Code görev geçmişi bulunamadı.",
 			"alreadyImported_one": "{{count}} Roo Code görev geçmişinin tamamı zaten Zoo Code'a aktarılmış.",

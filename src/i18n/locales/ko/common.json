@@ -124,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "선택된 터미널 내용이 없습니다",
 		"auto_import_failed": "ZooCode 설정 자동 가져오기 실패: {{error}}",
+		"settings_export_location_not_remembered": "설정을 {{path}}(으)로 내보냈습니다만 다음 내보내기할 위치를 기억하지 못했습니다: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "{{domain}}에서 가져올 Roo Code 작업 기록을 찾을 수 없습니다.",
 			"alreadyImported_one": "{{count}}개의 Roo Code 작업 기록이 이미 Zoo Code로 가져와졌습니다.",

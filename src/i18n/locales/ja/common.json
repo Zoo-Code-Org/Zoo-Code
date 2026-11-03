@@ -124,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "選択されたターミナルコンテンツがありません",
 		"auto_import_failed": "ZooCode設定の自動インポートに失敗しました：{{error}}",
+		"settings_export_location_not_remembered": "設定を {{path}} にエクスポートしましたが、次のエクスポート用の保存場所を記憶できませんでした：{{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "{{domain}}からインポートするRoo Codeのタスク履歴が見つかりませんでした。",
 			"alreadyImported_one": "{{count}}件のRoo Codeタスク履歴はすでにZoo Codeにインポート済みです。",

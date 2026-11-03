@@ -124,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "Tidak ada konten terminal yang dipilih",
 		"auto_import_failed": "Gagal mengimpor pengaturan ZooCode secara otomatis: {{error}}",
+		"settings_export_location_not_remembered": "Pengaturan diekspor ke {{path}}, tetapi lokasi tidak dapat diingat untuk ekspor berikutnya: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "Tidak ada riwayat tugas Roo Code yang ditemukan untuk diimpor dari {{domain}}.",
 			"alreadyImported_one": "Semua {{count}} riwayat tugas Roo Code sudah diimpor ke Zoo Code.",

@@ -129,6 +129,7 @@
 	"warnings": {
 		"no_terminal_content": "没有选择终端内容",
 		"auto_import_failed": "自动导入 ZooCode 设置失败：{{error}}",
+		"settings_export_location_not_remembered": "设置已导出到 {{path}}，但无法记住下次导出所用的位置：{{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "未找到可从 {{domain}} 导入的 Roo Code 任务历史记录。",
 			"alreadyImported_one": "全部 {{count}} 条 Roo Code 任务历史记录已导入 Zoo Code。",

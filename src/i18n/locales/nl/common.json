@@ -124,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "Geen terminalinhoud geselecteerd",
 		"auto_import_failed": "Automatisch importeren van ZooCode-instellingen mislukt: {{error}}",
+		"settings_export_location_not_remembered": "Instellingen geëxporteerd naar {{path}}, maar de locatie kon niet worden onthouden voor de volgende export: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "Geen Roo Code-taakgeschiedenis gevonden om te importeren van {{domain}}.",
 			"alreadyImported_one": "De {{count}} Roo Code-taakgeschiedenis is al geïmporteerd in Zoo Code.",

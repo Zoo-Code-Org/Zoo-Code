@@ -26,7 +26,10 @@ import vi from "../locales/vi/common.json"
 import zhCn from "../locales/zh-CN/common.json"
 import zhTw from "../locales/zh-TW/common.json"
 
-const bundles: Record<string, { errors: Record<string, unknown>; info: Record<string, unknown> }> = {
+const bundles: Record<
+	string,
+	{ errors: Record<string, unknown>; info: Record<string, unknown>; warnings: Record<string, unknown> }
+> = {
 	ca,
 	de,
 	en,
@@ -68,5 +71,10 @@ describe("settings export locale bundles", () => {
 		expect(bundles[locale].info.settings_exported).toContain("{{path}}")
 		expect(bundles[locale].errors.settings_export_failed).toEqual(expect.any(String))
 		expect(bundles[locale].errors.settings_export_failed).toContain("{{error}}")
+		// A written file whose location could not be remembered is a partial export:
+		// every locale has to be able to say both halves.
+		expect(bundles[locale].warnings.settings_export_location_not_remembered).toEqual(expect.any(String))
+		expect(bundles[locale].warnings.settings_export_location_not_remembered).toContain("{{path}}")
+		expect(bundles[locale].warnings.settings_export_location_not_remembered).toContain("{{error}}")
 	})
 })
