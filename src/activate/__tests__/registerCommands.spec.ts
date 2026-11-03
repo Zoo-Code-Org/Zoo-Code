@@ -774,13 +774,14 @@ describe("openClineInNewTab", () => {
 		// tracked tab there, as the API path or a sidebar-to-tab move would.
 		const constructed = vi.mocked(ClineProvider)
 		// A plain function, not an arrow: the production code calls this with `new`.
+		const constructedProvider = { dispose: vi.fn().mockResolvedValue(undefined) }
 		constructed.mockImplementationOnce(function () {
 			setPanel(trackedPanel as never, "tab")
 			;(ClineProvider.getInstanceForView as Mock).mockReturnValue(trackedProvider)
-			return { dispose: vi.fn().mockResolvedValue(undefined) }
+			return constructedProvider
 		} as never)
 
-		await openClineInNewTab({
+		const returned = await openClineInNewTab({
 			context: mockContext,
 			outputChannel: mockOutputChannel,
 			webviewFocusTracker: new WebviewFocusTracker(),
@@ -789,6 +790,10 @@ describe("openClineInNewTab", () => {
 		// A tab that appeared in the window is reused instead of replaced, and the provider that
 		// never received a panel is disposed so it does not stay registered with listeners.
 		expect(vscode.window.createWebviewPanel).not.toHaveBeenCalled()
+		// The caller gets the tracked provider, not the one that was constructed in this call.
+		expect(returned).toBe(trackedProvider)
+		// ...and that constructed provider is disposed, so it cannot stay registered with listeners.
+		expect(constructedProvider.dispose).toHaveBeenCalledTimes(1)
 		expect(trackedProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "action",
 			action: "didBecomeVisible",
