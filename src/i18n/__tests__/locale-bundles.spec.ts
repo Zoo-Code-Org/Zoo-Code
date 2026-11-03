@@ -26,7 +26,7 @@ import vi from "../locales/vi/common.json"
 import zhCn from "../locales/zh-CN/common.json"
 import zhTw from "../locales/zh-TW/common.json"
 
-const bundles: Record<string, { errors: Record<string, unknown> }> = {
+const bundles: Record<string, { errors: Record<string, unknown>; info: Record<string, unknown> }> = {
 	ca,
 	de,
 	en,
@@ -56,5 +56,17 @@ describe("common locale bundles", () => {
 		for (const key of addedKeys) {
 			expect(bundles[locale].errors[key]).toEqual(expect.any(String))
 		}
+	})
+})
+
+// Keys the settings-export unit adds to the common namespace: exportSettings
+// now names the location that received the file, and names the failure
+// instead of swallowing it.
+describe("settings export locale bundles", () => {
+	it.each(Object.keys(bundles))("%s defines every settings export message", (locale) => {
+		expect(bundles[locale].info.settings_exported).toEqual(expect.any(String))
+		expect(bundles[locale].info.settings_exported).toContain("{{path}}")
+		expect(bundles[locale].errors.settings_export_failed).toEqual(expect.any(String))
+		expect(bundles[locale].errors.settings_export_failed).toContain("{{error}}")
 	})
 })

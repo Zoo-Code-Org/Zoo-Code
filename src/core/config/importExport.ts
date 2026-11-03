@@ -271,7 +271,7 @@ export async function importSettingsFromPath(
  */
 export const importSettings = async ({ providerSettingsManager, contextProxy, customModesManager }: ImportOptions) => {
 	// Use the last export path as a sensible default, falling back to Downloads
-	const defaultUri = resolveDefaultSaveUri(contextProxy, "lastSettingsExportPath", "zoo-code-settings.json", {
+	const defaultUri = await resolveDefaultSaveUri(contextProxy, "lastSettingsExportPath", "zoo-code-settings.json", {
 		useWorkspace: false,
 		fallbackDir: path.join(os.homedir(), "Downloads"),
 	})
@@ -327,8 +327,6 @@ export const exportSettings = async ({ providerSettingsManager, contextProxy }: 
 		return
 	}
 
-	await saveLastExportPath(contextProxy, "lastSettingsExportPath", uri)
-
 	try {
 		const providerProfiles = await providerSettingsManager.export()
 		const globalSettings = await contextProxy.export()
@@ -348,9 +346,19 @@ export const exportSettings = async ({ providerSettingsManager, contextProxy }: 
 		await fs.mkdir(dirname, { recursive: true })
 		await safeWriteJson(uri.fsPath, { providerProfiles, globalSettings })
 	} catch (e) {
+		const message = e instanceof Error ? e.message : String(e)
 		console.error("Failed to export settings:", e)
-		// Don't re-throw - the UI will handle showing error messages
+		// A silent export failure is how a user ends up with a settings file in a
+		// folder they never picked: nothing on disk reported that the chosen
+		// location was unwritable.
+		await vscode.window.showErrorMessage(t("common:errors.settings_export_failed", { error: message }))
+		return
 	}
+
+	// Remember only a location that actually received the file, so a failed
+	// export cannot steer the next dialog either.
+	await saveLastExportPath(contextProxy, "lastSettingsExportPath", uri)
+	await vscode.window.showInformationMessage(t("common:info.settings_exported", { path: uri.fsPath }))
 }
 
 /**

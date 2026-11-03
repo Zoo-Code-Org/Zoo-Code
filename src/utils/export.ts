@@ -1,5 +1,6 @@
 import * as vscode from "vscode"
 import * as path from "path"
+import { access, constants, stat } from "fs/promises"
 
 export interface ExportContext {
 	getValue(key: string): unknown
@@ -19,41 +20,69 @@ export interface ExportOptions {
 }
 
 /**
+ * Whether a directory can actually receive a saved file right now.
+ *
+ * A remembered export location is frequently on a removable or network drive
+ * that is gone by the next export (unmounted, or remounted under a different
+ * drive letter). Handing such a path to `showSaveDialog` does not fail loudly:
+ * the platform silently falls back to its own default folder, so the file lands
+ * somewhere the user never selected. Validating the directory first lets the
+ * resolver fall through to the documented priorities instead.
+ */
+async function isUsableSaveDirectory(dirPath: string): Promise<boolean> {
+	try {
+		const stats = await stat(dirPath)
+		if (!stats.isDirectory()) {
+			return false
+		}
+		// W_OK is the property that matters: a readable-but-read-only volume cannot
+		// receive the export either.
+		await access(dirPath, constants.W_OK)
+		return true
+	} catch {
+		return false
+	}
+}
+
+/**
  * Resolves the default save URI for an export operation.
  * Priorities:
- * 1. Last used export path (if available)
+ * 1. Last used export path, if that directory still exists and is writable
  * 2. Active workspace folder (if useWorkspace is true)
  * 3. Fallback directory (e.g. Downloads or Documents)
  * 4. Default to just the filename (user's home/cwd)
  */
-export function resolveDefaultSaveUri(
+export async function resolveDefaultSaveUri(
 	context: ExportContext,
 	configKey: string,
 	fileName: string,
 	options: ExportOptions = {},
-): vscode.Uri {
+): Promise<vscode.Uri> {
 	const { useWorkspace = true, fallbackDir } = options
 	const lastExportPath = context.getValue(configKey) as string | undefined
 
 	if (lastExportPath) {
-		// Use the directory from the last export
+		// Use the directory from the last export, but only while it is still a
+		// directory we can actually write to.
 		const lastDir = path.dirname(lastExportPath)
-		return vscode.Uri.file(path.join(lastDir, fileName))
-	} else {
-		// Try workspace if enabled
-		const workspaceFolders = vscode.workspace.workspaceFolders
-		if (useWorkspace && workspaceFolders && workspaceFolders.length > 0) {
-			return vscode.Uri.file(path.join(workspaceFolders[0].uri.fsPath, fileName))
+		if (await isUsableSaveDirectory(lastDir)) {
+			return vscode.Uri.file(path.join(lastDir, fileName))
 		}
-
-		// Fallback
-		if (fallbackDir) {
-			return vscode.Uri.file(path.join(fallbackDir, fileName))
-		}
-
-		// Default to cwd/home
-		return vscode.Uri.file(fileName)
 	}
+
+	// Try workspace if enabled
+	const workspaceFolders = vscode.workspace.workspaceFolders
+	if (useWorkspace && workspaceFolders && workspaceFolders.length > 0) {
+		return vscode.Uri.file(path.join(workspaceFolders[0].uri.fsPath, fileName))
+	}
+
+	// Fallback
+	if (fallbackDir) {
+		return vscode.Uri.file(path.join(fallbackDir, fileName))
+	}
+
+	// Default to cwd/home
+	return vscode.Uri.file(fileName)
 }
 
 export async function saveLastExportPath(context: ExportContext, configKey: string, uri: vscode.Uri) {
