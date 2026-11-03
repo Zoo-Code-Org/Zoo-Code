@@ -2808,6 +2808,12 @@ export class ClineProvider
 			// Capture every store the activation group rewrites: one member can reject after
 			// others landed, and restoring only the shared name would leave the old name next to
 			// the new settings and a mode binding pointing at the new profile.
+			const previousModeConfigId = this.providerSettingsManager.getModeConfigId
+				? await this.providerSettingsManager.getModeConfigId(mode)
+				: undefined
+			// Snapshot every store after the last await above: another view can write any of them while
+			// this activation is suspended, and a snapshot taken earlier would both mis-arm the
+			// ownership generations below and restore a value that was never current.
 			const previousList = this.contextProxy.getValue("listApiConfigMeta")
 			const previousName = this.contextProxy.getValue("currentApiConfigName")
 			const previousViewName = this.viewLocalState.currentApiConfigName
@@ -2824,9 +2830,6 @@ export class ClineProvider
 			const expectedApiProviderGeneration = this.contextProxy.getStateWriteGeneration("apiProvider") + 1
 			// Test doubles and older managers may not implement the read: absence means "no previous
 			// binding to restore", not a failed activation.
-			const previousModeConfigId = this.providerSettingsManager.getModeConfigId
-				? await this.providerSettingsManager.getModeConfigId(mode)
-				: undefined
 
 			const activationResults = await Promise.allSettled([
 				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
