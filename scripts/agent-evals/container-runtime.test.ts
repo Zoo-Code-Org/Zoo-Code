@@ -188,7 +188,13 @@ describe("container grading runtime", () => {
 		// The second run finds no digest before or after the pull. The
 		// runtime must report the identity as unavailable instead of reusing
 		// the digest of the image the first run graded with.
-		await runtime.run(makeJob())
+		const verdict = await runtime.run(makeJob())
+		assert.deepEqual(verdict, {
+			kind: "grading-failure",
+			isolation: "container",
+			reason: "graderImageDigestUnavailable",
+		})
+		assert.equal(cli.runArgs.length, 1)
 		// The missed lookups sent the second run to the pull path.
 		assert.equal(cli.calls.filter((call) => call.startsWith("pull")).length, 1)
 		const second = await runtime.imageDigest!()
@@ -401,4 +407,35 @@ describe("bounded cli output capture", () => {
 		assert.equal(outcome.stdout, "sha256:digest")
 		assert.equal(outcome.stderr, "no such container: gone")
 	})
+})
+
+for (const identity of ["node@sha256:" + "c".repeat(64), "sha256:" + "d".repeat(64)]) {
+	it(`launches the exact inspected image identity ${identity}`, async () => {
+		const cli = recordingCli({ imageDigest: async () => identity })
+		const runtime = createContainerGradingRuntime({ cli })
+		assert.equal((await runtime.run(makeJob())).kind, "passed")
+		const args = cli.runArgs[0]!
+		assert.deepEqual(args.slice(args.indexOf(identity)), [
+			identity,
+			"node",
+			"/driver/grader-driver.mjs",
+			"/out/result.json",
+			"test",
+		])
+		assert.equal(args.includes(GRADER_IMAGE), false)
+		assert.deepEqual(await runtime.imageDigest!(), { available: true, value: identity })
+	})
+}
+
+it("refuses to run when inspection remains unavailable after a successful pull", async () => {
+	const cli = recordingCli({ imageDigest: async () => undefined })
+	const runtime = createContainerGradingRuntime({ cli })
+	assert.deepEqual(await runtime.run(makeJob()), {
+		kind: "grading-failure",
+		isolation: "container",
+		reason: "graderImageDigestUnavailable",
+	})
+	assert.deepEqual(cli.calls, [`pull ${GRADER_IMAGE}`])
+	assert.deepEqual(cli.runArgs, [])
+	assert.deepEqual(await runtime.imageDigest!(), { available: false, reason: "digestUnavailable" })
 })

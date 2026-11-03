@@ -18,10 +18,8 @@ export interface HostRuntimeOptions {
 	// commit identity, and the extension source all stay inside it.
 	root: string
 	artifactsDir: string
-	// Optional trusted cache for the downloaded VS Code build. Defaults to
-	// the evaluated root, so callers driving historical worktrees can keep
-	// one cache in the harness checkout.
-	vscodeCachePath?: string
+	// Test seam for the download boundary; caches always live in private scratch.
+	downloadVSCode?: typeof downloadAndUnzipVSCode
 	now?: () => number
 	pause?: (ms: number) => Promise<void>
 	// Optional --extensionTestsPath module. The module's run() must never
@@ -137,9 +135,9 @@ export function createHostRuntime(options: HostRuntimeOptions): AgentRuntime {
 			const pkg = JSON.parse(await fs.readFile(path.join(root, "apps/vscode-e2e/package.json"), "utf8")) as {
 				devDependencies: Record<string, string>
 			}
-			const executable = await downloadAndUnzipVSCode({
+			const executable = await (options.downloadVSCode ?? downloadAndUnzipVSCode)({
 				version: pkg.devDependencies["@types/vscode"] ?? "1.100.0",
-				cachePath: options.vscodeCachePath ?? path.join(root, "apps/vscode-e2e/.vscode-test"),
+				cachePath: path.join(temp, "vscode-cache"),
 			})
 			const args = buildLaunchArgs(
 				workspace,

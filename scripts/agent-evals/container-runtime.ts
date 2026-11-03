@@ -5,9 +5,8 @@ import path from "node:path"
 import type { GraderJob, GraderVerdict, GradingRuntime, DriverResult } from "./coding-grader.ts"
 import type { Measured } from "./trace.ts"
 
-// Pinned grader image tag. The digest resolved from the local engine travels
-// in the comparison pins, so the recorded identity is immutable even though
-// the tag alone is not.
+// Grader image tag used only for lookup and pull. Containers launch by the
+// resolved immutable identity, which is also recorded in the comparison pins.
 export const GRADER_IMAGE = "node:22-bookworm"
 
 export type ContainerExecutable = "docker" | "podman"
@@ -235,9 +234,8 @@ export function createContainerGradingRuntime(options: ContainerRuntimeOptions =
 				if ((await selected.pull(job.resources.image)) === "failed") return failure("graderImagePullFailed")
 				digest = await selected.imageDigest(job.resources.image)
 			}
-			// A lookup that still finds nothing leaves the digest unset, and
-			// the pins record the identity as unavailable instead of reusing
-			// one from an earlier run. The runtime never fabricates a value.
+			// Never launch a mutable tag when its immutable identity is unavailable.
+			if (digest === undefined) return failure("graderImageDigestUnavailable")
 			resolvedDigest = digest
 			const outDir = path.join(path.dirname(job.gradingDir), "grading-out")
 			await fs.mkdir(outDir, { recursive: true })
@@ -246,7 +244,7 @@ export function createContainerGradingRuntime(options: ContainerRuntimeOptions =
 			// write to any uid.
 			await fs.chmod(outDir, 0o777)
 			const name = containerNameFor()
-			const args = buildContainerArgs(job, outDir, name)
+			const args = buildContainerArgs({ ...job, resources: { ...job.resources, image: digest } }, outDir, name)
 			let exit: number | "timeout" | "error"
 			try {
 				exit = await selected.run(args, job.resources.timeoutMs)

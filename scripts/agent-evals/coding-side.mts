@@ -271,7 +271,6 @@ try {
 				runtime: createHostRuntime({
 					root: evaluatedWorktree,
 					artifactsDir,
-					vscodeCachePath: path.join(thisRoot, "apps/vscode-e2e/.vscode-test"),
 				}),
 				gradingRuntime,
 				scratchDir: artifactsDir,

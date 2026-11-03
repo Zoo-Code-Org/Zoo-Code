@@ -66,7 +66,7 @@ describe("coding graders against reference solutions", () => {
 	}
 
 	it("pins one grader version across the suite", () => {
-		assert.equal(GRADER_VERSION, "coding-grader-v4")
+		assert.equal(GRADER_VERSION, "coding-grader-v5")
 		assert.equal(CODING_GRADER_RESOURCES.image.startsWith("node:"), true)
 	})
 })

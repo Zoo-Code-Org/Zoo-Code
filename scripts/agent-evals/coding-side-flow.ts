@@ -61,6 +61,17 @@ export async function executeSideFlow(inputs: SideFlowInputs): Promise<SideFlowO
 		try {
 			runs.push(await inputs.runRepetition(repetition))
 		} catch (error) {
+			try {
+				await fs.rm(path.join(inputs.out, "artifacts", `${repetition.fixtureName}-rep${repetition.repIndex}`), {
+					recursive: true,
+					force: true,
+				})
+			} catch (cleanupError) {
+				// A partial repetition cannot accompany a completed side result.
+				console.error(`coding-evals repetition cleanup failed: ${describeRepetitionError(cleanupError)}`)
+				await abortPublication()
+				throw new Error("repetition artifact cleanup failed", { cause: cleanupError })
+			}
 			// The substrate never throws for task failures. This guards wiring
 			// errors only, and records them as infrastructure failures. The
 			// diagnostic names the repetition so a silent failure row has an
