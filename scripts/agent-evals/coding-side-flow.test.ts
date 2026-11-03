@@ -270,3 +270,66 @@ for (const boundary of ["directory", "record", "pins", "marker"] as const) {
 		}
 	})
 }
+
+it("removes a failed repetition's partial artifacts before continuing", async () => {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "side-failed-artifacts-"))
+	const partial = path.join(dir, "artifacts/clamp-range-rep0")
+	try {
+		const outcome = await flow({
+			repetitions: plan(2),
+			out: dir,
+			isInterrupted: () => false,
+			runRepetition: async (repetition) => {
+				if (repetition.repIndex === 0) {
+					await fs.mkdir(partial, { recursive: true })
+					await fs.writeFile(path.join(partial, "trace.json"), "partial")
+					throw new Error("failed after writing trace")
+				}
+				await assert.rejects(fs.access(partial))
+				return record(repetition, true)
+			},
+		})
+		assert.equal(outcome.completed, true)
+		assert.equal(outcome.runs[0]?.outcome.outcome, "infrastructure-failure")
+		assert.deepEqual(await fs.readdir(path.join(dir, "artifacts")), ["clamp-range-rep1"])
+		await fs.access(path.join(dir, "side-results.json"))
+	} finally {
+		await fs.rm(dir, { recursive: true, force: true })
+	}
+})
+
+it("aborts publication and removes all artifacts if failed-repetition cleanup fails", async (t) => {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "side-cleanup-failure-"))
+	const partial = path.join(dir, "artifacts/clamp-range-rep0")
+	const remove = fs.rm
+	const lines: string[] = []
+	t.mock.method(console, "error", (line: string) => lines.push(line))
+	try {
+		const executed: number[] = []
+		await assert.rejects(
+			flow({
+				repetitions: plan(2),
+				out: dir,
+				isInterrupted: () => false,
+				runRepetition: async (repetition) => {
+					executed.push(repetition.repIndex)
+					await fs.mkdir(partial, { recursive: true })
+					await fs.writeFile(path.join(partial, "trace.json"), "partial")
+					await fs.writeFile(path.join(dir, "side-results.json"), "stale")
+					t.mock.method(fs, "rm", async (target: string, options: Parameters<typeof fs.rm>[1]) => {
+						if (target === partial) throw new Error("cleanup denied")
+						await remove(target, options)
+					})
+					throw new Error("repetition failed")
+				},
+			}),
+			/repetition artifact cleanup failed/,
+		)
+		assert.deepEqual(executed, [0])
+		assert.deepEqual(await fs.readdir(dir), [])
+		assert.match(lines[0] ?? "", /repetition cleanup failed: Error: cleanup denied/)
+	} finally {
+		t.mock.restoreAll()
+		await remove(dir, { recursive: true, force: true })
+	}
+})

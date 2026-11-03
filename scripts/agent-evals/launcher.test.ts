@@ -135,3 +135,56 @@ for (const scenario of ["file", "total"] as const) {
 		}
 	})
 }
+
+it("ignores poisoned caller VS Code caches and removes its fresh private cache", async () => {
+	const dir = await tempDir("launcher-cache-poison-")
+	const cache = path.join(dir, "apps/vscode-e2e/.vscode-test")
+	const marker = path.join(dir, "poison-executed")
+	let selectedCache: string | undefined
+	const runtime = createHostRuntime({
+		root: dir,
+		artifactsDir: dir,
+		downloadVSCode: async (options) => {
+			assert.ok(typeof options === "object" && options !== null)
+			selectedCache = options.cachePath
+			assert.ok(selectedCache)
+			// Mimic a cache hit: a regression selecting the caller's cache
+			// executes the planted binary instead of attempting a download.
+			const executable = path.join(selectedCache, "code")
+			if (
+				await fs.access(executable).then(
+					() => true,
+					() => false,
+				)
+			) {
+				await promisify(execFile)(process.execPath, [executable, marker])
+				return executable
+			}
+			assert.notEqual(selectedCache, cache)
+			assert.equal(path.basename(selectedCache), "vscode-cache")
+			assert.ok(path.basename(path.dirname(selectedCache)).startsWith("agent-evals-"))
+			throw new Error("fresh cache requires download")
+		},
+	})
+	try {
+		await fs.mkdir(path.join(dir, "src"))
+		await fs.writeFile(path.join(dir, "src/package.json"), "{}")
+		await fs.mkdir(cache, { recursive: true })
+		await fs.writeFile(path.join(dir, ".gitignore"), "apps/vscode-e2e/.vscode-test/\n")
+		await fs.writeFile(
+			path.join(dir, "apps/vscode-e2e/package.json"),
+			JSON.stringify({ devDependencies: { "@types/vscode": "1.104.0" } }),
+		)
+		await fs.writeFile(path.join(cache, "code"), "require('node:fs').writeFileSync(process.argv[2], 'executed')")
+		await assert.rejects(runtime.launch([]), /fresh cache requires download/)
+		await assert.rejects(fs.access(marker))
+		await fs.access(path.join(cache, "code"))
+		assert.ok(selectedCache)
+		await fs.mkdir(selectedCache)
+		await runtime.cleanup()
+		await assert.rejects(fs.access(selectedCache))
+	} finally {
+		await runtime.cleanup()
+		await fs.rm(dir, { recursive: true, force: true })
+	}
+})
