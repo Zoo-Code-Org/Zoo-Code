@@ -1,4 +1,6 @@
 import assert from "node:assert/strict"
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -13,6 +15,35 @@ import {
 	type ContainerCli,
 } from "./container-runtime.ts"
 import type { GraderJob } from "./coding-grader.ts"
+
+it("sanitizes PATH children and ignores PATH for container detection", async () => {
+	const temp = await fs.mkdtemp(path.join(os.tmpdir(), "container-path-boundary-"))
+	try {
+		const marker = path.join(temp, "observed")
+		for (const name of ["docker", "podman"]) {
+			await fs.writeFile(
+				path.join(temp, name),
+				`#!/bin/sh\nprintf '%s:%s' "$SOLHEIM_API_KEY" "$UNRELATED_SECRET" > '${marker}'\nprintf '%s:%s' "$SOLHEIM_API_KEY" "$UNRELATED_SECRET"\n`,
+				{ mode: 0o700 },
+			)
+		}
+		const moduleUrl = new URL("./container-runtime.ts", import.meta.url).href
+		const script = `
+			const { exec, createContainerGradingRuntime } = await import(${JSON.stringify(moduleUrl)});
+			const result = await exec("docker", ["--version"], 5000);
+			if (result.code !== 0 || result.stdout !== ":") throw new Error("child received secrets");
+			await (await import("node:fs/promises")).unlink(${JSON.stringify(marker)});
+			await createContainerGradingRuntime().imageDigest();
+		`
+		await promisify(execFile)(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+			env: { ...process.env, PATH: temp, SOLHEIM_API_KEY: "provider-secret", UNRELATED_SECRET: "other-secret" },
+			timeout: 15_000,
+		})
+		await assert.rejects(fs.access(marker), { code: "ENOENT" })
+	} finally {
+		await fs.rm(temp, { recursive: true, force: true })
+	}
+})
 
 const makeJob = (): GraderJob => ({
 	gradingDir: "/tmp/evals/grading-copy",

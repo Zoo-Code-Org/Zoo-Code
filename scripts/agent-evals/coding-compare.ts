@@ -289,10 +289,12 @@ export const executeComparisonFlow = async (wiring: ComparisonFlowWiring): Promi
 		await execFileAsync("git", ["worktree", "remove", "--force", path.join(wiring.scratchDir, "baseline")], {
 			cwd: wiring.root,
 			timeout: WORKTREE_REMOVE_TIMEOUT_MS,
+			env: buildWorktreeEnvironment(process.env),
 		}).catch(() => {})
 		await execFileAsync("git", ["worktree", "remove", "--force", path.join(wiring.scratchDir, "candidate")], {
 			cwd: wiring.root,
 			timeout: WORKTREE_REMOVE_TIMEOUT_MS,
+			env: buildWorktreeEnvironment(process.env),
 		}).catch(() => {})
 		await fs.rm(wiring.scratchDir, { recursive: true, force: true }).catch(() => {})
 	}

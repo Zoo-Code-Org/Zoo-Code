@@ -29,6 +29,7 @@ import { sideGraderImageDigest, type SidePins } from "./coding-pins.ts"
 import { invalidateSideArtifacts, runBoundedPreparation } from "./coding-compare.ts"
 import {
 	assertCommitsApproved,
+	buildWorktreeEnvironment,
 	assertCredentialEnvAllowed,
 	assertEvaluatedTreeClean,
 	loadTrustPolicy,
@@ -174,6 +175,7 @@ const removePreparedTree = async (): Promise<void> => {
 	await execFileAsync("git", ["worktree", "remove", "--force", evaluatedWorktree], {
 		cwd: evaluatedRoot,
 		timeout: WORKTREE_REMOVE_TIMEOUT_MS,
+		env: buildWorktreeEnvironment(process.env),
 	}).catch((error: unknown) => {
 		console.error(`coding-evals side: failed to remove worktree ${evaluatedWorktree}: ${String(error)}`)
 	})
