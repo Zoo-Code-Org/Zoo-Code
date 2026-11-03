@@ -73,19 +73,21 @@ function createRealCommandStream(command: string): { stream: AsyncIterable<strin
 			shell,
 		})
 		exitCode = 0 // Command succeeded
-	} catch (error: any) {
+	} catch (error) {
+		// execSync failures carry stdout plus an ExecException shape (signal/status).
+		const execError = error as import("child_process").ExecException & { status?: number | null; stdout?: string }
 		// Command failed - get output and exit code from error
-		realOutput = error.stdout?.toString() || ""
+		realOutput = execError.stdout?.toString() || ""
 
 		// Handle signal termination
-		if (error.signal) {
+		if (execError.signal) {
 			// Convert signal name to number using Node's constants
 			const signals: Record<string, number> = {
 				SIGTERM: 15,
 				SIGSEGV: 11,
 				// Add other signals as needed
 			}
-			const signalNum = signals[error.signal]
+			const signalNum = signals[execError.signal]
 			if (signalNum !== undefined) {
 				exitCode = 128 + signalNum // Signal exit codes are 128 + signal number
 			} else {
@@ -216,7 +218,10 @@ async function testTerminalCommand(
 		// We've already created the process, so we'll trigger the events manually
 
 		// Get the event handlers from the mock
-		const eventHandlers = (vscode as any).__eventHandlers
+		// The vscode mock exposes its registered event handlers for manual firing.
+		const eventHandlers = (
+			vscode as typeof vscode & { __eventHandlers: Record<string, ((event: unknown) => void) | undefined> }
+		).__eventHandlers
 
 		// Execute the command first to set up the process
 		const runPromise = terminalProcess.run(command)
@@ -236,9 +241,10 @@ async function testTerminalCommand(
 		// that (e.g. after the first 'line' event) would cause DONE_SENTINEL to win
 		// the Promise.race and skip unconsumed chunks.
 		if (eventHandlers.endTerminalShellExecution) {
+			const endHandler = eventHandlers.endTerminalShellExecution
 			const _exitCode = exitCode
 			setTimeout(() => {
-				eventHandlers.endTerminalShellExecution({
+				endHandler({
 					terminal: mockTerminal,
 					execution: mockExecution,
 					exitCode: _exitCode,

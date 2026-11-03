@@ -23,7 +23,7 @@ export interface CommandStream {
  * @returns Boolean indicating whether pwsh is available
  */
 export function isPowerShellCoreAvailable(): boolean {
-	return (global as any).__TEST_ENV__?.isPowerShellAvailable || false
+	return global.__TEST_ENV__?.isPowerShellAvailable || false
 }
 
 /**
@@ -31,7 +31,7 @@ export function isPowerShellCoreAvailable(): boolean {
  * @returns The current platform: 'win32', 'darwin', 'linux', etc.
  */
 export function getPlatform(): string {
-	return (global as any).__TEST_ENV__?.platform || process.platform
+	return global.__TEST_ENV__?.platform || process.platform
 }
 
 /**

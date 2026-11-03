@@ -22,10 +22,12 @@ export function createCmdCommandStream(command: string): CommandStream {
 			stdio: ["pipe", "pipe", "ignore"], // Redirect stderr to null
 		})
 		exitCode = 0 // Command succeeded
-	} catch (error: any) {
+	} catch (error) {
 		// Command failed - get output and exit code from error
-		realOutput = error.stdout?.toString() || ""
-		exitCode = error.status ?? 1
+		// execSync failures carry stdout plus an ExecException shape (signal/status).
+		const execError = error as import("child_process").ExecException & { status?: number | null; stdout?: string }
+		realOutput = execError.stdout?.toString() || ""
+		exitCode = execError.status ?? 1
 	}
 
 	// Create an async iterator for the stream

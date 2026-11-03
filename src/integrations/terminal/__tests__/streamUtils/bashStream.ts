@@ -2,6 +2,13 @@
 import { execSync } from "child_process"
 import { CommandStream } from "./index"
 
+// execSync failures carry stdout plus an ExecException shape (signal/status).
+type SyncExecError = import("child_process").ExecException & {
+	status?: number | null
+	stdout?: string
+	stderr?: string
+}
+
 /**
  * Creates a stream with real command output using Bash
  * @param command The bash command to execute
@@ -19,24 +26,25 @@ export function createBashCommandStream(command: string): CommandStream {
 			stdio: ["pipe", "pipe", "ignore"], // Redirect stderr to null
 		})
 		exitCode = 0 // Command succeeded
-	} catch (error: any) {
+	} catch (error) {
+		const { signal, stdout } = error as SyncExecError
 		// Command failed - get output and exit code from error
-		realOutput = error.stdout?.toString() || ""
+		realOutput = stdout?.toString() || ""
 
 		// Handle signal termination
-		if (error.signal) {
+		if (signal) {
 			// Convert signal name to number using Node's constants
 			const signals: Record<string, number> = {
 				SIGTERM: 15,
 				SIGSEGV: 11,
 				// Add other signals as needed
 			}
-			const signalNum = signals[error.signal]
+			const signalNum = signals[signal]
 			if (signalNum !== undefined) {
 				exitCode = 128 + signalNum // Signal exit codes are 128 + signal number
 			} else {
 				// Log error and default to 1 if signal not recognized
-				console.log(`[DEBUG] Unrecognized signal '${error.signal}' from command '${command}'`)
+				console.log(`[DEBUG] Unrecognized signal '${signal}' from command '${command}'`)
 				exitCode = 1
 			}
 		} else {

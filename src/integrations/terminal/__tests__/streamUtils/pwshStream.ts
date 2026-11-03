@@ -35,14 +35,20 @@ export function createPowerShellStream(command: string): CommandStream {
 			stdio: ["pipe", "pipe", "pipe"], // Capture stderr for debugging
 		})
 		exitCode = 0 // Command succeeded
-	} catch (error: any) {
+	} catch (error) {
 		// Command failed - get output and exit code from error
-		realOutput = error.stdout?.toString() || ""
-		console.error(`PowerShell command failed with status ${error.status ?? "unknown"}:`, error.message)
-		if (error.stderr) {
-			console.error(`stderr: ${error.stderr.toString()}`)
+		// execSync failures carry stdout/stderr plus an ExecException shape (signal/status).
+		const execError = error as import("child_process").ExecException & {
+			status?: number | null
+			stdout?: string
+			stderr?: string
 		}
-		exitCode = error.status ?? 1
+		realOutput = execError.stdout?.toString() || ""
+		console.error(`PowerShell command failed with status ${execError.status ?? "unknown"}:`, execError.message)
+		if (execError.stderr) {
+			console.error(`stderr: ${execError.stderr.toString()}`)
+		}
+		exitCode = execError.status ?? 1
 	}
 
 	// Create an async iterator for the stream
