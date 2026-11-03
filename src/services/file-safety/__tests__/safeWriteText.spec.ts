@@ -689,6 +689,54 @@ describe("safeWriteText", () => {
 			expect(warnings.filter((m) => m.includes("different access rights"))).toHaveLength(1)
 		})
 
+		it.skipIf(process.platform !== "win32")(
+			"bounds every icacls call with a finite timeout under the lock staleness window",
+			async () => {
+				const targetPath = "/tmp/test-dir/target.txt"
+				vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+				vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+				await safeWriteText(targetPath, "data", { platform: "win32" })
+
+				const calls = vi.mocked(execFile).mock.calls
+				expect(calls).toHaveLength(2)
+				for (const call of calls) {
+					expect(call[0]).toBe("icacls")
+					// An execFile without a timeout waits for its child forever. While it waits,
+					// this write is open and - for a safeWriteJson caller - the per-file advisory
+					// lock is held while every other writer of the same file burns its retries.
+					const timeout = Number((call[2] as { timeout?: number } | undefined)?.timeout)
+					expect(Number.isFinite(timeout)).toBe(true)
+					expect(timeout).toBeGreaterThan(0)
+					// Below LOCK_STALE_MS (src/utils/fileLock.ts) so a hung helper cannot outlive
+					// the staleness window the lock protocol is written around.
+					expect(timeout).toBeLessThan(31_000)
+				}
+			},
+		)
+
+		it("win32: a timed-out icacls degrades to the designed skip-DACL path and still commits", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// What execFile hands back when its timeout fires: an error whose code is ETIMEDOUT.
+			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+				if (typeof cb === "function") {
+					cb(Object.assign(new Error("spawnSync icacls ETIMEDOUT"), { code: "ETIMEDOUT" }), "", "")
+				}
+				return fakeChild
+			})
+			const warnings: string[] = []
+
+			await expect(
+				safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) }),
+			).resolves.toBeUndefined()
+
+			expect(execFile).toHaveBeenCalledTimes(1)
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
+			expect(warnings.filter((m) => m.includes("different access rights"))).toHaveLength(1)
+		})
+
 		it("win32: reports when the target cannot be checked for DACL preservation", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
@@ -1272,6 +1320,35 @@ describe("caller-supplied staging path", () => {
 		).rejects.toThrow(StagingPathError)
 		expect(fsSync.openSync).not.toHaveBeenCalled()
 		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("creates no directory when a supplied staging path is rejected", async () => {
+		const targetPath = "/tmp/test-dir/nested-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+
+		// A rejected write has to leave the filesystem as it found it. mkdir -p ran ahead of
+		// these checks, so a caller could create directories in the target's tree - and learn
+		// about them only from a StagingPathError that never mentioned them.
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: "/tmp/other-dir/x.tmp", platform: "linux" }),
+		).rejects.toThrow(StagingPathError)
+
+		expect(fs.mkdir).not.toHaveBeenCalled()
+		expect(fs.access).not.toHaveBeenCalled()
+		expect(fsSync.mkdirSync).not.toHaveBeenCalled()
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("still creates the parent directory for a staging path it accepts", async () => {
+		const targetPath = "/tmp/test-dir/nested-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+		await safeWriteText(targetPath, "data", { tempPath: "/tmp/test-dir/nested-dir/x.tmp", platform: "linux" })
+
+		expect(fs.mkdir).toHaveBeenCalledWith(path.dirname(targetPath), { recursive: true })
+		expect(fs.rename).toHaveBeenCalledWith("/tmp/test-dir/nested-dir/x.tmp", targetPath)
 	})
 
 	it("rejects a staging path that is a symlink", async () => {

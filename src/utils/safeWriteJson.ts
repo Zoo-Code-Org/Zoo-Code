@@ -150,6 +150,17 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			options?.trace?.({ stage: "recover", detail: recovery.restoredFrom ?? "cleaned-leftovers" })
 		}
 
+		// The lock above was chosen from the path as it looked before the lock was taken, and the
+		// publish target is resolved under the lock - after a peer committed, and after the alias
+		// itself may have been repointed. If the two no longer name the same file, this writer is
+		// holding the lock of a path it is not about to publish while some other writer can hold
+		// the lock of the one it is about to publish, which is two commits onto one file each
+		// believing it owned it. Nothing has been staged or merged yet, so rejecting here leaves
+		// every file untouched and the caller can retry against the key it resolves to now.
+		if ((await resolveLockKey(resolvedTargetPath)) !== lockKey) {
+			throw new LockKeyDriftError(absoluteFilePath, lockKey, resolvedTargetPath)
+		}
+
 		// Confinement, if the caller declared a scope. Both sides are canonicalized the
 		// same way: the publish target is resolved through symlinks, and a target that
 		// does not exist yet still carries the alias components of the path it was

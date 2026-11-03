@@ -97,16 +97,18 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// The lock key is the key every other writer to this file uses, so the caller
 		// queued behind the peer instead of failing before the lock.
 		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
-		// The two trailing lstat calls are safeWriteText's staging-path checks: the
-		// regular-file check on the temp file this write created, and the identity check
-		// that the staging path is not the target. Both run after the key was resolved
-		// and the lock was taken, so neither changes which lock the caller queued behind.
+		// After the lock: the strict publish resolution, then the key/publish-target
+		// agreement check (resolve of the publish target plus canonicalization of its
+		// directory), then safeWriteText's two staging-path lstat checks. None of them
+		// changes which lock the caller queued behind.
 		expect(order).toEqual([
 			"resolve-failed",
 			"lstat",
 			"resolve",
 			"resolve",
 			"lock",
+			"resolve",
+			"resolve",
 			"resolve",
 			"resolve",
 			"lstat",
@@ -149,6 +151,68 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// The strict rejection is reached through the ENOENT + symlink branch, not
 		// through a synchronous throw that skips it.
 		expect(order).toEqual(["lstat", "lock", "lstat", "release"])
+	})
+
+	it("refuses to publish through a lock that no longer names the target", async () => {
+		const order: string[] = []
+		let released = false
+		const dir = await makeDir("lockkey-")
+		const keyedFile = path.join(dir, "history_item.json")
+		const movedFile = path.join(dir, "elsewhere.json")
+		currentLink = path.join(dir, "link.json")
+
+		// The key is resolved from the alias as it looks before the lock; the publish target is
+		// resolved again under it. Repoint the alias in between - a peer committing, or a planted
+		// link swap - and this writer would commit onto a file whose lock it never took, while
+		// another writer can hold that file's lock and commit onto it too.
+		let referent = keyedFile
+		mockedRealpath.mockImplementation(async (target) => (target === currentLink ? referent : String(target)))
+		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
+		mockedReadlink.mockImplementation(async (target) =>
+			target === currentLink ? referent : Promise.reject(new Error("not a link")),
+		)
+		mockedAcquireFileLock.mockImplementation(async (lockedPath) => {
+			order.push("lock:" + path.basename(lockedPath))
+			referent = movedFile
+			return async () => {
+				order.push("release")
+				released = true
+			}
+		})
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		await expect(safeWriteJson(currentLink, { id: "task-1" })).rejects.toThrow("the advisory lock was taken for")
+
+		expect(order).toEqual(["lock:history_item.json", "release"])
+		expect(released).toBe(true)
+		// Nothing was staged or published: neither the keyed file nor the file the alias moved to.
+		for (const candidate of [keyedFile, movedFile]) {
+			const present = await fs.access(candidate).then(
+				() => true,
+				() => false,
+			)
+			expect(present).toBe(false)
+		}
+		consoleError.mockRestore()
+	})
+
+	it("locks and publishes the same file when the alias does not move", async () => {
+		// The guard has to stay quiet on the normal path: key and publish target resolve through
+		// the same alias, and the write goes ahead under one lock.
+		const dir = await makeDir("lockkey-")
+		const target = path.join(dir, "history_item.json")
+		currentLink = ""
+		mockedRealpath.mockImplementation(async (t) => String(t))
+		mockedLstat.mockImplementation(
+			async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats,
+		)
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		await safeWriteJson(target, { id: "task-1" })
+
+		expect(mockedAcquireFileLock).toHaveBeenCalledWith(target)
+		expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({ id: "task-1" })
+		consoleError.mockRestore()
 	})
 
 	it("canonicalizes the parent directory when the file itself is not there yet", async () => {
