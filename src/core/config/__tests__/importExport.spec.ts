@@ -367,6 +367,30 @@ describe("importExport", () => {
 				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
 			})
 
+			it("stores every appearance value of an import that has several", async () => {
+				const result = await importWith({ interfaceFontScale: 120, terminalFontSize: 14, spacingScale: 90 })
+
+				expect(result).toMatchObject({ success: true })
+				expect(stored.get("interfaceFontScale")).toBe(120)
+				expect(stored.get("terminalFontSize")).toBe(14)
+				expect(stored.get("spacingScale")).toBe(90)
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			})
+
+			it("puts back only the value whose write failed after storing it, when another appearance write succeeds", async () => {
+				mockContextProxy.setValue.mockImplementation((async (key: string, value: unknown) => {
+					stored.set(key, value)
+					if (key === "interfaceFontScale") throw new Error("failed after storing")
+				}) as unknown as typeof mockContextProxy.setValue)
+
+				const result = await importWith({ interfaceFontScale: 120, terminalFontSize: 14 })
+
+				expect(result).toEqual({ success: false, error: "failed after storing" })
+				expect(stored.get("interfaceFontScale")).toBe(100)
+				expect(stored.get("terminalFontSize")).toBe(14)
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			})
+
 			it("puts back a value that was stored before its write failed, and still reports the failure", async () => {
 				mockContextProxy.setValue.mockImplementation((async (key: string, value: unknown) => {
 					stored.set(key, value)
@@ -406,7 +430,7 @@ describe("importExport", () => {
 				expect(result).toEqual({ success: false, error: "failed after storing" })
 				expect(consoleError).toHaveBeenCalledTimes(1)
 				expect(consoleError).toHaveBeenCalledWith(
-					'Failed to restore setting "interfaceFontScale" after import failure:',
+					'Failed to restore setting "interfaceFontScale" after a failed write:',
 					expect.objectContaining({ message: "restore failed" }),
 				)
 				consoleError.mockRestore()

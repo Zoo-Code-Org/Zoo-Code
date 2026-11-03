@@ -4,6 +4,8 @@ import {
 	finishSettingWrites,
 	isAppearanceSetting,
 	performSettingWrite,
+	setValuesThroughWriteChain,
+	settingWriteBookkeepingSize,
 	undoSettingWrite,
 } from "../appearanceSettingWrites"
 import type { ContextProxy } from "../ContextProxy"
@@ -176,5 +178,127 @@ describe("appearanceSettingWrites", () => {
 		// Back to the finished write's value, not past it.
 		expect(stored.get("interfaceFontScale")).toBe(120)
 		expect(second.prev).toBeUndefined()
+	})
+
+	describe("a write that never settles", () => {
+		beforeEach(() => vi.useFakeTimers())
+		afterEach(() => vi.useRealTimers())
+
+		it("stops holding its key after the timeout, and the write behind it goes ahead", async () => {
+			const hung = new Promise<void>(() => {})
+			const proxy = {
+				getValue: (key: string) => stored.get(key),
+				setValue: vi.fn(async (key: string, value: unknown) => {
+					if (value === 120) return hung // never settles
+					stored.set(key, value)
+				}),
+			} as unknown as ContextProxy
+			const first = beginSettingWrite("interfaceFontScale", 100, 120)
+			const second = beginSettingWrite("interfaceFontScale", 100, 150)
+			const firstDone = performSettingWrite(proxy, first)
+			const secondDone = performSettingWrite(proxy, second)
+			const firstFailed = expect(firstDone).rejects.toThrow("did not finish in 15 seconds")
+
+			await vi.advanceTimersByTimeAsync(14_999)
+			expect(stored.get("interfaceFontScale")).toBe(100) // the second is still waiting behind the first
+			await vi.advanceTimersByTimeAsync(1)
+			await firstFailed
+			await secondDone
+
+			expect(stored.get("interfaceFontScale")).toBe(150)
+			await undoSettingWrite(proxy, first)
+			finishSettingWrites([second])
+			expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			expect(vi.getTimerCount()).toBe(0)
+		})
+
+		it("does not time out a write that finishes in time, and leaves no timer behind", async () => {
+			const proxy = {
+				getValue: (key: string) => stored.get(key),
+				setValue: async (key: string, value: unknown) => {
+					await new Promise((resolve) => setTimeout(resolve, 14_000))
+					stored.set(key, value)
+				},
+			} as unknown as ContextProxy
+			const write = beginSettingWrite("interfaceFontScale", 100, 120)
+			const done = performSettingWrite(proxy, write)
+
+			await vi.advanceTimersByTimeAsync(14_000)
+			await done
+			finishSettingWrites([write])
+
+			expect(stored.get("interfaceFontScale")).toBe(120)
+			expect(vi.getTimerCount()).toBe(0)
+		})
+	})
+
+	describe("setValuesThroughWriteChain", () => {
+		let setValues: ReturnType<typeof vi.fn>
+		let proxy: ContextProxy
+
+		beforeEach(() => {
+			setValues = vi.fn().mockResolvedValue(undefined)
+			stored = new Map<string, unknown>([
+				["interfaceFontScale", 100],
+				["terminalFontSize", 12],
+			])
+			proxy = {
+				getValue: (key: string) => stored.get(key),
+				setValue: async (key: string, value: unknown) => {
+					stored.set(key, value)
+				},
+				setValues,
+			} as unknown as ContextProxy
+		})
+
+		it("hands settings with no appearance value to setValues as they are", async () => {
+			await setValuesThroughWriteChain(proxy, { mode: "code" })
+
+			expect(setValues).toHaveBeenCalledExactlyOnceWith({ mode: "code" })
+		})
+
+		it("stores several appearance values through the chain and the rest through setValues", async () => {
+			await setValuesThroughWriteChain(proxy, { interfaceFontScale: 120, terminalFontSize: 14, mode: "code" })
+
+			expect(stored.get("interfaceFontScale")).toBe(120)
+			expect(stored.get("terminalFontSize")).toBe(14)
+			expect(setValues).toHaveBeenCalledExactlyOnceWith({ mode: "code" })
+			expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+		})
+
+		it("puts back the value whose write failed after storing it, keeps the other, and throws the failure", async () => {
+			proxy.setValue = (async (key: string, value: unknown) => {
+				stored.set(key, value)
+				if (key === "interfaceFontScale") throw new Error("failed after storing")
+			}) as unknown as ContextProxy["setValue"]
+
+			await expect(
+				setValuesThroughWriteChain(proxy, { interfaceFontScale: 120, terminalFontSize: 14 }),
+			).rejects.toThrow("failed after storing")
+
+			expect(stored.get("interfaceFontScale")).toBe(100)
+			expect(stored.get("terminalFontSize")).toBe(14)
+			expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+		})
+
+		it("keeps the stored appearance values when the other settings fail, and throws that failure", async () => {
+			setValues.mockRejectedValue(new Error("other settings failed"))
+
+			await expect(setValuesThroughWriteChain(proxy, { interfaceFontScale: 120, mode: "code" })).rejects.toThrow(
+				"other settings failed",
+			)
+
+			expect(stored.get("interfaceFontScale")).toBe(120)
+		})
+
+		it("does not let a failing save that wrote the same value undo it", async () => {
+			const save = beginSettingWrite("interfaceFontScale", 100, 120)
+			await performSettingWrite(proxy, save)
+
+			await setValuesThroughWriteChain(proxy, { interfaceFontScale: 120 })
+			await undoSettingWrite(proxy, save)
+
+			expect(stored.get("interfaceFontScale")).toBe(120)
+		})
 	})
 })

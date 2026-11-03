@@ -674,6 +674,17 @@ describe("SettingsView – a save the host never answers", () => {
 			expect(lastUpdatedSettings()).toHaveProperty("terminalFontSize", null)
 		})
 
+		it("keeps a value the user edited again after the save was sent when its late success arrives", async () => {
+			const id = await timeOutAfterAnEdit() // 13 sent, unanswered
+			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // 14, an edit made after the send
+
+			answerSave(id, { success: true })
+
+			// The edit is not what was stored: it stays in the form, and is still an unsaved change.
+			expect((screen.getByTestId("appearance-terminalFontSize-input") as HTMLInputElement).value).toBe("14")
+			expect(screen.getByTestId("save-button")).toBeEnabled()
+		})
+
 		it("does not let a late answer overwrite a value that a newer save has stored", async () => {
 			const first = await timeOutAfterAnEdit() // 13, unanswered
 			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // 14

@@ -58,10 +58,30 @@ export const beginSettingWrite = (key: AppearanceSettingKey, previous: unknown, 
  */
 const settingWriteQueues = new Map<AppearanceSettingKey, Promise<void>>()
 
-const queuedSettingWrite = (key: AppearanceSettingKey, write: () => Promise<unknown>): Promise<void> => {
-	const run = (settingWriteQueues.get(key) ?? Promise.resolve()).then(async () => {
-		await write()
+/**
+ * How long a write may take before the queue stops waiting for it. A store that never settles would otherwise hold
+ * every later write of its key, and the closure over its ContextProxy, for as long as the extension host lives. It is
+ * shorter than the time the webview waits for the answer to a save, so the webview gets a failure, not silence. The
+ * write itself is not cancelled: if it lands later, the stored-value check of a rollback keeps what it wrote.
+ */
+const SETTING_WRITE_TIMEOUT_MS = 15_000
+
+const withinTimeout = (write: Promise<unknown>, key: AppearanceSettingKey): Promise<void> =>
+	new Promise<void>((resolve, reject) => {
+		const timer = setTimeout(
+			() => reject(new Error(`Writing ${key} did not finish in ${SETTING_WRITE_TIMEOUT_MS / 1000} seconds`)),
+			SETTING_WRITE_TIMEOUT_MS,
+		)
+		write
+			.then(
+				() => resolve(),
+				(error: unknown) => reject(error),
+			)
+			.finally(() => clearTimeout(timer))
 	})
+
+const queuedSettingWrite = (key: AppearanceSettingKey, write: () => Promise<unknown>): Promise<void> => {
+	const run = (settingWriteQueues.get(key) ?? Promise.resolve()).then(() => withinTimeout(write(), key))
 	const tail = run.catch(() => undefined)
 	settingWriteQueues.set(key, tail)
 	void tail.then(() => {
@@ -145,4 +165,44 @@ export const undoSettingWrite = async (contextProxy: ContextProxy, write: Settin
 			await contextProxy.setValue(key as keyof RooCodeSettings, write.previous as never)
 		}
 	})
+}
+
+/**
+ * Writes settings from a generic writer (an import, the public API, the configuration of a new task). The appearance
+ * values go through the same per-key write chain as saves, so a save that fails and rolls back does not undo a value
+ * written here meanwhile, even when it is the same value. The write is not rolled back as a whole: a write that
+ * succeeded is final. A write that failed is undone, not finished, so it leaves the chain the way a failed save does
+ * and an earlier save that is still pending keeps its own rollback.
+ */
+export async function setValuesThroughWriteChain(contextProxy: ContextProxy, settings: RooCodeSettings) {
+	const keys = APPEARANCE_SETTING_KEYS.filter((key) => key in settings)
+	if (keys.length === 0) return contextProxy.setValues(settings)
+
+	const writes = keys.map((key) => beginSettingWrite(key, contextProxy.getValue(key), settings[key]))
+	const others = Object.fromEntries(
+		Object.entries(settings).filter(([key]) => !isAppearanceSetting(key)),
+	) as RooCodeSettings
+
+	// Every write is awaited before any is finished or undone, so none is still running when it leaves the chain.
+	const [othersResult, ...writeResults] = await Promise.allSettled([
+		contextProxy.setValues(others),
+		...writes.map((write) => performSettingWrite(contextProxy, write)),
+	])
+
+	let failure = othersResult.status === "rejected" ? othersResult : undefined
+	for (const [index, write] of writes.entries()) {
+		const result = writeResults[index]
+		if (result.status === "fulfilled") {
+			finishSettingWrites([write])
+			continue
+		}
+		failure ??= result
+		try {
+			await undoSettingWrite(contextProxy, write)
+		} catch (restoreError) {
+			console.error(`Failed to restore setting "${write.key}" after a failed write:`, restoreError)
+		}
+	}
+
+	if (failure) throw failure.reason
 }

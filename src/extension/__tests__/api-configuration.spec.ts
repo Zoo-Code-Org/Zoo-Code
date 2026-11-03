@@ -63,4 +63,50 @@ describe("API - configuration", () => {
 		expect(setModeConfig).not.toHaveBeenCalled()
 		expect(postStateToWebview).toHaveBeenCalledOnce()
 	})
+
+	it("writes an appearance value through the per-key write chain, and the rest through setValues", async () => {
+		const stored = new Map<string, unknown>([["terminalFontSize", 12]])
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const setValue = vi.fn(async (key: string, value: unknown) => {
+			stored.set(key, value)
+		})
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			contextProxy: { getValue: (key: string) => stored.get(key), setValue, setValues },
+			providerSettingsManager: { saveConfig: vi.fn().mockResolvedValue("id"), setModeConfig: vi.fn() },
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await api.setConfiguration({ terminalFontSize: 14, mode: "code" })
+
+		expect(setValue).toHaveBeenCalledExactlyOnceWith("terminalFontSize", 14)
+		expect(setValues).toHaveBeenCalledExactlyOnceWith({ mode: "code" })
+	})
+
+	it("puts an appearance value back when its write fails, and rejects", async () => {
+		const stored = new Map<string, unknown>([["terminalFontSize", 12]])
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			contextProxy: {
+				getValue: (key: string) => stored.get(key),
+				setValue: async (key: string, value: unknown) => {
+					stored.set(key, value)
+					if (value === 14) throw new Error("failed after storing")
+				},
+				setValues: vi.fn().mockResolvedValue(undefined),
+			},
+			providerSettingsManager: { saveConfig: vi.fn(), setModeConfig: vi.fn() },
+			postStateToWebview: vi.fn(),
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(api.setConfiguration({ terminalFontSize: 14 })).rejects.toThrow("failed after storing")
+
+		expect(stored.get("terminalFontSize")).toBe(12)
+	})
 })

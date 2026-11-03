@@ -3413,6 +3413,16 @@ describe("ClineProvider", () => {
 		expect(newer.appearanceSeq).toBe(older.appearanceSeq! + 1)
 	})
 
+	test("setValues, which a new task's configuration goes through, writes an appearance value through the write chain", async () => {
+		const setValue = vi.spyOn(provider.contextProxy, "setValue").mockResolvedValue(undefined)
+		const setValues = vi.spyOn(provider.contextProxy, "setValues").mockResolvedValue(undefined)
+
+		await provider.setValues({ terminalFontSize: 14, mode: "code" })
+
+		expect(setValue).toHaveBeenCalledWith("terminalFontSize", 14)
+		expect(setValues).toHaveBeenCalledExactlyOnceWith({ mode: "code" })
+	})
+
 	test("numbers a push by when its settings were read, not by when it finishes", async () => {
 		let stored = 1
 		vi.spyOn(provider.contextProxy, "getValues").mockImplementation(() => ({ spacingScale: stored }))
