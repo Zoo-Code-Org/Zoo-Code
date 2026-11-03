@@ -1,5 +1,6 @@
 import { reactConfig } from "@roo-code/config-eslint/react"
 import { createProviderIdentifierConfig } from "@roo-code/config-eslint/provider-identifiers"
+import { createI18nDotKeyConfig } from "@roo-code/config-eslint/i18n-keys"
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
 /** @type {import("eslint").Linter.Config} */
@@ -7,6 +8,7 @@ export default [
 	{ ignores: ["playwright/.cache/**"] },
 	...reactConfig,
 	createProviderIdentifierConfig({ providerIdentifiers, retiredProviderIdentifiers }),
+	createI18nDotKeyConfig(`${import.meta.dirname}/src/i18n/locales/en`),
 	{
 		rules: {
 			"@typescript-eslint/no-unused-vars": [
@@ -22,6 +24,18 @@ export default [
 			"@typescript-eslint/no-explicit-any": "off",
 			"react/prop-types": "off",
 			"react/display-name": "off",
+			"no-restricted-imports": [
+				"error",
+				{
+					paths: [
+						{
+							name: "debounce",
+							message:
+								"Use @src/utils/leadingEdgeDebounce for leading-edge, or useDebounceEffect for trailing.",
+						},
+					],
+				},
+			],
 		},
 	},
 	{
