@@ -1204,9 +1204,17 @@ describe("OpenAiNativeHandler", () => {
 				})
 				global.fetch = mockFetch as typeof fetch
 
-				// A status-less stream failure takes the wrapping path: pin the full message so a
-				// mutation that skips the wrapper (e.g. forcing hasNumericHttpStatus() to true) fails.
-				await expect(collectStream(handler.createMessage(systemPrompt, messages))).rejects.toThrow(
+				// A status-less stream failure takes the wrapping path. Capture the rejection so
+				// both halves of the contract are pinned: a mutation that skips the wrapper (e.g.
+				// forcing hasNumericHttpStatus() to true) fails the message, and a mutation that
+				// renames the failure to the cancellation contract fails the name.
+				const error = await collectStream(handler.createMessage(systemPrompt, messages)).then(
+					() => undefined,
+					(e: unknown) => e,
+				)
+				expect(error).toBeInstanceOf(Error)
+				expect((error as Error).name).toBe("Error")
+				expect((error as Error).message).toBe(
 					"Failed to connect to Responses API: Error processing response stream: socket hang up",
 				)
 			})
