@@ -54,7 +54,11 @@ jobs:
                   esac
                   printf '%s\n' "$STACKED_MAP" > stacked-map.json
 
+            # A failed upload must not skip the gate: the download side already treats a missing
+            # artifact as "measure against the event base" (stricter, never looser), and that
+            # fallback can only run if this job still succeeds.
             - name: Publish the stacked map
+              continue-on-error: true
               uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
               with:
                   name: mutation-stacked-map

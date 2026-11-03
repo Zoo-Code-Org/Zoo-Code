@@ -123,8 +123,10 @@ describe("mutation testing workflow", () => {
 		// Both jobs need actions:write - one to publish the map, one to read it and publish the reports.
 		assert.equal(workflow.match(/actions: write/g)?.length, 2)
 		// A missing map artifact degrades to the event base inside the script, so the download step must
-		// not fail the job; the report upload keeps its own tolerance.
-		assert.equal(workflow.match(/continue-on-error: true/g)?.length, 2)
+		// not fail the job. The upload that produces it is tolerant for the same reason: a failed upload
+		// would otherwise fail this job and skip the gate entirely, so the fallback could never run. The
+		// report upload keeps its own tolerance.
+		assert.equal(workflow.match(/continue-on-error: true/g)?.length, 3)
 		assert.equal(workflow.match(/Could not write the job summary/g)?.length, 2)
 		const script = fs.readFileSync(path.join(repositoryRoot, "scripts/stryker-diff.mjs"), "utf8")
 		assert.ok(script.includes("appendSummary([], manifest.advisories, manifest)"))
@@ -286,7 +288,7 @@ describe("stacked unit base resolution", () => {
 				repository,
 				eventBaseSha,
 				childSha,
-				[{ number: 1, headSha: parentSha, baseRef: "main" }],
+				[{ number: 1, headSha: parentSha, draft: false, baseRef: "main" }],
 				"main",
 			)
 			assert.equal(resolved.baseSha, parentSha)
@@ -320,7 +322,7 @@ describe("stacked unit base resolution", () => {
 				repository,
 				advancedBase,
 				childSha,
-				[{ number: 1, headSha: parentSha, baseRef: "main" }],
+				[{ number: 1, headSha: parentSha, draft: false, baseRef: "main" }],
 				"main",
 			)
 			assert.equal(resolved.baseSha, parentSha)
@@ -391,6 +393,18 @@ describe("stacked unit base resolution", () => {
 			assert.equal(draft.baseSha, eventBaseSha)
 			assert.equal(draft.stackedOn, null)
 
+			// An entry whose draft flag is missing proves nothing about gating, so it keeps the event
+			// base like a known draft does.
+			const unconfirmed = resolveStackedUnitBase(
+				repository,
+				eventBaseSha,
+				childSha,
+				[{ number: 1, headSha: parentSha, baseRef: "main", draft: undefined }],
+				"main",
+			)
+			assert.equal(unconfirmed.baseSha, eventBaseSha)
+			assert.equal(unconfirmed.stackedOn, null)
+
 			// The same entry, ready for review: the parent was gated, so it is the unit's base again.
 			const ready = resolveStackedUnitBase(
 				repository,
@@ -425,7 +439,7 @@ describe("stacked unit base resolution", () => {
 				repository,
 				eventBaseSha,
 				childSha,
-				[{ number: 1, headSha: parentSha, baseRef: "feature/other" }],
+				[{ number: 1, headSha: parentSha, draft: false, baseRef: "feature/other" }],
 				"main",
 			)
 			assert.equal(featureBranchParent.baseSha, eventBaseSha)
@@ -436,7 +450,7 @@ describe("stacked unit base resolution", () => {
 				repository,
 				eventBaseSha,
 				childSha,
-				[{ number: 1, headSha: parentSha, baseRef: "main" }],
+				[{ number: 1, headSha: parentSha, draft: false, baseRef: "main" }],
 				"main",
 			)
 			assert.equal(sameBase.baseSha, parentSha)
@@ -447,7 +461,7 @@ describe("stacked unit base resolution", () => {
 				repository,
 				eventBaseSha,
 				childSha,
-				[{ number: 1, headSha: parentSha, baseRef: "main" }],
+				[{ number: 1, headSha: parentSha, draft: false, baseRef: "main" }],
 				undefined,
 			)
 			assert.equal(unknownUnitBase.stackedOn, null)
@@ -455,7 +469,7 @@ describe("stacked unit base resolution", () => {
 				repository,
 				eventBaseSha,
 				childSha,
-				[{ number: 1, headSha: parentSha }],
+				[{ number: 1, headSha: parentSha, draft: false }],
 				"main",
 			)
 			assert.equal(unknownParentBase.stackedOn, null)
@@ -479,8 +493,8 @@ describe("stacked unit base resolution", () => {
 
 		try {
 			const map = [
-				{ number: 9, headSha: parentSha, baseRef: "feature/other" },
-				{ number: 1, headSha: parentSha, baseRef: "main" },
+				{ number: 9, headSha: parentSha, draft: false, baseRef: "feature/other" },
+				{ number: 1, headSha: parentSha, draft: false, baseRef: "main" },
 			]
 
 			const unitOnMain = resolveStackedUnitBase(repository, eventBaseSha, childSha, map, "main")
@@ -621,7 +635,7 @@ describe("stacked unit base resolution", () => {
 				advancedBase,
 				mergeSha,
 				childSha,
-				[{ number: 1, headSha: parentSha, baseRef: "main" }],
+				[{ number: 1, headSha: parentSha, draft: false, baseRef: "main" }],
 				"main",
 			)
 			assert.equal(stacked.baseSha, parentSha)
@@ -655,7 +669,7 @@ describe("stacked unit base resolution", () => {
 				repository,
 				advancedBase,
 				multiParentHead,
-				[{ number: 1, headSha: parentSha, baseRef: "main" }],
+				[{ number: 1, headSha: parentSha, draft: false, baseRef: "main" }],
 				"main",
 			)
 			assert.equal(multi.baseSha, advancedBase)
@@ -666,7 +680,7 @@ describe("stacked unit base resolution", () => {
 					advancedBase,
 					multiParentHead,
 					multiParentHead,
-					[{ number: 1, headSha: parentSha, baseRef: "main" }],
+					[{ number: 1, headSha: parentSha, draft: false, baseRef: "main" }],
 					"main",
 				).stackedOn,
 				null,
@@ -723,7 +737,7 @@ describe("stacked unit base resolution", () => {
 				advancedBase,
 				mergeSha,
 				childSha,
-				[{ number: 1, headSha: parentSha, baseRef: "main" }],
+				[{ number: 1, headSha: parentSha, draft: false, baseRef: "main" }],
 				"main",
 			)
 			assert.equal(invocation.diffHead, childSha)

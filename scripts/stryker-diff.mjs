@@ -321,9 +321,12 @@ export function resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPu
 	// measuring this unit against its head hides the parent's feature-branch delta from the changed-line
 	// cap while merging this unit lands that delta on main. Without either base ref the comparison cannot
 	// be made, and the unit keeps the event base.
+	// The predicate requires draft === false rather than accepting anything that is not true: an
+	// entry whose draft flag is missing or not a boolean (an inline --stacked-map entry, an older
+	// map format) has not proven the parent was gated, so it keeps the event base.
 	const parent = openPullRequests.find(
 		(pr) =>
-			pr.draft !== true &&
+			pr.draft === false &&
 			String(pr.headSha).toLowerCase() === parentSha &&
 			Boolean(childBaseRef) &&
 			(typeof pr.baseRef === "string" ? pr.baseRef : "") === childBaseRef,
