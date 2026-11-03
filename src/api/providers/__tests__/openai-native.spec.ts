@@ -1274,6 +1274,11 @@ describe("OpenAiNativeHandler", () => {
 				})
 				let firstSdkSignal: AbortSignal | undefined
 				let secondSdkSignal: AbortSignal | undefined
+				let secondStreamFinished = false
+				let secondGateOpen: (() => void) | undefined
+				const secondGate = new Promise<void>((resolve) => {
+					secondGateOpen = resolve
+				})
 				let sdkCalls = 0
 				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
 					sdkCalls += 1
@@ -1288,10 +1293,14 @@ describe("OpenAiNativeHandler", () => {
 					}
 					secondSdkSignal = options?.signal
 					return Promise.resolve(
-						asyncStreamFrom([
-							{ type: "response.output_text.delta", delta: "two-a" },
-							{ type: "response.output_text.delta", delta: " two-b" },
-						]),
+						(async function* () {
+							yield { type: "response.output_text.delta", delta: "two-a" }
+							yield { type: "response.output_text.delta", delta: " two-b" }
+							// Hold the stream open until the abort below has been observed, so the signal
+							// assertions run while this request is genuinely in flight.
+							await secondGate
+							secondStreamFinished = true
+						})(),
 					)
 				})
 
@@ -1320,8 +1329,14 @@ describe("OpenAiNativeHandler", () => {
 				await tick()
 				expect(firstSdkSignal?.aborted).toBe(true)
 				expect(secondSdkSignal?.aborted).toBe(false)
+				// Liveness proof for the two assertions above: with an ungated stream this
+				// second request can drain during the ticks, and the same signal assertions would
+				// pass even if the first request's abort leaked into it.
+				expect(secondStreamFinished).toBe(false)
 
 				// The second request completes normally with its own content.
+				secondGateOpen?.()
+
 				const chunks2 = await collected2
 				expect(textChunks(chunks2).map((chunk) => chunk.text)).toEqual(["two-a", " two-b"])
 				expect(secondExternal.signal.aborted).toBe(false)
