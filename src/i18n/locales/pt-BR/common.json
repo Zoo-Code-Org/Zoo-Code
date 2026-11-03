@@ -21,6 +21,9 @@
 		"could_not_open_file_generic": "Não foi possível abrir o arquivo!",
 		"checkpoint_timeout": "Tempo esgotado ao tentar restaurar o ponto de verificação.",
 		"checkpoint_failed": "Falha ao restaurar o ponto de verificação.",
+		"checkpoint_restore_failed": "Erro durante a restauração do ponto de verificação: {{error}}",
+		"checkpoint_missing": "Não é possível restaurar o ponto de verificação {{commitHash}}: este ponto de verificação não existe mais no repositório de pontos de verificação. Nenhum arquivo foi alterado.",
+		"checkpoint_invalid_hash": "Não é possível restaurar ou comparar o ponto de verificação: a referência não é um ponto de verificação válido desta tarefa. Nenhum arquivo foi alterado.",
 		"git_not_installed": "O Git é necessário para o recurso de checkpoints. Por favor, instale o Git para habilitar os checkpoints.",
 		"checkpoint_no_first": "Nenhum primeiro ponto de verificação para comparar.",
 		"checkpoint_no_previous": "Nenhum ponto de verificação anterior para comparar.",
@@ -116,6 +119,10 @@
 			"completionError": "OpenAI Codex completion error: {{message}}"
 		},
 		"rooHistoryImport": "Falha ao importar o histórico do Roo Code: {{error}}"
+	},
+	"checkpoints": {
+		"restart_after_restore_failure": "A restauração do ponto de verificação falhou e a tarefa está parada. Quer reiniciá-la?",
+		"restart": "Reiniciar"
 	},
 	"warnings": {
 		"no_terminal_content": "Nenhum conteúdo do terminal selecionado",
