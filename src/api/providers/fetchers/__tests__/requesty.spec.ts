@@ -305,9 +305,19 @@ describe("getRequestyModels", () => {
 			)
 
 			const pending = getRequestyModels()
-			await vi.advanceTimersByTimeAsync(10_000)
+			let settled = false
+			void pending.then(() => {
+				settled = true
+			})
+			// The merged deadline has to be the documented 10 s: any shorter value also produces the
+			// fallback and the log, so the assertions below are what pin the value.
+			expect(timeoutSpy).toHaveBeenCalledWith(10_000)
+			await vi.advanceTimersByTimeAsync(9_999)
+			// Nothing may settle before the deadline fires.
+			expect(settled).toBe(false)
+			await vi.advanceTimersByTimeAsync(1)
 			const models = await pending
-
+			expect(settled).toBe(true)
 			// The fallback is intentional: callers use the cached/default model info.
 			expect(models).toEqual({})
 			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("timed out"))

@@ -401,7 +401,7 @@ describe("RequestyHandler", () => {
 					contextWindow: 200000,
 					supportsImages: true,
 					supportsPromptCache: true,
-					supportsReasoningEffort: ["low", "medium", "high"],
+					supportsReasoningEffort: ["minimal", "low", "medium", "high"],
 					inputPrice: 3,
 					outputPrice: 15,
 					description: "Claude 4 Sonnet",
@@ -421,7 +421,10 @@ describe("RequestyHandler", () => {
 			)
 			expect(chunks).toHaveLength(1)
 			expect(mockCreate).toHaveBeenCalledTimes(1)
-			// "minimal" is outside ["low", "medium", "high"], so the key must be absent entirely.
+			// "minimal" is declared by the model fixture so it survives shouldUseReasoningEffort and
+			// reaches the handler, where the Requesty allowed-effort filter must drop it. With the
+			// older ["low", "medium", "high"] fixture the shared gate rejected "minimal" first, so deleting
+			// that filter left this test green.
 			expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("reasoning_effort")
 		})
 
