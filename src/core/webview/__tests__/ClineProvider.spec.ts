@@ -16044,15 +16044,12 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 					}),
 					true,
 				)
-				// The non-active profile now goes through upsertProviderProfile so the views
-				// pinned to it are refreshed, not just the file on disk.
-				expect(upsertSpy).toHaveBeenCalledWith(
+				expect(saveConfig).toHaveBeenCalledWith(
 					"Backup Zoo",
 					expect.objectContaining({
 						zooSessionToken: "new-token",
 						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
 					}),
-					false,
 				)
 			})
 

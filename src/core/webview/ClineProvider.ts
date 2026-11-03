@@ -3903,7 +3903,7 @@ export class ClineProvider
 			// Same contract on the non-active path: the deletion stands even if this post fails.
 			await this.postStateToWebview().catch((postError: unknown) =>
 				this.log(
-					`deleteProviderProfile: deletion committed; state post failed: ${postError instanceof Error ? postError.message : String(postError)}`,
+					`deleteProviderProfile: deletion committed, but posting state failed: ${postError instanceof Error ? postError.message : String(postError)}`,
 				),
 			)
 		} catch (error) {
