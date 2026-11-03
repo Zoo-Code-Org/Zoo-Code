@@ -184,67 +184,89 @@ describe("appearanceSettingWrites", () => {
 		beforeEach(() => vi.useFakeTimers())
 		afterEach(() => vi.useRealTimers())
 
-		it("stops holding its key after the timeout, and the write behind it goes ahead", async () => {
-			const hung = new Promise<void>(() => {})
+		/** A store that settles only when it is released, and records what it stored. */
+		const deferredProxy = () => {
+			const releases: Array<() => void> = []
 			const proxy = {
 				getValue: (key: string) => stored.get(key),
 				setValue: vi.fn(async (key: string, value: unknown) => {
-					if (value === 120) return hung // never settles
+					if (value === 120) await new Promise<void>((resolve) => releases.push(resolve))
 					stored.set(key, value)
 				}),
 			} as unknown as ContextProxy
+			return { proxy, landLate: () => releases.splice(0).forEach((release) => release()) }
+		}
+
+		it("tells the caller after the timeout, refuses a new write of that key while the store is outstanding, and goes ahead once it has settled", async () => {
+			const { proxy, landLate } = deferredProxy()
 			const first = beginSettingWrite("interfaceFontScale", 100, 120)
-			const second = beginSettingWrite("interfaceFontScale", 100, 150)
-			const firstDone = performSettingWrite(proxy, first)
-			const secondDone = performSettingWrite(proxy, second)
-			const firstFailed = expect(firstDone).rejects.toThrow("did not finish in 15 seconds")
+			const firstFailed = expect(performSettingWrite(proxy, first)).rejects.toThrow(
+				"did not finish in 15 seconds",
+			)
 
 			await vi.advanceTimersByTimeAsync(14_999)
-			expect(stored.get("interfaceFontScale")).toBe(100) // the second is still waiting behind the first
 			await vi.advanceTimersByTimeAsync(1)
 			await firstFailed
-			await secondDone
 
+			// The store is still outstanding: a new write is refused at once, not queued behind it and not started.
+			const second = beginSettingWrite("interfaceFontScale", 100, 150)
+			await expect(performSettingWrite(proxy, second)).rejects.toThrow("has not finished yet")
+			expect(proxy.setValue).toHaveBeenCalledTimes(1)
+			expect(stored.get("interfaceFontScale")).toBe(100)
+
+			// It lands late. Nothing newer was written meanwhile, so it cannot have been overwritten or have overwritten.
+			landLate()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(stored.get("interfaceFontScale")).toBe(120)
+			expect(settingWriteBookkeepingSize().queuedKeys).toBe(0)
+
+			// The key is free again.
+			const third = beginSettingWrite("interfaceFontScale", 120, 150)
+			await performSettingWrite(proxy, third)
 			expect(stored.get("interfaceFontScale")).toBe(150)
+
+			finishSettingWrites([third])
+			await undoSettingWrite(proxy, second)
 			await undoSettingWrite(proxy, first)
-			finishSettingWrites([second])
-			expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
 			expect(vi.getTimerCount()).toBe(0)
 		})
 
-		it("lets a write that lands after the timeout stand, and a rollback keeps what it wrote", async () => {
-			let landLate: () => void = () => {}
-			const proxy = {
-				getValue: (key: string) => stored.get(key),
-				setValue: vi.fn(async (key: string, value: unknown) => {
-					if (value === 120) {
-						// Stores only when it is released, long after the timeout.
-						await new Promise<void>((resolve) => (landLate = resolve))
-					}
-					stored.set(key, value)
-				}),
-			} as unknown as ContextProxy
-			const first = beginSettingWrite("interfaceFontScale", 100, 120)
-			const firstDone = performSettingWrite(proxy, first)
-			const firstFailed = expect(firstDone).rejects.toThrow("did not finish in 15 seconds")
+		it("drops a write whose caller gave up before it started, so it never lands later", async () => {
+			const { proxy, landLate } = deferredProxy()
+			const first = beginSettingWrite("interfaceFontScale", 100, 120) // the store that hangs
+			const second = beginSettingWrite("interfaceFontScale", 100, 150) // queued behind it
+			const firstDone = expect(performSettingWrite(proxy, first)).rejects.toThrow("did not finish")
+			const secondDone = expect(performSettingWrite(proxy, second)).rejects.toThrow("did not finish")
 
 			await vi.advanceTimersByTimeAsync(15_000)
-			await firstFailed
-			// The key is free: a later write goes ahead while the first is still outstanding.
-			const second = beginSettingWrite("interfaceFontScale", 100, 150)
-			await performSettingWrite(proxy, second)
-			expect(stored.get("interfaceFontScale")).toBe(150)
-
-			// The timed-out write now lands, and the failed save is rolled back: the stored value is no longer
-			// the one that write stored the last time it was looked at, so the rollback leaves it alone.
+			await firstDone
+			await secondDone
 			landLate()
 			await vi.advanceTimersByTimeAsync(0)
-			finishSettingWrites([second])
-			await undoSettingWrite(proxy, first)
 
-			expect(stored.get("interfaceFontScale")).toBe(120) // the late write is the last one to have landed
-			expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
-			expect(vi.getTimerCount()).toBe(0)
+			// Only the first store was ever issued; the second was dropped, not run after the first landed.
+			expect(proxy.setValue).toHaveBeenCalledTimes(1)
+			expect(stored.get("interfaceFontScale")).toBe(120)
+			expect(settingWriteBookkeepingSize().queuedKeys).toBe(0)
+			await undoSettingWrite(proxy, second)
+			await undoSettingWrite(proxy, first)
+		})
+
+		it("keeps the other keys going while one key's store is outstanding", async () => {
+			const { proxy, landLate } = deferredProxy()
+			const hung = beginSettingWrite("interfaceFontScale", 100, 120)
+			const hungDone = expect(performSettingWrite(proxy, hung)).rejects.toThrow("did not finish")
+			await vi.advanceTimersByTimeAsync(15_000)
+			await hungDone
+
+			const other = beginSettingWrite("terminalFontSize", 12, 14)
+			await performSettingWrite(proxy, other)
+
+			expect(stored.get("terminalFontSize")).toBe(14)
+			finishSettingWrites([other])
+			landLate()
+			await vi.advanceTimersByTimeAsync(0)
+			await undoSettingWrite(proxy, hung)
 		})
 
 		it("does not time out a write that finishes in time, and leaves no timer behind", async () => {

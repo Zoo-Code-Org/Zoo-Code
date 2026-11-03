@@ -54,46 +54,75 @@ export const beginSettingWrite = (key: AppearanceSettingKey, previous: unknown, 
  * The writes to one key, one at a time, from every save and rollback, across providers. A write is only
  * started once the one before it has reached durable storage, so a slower write cannot complete after a newer one
  * and overwrite it, and a rollback cannot land after a newer write has started. A write that fails does not hold up
- * the ones behind it.
+ * the ones behind it. The entry of a key is released when the last write's store has settled, not when its caller
+ * stopped waiting.
  */
 const settingWriteQueues = new Map<AppearanceSettingKey, Promise<void>>()
 
 /**
- * How long a write may take before the queue stops waiting for it. A store that never settles would otherwise hold
- * every later write of its key, and the closure over its ContextProxy, for as long as the extension host lives. It is
- * shorter than the time the webview waits for the answer to a save, so the webview gets a failure, not silence. The
- * write itself is not cancelled: if it lands later, the stored-value check of a rollback keeps what it wrote.
+ * How long a caller waits for a write, counted from when it was queued. It is shorter than the time the webview waits
+ * for the answer to a save, so the webview gets a failure, not silence. A write that has not started by then never
+ * will. A write that has started cannot be cancelled (`globalState.update` has no cancellation), so its key stays
+ * taken until the store settles: a later write of that key is refused at once (see `staleKeys`) rather than queued, so
+ * a store that never settles holds one entry and one closure, not one per attempt, and a late store can never land
+ * after, and overwrite, a newer write.
  */
 const SETTING_WRITE_TIMEOUT_MS = 15_000
 
-const withinTimeout = (write: Promise<unknown>, key: AppearanceSettingKey): Promise<void> =>
-	new Promise<void>((resolve, reject) => {
-		const timer = setTimeout(
-			() => reject(new Error(`Writing ${key} did not finish in ${SETTING_WRITE_TIMEOUT_MS / 1000} seconds`)),
-			SETTING_WRITE_TIMEOUT_MS,
-		)
-		write
-			.then(
-				() => resolve(),
-				(error: unknown) => reject(error),
-			)
-			.finally(() => clearTimeout(timer))
-	})
+/** Keys with a write whose caller gave up but whose store has not settled. */
+const staleKeys = new Set<AppearanceSettingKey>()
 
 const queuedSettingWrite = (key: AppearanceSettingKey, write: () => Promise<unknown>): Promise<void> => {
-	const run = (settingWriteQueues.get(key) ?? Promise.resolve()).then(() => withinTimeout(write(), key))
-	const tail = run.catch(() => undefined)
+	if (staleKeys.has(key)) {
+		return Promise.reject(new Error(`An earlier write of ${key} has not finished yet`))
+	}
+
+	const prior = settingWriteQueues.get(key) ?? Promise.resolve()
+	let gaveUp = false
+	let started = false
+
+	let resolveTail: () => void = () => {}
+	const tail = new Promise<void>((resolve) => (resolveTail = resolve))
 	settingWriteQueues.set(key, tail)
-	void tail.then(() => {
+	// The key is free for the next write once this one's store has settled (or it was dropped before it started).
+	const release = () => {
+		staleKeys.delete(key)
 		if (settingWriteQueues.get(key) === tail) settingWriteQueues.delete(key)
+		resolveTail()
+	}
+
+	return new Promise<void>((resolve, reject) => {
+		const timer = setTimeout(() => {
+			gaveUp = true
+			if (started) staleKeys.add(key)
+			reject(new Error(`Writing ${key} did not finish in ${SETTING_WRITE_TIMEOUT_MS / 1000} seconds`))
+		}, SETTING_WRITE_TIMEOUT_MS)
+
+		void prior.then(() => {
+			// Its caller has given up before it started: it is dropped, and the next write may go ahead.
+			if (gaveUp) return release()
+			started = true
+			void Promise.resolve()
+				.then(write)
+				.then(
+					() => undefined,
+					(error: unknown) => ({ error }),
+				)
+				.then((failure) => {
+					clearTimeout(timer)
+					release()
+					// After the timeout the caller has been told already: a second answer is ignored.
+					if (failure) reject(failure.error)
+					else resolve()
+				})
+		})
 	})
-	return run
 }
 
 /** @internal test hook: how much is kept about writes. It is nothing once the saves are over. */
 export const settingWriteBookkeepingSize = () => ({
 	latestWrites: lastWriteOfSetting.size,
-	queuedKeys: settingWriteQueues.size,
+	queuedKeys: settingWriteQueues.size + staleKeys.size,
 })
 
 /**
