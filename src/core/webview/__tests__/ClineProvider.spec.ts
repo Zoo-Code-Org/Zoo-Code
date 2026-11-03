@@ -7691,6 +7691,200 @@ describe("ClineProvider", () => {
 			await failingSibling.dispose()
 		})
 
+		it("reads a sibling's task history from the sibling's own store when snapshotting the deletion", async () => {
+			// The deletion snapshots each sibling task's history item through this provider's
+			// TaskHistoryStore cache, which cannot see a task the sibling created after its last
+			// refresh. Without the sibling's own store the snapshot carries no history item, so a
+			// failed deletion skips restoring that task's persisted apiConfigName and leaves it on
+			// the replacement profile.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const failingSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await failingSibling["setViewStateId"]("history-sibling-view")
+			await failingSibling.saveViewState("currentApiConfigName", "doomed-profile")
+			await provider.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ id: "doomed-id", name: "doomed-profile", apiProvider: providerIdentifiers.anthropic },
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn().mockImplementation(async ({ name }: { name?: string }) =>
+					name === "doomed-profile"
+						? { name: "doomed-profile", id: "doomed-id", apiProvider: providerIdentifiers.anthropic }
+						: {
+								name: "replacement-profile",
+								id: "replacement-id",
+								apiProvider: providerIdentifiers.openrouter,
+							},
+				),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("doomed-id"),
+			}
+			const siblingTask = {
+				taskId: "sibling-only-task",
+				taskApiConfigName: "doomed-profile",
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+				updateApiConfiguration: vi.fn(),
+				setTaskApiConfigName: vi.fn(),
+			}
+			// Structural cast: the double only carries the members the rebuild and sticky paths touch.
+			vi.spyOn(failingSibling, "getCurrentTask").mockReturnValue(siblingTask as unknown as Task)
+			const historyItem = {
+				id: "sibling-only-task",
+				ts: 1,
+				task: "test",
+				mode: "code",
+				apiConfigName: "replacement-profile",
+			}
+			// This view's cache does not hold the task at all (the sibling created it after the last
+			// refresh); only the sibling's store does.
+			const ownLookup = vi.spyOn(
+				provider as unknown as { getTaskHistoryItem: (id: string) => unknown },
+				"getTaskHistoryItem",
+			)
+			ownLookup.mockReturnValue(undefined)
+			vi.spyOn(
+				failingSibling as unknown as { getTaskHistoryItem: (id: string) => unknown },
+				"getTaskHistoryItem",
+			).mockReturnValue(historyItem)
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+
+			// Fail after the snapshot so the compensation path runs.
+			const siblingC = failingSibling as unknown as {
+				_saveViewLocalStateFromMutation: (values: unknown) => Promise<void>
+			}
+			vi.spyOn(siblingC, "_saveViewLocalStateFromMutation").mockRejectedValueOnce(
+				new Error("sibling re-pin failed"),
+			)
+
+			await expect(
+				provider.deleteProviderProfile({
+					id: "doomed-id",
+					name: "doomed-profile",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+			).rejects.toThrow()
+
+			// The snapshot came from the sibling's store, so the rollback restored that task's
+			// persisted profile name and sticky name.
+			expect(updateTaskHistorySpy).toHaveBeenCalledWith(
+				expect.objectContaining({ id: "sibling-only-task", apiConfigName: "replacement-profile" }),
+			)
+			expect(siblingTask.setTaskApiConfigName).toHaveBeenCalledWith("doomed-profile")
+			await provider.dispose()
+			await failingSibling.dispose()
+		})
+
+		it("leaves a task that became current during the re-pin alone", async () => {
+			// The re-pin loop runs after an await, so a navigation in the sibling can make a
+			// different task current between the snapshot and the task rebuild. Both task-update
+			// methods act on the instance's current task, so without the snapshotted task id the
+			// new task gets rebuilt with the replacement settings and re-pointed to the replacement
+			// profile even though the user never chose that for it.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await sibling["setViewStateId"]("navigated-sibling-view")
+			await sibling.saveViewState("currentApiConfigName", "doomed-profile")
+			await provider.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ id: "doomed-id", name: "doomed-profile", apiProvider: providerIdentifiers.anthropic },
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn().mockImplementation(async ({ name }: { name?: string }) =>
+					name === "doomed-profile"
+						? { name: "doomed-profile", id: "doomed-id", apiProvider: providerIdentifiers.anthropic }
+						: {
+								name: "replacement-profile",
+								id: "replacement-id",
+								apiProvider: providerIdentifiers.openrouter,
+							},
+				),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("doomed-id"),
+			}
+			const snapshottedTask = {
+				taskId: "task-at-snapshot-time",
+				taskApiConfigName: "doomed-profile",
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+				updateApiConfiguration: vi.fn(),
+				setTaskApiConfigName: vi.fn(),
+			}
+			const navigatedTask = {
+				taskId: "task-after-navigation",
+				taskApiConfigName: "doomed-profile",
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+				updateApiConfiguration: vi.fn(),
+				setTaskApiConfigName: vi.fn(),
+			}
+			// The navigation is modelled as landing during the re-pin write: every read before it
+			// (including the deletion's own stickiness snapshot) sees the snapshotted task, and
+			// every read after it sees the task the user switched to.
+			let navigated = false
+			vi.spyOn(sibling, "getCurrentTask").mockImplementation(
+				() => (navigated ? navigatedTask : snapshottedTask) as unknown as Task,
+			)
+			const originalSaveViewLocalState = sibling["_saveViewLocalStateFromMutation"].bind(sibling)
+			vi.spyOn(
+				sibling as unknown as {
+					_saveViewLocalStateFromMutation: (values: unknown) => Promise<void>
+				},
+				"_saveViewLocalStateFromMutation",
+			).mockImplementation(async (values: unknown) => {
+				navigated = true
+				await originalSaveViewLocalState(values as never)
+			})
+			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// The re-pin loop's own post must land (it is the first call); the post-re-pin task
+			// step's post is the second and fails, which keeps the deletion from committing and
+			// therefore from running its post-commit survivor activation - otherwise that later
+			// rebuild of sibling tasks would be indistinguishable from the re-pin loop's own.
+			vi.spyOn(sibling, "postStateToWebview")
+				.mockResolvedValueOnce(undefined)
+				.mockRejectedValueOnce(new Error("sibling post-task step down"))
+
+			await expect(
+				provider.deleteProviderProfile({
+					id: "doomed-id",
+					name: "doomed-profile",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+			).rejects.toThrow("sibling post-task step down")
+
+			// The snapshotted task is the one that may be re-pointed; the task that became current
+			// afterwards keeps its own handler and sticky name.
+			expect(navigatedTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(navigatedTask.setTaskApiConfigName).not.toHaveBeenCalled()
+			await provider.dispose()
+			await sibling.dispose()
+		})
+
 		it("restores every sibling's sticky profile even when one restore rejects", async () => {
 			// One failing history restore used to abort the whole stickiness loop, so every later
 			// sibling's persisted apiConfigName kept the replacement profile the deletion was
@@ -7757,12 +7951,16 @@ describe("ClineProvider", () => {
 			// Structural cast: the double only carries the members the rebuild and sticky paths touch.
 			vi.spyOn(healthySibling, "getCurrentTask").mockReturnValue(bTask as unknown as Task)
 			vi.spyOn(failingSibling, "getCurrentTask").mockReturnValue(cTask as unknown as Task)
-			vi.spyOn(provider.taskHistoryStore, "get").mockImplementation(
-				(id: string) =>
-					({ id, ts: 1, task: "test", mode: "code" }) as unknown as ReturnType<
-						typeof provider.taskHistoryStore.get
-					>,
-			)
+			// Each sibling's history is read through its own store now, so every store the deletion
+			// snapshots from has to answer.
+			for (const owner of [provider, healthySibling, failingSibling]) {
+				vi.spyOn(owner.taskHistoryStore, "get").mockImplementation(
+					(id: string) =>
+						({ id, ts: 1, task: "test", mode: "code" }) as unknown as ReturnType<
+							typeof owner.taskHistoryStore.get
+						>,
+				)
+			}
 			// The first sibling's history restore rejects; the second must still be attempted.
 			const updateTaskHistorySpy = vi
 				.spyOn(provider, "updateTaskHistory")
