@@ -333,3 +333,91 @@ it("aborts publication and removes all artifacts if failed-repetition cleanup fa
 		await remove(dir, { recursive: true, force: true })
 	}
 })
+
+for (const boundary of ["later artifact", "result construction", "result write"] as const) {
+	it(`removes all publication output when ${boundary} fails`, async (t) => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "side-publication-failure-"))
+		const failure = new Error(`${boundary} failed`)
+		const rename = fs.rename
+		try {
+			// Include an existing marker and substrate artifacts in the rollback.
+			await fs.writeFile(path.join(dir, "side-results.json"), "stale")
+			t.mock.method(fs, "rename", async (...args: Parameters<typeof fs.rename>) => {
+				const target = String(args[1])
+				if (
+					(boundary === "later artifact" && target.endsWith("clamp-range-rep1/run-record.json")) ||
+					(boundary === "result write" && target === path.join(dir, "side-results.json"))
+				) {
+					await fs.access(path.join(dir, "artifacts/clamp-range-rep0/run-record.json"))
+					throw failure
+				}
+				await rename(...args)
+			})
+			await assert.rejects(
+				executeSideFlow({
+					repetitions: plan(2),
+					out: dir,
+					isInterrupted: () => false,
+					runRepetition: async (repetition) => {
+						const artifactDir = path.join(dir, "artifacts", `clamp-range-rep${repetition.repIndex}`)
+						await fs.mkdir(artifactDir, { recursive: true })
+						await fs.writeFile(path.join(artifactDir, "trace.json"), "{}")
+						return record(repetition, true)
+					},
+					buildResult: async (runs) => {
+						await fs.access(path.join(dir, "artifacts/clamp-range-rep1/run-record.json"))
+						if (boundary === "result construction") throw failure
+						return { pins: pins(), runs }
+					},
+				}),
+				(error: unknown) => error === failure,
+			)
+			assert.deepEqual(await fs.readdir(dir), [])
+		} finally {
+			t.mock.restoreAll()
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}
+
+for (const failedRemoval of ["side-results.json", "artifacts"] as const) {
+	it(`reports failed ${failedRemoval} cleanup and still attempts the other removal`, async (t) => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "side-publication-cleanup-"))
+		const remove = fs.rm
+		const failure = new Error("result construction failed")
+		const cleanupFailure = new Error("cleanup denied")
+		const lines: string[] = []
+		t.mock.method(console, "error", (line: string) => lines.push(line))
+		try {
+			await fs.writeFile(path.join(dir, "side-results.json"), "stale")
+			t.mock.method(fs, "rm", async (target: string, options: Parameters<typeof fs.rm>[1]) => {
+				if (target === path.join(dir, failedRemoval)) throw cleanupFailure
+				await remove(target, options)
+			})
+			await assert.rejects(
+				executeSideFlow({
+					repetitions: plan(1),
+					out: dir,
+					isInterrupted: () => false,
+					runRepetition: async (repetition) => record(repetition, true),
+					buildResult: () => {
+						throw failure
+					},
+				}),
+				(error: unknown) => {
+					assert.ok(error instanceof AggregateError)
+					assert.equal(error.errors[0], failure)
+					const cleanup = error.errors[1]
+					assert.ok(cleanup instanceof AggregateError)
+					assert.deepEqual(cleanup.errors, [cleanupFailure])
+					return true
+				},
+			)
+			assert.deepEqual(await fs.readdir(dir), [failedRemoval])
+			assert.deepEqual(lines, ["coding-evals publication cleanup failed: Error: cleanup denied"])
+		} finally {
+			t.mock.restoreAll()
+			await remove(dir, { recursive: true, force: true })
+		}
+	})
+}
