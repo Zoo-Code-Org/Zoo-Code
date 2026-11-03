@@ -1257,9 +1257,10 @@ describe("OpenAiNativeHandler", () => {
 					() => undefined,
 					(e: unknown) => e,
 				)
-				expect(error).not.toMatchObject({ name: "AbortError" })
-				expect(error).toMatchObject({ status: 429 })
-				expect((error as Error).message).toContain("Rate limit exceeded")
+				// The exact stream failure object must reach the caller unchanged (same
+				// reference): retry/backoff read its status, so a wrapper or clone that
+				// copies status and message would silently break them.
+				expect(error).toBe(rateLimited)
 			})
 
 			it("should not let an earlier request's external abort affect a later request on the same handler", async () => {

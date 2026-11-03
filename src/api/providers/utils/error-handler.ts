@@ -47,7 +47,9 @@ export function hasNumericHttpStatus(error: unknown): boolean {
 	if (!error || typeof error !== "object") return false
 	const candidate = error as { status?: unknown; statusCode?: unknown }
 	for (const status of [candidate.status, candidate.statusCode]) {
-		if (typeof status === "number" && Number.isFinite(status)) return true
+		// Number.isFinite does not coerce, so it already rejects every non-number;
+		// a separate typeof check would be dead weight (and an equivalent mutant).
+		if (Number.isFinite(status)) return true
 	}
 	return false
 }

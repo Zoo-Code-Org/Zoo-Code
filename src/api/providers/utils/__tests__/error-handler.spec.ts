@@ -373,6 +373,10 @@ describe("hasNumericHttpStatus", () => {
 		expect(hasNumericHttpStatus(null)).toBe(false)
 		expect(hasNumericHttpStatus("429")).toBe(false)
 		expect(hasNumericHttpStatus(429)).toBe(false)
+		// A callable is not an HTTP error carrier, even when a numeric status is
+		// attached: the object guard must reject it (kills the surviving mutant on
+		// that guard).
+		expect(hasNumericHttpStatus(Object.assign(() => undefined, { status: 429 }))).toBe(false)
 	})
 
 	it("falls through to a numeric statusCode when status is not numeric", () => {

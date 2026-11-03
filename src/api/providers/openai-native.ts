@@ -874,7 +874,6 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		const decoder = new TextDecoder()
 		let buffer = ""
 		let hasContent = false
-		let streamCompleted = false
 
 		try {
 			while (true) {
@@ -892,7 +891,6 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 				const { done, value } = await reader.read()
 				if (done) {
-					streamCompleted = true
 					break
 				}
 
@@ -1358,9 +1356,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			// terminate — an overlapping request's stream. Cancel is a no-op once the
 			// stream has already completed or failed; the guarded catch keeps this
 			// best-effort cleanup from masking the original error.
-			if (!streamCompleted) {
-				await reader.cancel().catch(() => undefined)
-			}
+			await reader.cancel().catch(() => undefined)
 			reader.releaseLock()
 		}
 	}
