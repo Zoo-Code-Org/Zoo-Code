@@ -331,6 +331,47 @@ describe("ClineProvider - Sticky Mode", () => {
 			await provider.resolveWebviewView(mockWebviewView)
 		})
 
+		it("restores the task history mode and _taskMode when the shared mode write fails", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			const mockTask = {
+				taskId: "rollback-task-id",
+				_taskMode: "code",
+				emit: vi.fn(),
+				saveClineMessages: vi.fn(),
+				clineMessages: [],
+				apiConversationHistory: [],
+				updateApiConfiguration: vi.fn(),
+			}
+
+			await provider.addClineToStack(mockTask as unknown as Task)
+			await seedTaskHistory([
+				{
+					id: mockTask.taskId,
+					ts: Date.now(),
+					task: "Test task",
+					number: 1,
+					tokensIn: 0,
+					tokensOut: 0,
+					cacheWrites: 0,
+					cacheReads: 0,
+					totalCost: 0,
+					mode: "code",
+				},
+			])
+
+			// The durable shared-mode write is the last write of the switch and it
+			// rejects: the task history entry and _taskMode already carry the new mode,
+			// so the failure has to put them back instead of leaving the task on a mode
+			// that was never persisted.
+			vi.spyOn(provider, "setValue").mockRejectedValue(new Error("durable mode write failed"))
+
+			await expect(provider.handleModeSwitch("architect")).rejects.toThrow("durable mode write failed")
+
+			expect(provider["getTaskHistoryItem"](mockTask.taskId)?.mode).toBe("code")
+			expect(mockTask._taskMode).toBe("code")
+		})
+
 		it("should save mode to task metadata when switching modes", async () => {
 			// Create a mock task
 			const mockTask = new Task({

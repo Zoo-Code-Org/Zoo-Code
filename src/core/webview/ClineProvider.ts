@@ -847,10 +847,20 @@ export class ClineProvider
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 			const states = this.getPersistedViewStates({ fresh: true })
 			delete states[viewStateId]
+			// The tombstone claims the entry is gone, so only a landed clear may leave
+			// it set: a rejected durable write leaves the entry stored, and a later
+			// activation that prunes it would skip the rollback restore for a view ID
+			// this clear did not actually remove. Drop the claim this call added.
+			const wasCleared = ClineProvider.clearedViewStateIds.has(viewStateId)
 			ClineProvider.clearedViewStateIds.add(viewStateId)
 			try {
 				await this.contextProxy.setValue("viewStates", states)
 			} catch (error) {
+				// The entry is still durable after a failed clear, so drop the
+				// tombstone this call added (one an earlier clear set stays).
+				if (!wasCleared) {
+					ClineProvider.clearedViewStateIds.delete(viewStateId)
+				}
 				// updateGlobalState applies the new map to the in-memory cache before
 				// the durable write, so a rejected write leaves the cache missing an
 				// entry that durable storage still holds. Restore the cache to the
@@ -2683,12 +2693,18 @@ export class ClineProvider
 			return
 		}
 
+		// The task-level writes below land before the durable shared-mode write, so a
+		// rejected shared write has to undo them: capture the pre-switch mode here.
+		let previousTaskMode: Mode | undefined
+
 		if (task) {
 			TelemetryService.instance.captureModeSwitch(task.taskId, newMode)
 
 			try {
 				// Update the task history with the new mode first.
 				const taskHistoryItem = this.getTaskHistoryItem(task.taskId)
+				// The history item holds the mode this switch is about to overwrite.
+				previousTaskMode = taskHistoryItem?.mode ?? task["_taskMode"]
 
 				if (taskHistoryItem) {
 					await this.updateTaskHistory({ ...taskHistoryItem, mode: newMode })
@@ -2755,6 +2771,26 @@ export class ClineProvider
 						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
 					}`,
 				)
+			}
+			// The history write and `_taskMode` landed before this durable write:
+			// restore the pre-switch mode so a rejected switch cannot leave the task
+			// and its history entry on a mode that was never persisted.
+			if (task && previousTaskMode !== undefined) {
+				try {
+					// Re-read the item so fields the running task persisted while the
+					// switch was in flight survive; only the mode is restored.
+					const latest = this.getTaskHistoryItem(task.taskId)
+					if (latest) {
+						await this.updateTaskHistory({ ...latest, mode: previousTaskMode })
+					}
+				} catch (rollbackError) {
+					this.log(
+						`[handleModeSwitch] Failed to roll back the task mode for ${task.taskId}: ${
+							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+						}`,
+					)
+				}
+				task["_taskMode"] = previousTaskMode
 			}
 			this.log(
 				`[handleModeSwitch] Failed to persist mode "${newMode}": ${error instanceof Error ? error.message : String(error)}`,
@@ -3314,11 +3350,6 @@ export class ClineProvider
 
 				if (failedActivation) throw failedActivation.reason
 
-				// Other live views may have buffered this profile's settings earlier;
-				// refresh them so their getState() cannot report the updated profile's
-				// name with stale settings.
-				await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings)
-
 				// Change the provider for the current task.
 				// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
 				this.updateTaskApiHandlerIfNeeded(normalizedSettings, { forceRebuild: true })
@@ -3342,10 +3373,25 @@ export class ClineProvider
 						this.updateTaskApiHandlerIfNeeded(normalizedSettings, { forceRebuild: true })
 					}
 				}
-				await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings)
 			}
 
 			await this.postStateToWebview()
+
+			// The compensated write group above has committed: refresh the sibling
+			// views last, so a failure in any earlier step happens while their
+			// buffers and task handlers still hold the pre-save state (there is then
+			// nothing to roll back), and a refresh failure is logged instead of
+			// failing a save whose other writes already landed.
+			try {
+				await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings)
+			} catch (refreshError) {
+				this.log(
+					`[ClineProvider] failed to refresh the sibling views pinned to '${name}': ${
+						refreshError instanceof Error ? refreshError.message : String(refreshError)
+					}`,
+				)
+			}
+
 			// The create completed: the claim is spent and later rollbacks of
 			// other creates must see this one as finished - and spare the record
 			// it saved.
@@ -3446,11 +3492,23 @@ export class ClineProvider
 				})
 				survivingSettings = settings as ProviderSettings
 			} catch (error) {
+				// Without the survivor's settings the re-point below would leave this view,
+				// and every view pinned to the deleted profile, serving the deleted
+				// profile's configuration under the survivor's name. When this deletion
+				// actually removed a stored record, fail it so the compensation restores the
+				// profile. An already-absent record is the idempotent prune path: the stale
+				// list entry must still be dropped, so that path continues and clears the
+				// deleted profile's residue from the affected views below.
 				this.log(
 					`[deleteProviderProfile] Unable to resolve API profile '${profileToActivate}': ${
 						error instanceof Error ? error.message : String(error)
 					}`,
 				)
+				if (previousRecord) {
+					throw new Error(
+						`Cannot delete profile '${profileToDelete.name}': the surviving profile '${profileToActivate}' could not be loaded`,
+					)
+				}
 			}
 
 			// Capture this view's pin before any rewrite: a view pinned to the
@@ -3485,12 +3543,13 @@ export class ClineProvider
 					// settings. A view pinned to another profile keeps its own overlay.
 					await this._saveViewLocalStateFromMutation({ apiConfiguration: survivingSettings })
 				}
+			} else if (viewWasPinnedToDeleted) {
+				// The survivor's settings could not be resolved (idempotent prune of a
+				// stale list entry): the pin was re-pointed, so this view's overlay must
+				// not keep serving the deleted profile's configuration under the
+				// survivor's name.
+				await this._saveViewLocalStateFromMutation({ apiConfiguration: undefined })
 			}
-
-			// Re-pin other live views still buffered on the deleted profile: their
-			// buffer and durable viewStates entry would otherwise keep serving the
-			// deleted profile's name and configuration.
-			await this.rePinViewLocalStateForDeletedProfile(profileToDelete.name, profileToActivate, survivingSettings)
 
 			// Closed views keep their durable viewStates entry after disposal: a pin
 			// naming the deleted profile would rehydrate a missing profile name on
@@ -3498,6 +3557,28 @@ export class ClineProvider
 			await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
 
 			await this.postStateToWebview()
+
+			// Re-pin the other live views last: doing it mid-group would leave their
+			// buffers, rebuilt task handlers, and sticky profile names on the survivor
+			// while a later step's failure rolls the stored profile back - the
+			// compensation restores the record, the metadata, the shared settings, and
+			// the durable pins, but a sibling already moved in memory would need a
+			// reload to notice. Running it after every other write has committed
+			// leaves nothing to compensate, and a failure here is logged instead of
+			// resurrecting a profile the user deleted.
+			try {
+				await this.rePinViewLocalStateForDeletedProfile(
+					profileToDelete.name,
+					profileToActivate,
+					survivingSettings,
+				)
+			} catch (repinError) {
+				this.log(
+					`[deleteProviderProfile] failed to re-pin the live views buffered on '${profileToDelete.name}': ${
+						repinError instanceof Error ? repinError.message : String(repinError)
+					}`,
+				)
+			}
 		} catch (error) {
 			// The manager delete committed but a later write failed: restore the
 			// deleted record first, then the shared metadata, selection, and shared
@@ -3509,7 +3590,10 @@ export class ClineProvider
 			// failure is what the caller sees.
 			if (previousRecord) {
 				try {
-					const { name: _previousName, id: _previousId, ...previousSettings } = previousRecord
+					// Keep the record's own id: mode mappings store the id, so restoring it
+					// under a generated id would leave the mapped mode pointing at a profile
+					// that no longer exists.
+					const { name: _previousName, ...previousSettings } = previousRecord
 					await this.providerSettingsManager.saveConfig(profileToDelete.name, previousSettings)
 				} catch (restoreError) {
 					this.log(
@@ -3691,11 +3775,6 @@ export class ClineProvider
 				await this._restoreProfileActivationState(activationSnapshot)
 				throw error
 			}
-
-			// Other live views may have buffered this profile's settings earlier;
-			// refresh them so their getState() cannot report the activated profile's
-			// name with stale settings.
-			await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
 		}
 
 		const { mode } = await this.getState()
@@ -3727,6 +3806,22 @@ export class ClineProvider
 
 		if (providerSettings.apiProvider && !skipCurrentTaskRebuild) {
 			this.emit(RooCodeEventName.ProviderProfileChanged, { name, provider: providerSettings.apiProvider })
+		}
+
+		// The write group above has committed: refresh the sibling views last, so a
+		// failure in any earlier step happens while their buffers and task handlers
+		// still hold the pre-activation state (nothing to roll back), and a refresh
+		// failure is logged instead of failing an activation whose other writes landed.
+		if (!skipCurrentTaskRebuild) {
+			try {
+				await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
+			} catch (refreshError) {
+				this.log(
+					`[ClineProvider] failed to refresh the sibling views pinned to '${name}': ${
+						refreshError instanceof Error ? refreshError.message : String(refreshError)
+					}`,
+				)
+			}
 		}
 	}
 
@@ -3796,9 +3891,11 @@ export class ClineProvider
 					currentApiConfigName: replacementName,
 				}
 
-				if (replacementSettings) {
-					values.apiConfiguration = replacementSettings
-				}
+				// Assign the overlay explicitly (even undefined) so it is replaced or
+				// cleared: without the replacement's settings the re-pinned view must fall
+				// back to the shared state instead of serving the deleted profile's
+				// configuration under the survivor's name.
+				values.apiConfiguration = replacementSettings
 
 				// Direct private access: compile-time safe across sibling instances.
 				await instance._saveViewLocalStateFromMutation(values)

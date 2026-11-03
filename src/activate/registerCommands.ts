@@ -63,6 +63,24 @@ export function __getLiveTabPanelCountForTests(): number {
 // two tab panels.
 let pendingTabPanelCreation: Promise<ClineProvider> | undefined
 
+// Tab panels whose editor group is known to be locked. A first lock can
+// reject (the command is not guaranteed to run) while the panel and its
+// provider stay registered, and a retry then takes the reuse branch below -
+// so the reuse path has to re-issue the lock it never got.
+const lockedTabGroups = new WeakSet<vscode.WebviewPanel>()
+
+/**
+ * Lock the editor group hosting `panel` so clicking on files does not open
+ * them over the panel, and remember that the lock landed. A freshly created
+ * group has to settle first: locking in the same tick as the panel creation
+ * targets the group the panel is leaving.
+ */
+const lockTabEditorGroup = async (panel: vscode.WebviewPanel): Promise<void> => {
+	await delay(100)
+	await vscode.commands.executeCommand("workbench.action.lockEditorGroup")
+	lockedTabGroups.add(panel)
+}
+
 /**
  * Get the currently active panel.
  *
@@ -368,6 +386,12 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 		const existingProvider = ClineProvider.getInstanceForView(tabPanel)
 		if (existingProvider) {
 			await tabPanel.reveal()
+			// A first lock that rejected left this panel tracked with its editor
+			// group unlocked; returning here without retrying it would leave files
+			// opening over the panel for the rest of the session.
+			if (!lockedTabGroups.has(tabPanel)) {
+				await lockTabEditorGroup(tabPanel)
+			}
 			await existingProvider.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
 			return existingProvider
 		}
@@ -419,6 +443,11 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 	setPanel(newPanel, "tab")
 	liveTabPanels.add(newPanel)
 
+	// A close that lands while the provider is still initializing makes
+	// resolveWebviewView return without an error (the provider treats a disposed
+	// view as a stale resolve), so the open has to notice it on its own.
+	let closedBeforeInitialized = false
+
 	// TODO: Use better svg icon with light and dark variants (see
 	// https://stackoverflow.com/questions/58365687/vscode-extension-iconpath).
 	newPanel.iconPath = {
@@ -454,6 +483,7 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 	// panel cannot clobber the replacement's ref.
 	newPanel.onDidDispose(
 		() => {
+			closedBeforeInitialized = true
 			liveTabPanels.delete(newPanel)
 			if (tabPanel === newPanel) {
 				// Re-point the tracked ref at the best remaining live tab: an active
@@ -476,6 +506,13 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 
 	try {
 		await tabProvider.resolveWebviewView(newPanel)
+
+		// The panel was closed while the provider initialized: resolveWebviewView
+		// returned without an error, and handing the disposed provider back would
+		// let the caller (API.startNewTask) build a task on a dead surface.
+		if (closedBeforeInitialized) {
+			throw new Error("The Zoo Code editor tab was closed while it was initializing.")
+		}
 	} catch (error) {
 		// Initialization failed: drop the half-registered panel from the live
 		// registry and dispose the provider so the failed surface leaves no
@@ -502,8 +539,7 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 	}
 
 	// Lock the editor group so clicking on files doesn't open them over the panel.
-	await delay(100)
-	await vscode.commands.executeCommand("workbench.action.lockEditorGroup")
+	await lockTabEditorGroup(newPanel)
 
 	return tabProvider
 }

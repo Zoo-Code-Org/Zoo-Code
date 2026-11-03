@@ -771,6 +771,85 @@ describe("openClineInNewTab", () => {
 		})
 	})
 
+	it("re-runs the editor group lock when the first attempt failed", async () => {
+		const mockExistingProvider = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
+		const panel = Object.assign({} as vscode.WebviewPanel, {
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+			reveal: vi.fn().mockResolvedValue(undefined),
+		})
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValue(panel)
+		// The lock rejects after the panel was created and tracked: the panel and its
+		// provider stay registered, so the next open takes the reuse path and has to
+		// re-issue the lock it never got.
+		const executeCommand = vi.mocked(vscode.commands.executeCommand)
+		executeCommand.mockImplementation(async (command: string) => {
+			if (command === "workbench.action.lockEditorGroup") {
+				throw new Error("lock failed")
+			}
+			return undefined
+		})
+
+		await expect(
+			openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			}),
+		).rejects.toThrow("lock failed")
+		expect(getPanel()).toBe(panel)
+
+		executeCommand.mockImplementation(async () => undefined)
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(mockExistingProvider)
+		const result = await openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		})
+
+		expect(result).toBe(mockExistingProvider)
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
+		expect(
+			executeCommand.mock.calls.filter(([command]) => command === "workbench.action.lockEditorGroup"),
+		).toHaveLength(2)
+
+		executeCommand.mockReset()
+	})
+
+	it("fails the open when the panel closes while the provider is initializing", async () => {
+		let disposeHandler: (() => void) | undefined
+		const panel = Object.assign({} as vscode.WebviewPanel, {
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn((handler: () => void) => {
+				disposeHandler = handler
+			}),
+			dispose: vi.fn(() => disposeHandler?.()),
+		})
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValue(panel)
+		// A close that lands while the provider is generating HTML makes its
+		// resolveWebviewView return without an error (a disposed view is a stale
+		// resolve), so the open must detect the close itself instead of handing the
+		// disposed provider back to API.startNewTask.
+		const resolveSpy = vi.spyOn(ClineProvider.prototype, "resolveWebviewView").mockImplementation(async () => {
+			disposeHandler?.()
+		})
+		const disposeSpy = vi.spyOn(ClineProvider.prototype, "dispose").mockResolvedValue(undefined)
+
+		await expect(
+			openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			}),
+		).rejects.toThrow("The Zoo Code editor tab was closed while it was initializing.")
+		expect(disposeSpy).toHaveBeenCalledTimes(1)
+
+		resolveSpy.mockRestore()
+		disposeSpy.mockRestore()
+	})
+
 	it("creates a new tab panel when the tracked tab's provider has been disposed", async () => {
 		const mockPanel = Object.assign({} as vscode.WebviewPanel, {
 			webview: { postMessage: vi.fn() },
