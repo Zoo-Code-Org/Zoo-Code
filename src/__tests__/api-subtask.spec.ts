@@ -31,7 +31,6 @@ vi.mock("@roo-code/ipc", () => ({
 vi.mock("../services/command/commands", () => ({ getCommands: vi.fn().mockResolvedValue([]) }))
 
 import { API } from "../extension/api"
-import { makeClineProviderFactory } from "../test-utils/provider"
 
 function makeProviderMock() {
 	const emitter = new EventEmitter()
@@ -67,7 +66,7 @@ describe("API.clearCurrentTask()", () => {
 		vi.clearAllMocks()
 		provider = makeProviderMock()
 		// Double provides event methods, context, task access, eviction, abandonment, and webview posting.
-		api = new API({} as OutputChannel, provider as unknown as ClineProvider, makeClineProviderFactory())
+		api = new API({} as OutputChannel, provider as unknown as ClineProvider)
 	})
 
 	it("calls evictCurrentTask then postStateToWebview on sidebarProvider", async () => {
@@ -89,7 +88,7 @@ describe("API.abandonSubtask()", () => {
 		vi.clearAllMocks()
 		provider = makeProviderMock()
 		// Double provides event methods, context, task access, eviction, abandonment, and webview posting.
-		api = new API({} as OutputChannel, provider as unknown as ClineProvider, makeClineProviderFactory())
+		api = new API({} as OutputChannel, provider as unknown as ClineProvider)
 	})
 
 	it("delegates to sidebarProvider.abandonSubtask and returns its result", async () => {
