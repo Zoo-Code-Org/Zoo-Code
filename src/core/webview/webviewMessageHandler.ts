@@ -2256,6 +2256,7 @@ export const webviewMessageHandler = async (
 						includeTaskHistoryInEnhance,
 						currentClineMessages: currentCline?.clineMessages,
 						providerSettingsManager: provider.providerSettingsManager,
+						taskId: currentCline?.taskId,
 					})
 
 					if (result.success && result.enhancedText) {
