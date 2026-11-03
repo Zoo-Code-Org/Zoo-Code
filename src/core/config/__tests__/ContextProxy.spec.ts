@@ -298,6 +298,36 @@ describe("ContextProxy", () => {
 
 			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
 		})
+
+		it("repairs the cache when an older write lands after a newer one failed", async () => {
+			await proxy.updateGlobalState("apiProvider", "deepseek")
+
+			let settleFirst: (value: undefined) => void = () => {}
+			let failSecond: (error: Error) => void = () => {}
+			mockGlobalState.update.mockImplementationOnce(() => new Promise((resolve) => (settleFirst = resolve)))
+			const first = proxy.updateGlobalState("apiProvider", "openai")
+
+			mockGlobalState.update.mockImplementationOnce(
+				() => new Promise((_resolve, reject) => (failSecond = reject)),
+			)
+			const second = proxy.updateGlobalState("apiProvider", "anthropic")
+
+			// The newer write fails while the older one is still in flight, so for a moment
+			// the cache holds only the failed write's value.
+			failSecond(new Error("globalState write failed"))
+			await expect(second).rejects.toThrow("globalState write failed")
+
+			// The older write lands afterwards, so it is what storage holds and what the
+			// cache has to report once nothing is in flight.
+			settleFirst(undefined)
+			await first
+
+			expect(proxy.getGlobalState("apiProvider")).toBe("openai")
+			// `getValues()` is the mirror `export()` and `getState()` read from;
+			// `export()` itself runs it through `globalSettingsExportSchema`, which
+			// deliberately leaves provider settings such as `apiProvider` out.
+			expect(proxy.getValues().apiProvider).toBe("openai")
+		})
 	})
 
 	describe("getSecret", () => {
@@ -579,6 +609,26 @@ describe("ContextProxy", () => {
 
 			// Should reinitialize caches
 			expect(initializeSpy).toHaveBeenCalledTimes(1)
+		})
+
+		it("forgets what it had persisted, so a write rejected after a reset leaves the key unset", async () => {
+			await proxy.updateGlobalState("lastSettingsExportPath", "/usb/zoo-code-settings.json")
+			expect(proxy.getGlobalState("lastSettingsExportPath")).toBe("/usb/zoo-code-settings.json")
+
+			await proxy.resetAllState()
+
+			// The reset wrote every key, this one included, and cleared the write bookkeeping
+			// with the caches, so a rejection afterwards has no pre-reset value to fall back to.
+			expect(mockGlobalState.update).toHaveBeenCalledWith("lastSettingsExportPath", undefined)
+			expect(proxy.getGlobalState("lastSettingsExportPath")).toBeUndefined()
+
+			mockGlobalState.update.mockRejectedValueOnce(new Error("globalState write failed"))
+
+			await expect(proxy.updateGlobalState("lastSettingsExportPath", "/c/other.json")).rejects.toThrow(
+				"globalState write failed",
+			)
+
+			expect(proxy.getGlobalState("lastSettingsExportPath")).toBeUndefined()
 		})
 	})
 

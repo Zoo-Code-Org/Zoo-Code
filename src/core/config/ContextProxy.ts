@@ -43,12 +43,14 @@ export class ContextProxy {
 
 	private stateCache: GlobalState
 	private secretCache: SecretState
-	// `Memento.update` batches: two writes to the same key issued before the scheduled
-	// flush share one pending promise, so a rejected batch rejects both callers at once.
-	// Each write is numbered per key and the newest value that actually persisted is
-	// remembered, so only the newest write may roll the cache back, and it rolls back
-	// to something that is really on disk.
-	private readonly writeSequences = new Map<GlobalStateKey, number>()
+	// Writes to one key can settle out of order, and `Memento.update` batches: writes
+	// issued before a scheduled flush share one pending promise, so a rejected batch
+	// rejects every caller in that batch at once. Per key this tracks how many writes
+	// are still in flight and the newest value that actually persisted. While a write
+	// is in flight the cache optimistically holds the value that was asked for; once
+	// nothing is in flight the cache must equal what storage holds - which is the last
+	// write that landed, not necessarily the last one issued.
+	private readonly outstandingWrites = new Map<GlobalStateKey, number>()
 	private readonly persistedValues = new Map<GlobalStateKey, GlobalState[GlobalStateKey]>()
 	private _isInitialized = false
 
@@ -372,30 +374,50 @@ export class ContextProxy {
 			return this.originalContext.globalState.update(key, value)
 		}
 
-		const sequence = (this.writeSequences.get(key) ?? 0) + 1
-		this.writeSequences.set(key, sequence)
+		this.outstandingWrites.set(key, (this.outstandingWrites.get(key) ?? 0) + 1)
 		if (!this.persistedValues.has(key)) {
+			// First write of this key in the session: what the cache holds now came from
+			// storage, so it is the value a rejection has to fall back to.
 			this.persistedValues.set(key, this.stateCache[key])
 		}
 
 		// The cache is globalState's in-memory mirror, so a value that never reached
-		// disk must not stay in the mirror: readers would report a setting that the
-		// next restart will not reproduce. Roll the key back to what is on disk and
-		// let the rejection reach the caller. Memento.update is only specified as a
-		// Thenable, so its result is normalized before handlers are hung off it.
+		// disk must not stay in the mirror once the write is settled: readers would
+		// report a setting that the next restart will not reproduce. Memento.update is
+		// only specified as a Thenable, so its result is normalized before handlers are
+		// hung off it.
 		this.stateCache[key] = value
 		const update = Promise.resolve(this.originalContext.globalState.update(key, value))
+
+		// Whether this write is the last one still in flight for the key. Writes for the
+		// same key settle independently, so only the last one standing may decide what
+		// the cache holds; the others leave it to the newer write that is still running.
+		const isLastWriteStanding = () => {
+			const remaining = (this.outstandingWrites.get(key) ?? 1) - 1
+			if (remaining > 0) {
+				this.outstandingWrites.set(key, remaining)
+			} else {
+				this.outstandingWrites.delete(key)
+			}
+			return remaining === 0
+		}
 
 		return update.then(
 			() => {
 				this.persistedValues.set(key, value)
+
+				// Storage holds this value now. When a newer write for the same key has
+				// already failed, this landing is what storage actually holds, so the
+				// mirror has to follow it instead of keeping the failed write's value.
+				if (isLastWriteStanding()) {
+					this.stateCache[key] = value
+				}
 			},
 			(error) => {
-				// A batch also rejects writes that have since been superseded; only the
-				// newest write for the key may touch the cache, and only back to a value
-				// that persisted. The map spans every key, so its value is the union over
-				// all keys - this write's key is the one being restored.
-				if (this.writeSequences.get(key) === sequence) {
+				// Fall back to the newest value that actually persisted. The map spans
+				// every key, so its value is the union over all keys - this write's key is
+				// the one being restored.
+				if (isLastWriteStanding()) {
 					this.stateCache[key] = this.persistedValues.get(key) as GlobalState[K]
 				}
 				throw error
@@ -626,7 +648,7 @@ export class ContextProxy {
 		this.secretCache = {}
 		// Nothing is persisted after a reset, so the write bookkeeping must not
 		// remember values that storage no longer holds.
-		this.writeSequences.clear()
+		this.outstandingWrites.clear()
 		this.persistedValues.clear()
 
 		await Promise.all([
