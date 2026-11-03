@@ -364,7 +364,10 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 			// full-file replacement cannot be built from a clipped line.
 			output = `IMPORTANT: Some lines exceed ${MAX_LINE_LENGTH} characters and were clipped in this view. The file was read in full, but the clipped lines were not shown in full.
 				${result.content}`
-		} else if (result.returnedLines === 0) {
+		} else if (result.returnedLines === 0 && result.totalLines === 0) {
+			// Only a truly empty file is reported as empty. A slice that starts past the last line
+			// returns the producer's beyond-EOF text (src/integrations/misc/indentation-reader.ts),
+			// which must reach the model instead of being replaced by an empty-file note.
 			output = "Note: File is empty"
 		}
 
