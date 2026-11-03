@@ -90,6 +90,50 @@ describe("ProviderSettingsManager", () => {
 	})
 
 	describe("initialize", () => {
+		it("serializes critical sections across managers bound to the same secrets key", async () => {
+			const first = new ProviderSettingsManager(mockContext)
+			const second = new ProviderSettingsManager(mockContext)
+			const events: string[] = []
+			let releaseFirst: () => void = () => {}
+			const firstGate = new Promise<void>((resolve) => {
+				releaseFirst = resolve
+			})
+
+			const firstRun = first.runExclusiveAcrossInstances(async () => {
+				events.push("first:enter")
+				await firstGate
+				events.push("first:exit")
+			})
+			// Let the first critical section start before the second one is queued.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			const secondRun = second.runExclusiveAcrossInstances(async () => {
+				events.push("second:enter")
+			})
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			// The sidebar and each editor tab own a manager over the same
+			// context.secrets: without a lock shared by those instances the second
+			// critical section starts while the first is still inside it.
+			expect(events).toEqual(["first:enter"])
+
+			releaseFirst()
+			await Promise.all([firstRun, secondRun])
+			expect(events).toEqual(["first:enter", "first:exit", "second:enter"])
+		})
+
+		it("keeps the shared critical section usable after a rejection", async () => {
+			const first = new ProviderSettingsManager(mockContext)
+			const second = new ProviderSettingsManager(mockContext)
+
+			await expect(
+				first.runExclusiveAcrossInstances(async () => {
+					throw new Error("boom")
+				}),
+			).rejects.toThrow("boom")
+
+			await expect(second.runExclusiveAcrossInstances(async () => "ok")).resolves.toBe("ok")
+		})
+
 		it("should not write to storage when secrets.get returns null", async () => {
 			// Mock readConfig to return null
 			mockSecrets.get.mockResolvedValueOnce(null)

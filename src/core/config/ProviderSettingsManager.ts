@@ -112,6 +112,36 @@ export class ProviderSettingsManager {
 		return next
 	}
 
+	// Lock shared by every manager bound to the same secrets key. The sidebar and
+	// each editor tab construct their own `ProviderSettingsManager` over the same
+	// `context.secrets`, so the per-instance `_lock` above cannot serialize a
+	// check-then-write pair issued through two instances: a same-name create from
+	// the other view fits between `hasConfig` and `saveConfig`.
+	private static sharedLocks = new Map<string, Promise<void>>()
+
+	/**
+	 * Run `cb` inside the critical section shared by every manager using this
+	 * instance's secrets key, so a check-then-write pair - and the compensation
+	 * that undoes it - cannot interleave with another view's. The per-instance
+	 * lock still guards each individual read/write; this outer lock is taken
+	 * first and released last, so the two cannot deadlock.
+	 */
+	public runExclusiveAcrossInstances<T>(cb: () => Promise<T>): Promise<T> {
+		const key = this.secretsKey
+		const previous = ProviderSettingsManager.sharedLocks.get(key) ?? Promise.resolve()
+		const run = previous.then(cb)
+		// Store a settled-clean owner so one failed critical section cannot poison
+		// the queue for the next caller.
+		ProviderSettingsManager.sharedLocks.set(
+			key,
+			run.then(
+				() => {},
+				() => {},
+			),
+		)
+		return run
+	}
+
 	/**
 	 * Initialize config if it doesn't exist and run migrations.
 	 */

@@ -2794,6 +2794,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 			saveConfig: ReturnType<typeof vi.fn>
 			deleteConfig: ReturnType<typeof vi.fn>
 			hasConfig: ReturnType<typeof vi.fn>
+			runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => Promise<unknown>
 		}
 		repointViewLocalStateAfterProfileRename: ReturnType<typeof vi.fn>
 		activateProviderProfile: ReturnType<typeof vi.fn>
@@ -2816,9 +2817,59 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		vi.clearAllMocks()
 	})
 
+	// The rename runs its name check, save, and compensation inside the manager's
+	// cross-instance critical section; this double runs the callback inline.
+	const runExclusiveAcrossInstances = (cb: () => Promise<unknown>) => cb()
+
+	it("runs the name check, the save, and the compensation inside the shared critical section", async () => {
+		const events: string[] = []
+		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances: async (cb: () => Promise<unknown>) => {
+				events.push("enter")
+				try {
+					return await cb()
+				} finally {
+					events.push("exit")
+				}
+			},
+			hasConfig: vi.fn(async () => {
+				events.push("hasConfig")
+				return false
+			}),
+			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
+			saveConfig: vi.fn(async () => {
+				events.push("saveConfig")
+			}),
+			deleteConfig: vi.fn(async () => {
+				events.push("deleteConfig")
+			}),
+		}
+		provider.repointViewLocalStateAfterProfileRename = vi.fn().mockResolvedValue(undefined)
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// Separate locked calls let another view's same-name create fit between the
+		// existence check and the save, and the rollback then deletes that view's
+		// record: the check, the save, and the compensation share one section.
+		expect(events[0]).toBe("enter")
+		expect(events.filter((event) => event === "enter")).toHaveLength(1)
+		expect(events).toContain("hasConfig")
+		expect(events).toContain("saveConfig")
+		expect(events).toContain("deleteConfig")
+		// The activation that follows takes the provider's mutation queue, not the
+		// manager lock, so it runs after the critical section closed.
+		expect(events.at(-1)).toBe("exit")
+	})
+
 	it("re-points views pinned to the old name before the old name is deleted", async () => {
 		const order: string[] = []
 		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances,
 			hasConfig: vi.fn().mockResolvedValue(false),
 			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
 			saveConfig: vi.fn().mockResolvedValue(undefined),
@@ -2849,6 +2900,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 
 	it("rolls the new profile back when the re-point fails", async () => {
 		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances,
 			hasConfig: vi.fn().mockResolvedValue(false),
 			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
 			saveConfig: vi.fn().mockResolvedValue(undefined),
@@ -2881,6 +2933,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 
 	it("restores the old pin and removes the new profile when the deletion fails", async () => {
 		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances,
 			hasConfig: vi.fn().mockResolvedValue(false),
 			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
 			saveConfig: vi.fn().mockResolvedValue(undefined),
@@ -2913,6 +2966,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 
 	it("re-points views with the stored record instead of the raw webview payload", async () => {
 		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances,
 			hasConfig: vi.fn().mockResolvedValue(false),
 			getProfile: vi.fn().mockResolvedValueOnce({ id: "profile-id" }).mockResolvedValueOnce({
 				id: "profile-id",
@@ -2943,6 +2997,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 
 	it("rejects a rename onto an existing profile without saving", async () => {
 		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances,
 			hasConfig: vi.fn().mockResolvedValue(true),
 			getProfile: vi.fn().mockResolvedValue({ id: "profile-id" }),
 			saveConfig: vi.fn().mockResolvedValue(undefined),
@@ -2968,6 +3023,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 
 	it("removes the new profile when the normalized read-back fails", async () => {
 		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances,
 			hasConfig: vi.fn().mockResolvedValue(false),
 			getProfile: vi
 				.fn()
@@ -2997,6 +3053,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 
 	it("restores the previously stored settings when the deletion fails", async () => {
 		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances,
 			hasConfig: vi.fn().mockResolvedValue(false),
 			getProfile: vi
 				.fn()
@@ -3038,6 +3095,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 
 	it("logs a failed rename compensation", async () => {
 		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances,
 			hasConfig: vi.fn().mockResolvedValue(false),
 			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
 			saveConfig: vi.fn().mockResolvedValue(undefined),
