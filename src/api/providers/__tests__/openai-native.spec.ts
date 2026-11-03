@@ -1882,6 +1882,22 @@ describe("OpenAiNativeHandler", () => {
 			expect(requestSignal?.aborted).toBe(true)
 		})
 
+		it("completePrompt should report a deadline as TimeoutError rather than AbortError", async () => {
+			// The locked SDK surfaces its own abort error once the request signal aborts; a deadline that
+			// fired must not be reported as a caller stop.
+			mockResponsesCreate.mockImplementationOnce(async (_body: unknown, options: { signal?: AbortSignal }) => {
+				await new Promise<void>((resolve) => {
+					options.signal?.addEventListener("abort", () => resolve(), { once: true })
+				})
+				const abortLike = new Error("Request was aborted.")
+				abortLike.name = "APIUserAbortError"
+				throw abortLike
+			})
+
+			await expect(handler.completePrompt("Test prompt", { timeoutMs: 50 })).rejects.toMatchObject({
+				name: "TimeoutError",
+			})
+		})
 		it("completePrompt should merge the external signal and timeoutMs together", async () => {
 			const controller = new AbortController()
 			mockResponsesCreate.mockResolvedValue({
