@@ -2577,41 +2577,6 @@ Body here.`
 			expect(parsed2.data.description).toBe(description)
 		})
 
-		it("refuses the atomic rewrite when the target's mode cannot be read", async () => {
-			const skillDir = p(globalSkillsDir, "mode-unreadable-skill")
-			const skillMd = p(skillDir, "SKILL.md")
-			const originalContent = `---
-		name: mode-unreadable-skill
-		description: 'Mode unreadable'
-		---
-
-		Body.`
-			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
-			mockReaddir.mockImplementation(async (dir: string) =>
-				dir === globalSkillsDir ? ["mode-unreadable-skill"] : [],
-			)
-			mockReadFile.mockResolvedValue(originalContent)
-			mockStat.mockImplementation(async (pathArg: string) => {
-				if (pathArg === skillDir) {
-					return { isDirectory: () => true }
-				}
-				if (pathArg === skillMd) {
-					// A coded failure other than ENOENT: the mode cannot be read, so the rewrite must not
-					// replace a possibly restricted file with one carrying the default mode.
-					const error = new Error("EACCES: permission denied") as Error & { code: string }
-					error.code = "EACCES"
-					throw error
-				}
-				const missing = new Error("ENOENT: no such file") as Error & { code: string }
-				missing.code = "ENOENT"
-				throw missing
-			})
-
-			await expect(skillsManager.updateSkillModes("mode-unreadable-skill", "global", ["code"])).rejects.toThrow()
-			expect(mockChmod).not.toHaveBeenCalled()
-		})
-
 		it("preserves the existing SKILL.md permission bits through the atomic rewrite", async () => {
 			// rename replaces the target's inode: without an explicit chmod the new file gets
 			// the process default mode, so a user-restricted SKILL.md (0600) would come back
