@@ -17,6 +17,15 @@ export interface ExportOptions {
 	 * Fallback directory if no previous path or workspace is available.
 	 */
 	fallbackDir?: string
+	/**
+	 * The permission the remembered directory must still have to be used as the dialog
+	 * default, as an `fs/promises` access constant. A save target has to be writable
+	 * (`constants.W_OK`); an open dialog only has to be readable (`constants.R_OK`),
+	 * otherwise a read-only folder that actually holds the file would be skipped in
+	 * favour of the fallback directory.
+	 * Default: constants.W_OK
+	 */
+	accessMode?: number
 }
 
 /**
@@ -29,15 +38,15 @@ export interface ExportOptions {
  * somewhere the user never selected. Validating the directory first lets the
  * resolver fall through to the documented priorities instead.
  */
-async function isUsableSaveDirectory(dirPath: string): Promise<boolean> {
+async function isUsableSaveDirectory(dirPath: string, accessMode: number): Promise<boolean> {
 	try {
 		const stats = await stat(dirPath)
 		if (!stats.isDirectory()) {
 			return false
 		}
-		// W_OK is the property that matters: a readable-but-read-only volume cannot
-		// receive the export either.
-		await access(dirPath, constants.W_OK)
+		// The access mode is the property that matters: a readable-but-read-only volume
+		// cannot receive an export, while an open dialog only reads from it.
+		await access(dirPath, accessMode)
 		return true
 	} catch {
 		return false
@@ -47,7 +56,8 @@ async function isUsableSaveDirectory(dirPath: string): Promise<boolean> {
 /**
  * Resolves the default save URI for an export operation.
  * Priorities:
- * 1. Last used export path, if that directory still exists and is writable
+ * 1. Last used export path, if that directory still exists and still has the
+ *    access the caller needs (writable for a save, readable for an open)
  * 2. Active workspace folder (if useWorkspace is true)
  * 3. Fallback directory (e.g. Downloads or Documents)
  * 4. Default to just the filename (user's home/cwd)
@@ -58,14 +68,14 @@ export async function resolveDefaultSaveUri(
 	fileName: string,
 	options: ExportOptions = {},
 ): Promise<vscode.Uri> {
-	const { useWorkspace = true, fallbackDir } = options
+	const { useWorkspace = true, fallbackDir, accessMode = constants.W_OK } = options
 	const lastExportPath = context.getValue(configKey) as string | undefined
 
 	if (lastExportPath) {
 		// Use the directory from the last export, but only while it is still a
-		// directory we can actually write to.
+		// directory we can actually reach with the access this operation needs.
 		const lastDir = path.dirname(lastExportPath)
-		if (await isUsableSaveDirectory(lastDir)) {
+		if (await isUsableSaveDirectory(lastDir, accessMode)) {
 			return vscode.Uri.file(path.join(lastDir, fileName))
 		}
 	}

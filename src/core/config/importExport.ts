@@ -270,10 +270,13 @@ export async function importSettingsFromPath(
  * @returns Promise resolving to import result
  */
 export const importSettings = async ({ providerSettingsManager, contextProxy, customModesManager }: ImportOptions) => {
-	// Use the last export path as a sensible default, falling back to Downloads
+	// Use the last export path as a sensible default, falling back to Downloads.
+	// An open dialog only reads from that folder, so requiring write access here
+	// would drop a read-only folder that does hold the settings file.
 	const defaultUri = await resolveDefaultSaveUri(contextProxy, "lastSettingsExportPath", "zoo-code-settings.json", {
 		useWorkspace: false,
 		fallbackDir: path.join(os.homedir(), "Downloads"),
+		accessMode: fs.constants.R_OK,
 	})
 
 	const uris = await vscode.window.showOpenDialog({
@@ -355,10 +358,18 @@ export const exportSettings = async ({ providerSettingsManager, contextProxy }: 
 		return
 	}
 
-	// Remember only a location that actually received the file, so a failed
-	// export cannot steer the next dialog either.
-	await saveLastExportPath(contextProxy, "lastSettingsExportPath", uri)
+	// The file is on disk: confirm it before anything that can still fail.
 	await vscode.window.showInformationMessage(t("common:info.settings_exported", { path: uri.fsPath }))
+
+	// Remember only a location that actually received the file, so a failed export
+	// cannot steer the next dialog either. Failing to remember is not a failed
+	// export, so it must not swallow the confirmation above or escape into the
+	// unawaited message handler.
+	try {
+		await saveLastExportPath(contextProxy, "lastSettingsExportPath", uri)
+	} catch (e) {
+		console.error("Failed to remember the export location:", e)
+	}
 }
 
 /**

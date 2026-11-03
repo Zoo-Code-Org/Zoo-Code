@@ -294,7 +294,48 @@ describe("importExport", () => {
 				customModesManager: mockCustomModesManager,
 			})
 
-			expect(vscode.Uri.file).toHaveBeenCalledWith(path.join("/usb", "zoo-code-settings.json"))
+			// Assert the dialog argument, not just that a URI was built: the remembered
+			// location is only fixed if the dialog is actually opened there.
+			expect(vscode.window.showOpenDialog).not.toHaveBeenCalledWith(
+				expect.objectContaining({
+					defaultUri: expect.objectContaining({
+						fsPath: path.join("/mock/home", "Downloads", "zoo-code-settings.json"),
+					}),
+				}),
+			)
+			expect(vscode.window.showOpenDialog).toHaveBeenCalledWith(
+				expect.objectContaining({
+					defaultUri: expect.objectContaining({ fsPath: path.join("/usb", "zoo-code-settings.json") }),
+				}),
+			)
+		})
+
+		it("should default the import dialog to a remembered directory that is readable but read-only", async () => {
+			const remembered = path.join("/usb", "zoo-code-settings.json")
+			mockContextProxy.getValue.mockImplementation((key: string) =>
+				key === "lastSettingsExportPath" ? remembered : undefined,
+			)
+			// A read-only volume: write access fails, read access succeeds. An open
+			// dialog only reads, so this folder must stay the default.
+			fsMocks.access.mockImplementation((_dir: string, mode: number) =>
+				mode === fsMocks.constants.W_OK
+					? Promise.reject(Object.assign(new Error("EACCES"), { code: "EACCES" }))
+					: Promise.resolve(),
+			)
+			;(vscode.window.showOpenDialog as Mock).mockResolvedValue(undefined)
+
+			await importSettings({
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: mockContextProxy,
+				customModesManager: mockCustomModesManager,
+			})
+
+			expect(fs.access).toHaveBeenCalledWith(path.dirname(remembered), fsMocks.constants.R_OK)
+			expect(vscode.window.showOpenDialog).toHaveBeenCalledWith(
+				expect.objectContaining({
+					defaultUri: expect.objectContaining({ fsPath: path.join("/usb", "zoo-code-settings.json") }),
+				}),
+			)
 		})
 
 		it("should not default the import dialog to a remembered directory that no longer exists", async () => {
@@ -311,10 +352,20 @@ describe("importExport", () => {
 				customModesManager: mockCustomModesManager,
 			})
 
-			expect(vscode.Uri.file).not.toHaveBeenCalledWith(
-				path.join(path.dirname(staleRemembered), "zoo-code-settings.json"),
+			expect(vscode.window.showOpenDialog).not.toHaveBeenCalledWith(
+				expect.objectContaining({
+					defaultUri: expect.objectContaining({
+						fsPath: path.join(path.dirname(staleRemembered), "zoo-code-settings.json"),
+					}),
+				}),
 			)
-			expect(vscode.Uri.file).toHaveBeenCalledWith(path.join("/mock/home", "Downloads", "zoo-code-settings.json"))
+			expect(vscode.window.showOpenDialog).toHaveBeenCalledWith(
+				expect.objectContaining({
+					defaultUri: expect.objectContaining({
+						fsPath: path.join("/mock/home", "Downloads", "zoo-code-settings.json"),
+					}),
+				}),
+			)
 		})
 
 		it("should import settings successfully from a valid file", async () => {
@@ -1790,6 +1841,32 @@ describe("importExport", () => {
 			)
 		})
 
+		it("should still confirm the export when the location cannot be remembered", async () => {
+			;(fs.mkdir as Mock).mockResolvedValue(undefined)
+			;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
+				fsPath: "/usb/zoo-code-settings.json",
+			})
+			mockProviderSettingsManager.export.mockResolvedValue({
+				currentApiConfigName: "test",
+				apiConfigs: { test: { apiProvider: providerIdentifiers.openai, id: "test-id" } },
+				migrations: { rateLimitSecondsMigrated: false },
+			})
+			mockContextProxy.export.mockResolvedValue({ mode: "code" })
+			// The file is on disk; only the remembered location fails. That must not
+			// swallow the confirmation the user just earned.
+			mockContextProxy.setValue.mockRejectedValueOnce(new Error("storage unavailable"))
+
+			await exportSettings({
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: mockContextProxy,
+			})
+
+			expect(safeWriteJson).toHaveBeenCalledWith("/usb/zoo-code-settings.json", expect.anything())
+			expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+				expect.stringContaining("info.settings_exported"),
+			)
+		})
+
 		it("should not default the dialog to a remembered directory that no longer exists", async () => {
 			const staleRemembered = path.join("Z:\\gone", "zoo-code-settings.json")
 			mockContextProxy.getValue.mockImplementation((key: string) =>
@@ -1805,10 +1882,20 @@ describe("importExport", () => {
 
 			// Falling through to the documented fallback beats handing a dead path to
 			// the platform dialog, which silently lands the file in a default folder.
-			expect(vscode.Uri.file).not.toHaveBeenCalledWith(
-				path.join(path.dirname(staleRemembered), "zoo-code-settings.json"),
+			expect(vscode.window.showSaveDialog).not.toHaveBeenCalledWith(
+				expect.objectContaining({
+					defaultUri: expect.objectContaining({
+						fsPath: path.join(path.dirname(staleRemembered), "zoo-code-settings.json"),
+					}),
+				}),
 			)
-			expect(vscode.Uri.file).toHaveBeenCalledWith(path.join("/mock/home", "Downloads", "zoo-code-settings.json"))
+			expect(vscode.window.showSaveDialog).toHaveBeenCalledWith(
+				expect.objectContaining({
+					defaultUri: expect.objectContaining({
+						fsPath: path.join("/mock/home", "Downloads", "zoo-code-settings.json"),
+					}),
+				}),
+			)
 		})
 
 		it("should not default the dialog to a remembered path that is now a file", async () => {
@@ -1824,8 +1911,18 @@ describe("importExport", () => {
 				contextProxy: mockContextProxy,
 			})
 
-			expect(vscode.Uri.file).not.toHaveBeenCalledWith(path.join("/usb", "zoo-code-settings.json"))
-			expect(vscode.Uri.file).toHaveBeenCalledWith(path.join("/mock/home", "Downloads", "zoo-code-settings.json"))
+			expect(vscode.window.showSaveDialog).not.toHaveBeenCalledWith(
+				expect.objectContaining({
+					defaultUri: expect.objectContaining({ fsPath: path.join("/usb", "zoo-code-settings.json") }),
+				}),
+			)
+			expect(vscode.window.showSaveDialog).toHaveBeenCalledWith(
+				expect.objectContaining({
+					defaultUri: expect.objectContaining({
+						fsPath: path.join("/mock/home", "Downloads", "zoo-code-settings.json"),
+					}),
+				}),
+			)
 		})
 
 		it("should not default the dialog to a remembered directory that is not writable", async () => {
@@ -1843,8 +1940,18 @@ describe("importExport", () => {
 
 			// W_OK is the property that matters for an export target.
 			expect(fs.access).toHaveBeenCalledWith(path.dirname(remembered), fsMocks.constants.W_OK)
-			expect(vscode.Uri.file).not.toHaveBeenCalledWith(path.join("/usb", "zoo-code-settings.json"))
-			expect(vscode.Uri.file).toHaveBeenCalledWith(path.join("/mock/home", "Downloads", "zoo-code-settings.json"))
+			expect(vscode.window.showSaveDialog).not.toHaveBeenCalledWith(
+				expect.objectContaining({
+					defaultUri: expect.objectContaining({ fsPath: path.join("/usb", "zoo-code-settings.json") }),
+				}),
+			)
+			expect(vscode.window.showSaveDialog).toHaveBeenCalledWith(
+				expect.objectContaining({
+					defaultUri: expect.objectContaining({
+						fsPath: path.join("/mock/home", "Downloads", "zoo-code-settings.json"),
+					}),
+				}),
+			)
 		})
 
 		it("should default the dialog to a remembered directory that is still writable", async () => {
@@ -1859,7 +1966,11 @@ describe("importExport", () => {
 				contextProxy: mockContextProxy,
 			})
 
-			expect(vscode.Uri.file).toHaveBeenCalledWith(path.join("/usb", "zoo-code-settings.json"))
+			expect(vscode.window.showSaveDialog).toHaveBeenCalledWith(
+				expect.objectContaining({
+					defaultUri: expect.objectContaining({ fsPath: path.join("/usb", "zoo-code-settings.json") }),
+				}),
+			)
 		})
 
 		it("should use the correct default save location", async () => {

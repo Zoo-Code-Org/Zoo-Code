@@ -8,7 +8,7 @@ import type * as vscode from "vscode"
 
 import { resolveDefaultSaveUri, saveLastExportPath } from "../export"
 
-import type { ExportContext } from "../export"
+import type { ExportContext, ExportOptions } from "../export"
 
 const mocks = vi.hoisted(() => ({
 	workspaceFolders: undefined as undefined | { uri: { fsPath: string } }[],
@@ -47,7 +47,7 @@ function makeContext(remembered?: string): ExportContext {
 	}
 }
 
-async function resolveWith(remembered: string | undefined, options = {}) {
+async function resolveWith(remembered: string | undefined, options: ExportOptions = {}) {
 	const uri = await resolveDefaultSaveUri(
 		makeContext(remembered),
 		"lastSettingsExportPath",
@@ -110,6 +110,36 @@ describe("resolveDefaultSaveUri", () => {
 		mocks.access.mockRejectedValueOnce(Object.assign(new Error("EACCES"), { code: "EACCES" }))
 
 		const resolved = await resolveWith(REMEMBERED, { useWorkspace: false, fallbackDir: FALLBACK })
+
+		expect(resolved).toBe(path.join(FALLBACK, "zoo-code-settings.json"))
+	})
+
+	it("keeps a read-only remembered directory when the caller only reads from it", async () => {
+		// A read-only volume: write access fails, read access succeeds.
+		mocks.access.mockImplementation((_dir: string, mode: number) =>
+			mode === constants.W_OK
+				? Promise.reject(Object.assign(new Error("EACCES"), { code: "EACCES" }))
+				: Promise.resolve(),
+		)
+
+		const resolved = await resolveWith(REMEMBERED, {
+			useWorkspace: false,
+			fallbackDir: FALLBACK,
+			accessMode: constants.R_OK,
+		})
+
+		expect(resolved).toBe(REMEMBERED)
+		expect(mocks.access).toHaveBeenCalledWith(REMEMBERED_DIR, constants.R_OK)
+	})
+
+	it("falls back when the remembered directory cannot be read either", async () => {
+		mocks.access.mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }))
+
+		const resolved = await resolveWith(REMEMBERED, {
+			useWorkspace: false,
+			fallbackDir: FALLBACK,
+			accessMode: constants.R_OK,
+		})
 
 		expect(resolved).toBe(path.join(FALLBACK, "zoo-code-settings.json"))
 	})
