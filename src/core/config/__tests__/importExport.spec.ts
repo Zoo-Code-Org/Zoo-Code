@@ -1183,6 +1183,11 @@ describe("importExport", () => {
 					{ name: "valid-profile", id: "valid-id", apiProvider: providerIdentifiers.openai },
 				])
 
+				// The broadcast is held open until the test releases it: recording the call
+				// synchronously would let an import that never awaits the broadcast reach
+				// the state post before the assertion runs, which is the failure this test
+				// claims to catch.
+				const broadcastGate = createDeferred<void>()
 				const callOrder: string[] = []
 				const mockProvider = {
 					settingsImportedAt: 0,
@@ -1191,10 +1196,11 @@ describe("importExport", () => {
 					}),
 					broadcastResetToAllInstances: vi.fn().mockImplementation(async () => {
 						callOrder.push("broadcast")
+						await broadcastGate.promise
 					}),
 				}
 
-				await importSettingsWithFeedback(
+				const importRun = importSettingsWithFeedback(
 					{
 						providerSettingsManager: mockProviderSettingsManager,
 						contextProxy: mockContextProxy,
@@ -1203,6 +1209,17 @@ describe("importExport", () => {
 					},
 					filePath,
 				)
+
+				// While the broadcast is still in flight, the initiating provider's webview
+				// post must not have run yet. Asserting in the middle of the await proves
+				// the ordering happens during the call, not just in the final call order.
+				await vi.waitFor(() => {
+					expect(callOrder).toEqual(["broadcast"])
+				})
+				expect(mockProvider.postStateToWebview).not.toHaveBeenCalled()
+
+				broadcastGate.resolve()
+				await importRun
 
 				// The broadcast clears the durable view state, so the initiating provider's
 				// webview post must run after it — otherwise the webview keeps the stale

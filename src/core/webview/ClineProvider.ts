@@ -982,7 +982,13 @@ export class ClineProvider
 			// loading, so the load sees the view's own pre-registration selections.
 			await this.rekeyPersistedViewStateEntry(this.viewStateId)
 
-			await this.loadViewState()
+			// loadViewState logs and swallows its own read failures, so a false return is the
+			// only signal that the load did not happen: roll the id back here too, or a retry
+			// with the same id would early-return on the guard above and the view would never
+			// reload its pinned mode/profile.
+			if (!(await this.loadViewState())) {
+				this.viewStateId = previousViewStateId
+			}
 		} catch (error) {
 			// A persistence failure must not leave the provider holding an id that was
 			// never registered: restore the previous id so a later launch retries the
@@ -998,8 +1004,10 @@ export class ClineProvider
 	 * Missing entries are intentionally left unset so getState() falls back to shared ContextProxy values.
 	 * Fields mutated while the async profile lookup is in flight are reapplied on top of the
 	 * loaded state, field by field, so in-flight user selections are not clobbered by the load.
+	 * @returns true when the load ran or had nothing to load, false when a read failed and the
+	 * persistence error was swallowed here (the caller must then roll back the id it registered).
 	 */
-	private async loadViewState(): Promise<void> {
+	private async loadViewState(): Promise<boolean> {
 		// Capture the id this load is for: a newer id registered while an async
 		// profile lookup is in flight must not be overwritten by this stale load.
 		const loadedForViewId = this.viewStateId
@@ -1009,7 +1017,7 @@ export class ClineProvider
 		// entry under the same name can belong to a different session. Load only entries
 		// this instance authored.
 		if (loadedForViewId === this.viewId && !this.wroteUnderTemporaryViewStateId) {
-			return
+			return true
 		}
 		try {
 			const persisted = this.getPersistedViewStates()[loadedForViewId]
@@ -1048,8 +1056,10 @@ export class ClineProvider
 			}
 
 			if (this.viewStateId !== loadedForViewId) {
+				// A newer id owns this provider now: the load was superseded, not failed, so the
+				// caller must keep the id the newer registration set.
 				this.log(`[loadViewState] Discarding stale state for superseded view id ${loadedForViewId}`)
-				return
+				return true
 			}
 
 			// Reapply the buffer fields that changed while the load was in flight,
@@ -1088,10 +1098,12 @@ export class ClineProvider
 
 			this.viewLocalState = mergedState
 			this.log(`[loadViewState] Loaded state for viewId ${this.viewId}`)
+			return true
 		} catch (error) {
 			this.log(
 				`[loadViewState] Error loading state for viewId ${this.viewId}: ${error instanceof Error ? error.message : String(error)}`,
 			)
+			return false
 		}
 	}
 
@@ -1460,7 +1472,31 @@ export class ClineProvider
 			return
 		}
 
+		// Set before the first await: every re-entrant call, guard and delivery check must
+		// see the provider as closing for the whole teardown window.
 		this._disposed = true
+
+		try {
+			await this.disposeInternal()
+		} finally {
+			// Deregistration must not depend on the teardown completing: a failing task
+			// eviction, a throwing disposable or a rejecting MCP client would otherwise
+			// leave this provider registered while _disposed is already set, and the early
+			// return above means no later dispose() could repair the registry.
+			ClineProvider.activeInstances.delete(this)
+
+			// Clean up any event listeners attached to this provider
+			this.removeAllListeners()
+
+			McpServerManager.unregisterProvider(this)
+		}
+	}
+
+	/**
+	 * Teardown body for {@link dispose}. Kept separate so every step here - task eviction
+	 * included - runs under the caller's finally, which owns the deregistration.
+	 */
+	private async disposeInternal(): Promise<void> {
 		this._postStateToWebviewThrottled.cancel()
 		this.stopWebviewWatchdog()
 		this.diagnosticsRecorder.record({ boundary: "provider", phase: "start", type: "dispose" })
@@ -1510,29 +1546,16 @@ export class ClineProvider
 			}
 		}
 
-		try {
-			this._workspaceTracker?.dispose()
-			this._workspaceTracker = undefined
-			await this.mcpHub?.unregisterClient()
-			this.mcpHub = undefined
-			await this.skillsManager?.dispose()
-			this.skillsManager = undefined
-			await this.marketplaceManager?.cleanup()
-			this.customModesManager?.dispose()
-			this.taskHistoryStore.dispose()
-			this.log("Disposed all disposables")
-		} finally {
-			// Deregistration must not depend on the cleanup above completing: a
-			// throwing disposable (e.g. an MCP client whose disposal rejects)
-			// would otherwise leave this provider registered while _disposed is
-			// already set, so no later retry could repair the registration.
-			ClineProvider.activeInstances.delete(this)
-
-			// Clean up any event listeners attached to this provider
-			this.removeAllListeners()
-
-			McpServerManager.unregisterProvider(this)
-		}
+		this._workspaceTracker?.dispose()
+		this._workspaceTracker = undefined
+		await this.mcpHub?.unregisterClient()
+		this.mcpHub = undefined
+		await this.skillsManager?.dispose()
+		this.skillsManager = undefined
+		await this.marketplaceManager?.cleanup()
+		this.customModesManager?.dispose()
+		this.taskHistoryStore.dispose()
+		this.log("Disposed all disposables")
 	}
 
 	public get isViewVisible(): boolean {
@@ -1554,7 +1577,12 @@ export class ClineProvider
 	 * heuristic (which picks whichever surface the user last focused).
 	 */
 	public static getInstanceForView(view: vscode.WebviewView | vscode.WebviewPanel): ClineProvider | undefined {
-		return Array.from(this.activeInstances).find((instance) => instance.view === view)
+		// A provider that is already disposing must not be handed out: dispose() sets
+		// _disposed before it awaits task cleanup, and during that window the view is still
+		// registered while every postMessageToWebview on it is dropped. A caller that
+		// reveals the view and posts didBecomeVisible would therefore have no visible
+		// effect, and the user's next click would open a second tab.
+		return Array.from(this.activeInstances).find((instance) => instance.view === view && !instance._disposed)
 	}
 
 	public static async getInstance(): Promise<ClineProvider | undefined> {
@@ -2270,14 +2298,23 @@ export class ClineProvider
 		// path (e.g. the trailing postStateToWebview in handleModeSwitchUnlocked gates the next
 		// turn after a mode switch). Message ordering is enforced by the message seq, not the ack.
 		// Promise.resolve() normalizes non-promise returns (e.g. test doubles) before the catch.
-		void Promise.resolve(webview.postMessage(omitOriginalContentFromExtensionMessage(message))).catch((error) => {
-			// Swallow: postMessage rejects when the webview is disposed in flight.
-			// Log the dropped message type so a wedged webview channel is diagnosable
-			// instead of silently losing state updates.
-			this.log(
-				`[postMessageToWebview] dropped message type=${message.type}: ${error instanceof Error ? error.message : String(error)}`,
-			)
-		})
+		void Promise.resolve(webview.postMessage(omitOriginalContentFromExtensionMessage(message)))
+			.then((delivered) => {
+				// VS Code resolves `false` when the message was not delivered (the page was
+				// torn down or never finished loading). That is a drop just like a rejection,
+				// so it is logged too instead of losing state updates silently.
+				if (delivered === false) {
+					this.log(`[postMessageToWebview] undelivered message type=${message.type}`)
+				}
+			})
+			.catch((error) => {
+				// Swallow: postMessage rejects when the webview is disposed in flight.
+				// Log the dropped message type so a wedged webview channel is diagnosable
+				// instead of silently losing state updates.
+				this.log(
+					`[postMessageToWebview] dropped message type=${message.type}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			})
 	}
 
 	public requestWebviewThemeFixture(timeoutMs = 5_000): Promise<WebviewThemeFixture> {
@@ -4815,15 +4852,17 @@ export class ClineProvider
 		// A view-local profile is a complete snapshot, not a patch over the shared store.
 		// Spreading it on top of providerSettings would let a key the profile never defined
 		// leak in from another profile, which ContextProxy.setProviderSettings deliberately
-		// prevents by clearing omitted keys. Use the view's own settings in place and take
-		// only apiProvider from the shared state when the profile does not carry one.
+		// prevents by clearing omitted keys. Use the view's own settings in place. A profile
+		// that never recorded a provider resolves to Anthropic - the same default the stored
+		// profile path applies (upsertProviderProfile) - rather than borrowing the shared
+		// provider, which would run a sibling's provider with this view's own fields.
 		// The overlay is read from the buffer itself: the raw apiConfiguration state key
 		// is a partial patch from shared-store paths, not a view snapshot.
 		const viewApiConfiguration = this.viewLocalState.apiConfiguration
 		const resolvedApiConfiguration = viewApiConfiguration
 			? {
 					...viewApiConfiguration,
-					apiProvider: viewApiConfiguration.apiProvider ?? providerSettings.apiProvider,
+					apiProvider: viewApiConfiguration.apiProvider ?? providerIdentifiers.anthropic,
 				}
 			: providerSettings
 

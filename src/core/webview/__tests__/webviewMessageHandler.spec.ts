@@ -2220,6 +2220,36 @@ it("persists alwaysDenyUnapprovedCommands through the generic updateSettings loo
 	expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
 })
 
+// A mode slug reaches the shared store and this view's durable pin through the
+// per-key updateSettings path, so an unknown slug must be rejected there: only
+// setValues validates modes, and this loop does not go through it.
+describe("webviewMessageHandler - mode through updateSettings", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([])
+	})
+
+	it("persists a mode that resolves", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { mode: "architect" },
+		})
+
+		expect(mockClineProvider.setValue).toHaveBeenCalledWith("mode", "architect")
+	})
+
+	it("drops an unknown mode instead of writing it to the shared store and the view pin", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { mode: "no-such-mode" },
+		})
+
+		expect(mockClineProvider.setValue).not.toHaveBeenCalledWith("mode", "no-such-mode")
+		expect(mockClineProvider.setValue).not.toHaveBeenCalledWith("mode", expect.anything())
+		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Ignoring invalid mode"))
+	})
+})
+
 // Both allowlists are normalized by the same branch, so both are held to the
 // same contract.
 describe.each(["allowedReadFiles", "allowedWriteFiles"] as const)("webviewMessageHandler - %s", (key) => {

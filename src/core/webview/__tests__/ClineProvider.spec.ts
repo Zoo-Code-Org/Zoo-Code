@@ -660,6 +660,28 @@ describe("ClineProvider", () => {
 		it("returns undefined when no live instance owns the view", () => {
 			expect(ClineProvider.getInstanceForView({} as vscode.WebviewView)).toBeUndefined()
 		})
+
+		it("ignores an instance whose disposal is already in flight", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Hold the disposal after _disposed is set: mcpHub.unregisterClient is awaited
+			// inside dispose(), so the view is still registered while the provider is
+			// already closing. The double is structural because only unregisterClient is
+			// reached before the gate is released.
+			let releaseDisposal!: () => void
+			const disposalGate = new Promise<void>((resolve) => {
+				releaseDisposal = resolve
+			})
+			Object.assign(provider, { mcpHub: { unregisterClient: () => disposalGate } })
+
+			const disposal = provider.dispose()
+			await vi.waitFor(() => expect(provider["_disposed"]).toBe(true))
+
+			expect(ClineProvider.getInstanceForView(mockWebviewView)).toBeUndefined()
+
+			releaseDisposal()
+			await disposal
+		})
 	})
 
 	test("reports an unresolved webview as not visible", () => {
@@ -3994,6 +4016,39 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 		})
+
+		it("restores the previous view id when the persisted load fails, so a later launch reloads it", async () => {
+			const contextProxy = new ContextProxy(mockContext)
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				contextProxy,
+				new WebviewFocusTracker(),
+			)
+			await contextProxy.setValue("viewStates", { "view-b": { mode: "architect", updatedAt: 1 } })
+
+			// getCustomModes is read before the pinned mode can be restored and its rejection
+			// is swallowed inside loadViewState (only logged), so this is the load failure that
+			// the throw-based rollback never saw.
+			const getCustomModesSpy = vi
+				.spyOn(provider["customModesManager"], "getCustomModes")
+				.mockRejectedValueOnce(new Error("modes unavailable"))
+
+			await provider["setViewStateId"]("view-b")
+
+			expect(provider["viewStateId"]).toBe(provider.viewId)
+			expect(provider["viewLocalState"]).toEqual({})
+
+			// The retried registration loads the pin instead of early-returning on the id the
+			// failed load left behind.
+			getCustomModesSpy.mockRestore()
+			await provider["setViewStateId"]("view-b")
+			expect(provider["viewStateId"]).toBe("view-b")
+			expect(provider["viewLocalState"].mode).toBe("architect")
+
+			await provider.dispose()
+		})
 	})
 
 	describe("view state persistence edge cases", () => {
@@ -5603,6 +5658,31 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("resolves an unset view-profile provider to Anthropic instead of the shared provider", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			// The shared store holds another profile's provider; the view's own pinned profile
+			// never recorded one.
+			await provider.setValue("apiProvider", providerIdentifiers.openrouter)
+			expect(provider.contextProxy.getProviderSettings().apiProvider).toBe(providerIdentifiers.openrouter)
+			await provider.saveViewState("apiConfiguration", { openRouterModelId: "pinned-model" })
+
+			const state = await provider.getState()
+
+			// A view-local profile is a complete snapshot: the unset provider must resolve to
+			// the same default as a stored profile, not to the sibling's shared provider.
+			expect(state.apiConfiguration.apiProvider).toBe(providerIdentifiers.anthropic)
+			expect(state.apiConfiguration.openRouterModelId).toBe("pinned-model")
+
+			await provider.dispose()
+		})
+
 		it("reports the fresh global apiConfiguration after a profile activation followed by a global settings write", async () => {
 			const provider = new ClineProvider(
 				mockContext,
@@ -6326,26 +6406,35 @@ describe("ClineProvider", () => {
 		})
 
 		it("should persist queued writes under the viewStateId active when the change was made", async () => {
-			let releaseFirstWrite!: () => void
+			// Hold the first *viewStates* write specifically. The constructor writes other
+			// global-state keys synchronously (codebaseIndexModels at ClineProvider.ts:509),
+			// so an unqualified once-only mock is consumed by that write: the viewStates
+			// write then resolves immediately and is never held across the id switch, which
+			// is the in-flight behaviour this test claims to prove.
+			let releaseFirstViewStatesWrite!: () => void
+			let viewStatesWriteHeld = false
+			let markFirstWriteStarted!: () => void
 			const firstWriteStarted = new Promise<void>((resolve) => {
-				mockContext.globalState.update = vi
-					.fn()
-					.mockImplementationOnce((key: string, value: unknown) => {
-						mockContext.globalState.get = vi
-							.fn()
-							.mockImplementation((lookupKey: string) => (lookupKey === key ? value : undefined))
-						resolve()
-						return new Promise<void>((writeResolve) => {
-							releaseFirstWrite = writeResolve
-						})
-					})
-					.mockImplementation((key: string, value: unknown) => {
-						mockContext.globalState.get = vi
-							.fn()
-							.mockImplementation((lookupKey: string) => (lookupKey === key ? value : undefined))
-						return Promise.resolve()
-					})
+				markFirstWriteStarted = resolve
 			})
+
+			mockContext.globalState.update = vi.fn().mockImplementation((key: string, value: unknown) => {
+				mockContext.globalState.get = vi
+					.fn()
+					.mockImplementation((lookupKey: string) => (lookupKey === key ? value : undefined))
+
+				if (key !== "viewStates" || viewStatesWriteHeld) {
+					return Promise.resolve()
+				}
+
+				viewStatesWriteHeld = true
+				markFirstWriteStarted()
+
+				return new Promise<void>((writeResolve) => {
+					releaseFirstViewStatesWrite = writeResolve
+				})
+			})
+
 			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
@@ -6355,14 +6444,21 @@ describe("ClineProvider", () => {
 			)
 
 			await provider["setViewStateId"]("view-a")
-			const firstSave = provider.saveViewState("mode", "architect")
+			// The first write is held, so the second one is captured under "view-a" but only
+			// executes after the id switch: that is the interleaving this test names.
+			const heldSave = provider.saveViewState("currentApiConfigName", "cfg-a")
 			await firstWriteStarted
-			await provider["setViewStateId"]("view-b")
-			releaseFirstWrite()
-			await firstSave
+			const queuedSave = provider.saveViewState("mode", "architect")
+			const idSwitch = provider["setViewStateId"]("view-b")
+			releaseFirstViewStatesWrite()
+			await heldSave
+			await queuedSave
+			await idSwitch
 
+			// Both writes stay under the id active when each change was made, even though the
+			// second one ran after "view-b" had been registered.
 			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
-				"view-a": { mode: "architect" },
+				"view-a": { mode: "architect", currentApiConfigName: "cfg-a" },
 			})
 			expect(provider.contextProxy.getValue("viewStates")).not.toHaveProperty("view-b")
 
@@ -6847,6 +6943,22 @@ describe("ClineProvider", () => {
 		expect(mockPostMessage).not.toHaveBeenCalled()
 	})
 
+	test("postMessageToWebview logs a delivery that resolves false", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		mockPostMessage.mockResolvedValue(false)
+
+		const message: ExtensionMessage = { type: "action", action: "chatButtonClicked" }
+		await provider.postMessageToWebview(message)
+
+		// A resolved false is a drop (the page is not deliverable), not a success: it must
+		// reach the log so a wedged channel is diagnosable.
+		await vi.waitFor(() => {
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining("[postMessageToWebview] undelivered message type=action"),
+			)
+		})
+	})
+
 	test("dispose is idempotent — second call is a no-op", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 
@@ -6858,6 +6970,27 @@ describe("ClineProvider", () => {
 			([msg]) => typeof msg === "string" && msg.includes("Disposing ClineProvider..."),
 		)
 		expect(disposeCalls).toHaveLength(1)
+	})
+
+	test("dispose still deregisters the provider when task eviction fails", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		Object.assign(provider, { taskRegistry: new TaskRegistry() })
+		provider["taskRegistry"].push({
+			taskId: "stuck-task",
+			instanceId: "stuck-instance",
+			emit: vi.fn(),
+			abortTask: vi.fn(),
+			dispose: vi.fn(),
+		} as unknown as Task)
+		// Bracket notation keeps the private member accessible without a cast.
+		provider["evictCurrentTask"] = vi.fn().mockRejectedValue(new Error("eviction failed"))
+
+		await expect(provider.dispose()).rejects.toThrow("eviction failed")
+
+		// _disposed is already set, so a second dispose() returns early: a teardown failure
+		// must deregister the provider instead of stranding a live-looking entry that
+		// setViewStateId would keep treating as a claim on its viewStateId.
+		expect(ClineProvider.getAllInstances()).not.toContain(provider)
 	})
 
 	test("dispose drains every task in abort-then-cleanup order", async () => {
