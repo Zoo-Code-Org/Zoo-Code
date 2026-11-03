@@ -9484,11 +9484,18 @@ describe("ClineProvider", () => {
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
-			await provider.upsertProviderProfile(
+			const activatedProfileId = await provider.upsertProviderProfile(
 				"activated-profile",
 				{ apiProvider: providerIdentifiers.anthropic },
 				true,
 			)
+
+			// Pin the activation itself: upsert swallows a failure that happens before its
+			// activation writes and reports it as `undefined`, and every assertion below also
+			// holds when the activation never ran. The manager double returns this id, so it is
+			// the observable proof that the activation path completed.
+			expect(activatedProfileId).toBe("activated-id")
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("activated-profile")
 
 			// Simulate api.setConfiguration (src/extension/api.ts): a global-only
 			// write that does not refresh the view-local buffer.

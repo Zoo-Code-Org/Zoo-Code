@@ -1112,6 +1112,50 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 	})
 
 	describe("deleteProviderProfile", () => {
+		it("keeps a committed deletion when posting the committed state fails", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			const childId = await provider.providerSettingsManager.saveConfig("subtask-child-profile", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "subtask-child-profile", id: childId, apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "subtask-child-profile",
+			})
+
+			const logSpy = vi.spyOn(provider, "log")
+			// The deletion has committed at this point: a state-post failure must be logged,
+			// not routed through the compensation path that restores the deleted record.
+			vi.spyOn(provider, "postStateToWebview").mockRejectedValue(new Error("post failed"))
+
+			// Assert the fulfilled value, not just absence of a throw: under `resolves` the
+			// negated `toThrow` matcher passes for any fulfilled value, so a regression that
+			// resolved with something other than the documented void would slip through.
+			await expect(
+				provider.deleteProviderProfile({
+					name: "subtask-child-profile",
+					id: childId,
+					apiProvider: providerIdentifiers.openrouter,
+				}),
+			).resolves.toBeUndefined()
+
+			const remaining = await provider.providerSettingsManager.listConfig()
+			expect(remaining.some((config) => config.name === "subtask-child-profile")).toBe(false)
+			const afterDeletion = provider.contextProxy.getValues()
+			expect(afterDeletion.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default"])
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("deletion committed, but posting state failed"))
+		})
+
 		it("removes the stored profile so a dangling mode mapping can no longer re-activate it", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 
@@ -1170,7 +1214,13 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			// Drive the public path the comment above describes instead of asserting only the
 			// mapping: switching to the mode that was pinned to the deleted profile must fall
 			// through to the surviving profile, not re-activate the deleted one.
+			// Start from a different mode so the switch has to write something: the assertions
+			// below already hold before handleModeSwitch runs (the deletion repointed the
+			// selection), so without a mode assertion a switch that persisted nothing passes.
+			await provider.contextProxy.setValue("mode", "code")
+			expect(provider.contextProxy.getValue("mode")).not.toBe("ask")
 			await provider.handleModeSwitch("ask")
+			expect(provider.contextProxy.getValue("mode")).toBe("ask")
 			const afterSwitch = provider.contextProxy.getValues()
 			expect(afterSwitch.currentApiConfigName).toBe("default")
 			expect(afterSwitch.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default"])
