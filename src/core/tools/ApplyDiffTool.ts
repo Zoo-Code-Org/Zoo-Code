@@ -216,6 +216,23 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				// Show diff view before asking for approval
 				task.diffViewProvider.editType = "modify"
 				await task.diffViewProvider.open(relPath)
+				// The diff above was computed against this tool's own read, but open() re-reads
+				// the file and records that newer text as the save baseline. If the file changed
+				// between the two reads, saveChanges() would guard the newer baseline while
+				// publishing content derived from the older one, silently overwriting the write
+				// that landed in between. Fail closed instead: nothing is saved until the model
+				// re-reads and reapplies against the current content.
+				if (task.diffViewProvider.originalContent !== originalContent) {
+					task.consecutiveMistakeCount++
+					task.recordToolError("apply_diff")
+					const staleError = `The file ${relPath} changed after it was read for this diff, so the diff was not applied. Read the file again and reapply the diff to its current content.`
+					await task.say("error", staleError)
+					task.didToolFailInCurrentTurn = true
+					await task.diffViewProvider.revertChanges()
+					task.processQueuedMessages()
+					pushToolResult(staleError)
+					return
+				}
 				await task.diffViewProvider.update(diffResult.content, true)
 				task.diffViewProvider.scrollToFirstDiff()
 

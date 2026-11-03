@@ -61,6 +61,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		| "providerRef"
 		| "fileContextTracker"
 		| "observationRegistry"
+		| "didToolFailInCurrentTurn"
 	>
 	let mockSaveDirectly: MockedFunction<(...args: unknown[]) => Promise<unknown>>
 	let mockAskApproval: MockedFunction<(...args: unknown[]) => Promise<boolean>>
@@ -102,6 +103,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			say: vi.fn().mockResolvedValue(undefined),
 			processQueuedMessages: vi.fn(),
 			didEditFile: false,
+			didToolFailInCurrentTurn: false,
 			api: {
 				getModel: () => ({ id: "claude-sonnet-4-5" }),
 			} as unknown as Task["api"],
@@ -318,7 +320,11 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		// registry, so the read must not leave a token behind for a later write_to_file
 		// to spend on an unrelated overwrite.
 		const diffViewStub = mockTask.diffViewProvider as unknown as Record<string, unknown>
-		diffViewStub.open = vi.fn().mockResolvedValue(undefined)
+		// open() records the text it read; an unchanged file yields the same content the
+		// tool diffed against, so the stale-base guard lets the save through.
+		diffViewStub.open = vi.fn().mockImplementation(async () => {
+			diffViewStub.originalContent = "original file content\n"
+		})
 		diffViewStub.update = vi.fn().mockResolvedValue(undefined)
 		diffViewStub.scrollToFirstDiff = vi.fn()
 		diffViewStub.saveChanges = vi.fn().mockResolvedValue({
@@ -347,5 +353,47 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(diffViewStub.saveChanges).toHaveBeenCalled()
 		expect(mockSaveDirectly).not.toHaveBeenCalled()
 		expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
+	})
+
+	it("refuses to save when the file changed between the read and the diff view opening", async () => {
+		// The diff was computed against "original file content\n", but another writer
+		// replaced the file before open() re-read it. Saving would publish the older diff
+		// over that change while the guard checked the newer baseline.
+		const diffViewStub = mockTask.diffViewProvider as unknown as Record<string, unknown>
+		diffViewStub.open = vi.fn().mockImplementation(async () => {
+			diffViewStub.originalContent = "written by another process\n"
+		})
+		diffViewStub.update = vi.fn().mockResolvedValue(undefined)
+		diffViewStub.scrollToFirstDiff = vi.fn()
+		diffViewStub.revertChanges = vi.fn().mockResolvedValue(undefined)
+		diffViewStub.saveChanges = vi.fn().mockResolvedValue({
+			newProblemsMessage: "",
+			userEdits: undefined,
+			finalContent: "new content",
+		})
+		mockTask.providerRef = {
+			deref: vi.fn().mockReturnValue({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					experiments: {},
+				}),
+			}),
+		} as unknown as Task["providerRef"]
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		expect(diffViewStub.update).not.toHaveBeenCalled()
+		expect(diffViewStub.saveChanges).not.toHaveBeenCalled()
+		expect(diffViewStub.revertChanges).toHaveBeenCalled()
+		expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+		expect(mockPushToolResult).toHaveBeenCalledWith(
+			expect.stringContaining("changed after it was read for this diff"),
+		)
 	})
 })
