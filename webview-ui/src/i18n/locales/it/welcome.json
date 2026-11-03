@@ -1,8 +1,7 @@
 {
 	"landing": {
 		"greeting": "Benvenuto in Zoo Code!",
-		"introduction": "Con una gamma di Modalità integrate ed estensibili, Zoo Code ti permette di pianificare, architettare, codificare, debuggare e aumentare la tua produttività come mai prima d'ora.",
-		"getStarted": "Scegli il tuo provider"
+		"introduction": "Con una gamma di Modalità integrate ed estensibili, Zoo Code ti permette di pianificare, architettare, codificare, debuggare e aumentare la tua produttività come mai prima d'ora."
 	},
 	"providerSignup": {
 		"heading": "Scegli il tuo provider",

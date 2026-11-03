@@ -17,6 +17,11 @@ export interface HostRuntimeOptions {
 	artifactsDir: string
 	now?: () => number
 	pause?: (ms: number) => Promise<void>
+	// Optional --extensionTestsPath module. The module's run() must never
+	// settle, because VS Code exits when it does. Off by default.
+	testsPath?: string
+	// Optional bounded status artifact written by the extension test module.
+	testsDiagnosticsPath?: string
 }
 
 const readCommit = async (root: string): Promise<MeasuredString> => {
@@ -84,13 +89,19 @@ export function createHostRuntime(options: HostRuntimeOptions): AgentRuntime {
 				path.join(temp, "userdata"),
 				path.join(temp, "extensions"),
 				extension,
+				options.testsPath,
 			)
 			const child = spawn(
 				process.env.DISPLAY ? executable : "xvfb-run",
 				process.env.DISPLAY ? args : ["-a", executable, ...args],
 				{
 					detached: true,
-					env: buildChildEnvironment(process.env, isolatedHome, socket),
+					env: {
+						...buildChildEnvironment(process.env, isolatedHome, socket),
+						...(options.testsDiagnosticsPath
+							? { AGENT_EVALS_TESTS_DIAGNOSTICS_PATH: options.testsDiagnosticsPath }
+							: {}),
+					},
 					stdio: "ignore",
 				},
 			)
