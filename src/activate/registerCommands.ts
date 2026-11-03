@@ -13,6 +13,7 @@ import { handleNewTask } from "./handleTask"
 import { importSettingsWithFeedback } from "../core/config/importExport"
 import { MdmService } from "../services/mdm/MdmService"
 import { registerRipgrepDiagnosticCommand } from "../services/ripgrep/diagnostic"
+import { Package } from "../shared/package"
 import { createDiagnosticsReport } from "../services/diagnostics"
 
 /**
@@ -138,6 +139,13 @@ const getCommandsMap = ({
 
 		await provider.evictCurrentTask()
 		await provider.refreshWorkspace()
+
+		// The worktree auto-open flow (`extension.ts`) invokes this command without a sidebar click,
+		// so the view may not be resolved yet: focus it explicitly instead of posting into a webview
+		// that does not exist. On the menu path the view is already resolved and this is a no-op.
+		if (!provider.isViewLaunched) {
+			await vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`)
+		}
 		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
 		// Send focusInput action immediately after chatButtonClicked
 		// This ensures the focus happens after the view has switched
