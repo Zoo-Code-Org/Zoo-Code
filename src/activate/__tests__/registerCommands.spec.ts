@@ -157,6 +157,7 @@ describe("registerCommands handlers", () => {
 		evictCurrentTask: Mock
 		refreshWorkspace: Mock
 		webviewFocusTracker: WebviewFocusTracker
+		retryWebviewRecovery: Mock<() => Promise<void>>
 	}
 	let mockVisibleProviderInstance: ClineProvider
 	let handlers: Record<string, (...args: unknown[]) => unknown>
