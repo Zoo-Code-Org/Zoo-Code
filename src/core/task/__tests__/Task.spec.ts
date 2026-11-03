@@ -534,6 +534,59 @@ describe("Cline", () => {
 		})
 	})
 
+	describe("cache-write TTL split in telemetry", () => {
+		it("bills a 1h cache write at the 1h rate when usage is captured after a cancelled stream", async () => {
+			// glm P1: the telemetry cost recompute inside captureUsageData must receive
+			// the per-TTL split. Before the fix it passed only the aggregate write count,
+			// so a 1h write was billed at the 5m rate (0.375 instead of 0.6 for 100k
+			// tokens at claude-3-5-sonnet's 3.0 input price).
+			const task = await createTaskWithManualRetries()
+			const captureLlmCompletion = vi.spyOn(TelemetryService.instance, "captureLlmCompletion")
+
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			// A stream that reports the split but never yields a final cost chunk, which is
+			// the shape a cancelled request leaves behind. The second call throws so the
+			// request loop terminates the way the neighbouring tests do.
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					stream([
+						{
+							type: "usage",
+							inputTokens: 0,
+							outputTokens: 0,
+							cacheWriteTokens: 100_000,
+							cacheWrite1hTokens: 100_000,
+							cacheReadTokens: 0,
+						},
+						{ type: "text", text: "partial response" },
+					]),
+				)
+				.mockImplementation(() => {
+					throw new Error("stop after usage capture")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			// The drain is fire-and-forget and reaches `captureLlmCompletion` after several
+			// awaits, some of which touch the filesystem. A fixed sleep races that work on a
+			// loaded worker, so poll for the captured call instead.
+			await vi.waitFor(() =>
+				expect(
+					captureLlmCompletion.mock.calls.some(([, payload]) => payload?.cacheWriteTokens === 100_000),
+				).toBe(true),
+			)
+
+			const call = captureLlmCompletion.mock.calls.find(([, payload]) => payload?.cacheWriteTokens === 100_000)
+			expect(call).toBeDefined()
+
+			// claude-3-5-sonnet-20241022: input 3.0, cacheWritesPrice 3.75, cacheWritesPrice1h 6.0.
+			// 1h writes: (6.0 / 1_000_000) * 100_000 = 0.6
+			// The pre-fix lumped behaviour billed (3.75 / 1_000_000) * 100_000 = 0.375.
+			expect(call![1].cost).toBeCloseTo(0.6, 9)
+			expect(call![1].cost).not.toBeCloseTo(0.375, 9)
+		})
+	})
+
 	describe("request continuation", () => {
 		it("sends the no-tool-use reminder in a second request when the first response has no tool use", async () => {
 			const task = await createTaskWithManualRetries()

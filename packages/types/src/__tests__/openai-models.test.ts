@@ -122,6 +122,7 @@ describe("OpenAI native models", () => {
 			inputPrice: 2,
 			outputPrice: 10,
 			cacheWritesPrice: 2.5,
+			cacheWritesPrice12h: 5,
 			cacheReadsPrice: 0.2,
 			longContextPricing: {
 				thresholdTokens: 272_000,
@@ -166,6 +167,7 @@ describe("OpenAI native models", () => {
 			inputPrice: 0.1,
 			outputPrice: 0.5,
 			cacheWritesPrice: 0.125,
+			cacheWritesPrice12h: 0.25,
 			cacheReadsPrice: 0.01,
 			longContextPricing: {
 				thresholdTokens: 272_000,

@@ -485,6 +485,115 @@ describe("OpenRouterHandler", () => {
 			)
 		})
 
+		describe("prompt cache TTL", () => {
+			const mockStreamWithUsage = () =>
+				asyncStreamFrom([
+					{ id: "test-id", choices: [{ delta: { content: "test response" } }] },
+					{ id: "test-id", choices: [{ delta: {} }], usage: { prompt_tokens: 10, completion_tokens: 20 } },
+				])
+
+			const requestBody = (mockCreate: ReturnType<typeof vitest.fn>) =>
+				mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+
+			// `openai` is mocked for this file, so the prototype is a plain object here.
+			// Reaching it once keeps the casts out of each test body.
+			const stubChatCreate = (mockCreate: ReturnType<typeof vitest.fn>) => {
+				const proto = OpenAI.prototype as unknown as { chat: { completions: { create: unknown } } }
+				proto.chat = { completions: { create: mockCreate } }
+			}
+
+			const cacheControlsIn = (body: unknown) => {
+				const found: Array<Record<string, unknown>> = []
+				const walk = (node: unknown) => {
+					if (Array.isArray(node)) {
+						node.forEach(walk)
+						return
+					}
+					if (node && typeof node === "object") {
+						for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+							if (key === "cache_control" && child && typeof child === "object") {
+								found.push(child as Record<string, unknown>)
+							}
+							walk(child)
+						}
+					}
+				}
+				walk(JSON.parse(JSON.stringify(body)))
+				return found
+			}
+
+			it("emits no ttl key when the knob is unset", async () => {
+				const handler = new OpenRouterHandler(
+					makeApiHandlerOptions({ ...mockOptions, openRouterModelId: "anthropic/claude-sonnet-4" }),
+				)
+
+				const mockCreate = vitest.fn().mockResolvedValue(mockStreamWithUsage())
+				stubChatCreate(mockCreate)
+
+				await collectStream(
+					handler.createMessage("test system prompt", [{ role: "user", content: "test message" }]),
+				)
+
+				const body = requestBody(mockCreate)
+				expect(JSON.stringify(body)).not.toContain("ttl")
+				expect(cacheControlsIn(body).every((control) => control.ttl === undefined)).toBe(true)
+			})
+
+			it("fails closed when the resolved model advertises no TTL capability", async () => {
+				// OpenRouter models come from a dynamic catalog that carries no TTL
+				// capability data, so a 1h knob must not reach the wire (ADR-0006 I2,
+				// and the ADR's stated risk for dynamic catalogs).
+				const handler = new OpenRouterHandler(
+					makeApiHandlerOptions({
+						...mockOptions,
+						openRouterModelId: "anthropic/claude-sonnet-4",
+						promptCacheTtl: "1h",
+					}),
+				)
+
+				expect(handler.getModel().info.promptCacheTtlSupport).toBeUndefined()
+
+				const mockCreate = vitest.fn().mockResolvedValue(mockStreamWithUsage())
+				stubChatCreate(mockCreate)
+
+				await collectStream(
+					handler.createMessage("test system prompt", [{ role: "user", content: "test message" }]),
+				)
+
+				const body = requestBody(mockCreate)
+				expect(JSON.stringify(body)).not.toContain("ttl")
+				expect(cacheControlsIn(body).every((control) => control.ttl === undefined)).toBe(true)
+			})
+
+			it("carries ttl 1h on every marker when the resolved model advertises it", async () => {
+				const handler = new OpenRouterHandler(
+					makeApiHandlerOptions({
+						...mockOptions,
+						openRouterModelId: "anthropic/claude-sonnet-4",
+						promptCacheTtl: "1h",
+					}),
+				)
+
+				// Simulate a catalog that does carry capability data.
+				const model = handler.getModel()
+				vitest.spyOn(handler, "getModel").mockReturnValue({
+					...model,
+					info: { ...model.info, promptCacheTtlSupport: ["5m", "1h"] },
+				})
+
+				const mockCreate = vitest.fn().mockResolvedValue(mockStreamWithUsage())
+				stubChatCreate(mockCreate)
+
+				await collectStream(
+					handler.createMessage("test system prompt", [{ role: "user", content: "test message" }]),
+				)
+
+				const controls = cacheControlsIn(requestBody(mockCreate))
+				expect(controls).toHaveLength(2)
+				expect(controls.every((control) => control.ttl === "1h")).toBe(true)
+			})
+		})
+
 		it("handles API errors and captures telemetry", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const mockStream = asyncStreamFrom([{ error: { message: "API Error", code: 500 } }])
