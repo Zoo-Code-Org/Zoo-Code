@@ -101,18 +101,32 @@ async function recoverInterruptedReplacement(
 	}
 
 	let restoredFrom: string | null = null
+	let canonicalPathMissing = false
 
 	try {
 		await fs.access(absoluteFilePath)
-	} catch {
+	} catch (error: unknown) {
+		canonicalPathMissing = typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"
+	}
+
+	if (canonicalPathMissing) {
 		// The canonical path is absent. An interrupted two-step replacement
 		// leaves the committed content in the newest backup, so restore it
 		// and keep readers on the last committed state.
-		const backupStats = await Promise.all(
-			orphanedPaths
-				.filter((orphanPath) => path.basename(orphanPath).startsWith(backupPrefix))
-				.map(async (backupPath) => ({ backupPath, mtimeMs: (await fs.stat(backupPath)).mtimeMs })),
-		)
+		const backupStats = (
+			await Promise.all(
+				orphanedPaths
+					.filter((orphanPath) => path.basename(orphanPath).startsWith(backupPrefix))
+					.map(async (backupPath) => {
+						try {
+							return { backupPath, mtimeMs: (await fs.stat(backupPath)).mtimeMs }
+						} catch {
+							// Skip leftovers removed or made unreadable since the directory listing.
+							return null
+						}
+					}),
+			)
+		).filter((entry): entry is { backupPath: string; mtimeMs: number } => entry !== null)
 		if (backupStats.length > 0) {
 			backupStats.sort((a, b) => b.mtimeMs - a.mtimeMs)
 			const newestBackupPath = backupStats[0].backupPath
@@ -369,7 +383,7 @@ async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint 
  */
 async function _flushFileToDisk(targetPath: string): Promise<void> {
 	try {
-		const handle = await fs.open(targetPath, "r")
+		const handle = await fs.open(targetPath, "r+")
 		try {
 			await handle.sync()
 		} finally {

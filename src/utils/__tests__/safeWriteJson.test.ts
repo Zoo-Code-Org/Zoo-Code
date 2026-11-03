@@ -27,12 +27,14 @@ vi.mock("fs/promises", async () => {
 		rename: vi.fn(actual.rename),
 		unlink: vi.fn(actual.unlink),
 		access: vi.fn(actual.access),
+		stat: vi.fn(actual.stat),
+		open: vi.fn(actual.open),
 		mkdtemp: vi.fn(actual.mkdtemp),
 		rm: vi.fn(actual.rm),
 		readdir: vi.fn(actual.readdir),
 		mkdir: vi.fn(actual.mkdir),
 	}
-	// fs.stat and fs.lstat are available via { ...actual }
+	// fs.lstat is available via { ...actual }
 
 	return mockedFs
 })
@@ -585,6 +587,60 @@ describe("safeWriteJson", () => {
 			(entry) => entry.includes(".new_") || entry.includes(".bak_"),
 		)
 		expect(leftovers).toEqual([])
+	})
+
+	it.each(["EACCES", "EIO", "EPERM", undefined])(
+		"should preserve committed content when canonical access fails with %s",
+		async (code) => {
+			const backupPath = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_1_stale.tmp`)
+			await fs.writeFile(backupPath, JSON.stringify({ stale: true }))
+			// Directory access succeeds; only the canonical-path check fails.
+			vi.mocked(fs.access)
+				.mockResolvedValueOnce(undefined)
+				.mockRejectedValueOnce(Object.assign(new Error("Canonical access failed"), { code }))
+			const merge = vi.fn((existing: unknown) => existing)
+
+			await safeWriteJson(currentTestFilePath, {}, { merge })
+
+			expect(merge).toHaveBeenCalledWith({ initial: "content" }, {})
+			expect(await readFileContent(currentTestFilePath)).toEqual({ initial: "content" })
+			expect(await fs.readdir(tempDir)).toEqual([path.basename(currentTestFilePath)])
+		},
+	)
+
+	it.each(["ENOENT", "EACCES", "EIO"])(
+		"should recover from a readable backup when another backup stat fails with %s",
+		async (code) => {
+			await fs.unlink(currentTestFilePath)
+			const unreadableBackup = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_1_bad.tmp`)
+			const readableBackup = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_2_good.tmp`)
+			await fs.writeFile(unreadableBackup, JSON.stringify({ stale: true }))
+			await fs.writeFile(readableBackup, JSON.stringify({ committed: true }))
+			const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+			vi.mocked(fs.stat).mockImplementation(async (backupPath) => {
+				if (backupPath === unreadableBackup) {
+					throw Object.assign(new Error("Backup stat failed"), { code })
+				}
+				return actual.stat(backupPath)
+			})
+			const merge = vi.fn((existing: unknown) => existing)
+
+			await safeWriteJson(currentTestFilePath, {}, { merge })
+
+			expect(merge).toHaveBeenCalledWith({ committed: true }, {})
+			expect(await readFileContent(currentTestFilePath)).toEqual({ committed: true })
+			expect(await fs.readdir(tempDir)).toEqual([path.basename(currentTestFilePath)])
+		},
+	)
+
+	test("should open the replacement with write access for flushing", async () => {
+		const open = vi.mocked(fs.open)
+		open.mockClear()
+
+		await safeWriteJson(currentTestFilePath, { flushed: true })
+
+		expect(open).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(".new_"), "r+")
+		expect(await readFileContent(currentTestFilePath)).toEqual({ flushed: true })
 	})
 
 	test("should garbage collect orphaned replacement files when the canonical path exists", async () => {
