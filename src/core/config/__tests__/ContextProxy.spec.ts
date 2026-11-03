@@ -337,6 +337,28 @@ describe("ContextProxy", () => {
 			expect(proxy.getGlobalState("dateFormat")).toBe("ymd")
 		})
 
+		it("reads a secret whose store failed back from the secret storage", async () => {
+			mockSecrets.get.mockImplementation(async (key: string) =>
+				key === "openAiApiKey" ? "stored-key" : undefined,
+			)
+			mockSecrets.store.mockRejectedValue(new Error("keychain locked"))
+			await proxy.initialize()
+
+			const error = await proxy.setValues({ openAiApiKey: "new-key" }).catch((e: unknown) => e)
+
+			expect(error).toMatchObject({ committed: [], failed: ["openAiApiKey"] })
+			// The cache shows what the keychain holds, not the key that was never saved.
+			expect(proxy.getSecret("openAiApiKey")).toBe("stored-key")
+		})
+
+		it("still reports the failure when the secret cannot be read back either", async () => {
+			mockSecrets.store.mockRejectedValue(new Error("keychain locked"))
+			await proxy.initialize()
+			mockSecrets.get.mockRejectedValue(new Error("keychain locked"))
+
+			await expect(proxy.setValues({ openAiApiKey: "new-key" })).rejects.toBeInstanceOf(SettingsWriteError)
+		})
+
 		it("does not report a failure when every store succeeds", async () => {
 			await expect(proxy.setValues({ timeFormat: "24h", dateFormat: "ymd" })).resolves.toBeUndefined()
 		})

@@ -574,7 +574,7 @@ export class ContextProxy {
 	/**
 	 * Writes every value at once. This is not a transaction, for any setting: each key is stored on its own, and the
 	 * stores that completed are not undone. If any store rejects, every store is still awaited, the cache of each
-	 * failed key is read back from storage (so it never runs ahead of what was stored), and the call rejects with a
+	 * failed key (secrets included) is read back from storage (so it never runs ahead of what was stored), and the call rejects with a
 	 * `SettingsWriteError` that says which keys were stored and which were not. Callers that need more than this,
 	 * such as a rollback, must provide it themselves.
 	 */
@@ -584,6 +584,7 @@ export class ContextProxy {
 
 		const committed: string[] = []
 		const failed: string[] = []
+		const secretsToReread: SecretStateKey[] = []
 		let cause: unknown
 		for (const [index, [key]] of entries.entries()) {
 			const result = results[index]
@@ -593,8 +594,20 @@ export class ContextProxy {
 			}
 			cause ??= result.reason
 			failed.push(key)
-			if (!isSecretStateKey(key) && !isPassThroughStateKey(key)) {
+			if (isSecretStateKey(key)) {
+				secretsToReread.push(key as SecretStateKey)
+			} else if (!isPassThroughStateKey(key)) {
 				this.stateCache[key as GlobalStateKey] = this.originalContext.globalState.get(key)
+			}
+		}
+		// A secret is cached before its store settles, so a failed one is read back too (as `refreshSecrets` does).
+		for (const key of secretsToReread) {
+			try {
+				this.secretCache[key] = await this.originalContext.secrets.get(key)
+			} catch (error) {
+				logger.error(
+					`Error reading back secret ${key}: ${error instanceof Error ? error.message : String(error)}`,
+				)
 			}
 		}
 		if (failed.length > 0) throw new SettingsWriteError(committed, failed, cause)
