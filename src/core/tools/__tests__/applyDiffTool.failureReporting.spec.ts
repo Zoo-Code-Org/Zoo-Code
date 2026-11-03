@@ -69,6 +69,27 @@ describe("ApplyDiffTool failure reporting", () => {
 		mockAskApproval = vi.fn().mockResolvedValue(true)
 		mockHandleError = vi.fn().mockResolvedValue(undefined)
 
+		// The diff-view double mirrors the one behaviour execute now depends on: open() reads the
+		// file and records that text as the save baseline. Reading through the same fs mock the
+		// tool reads through keeps the fixture's base consistent, which is what the stale-base
+		// guard compares; a fixture that leaves originalContent at "" or from another read would
+		// report a stale base that never happened. Stale-base itself is covered by
+		// applyDiffTool.guardedWrite.spec.ts, which overrides open() with a different content.
+		const diffViewProviderStub = {
+			editType: undefined as "create" | "modify" | undefined,
+			originalContent: "" as string | undefined,
+			open: vi.fn(async () => {
+				diffViewProviderStub.originalContent = String(await vi.mocked(fs.readFile)(testFilePath as never))
+			}),
+			update: vi.fn().mockResolvedValue(undefined),
+			reset: vi.fn().mockResolvedValue(undefined),
+			revertChanges: vi.fn().mockResolvedValue(undefined),
+			saveChanges: vi.fn().mockResolvedValue(undefined),
+			saveDirectly: vi.fn().mockResolvedValue(undefined),
+			scrollToFirstDiff: vi.fn(),
+			pushToolWriteResult: vi.fn().mockResolvedValue("Changes successfully applied."),
+		}
+
 		// Only the provider, edit tracking, and diff-view members used by execute are needed.
 		mockTask = {
 			cwd: "/workspace",
@@ -87,18 +108,7 @@ describe("ApplyDiffTool failure reporting", () => {
 					}),
 				}),
 			},
-			diffViewProvider: {
-				editType: undefined,
-				originalContent: "",
-				open: vi.fn().mockResolvedValue(undefined),
-				update: vi.fn().mockResolvedValue(undefined),
-				reset: vi.fn().mockResolvedValue(undefined),
-				revertChanges: vi.fn().mockResolvedValue(undefined),
-				saveChanges: vi.fn().mockResolvedValue(undefined),
-				saveDirectly: vi.fn().mockResolvedValue(undefined),
-				scrollToFirstDiff: vi.fn(),
-				pushToolWriteResult: vi.fn().mockResolvedValue("Changes successfully applied."),
-			},
+			diffViewProvider: diffViewProviderStub as unknown as Task["diffViewProvider"],
 			fileContextTracker: { trackFileContext: vi.fn().mockResolvedValue(undefined) },
 			say: vi.fn().mockResolvedValue(undefined),
 			ask: vi.fn().mockResolvedValue(undefined),
