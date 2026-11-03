@@ -262,7 +262,7 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 					if (token.isCancellationRequested) {
 						return
 					}
-	
+
 					const { apiConfiguration } = await provider.getState()
 					if (!apiConfiguration || !apiConfiguration.apiProvider) {
 						vscode.window.showErrorMessage(
@@ -274,7 +274,7 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 					if (token.isCancellationRequested) {
 						return
 					}
-	
+
 					const prompt = buildCommitMessagePrompt(diff)
 					const rawMessage = await singleCompletionHandler(apiConfiguration as ProviderSettings, prompt, {
 						abortSignal: abortController.signal,
