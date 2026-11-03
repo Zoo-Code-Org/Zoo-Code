@@ -783,7 +783,21 @@ export class SkillsManager {
 				// permission bits: a user-restricted SKILL.md (e.g. 0600) would otherwise come back
 				// with the process default mode and become readable by other local users. A target
 				// that does not exist yet (createSkill) has no mode to preserve and keeps the default.
-				const existingTarget = await fs.stat(filePath).catch(() => undefined)
+				// Only a missing target is allowed to fall through to the default mode: any other stat
+				// failure means the mode could not be read, and renaming anyway would replace a
+				// restricted SKILL.md with a file carrying the process default mode.
+				const existingTarget = await fs.stat(filePath).catch((error: unknown) => {
+					const code =
+						typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined
+					// A missing target (or an error that carries no filesystem code at all) has no mode to
+					// preserve. Any coded failure - EACCES, EIO, EPERM - means the mode could not be read,
+					// and renaming anyway would replace a restricted SKILL.md with a file that carries the
+					// process default mode, so it fails closed.
+					if (code === "ENOENT" || typeof code !== "string") {
+						return undefined
+					}
+					throw error
+				})
 				if (existingTarget && typeof existingTarget.mode === "number") {
 					await fs.chmod(temporaryPath, existingTarget.mode & 0o777)
 				}
