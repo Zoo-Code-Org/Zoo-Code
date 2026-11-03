@@ -17,6 +17,9 @@
 		"could_not_open_file_generic": "Datei konnte nicht geöffnet werden!",
 		"checkpoint_timeout": "Zeitüberschreitung beim Versuch, den Checkpoint wiederherzustellen.",
 		"checkpoint_failed": "Fehler beim Wiederherstellen des Checkpoints.",
+		"checkpoint_restore_failed": "Fehler beim Wiederherstellen des Checkpoints: {{error}}",
+		"checkpoint_missing": "Checkpoint {{commitHash}} kann nicht wiederhergestellt werden: Dieser Checkpoint existiert nicht mehr im Checkpoint-Repository. Es wurden keine Dateien geändert.",
+		"checkpoint_invalid_hash": "Checkpoint kann nicht wiederhergestellt oder verglichen werden: Die Referenz ist kein gültiger Checkpoint dieser Aufgabe. Es wurden keine Dateien geändert.",
 		"git_not_installed": "Git ist für die Checkpoint-Funktion erforderlich. Bitte installiere Git, um Checkpoints zu aktivieren.",
 		"checkpoint_no_first": "Kein erster Checkpoint zum Vergleich vorhanden.",
 		"checkpoint_no_previous": "Kein vorheriger Checkpoint zum Vergleich vorhanden.",
@@ -112,6 +115,10 @@
 		"manual_url_auth_failed": "Manuelle URL-Authentifizierung fehlgeschlagen",
 		"manual_url_auth_error": "Authentifizierung fehlgeschlagen",
 		"rooHistoryImport": "Fehler beim Importieren des Roo Code-Verlaufs: {{error}}"
+	},
+	"checkpoints": {
+		"restart_after_restore_failure": "Das Wiederherstellen des Checkpoints ist fehlgeschlagen und die Aufgabe wurde angehalten. Möchtest du sie neu starten?",
+		"restart": "Neu starten"
 	},
 	"warnings": {
 		"no_terminal_content": "Kein Terminal-Inhalt ausgewählt",
