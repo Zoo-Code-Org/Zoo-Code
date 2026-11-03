@@ -430,6 +430,13 @@ export class ContextProxy {
 				}
 			},
 			(error) => {
+				// A write from a discarded generation is not part of this generation's
+				// in-flight count. Retiring it would credit a newer write as finished and let
+				// that write decide the mirror while something newer is still running.
+				if (!belongsToCurrentState()) {
+					throw error
+				}
+
 				retireWrite()
 
 				// The newest write for the key is the one storage would have ended up with,
@@ -439,7 +446,7 @@ export class ContextProxy {
 				// leaves the mirror to the newer write that is still in flight.
 				// The map spans every key, so its value is the union over all keys - this
 				// write's key is the one being restored.
-				if (belongsToCurrentState() && this.writeSequences.get(key) === sequence) {
+				if (this.writeSequences.get(key) === sequence) {
 					this.stateCache[key] = this.persistedValues.get(key) as GlobalState[K]
 				}
 				throw error

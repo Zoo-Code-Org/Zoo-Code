@@ -679,6 +679,39 @@ describe("ContextProxy", () => {
 			await postReset
 			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
 		})
+
+		it("keeps a rejected pre-reset write out of the in-flight count of newer writes", async () => {
+			let failPreReset: (error: Error) => void = () => {}
+			mockGlobalState.update.mockImplementationOnce(
+				() => new Promise((_resolve, reject) => (failPreReset = reject)),
+			)
+			const preReset = proxy.updateGlobalState("apiProvider", "openai")
+
+			await proxy.resetAllState()
+
+			let settleOlder: (value: undefined) => void = () => {}
+			let settleNewer: (value: undefined) => void = () => {}
+			mockGlobalState.update.mockImplementationOnce(() => new Promise((resolve) => (settleOlder = resolve)))
+			const older = proxy.updateGlobalState("apiProvider", "anthropic")
+			mockGlobalState.update.mockImplementationOnce(() => new Promise((resolve) => (settleNewer = resolve)))
+			const newer = proxy.updateGlobalState("apiProvider", "openrouter")
+
+			// The stale rejection must not retire one of the post-reset writes; if it did,
+			// the older landing below would look like the last write standing.
+			failPreReset(new Error("globalState write failed"))
+			await expect(preReset).rejects.toThrow("globalState write failed")
+
+			settleOlder(undefined)
+			await older
+
+			// The newer write is still in flight, so its value is what the mirror holds.
+			expect(proxy.getGlobalState("apiProvider")).toBe("openrouter")
+
+			settleNewer(undefined)
+			await newer
+
+			expect(proxy.getGlobalState("apiProvider")).toBe("openrouter")
+		})
 	})
 
 	describe("invalid apiProvider migration", () => {
