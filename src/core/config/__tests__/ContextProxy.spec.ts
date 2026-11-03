@@ -330,6 +330,43 @@ describe("ContextProxy", () => {
 			// deliberately leaves provider settings such as `apiProvider` out.
 			expect(proxy.getValues().apiProvider).toBe("openai")
 		})
+
+		it("keeps the landed value when the last write standing for the key rejects", async () => {
+			await proxy.updateGlobalState("apiProvider", "deepseek")
+
+			let settleOldest: (value: undefined) => void = () => {}
+			let rejectMiddle: (error: Error) => void = () => {}
+			let rejectNewest: (error: Error) => void = () => {}
+			mockGlobalState.update.mockImplementationOnce(() => new Promise((resolve) => (settleOldest = resolve)))
+			const oldest = proxy.updateGlobalState("apiProvider", "openai")
+			mockGlobalState.update.mockImplementationOnce(
+				() => new Promise((_resolve, reject) => (rejectMiddle = reject)),
+			)
+			const middle = proxy.updateGlobalState("apiProvider", "anthropic")
+			mockGlobalState.update.mockImplementationOnce(
+				() => new Promise((_resolve, reject) => (rejectNewest = reject)),
+			)
+			const newest = proxy.updateGlobalState("apiProvider", "openrouter")
+
+			// The newest write fails first, so the mirror falls back to what storage held
+			// before these three writes.
+			rejectNewest(new Error("globalState write failed"))
+			await expect(newest).rejects.toThrow("globalState write failed")
+			expect(proxy.getGlobalState("apiProvider")).toBe("deepseek")
+
+			// The oldest write lands, so storage now holds its value while the middle one
+			// is still in flight.
+			settleOldest(undefined)
+			await oldest
+
+			// The middle write is the last one standing and it fails too: the mirror has
+			// to report what landed, not what was there before all three writes.
+			rejectMiddle(new Error("globalState write failed"))
+			await expect(middle).rejects.toThrow("globalState write failed")
+
+			expect(proxy.getGlobalState("apiProvider")).toBe("openai")
+			expect(proxy.getValues().apiProvider).toBe("openai")
+		})
 	})
 
 	describe("getSecret", () => {

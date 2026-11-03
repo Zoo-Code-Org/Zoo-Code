@@ -437,16 +437,17 @@ export class ContextProxy {
 					throw error
 				}
 
-				retireWrite()
+				const wasLastWriteStanding = retireWrite()
 
-				// The newest write for the key is the one storage would have ended up with,
-				// so its rejection is rolled back to the newest value that actually
-				// persisted, even while an older write for the same key is still running -
-				// otherwise readers report a value that was rejected. An older rejection
-				// leaves the mirror to the newer write that is still in flight.
+				// Two cases decide what the mirror holds:
+				// - this was the newest write issued for the key: storage will never take
+				//   that value, so fall back to the newest value that persisted, even while
+				//   an older write for the same key is still running;
+				// - nothing is in flight for this key any more: whatever landed and whatever
+				//   failed, the mirror has to equal what storage actually holds.
 				// The map spans every key, so its value is the union over all keys - this
 				// write's key is the one being restored.
-				if (this.writeSequences.get(key) === sequence) {
+				if (wasLastWriteStanding || this.writeSequences.get(key) === sequence) {
 					this.stateCache[key] = this.persistedValues.get(key) as GlobalState[K]
 				}
 				throw error
