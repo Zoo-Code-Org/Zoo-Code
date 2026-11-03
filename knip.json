@@ -1,7 +1,6 @@
 {
 	"$schema": "https://unpkg.com/knip@5/schema.json",
 	"ignore": [
-		"src/core/checkpoints/rollback.ts",
 		"apps/vscode-e2e/**",
 		"scripts/**",
 		"packages/core/src/custom-tools/__tests__/fixtures/**",
@@ -18,7 +17,7 @@
 	"playwright-ct": false,
 	"workspaces": {
 		"src": {
-			"entry": ["extension.ts!", "extension/api.ts!", "workers/countTokens.ts!"],
+			"entry": ["extension.ts!", "extension/api.ts!", "workers/countTokens.ts!", "core/checkpoints/rollback.ts!"],
 			"project": [
 				"**/*.ts!",
 				"!**/__tests__/**!",
