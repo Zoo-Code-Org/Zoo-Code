@@ -265,6 +265,9 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openai/gpt-4",
 			}),
+			// Mirrors ProviderSettingsManager.hasConfig: the sibling-overlay snapshot asks
+			// before reading a pinned profile so a dangling pin can be left alone.
+			hasConfig: vi.fn().mockResolvedValue(true),
 			getProfile: vi.fn().mockResolvedValue({
 				name: "test-config",
 				id: "test-id",

@@ -884,7 +884,7 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 	// the class type declares several of them as getters / readonly, so the fixture
 	// type is the writable view of the same object (no cast through unknown needed).
 	type LaunchProviderFixture = {
-		setViewStateId: (viewStateId: string) => Promise<void>
+		setViewStateId: (viewStateId: string, repairBeforeReady?: () => Promise<void>) => Promise<void>
 		workspaceTracker: { initializeFilePaths: () => Promise<void> }
 		providerSettingsManager: {
 			listConfig: () => Promise<unknown[]>
@@ -916,7 +916,11 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 				currentApiConfigName: "view-local-profile",
 			}),
 		)
-		double.setViewStateId = vi.fn().mockResolvedValue(undefined)
+		// Mirror the real contract: setViewStateId runs the launch repair inside the
+		// view-state readiness window before it resolves.
+		double.setViewStateId = vi.fn(async (_viewStateId: string, repairBeforeReady?: () => Promise<void>) => {
+			await repairBeforeReady?.()
+		})
 		double.workspaceTracker = { initializeFilePaths: vi.fn().mockResolvedValue(undefined) }
 		double.providerSettingsManager = {
 			listConfig: vi
@@ -957,7 +961,7 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
 		await new Promise((resolve) => setImmediate(resolve))
 
-		expect(double.setViewStateId).toHaveBeenCalledWith("view-1")
+		expect(double.setViewStateId).toHaveBeenCalledWith("view-1", expect.any(Function))
 
 		// The merged (view-local) name is validated first; the shared global is only
 		// consulted when the view-local name is invalid. toHaveBeenCalledWith proves both
@@ -1063,6 +1067,63 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
 		// ... and marks the view as launched.
 		expect(mockClineProvider.isViewLaunched).toBe(true)
+	})
+})
+
+describe("webviewMessageHandler - deleteApiConfiguration", () => {
+	const provider = mockClineProvider as unknown as {
+		deleteProviderProfile: ReturnType<typeof vi.fn>
+		getProviderProfileEntry: ReturnType<typeof vi.fn>
+		providerSettingsManager: {
+			listConfig: ReturnType<typeof vi.fn>
+			deleteConfig: ReturnType<typeof vi.fn>
+		}
+	}
+	const originalMembers = {
+		deleteProviderProfile: (mockClineProvider as unknown as Record<string, unknown>).deleteProviderProfile,
+		getProviderProfileEntry: (mockClineProvider as unknown as Record<string, unknown>).getProviderProfileEntry,
+		providerSettingsManager: provider.providerSettingsManager,
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		provider.providerSettingsManager = {
+			listConfig: vi.fn().mockResolvedValue([
+				{ name: "deleted-profile", id: "deleted-id", apiProvider: providerIdentifiers.openrouter },
+				{ name: "keeper-profile", id: "keeper-id", apiProvider: providerIdentifiers.anthropic },
+			]),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		provider.getProviderProfileEntry = vi.fn().mockReturnValue({
+			name: "deleted-profile",
+			id: "deleted-id",
+			apiProvider: providerIdentifiers.openrouter,
+		})
+		provider.deleteProviderProfile = vi.fn().mockResolvedValue(undefined)
+		// The handler compares the answer against the localized "yes" string, which the
+		// vscode MessageItem typing does not model.
+		vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(
+			t("common:answers.yes") as unknown as vscode.MessageItem,
+		)
+	})
+
+	afterEach(() => {
+		Object.assign(mockClineProvider, originalMembers)
+	})
+
+	it("routes the deletion through deleteProviderProfile so the pinned views are re-pointed", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "deleteApiConfiguration",
+			text: "deleted-profile",
+		})
+
+		// Deleting the record and re-activating the survivor here left every other view
+		// pinned to the removed profile name, in its loaded state and in its durable
+		// viewStates entry. The provider's deletion path owns those re-points.
+		expect(provider.deleteProviderProfile).toHaveBeenCalledWith(
+			expect.objectContaining({ name: "deleted-profile" }),
+		)
+		expect(provider.providerSettingsManager.deleteConfig).not.toHaveBeenCalled()
 	})
 })
 

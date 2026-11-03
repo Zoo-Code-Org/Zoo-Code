@@ -521,6 +521,9 @@ vi.mock("../../config/ProviderSettingsManager", () => ({
 		return {
 			saveConfig: vi.fn().mockResolvedValue("test-id"),
 			listConfig: vi.fn().mockResolvedValue([]),
+			// Mirrors ProviderSettingsManager.hasConfig: the sibling-overlay snapshot asks
+			// before reading a pinned profile so a dangling pin can be left alone.
+			hasConfig: vi.fn().mockResolvedValue(true),
 			getProfile: vi.fn().mockResolvedValue({}),
 			activateProfile: vi.fn().mockImplementation(async (args: { name?: string; id?: string }) => ({
 				name: args.name ?? "default",

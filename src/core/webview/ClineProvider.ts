@@ -170,6 +170,14 @@ type PersistedViewState = NonNullable<GlobalState["viewStates"]>[string]
 type ViewLocalStateValues = Partial<RooCodeSettings> & Partial<ExtensionState>
 
 /**
+ * The only view-local selections `saveViewState` may persist. `viewLocalState` also
+ * carries shared keys (writeDelayMs, ...), which this path silently dropped while
+ * logging success: they belong to `setValue`, which writes them through the shared
+ * store instead of the per-view overlay.
+ */
+type SavableViewStateKey = "mode" | "currentApiConfigName" | "apiConfiguration"
+
+/**
  * https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default/weather-webview/src/providers/WeatherViewProvider.ts
  * https://github.com/KumarVariable/vscode-extension-sidebar-html/blob/master/src/customSidebarViewProvider.ts
  */
@@ -939,7 +947,15 @@ export class ClineProvider
 	 * Registers this provider's stable view identifier and loads any persisted selections it owns.
 	 * The identifier is sanitized so it remains a safe object key in the shared viewStates map.
 	 */
-	public async setViewStateId(viewStateId: string | undefined): Promise<void> {
+	public async setViewStateId(
+		viewStateId: string | undefined,
+		/**
+		 * Launch-time repair that must finish inside the readiness window: it re-points
+		 * a pin that names a removed profile, so a task started before it runs would
+		 * record the removed name in its own task record.
+		 */
+		repairBeforeReady?: () => Promise<void>,
+	): Promise<void> {
 		// The webview generates this id on purpose - it has to survive a webview reload,
 		// which recreates the view on both sides - so the host cannot mint it instead.
 		// What the host owns is which view may hold a given persisted key, so everything
@@ -1010,6 +1026,14 @@ export class ClineProvider
 			await this.rekeyPersistedViewStateEntry(this.viewStateId)
 
 			await this.loadViewState()
+
+			// The launch repair belongs inside the window it protects: it re-points a
+			// pin that names a removed profile, and a task created before it runs would
+			// record the removed name as its own (the launch handler repairs the shared
+			// list and this view's pin in place).
+			if (repairBeforeReady) {
+				await repairBeforeReady()
+			}
 		} catch (error) {
 			// A persistence failure must not leave the provider holding an id that was
 			// never registered: restore the previous id so a later launch retries the
@@ -1017,11 +1041,12 @@ export class ClineProvider
 			// the failed id.
 			this.viewStateId = previousViewStateId
 			throw error
-		} finally {
-			// The stable id is now registered (or restored): API-driven task creation
-			// can proceed against this view's loaded state.
-			this.viewStateReadinessResolve()
 		}
+
+		// Readiness is released only after the load - and the launch repair - succeeded:
+		// a failed registration leaves API-driven task creation to its timeout instead
+		// of letting a task read shared state for fields this view never loaded.
+		this.viewStateReadinessResolve()
 	}
 
 	/**
@@ -1131,7 +1156,7 @@ export class ClineProvider
 	 * non-secret subset (mode, currentApiConfigName) is persisted durably under the view
 	 * id active when the change was made, re-keyed to the stable id on registration.
 	 */
-	public async saveViewState<K extends keyof ViewLocalStateValues>(
+	public async saveViewState<K extends SavableViewStateKey>(
 		key: K,
 		value: ViewLocalStateValues[K] | undefined,
 	): Promise<void> {
@@ -3422,6 +3447,8 @@ export class ClineProvider
 				instance.viewLocalState.apiConfiguration === undefined,
 		)
 
+		const unresolvablePins: string[] = []
+
 		await Promise.all(
 			affected.map(async (instance) => {
 				const pinName = instance.pinnedProfileName
@@ -3430,24 +3457,53 @@ export class ClineProvider
 				}
 
 				try {
+					// A pin whose record is gone has nothing to snapshot: the deletion and
+					// launch-repair paths re-point it. Any other failure means this sibling
+					// would read the activated profile's settings under its own pin name once
+					// the shared write lands, so the caller has to abort instead.
+					if (!(await this.providerSettingsManager.hasConfig(pinName))) {
+						this.log(
+							`[snapshotSiblingOverlaysBeforeSharedSettingsWrite] Pinned profile '${pinName}' no longer resolves; leaving that pin to the re-point path.`,
+						)
+						return
+					}
+
 					const { name: _siblingPinName, ...settings } = await this.providerSettingsManager.getProfile({
 						name: pinName,
 					})
 					// Direct private access: compile-time safe across sibling instances.
 					await instance._saveViewLocalStateFromMutation({ apiConfiguration: settings as ProviderSettings })
-					await instance.postStateToWebview()
 				} catch (error) {
-					// If the pinned profile cannot be resolved, leave the overlay as is:
-					// the deletion path re-points such views, and a wrong snapshot is
-					// worse than the pre-write shared values.
+					unresolvablePins.push(`${pinName} (${error instanceof Error ? error.message : String(error)})`)
 					this.log(
 						`[snapshotSiblingOverlaysBeforeSharedSettingsWrite] Unable to resolve profile '${pinName}': ${
 							error instanceof Error ? error.message : String(error)
 						}`,
 					)
 				}
+
+				// A snapshot that landed is already usable: a sibling without a live
+				// webview throws in postStateToWebview, which must not fail the write.
+				try {
+					await instance.postStateToWebview()
+				} catch (error) {
+					this.log(
+						`[snapshotSiblingOverlaysBeforeSharedSettingsWrite] Failed to post state to a sibling pinned to '${pinName}': ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					)
+				}
 			}),
 		)
+
+		if (unresolvablePins.length > 0) {
+			// Proceeding would leave these siblings pinned to their own profile name while
+			// they read the activated profile's settings and credentials from the shared
+			// slot: fail the write so the caller's compensation keeps the store intact.
+			throw new Error(
+				`Cannot rewrite the shared provider settings: the settings pinned by ${unresolvablePins.join(", ")} could not be snapshotted for the sibling view(s) that pin them`,
+			)
+		}
 	}
 
 	async activateProviderProfile(
@@ -3627,9 +3683,11 @@ export class ClineProvider
 					currentApiConfigName: replacementName,
 				}
 
-				if (replacementSettings) {
-					values.apiConfiguration = replacementSettings
-				}
+				// Assign the overlay explicitly (even undefined) so it is replaced or
+				// cleared: without the replacement's settings the re-pinned view must fall
+				// back to the shared state instead of serving the deleted profile's
+				// configuration under the survivor's name.
+				values.apiConfiguration = replacementSettings
 
 				// Direct private access: compile-time safe across sibling instances.
 				await instance._saveViewLocalStateFromMutation(values)

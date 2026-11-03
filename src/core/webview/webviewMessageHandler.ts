@@ -593,43 +593,12 @@ export const webviewMessageHandler = async (
 			}
 			break
 		case "webviewDidLaunch": {
-			// A failed view-state registration must not abort launch handling: the
-			// initial state, theme and API-configuration sync below still run, and the
-			// provider restores its previous viewStateId on failure (setViewStateId) so
-			// a later launch retries registration and loadViewState instead of
-			// treating the failed id as already handled.
-			try {
-				await provider.setViewStateId(message.viewStateId)
-			} catch (error) {
-				provider.log(
-					`[webviewDidLaunch] view-state registration failed: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
-
-			// Load custom modes first
-			const customModes = await provider.customModesManager.getCustomModes()
-			await updateGlobalState("customModes", customModes)
-
-			await provider.postStateToWebview()
-			void provider.workspaceTracker
-				?.initializeFilePaths()
-				.catch((err) => provider.log(`Workspace initialization error: ${err}`)) // Don't await.
-
-			await getTheme().then((theme) =>
-				provider.postMessageToWebview({ type: "theme", text: JSON.stringify(theme) }),
-			)
-
-			// If MCP Hub is already initialized, update the webview with
-			// current server list.
-			const mcpHub = provider.getMcpHub()
-
-			if (mcpHub) {
-				await provider.postMessageToWebview({ type: "mcpServers", mcpServers: mcpHub.getAllServers() })
-			}
-
-			provider.providerSettingsManager
-				.listConfig()
-				.then(async (listApiConfig) => {
+			// Launch repair, run inside the view-state readiness window: a pin that names
+			// a removed profile is re-pointed here, and a task created before this ran
+			// would record the removed profile name in its own task record.
+			const repairRemovedViewPin = async () => {
+				try {
+					const listApiConfig = await provider.providerSettingsManager.listConfig()
 					if (!listApiConfig) {
 						return
 					}
@@ -709,12 +678,50 @@ export const webviewMessageHandler = async (
 						await updateGlobalState("listApiConfigMeta", listApiConfig),
 						await provider.postMessageToWebview({ type: "listApiConfig", listApiConfig }),
 					])
-				})
-				.catch((error) =>
+				} catch (error) {
 					provider.log(
 						`Error list api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
-					),
+					)
+				}
+			}
+
+			// A failed view-state registration must not abort launch handling: the
+			// initial state, theme and API-configuration sync below still run, and the
+			// provider restores its previous viewStateId on failure (setViewStateId) so
+			// a later launch retries registration and loadViewState instead of
+			// treating the failed id as already handled.
+			try {
+				await provider.setViewStateId(message.viewStateId, repairRemovedViewPin)
+			} catch (error) {
+				provider.log(
+					`[webviewDidLaunch] view-state registration failed: ${error instanceof Error ? error.message : String(error)}`,
 				)
+				// Registration failed and this view's state was never loaded: still run the
+				// launch repair so a pin that names a removed profile does not survive the
+				// failed launch.
+				await repairRemovedViewPin()
+			}
+
+			// Load custom modes first
+			const customModes = await provider.customModesManager.getCustomModes()
+			await updateGlobalState("customModes", customModes)
+
+			await provider.postStateToWebview()
+			void provider.workspaceTracker
+				?.initializeFilePaths()
+				.catch((err) => provider.log(`Workspace initialization error: ${err}`)) // Don't await.
+
+			await getTheme().then((theme) =>
+				provider.postMessageToWebview({ type: "theme", text: JSON.stringify(theme) }),
+			)
+
+			// If MCP Hub is already initialized, update the webview with
+			// current server list.
+			const mcpHub = provider.getMcpHub()
+
+			if (mcpHub) {
+				await provider.postMessageToWebview({ type: "mcpServers", mcpServers: mcpHub.getAllServers() })
+			}
 
 			// Telemetry is on by disclosed default: "unset" (no choice made yet) leaves that
 			// default in effect, same as "enabled". Only an explicit "disabled" opts out.
@@ -2675,9 +2682,20 @@ export const webviewMessageHandler = async (
 					return
 				}
 
+				const entry = provider.getProviderProfileEntry(oldName)
+
+				if (!entry) {
+					vscode.window.showErrorMessage(t("common:errors.delete_api_config"))
+					return
+				}
+
 				try {
-					await provider.providerSettingsManager.deleteConfig(oldName)
-					await provider.activateProviderProfile({ name: newName })
+					// Route the deletion through the provider: deleting the record and then
+					// activating the survivor here left every other view pinned to the removed
+					// profile name in its loaded state and in its durable viewStates entry.
+					// deleteProviderProfile prunes the record, re-points the live and persisted
+					// pins, and activates the survivor for the views that pinned the deleted one.
+					await provider.deleteProviderProfile(entry)
 				} catch (error) {
 					provider.log(
 						`Error delete api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,

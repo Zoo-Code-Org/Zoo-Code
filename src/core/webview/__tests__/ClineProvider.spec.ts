@@ -4122,6 +4122,184 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	it("releases viewStateReadiness only after the launch repair finished", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+
+		let releaseRepair: () => void = () => {}
+		const repairGate = new Promise<void>((resolve) => {
+			releaseRepair = resolve
+		})
+		let repairFinished = false
+		let readinessSettled = false
+		void provider.viewStateReadiness.then(() => {
+			readinessSettled = true
+		})
+
+		const registration = provider["setViewStateId"]("repair-view", async () => {
+			await repairGate
+			repairFinished = true
+		})
+		await new Promise((resolve) => setTimeout(resolve, 0))
+
+		// The repair runs inside the readiness window: API-driven task creation must not
+		// proceed while a pin that names a removed profile is still being re-pointed.
+		expect(repairFinished).toBe(false)
+		expect(readinessSettled).toBe(false)
+
+		releaseRepair()
+		await registration
+		await provider.viewStateReadiness
+		expect(repairFinished).toBe(true)
+		expect(readinessSettled).toBe(true)
+
+		await provider.dispose()
+	})
+
+	it("keeps viewStateReadiness unresolved when the registration fails", async () => {
+		const contextProxy = new ContextProxy(mockContext)
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			contextProxy,
+			new WebviewFocusTracker(),
+		)
+		// Seed a pre-launch entry so the re-key has a durable write to make fail.
+		await provider["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
+		const setValueSpy = vi.spyOn(contextProxy, "setValue").mockRejectedValue(new Error("storage down"))
+
+		let readinessSettled = false
+		void provider.viewStateReadiness.then(() => {
+			readinessSettled = true
+		})
+
+		await expect(provider["setViewStateId"]("failed-view")).rejects.toThrow("storage down")
+		await new Promise((resolve) => setTimeout(resolve, 0))
+
+		// The failure path must not release readiness: a task would otherwise read the
+		// shared state for fields this view never loaded. Dispose releases the waiters.
+		expect(readinessSettled).toBe(false)
+		setValueSpy.mockRestore()
+
+		await provider.dispose()
+		await provider.viewStateReadiness
+		expect(readinessSettled).toBe(true)
+	})
+
+	it("aborts the shared settings write when a pinned sibling's profile cannot be snapshotted", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const sibling = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"editor",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		try {
+			sibling["viewLocalState"].currentApiConfigName = "sibling-profile"
+			vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ name: "sibling-profile", id: "sibling-id", apiProvider: providerIdentifiers.openrouter },
+				{ name: "activated-profile", id: "activated-id", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (params) => {
+				if ("name" in params && params.name === "activated-profile") {
+					return {
+						name: "activated-profile",
+						id: "activated-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "activated-key",
+					}
+				}
+				throw new Error("sibling profile read failed")
+			})
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("mode-id")
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const sharedSettingsBefore = provider.contextProxy.getProviderSettings()
+
+			await expect(provider.activateProviderProfile({ name: "activated-profile" })).rejects.toThrow(
+				/could not be snapshotted/,
+			)
+
+			// The sibling is still pinned to its own profile: if the shared write had
+			// landed, its getState() would report that pin with the activated profile's
+			// settings and credentials.
+			expect(sibling["viewLocalState"].apiConfiguration).toBeUndefined()
+			expect(provider.contextProxy.getProviderSettings()).toEqual(sharedSettingsBefore)
+		} finally {
+			await sibling.dispose()
+			await provider.dispose()
+		}
+	})
+
+	it("clears a re-pinned sibling's overlay when the replacement's settings cannot be read", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const sibling = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"editor",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		try {
+			const deletedProfile: ProviderSettingsEntry = {
+				name: "deleted-profile",
+				id: "deleted-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				deletedProfile,
+				{ name: "keeper-profile", id: "keeper-id", apiProvider: providerIdentifiers.anthropic },
+			])
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			sibling["viewLocalState"].currentApiConfigName = "deleted-profile"
+			sibling["viewLocalState"].apiConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "deleted-profile-secret",
+			}
+			vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (params) => {
+				if ("name" in params && params.name === "deleted-profile") {
+					return { name: "deleted-profile", id: "deleted-id", apiProvider: providerIdentifiers.openrouter }
+				}
+				throw new Error("survivor read failed")
+			})
+			vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await provider.deleteProviderProfile(deletedProfile)
+
+			// The sibling is re-pointed at the surviving name; without the replacement's
+			// settings its overlay has to be cleared, or getState() keeps serving the
+			// deleted profile's configuration under the survivor's name.
+			expect(sibling["viewLocalState"].currentApiConfigName).toBe("keeper-profile")
+			expect(sibling["viewLocalState"].apiConfiguration).toBeUndefined()
+		} finally {
+			await sibling.dispose()
+			await provider.dispose()
+		}
+	})
+
 	describe("view state persistence edge cases", () => {
 		it("should read viewStates from the ContextProxy cache when not fresh", async () => {
 			const provider = new ClineProvider(
