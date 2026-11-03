@@ -3585,6 +3585,12 @@ export class ClineProvider
 	 * activated profile are refreshed by `refreshViewLocalStateForUpdatedProfile`;
 	 * unpinned siblings follow the shared slot, where name and settings move
 	 * together.
+	 *
+	 * A pin that cannot be resolved fails the whole snapshot so the caller does not write
+	 * the shared store: that sibling would otherwise report its pin's name with the
+	 * activated profile's settings and start tasks on them. Siblings already snapshotted
+	 * keep an overlay equal to their own pin's settings, which is what they reported before
+	 * the aborted write.
 	 */
 	private async snapshotSiblingOverlaysBeforeSharedSettingsWrite(activatedProfileName: string): Promise<void> {
 		const affected = ClineProvider.getAllInstances().filter(
@@ -3594,6 +3600,8 @@ export class ClineProvider
 				instance.pinnedProfileName !== activatedProfileName &&
 				instance.viewLocalState.apiConfiguration === undefined,
 		)
+
+		const unresolvedPins: string[] = []
 
 		await Promise.all(
 			affected.map(async (instance) => {
@@ -3610,9 +3618,10 @@ export class ClineProvider
 					await instance._saveViewLocalStateFromMutation({ apiConfiguration: settings as ProviderSettings })
 					await instance.postStateToWebview()
 				} catch (error) {
-					// If the pinned profile cannot be resolved, leave the overlay as is:
-					// the deletion path re-points such views, and a wrong snapshot is
-					// worse than the pre-write shared values.
+					// The sibling keeps its pin but gets no overlay, so the shared write would
+					// leave its getState() reporting that pin with the activated profile's
+					// settings. Record it and fail the mutation instead of writing on top.
+					unresolvedPins.push(pinName)
 					this.log(
 						`[snapshotSiblingOverlaysBeforeSharedSettingsWrite] Unable to resolve profile '${pinName}': ${
 							error instanceof Error ? error.message : String(error)
@@ -3621,6 +3630,14 @@ export class ClineProvider
 				}
 			}),
 		)
+
+		if (unresolvedPins.length > 0) {
+			throw new Error(
+				`Refusing to overwrite the shared provider settings while pinned profile(s) could not be resolved: ${[
+					...new Set(unresolvedPins),
+				].join(", ")}`,
+			)
+		}
 	}
 
 	async activateProviderProfile(

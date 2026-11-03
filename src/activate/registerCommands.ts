@@ -294,7 +294,18 @@ type OpenClineInNewTabOptions = {
 	webviewFocusTracker: WebviewFocusTracker
 }
 
-export const openClineInNewTab = async ({ context, outputChannel, webviewFocusTracker }: OpenClineInNewTabOptions) => {
+/**
+ * The tab creation currently in flight, if any.
+ *
+ * The tab panel is tracked before its provider exists (the provider construction and
+ * `resolveWebviewView` are awaits), so the reuse check below misses exactly inside that
+ * window. Two overlapping calls would then both pass it and both create a panel: only the
+ * second panel ends up tracked, the first stays open with a provider no command can reach,
+ * and the next click opens a third tab. Overlapping callers join this creation instead.
+ */
+let tabCreationInFlight: Promise<ClineProvider> | undefined = undefined
+
+export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
 	// Reuse the tracked tab instead of opening a second one: a repeated
 	// "Open in editor" click reveals the existing tab's panel.
 	if (tabPanel) {
@@ -306,6 +317,24 @@ export const openClineInNewTab = async ({ context, outputChannel, webviewFocusTr
 		}
 	}
 
+	if (tabCreationInFlight) {
+		return tabCreationInFlight
+	}
+
+	const creation = createClineTab(options)
+	tabCreationInFlight = creation
+
+	try {
+		return await creation
+	} finally {
+		// Cleared for every outcome, so a failed creation cannot wedge the next click.
+		if (tabCreationInFlight === creation) {
+			tabCreationInFlight = undefined
+		}
+	}
+}
+
+const createClineTab = async ({ context, outputChannel, webviewFocusTracker }: OpenClineInNewTabOptions) => {
 	// (This example uses webviewProvider activation event which is necessary to
 	// deserialize cached webview, but since we use retainContextWhenHidden, we
 	// don't need to use that event).

@@ -1516,6 +1516,55 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await providerB.dispose()
 		})
 
+		it("should abort the shared settings write when a sibling's pin cannot be resolved", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await providerB.setValue("currentApiConfigName", "profile-y")
+
+			vi.spyOn(providerA.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "profile-x",
+				id: "x-id",
+				apiProvider: providerIdentifiers.anthropic,
+				anthropicBaseUrl: "x-url",
+			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "y-id", name: "profile-y", apiProvider: providerIdentifiers.openrouter },
+				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
+			])
+			// The sibling's pin cannot be resolved, so no overlay can shield it from the write.
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockRejectedValue(
+				new Error("profile store unavailable"),
+			)
+			const setSharedSettingsSpy = vi.spyOn(providerA.contextProxy, "setProviderSettings")
+
+			// The activation must fail instead of writing the shared store: B would otherwise
+			// report pin "profile-y" with profile-x's settings and start tasks on them.
+			await expect(providerA.activateProviderProfile({ name: "profile-x" })).rejects.toThrow(
+				/pinned profile\(s\) could not be resolved: profile-y/,
+			)
+
+			expect(setSharedSettingsSpy).not.toHaveBeenCalled()
+			expect(providerA.contextProxy.getValue("currentApiConfigName")).not.toBe("profile-x")
+			// B keeps its own pin and no overlay: unchanged from before the aborted write.
+			expect(providerB["viewLocalState"].currentApiConfigName).toBe("profile-y")
+			expect(providerB["viewLocalState"].apiConfiguration).toBeUndefined()
+
+			await providerA.dispose()
+			await providerB.dispose()
+		})
+
 		it("should drop the view-local overlay when flat provider settings are written through setValues", async () => {
 			const provider = new ClineProvider(
 				mockContext,

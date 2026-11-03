@@ -764,4 +764,43 @@ describe("openClineInNewTab", () => {
 		expect(mockPanel.reveal).not.toHaveBeenCalled()
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
 	})
+
+	it("shares one in-flight tab creation between overlapping calls", async () => {
+		// Hold the creation inside resolveWebviewView: the tab panel is already tracked there
+		// but its provider is not registered yet, which is the window the reuse check misses.
+		let releaseCreation!: () => void
+		const creationGate = new Promise<void>((resolve) => {
+			releaseCreation = resolve
+		})
+		const constructedProvider = {
+			resolveWebviewView: vi.fn().mockReturnValue(creationGate),
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn().mockResolvedValue(undefined),
+		}
+		// A plain function, not an arrow: the production code calls this with `new`.
+		vi.mocked(ClineProvider).mockImplementationOnce(function () {
+			return constructedProvider
+		} as never)
+
+		const options = {
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		}
+
+		const first = openClineInNewTab({ ...options })
+		// Let the first call create and track the panel, then block on its provider.
+		await vi.waitFor(() => expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1))
+
+		const second = openClineInNewTab({ ...options })
+		releaseCreation()
+		const [firstProvider, secondProvider] = await Promise.all([first, second])
+
+		// One panel, and the overlapping caller joined the same creation instead of racing
+		// the module-level tab panel and provider refs.
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
+		expect(firstProvider).toBe(constructedProvider)
+		expect(secondProvider).toBe(constructedProvider)
+		expect(ClineProvider).toHaveBeenCalledTimes(1)
+	})
 })
