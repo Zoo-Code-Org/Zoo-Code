@@ -618,7 +618,18 @@ describe("QwenCodeHandler Native Tools", () => {
 				external.abort()
 				expect(opts.signal.aborted).toBe(true) // the external abort is bridged to the SDK signal
 
-				await stream.next() // resume; the live stream ends once the signal aborts
+				// Resuming after the stop settles with the normalized abort contract: the SDK's
+				// own iterator ends the iteration quietly on an aborted controller, so the
+				// generator has to report the abort itself.
+				let caught: unknown
+				try {
+					await stream.next()
+				} catch (error) {
+					caught = error
+				}
+				expect(caught).toBeInstanceOf(Error)
+				expect((caught as Error).name).toBe("AbortError")
+				expect((caught as Error).message).toMatch(/aborted$/)
 			})
 
 			it("should fast-fail with a normalized AbortError for a pre-aborted signal", async () => {

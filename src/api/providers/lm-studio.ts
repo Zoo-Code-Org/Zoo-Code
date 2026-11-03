@@ -131,14 +131,10 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		}
 		const externalSignal = metadata?.abortSignal
 		if (externalSignal) {
+			// Nothing is awaited between throwIfAborted above and this registration,
+			// so the signal cannot have aborted in between; the listener alone covers
+			// an abort landing while either token count is pending.
 			externalSignal.addEventListener("abort", onExternalAbort)
-			// A listener registered after the signal already aborted never
-			// fires, so bridge the aborted state into the request-local
-			// controller (this also covers an abort landing while a token
-			// count below is still pending).
-			if (externalSignal.aborted) {
-				requestController.abort()
-			}
 		}
 
 		try {

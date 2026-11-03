@@ -180,10 +180,7 @@ describe("QwenCodeHandler abort wiring", () => {
 			const promise = handler.completePrompt("hi", { abortSignal: external.signal })
 			// Let the 401 attempt fail and the refresh fetch start, so the wait
 			// is established (listener registered) before the abort lands.
-			for (let i = 0; i < 20 && fetchMock.mock.calls.length === 0; i++) {
-				await Promise.resolve()
-			}
-			expect(fetchMock).toHaveBeenCalledTimes(1)
+			await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
 
 			external.abort() // Stop pressed while the token refresh wait is established
 
@@ -217,10 +214,7 @@ describe("QwenCodeHandler abort wiring", () => {
 			mockCreate.mockRejectedValueOnce(unauthorizedError())
 
 			const promise = handler.completePrompt("hi", { abortSignal: external.signal })
-			for (let i = 0; i < 20 && fetchMock.mock.calls.length === 0; i++) {
-				await Promise.resolve()
-			}
-			expect(fetchMock).toHaveBeenCalledTimes(1)
+			await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
 
 			external.abort() // Stop pressed while the token refresh wait is established
 
@@ -238,11 +232,10 @@ describe("QwenCodeHandler abort wiring", () => {
 			// request must not reuse the stale token and trigger a second 401
 			// refresh for a token we already hold.
 			releaseToken!() // assigned once the fetch mock was called (asserted above)
-			for (let i = 0; i < 20; i++) {
-				await Promise.resolve()
-			}
-			// credentials is loaded from the mocked file in the constructor; a null value would make the assertion fail (?. yields undefined, not the refreshed token)
-			expect(handler["credentials"]?.access_token).toBe("new-access-token")
+			// The constructor does not load credentials: ensureAuthenticated loads them from the
+			// mocked file while the first request runs, so the handler's in-memory credentials must
+			// hold the refreshed token even though this caller's assignment was skipped by the abort.
+			await vi.waitFor(() => expect(handler["credentials"]?.access_token).toBe("new-access-token"))
 			expect(mockCreate).toHaveBeenCalledTimes(1) // the retried request was never sent
 		})
 
@@ -312,10 +305,7 @@ describe("QwenCodeHandler abort wiring", () => {
 				const firstRun = collectStream(
 					handler.createMessage("test prompt", [], { taskId: "t1", abortSignal: first.signal }),
 				).catch((error: unknown) => error)
-				for (let i = 0; i < 20 && vi.mocked(fs.readFile).mock.calls.length === 0; i++) {
-					await Promise.resolve()
-				}
-				expect(fs.readFile).toHaveBeenCalledTimes(1)
+				await vi.waitFor(() => expect(fs.readFile).toHaveBeenCalledTimes(1))
 
 				first.abort() // Stop lands while the credential load is in flight
 				const firstError = await firstRun
@@ -379,7 +369,17 @@ describe("QwenCodeHandler abort wiring", () => {
 			external.abort()
 			expect(opts.signal.aborted).toBe(true) // the external abort is bridged to the SDK signal
 
-			await stream.next() // drain the generator
+			// Draining after the stop settles with the abort contract: the SDK's own
+			// iterator swallows the abort, so the generator has to report it.
+			let caught: unknown
+			try {
+				await stream.next()
+			} catch (error) {
+				caught = error
+			}
+			expect((caught as Error).name).toBe("AbortError")
+			expect((caught as Error).message).toBe("The Qwen Code request was aborted")
+
 			// The exact registered listener must be removed - removing a
 			// different function would leak the bridge on the shared Task signal.
 			expect(removeSpy).toHaveBeenCalledWith("abort", listener)
@@ -411,7 +411,8 @@ describe("QwenCodeHandler abort wiring", () => {
 
 			const stream = handler.createMessage("test prompt", [], { taskId: "t1", abortSignal: external.signal })
 			const pending = stream.next()
-			await new Promise((resolve) => setTimeout(resolve, 10)) // let the generator reach the pending load
+			// The pending credential load is observable: the generator reached it once readFile runs.
+			await vi.waitFor(() => expect(vi.mocked(fs.readFile)).toHaveBeenCalled())
 			external.abort()
 
 			let caught: unknown
@@ -441,20 +442,19 @@ describe("QwenCodeHandler abort wiring", () => {
 			}
 			vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(expiredCredentials))
 			let resolveFetch!: (response: { ok: boolean; json: () => Promise<Record<string, unknown>> }) => void
-			vi.stubGlobal(
-				"fetch",
-				vi.fn().mockImplementation(
-					() =>
-						new Promise<{ ok: boolean; json: () => Promise<Record<string, unknown>> }>((resolve) => {
-							resolveFetch = resolve
-						}),
-				),
+			const fetchMock = vi.fn().mockImplementation(
+				() =>
+					new Promise<{ ok: boolean; json: () => Promise<Record<string, unknown>> }>((resolve) => {
+						resolveFetch = resolve
+					}),
 			)
+			vi.stubGlobal("fetch", fetchMock)
 			const external = new AbortController()
 
 			const stream = handler.createMessage("test prompt", [], { taskId: "t1", abortSignal: external.signal })
 			const pending = stream.next()
-			await new Promise((resolve) => setTimeout(resolve, 10)) // let the generator reach the pending refresh
+			// The pending refresh is observable: the generator reached it once the fetch starts.
+			await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled())
 			external.abort()
 
 			let caught: unknown
@@ -472,8 +472,8 @@ describe("QwenCodeHandler abort wiring", () => {
 			// The shared refresh keeps running: once its fetch settles, the new
 			// credentials are persisted even though this request gave up.
 			resolveFetch(tokenResponse())
-			await new Promise((resolve) => setTimeout(resolve, 10))
-			expect(fs.writeFile).toHaveBeenCalled()
+			// The shared refresh keeps running: wait for it to persist the new credentials.
+			await vi.waitFor(() => expect(fs.writeFile).toHaveBeenCalled())
 		})
 
 		it("streams content, strips repeated prefixes and splits think tags", async () => {
@@ -637,6 +637,38 @@ describe("QwenCodeHandler abort wiring", () => {
 			expect((caught as Error).message).toBe("The Qwen Code request was aborted")
 		})
 
+		it("settles with the abort contract when the SDK stream stops quietly after an abort", async () => {
+			const external = new AbortController()
+			// openai/core/streaming.js turns an aborted controller into a quiet end of the
+			// iteration (isAbortError -> return), so the stream loop cannot rely on a thrown
+			// error: the generator has to notice the abort itself.
+			mockCreate.mockImplementationOnce((_params: unknown, opts?: { signal?: AbortSignal }) => {
+				return (async function* () {
+					yield { choices: [{ delta: { content: "partial" } }] }
+					await waitForSignalAbort(opts?.signal)
+					// No throw: this is exactly how the SDK iterator ends when its controller aborts.
+				})()
+			})
+
+			const stream = handler.createMessage("test prompt", [], { taskId: "t1", abortSignal: external.signal })
+			const chunkTypes: string[] = []
+			let caught: unknown
+			try {
+				for await (const chunk of stream) {
+					chunkTypes.push(chunk.type)
+					if (chunk.type === "text") {
+						external.abort()
+					}
+				}
+			} catch (error) {
+				caught = error
+			}
+
+			expect(chunkTypes).toEqual(["text"]) // the stop cut the stream before any usage chunk
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("AbortError")
+			expect((caught as Error).message).toBe("The Qwen Code request was aborted")
+		})
 		it("rethrows a non-abort stream error unchanged", async () => {
 			const apiError = new Error("stream exploded")
 			mockCreate.mockImplementationOnce(() => {
@@ -674,6 +706,46 @@ describe("QwenCodeHandler abort wiring", () => {
 			expect(opts?.signal.aborted).toBe(true)
 		})
 
+		it("keeps a concurrent request's SDK signal live when the other request is aborted", async () => {
+			const externalA = new AbortController()
+			const externalB = new AbortController()
+			const signals: AbortSignal[] = []
+			const recordSignal = (opts?: { signal?: AbortSignal }) => {
+				if (opts?.signal) {
+					signals.push(opts.signal)
+				}
+			}
+			mockCreate.mockImplementationOnce((_params: unknown, opts?: { signal?: AbortSignal }) => {
+				recordSignal(opts)
+				return asyncStreamFrom([{ choices: [{ delta: { content: "a" } }] }])
+			})
+			mockCreate.mockImplementationOnce((_params: unknown, opts?: { signal?: AbortSignal }) => {
+				recordSignal(opts)
+				return asyncStreamFrom([{ choices: [{ delta: { content: "b" } }] }])
+			})
+
+			const streamA = handler.createMessage("prompt a", [], { taskId: "t-a", abortSignal: externalA.signal })
+			const streamB = handler.createMessage("prompt b", [], { taskId: "t-b", abortSignal: externalB.signal })
+			expect((await streamA.next()).value?.type).toBe("text")
+			expect((await streamB.next()).value?.type).toBe("text")
+			expect(signals.length).toBe(2)
+			expect(signals[0]).not.toBe(signals[1]) // one handler, two requests: no shared controller
+
+			externalA.abort() // Stop one request while the other is still in flight
+			expect(signals[0].aborted).toBe(true)
+			expect(signals[1].aborted).toBe(false) // the concurrent request keeps running
+
+			let caught: unknown
+			try {
+				await collectStream(streamA)
+			} catch (error) {
+				caught = error
+			}
+			expect((caught as Error).name).toBe("AbortError")
+
+			await collectStream(streamB)
+			expect(signals[1].aborted).toBe(true) // B's own completion cancels its request
+		})
 		it("removes the external abort listener when the stream completes", async () => {
 			const external = new AbortController()
 			const addSpy = vi.spyOn(external.signal, "addEventListener")
@@ -762,7 +834,8 @@ describe("QwenCodeHandler abort wiring", () => {
 			const external = new AbortController()
 
 			const pending = handler.completePrompt("hi", { abortSignal: external.signal })
-			await new Promise((resolve) => setTimeout(resolve, 10)) // let the call reach the pending load
+			// The pending credential load is observable: the call reached it once readFile runs.
+			await vi.waitFor(() => expect(vi.mocked(fs.readFile)).toHaveBeenCalled())
 			external.abort()
 
 			let caught: unknown
@@ -792,19 +865,18 @@ describe("QwenCodeHandler abort wiring", () => {
 			}
 			vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(expiredCredentials))
 			let resolveFetch!: (response: { ok: boolean; json: () => Promise<Record<string, unknown>> }) => void
-			vi.stubGlobal(
-				"fetch",
-				vi.fn().mockImplementation(
-					() =>
-						new Promise<{ ok: boolean; json: () => Promise<Record<string, unknown>> }>((resolve) => {
-							resolveFetch = resolve
-						}),
-				),
+			const fetchMock = vi.fn().mockImplementation(
+				() =>
+					new Promise<{ ok: boolean; json: () => Promise<Record<string, unknown>> }>((resolve) => {
+						resolveFetch = resolve
+					}),
 			)
+			vi.stubGlobal("fetch", fetchMock)
 			const external = new AbortController()
 
 			const pending = handler.completePrompt("hi", { abortSignal: external.signal })
-			await new Promise((resolve) => setTimeout(resolve, 10)) // let the call reach the pending refresh
+			// The pending refresh is observable: the call reached it once the fetch starts.
+			await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled())
 			external.abort()
 
 			let caught: unknown
@@ -822,8 +894,8 @@ describe("QwenCodeHandler abort wiring", () => {
 			// The shared refresh keeps running: once its fetch settles, the new
 			// credentials are persisted even though this request gave up.
 			resolveFetch(tokenResponse())
-			await new Promise((resolve) => setTimeout(resolve, 10))
-			expect(fs.writeFile).toHaveBeenCalled()
+			// The shared refresh keeps running: wait for it to persist the new credentials.
+			await vi.waitFor(() => expect(fs.writeFile).toHaveBeenCalled())
 		})
 	})
 })

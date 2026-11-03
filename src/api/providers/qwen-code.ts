@@ -415,6 +415,15 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 					}
 				}
 			}
+
+			// The SDK's SSE iterator ends the iteration without throwing when its
+			// controller aborts (openai/core/streaming.js: isAbortError -> return), so a
+			// Stop mid-stream can leave the loop above having produced no error and no
+			// usage chunk, and this generator would read as a completed turn. Re-check
+			// the request-local signal before returning, as the LM Studio path does.
+			if (requestController.signal.aborted) {
+				throw createAbortError("Qwen Code")
+			}
 		} catch (error) {
 			if (isRequestAborted(error, externalSignal)) {
 				throw createAbortError("Qwen Code")

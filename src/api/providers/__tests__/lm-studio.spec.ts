@@ -118,6 +118,38 @@ describe("LmStudioHandler abort wiring", () => {
 			await stream.next() // drain the generator
 		})
 
+		it("keeps a concurrent request's SDK signal live when the other request is aborted", async () => {
+			const handler = new LmStudioHandler(options)
+			vitest.spyOn(handler, "countTokens").mockResolvedValue(1)
+			const create = lastCreate()
+			const signals: AbortSignal[] = []
+			create.mockImplementation((_params: unknown, opts?: { signal?: AbortSignal }) => {
+				if (opts?.signal) {
+					signals.push(opts.signal)
+				}
+				// A fresh generator per call: one stream instance cannot be iterated twice.
+				return asyncStreamFrom([{ choices: [{ delta: { content: "chunk-" + signals.length } }] }])
+			})
+
+			const externalA = new AbortController()
+			const externalB = new AbortController()
+			const streamA = handler.createMessage("system", [], { taskId: "t-a", abortSignal: externalA.signal })
+			const streamB = handler.createMessage("system", [], { taskId: "t-b", abortSignal: externalB.signal })
+			await streamA.next()
+			await streamB.next()
+			await vitest.waitFor(() => expect(create).toHaveBeenCalledTimes(2))
+			expect(signals.length).toBe(2)
+			expect(signals[0]).not.toBe(signals[1]) // one handler, two requests: no shared controller
+
+			externalA.abort() // Stop one request while the other is still in flight
+			expect(signals[0].aborted).toBe(true)
+			expect(signals[1].aborted).toBe(false) // the concurrent request keeps running
+
+			await streamA.return(undefined)
+			await streamB.return(undefined)
+			expect(signals[1].aborted).toBe(true) // B's own cleanup cancels its request
+		})
+
 		it("fast-fails with the abort contract error for a pre-aborted signal", async () => {
 			const handler = new LmStudioHandler(options)
 			const create = lastCreate()

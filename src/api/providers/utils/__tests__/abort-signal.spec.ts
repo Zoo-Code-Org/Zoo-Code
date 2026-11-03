@@ -702,7 +702,7 @@ describe("settleOnAbort", () => {
 
 		expect(await settleOnAbort(Promise.resolve("done"), controller.signal, "Test")).toBe("done")
 
-		expect(addSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+		expect(addSpy).toHaveBeenCalledTimes(1) // the wait registered a listener on this signal
 		expect(removeSpy).toHaveBeenCalledTimes(1)
 		// The exact registered listener must be removed — removing a
 		// different function would leave the real one attached.
@@ -731,7 +731,7 @@ describe("settleOnAbort", () => {
 
 		expect(caught).toBeInstanceOf(Error)
 		expect((caught as Error).name).toBe("AbortError")
-		expect(addSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+		expect(addSpy).toHaveBeenCalledTimes(1) // the wait registered a listener on this signal
 		expect(removeSpy).toHaveBeenCalledTimes(1)
 		// The exact registered listener must be removed — removing a
 		// different function would leave the real one attached.
@@ -778,7 +778,7 @@ describe("settleOnAbort", () => {
 		expect(caught).toBe(failure)
 		// The rejection path must detach the listener too: a leaked listener
 		// would keep this helper's closure alive for the life of the signal.
-		expect(addSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+		expect(addSpy).toHaveBeenCalledTimes(1) // the wait registered a listener on this signal
 		expect(removeSpy).toHaveBeenCalledTimes(1)
 		expect(removeSpy).toHaveBeenCalledWith("abort", addSpy.mock.calls[0]?.[1])
 	})
