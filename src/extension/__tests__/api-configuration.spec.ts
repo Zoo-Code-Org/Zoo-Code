@@ -86,6 +86,31 @@ describe("API - configuration", () => {
 		expect(setValues).toHaveBeenCalledExactlyOnceWith({ mode: "code" })
 	})
 
+	it.each([[999], [7], [12.5], ["12"]])(
+		"rejects an out-of-range appearance value (%j) and stores nothing",
+		async (value) => {
+			const setValue = vi.fn()
+			const setValues = vi.fn()
+			const provider = {
+				context: {},
+				on: vi.fn(),
+				contextProxy: { getValue: vi.fn(), setValue, setValues },
+				providerSettingsManager: { saveConfig: vi.fn(), setModeConfig: vi.fn() },
+				postStateToWebview: vi.fn(),
+			} as unknown as ClineProvider
+			const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+			const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+			await expect(
+				api.setConfiguration({ terminalFontSize: value, mode: "code" } as unknown as RooCodeSettings),
+			).rejects.toThrow("Invalid value for terminalFontSize")
+
+			expect(setValue).not.toHaveBeenCalled()
+			expect(setValues).not.toHaveBeenCalled()
+			expect(provider.providerSettingsManager.saveConfig).not.toHaveBeenCalled()
+		},
+	)
+
 	it("puts an appearance value back when its write fails, and rejects", async () => {
 		const stored = new Map<string, unknown>([["terminalFontSize", 12]])
 		const provider = {

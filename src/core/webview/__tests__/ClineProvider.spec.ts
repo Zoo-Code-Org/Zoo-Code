@@ -3413,6 +3413,28 @@ describe("ClineProvider", () => {
 		expect(newer.appearanceSeq).toBe(older.appearanceSeq! + 1)
 	})
 
+	test("deleting a provider profile does not write the appearance values back from its snapshot", async () => {
+		vi.spyOn(provider.contextProxy, "getValues").mockReturnValue({
+			currentApiConfigName: "a",
+			listApiConfigMeta: [
+				{ id: "1", name: "a" },
+				{ id: "2", name: "b" },
+			],
+			terminalFontSize: 14,
+			interfaceFontScale: 120,
+			soundEnabled: true,
+		})
+		const setValues = vi.spyOn(provider.contextProxy, "setValues").mockResolvedValue(undefined)
+
+		await provider.deleteProviderProfile({ id: "1", name: "a" })
+
+		expect(setValues).toHaveBeenCalledExactlyOnceWith({
+			currentApiConfigName: "b",
+			listApiConfigMeta: [{ id: "2", name: "b" }],
+			soundEnabled: true,
+		})
+	})
+
 	test("setValues, which a new task's configuration goes through, writes an appearance value through the write chain", async () => {
 		const setValue = vi.spyOn(provider.contextProxy, "setValue").mockResolvedValue(undefined)
 		const setValues = vi.spyOn(provider.contextProxy, "setValues").mockResolvedValue(undefined)

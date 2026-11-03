@@ -1,4 +1,4 @@
-import type { RooCodeSettings } from "@roo-code/types"
+import { globalSettingsSchema, type RooCodeSettings } from "@roo-code/types"
 
 import type { ContextProxy } from "./ContextProxy"
 
@@ -172,11 +172,21 @@ export const undoSettingWrite = async (contextProxy: ContextProxy, write: Settin
  * values go through the same per-key write chain as saves, so a save that fails and rolls back does not undo a value
  * written here meanwhile, even when it is the same value. The write is not rolled back as a whole: a write that
  * succeeded is final. A write that failed is undone, not finished, so it leaves the chain the way a failed save does
- * and an earlier save that is still pending keeps its own rollback.
+ * and an earlier save that is still pending keeps its own rollback. An invalid appearance value rejects the write
+ * before any value is stored.
  */
 export async function setValuesThroughWriteChain(contextProxy: ContextProxy, settings: RooCodeSettings) {
 	const keys = APPEARANCE_SETTING_KEYS.filter((key) => key in settings)
 	if (keys.length === 0) return contextProxy.setValues(settings)
+
+	// Every appearance value is checked before anything is written (these values come from the API and from a
+	// webview's new-task configuration, which are not bound by the settings controls): an invalid one rejects the
+	// whole write, so no appearance value is started and no other setting is stored.
+	for (const key of keys) {
+		if (!globalSettingsSchema.shape[key].safeParse(settings[key]).success) {
+			throw new Error(`Invalid value for ${key}`)
+		}
+	}
 
 	const writes = keys.map((key) => beginSettingWrite(key, contextProxy.getValue(key), settings[key]))
 	const others = Object.fromEntries(

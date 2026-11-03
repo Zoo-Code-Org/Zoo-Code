@@ -132,7 +132,7 @@ import { buildApiHandler } from "../../api"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/providers/fetchers/lmstudio"
 
 import { ContextProxy } from "../config/ContextProxy"
-import { setValuesThroughWriteChain } from "../config/appearanceSettingWrites"
+import { isAppearanceSetting, setValuesThroughWriteChain } from "../config/appearanceSettingWrites"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
 import { PendingActionSettlementError, Task } from "../task/Task"
@@ -2404,8 +2404,14 @@ export class ClineProvider
 
 		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
+		// The appearance values are left out: they are not changed here, and writing them back from this snapshot
+		// would bypass their write chain and could replace a value that a save stored in the meantime.
+		const unchanged = Object.fromEntries(
+			Object.entries(globalSettings).filter(([key]) => !isAppearanceSetting(key)),
+		) as RooCodeSettings
+
 		await this.contextProxy.setValues({
-			...globalSettings,
+			...unchanged,
 			currentApiConfigName: profileToActivate,
 			listApiConfigMeta: entries,
 		})

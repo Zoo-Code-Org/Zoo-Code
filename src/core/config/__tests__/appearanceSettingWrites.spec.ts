@@ -212,6 +212,41 @@ describe("appearanceSettingWrites", () => {
 			expect(vi.getTimerCount()).toBe(0)
 		})
 
+		it("lets a write that lands after the timeout stand, and a rollback keeps what it wrote", async () => {
+			let landLate: () => void = () => {}
+			const proxy = {
+				getValue: (key: string) => stored.get(key),
+				setValue: vi.fn(async (key: string, value: unknown) => {
+					if (value === 120) {
+						// Stores only when it is released, long after the timeout.
+						await new Promise<void>((resolve) => (landLate = resolve))
+					}
+					stored.set(key, value)
+				}),
+			} as unknown as ContextProxy
+			const first = beginSettingWrite("interfaceFontScale", 100, 120)
+			const firstDone = performSettingWrite(proxy, first)
+			const firstFailed = expect(firstDone).rejects.toThrow("did not finish in 15 seconds")
+
+			await vi.advanceTimersByTimeAsync(15_000)
+			await firstFailed
+			// The key is free: a later write goes ahead while the first is still outstanding.
+			const second = beginSettingWrite("interfaceFontScale", 100, 150)
+			await performSettingWrite(proxy, second)
+			expect(stored.get("interfaceFontScale")).toBe(150)
+
+			// The timed-out write now lands, and the failed save is rolled back: the stored value is no longer
+			// the one that write stored the last time it was looked at, so the rollback leaves it alone.
+			landLate()
+			await vi.advanceTimersByTimeAsync(0)
+			finishSettingWrites([second])
+			await undoSettingWrite(proxy, first)
+
+			expect(stored.get("interfaceFontScale")).toBe(120) // the late write is the last one to have landed
+			expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			expect(vi.getTimerCount()).toBe(0)
+		})
+
 		it("does not time out a write that finishes in time, and leaves no timer behind", async () => {
 			const proxy = {
 				getValue: (key: string) => stored.get(key),
@@ -289,6 +324,40 @@ describe("appearanceSettingWrites", () => {
 			)
 
 			expect(stored.get("interfaceFontScale")).toBe(120)
+		})
+
+		it.each([
+			["interfaceFontScale", 49],
+			["interfaceFontScale", 201],
+			["terminalFontSize", 999],
+			["terminalFontSize", 12.5],
+			["editorFontSize", "12"],
+			["spacingScale", Number.NaN],
+			["spacingScale", {}],
+		])("rejects %s = %j before anything is written", async (key, value) => {
+			const setValue = vi.spyOn(proxy, "setValue")
+
+			await expect(
+				setValuesThroughWriteChain(proxy, { interfaceFontScale: 100, [key]: value, mode: "code" } as never),
+			).rejects.toThrow(`Invalid value for ${key}`)
+
+			expect(setValue).not.toHaveBeenCalled()
+			expect(setValues).not.toHaveBeenCalled()
+			expect(stored.get("interfaceFontScale")).toBe(100)
+			expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+		})
+
+		it.each([
+			["interfaceFontScale", 50],
+			["interfaceFontScale", 200],
+			["terminalFontSize", 8],
+			["terminalFontSize", 32],
+			["editorFontSize", null],
+			["spacingScale", undefined],
+		])("accepts %s = %j", async (key, value) => {
+			await setValuesThroughWriteChain(proxy, { [key]: value } as never)
+
+			expect(stored.get(key)).toBe(value)
 		})
 
 		it("does not let a failing save that wrote the same value undo it", async () => {

@@ -688,8 +688,8 @@ describe("SettingsView – a save the host never answers", () => {
 
 			answerSave(id, { success: true })
 
-			// Stored as unset (null on the wire): the field is empty again, and nothing is left unsaved.
-			expect((screen.getByTestId("appearance-terminalFontSize-input") as HTMLInputElement).value).not.toBe("20")
+			// Stored as unset (null on the wire): the field shows the fallback again, and nothing is left unsaved.
+			expect((screen.getByTestId("appearance-terminalFontSize-input") as HTMLInputElement).value).toBe("12")
 			await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
 		})
 
