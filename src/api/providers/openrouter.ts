@@ -146,6 +146,10 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 	// abandoned lookup whose request was cancelled) can settle in any order, and
 	// only the newest one may publish the records it fetched.
 	private fetchModelSequence = 0
+	// Sequence of the newest lookup whose result this handler actually published. A lookup only
+	// publishes when it is newer than what was published, so an older lookup that settles first is
+	// not dropped just because a newer one has started.
+	private publishedModelSequence = 0
 
 	constructor(options: ApiHandlerOptions) {
 		super()
@@ -668,7 +672,8 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		// published: writing them would silently roll model metadata (pricing,
 		// limits, endpoint records) back to an older fetch. The stale lookup still
 		// returns the handler's current model, which is what its caller observes.
-		if (sequence === this.fetchModelSequence) {
+		if (sequence > this.publishedModelSequence) {
+			this.publishedModelSequence = sequence
 			this.models = models
 			// The endpoint lookup answers an empty map when the request failed. Publishing that would
 			// drop the endpoint records (pricing, limits) a previous successful lookup installed, so
