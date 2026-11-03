@@ -3852,6 +3852,36 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("drops a non-object viewStates entry instead of failing every save", async () => {
+			// A null entry in the shared map (written by an older build, or a hand-edited store)
+			// reaches prunePersistedViewStates, which reads updatedAt from every closed entry while
+			// sorting. That threw on every save until someone removed the entry by hand, so the read
+			// helper drops non-object entries: every caller reads the map through it.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			await provider.contextProxy.setValue("viewStates", {
+				"closed-view": { mode: "architect", updatedAt: 1_000 },
+				"corrupt-view": null,
+			} as unknown as never)
+			await provider["setViewStateId"]("stable-sidebar-view")
+
+			await expect(provider.saveViewState("mode", "code")).resolves.toBeUndefined()
+
+			const persisted = provider.contextProxy.getValue("viewStates") as Record<string, { mode?: string }>
+			expect(persisted["stable-sidebar-view"]?.mode).toBe("code")
+			// The healthy closed-view entry survives, and only the corrupt key is dropped.
+			expect(persisted["closed-view"]?.mode).toBe("architect")
+			expect(Object.prototype.hasOwnProperty.call(persisted, "corrupt-view")).toBe(false)
+
+			await provider.dispose()
+		})
+
 		it("should clear the currentApiConfigName override when saveViewState receives undefined", async () => {
 			const provider = new ClineProvider(
 				mockContext,
