@@ -24,13 +24,18 @@ const targetPath = path.resolve(process.env.INTERRUPTION_TARGET_PATH)
 const fsPromises = require("fs/promises")
 const actualRename = fsPromises.rename
 
-// Fault injection: die with code 0 before the replacement lands. Any rename
+// Fault injection: hard-kill before the replacement lands. Any rename
 // whose destination is the canonical path is the commit step, whatever
 // replacement protocol the writer uses; exit before performing it.
+let commitAttempts = 0
 fsPromises.rename = function interruptionRename(oldPath, newPath) {
 	if (path.resolve(String(newPath)) === targetPath) {
+		commitAttempts++
+		if (process.env.INTERRUPTION_MODE === "fallback" && commitAttempts === 1) {
+			return Promise.reject(Object.assign(new Error("Injected EPERM"), { code: "EPERM" }))
+		}
 		fs.writeSync(1, "EXIT_BEFORE_REPLACEMENT_RENAME\\n")
-		process.exit(0)
+		process.kill(process.pid, "SIGKILL")
 	}
 	return actualRename.apply(fsPromises, arguments)
 }
@@ -104,9 +109,9 @@ describe("safeWriteJson subprocess interruption fault injection", () => {
 		await fs.rm(tempDir, { recursive: true, force: true })
 	})
 
-	it.each([1, 2, 3])(
-		"keeps the committed file readable when the writer dies before the replacement lands (run %i)",
-		async (run) => {
+	it.each(["atomic", "fallback"] as const)(
+		"preserves committed history when the %s writer is killed before replacement",
+		async (mode) => {
 			// A previously committed write contains the restart marker.
 			const committed = { ui_messages: [{ ts: 1, type: "say", text: "RESTART_PERSISTENCE_MARKER" }] }
 			await fs.writeFile(targetPath, JSON.stringify(committed), "utf8")
@@ -123,8 +128,9 @@ describe("safeWriteJson subprocess interruption fault injection", () => {
 				env: {
 					...process.env,
 					INTERRUPTION_TARGET_PATH: targetPath,
+					INTERRUPTION_MODE: mode,
 					INTERRUPTION_PAYLOAD: JSON.stringify({
-						ui_messages: [{ ts: 2, type: "say", text: `INTERRUPTED_WRITE_${run}` }],
+						ui_messages: [{ ts: 2, type: "say", text: `INTERRUPTED_WRITE_${mode}` }],
 					}),
 					ESBUILD_PATH: esbuildPath,
 					SAFE_WRITE_JSON_ENTRY: safeWriteJsonEntryPath,
@@ -137,23 +143,32 @@ describe("safeWriteJson subprocess interruption fault injection", () => {
 			expect(exit.stdout).toContain("EXIT_BEFORE_REPLACEMENT_RENAME")
 			expect(exit.stdout).not.toContain("WRITE_COMPLETED")
 			expect(exit.stderr).not.toContain("WRITE_FAILED")
-			expect(exit.code).toBe(0)
+			expect(exit.code).toBeNull()
 
-			// The writer terminated before the replacement rename, so the
-			// canonical path must still hold the last committed content. This
-			// is the permanent-ENOENT regression: with the old two-rename
-			// protocol the committed target was already renamed away, and no
-			// read retry could bring it back.
-			const after = JSON.parse(await readFileWithMissingRetry(targetPath))
-			expect(after).toEqual(committed)
+			// Atomic replacement retains the canonical file; the two-step
+			// fallback retains committed content in its backup until recovery.
+			const interruptedFiles = await fs.readdir(storageDir)
+			expect(interruptedFiles.filter((entry) => entry.includes(".new_"))).toHaveLength(1)
+			if (mode === "fallback") {
+				await expect(fs.readFile(targetPath)).rejects.toMatchObject({ code: "ENOENT" })
+				const backups = interruptedFiles.filter((entry) => entry.includes(".bak_"))
+				expect(backups).toHaveLength(1)
+				expect(JSON.parse(await fs.readFile(path.join(storageDir, backups[0]), "utf8"))).toEqual(committed)
+			} else {
+				expect(JSON.parse(await readFileWithMissingRetry(targetPath))).toEqual(committed)
+			}
 
-			// Restart recovery: remove the advisory lock file orphaned by the
-			// dead writer (proper-lockfile would only treat it as stale after
-			// 31 seconds), then a fresh write must succeed and consume the
-			// interrupted write's leftovers.
-			await fs.rm(`${targetPath}.lock`, { force: true })
+			// SIGKILL leaves the lock behind. Age it to exercise real stale-lock
+			// acquisition without making the test wait through the stale window.
+			const staleTime = new Date(Date.now() - 60_000)
+			await fs.utimes(`${targetPath}.lock`, staleTime, staleTime)
 			const recovered = { ui_messages: [{ ts: 3, type: "say", text: "RECOVERED_AFTER_RESTART" }] }
-			await safeWriteJson(targetPath, recovered)
+			await safeWriteJson(targetPath, recovered, {
+				merge: (existing, incoming) => {
+					expect(existing).toEqual(committed)
+					return incoming
+				},
+			})
 
 			expect(JSON.parse(await readFileWithMissingRetry(targetPath))).toEqual(recovered)
 			const leftovers = (await fs.readdir(storageDir)).filter(

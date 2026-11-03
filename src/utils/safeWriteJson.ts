@@ -106,7 +106,11 @@ async function recoverInterruptedReplacement(
 	try {
 		await fs.access(absoluteFilePath)
 	} catch (error: unknown) {
-		canonicalPathMissing = typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"
+		if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "ENOENT") {
+			// Unknown canonical state must not authorize deleting committed backups.
+			throw error
+		}
+		canonicalPathMissing = true
 	}
 
 	if (canonicalPathMissing) {
@@ -120,9 +124,19 @@ async function recoverInterruptedReplacement(
 					.map(async (backupPath) => {
 						try {
 							return { backupPath, mtimeMs: (await fs.stat(backupPath)).mtimeMs }
-						} catch {
-							// Skip leftovers removed or made unreadable since the directory listing.
-							return null
+						} catch (error: unknown) {
+							if (
+								typeof error === "object" &&
+								error !== null &&
+								"code" in error &&
+								error.code === "ENOENT"
+							) {
+								return null
+							}
+							// An unreadable backup could be the newest committed state.
+							// Intentionally block writes until it becomes readable or is
+							// explicitly removed, rather than risk losing committed history.
+							throw error
 						}
 					}),
 			)
@@ -138,6 +152,7 @@ async function recoverInterruptedReplacement(
 					`Failed to restore interrupted-write backup ${newestBackupPath} to ${absoluteFilePath}:`,
 					restoreError,
 				)
+				throw restoreError
 			}
 		}
 	}
@@ -322,17 +337,8 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			}
 		}
 
-		// Cleanup the .bak file if it still needs to be (i.e., wasn't successfully restored)
-		if (actualTempBackupFilePath) {
-			try {
-				await fs.unlink(actualTempBackupFilePath)
-			} catch (cleanupError) {
-				console.error(
-					`[Catch] Failed to clean up temporary backup file ${actualTempBackupFilePath}:`,
-					cleanupError,
-				)
-			}
-		}
+		// A failed rollback leaves the backup as the only committed copy.
+		// Preserve it for recovery by a later writer.
 		throw originalError // This MUST be the error that rejects the promise.
 	} finally {
 		// Release the lock in the main finally block.

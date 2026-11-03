@@ -439,7 +439,7 @@ describe("safeWriteJson", () => {
 
 	// Test for rollback failure scenario
 	test("should log error and re-throw original if rollback fails", async () => {
-		const initialData = { message: "Initial, should be lost if rollback fails" }
+		const initialData = { message: "Initial, preserved if rollback fails" }
 		const newData = { message: "New content" }
 
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
@@ -470,6 +470,16 @@ describe("safeWriteJson", () => {
 		// The fallback's replacement error rejects the write; the rollback error
 		// is only logged.
 		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Fallback replacement rename failed")
+
+		const backups = (await fs.readdir(tempDir)).filter((entry) => entry.includes(".bak_"))
+		expect(backups).toHaveLength(1)
+		expect(await readFileContent(path.join(tempDir, backups[0]))).toEqual(initialData)
+		await safeWriteJson(currentTestFilePath, newData, {
+			merge: (existing) => {
+				expect(existing).toEqual(initialData)
+				return newData
+			},
+		})
 
 		// Verify console.error was called for the rollback failure
 		expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -595,21 +605,20 @@ describe("safeWriteJson", () => {
 			const backupPath = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_1_stale.tmp`)
 			await fs.writeFile(backupPath, JSON.stringify({ stale: true }))
 			// Directory access succeeds; only the canonical-path check fails.
-			vi.mocked(fs.access)
-				.mockResolvedValueOnce(undefined)
-				.mockRejectedValueOnce(Object.assign(new Error("Canonical access failed"), { code }))
+			const error = Object.assign(new Error("Canonical access failed"), { code })
+			vi.mocked(fs.access).mockResolvedValueOnce(undefined).mockRejectedValueOnce(error)
 			const merge = vi.fn((existing: unknown) => existing)
 
-			await safeWriteJson(currentTestFilePath, {}, { merge })
+			await expect(safeWriteJson(currentTestFilePath, {}, { merge })).rejects.toBe(error)
 
-			expect(merge).toHaveBeenCalledWith({ initial: "content" }, {})
+			expect(merge).not.toHaveBeenCalled()
 			expect(await readFileContent(currentTestFilePath)).toEqual({ initial: "content" })
-			expect(await fs.readdir(tempDir)).toEqual([path.basename(currentTestFilePath)])
+			expect(await readFileContent(backupPath)).toEqual({ stale: true })
 		},
 	)
 
 	it.each(["ENOENT", "EACCES", "EIO"])(
-		"should recover from a readable backup when another backup stat fails with %s",
+		"should preserve backups when another backup stat fails with %s",
 		async (code) => {
 			await fs.unlink(currentTestFilePath)
 			const unreadableBackup = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_1_bad.tmp`)
@@ -625,13 +634,59 @@ describe("safeWriteJson", () => {
 			})
 			const merge = vi.fn((existing: unknown) => existing)
 
-			await safeWriteJson(currentTestFilePath, {}, { merge })
-
-			expect(merge).toHaveBeenCalledWith({ committed: true }, {})
-			expect(await readFileContent(currentTestFilePath)).toEqual({ committed: true })
-			expect(await fs.readdir(tempDir)).toEqual([path.basename(currentTestFilePath)])
+			if (code === "ENOENT") {
+				await safeWriteJson(currentTestFilePath, {}, { merge })
+				expect(merge).toHaveBeenCalledWith({ committed: true }, {})
+			} else {
+				await expect(safeWriteJson(currentTestFilePath, {}, { merge })).rejects.toMatchObject({ code })
+				expect(merge).not.toHaveBeenCalled()
+				expect(await readFileContent(unreadableBackup)).toEqual({ stale: true })
+				expect(await readFileContent(readableBackup)).toEqual({ committed: true })
+			}
 		},
 	)
+
+	it.each(["rename", "stat"] as const)(
+		"should abort recovery and preserve history when backup %s fails",
+		async (operation) => {
+			await fs.unlink(currentTestFilePath)
+			const backupPath = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_1_saved.tmp`)
+			const committed = { history: ["saved"] }
+			await fs.writeFile(backupPath, JSON.stringify(committed))
+			const error = Object.assign(new Error("Recovery failed"), { code: "EACCES" })
+			vi.mocked(fs[operation]).mockRejectedValueOnce(error)
+			const merge = vi.fn()
+
+			await expect(safeWriteJson(currentTestFilePath, {}, { merge })).rejects.toBe(error)
+
+			expect(merge).not.toHaveBeenCalled()
+			expect(await readFileContent(backupPath)).toEqual(committed)
+			await expect(fs.readFile(currentTestFilePath)).rejects.toMatchObject({ code: "ENOENT" })
+			await safeWriteJson(currentTestFilePath, {}, { merge: (existing) => existing })
+			expect(await readFileContent(currentTestFilePath)).toEqual(committed)
+		},
+	)
+
+	test("should restore by mtime and preserve unrelated siblings", async () => {
+		await fs.unlink(currentTestFilePath)
+		const prefix = `.${path.basename(currentTestFilePath)}`
+		const newest = path.join(tempDir, `${prefix}.bak_1_newest.tmp`)
+		const older = path.join(tempDir, `${prefix}.bak_9_older.tmp`)
+		const unrelated = path.join(tempDir, ".other.json.bak_1_saved.tmp")
+		const wrongSuffix = path.join(tempDir, `${prefix}.bak_1_saved.txt`)
+		await fs.writeFile(newest, JSON.stringify({ newest: true }))
+		await fs.writeFile(older, JSON.stringify({ older: true }))
+		await fs.writeFile(unrelated, "keep")
+		await fs.writeFile(wrongSuffix, "keep")
+		await fs.utimes(older, new Date(1000), new Date(1000))
+		await fs.utimes(newest, new Date(2000), new Date(2000))
+
+		await safeWriteJson(currentTestFilePath, {}, { merge: (existing) => existing })
+
+		expect(await readFileContent(currentTestFilePath)).toEqual({ newest: true })
+		expect(await fs.readFile(unrelated, "utf8")).toBe("keep")
+		expect(await fs.readFile(wrongSuffix, "utf8")).toBe("keep")
+	})
 
 	test("should open the replacement with write access for flushing", async () => {
 		const open = vi.mocked(fs.open)
