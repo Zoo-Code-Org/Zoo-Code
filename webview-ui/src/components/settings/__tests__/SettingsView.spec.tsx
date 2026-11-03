@@ -657,6 +657,7 @@ describe("SettingsView - Usage tab", () => {
 	it("shows the totals and the filters when there is history", () => {
 		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="usage" />, {
 			state: {
+				cwd: "/ws/a",
 				taskHistory: [
 					{
 						id: "t1",
@@ -666,6 +667,7 @@ describe("SettingsView - Usage tab", () => {
 						tokensIn: 100,
 						tokensOut: 50,
 						totalCost: 0.5,
+						workspace: "/ws/a",
 					},
 				],
 			},

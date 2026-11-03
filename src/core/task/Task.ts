@@ -4072,14 +4072,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					const existingData = JSON.parse(this.clineMessages[lastApiReqIndex].text || "{}")
 
-					// Calculate total tokens and cost using provider-aware function
-					const modelId = getModelId(this.apiConfiguration)
-					const apiProvider = this.apiConfiguration.apiProvider
-					const apiProtocol = getApiProtocol(
-						apiProvider && !isRetiredProvider(apiProvider) ? apiProvider : undefined,
-						modelId,
-					)
-
+					// Calculate total tokens and cost with the protocol this request started with: a profile switch
+					// while the usage is still being drained must not price it with another provider's formula.
 					const costResult =
 						apiProtocol === "anthropic"
 							? calculateApiCostAnthropic(
@@ -4564,14 +4558,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									await this.updateClineMessage(apiReqMessage)
 								}
 
-								// Capture telemetry with provider-aware cost calculation
-								const modelId = getModelId(this.apiConfiguration)
-								const apiProvider = this.apiConfiguration.apiProvider
-								const apiProtocol = getApiProtocol(
-									apiProvider && !isRetiredProvider(apiProvider) ? apiProvider : undefined,
-									modelId,
-								)
-
+								// Capture telemetry with provider-aware cost calculation, using the protocol this request
+								// started with (see `updateApiReqMsg`).
 								// Use the appropriate cost function based on the API protocol.
 								// The per-TTL split must be passed here too: without it this
 								// telemetry recompute bills every write at the short-TTL rate,

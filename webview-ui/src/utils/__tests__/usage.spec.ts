@@ -95,6 +95,15 @@ describe("summarizeUsage", () => {
 		expect(s.totalCost).toBeCloseTo(2)
 	})
 
+	it("treats an empty workspace (no folder open) as a filter that matches nothing, and only an unset one as all", () => {
+		expect(summarizeUsage(history, { range: "7d", now: NOW, workspace: "" }).taskCount).toBe(0)
+		expect(usageToCsv(history, { range: "7d", now: NOW, workspace: "" }).split("\n")).toHaveLength(1)
+		expect(summarizeUsage(history, { range: "7d", now: NOW }).taskCount).toBeGreaterThan(2)
+		// A task that recorded an empty workspace is the one task that matches it.
+		const withEmpty = [...history, item({ task: "no folder", workspace: "" })]
+		expect(summarizeUsage(withEmpty, { range: "7d", now: NOW, workspace: "" }).taskCount).toBe(1)
+	})
+
 	it("groups by recorded provider and by model, sorted by cost desc", () => {
 		const s = summarizeUsage(history, { range: "7d", now: NOW })
 		expect(s.byProvider.map((b) => [b.key, b.tasks])).toEqual([

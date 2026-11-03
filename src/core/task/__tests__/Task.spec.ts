@@ -585,6 +585,51 @@ describe("Cline", () => {
 			expect(call![1].cost).toBeCloseTo(0.6, 9)
 			expect(call![1].cost).not.toBeCloseTo(0.375, 9)
 		})
+
+		it("prices a request with the protocol it started with when the profile is switched while its usage is drained", async () => {
+			const task = await createTaskWithManualRetries()
+			const captureLlmCompletion = vi.spyOn(TelemetryService.instance, "captureLlmCompletion")
+
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					(async function* (): AsyncGenerator<ApiStreamChunk> {
+						yield { type: "text", text: "partial response" }
+						// The user switches to a profile whose provider prices requests the OpenAI way, while the
+						// usage of this request has not been collected yet.
+						task.apiConfiguration = {
+							...mockApiConfig,
+							apiProvider: providerIdentifiers.openai,
+							apiModelId: "gpt-4o",
+						}
+						yield {
+							type: "usage",
+							inputTokens: 0,
+							outputTokens: 0,
+							cacheWriteTokens: 100_000,
+							cacheWrite1hTokens: 100_000,
+							cacheReadTokens: 0,
+						}
+					})(),
+				)
+				.mockImplementation(() => {
+					throw new Error("stop after usage capture")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			await vi.waitFor(() =>
+				expect(
+					captureLlmCompletion.mock.calls.some(([, payload]) => payload?.cacheWriteTokens === 100_000),
+				).toBe(true),
+			)
+			const call = captureLlmCompletion.mock.calls.find(([, payload]) => payload?.cacheWriteTokens === 100_000)
+
+			// Still the Anthropic accounting the request started with: its input tokens add the cache writes back in
+			// (100k), where the OpenAI accounting of the new profile would report the 0 input tokens as they are.
+			expect(call![1].inputTokens).toBe(100_000)
+			expect(call![1].cost).toBeCloseTo(0.6, 9)
+		})
 	})
 
 	describe("request continuation", () => {

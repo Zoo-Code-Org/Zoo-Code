@@ -206,6 +206,27 @@ describe("UsageSettings", () => {
 			expect(screen.getByTestId("usage-stats").textContent).not.toContain("$3.00")
 		})
 
+		it("shows nothing for This workspace when no folder is open, and everything for All workspaces", () => {
+			state.cwd = ""
+			state.taskHistory = [priced(1, { workspace: "/ws/a" }), priced(2, { workspace: "/ws/b" })]
+			try {
+				render(<UsageSettings />)
+				expect(screen.getByTestId("usage-empty")).toBeInTheDocument()
+				expect(screen.queryByTestId("usage-export-csv")).not.toBeInTheDocument()
+			} finally {
+				state.cwd = "/ws/a"
+			}
+		})
+
+		it("makes the range one tab stop: the group is tabbed to, and the options are reached with the arrow keys", () => {
+			render(<UsageSettings />)
+
+			const ranges = ["today", "7d", "30d", "all"].map((r) => screen.getByTestId(`usage-range-${r}`))
+			expect(screen.getByRole("radiogroup").getAttribute("tabindex")).toBe("0")
+			expect(ranges.map((el) => el.getAttribute("tabindex"))).toEqual(["-1", "-1", "-1", "-1"])
+			expect(ranges.map((el) => el.getAttribute("aria-checked"))).toEqual(["false", "true", "false", "false"])
+		})
+
 		it("changes the range", () => {
 			state.taskHistory = [priced(1), priced(5, { ts: NOW - 20 * 24 * 60 * 60 * 1000 })]
 			render(<UsageSettings />)

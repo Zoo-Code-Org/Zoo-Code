@@ -109,7 +109,7 @@ export interface UsageSummary {
 
 export interface UsageOptions {
 	range: UsageRange
-	/** When set, only tasks from this workspace are included. */
+	/** When set (even to the empty string, which is no folder), only tasks from this workspace are included. */
 	workspace?: string
 	now?: number
 	topTaskLimit?: number
@@ -206,7 +206,7 @@ function itemsInScope(history: HistoryItem[], options: UsageOptions): HistoryIte
 			isRepresentableTime(item.ts) &&
 			(start === undefined || item.ts >= start) &&
 			(lastDay === undefined || startOfLocalDay(item.ts) <= lastDay) &&
-			(!options.workspace || item.workspace === options.workspace),
+			(options.workspace === undefined || item.workspace === options.workspace),
 	)
 }
 

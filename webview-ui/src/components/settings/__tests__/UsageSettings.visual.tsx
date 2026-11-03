@@ -57,3 +57,30 @@ test("shows the empty state, and hides the limits section when no provider has a
 
 	await expect(story).toHaveScreenshot("usage-settings-empty.png")
 })
+
+// Real focus and key events, which the unit tests cannot cover because the unit test setup stubs `focus()`.
+test("the time range is one tab stop and the arrow keys move between the ranges and select them", async ({
+	mount,
+	page,
+}) => {
+	await page.clock.setFixedTime(NOW)
+	const component = mountedStory(await mount("usage-settings"))
+	const story = component.getByTestId("usage-story")
+	const range = (name: "today" | "7d" | "30d" | "all") => story.getByTestId(`usage-range-${name}`)
+
+	await range("7d").focus()
+	await expect(range("7d")).toHaveAttribute("aria-checked", "true")
+
+	await page.keyboard.press("ArrowRight")
+	await expect(range("30d")).toBeFocused()
+	await expect(range("30d")).toHaveAttribute("aria-checked", "true")
+	await page.keyboard.press("ArrowLeft")
+	await expect(range("7d")).toBeFocused()
+	await expect(range("7d")).toHaveAttribute("aria-checked", "true")
+
+	// Only the selected range is a tab stop: Tab leaves the group instead of stepping through the ranges.
+	await expect(range("7d")).toHaveAttribute("tabindex", "0")
+	await expect(range("30d")).toHaveAttribute("tabindex", "-1")
+	await page.keyboard.press("Tab")
+	for (const name of ["today", "7d", "30d", "all"] as const) await expect(range(name)).not.toBeFocused()
+})

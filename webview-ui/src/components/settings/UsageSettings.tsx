@@ -1,5 +1,6 @@
 import { HTMLAttributes, useEffect, useMemo, useState } from "react"
 import { Download } from "lucide-react"
+import * as RadioGroupPrimitive from "@radix-ui/react-radio-group"
 
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { useExtensionState } from "@/context/ExtensionStateContext"
@@ -138,28 +139,34 @@ export const UsageSettings = ({ className, ...props }: HTMLAttributes<HTMLDivEle
 							section="usage"
 							label={t("settings:usage.range.label")}>
 							<div className="flex flex-wrap items-center gap-2">
-								<div
+								{/* A radio group: one tab stop, and the arrow keys move between the ranges and select them. */}
+								<RadioGroupPrimitive.Root
 									className="inline-flex rounded-md border border-vscode-input-border overflow-hidden"
-									role="radiogroup"
+									value={range}
+									onValueChange={(value) => setRange(value as UsageRange)}
+									orientation="horizontal"
 									aria-label={t("settings:usage.range.label")}>
 									{USAGE_RANGES.map((r) => (
-										<button
+										<RadioGroupPrimitive.Item
 											key={r}
-											type="button"
-											role="radio"
-											aria-checked={r === range}
-											onClick={() => setRange(r)}
+											value={r}
+											// Selection follows focus, as for any radio group. Radix only does this while the
+											// arrow key is still held when its focus move lands, so a quick tap would otherwise
+											// leave the focus and the selected range apart.
+											onFocus={() => {
+												if (r !== range) setRange(r)
+											}}
 											data-testid={`usage-range-${r}`}
 											className={cn(
-												"px-2.5 py-1 text-xs border-r border-vscode-input-border last:border-r-0 cursor-pointer",
+												"px-2.5 py-1 text-xs border-r border-vscode-input-border last:border-r-0 cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-vscode-focusBorder",
 												r === range
 													? "bg-vscode-button-background text-vscode-button-foreground"
 													: "bg-vscode-input-background text-vscode-foreground hover:bg-vscode-list-hoverBackground",
 											)}>
 											{t(`settings:usage.range.${r}`)}
-										</button>
+										</RadioGroupPrimitive.Item>
 									))}
-								</div>
+								</RadioGroupPrimitive.Root>
 								<Select value={scope} onValueChange={(v) => setScope(v as "workspace" | "all")}>
 									<SelectTrigger
 										className="h-7 w-auto min-w-36 text-xs"

@@ -68,6 +68,14 @@ describe("exportUsageCsv", () => {
 		expect(writeFile).not.toHaveBeenCalled()
 	})
 
+	it("tells the user when the save dialog itself fails, and writes nothing", async () => {
+		showSaveDialog.mockRejectedValue(new Error("dialog unavailable"))
+
+		expect(await exportUsageCsv("a", "all")).toBeUndefined()
+		expect(showErrorMessage).toHaveBeenCalledWith("dialog unavailable")
+		expect(writeFile).not.toHaveBeenCalled()
+	})
+
 	it("tells the user when the file cannot be written, and does not report a saved file", async () => {
 		showSaveDialog.mockResolvedValue({ fsPath: "/ro/file.csv" } as vscode.Uri)
 		writeFile.mockRejectedValue(new Error("EACCES: permission denied"))
