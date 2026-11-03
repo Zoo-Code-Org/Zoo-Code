@@ -1589,26 +1589,6 @@ export class ClineProvider
 			CloudService.instance.off("settings-updated", this.handleCloudSettingsUpdate)
 		}
 
-		this._workspaceTracker?.dispose()
-		this._workspaceTracker = undefined
-		await this.mcpHub?.unregisterClient()
-		this.mcpHub = undefined
-		await this.skillsManager?.dispose()
-		this.skillsManager = undefined
-		await this.marketplaceManager?.cleanup()
-		this.customModesManager?.dispose()
-		this.taskHistoryStore.dispose()
-		this.log("Disposed all disposables")
-		ClineProvider.activeInstances.delete(this)
-		this.diagnosticsRequestBroker.dispose()
-		while (this.disposables.length) {
-			const x = this.disposables.pop()
-
-			if (x) {
-				x.dispose()
-			}
-		}
-
 		try {
 			this._workspaceTracker?.dispose()
 			this._workspaceTracker = undefined
@@ -1619,6 +1599,7 @@ export class ClineProvider
 			await this.marketplaceManager?.cleanup()
 			this.customModesManager?.dispose()
 			this.taskHistoryStore.dispose()
+			this.diagnosticsRequestBroker.dispose()
 			this.log("Disposed all disposables")
 		} finally {
 			// Deregistration must not depend on the cleanup above completing: a
