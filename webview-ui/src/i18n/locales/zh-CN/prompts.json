@@ -1,6 +1,4 @@
 {
-	"title": "模式",
-	"done": "完成",
 	"modes": {
 		"title": "模式配置",
 		"createNewMode": "新建模式",
@@ -53,9 +51,7 @@
 	},
 	"exportMode": {
 		"title": "导出模式",
-		"description": "将此模式导出为包含所有规则的 YAML 文件，以便与他人轻松共享。",
-		"export": "导出模式",
-		"exporting": "正在导出..."
+		"export": "导出模式"
 	},
 	"importMode": {
 		"selectLevel": "选择导入模式的位置：",
@@ -81,7 +77,6 @@
 		"title": "系统提示词（{{modeName}}模式）"
 	},
 	"supportPrompts": {
-		"title": "功能提示词",
 		"resetPrompt": "恢复{{promptType}}默认设置",
 		"prompt": "提示词",
 		"enhance": {
@@ -93,11 +88,6 @@
 			"testEnhancement": "测试增强",
 			"includeTaskHistory": "包含任务历史作为上下文",
 			"includeTaskHistoryDescription": "启用后，当前对话的最后 10 条消息将作为上下文包含在增强提示词时，有助于生成更相关和上下文感知的建议。"
-		},
-		"condense": {
-			"apiConfiguration": "用于上下文压缩的 API 配置",
-			"apiConfigDescription": "选择用于上下文压缩操作的 API 配置。保留未选择状态以使用当前活动的配置。",
-			"useCurrentConfig": "使用当前选中的 API 配置"
 		},
 		"types": {
 			"ENHANCE": {
@@ -196,7 +186,6 @@
 		"title": "删除模式",
 		"message": "您确定要删除\"{{modeName}}\"模式吗？",
 		"rulesFolder": "此模式在 {{folderPath}} 有一个规则文件夹，该文件夹也将被删除。",
-		"descriptionNoRules": "您确定要删除此自定义模式吗？",
 		"confirm": "删除",
 		"cancel": "取消"
 	}

@@ -19,6 +19,7 @@ import { ApiStream } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 import { filterNonAnthropicBlocks } from "../transform/anthropic-filter"
 import { getAnthropicProviderReasoning } from "../transform/reasoning"
+import { cacheControl, resolveCacheTtl } from "../transform/caching/ttl"
 
 import { BaseProvider } from "./base-provider"
 import { bridgeExternalAbortSignal, hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
@@ -32,7 +33,7 @@ import {
 // Pre-sorted list of known Anthropic model IDs (lowercased) by length (descending) for case-insensitive substring matching.
 const ANTHROPIC_MODEL_IDS_SORTED_LOWER = (Object.keys(anthropicModels) as AnthropicModelId[])
 	.map((id) => id.toLowerCase())
-	.sort((a, b) => b.length - a.length) as string[]
+	.sort((a, b) => b.length - a.length)
 
 // Original-case mapping: lowercase key → original AnthropicModelId for lookup.
 const ANTHROPIC_MODEL_ID_LOWER_TO_ORIGINAL = Object.fromEntries(
@@ -64,7 +65,6 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		let stream: AnthropicStream<Anthropic.Messages.RawMessageStreamEvent>
-		const cacheControl: CacheControlEphemeral = { type: "ephemeral" }
 		const {
 			id: modelId,
 			betas = ["fine-grained-tool-streaming-2025-05-14"],
@@ -78,6 +78,11 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			reasoningBudget,
 			settings: this.options,
 		})
+
+		// One TTL for the whole request (ADR-0006 I4): every marker below reuses
+		// this single object, so a mixed-TTL request is unrepresentable.
+		const cacheTtl = resolveCacheTtl(this.options, info)
+		const marker: CacheControlEphemeral = cacheControl(cacheTtl)
 
 		// Filter out non-Anthropic blocks (reasoning, thoughtSignature, etc.) before sending to the API
 		const sanitizedMessages = filterNonAnthropicBlocks(messages)
@@ -169,17 +174,17 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 						temperature,
 						thinking,
 						// Setting cache breakpoint for system prompt so new tasks can reuse it.
-						system: [{ text: systemPrompt, type: "text", cache_control: cacheControl }],
+						system: [{ text: systemPrompt, type: "text", cache_control: marker }],
 						messages: sanitizedMessages.map((message, index) => {
 							if (index === lastUserMsgIndex || index === secondLastMsgUserIndex) {
 								return {
 									...message,
 									content:
 										typeof message.content === "string"
-											? [{ type: "text", text: message.content, cache_control: cacheControl }]
+											? [{ type: "text", text: message.content, cache_control: marker }]
 											: message.content.map((content, contentIndex) =>
 													contentIndex === message.content.length - 1
-														? { ...content, cache_control: cacheControl }
+														? { ...content, cache_control: marker }
 														: content,
 												),
 								}
@@ -256,6 +261,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		let inputTokens = 0
 		let outputTokens = 0
 		let cacheWriteTokens = 0
+		let cacheWrite1hTokens = 0
 		let cacheReadTokens = 0
 
 		for await (const chunk of withFinallyCleanup(stream, removeExternalAbortListener)) {
@@ -266,8 +272,13 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 						input_tokens = 0,
 						output_tokens = 0,
 						cache_creation_input_tokens,
+						cache_creation,
 						cache_read_input_tokens,
 					} = chunk.message.usage
+
+					// The per-TTL breakdown decomposes `cache_creation_input_tokens`; it is
+					// absent for providers that do not report it, which leaves the split at 0.
+					const startCacheWrite1hTokens = cache_creation?.ephemeral_1h_input_tokens
 
 					// `output_tokens_details.thinking_tokens` decomposes the billed
 					// output into internal reasoning tokens (0 ⇒ the model skipped
@@ -280,6 +291,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 						inputTokens: input_tokens,
 						outputTokens: output_tokens,
 						cacheWriteTokens: cache_creation_input_tokens || undefined,
+						cacheWrite1hTokens: startCacheWrite1hTokens || undefined,
 						cacheReadTokens: cache_read_input_tokens || undefined,
 						...(typeof startThinkingTokens === "number" ? { reasoningTokens: startThinkingTokens } : {}),
 					}
@@ -287,6 +299,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 					inputTokens += input_tokens
 					outputTokens += output_tokens
 					cacheWriteTokens += cache_creation_input_tokens || 0
+					cacheWrite1hTokens += startCacheWrite1hTokens || 0
 					cacheReadTokens += cache_read_input_tokens || 0
 
 					break
@@ -297,6 +310,10 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 					// Carries the final `thinking_tokens` decomposition for the
 					// whole message (the `message_start` snapshot typically has none).
 					const deltaThinkingTokens = chunk.usage.output_tokens_details?.thinking_tokens
+
+					// The API reports the cumulative output token count, so adopt
+					// it rather than adding it to the message_start seed value.
+					outputTokens = chunk.usage.output_tokens || outputTokens
 
 					yield {
 						type: "usage",
@@ -381,6 +398,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 				outputTokens,
 				cacheWriteTokens,
 				cacheReadTokens,
+				cacheWrite1hTokens,
 			)
 
 			yield {
@@ -401,7 +419,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			return anthropicModels[anthropicDefaultModelId]
 		}
 
-		const originalId = ANTHROPIC_MODEL_ID_LOWER_TO_ORIGINAL[matchedLower] as AnthropicModelId
+		const originalId = ANTHROPIC_MODEL_ID_LOWER_TO_ORIGINAL[matchedLower]
 		return anthropicModels[originalId]
 	}
 
@@ -433,6 +451,11 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 					inputPrice: tier.inputPrice,
 					outputPrice: tier.outputPrice,
 					cacheWritesPrice: tier.cacheWritesPrice,
+					// The tier's own TTL rate must come along: the entry-level rate was
+					// derived from the 200K input price, so keeping it here would bill a
+					// 1M-context 1h write at half its tier rate.
+					cacheWritesPrice1h: tier.cacheWritesPrice1h ?? info.cacheWritesPrice1h,
+					cacheWritesPrice12h: tier.cacheWritesPrice12h ?? info.cacheWritesPrice12h,
 					cacheReadsPrice: tier.cacheReadsPrice,
 				}
 			}

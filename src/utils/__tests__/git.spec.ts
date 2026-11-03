@@ -24,9 +24,11 @@ type ExecFunction = (
 
 type PromisifiedExec = (command: string, options?: { cwd?: string }) => Promise<{ stdout: string; stderr: string }>
 
+const execMock = vitest.hoisted(() => vitest.fn<ExecFunction>())
+
 // Mock child_process.exec
 vitest.mock("child_process", () => ({
-	exec: vitest.fn(),
+	exec: execMock,
 }))
 
 // Mock fs.promises
@@ -87,13 +89,13 @@ describe("git utils", () => {
 
 	describe("checkGitInstalled", () => {
 		it("should return true when git --version succeeds", async () => {
-			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+			execMock.mockImplementation((command, _options, callback) => {
 				if (command === "git --version") {
 					callback(null, { stdout: "git version 2.39.2", stderr: "" })
-					return {} as any
+					return
 				}
 				callback(new Error("Unexpected command"))
-				return {} as any
+				return
 			})
 
 			const result = await checkGitInstalled()
@@ -102,13 +104,13 @@ describe("git utils", () => {
 		})
 
 		it("should return false when git --version fails", async () => {
-			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+			execMock.mockImplementation((command, _options, callback) => {
 				if (command === "git --version") {
 					callback(new Error("git not found"))
-					return {} as any
+					return
 				}
 				callback(new Error("Unexpected command"))
-				return {} as any
+				return
 			})
 
 			const result = await checkGitInstalled()
@@ -117,14 +119,14 @@ describe("git utils", () => {
 		})
 
 		it("should handle unexpected errors gracefully", async () => {
-			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+			execMock.mockImplementation((command, _options, callback) => {
 				if (command === "git --version") {
 					// Simulate an unexpected error
 					callback(new Error("Unexpected system error"))
-					return {} as any
+					return
 				}
 				callback(new Error("Unexpected command"))
-				return {} as any
+				return
 			})
 
 			const result = await checkGitInstalled()
@@ -158,12 +160,12 @@ describe("git utils", () => {
 				],
 			])
 
-			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+			execMock.mockImplementation((command, _options, callback) => {
 				// Find matching response
 				for (const [cmd, response] of responses) {
 					if (command === cmd) {
 						callback(null, response)
-						return {} as any
+						return
 					}
 				}
 				callback(new Error(`Unexpected command: ${command}`))
@@ -192,13 +194,13 @@ describe("git utils", () => {
 		})
 
 		it("should return empty array when git is not installed", async () => {
-			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+			execMock.mockImplementation((command, _options, callback) => {
 				if (command === "git --version") {
 					callback(new Error("git not found"))
-					return {} as any
+					return
 				}
 				callback(new Error("Unexpected command"))
-				return {} as any
+				return
 			})
 
 			const result = await searchCommits("test", cwd)
@@ -212,17 +214,17 @@ describe("git utils", () => {
 				["git rev-parse --git-dir", null], // null indicates error should be called
 			])
 
-			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+			execMock.mockImplementation((command, _options, callback) => {
 				const response = responses.get(command)
 				if (response === null) {
 					callback(new Error("not a git repository"))
-					return {} as any
+					return
 				} else if (response) {
 					callback(null, response)
-					return {} as any
+					return
 				} else {
 					callback(new Error("Unexpected command"))
-					return {} as any
+					return
 				}
 			})
 
@@ -246,15 +248,15 @@ describe("git utils", () => {
 				],
 			])
 
-			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+			execMock.mockImplementation((command, _options, callback) => {
 				for (const [cmd, response] of responses) {
 					if (command === cmd) {
 						callback(null, response)
-						return {} as any
+						return
 					}
 				}
 				callback(new Error("Unexpected command"))
-				return {} as any
+				return
 			})
 
 			const result = await searchCommits("abc123", cwd)
@@ -293,15 +295,15 @@ describe("git utils", () => {
 				['git show --format="" abc123', { stdout: mockDiff, stderr: "" }],
 			])
 
-			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+			execMock.mockImplementation((command, _options, callback) => {
 				for (const [cmd, response] of responses) {
 					if (command.startsWith(cmd)) {
 						callback(null, response)
-						return {} as any
+						return
 					}
 				}
 				callback(new Error("Unexpected command"))
-				return {} as any
+				return
 			})
 
 			const result = await getCommitInfo("abc123", cwd)
@@ -313,13 +315,13 @@ describe("git utils", () => {
 		})
 
 		it("should return error message when git is not installed", async () => {
-			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+			execMock.mockImplementation((command, _options, callback) => {
 				if (command === "git --version") {
 					callback(new Error("git not found"))
-					return {} as any
+					return
 				}
 				callback(new Error("Unexpected command"))
-				return {} as any
+				return
 			})
 
 			const result = await getCommitInfo("abc123", cwd)
@@ -332,17 +334,17 @@ describe("git utils", () => {
 				["git rev-parse --git-dir", null], // null indicates error should be called
 			])
 
-			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+			execMock.mockImplementation((command, _options, callback) => {
 				const response = responses.get(command)
 				if (response === null) {
 					callback(new Error("not a git repository"))
-					return {} as any
+					return
 				} else if (response) {
 					callback(null, response)
-					return {} as any
+					return
 				} else {
 					callback(new Error("Unexpected command"))
-					return {} as any
+					return
 				}
 			})
 
@@ -363,15 +365,15 @@ describe("git utils", () => {
 				["git diff HEAD", { stdout: mockDiff, stderr: "" }],
 			])
 
-			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+			execMock.mockImplementation((command, _options, callback) => {
 				for (const [cmd, response] of responses) {
 					if (command === cmd) {
 						callback(null, response)
-						return {} as any
+						return
 					}
 				}
 				callback(new Error("Unexpected command"))
-				return {} as any
+				return
 			})
 
 			const result = await getWorkingState(cwd)
@@ -388,15 +390,15 @@ describe("git utils", () => {
 				["git status --short", { stdout: "", stderr: "" }],
 			])
 
-			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+			execMock.mockImplementation((command, _options, callback) => {
 				for (const [cmd, response] of responses) {
 					if (command === cmd) {
 						callback(null, response)
-						return {} as any
+						return
 					}
 				}
 				callback(new Error("Unexpected command"))
-				return {} as any
+				return
 			})
 
 			const result = await getWorkingState(cwd)
@@ -404,13 +406,13 @@ describe("git utils", () => {
 		})
 
 		it("should return error message when git is not installed", async () => {
-			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+			execMock.mockImplementation((command, _options, callback) => {
 				if (command === "git --version") {
 					callback(new Error("git not found"))
-					return {} as any
+					return
 				}
 				callback(new Error("Unexpected command"))
-				return {} as any
+				return
 			})
 
 			const result = await getWorkingState(cwd)
@@ -423,17 +425,17 @@ describe("git utils", () => {
 				["git rev-parse --git-dir", null], // null indicates error should be called
 			])
 
-			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+			execMock.mockImplementation((command, _options, callback) => {
 				const response = responses.get(command)
 				if (response === null) {
 					callback(new Error("not a git repository"))
-					return {} as any
+					return
 				} else if (response) {
 					callback(null, response)
-					return {} as any
+					return
 				} else {
 					callback(new Error("Unexpected command"))
-					return {} as any
+					return
 				}
 			})
 
@@ -493,7 +495,7 @@ describe("getGitRepositoryInfo", () => {
 		const mockHead = "ref: refs/heads/main"
 
 		// Setup the readFile mock to return different values based on the path
-		gitSpy.mockImplementation((path: any, _encoding: any) => {
+		gitSpy.mockImplementation((path: fs.PathLike | fs.promises.FileHandle, _encoding: unknown) => {
 			if (path === configPath) {
 				return Promise.resolve(mockConfig)
 			} else if (path === headPath) {
@@ -538,7 +540,7 @@ describe("getGitRepositoryInfo", () => {
 		const mockHead = "ref: refs/heads/main"
 
 		// Setup the readFile mock to return different values based on the path
-		gitSpy.mockImplementation((path: any, _encoding: any) => {
+		gitSpy.mockImplementation((path: fs.PathLike | fs.promises.FileHandle, _encoding: unknown) => {
 			if (path === configPath) {
 				return Promise.resolve(mockConfig)
 			} else if (path === headPath) {
@@ -565,7 +567,7 @@ describe("getGitRepositoryInfo", () => {
 		vitest.mocked(fs.promises.access).mockResolvedValue(undefined)
 
 		// Setup the readFile mock to return different values based on the path
-		gitSpy.mockImplementation((path: any, _encoding: any) => {
+		gitSpy.mockImplementation((path: fs.PathLike | fs.promises.FileHandle, _encoding: unknown) => {
 			if (path === configPath) {
 				return Promise.reject(new Error("Failed to read config"))
 			} else if (path === headPath) {
@@ -592,7 +594,7 @@ describe("getGitRepositoryInfo", () => {
 		vitest.mocked(fs.promises.access).mockResolvedValue(undefined)
 
 		// Setup the readFile mock to return different values based on the path
-		gitSpy.mockImplementation((path: any, _encoding: any) => {
+		gitSpy.mockImplementation((path: fs.PathLike | fs.promises.FileHandle, _encoding: unknown) => {
 			if (path === configPath) {
 				return Promise.resolve(`
 [remote "origin"]
@@ -639,7 +641,7 @@ describe("getGitRepositoryInfo", () => {
 		const mockHead = "ref: refs/heads/main"
 
 		// Setup the readFile mock to return different values based on the path
-		gitSpy.mockImplementation((path: any, _encoding: any) => {
+		gitSpy.mockImplementation((path: fs.PathLike | fs.promises.FileHandle, _encoding: unknown) => {
 			if (path === configPath) {
 				return Promise.resolve(mockConfig)
 			} else if (path === headPath) {
@@ -817,8 +819,8 @@ describe("getWorkspaceGitInfo", () => {
 `
 
 		// Setup the readFile mock to return config content
-		readFileSpy.mockImplementation((path: any, _encoding: any) => {
-			if (path.includes("config")) {
+		readFileSpy.mockImplementation((path: fs.PathLike | fs.promises.FileHandle, _encoding: unknown) => {
+			if (typeof path === "string" && path.includes("config")) {
 				return Promise.resolve(mockConfig)
 			}
 			return Promise.reject(new Error(`Unexpected path: ${path}`))
@@ -858,15 +860,15 @@ MM src/both-modified.ts
 			["git status --porcelain=v1 --branch", { stdout: mockOutput, stderr: "" }],
 		])
 
-		vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+		execMock.mockImplementation((command, _options, callback) => {
 			for (const [cmd, response] of responses) {
 				if (command === cmd) {
 					callback(null, response)
-					return {} as any
+					return
 				}
 			}
 			callback(new Error("Unexpected command"))
-			return {} as any
+			return
 		})
 
 		const result = await getGitStatus(cwd, 20)
@@ -885,15 +887,15 @@ M  src/file1.ts
 			["git status --porcelain=v1 --branch", { stdout: mockOutput, stderr: "" }],
 		])
 
-		vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+		execMock.mockImplementation((command, _options, callback) => {
 			for (const [cmd, response] of responses) {
 				if (command === cmd) {
 					callback(null, response)
-					return {} as any
+					return
 				}
 			}
 			callback(new Error("Unexpected command"))
-			return {} as any
+			return
 		})
 
 		const result = await getGitStatus(cwd, 0)
@@ -904,13 +906,13 @@ M  src/file1.ts
 	})
 
 	it("should return null when git is not installed", async () => {
-		vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+		execMock.mockImplementation((command, _options, callback) => {
 			if (command === "git --version") {
 				callback(new Error("git not found"))
-				return {} as any
+				return
 			}
 			callback(new Error("Unexpected command"))
-			return {} as any
+			return
 		})
 
 		const result = await getGitStatus(cwd)
@@ -923,17 +925,17 @@ M  src/file1.ts
 			["git rev-parse --git-dir", null],
 		])
 
-		vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+		execMock.mockImplementation((command, _options, callback) => {
 			const response = responses.get(command)
 			if (response === null) {
 				callback(new Error("not a git repository"))
-				return {} as any
+				return
 			} else if (response) {
 				callback(null, response)
-				return {} as any
+				return
 			}
 			callback(new Error("Unexpected command"))
-			return {} as any
+			return
 		})
 
 		const result = await getGitStatus(cwd)
@@ -953,15 +955,15 @@ M  src/file1.ts
 			["git status --porcelain=v1 --branch", { stdout: mockOutput, stderr: "" }],
 		])
 
-		vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+		execMock.mockImplementation((command, _options, callback) => {
 			for (const [cmd, response] of responses) {
 				if (command === cmd) {
 					callback(null, response)
-					return {} as any
+					return
 				}
 			}
 			callback(new Error("Unexpected command"))
-			return {} as any
+			return
 		})
 
 		const result = await getGitStatus(cwd, 10)
@@ -979,15 +981,15 @@ M  src/file1.ts
 			["git status --porcelain=v1 --branch", { stdout: "", stderr: "" }],
 		])
 
-		vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
+		execMock.mockImplementation((command, _options, callback) => {
 			for (const [cmd, response] of responses) {
 				if (command === cmd) {
 					callback(null, response)
-					return {} as any
+					return
 				}
 			}
 			callback(new Error("Unexpected command"))
-			return {} as any
+			return
 		})
 
 		const result = await getGitStatus(cwd)

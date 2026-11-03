@@ -137,6 +137,7 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 		let inputTokens = 0
 		let outputTokens = 0
 		let cacheWriteTokens = 0
+		let cacheWrite1hTokens = 0
 		let cacheReadTokens = 0
 
 		for await (const chunk of withFinallyCleanup(stream, removeExternalAbortListener)) {
@@ -147,26 +148,36 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 						input_tokens = 0,
 						output_tokens = 0,
 						cache_creation_input_tokens,
+						cache_creation,
 						cache_read_input_tokens,
 					} = chunk.message.usage
+
+					// Per-TTL breakdown of the write total; absent when the provider
+					// does not report it, leaving the split at 0.
+					const startCacheWrite1hTokens = cache_creation?.ephemeral_1h_input_tokens
 
 					yield {
 						type: "usage",
 						inputTokens: input_tokens,
 						outputTokens: output_tokens,
 						cacheWriteTokens: cache_creation_input_tokens || undefined,
+						cacheWrite1hTokens: startCacheWrite1hTokens || undefined,
 						cacheReadTokens: cache_read_input_tokens || undefined,
 					}
 
 					inputTokens += input_tokens
 					outputTokens += output_tokens
 					cacheWriteTokens += cache_creation_input_tokens || 0
+					cacheWrite1hTokens += startCacheWrite1hTokens || 0
 					cacheReadTokens += cache_read_input_tokens || 0
 
 					break
 				}
 				case "message_delta":
 					// Tells us stop_reason, stop_sequence, and output tokens
+					// The API reports the cumulative output token count, so adopt
+					// it rather than adding it to the message_start seed value.
+					outputTokens = chunk.usage.output_tokens || outputTokens
 					yield {
 						type: "usage",
 						inputTokens: 0,
@@ -244,6 +255,7 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 				outputTokens,
 				cacheWriteTokens,
 				cacheReadTokens,
+				cacheWrite1hTokens,
 			)
 
 			yield {
