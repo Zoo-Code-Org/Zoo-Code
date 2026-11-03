@@ -4434,12 +4434,11 @@ describe("ClineProvider", () => {
 			resolveProfile({ name: "cfg-a", apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-x" })
 			await load
 
-			// The in-flight selection wins over the loaded state.
+			// The in-flight selection wins over the loaded state. The lookup resolved cfg-a, a
+			// profile this view no longer names, so its settings must not be paired with cfg-b:
+			// the overlay stays unresolved and getState falls back to the shared store.
 			expect(provider["viewLocalState"].currentApiConfigName).toBe("cfg-b")
-			expect(provider["viewLocalState"].apiConfiguration).toEqual({
-				apiProvider: providerIdentifiers.openrouter,
-				openRouterModelId: "model-x",
-			})
+			expect(provider["viewLocalState"]).not.toHaveProperty("apiConfiguration")
 			expect(provider["viewLocalState"]).not.toHaveProperty("mode")
 			await provider.dispose()
 		})
@@ -4610,6 +4609,41 @@ describe("ClineProvider", () => {
 			await provider.resetState()
 			expect(provider["viewLocalState"]).toEqual({})
 			expect(mockContext.globalState.get("viewStates")).toEqual({})
+			await provider.dispose()
+		})
+
+		it("should not tombstone a view id when the durable viewStates delete fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-tombstone-view")
+			await provider.saveViewState("currentApiConfigName", "cfg-tombstone")
+			const viewId = provider["viewStateId"]
+			expect(ClineProvider["clearedViewStateIds"].has(viewId)).toBe(false)
+
+			const originalUpdate = mockContext.globalState.update
+			mockContext.globalState.update = vi.fn().mockImplementation((key: string) => {
+				if (key === "viewStates") {
+					return Promise.reject(new Error("storage unavailable"))
+				}
+				return Promise.resolve()
+			})
+
+			await expect(provider["clearPersistedViewState"](viewId)).rejects.toThrow("storage unavailable")
+			mockContext.globalState.update = originalUpdate
+
+			// The entry is still in durable storage, so the id must stay restorable: profile
+			// activation rollback skips pruning of ids that were cleared, and tombstoning an id that
+			// storage never dropped is what loses the pin on the next reload.
+			expect(ClineProvider["clearedViewStateIds"].has(viewId)).toBe(false)
+			expect(mockContext.globalState.get("viewStates")).toMatchObject({
+				[viewId]: { currentApiConfigName: "cfg-tombstone" },
+			})
+
 			await provider.dispose()
 		})
 
@@ -6684,13 +6718,18 @@ describe("ClineProvider", () => {
 				"stable-sidebar-view": { mode: "debug", updatedAt: 2 },
 			})
 
+			// Author the temporary entry through the real write path so this instance owns it: an
+			// unowned temporary entry makes loadViewState bail before the profile lookup, so the
+			// stale check below would never be reached.
+			await provider.saveViewState("currentApiConfigName", "ghost-profile")
+
 			// Hang the temporary entry's profile lookup so that load is still in flight
 			// when the stable id is registered.
 			let releaseGhost!: () => void
 			const ghostLoad = new Promise<void>((resolve) => {
 				releaseGhost = resolve
 			})
-			vi.spyOn(provider.providerSettingsManager, "getProfile").mockReturnValue(
+			const ghostGetProfile = vi.spyOn(provider.providerSettingsManager, "getProfile").mockReturnValue(
 				ghostLoad.then(() =>
 					Object.assign({} as Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>, {
 						name: "ghost-profile",
@@ -6701,6 +6740,10 @@ describe("ClineProvider", () => {
 			)
 
 			const staleLoad = provider["loadViewState"]()
+
+			// The lookup has to be in flight before the stable id is registered; asserting only
+			// after the call completes cannot prove the stale check fires mid-load.
+			await vi.waitFor(() => expect(ghostGetProfile).toHaveBeenCalledTimes(1))
 
 			// Register the stable id without awaiting its load: the re-key drops the
 			// temporary entry (the stable one already exists) and the registration's own

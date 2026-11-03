@@ -170,6 +170,13 @@ type PersistedViewState = NonNullable<GlobalState["viewStates"]>[string]
 type ViewLocalStateValues = Partial<RooCodeSettings> & Partial<ExtensionState>
 
 /**
+ * The keys the view-local mutation helper actually applies. A wider key would update
+ * neither the in-memory buffer nor the persisted entry, so it must not be accepted by
+ * the public save path.
+ */
+type PerViewSavedStateKey = "mode" | "currentApiConfigName" | "apiConfiguration"
+
+/**
  * https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default/weather-webview/src/providers/WeatherViewProvider.ts
  * https://github.com/KumarVariable/vscode-extension-sidebar-html/blob/master/src/customSidebarViewProvider.ts
  */
@@ -820,9 +827,12 @@ export class ClineProvider
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 			const states = this.getPersistedViewStates({ fresh: true })
 			delete states[viewStateId]
-			ClineProvider.clearedViewStateIds.add(viewStateId)
 			try {
 				await this.contextProxy.setValue("viewStates", states)
+				// The tombstone is recorded only after the durable delete lands: a rejected write
+				// leaves the entry in storage, and tombstoning an id that is still persisted would
+				// let a later activation rollback skip a pin that pruning had evicted.
+				ClineProvider.clearedViewStateIds.add(viewStateId)
 			} catch (error) {
 				// updateGlobalState applies the new map to the in-memory cache before
 				// the durable write, so a rejected write leaves the cache missing an
@@ -1122,6 +1132,19 @@ export class ClineProvider
 			const postLoadBuffer = this.viewLocalState
 			const mergedState: Partial<ExtensionState> = { ...loadedState }
 
+			// The lookup resolved the profile that was pinned when the load started. If the view
+			// pinned a different profile during the lookup window, those settings belong to a
+			// profile this view no longer names, and keeping them would report the new name with
+			// the old profile's configuration. Dropping the overlay falls back to the shared
+			// store, which is the same outcome as any other unresolved view-local profile.
+			if (
+				persisted?.currentApiConfigName &&
+				!Object.is(preLoadBuffer.currentApiConfigName, postLoadBuffer.currentApiConfigName) &&
+				!Object.is(persisted.currentApiConfigName, postLoadBuffer.currentApiConfigName)
+			) {
+				delete mergedState.apiConfiguration
+			}
+
 			if (!Object.is(preLoadBuffer.mode, postLoadBuffer.mode)) {
 				if (postLoadBuffer.mode === undefined) {
 					delete mergedState.mode
@@ -1159,8 +1182,12 @@ export class ClineProvider
 	 * Saves a single view-local state value. The in-memory buffer is always updated; the
 	 * non-secret subset (mode, currentApiConfigName) is persisted durably under the view
 	 * id active when the change was made, re-keyed to the stable id on registration.
+	 *
+	 * Only the three per-view fields are accepted: the mutation helper applies exactly
+	 * those, so any other key would leave both the buffer and the persisted store
+	 * untouched while the method still reported a successful save.
 	 */
-	public async saveViewState<K extends keyof ViewLocalStateValues>(
+	public async saveViewState<K extends PerViewSavedStateKey>(
 		key: K,
 		value: ViewLocalStateValues[K] | undefined,
 	): Promise<void> {
