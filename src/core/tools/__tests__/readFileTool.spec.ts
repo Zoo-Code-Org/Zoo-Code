@@ -1868,6 +1868,7 @@ describe("ReadFileTool", () => {
 				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
 				// The pushed result is the file content, not an error substituted for it.
 				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("File: stat-fail.ts"))
+				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("test content"))
 				expect(callbacks.pushToolResult).not.toHaveBeenCalledWith(expect.stringContaining("Error"))
 			})
 
@@ -1905,6 +1906,7 @@ describe("ReadFileTool", () => {
 				expect(callbacks.pushToolResult).toHaveBeenCalledWith(
 					expect.stringContaining("File: post-stat-fail.ts"),
 				)
+				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("test content"))
 				expect(callbacks.pushToolResult).not.toHaveBeenCalledWith(expect.stringContaining("Error"))
 			})
 
@@ -1975,6 +1977,7 @@ describe("ReadFileTool", () => {
 				expect(callbacks.pushToolResult).toHaveBeenCalledWith(
 					expect.stringContaining("File: legacy-stat-fail.ts"),
 				)
+				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("test content"))
 				expect(callbacks.pushToolResult).not.toHaveBeenCalledWith(expect.stringContaining("Error"))
 			})
 			it("legacy format: leaves the target unobserved when the post-read stat fails", async () => {
@@ -2016,6 +2019,7 @@ describe("ReadFileTool", () => {
 				expect(callbacks.pushToolResult).toHaveBeenCalledWith(
 					expect.stringContaining("File: legacy-post-stat-fail.ts"),
 				)
+				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("test content"))
 				expect(callbacks.pushToolResult).not.toHaveBeenCalledWith(expect.stringContaining("Error"))
 			})
 			it("two separate Task-owned registries are independent", async () => {
