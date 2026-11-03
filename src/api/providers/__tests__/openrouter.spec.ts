@@ -390,6 +390,31 @@ describe("OpenRouterHandler", () => {
 
 			expect(handler.getModel().info.maxTokens).toBe(222)
 		})
+
+		it("keeps the previous endpoint records when a newer endpoint lookup returns none", async () => {
+			mockGetModelEndpoints
+				.mockResolvedValueOnce({
+					"provider-x": { ...openRouterDefaultModelInfo, maxTokens: 333 },
+				})
+				// A failed endpoint fetch answers an empty map.
+				.mockResolvedValueOnce({})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-sonnet-4",
+					openRouterSpecificProvider: "provider-x",
+				}),
+			)
+
+			await handler.fetchModel()
+			expect(handler.getModel().info.maxTokens).toBe(333)
+
+			// The newer lookup saw no endpoints: the records from the successful one must survive,
+			// otherwise the pricing and limits fall back to the base catalogue entry.
+			await handler.fetchModel()
+			expect(handler.getModel().info.maxTokens).toBe(333)
+		})
 	})
 
 	describe("applyOpenRouterMoonshotK3Profile", () => {
