@@ -1082,7 +1082,7 @@ describe("PR review-state workflow", () => {
 			expect.objectContaining({
 				name: "stacked",
 				color: "c2c2c2",
-				description: "Head commit also sits on another open PR (detected from the commit graph)",
+				description: "Head commit sits directly on another open PR head (detected from the commit graph)",
 			}),
 		)
 	})
