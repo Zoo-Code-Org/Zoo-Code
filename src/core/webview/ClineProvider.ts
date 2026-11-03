@@ -4609,19 +4609,61 @@ export class ClineProvider
 		// with the replacement's settings and re-point the sticky name, or the running
 		// conversation keeps sending the deleted profile's configuration even though the view's
 		// buffer was re-pointed (the posted state prefers the task's own apiConfiguration).
-		for (const snapshot of snapshots) {
-			// Only re-point when the task actually runs under the deleted profile:
-			// a view pinned to it can hold a task that follows a different sticky
-			// profile, and forcing the replacement would silently switch that
-			// conversation and rewrite its persisted profile name without the user
-			// asking.
-			if (snapshot.instance.getCurrentTask()?.taskApiConfigName === deletedProfileName) {
-				if (replacementSettings) {
-					snapshot.instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
+		try {
+			for (const snapshot of snapshots) {
+				// Only re-point when the task actually runs under the deleted profile:
+				// a view pinned to it can hold a task that follows a different sticky
+				// profile, and forcing the replacement would silently switch that
+				// conversation and rewrite its persisted profile name without the user
+				// asking.
+				if (snapshot.instance._disposed) {
+					continue
 				}
-				await snapshot.instance.persistStickyProviderProfileToCurrentTask(replacementName)
+				if (snapshot.instance.getCurrentTask()?.taskApiConfigName === deletedProfileName) {
+					if (replacementSettings) {
+						snapshot.instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
+					}
+					await snapshot.instance.persistStickyProviderProfileToCurrentTask(replacementName)
+				}
+				await snapshot.instance.postStateToWebview()
 			}
-			await snapshot.instance.postStateToWebview()
+		} catch (taskStepError: unknown) {
+			// This step runs after every sibling's buffer was re-pointed, so the rollback above
+			// never ran for it: the deletion's own compensation covers the shared stores and this
+			// view's pin only, which would leave each sibling serving the replacement profile's
+			// name and overlay while the deletion reports failure. Put every sibling's buffer back,
+			// one restore at a time so a failing restore cannot skip the next.
+			const restoreFailures: string[] = []
+
+			for (const snapshot of snapshots) {
+				// A provider that has begun disposal owns an orphaned viewStates key and is being
+				// torn down; writing durable state through it is the defect the guards above exist
+				// to avoid.
+				if (snapshot.instance._disposed) {
+					continue
+				}
+				try {
+					await snapshot.instance._saveViewLocalStateFromMutation({
+						currentApiConfigName: snapshot.previousPin,
+						apiConfiguration: snapshot.previousOverlay,
+					})
+				} catch (restoreError: unknown) {
+					const message = restoreError instanceof Error ? restoreError.message : String(restoreError)
+					snapshot.instance.log(
+						`[rePinViewLocalStateForDeletedProfile] Could not restore the pin for view ${snapshot.instance.viewId} after a failed task re-point: ${message}`,
+					)
+					restoreFailures.push(`view ${snapshot.instance.viewId}: ${message}`)
+				}
+			}
+
+			if (restoreFailures.length > 0) {
+				const prefix = taskStepError instanceof Error ? taskStepError.message : String(taskStepError)
+				throw new Error(`${prefix}; sibling restore also failed: ${restoreFailures.join("; ")}`, {
+					cause: taskStepError instanceof Error ? taskStepError : undefined,
+				})
+			}
+
+			throw taskStepError
 		}
 	}
 

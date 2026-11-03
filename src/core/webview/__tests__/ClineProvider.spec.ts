@@ -8601,6 +8601,75 @@ describe("ClineProvider", () => {
 			await sibling.dispose()
 		})
 
+		it("restores an affected sibling view's own pin when the post-re-pin task step fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await sibling["setViewStateId"]("sibling-task-step-view")
+			await sibling.saveViewState("currentApiConfigName", "doomed-profile")
+			await sibling.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "doomed-secret",
+			})
+
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// The first post is the re-pin loop's own (it must land, so the buffer really is
+			// re-pointed); the second is the post-re-pin task loop's, and it fails there. That is
+			// the window this case covers: every sibling buffer already names the survivor.
+			vi.spyOn(sibling, "postStateToWebview")
+				.mockResolvedValueOnce(undefined)
+				.mockRejectedValueOnce(new Error("sibling post-task step down"))
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "keeper-secret",
+				}),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("doomed-id"),
+			}
+
+			await expect(provider.deleteProviderProfile(doomedProfile)).rejects.toThrow("sibling post-task step down")
+
+			// The rolled-back deletion must not leave the sibling serving the survivor's name and
+			// overlay: without an explicit restore on this path the sibling keeps the re-pinned
+			// buffer the task step ran behind.
+			expect(sibling["viewLocalState"].currentApiConfigName).toBe("doomed-profile")
+			expect(sibling["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "doomed-secret",
+			})
+			const cached = sibling["getPersistedViewStates"]()["sibling-task-step-view"] ?? {}
+			expect(cached.currentApiConfigName).toBe("doomed-profile")
+			await provider.dispose()
+			await sibling.dispose()
+		})
+
 		it("rolls back the sibling views whose re-pin write succeeded when another sibling fails", async () => {
 			const provider = new ClineProvider(
 				mockContext,
