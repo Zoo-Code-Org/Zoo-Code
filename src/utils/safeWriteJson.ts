@@ -75,6 +75,33 @@ class LockKeyDriftError extends Error {
 }
 
 /**
+ * Thrown when the directory this write was approved to stage into no longer names that
+ * directory. The publish target and the staging location are resolved under the lock, but
+ * a resolved path is a pathname, not a bound identity: if the target's parent is replaced
+ * with a link pointing elsewhere before the staged file is written, the staged JSON is
+ * created outside the directory this write was approved for, and the staging checks inside
+ * safeWriteText - which run after that write - could reject the publish without undoing
+ * the file. Rejecting here leaves nothing on disk.
+ */
+class StagingDirectoryDriftError extends Error {
+	constructor(requestedPath: string, approvedDirectory: string, actualDirectory: string) {
+		super(
+			`Refusing to stage ${requestedPath}: the directory this write was approved for (${approvedDirectory}) now resolves to ${actualDirectory}. Retry the write.`,
+		)
+		this.name = "StagingDirectoryDriftError"
+	}
+}
+
+/**
+ * Whether two paths name the same directory. `realpath` reports the on-disk spelling,
+ * which can differ in case on Windows, so the identity being compared here is the
+ * directory, not the spelling of it.
+ */
+function _sameDirectory(approved: string, actual: string): boolean {
+	return process.platform === "win32" ? approved.toLowerCase() === actual.toLowerCase() : approved === actual
+}
+
+/**
  * Canonicalize the directory a write is confined to. The publish target is fully
  * resolved through symlinks, so the scope has to be resolved the same way or a
  * scope path that itself runs through a symlink (macOS /var -> /private/var is the
@@ -266,6 +293,34 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			path.dirname(resolvedTargetPath),
 			".new_" + Date.now() + "_" + Math.random().toString(36).substring(2) + ".tmp",
 		)
+
+		// The staging location was chosen from the parent directory resolved under the lock. Re-verify
+		// that directory against itself before writing anything into it: a resolved pathname is not an
+		// identity, and a parent that was replaced with a link pointing elsewhere in the meantime would
+		// put the staged file outside the directory this write was approved for. safeWriteText would
+		// then reject the publish, but the stray file would already exist.
+		const approvedStagingDirectory = path.dirname(actualTempNewFilePath)
+		let currentStagingDirectory: string
+		try {
+			currentStagingDirectory = await fs.realpath(approvedStagingDirectory)
+		} catch (driftError: unknown) {
+			const code =
+				driftError && typeof driftError === "object" && "code" in driftError
+					? (driftError as { code?: string }).code
+					: undefined
+			throw new StagingDirectoryDriftError(
+				resolvedTargetPath ?? absoluteFilePath,
+				approvedStagingDirectory,
+				code === "ENOENT" ? "no existing directory" : String(driftError),
+			)
+		}
+		if (!_sameDirectory(approvedStagingDirectory, currentStagingDirectory)) {
+			throw new StagingDirectoryDriftError(
+				resolvedTargetPath ?? absoluteFilePath,
+				approvedStagingDirectory,
+				currentStagingDirectory,
+			)
+		}
 
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
 

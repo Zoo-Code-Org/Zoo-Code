@@ -97,16 +97,17 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// The lock key is the key every other writer to this file uses, so the caller
 		// queued behind the peer instead of failing before the lock.
 		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
-		// After the lock: the strict publish resolution, then the key/publish-target
-		// agreement check (resolve of the publish target plus canonicalization of its
-		// directory), then safeWriteText's two staging-path lstat checks. None of them
-		// changes which lock the caller queued behind.
+		// After the lock: the strict publish resolution, the key/publish-target agreement check
+		// (resolve of the publish target plus canonicalization of its directory), the re-resolution of
+		// the staging directory before anything is written into it, then safeWriteText's two
+		// staging-path lstat checks. None of them changes which lock the caller queued behind.
 		expect(order).toEqual([
 			"resolve-failed",
 			"lstat",
 			"resolve",
 			"resolve",
 			"lock",
+			"resolve",
 			"resolve",
 			"resolve",
 			"resolve",
@@ -193,6 +194,38 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			)
 			expect(present).toBe(false)
 		}
+		consoleError.mockRestore()
+	})
+
+	it("refuses to stage when the target's parent no longer names that directory", async () => {
+		let released = false
+		const dir = await makeDir("lockkey-")
+		const target = path.join(dir, "history_item.json")
+		const outside = path.join(dir, "elsewhere")
+		currentLink = ""
+
+		// The staging location is chosen from the parent directory resolved under the lock, and the
+		// staged file is written here in safeWriteJson before safeWriteText runs. Replace that
+		// directory with a link pointing outside it in between, and the staged JSON lands outside the
+		// directory this write was approved for - safeWriteText can still reject the publish, but the
+		// stray file already exists. Canonicalizing the parent is the only thing that can see the swap.
+		mockedRealpath.mockImplementation(async (t) => (String(t) === dir ? outside : String(t)))
+		mockedLstat.mockImplementation(
+			async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats,
+		)
+		mockedAcquireFileLock.mockImplementation(async () => async () => {
+			released = true
+		})
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		await expect(safeWriteJson(target, { id: "task-1" })).rejects.toThrow(
+			"the directory this write was approved for",
+		)
+
+		expect(released).toBe(true)
+		// Nothing was staged: no target, and no .new_*.tmp left behind in the directory.
+		await expect(fs.readFile(target, "utf8")).rejects.toThrow()
+		expect((await fs.readdir(dir)).filter((name) => name.startsWith(".new_"))).toEqual([])
 		consoleError.mockRestore()
 	})
 
