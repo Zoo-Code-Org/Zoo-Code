@@ -87,6 +87,10 @@ vi.mock("../../services/code-index/code-index-manager-registry", () => ({
 	},
 }))
 
+vi.mock("../../services/diagnostics", () => ({
+	createDiagnosticsReport: vi.fn(),
+}))
+
 vi.mock("../../services/mdm/MdmService", () => ({
 	MdmService: {
 		getInstance: vi.fn(),
@@ -209,6 +213,22 @@ describe("registerCommands handlers", () => {
 			outputChannel: mockOutputChannel,
 			provider: mockProvider as unknown as ClineProvider,
 		})
+	})
+
+	it("creates the diagnostics report from every provider even when none is visible", async () => {
+		vi.mocked(ClineProvider.getVisibleInstance).mockReturnValue(undefined)
+		const allInstances = [mockVisibleProviderInstance]
+		vi.mocked(ClineProvider.getAllInstances).mockReturnValue(allInstances)
+		const { createDiagnosticsReport } = await import("../../services/diagnostics")
+
+		await handlers["zoo-code.createDiagnosticsReport"]()
+
+		// The command must not be gated on a visible provider (a tab-only surface still
+		// needs a report), and the report must cover every live instance, not just a
+		// visible one.
+		expect(vi.mocked(createDiagnosticsReport)).toHaveBeenCalledWith(
+			expect.objectContaining({ providers: allInstances }),
+		)
 	})
 
 	it.each([false, true])("retries the appropriate provider when a visible provider exists: %s", async (visible) => {
@@ -702,6 +722,7 @@ describe("openClineInNewTab", () => {
 			webview: { postMessage: vi.fn() },
 			onDidChangeViewState: vi.fn(),
 			onDidDispose: vi.fn(),
+			dispose: vi.fn(),
 		}
 		;(vscode.window.createWebviewPanel as Mock).mockReturnValue(mockPanel)
 
@@ -1398,6 +1419,7 @@ describe("openClineInNewTab initialization failure", () => {
 			webview: { postMessage: vi.fn() },
 			onDidChangeViewState: vi.fn(),
 			onDidDispose: vi.fn(),
+			dispose: vi.fn(),
 		}
 		;(vscode.window.createWebviewPanel as Mock).mockReturnValue(mockPanel)
 
@@ -1429,7 +1451,49 @@ describe("openClineInNewTab initialization failure", () => {
 		expect(getPanel()).toBeUndefined()
 		expect(disposeSpy).toHaveBeenCalledTimes(1)
 
+		// The failed panel itself must be closed: leaving it open shows a blank,
+		// non-functional Zoo Code tab and makes the next open create a second panel.
+		const panel = (vscode.window.createWebviewPanel as Mock).mock.results[0].value
+		expect(panel.dispose).toHaveBeenCalledTimes(1)
+
 		resolveSpy.mockRestore()
 		disposeSpy.mockRestore()
+	})
+	it("creates a fresh tab when the shared in-flight creation resolves to a disposed provider", async () => {
+		let releaseInitialization: () => void = () => {}
+		const initializationGate = new Promise<void>((resolve) => {
+			releaseInitialization = resolve
+		})
+		const resolveSpy = vi.spyOn(ClineProvider.prototype, "resolveWebviewView").mockImplementation(async () => {
+			await initializationGate
+		})
+		const isDisposedSpy = vi.spyOn(ClineProvider.prototype, "isDisposed", "get").mockReturnValue(true)
+
+		// The disposed provider's panel must not be treated as reusable: each tab here
+		// is a fresh surface.
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
+
+		// Two overlapping opens: the first owns the creation, the second waits on the
+		// shared promise. The provider is disposed by the time that promise settles.
+		const first = openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		})
+		const second = openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		})
+
+		releaseInitialization()
+		await first
+		await second
+
+		// The waiting caller must not receive the disposed provider: it opens its own tab.
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
+
+		resolveSpy.mockRestore()
+		isDisposedSpy.mockRestore()
 	})
 })

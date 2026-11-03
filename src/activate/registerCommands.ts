@@ -341,8 +341,19 @@ export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
 	// is in flight — openInNewTab and popoutButtonClicked both dispatch
 	// through here — awaits it instead of creating a second panel: exactly
 	// one panel is created and every caller receives the same provider.
-	if (pendingTabPanelCreation) {
-		return pendingTabPanelCreation
+	const inFlight = pendingTabPanelCreation
+	if (inFlight) {
+		const pendingProvider = await inFlight
+		// The panel can be closed while the creation is still settling (the settle delay
+		// and the editor-group lock run after resolveWebviewView): the shared promise then
+		// resolves to a disposed provider, and returning it opens no usable tab. Drop the
+		// settled creation and fall through to create a fresh panel.
+		if (!pendingProvider.isDisposed) {
+			return pendingProvider
+		}
+		if (pendingTabPanelCreation === inFlight) {
+			pendingTabPanelCreation = undefined
+		}
 	}
 
 	const creation = createTabPanelUnlocked(options)
@@ -493,6 +504,10 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 			setPanel(undefined, "tab")
 		}
 		await tabProvider.dispose()
+		// The provider's own dispose path does not own this panel: without disposing it
+		// the failed tab stays open as a blank, non-functional surface, and the next
+		// "Open in editor" creates a second panel next to it.
+		newPanel.dispose()
 		throw error
 	}
 
