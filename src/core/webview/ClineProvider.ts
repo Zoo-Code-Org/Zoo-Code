@@ -2813,6 +2813,10 @@ export class ClineProvider
 			const previousViewName = this.viewLocalState.currentApiConfigName
 			// This activation owns the shared selection until a newer write bumps the generation.
 			const expectedNameGeneration = this.contextProxy.getStateWriteGeneration("currentApiConfigName") + 1
+			// The profile list needs its own ownership signal: a non-activating save from another view
+			// writes listApiConfigMeta without touching the shared name, and undoing it would drop the
+			// profile that save just stored from the metadata.
+			const expectedListGeneration = this.contextProxy.getStateWriteGeneration("listApiConfigMeta") + 1
 			const previousProviderSettings = this.contextProxy.getProviderSettings()
 			// Ownership signal for the provider-settings store, independent of the shared name:
 			// this activation's `setProviderSettings` writes `apiProvider` exactly once, so those
@@ -2859,9 +2863,9 @@ export class ClineProvider
 					}
 				}
 				await restore("profile list", async () => {
-					if (!ownsSharedSelection()) {
+					if (this.contextProxy.getStateWriteGeneration("listApiConfigMeta") !== expectedListGeneration) {
 						this.log(
-							"[persistProviderProfile] Skipping the profile-list restore: another view wrote the shared selection",
+							"[persistProviderProfile] Skipping the profile-list restore: another view wrote the profile list",
 						)
 						return
 					}
