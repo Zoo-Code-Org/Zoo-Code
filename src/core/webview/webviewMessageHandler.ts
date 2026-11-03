@@ -24,6 +24,8 @@ import {
 	checkoutRestorePayloadSchema,
 	getCompletionCheckpoint,
 	providerIdentifiers,
+	providerSettingsSchema,
+	globalSettingsSchema,
 	retiredProviderIdentifiers,
 	LmStudioModelsMessageType,
 	OllamaModelsMessageType,
@@ -114,6 +116,19 @@ const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 // the shared store and into this view's local buffer - and getState() prefers the
 // buffer - so a webview payload must not be allowed to carry them.
 const HOST_OWNED_SETTINGS = new Set(["apiConfiguration", "listApiConfigMeta", "viewStates", "currentApiConfigName"])
+
+// RooCodeSettings is GlobalSettings & ProviderSettings, so a payload can also carry flat profile
+// fields ("apiProvider", "openAiApiKey", "openAiBaseUrl", ...) without leaving the message type.
+// Those keys are only ever applied by the profile-management paths, which run them through
+// ProviderSettingsManager before a configuration may become active; the generic loop below writes
+// straight into the shared store, so an injected profile field would reach getState() and the next
+// task unvalidated. Every settings payload the webview actually sends was checked (packages/types
+// vs webview-ui) and carries global keys only, so a profile-only key here is never a real setting.
+// Keys that are genuinely global too (rateLimitSeconds) stay on the ordinary route.
+const GLOBAL_SETTINGS_KEYS = new Set(Object.keys(globalSettingsSchema.shape))
+const PROVIDER_PROFILE_SETTINGS = new Set(
+	Object.keys(providerSettingsSchema.shape).filter((key) => !GLOBAL_SETTINGS_KEYS.has(key)),
+)
 
 // Serializes handling of "telemetrySetting" messages. Each invocation reads the previous
 // setting, awaits a persistence write, then applies the new live telemetry state -- with no
@@ -813,6 +828,15 @@ export const webviewMessageHandler = async (
 				}
 
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
+					if (PROVIDER_PROFILE_SETTINGS.has(key)) {
+						// Same boundary as the host-owned keys above, one level lower: the key is a
+						// provider-settings field, and only a validated profile may carry it.
+						provider.log(
+							`[updateSettings] Ignoring provider-profile setting '${key}' supplied by the webview; it must go through the profile-management path.`,
+						)
+						continue
+					}
+
 					if (HOST_OWNED_SETTINGS.has(key)) {
 						// Boundary check, not normalization: these keys reach the runtime through the
 						// profile-management paths, which validate them first. Applying them here would

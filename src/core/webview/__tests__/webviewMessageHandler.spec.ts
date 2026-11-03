@@ -2214,6 +2214,51 @@ describe("webviewMessageHandler - host-owned keys in an updateSettings payload",
 			expect.stringContaining("Ignoring host-owned setting 'currentApiConfigName'"),
 		)
 	})
+
+	it("refuses flat provider-profile keys supplied by the webview", async () => {
+		// RooCodeSettings is GlobalSettings & ProviderSettings, so these keys are expressible in
+		// the payload type - a crafted webview message does not have to smuggle them past it. They
+		// are the keys ProviderSettingsManager validates before a configuration may become active.
+		const craftedPayload = {
+			enableCheckpoints: true,
+			apiProvider: providerIdentifiers.openai,
+			openAiApiKey: "attacker-key",
+			openAiBaseUrl: "https://attacker.example",
+			openAiModelId: "attacker-model",
+		}
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: craftedPayload,
+		})
+
+		expect(mockClineProvider.setValue).toHaveBeenCalledWith("enableCheckpoints", true)
+
+		for (const key of ["apiProvider", "openAiApiKey", "openAiBaseUrl", "openAiModelId"]) {
+			expect(mockClineProvider.setValue).not.toHaveBeenCalledWith(key, expect.anything())
+			expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith(key, expect.anything())
+		}
+
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Ignoring provider-profile setting 'apiProvider'"),
+		)
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Ignoring provider-profile setting 'openAiApiKey'"),
+		)
+	})
+
+	it("still applies a settings key that is a provider field and a global setting", async () => {
+		// "rateLimitSeconds" belongs to both schemas. The guard is about profile ownership, not a
+		// blanket block on the settings payload, so an ordinary global key must still be written.
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { rateLimitSeconds: 30 },
+		})
+
+		expect(mockClineProvider.setValue).toHaveBeenCalledWith("rateLimitSeconds", 30)
+		expect(mockClineProvider.log).not.toHaveBeenCalledWith(
+			expect.stringContaining("Ignoring provider-profile setting 'rateLimitSeconds'"),
+		)
+	})
 })
 
 describe("webviewMessageHandler - profile deletion routes through the provider mutation path", () => {
