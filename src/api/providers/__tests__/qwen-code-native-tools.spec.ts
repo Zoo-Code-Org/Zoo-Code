@@ -569,16 +569,6 @@ describe("QwenCodeHandler Native Tools", () => {
 			}),
 		})
 
-		const waitForCreateCall = async (create: { mock: { calls: unknown[][] } }, timeoutMs = 5000): Promise<void> => {
-			const start = Date.now()
-			while (create.mock.calls.length === 0) {
-				if (Date.now() - start > timeoutMs) {
-					throw new Error("timed out waiting for the SDK create call")
-				}
-				await new Promise((resolve) => setTimeout(resolve, 5))
-			}
-		}
-
 		const waitForSignalAbort = (signal: AbortSignal | undefined): Promise<void> => {
 			return new Promise((resolve, reject) => {
 				if (!signal) {
@@ -665,7 +655,9 @@ describe("QwenCodeHandler Native Tools", () => {
 
 				const stream = handler.createMessage("test prompt", [], { taskId: "t1", abortSignal: external.signal })
 				const pending = stream.next()
-				await waitForCreateCall(mockCreate)
+				// vi.waitFor polls instead of assuming a fixed await depth on the path from
+				// createMessage/completePrompt to the SDK call.
+				await vi.waitFor(() => expect(mockCreate.mock.calls.length).toBeGreaterThan(0))
 				external.abort()
 
 				let caught: unknown
@@ -794,9 +786,11 @@ describe("QwenCodeHandler Native Tools", () => {
 				// Start consuming before draining so the 401 attempt fails and
 				// the refresh fetch starts while microtasks are drained.
 				const pending = collectStream(stream)
-				for (let i = 0; i < 50 && fetchMock.mock.calls.length === 0; i++) {
-					await Promise.resolve()
-				}
+				// Poll for the refresh fetch instead of draining a fixed number of microtasks:
+				// the path from the 401 rejection through settleOnAbort, ensureAuthenticated and the
+				// shared credentialLoad to the refresh fetch gains await hops whenever the provider is
+				// refactored, and a fixed depth fails while the code still behaves correctly.
+				await vi.waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(0))
 				expect(fetchMock).toHaveBeenCalledTimes(1)
 
 				external.abort() // Stop pressed while the token refresh wait is established
@@ -895,7 +889,9 @@ describe("QwenCodeHandler Native Tools", () => {
 				})
 
 				const pending = handler.completePrompt("hi", { abortSignal: external.signal, timeoutMs: 60_000 })
-				await waitForCreateCall(mockCreate)
+				// vi.waitFor polls instead of assuming a fixed await depth on the path from
+				// createMessage/completePrompt to the SDK call.
+				await vi.waitFor(() => expect(mockCreate.mock.calls.length).toBeGreaterThan(0))
 				const opts = mockCreate.mock.calls[0][1]
 				expect(opts?.signal).toBeInstanceOf(AbortSignal)
 				expect(opts.signal).not.toBe(external.signal) // merged via AbortSignal.any
@@ -953,9 +949,11 @@ describe("QwenCodeHandler Native Tools", () => {
 				mockCreate.mockRejectedValueOnce(unauthorizedError())
 
 				const promise = handler.completePrompt("hi", { abortSignal: external.signal })
-				for (let i = 0; i < 50 && fetchMock.mock.calls.length === 0; i++) {
-					await Promise.resolve()
-				}
+				// Poll for the refresh fetch instead of draining a fixed number of microtasks:
+				// the path from the 401 rejection through settleOnAbort, ensureAuthenticated and the
+				// shared credentialLoad to the refresh fetch gains await hops whenever the provider is
+				// refactored, and a fixed depth fails while the code still behaves correctly.
+				await vi.waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(0))
 				expect(fetchMock).toHaveBeenCalledTimes(1)
 
 				external.abort() // Stop pressed while the token refresh wait is established

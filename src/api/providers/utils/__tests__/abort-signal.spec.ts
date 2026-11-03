@@ -871,26 +871,41 @@ describe("isTimeoutAbort", () => {
 	it("is true when the timeout aborted first and the caller aborted later", () => {
 		// Both orders must classify the same way: the merged signal retains the reason of the
 		// first abort, so a timeout that fired first stays a deadline even after a caller stop.
-		const request = new AbortController()
+		// The signal under test is the real merge, because "the merged signal keeps the first
+		// reason" is the premise of this classification - two unlinked controllers pass even if
+		// the merge stops preserving it.
+		const timeout = new AbortController()
 		const caller = new AbortController()
-		request.abort(createTimeoutError("Qwen Code"))
+		const merged = mergeAbortSignals(timeout.signal, caller.signal)
+		timeout.abort(createTimeoutError("Qwen Code"))
 		caller.abort()
 
-		expect(isTimeoutAbort(request.signal)).toBe(true)
+		expect(isTimeoutAbort(merged)).toBe(true)
 	})
 
 	it("is false when the caller aborted first and the merged signal kept the caller reason", () => {
-		const request = new AbortController()
+		const timeout = new AbortController()
 		const caller = new AbortController()
-		caller.abort()
-		request.abort(caller.signal.reason)
+		const merged = mergeAbortSignals(timeout.signal, caller.signal)
+		caller.abort(new Error("user stop"))
+		timeout.abort(createTimeoutError("Qwen Code"))
 
-		expect(isTimeoutAbort(request.signal)).toBe(false)
+		expect(isTimeoutAbort(merged)).toBe(false)
 	})
 
 	it("is false when the request was aborted for a non-timeout reason", () => {
 		const request = new AbortController()
 		request.abort(new Error("shutdown"))
+
+		expect(isTimeoutAbort(request.signal)).toBe(false)
+	})
+
+	it("is false, and does not throw, when the abort reason is null", () => {
+		// controller.abort(null) stores null as the reason: the optional chain on
+		// requestSignal.reason in isTimeoutAbort is load-bearing, and no other case here
+		// reaches it with a reason that has no properties at all.
+		const request = new AbortController()
+		request.abort(null)
 
 		expect(isTimeoutAbort(request.signal)).toBe(false)
 	})
