@@ -724,20 +724,6 @@ export class SkillsManager {
 		}
 	}
 
-	/**
-	 * Create a new skill
-	 * @param name - Skill name (must be valid per agentskills.io spec)
-	 * @param source - "global" or "project"
-	 * @param description - Skill description
-	 * @param modeSlugs - Optional mode restrictions (undefined/empty = any mode)
-	 * @returns Path to created SKILL.md file
-	 */
-	/**
-	 * Write one SKILL.md atomically: stage the content in a same-directory temp file,
-	 * await the complete write, then rename it over the target. A crash or failed write
-	 * must not leave a truncated SKILL.md that the loader would silently misparse.
-	 * The temp file is removed when the write or rename fails.
-	 */
 	private async withDirectoryLock<T>(directory: string, operation: () => Promise<T>): Promise<T> {
 		// Normalize through realpath first so a symlinked alias shares the same queue key; fall
 		// back to the resolved path when the directory cannot be resolved (e.g. not created yet).
@@ -762,6 +748,12 @@ export class SkillsManager {
 		}
 	}
 
+	/**
+	 * Write one SKILL.md atomically: stage the content in a same-directory temp file,
+	 * await the complete write, then rename it over the target. A crash or failed write
+	 * must not leave a truncated SKILL.md that the loader would silently misparse.
+	 * The temp file is removed when the write or rename fails.
+	 */
 	private async writeSkillFileAtomically(
 		filePath: string,
 		content: string,
@@ -803,6 +795,14 @@ export class SkillsManager {
 		})
 	}
 
+	/**
+	 * Create a new skill
+	 * @param name - Skill name (must be valid per agentskills.io spec)
+	 * @param source - "global" or "project"
+	 * @param description - Skill description
+	 * @param modeSlugs - Optional mode restrictions (undefined/empty = any mode)
+	 * @returns Path to created SKILL.md file
+	 */
 	async createSkill(
 		name: string,
 		source: "global" | "project",
@@ -1175,12 +1175,6 @@ Add your skill instructions here.
 	}
 
 	/**
-	 * Update the mode associations for a skill by modifying its SKILL.md frontmatter.
-	 * @param name - Skill name
-	 * @param source - Where the skill is located ("global" or "project")
-	 * @param newModeSlugs - New mode slugs (undefined/empty = any mode)
-	 */
-	/**
 	 * The resolved SKILL.md target must stay inside one of the configured skills roots for the
 	 * source: a direct skill-directory symlink can point anywhere, and publishing through it
 	 * would write outside the user selected skills folder.
@@ -1197,9 +1191,15 @@ Add your skill instructions here.
 		for (const root of roots) {
 			if (await inside(root)) return
 		}
-		throw new Error(`Refusing to update SKILL.md outside the ${source} skills directories: ${targetPath}`)
+		throw new Error(t("skills:errors.outside_skills_root", { source, path: targetPath }))
 	}
 
+	/**
+	 * Update the mode associations for a skill by modifying its SKILL.md frontmatter.
+	 * @param name - Skill name
+	 * @param source - Where the skill is located ("global" or "project")
+	 * @param newModeSlugs - New mode slugs (undefined/empty = any mode)
+	 */
 	async updateSkillModes(name: string, source: "global" | "project", newModeSlugs?: string[]): Promise<void> {
 		// Find any skill with this name and source (regardless of current mode)
 		let skill: SkillMetadata | undefined

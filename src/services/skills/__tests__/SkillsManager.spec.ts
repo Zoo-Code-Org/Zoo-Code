@@ -147,6 +147,7 @@ vi.mock("../../../i18n", () => ({
 			"skills:errors.already_exists": `Skill "${params?.name}" already exists at ${params?.path}`,
 			"skills:errors.not_found": `Skill "${params?.name}" not found in ${params?.source}${params?.modeInfo}`,
 			"skills:errors.move_restore_failed": `Moving the skill failed (${params?.error}) and its original folder couldn't be restored to ${params?.path}. Your skill is safe in ${params?.backupPath}; move it back manually.`,
+			"skills:errors.outside_skills_root": `Refusing to update SKILL.md outside the ${params?.source} skills directories: ${params?.path}`,
 		}
 		return translations[key] || key
 	},
