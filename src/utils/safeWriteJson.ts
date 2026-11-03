@@ -194,6 +194,34 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		options?.trace?.({ stage: "write-start" })
 		actualTempNewFilePath = createTempFilePath(absoluteFilePath, "new")
 
+		// The staging location was chosen from the parent directory resolved under the lock. Re-verify
+		// that directory against itself before writing anything into it: a resolved pathname is not an
+		// identity, and a parent that was replaced with a link pointing elsewhere in the meantime would
+		// put the staged file outside the directory this write was approved for. safeWriteText would
+		// then reject the publish, but the stray file would already exist.
+		const approvedStagingDirectory = path.dirname(actualTempNewFilePath)
+		let currentStagingDirectory: string
+		try {
+			currentStagingDirectory = await fs.realpath(approvedStagingDirectory)
+		} catch (driftError: unknown) {
+			const code =
+				driftError && typeof driftError === "object" && "code" in driftError
+					? (driftError as { code?: string }).code
+					: undefined
+			throw new StagingDirectoryDriftError(
+				resolvedTargetPath ?? absoluteFilePath,
+				approvedStagingDirectory,
+				code === "ENOENT" ? "no existing directory" : String(driftError),
+			)
+		}
+		if (!_sameDirectory(approvedStagingDirectory, currentStagingDirectory)) {
+			throw new StagingDirectoryDriftError(
+				resolvedTargetPath ?? absoluteFilePath,
+				approvedStagingDirectory,
+				currentStagingDirectory,
+			)
+		}
+
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
 		await _flushFileToDisk(actualTempNewFilePath)
 
