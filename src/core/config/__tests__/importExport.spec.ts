@@ -413,6 +413,16 @@ describe("importExport", () => {
 			expect(result.globalSettings).not.toHaveProperty("lastTaskExportPath")
 			expect(result.globalSettings).not.toHaveProperty("lastModeExportPath")
 			expect(result.globalSettings).not.toHaveProperty("lastImageSavePath")
+			// What matters is what reaches storage: setValues installs the imported object,
+			// so the foreign dialog memory has to be gone from the value the extension will
+			// actually use, not only from the summary returned to the caller.
+			expect(mockContextProxy.setValues).toHaveBeenCalledTimes(1)
+			const installedGlobalSettings = mockContextProxy.setValues.mock.calls[0][0]
+			expect(installedGlobalSettings).toEqual(expect.objectContaining({ mode: "code" }))
+			expect(installedGlobalSettings).not.toHaveProperty("lastSettingsExportPath")
+			expect(installedGlobalSettings).not.toHaveProperty("lastTaskExportPath")
+			expect(installedGlobalSettings).not.toHaveProperty("lastModeExportPath")
+			expect(installedGlobalSettings).not.toHaveProperty("lastImageSavePath")
 			// Dropped silently: every export contains these keys, so warning on each
 			// import would report nothing the user can act on. The whole warning list is
 			// the assertion here — this import has nothing to report.
