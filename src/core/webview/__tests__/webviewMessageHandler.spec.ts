@@ -3395,6 +3395,42 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		})
 	})
 
+	it("points the shared selection at the renamed profile when the selection write fails", async () => {
+		// deleteConfig(oldName) has already run by the time the shared selection is updated, so the
+		// rollback inside provider.setValue (which restores the value it read, oldName) leaves the
+		// shared selection naming a profile that no longer exists. The handler must repoint it at the
+		// stored newName instead.
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		provider.repointViewLocalStateAfterProfileRename = vi.fn().mockResolvedValue(undefined)
+		provider.runProviderProfileMutation = (fn) => fn()
+		provider.activateProviderProfileUnlocked = vi.fn().mockResolvedValue(undefined)
+		// The shared selection still names the old profile, which is what sends the handler through
+		// the re-point below.
+		const withSelection = mockClineProvider as unknown as { getValue: (key: string) => unknown }
+		withSelection.getValue = () => "old-profile"
+		// The selection write itself fails; everything written after it goes through normally.
+		const proxySetValue = vi.mocked(mockClineProvider.contextProxy.setValue)
+		proxySetValue.mockClear()
+		proxySetValue.mockRejectedValueOnce(new Error("selection write down"))
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// One write is the failed selection update, the second is the repair that points the
+		// selection at the profile which still exists. Without the repair there is only the failed
+		// write, whose recorded call says "new-profile" even though it never landed.
+		const selectionWrites = proxySetValue.mock.calls.filter(([key]) => key === "currentApiConfigName")
+		expect(selectionWrites.map(([, value]) => value)).toEqual(["new-profile", "new-profile"])
+	})
+
 	it("logs a failed rename compensation", async () => {
 		provider.providerSettingsManager = {
 			hasConfig: vi.fn().mockResolvedValue(false),
