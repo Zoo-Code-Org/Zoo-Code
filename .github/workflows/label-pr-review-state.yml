@@ -226,11 +226,13 @@ jobs:
                       //
                       // An empty output means the map was unavailable this run; shards then skip the
                       // stacked label rather than deciding from an empty map.
-                      const stackMayHaveChanged =
-                        context.eventName === 'pull_request_target' &&
-                        ['opened', 'reopened', 'synchronize', 'labeled', 'unlabeled'].includes(context.payload.action);
+                      // Every execution that targets a PR reads the map: reviews, comments, manual
+                      // dispatches and workflow_run completions share this PR's concurrency group with
+                      // synchronize runs, so a displaced synchronize leaves its stacked label stale unless
+                      // the replacement run evaluates it too. The sweep already holds the list in
+                      // `openPrsCache`, so its cost is unchanged.
                       let openPrHeadsOutput = '';
-                      if (prNumbers.length > 0 && (openPrsCache || stackMayHaveChanged)) {
+                      if (prNumbers.length > 0) {
                         try {
                           const openPrsForMap = openPrsCache ?? (await github.paginate(github.rest.pulls.list, {
                             owner, repo, state: 'open', per_page: 100,
@@ -246,13 +248,6 @@ jobs:
                         } catch (error) {
                           core.warning(`Could not read the open pull request map: ${error.message}; shards will skip the stacked label this run`);
                         }
-                      } else if (prNumbers.length > 0) {
-                        // Sentinel: this event cannot change a stacked relationship, so the label was
-                        // not evaluated rather than found unavailable. Shards skip it silently.
-                        openPrHeadsOutput = 'not-evaluated';
-                        core.info(
-                          `Open-PR head map not read: ${context.eventName} cannot change a stacked unit; shards skip the stacked label.`
-                        );
                       }
                       core.setOutput('open_pr_heads', openPrHeadsOutput);
 

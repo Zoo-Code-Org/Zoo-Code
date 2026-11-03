@@ -2691,20 +2691,19 @@ describe("PR review-state workflow", () => {
 		expect(pages[0].info).toHaveBeenCalledWith(expect.stringContaining("450"))
 	})
 
-	it("reconciles only the requested PR during manual dispatch and does not read the head map", async () => {
+	it("reconciles only the requested PR during manual dispatch and still reads the head map", async () => {
 		const resolution = await runResolve({ eventName: "workflow_dispatch", workflowDispatchPrNumber: 1437 })
 
-		// A manual dispatch cannot publish a head commit, so it cannot change a stacked relationship:
-		// the paginated open-PR read is skipped and shards are told the label was not evaluated.
-		expect(resolution.listPullRequests).not.toHaveBeenCalled()
+		// A manual dispatch shares the PR's concurrency group with synchronize runs, so it can replace
+		// a pending run: it reads the map instead of passing a not-evaluated sentinel.
+		expect(resolution.listPullRequests).toHaveBeenCalledTimes(1)
 		expect(resolution.prNumbers()).toEqual([1437])
-		expect(resolution.openPrHeadsRaw()).toBe("not-evaluated")
-		expect(resolution.info).toHaveBeenCalledWith(expect.stringContaining("cannot change a stacked unit"))
+		expect(resolution.openPrHeads()).toEqual({ [SHA.toLowerCase()]: 1437 })
 
 		const result = await runWorkflow({
 			eventName: "workflow_dispatch",
 			workflowDispatchPrNumber: 1437,
-			openPrHeadsEnv: "not-evaluated",
+			openPrHeadsEnv: JSON.stringify({ [SHA.toLowerCase()]: 1437 }),
 		})
 
 		// The shard receives the sentinel through the env; only the requested PR is reconciled.
@@ -2833,16 +2832,18 @@ describe("PR review-state workflow", () => {
 		}
 	})
 
-	it("reconciles the PR associated with a workflow run", async () => {
+	it("reconciles the PR associated with a workflow run and reads the head map", async () => {
 		const resolution = await runResolve({ eventName: "workflow_run" })
 
-		// Associated runs need no lookup, and a workflow_run cannot publish a head commit, so the
-		// head map is not read here either.
-		expect(resolution.listPullRequests).not.toHaveBeenCalled()
-		expect(resolution.openPrHeadsRaw()).toBe("not-evaluated")
+		// A run completion shares the PR's concurrency group, so it evaluates the map too.
+		expect(resolution.listPullRequests).toHaveBeenCalledTimes(1)
+		expect(resolution.openPrHeads()).toEqual({ [SHA.toLowerCase()]: 1437 })
 		expect(resolution.prNumbers()).toEqual([1437])
 
-		const result = await runWorkflow({ eventName: "workflow_run" })
+		const result = await runWorkflow({
+			eventName: "workflow_run",
+			openPrHeadsEnv: JSON.stringify({ [SHA.toLowerCase()]: 1437 }),
+		})
 
 		// The shard receives the map through the env; only the requested PR is reconciled.
 		expect(result.listPullRequests).not.toHaveBeenCalled()
