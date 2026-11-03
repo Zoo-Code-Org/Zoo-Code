@@ -3586,11 +3586,16 @@ export class ClineProvider
 	 * unpinned siblings follow the shared slot, where name and settings move
 	 * together.
 	 *
-	 * A pin that cannot be resolved fails the whole snapshot so the caller does not write
-	 * the shared store: that sibling would otherwise report its pin's name with the
-	 * activated profile's settings and start tasks on them. Siblings already snapshotted
-	 * keep an overlay equal to their own pin's settings, which is what they reported before
-	 * the aborted write.
+	 * A pin that cannot be READ fails the whole snapshot so the caller does not write the
+	 * shared store: that sibling would otherwise report its pin's name with the activated
+	 * profile's settings and start tasks on them. Siblings already snapshotted keep an overlay
+	 * equal to their own pin's settings, which is what they reported before the aborted write.
+	 *
+	 * The one tolerated failure is a pin naming a profile the store no longer has
+	 * (`ProviderSettingsNotFoundError`): the deletion path re-points those views itself
+	 * (`rePinViewLocalStateForDeletedProfile`), and aborting here would let one stale view
+	 * block every later activation in the host. Same discrimination `deleteProviderProfile`
+	 * applies to its own missing-profile read.
 	 */
 	private async snapshotSiblingOverlaysBeforeSharedSettingsWrite(activatedProfileName: string): Promise<void> {
 		const affected = ClineProvider.getAllInstances().filter(
@@ -3601,7 +3606,7 @@ export class ClineProvider
 				instance.viewLocalState.apiConfiguration === undefined,
 		)
 
-		const unresolvedPins: string[] = []
+		const unresolvedPins: Array<{ pinName: string; error: unknown }> = []
 
 		await Promise.all(
 			affected.map(async (instance) => {
@@ -3618,24 +3623,33 @@ export class ClineProvider
 					await instance._saveViewLocalStateFromMutation({ apiConfiguration: settings as ProviderSettings })
 					await instance.postStateToWebview()
 				} catch (error) {
-					// The sibling keeps its pin but gets no overlay, so the shared write would
-					// leave its getState() reporting that pin with the activated profile's
-					// settings. Record it and fail the mutation instead of writing on top.
-					unresolvedPins.push(pinName)
+					// A pin naming a deleted profile is tolerated: the deletion path re-points that
+					// view itself, and one stale view must not block every later activation. Any
+					// other read failure leaves the sibling's settings unknown, and unknown settings
+					// must not be silently replaced by the profile this call is about to activate -
+					// so that case fails the mutation before the shared write.
+					const deletedPin = error instanceof ProviderSettingsNotFoundError
+
+					if (!deletedPin) {
+						unresolvedPins.push({ pinName, error })
+					}
+
 					this.log(
 						`[snapshotSiblingOverlaysBeforeSharedSettingsWrite] Unable to resolve profile '${pinName}': ${
 							error instanceof Error ? error.message : String(error)
-						}`,
+						}${deletedPin ? " (deleted; the deletion path re-points this view)" : ""}`,
 					)
 				}
 			}),
 		)
 
 		if (unresolvedPins.length > 0) {
+			const firstError = unresolvedPins[0].error
+
 			throw new Error(
 				`Refusing to overwrite the shared provider settings while pinned profile(s) could not be resolved: ${[
-					...new Set(unresolvedPins),
-				].join(", ")}`,
+					...new Set(unresolvedPins.map(({ pinName }) => pinName)),
+				].join(", ")} (${firstError instanceof Error ? firstError.message : String(firstError)})`,
 			)
 		}
 	}

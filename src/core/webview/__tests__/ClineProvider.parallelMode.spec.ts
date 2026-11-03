@@ -11,6 +11,7 @@ import {
 } from "@roo-code/types"
 
 import { ContextProxy } from "../../config/ContextProxy"
+import { ProviderSettingsNotFoundError } from "../../config/ProviderSettingsManager"
 import { WebviewFocusTracker } from "../WebviewFocusTracker"
 import { ClineProvider } from "../ClineProvider"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -515,24 +516,31 @@ vi.mock("../../services/marketplace", () => ({
 }))
 
 // Mock ProviderSettingsManager
-vi.mock("../../config/ProviderSettingsManager", () => ({
-	ProviderSettingsManager: vi.fn().mockImplementation(function () {
-		return {
-			saveConfig: vi.fn().mockResolvedValue("test-id"),
-			listConfig: vi.fn().mockResolvedValue([]),
-			getProfile: vi.fn().mockResolvedValue({}),
-			activateProfile: vi.fn().mockImplementation(async (args: { name?: string; id?: string }) => ({
-				name: args.name ?? "default",
-				id: args.id ?? "test-id",
-				apiProvider: providerIdentifiers.anthropic,
-			})),
-			setModeConfig: vi.fn().mockResolvedValue(undefined),
-			getModeConfigId: vi.fn().mockResolvedValue(undefined),
-			resetAllConfigs: vi.fn().mockResolvedValue(undefined),
-			deleteConfig: vi.fn().mockResolvedValue(undefined),
-		}
-	}),
-}))
+vi.mock("../../config/ProviderSettingsManager", async (importOriginal) => {
+	// The real error class, not a double: the snapshot discriminates a pin naming a deleted
+	// profile with `instanceof ProviderSettingsNotFoundError`.
+	const actual = await importOriginal<typeof import("../../config/ProviderSettingsManager")>()
+
+	return {
+		ProviderSettingsNotFoundError: actual.ProviderSettingsNotFoundError,
+		ProviderSettingsManager: vi.fn().mockImplementation(function () {
+			return {
+				saveConfig: vi.fn().mockResolvedValue("test-id"),
+				listConfig: vi.fn().mockResolvedValue([]),
+				getProfile: vi.fn().mockResolvedValue({}),
+				activateProfile: vi.fn().mockImplementation(async (args: { name?: string; id?: string }) => ({
+					name: args.name ?? "default",
+					id: args.id ?? "test-id",
+					apiProvider: providerIdentifiers.anthropic,
+				})),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				resetAllConfigs: vi.fn().mockResolvedValue(undefined),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+			}
+		}),
+	}
+})
 
 // Mock CustomModesManager
 vi.mock("../../config/CustomModesManager", () => ({
@@ -1560,6 +1568,54 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			// B keeps its own pin and no overlay: unchanged from before the aborted write.
 			expect(providerB["viewLocalState"].currentApiConfigName).toBe("profile-y")
 			expect(providerB["viewLocalState"].apiConfiguration).toBeUndefined()
+
+			await providerA.dispose()
+			await providerB.dispose()
+		})
+
+		it("should still write the shared store when a sibling pins a deleted profile", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await providerB.setValue("currentApiConfigName", "deleted-profile")
+
+			vi.spyOn(providerA.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "profile-x",
+				id: "x-id",
+				apiProvider: providerIdentifiers.anthropic,
+				anthropicBaseUrl: "x-url",
+			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
+			])
+			// The sibling pins a profile the store no longer has: the deletion path re-points
+			// that view itself, so this activation must not be blocked by one stale pin.
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockRejectedValue(
+				new ProviderSettingsNotFoundError("Config 'deleted-profile' not found"),
+			)
+			const setSharedSettingsSpy = vi.spyOn(providerA.contextProxy, "setProviderSettings")
+
+			await expect(providerA.activateProviderProfile({ name: "profile-x" })).resolves.not.toThrow()
+
+			// The shared write proceeded, so the activation is not hostage to the stale pin.
+			expect(setSharedSettingsSpy).toHaveBeenCalledWith(
+				expect.objectContaining({
+					apiProvider: providerIdentifiers.anthropic,
+					anthropicBaseUrl: "x-url",
+				}),
+			)
+			expect(providerA.contextProxy.getValue("currentApiConfigName")).toBe("profile-x")
 
 			await providerA.dispose()
 			await providerB.dispose()
