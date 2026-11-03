@@ -546,6 +546,7 @@ export interface WebviewMessage {
 		| "renameTaskWithId"
 		| "importSettings"
 		| "exportSettings"
+		| "exportUsageCsv"
 		| "resetState"
 		| typeof RouterModelsMessageType.flushRouterModels
 		| typeof RouterModelsMessageType.requestRouterModels

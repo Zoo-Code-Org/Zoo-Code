@@ -100,14 +100,13 @@ export const UsageSettings = ({ className, ...props }: HTMLAttributes<HTMLDivEle
 	const showDayLabels = summary.daily.length <= 14
 	const isEmpty = summary.taskCount === 0
 
+	// A webview cannot reliably download a file, so the host saves it where the user chooses (like every other export).
 	const handleExport = () => {
-		const csv = usageToCsv(history, { range, workspace, now })
-		const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }))
-		const a = document.createElement("a")
-		a.href = url
-		a.download = `zoo-usage-${range}.csv`
-		a.click()
-		URL.revokeObjectURL(url)
+		vscode.postMessage({
+			type: "exportUsageCsv",
+			text: usageToCsv(history, { range, workspace, now }),
+			values: { range },
+		})
 	}
 
 	return (

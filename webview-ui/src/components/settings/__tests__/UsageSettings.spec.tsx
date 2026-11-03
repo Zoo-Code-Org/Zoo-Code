@@ -240,19 +240,22 @@ describe("UsageSettings", () => {
 			expect(post).toHaveBeenCalledWith({ type: "showTaskWithId", text: t.id })
 		})
 
-		it("exports a CSV of the filtered range", () => {
+		it("asks the host to save a CSV of the filtered range, and does not download it itself", () => {
 			state.taskHistory = [priced(1)]
 			const createObjectURL = vi.fn(() => "blob:x")
-			const revokeObjectURL = vi.fn()
-			Object.assign(URL, { createObjectURL, revokeObjectURL })
+			Object.assign(URL, { createObjectURL })
 			const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
 
 			render(<UsageSettings />)
 			fireEvent.click(screen.getByTestId("usage-export-csv"))
 
-			expect(createObjectURL).toHaveBeenCalledTimes(1)
-			expect(click).toHaveBeenCalled()
-			expect(revokeObjectURL).toHaveBeenCalledWith("blob:x")
+			expect(post).toHaveBeenCalledWith({
+				type: "exportUsageCsv",
+				text: expect.stringContaining("\n"),
+				values: { range: "7d" },
+			})
+			expect(createObjectURL).not.toHaveBeenCalled()
+			expect(click).not.toHaveBeenCalled()
 			click.mockRestore()
 		})
 	})

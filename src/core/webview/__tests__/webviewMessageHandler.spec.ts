@@ -773,6 +773,9 @@ describe("webviewMessageHandler - theme fixture probes", () => {
 })
 
 import { t } from "../../../i18n"
+import { exportUsageCsv } from "../../../integrations/misc/export-usage-csv"
+
+vi.mock("../../../integrations/misc/export-usage-csv", () => ({ exportUsageCsv: vi.fn() }))
 
 vi.mock("vscode", () => {
 	const showInformationMessage = vi.fn()
@@ -3051,5 +3054,27 @@ describe("webviewMessageHandler - renameTaskWithId", () => {
 		await webviewMessageHandler(mockClineProvider, { type: "renameTaskWithId", ...payload })
 
 		expect(vi.mocked(mockClineProvider.renameTaskWithId).mock.calls).toEqual(expectedCalls)
+	})
+})
+
+describe("exportUsageCsv", () => {
+	beforeEach(() => {
+		vi.mocked(exportUsageCsv).mockReset()
+	})
+
+	it("hands the CSV text and the range to the host export", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "exportUsageCsv",
+			text: "date,cost\n2026-06-01,1.2",
+			values: { range: "30d" },
+		})
+
+		expect(exportUsageCsv).toHaveBeenCalledExactlyOnceWith("date,cost\n2026-06-01,1.2", "30d")
+	})
+
+	it("passes nothing for the range when the message has no values", async () => {
+		await webviewMessageHandler(mockClineProvider, { type: "exportUsageCsv", text: "a" })
+
+		expect(exportUsageCsv).toHaveBeenCalledExactlyOnceWith("a", undefined)
 	})
 })

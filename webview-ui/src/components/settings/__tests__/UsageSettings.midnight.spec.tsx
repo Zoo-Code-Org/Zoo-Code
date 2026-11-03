@@ -82,9 +82,6 @@ describe("UsageSettings – across local midnight", () => {
 	it("keeps the view and the export on the same day, even if the clock moves past midnight first", () => {
 		render(<UsageSettings />)
 		fireEvent.click(screen.getByTestId("usage-range-today"))
-		Object.assign(URL, { createObjectURL: vi.fn(() => "blob:x"), revokeObjectURL: vi.fn() })
-		const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
-
 		// The wall clock passes midnight but the roll-over timer has not fired yet: the view still shows the
 		// old day, so Export must use that same day rather than a fresh Date.now().
 		vi.setSystemTime(BEFORE_MIDNIGHT + 20 * MINUTE)
@@ -92,7 +89,9 @@ describe("UsageSettings – across local midnight", () => {
 
 		expect(csvSpy).toHaveBeenCalledTimes(1)
 		expect(csvSpy.mock.calls[0][1]).toMatchObject({ range: "today", now: BEFORE_MIDNIGHT })
-		click.mockRestore()
+		expect(post).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "exportUsageCsv", values: { range: "today" } }),
+		)
 	})
 
 	it("does not leave a timer running after unmount", () => {

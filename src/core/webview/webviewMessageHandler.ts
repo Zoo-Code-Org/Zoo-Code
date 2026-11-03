@@ -73,6 +73,7 @@ import { Terminal } from "../../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
 import { openFile } from "../../integrations/misc/open-file"
 import { openImage, saveImage } from "../../integrations/misc/image-handler"
+import { exportUsageCsv } from "../../integrations/misc/export-usage-csv"
 import { selectImages } from "../../integrations/misc/process-images"
 import { getTheme } from "../../integrations/theme/getTheme"
 import { searchWorkspaceFiles } from "../../services/search/file-search"
@@ -1137,6 +1138,9 @@ export const webviewMessageHandler = async (
 				contextProxy: provider.contextProxy,
 			})
 
+			break
+		case "exportUsageCsv":
+			await exportUsageCsv(message.text, message.values?.range)
 			break
 		case "resetState":
 			await provider.resetState()
