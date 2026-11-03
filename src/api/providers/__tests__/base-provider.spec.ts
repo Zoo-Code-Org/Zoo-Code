@@ -32,6 +32,11 @@ class TestProvider extends BaseProvider {
 	public testConvertToolsForOpenAI(tools: any[] | undefined, strict?: boolean): any[] | undefined {
 		return this.convertToolsForOpenAI(tools, strict)
 	}
+
+	// Expose protected method for testing
+	public testEnsureCatalogLoaded(load: () => Promise<boolean | void>, signal?: AbortSignal): Promise<void> {
+		return this.ensureCatalogLoaded(load, signal)
+	}
 }
 
 describe("BaseProvider", () => {
@@ -525,6 +530,159 @@ describe("BaseProvider", () => {
 			const result = provider.testConvertToolsForOpenAI(tools)
 
 			expect(result?.[0]).toEqual(tools[0])
+		})
+	})
+
+	describe("ensureCatalogLoaded", () => {
+		it("loads once and memoizes a successful load", async () => {
+			const load = vi.fn().mockResolvedValue(undefined)
+
+			await provider.testEnsureCatalogLoaded(load)
+			await provider.testEnsureCatalogLoaded(load)
+
+			expect(load).toHaveBeenCalledTimes(1)
+		})
+
+		it("single-flights concurrent callers", async () => {
+			let resolveLoad: () => void = () => {}
+			const load = vi.fn(
+				() =>
+					new Promise<void>((resolve) => {
+						resolveLoad = resolve
+					}),
+			)
+
+			const first = provider.testEnsureCatalogLoaded(load)
+			const second = provider.testEnsureCatalogLoaded(load)
+
+			expect(load).toHaveBeenCalledTimes(1)
+
+			resolveLoad()
+			await Promise.all([first, second])
+		})
+
+		it("retries after a failed load", async () => {
+			const load = vi.fn().mockRejectedValueOnce(new Error("catalog unavailable")).mockResolvedValue(undefined)
+
+			await expect(provider.testEnsureCatalogLoaded(load)).rejects.toThrow("catalog unavailable")
+			await expect(provider.testEnsureCatalogLoaded(load)).resolves.toBeUndefined()
+
+			expect(load).toHaveBeenCalledTimes(2)
+		})
+
+		it("rejects a pre-aborted caller without starting a load", async () => {
+			const controller = new AbortController()
+			controller.abort(new Error("caller gave up"))
+			const load = vi.fn().mockResolvedValue(undefined)
+
+			await expect(provider.testEnsureCatalogLoaded(load, controller.signal)).rejects.toThrow("caller gave up")
+			expect(load).not.toHaveBeenCalled()
+		})
+
+		it("detaches only the aborted waiter while the shared load still settles", async () => {
+			let resolveLoad: () => void = () => {}
+			const load = vi.fn(
+				() =>
+					new Promise<void>((resolve) => {
+						resolveLoad = resolve
+					}),
+			)
+
+			const controller = new AbortController()
+			const wait = provider.testEnsureCatalogLoaded(load, controller.signal)
+			controller.abort(new Error("caller gave up"))
+
+			await expect(wait).rejects.toThrow("caller gave up")
+
+			resolveLoad()
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			// The shared load completed, so a later caller is a memoized no-op.
+			await expect(provider.testEnsureCatalogLoaded(load)).resolves.toBeUndefined()
+			expect(load).toHaveBeenCalledTimes(1)
+		})
+
+		it("does not forward the caller signal to the shared load", async () => {
+			const controller = new AbortController()
+			const load = vi.fn().mockResolvedValue(undefined)
+
+			await provider.testEnsureCatalogLoaded(load, controller.signal)
+
+			expect(load).toHaveBeenCalledWith()
+		})
+
+		it("propagates a shared-load failure to a signal-carrying waiter", async () => {
+			const controller = new AbortController()
+			const load = vi.fn().mockRejectedValueOnce(new Error("catalog unavailable")).mockResolvedValue(undefined)
+
+			// The waiter is watching a signal that never aborts, so the rejection can
+			// only come from the shared fetch failing -- the branch that must reject
+			// the waiter rather than hang until the caller's signal fires.
+			await expect(provider.testEnsureCatalogLoaded(load, controller.signal)).rejects.toThrow(
+				"catalog unavailable",
+			)
+
+			// The failed load cleared the shared promise, so the next caller retries.
+			await expect(provider.testEnsureCatalogLoaded(load)).resolves.toBeUndefined()
+			expect(load).toHaveBeenCalledTimes(2)
+		})
+
+		it("removes the exact abort listener it registered after a successful load", async () => {
+			const controller = new AbortController()
+			const addListener = vi.spyOn(controller.signal, "addEventListener")
+			const removeListener = vi.spyOn(controller.signal, "removeEventListener")
+			const load = vi.fn().mockResolvedValue(undefined)
+
+			await provider.testEnsureCatalogLoaded(load, controller.signal)
+
+			// A long-lived signal must not accumulate listeners: the removal has to
+			// target the same function reference that was registered.
+			expect(addListener).toHaveBeenCalledWith("abort", expect.any(Function), { once: true })
+			const registered = addListener.mock.calls[0]?.[1]
+			expect(removeListener).toHaveBeenCalledWith("abort", registered)
+			expect(removeListener).toHaveBeenCalledTimes(1)
+		})
+
+		it("removes the exact abort listener it registered after a rejected load", async () => {
+			const controller = new AbortController()
+			const addListener = vi.spyOn(controller.signal, "addEventListener")
+			const removeListener = vi.spyOn(controller.signal, "removeEventListener")
+			const load = vi.fn().mockRejectedValueOnce(new Error("catalog unavailable"))
+
+			await expect(provider.testEnsureCatalogLoaded(load, controller.signal)).rejects.toThrow(
+				"catalog unavailable",
+			)
+
+			expect(addListener).toHaveBeenCalledWith("abort", expect.any(Function), { once: true })
+			const registered = addListener.mock.calls[0]?.[1]
+			expect(removeListener).toHaveBeenCalledWith("abort", registered)
+			expect(removeListener).toHaveBeenCalledTimes(1)
+		})
+
+		it("does not memoize a load that reports an empty catalog", async () => {
+			const load = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+
+			await provider.testEnsureCatalogLoaded(load)
+			// The empty result must stay retryable, so the next caller loads again.
+			await provider.testEnsureCatalogLoaded(load)
+			expect(load).toHaveBeenCalledTimes(2)
+
+			// The second load produced a catalog, so it is memoized.
+			await provider.testEnsureCatalogLoaded(load)
+			expect(load).toHaveBeenCalledTimes(2)
+		})
+
+		it("memoizes a load that returns true or void", async () => {
+			const returningTrue = vi.fn().mockResolvedValue(true)
+			await provider.testEnsureCatalogLoaded(returningTrue)
+			await provider.testEnsureCatalogLoaded(returningTrue)
+			expect(returningTrue).toHaveBeenCalledTimes(1)
+
+			const other = new TestProvider()
+			const returningVoid = vi.fn().mockResolvedValue(undefined)
+			await other.testEnsureCatalogLoaded(returningVoid)
+			await other.testEnsureCatalogLoaded(returningVoid)
+			expect(returningVoid).toHaveBeenCalledTimes(1)
 		})
 	})
 })
