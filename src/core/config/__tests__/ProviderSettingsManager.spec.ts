@@ -994,6 +994,75 @@ describe("ProviderSettingsManager", () => {
 				"Failed to delete config: Error: Cannot delete the last remaining configuration",
 			)
 		})
+
+		it("should drop the mode bindings that pointed at the deleted config", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "default",
+				apiConfigs: {
+					default: {
+						id: "default",
+					},
+					test: {
+						apiProvider: providerIdentifiers.anthropic,
+						id: "test-id",
+					},
+				},
+				modeApiConfigs: {
+					code: "test-id",
+					architect: "default",
+					ask: "test-id",
+				},
+				migrations: {
+					rateLimitSecondsMigrated: false,
+				},
+			}
+
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+
+			const { removedModeConfigs } = await providerSettingsManager.deleteConfig("test")
+
+			// A surviving binding would make the next switch to that mode resolve a profile that no
+			// longer exists, so the mode silently keeps the current profile instead of switching.
+			const storedConfig = JSON.parse(mockSecrets.store.mock.calls[0][1])
+			expect(storedConfig.modeApiConfigs).toEqual({ architect: "default" })
+			// The dropped bindings come back so a rollback can re-apply them.
+			expect(removedModeConfigs).toEqual({ code: "test-id", ask: "test-id" })
+		})
+
+		it("should keep the mode bindings when the deleted config's id is reused by a rename", async () => {
+			// `renameApiConfiguration` saves the new name with the old `id` and then deletes the old
+			// name, so the id is still live and its mode bindings must survive the purge.
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "default",
+				apiConfigs: {
+					default: {
+						id: "default",
+					},
+					renamed: {
+						apiProvider: providerIdentifiers.anthropic,
+						id: "test-id",
+					},
+					test: {
+						apiProvider: providerIdentifiers.anthropic,
+						id: "test-id",
+					},
+				},
+				modeApiConfigs: {
+					code: "test-id",
+				},
+				migrations: {
+					rateLimitSecondsMigrated: false,
+				},
+			}
+
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+
+			const { removedModeConfigs } = await providerSettingsManager.deleteConfig("test")
+
+			const storedConfig = JSON.parse(mockSecrets.store.mock.calls[0][1])
+			expect(storedConfig.modeApiConfigs).toEqual({ code: "test-id" })
+			expect(removedModeConfigs).toEqual({})
+		})
 	})
 
 	describe("LoadConfig", () => {
@@ -1384,6 +1453,58 @@ describe("ProviderSettingsManager", () => {
 			await expect(providerSettingsManager.hasConfig("test")).rejects.toThrow(
 				"Failed to check config existence: Error: Failed to read provider profiles from secrets: Error: Storage failed",
 			)
+		})
+	})
+
+	describe("setModeConfig with onlyIfUnbound", () => {
+		// The reconcile's re-apply is the only caller. Both skips are the point of the option: a
+		// newer selection may have bound the mode while the rollback ran, and the binding's profile
+		// may no longer exist because the restore's `saveConfig` rejected.
+		const profilesWith = (modeApiConfigs?: Record<string, string>): ProviderProfiles => ({
+			currentApiConfigName: "default",
+			apiConfigs: {
+				default: { id: "default" },
+				test: { apiProvider: providerIdentifiers.anthropic, id: "test-id" },
+			},
+			modeApiConfigs,
+			migrations: { rateLimitSecondsMigrated: false },
+		})
+
+		const storedProfiles = () => JSON.parse(mockSecrets.store.mock.calls.at(-1)![1] as string) as ProviderProfiles
+
+		it("binds the mode when it is unbound and the profile exists", async () => {
+			mockSecrets.get.mockResolvedValue(JSON.stringify(profilesWith()))
+
+			await expect(
+				providerSettingsManager.setModeConfig("code" as never, "test-id", { onlyIfUnbound: true }),
+			).resolves.toBe(true)
+			expect(storedProfiles().modeApiConfigs).toEqual({ code: "test-id" })
+		})
+
+		it("leaves a newer selection's binding alone", async () => {
+			mockSecrets.get.mockResolvedValue(JSON.stringify(profilesWith({ code: "newer-id" })))
+
+			await expect(
+				providerSettingsManager.setModeConfig("code" as never, "test-id", { onlyIfUnbound: true }),
+			).resolves.toBe(false)
+			// Nothing was written, so the newer binding survives.
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
+		it("skips a binding whose profile no longer exists", async () => {
+			mockSecrets.get.mockResolvedValue(JSON.stringify(profilesWith()))
+
+			await expect(
+				providerSettingsManager.setModeConfig("code" as never, "gone-id", { onlyIfUnbound: true }),
+			).resolves.toBe(false)
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
+		it("still overwrites unconditionally without the option", async () => {
+			mockSecrets.get.mockResolvedValue(JSON.stringify(profilesWith({ code: "newer-id" })))
+
+			await expect(providerSettingsManager.setModeConfig("code" as never, "test-id")).resolves.toBe(true)
+			expect(storedProfiles().modeApiConfigs).toEqual({ code: "test-id" })
 		})
 	})
 
