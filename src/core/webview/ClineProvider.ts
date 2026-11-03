@@ -6145,6 +6145,11 @@ export class ClineProvider
 			return
 		}
 
+		// Fence in-flight profile and mode mutations before the reset clears the stores: a mutation
+		// that started before the reset can otherwise persist after the whole-map clear, and the clear
+		// would then be undone by a write the user never saw.
+		await ClineProvider.providerProfileMutationQueue.catch(() => {})
+
 		// Log out from cloud if authenticated
 		if (CloudService.hasInstance()) {
 			try {
