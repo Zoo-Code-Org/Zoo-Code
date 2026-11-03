@@ -670,7 +670,12 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		// returns the handler's current model, which is what its caller observes.
 		if (sequence === this.fetchModelSequence) {
 			this.models = models
-			this.endpoints = endpoints
+			// The endpoint lookup answers an empty map when the request failed. Publishing that would
+			// drop the endpoint records (pricing, limits) a previous successful lookup installed, so
+			// only a non-empty answer replaces them.
+			if (Object.keys(endpoints).length > 0) {
+				this.endpoints = endpoints
+			}
 		}
 
 		return this.getModel()
