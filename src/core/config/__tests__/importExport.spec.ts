@@ -1924,7 +1924,11 @@ describe("importExport", () => {
 			;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
 				fsPath: "/mock/path/zoo-code-settings.json",
 			})
-			mockProviderSettingsManager.export.mockResolvedValue(undefined)
+			// `ProviderSettingsManager.export()` is typed as returning parsed profiles or
+			// throwing, so the profile-less branch in `exportSettings` is defensive rather
+			// than reachable. The mock is loosened the way this file already loosens the
+			// dialog mocks so the defensive branch is the one under test.
+			;(mockProviderSettingsManager.export as Mock).mockResolvedValue(undefined)
 			mockContextProxy.export.mockResolvedValue({ mode: "code" })
 
 			await exportSettings({
