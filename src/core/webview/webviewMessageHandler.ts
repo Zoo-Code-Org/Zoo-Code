@@ -2609,18 +2609,24 @@ export const webviewMessageHandler = async (
 
 				const oldName = message.text
 
-				const newName = (await provider.providerSettingsManager.listConfig()).filter(
-					(c) => c.name !== oldName,
-				)[0]?.name
+				const profileToDelete = (await provider.providerSettingsManager.listConfig()).find(
+					(c) => c.name === oldName,
+				)
 
-				if (!newName) {
+				if (!profileToDelete) {
 					vscode.window.showErrorMessage(t("common:errors.delete_api_config"))
 					return
 				}
 
+				// Route the deletion through ClineProvider.deleteProviderProfile. That is where
+				// the profile list, the live views' pins and overlays, the closed views'
+				// persisted pins, the last-profile guard, and the compensation for a
+				// half-finished deletion live. Deleting the manager record here and activating
+				// a survivor afterwards leaves every one of those surfaces naming a profile
+				// that no longer exists, and the survivor's settings are never written to the
+				// shared store.
 				try {
-					await provider.providerSettingsManager.deleteConfig(oldName)
-					await provider.activateProviderProfile({ name: newName })
+					await provider.deleteProviderProfile(profileToDelete)
 				} catch (error) {
 					provider.log(
 						`Error delete api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,

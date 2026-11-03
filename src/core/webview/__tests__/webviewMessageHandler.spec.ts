@@ -132,6 +132,14 @@ const mockClineProvider = {
 	log: vi.fn(),
 	postStateToWebview: vi.fn(),
 	resolveWebviewThemeFixtureProbe: vi.fn(),
+	// deleteApiConfiguration is routed through deleteProviderProfile, which needs the
+	// manager only to resolve the entry the caller named.
+	providerSettingsManager: {
+		listConfig: vi.fn(),
+		deleteConfig: vi.fn(),
+	},
+	deleteProviderProfile: vi.fn().mockResolvedValue(undefined),
+	activateProviderProfile: vi.fn().mockResolvedValue(undefined),
 	getCurrentTask: vi.fn(),
 	getTaskWithId: vi.fn(),
 	createTaskWithHistoryItem: vi.fn(),
@@ -1683,6 +1691,47 @@ describe("webviewMessageHandler - requestOpenAiCodexRateLimits", () => {
 				fetchedAt: 1700000000000,
 			},
 		})
+	})
+})
+
+describe("webviewMessageHandler - deleteApiConfiguration", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.mocked(mockClineProvider.providerSettingsManager.listConfig).mockResolvedValue([])
+		vi.mocked(mockClineProvider.deleteProviderProfile).mockResolvedValue(undefined)
+	})
+
+	it("routes the deletion through deleteProviderProfile instead of the manager", async () => {
+		const profileToDelete = { name: "old-profile", id: "old-id", apiProvider: providerIdentifiers.openrouter }
+		vi.mocked(mockClineProvider.providerSettingsManager.listConfig).mockResolvedValue([profileToDelete])
+		vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)
+
+		await webviewMessageHandler(mockClineProvider, { type: "deleteApiConfiguration", text: "old-profile" })
+
+		// ClineProvider.deleteProviderProfile is where the profile list, every live view's pin
+		// and overlay, the closed views' persisted pins, the last-profile guard, and the
+		// compensation for a half-finished deletion live. Deleting the manager record here and
+		// activating a survivor afterwards left every one of those surfaces naming a profile
+		// that no longer exists, and never wrote the survivor's settings to the shared store.
+		expect(mockClineProvider.deleteProviderProfile).toHaveBeenCalledWith(profileToDelete)
+		expect(mockClineProvider.providerSettingsManager.deleteConfig).not.toHaveBeenCalled()
+		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
+	})
+
+	it("reports the failure when the routed deletion rejects", async () => {
+		const profileToDelete = { name: "only-profile", id: "only-id", apiProvider: providerIdentifiers.zooGateway }
+		vi.mocked(mockClineProvider.providerSettingsManager.listConfig).mockResolvedValue([profileToDelete])
+		vi.mocked(mockClineProvider.deleteProviderProfile).mockRejectedValue(
+			new Error("You cannot delete the last profile"),
+		)
+		vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)
+
+		await webviewMessageHandler(mockClineProvider, { type: "deleteApiConfiguration", text: "only-profile" })
+
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("You cannot delete the last profile"),
+		)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(t("common:errors.delete_api_config"))
 	})
 })
 
