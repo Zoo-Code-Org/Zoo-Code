@@ -798,7 +798,17 @@ export async function safeWriteText(
 			}
 
 			// -- Step 3 (backup:true): durable copy target -> backup ----
-			if (options?.backup) {
+			// A backup of a publish-over-link target copies the SYMLINK REFERENT's bytes, because
+			// copyFile follows the link. The copy then sits in the LINK's directory - inheritable rights
+			// from a directory the referent's own DACL never promised - and the rollback path could rename
+			// that copy over the link, replacing the link with a regular file of outside content. The entry
+			// this publish replaces is the link, so no content backup is taken for it, and nothing can be
+			// renamed back over the link either.
+			const backupTargetIsLink =
+				options?.backup === true &&
+				options?.publishOverLink === true &&
+				(await fs.lstat(targetPath).catch(() => null))?.isSymbolicLink() === true
+			if (options?.backup && !backupTargetIsLink) {
 				try {
 					await fs.access(targetPath)
 					backupPath = _tempName(dirPath, "safeWriteText.bak")

@@ -103,10 +103,12 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// able to overlap with the one that queued behind the referent.
 		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
 		expect(mockedAcquireFileLock).toHaveBeenCalledWith(currentLink)
-		// The two trailing lstat calls are safeWriteText's staging-path checks: the
-		// regular-file check on the temp file this write created, and the identity check
-		// that the staging path is not the target. Both run after the key was resolved
-		// and the lock was taken, so neither changes which lock the caller queued behind.
+		// The three trailing lstat calls are safeWriteText's own checks, all of them after the key was
+		// resolved and the lock was taken, so none changes which lock the caller queued behind: the
+		// regular-file check on the temp file this write created, the identity check that the staging
+		// path is not the target, and the check of the TARGET ENTRY that decides whether a backup may
+		// be copied - for a publish-over-link write, backing up a symlink target would copy the
+		// referent's bytes into this directory.
 		// A write that declares no confinement scope no longer resolves the publish target at all,
 		// so the two post-lock resolutions this used to record are gone; the lock key still comes
 		// from the referent, which is what the test is about. The two extra resolutions before the
@@ -122,6 +124,7 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			"resolve",
 			"history_item.json",
 			"link.json",
+			"lstat",
 			"lstat",
 			"lstat",
 		])

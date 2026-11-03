@@ -560,6 +560,56 @@ describe("safeWriteText", () => {
 			expect(backupOpen).toBeDefined()
 		})
 
+		it("publishOverLink over a symbolic link takes no content backup of the referent", async () => {
+			// An unscoped publish keeps the link path as the target. copyFile would follow the link and
+			// back up the referent's bytes into the link's directory, where the directory's inheritable
+			// rights are not the referent's; a rollback rename would then replace the LINK with a regular
+			// file of outside content. The link itself is what this commit replaces, so no content backup
+			// is taken.
+			const targetPath = "/tmp/test-dir/link.json"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.closeSync).mockReturnValue(undefined)
+
+			await expect(
+				safeWriteText(targetPath, "new data", { backup: true, publishOverLink: true, platform: "linux" }),
+			).resolves.toBeUndefined()
+
+			// No backup was seeded, copied, or fsynced beside the link...
+			expect(fs.copyFile).not.toHaveBeenCalled()
+			expect(
+				vi.mocked(fsSync.openSync).mock.calls.some((call) => String(call[0]).includes("safeWriteText.bak_")),
+			).toBe(false)
+			// ...and none is left behind or renamed back over the link.
+			expect(vi.mocked(fs.unlink).mock.calls.some((call) => String(call[0]).includes("safeWriteText.bak_"))).toBe(
+				false,
+			)
+			expect(vi.mocked(fs.rename).mock.calls.some((call) => String(call[0]).includes("safeWriteText.bak_"))).toBe(
+				false,
+			)
+			// The commit itself still happened: temp -> link path.
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), path.resolve(targetPath))
+		})
+
+		it("publishOverLink over a regular file still takes the content backup", async () => {
+			// The guard is for links only: a regular publish-over-link target keeps the durable backup.
+			const targetPath = "/tmp/test-dir/regular.json"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fs.lstat).mockResolvedValue(_fileStats(false))
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.closeSync).mockReturnValue(undefined)
+
+			await expect(
+				safeWriteText(targetPath, "new data", { backup: true, publishOverLink: true, platform: "linux" }),
+			).resolves.toBeUndefined()
+
+			expect(fs.copyFile).toHaveBeenCalledWith(
+				path.resolve(targetPath),
+				expect.stringContaining("safeWriteText.bak_"),
+			)
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), path.resolve(targetPath))
+		})
 		it("a failed backup flush is reported and leaves no partial backup behind", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
