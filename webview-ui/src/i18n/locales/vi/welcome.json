@@ -1,8 +1,7 @@
 {
 	"landing": {
 		"greeting": "Chào mừng đến với Zoo Code!",
-		"introduction": "Với nhiều Chế độ tích hợp và có thể mở rộng, Zoo Code cho phép bạn lập kế hoạch, thiết kế kiến trúc, viết mã, gỡ lỗi và tăng năng suất như chưa từng có trước đây.",
-		"getStarted": "Chọn nhà cung cấp của bạn"
+		"introduction": "Với nhiều Chế độ tích hợp và có thể mở rộng, Zoo Code cho phép bạn lập kế hoạch, thiết kế kiến trúc, viết mã, gỡ lỗi và tăng năng suất như chưa từng có trước đây."
 	},
 	"providerSignup": {
 		"heading": "Chọn nhà cung cấp của bạn",
