@@ -118,6 +118,23 @@ export const registerCommands = (options: RegisterCommandOptions) => {
 // type while rejecting direct calls with arguments. VS Code dispatches positional
 // arguments dynamically; `unknown` requires callers to inspect returned values.
 type CommandCallback = (...args: never[]) => unknown
+
+// Posts each action in order to the target instance. Failures are logged
+// (not thrown) with the handler-specific prefix so a failed post stays
+// attributable in the output channel.
+const postActions = (
+	outputChannel: vscode.OutputChannel,
+	target: ClineProvider,
+	actions: readonly NonNullable<ExtensionMessage["action"]>[],
+	logPrefix: string,
+) => {
+	for (const action of actions) {
+		void target
+			.postMessageToWebview({ type: "action", action })
+			.catch((error) => outputChannel.appendLine(`[${logPrefix}] postMessageToWebview failed: ${error}`))
+	}
+}
+
 const getCommandsMap = ({
 	context,
 	outputChannel,
