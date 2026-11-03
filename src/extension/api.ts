@@ -631,9 +631,10 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 	/**
 	 * Stores the settings, then the API profile and the mode profiles. The settings are written with
-	 * `ContextProxy.setValues`, which is not a transaction (see there): if a setting cannot be stored, this rejects with
-	 * that error, the settings stored before it stay, and nothing after the settings is written. Invalid values of the
-	 * display settings are dropped and logged first.
+	 * `ContextProxy.setValues`, which is not a transaction (see there): if a setting cannot be stored, this rejects
+	 * with a `SettingsWriteError` that lists the keys that were stored and the keys that were not (the cache of the
+	 * failed keys has been read back from storage), the stored settings stay, and nothing after the settings is
+	 * written. Invalid values of the display settings are dropped and logged first.
 	 */
 	public async setConfiguration(allValues: RooCodeSettings) {
 		const values = withoutInvalidDisplaySettings(allValues, (key) =>

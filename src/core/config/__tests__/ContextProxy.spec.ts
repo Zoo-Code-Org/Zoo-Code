@@ -7,7 +7,7 @@ import { GLOBAL_STATE_KEYS, SECRET_STATE_KEYS, GLOBAL_SECRET_KEYS } from "@roo-c
 import { clearAllMocks } from "../../../test-utils/reset"
 import { makeExtensionContext, makeUri } from "../../../test-utils/vscode"
 
-import { ContextProxy } from "../ContextProxy"
+import { ContextProxy, SettingsWriteError } from "../ContextProxy"
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
 vi.mock("vscode", () => ({
@@ -287,29 +287,58 @@ describe("ContextProxy", () => {
 			expect(proxy.getGlobalState("mode")).toBe("test-mode")
 		})
 
-		it("is not a transaction: if one store rejects, it rejects with that failure and the other stores stay", async () => {
+		it("is not a transaction: if one store rejects, the others stay, the cache is read back, and the keys are reported", async () => {
+			// Storage that really holds values: what was stored before, and what a failed store leaves behind.
+			const storage = new Map<string, unknown>([
+				["timeFormat", "auto"],
+				["dateFormat", "auto"],
+				["showRelativeTimes", true],
+			])
+			mockGlobalState.get.mockImplementation((key: string) => storage.get(key))
 			const failure = new Error("storage unavailable")
-			mockGlobalState.update.mockImplementation(async (key: string) => {
-				if (key === "dateFormat") throw failure
+			mockGlobalState.update.mockImplementation(async (key: string, value: unknown) => {
+				if (key === "dateFormat") throw failure // rejects without having stored anything
+				storage.set(key, value)
 			})
+			await proxy.initialize()
 
-			await expect(
-				proxy.setValues({ timeFormat: "24h", dateFormat: "ymd", showRelativeTimes: false }),
-			).rejects.toBe(failure)
+			const error = await proxy
+				.setValues({ timeFormat: "24h", dateFormat: "ymd", showRelativeTimes: false })
+				.catch((e: unknown) => e)
 
-			// Every store was started, and the ones that did not fail were not undone.
-			const stores = mockGlobalState.update.mock.calls.map(([key, value]: [string, unknown]) => [key, value])
-			expect(stores).toEqual(
-				expect.arrayContaining([
-					["timeFormat", "24h"],
-					["dateFormat", "ymd"],
-					["showRelativeTimes", false],
-				]),
+			expect(error).toBeInstanceOf(SettingsWriteError)
+			expect(error).toMatchObject({
+				committed: ["timeFormat", "showRelativeTimes"],
+				failed: ["dateFormat"],
+				cause: failure,
+			})
+			expect((error as Error).message).toBe(
+				"Could not store dateFormat (stored: timeFormat, showRelativeTimes): storage unavailable",
 			)
-			expect(stores).toHaveLength(3)
-			// The cache holds the attempted value of the key that failed, until storage is read again.
+			// The stores that worked were not undone, and the failed key's cache shows what storage holds.
+			expect(storage.get("timeFormat")).toBe("24h")
 			expect(proxy.getGlobalState("timeFormat")).toBe("24h")
+			expect(proxy.getGlobalState("showRelativeTimes")).toBe(false)
+			expect(proxy.getGlobalState("dateFormat")).toBe("auto")
+		})
+
+		it("reads the cache back from storage for a key whose store failed after changing it", async () => {
+			const storage = new Map<string, unknown>([["dateFormat", "auto"]])
+			mockGlobalState.get.mockImplementation((key: string) => storage.get(key))
+			mockGlobalState.update.mockImplementation(async (key: string, value: unknown) => {
+				storage.set(key, value)
+				throw new Error("failed after storing")
+			})
+			await proxy.initialize()
+
+			await expect(proxy.setValues({ dateFormat: "ymd" })).rejects.toBeInstanceOf(SettingsWriteError)
+
+			// Storage did change, so the cache shows the stored value, not a value it assumed.
 			expect(proxy.getGlobalState("dateFormat")).toBe("ymd")
+		})
+
+		it("does not report a failure when every store succeeds", async () => {
+			await expect(proxy.setValues({ timeFormat: "24h", dateFormat: "ymd" })).resolves.toBeUndefined()
 		})
 
 		it("should handle both secret and global state keys", async () => {

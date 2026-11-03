@@ -30,6 +30,22 @@ type RooCodeSettingsKey = keyof RooCodeSettings
 
 const PASS_THROUGH_STATE_KEYS = ["taskHistory"]
 
+/** `ContextProxy.setValues` could not store every key: which ones it stored, which it did not, and the first failure. */
+export class SettingsWriteError extends Error {
+	constructor(
+		readonly committed: string[],
+		readonly failed: string[],
+		readonly cause: unknown,
+	) {
+		super(
+			`Could not store ${failed.join(", ")}${committed.length > 0 ? ` (stored: ${committed.join(", ")})` : ""}: ${
+				cause instanceof Error ? cause.message : String(cause)
+			}`,
+		)
+		this.name = "SettingsWriteError"
+	}
+}
+
 export const isPassThroughStateKey = (key: string) => PASS_THROUGH_STATE_KEYS.includes(key)
 
 const globalSettingsExportSchema = globalSettingsSchema.omit({
@@ -556,14 +572,32 @@ export class ContextProxy {
 	}
 
 	/**
-	 * Writes every value at once. This is not a transaction, for any setting: each key is stored on its own. If a
-	 * store rejects, `setValues` rejects with the first failure, the other stores are not undone (they may have
-	 * completed), and the cache holds the value that was attempted for the key that failed until storage is read again.
-	 * Callers that need more than this, such as a rollback, must provide it themselves.
+	 * Writes every value at once. This is not a transaction, for any setting: each key is stored on its own, and the
+	 * stores that completed are not undone. If any store rejects, every store is still awaited, the cache of each
+	 * failed key is read back from storage (so it never runs ahead of what was stored), and the call rejects with a
+	 * `SettingsWriteError` that says which keys were stored and which were not. Callers that need more than this,
+	 * such as a rollback, must provide it themselves.
 	 */
 	public async setValues(values: RooCodeSettings) {
 		const entries = Object.entries(values) as [RooCodeSettingsKey, unknown][]
-		await Promise.all(entries.map(([key, value]) => this.setValue(key, value)))
+		const results = await Promise.allSettled(entries.map(([key, value]) => this.setValue(key, value)))
+
+		const committed: string[] = []
+		const failed: string[] = []
+		let cause: unknown
+		for (const [index, [key]] of entries.entries()) {
+			const result = results[index]
+			if (result.status === "fulfilled") {
+				committed.push(key)
+				continue
+			}
+			cause ??= result.reason
+			failed.push(key)
+			if (!isSecretStateKey(key) && !isPassThroughStateKey(key)) {
+				this.stateCache[key as GlobalStateKey] = this.originalContext.globalState.get(key)
+			}
+		}
+		if (failed.length > 0) throw new SettingsWriteError(committed, failed, cause)
 	}
 
 	/**
