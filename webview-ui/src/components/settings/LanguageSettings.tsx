@@ -65,11 +65,13 @@ export const LanguageSettings = ({
 							section="language"
 							label={t("settings:sections.language")}>
 							<div className="flex flex-col gap-1">
-								<label className="font-medium">{t("settings:language.displayLanguage")}</label>
+								<label htmlFor="display-language-select" className="font-medium">
+									{t("settings:language.displayLanguage")}
+								</label>
 								<Select
 									value={language}
 									onValueChange={(value) => setCachedStateField("language", value as Language)}>
-									<SelectTrigger className="w-full">
+									<SelectTrigger id="display-language-select" className="w-full">
 										<SelectValue placeholder={t("settings:common.select")} />
 									</SelectTrigger>
 									<SelectContent>

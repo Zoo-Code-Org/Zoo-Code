@@ -20,21 +20,24 @@ vi.mock("../../ui/standard-tooltip", async (importOriginal) => ({
 	),
 }))
 
-vi.mock("@/utils/format", () => ({
-	formatTimeAgo: vi.fn(() => "2 hours ago"),
-	// Depends on its arguments, so a test can tell which formats were applied.
-	formatDateTime: vi.fn(
-		(_ts: number, timeFormat = "auto", dateFormat = "auto") =>
-			`${dateFormat === "ymd" ? "2024-01-15" : dateFormat === "dmy" ? "15/01/2024" : "Jan 15, 2024"}, ${timeFormat === "24h" ? "14:30" : "2:30 PM"}`,
-	),
-	formatLargeNumber: vi.fn((num: number) => num.toString()),
-}))
+// Only the relative-time boundary and the number formatter are mocked: the date and time formats are the real ones,
+// so these tests fail if the formatter stops honoring a setting. The spy keeps the real implementation.
+vi.mock("@/utils/format", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/utils/format")>()
+	return {
+		...actual,
+		formatTimeAgo: vi.fn(() => "2 hours ago"),
+		formatDateTime: vi.fn(actual.formatDateTime),
+		formatLargeNumber: vi.fn((num: number) => num.toString()),
+	}
+})
 
 const mockItem = {
 	id: "1",
 	number: 1,
 	task: "Test task",
-	ts: Date.now(),
+	// Local time, so the shown clock does not depend on the time zone of the machine.
+	ts: new Date(2024, 0, 15, 14, 30).getTime(),
 	tokensIn: 100,
 	tokensOut: 50,
 	totalCost: 0.002,

@@ -173,6 +173,14 @@ describe("LanguageSettings – date & time (design mock 2)", () => {
 		})
 	})
 
+	it.each([["settings:language.displayLanguage"], ["settings:language.dateFormat.label"]])(
+		"names the %s select for assistive technology",
+		(name) => {
+			render(<LanguageSettings language="en" setCachedStateField={vi.fn()} />)
+			expect(screen.getByRole("combobox", { name })).toBeInTheDocument()
+		},
+	)
+
 	it("keeps the language selector", () => {
 		const { container } = (() => {
 			const r = render(<LanguageSettings language="en" setCachedStateField={vi.fn()} />)

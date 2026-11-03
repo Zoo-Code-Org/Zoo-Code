@@ -43,6 +43,7 @@ import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 import { ClineProvider } from "./ClineProvider"
 import { findOriginalContent } from "./stripOriginalContent"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
+import { assertRecordedCheckpoint } from "../checkpoints/recordedCheckpoint"
 import { generateErrorDiagnostics } from "./diagnosticsHandler"
 import {
 	handleRequestSkills,
@@ -1799,19 +1800,30 @@ export const webviewMessageHandler = async (
 			const result = checkoutRestorePayloadSchema.safeParse(message.payload)
 
 			if (result.success) {
-				await provider.cancelTask()
-
 				try {
-					await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, { timeout: 3_000 })
-				} catch {
-					vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
-					return
-				}
+					const taskBeforeCancel = provider.getCurrentTask()
+					// Reject a bad hash before cancelling, so the running task survives.
+					if (taskBeforeCancel) {
+						assertRecordedCheckpoint(taskBeforeCancel, result.data.commitHash)
+					}
 
-				try {
+					await provider.cancelTask()
+
+					try {
+						await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, { timeout: 3_000 })
+					} catch {
+						vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
+						return
+					}
+
 					await provider.getCurrentTask()?.checkpointRestore(result.data)
-				} catch {
-					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
+				} catch (error) {
+					console.error("[checkpointRestore] checkpointRestore failed:", error)
+					void vscode.window.showErrorMessage(
+						t("common:errors.checkpoint_restore_failed", {
+							error: error instanceof Error ? error.message : String(error),
+						}),
+					)
 				}
 			}
 
@@ -1861,7 +1873,11 @@ export const webviewMessageHandler = async (
 					})
 				} catch (error) {
 					console.error("[completionCheckpointRestore] checkpointRestore failed:", error)
-					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
+					void vscode.window.showErrorMessage(
+						t("common:errors.checkpoint_restore_failed", {
+							error: error instanceof Error ? error.message : String(error),
+						}),
+					)
 				}
 			}
 
@@ -2267,6 +2283,7 @@ export const webviewMessageHandler = async (
 						includeTaskHistoryInEnhance,
 						currentClineMessages: currentCline?.clineMessages,
 						providerSettingsManager: provider.providerSettingsManager,
+						taskId: currentCline?.taskId,
 					})
 
 					if (result.success && result.enhancedText) {
