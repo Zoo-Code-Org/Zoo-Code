@@ -49,8 +49,20 @@ const describeRepetitionError = (error: unknown): string =>
 export async function executeSideFlow(inputs: SideFlowInputs): Promise<SideFlowOutcome> {
 	const runs: CodingRunRecord[] = []
 	const abortPublication = async (): Promise<SideFlowOutcome> => {
-		await fs.rm(path.join(inputs.out, "side-results.json"), { force: true })
-		await fs.rm(path.join(inputs.out, "artifacts"), { recursive: true, force: true })
+		// Attempt both removals even if one fails. Never report completion when
+		// publication or its cleanup failed.
+		const cleanup = await Promise.allSettled([
+			fs.rm(path.join(inputs.out, "side-results.json"), { force: true }),
+			fs.rm(path.join(inputs.out, "artifacts"), { recursive: true, force: true }),
+		])
+		const errors: unknown[] = []
+		for (const result of cleanup) {
+			if (result.status === "rejected") {
+				errors.push(result.reason)
+				console.error(`coding-evals publication cleanup failed: ${describeRepetitionError(result.reason)}`)
+			}
+		}
+		if (errors.length > 0) throw new AggregateError(errors, "publication cleanup failed")
 		return { runs, completed: false }
 	}
 
@@ -97,18 +109,27 @@ export async function executeSideFlow(inputs: SideFlowInputs): Promise<SideFlowO
 	// The completion marker must never exist for an interrupted side, so the
 	// publication stays gated even when the loop itself finished.
 	if (inputs.isInterrupted()) return abortPublication()
-	// Per-run artifacts are published atomically as each record exists.
-	for (const record of runs) {
-		if (!record.trace) continue
-		const artifactDir = path.join(inputs.out, "artifacts", `${record.fixtureName}-rep${record.repIndex}`)
-		await fs.mkdir(artifactDir, { recursive: true })
+	try {
+		// Per-run artifacts are published atomically as each record exists.
+		for (const record of runs) {
+			if (!record.trace) continue
+			const artifactDir = path.join(inputs.out, "artifacts", `${record.fixtureName}-rep${record.repIndex}`)
+			await fs.mkdir(artifactDir, { recursive: true })
+			if (inputs.isInterrupted()) return abortPublication()
+			await writeJsonAtomic(path.join(artifactDir, "run-record.json"), record)
+			if (inputs.isInterrupted()) return abortPublication()
+		}
+		const result = await inputs.buildResult(runs)
 		if (inputs.isInterrupted()) return abortPublication()
-		await writeJsonAtomic(path.join(artifactDir, "run-record.json"), record)
+		await writeJsonAtomic(path.join(inputs.out, "side-results.json"), result)
 		if (inputs.isInterrupted()) return abortPublication()
+		return { runs, completed: true }
+	} catch (error) {
+		try {
+			await abortPublication()
+		} catch (cleanupError) {
+			throw new AggregateError([error, cleanupError], "publication failed and cleanup failed")
+		}
+		throw error
 	}
-	const result = await inputs.buildResult(runs)
-	if (inputs.isInterrupted()) return abortPublication()
-	await writeJsonAtomic(path.join(inputs.out, "side-results.json"), result)
-	if (inputs.isInterrupted()) return abortPublication()
-	return { runs, completed: true }
 }
