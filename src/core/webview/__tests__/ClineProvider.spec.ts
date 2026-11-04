@@ -4835,6 +4835,90 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("keeps tearing down when the pre-registration change cannot be flushed", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider.saveViewState("mode", "plan")
+			const viewId = provider["viewId"]
+
+			const originalUpdate = mockContext.globalState.update
+			mockContext.globalState.update = vi.fn().mockImplementation((key: string) => {
+				if (key === "viewStates") {
+					// A non-Error rejection: teardown has to report what it got, not assume a shape.
+					return Promise.reject("storage unavailable")
+				}
+				return Promise.resolve()
+			})
+
+			// Teardown must not turn into a rejection because one durable write failed.
+			await provider.dispose()
+			mockContext.globalState.update = originalUpdate
+
+			expect(provider["pendingViewState"]).toBeUndefined()
+			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({})
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining(`[dispose] Unable to flush the unregistered view state of view ${viewId}`),
+			)
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(expect.stringContaining("storage unavailable"))
+		})
+
+		it("writes a held pre-registration change to storage when the provider is disposed", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider.saveViewState("mode", "plan")
+
+			// Nothing is on disk while the change waits for a registration that has not happened.
+			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({})
+			expect(provider["pendingViewState"]).toEqual({ mode: "plan" })
+
+			await provider.dispose()
+
+			// Disposal is the last chance to keep the change: it reaches storage under the only id
+			// this view ever had, and it stays a durability record rather than something a later view
+			// can load as its own.
+			const states = provider["getPersistedViewStates"]({ fresh: true })
+			const viewId = provider["viewId"]
+			expect(Object.keys(states)).toEqual([viewId])
+			expect(states[viewId]).toMatchObject({ mode: "plan" })
+			expect(typeof states[viewId]?.updatedAt).toBe("number")
+			expect(provider["pendingViewState"]).toBeUndefined()
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining(`[dispose] Flushed the unregistered view state of view ${viewId}`),
+			)
+		})
+
+		it("does not write anything when a provider is disposed with nothing held", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["_updateViewLocalStateFromMutation"]({
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "own" },
+			})
+
+			await provider.dispose()
+
+			// Only a change that was waiting on a registration gets a teardown write. A provider that
+			// held none must not put an entry under its session-local id, nor claim that it flushed one.
+			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({})
+			expect(mockOutputChannel.appendLine).not.toHaveBeenCalledWith(
+				expect.stringContaining("the unregistered view state of view " + provider["viewId"]),
+			)
+		})
+
 		it("tombstones an id whose entry a write cleared and releases it at dispose", async () => {
 			const provider = new ClineProvider(
 				mockContext,
