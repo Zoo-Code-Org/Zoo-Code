@@ -349,9 +349,12 @@ describe("SwitchModeTool", () => {
 		)
 	})
 
-	it("should use the default slug reported by task.getTaskMode when no mode is active", async () => {
-		// task.getTaskMode applies the default slug when the task has no explicit mode, so the
-		// tool reports switching from the default (Code) mode.
+	it("should report the mode that task.getTaskMode returns for the switch source", async () => {
+		// The tool takes the switch source from the task, not from provider state: the task
+		// reports the default Code slug when it has no explicit mode, and that is what the
+		// report names. The fallback itself lives in Task.getTaskMode and is covered in
+		// Task.spec.ts. The state mock supplies customModes for the target-mode check; the
+		// mode field of the state is not consulted.
 		mockGetState.mockResolvedValue({ customModes: [] })
 		mockGetTaskMode.mockResolvedValue("code")
 
