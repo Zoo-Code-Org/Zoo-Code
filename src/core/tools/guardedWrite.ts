@@ -570,6 +570,23 @@ export async function guardedWrite(
 				cursor = parent
 			}
 		})
+		// A relative task path is workspace-scoped by construction: the caller named it relative to
+		// task.cwd and the tool layer approved it as an in-workspace path. Canonicalizing it can still
+		// land outside the workspace - the ordinary shape is a link directory inside the workspace whose
+		// referent is elsewhere - and the clause below cannot catch that, because it only binds the
+		// retained target when the alias looks inside the canonical root. An alias that itself escapes
+		// would read as an intentional outside-workspace write, indistinguishable here from an absolute
+		// path the caller named outright. So the alias's own containment is checked for relative paths
+		// only, and it fails closed: the approved bytes were approved for a path inside the workspace.
+		// An absolute caller path keeps its own authorization and is left to the clause below.
+		if (!path.isAbsolute(relPathOrAbsolute) && !isInsideDirectory(canonicalWorkspaceRoot, canonicalAlias)) {
+			throw new GuardRejectedError(
+				"The write path resolves outside the workspace (" +
+					canonicalAlias +
+					") -- nothing was written; re-read the file under its canonical path, then retry.",
+				displayPath,
+			)
+		}
 		const authorizeTarget = (retainedTarget: string): void => {
 			// Containment: validateAccess enforces .rooignore only (its own tests allow
 			// absolute and ../ paths), so a workspace symlink retargeted after the tool's

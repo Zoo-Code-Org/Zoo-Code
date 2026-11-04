@@ -719,27 +719,25 @@ export class DiffViewProvider {
 	 * the save was authorized against the exact version open() stat-matched.
 	 */
 	private canAdoptPublishedContent(writeKind: GuardedWriteKind, rejection: GuardRejectedError): boolean {
-		// The two authorization refusals run first, before any early-return that would
-		// adopt the match: a never-read or partial-read preview is not a moved-token
-		// rejection for ANY session, including one whose baseline is a create placeholder
-		// open() itself wrote. Ordering the refusals after the placeholder branch made
-		// adoption depend on which baseline the session happened to have.
-		// A preview over a target the model never read: the rejection is about
-		// authorization, not a moved token, for every write kind. Adopting the match
-		// would record an observation for content the model never read and authorize a
-		// later full-file replacement.
+		// Ownership first. A create placeholder is the file open() itself wrote: open() verified the
+		// empty content and recorded it as this session's baseline, so the session owns the bytes it is
+		// publishing and the compare-and-swap baseline is the placeholder token. For that session nothing
+		// in the pre-open snapshot decides the question - preOpenObservation describes the file as it was
+		// BEFORE open() ran, and that file may already have been gone (a partial slice of it, or nothing
+		// at all), which says nothing about the verified empty placeholder that replaced it or about the
+		// complete registry observation that authorized this write. The exception stays gated on the
+		// rejection the placeholder can actually explain: an "already exists and was not read" rejection
+		// means somebody else's file is at the target, and a matching read of it is what a clobber looks
+		// like from here. Deciding the refusals first made adoption depend on which stale snapshot the
+		// session happened to carry, which is the same failure mode the null case had.
+		if (this.placeholderVersion !== undefined) {
+			return rejection instanceof GuardStaleVersionError
+		}
+		// A preview over a target the model never read: the rejection is about authorization, not a
+		// moved token, for every write kind. Adopting the match would record an observation for content
+		// the model never read and authorize a later full-file replacement.
 		if (this.preOpenObservation === null) {
-			// Two sessions land on a null observation and only one of them is authorized. An existing
-			// file the model never read is the refusal: the rejection is about authorization, not a
-			// moved token, for every write kind, and adopting the match would record an observation for
-			// content the model never read and authorize a later full-file replacement. A file open()
-			// itself created is the other case - there was nothing to read, and open() verified the
-			// empty placeholder and recorded it as this session's baseline - so the session owns the
-			// content it is publishing and an autosave of the accepted bytes stays adoptable. Gated on
-			// the rejection the placeholder can actually explain: an "already exists and was not read"
-			// rejection means somebody else's file is at the target, and a matching read of it is what a
-			// clobber looks like from here.
-			return this.placeholderVersion !== undefined && rejection instanceof GuardStaleVersionError
+			return false
 		}
 		// A full-file publish rejected for a partial read is not a moved-token rejection:
 		// the completeness gate refused before any compare-and-swap ran, so the matching
@@ -751,11 +749,6 @@ export class DiffViewProvider {
 		// only ever runs on a snapshot that exists.
 		if (this.preOpenObservation !== undefined && writeKind !== "edit" && !this.preOpenObservation.complete) {
 			return false
-		}
-		// A create placeholder is the file open() itself wrote, so a match is
-		// unambiguous and the CAS baseline is the placeholder token.
-		if (this.placeholderVersion !== undefined) {
-			return true
 		}
 		// open() snapshots the authorization as it stood before the preview. No
 		// snapshot means no preview ran, so there is no pairing to verify.

@@ -2634,13 +2634,17 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider["canAdoptPublishedContent"]("update", unread)).toBe(false)
 		})
 
-		it("refuses to adopt a published match when a create placeholder previewed a partial read", () => {
+		it("adopts for an owned placeholder whose pre-open snapshot was only a partial read", () => {
 			diffViewProvider["placeholderVersion"] = "placeholder-token"
-			diffViewProvider["preOpenObservation"] = { version: "placeholder-token", complete: false }
+			// The snapshot describes the target as it stood before open() ran: a slice of a file that the
+			// create path then replaced with the verified empty placeholder. It cannot stand in for a
+			// refusal on behalf of the placeholder the registry now holds.
+			diffViewProvider["preOpenObservation"] = { version: "gone-file-partial", complete: false }
 
-			expect(diffViewProvider["canAdoptPublishedContent"]("update", stale)).toBe(false)
-			// A targeted edit is authorized by a partial read, so it is not this refusal.
+			expect(diffViewProvider["canAdoptPublishedContent"]("update", stale)).toBe(true)
 			expect(diffViewProvider["canAdoptPublishedContent"]("edit", stale)).toBe(true)
+			// The reason gate still binds: a rejection the placeholder cannot explain keeps refusing.
+			expect(diffViewProvider["canAdoptPublishedContent"]("update", unread)).toBe(false)
 		})
 
 		it("still adopts for a create placeholder when no preview snapshot exists to check", () => {
@@ -2699,6 +2703,49 @@ describe("DiffViewProvider", () => {
 			expect(observation?.complete).toBe(true)
 		})
 
+		it("adopts the bytes Auto Save published when open() recreated a partially read file", async () => {
+			// The thread's trigger, end to end: the model read the file partially, the file was removed,
+			// and open() took the create path - the registry now holds the verified empty placeholder
+			// marked complete and placeholderVersion is set, while preOpenObservation still describes the
+			// slice of a file that is gone. Auto Save wrote the accepted bytes, and the guard rejected with
+			// GuardStaleVersionError because the completeness gate never ran - the registry entry is
+			// complete. Adoption has to be decided from the placeholder the session owns, not from the
+			// stale snapshot: refusing here reports a failure for a new file that already holds the
+			// accepted bytes, and the cleanup cannot unlink it because it is no longer the empty
+			// placeholder open() wrote.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider.editType = "create"
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, "placeholder-token", true)
+			diffViewProvider["placeholderVersion"] = "placeholder-token"
+			diffViewProvider["placeholderIdentity"] = { dev: 1n, ino: 1n }
+			diffViewProvider["preOpenObservation"] = { version: "gone-file-partial", complete: false }
+			diffViewProvider["openToken"] = "gone-file-partial"
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("new content")
+
+			await expect(diffViewProvider.saveChanges(false)).resolves.toMatchObject({
+				newProblemsMessage: "",
+				finalContent: "new content",
+			})
+
+			expect(fs.unlink).not.toHaveBeenCalled()
+			const observation = mockTask.observationRegistry.get(`${mockCwd}/test.ts`)
+			expect(observation?.version).toBe(versionTokenOfStat(previewStats))
+			expect(observation?.complete).toBe(true)
+		})
 		it("adopts content autosave already published instead of reporting a stale rejection", async () => {
 			// Autosave wrote the buffer before acceptance: the document is clean and the
 			// disk already holds exactly the bytes this save intended, but the version

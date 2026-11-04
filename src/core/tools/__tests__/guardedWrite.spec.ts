@@ -1223,6 +1223,119 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
 
+		it("guardedWrite reconstructs several missing components below the resolving root", async () => {
+			// Only the workspace root resolves here: sub and deeper are part of the path this write is
+			// creating, so the reconstruction has to re-join them in order below the canonical root. A
+			// retained target outside that root still trips containment, which is the outcome the alias
+			// canonicalization exists to make decidable at all.
+			const reg = new ObservationRegistry()
+			const workspaceRoot = path.resolve(WORKSPACE)
+			const canonicalRoot = path.resolve("/private/workspace")
+			const rel = path.join("sub", "deeper", "new-file.txt")
+			reg.observe(path.resolve(workspaceRoot, rel), "v1", true)
+			const task = createMockTask({ observationRegistry: reg })
+			mockedFsAccess.mockResolvedValue(undefined)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			mockedResolvePublishTarget.mockResolvedValue(path.resolve("/outside/workspace/secret.txt"))
+			vi.mocked(fs.realpath).mockImplementation(async (value) => {
+				const key = path.resolve(String(value))
+				if (key === workspaceRoot) {
+					return canonicalRoot
+				}
+				throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			})
+
+			await expect(guardedWrite(task, rel, "hello", "update")).rejects.toThrow(/outside the workspace/)
+
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("guardedWrite publishes a retained target reached through reconstructed components", async () => {
+			// The other containment outcome: the retained target sits under the reconstructed canonical
+			// path inside the canonical root, so the write is approved and lands on that target.
+			const reg = new ObservationRegistry()
+			const workspaceRoot = path.resolve(WORKSPACE)
+			const canonicalRoot = path.resolve("/private/workspace")
+			const rel = path.join("sub", "deeper", "new-file.txt")
+			const retained = path.join(canonicalRoot, "sub", "deeper", "new-file.txt")
+			reg.observe(path.resolve(workspaceRoot, rel), "v1", true)
+			const task = createMockTask({ observationRegistry: reg })
+			mockedFsAccess.mockResolvedValue(undefined)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			mockedResolvePublishTarget.mockResolvedValue(retained)
+			vi.mocked(fs.realpath).mockImplementation(async (value) => {
+				const key = path.resolve(String(value))
+				if (key === workspaceRoot) {
+					return canonicalRoot
+				}
+				throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			})
+
+			await guardedWrite(task, rel, "hello", "update")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(retained, "hello", { retainedTarget: true })
+		})
+
+		it("guardedWrite fails closed on a relative alias that canonicalizes outside the workspace", async () => {
+			// The bypass this row is about: child/ is a link directory inside the workspace whose referent
+			// is elsewhere, and the two components below it do not exist yet. Containment alone could not
+			// see it - the clause only binds the retained target when the alias looks inside the canonical
+			// root, and here the alias itself escaped, which reads as an intentional outside-workspace
+			// write. The rejection names the reconstructed path in order, because that is the path the
+			// model has to re-read.
+			const reg = new ObservationRegistry()
+			const workspaceRoot = path.resolve(WORKSPACE)
+			const canonicalRoot = path.resolve("/private/workspace")
+			const linkDir = path.join(workspaceRoot, "child")
+			const referentDir = path.join("/private/external", "child")
+			const rel = path.join("child", "deeper", "deeper2", "new-file.txt")
+			reg.observe(path.resolve(workspaceRoot, rel), "v1", true)
+			const task = createMockTask({ observationRegistry: reg })
+			mockedFsAccess.mockResolvedValue(undefined)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			mockedResolvePublishTarget.mockImplementation(async (p: string) =>
+				path.join(referentDir, "deeper", "deeper2", path.basename(p)),
+			)
+			vi.mocked(fs.realpath).mockImplementation(async (value) => {
+				const key = path.resolve(String(value))
+				if (key === workspaceRoot) {
+					return canonicalRoot
+				}
+				if (key === linkDir) {
+					return referentDir
+				}
+				throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			})
+
+			await expect(guardedWrite(task, rel, "hello", "update")).rejects.toThrow(
+				path.join(referentDir, "deeper", "deeper2", "new-file.txt"),
+			)
+
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("guardedWrite leaves an absolute alias that canonicalizes outside the workspace to its own authorization", async () => {
+			// The distinction that keeps this a relative-path rule: an absolute caller path was approved as
+			// that path by the tool layer, so an outside referent is the caller's choice and the write
+			// still lands on it. Only a path the caller named relative to the workspace is bound to the
+			// workspace by its own spelling.
+			const reg = new ObservationRegistry()
+			const outsideAlias = path.resolve("/outside/alias.txt")
+			const referent = path.resolve("/private/external/referent.txt")
+			reg.observe(outsideAlias, "v1", true)
+			const task = createMockTask({ observationRegistry: reg })
+			mockedFsAccess.mockResolvedValue(undefined)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			mockedResolvePublishTarget.mockResolvedValue(referent)
+			vi.mocked(fs.realpath).mockImplementation(async (value) =>
+				path.resolve(String(value)) === outsideAlias ? referent : path.resolve(String(value)),
+			)
+
+			await guardedWrite(task, outsideAlias, "hello", "update")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(referent, "hello", { retainedTarget: true })
+		})
+
 		it.each([path.resolve("/test/workspace-evil/secret.txt"), path.resolve("./workspace", "../escape.txt")])(
 			"guardedWrite rejects a retained target outside the workspace: %s",
 			async (target) => {
