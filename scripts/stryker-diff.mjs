@@ -11,6 +11,9 @@ import ts from "typescript"
 export const MAX_CHANGED_LINES = 500
 export const MAX_MUTANTS = 400
 
+export const PR_COMMENT_MARKER = "<!-- zoo-code-mutation-report -->"
+export const PR_COMMENT_FILENAME = "pr-comment.md"
+
 export const PACKAGE_CONFIGS = [
 	{
 		id: "core",
@@ -592,9 +595,13 @@ export function formatSummary(rows, advisories, manifest = {}) {
 			if (row.testFiles?.length > 0) {
 				lines.push(`- **${row.id}** (cwd \`${cwd}\`): ${row.testFiles.map((file) => `\`${file}\``).join(", ")}`)
 			} else {
-				lines.push(
-					`- **${row.id}** (cwd \`${cwd}\`): the mutation run did not complete far enough to report its selected tests; use the exact reproduction command below.`,
-				)
+				const detail =
+					row.result === "Advisory incomplete"
+						? "The mutation run was incomplete; selected test file names were not recorded. See Advisory findings for the failure."
+						: row.result === "No mutants generated"
+							? "No mutants were generated; selected test file names were not recorded."
+							: "Selected test file names were not recorded in the mutation report."
+				lines.push(`- **${row.id}** (cwd \`${cwd}\`): ${detail}`)
 			}
 		}
 	}
@@ -664,8 +671,32 @@ export function formatSummary(rows, advisories, manifest = {}) {
 	return `${lines.join("\n")}\n`
 }
 
-export function appendSummary(rows, advisories, manifest) {
+export function formatPrComment(rows, advisories, manifest) {
+	// Analysis uses the merge commit; comment provenance uses the PR head.
+	const headSha = process.env.PR_HEAD_SHA || manifest?.headSha
+	if (!headSha || !/^[0-9a-f]{40}$/i.test(headSha)) return undefined
+	const blocking = rows.reduce((total, row) => total + (row.blocking?.length ?? 0), 0)
+	return [
+		PR_COMMENT_MARKER,
+		`<!-- zoo-code-mutation-report head:${headSha.toLowerCase()} blocking:${blocking} advisories:${advisories.length} -->`,
+		"",
+		formatSummary(rows, advisories, manifest),
+	].join("\n")
+}
+
+export function appendSummary(rows, advisories, manifest, commentFile) {
 	for (const advisory of advisories) console.warn(formatAdvisoryCommand(advisory))
+	const comment = commentFile ? formatPrComment(rows, advisories, manifest) : undefined
+	if (comment) {
+		try {
+			fs.mkdirSync(path.dirname(commentFile), { recursive: true })
+			fs.writeFileSync(commentFile, comment)
+		} catch (error) {
+			console.warn(
+				`::warning title=Mutation test advisory::Could not write the mutation PR comment file: ${escapeWorkflowData(error.message)}`,
+			)
+		}
+	}
 	if (!process.env.GITHUB_STEP_SUMMARY) return
 	try {
 		fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, formatSummary(rows, advisories, manifest))
@@ -793,7 +824,7 @@ export function runManifest(
 		}
 	}
 
-	appendSummary(rows, advisories, manifest)
+	appendSummary(rows, advisories, manifest, path.join(reportRoot, PR_COMMENT_FILENAME))
 	return rows
 }
 
@@ -815,7 +846,7 @@ function main() {
 	const reportRoot = path.resolve(repoRoot, argument("--reports") ?? "reports/mutation")
 	const manifest = selectFromGit(repoRoot, baseSha, headSha)
 	if (manifest.packages.length === 0) {
-		appendSummary([], manifest.advisories, manifest)
+		appendSummary([], manifest.advisories, manifest, path.join(reportRoot, PR_COMMENT_FILENAME))
 		console.log("No changed executable lines in mutation-tested packages; mutation testing is not applicable.")
 		return
 	}
