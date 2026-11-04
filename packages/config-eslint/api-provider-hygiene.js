@@ -81,3 +81,20 @@ export const apiSpecTsIgnoreConfig = {
 		"@typescript-eslint/ban-ts-comment": ["error", { "ts-ignore": true }],
 	},
 }
+
+// A fixed sleep in a provider spec either flakes or hides a missing await. Poll with vi.waitFor on the
+// observable condition. This uses no-restricted-globals, not no-restricted-syntax, because later config
+// blocks replace no-restricted-syntax for the same files.
+export const apiSpecSleepConfig = {
+	files: ["api/**/__tests__/**/*.spec.ts"],
+	rules: {
+		"no-restricted-globals": [
+			"error",
+			{
+				name: "setTimeout",
+				message:
+					"Poll with vi.waitFor on the observable condition. A fixed sleep either flakes or hides a missing await.",
+			},
+		],
+	},
+}
