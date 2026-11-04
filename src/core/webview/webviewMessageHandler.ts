@@ -3294,7 +3294,11 @@ export const webviewMessageHandler = async (
 									`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile and updated in-memory handler`,
 								)
 							} else if (profile.zooSessionToken) {
-								await provider.providerSettingsManager.saveConfig(entry.name, cleanedProfile)
+								// Route through the provider's mutation queue so live views pinned to this profile drop the
+								// token too: a direct saveConfig rewrites the record only, and a pinned view keeps buffering
+								// the cleared token, which its getState() reports and new tasks send. activate=false keeps the
+								// shared selection on the profile that was actually active.
+								await provider.upsertProviderProfile(entry.name, cleanedProfile, false)
 								provider.log(`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile`)
 							}
 						} catch (profileError) {

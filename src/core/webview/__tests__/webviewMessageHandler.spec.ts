@@ -2728,10 +2728,16 @@ describe("zooCodeSignOut", () => {
 			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
 			true,
 		)
-		expect(saveConfig).toHaveBeenCalledWith(
+		// The non-active profile goes through the provider too: a direct saveConfig rewrites the
+		// record only, so a live view pinned to it keeps buffering the token that was just cleared,
+		// and its getState() hands that token to new tasks. activate=false keeps the shared
+		// selection on the profile that was actually active.
+		expect(upsertProviderProfile).toHaveBeenCalledWith(
 			"Backup Zoo",
 			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
+			false,
 		)
+		expect(saveConfig).not.toHaveBeenCalled()
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
 	})
 
