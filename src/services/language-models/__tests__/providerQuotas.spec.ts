@@ -1404,20 +1404,22 @@ describe("loadProfiles", () => {
 			const unhandled = vi.fn()
 			process.on("unhandledRejection", unhandled)
 			try {
+				// A plain function: a `vi.fn` attaches handlers to the promises it returns, which would hide the problem.
 				const source = {
-					listConfig: vi.fn(() => Promise.reject(new Error("corrupt secret storage"))),
+					listConfig: () => Promise.reject(new Error("corrupt secret storage")),
 					getProfile: vi.fn(),
 				}
 
 				await expect(loadProfilesWithActive(source, controller.signal)).rejects.toMatchObject({
 					name: "AbortError",
 				})
-				await vi.advanceTimersByTimeAsync(0)
-				await new Promise((resolve) => setImmediate(resolve)) // let a stray rejection surface
 
-				expect(unhandled).not.toHaveBeenCalled()
 				expect(source.getProfile).not.toHaveBeenCalled()
 				expect(vi.getTimerCount()).toBe(0)
+				// Let a stray rejection surface: Node reports it after the microtask queue has drained, in a later turn.
+				vi.useRealTimers()
+				await new Promise((resolve) => setTimeout(resolve, 20))
+				expect(unhandled).not.toHaveBeenCalled()
 			} finally {
 				process.off("unhandledRejection", unhandled)
 			}
