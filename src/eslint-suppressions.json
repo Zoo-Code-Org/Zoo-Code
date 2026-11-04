@@ -871,7 +871,7 @@
 	},
 	"core/tools/__tests__/readFileTool.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 96
+			"count": 95
 		}
 	},
 	"core/tools/__tests__/runSlashCommandTool.spec.ts": {
