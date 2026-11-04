@@ -306,6 +306,24 @@ type OpenClineInNewTabOptions = {
  */
 let tabCreationInFlight: Promise<ClineProvider> | undefined = undefined
 
+/**
+ * Record a cleanup that failed after tab initialization already failed. Both
+ * failures stay in one line so the reason the tab broke is not lost behind the
+ * error its own teardown threw.
+ */
+const logInitFailureCleanupError = (
+	what: string,
+	cleanupError: unknown,
+	initError: unknown,
+	outputChannel: vscode.OutputChannel,
+): void => {
+	const reason = cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+	const cause = initError instanceof Error ? initError.message : String(initError)
+	outputChannel.appendLine(
+		`[openClineInNewTab] ${what} failed after initialization failure: ${reason} (initialization error: ${cause})`,
+	)
+}
+
 export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
 	// Join a creation that is still in flight before looking at the tracked panel: its
 	// provider is already registered on that panel while it initializes, so the reuse below
@@ -391,8 +409,9 @@ const createClineTab = async ({ context, outputChannel, webviewFocusTracker }: O
 		dark: vscode.Uri.joinPath(context.extensionUri, "assets", "icons", "panel_dark.png"),
 	}
 
-	await tabProvider.resolveWebviewView(newPanel)
-
+	// Register the panel's listeners before resolving the webview: the cleanup below
+	// guards on state this creation owns, and the dispose listener is the only thing
+	// that would ever clear the tracked panel if the rejection were left unhandled.
 	// Add listener for visibility changes to notify webview
 	newPanel.onDidChangeViewState(
 		(e) => {
@@ -414,6 +433,31 @@ const createClineTab = async ({ context, outputChannel, webviewFocusTracker }: O
 		null,
 		context.subscriptions, // Also register dispose listener
 	)
+
+	try {
+		await tabProvider.resolveWebviewView(newPanel)
+	} catch (error) {
+		// The panel is on screen and tracked. Left alone, the next "Open in editor" click
+		// reuses the provider whose creation just failed, and the tracked panel keeps
+		// pointing at one the user can close with nothing left to clear it. Only state
+		// that still belongs to this panel is touched - a recovery may have replaced it.
+		if (tabPanel === newPanel) {
+			setPanel(undefined, "tab")
+			try {
+				newPanel.dispose()
+			} catch (panelError) {
+				logInitFailureCleanupError("panel disposal", panelError, error, outputChannel)
+			}
+			try {
+				await tabProvider.dispose()
+			} catch (disposeError) {
+				logInitFailureCleanupError("provider disposal", disposeError, error, outputChannel)
+			}
+		}
+		// A cleanup failure is logged, never thrown: teardown noise must not replace the
+		// initialization error that explains why the tab broke.
+		throw error
+	}
 
 	// Lock the editor group so clicking on files doesn't open them over the panel.
 	await delay(100)

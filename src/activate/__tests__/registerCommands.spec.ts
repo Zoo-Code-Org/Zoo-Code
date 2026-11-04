@@ -855,4 +855,86 @@ describe("openClineInNewTab", () => {
 		})
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
 	})
+
+	it("clears the tracked tab and closes the panel when webview resolution rejects", async () => {
+		const initError = new Error("webview initialization failed")
+		const constructedProvider = {
+			resolveWebviewView: vi.fn().mockRejectedValue(initError),
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn().mockResolvedValue(undefined),
+		}
+		// A plain function, not an arrow: the production code calls this with `new`.
+		vi.mocked(ClineProvider).mockImplementationOnce(function () {
+			return constructedProvider
+		} as never)
+		const panel = {
+			reveal: vi.fn().mockResolvedValue(undefined),
+			onDidChangeViewState: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
+			onDidDispose: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
+			webview: { postMessage: vi.fn().mockResolvedValue(true) },
+			dispose: vi.fn(),
+		}
+		vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as never)
+
+		const thrown = await openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		}).catch((error: unknown) => error)
+
+		expect(thrown).toBe(initError)
+		// A rejected initialization must not leave the failed panel tracked: the next
+		// "Open in editor" click would reuse the provider whose creation just failed, and
+		// the panel would stay tracked with nothing left to clear it.
+		expect(getPanel()).toBeUndefined()
+		expect(panel.dispose).toHaveBeenCalledTimes(1)
+		expect(constructedProvider.dispose).toHaveBeenCalledTimes(1)
+		// The listeners exist before the await, which is what makes the cleanup above
+		// and the dispose listener below apply to a panel that failed to initialize.
+		// Registered before the await: a creation that fails inside resolveWebviewView
+		// still has its panel listeners installed.
+		expect(panel.onDidDispose).toHaveBeenCalledTimes(1)
+		expect(panel.onDidChangeViewState).toHaveBeenCalledTimes(1)
+		expect(panel.onDidDispose.mock.invocationCallOrder[0]).toBeLessThan(
+			constructedProvider.resolveWebviewView.mock.invocationCallOrder[0],
+		)
+	})
+
+	it("keeps the initialization error when the failed tab's provider teardown rejects", async () => {
+		const initError = new Error("webview initialization failed")
+		const teardownError = new Error("provider teardown failed")
+		const constructedProvider = {
+			resolveWebviewView: vi.fn().mockRejectedValue(initError),
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn().mockRejectedValue(teardownError),
+		}
+		vi.mocked(ClineProvider).mockImplementationOnce(function () {
+			return constructedProvider
+		} as never)
+		const panel = {
+			reveal: vi.fn().mockResolvedValue(undefined),
+			onDidChangeViewState: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
+			onDidDispose: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
+			webview: { postMessage: vi.fn().mockResolvedValue(true) },
+			dispose: vi.fn(),
+		}
+		vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as never)
+
+		const thrown = await openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		}).catch((error: unknown) => error)
+
+		// The rejection the caller sees is still the initialization failure; the teardown
+		// failure is logged beside it instead of taking its place.
+		expect(thrown).toBe(initError)
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+			expect.stringContaining(
+				"[openClineInNewTab] provider disposal failed after initialization failure: provider teardown failed (initialization error: webview initialization failed)",
+			),
+		)
+		expect(getPanel()).toBeUndefined()
+		expect(panel.dispose).toHaveBeenCalledTimes(1)
+	})
 })
