@@ -1338,17 +1338,20 @@ describe("loadProfiles", () => {
 		beforeEach(() => vi.useFakeTimers())
 		afterEach(() => vi.useRealTimers())
 
-		/** Counts the abort listeners that are added and not removed. */
+		/** The abort listeners that were added and not removed: a removal counts only for the function that was added. */
 		const trackListeners = (signal: AbortSignal) => {
-			let live = 0
+			const live = new Set<EventListenerOrEventListenerObject>()
 			const add = signal.addEventListener.bind(signal)
 			const remove = signal.removeEventListener.bind(signal)
-			signal.addEventListener = ((...args: Parameters<typeof add>) => (live++, add(...args))) as typeof add
-			signal.removeEventListener = ((...args: Parameters<typeof remove>) => (
-				live--,
-				remove(...args)
-			)) as typeof remove
-			return () => live
+			signal.addEventListener = ((...args: Parameters<typeof add>) => {
+				if (args[1]) live.add(args[1])
+				return add(...args)
+			}) as typeof add
+			signal.removeEventListener = ((...args: Parameters<typeof remove>) => {
+				if (args[1]) live.delete(args[1])
+				return remove(...args)
+			}) as typeof remove
+			return () => live.size
 		}
 
 		it("rejects at once while the list is pending, and leaves no timer or listener behind", async () => {

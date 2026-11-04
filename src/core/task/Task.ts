@@ -1786,39 +1786,56 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * to replace the stored messages outright.
 	 */
 	private async saveClineMessages(merge = true): Promise<boolean> {
-		// One save at a time per task, from the message write to the task-history write: callers that do not wait for it
-		// (the fire-and-forget ones) would otherwise let an older save's metadata land after a newer save's and replace
-		// it, an explicit clear of the usage breakdown included. A save that fails does not hold up the next one.
-		const run = this.saveClineMessagesQueue.then(
-			() => this.persistClineMessages(merge),
-			() => this.persistClineMessages(merge),
+		// Two queues. The message writes go one at a time, and a write never waits for the metadata of the save before
+		// it: the messages are what must reach the disk, so a slow history write cannot delay them. The metadata stage
+		// (the history entry, derived from the messages that save persisted) also goes one at a time, in the order the
+		// message writes finished, which is the order the saves were asked for: callers that do not wait for a save (the
+		// fire-and-forget ones) would otherwise let an older save's metadata land after a newer save's and replace it,
+		// an explicit clear of the usage breakdown included. A save that fails does not hold up the next one.
+		const written = this.saveClineMessagesQueue.then(
+			() => this.writeClineMessages(merge),
+			() => this.writeClineMessages(merge),
 		)
-		this.saveClineMessagesQueue = run.then(
+		this.saveClineMessagesQueue = written.then(
 			() => undefined,
 			() => undefined,
 		)
-		return run
+
+		return written.then(async (result) => {
+			if (!result.saved) return false
+			const metadata = this.saveTaskMetadataQueue.then(() => this.writeTaskMetadata(result.persistedMessages))
+			this.saveTaskMetadataQueue = metadata
+			await metadata
+			return true
+		})
 	}
 
 	private saveClineMessagesQueue: Promise<void> = Promise.resolve()
+	private saveTaskMetadataQueue: Promise<void> = Promise.resolve()
 
-	private async persistClineMessages(merge: boolean): Promise<boolean> {
+	/** The message write: `saved` is whether it reached the disk, and `persistedMessages` what was actually stored. */
+	private async writeClineMessages(
+		merge: boolean,
+	): Promise<{ saved: false } | { saved: true; persistedMessages: ClineMessage[] | undefined }> {
 		// What was actually persisted: with `merge`, newer messages another host wrote are folded in. The metadata
 		// (including the usage breakdown) is computed from it, so a stale local snapshot cannot clear usage that
 		// the stored messages still contain.
-		let persistedMessages: ClineMessage[] | undefined
 		try {
-			persistedMessages = await saveTaskMessages({
+			const persistedMessages = await saveTaskMessages({
 				messages: structuredClone(this.clineMessages),
 				taskId: this.taskId,
 				globalStoragePath: this.globalStoragePath,
 				merge,
 			})
+			return { saved: true, persistedMessages }
 		} catch (error) {
 			console.error("Failed to save Roo messages:", error)
-			return false
+			return { saved: false }
 		}
+	}
 
+	/** The metadata stage of a save: it never fails the save, whose messages are already persisted. */
+	private async writeTaskMetadata(persistedMessages: ClineMessage[] | undefined): Promise<void> {
 		try {
 			if (this._taskApiConfigName === undefined) {
 				await this.taskApiConfigReady
@@ -1853,8 +1870,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// recomputes and re-emits the metadata update.
 			console.error("Failed to save task metadata:", error)
 		}
-
-		return true
 	}
 
 	private findMessageByTimestamp(ts: number): ClineMessage | undefined {

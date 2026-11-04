@@ -1117,7 +1117,7 @@ describe("Task persistence", () => {
 			tokenUsage: { totalTokensIn: 0, totalTokensOut: 0, totalCost: 0, contextTokens: 0 },
 		})
 
-		it("does not start a save before the previous save has written its task-history entry", async () => {
+		it("does not let the metadata of an older save land after the metadata of a newer one, whatever the timing", async () => {
 			const events: string[] = []
 			const firstMetadata = createDeferred<ReturnType<typeof metadataFor>>()
 			const firstHistoryWrite = createDeferred<undefined>()
@@ -1150,18 +1150,40 @@ describe("Task persistence", () => {
 			const newer = save()
 			await vi.waitFor(() => expect(mockTaskMetadata).toHaveBeenCalledTimes(1))
 
-			// The older save is between its two writes; the newer one has not written anything yet.
-			expect(events).toEqual(["messages"])
+			// The older save is in its metadata stage; the newer one has written its messages but not its metadata.
+			expect(events).toEqual(["messages", "messages"])
 
 			firstMetadata.resolve(metadataFor(false))
 			await vi.waitFor(() => expect(updateTaskHistory).toHaveBeenCalledTimes(1))
-			expect(events).toEqual(["messages"])
+			expect(events).toEqual(["messages", "messages"]) // the newer metadata waits for the older one
 			firstHistoryWrite.resolve(undefined)
 			await Promise.all([older, newer])
 
 			// The newer save's entry is the last one written, whatever the timing of the older one.
-			expect(events).toEqual(["messages", "history 1", "messages", "history 2"])
+			expect(events).toEqual(["messages", "messages", "history 1", "history 2"])
 			expect(updateTaskHistory.mock.calls.map(([item]) => item.usage)).toEqual([false, true])
+		})
+
+		it("does not make a message write wait for the metadata stage of the save before it", async () => {
+			const slowMetadata = createDeferred<ReturnType<typeof metadataFor>>()
+			mockSaveTaskMessages.mockResolvedValue([])
+			mockTaskMetadata.mockImplementationOnce(() => slowMetadata.promise)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const save = () => getTaskPersistenceAccess(task).saveClineMessages()
+
+			const first = save()
+			await vi.waitFor(() => expect(mockTaskMetadata).toHaveBeenCalledTimes(1)) // the first is in its metadata stage
+			const second = save()
+
+			// The second message write reaches the disk while the first metadata is still pending.
+			await vi.waitFor(() => expect(mockSaveTaskMessages).toHaveBeenCalledTimes(2))
+			slowMetadata.resolve(metadataFor(false))
+			await Promise.all([first, second])
 		})
 
 		it("runs the next save even when the one before it failed", async () => {
