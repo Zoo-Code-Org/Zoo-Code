@@ -718,16 +718,11 @@ export class DiffViewProvider {
 	 * the save was authorized against the exact version open() stat-matched.
 	 */
 	private canAdoptPublishedContent(writeKind: GuardedWriteKind): boolean {
-		// A create placeholder is the file open() itself wrote, so a match is
-		// unambiguous and the CAS baseline is the placeholder token.
-		if (this.placeholderVersion !== undefined) {
-			return true
-		}
-		// open() snapshots the authorization as it stood before the preview. No
-		// snapshot means no preview ran, so there is no pairing to verify.
-		if (this.preOpenObservation === undefined) {
-			return true
-		}
+		// The two authorization refusals run first, before any early-return that would
+		// adopt the match: a never-read or partial-read preview is not a moved-token
+		// rejection for ANY session, including one whose baseline is a create placeholder
+		// open() itself wrote. Ordering the refusals after the placeholder branch made
+		// adoption depend on which baseline the session happened to have.
 		// A preview over a target the model never read: the rejection is about
 		// authorization, not a moved token, for every write kind. Adopting the match
 		// would record an observation for content the model never read and authorize a
@@ -740,9 +735,21 @@ export class DiffViewProvider {
 		// bytes on disk are the un-authorized replacement, not this save's satisfied
 		// autosave. Adopting them would report a successful full-file replacement for a
 		// write the completeness gate rejected. A targeted edit is authorized by a
-		// partial read, so only the full-file kinds take this branch.
-		if (writeKind !== "edit" && !this.preOpenObservation.complete) {
+		// partial read, so only the full-file kinds take this branch. The undefined case is the
+		// no-snapshot case and is settled by its own branch below, so the completeness check
+		// only ever runs on a snapshot that exists.
+		if (this.preOpenObservation !== undefined && writeKind !== "edit" && !this.preOpenObservation.complete) {
 			return false
+		}
+		// A create placeholder is the file open() itself wrote, so a match is
+		// unambiguous and the CAS baseline is the placeholder token.
+		if (this.placeholderVersion !== undefined) {
+			return true
+		}
+		// open() snapshots the authorization as it stood before the preview. No
+		// snapshot means no preview ran, so there is no pairing to verify.
+		if (this.preOpenObservation === undefined) {
+			return true
 		}
 		// The caller's observation must still name the version the preview saw. If a
 		// different writer moved the file first, the guard was right to reject and the

@@ -2597,6 +2597,34 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider["closeOwnDiffView"]).toHaveBeenCalled()
 		})
 
+		// The two authorization refusals have to be decided before the baseline branches, or
+		// adoption depends on which baseline the session happened to have. Pinned directly on
+		// the predicate because no scenario above reaches these combinations: the suite never
+		// pairs a create placeholder with a never-read or partial-read preview, which is exactly
+		// the gap the review row is about.
+		it("refuses to adopt a published match when a create placeholder previewed a never-read target", () => {
+			diffViewProvider["placeholderVersion"] = "placeholder-token"
+			diffViewProvider["preOpenObservation"] = null
+
+			expect(diffViewProvider["canAdoptPublishedContent"]("update")).toBe(false)
+		})
+
+		it("refuses to adopt a published match when a create placeholder previewed a partial read", () => {
+			diffViewProvider["placeholderVersion"] = "placeholder-token"
+			diffViewProvider["preOpenObservation"] = { version: "placeholder-token", complete: false }
+
+			expect(diffViewProvider["canAdoptPublishedContent"]("update")).toBe(false)
+			// A targeted edit is authorized by a partial read, so it is not this refusal.
+			expect(diffViewProvider["canAdoptPublishedContent"]("edit")).toBe(true)
+		})
+
+		it("still adopts for a create placeholder when no preview snapshot exists to check", () => {
+			diffViewProvider["placeholderVersion"] = "placeholder-token"
+			diffViewProvider["preOpenObservation"] = undefined
+
+			expect(diffViewProvider["canAdoptPublishedContent"]("update")).toBe(true)
+		})
+
 		it("adopts content autosave already published instead of reporting a stale rejection", async () => {
 			// Autosave wrote the buffer before acceptance: the document is clean and the
 			// disk already holds exactly the bytes this save intended, but the version
@@ -4761,11 +4789,16 @@ describe("DiffViewProvider", () => {
 				await gate
 			})
 			const restorePreviewTabs = vi.fn().mockResolvedValue(undefined)
-			const reset = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["closeOwnDiffView"] = closeOwnDiffView
 			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
-			// The guard sits on the public reset(), so the stub stands in for the teardown it
-			// guards: what has to happen exactly once is the teardown, not the call.
+			// Scenario-local and calling through, per the review row: with a blind stub the count
+			// below is a statement about a call into a double, not about the teardown. The spy still
+			// counts the single pass the guard allows, and the real final reset runs underneath it, so
+			// the state assertions after it measure the finalization the count claims to have counted.
+			const realFinalReset = diffViewProvider["performFinalReset"]
+			const reset = vi.fn(async () => {
+				await realFinalReset.call(diffViewProvider)
+			})
 			diffViewProvider["performFinalReset"] = reset
 			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
@@ -4805,6 +4838,10 @@ describe("DiffViewProvider", () => {
 
 			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
 			expect(reset).toHaveBeenCalledTimes(1)
+			// The finalization the count is supposed to stand for: the final reset owns these fields.
+			// A call into a stub that never ran them would pass the count and fail here.
+			expect(diffViewProvider["activeDiffEditor"]).toBeUndefined()
+			expect(diffViewProvider["originalContent"]).toBeUndefined()
 		})
 
 		it("revertChanges() does not finalize a session a second time after the first cancellation closed it", async () => {
