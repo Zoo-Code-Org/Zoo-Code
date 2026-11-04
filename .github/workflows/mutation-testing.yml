@@ -106,13 +106,16 @@ jobs:
 
             - name: Read the stacked map
               if: github.event_name == 'pull_request'
-              # A missing artifact degrades to the event base, which charges this unit every unmerged
-              # ancestor - stricter than the intended measurement, never looser - and the gate logs it.
+              # Downloaded outside the checkout on purpose: a pull request can commit .mutation/stacked-map.json
+              # itself, and with continue-on-error a missing artifact would leave that committed file in place for
+              # the gate to read as if it were the map. Under RUNNER_TEMP a missing artifact means no file, which
+              # degrades to the event base - stricter than the intended measurement, never looser - and the gate
+              # logs it.
               continue-on-error: true
               uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
               with:
                   name: mutation-stacked-map
-                  path: .mutation
+                  path: ${{ runner.temp }}/mutation-stacked-map
 
             - name: Enforce executable-line scope and run advisory mutation testing
               if: github.event_name == 'pull_request'
@@ -128,7 +131,7 @@ jobs:
                   # The event already carries that head for provenance, so it wins here; deriving it from
                   # the merge commit stays as the fallback for a manual run with no pull_request payload.
                   PR_HEAD_SHA="${PR_HEAD_SHA:-$(git rev-parse "$HEAD_SHA^2" 2>/dev/null || git rev-parse "$HEAD_SHA")}"
-                  node scripts/stryker-diff.mjs ci --base "$BASE_SHA" --head "$HEAD_SHA" --pr-head "$PR_HEAD_SHA" --pr-base-ref "$PR_BASE_REF" --stacked-map-file .mutation/stacked-map.json
+                  node scripts/stryker-diff.mjs ci --base "$BASE_SHA" --head "$HEAD_SHA" --pr-head "$PR_HEAD_SHA" --pr-base-ref "$PR_BASE_REF" --stacked-map-file "${RUNNER_TEMP}/mutation-stacked-map/stacked-map.json"
 
             - name: Upload mutation reports
               id: mutation_report

@@ -394,14 +394,25 @@ export function dependencyManifestDrift(repoRoot, installedSha, alignedSha) {
 	return changed.trim().split(/\n+/).filter(Boolean)
 }
 
+/**
+ * The detail of a failed `pnpm install --frozen-lockfile`. pnpm writes its diagnostics to stderr, but a
+ * killed or signal-terminated run leaves stderr empty, and "" is a valid ?? operand: with ?? the failure
+ * would report a blank detail and lose the exit status that is the only remaining fact. || treats the
+ * empty string as absent, so the chain reaches the exit status.
+ */
+export function reinstallFailureDetail(result) {
+	return result.error?.message || result.stderr?.trim() || `exit ${result.status}`
+}
+
 function reinstallAlignedDependencies(repoRoot, driftedManifests) {
 	console.log(
 		`Reinstalling dependencies from the aligned tree: ${driftedManifests.join(", ")} differ from the tree they were installed from.`,
 	)
 	const result = spawnSync("pnpm", ["install", "--frozen-lockfile"], { cwd: repoRoot, encoding: "utf8" })
 	if (result.error || result.status !== 0) {
-		const detail = result.error?.message ?? result.stderr?.trim() ?? `exit ${result.status}`
-		throw new Error(`The aligned tree changed ${driftedManifests.join(", ")} and the reinstall failed: ${detail}`)
+		throw new Error(
+			`The aligned tree changed ${driftedManifests.join(", ")} and the reinstall failed: ${reinstallFailureDetail(result)}`,
+		)
 	}
 }
 
@@ -840,13 +851,16 @@ export function appendSummary(rows, advisories, manifest, commentFile) {
  * trace of the run is a step log: the author cannot see which base the gate chose, which is the fact
  * that explains a stacked unit's numbers. The caller rethrows - this only makes the failure visible.
  */
-export function summarizeReinstallFailure(stackedOn, driftedManifests, error) {
+export function summarizeReinstallFailure(invocation, driftedManifests, error) {
 	appendSummary(
 		[],
 		[
 			`Dependency reinstall failed for the aligned tree (${driftedManifests.join(", ")}): ${error.message} The gate measured nothing; fix the lockfile drift and re-run.`,
 		],
-		{ stackedOn },
+		// The base and the diff head belong in this summary too: once the parent PR's head advances, the
+		// selected base is the only way to trace which commit the run measured, and formatSummary turns
+		// these two into the "Reproduce locally" command.
+		{ stackedOn: invocation.stackedOn, baseSha: invocation.baseSha, headSha: invocation.diffHead },
 	)
 }
 
@@ -1094,7 +1108,7 @@ function main() {
 			try {
 				reinstallAlignedDependencies(repoRoot, driftedManifests)
 			} catch (error) {
-				summarizeReinstallFailure(invocation.stackedOn, driftedManifests, error)
+				summarizeReinstallFailure(invocation, driftedManifests, error)
 				throw error
 			}
 		}

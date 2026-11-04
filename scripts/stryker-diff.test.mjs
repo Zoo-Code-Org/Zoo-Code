@@ -32,6 +32,7 @@ import {
 	preferDirectTestFiles,
 	parseStackedMap,
 	readStackedMap,
+	reinstallFailureDetail,
 	summarizeReinstallFailure,
 	dependencyManifestDrift,
 	alignExecutionTree,
@@ -84,7 +85,12 @@ describe("mutation testing workflow", () => {
 		// The map crosses jobs as a file, never as an argument or an environment string: Linux caps one
 		// argument/env string at 128 KiB (MAX_ARG_STRLEN), and a map past that cap makes the step
 		// unstartable rather than merely large.
-		assert.ok(workflow.includes("--stacked-map-file .mutation/stacked-map.json"))
+		assert.ok(workflow.includes('--stacked-map-file "${RUNNER_TEMP}/mutation-stacked-map/stacked-map.json"'))
+		// The map must land outside the checkout: a pull request can commit .mutation/stacked-map.json,
+		// and with continue-on-error a missing artifact would leave that committed file in front of the
+		// gate, which then measures against whatever base the pull request chose for itself.
+		assert.ok(workflow.includes("path: ${{ runner.temp }}/mutation-stacked-map"))
+		assert.ok(!workflow.includes("path: .mutation"))
 		assert.ok(!workflow.includes('--stacked-map "$STACKED_MAP"'))
 		assert.ok(workflow.includes("name: mutation-stacked-map"))
 		assert.ok(workflow.includes('--pr-head "$PR_HEAD_SHA"'))
@@ -580,10 +586,19 @@ describe("stacked unit base resolution", () => {
 		const warn = console.warn
 		console.warn = (message) => warnings.push(message)
 		try {
-			summarizeReinstallFailure(7, ["src/package.json", "pnpm-lock.yaml"], new Error("pnpm install exited 1"))
+			summarizeReinstallFailure(
+				{ stackedOn: 7, baseSha: "1".repeat(40), diffHead: "2".repeat(40) },
+				["src/package.json", "pnpm-lock.yaml"],
+				new Error("pnpm install exited 1"),
+			)
 			const summary = fs.readFileSync(summaryPath, "utf8")
-			// The whole point of the summary here: which base this unit was measured against.
+			// The whole point of the summary here: which base this unit was measured against, and the
+			// command that reproduces it - the parent head moves, the selected base is what is left.
 			assert.ok(summary.includes("Stacked unit: measured against the head of parent PR #7"))
+			assert.ok(
+				summary.includes(`node scripts/stryker-diff.mjs ci --base ${"1".repeat(40)} --head ${"2".repeat(40)}`),
+			)
+			assert.ok(summary.includes("git checkout " + "2".repeat(40)))
 			assert.ok(summary.includes("src/package.json, pnpm-lock.yaml"))
 			assert.ok(summary.includes("pnpm install exited 1"))
 			assert.equal(warnings.length, 1)
@@ -593,6 +608,21 @@ describe("stacked unit base resolution", () => {
 			else process.env.GITHUB_STEP_SUMMARY = previous
 			fs.rmSync(directory, { recursive: true, force: true })
 		}
+	})
+
+	it("keeps the exit status when the reinstall writes nothing to stderr", () => {
+		// A killed or signal-terminated pnpm leaves stderr empty, and "" is a valid ?? operand: with ?? the
+		// report would end in a blank detail and lose the only fact that is left.
+		assert.equal(reinstallFailureDetail({ status: 1, stderr: "" }), "exit 1")
+		assert.equal(reinstallFailureDetail({ status: null, stderr: undefined }), "exit null")
+		assert.equal(
+			reinstallFailureDetail({ status: 1, stderr: "  ERR_PNPM_OUTDATED_LOCKFILE  " }),
+			"ERR_PNPM_OUTDATED_LOCKFILE",
+		)
+		assert.equal(
+			reinstallFailureDetail({ status: null, stderr: "", error: new Error("spawnSync pnpm ENOENT") }),
+			"spawnSync pnpm ENOENT",
+		)
 	})
 
 	it("degrades to the event base for an unparsable stacked map", () => {
