@@ -3,6 +3,19 @@
 import { tiktoken } from "../tiktoken"
 import { Anthropic } from "@anthropic-ai/sdk"
 
+type TextContentBlockWithoutText = Omit<Anthropic.Messages.TextBlockParam, "text"> & { text?: string }
+type Base64ImageSourceWithoutData = Omit<Anthropic.Base64ImageSource, "data"> & { data?: string }
+type ImageContentBlockWithoutData = Omit<Anthropic.Messages.ImageBlockParam, "source"> & {
+	source: Base64ImageSourceWithoutData
+}
+type ContentBlockTestDouble =
+	Anthropic.Messages.ContentBlockParam | TextContentBlockWithoutText | ImageContentBlockWithoutData
+
+function asContentBlockParams(content: ContentBlockTestDouble[]): Anthropic.Messages.ContentBlockParam[] {
+	// Intentionally models malformed blocks that tiktoken must tolerate at runtime.
+	return content as Anthropic.Messages.ContentBlockParam[]
+}
+
 describe("tiktoken", () => {
 	it("should return 0 for empty content array", async () => {
 		const result = await tiktoken([])
@@ -35,11 +48,10 @@ describe("tiktoken", () => {
 	})
 
 	it("should handle missing text content", async () => {
-		// Using 'as any' to bypass TypeScript's type checking for this test case
-		// since we're specifically testing how the function handles undefined text
-		const content = [{ type: "text" }] as any as Anthropic.Messages.ContentBlockParam[]
+		// Intentionally malformed runtime shape: tiktoken must tolerate absent text.
+		const content: ContentBlockTestDouble[] = [{ type: "text" }]
 
-		const result = await tiktoken(content)
+		const result = await tiktoken(asContentBlockParams(content))
 		expect(result).toBe(0)
 	})
 
@@ -65,20 +77,18 @@ describe("tiktoken", () => {
 	})
 
 	it("should use conservative estimate for image content without data", async () => {
-		// Using 'as any' to bypass TypeScript's type checking for this test case
-		// since we're specifically testing the fallback behavior
-		const content = [
+		// Intentionally malformed runtime shape: tiktoken must tolerate absent image data.
+		const content: ContentBlockTestDouble[] = [
 			{
 				type: "image",
 				source: {
 					type: "base64",
 					media_type: "image/png",
-					// data is intentionally missing to test fallback
 				},
 			},
-		] as any as Anthropic.Messages.ContentBlockParam[]
+		]
 
-		const result = await tiktoken(content)
+		const result = await tiktoken(asContentBlockParams(content))
 		// Conservative estimate is 300 tokens, plus the fudge factor
 		const expectedMinTokens = 300
 		expect(result).toBeGreaterThanOrEqual(expectedMinTokens)

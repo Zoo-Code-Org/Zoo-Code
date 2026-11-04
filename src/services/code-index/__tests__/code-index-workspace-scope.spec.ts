@@ -1,4 +1,5 @@
 import { makeExtensionContext, makeUri } from "../../../test-utils/vscode"
+import { clearAllMocks } from "../../../test-utils/reset"
 import { CodeIndexManager } from "../manager"
 import { CodeIndexWorkspaceScope } from "../code-index-workspace-scope"
 import { CodeIndexStateManager } from "../state-manager"
@@ -13,7 +14,7 @@ vi.mock("../manager", () => ({
 }))
 
 describe("CodeIndexWorkspaceScope", () => {
-	beforeEach(() => vi.clearAllMocks())
+	beforeEach(() => clearAllMocks())
 
 	it("owns a guarded workspace indexing manager and recreates it after disposal", () => {
 		const scope = new CodeIndexWorkspaceScope("/workspace", makeUri("/workspace"), makeExtensionContext())
