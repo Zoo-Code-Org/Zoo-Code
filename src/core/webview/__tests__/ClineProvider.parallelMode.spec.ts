@@ -3,6 +3,7 @@
 import * as vscode from "vscode"
 
 import {
+	type HistoryItem,
 	type ProviderSettingsEntry,
 	type ProviderSettingsWithId,
 	PROVIDER_SETTINGS_KEYS,
@@ -532,6 +533,10 @@ vi.mock("../../config/ProviderSettingsManager", () => ({
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			resetAllConfigs: vi.fn().mockResolvedValue(undefined),
 			deleteConfig: vi.fn().mockResolvedValue(undefined),
+			// The delete path classifies a rejected getProfile snapshot as absence with hasConfig; the
+			// per-test spies below reject lookups for profiles the scenario does not carry, so
+			// absence is what this double reports.
+			hasConfig: vi.fn().mockResolvedValue(false),
 		}
 	}),
 }))
@@ -1902,6 +1907,75 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(provider["viewLocalState"].mode).toBe("code")
 			expect(modeChangedSpy).not.toHaveBeenCalled()
 			expect(activateProfileSpy).not.toHaveBeenCalled()
+			await provider.dispose()
+		})
+
+		// A4 regression: the history write runs before the TaskModeSwitched emit, so a listener
+		// that throws on that emit must not leave the persisted item on the new mode.
+		it("should roll task history back when a TaskModeSwitched listener throws", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["resolveWebviewView"](createMockWebviewView())
+			const task = {
+				taskId: "emit-throw-task",
+				_taskMode: "code",
+				// The mode-switch emit is the reachable thrower here: it runs on the mode that the
+				// history write above already persisted. addClineToStack emits on the same task, so
+				// only the mode-switch event throws.
+				emit: vi.fn((event: RooCodeEventName) => {
+					if (event === RooCodeEventName.TaskModeSwitched) {
+						throw new Error("TaskModeSwitched listener down")
+					}
+				}),
+				saveClineMessages: vi.fn().mockResolvedValue(undefined),
+				clineMessages: [],
+				apiConversationHistory: [],
+				updateApiConfiguration: vi.fn(),
+			}
+			// Minimal Task double: handleModeSwitch only touches the fields above.
+			await provider.addClineToStack(task as unknown as Task)
+			await provider["setViewStateId"]("emit-throw-view")
+			await provider.saveViewState("mode", "code")
+			const seedItem: HistoryItem = {
+				id: "emit-throw-task",
+				number: 1,
+				ts: 1,
+				task: "seed prompt",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				mode: "code",
+			}
+			// Double assertion: getTaskHistoryItem is private and has no typed accessor, and the
+			// seeded item is what makes the history write land before the throw. The spy is taken
+			// on this instance rather than the prototype so it cannot leak into a later test.
+			const historyApi = provider as unknown as {
+				getTaskHistoryItem: (id: string) => HistoryItem | undefined
+			}
+			const historySpy = vi.spyOn(historyApi, "getTaskHistoryItem").mockReturnValue(seedItem)
+			const updateSpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([seedItem])
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+
+			await expect(provider.handleModeSwitch("architect", task as unknown as Task)).rejects.toThrow(
+				"TaskModeSwitched listener down",
+			)
+
+			// The switch wrote architect into history first and then undid it: the last write
+			// carries the pre-switch mode, so history cannot keep a mode the task never took.
+			expect(updateSpy).toHaveBeenCalledTimes(2)
+			expect(updateSpy.mock.calls[0][0]).toMatchObject({ mode: "architect" })
+			expect(updateSpy.mock.calls[1][0]).toMatchObject({ mode: "code" })
+			// The in-memory task mode was never moved: the emit threw before that write.
+			expect(task._taskMode).toBe("code")
+
+			updateSpy.mockRestore()
+			historySpy.mockRestore()
 			await provider.dispose()
 		})
 

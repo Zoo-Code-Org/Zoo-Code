@@ -2659,12 +2659,25 @@ export class ClineProvider
 		if (task) {
 			TelemetryService.instance.captureModeSwitch(task.taskId, newMode)
 
+			// Captured above the try so the catch below can undo a history write that already landed.
+			// The emit on the persisted new mode runs after that write, and a listener that throws there
+			// must not leave task history on the new mode while _taskMode and the view's durable pin
+			// still hold the old one.
+			let undoHistoryWrite: (() => Promise<void>) | undefined
+
 			try {
 				// Update the task history with the new mode first.
 				const taskHistoryItem = this.getTaskHistoryItem(task.taskId)
 
 				if (taskHistoryItem) {
 					await this.updateTaskHistory({ ...taskHistoryItem, mode: newMode })
+
+					undoHistoryWrite = async () => {
+						// Restore only the field this switch changed, re-reading the item so fields the running
+						// task persisted during the pending window survive the restore.
+						const latest = this.getTaskHistoryItem(task.taskId) ?? taskHistoryItem
+						await this.updateTaskHistory({ ...latest, mode: taskHistoryItem.mode })
+					}
 
 					// An abort that lands while the history write is in flight has
 					// already persisted the new mode: restore the pre-switch item and
@@ -2717,6 +2730,22 @@ export class ClineProvider
 				this.log(
 					`Failed to persist mode switch for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`,
 				)
+
+				// The history write landed before this failure - the emit above is the reachable
+				// thrower now that the history write runs first - so undo it: without the undo, the
+				// persisted item keeps a mode the task, its view pin and its profile never took on.
+				// A failed undo is logged; the original failure is what the caller sees.
+				if (undoHistoryWrite) {
+					try {
+						await undoHistoryWrite()
+					} catch (rollbackError) {
+						this.log(
+							`Failed to roll back the task history entry after a failed mode switch: ${
+								rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+							}`,
+						)
+					}
+				}
 
 				// Optionally, we could emit an event to notify about the failure.
 				// This ensures the in-memory state remains consistent with persisted state.
