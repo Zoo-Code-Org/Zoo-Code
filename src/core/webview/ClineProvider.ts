@@ -3162,7 +3162,15 @@ export class ClineProvider
 		// we rely on the `ContextProxy`'s data store and in other cases
 		// we rely on the `ProviderSettingsManager`'s data store. It might
 		// be simpler to unify these two.
-		const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
+		// The profile rename holds the manager's cross-instance critical section across its
+		// name check, its save, and its compensation delete. Only the per-instance mutation
+		// queue orders this view's writes, so a same-name save from another view can land
+		// between that rename's check and its save and then be deleted by its compensation.
+		// Joining the section here puts both writers behind one lock; only the store write
+		// is wrapped, so the shared lock is never held across the activation work below.
+		const id = await this.providerSettingsManager.runExclusiveAcrossInstances(() =>
+			this.providerSettingsManager.saveConfig(name, providerSettings),
+		)
 
 		if (signal.aborted) return id
 

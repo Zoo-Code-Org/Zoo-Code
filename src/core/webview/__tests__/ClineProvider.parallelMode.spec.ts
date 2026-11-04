@@ -520,6 +520,9 @@ vi.mock("../../config/ProviderSettingsManager", () => ({
 	ProviderSettingsManager: vi.fn().mockImplementation(function () {
 		return {
 			saveConfig: vi.fn().mockResolvedValue("test-id"),
+			// persistProviderProfile joins the manager's cross-instance section around the store
+			// write; this mock runs the callback inline because no second view competes here.
+			runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 			listConfig: vi.fn().mockResolvedValue([]),
 			// Mirrors ProviderSettingsManager.hasConfig: the sibling-overlay snapshot asks
 			// before reading a pinned profile so a dangling pin can be left alone.

@@ -1068,6 +1068,8 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		// ... and marks the view as launched.
 		expect(mockClineProvider.isViewLaunched).toBe(true)
 	})
+
+	// The repair runs inside the readiness window, so a swallowed failure there releases
 })
 
 describe("webviewMessageHandler - deleteApiConfiguration", () => {
@@ -3189,6 +3191,80 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 	})
 })
 
+describe("webviewMessageHandler - saveApiConfiguration", () => {
+	// Double assertion: the spec-wide provider double only declares the members
+	// most tests drive; this structural widening keeps these tests free of any.
+	const provider = mockClineProvider as unknown as {
+		providerSettingsManager: {
+			saveConfig: ReturnType<typeof vi.fn>
+			listConfig: ReturnType<typeof vi.fn>
+			runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => Promise<unknown>
+		}
+	}
+	const originalSaveMembers = {
+		providerSettingsManager: provider.providerSettingsManager,
+	}
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+	afterEach(() => {
+		Object.assign(mockClineProvider, originalSaveMembers)
+	})
+
+	// A promise-chain double, matching the real shared lock: a caller queues behind
+	// whoever holds the section instead of running inline.
+	let section: Promise<unknown> = Promise.resolve()
+	const runExclusiveAcrossInstances = <T>(cb: () => Promise<T>): Promise<T> => {
+		const run = section.then(cb)
+		section = run.then(
+			() => {},
+			() => {},
+		)
+		return run
+	}
+
+	it("waits for another view's critical section before saving the profile record", async () => {
+		const events: string[] = []
+		let releaseOtherView!: () => void
+		const otherViewHold = new Promise<void>((resolve) => {
+			releaseOtherView = resolve
+		})
+		section = Promise.resolve()
+		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances,
+			saveConfig: vi.fn(async () => {
+				events.push("saveConfig")
+			}),
+			listConfig: vi.fn(async () => {
+				events.push("listConfig")
+				return []
+			}),
+		}
+		// Another view's rename holds the section across its name check, its save, and its
+		// compensation delete.
+		const heldSection = runExclusiveAcrossInstances(async () => {
+			events.push("otherViewEnter")
+			await otherViewHold
+			events.push("otherViewExit")
+		})
+		const saveWrite = webviewMessageHandler(mockClineProvider, {
+			type: "saveApiConfiguration",
+			text: "rival-profile",
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+		await new Promise((resolve) => setImmediate(resolve))
+
+		// The rollback deletes whatever the new name holds at that moment, so a save that
+		// landed while the section was held would be deleted with the failed rename.
+		expect(events).toEqual(["otherViewEnter"])
+
+		releaseOtherView()
+		await saveWrite
+		await heldSection
+
+		expect(events).toEqual(["otherViewEnter", "otherViewExit", "saveConfig", "listConfig"])
+	})
+})
 describe("webviewMessageHandler - kimiCodeSignIn", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()

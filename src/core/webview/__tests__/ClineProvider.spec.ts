@@ -461,12 +461,20 @@ function stallProviderSettingsProfile(provider: ClineProvider) {
 		return new Promise<StalledProfile>((resolve) => (resolveProfile = resolve))
 	})
 	// @ts-ignore - Reassign the readonly providerSettingsManager for the test; the double only backs getProfile.
-	provider.providerSettingsManager = { getProfile: getProfileSpy }
+	provider.providerSettingsManager = {
+		runExclusiveAcrossInstances: runManagerSectionInline,
+		getProfile: getProfileSpy,
+	}
 	// Return a stable wrapper around the closure binding: resolveProfile is
 	// reassigned to the pending promise's resolver once getProfile is called,
 	// so returning the variable directly would hand the test the initial no-op.
 	return { getProfile: getProfileSpy, resolveProfile: (value: StalledProfile) => resolveProfile(value) }
 }
+
+// A same-name profile save joins the manager's cross-instance critical section, so a
+// double that stubs the manager must still run the callback inline: the real lock does
+// that whenever no other view holds the section.
+const runManagerSectionInline = (cb: () => Promise<unknown>): Promise<unknown> => cb()
 
 describe("ClineProvider", () => {
 	it("reports hasResolvedView once a view or panel is resolved", async () => {
@@ -4501,7 +4509,10 @@ describe("ClineProvider", () => {
 				openRouterModelId: "model-x",
 			})
 			// @ts-ignore - Replace providerSettingsManager with a test double for the profile lookup.
-			provider.providerSettingsManager = { getProfile: getProfileSpy }
+			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
+				getProfile: getProfileSpy,
+			}
 			// The ownership check requires the writer to release the id before the
 			// next view adopts it; the durable entry it wrote stays in storage.
 			await writer.dispose()
@@ -4546,7 +4557,10 @@ describe("ClineProvider", () => {
 			)
 			const logSpy = vi.spyOn(provider, "log")
 			// @ts-ignore - Replace providerSettingsManager with a failing test double.
-			provider.providerSettingsManager = { getProfile: vi.fn().mockRejectedValue(new Error("profile missing")) }
+			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
+				getProfile: vi.fn().mockRejectedValue(new Error("profile missing")),
+			}
 			await provider.saveViewState("currentApiConfigName", "my-profile")
 			await provider["setViewStateId"]("stable-sidebar-view")
 			expect(provider["viewLocalState"].currentApiConfigName).toBe("my-profile")
@@ -4566,6 +4580,7 @@ describe("ClineProvider", () => {
 			const logSpy = vi.spyOn(provider, "log")
 			// @ts-ignore - Replace providerSettingsManager with a test double that registers a newer id.
 			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				getProfile: vi.fn().mockImplementation(() => {
 					provider["viewStateId"] = "superseded-view"
 					return Promise.resolve({ name: "my-profile", apiProvider: providerIdentifiers.openrouter })
@@ -4637,6 +4652,7 @@ describe("ClineProvider", () => {
 			)
 			// @ts-ignore - Replace providerSettingsManager with a test double for the profile lookup.
 			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				getProfile: vi.fn().mockResolvedValue({
 					name: "my-profile",
 					apiProvider: providerIdentifiers.openrouter,
@@ -5123,6 +5139,7 @@ describe("ClineProvider", () => {
 			)
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				activateProfile: vi.fn().mockResolvedValue(profile),
 				listConfig: vi.fn().mockResolvedValue([profile]),
 				setModeConfig: vi.fn(),
@@ -5163,6 +5180,7 @@ describe("ClineProvider", () => {
 			const freshSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "fresh-key" }
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				activateProfile: vi.fn().mockResolvedValue({ name: "new-profile", id: "new-id", ...freshSettings }),
 				listConfig: vi.fn().mockResolvedValue([]),
 				setModeConfig: vi.fn(),
@@ -5216,6 +5234,7 @@ describe("ClineProvider", () => {
 			}
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				saveConfig: vi.fn().mockResolvedValue("fresh-id"),
 				listConfig: vi.fn().mockResolvedValue([profile]),
 				setModeConfig: vi.fn(),
@@ -5229,6 +5248,67 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		// The mutation queue only orders this view's own writes, so a same-name write from
+		// another view can still land inside the rename's critical section and be removed
+		// by its compensation: the store write joins that section.
+		it("waits for another view's critical section before saving the profile record", async () => {
+			const events: string[] = []
+			let releaseOtherView!: () => void
+			const otherViewHold = new Promise<void>((resolve) => {
+				releaseOtherView = resolve
+			})
+			// A promise-chain double, matching the real shared lock: a caller queues behind
+			// whoever holds the section instead of running inline.
+			let section: Promise<unknown> = Promise.resolve()
+			const runExclusiveAcrossInstances = <T>(cb: () => Promise<T>): Promise<T> => {
+				const run = section.then(cb)
+				section = run.then(
+					() => {},
+					() => {},
+				)
+				return run
+			}
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances,
+				saveConfig: vi.fn(async () => {
+					events.push("saveConfig")
+					return "rival-id"
+				}),
+				listConfig: vi.fn().mockResolvedValue([]),
+				setModeConfig: vi.fn(),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// Another view's rename holds the section across its name check, its save, and its
+			// compensation delete.
+			const heldSection = runExclusiveAcrossInstances(async () => {
+				events.push("otherViewEnter")
+				await otherViewHold
+				events.push("otherViewExit")
+			})
+			const upsert = provider.upsertProviderProfile("rival-profile", {
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			await new Promise((resolve) => setImmediate(resolve))
+
+			// The rename's rollback deletes whatever the new name holds, so a save that skipped
+			// the section would be deleted by the other view's compensation.
+			expect(events).toEqual(["otherViewEnter"])
+
+			releaseOtherView()
+			await upsert
+			await heldSection
+
+			expect(events).toEqual(["otherViewEnter", "otherViewExit", "saveConfig"])
+			await provider.dispose()
+		})
 		it("should report the fresh profile's settings over a stale view-local buffer in getState after upserting and activating a profile", async () => {
 			const provider = new ClineProvider(
 				mockContext,
@@ -5244,6 +5324,7 @@ describe("ClineProvider", () => {
 			}
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				saveConfig: vi.fn().mockResolvedValue("fresh-id"),
 				listConfig: vi.fn().mockResolvedValue([profile]),
 				setModeConfig: vi.fn(),
@@ -5301,6 +5382,7 @@ describe("ClineProvider", () => {
 			// @ts-ignore - Replace providerSettingsManager with a test double: deleting the
 			// current profile now activates the fallback, which reads its settings.
 			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
 				activateProfile: vi.fn().mockResolvedValue(keeperProfile),
 				listConfig: vi.fn().mockResolvedValue([keeperProfile]),
@@ -5363,6 +5445,7 @@ describe("ClineProvider", () => {
 			})
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
 				activateProfile: vi.fn().mockResolvedValue(replacementProfile),
 				listConfig: vi.fn().mockResolvedValue([replacementProfile, pinnedProfile]),
@@ -5413,6 +5496,7 @@ describe("ClineProvider", () => {
 			})
 			// @ts-ignore - Replace providerSettingsManager with a double whose deletion fails.
 			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				deleteConfig: vi.fn().mockRejectedValue(new Error("storage down")),
 				activateProfile: vi.fn().mockResolvedValue(keeperProfile),
 				listConfig: vi.fn().mockResolvedValue([keeperProfile]),
@@ -5463,6 +5547,7 @@ describe("ClineProvider", () => {
 			// reports the secret as already gone: an idempotent no-op that must still prune
 			// the stale list entry and re-point the pin.
 			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				deleteConfig: vi.fn().mockRejectedValue(new ProviderSettingsNotFoundError("missing")),
 				activateProfile: vi.fn().mockResolvedValue(keeperProfile),
 				listConfig: vi.fn().mockResolvedValue([keeperProfile]),
@@ -5519,6 +5604,7 @@ describe("ClineProvider", () => {
 			// view takes the activation path, so the survivor's settings are read through
 			// activateProfile.
 			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				activateProfile: vi.fn().mockResolvedValue({
 					name: "keeper-profile",
 					id: "keeper-id",
@@ -5667,6 +5753,7 @@ describe("ClineProvider", () => {
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				getProfile: vi.fn().mockResolvedValue({
 					name: "other-profile",
 					id: "other-id",
@@ -5837,6 +5924,7 @@ describe("ClineProvider", () => {
 			)
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				saveConfig: vi.fn().mockResolvedValue("activated-id"),
 				listConfig: vi
 					.fn()
@@ -5886,6 +5974,7 @@ describe("ClineProvider", () => {
 
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				saveConfig: vi.fn().mockResolvedValue("profile-b-id"),
 				listConfig: vi
 					.fn()
@@ -6142,6 +6231,7 @@ describe("ClineProvider", () => {
 
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				activateProfile: vi.fn().mockResolvedValue({
 					name: "profile-b",
 					id: "profile-b-id",
@@ -7832,6 +7922,7 @@ describe("ClineProvider", () => {
 		}
 
 		;(provider as any).providerSettingsManager = {
+			runExclusiveAcrossInstances: runManagerSectionInline,
 			getModeConfigId: vi.fn().mockResolvedValue("test-id"),
 			listConfig: vi.fn().mockResolvedValue([profile]),
 			activateProfile: vi.fn().mockResolvedValue(profile),
@@ -7853,6 +7944,7 @@ describe("ClineProvider", () => {
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 		;(provider as any).providerSettingsManager = {
+			runExclusiveAcrossInstances: runManagerSectionInline,
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			listConfig: vi
 				.fn()
@@ -7882,6 +7974,7 @@ describe("ClineProvider", () => {
 		}
 
 		;(provider as any).providerSettingsManager = {
+			runExclusiveAcrossInstances: runManagerSectionInline,
 			activateProfile: vi.fn().mockResolvedValue(profile),
 			listConfig: vi.fn().mockResolvedValue([profile]),
 			setModeConfig: vi.fn(),
@@ -7909,6 +8002,7 @@ describe("ClineProvider", () => {
 		}
 
 		;(provider as any).providerSettingsManager = {
+			runExclusiveAcrossInstances: runManagerSectionInline,
 			activateProfile: vi.fn().mockResolvedValue(profile),
 			listConfig: vi.fn().mockResolvedValue([profile]),
 			setModeConfig: vi.fn(),
@@ -8085,6 +8179,7 @@ describe("ClineProvider", () => {
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 		;(provider as any).providerSettingsManager = {
+			runExclusiveAcrossInstances: runManagerSectionInline,
 			listConfig: vi
 				.fn()
 				.mockResolvedValue([
@@ -8435,6 +8530,7 @@ describe("ClineProvider", () => {
 			}
 
 			;(provider as any).providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				getModeConfigId: vi.fn().mockResolvedValue("saved-config-id"),
 				listConfig: vi.fn().mockResolvedValue([profile]),
 				activateProfile: vi.fn().mockResolvedValue(profile),
@@ -8467,6 +8563,7 @@ describe("ClineProvider", () => {
 
 		test("saves current config when switching to mode without config", async () => {
 			;(provider as any).providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
@@ -8535,6 +8632,7 @@ describe("ClineProvider", () => {
 
 			// Mock provider settings manager
 			;(provider as any).providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi.fn().mockResolvedValue([]),
 			}
@@ -8601,6 +8699,7 @@ describe("ClineProvider", () => {
 
 			// Mock provider settings manager
 			;(provider as any).providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
 				listConfig: vi
 					.fn()
@@ -8666,6 +8765,7 @@ describe("ClineProvider", () => {
 
 			// Mock provider settings manager
 			;(provider as any).providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi.fn().mockResolvedValue([]),
 			}
@@ -8698,6 +8798,7 @@ describe("ClineProvider", () => {
 
 			// Mock provider settings manager
 			;(provider as any).providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi.fn().mockResolvedValue([]),
 			}
@@ -8742,6 +8843,7 @@ describe("ClineProvider", () => {
 
 			// Mock provider settings manager to throw error
 			;(provider as any).providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
 				listConfig: vi
 					.fn()
@@ -8844,6 +8946,7 @@ describe("ClineProvider", () => {
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 			;(provider as any).providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				setModeConfig: vi.fn().mockRejectedValue(new Error("Failed to update mode config")),
 				listConfig: vi
 					.fn()
@@ -8877,6 +8980,7 @@ describe("ClineProvider", () => {
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 			;(provider as any).providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				setModeConfig: vi.fn(),
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
@@ -8922,6 +9026,7 @@ describe("ClineProvider", () => {
 				throw new Error("API handler error")
 			})
 			;(provider as any).providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				setModeConfig: vi.fn(),
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
@@ -8965,6 +9070,7 @@ describe("ClineProvider", () => {
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 			;(provider as any).providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				setModeConfig: vi.fn(),
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
@@ -11339,6 +11445,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
 				;(provider as any).providerSettingsManager = {
+					runExclusiveAcrossInstances: runManagerSectionInline,
 					listConfig: vi.fn().mockResolvedValue([]),
 				}
 
@@ -11370,6 +11477,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const saveConfig = vi.fn().mockResolvedValue(undefined)
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				;(provider as any).providerSettingsManager = {
+					runExclusiveAcrossInstances: runManagerSectionInline,
 					listConfig: vi.fn().mockResolvedValue([
 						{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
 						{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
@@ -11414,6 +11522,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				vi.spyOn(provider, "getState").mockRejectedValue(new Error("state unavailable"))
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				;(provider as any).providerSettingsManager = {
+					runExclusiveAcrossInstances: runManagerSectionInline,
 					listConfig: vi.fn().mockResolvedValue([]),
 				}
 
@@ -11432,6 +11541,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
+					runExclusiveAcrossInstances: runManagerSectionInline,
 					listConfig: vi.fn(),
 				}
 
@@ -11447,6 +11557,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
+					runExclusiveAcrossInstances: runManagerSectionInline,
 					listConfig: vi
 						.fn()
 						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
@@ -11468,6 +11579,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
+					runExclusiveAcrossInstances: runManagerSectionInline,
 					listConfig: vi
 						.fn()
 						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
@@ -11488,6 +11600,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
+					runExclusiveAcrossInstances: runManagerSectionInline,
 					listConfig: vi
 						.fn()
 						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
@@ -11541,6 +11654,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				// @ts-ignore - Replace providerSettingsManager with a test double.
 				provider.providerSettingsManager = {
+					runExclusiveAcrossInstances: runManagerSectionInline,
 					saveConfig: vi.fn().mockResolvedValue("saved-id"),
 					listConfig: vi.fn().mockResolvedValue([]),
 					setModeConfig: vi.fn(),
@@ -11610,6 +11724,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				// @ts-ignore - Replace providerSettingsManager with a test double.
 				provider.providerSettingsManager = {
+					runExclusiveAcrossInstances: runManagerSectionInline,
 					saveConfig: vi.fn().mockResolvedValue("saved-id"),
 					listConfig: vi.fn().mockResolvedValue([]),
 					setModeConfig: vi.fn(),
@@ -11655,6 +11770,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			provider["viewLocalState"].currentApiConfigName = "saved-profile"
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				saveConfig: vi.fn().mockResolvedValue("saved-id"),
 				listConfig: vi.fn().mockResolvedValue([]),
 				setModeConfig: vi.fn(),
@@ -11721,6 +11837,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				activateProfile: vi.fn().mockResolvedValue({
 					name: "shared-profile",
 					id: "id-shared",
