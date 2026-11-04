@@ -183,6 +183,27 @@ describe("VSCodeAPIWrapper", () => {
 		expect(JSON.parse(storage.getItem("vscodeState")!)).toMatchObject({ viewStateId: "loyw3v28-zk00000ytu" })
 	})
 
+	it("falls back to a timestamp-random id when crypto.randomUUID is inherited but not callable", () => {
+		// "randomUUID" in crypto is also true for an inherited property, so a presence check
+		// alone would call a value that is not a function and throw before any id is minted.
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: Object.create({ randomUUID: "not-a-function" }),
+		})
+		vi.spyOn(Date, "now").mockReturnValue(1700000000000)
+		vi.spyOn(Math, "random").mockReturnValue(0.987654321)
+		const storage = createMockStorage()
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		// Same deterministic fallback id as the sibling cases: 1700000000000.toString(36) ===
+		// "loyw3v28" and (0.987654321).toString(36) drops its "0." prefix.
+		expect(wrapper.getViewStateId()).toBe("loyw3v28-zk00000ytu")
+		expect(JSON.parse(storage.getItem("vscodeState")!)).toMatchObject({ viewStateId: "loyw3v28-zk00000ytu" })
+	})
 	it("creates a new viewStateId when the stored state parses to JSON null", () => {
 		Object.defineProperty(globalThis, "crypto", {
 			configurable: true,
@@ -317,6 +338,28 @@ describe("VSCodeAPIWrapper", () => {
 		expect(randomUUID).toHaveBeenCalledTimes(1)
 	})
 
+	it("falls back to in-memory state when the persisted vscodeState JSON is malformed", () => {
+		// A half-written value is not a state: a read must fall back to the in-memory state
+		// instead of throwing out of getViewStateId, and once a write fails the stale JSON must
+		// stay out of the way rather than becoming authoritative again.
+		const storage = createMockStorage({ vscodeState: '{"viewStateId": "half-writt' })
+		storage.setItem = vi.fn(() => {
+			throw new Error("storage quota exceeded")
+		})
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		expect(wrapper.getState()).toBeUndefined()
+		wrapper.setState({ viewStateId: "in-memory-view" })
+		expect(wrapper.getState()).toEqual({ viewStateId: "in-memory-view" })
+		expect(wrapper.getViewStateId()).toBe("in-memory-view")
+		// Only the first read reaches storage: after the failed write the in-memory state is
+		// authoritative, so the malformed value is never parsed again.
+		expect(storage.getItem).toHaveBeenCalledTimes(1)
+	})
 	it("keeps the in-memory viewStateId when setItem is unavailable while reads still work", () => {
 		const randomUUID = vi.fn().mockReturnValueOnce("no-setitem-view").mockReturnValueOnce("flapped-view")
 		Object.defineProperty(globalThis, "crypto", {

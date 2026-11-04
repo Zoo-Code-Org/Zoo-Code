@@ -33,7 +33,9 @@ export class VSCodeAPIWrapper {
 	 * @remarks Used only when no persisted identifier exists yet.
 	 */
 	private createViewStateId(): string {
-		if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+		// Presence is not enough: a crypto object can inherit a randomUUID property that is
+		// undefined or not a function, and calling it would throw before any id is minted.
+		if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
 			return crypto.randomUUID()
 		}
 
