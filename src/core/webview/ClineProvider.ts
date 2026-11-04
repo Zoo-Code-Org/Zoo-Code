@@ -766,7 +766,7 @@ export class ClineProvider
 		// Delivered only once the durable write landed: a webview must never hold a claim the
 		// host did not store, or the next launch would present a token the entry cannot match.
 		if (mintedClaimToken) {
-			this.postViewStateClaimToWebview(viewStateId, mintedClaimToken)
+			await this.postViewStateClaimToWebview(viewStateId, mintedClaimToken)
 		}
 	}
 
@@ -813,9 +813,30 @@ export class ClineProvider
 	 * Delivers the host-minted claim that governs a durable viewStates key to this view's
 	 * webview. The webview only stores it and echoes it back on the next launch: it can
 	 * never mint or choose a claim itself.
+	 *
+	 * Awaited rather than fired and forgotten: the entry already carries this claim once the
+	 * write lands, so a view that never receives it would be missing an identity the host
+	 * believes it holds. `postMessageToWebview` drops a message silently while no webview is
+	 * attached (or once the provider is disposed), so the gap is reported here; the post
+	 * itself stays the single place that records the webview-out diagnostic.
 	 */
-	private postViewStateClaimToWebview(viewStateId: string, claimToken: string): void {
-		void this.postMessageToWebview({ type: "viewStateClaim", viewStateId, viewStateClaim: claimToken })
+	private async postViewStateClaimToWebview(viewStateId: string, claimToken: string): Promise<boolean> {
+		try {
+			await this.postMessageToWebview({ type: "viewStateClaim", viewStateId, viewStateClaim: claimToken })
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error)
+			this.log(`[viewStateClaim] Delivery for ${viewStateId} to view ${this.viewId} failed: ${reason}`)
+			return false
+		}
+
+		if (!this.view) {
+			this.log(
+				`[viewStateClaim] Claim for ${viewStateId} not delivered to view ${this.viewId}: no webview attached.`,
+			)
+			return false
+		}
+
+		return true
 	}
 
 	/**
@@ -958,7 +979,7 @@ export class ClineProvider
 					return
 				}
 
-				this.postViewStateClaimToWebview(normalizedViewStateId, reboundClaim)
+				await this.postViewStateClaimToWebview(normalizedViewStateId, reboundClaim)
 				this.log(
 					`[setViewStateId] Re-bound claim-less viewStates entry ${normalizedViewStateId} for view ${this.viewId}: unbound selections were not loaded.`,
 				)
@@ -988,7 +1009,7 @@ export class ClineProvider
 			const adoptedClaim = this.getPersistedViewStates({ fresh: true })[this.viewStateId]?.claimToken
 
 			if (adoptedClaim) {
-				this.postViewStateClaimToWebview(this.viewStateId, adoptedClaim)
+				await this.postViewStateClaimToWebview(this.viewStateId, adoptedClaim)
 			}
 
 			// Registration is what loads this view's own persisted selections.

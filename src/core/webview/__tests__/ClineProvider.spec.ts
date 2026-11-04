@@ -5939,6 +5939,44 @@ describe("ClineProvider", () => {
 			).toHaveLength(1)
 		})
 
+		test("resolves the persistence write only after the minted claim has been posted", async () => {
+			const gated = createProvider()
+			let posted = false
+			const postSpy = vi.spyOn(gated, "postMessageToWebview").mockImplementation(async () => {
+				// A real webview post settles on a later turn: a write that reported success before
+				// this resolved would leave the view without the claim it just made durable.
+				await new Promise((resolve) => setTimeout(resolve, 0))
+				posted = true
+			})
+
+			await gated.saveViewState("mode", "architect")
+
+			expect(storedEntries()[gated.viewId]?.claimToken).toEqual(expect.any(String))
+			expect(posted).toBe(true)
+
+			postSpy.mockRestore()
+			await gated.dispose()
+		})
+
+		test("logs a claim that cannot be delivered because no webview is attached", async () => {
+			const detached = createProvider()
+			// Nothing is attached in this harness: the post is dropped and the claim is durable
+			// anyway, so the gap has to reach the log instead of leaving a silent mismatch.
+			expect(detached["view"]).toBeUndefined()
+			const loggedBefore = (mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mock.calls.length
+
+			await detached.saveViewState("mode", "architect")
+
+			const loggedLines: string[] = (mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mock.calls
+				.slice(loggedBefore)
+				.map((call: unknown[]) => String(call[0]))
+			const claimLines = loggedLines.filter((line) => line.includes("[viewStateClaim]"))
+			expect(claimLines).toHaveLength(1)
+			expect(claimLines[0]).toContain("not delivered")
+
+			await detached.dispose()
+		})
+
 		test("re-binds a claim-less legacy entry instead of loading its selections", async () => {
 			// An entry written before claims existed cannot be attributed to any webview: its
 			// selections are refused, and the key is re-bound with a fresh host-minted claim so
