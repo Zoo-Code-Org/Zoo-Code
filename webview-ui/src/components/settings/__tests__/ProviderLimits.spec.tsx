@@ -138,6 +138,15 @@ describe("ProviderLimits", () => {
 
 			expect(screen.getByTestId(`provider-limit-${providerIdentifiers.zai}`).textContent).toContain("$4.25 left")
 		})
+
+		it("shows that a window is degraded, which has no figure, in the text of the row", () => {
+			render(<ProviderLimits />)
+			respond([quota([{ id: "daily", valueLabel: "Daily (degraded)" }])])
+
+			const row = screen.getByTestId(`provider-limit-${providerIdentifiers.zai}`)
+			expect(row.textContent).toContain("Daily (degraded)")
+			expect(row.textContent).not.toContain("%")
+		})
 	})
 
 	it("shows a loading row until the first response", () => {

@@ -287,9 +287,17 @@ describe("parseNanoGptUsage", () => {
 		])
 	})
 
-	it("shows no percent for a degraded window", () => {
+	it("shows no percent for a degraded window, and says in its label that it is degraded", () => {
 		const daily = parseNanoGptUsage({ dailyInputTokens: { percentUsed: 0.9, degraded: true } })![0]
 		expect(daily.usedPercent).toBeUndefined()
+		expect(daily.valueLabel).toBe("Daily (degraded)")
+	})
+
+	it("names the plan state rather than 'degraded' when both apply, and leaves a healthy window's label alone", () => {
+		expect(
+			parseNanoGptUsage({ state: "grace", dailyInputTokens: { percentUsed: 0.9, degraded: true } })?.[0],
+		).toMatchObject({ valueLabel: "Daily (grace)" })
+		expect(parseNanoGptUsage({ dailyInputTokens: { percentUsed: 0.5 } })?.[0].valueLabel).toBe("Daily")
 	})
 })
 

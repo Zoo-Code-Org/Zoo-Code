@@ -325,7 +325,8 @@ export function parseNanoGptUsage(payload: unknown): ProviderQuotaWindow[] | und
 
 		windows.push({
 			id,
-			valueLabel: state !== "active" ? `${label} (${state})` : label,
+			// A degraded window has no figure to show, so its label says so, as it does for a plan state.
+			valueLabel: state !== "active" ? `${label} (${state})` : q.degraded ? `${label} (degraded)` : label,
 			usedPercent,
 			resetAt: reset,
 		})
