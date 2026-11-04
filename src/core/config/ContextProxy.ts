@@ -479,6 +479,19 @@ export class ContextProxy {
 	}
 
 	/**
+	 * Loads one secret into the cache. A write of the key that started while the secret was being read has its own
+	 * outcome, so the (older) value that was read is dropped. Otherwise the load takes over the key from a write that is
+	 * still pending, so that a failure of that write cannot replace what was just loaded.
+	 */
+	private async refreshSecret(key: SecretStateKey) {
+		const owner = this.secretWriteOwner.get(key)
+		const value = await this.originalContext.secrets.get(key)
+		if (this.secretWriteOwner.get(key) !== owner) return
+		this.secretWriteOwner.delete(key)
+		this.secretCache[key] = value
+	}
+
+	/**
 	 * Refresh secrets from storage and update cache
 	 * This is useful when you need to ensure the cache has the latest values
 	 */
@@ -486,7 +499,7 @@ export class ContextProxy {
 		const promises = [
 			...SECRET_STATE_KEYS.map(async (key) => {
 				try {
-					this.secretCache[key] = await this.originalContext.secrets.get(key)
+					await this.refreshSecret(key)
 				} catch (error) {
 					logger.error(
 						`Error refreshing secret ${key}: ${error instanceof Error ? error.message : String(error)}`,
@@ -495,7 +508,7 @@ export class ContextProxy {
 			}),
 			...GLOBAL_SECRET_KEYS.map(async (key) => {
 				try {
-					this.secretCache[key] = await this.originalContext.secrets.get(key)
+					await this.refreshSecret(key)
 				} catch (error) {
 					logger.error(
 						`Error refreshing global secret ${key}: ${error instanceof Error ? error.message : String(error)}`,

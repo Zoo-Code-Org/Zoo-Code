@@ -444,6 +444,44 @@ describe("ContextProxy", () => {
 			expect(proxy["stateWriteOwner"].size).toBe(1)
 		})
 
+		it("does not let a failed write whose read-back times out hide a secret that refreshSecrets loaded", async () => {
+			vi.useFakeTimers()
+			try {
+				mockSecrets.store.mockRejectedValue(new Error("keychain locked"))
+				await proxy.initialize()
+				let readBackSettles: (value: string) => void = () => {}
+				mockSecrets.get
+					.mockImplementationOnce(() => new Promise((resolve) => (readBackSettles = resolve))) // the read-back, queued first
+					.mockResolvedValue("loaded-key") // what the refresh reads
+
+				const failed = expect(proxy.storeSecret("openAiApiKey", "new-key")).rejects.toThrow("keychain locked")
+				await vi.advanceTimersByTimeAsync(0) // the store has failed and the read-back has started
+				await proxy.refreshSecrets()
+				expect(proxy.getSecret("openAiApiKey")).toBe("loaded-key")
+				await vi.advanceTimersByTimeAsync(5_000) // the read-back times out
+				await failed
+
+				expect(proxy.getSecret("openAiApiKey")).toBe("loaded-key")
+				expect(proxy["secretWriteOwner"].size).toBe(0)
+				readBackSettles("late")
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("does not replace a secret written while refreshSecrets was reading it", async () => {
+			await proxy.initialize()
+			let finishRead: (value: string) => void = () => {}
+			mockSecrets.get.mockImplementationOnce(() => new Promise((resolve) => (finishRead = resolve)))
+
+			const refreshing = proxy.refreshSecrets()
+			await proxy.storeSecret("openAiApiKey", "written-key") // starts and succeeds during the read
+			finishRead("older-key")
+			await refreshing
+
+			expect(proxy.getSecret("openAiApiKey")).toBe("written-key")
+		})
+
 		it("still reports the failure when the secret cannot be read back either", async () => {
 			mockSecrets.store.mockRejectedValue(new Error("keychain locked"))
 			await proxy.initialize()
