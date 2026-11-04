@@ -1158,7 +1158,7 @@
 			"refresh": "Atualizar",
 			"updated": "Atualizado {{time}}",
 			"loading": "Verificando os provedores conectados…",
-			"resets": "Redefine {{date}}",
+			"resets": "Redefine em {{date}}",
 			"signedOut": "Sem login",
 			"noCopilot": "Sem cota do Copilot",
 			"noKey": "Chave de API ausente ou inválida",
