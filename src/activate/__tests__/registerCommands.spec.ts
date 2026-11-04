@@ -1122,6 +1122,79 @@ describe("openClineInNewTab", () => {
 		expect(firstProvider).not.toBe(secondProvider)
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
 	})
+
+	it("keeps a forced creation from evicting an in-flight ordinary creation", async () => {
+		// An ordinary "Open in editor" call is mid-creation when startNewTask({ newTab: true }) starts.
+		// The forced call must create its own provider without taking the shared slot away from the
+		// ordinary one: a caller that starts afterwards is asking for the panel the ordinary creation
+		// is building, and receiving the forced creation's promise would reject it for a failure of
+		// someone else's creation while its own creation still opens a panel nobody awaits.
+		let resolveContextProxy!: () => void
+		const gate = new Promise<void>((resolve) => {
+			resolveContextProxy = resolve
+		})
+		;(ContextProxy.getInstance as Mock).mockReturnValue(gate)
+
+		const ordinary = openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		})
+		const forced = openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+			forceNew: true,
+		})
+		const later = openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		})
+
+		resolveContextProxy()
+		const [ordinaryProvider, forcedProvider, laterProvider] = await Promise.all([ordinary, forced, later])
+
+		const ctor = vi.mocked(ClineProvider)
+		// The ordinary creation keeps the slot, so the call that starts after the forced one still
+		// joins the ordinary creation instead of the forced one.
+		expect(ordinaryProvider).toBe(ctor.mock.instances[0])
+		expect(laterProvider).toBe(ctor.mock.instances[0])
+		// The forced call still gets its own provider and its own panel.
+		expect(forcedProvider).toBe(ctor.mock.instances[1])
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
+	})
+
+	it("lets a later ordinary call join a forced creation that started with a free slot", async () => {
+		// The store guard is only about not evicting somebody else's creation. A forced call that
+		// starts while the slot is free still occupies it, so a non-forced caller that starts during
+		// that creation reuses its panel rather than opening a second one.
+		let resolveContextProxy!: () => void
+		const gate = new Promise<void>((resolve) => {
+			resolveContextProxy = resolve
+		})
+		;(ContextProxy.getInstance as Mock).mockReturnValue(gate)
+
+		const forced = openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+			forceNew: true,
+		})
+		const later = openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		})
+
+		resolveContextProxy()
+		const [forcedProvider, laterProvider] = await Promise.all([forced, later])
+
+		const ctor = vi.mocked(ClineProvider)
+		expect(forcedProvider).toBe(ctor.mock.instances[0])
+		expect(laterProvider).toBe(ctor.mock.instances[0])
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
+	})
 	it("shares one in-flight creation when openInNewTab and popoutButtonClicked start before it resolves", async () => {
 		// Defer the first creation at ContextProxy.getInstance so both command
 		// handlers can start while the creation is still in flight.

@@ -339,7 +339,14 @@ export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
 	}
 
 	const creation = createTabPanelUnlocked(options)
-	pendingTabPanelCreation = creation
+	// The forced call creates its own provider but only occupies the shared slot when the
+	// slot is free. A forced call that arrives while an ordinary creation is in flight must
+	// not evict it: an ordinary caller that starts afterwards is asking for the panel that
+	// creation is building, and giving it the forced promise would reject it for a failure of
+	// somebody else's creation while its own creation still opens a panel nobody awaits.
+	if (!pendingTabPanelCreation) {
+		pendingTabPanelCreation = creation
+	}
 
 	try {
 		return await creation
