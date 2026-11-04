@@ -300,10 +300,16 @@ export const undoSettingWrite = async (
 		// waits for it (the store may never settle), and a newer write cannot have been stored in between.
 		// `onDeferredSettled` runs when it is over, so the caller can show what is really stored; disposing the owner
 		// detaches it.
-		const holder = { callback: onDeferredSettled }
+		// An owner that is already disposed registers no callback at all: nothing may be called back into it, or kept
+		// alive by it, however late the store settles.
+		const holder: { callback?: () => void } = {
+			callback: disposedOwners.has(owner) ? undefined : onDeferredSettled,
+		}
 		const holders = callbacksByOwner.get(owner) ?? new Set<{ callback?: () => void }>()
-		holders.add(holder)
-		callbacksByOwner.set(owner, holders)
+		if (holder.callback) {
+			holders.add(holder)
+			callbacksByOwner.set(owner, holders)
+		}
 		void queuedSettingWrite(owner, key, restore, true)
 			.catch((error: unknown) =>
 				console.error(`Failed to restore setting "${key}" after a write that timed out:`, error),

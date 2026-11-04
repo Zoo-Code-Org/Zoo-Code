@@ -491,6 +491,26 @@ describe("appearanceSettingWrites", () => {
 				expect(settingWriteBookkeepingSize().queuedKeys).toBe(0)
 			})
 
+			it("registers no callback for a provider that was disposed before the write timed out, and still puts the late store right", async () => {
+				const { proxy, landLate } = deferredProxy()
+				const save = beginSettingWrite("interfaceFontScale", 100, 120)
+				const saveFailed = expect(performSettingWrite(proxy, save, sidebar)).rejects.toThrow("did not finish")
+				await vi.advanceTimersByTimeAsync(5_000)
+
+				disposeSettingWrites(sidebar) // before the timeout: the store has started and cannot be cancelled
+				await vi.advanceTimersByTimeAsync(10_000)
+				await saveFailed
+				const settled = vi.fn()
+				await undoSettingWrite(proxy, save, { owner: sidebar, onDeferredSettled: settled }) // registered after disposal
+
+				landLate()
+				await vi.advanceTimersByTimeAsync(0)
+
+				expect(stored.get("interfaceFontScale")).toBe(100) // the storage rollback still ran
+				expect(settled).not.toHaveBeenCalled() // and nothing was called back into the disposed provider
+				expect(settingWriteBookkeepingSize().queuedKeys).toBe(0)
+			})
+
 			it("does not drop a second time a write whose caller already gave up, and releases it", async () => {
 				const { proxy, landLate } = deferredProxy()
 				const first = beginSettingWrite("interfaceFontScale", 100, 120) // hangs
