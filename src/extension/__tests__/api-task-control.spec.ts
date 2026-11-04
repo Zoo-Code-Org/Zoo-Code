@@ -147,6 +147,13 @@ describe("API task controls", () => {
 	})
 
 	describe("startNewTask", () => {
+		// The readiness tests below switch to fake timers. An awaited advance that rejects
+		// skips the restore in its own finally, and a leaked fake clock makes every later test
+		// that awaits a real setTimeout wait for a tick that never arrives. Restore
+		// unconditionally so a leak cannot leave this describe.
+		afterEach(() => {
+			vi.useRealTimers()
+		})
 		it("reverts and closes existing editors before opening a new tab unless preserveOpenTabs is true", async () => {
 			const newTabProvider = createProvider("new-tab-task")
 			openClineInNewTabMock.mockResolvedValue(newTabProvider)
