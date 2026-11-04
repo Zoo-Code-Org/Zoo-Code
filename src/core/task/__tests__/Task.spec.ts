@@ -4555,6 +4555,24 @@ describe("Cline", () => {
 
 			await vi.advanceTimersByTimeAsync(500)
 			expect(messageUpdates.map(({ text }) => text)).toEqual(["r2", "r3", "t2"])
+			// The queued "r3" post keeps the reasoning message's ts; "t2" targets the text message.
+			expect(messageUpdates[1].ts).toBe(messageUpdates[0].ts)
+			expect(messageUpdates[2].ts).not.toBe(messageUpdates[0].ts)
+		})
+
+		it("does not delay the trailing post beyond the interval when the clock steps backward", async () => {
+			const { task, messageUpdates } = createStreamingTask()
+
+			await task.say("text", "first", undefined, true)
+			await task.say("text", "second", undefined, true)
+			expect(messageUpdates.map(({ text }) => text)).toEqual(["second"])
+
+			vi.setSystemTime(Date.now() - 10_000)
+			await task.say("text", "third", undefined, true)
+			expect(messageUpdates.map(({ text }) => text)).toEqual(["second"])
+
+			await vi.advanceTimersByTimeAsync(120)
+			expect(messageUpdates.map(({ text }) => text)).toEqual(["second", "third"])
 		})
 
 		it("posts updates that are far enough apart immediately", async () => {

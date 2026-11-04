@@ -1782,7 +1782,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			post(queued)
 		}
 
-		const elapsed = Date.now() - this.lastPartialMessagePostTs
+		// Clamp: a backward wall-clock step makes the difference negative, which would schedule
+		// the trailing post later than the interval.
+		const elapsed = Math.max(0, Date.now() - this.lastPartialMessagePostTs)
 		if (elapsed >= PARTIAL_MESSAGE_UPDATE_INTERVAL_MS) {
 			this.cancelPendingPartialMessageUpdate()
 			post(message)
