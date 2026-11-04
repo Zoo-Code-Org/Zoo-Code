@@ -3722,6 +3722,46 @@ describe("OpenRouterHandler", () => {
 			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(3)
 		})
 
+		it("keeps retrying when a lookup returns no models after an earlier partial load", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+			const mockedGetModels = vitest.mocked(getModels)
+
+			mockGetModelEndpoints
+				// Lookup 1: the model catalog arrives, the endpoint request produced nothing.
+				.mockResolvedValueOnce({})
+				// Lookup 2: the endpoints arrive, the model request answers an empty map.
+				.mockResolvedValueOnce({ "provider-x": { ...openRouterDefaultModelInfo, maxTokens: 1000 } })
+				// Lookup 3: both answers present, so the load is complete from here on.
+				.mockResolvedValueOnce({ "provider-x": { ...openRouterDefaultModelInfo, maxTokens: 1000 } })
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-sonnet-4",
+					openRouterSpecificProvider: "provider-x",
+				}),
+			)
+
+			await handler.ensureModelFetched()
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(1)
+
+			// The endpoint catalog fills in, but this lookup saw no models. The records from lookup 1
+			// are still published, so judging by the published maps would call this load complete;
+			// the load must stay retryable because the answer it got was empty.
+			mockedGetModels.mockResolvedValueOnce({})
+			await handler.ensureModelFetched()
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(2)
+
+			await handler.ensureModelFetched()
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(3)
+			expect(handler.getModel().info.maxTokens).toBe(1000)
+
+			// A load that answered both catalogs is memoized.
+			await handler.ensureModelFetched()
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(3)
+			expect(mockedGetModels).toHaveBeenCalledTimes(3)
+		})
+
 		it("memoizes the default-provider load even when the endpoint catalog is empty", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
 

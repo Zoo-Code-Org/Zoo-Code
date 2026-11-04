@@ -189,14 +189,13 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 	async ensureModelFetched(signal?: AbortSignal): Promise<void> {
 		await this.ensureCatalogLoaded(async () => {
-			await this.fetchModel()
-			// fetchModel() returns model info, not the catalog, so report emptiness
-			// from the catalogs it assigned: an empty response must stay retryable.
-			// With a specific provider selected, the endpoint catalog is what
-			// getModel() uses, so an empty endpoint response is a failed load even
-			// when the model-level catalog arrived.
-			const hasModels = Object.keys(this.models).length > 0
-			const hasEndpoints = Object.keys(this.endpoints).length > 0
+			const { hasModels, hasEndpoints } = await this.runModelLookup()
+			// Judge the load by what this lookup returned, not by the records that happen to be
+			// published: a lookup that came back empty keeps the previous records, so reading
+			// this.models / this.endpoints here would memoize a failed lookup as complete and never
+			// retry it. With a specific provider selected, the endpoint catalog is what getModel()
+			// uses, so an empty endpoint response is a failed load even when the model-level catalog
+			// arrived.
 			return hasModels && (!this.hasSpecificProvider || hasEndpoints)
 		}, signal)
 	}
@@ -658,6 +657,18 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 	}
 
 	public async fetchModel() {
+		const { info } = await this.runModelLookup()
+		return info
+	}
+
+	/**
+	 * Run one catalog lookup and publish whichever records it returned, under the per-catalog
+	 * sequences above. It also reports what this lookup itself saw: a lookup that came back empty
+	 * leaves the previous records published (both retention rules are deliberate), so the published
+	 * maps cannot tell a fresh catalog from a failed fetch, and a loader that reads them would memoize
+	 * the failure as a complete load.
+	 */
+	private async runModelLookup() {
 		// Claim the lookup id before the first await so a lookup that starts later
 		// always outranks an earlier one when both are in flight.
 		const sequence = ++this.fetchModelSequence
@@ -692,7 +703,13 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			this.endpoints = endpoints
 		}
 
-		return this.getModel()
+		return {
+			info: this.getModel(),
+			// What this lookup itself saw, reported alongside the model so a loader can judge its own
+			// attempt instead of the records that happen to be published.
+			hasModels: Object.keys(models).length > 0,
+			hasEndpoints: Object.keys(endpoints).length > 0,
+		}
 	}
 
 	override getModel() {
