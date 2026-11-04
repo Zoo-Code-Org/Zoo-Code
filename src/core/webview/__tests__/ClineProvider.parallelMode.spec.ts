@@ -1292,7 +1292,9 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await providerB.dispose()
 		})
 
-		it("should re-pin siblings by name only and log when the replacement profile cannot be resolved", async () => {
+		// A4 regression: renaming a sibling's pin without the replacement's settings shows one
+		// profile while the sibling's requests keep using the deleted profile's credentials.
+		it("aborts the deletion when a live sibling's replacement settings cannot be resolved", async () => {
 			const providerA = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
@@ -1327,25 +1329,111 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
 			])
-			// The resolution rejects: the re-pin must fall back to the replacement name
-			// alone and log the miss.
+			// The replacement's settings cannot be resolved. Re-pointing by name alone is what the
+			// finding rejects, so the deletion fails closed and the compensation below runs.
 			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockRejectedValue(
 				new Error("profile store unavailable"),
 			)
 
-			await providerA.deleteProviderProfile({
-				id: "doomed-id",
-				name: "doomed-profile",
-				apiProvider: providerIdentifiers.anthropic,
-			})
+			await expect(
+				providerA.deleteProviderProfile({
+					id: "doomed-id",
+					name: "doomed-profile",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+			).rejects.toThrow("Unable to resolve API profile 'replacement-profile'")
 
-			// B is re-pointed at the replacement by name, without settings it cannot
-			// resolve, and the miss is logged for diagnosis.
-			expect(providerB["viewLocalState"].currentApiConfigName).toBe("replacement-profile")
+			// B is left whole: its pin still names the profile it was pinned to and no partial
+			// overlay was minted for it, because a name-only re-point is the half-state this
+			// finding is about.
+			expect(providerB["viewLocalState"].currentApiConfigName).toBe("doomed-profile")
 			expect(providerB["viewLocalState"].apiConfiguration).toBeUndefined()
+			// The committed manager delete is compensated: the shared profile list is restored
+			// with the deleted profile back in it.
+			expect(providerA.getProviderProfileEntries().map(({ name }) => name)).toContain("doomed-profile")
 			expect(logSpy).toHaveBeenCalledWith(
 				expect.stringContaining("Unable to resolve API profile 'replacement-profile'"),
 			)
+
+			await providerA.dispose()
+			await providerB.dispose()
+		})
+
+		// A4 regression: the deletion's shared write must not leave a sibling pinned to a third
+		// profile reporting that pin's name together with the replacement's settings.
+		it("snapshots a sibling's own profile settings before rewriting shared settings on delete", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedEntry: ProviderSettingsEntry = {
+				id: "doomed-id",
+				name: "doomed-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const keeperEntry: ProviderSettingsEntry = {
+				id: "keeper-id",
+				name: "keeper-profile",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const thirdEntry: ProviderSettingsEntry = {
+				id: "third-id",
+				name: "third-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const keeperSettings = { apiProvider: providerIdentifiers.openrouter, openRouterBaseUrl: "keeper-url" }
+			const thirdSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "third-key" }
+
+			await providerA.contextProxy.setValue("listApiConfigMeta", [doomedEntry, keeperEntry, thirdEntry])
+			// The doomed profile is the globally selected one, so the shared provider keys below
+			// carry its settings until the deletion replaces them.
+			await providerA.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+			// A pins a third profile: a view pinned to the deleted profile or with no pin of its
+			// own would have taken the activation branch instead.
+			await providerA.saveViewState("currentApiConfigName", "third-profile")
+			// B pins that same third profile and holds no API overlay of its own.
+			await providerB.setValue("currentApiConfigName", "third-profile")
+
+			vi.spyOn(providerA.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
+			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([keeperEntry, thirdEntry])
+			const getProfile = async (args: { name?: string; id?: string }) => {
+				if (args.name === "keeper-profile") {
+					return { name: "keeper-profile", id: "keeper-id", ...keeperSettings } as unknown as Awaited<
+						ReturnType<typeof providerA.providerSettingsManager.getProfile>
+					>
+				}
+				if (args.name === "third-profile") {
+					return { name: "third-profile", id: "third-id", ...thirdSettings } as unknown as Awaited<
+						ReturnType<typeof providerA.providerSettingsManager.getProfile>
+					>
+				}
+				return Promise.reject(new Error("profile doomed-profile not found"))
+			}
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockImplementation(getProfile)
+			vi.spyOn(providerB.providerSettingsManager, "getProfile").mockImplementation(getProfile)
+
+			await providerA.deleteProviderProfile(doomedEntry)
+
+			// The shared selection and shared provider keys moved onto the keeper, while B keeps
+			// its own pin together with its own settings: without the pre-write snapshot B would
+			// serve third-profile's name with keeper-profile's provider and credentials.
+			expect(providerA.contextProxy.getValue("currentApiConfigName")).toBe("keeper-profile")
+			expect(providerA.contextProxy.getProviderSettings()).toMatchObject(keeperSettings)
+			expect(providerB["viewLocalState"].currentApiConfigName).toBe("third-profile")
+			expect(providerB["viewLocalState"].apiConfiguration).toMatchObject(thirdSettings)
+			const siblingState = await providerB.getState()
+			expect(siblingState.currentApiConfigName).toBe("third-profile")
+			expect(siblingState.apiConfiguration).toMatchObject(thirdSettings)
 
 			await providerA.dispose()
 			await providerB.dispose()

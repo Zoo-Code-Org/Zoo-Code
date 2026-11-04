@@ -3436,7 +3436,17 @@ export class ClineProvider
 			// here, and this view's own overlay can be left alone.
 			const deletedWasGlobal = profileToDelete.name === globalSettings.currentApiConfigName
 
+			// The selection and provider-key writes below move shared state onto the surviving
+			// profile. A live sibling pinned to a profile that is neither the deleted one nor the
+			// replacement, and which has no API overlay of its own, would then report its own pin
+			// name together with the replacement's settings, because getState() merges the shared
+			// provider keys under the pin: a task created from that view would run against the
+			// wrong provider, model and credentials. Capture each such sibling's own profile
+			// settings into its overlay first, exactly as activation and upsert do before their
+			// shared writes.
 			if (deletedWasGlobal) {
+				await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(profileToActivate)
+
 				// The shared selection changed, but this view's own pin still names a
 				// surviving profile: update the shared store only, leaving the
 				// view-local pin untouched.
@@ -3789,6 +3799,19 @@ export class ClineProvider
 
 		if (affected.length === 0) {
 			return
+		}
+
+		if (!replacementSettings) {
+			// Renaming the pin without the replacement's settings would leave every affected view
+			// and running task holding the deleted profile's apiConfiguration under the
+			// replacement's name: the UI would show one profile while requests went out with
+			// another profile's provider, model and credentials - the deleted profile's secret
+			// keeps being used after the profile is gone. There is no safe partial repair here
+			// (the manager delete already committed), so fail closed and let deleteProviderProfile
+			// compensate the record and the shared surfaces it rewrote.
+			throw new Error(
+				`Unable to resolve API profile '${replacementName}' to re-point ${affected.length} live view(s) after deleting '${deletedProfileName}'`,
+			)
 		}
 
 		await Promise.all(
