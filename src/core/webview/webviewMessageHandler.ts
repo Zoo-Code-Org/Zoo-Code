@@ -682,6 +682,11 @@ export const webviewMessageHandler = async (
 					provider.log(
 						`Error list api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 					)
+					// The repair runs inside the view-state readiness window: swallowing the failure
+					// here resolves readiness while this view is still pinned to a profile that no
+					// longer exists, so an API-created task records the removed name. The failure must
+					// reach setViewStateId, which restores the previous id and leaves readiness pending.
+					throw error
 				}
 			}
 
@@ -698,8 +703,18 @@ export const webviewMessageHandler = async (
 				)
 				// Registration failed and this view's state was never loaded: still run the
 				// launch repair so a pin that names a removed profile does not survive the
-				// failed launch.
-				await repairRemovedViewPin()
+				// failed launch. The repair can fail again for the same reason it just failed
+				// inside registration, so its own failure is logged and contained here instead of
+				// aborting the rest of launch handling.
+				try {
+					await repairRemovedViewPin()
+				} catch (repairError) {
+					provider.log(
+						`[webviewDidLaunch] launch repair failed after registration failure: ${
+							repairError instanceof Error ? repairError.message : String(repairError)
+						}`,
+					)
+				}
 			}
 
 			// Load custom modes first

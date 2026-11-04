@@ -1070,6 +1070,42 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 	})
 
 	// The repair runs inside the readiness window, so a swallowed failure there releases
+	// API-driven task creation onto a pin that still names the removed profile.
+	it("reports the launch repair's own failure instead of swallowing it twice", async () => {
+		const repairResults: string[] = []
+		double.providerSettingsManager = {
+			listConfig: vi.fn().mockRejectedValue(new Error("secrets unreadable")),
+			hasConfig: vi.fn().mockResolvedValue(false),
+		}
+		// Mirrors the real provider: a repair rejection leaves viewStateReadiness pending
+		// and the registration rethrows after restoring the previous id.
+		double.setViewStateId = vi.fn(async (_viewStateId: string, repairBeforeReady?: () => Promise<void>) => {
+			try {
+				await repairBeforeReady?.()
+				repairResults.push("repair-resolved")
+			} catch {
+				repairResults.push("repair-rejected")
+				throw new Error("registration failed")
+			}
+		})
+
+		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
+		await new Promise((resolve) => setImmediate(resolve))
+
+		// The repair failed inside registration, and the handler's rerun failed for the same
+		// reason; only that second failure may be swallowed, and only after logging it.
+		expect(repairResults).toEqual(["repair-rejected"])
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("[webviewDidLaunch] view-state registration failed"),
+		)
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("[webviewDidLaunch] launch repair failed after registration failure"),
+		)
+		// Readiness stayed pending (the double resolves it only after a successful repair)
+		// while the rest of launch handling still ran.
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+		expect(mockClineProvider.isViewLaunched).toBe(true)
+	})
 })
 
 describe("webviewMessageHandler - deleteApiConfiguration", () => {
