@@ -1139,12 +1139,12 @@ describe("Task persistence", () => {
 				})
 			const provider = { ...mockProvider, updateTaskHistory }
 			const task = new Task({
-				provider: provider as any,
+				provider: provider as unknown as ClineProvider,
 				apiConfiguration: mockApiConfig,
 				task: "test task",
 				startTask: false,
 			})
-			const save = () => (task as Record<string, any>).saveClineMessages() as Promise<boolean>
+			const save = () => getTaskPersistenceAccess(task).saveClineMessages()
 
 			const older = save() // not awaited, like the fire-and-forget callers
 			const newer = save()
@@ -1172,7 +1172,7 @@ describe("Task persistence", () => {
 				task: "test task",
 				startTask: false,
 			})
-			const save = () => (task as Record<string, any>).saveClineMessages() as Promise<boolean>
+			const save = () => getTaskPersistenceAccess(task).saveClineMessages()
 
 			const first = save()
 			const second = save()
@@ -1197,7 +1197,7 @@ describe("Task persistence", () => {
 				task: "test task",
 				startTask: false,
 			})
-			const save = () => (task as Record<string, any>).saveClineMessages() as Promise<boolean>
+			const save = () => getTaskPersistenceAccess(task).saveClineMessages()
 
 			await Promise.all([save(), save(), save()])
 
