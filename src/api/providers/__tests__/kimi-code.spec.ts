@@ -122,7 +122,9 @@ describe("KimiCodeHandler", () => {
 	})
 
 	it("retries with forced refresh on 401 when using OAuth", async () => {
-		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
+		// The SDK client binds globalThis.fetch when it is constructed, so the completion stub
+		// has to be installed before the handler exists; written the other way round this test
+		// passes only because an earlier test left a fetch spy in place.
 		const fetchSpy = vi.spyOn(globalThis, "fetch")
 		fetchSpy.mockResolvedValueOnce(new Response(null, { status: 401 }))
 		fetchSpy.mockResolvedValueOnce(
@@ -130,6 +132,7 @@ describe("KimiCodeHandler", () => {
 				status: 200,
 			}),
 		)
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
 		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
 		try {
 			for await (const _chunk of gen) {
@@ -142,7 +145,6 @@ describe("KimiCodeHandler", () => {
 	})
 
 	it("does not refresh or retry when the caller cancels before the 401 retry branch", async () => {
-		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
 		const controller = new AbortController()
 		// The completion request answers 401 in the same tick the caller cancels: the retry
 		// branch must observe the cancellation and stop instead of forcing an OAuth refresh
@@ -151,6 +153,9 @@ describe("KimiCodeHandler", () => {
 			controller.abort()
 			return new Response(null, { status: 401 })
 		})
+		// Stub first, handler second, for the same reason: the SDK client binds
+		// globalThis.fetch at construction.
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
 
 		const error = await captureError(
 			(async () => {
