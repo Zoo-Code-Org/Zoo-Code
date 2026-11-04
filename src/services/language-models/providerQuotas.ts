@@ -615,7 +615,11 @@ function withDeadline<T>(work: Promise<T>, ms: number, message: string, signal?:
 			done()
 			reject(new Error(message))
 		}, ms)
-		if (signal?.aborted) return onAbort()
+		if (signal?.aborted) {
+			// Nobody will wait for `work`, so its own rejection must not go unhandled.
+			work.catch(() => undefined)
+			return onAbort()
+		}
 		signal?.addEventListener("abort", onAbort, { once: true })
 		work.then(
 			(value) => {

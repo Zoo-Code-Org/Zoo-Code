@@ -1398,6 +1398,31 @@ describe("loadProfiles", () => {
 			expect(vi.getTimerCount()).toBe(0)
 		})
 
+		it("leaves no unhandled rejection when the signal is already aborted and the list read fails", async () => {
+			const controller = new AbortController()
+			controller.abort()
+			const unhandled = vi.fn()
+			process.on("unhandledRejection", unhandled)
+			try {
+				const source = {
+					listConfig: vi.fn(() => Promise.reject(new Error("corrupt secret storage"))),
+					getProfile: vi.fn(),
+				}
+
+				await expect(loadProfilesWithActive(source, controller.signal)).rejects.toMatchObject({
+					name: "AbortError",
+				})
+				await vi.advanceTimersByTimeAsync(0)
+				await new Promise((resolve) => setImmediate(resolve)) // let a stray rejection surface
+
+				expect(unhandled).not.toHaveBeenCalled()
+				expect(source.getProfile).not.toHaveBeenCalled()
+				expect(vi.getTimerCount()).toBe(0)
+			} finally {
+				process.off("unhandledRejection", unhandled)
+			}
+		})
+
 		it("releases its timers and listener when everything settles normally", async () => {
 			const controller = new AbortController()
 			const live = trackListeners(controller.signal)
