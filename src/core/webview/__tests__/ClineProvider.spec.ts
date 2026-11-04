@@ -784,6 +784,44 @@ describe("ClineProvider", () => {
 			expect(tab.postMessage).not.toHaveBeenCalled()
 		})
 
+		it.each([
+			{
+				message: {
+					type: "diagnosticsResponse",
+					requestId: "request-1",
+					diagnostics: { capturedAt: "2026-11-01T00:00:00.000Z" },
+				},
+				routed: true,
+			},
+			{
+				message: { type: "diagnosticsResponse", diagnostics: { capturedAt: "2026-11-01T00:00:00.000Z" } },
+				routed: false,
+			},
+			{ message: { type: "themeFixtureProbeResponse", requestId: "request-1" }, routed: false },
+		] satisfies { message: WebviewMessage; routed: boolean }[])(
+			"routes $message to the diagnostics broker only when addressed",
+			async ({ message, routed }) => {
+				const handler = vi
+					.spyOn(await import("../webviewMessageHandler"), "webviewMessageHandler")
+					.mockResolvedValue(undefined)
+				const resolve = vi.spyOn(provider["diagnosticsRequestBroker"], "resolve")
+				try {
+					sidebar.messages.fire(message)
+					if (routed) {
+						expect(resolve).toHaveBeenCalledExactlyOnceWith("request-1", message.diagnostics)
+						expect(handler).not.toHaveBeenCalled()
+					} else {
+						expect(resolve).not.toHaveBeenCalled()
+						expect(handler).toHaveBeenCalledOnce()
+						expect(handler.mock.calls[0].slice(0, 2)).toEqual([provider, message])
+					}
+				} finally {
+					handler.mockRestore()
+					resolve.mockRestore()
+				}
+			},
+		)
+
 		test("background messages reach the provider handler without changing the last focused chat", async () => {
 			sidebar.messages.fire({ type: "webviewDidFocus" })
 			const handler = vi
@@ -4044,6 +4082,65 @@ describe("ClineProvider", () => {
 		const state = await provider.getStateToPostToWebview()
 
 		expect(state.allowedReadFiles).toEqual(["notes.md"])
+	})
+
+	describe("prompt cache TTL round trip", () => {
+		// The provider-settings route: the knob rides `apiConfiguration`, so the
+		// round trip is the profile write plus the state post, with no dedicated
+		// message type and no settings-specific branch in the message handler.
+		test("a saved 1h survives a fresh getStateToPostToWebview payload", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await provider.upsertProviderProfile("ttl-profile", {
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-sonnet-4-5",
+				apiKey: "test-key",
+				promptCacheTtl: "1h",
+			})
+
+			// A fresh read, not the in-memory value the save path just wrote: this is
+			// the "saved control reverts visually" case the checklist calls out.
+			const posted = await provider.getStateToPostToWebview()
+
+			expect(posted.apiConfiguration.promptCacheTtl).toBe("1h")
+			expect((await provider.getState()).apiConfiguration.promptCacheTtl).toBe("1h")
+		})
+
+		test("an unset knob stays absent rather than becoming an explicit 5m", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await provider.upsertProviderProfile("default-ttl-profile", {
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-sonnet-4-5",
+				apiKey: "test-key",
+			})
+
+			const posted = await provider.getStateToPostToWebview()
+
+			// Consumers apply the vendor default, so the stored value must be absent
+			// rather than a literal "5m" that would look like a user choice.
+			expect(posted.apiConfiguration.promptCacheTtl).toBeUndefined()
+			expect(posted.apiConfiguration).not.toHaveProperty("promptCacheTtl", "5m")
+		})
+
+		test("a hand-edited 1h for a model without the capability is stored, not silently rewritten", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// MiniMax caches prompts but advertises no TTL class. The profile can only
+			// have been written by hand or imported, and the save path must keep what
+			// the user stored: capability is enforced where the request is built (the
+			// emitter fails closed), so a save-time rewrite would be a second, silent
+			// source of truth for the same rule.
+			await provider.upsertProviderProfile("hand-edited-profile", {
+				apiProvider: providerIdentifiers.minimax,
+				apiKey: "test-key",
+				promptCacheTtl: "1h",
+			})
+
+			const posted = await provider.getStateToPostToWebview()
+
+			expect(posted.apiConfiguration.promptCacheTtl).toBe("1h")
+		})
 	})
 
 	test("getStateToPostToWebview defaults allowed read files to an empty list", async () => {
