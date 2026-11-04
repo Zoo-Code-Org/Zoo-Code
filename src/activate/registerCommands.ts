@@ -145,6 +145,12 @@ const getCommandsMap = ({
 		// that does not exist. On the menu path the view is already resolved and this is a no-op.
 		if (!provider.isViewLaunched) {
 			await vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`)
+			// The focus command settles when VS Code opens the pane, not when resolveWebviewView
+			// hands this provider its view, and postMessageToWebview returns without sending while the
+			// view is unset - both actions below would be dropped. Wait for the resolution that this
+			// command just asked VS Code to start; the wait also ends if the view never arrives, so the
+			// command cannot hang.
+			await provider.whenViewResolved()
 		}
 		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
 		// Send focusInput action immediately after chatButtonClicked

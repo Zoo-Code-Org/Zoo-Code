@@ -541,6 +541,15 @@ export class ClineProvider
 	}
 
 	public isViewLaunched = false
+
+	// Callers that must actually deliver a webview message wait on this gate. The
+	// SidebarProvider.focus command settles when VS Code opens the pane - well before
+	// resolveWebviewView hands this provider its view - and postMessageToWebview returns
+	// without sending while `view` is unset, so a message posted straight after that command
+	// can be dropped. The gate settles when the view resolves and on every path that removes
+	// it, so a caller can never hang on a view that is never coming.
+	private viewResolvedGate?: Promise<void>
+	private viewResolvedGateRelease?: () => void
 	public settingsImportedAt?: number
 	public readonly latestAnnouncementId = "oct-2026-v3.94.0-models-oauth-chat" // v3.94.0 model support, MCP OAuth, and chat reliability
 	public readonly providerSettingsManager: ProviderSettingsManager
@@ -1602,6 +1611,7 @@ export class ClineProvider
 		}
 
 		this.clearWebviewResources()
+		this.settleViewResolvedGate()
 
 		// Clean up cloud service event listener
 		if (CloudService.hasInstance()) {
@@ -1788,6 +1798,7 @@ export class ClineProvider
 		const epoch = this.webviewRecoveryEpoch
 		this.pendingSidebarRecovery = false
 		this.view = webviewView
+		this.settleViewResolvedGate()
 		const inTabMode = "onDidChangeViewState" in webviewView
 		this.diagnosticsRecorder.record({
 			boundary: "provider",
@@ -1811,8 +1822,10 @@ export class ClineProvider
 					await this.dispose()
 				} else {
 					this.log("Clearing webview resources for sidebar view")
+
 					this.view = undefined
 					this.clearWebviewResources()
+					this.settleViewResolvedGate()
 				}
 			},
 			null,
@@ -2326,6 +2339,37 @@ export class ClineProvider
 		}
 
 		return task
+	}
+
+	/**
+	 * Settles once this provider can actually post into a webview: either the view is resolved
+	 * (or was already) or the view and provider are gone, which is the only other way the wait
+	 * can end without hanging the caller. Callers that must deliver a message, rather than merely
+	 * try, await this before posting.
+	 */
+	async whenViewResolved(): Promise<void> {
+		if (this.view || this._disposed) {
+			return
+		}
+
+		if (!this.viewResolvedGate) {
+			this.viewResolvedGate = new Promise<void>((resolve) => {
+				this.viewResolvedGateRelease = resolve
+			})
+		}
+
+		return this.viewResolvedGate
+	}
+
+	/**
+	 * Releases every pending whenViewResolved waiter and drops the gate so the next wait starts
+	 * fresh: a view that resolves again after a disposal must still be gated.
+	 */
+	private settleViewResolvedGate(): void {
+		const release = this.viewResolvedGateRelease
+		this.viewResolvedGate = undefined
+		this.viewResolvedGateRelease = undefined
+		release?.()
 	}
 
 	public async postMessageToWebview(message: ExtensionMessage) {

@@ -145,6 +145,7 @@ describe("registerCommands handlers", () => {
 		refreshWorkspace: Mock
 		webviewFocusTracker: WebviewFocusTracker
 		retryWebviewRecovery: Mock<() => Promise<void>>
+		whenViewResolved: Mock<() => Promise<void>>
 	}
 	let mockVisibleProviderInstance: ClineProvider
 	let handlers: Record<string, (...args: unknown[]) => unknown>
@@ -179,6 +180,8 @@ describe("registerCommands handlers", () => {
 			evictCurrentTask: vi.fn().mockResolvedValue(undefined),
 			refreshWorkspace: vi.fn().mockResolvedValue(undefined),
 			webviewFocusTracker: new WebviewFocusTracker(),
+			// plusButtonClicked waits for the view before posting, so the double needs the gate.
+			whenViewResolved: vi.fn().mockResolvedValue(undefined),
 		}
 		;(ClineProvider.getVisibleInstance as Mock).mockReturnValue(mockVisibleProvider)
 		;(vscode.commands.registerCommand as Mock).mockImplementation(
@@ -613,6 +616,50 @@ describe("registerCommands handlers", () => {
 		)
 	})
 
+	it("waits for the sidebar webview to resolve before posting the chat actions", async () => {
+		// The worktree flow invokes plusButtonClicked without a sidebar click, so the pane opens but
+		// resolveWebviewView has not handed the provider its view yet. postMessageToWebview returns
+		// without sending while the view is unset, so posting immediately drops both actions.
+		let settleGate!: () => void
+		const gate = new Promise<void>((resolve) => {
+			settleGate = resolve
+		})
+		const sidebarProvider = Object.assign({} as ClineProvider, {
+			isViewLaunched: false,
+			evictCurrentTask: vi.fn().mockResolvedValue(undefined),
+			refreshWorkspace: vi.fn().mockResolvedValue(undefined),
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			whenViewResolved: vi.fn().mockReturnValue(gate),
+		})
+		const commandHandlers: Record<string, (...args: unknown[]) => unknown> = {}
+		;(vscode.commands.registerCommand as Mock).mockImplementation(
+			(id: string, cb: (...args: unknown[]) => unknown) => {
+				commandHandlers[id] = cb
+				return { dispose: vi.fn() }
+			},
+		)
+		registerCommands({ context: mockContext, outputChannel: mockOutputChannel, provider: sidebarProvider })
+
+		const handler = commandHandlers["zoo-code.plusButtonClicked"]()
+
+		// The pane opened, but nothing may be posted until the view itself resolves. Drain the
+		// microtask queue so the handler reaches the gate and stops there.
+		await new Promise((resolve) => setImmediate(resolve))
+		expect(vscode.commands.executeCommand).toHaveBeenCalledWith(expect.stringContaining("SidebarProvider.focus"))
+		expect(sidebarProvider.postMessageToWebview).not.toHaveBeenCalled()
+
+		settleGate()
+		await handler
+
+		expect(sidebarProvider.postMessageToWebview).toHaveBeenNthCalledWith(1, {
+			type: "action",
+			action: "chatButtonClicked",
+		})
+		expect(sidebarProvider.postMessageToWebview).toHaveBeenNthCalledWith(2, {
+			type: "action",
+			action: "focusInput",
+		})
+	})
 	it("plusButtonClicked calls evictCurrentTask on the registered sidebar provider", async () => {
 		await handlers["zoo-code.plusButtonClicked"]()
 

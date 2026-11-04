@@ -1158,6 +1158,37 @@ describe("ClineProvider", () => {
 		expect(mockWebviewView.webview.html).toContain("<!DOCTYPE html>")
 		expect(mockWebviewView.webview.html).toContain("<title>Zoo Code</title>")
 	})
+	test("whenViewResolved releases waiters only once messages would actually be delivered", async () => {
+		// The focus command settles when VS Code opens the pane, so the plus-button flow awaits this
+		// gate before posting. A waiter must not wake while postMessageToWebview would drop the
+		// message because the view is still unset.
+		const pending = provider.whenViewResolved()
+		let settled = false
+		void pending.then(() => {
+			settled = true
+		})
+
+		await new Promise((resolve) => setImmediate(resolve))
+		expect(settled).toBe(false)
+
+		await provider.resolveWebviewView(mockWebviewView)
+		await pending
+		expect(settled).toBe(true)
+
+		// An already-resolved view answers immediately, and a provider that goes away must not leave
+		// the caller hanging on a view that is never coming.
+		await expect(provider.whenViewResolved()).resolves.toBeUndefined()
+		const orphan = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"editor",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const hanging = orphan.whenViewResolved()
+		await orphan.dispose()
+		await expect(hanging).resolves.toBeUndefined()
+	})
 
 	describe("logWebviewHiddenDiagnostics", () => {
 		let visibilityCallback: () => void
