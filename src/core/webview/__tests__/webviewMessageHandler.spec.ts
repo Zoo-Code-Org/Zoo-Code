@@ -2707,6 +2707,44 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		// to be re-pointed at the stored record instead.
 		expect(mockClineProvider.setValue).toHaveBeenCalledWith("currentApiConfigName", "new-profile")
 	})
+	it("leaves another rename's record alone when its own compensation runs", async () => {
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			// The store answers newName with a different record than the one this rename
+			// wrote: a rename in another webview (its own ProviderSettingsManager instance)
+			// stored its own profile under the same name first.
+			getProfile: vi.fn(async ({ name }: { name: string }) =>
+				name === "new-profile"
+					? { id: "other-rename-id", apiProvider: providerIdentifiers.anthropic }
+					: { id: "profile-id", apiProvider: providerIdentifiers.anthropic },
+			),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		// Only the forward re-point fails; the compensation's reverse re-point has to succeed
+		// for the guard under test to be reached at all.
+		provider.repointViewLocalStateAfterProfileRename = vi.fn().mockRejectedValueOnce(new Error("repoint failed"))
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// The compensation re-points the views it moved, but it must not delete a record it
+		// never created: the id under newName is not this rename's id.
+		expect(provider.repointViewLocalStateAfterProfileRename).toHaveBeenCalledWith("new-profile", "old-profile", {
+			id: "profile-id",
+			apiProvider: providerIdentifiers.anthropic,
+		})
+		expect(provider.providerSettingsManager.deleteConfig).not.toHaveBeenCalledWith("new-profile")
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Rename compensation skipped for 'new-profile'"),
+		)
+		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
+	})
+
 	it("rolls the new profile back when the re-point fails", async () => {
 		provider.providerSettingsManager = {
 			hasConfig: vi.fn().mockResolvedValue(false),

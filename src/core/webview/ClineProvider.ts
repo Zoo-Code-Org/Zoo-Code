@@ -448,7 +448,23 @@ export class ClineProvider
 		// Advance from the unbounded run, not the timeout-bounded caller result: a mutation that
 		// outlives its caller's timeout still owns the queue until every write settles.
 		this.providerProfileMutationQueue = run.then(
-			() => undefined,
+			() => {
+				if (callerTimedOut) {
+					// The caller already saw a failure, but the mutation went through: these writes are
+					// live now, so the views must be told. Without this the webview keeps rendering the
+					// pre-mutation profile list under an error toast even though the profile was saved,
+					// activated and picked up by every task handler.
+					this.log("Provider profile mutation committed after its caller timed out; re-posting state")
+					void this.postStateToWebview().catch((error) => {
+						this.log(
+							`[enqueueProviderProfileMutation] re-post after a late commit failed: ${
+								error instanceof Error ? error.message : String(error)
+							}`,
+						)
+					})
+				}
+				return undefined
+			},
 			() => undefined,
 		)
 		return callerResult
@@ -3821,12 +3837,16 @@ export class ClineProvider
 		const persistTaskHistory = options?.persistTaskHistory ?? true
 		const skipCurrentTaskRebuild = options?.skipCurrentTaskRebuild ?? false
 
+		// Hoisted out of the group below: the mode-binding failure further down happens after
+		// the selection, the profile list and the shared settings have already landed, and it has
+		// to roll the same activation back.
+		let activationSnapshot: ProfileActivationSnapshot | undefined
 		if (!skipCurrentTaskRebuild) {
 			// See `upsertProviderProfile` for a description of what this is doing.
 			// Sibling views pinned to other profiles must keep their own settings:
 			// the shared write below replaces the shared store, so pin their
 			// profile's settings into their overlays first.
-			const activationSnapshot = this._snapshotProfileActivationState()
+			activationSnapshot = this._snapshotProfileActivationState()
 			try {
 				await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(name, { requireResolvablePins: true })
 
@@ -3892,6 +3912,12 @@ export class ClineProvider
 					}
 				}
 				await this._restoreProviderManagerSelection(managerSelectionSnapshot)
+				if (activationSnapshot) {
+					// The activation is already applied at this point: selection, profile list and shared
+					// settings have all moved. A caller that receives an error must not end up with a
+					// profile that is activated but bound to no mode.
+					await this._restoreProfileActivationState(activationSnapshot)
+				}
 				throw error
 			}
 		}

@@ -5019,6 +5019,48 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("re-posts state when a profile mutation commits after its caller timed out", async () => {
+			vi.useFakeTimers()
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// The mutation body only waits here, so the only postStateToWebview call this
+			// test can observe is the one that reports the late commit.
+			const postSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const logSpy = vi.spyOn(provider, "log")
+			let release!: () => void
+			const gate = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			// Bracket access: enqueueProviderProfileMutation is private, and the point of the
+			// test is the queue's own bookkeeping rather than any one public mutation.
+			const callerSettled = provider["enqueueProviderProfileMutation"](async () => gate).catch(() => undefined)
+
+			await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1000)
+			// The caller-side timeout is deliberate: it reports failure and keeps the queue
+			// waiting for the run. Nothing has been committed yet, so nothing to report.
+			expect(postSpy).not.toHaveBeenCalled()
+
+			release()
+			await callerSettled
+			await vi.advanceTimersByTimeAsync(0)
+
+			// The mutation landed: the profile list, the activation and the task handlers have
+			// all moved, so the views must be told instead of staying on the pre-mutation state
+			// under the error the caller already showed.
+			expect(postSpy).toHaveBeenCalledTimes(1)
+			expect(logSpy).toHaveBeenCalledWith(
+				"Provider profile mutation committed after its caller timed out; re-posting state",
+			)
+
+			vi.useRealTimers()
+			await provider.dispose()
+		})
+
 		it("does not resurrect a pruned sibling entry that the sibling cleared mid-window", async () => {
 			const provider = new ClineProvider(
 				mockContext,
@@ -6444,6 +6486,110 @@ describe("ClineProvider", () => {
 			// create that never happened and strand the landed record: the deletion
 			// must land.
 			expect(deleteSpy).toHaveBeenCalledWith("leaky-profile")
+			await provider.dispose()
+		})
+
+		it("restores the mode mapping when the mode binding fails after an activation", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ name: "old-profile", id: "old-id", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "new-profile", id: "new-id", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("old-mode-id")
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "new-profile",
+				id: "new-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockResolvedValue("old-profile")
+			// The activation destructures { name, id, ...settings } from the manager: the id is what
+			// the mode binding is written with, so the double has to carry one.
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "new-profile",
+				id: "new-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			const setModeConfigSpy = vi
+				.spyOn(provider.providerSettingsManager, "setModeConfig")
+				.mockImplementation(async (mode: string, id: string) => {
+					if (id !== "old-mode-id") {
+						throw new Error("mode write failed")
+					}
+				})
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await expect(provider.activateProviderProfile({ name: "new-profile" })).rejects.toThrow("mode write failed")
+
+			// The activation had already moved the selection and the shared settings before the
+			// mode binding failed, so the mapping has to go back to what it held: otherwise the
+			// mode stays bound to a profile whose activation the caller was told failed.
+			expect(setModeConfigSpy).toHaveBeenCalledWith("code", "old-mode-id")
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("old-profile")
+			expect((provider.contextProxy.getValue("listApiConfigMeta") ?? []).map((entry) => entry.name)).toEqual([
+				"old-profile",
+			])
+			await provider.dispose()
+		})
+
+		it("restores the activation state when a sibling overlay refresh fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ name: "old-profile", id: "old-id", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "new-profile", id: "new-id", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "new-profile",
+				id: "new-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockResolvedValue("old-profile")
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "old-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			// Double assertion: the refresh is private, and the failure being injected is a
+			// sibling's storage write, which no public seam can produce on demand.
+			const proto = ClineProvider.prototype as unknown as {
+				refreshViewLocalStateForUpdatedProfile: (...args: unknown[]) => Promise<void>
+			}
+			const refreshSpy = vi
+				.spyOn(proto, "refreshViewLocalStateForUpdatedProfile")
+				.mockRejectedValue(new Error("sibling refresh failed"))
+			const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
+
+			await expect(provider.activateProviderProfile({ name: "new-profile" })).rejects.toThrow(
+				"sibling refresh failed",
+			)
+
+			// The refresh runs after the selection, the profile list and the shared provider
+			// settings have all moved, so a failure there has to roll them back like any other
+			// write in the group: the caller saw an error, and the state must match that.
+			expect(refreshSpy).toHaveBeenCalledTimes(1)
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("old-profile")
+			expect((provider.contextProxy.getValue("listApiConfigMeta") ?? []).map((entry) => entry.name)).toEqual([
+				"old-profile",
+			])
+			expect(setProviderSettingsSpy).toHaveBeenCalledTimes(2)
+			refreshSpy.mockRestore()
 			await provider.dispose()
 		})
 

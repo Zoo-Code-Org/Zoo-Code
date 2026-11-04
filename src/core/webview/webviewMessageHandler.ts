@@ -79,6 +79,7 @@ import { fileExistsAtPath } from "../../utils/fs"
 import { playTts, setTtsEnabled, setTtsSpeed, stopTts } from "../../utils/tts"
 import { searchCommits } from "../../utils/git"
 import { exportSettings, importSettingsWithFeedback } from "../config/importExport"
+import { ProviderSettingsNotFoundError } from "../config/ProviderSettingsManager"
 import { getOpenAiModels } from "../../api/providers/openai"
 import { getVsCodeLmModels } from "../../api/providers/vscode-lm"
 import { getGitHubCopilotViewState } from "../../services/language-models/copilotViewState"
@@ -2490,6 +2491,34 @@ export const webviewMessageHandler = async (
 						await provider.providerSettingsManager.getProfile({ name: oldName })
 					const { id } = previousRecord
 
+					// Only remove a record this rename actually wrote. Two renames in the same extension
+					// host use different ProviderSettingsManager instances, so one rename's existence check
+					// and save are not ordered against the other's: both can see newName as absent, and a
+					// compensation here would then delete the record the other rename stored. The id is the
+					// record's identity, and every rename carries the id it loaded from oldName.
+					const removeOwnRenameRecord = async (): Promise<void> => {
+						let storedId: string | undefined
+						try {
+							const stored = await provider.providerSettingsManager.getProfile({ name: newName })
+							storedId = stored.id
+						} catch (readError) {
+							if (readError instanceof ProviderSettingsNotFoundError) {
+								// The record is gone: there is nothing of this rename left to undo, and a
+								// blind delete here would target whatever stored newName next.
+								return
+							}
+							// Any other read failure leaves the previous behaviour: this rename did store
+							// newName, so its compensation still removes it.
+						}
+						if (storedId !== undefined && storedId !== id) {
+							provider.log(
+								`Rename compensation skipped for '${newName}': the stored record (id ${storedId}) is not the one this rename wrote (id ${id})`,
+							)
+							return
+						}
+						await provider.providerSettingsManager.deleteConfig(newName)
+					}
+
 					// Create a new configuration with the new name and old ID.
 					await provider.providerSettingsManager.saveConfig(newName, { ...message.apiConfiguration, id })
 
@@ -2507,7 +2536,7 @@ export const webviewMessageHandler = async (
 						normalizedRenamed = renamedRecord
 					} catch (error) {
 						try {
-							await provider.providerSettingsManager.deleteConfig(newName)
+							await removeOwnRenameRecord()
 						} catch (cleanupError) {
 							provider.log(
 								`Rename rollback failed to remove '${newName}': ${JSON.stringify(cleanupError, Object.getOwnPropertyNames(cleanupError), 2)}`,
@@ -2529,7 +2558,7 @@ export const webviewMessageHandler = async (
 					} catch (error) {
 						try {
 							await provider.repointViewLocalStateAfterProfileRename(newName, oldName, previousRecord)
-							await provider.providerSettingsManager.deleteConfig(newName)
+							await removeOwnRenameRecord()
 						} catch (compensationError) {
 							provider.log(
 								`Rename compensation failed after re-point rejection: ${JSON.stringify(compensationError, Object.getOwnPropertyNames(compensationError), 2)}`,
@@ -2550,7 +2579,7 @@ export const webviewMessageHandler = async (
 					} catch (error) {
 						try {
 							await provider.repointViewLocalStateAfterProfileRename(newName, oldName, previousRecord)
-							await provider.providerSettingsManager.deleteConfig(newName)
+							await removeOwnRenameRecord()
 						} catch (compensationError) {
 							provider.log(
 								`Rename compensation failed after delete rejection: ${JSON.stringify(compensationError, Object.getOwnPropertyNames(compensationError), 2)}`,
