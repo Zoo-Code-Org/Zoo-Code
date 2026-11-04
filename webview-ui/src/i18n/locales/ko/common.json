@@ -9,10 +9,7 @@
 	},
 	"answers": {
 		"yes": "예",
-		"no": "아니오",
-		"cancel": "취소",
-		"remove": "삭제",
-		"keep": "유지"
+		"cancel": "취소"
 	},
 	"number_format": {
 		"thousand_suffix": "k",
@@ -33,19 +30,11 @@
 			"copy": "복사",
 			"save": "이미지 저장",
 			"viewCode": "코드 보기",
-			"viewDiagram": "다이어그램 보기",
 			"close": "닫기"
-		},
-		"modal": {
-			"codeTitle": "머메이드 코드"
 		},
 		"tabs": {
 			"diagram": "다이어그램",
 			"code": "코드"
-		},
-		"feedback": {
-			"imageCopied": "이미지가 클립보드에 복사됨",
-			"copyError": "이미지 복사 오류"
 		}
 	},
 	"image": {
@@ -53,19 +42,6 @@
 			"view": "이미지"
 		},
 		"noData": "이미지 데이터 없음"
-	},
-	"file": {
-		"errors": {
-			"invalidDataUri": "잘못된 데이터 URI 형식",
-			"copyingImage": "이미지 복사 오류: {{error}}",
-			"openingImage": "이미지 열기 오류: {{error}}",
-			"pathNotExists": "경로가 존재하지 않음: {{path}}",
-			"couldNotOpen": "파일을 열 수 없음: {{error}}",
-			"couldNotOpenGeneric": "파일을 열 수 없습니다!"
-		},
-		"success": {
-			"imageDataUriCopied": "이미지 데이터 URI가 클립보드에 복사됨"
-		}
 	},
 	"confirmation": {
 		"deleteMessage": "메시지 삭제",
@@ -77,8 +53,7 @@
 		"editOnly": "아니요, 메시지만 편집",
 		"deleteOnly": "아니요, 메시지만 삭제",
 		"restoreToCheckpoint": "예, 체크포인트 복원",
-		"proceed": "계속",
-		"dontShowAgain": "다시 표시하지 않음"
+		"proceed": "계속"
 	},
 	"time_ago": {
 		"just_now": "방금",
@@ -100,12 +75,6 @@
 		"wait_checkpoint_long_time": "{{timeout}}초 동안 체크포인트 초기화를 기다렸어. 체크포인트 기능이 필요 없다면 <settingsLink>체크포인트 설정</settingsLink>에서 꺼 줘.",
 		"init_checkpoint_fail_long_time": "체크포인트 초기화가 {{timeout}}초 이상 걸려서 이 작업에 대해 체크포인트가 꺼졌어. 체크포인트를 끄거나 <settingsLink>체크포인트 설정</settingsLink>에서 대기 시간을 늘릴 수 있어.",
 		"attempt_completion_tool_failed": "이전 도구 호출이 이 턴에서 실패했기 때문에 attempt_completion을 실행할 수 없습니다. 완료를 시도하기 전에 도구 실패를 해결하세요."
-	},
-	"tasks": {
-		"delegated": "하위 작업에 위임됨",
-		"delegated_to": "작업 {{childId}}에 위임됨",
-		"delegation_completed": "하위 작업 완료, 상위 작업 재개",
-		"awaiting_child": "하위 작업 {{childId}} 대기 중"
 	},
 	"costs": {
 		"own": "자체",

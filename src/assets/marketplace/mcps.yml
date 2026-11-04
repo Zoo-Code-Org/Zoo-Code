@@ -1529,6 +1529,42 @@ items:
             key: KAGI_SUMMARIZER_ENGINE
             placeholder: cecil
             optional: true
+    - id: keenable
+      name: Keenable
+      description:
+          Web search and page fetch for AI agents over MCP. Search the web and read pages as clean markdown. No account
+          or API key is needed. An optional API key raises the rate limits.
+      author: Keenable
+      url: https://github.com/keenableai/keenable-mcp
+      tags:
+          - web-search
+          - search-engine
+          - content-extraction
+          - research
+      content:
+          - name: Remote Server
+            content: |
+                {
+                  "type": "streamable-http",
+                  "url": "https://api.keenable.ai/mcp-public",
+                  "headers": {
+                    "X-Keenable-Title": "Zoo Code"
+                  }
+                }
+          - name: Remote Server (API Key)
+            content: |
+                {
+                  "type": "streamable-http",
+                  "url": "https://api.keenable.ai/mcp-public",
+                  "headers": {
+                    "X-Keenable-Title": "Zoo Code",
+                    "X-API-Key": "{{KEENABLE_API_KEY}}"
+                  }
+                }
+            parameters:
+                - name: Keenable API Key
+                  key: KEENABLE_API_KEY
+                  placeholder: your_keenable_api_key
     - id: laravel-boost
       name: Laravel Boost
       description:
@@ -1611,6 +1647,26 @@ items:
             key: LINEAR_PATH
             placeholder: /path/to/linear-mcp
             optional: true
+    - id: mailtea
+      name: Mailtea
+      description:
+          Send email and newsletters with Mailtea over MCP, covering transactional email, scheduled newsletters, contacts, senders,
+          domains and delivery status. Sign in with OAuth, no API key needed.
+      author: Mailtea
+      url: https://github.com/mailtea-app/mailtea-agent-plugin
+      tags:
+          - email
+          - newsletter
+          - transactional-email
+          - marketing
+          - communication
+      content:
+          - name: Remote MCP
+            content: |
+                {
+                  "type": "streamable-http",
+                  "url": "https://api.mailtea.app/mcp"
+                }
     - id: memory
       name: Knowledge Graph Memory
       description:
@@ -2971,6 +3027,25 @@ items:
                 - name: Local Timezone
                   key: LOCAL_TIMEZONE
                   placeholder: America/New_York
+    - id: tradehand
+      name: Tradehand
+      description:
+          Find and book local tradespeople. Search traders by trade and area, compare fixed prices and reviews, get
+          instant quotes, book and pay through a secure checkout link. Tradespeople use it to manage their business.
+      author: Outside HQ LTD
+      url: https://github.com/Humanleap/tradehand-agent-plugin
+      tags:
+          - local-services
+          - bookings
+          - quotes
+          - tradespeople
+      content:
+          - name: Remote Server
+            content: |
+                {
+                  "type": "streamable-http",
+                  "url": "https://tradehand.com/api/mcp"
+                }
     - id: verodat
       name: Verodat
       description:

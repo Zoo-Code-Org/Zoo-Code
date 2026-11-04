@@ -4,6 +4,7 @@ import { LLM, LLMInfo, LLMInstanceInfo, LMStudioClient } from "@lmstudio/sdk"
 import { type ModelInfo, lMStudioDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
 
 import { throwIfAborted } from "../utils/abort-signal"
+import { getLoggableOrigin } from "../utils/endpoint-origin"
 
 import type { ApiHandler } from "../../index"
 
@@ -33,7 +34,7 @@ export const forceFullModelDetailsLoad = async (
 		modelsWithLoadedDetails.add(modelId)
 	} catch (error) {
 		if (error.code === "ECONNREFUSED") {
-			console.warn(`Error connecting to LMStudio at ${baseUrl}`)
+			console.warn(`Error connecting to LMStudio at ${getLoggableOrigin(baseUrl)}`)
 		} else {
 			console.error(
 				`Error refreshing LMStudio model details: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
@@ -135,7 +136,7 @@ export async function getLMStudioModels(
 		throwIfAborted(opts?.signal)
 
 		if (error.code === "ECONNREFUSED") {
-			console.warn(`Error connecting to LMStudio at ${baseUrl}`)
+			console.warn(`Error connecting to LMStudio at ${getLoggableOrigin(baseUrl)}`)
 		} else {
 			console.error(
 				`Error fetching LMStudio models: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,

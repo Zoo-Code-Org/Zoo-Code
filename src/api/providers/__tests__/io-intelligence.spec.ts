@@ -9,6 +9,7 @@ import { ioIntelligenceDefaultModelId, providerIdentifiers } from "@roo-code/typ
 
 import { buildApiHandler } from "../../index"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 import { IOIntelligenceHandler } from "../io-intelligence"
 import { getModels } from "../fetchers/modelCache"
 
@@ -42,7 +43,7 @@ const loggedText = (spy: { mock: { calls: unknown[][] } }) =>
 
 describe("IOIntelligenceHandler", () => {
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		vi.mocked(getModels).mockResolvedValue({
 			"meta-llama/Llama-3.3-70B-Instruct": {
 				maxTokens: 8192,
@@ -363,6 +364,27 @@ describe("IOIntelligenceHandler", () => {
 		await handler.completePrompt("ping", { abortSignal: signal, timeoutMs: 5_000 })
 		expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ stream: false }), { signal, timeout: 5_000 })
 	})
+
+	it.each([
+		{ label: "a whole-number", input: 3000, forwarded: 3000 },
+		{ label: "a fractional", input: 12.5, forwarded: 13 },
+		{ label: "an over-cap", input: 2_147_483_648, forwarded: 2_147_483_647 },
+	])("completePrompt forwards $label timeoutMs as $forwarded", async ({ input, forwarded }) => {
+		mockCreate.mockResolvedValue({ choices: [{ message: { role: "assistant", content: "ok" } }] })
+		const handler = new IOIntelligenceHandler({ ioIntelligenceModelId: "meta-llama/Llama-3.3-70B-Instruct" })
+		await handler.completePrompt("ping", { timeoutMs: input })
+		expect(mockCreate.mock.calls[0][1]).toEqual({ timeout: forwarded })
+	})
+
+	it.each([0, -5, Number.NaN, Number.POSITIVE_INFINITY])(
+		"completePrompt does not forward an unusable timeoutMs (%s)",
+		async (timeoutMs) => {
+			mockCreate.mockResolvedValue({ choices: [{ message: { role: "assistant", content: "ok" } }] })
+			const handler = new IOIntelligenceHandler({ ioIntelligenceModelId: "meta-llama/Llama-3.3-70B-Instruct" })
+			await handler.completePrompt("ping", { timeoutMs })
+			expect(mockCreate.mock.calls[0][1]).toBeUndefined()
+		},
+	)
 
 	it("does not send the OpenAI Compatible custom headers to the fixed endpoint", () => {
 		new IOIntelligenceHandler({

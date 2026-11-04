@@ -13,6 +13,7 @@
 	"deleteTaskTitle": "Usuń zadanie (Shift + Klik, aby pominąć potwierdzenie)",
 	"copyPrompt": "Kopiuj prompt",
 	"exportTask": "Eksportuj zadanie",
+	"renameTask": "Zmień nazwę zadania",
 	"deleteTask": "Usuń zadanie",
 	"deleteTaskMessage": "Czy na pewno chcesz usunąć to zadanie? Tej akcji nie można cofnąć.",
 	"cancel": "Anuluj",

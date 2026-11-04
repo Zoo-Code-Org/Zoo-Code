@@ -165,8 +165,8 @@ describe("Task abort-reason race", () => {
 			const parsed = apiReqMsg?.text ? (JSON.parse(apiReqMsg.text) as { cancelReason?: string }) : {}
 			if (parsed.cancelReason === "streaming_failed" && !task.didFinishAbortingStream) {
 				// cancelTask sets abortReason before abort=true.
-				task["abortReason"] = "user_cancelled"
-				task["abort"] = true
+				task.setAbortReason("user_cancelled")
+				task.requestAbort(false)
 			}
 		})
 
@@ -176,6 +176,7 @@ describe("Task abort-reason race", () => {
 		expect(task.didFinishAbortingStream).toBe(true)
 		expect(abortTaskSpy).toHaveBeenCalledOnce()
 		expect(task.abortReason).toBe("user_cancelled")
+		expect(task.runState.latches.reason).toBe("user_cancelled")
 	})
 
 	it("keeps pre-existing abortReason when cancel lands during retry backoff", async () => {
@@ -202,8 +203,8 @@ describe("Task abort-reason race", () => {
 		// Simulate cancel landing during backoff: cancelTask sets abortReason before abort=true.
 		// Use a distinct seed value so ??= (keeps it) is distinguishable from = (overwrites).
 		task["backoffAndAnnounce"] = async () => {
-			task["abortReason"] = "streaming_failed"
-			task["abort"] = true
+			task.setAbortReason("streaming_failed")
+			task.requestAbort(false)
 		}
 
 		const abortTaskSpy = vi.spyOn(task, "abortTask")
@@ -212,5 +213,6 @@ describe("Task abort-reason race", () => {
 		expect(result).toBe(false)
 		expect(abortTaskSpy).toHaveBeenCalledOnce()
 		expect(task.abortReason).toBe("streaming_failed")
+		expect(task.runState.latches.reason).toBe("streaming_failed")
 	})
 })
