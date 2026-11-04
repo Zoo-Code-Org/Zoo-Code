@@ -1069,6 +1069,25 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		expect(mockClineProvider.isViewLaunched).toBe(true)
 	})
 
+	// setViewStateId resolves readiness and returns without running the repair when the
+	// id is unusable, is already this view's id (a reload keeps it), or belongs to a
+	// live view: the launch repair must not be skipped along with the registration.
+	it("runs the launch repair when registration returns without invoking it", async () => {
+		double.setViewStateId = vi.fn(async (_viewStateId: string, _repairBeforeReady?: () => Promise<void>) => {})
+		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "reloaded-view" })
+		await new Promise((resolve) => setImmediate(resolve))
+
+		// The view's pin no longer resolves while the shared selection is still listed, so
+		// the repair re-points this view through the activation path: that call is the
+		// observable that the repair ran at all.
+		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledTimes(1)
+		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledWith({ name: "shared-profile" })
+		expect(mockClineProvider.log).not.toHaveBeenCalledWith(
+			expect.stringContaining("view-state registration failed"),
+		)
+		expect(mockClineProvider.isViewLaunched).toBe(true)
+	})
+
 	// The repair runs inside the readiness window, so a swallowed failure there releases
 	// API-driven task creation onto a pin that still names the removed profile.
 	it("reports the launch repair's own failure instead of swallowing it twice", async () => {

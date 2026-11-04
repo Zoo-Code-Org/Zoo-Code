@@ -866,7 +866,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			const first = provider.activateProviderProfile({ name: "first-profile" })
 			const second = provider.activateProviderProfile({ name: "second-profile" })
 
-			await Promise.resolve()
+			// The activation now takes a sibling-overlay snapshot before it asks the manager to
+			// write, so flush past that pre-flight await rather than a single microtask: the
+			// assertions below still prove only the first mutation had started.
+			await new Promise((resolve) => setImmediate(resolve))
 			expect(events).toEqual(["first:start"])
 
 			resolveFirst()

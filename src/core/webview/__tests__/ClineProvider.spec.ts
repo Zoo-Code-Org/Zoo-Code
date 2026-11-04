@@ -4169,6 +4169,41 @@ describe("ClineProvider", () => {
 		await provider.dispose()
 	})
 
+	it("restores the previous view id when the launch repair rejects after the load", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const temporaryViewStateId = provider["viewStateId"]
+
+		let readinessSettled = false
+		void provider.viewStateReadiness.then(() => {
+			readinessSettled = true
+		})
+
+		await expect(
+			provider["setViewStateId"]("rejecting-repair-view", async () => {
+				throw new Error("re-pin of the removed profile failed")
+			}),
+		).rejects.toThrow("re-pin of the removed profile failed")
+		await new Promise((resolve) => setTimeout(resolve, 0))
+
+		// The re-key and the load had already succeeded when the repair rejected, so this
+		// is the branch a readiness release in a finally block - or a skipped id restore -
+		// would pass unnoticed: the id must be back on its pre-launch value so a later
+		// launch retries the registration instead of early-returning on the failed id, and
+		// readiness must stay pending so no task reads state this view never loaded.
+		expect(provider["viewStateId"]).toBe(temporaryViewStateId)
+		expect(readinessSettled).toBe(false)
+
+		await provider.dispose()
+		await provider.viewStateReadiness
+		expect(readinessSettled).toBe(true)
+	})
+
 	it("keeps viewStateReadiness unresolved when the registration fails", async () => {
 		const contextProxy = new ContextProxy(mockContext)
 		const provider = new ClineProvider(
@@ -4236,12 +4271,17 @@ describe("ClineProvider", () => {
 			})
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("mode-id")
 			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+			// The snapshot must abort before the manager is asked to switch: the store's
+			// selected profile and the mode that follows it stay the pre-activation pair.
+			const activateProfileSpy = vi.spyOn(provider.providerSettingsManager, "activateProfile")
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			const sharedSettingsBefore = provider.contextProxy.getProviderSettings()
 
 			await expect(provider.activateProviderProfile({ name: "activated-profile" })).rejects.toThrow(
 				/could not be snapshotted/,
 			)
+
+			expect(activateProfileSpy).not.toHaveBeenCalled()
 
 			// The sibling is still pinned to its own profile: if the shared write had
 			// landed, its getState() would report that pin with the activated profile's

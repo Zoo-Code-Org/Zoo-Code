@@ -695,22 +695,33 @@ export const webviewMessageHandler = async (
 			// provider restores its previous viewStateId on failure (setViewStateId) so
 			// a later launch retries registration and loadViewState instead of
 			// treating the failed id as already handled.
+			let repairRanInsideRegistration = false
+			let registrationFailed = false
 			try {
-				await provider.setViewStateId(message.viewStateId, repairRemovedViewPin)
+				await provider.setViewStateId(message.viewStateId, async () => {
+					repairRanInsideRegistration = true
+					await repairRemovedViewPin()
+				})
 			} catch (error) {
+				registrationFailed = true
 				provider.log(
 					`[webviewDidLaunch] view-state registration failed: ${error instanceof Error ? error.message : String(error)}`,
 				)
-				// Registration failed and this view's state was never loaded: still run the
-				// launch repair so a pin that names a removed profile does not survive the
-				// failed launch. The repair can fail again for the same reason it just failed
-				// inside registration, so its own failure is logged and contained here instead of
-				// aborting the rest of launch handling.
+			}
+
+			if (registrationFailed || !repairRanInsideRegistration) {
+				// Either registration failed - this view's state was never loaded - or
+				// setViewStateId returned early without reaching the repair: an unusable id,
+				// this view's id again (a reload keeps the same id), or an id another live
+				// view already owns. The launch repair still has to run in every one of those
+				// cases, or a pin that names a removed profile survives the launch. It can fail
+				// for the same reason registration did, so its own failure is logged and
+				// contained here instead of aborting the rest of launch handling.
 				try {
 					await repairRemovedViewPin()
 				} catch (repairError) {
 					provider.log(
-						`[webviewDidLaunch] launch repair failed after registration failure: ${
+						`[webviewDidLaunch] launch repair failed${registrationFailed ? " after registration failure" : ""}: ${
 							repairError instanceof Error ? repairError.message : String(repairError)
 						}`,
 					)
