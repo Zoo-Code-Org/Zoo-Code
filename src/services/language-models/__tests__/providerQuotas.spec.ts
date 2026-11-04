@@ -983,6 +983,23 @@ describe("getProviderQuotas", () => {
 		expect(fetchSpy).toHaveBeenCalledTimes(1)
 	})
 
+	it("does not go on to the next MiniMax URL when the first answered with nothing and the lookup was cancelled meanwhile", async () => {
+		const controller = new AbortController()
+		const fetchSpy = vi.fn(async () => {
+			controller.abort()
+			return new Response(JSON.stringify({}), { status: 200 }) // parses to no windows: the loop would go on
+		})
+
+		const result = getProviderQuotas(
+			[{ apiProvider: providerIdentifiers.minimax, minimaxApiKey: "k" } as never],
+			{ signal: controller.signal },
+			fetchSpy,
+		)
+		await expect(result).rejects.toMatchObject({ name: "AbortError" })
+
+		expect(fetchSpy).toHaveBeenCalledTimes(1)
+	})
+
 	it("keeps the shared request running until its last caller leaves", async () => {
 		let seen: AbortSignal | undefined
 		let release: (r: Response) => void = () => {}
