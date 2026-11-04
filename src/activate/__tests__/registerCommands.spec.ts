@@ -393,6 +393,25 @@ describe("registerCommands handlers", () => {
 		})
 	})
 
+	it("routes to the visible instance when the sidebar provider is disposed with a resolved view", () => {
+		const visible = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
+		// Structural double: only the member the title-bar handlers touch.
+		vi.mocked(ClineProvider.getVisibleInstance).mockReturnValue(visible as unknown as ClineProvider)
+		// Disposal is the only reason this provider cannot serve the click: its view did
+		// resolve, so the hasResolvedView half of the fallback condition still holds and
+		// isDisposed alone has to move the action.
+		mockProvider.isDisposed = true
+
+		handlers["zoo-code.marketplaceButtonClicked"]?.()
+
+		expect(visible.postMessageToWebview).toHaveBeenCalledWith({
+			type: "action",
+			action: "marketplaceButtonClicked",
+		})
+		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+		expect(mockVisibleProvider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
 	// The `*InTab` handlers serve the `editor/title` menu: they target the
 	// instance that owns the tracked tab panel, resolved via
 	// ClineProvider.getInstanceForView.
