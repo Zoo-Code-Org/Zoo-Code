@@ -2224,7 +2224,8 @@ export class ClineProvider
 					const snapshot = await this.snapshotProviderProfileState(name, mode)
 
 					try {
-						return await this.persistProviderProfile(name, providerSettings, activate, signal)
+						// Activate with the snapshot's mode so rollback undoes the binding it wrote.
+						return await this.persistProviderProfile(name, providerSettings, activate, signal, mode)
 					} catch (persistError) {
 						// Save, activate and propagate are separate writes; put everything back so
 						// storage, context settings, the mode binding and the task agree again.
@@ -2270,6 +2271,7 @@ export class ClineProvider
 		// A delegated child can run with a handoff configuration that differs from the global
 		// settings, so rollback rebuilds this task from its own captured configuration.
 		const task = this.getCurrentTask()
+		const historyItem = task ? this.getTaskHistoryItem(task.taskId) : undefined
 
 		return {
 			previousProfile,
@@ -2279,6 +2281,9 @@ export class ClineProvider
 			providerSettings: this.contextProxy.getProviderSettings(),
 			task,
 			taskApiConfiguration: task?.apiConfiguration ? structuredClone(task.apiConfiguration) : undefined,
+			// Activation re-points the task's sticky profile and its history entry at `name`.
+			taskApiConfigName: task?.taskApiConfigName,
+			taskHistoryEntry: historyItem ? { apiConfigName: historyItem.apiConfigName } : undefined,
 		}
 	}
 
@@ -2288,6 +2293,8 @@ export class ClineProvider
 		snapshot: Awaited<ReturnType<ClineProvider["snapshotProviderProfileState"]>>,
 		activate: boolean,
 	): Promise<void> {
+		const task = activate && snapshot.task && this.getCurrentTask() === snapshot.task ? snapshot.task : undefined
+
 		// Run every step even if one fails, then report the first failure.
 		const results = await Promise.allSettled([
 			snapshot.previousProfile
@@ -2302,14 +2309,37 @@ export class ClineProvider
 				? this.providerSettingsManager.setModeConfig(mode, snapshot.modeConfigId)
 				: this.providerSettingsManager.clearModeConfig(mode),
 			this.contextProxy.setProviderSettings(snapshot.providerSettings),
+			task
+				? this.restoreTaskApiConfigName(task, snapshot.taskApiConfigName, snapshot.taskHistoryEntry)
+				: undefined,
 		])
 
-		if (activate && snapshot.task && snapshot.taskApiConfiguration && this.getCurrentTask() === snapshot.task) {
+		if (task && snapshot.taskApiConfiguration) {
 			this.updateTaskApiHandlerIfNeeded(snapshot.taskApiConfiguration, { forceRebuild: true })
 		}
 
 		const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected")
 		if (failed) throw failed.reason
+	}
+
+	/** Puts back the task's sticky profile name and its history entry if activation re-pointed them. */
+	private async restoreTaskApiConfigName(
+		task: Task,
+		apiConfigName: string | undefined,
+		historyEntry: { apiConfigName?: string } | undefined,
+	): Promise<void> {
+		if (task.taskApiConfigName !== apiConfigName) {
+			task.setTaskApiConfigName(apiConfigName)
+		}
+
+		if (!historyEntry) return
+
+		// Re-read the entry so only the profile name is reverted, not fields written since the snapshot.
+		const historyItem = this.getTaskHistoryItem(task.taskId)
+
+		if (historyItem && historyItem.apiConfigName !== historyEntry.apiConfigName) {
+			await this.updateTaskHistory({ ...historyItem, apiConfigName: historyEntry.apiConfigName })
+		}
 	}
 
 	/**
@@ -2417,6 +2447,7 @@ export class ClineProvider
 		providerSettings: ProviderSettings,
 		activate: boolean,
 		signal: AbortSignal,
+		activationMode?: Mode,
 	): Promise<string | undefined> {
 		// TODO: Do we need to be calling `activateProfile`? It's not
 		// clear to me what the source of truth should be; in some cases
@@ -2428,7 +2459,7 @@ export class ClineProvider
 		if (signal.aborted) return id
 
 		if (activate) {
-			const { mode } = await this.getState()
+			const mode = activationMode ?? (await this.getState()).mode
 
 			if (signal.aborted) return id
 

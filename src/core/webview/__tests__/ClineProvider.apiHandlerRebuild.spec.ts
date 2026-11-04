@@ -5,7 +5,7 @@ import * as vscode from "vscode"
 import { makeCompositeDisposable } from "../../../test-utils/vscode"
 
 import { TelemetryService } from "@roo-code/telemetry"
-import { getModelId, RooCodeEventName } from "@roo-code/types"
+import { getModelId, RooCodeEventName, type HistoryItem } from "@roo-code/types"
 
 import { ContextProxy } from "../../config/ContextProxy"
 import type { Mode } from "../../../shared/modes"
@@ -437,6 +437,68 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(manager.setModeConfig).not.toHaveBeenLastCalledWith(mode, undefined)
 		})
 
+		test("activates and rolls back the same mode when the mode changes during the save", async () => {
+			const manager = provider["providerSettingsManager"]
+			vi.mocked(manager.getModeConfigId).mockResolvedValue("previous-mode-id")
+			const realGetState = provider.getState.bind(provider)
+			let calls = 0
+			// The first read (allow-list check and snapshot) sees "code"; a mode switch lands right after.
+			vi.spyOn(provider, "getState").mockImplementation(async () => ({
+				...(await realGetState()),
+				mode: ++calls === 1 ? "code" : "architect",
+			}))
+			vi.spyOn(provider.contextProxy, "setProviderSettings").mockRejectedValueOnce(new Error("write failed"))
+
+			await provider.upsertProviderProfile("test-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "anthropic/claude",
+			})
+
+			const modes = vi.mocked(manager.setModeConfig).mock.calls.map(([mode]) => mode)
+			expect(modes).toEqual(["code", "code"])
+			expect(manager.setModeConfig).toHaveBeenLastCalledWith("code", "previous-mode-id")
+		})
+
+		test("restores the task's sticky profile and history entry when a late activation step fails", async () => {
+			const mockTask = new Task({ ...defaultTaskOptions })
+			Object.assign(mockTask, { taskApiConfigName: "previous-profile" })
+			vi.mocked(mockTask.setTaskApiConfigName).mockImplementation((apiConfigName) => {
+				Object.assign(mockTask, { taskApiConfigName: apiConfigName })
+			})
+			await provider.addClineToStack(mockTask)
+			let historyItem: HistoryItem = {
+				id: mockTask.taskId,
+				ts: Date.now(),
+				task: "Test task",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				apiConfigName: "previous-profile",
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockImplementation(() => historyItem)
+			const updateTaskHistory = vi.spyOn(provider, "updateTaskHistory").mockImplementation(async (item) => {
+				historyItem = item
+				return [item]
+			})
+			// The sticky profile is written before the webview is refreshed, so this failure must undo it.
+			vi.spyOn(provider, "postStateToWebview").mockRejectedValueOnce(new Error("post failed"))
+
+			const result = await provider.upsertProviderProfile("test-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "anthropic/claude",
+			})
+
+			expect(result).toBeUndefined()
+			expect(updateTaskHistory).toHaveBeenNthCalledWith(
+				1,
+				expect.objectContaining({ apiConfigName: "test-config" }),
+			)
+			expect(mockTask.taskApiConfigName).toBe("previous-profile")
+			expect(historyItem.apiConfigName).toBe("previous-profile")
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.create_api_config")
+		})
+
 		test("rebuilds a delegated task from its own configuration, not the global settings, when activation fails", async () => {
 			const manager = provider["providerSettingsManager"]
 			const childConfiguration = {
@@ -850,7 +912,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				})
 				let calls = 0
 				vi.spyOn(provider, "getState").mockImplementation(async () => {
-					// 1st call: activation inside persistProviderProfile.
+					// 1st call: the allow-list check, which also supplies the activation mode.
 					if (++calls === 1) await gate
 					return realGetState()
 				})
