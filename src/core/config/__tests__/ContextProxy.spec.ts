@@ -359,6 +359,35 @@ describe("ContextProxy", () => {
 			await expect(proxy.setValues({ openAiApiKey: "new-key" })).rejects.toBeInstanceOf(SettingsWriteError)
 		})
 
+		it("words the report for a failure that is not an Error, and when nothing was stored", async () => {
+			mockGlobalState.update.mockRejectedValue("disk full")
+			await proxy.initialize()
+
+			const error = await proxy.setValues({ dateFormat: "ymd" }).catch((e: unknown) => e)
+
+			expect(error).toMatchObject({ committed: [], failed: ["dateFormat"], cause: "disk full" })
+			expect((error as Error).message).toBe("Could not store dateFormat: disk full")
+		})
+
+		it("reports a failed pass-through key without touching the cache, which does not hold it", async () => {
+			mockGlobalState.update.mockRejectedValue(new Error("storage unavailable"))
+			await proxy.initialize()
+			mockGlobalState.get.mockClear()
+
+			const error = await proxy.setValues({ taskHistory: [] }).catch((e: unknown) => e)
+
+			expect(error).toMatchObject({ committed: [], failed: ["taskHistory"] })
+			expect(mockGlobalState.get).not.toHaveBeenCalled() // no read-back: this key is never cached
+		})
+
+		it("logs a secret that cannot be read back as text when the failure is not an Error", async () => {
+			mockSecrets.store.mockRejectedValue(new Error("keychain locked"))
+			await proxy.initialize()
+			mockSecrets.get.mockRejectedValue("locked")
+
+			await expect(proxy.setValues({ openAiApiKey: "new-key" })).rejects.toBeInstanceOf(SettingsWriteError)
+		})
+
 		it("does not report a failure when every store succeeds", async () => {
 			await expect(proxy.setValues({ timeFormat: "24h", dateFormat: "ymd" })).resolves.toBeUndefined()
 		})
