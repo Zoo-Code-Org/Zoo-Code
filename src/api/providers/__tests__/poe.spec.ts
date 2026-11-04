@@ -5,12 +5,13 @@ import { getModelsFromCache } from "../fetchers/modelCache"
 
 import { clearAllMocks } from "../../../test-utils/reset"
 
-const { mockStreamText, mockGenerateText, mockCreatePoe, mockGetModelsFromCache, mockCaptureException } =
+const { mockStreamText, mockGenerateText, mockCreatePoe, mockGetModels, mockGetModelsFromCache, mockCaptureException } =
 	vitest.hoisted(() => ({
 		mockStreamText: vitest.fn(),
 		mockGenerateText: vitest.fn(),
 		mockCreatePoe: vitest.fn(),
 		mockCaptureException: vitest.fn(),
+		mockGetModels: vitest.fn(),
 		mockGetModelsFromCache: vitest.fn(),
 	}))
 
@@ -90,6 +91,7 @@ vitest.mock("ai", async (importOriginal) => {
 })
 
 vitest.mock("../fetchers/modelCache", () => ({
+	getModels: mockGetModels,
 	getModelsFromCache: mockGetModelsFromCache,
 }))
 
@@ -169,6 +171,36 @@ describe("PoeHandler", () => {
 			expect(result.id).toBe("unknown/model")
 			expect(result.info.contextWindow).toBeGreaterThan(0)
 			expect(result.info.maxTokens).toBeGreaterThan(0)
+		})
+	})
+
+	describe("ensureModelFetched", () => {
+		it("returns default info before the pre-warm and cached info after", async () => {
+			// The pre-warm populates the shared cache that getModel() reads, so the
+			// cache starts empty and is filled by the mocked getModels() call.
+			let cacheContents: typeof cachedModels | undefined
+			mockGetModelsFromCache.mockImplementation(() => cacheContents)
+			mockGetModels.mockImplementation(async () => {
+				cacheContents = cachedModels
+				return cachedModels
+			})
+
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "anthropic/claude-sonnet-4" })
+
+			expect(handler.getModel().info.maxTokens).toBe(8192)
+
+			await handler.ensureModelFetched()
+
+			expect(mockGetModels).toHaveBeenCalledWith(
+				{
+					provider: providerIdentifiers.poe,
+					apiKey: "key",
+					baseUrl: undefined,
+				},
+				handler,
+			)
+			expect(handler.getModel().info.maxTokens).toBe(10_000)
+			expect(handler.getModel().info.contextWindow).toBe(200_000)
 		})
 	})
 
