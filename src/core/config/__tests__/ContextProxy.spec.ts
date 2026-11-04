@@ -438,6 +438,25 @@ describe("ContextProxy", () => {
 			}
 		})
 
+		it("does not read a secret back for a failed store that a newer write of the key has already superseded", async () => {
+			let failOlder: () => void = () => {}
+			mockSecrets.store
+				.mockImplementationOnce(
+					() => new Promise((_resolve, reject) => (failOlder = () => reject(new Error("no")))),
+				)
+				.mockResolvedValue(undefined)
+			await proxy.initialize()
+			mockSecrets.get.mockClear()
+
+			const older = proxy.storeSecret("openAiApiKey", "older").catch((e: unknown) => e)
+			await proxy.storeSecret("openAiApiKey", "newer") // the newer write has its own outcome
+			failOlder()
+			await older
+
+			expect(mockSecrets.get).not.toHaveBeenCalled()
+			expect(proxy.getSecret("openAiApiKey")).toBe("newer")
+		})
+
 		it("keeps a newer value written while a failed secret is being read back", async () => {
 			mockSecrets.store.mockRejectedValueOnce(new Error("keychain locked")).mockResolvedValue(undefined)
 			await proxy.initialize()
