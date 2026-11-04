@@ -107,6 +107,12 @@ vi.mock("../../services/ripgrep/diagnostic", () => ({
 	registerRipgrepDiagnosticCommand: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 }))
 
+// The diagnostics service builds the report itself; what this suite has to prove is that the
+// command map hands it the extension context, the output channel and the live provider list.
+vi.mock("../../services/diagnostics", () => ({
+	createDiagnosticsReport: vi.fn().mockResolvedValue(undefined),
+}))
+
 describe("getVisibleProviderOrLog", () => {
 	let mockOutputChannel: vscode.OutputChannel
 
@@ -215,6 +221,25 @@ describe("registerCommands handlers", () => {
 		// Reset module-level panel state to prevent leakage between tests.
 		setPanel(undefined, "sidebar")
 		setPanel(undefined, "tab")
+	})
+
+	it("creates the diagnostics report from all provider instances without requiring a visible provider", async () => {
+		const { createDiagnosticsReport } = await import("../../services/diagnostics")
+		const providers = [{}, {}]
+		;(ClineProvider.getAllInstances as Mock).mockReturnValue(providers)
+		;(ClineProvider.getVisibleInstance as Mock).mockReturnValue(undefined)
+
+		await handlers["zoo-code.createDiagnosticsReport"]()
+
+		// The report itself is covered by the service's own suite; nothing there can tell that this
+		// registration passed the context, the channel and the instances, so the command-map call has
+		// to be asserted here. A visible provider must not be required either: the report works over
+		// every instance.
+		expect(createDiagnosticsReport).toHaveBeenCalledWith({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			providers,
+		})
 	})
 
 	it("registers the ripgrep diagnostic command and stores its disposable in context.subscriptions", async () => {
