@@ -672,11 +672,11 @@ describe("parseCommand", () => {
 		})
 
 		it("fails closed when a nested ] slices a $[…] payload open", () => {
-			// bash tracks bracket nesting through its arithmetic grammar. The
-			// scanner ends `$[…]` at the first `]`. The truncated payload then
-			// leaves its `$(` unclosed. That fails closed, like the shell's own
-			// arithmetic syntax error for the same input. This holds at top
-			// level and inside a heredoc body.
+			// bash's legacy `$[…]` reader ends the expression at an unquoted
+			// `]` even inside an open `$(`, so this input's `$(` never closes.
+			// bash refuses it with an unexpected-EOF error, and the interior
+			// walk reports the same shape. The quoted-`]` class the same reader
+			// accepts parses instead; see the next test.
 			const input = "echo $[1+$(echo ])]"
 			const { commands, parseError } = parseCommand(input)
 			expect(commands).toEqual([input])
@@ -685,6 +685,33 @@ describe("parseCommand", () => {
 			const bodyResult = parseCommand(body)
 			expect(bodyResult.commands).toEqual([body])
 			expect(bodyResult.parseError?.quoteType).toBe("command-substitution")
+			// The accepted class: bash closes the expression at the final `]`
+			// because the earlier one sits inside single quotes, then inside
+			// `$(`. The payload is extracted and the host stays parseable.
+			const accepted = parseCommand("echo $[1+$(printf '2]' | cut -c1)]")
+			expect(accepted.parseError).toBeNull()
+			expect(accepted.commands).toEqual(["echo $[1+$(printf '2]' | cut -c1)]", "printf '2]'", "cut -c1"])
+		})
+
+		it("closes $[…] at the first ] outside quotes and substitutions", () => {
+			// A subscript's `[` opens a bracket the shell closes last-open-
+			// first, so the expression ends at the depth-zero `]`, not the
+			// first `]`. Quote and substitution interiors are inert to the
+			// closer scan.
+			const subscript = parseCommand("a=(5 7)\necho $[a[0]+1]")
+			expect(subscript.parseError).toBeNull()
+			expect(subscript.commands).toEqual(["a= ( 5 7 )", "echo $[a[0]+1]"])
+			// A double-quoted `]` is equally inert: bash runs this input.
+			const dq = parseCommand('echo $[1+$(printf "2]" | cut -c1)]')
+			expect(dq.parseError).toBeNull()
+			expect(dq.commands).toEqual(['echo $[1+$(printf "2]" | cut -c1)]', 'printf "2]"', "cut -c1"])
+			// A substitution may open a subscript's bracket too: the `]` that
+			// closes the subscript is the one balancing its `[`.
+			const nested = parseCommand("a=(5 7)\necho $[a[$(echo 0)]+1]")
+			expect(nested.parseError).toBeNull()
+			expect(nested.commands).toEqual(["a= ( 5 7 )", "echo $[a[$(echo 0)]+1]", "echo 0"])
+			// Unclosed forms still fail closed: no depth-zero `]` arrives.
+			expect(structuralError("echo $[1+2")?.quoteType).toBe("arithmetic")
 		})
 
 		it("does not extract from a quoted-delimiter heredoc body (the shell suppresses expansion there)", () => {
@@ -930,12 +957,255 @@ describe("parseCommand", () => {
 			const denied = parseCommand('cat <<E "a\' # $(rm x)"\nbody\nE')
 			expect(denied.parseError).toBeNull()
 			expect(denied.commands).toEqual(["cat <<E\nbody\nE a' # $(rm x)", "rm x"])
-			// The reverse kind pair pins the same rule from the other side: a `"`
-			// inside `'...'` is literal word content, so the `#` there is also
-			// never a comment onset and the tail still surfaces.
+			// The reverse kind pair pins the mask from the other side: a
+			// balanced `'…'` span on the remainder undergoes bash's quote
+			// removal, so the bytes inside it never parse as syntax. The `#`
+			// there never tests as a comment onset either, and neither the `#`
+			// nor the substitution inside the span produces a segment: bash
+			// opens one file named by the whole word.
 			const sq = parseCommand("cat <<E 'a\" # $(zap x)'\nbody\nE")
 			expect(sq.parseError).toBeNull()
-			expect(sq.commands).toEqual(['cat <<E\nbody\nE a" # $(zap x)', "zap x"])
+			expect(sq.commands).toEqual(['cat <<E\nbody\nE a" # $(zap x)'])
+		})
+
+		it("scans the body of a second heredoc opener on the same line", () => {
+			// bash opens a heredoc for every redirect on the opener line and
+			// expands each body: a heredoc body carries no comments, so the
+			// `# $(evil)` line in the second body executes. The scan collects
+			// the chained opener on the opener line and searches its body
+			// after the outer one, so `evil` surfaces as its own segment and
+			// no allowlist decision can let the command through clean. Without
+			// the collection the body's bytes stay host text and nothing
+			// surfaces.
+			const { commands, parseError } = parseCommand("cat <<A <<cat\nA\n# $(evil)\ncat\n")
+			expect(parseError).toBeNull()
+			// One H placeholder spans the opener through the last chained
+			// terminator; the opener-line remainder (chained `<<` token and
+			// delimiter word included) stays live host text after it.
+			expect(commands).toEqual(["cat <<A\nA\n# $(evil)\ncat << cat", "evil"])
+			// A `<<<` herestring is one operator, never a chained opener: the
+			// walk consumes all three bytes and the word passes to the host.
+			expect(parseCommand("cat <<E <<<str\nbody\nE").commands).toEqual(["cat <<E\nbody\nE <<< str"])
+			// Fail-closed controls: a chained body that never reaches its
+			// terminator hides everything after it, so the whole heredoc fails
+			// closed like any other unclosed construct — bash's own read layer
+			// reports the missing terminator for both shapes.
+			const unclosed = parseCommand("cat <<A <<B\nA\n$(x)\n")
+			expect(unclosed.commands).toEqual(["cat <<A <<B\nA\n$(x)\n"])
+			expect(unclosed.parseError?.quoteType).toBe("heredoc")
+			const glued = parseCommand("cat <<E x<<y\nbody\nE")
+			expect(glued.commands).toEqual(["cat <<E x<<y\nbody\nE"])
+			expect(glued.parseError?.quoteType).toBe("heredoc")
+			// Frame-context pin: the same opener inside `$(…)` re-scan runs the
+			// emission at top level, so the frame branch's heredoc route chains
+			// through the identical path.
+			expect(parseCommand("echo $(cat <<A <<cat\nA\n# $(evil)\ncat\n)").commands).toEqual([
+				"echo",
+				"cat <<A\nA\n# $(evil)\ncat << cat",
+				"evil",
+			])
+		})
+
+		it("extracts a substitution from a chained opener's body", () => {
+			// An unquoted chained body is expansion-active exactly like the
+			// first body: the substitution inside it must reach its own
+			// segment instead of hiding in the outer host word.
+			const { commands, parseError } = parseCommand("cat <<A <<B\nA\n$(mid)\nB\n")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["cat <<A\nA\n$(mid)\nB << B", "mid"])
+		})
+
+		it("keeps a quoted chained delimiter's body inert", () => {
+			// A quoted delimiter suppresses expansion in its own body: the
+			// `$(quiet)` line is literal data, so no payload surfaces and the
+			// construct still parses clean.
+			const { commands, parseError } = parseCommand("cat <<A <<'Q'\nA\n$(quiet)\nQ\n")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["cat <<A\nA\n$(quiet)\nQ << Q"])
+		})
+
+		it("consumes three chained openers in body order", () => {
+			// Every chained body starts on the line after the previous
+			// construct's terminator, in bash's sequential read order, and
+			// only the innermost body carries the substitution. The single
+			// masked region spans the opener through the last terminator.
+			const { commands, parseError } = parseCommand("cat <<A <<B <<C\nA\nB\n$(deep)\nC\n")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["cat <<A\nA\nB\n$(deep)\nC << B << C", "deep"])
+		})
+
+		it("fails closed when the chained body runs past the end of input (sequential stdin cursor)", () => {
+			// bash reads chained bodies sequentially: B's body starts after
+			// A's terminator line, so the `# $(evil) B` line is B's unterminated
+			// body and bash expands the substitution there anyway (its warning
+			// only reports the missing terminator). A parser that anchored B's
+			// body at the line after the shared opener line found the stray `B`
+			// inside A's body instead and returned the `#` line to the main
+			// scan, where it reads as a top-level comment — the executed bytes
+			// hid. bash's executed set for this input carries `evil`.
+			const { commands, parseError } = parseCommand("cat <<A <<B\nB\nA\n# $(evil) B\n")
+			expect(parseError?.quoteType).toBe("heredoc")
+			expect(commands).toEqual(["cat <<A <<B\nB\nA\n# $(evil) B\n"])
+		})
+
+		it("reads chained bodies in bash's sequential order when a chained terminator lands inside the outer body", () => {
+			// A's body runs to the `A` line; B's body starts on the next line
+			// and holds `$(two)`. bash expands both substitutions; a body
+			// anchored at the shared opener line would take B's body from the
+			// `B` line and lose the `$(two)` byte range.
+			const { commands, parseError } = parseCommand("cat <<A <<B\n$(one)\nA\n$(two)\nB\n")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["cat <<A\n$(one)\nA\n$(two)\nB << B", "one", "two"])
+		})
+
+		it("fails closed beyond MAX_PAYLOAD_SCAN_DEPTH chained openers on one line", () => {
+			// The collector cap rides the scan's existing generated-input bound.
+			// 64 chained openers (plus the outer one) parse; the 65th chained
+			// opener fails the construct closed before any body search runs, so
+			// the accept half pins the boundary from both sides.
+			const chain = (count: number): string => {
+				const delims = Array.from({ length: count }, (_, k) => `d${k}`)
+				return "cat " + delims.map((d) => `<<${d}`).join(" ") + "\n" + delims.map((d) => `${d}\n`).join("")
+			}
+			const at = parseCommand(chain(65))
+			expect(at.parseError).toBeNull()
+			expect(at.commands.length).toBe(1)
+			const over = parseCommand(chain(66))
+			expect(over.parseError?.quoteType).toBe("heredoc")
+			// Stack safety: a generated chain far beyond the cap fails closed
+			// at the collector, never through recursion.
+			const huge = parseCommand(chain(8000))
+			expect(huge.parseError?.quoteType).toBe("heredoc")
+		})
+
+		it("starts a frame comment after every word-ending metacharacter", () => {
+			// The frame-comment word-boundary set is the default $IFS blanks
+			// plus every metacharacter that ends a word. Each member row gets
+			// the same shape: a `#` glued after the member comments out the
+			// `$(zap y)` payload, exactly as bash discards the comment bytes.
+			// The grouped-frame forms pin `(` and `)`, where a bare paren
+			// would otherwise be read as group bookkeeping. The glued control
+			// pins that a `#` after an ordinary word character stays word text
+			// and still yields the payload.
+			const rows = [
+				{ name: "semicolon", input: "echo $(x;#$(zap y)\n)", commands: ["echo", "x"], error: null },
+				// Decoy-closer rows for `&`, `(` and `)`: the comment swallows a
+				// `)` that would otherwise close the frame, so bash rejects the
+				// whole input and the scan must fail the frame closed too.
+				// Dropping the member from the boundary class instead closes the
+				// frame at the decoy and accepts bash-invalid input clean.
+				{
+					name: "ampersand",
+					input: "echo $(x&#) $(evil)",
+					commands: ["echo $(x&#) $(evil)"],
+					error: "command-substitution",
+				},
+				{ name: "pipe", input: "echo $(x|#$(zap y)\n)", commands: ["echo", "x"], error: null },
+				{ name: "less-than", input: "echo $(x<#$(zap y)\n)", commands: ["echo", "x <"], error: null },
+				{ name: "greater-than", input: "echo $(x>#$(zap y)\n)", commands: ["echo", "x >"], error: null },
+				{
+					name: "open-paren",
+					input: "echo $(x(#) $(evil)",
+					commands: ["echo $(x(#) $(evil)"],
+					error: "command-substitution",
+				},
+				{
+					name: "open-paren-process-sub",
+					input: "echo $(x>(#$(zap y)\n)",
+					commands: ["echo $(x>(#$(zap y)\n)"],
+					error: "command-substitution",
+				},
+				{
+					name: "close-paren",
+					input: "echo $( (x)#) end",
+					commands: ["echo $( (x)#) end"],
+					error: "command-substitution",
+				},
+				// Glued control: mid-word `#` keeps the payload live.
+				{ name: "glued-word", input: "echo $(x#a$(zap y)\n)", commands: ["echo", "x#a", "zap y"], error: null },
+			]
+			const observed = rows.map(({ name, input }) => {
+				const result = parseCommand(input)
+				return { name, commands: result.commands, error: result.parseError?.quoteType ?? null }
+			})
+			expect(observed).toEqual(rows.map(({ name, input: _input, ...expected }) => ({ name, ...expected })))
+		})
+
+		it("does not treat exotic JS-\\s bytes as shell word separators", () => {
+			// bash word-splits on the default $IFS blanks (space, tab, newline)
+			// only. JS `\s` is wider — VT, FF, NBSP, U+3000, U+2001, U+2028 —
+			// and a `#` after one of those extras is mid-word to bash, so the
+			// comment bytes (here a whole `$(evil)`) execute. Reading the
+			// extras as boundaries commented the payload away and approved the
+			// command. The frame rows pin the substitution-frame rule and its
+			// payload re-scan; the top rows pin the same rule's top-level twin.
+			// The accept rows keep space and tab commenting: exact $IFS, never a
+			// widened refusal.
+			const exotic = ["\x0b", "\x0c", "\u00a0", "\u3000", "\u2001", "\u2028"]
+			// The top-level host word reaches the tokenizer as
+			// `a<exotic><# placeholder>`: the tokenizer ends the word at the
+			// exotic byte and the placeholder rejoins with one space, so the
+			// pinned invariant is the `#` surviving as a restored word byte
+			// (not a dropped comment) and `evil` surfacing as its own segment.
+			const rows = exotic.flatMap((b) => [
+				{
+					name: `frame-${b.codePointAt(0)}`,
+					input: `echo $( ${b}#$(evil)\n)`,
+					commands: ["echo", "#", "evil"],
+					error: null,
+				},
+				// Decoy-closer frame shape: a boundary class that wrongly ends
+				// the word at the exotic byte would start a comment swallowing
+				// the frame's own `)`, leaving bash-valid input open.
+				{
+					name: `frame-decoy-${b.codePointAt(0)}`,
+					input: `echo $(x${b}#c) $(evil)`,
+					commands: ["echo", "x #c", "evil"],
+					error: null,
+				},
+				{
+					name: `top-${b.codePointAt(0)}`,
+					input: `echo a${b}#$(evil)`,
+					commands: ["echo a #", "evil"],
+					error: null,
+				},
+			])
+			const observed = rows.map(({ name, input }) => {
+				const result = parseCommand(input)
+				return { name, commands: result.commands, error: result.parseError?.quoteType ?? null }
+			})
+			expect(observed).toEqual(rows.map(({ name, input: _input, ...expected }) => ({ name, ...expected })))
+			for (const blank of [" ", "\t"]) {
+				expect(parseCommand(`echo $( ${blank}#$(evil)\n)`).commands).toEqual(["echo"])
+				expect(parseCommand(`echo a${blank}#$(evil)`).commands).toEqual(["echo a"])
+			}
+		})
+
+		it("does not extract a substitution from a single-quoted span on the opener remainder", () => {
+			// bash tokenizes the opener-line remainder, so a balanced `'…'`
+			// span undergoes quote removal and nothing inside it executes: the
+			// span contributes no payload, and the command keeps the head's
+			// clean approval path. Over-extracting here turns an inert argument
+			// into a denied segment bash never runs.
+			const { commands, parseError } = parseCommand("cat <<E '$(rm -rf /)'\nbody\nE")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["cat <<E\nbody\nE $(rm -rf /)"])
+		})
+
+		it("still extracts from unquoted text following a masked single-quoted remainder span", () => {
+			// The mask ends at the span's closing quote: live syntax after it
+			// still reaches its own segment, so masking cannot become a way to
+			// hide a payload by prefixing an inert quote word.
+			const { commands, parseError } = parseCommand("cat <<E '$(inert)' $(zap x)\nbody\nE")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["cat <<E\nbody\nE $(inert) $ ( zap x )", "zap x"])
+			// A single quote inside a double-quoted word is literal: the word
+			// still expands, so the interior `'…'` shape must not mask the
+			// substitution. bash runs `zap x` here (the quotes inside `"…"`
+			// never open a single-quote region).
+			const dq = parseCommand(`cat <<E "x' $(zap x)' y"\nbody\nE`)
+			expect(dq.parseError).toBeNull()
+			expect(dq.commands).toEqual(["cat <<E\nbody\nE x' $(zap x)' y", "zap x"])
 		})
 
 		it("keeps an escaped double quote from closing a double-quoted opener region", () => {
@@ -2476,6 +2746,41 @@ describe("parseCommand", () => {
 			expect(halfClosed.parseError?.quoteType).toBe("command-substitution")
 		})
 
+		it("ignores a single-quoted ) while counting arithmetic parentheses", () => {
+			// bash reads the `'` here as a quote, so its `)` is quoted text and
+			// cannot look like the arithmetic closer. The expression stays
+			// arithmetic and the inner substitution is extracted as its own
+			// segment. A counter that reads the quoted `)` as a closer trips the
+			// closer-adjacency re-route and degrades the command to a group
+			// segment bash never runs.
+			const { commands, parseError } = parseCommand("echo $(( $(printf 1 ')') + 1 ))")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["echo $(( $(printf 1 ')') + 1 ))", "printf 1 ')'"])
+		})
+
+		it("ignores parens inside quoted text and nested substitution bodies when counting", () => {
+			// Double quotes, nested `$(` bodies, and nested `${…}` regions are
+			// each read with the shell's own matching rules, so their parens
+			// never enter the arithmetic depth. Controls: the adjacency re-route
+			// still fires for a mis-nested `$(( … ) … )`, and well-formed
+			// arithmetic stays masked.
+			const dq = parseCommand('echo $(( $(echo "1)" | cut -c1) + 1 ))')
+			expect(dq.parseError).toBeNull()
+			expect(dq.commands).toEqual(['echo $(( $(echo "1)" | cut -c1) + 1 ))', 'echo "1)"', "cut -c1"])
+			// Frame call site: the nested arithmetic closes inside the frame.
+			const frame = parseCommand("echo $( x=$(( $(printf '%d' 2) + 1 )); echo $x )")
+			expect(frame.parseError).toBeNull()
+			expect(frame.commands).toEqual(["echo", "x=$(( $(printf '%d' 2) + 1 ))", "printf '%d' 2", "echo $x"])
+			// Body call site.
+			const body = parseCommand("cat <<EOF\necho $(( $(printf '%d' 2) + 1 ))\nEOF")
+			expect(body.parseError).toBeNull()
+			expect(body.commands).toEqual(["cat <<EOF\necho $(( $(printf '%d' 2) + 1 ))\nEOF", "printf '%d' 2"])
+			// Controls: the depth-1 closer that is not doubled is still bash's
+			// `$(`-plus-group reading, and balanced arithmetic stays masked.
+			expect(parseCommand("echo $((rm -rf /) )").commands).toEqual(["echo", "( rm -rf / )"])
+			expect(parseCommand("echo $((1 + (2) ))").commands).toEqual(["echo $((1 + (2) ))"])
+		})
+
 		it("extracts a grouped substitution whole from an unquoted heredoc body", () => {
 			// The body walk balances groups inside an expansion frame the way
 			// the main scan does. It treats quotes inside the frame as shell
@@ -2676,14 +2981,49 @@ describe("parseCommand", () => {
 		})
 
 		it("parses the non-heredoc equivalent at top level (main-scan parity)", () => {
-			// The same payload outside a body reaches a `)` at depth 0 once the
-			// comment hides the context of its matching closer. A depth-0 `)`
-			// cannot hide a substitution, so the closer stays host text and the
-			// second line still segments on its own.
+			// The main scan applies the same word-start comment rule inside
+			// substitution frames as the body walk. The comment hides the first
+			// line's `)`, the frame stays open across the newline, and the second
+			// line's `)` is the shell's own closer. The payload re-scan comments
+			// its first line too, so `curl evil` surfaces without a closer
+			// remnant.
 			const input = "$( echo ok # )\ncurl evil)"
 			const { commands, parseError } = parseCommand(input)
 			expect(parseError).toBeNull()
-			expect(commands).toEqual(["echo ok", "curl evil )"])
+			expect(commands).toEqual(["echo ok", "curl evil"])
+		})
+
+		it("does not open a substitution from a $( inside a comment within an open substitution frame", () => {
+			// bash discards the comment bytes before parsing, so the `$(x` inside
+			// the comment never opens a frame. The frame closes at the second
+			// line's `)` and only `echo ok` ever runs. A frame scan that reads
+			// the commented `$(` as live opens a second frame that the `)`
+			// closes at the wrong place, leaving the outer frame open and
+			// refusing this valid input as malformed.
+			const { commands, parseError } = parseCommand("echo $( echo ok # $(x\n)")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["echo", "echo ok"])
+			// A process-substitution frame takes the rule too: bash prints `hi`.
+			const proc = parseCommand("cat <( echo hi # decoy\n)")
+			expect(proc.parseError).toBeNull()
+			expect(proc.commands).toEqual(["cat", "echo hi"])
+		})
+
+		it("closes a frame at the shell's closer when a word-start comment hides a decoy )", () => {
+			// The comment's `)` is discarded before parsing, so the frame's only
+			// real closer is the second line's `)`. Each executed line becomes its
+			// own segment. A frame whose comment hides the only closer still
+			// fails closed, like bash's own unexpected-EOF refusal.
+			const { commands, parseError } = parseCommand("$( echo a # decoy )\necho b )")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["echo a", "echo b"])
+			const swallowed = parseCommand("$( echo # )")
+			expect(swallowed.commands).toEqual(["$( echo # )"])
+			expect(swallowed.parseError?.quoteType).toBe("command-substitution")
+			// The rule stays confined to substitution frame kinds: `#` inside
+			// `${…}` is operator syntax, not a comment.
+			expect(parseCommand("echo ${#x}").parseError).toBeNull()
+			expect(parseCommand("echo ${x#pat}").parseError).toBeNull()
 		})
 
 		it("does not open a substitution at a `$(` inside a body comment", () => {
