@@ -70,12 +70,10 @@ jobs:
         steps:
             - name: Checkout code
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-            # find-missing-translations.js uses Node built-ins only, so the
-            # pinned Node setup is kept but no workspace install is needed.
             - name: Setup Node.js and pnpm
               uses: ./.github/actions/setup-node-pnpm
               with:
-                  skip-install: true
+                  install-args: "--frozen-lockfile"
             - name: Verify all translations are complete
               run: node scripts/find-missing-translations.js
             - name: Verify t() calls pass every interpolation variable
