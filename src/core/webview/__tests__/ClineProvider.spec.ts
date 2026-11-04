@@ -4132,9 +4132,14 @@ describe("ClineProvider", () => {
 			)
 			await contextProxy.setValue("mode", "code")
 
-			const setValuesSpy = vi
-				.spyOn(contextProxy, "setValues")
-				.mockRejectedValueOnce(new Error("shared write failed"))
+			// The value reaches the store and only the flush fails: that is the partial-durability
+			// shape the rollback must compensate, and it is what the shared restore below checks
+			// against (a key the failed call never wrote is left alone).
+			const setValuesOriginal = contextProxy.setValues.bind(contextProxy)
+			const setValuesSpy = vi.spyOn(contextProxy, "setValues").mockImplementationOnce(async (values) => {
+				await setValuesOriginal(values)
+				throw new Error("shared write failed")
+			})
 
 			await expect(provider.setValues({ mode: "architect" })).rejects.toThrow("shared write failed")
 
@@ -4159,9 +4164,13 @@ describe("ClineProvider", () => {
 			)
 			await contextProxy.setValue("mode", "code")
 
-			const setValueSpy = vi
-				.spyOn(contextProxy, "setValue")
-				.mockRejectedValueOnce(new Error("shared write failed"))
+			// Same partial-durability shape as the multi-key case above: the value lands in the
+			// store and the write still rejects, so the shared restore has a value of ours to undo.
+			const setValueOriginal = contextProxy.setValue.bind(contextProxy)
+			const setValueSpy = vi.spyOn(contextProxy, "setValue").mockImplementationOnce(async (key, value) => {
+				await setValueOriginal(key, value)
+				throw new Error("shared write failed")
+			})
 			const restoreSpy = vi.spyOn(contextProxy, "setValues")
 
 			await expect(provider.setValue("mode", "architect")).rejects.toThrow("shared write failed")
@@ -5415,6 +5424,50 @@ describe("ClineProvider", () => {
 			switchSpy.mockRestore()
 			vi.useRealTimers()
 			await provider.dispose()
+		})
+
+		it("leaves a sibling view's newer shared write alone when rolling back a failed write", async () => {
+			// Production shares one ContextProxy across views (ContextProxy.getInstance); the two
+			// views here share one too, so a sibling write lands in the same shared store.
+			const sharedProxy = new ContextProxy(mockContext)
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				sharedProxy,
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				sharedProxy,
+				new WebviewFocusTracker(),
+			)
+			await sharedProxy.setValue("mode", "code")
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+			// The shared write lands, then a sibling view moves the same shared key while this
+			// view's paired per-view write is still in flight and then fails.
+			// Double assertion: _saveViewLocalStateFromMutation is private and has no typed
+			// accessor, and the failure has to be injected inside the paired write.
+			const proto = ClineProvider.prototype as unknown as {
+				_saveViewLocalStateFromMutation: (values: Record<string, unknown>) => Promise<void>
+			}
+			const saveSpy = vi.spyOn(proto, "_saveViewLocalStateFromMutation").mockImplementation(async () => {
+				await sibling.contextProxy.setValue("mode", "programmer")
+				throw new Error("view write down")
+			})
+
+			await expect(provider.setValues({ mode: "architect" })).rejects.toThrow("view write down")
+
+			// The rollback replays only keys that still hold what this call wrote, so the sibling's
+			// newer shared value survives instead of being reverted to the captured "code".
+			expect(provider.contextProxy.getValue("mode")).toBe("programmer")
+			expect(sibling.contextProxy.getValue("mode")).toBe("programmer")
+
+			saveSpy.mockRestore()
+			await provider.dispose()
+			await sibling.dispose()
 		})
 		it("should refresh the view-local apiConfiguration when deleting the active profile", async () => {
 			const provider = new ClineProvider(

@@ -644,6 +644,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		}
 		const previousValues = this.getConfiguration()
 		const previousSharedSettings = this.sidebarProvider.contextProxy.getProviderSettings()
+		// getConfiguration() folds this view's overlay into the merged copy, so its mode and profile
+		// pin are this view's values rather than the shared ones. Snapshot the shared pair here:
+		// the rollback below replays the merged copy through setValues, which writes both keys to
+		// shared global state, and without this snapshot a failed call would leave every other
+		// unpinned view on this view's mode and profile.
+		const previousSharedMode = this.sidebarProvider.contextProxy.getValue("mode")
+		const previousSharedProfileName = this.sidebarProvider.contextProxy.getValue("currentApiConfigName")
 		// Fail closed BEFORE any write: an existing record that cannot be read
 		// aborts the call while nothing has been mutated.
 		let previousRecord: Awaited<ReturnType<typeof manager.getProfile>> | undefined
@@ -703,6 +710,21 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			} catch (restoreError) {
 				this.log(
 					"[setConfiguration] failed to restore the previous configuration values: " +
+						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+				)
+			}
+			// The merged replay above wrote this view's mode and pin into shared state, which
+			// belongs to every unpinned view: put the shared pair back from the pre-write snapshot.
+			// This touches the shared store only - this view's own overlay keeps the same pair the
+			// replay just wrote there, so nothing about this view changes.
+			try {
+				await this.sidebarProvider.contextProxy.setValues({
+					mode: previousSharedMode,
+					currentApiConfigName: previousSharedProfileName,
+				})
+			} catch (restoreError) {
+				this.log(
+					"[setConfiguration] failed to restore the shared mode and profile pin: " +
 						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
 				)
 			}

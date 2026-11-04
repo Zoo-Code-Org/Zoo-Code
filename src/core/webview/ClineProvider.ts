@@ -8,6 +8,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import delay from "delay"
 import axios from "axios"
 import debounce from "lodash.debounce"
+import deepEqual from "fast-deep-equal"
 import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
 import {
@@ -5105,13 +5106,14 @@ export class ClineProvider
 
 	public async setValue<K extends keyof RooCodeSettings>(key: K, value: RooCodeSettings[K]) {
 		const previousSharedValues = { [key]: this.contextProxy.getValue(key) } as RooCodeSettings
+		const writtenSharedValues = { [key]: value } as RooCodeSettings
 		try {
 			await this.contextProxy.setValue(key, value)
 		} catch (error) {
 			// The shared write is inside the rollback scope too: ContextProxy persists
 			// keys one at a time, so a rejected initial write must not leave a durable
 			// subset behind without the compensating restore below.
-			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues)
+			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues, writtenSharedValues)
 			throw error
 		}
 		try {
@@ -5119,7 +5121,7 @@ export class ClineProvider
 		} catch (error) {
 			// The per-view record did not land: restore the prior shared value so the two
 			// persistence layers cannot diverge, then surface the original failure.
-			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues)
+			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues, writtenSharedValues)
 			throw error
 		}
 	}
@@ -5127,11 +5129,29 @@ export class ClineProvider
 	/**
 	 * Restore shared values captured before a setter wrote them, used when the paired
 	 * per-view persistence failed so the shared store cannot move ahead of the per-view
-	 * record. A failed rollback is logged; the original failure is what callers see.
+	 * record. Only keys that still hold the value this call wrote are replayed: the shared
+	 * store is host-wide, so a sibling view can write the same key while this call awaits,
+	 * and replaying this call's snapshot over the newer value would silently undo the
+	 * sibling's write. A failed rollback is logged; the original failure is what callers
+	 * see.
 	 */
-	private async _restoreSharedValuesAfterFailedViewWrite(previous: RooCodeSettings): Promise<void> {
+	private async _restoreSharedValuesAfterFailedViewWrite(
+		previous: RooCodeSettings,
+		written: RooCodeSettings,
+	): Promise<void> {
+		const current = this.contextProxy.getValues()
+		const restore = Object.fromEntries(
+			Object.entries(previous).filter(([key]) =>
+				deepEqual(current[key as keyof RooCodeSettings], written[key as keyof RooCodeSettings]),
+			),
+		) as RooCodeSettings
+
+		if (Object.keys(restore).length === 0) {
+			return
+		}
+
 		try {
-			await this.contextProxy.setValues(previous)
+			await this.contextProxy.setValues(restore)
 		} catch (rollbackError) {
 			this.log(
 				`[ClineProvider] Shared-state rollback after failed per-view write failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
@@ -5190,7 +5210,7 @@ export class ClineProvider
 			// Same scope rule as setValue: a multi-key write that fails partway has
 			// already persisted a durable subset, so the restore must cover the
 			// initial shared write, not only the per-view persistence below.
-			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues)
+			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues, sanitizedValues)
 			throw error
 		}
 		try {
@@ -5198,7 +5218,7 @@ export class ClineProvider
 		} catch (error) {
 			// The per-view record did not land: restore the prior shared values so the two
 			// persistence layers cannot diverge, then surface the original failure.
-			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues)
+			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues, sanitizedValues)
 			throw error
 		}
 

@@ -38,6 +38,7 @@ describe("API.setConfiguration", () => {
 			getValues: vi.fn().mockReturnValue({}),
 			setValues: vi.fn().mockResolvedValue(undefined),
 			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
 				setValues: vi.fn().mockResolvedValue(undefined),
 				getProviderSettings: vi.fn().mockReturnValue({}),
 			},

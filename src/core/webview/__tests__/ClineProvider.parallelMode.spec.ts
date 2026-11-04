@@ -2211,9 +2211,24 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			// The shared store already carries a mode, so the rollback has a concrete value
 			// to restore.
 			await provider.contextProxy.setValue("mode", "code")
+			// The mock mirrors the double's setValue and fails only at the durable flush, after the
+			// state cache and the store both hold the new value: that is the half-applied shape the
+			// shared restore compensates (a key the failed write never landed is left alone). Only
+			// the fresh mode write fails; the rollback write succeeds. Delegating to the double's own
+			// setValue instead would recurse, because spying on an existing mock reuses it.
+			// Double assertion: the proxy double keeps its state cache in a private field, and the
+			// failure has to land after that write.
+			const stateCache = provider.contextProxy["stateCache"] as unknown as Record<string, unknown>
 			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key, value) => {
-				// Only the fresh durable mode write fails; the rollback write succeeds.
-				if (key === "mode" && value !== "code") throw new Error("durable write failed")
+				if (value === undefined || value === null) {
+					delete stateCache[key]
+				} else {
+					stateCache[key] = value
+				}
+				await mockContext.globalState.update(key, value)
+				if (key === "mode" && value !== "code") {
+					throw new Error("durable write failed")
+				}
 			})
 			// The provider's async initialization can record stray writes on the spy
 			// before this test's mutation starts; start the assertion window clean.
@@ -2229,6 +2244,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				["mode", "code"],
 			])
 
+			setValueSpy.mockRestore()
 			await provider.dispose()
 		})
 
@@ -2243,8 +2259,21 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.contextProxy.setValue("mode", "code")
 			const appendLine = vi.spyOn(mockOutputChannel, "appendLine")
 			const durableError = new Error("durable write failed")
-			vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key) => {
-				if (key === "mode") throw durableError
+			// Same shape as the test above - the value lands in the cache and the store, and the
+			// durable flush fails - except that every mode write fails here, the rollback's own
+			// attempt included. Only a shared value of ours can need a rollback, and only a failing
+			// rollback can need logging.
+			const stateCache = provider.contextProxy["stateCache"] as unknown as Record<string, unknown>
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key, value) => {
+				if (value === undefined || value === null) {
+					delete stateCache[key]
+				} else {
+					stateCache[key] = value
+				}
+				await mockContext.globalState.update(key, value)
+				if (key === "mode") {
+					throw durableError
+				}
 			})
 
 			await expect(provider.handleModeSwitch("ask")).rejects.toThrow("durable write failed")
@@ -2257,6 +2286,8 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(appendLine).toHaveBeenCalledWith(expect.stringContaining("Shared-state rollback after failed"))
 			expect(appendLine).toHaveBeenCalledWith(expect.stringContaining('Failed to persist mode "ask"'))
 
+			setValueSpy.mockRestore()
+			appendLine.mockRestore()
 			await provider.dispose()
 		})
 	})
