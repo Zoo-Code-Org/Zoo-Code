@@ -661,6 +661,72 @@ describe("ClineProvider", () => {
 		await provider.dispose()
 	})
 
+	test("releases the sidebar view's listeners when that view is disposed", async () => {
+		const messageDisposable = { dispose: vi.fn() }
+		const visibilityDisposable = { dispose: vi.fn() }
+		// Every `onDidDispose` subscription the view received is collected and fired in registration order,
+		// the way VS Code fires them.
+		const disposeCallbacks: Array<() => void | Promise<void>> = []
+		const view = {
+			webview: {
+				postMessage: vi.fn().mockResolvedValue(true),
+				html: "",
+				options: {},
+				onDidReceiveMessage: vi.fn(() => messageDisposable),
+				asWebviewUri: vi.fn(),
+				cspSource: "vscode-webview://test-csp-source",
+			},
+			visible: true,
+			onDidDispose: vi.fn((callback: () => void | Promise<void>) => {
+				disposeCallbacks.push(callback)
+				return { dispose: vi.fn() }
+			}),
+			onDidChangeVisibility: vi.fn(() => visibilityDisposable),
+		} as unknown as vscode.WebviewView
+		provider.getMcpHub = vi.fn().mockReturnValue({
+			listTools: vi.fn().mockResolvedValue([]),
+			callTool: vi.fn(),
+			listResources: vi.fn().mockResolvedValue([]),
+			readResource: vi.fn().mockReturnValue({ contents: [] }),
+			getAllServers: vi.fn().mockReturnValue([]),
+		})
+
+		// Two registrations are handed back by collaborators rather than by the view double: the focus
+		// tracker's subscription and the workspace configuration listener.
+		const focusDisposable = { dispose: vi.fn() }
+		provider.webviewFocusTracker.init = vi.fn().mockReturnValue(focusDisposable)
+		const configDisposable = { dispose: vi.fn() }
+		vi.mocked(vscode.workspace.onDidChangeConfiguration).mockReturnValue(configDisposable)
+
+		await provider.resolveWebviewView(view)
+
+		// Registering the view puts its listeners in the provider's one disposable list.
+		expect(provider["webviewDisposables"]).toContain(messageDisposable)
+		expect(provider["webviewDisposables"]).toContain(visibilityDisposable)
+		expect(provider["webviewDisposables"]).toContain(focusDisposable)
+		expect(provider["webviewDisposables"]).toContain(configDisposable)
+		expect(messageDisposable.dispose, "pre-drain message").not.toHaveBeenCalled()
+		expect(visibilityDisposable.dispose, "pre-drain visibility").not.toHaveBeenCalled()
+		expect(focusDisposable.dispose, "pre-drain focus").not.toHaveBeenCalled()
+		expect(configDisposable.dispose, "pre-drain configuration").not.toHaveBeenCalled()
+
+		expect(disposeCallbacks.length).toBeGreaterThanOrEqual(1)
+		for (const callback of disposeCallbacks) {
+			await callback()
+		}
+
+		// The one drain is what releases them: every registration the view caused - message listener,
+		// focus registration, visibility listener, configuration listener - is gone from the list, and none
+		// of them survives as something a later owner would have to clean up.
+		expect(messageDisposable.dispose, "post-drain message").toHaveBeenCalled()
+		expect(visibilityDisposable.dispose, "post-drain visibility").toHaveBeenCalled()
+		expect(focusDisposable.dispose, "post-drain focus registration").toHaveBeenCalled()
+		expect(configDisposable.dispose, "post-drain configuration listener").toHaveBeenCalled()
+		expect(provider["webviewDisposables"]).toEqual([])
+		expect(provider["view"]).toBeUndefined()
+		await provider.dispose()
+	})
+
 	describe("getInstanceForView", () => {
 		it("returns the instance that owns the given view", async () => {
 			await provider.resolveWebviewView(mockWebviewView)

@@ -239,11 +239,11 @@ export class ClineProvider
 	public static readonly sideBarId = `${Package.name}.SidebarProvider`
 	public static readonly tabPanelId = `${Package.name}.TabPanelProvider`
 	private static activeInstances: Set<ClineProvider> = new Set()
+	// Listeners registered for the view this provider currently owns. A replacement view drains
+	// the previous view's subscriptions when it takes the slot (initializeWebviewView), and every
+	// disposal callback is identity-checked, so this one list always releases exactly the listeners
+	// of the surface that went away and never a replacement's.
 	private webviewDisposables: vscode.Disposable[] = []
-	// Listeners created while resolving one surface. VS Code can resolve a replacement view
-	// before the previous view's disposal callback runs, so cleanup is scoped to the surface
-	// that actually went away instead of draining listeners the replacement now owns.
-	private viewScopedDisposables = new Map<vscode.WebviewView | vscode.WebviewPanel, vscode.Disposable[]>()
 	private pendingThemeFixtureProbes = new Map<
 		string,
 		{
@@ -901,38 +901,6 @@ export class ClineProvider
 	- https://vscode-docs.readthedocs.io/en/stable/extensions/patterns-and-principles/
 	- https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
 	*/
-	/** Record a disposable against the surface it was created for, in addition to the flat list. */
-	private trackViewDisposable(view: vscode.WebviewView | vscode.WebviewPanel, disposable: vscode.Disposable): void {
-		this.webviewDisposables.push(disposable)
-		const scoped = this.viewScopedDisposables.get(view)
-		if (scoped) {
-			scoped.push(disposable)
-		} else {
-			this.viewScopedDisposables.set(view, [disposable])
-		}
-	}
-
-	/**
-	 * Dispose only the listeners created for one surface. A replacement resolved before the old
-	 * view's disposal callback keeps its own listeners.
-	 */
-	private clearViewScopedDisposables(view: vscode.WebviewView | vscode.WebviewPanel): void {
-		const scoped = this.viewScopedDisposables.get(view)
-		if (!scoped) {
-			return
-		}
-		for (const disposable of scoped) {
-			if (!disposable) {
-				continue
-			}
-			const index = this.webviewDisposables.indexOf(disposable)
-			if (index >= 0) {
-				this.webviewDisposables.splice(index, 1)
-			}
-			disposable.dispose()
-		}
-		this.viewScopedDisposables.delete(view)
-	}
 
 	private clearWebviewResources() {
 		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
@@ -949,7 +917,6 @@ export class ClineProvider
 		}
 		this.lastReceivedWebviewHeartbeatAt = undefined
 		this.webviewHealthySince = undefined
-		this.viewScopedDisposables.clear()
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()
 			if (x) {
@@ -1235,10 +1202,9 @@ export class ClineProvider
 					await this.dispose()
 				} else {
 					this.log("Clearing webview resources for sidebar view")
-					// Identity-checked: a view resolved after this one must keep the slot, and only
-					// this view's listeners are released so the replacement keeps its own.
+					// Identity-checked above: a replaced view already lost its subscriptions when the replacement
+					// took the slot, and the drain below releases everything this provider still holds.
 					clearSidebarPanel(webviewView)
-					this.clearViewScopedDisposables(webviewView)
 					this.view = undefined
 					this.clearWebviewResources()
 				}
@@ -1318,7 +1284,7 @@ export class ClineProvider
 		// Sets up an event listener to listen for messages passed from the webview view context
 		// and executes code based on the message that is received.
 		this.setWebviewMessageListener(webviewView.webview, webviewView)
-		this.trackViewDisposable(webviewView, this.webviewFocusTracker.init(this, webviewView))
+		this.webviewDisposables.push(this.webviewFocusTracker.init(this, webviewView))
 
 		// Detect a dead webview renderer process (gray screen) via heartbeat timeout.
 		this.startWebviewWatchdog()
@@ -1349,7 +1315,7 @@ export class ClineProvider
 				}
 			})
 
-			this.trackViewDisposable(webviewView, viewStateDisposable)
+			this.webviewDisposables.push(viewStateDisposable)
 		} else if ("onDidChangeVisibility" in webviewView) {
 			// sidebar
 			const visibilityDisposable = webviewView.onDidChangeVisibility(() => {
@@ -1373,7 +1339,7 @@ export class ClineProvider
 				}
 			})
 
-			this.trackViewDisposable(webviewView, visibilityDisposable)
+			this.webviewDisposables.push(visibilityDisposable)
 		}
 
 		// Listen for when color changes
@@ -1388,7 +1354,7 @@ export class ClineProvider
 				await this.postMessageToWebview({ type: "theme", text: JSON.stringify(await getTheme()) })
 			}
 		})
-		this.trackViewDisposable(webviewView, configDisposable)
+		this.webviewDisposables.push(configDisposable)
 
 		// If the extension is starting a new session, clear previous task state.
 		// But don't clear if there's already an active task (e.g., resumed via IPC/bridge).
@@ -2052,7 +2018,7 @@ export class ClineProvider
 		}
 
 		const messageDisposable = webview.onDidReceiveMessage(onReceiveMessage)
-		this.trackViewDisposable(view, messageDisposable)
+		this.webviewDisposables.push(messageDisposable)
 	}
 
 	/**
