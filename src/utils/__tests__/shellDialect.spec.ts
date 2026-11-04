@@ -14,6 +14,14 @@ describe("describeShellDialect", () => {
 		expect(describeShellDialect("C:\\Windows\\System32\\cmd.exe")).toContain("`;` is not a separator")
 	})
 
+	it("points PowerShell at $? for command success, not $LASTEXITCODE", () => {
+		const dialect = describeShellDialect("C:\\Program Files\\PowerShell\\7\\pwsh.exe")
+
+		expect(dialect).toContain("`$?` for whether the last command succeeded")
+		expect(dialect).not.toContain("`$LASTEXITCODE` for exit codes")
+		expect(dialect).toContain("does not change when a cmdlet fails")
+	})
+
 	it.each(["/bin/bash", "/bin/zsh", "C:\\Program Files\\Git\\bin\\bash.exe", "C:\\Windows\\System32\\wsl.exe"])(
 		"adds nothing for POSIX shell %s",
 		(shell) => {
