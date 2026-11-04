@@ -5,10 +5,14 @@ import { safeWriteJson } from "../safeWriteJson"
 
 // Capture the actual implementations before the mock factory wraps them, so a mocked realpath or
 // stat can delegate to the real one without recursing into itself.
-const actuals = vi.hoisted(() => ({
-	realpath: undefined as (typeof import("fs/promises"))["realpath"],
-	stat: undefined as (typeof import("fs/promises"))["stat"],
-}))
+// Typed by the hoisted callback's return type rather than by a cast on undefined: the target types
+// are overloaded function types, and casting undefined straight to them is what tsc rejects (TS2352).
+const actuals = vi.hoisted(
+	(): { realpath?: (typeof import("fs/promises"))["realpath"]; stat?: (typeof import("fs/promises"))["stat"] } => ({
+		realpath: undefined,
+		stat: undefined,
+	}),
+)
 
 vi.mock("fs/promises", async () => {
 	const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
