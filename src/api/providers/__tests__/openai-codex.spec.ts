@@ -14,6 +14,7 @@ import { OPEN_AI_CODEX_SERVICE_TIER_KEY, OpenAiCodexServiceTier, SERVICE_TIER_KE
 import { OpenAiCodexHandler, transformResponsesLiteBody } from "../openai-codex"
 import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { flushMacrotasks } from "../../../test-utils/timers"
 
 function createCompletedStream() {
 	return asyncStreamFrom([
@@ -1070,7 +1071,7 @@ describe("OpenAiCodexHandler Responses Lite requests", () => {
 		// slow refresh that loses the race.
 		const refresh = vitest
 			.spyOn(openAiCodexOAuthManager, "forceRefreshAccessToken")
-			.mockImplementation(() => new Promise<string | null>((resolve) => setTimeout(() => resolve(null), 50)))
+			.mockImplementation(() => new Promise<string | null>(() => {}))
 		const mockFetch = vitest.fn().mockResolvedValueOnce({
 			ok: false,
 			status: 401,
@@ -1087,7 +1088,7 @@ describe("OpenAiCodexHandler Responses Lite requests", () => {
 			}),
 		)
 		// Let the first request fail and the refresh start, then cancel the caller.
-		await new Promise((resolve) => setTimeout(resolve, 10))
+		await vitest.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
 		abortController.abort()
 
 		await expect(result).rejects.toMatchObject({ name: "AbortError" })
@@ -1361,7 +1362,7 @@ describe("OpenAiCodexHandler.createMessage abort bridging", () => {
 
 		// The lookup settling afterwards must be ignored: the request is already gone.
 		resolveToken("late-token")
-		await new Promise((resolve) => setTimeout(resolve, 0))
+		await flushMacrotasks()
 		expect(create).not.toHaveBeenCalled()
 	})
 
@@ -1383,13 +1384,13 @@ describe("OpenAiCodexHandler.createMessage abort bridging", () => {
 		})
 		const firstPull = stream.next()
 		// Let the token lookup settle so the generator reaches the account lookup.
-		await new Promise((resolve) => setTimeout(resolve, 0))
+		await flushMacrotasks()
 		controller.abort()
 
 		await expect(firstPull).rejects.toMatchObject({ name: "AbortError" })
 
 		resolveAccount("late-account")
-		await new Promise((resolve) => setTimeout(resolve, 0))
+		await flushMacrotasks()
 		expect(create).not.toHaveBeenCalled()
 	})
 
@@ -1418,13 +1419,13 @@ describe("OpenAiCodexHandler.createMessage abort bridging", () => {
 		})
 		const firstPull = stream.next()
 		// Let the SDK fail and the fallback reach its own account lookup.
-		await new Promise((resolve) => setTimeout(resolve, 0))
+		await flushMacrotasks()
 		controller.abort()
 
 		await expect(firstPull).rejects.toMatchObject({ name: "AbortError" })
 
 		resolveAccount("late-account")
-		await new Promise((resolve) => setTimeout(resolve, 0))
+		await flushMacrotasks()
 		expect(create).toHaveBeenCalledTimes(1)
 		expect(mockFetch).not.toHaveBeenCalled()
 	})
