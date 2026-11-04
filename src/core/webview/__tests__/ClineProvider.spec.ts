@@ -4059,6 +4059,68 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	it("aborts the shared settings write when a pinned sibling's profile cannot be snapshotted", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const sibling = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"editor",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		try {
+			sibling["viewLocalState"].currentApiConfigName = "sibling-profile"
+			vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ name: "sibling-profile", id: "sibling-id", apiProvider: providerIdentifiers.openrouter },
+				{ name: "activated-profile", id: "activated-id", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (params) => {
+				if ("name" in params && params.name === "activated-profile") {
+					return {
+						name: "activated-profile",
+						id: "activated-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "activated-key",
+					}
+				}
+				throw new Error("sibling profile read failed")
+			})
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("mode-id")
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+			// The snapshot must abort before the manager is asked to switch: the store's
+			// selected profile and the mode that follows it stay the pre-activation pair.
+			const activateProfileSpy = vi.spyOn(provider.providerSettingsManager, "activateProfile")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const sharedSettingsBefore = provider.contextProxy.getProviderSettings()
+
+			// The abort names the pin it could not snapshot. Match the pin rather than the
+			// wording: the sibling branches that carry this rule phrase the abort differently,
+			// and the rule - not the sentence - is what must stay covered.
+			await expect(provider.activateProviderProfile({ name: "activated-profile" })).rejects.toThrow(
+				/sibling-profile/,
+			)
+
+			expect(activateProfileSpy).not.toHaveBeenCalled()
+
+			// The sibling is still pinned to its own profile: if the shared write had
+			// landed, its getState() would report that pin with the activated profile's
+			// settings and credentials.
+			expect(sibling["viewLocalState"].apiConfiguration).toBeUndefined()
+			expect(provider.contextProxy.getProviderSettings()).toEqual(sharedSettingsBefore)
+		} finally {
+			await sibling.dispose()
+			await provider.dispose()
+		}
+	})
+
 	describe("view state persistence edge cases", () => {
 		it("should read viewStates from the ContextProxy cache when not fresh", async () => {
 			const provider = new ClineProvider(

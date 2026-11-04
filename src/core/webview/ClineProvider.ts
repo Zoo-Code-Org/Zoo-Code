@@ -3703,6 +3703,30 @@ export class ClineProvider
 		},
 		signal?: AbortSignal,
 	): Promise<void> {
+		const persistModeConfig = options?.persistModeConfig ?? true
+		const persistTaskHistory = options?.persistTaskHistory ?? true
+		const skipCurrentTaskRebuild = options?.skipCurrentTaskRebuild ?? false
+
+		if (!skipCurrentTaskRebuild) {
+			// Siblings pinned to other profiles must keep their own settings: the shared
+			// write below replaces the shared store, so pin their profile's settings into
+			// their overlays first. This runs before the manager writes the activated
+			// profile on purpose: a pin whose record cannot be read aborts the write, and
+			// aborting after activateProfile would leave the store on the new profile while
+			// a mode switch that already passed onSharedWriteStart keeps the new mode
+			// instead of restoring the pair, so mode and provider would disagree.
+			// For an activation by id the resolved name comes from the manager's own
+			// listing, which the shared write below reads as well.
+			let activatedProfileName: string
+			if ("name" in args) {
+				activatedProfileName = args.name
+			} else {
+				const listedProfiles = await this.providerSettingsManager.listConfig()
+				activatedProfileName = listedProfiles.find((entry) => entry.id === args.id)?.name ?? args.id
+			}
+			await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(activatedProfileName)
+		}
+
 		const { name, id, ...providerSettings } = await this.providerSettingsManager.activateProfile(args)
 
 		// The manager has now written the activated profile: from here on a failure
@@ -3711,18 +3735,9 @@ export class ClineProvider
 
 		if (signal?.aborted) return
 
-		const persistModeConfig = options?.persistModeConfig ?? true
-		const persistTaskHistory = options?.persistTaskHistory ?? true
-		const skipCurrentTaskRebuild = options?.skipCurrentTaskRebuild ?? false
-
 		if (!skipCurrentTaskRebuild) {
 			// See `upsertProviderProfile` for a description of what this is doing.
 			const listApiConfigMeta = await this.providerSettingsManager.listConfig()
-
-			// Siblings pinned to other profiles must keep their own settings: the
-			// shared write below replaces the shared store, so pin their profile's
-			// settings into their overlays first.
-			await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(name)
 
 			await Promise.all([
 				this.contextProxy.setValue("listApiConfigMeta", listApiConfigMeta),
