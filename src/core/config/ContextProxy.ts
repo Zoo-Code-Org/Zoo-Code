@@ -41,6 +41,16 @@ const globalSettingsExportSchema = globalSettingsSchema.omit({
 	viewStates: true,
 })
 
+/**
+ * Global settings a settings file may not carry in either direction. Per-view selections and the
+ * claim token that binds them are minted and held by the extension host, so a file that could
+ * set them would be replayable as another view's identity. The export side omits the key above;
+ * the import side consults this list in `sanitizeGlobalSettings`.
+ */
+const NON_PORTABLE_SETTINGS_KEYS: readonly string[] = ["viewStates"]
+
+export const isNonPortableSettingsKey = (key: string): boolean => NON_PORTABLE_SETTINGS_KEYS.includes(key)
+
 export class ContextProxy {
 	private readonly originalContext: vscode.ExtensionContext
 
