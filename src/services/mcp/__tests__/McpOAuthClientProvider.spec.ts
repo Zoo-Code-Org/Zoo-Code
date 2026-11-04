@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest"
 import type { Server } from "http"
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js"
+import type { CallbackResult } from "../utils/callbackServer"
 
 // Mock vscode
 vi.mock("vscode", () => ({
@@ -112,9 +113,59 @@ function deferred<T>() {
 	return { promise, resolve, reject }
 }
 
+/** Waits one macrotask so every pending promise reaction runs. */
+function flushPromises(): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+/** Runs a scenario and returns every unhandled rejection Node reports for it. */
+async function collectUnhandledRejections(run: () => Promise<void>): Promise<unknown[]> {
+	const unhandled: unknown[] = []
+	const onUnhandledRejection = (reason: unknown) => unhandled.push(reason)
+	process.on("unhandledRejection", onUnhandledRejection)
+	try {
+		await run()
+		// Node reports an unhandled rejection only after the microtask queue drains.
+		await flushPromises()
+	} finally {
+		process.off("unhandledRejection", onUnhandledRejection)
+	}
+	return unhandled
+}
+
+/** Queues callback listeners whose results each test settles explicitly. Listener ports start at 12345. */
+function mockCallbackListeners(count: number) {
+	return Array.from({ length: count }, (_, index) => {
+		const listener = {
+			// The provider only passes the server back to stopCallbackServer(), which is mocked.
+			server: { close: vi.fn((cb: () => void) => cb()) } as unknown as Server,
+			port: 12345 + index,
+			result: deferred<CallbackResult>(),
+			cancel: vi.fn(),
+		}
+		vi.mocked(startCallbackServer).mockResolvedValueOnce({
+			server: listener.server,
+			port: listener.port,
+			result: listener.result.promise,
+			cancel: listener.cancel,
+		})
+		return listener
+	})
+}
+
+/** A static client without a redirect URI starts its callback listener in create(). */
+function createStaticProvider(): Promise<McpOAuthClientProvider> {
+	return McpOAuthClientProvider.create("https://example.com/mcp", createMockSecretStorage(), undefined, {
+		clientId: "registered-client",
+	})
+}
+
 describe("McpOAuthClientProvider", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		// clearAllMocks() keeps queued one-time listeners. Reset them so a failed test cannot leak them.
+		vi.mocked(startCallbackServer).mockReset()
+		vi.mocked(stopCallbackServer).mockReset().mockResolvedValue(undefined)
 		McpOAuthClientProvider.clearNonOAuthCache()
 	})
 
@@ -231,16 +282,39 @@ describe("McpOAuthClientProvider", () => {
 				await provider.openBrowser()
 				const openedUri = vi.mocked(vscode.env.openExternal).mock.calls[0][0].toString()
 				expect(new URL(openedUri).searchParams.get("scope")).toBe("openid profile offline_access")
-				expect(startCallbackServer).toHaveBeenCalledWith(33418, expect.any(String), callbackHost)
+				expect(startCallbackServer).toHaveBeenCalledWith(33418, expect.any(String), callbackHost, "/callback")
 				await provider.close()
 			},
 		)
+
+		it("should listen on the configured callback path for a static client", async () => {
+			setupCallbackServerMock()
+			const redirectUri = "http://127.0.0.1:19876/mcp/oauth/callback"
+			const provider = await McpOAuthClientProvider.create(
+				"https://example.com/mcp",
+				createMockSecretStorage(),
+				undefined,
+				{ clientId: "registered-client", redirectUri },
+			)
+
+			expect(provider.redirectUrl).toBe(redirectUri)
+			expect(await provider.clientInformation()).toMatchObject({ redirect_uris: [redirectUri] })
+
+			await provider.redirectToAuthorization(new URL("https://auth.example.com/authorize"))
+			expect(startCallbackServer).toHaveBeenCalledWith(
+				19876,
+				expect.any(String),
+				"127.0.0.1",
+				"/mcp/oauth/callback",
+			)
+			await provider.close()
+		})
 
 		it.each([
 			["https://example.com:33418/callback", "must use a loopback host"],
 			["http://example.com:33418/callback", "must use a loopback host"],
 			["https://localhost:33418/callback", "must use HTTP on a loopback host"],
-			["http://localhost:33418/wrong", "path must be /callback"],
+			["http://localhost:33418/", "must specify a callback path"],
 			["http://localhost:33418/callback?x=1", "must not contain credentials, a query, or a fragment"],
 			["http://localhost:33418/callback#fragment", "must not contain credentials, a query, or a fragment"],
 			["http://u:p@localhost:33418/callback", "must not contain credentials, a query, or a fragment"],
@@ -563,7 +637,7 @@ describe("McpOAuthClientProvider", () => {
 			const secretStorage = createMockSecretStorage()
 			const serverUrl = "https://example.com/mcp"
 			const clientId = "registered-client"
-			const discoveredResource = "https://discovered.example.com/"
+			const discoveredResource = "https://example.com/mcp"
 			await secretStorage.saveOAuthData(
 				serverUrl,
 				{
@@ -614,7 +688,7 @@ describe("McpOAuthClientProvider", () => {
 				},
 				clientId,
 			)
-			mockOAuthDiscovery("https://discovered.example.com/")
+			mockOAuthDiscovery("https://example.com/mcp")
 			const provider = await McpOAuthClientProvider.create(serverUrl, secretStorage, undefined, {
 				clientId,
 				resource: explicitResource,
@@ -1277,49 +1351,158 @@ describe("McpOAuthClientProvider", () => {
 			await provider.close()
 		})
 
-		it("should close a failed listener, preserve its error, and start a fresh listener", async () => {
-			const firstResult = deferred<{ code?: string }>()
-			const secondResult = deferred<{ code?: string }>()
-			const cleanupFinished = deferred<void>()
-			const firstServer = { close: vi.fn((cb: () => void) => cb()) }
-			const secondServer = { close: vi.fn((cb: () => void) => cb()) }
-			const firstCancel = vi.fn()
-			vi.mocked(stopCallbackServer).mockReturnValueOnce(cleanupFinished.promise)
-			vi.mocked(startCallbackServer)
-				.mockResolvedValueOnce({
-					server: firstServer as unknown as Server,
-					port: 12345,
-					result: firstResult.promise,
-					cancel: firstCancel,
-				})
-				.mockResolvedValueOnce({
-					server: secondServer as unknown as Server,
-					port: 12346,
-					result: secondResult.promise,
-					cancel: vi.fn(),
+		it.each([
+			{ timing: "before the first caller waits", waitBeforeFailure: false },
+			{ timing: "while a caller is waiting", waitBeforeFailure: true },
+		])(
+			"should report a listener failure $timing once, close the listener, and retry on a fresh listener",
+			async ({ waitBeforeFailure }) => {
+				const [first, second] = mockCallbackListeners(2)
+				const callbackError = new Error("Callback listener failed")
+				vi.mocked(stopCallbackServer).mockRejectedValueOnce(new Error("Listener close failed"))
+				const provider = await createStaticProvider()
+
+				const unhandled = await collectUnhandledRejections(async () => {
+					// Attach the expectation before the failure so a waiting caller is never unhandled.
+					const waitingRejection = waitBeforeFailure
+						? expect(provider.waitForAuthCode()).rejects.toBe(callbackError)
+						: undefined
+					first.result.reject(callbackError)
+					await flushPromises()
+
+					const report = waitingRejection ?? expect(provider.waitForAuthCode()).rejects.toBe(callbackError)
+					await flushPromises()
+					// Reporting the failure must not start another listener and wait on it instead.
+					expect(startCallbackServer).toHaveBeenCalledTimes(1)
+					// The cleanup error must not replace the callback error.
+					await report
+					expect(stopCallbackServer).toHaveBeenCalledWith(first.server, first.cancel)
+
+					const retry = provider.waitForAuthCode()
+					await vi.waitFor(() => expect(startCallbackServer).toHaveBeenCalledTimes(2))
+					expect(provider.redirectUrl).toBe("http://127.0.0.1:12346/callback")
+					second.result.resolve({ code: "second-code" })
+					await expect(retry).resolves.toBe("second-code")
 				})
 
-			const provider = await McpOAuthClientProvider.create(
-				"https://example.com/mcp",
-				createMockSecretStorage(),
-				undefined,
-				{ clientId: "registered-client" },
-			)
-			const firstWait = provider.waitForAuthCode()
-			const firstRejection = expect(firstWait).rejects.toThrow("Callback listener failed")
-			firstResult.reject(new Error("Callback listener failed"))
-			await firstRejection
-			await vi.waitFor(() => expect(stopCallbackServer).toHaveBeenCalledWith(firstServer, firstCancel))
+				expect(unhandled).toEqual([])
+				await provider.close()
+			},
+		)
+
+		it.each([
+			{ timing: "before the first caller waits", waitBeforeCallback: false },
+			{ timing: "while a caller is waiting", waitBeforeCallback: true },
+		])(
+			"should return a code received $timing without starting another listener",
+			async ({ waitBeforeCallback }) => {
+				const [first] = mockCallbackListeners(1)
+				const provider = await createStaticProvider()
+
+				const waiting = waitBeforeCallback ? provider.waitForAuthCode() : undefined
+				first.result.resolve({ code: "first-code" })
+				await flushPromises()
+
+				await expect(waiting ?? provider.waitForAuthCode()).resolves.toBe("first-code")
+				expect(startCallbackServer).toHaveBeenCalledTimes(1)
+				// A successful callback is not a failure, so the listener stays attached until close().
+				expect(stopCallbackServer).not.toHaveBeenCalled()
+				await provider.close()
+				expect(stopCallbackServer).toHaveBeenCalledWith(first.server, first.cancel)
+			},
+		)
+
+		it("should report an immediate listener failure to every caller that waited for the listener to start", async () => {
+			vi.mocked(startCallbackServer).mockResolvedValueOnce({
+				// The provider only passes the server back to stopCallbackServer(), which is mocked.
+				server: { close: vi.fn((cb: () => void) => cb()) } as unknown as Server,
+				port: 12345,
+				result: Promise.resolve({ error: "access_denied" }),
+				cancel: vi.fn(),
+			})
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", createMockSecretStorage())
+
+			const results = await Promise.allSettled([provider.waitForAuthCode(), provider.waitForAuthCode()])
+
+			const expected = { status: "rejected", reason: new Error("OAuth authorization failed: access_denied") }
+			expect(results).toEqual([expected, expected])
 			expect(startCallbackServer).toHaveBeenCalledTimes(1)
-			cleanupFinished.resolve(undefined)
-			await cleanupFinished.promise
-			await Promise.resolve()
+			await provider.close()
+		})
 
-			const secondWait = provider.waitForAuthCode()
+		it.each([
+			{
+				action: "redirectToAuthorization() starts a replacement listener",
+				endFailedAttempt: (provider: McpOAuthClientProvider) =>
+					provider.redirectToAuthorization(new URL("https://auth.example.com/authorize")),
+			},
+			{
+				action: "close() ends the failed flow",
+				endFailedAttempt: (provider: McpOAuthClientProvider) => provider.close(),
+			},
+		])("should discard an unreported listener failure after $action", async ({ endFailedAttempt }) => {
+			const [first, second] = mockCallbackListeners(2)
+			const provider = await createStaticProvider()
+			first.result.reject(new Error("Callback listener failed"))
+			await flushPromises()
+
+			await endFailedAttempt(provider)
+			const wait = provider.waitForAuthCode()
 			await vi.waitFor(() => expect(startCallbackServer).toHaveBeenCalledTimes(2))
-			expect(provider.redirectUrl).toBe("http://127.0.0.1:12346/callback")
-			secondResult.resolve({ code: "second-code" })
-			await expect(secondWait).resolves.toBe("second-code")
+			second.result.resolve({ code: "second-code" })
+
+			await expect(wait).resolves.toBe("second-code")
+			await provider.close()
+		})
+
+		it("should report a replacement listener failure that happens before its first caller waits", async () => {
+			const [first, second] = mockCallbackListeners(2)
+			const provider = await createStaticProvider()
+			const firstError = new Error("First listener failed")
+			const firstReport = expect(provider.waitForAuthCode()).rejects.toBe(firstError)
+			first.result.reject(firstError)
+			await firstReport
+
+			// The SDK starts the next attempt's listener before the user can authenticate.
+			await provider.redirectToAuthorization(new URL("https://auth.example.com/authorize"))
+			expect(startCallbackServer).toHaveBeenCalledTimes(2)
+			const secondError = new Error("Callback timeout")
+			second.result.reject(secondError)
+			await flushPromises()
+
+			// The earlier caller waited on the first listener, not this one, so this failure is still unreported.
+			const secondReport = expect(provider.waitForAuthCode()).rejects.toBe(secondError)
+			await flushPromises()
+			expect(startCallbackServer).toHaveBeenCalledTimes(2)
+			await secondReport
+			await provider.close()
+		})
+
+		it("should start a replacement listener only after the failed listener stops", async () => {
+			const [first, second] = mockCallbackListeners(2)
+			const cleanup = deferred<void>()
+			vi.mocked(stopCallbackServer).mockReturnValueOnce(cleanup.promise)
+			const provider = await createStaticProvider()
+			const callbackError = new Error("Callback listener failed")
+			first.result.reject(callbackError)
+			await flushPromises()
+			await expect(provider.waitForAuthCode()).rejects.toBe(callbackError)
+
+			const retry = provider.waitForAuthCode()
+			await flushPromises()
+			// The replacement reuses the failed listener's port, so it must wait until that listener closes.
+			expect(startCallbackServer).toHaveBeenCalledTimes(1)
+
+			cleanup.resolve()
+			await vi.waitFor(() => expect(startCallbackServer).toHaveBeenCalledTimes(2))
+			expect(startCallbackServer).toHaveBeenLastCalledWith(
+				first.port,
+				expect.any(String),
+				"127.0.0.1",
+				"/callback",
+			)
+			second.result.resolve({ code: "second-code" })
+			await expect(retry).resolves.toBe("second-code")
 			await provider.close()
 		})
 	})
@@ -1358,6 +1541,61 @@ describe("McpOAuthClientProvider", () => {
 
 			expect(stopCallbackServer).not.toHaveBeenCalled()
 		})
+
+		it("should wait for a failed listener to stop", async () => {
+			const [first] = mockCallbackListeners(1)
+			const cleanup = deferred<void>()
+			vi.mocked(stopCallbackServer).mockReturnValueOnce(cleanup.promise)
+			const provider = await createStaticProvider()
+			first.result.reject(new Error("Callback listener failed"))
+			await flushPromises()
+
+			let closed = false
+			const closing = provider.close().then(() => {
+				closed = true
+			})
+			await flushPromises()
+			expect(closed).toBe(false)
+
+			cleanup.resolve()
+			await closing
+			expect(stopCallbackServer).toHaveBeenCalledTimes(1)
+		})
+
+		it.each([
+			{ outcome: "succeeds", stopListener: async (_server: Server, cancel: () => void) => cancel() },
+			{
+				outcome: "fails",
+				stopListener: async (_server: Server, cancel: () => void) => {
+					cancel()
+					throw new Error("Listener close failed")
+				},
+			},
+		])(
+			"should start a fresh listener after close() when stopping the old listener $outcome",
+			async ({ stopListener }) => {
+				const [first, second] = mockCallbackListeners(2)
+				// Like the real listener, cancelling rejects the pending callback result.
+				first.cancel.mockImplementation(() => first.result.reject(new Error("Callback cancelled")))
+				vi.mocked(stopCallbackServer).mockImplementationOnce(stopListener)
+				const provider = await createStaticProvider()
+
+				const unhandled = await collectUnhandledRejections(async () => {
+					await provider.close()
+					expect(stopCallbackServer).toHaveBeenCalledTimes(1)
+					expect(first.cancel).toHaveBeenCalledTimes(1)
+
+					// The cancellation belongs to the closed flow and must not be reported to the next attempt.
+					const wait = provider.waitForAuthCode()
+					await vi.waitFor(() => expect(startCallbackServer).toHaveBeenCalledTimes(2))
+					second.result.resolve({ code: "second-code" })
+					await expect(wait).resolves.toBe("second-code")
+				})
+
+				expect(unhandled).toEqual([])
+				await provider.close()
+			},
+		)
 
 		it("should handle cancellation of an eagerly started callback without an unhandled rejection", async () => {
 			const result = deferred<{ code?: string }>()
@@ -1398,7 +1636,7 @@ describe("McpOAuthClientProvider", () => {
 			// reads redirect_uris, so the advertised URI carries the real port and never :0.
 			expect(startCallbackServer).toHaveBeenCalledTimes(1)
 			// Port 0 asks the OS for an ephemeral port; the mock binds it to 12345.
-			expect(startCallbackServer).toHaveBeenCalledWith(0, expect.any(String), "127.0.0.1")
+			expect(startCallbackServer).toHaveBeenCalledWith(0, expect.any(String), "127.0.0.1", "/callback")
 			expect(provider.redirectUrl).toBe("http://127.0.0.1:12345/callback")
 			expect(provider.redirectUrl).not.toContain(":0/")
 			expect(provider.clientMetadata.redirect_uris).toEqual(["http://127.0.0.1:12345/callback"])
@@ -1409,6 +1647,7 @@ describe("McpOAuthClientProvider", () => {
 		})
 
 		it("should skip dynamic registration for a configured static client", async () => {
+			setupCallbackServerMock()
 			const provider = await McpOAuthClientProvider.create(
 				"https://example.com/mcp",
 				createMockSecretStorage(),

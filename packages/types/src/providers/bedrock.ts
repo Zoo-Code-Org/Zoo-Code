@@ -1,4 +1,13 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 // https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference.html
 
@@ -22,6 +31,7 @@ export const bedrockModels = {
 		inputPrice: 3.0,
 		outputPrice: 15.0,
 		cacheWritesPrice: 3.75,
+		cacheWritesPrice1h: 6, // $6.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.3,
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -36,6 +46,7 @@ export const bedrockModels = {
 		inputPrice: 3.0, // $3 per million input tokens (≤200K context)
 		outputPrice: 15.0, // $15 per million output tokens (≤200K context)
 		cacheWritesPrice: 3.75, // $3.75 per million tokens
+		cacheWritesPrice1h: 6, // $6.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.3, // $0.30 per million tokens
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -47,6 +58,7 @@ export const bedrockModels = {
 				inputPrice: 6.0, // $6 per million input tokens (>200K context)
 				outputPrice: 22.5, // $22.50 per million output tokens (>200K context)
 				cacheWritesPrice: 7.5, // $7.50 per million tokens (>200K context)
+				cacheWritesPrice1h: 12, // $12.00 per million tokens (2x tier input price, 1h cache writes)
 				cacheReadsPrice: 0.6, // $0.60 per million tokens (>200K context)
 			},
 		],
@@ -63,6 +75,7 @@ export const bedrockModels = {
 		inputPrice: 2.0, // $2 per million input tokens (introductory pricing through Aug 31, 2026)
 		outputPrice: 10.0, // $10 per million output tokens (introductory pricing through Aug 31, 2026)
 		cacheWritesPrice: 2.5, // $2.50 per million tokens (introductory pricing through Aug 31, 2026)
+		cacheWritesPrice1h: 4, // $4.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.2, // $0.20 per million tokens (introductory pricing through Aug 31, 2026)
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -143,6 +156,7 @@ export const bedrockModels = {
 		inputPrice: 3.0,
 		outputPrice: 15.0,
 		cacheWritesPrice: 3.75,
+		cacheWritesPrice1h: 6, // $6.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.3,
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -157,6 +171,7 @@ export const bedrockModels = {
 		inputPrice: 15.0,
 		outputPrice: 75.0,
 		cacheWritesPrice: 18.75,
+		cacheWritesPrice1h: 30, // $30.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 1.5,
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -171,6 +186,7 @@ export const bedrockModels = {
 		inputPrice: 5.0, // $5 per million input tokens (≤200K context)
 		outputPrice: 25.0, // $25 per million output tokens (≤200K context)
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
+		cacheWritesPrice1h: 10, // $10.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -182,6 +198,7 @@ export const bedrockModels = {
 				inputPrice: 10.0, // $10 per million input tokens (>200K context)
 				outputPrice: 37.5, // $37.50 per million output tokens (>200K context)
 				cacheWritesPrice: 12.5, // $12.50 per million tokens (>200K context)
+				cacheWritesPrice1h: 20, // $20.00 per million tokens (2x tier input price, 1h cache writes)
 				cacheReadsPrice: 1.0, // $1.00 per million tokens (>200K context)
 			},
 		],
@@ -195,6 +212,7 @@ export const bedrockModels = {
 		inputPrice: 5.0, // $5 per million input tokens (≤200K context) — verify against Bedrock console
 		outputPrice: 25.0, // $25 per million output tokens (≤200K context) — verify against Bedrock console
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
+		cacheWritesPrice1h: 10, // $10.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -206,6 +224,7 @@ export const bedrockModels = {
 				inputPrice: 10.0, // $10 per million input tokens (>200K context)
 				outputPrice: 37.5, // $37.50 per million output tokens (>200K context)
 				cacheWritesPrice: 12.5, // $12.50 per million tokens (>200K context)
+				cacheWritesPrice1h: 20, // $20.00 per million tokens (2x tier input price, 1h cache writes)
 				cacheReadsPrice: 1.0, // $1.00 per million tokens (>200K context)
 			},
 		],
@@ -219,6 +238,7 @@ export const bedrockModels = {
 		inputPrice: 5.0, // $5 per million input tokens (≤200K context) — verify against Bedrock console
 		outputPrice: 25.0, // $25 per million output tokens (≤200K context) — verify against Bedrock console
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
+		cacheWritesPrice1h: 10, // $10.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -232,6 +252,7 @@ export const bedrockModels = {
 				inputPrice: 10.0, // $10 per million input tokens (>200K context)
 				outputPrice: 37.5, // $37.50 per million output tokens (>200K context)
 				cacheWritesPrice: 12.5, // $12.50 per million tokens (>200K context)
+				cacheWritesPrice1h: 20, // $20.00 per million tokens (2x tier input price, 1h cache writes)
 				cacheReadsPrice: 1.0, // $1.00 per million tokens (>200K context)
 			},
 		],
@@ -248,6 +269,7 @@ export const bedrockModels = {
 		inputPrice: 5.0, // $5 per million input tokens
 		outputPrice: 25.0, // $25 per million output tokens
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
+		cacheWritesPrice1h: 10, // $10.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -268,6 +290,7 @@ export const bedrockModels = {
 		inputPrice: 4.0, // $4 per million input tokens
 		outputPrice: 20.0, // $20 per million output tokens
 		cacheWritesPrice: 5.0, // $5 per million tokens
+		cacheWritesPrice1h: 8, // $8.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.2, // $0.20 per million tokens
 		// The same Bedrock model card lists 512 as the minimum tokens per cache
 		// checkpoint for Opus 5.5 (matching the Fable 5.1 entry below).
@@ -297,6 +320,7 @@ export const bedrockModels = {
 		inputPrice: 0.1, // $0.10 per million input tokens
 		outputPrice: 0.5, // $0.50 per million output tokens
 		cacheWritesPrice: 0.125, // $0.125 per million tokens (5m cache writes)
+		cacheWritesPrice1h: 0.2, // $0.20 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.01, // $0.01 per million tokens (cache hits / refreshes)
 		// The same Bedrock model card lists 512 as the minimum tokens per cache
 		// checkpoint for Haiku 5.5 (matching the Opus 5.5 entry above).
@@ -317,6 +341,7 @@ export const bedrockModels = {
 		inputPrice: 10.0,
 		outputPrice: 50.0,
 		cacheWritesPrice: 12.5,
+		cacheWritesPrice1h: 20, // $20.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.25,
 		minTokensPerCachePoint: 512,
 		maxCachePoints: 4,
@@ -335,6 +360,7 @@ export const bedrockModels = {
 		inputPrice: 10.0,
 		outputPrice: 50.0,
 		cacheWritesPrice: 12.5,
+		cacheWritesPrice1h: 20, // $20.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 1.0,
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -351,6 +377,7 @@ export const bedrockModels = {
 		inputPrice: 5.0,
 		outputPrice: 25.0,
 		cacheWritesPrice: 6.25,
+		cacheWritesPrice1h: 10, // $10.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.5,
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -365,6 +392,7 @@ export const bedrockModels = {
 		inputPrice: 15.0,
 		outputPrice: 75.0,
 		cacheWritesPrice: 18.75,
+		cacheWritesPrice1h: 30, // $30.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 1.5,
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -379,6 +407,7 @@ export const bedrockModels = {
 		inputPrice: 3.0,
 		outputPrice: 15.0,
 		cacheWritesPrice: 3.75,
+		cacheWritesPrice1h: 6, // $6.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.3,
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -392,6 +421,7 @@ export const bedrockModels = {
 		inputPrice: 3.0,
 		outputPrice: 15.0,
 		cacheWritesPrice: 3.75,
+		cacheWritesPrice1h: 6, // $6.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.3,
 		minTokensPerCachePoint: 1024,
 		maxCachePoints: 4,
@@ -405,6 +435,7 @@ export const bedrockModels = {
 		inputPrice: 0.8,
 		outputPrice: 4.0,
 		cacheWritesPrice: 1.0,
+		cacheWritesPrice1h: 1.6, // $1.60 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.08,
 		minTokensPerCachePoint: 2048,
 		maxCachePoints: 4,
@@ -419,6 +450,7 @@ export const bedrockModels = {
 		inputPrice: 1.0,
 		outputPrice: 5.0,
 		cacheWritesPrice: 1.25, // 5m cache writes
+		cacheWritesPrice1h: 2, // $2.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.1, // cache hits / refreshes
 		minTokensPerCachePoint: 2048,
 		maxCachePoints: 4,
@@ -816,3 +848,31 @@ export const resolveBedrockCustomArnBaseModelId = (
 
 	return baseModelId && isBedrockModelId(baseModelId) ? baseModelId : namedModelId
 }
+
+export const bedrockProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.bedrock,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => bedrockDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		awsAccessKey: z.string().optional(),
+		awsSecretKey: z.string().optional(),
+		awsSessionToken: z.string().optional(),
+		awsRegion: z.string().optional(),
+		awsUseCrossRegionInference: z.boolean().optional(),
+		awsUseGlobalInference: z.boolean().optional(), // Enable Global Inference profile routing when supported
+		awsUsePromptCache: z.boolean().optional(),
+		awsProfile: z.string().optional(),
+		awsUseProfile: z.boolean().optional(),
+		awsApiKey: z.string().optional(),
+		awsUseApiKey: z.boolean().optional(),
+		awsCustomArn: z.string().optional(),
+		awsCustomArnBaseModelId: z.string().optional(), // Registry model a custom ARN points to; drives capabilities and pricing
+		awsModelContextWindow: z.number().optional(),
+		awsBedrockEndpointEnabled: z.boolean().optional(),
+		awsBedrockEndpoint: z.string().optional(),
+		awsBedrock1MContext: z.boolean().optional(), // Enable 'context-1m-2025-08-07' beta for 1M context window.
+		awsBedrockServiceTier: z.enum(["STANDARD", "FLEX", "PRIORITY"]).optional(), // AWS Bedrock service tier selection
+	},
+})

@@ -7,6 +7,7 @@ import {
 	CodeActionKind,
 	CodeLens,
 	LanguageModelTextPart,
+	LanguageModelDataPart,
 	LanguageModelToolCallPart,
 	LanguageModelToolResultPart,
 	FileSystemError,
@@ -258,6 +259,63 @@ describe("LanguageModelTextPart", () => {
 		const part = new LanguageModelTextPart("Hello, world!")
 
 		expect(part.value).toBe("Hello, world!")
+	})
+})
+
+describe("LanguageModelDataPart", () => {
+	const decode = (data: Uint8Array) => new TextDecoder().decode(data)
+
+	it("should create data part via constructor", () => {
+		const data = new Uint8Array([1, 2, 3])
+		const part = new LanguageModelDataPart(data, "image/png")
+
+		expect(part.data).toBe(data)
+		expect(part.mimeType).toBe("image/png")
+	})
+
+	describe("image()", () => {
+		it("should create image part preserving bytes and mime type", () => {
+			const data = new Uint8Array([137, 80, 78, 71])
+			const part = LanguageModelDataPart.image(data, "image/png")
+
+			expect(part).toBeInstanceOf(LanguageModelDataPart)
+			expect(part.data).toEqual(data)
+			expect(part.mimeType).toBe("image/png")
+		})
+
+		it("should round-trip base64-decoded image data", () => {
+			const base64 = Buffer.from("fake-image-bytes").toString("base64")
+			const part = LanguageModelDataPart.image(new Uint8Array(Buffer.from(base64, "base64")), "image/jpeg")
+
+			expect(decode(part.data)).toBe("fake-image-bytes")
+			expect(part.mimeType).toBe("image/jpeg")
+		})
+	})
+})
+
+describe("LanguageModelDataPart text and JSON", () => {
+	it.each([undefined, "text/html"])("encodes text with MIME type %s", (mimeType) => {
+		const part = LanguageModelDataPart.text("Hello 🌍", mimeType)
+		expect(part).toBeInstanceOf(LanguageModelDataPart)
+		expect(new TextDecoder().decode(part.data)).toBe("Hello 🌍")
+		expect(part.mimeType).toBe(mimeType ?? "text/plain")
+	})
+
+	it.each([undefined, "application/example+json"])("encodes JSON with MIME type %s", (mimeType) => {
+		const value = { message: "Hello 🌍", count: 2 }
+		const part = LanguageModelDataPart.json(value, mimeType)
+		expect(part).toBeInstanceOf(LanguageModelDataPart)
+		expect(JSON.parse(new TextDecoder().decode(part.data))).toEqual(value)
+		expect(part.mimeType).toBe(mimeType ?? "application/json")
+	})
+
+	it.each([undefined, () => 1, Symbol("x")])("rejects non-serializable JSON value %s", (value) => {
+		expect(() => LanguageModelDataPart.json(value)).toThrow(TypeError)
+	})
+
+	it.each([null, 0, false, ""])("accepts serializable falsy JSON value %s", (value) => {
+		const part = LanguageModelDataPart.json(value)
+		expect(JSON.parse(new TextDecoder().decode(part.data))).toBe(value)
 	})
 })
 

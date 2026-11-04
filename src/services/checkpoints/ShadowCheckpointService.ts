@@ -495,6 +495,22 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 		}
 	}
 
+	// MUST run before workspace-mutating Git commands: discovering a missing commit
+	// after git clean would leave untracked user files permanently deleted.
+	// Other Git failures are rethrown so callers don't mistake them for a deleted checkpoint.
+	private async commitExists(commitHash: string): Promise<boolean> {
+		try {
+			await this.git!.raw(["cat-file", "-e", `${commitHash}^{commit}`])
+			return true
+		} catch (e) {
+			const message = e instanceof Error ? e.message : String(e)
+			if (/not a valid object name|bad object|not a commit/i.test(message)) {
+				return false
+			}
+			throw e
+		}
+	}
+
 	public async restoreCheckpoint(commitHash: string) {
 		try {
 			this.log(`[${this.constructor.name}#restoreCheckpoint] starting checkpoint restore`)
@@ -507,10 +523,11 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 				throw new Error("Shadow git repo not initialized")
 			}
 
-			const start = Date.now()
-			if ((await this.git.raw(["cat-file", "-t", commitHash])).trim() !== "commit") {
-				throw new Error("Checkpoint hash does not identify a commit")
+			if (!(await this.commitExists(commitHash))) {
+				throw new Error(t("common:errors.checkpoint_missing", { commitHash }))
 			}
+
+			const start = Date.now()
 			const commitMessage = await this.git.show(["-s", "--format=%B", commitHash])
 			const recordRequired = commitMessage.split(/\r?\n/).includes(IGNORED_RECORD_HEADER)
 			const ignoredAtCheckpoint = await this.readIgnoredRecord(commitHash, recordRequired)
@@ -535,7 +552,10 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 		} catch (e) {
 			const error = e instanceof Error ? e : new Error(String(e))
 			this.log(`[${this.constructor.name}#restoreCheckpoint] failed to restore checkpoint: ${error.message}`)
-			this.emit("error", { type: "error", error })
+			// An unhandled error event throws its payload instead of the original restore error.
+			if (this.listenerCount("error") > 0) {
+				this.emit("error", { type: "error", error })
+			}
 			throw error
 		}
 	}
