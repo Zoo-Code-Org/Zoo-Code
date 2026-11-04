@@ -233,6 +233,10 @@ type GetStateOptions = {
 	includeTaskHistory?: boolean
 }
 
+// `installed` is false when a newer task took ownership during restoration; the
+// returned task was then aborted and never registered.
+type HistoryTaskInstallation = { task: Task; installed: boolean }
+
 function removeTaskEventListeners(listeners: WeakMap<Task, Array<() => void>>, task: Task): void {
 	const cleanupFunctions = listeners.get(task)
 	if (cleanupFunctions) {
@@ -1445,10 +1449,18 @@ export class ClineProvider
 		await this.handleZooCodeCallback(token)
 	}
 
-	public createTaskWithHistoryItem(
+	public async createTaskWithHistoryItem(
 		historyItem: HistoryItem & { rootTask?: Task; parentTask?: Task },
 		options?: { startTask?: boolean },
 	): Promise<Task> {
+		const { task } = await ClineProvider.prototype.installTaskWithHistoryItem.call(this, historyItem, options)
+		return task
+	}
+
+	private installTaskWithHistoryItem(
+		historyItem: HistoryItem & { rootTask?: Task; parentTask?: Task },
+		options?: { startTask?: boolean },
+	): Promise<HistoryTaskInstallation> {
 		// History navigation can arrive concurrently (for example, two rapid
 		// showTaskWithId messages). Serialize the full eviction/installation
 		// transition so both callers cannot observe the same previous registry
@@ -1456,8 +1468,8 @@ export class ClineProvider
 		// Fail forward so one rejected restoration does not poison the queue.
 		return ClineProvider.prototype.enqueueHistoryTaskTransition.call<
 			ClineProvider,
-			[() => Promise<Task>],
-			Promise<Task>
+			[() => Promise<HistoryTaskInstallation>],
+			Promise<HistoryTaskInstallation>
 		>(this, () => ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem, options))
 	}
 
@@ -1478,8 +1490,11 @@ export class ClineProvider
 			if (this.getCurrentTask() !== task) {
 				return false
 			}
-			await ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem)
-			return true
+			const { installed } = await ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(
+				this,
+				historyItem,
+			)
+			return installed
 		})
 	}
 
@@ -1496,7 +1511,7 @@ export class ClineProvider
 	private async createTaskWithHistoryItemUnlocked(
 		historyItem: HistoryItem & { rootTask?: Task; parentTask?: Task },
 		options?: { startTask?: boolean },
-	): Promise<Task> {
+	): Promise<HistoryTaskInstallation> {
 		const isCliRuntime = process.env.ROO_CLI_RUNTIME === "1"
 		// CLI injects runtime provider settings from command flags/env at startup.
 		// Restoring provider profiles from task history can overwrite those
@@ -1646,7 +1661,7 @@ export class ClineProvider
 			if (oldTask !== currentTask) {
 				removeTaskEventListeners(this.taskEventListeners, task)
 				await task.abortTask(true).catch(() => {})
-				return task
+				return { task, installed: false }
 			}
 
 			if (oldTask) {
@@ -1671,7 +1686,7 @@ export class ClineProvider
 				if (!installed) {
 					removeTaskEventListeners(this.taskEventListeners, task)
 					await task.abortTask(true).catch(() => {})
-					return task
+					return { task, installed: false }
 				}
 			}
 
@@ -1746,7 +1761,7 @@ export class ClineProvider
 			}, 100) // Small delay to ensure task is fully ready
 		}
 
-		return task
+		return { task, installed: true }
 	}
 
 	public async postMessageToWebview(message: ExtensionMessage) {
@@ -2822,7 +2837,18 @@ export class ClineProvider
 			if (id !== this.getCurrentTask()?.taskId) {
 				// Non-current task.
 				const { historyItem } = await this.getTaskWithId(id)
-				await this.createTaskWithHistoryItem(historyItem) // Clears existing task.
+				const { installed } = await this.installTaskWithHistoryItem(historyItem) // Clears existing task.
+				if (!installed) {
+					// A newer task took ownership while this one was being restored.
+					this.diagnosticsRecorder.record({
+						boundary: "task-navigation",
+						phase: "failure",
+						type: "show-task",
+						taskId: id,
+						elapsedMs: Date.now() - startedAt,
+					})
+					return
+				}
 			}
 
 			await this.postMessageToWebview({ type: "action", action: "chatButtonClicked" })

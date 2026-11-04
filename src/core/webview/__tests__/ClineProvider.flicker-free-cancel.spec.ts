@@ -498,6 +498,47 @@ describe("ClineProvider flicker-free cancel", () => {
 		expect(provider["taskRegistry"].current).toBe(mockTask2)
 	})
 
+	describe("when a newer task takes ownership during in-place rehydration", () => {
+		const newerTask = { taskId: "task-newer", instanceId: "instance-newer", emit: vi.fn() }
+
+		beforeEach(() => {
+			mockTask2.abortTask = vi.fn().mockResolvedValue(undefined)
+			// A newer top-level task replaces the old task while it is being aborted.
+			mockTask1.abortTask = vi.fn().mockImplementation(async () => {
+				provider["taskRegistry"].replace(mockTask1.taskId, newerTask as unknown as Task)
+			})
+		})
+
+		it("restartTaskIfCurrent reports that the replacement was not installed", async () => {
+			seedRegistry(provider, mockTask1)
+
+			await expect(provider.restartTaskIfCurrent(mockTask1 as unknown as Task)).resolves.toBe(false)
+
+			expect(provider["taskRegistry"].current).toBe(newerTask)
+			expect(mockTask2.abortTask).toHaveBeenCalledWith(true)
+		})
+
+		it("showTaskWithId does not report a successful navigation", async () => {
+			const previousTask = { taskId: "task-0", instanceId: "instance-0", emit: vi.fn() }
+			seedRegistry(provider, previousTask)
+			const getTaskWithId = provider.getTaskWithId
+			// An earlier queued navigation made task-1 current before this one was restored.
+			provider.getTaskWithId = vi.fn().mockImplementation(async (id: string) => {
+				provider["taskRegistry"].replace(previousTask.taskId, mockTask1 as unknown as Task)
+				return getTaskWithId(id)
+			})
+			const postMessageToWebview = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const record = vi.spyOn(provider["diagnosticsRecorder"], "record")
+
+			await provider.showTaskWithId("task-1")
+
+			expect(provider["taskRegistry"].current).toBe(newerTask)
+			expect(postMessageToWebview).not.toHaveBeenCalledWith({ type: "action", action: "chatButtonClicked" })
+			expect(record).not.toHaveBeenCalledWith(expect.objectContaining({ type: "show-task", phase: "success" }))
+			expect(record).toHaveBeenCalledWith(expect.objectContaining({ type: "show-task", phase: "failure" }))
+		})
+	})
+
 	it("should remove task from stack when creating different task", async () => {
 		// Setup: Add a task to the registry first
 		seedRegistry(provider, mockTask1)
