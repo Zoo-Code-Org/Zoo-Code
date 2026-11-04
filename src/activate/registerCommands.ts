@@ -297,15 +297,24 @@ type OpenClineInNewTabOptions = {
 /**
  * The tab creation currently in flight, if any.
  *
- * The tab panel is tracked before its provider exists (the provider construction and
- * `resolveWebviewView` are awaits), so the reuse check below misses exactly inside that
- * window. Two overlapping calls would then both pass it and both create a panel: only the
- * second panel ends up tracked, the first stays open with a provider no command can reach,
- * and the next click opens a third tab. Overlapping callers join this creation instead.
+ * The tab panel is tracked before the creation resolves, and the provider is bound to that
+ * panel as soon as `resolveWebviewView` assigns the view, so while the creation is still
+ * awaiting its webview the reuse check below already finds a provider whose creation can
+ * still fail. Overlapping callers join this creation instead: they wait for its outcome,
+ * including a rejection, instead of returning a provider whose tab never finished
+ * initializing.
  */
 let tabCreationInFlight: Promise<ClineProvider> | undefined = undefined
 
 export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
+	// Join a creation that is still in flight before looking at the tracked panel: its
+	// provider is already registered on that panel while it initializes, so the reuse below
+	// would hand this caller a provider whose creation can still reject, and the rejection
+	// would reach nobody.
+	if (tabCreationInFlight) {
+		return tabCreationInFlight
+	}
+
 	// Reuse the tracked tab instead of opening a second one: a repeated
 	// "Open in editor" click reveals the existing tab's panel.
 	if (tabPanel) {
@@ -315,10 +324,6 @@ export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
 			await existingProvider.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
 			return existingProvider
 		}
-	}
-
-	if (tabCreationInFlight) {
-		return tabCreationInFlight
 	}
 
 	const creation = createClineTab(options)

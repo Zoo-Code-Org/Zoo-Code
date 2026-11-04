@@ -803,4 +803,56 @@ describe("openClineInNewTab", () => {
 		expect(secondProvider).toBe(constructedProvider)
 		expect(ClineProvider).toHaveBeenCalledTimes(1)
 	})
+	it("makes an overlapping caller await the pending creation instead of reusing its initializing provider", async () => {
+		// Hold the creation inside resolveWebviewView. By then the tab panel is tracked and the
+		// provider is registered on it, so the tracked-tab reuse branch would hand the second
+		// caller a provider whose creation can still reject.
+		let rejectCreation!: (error: unknown) => void
+		const creationGate = new Promise<void>((_resolve, reject) => {
+			rejectCreation = reject
+		})
+		const constructedProvider = {
+			resolveWebviewView: vi.fn().mockReturnValue(creationGate),
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn().mockResolvedValue(undefined),
+		}
+		// A plain function, not an arrow: the production code calls this with `new`.
+		vi.mocked(ClineProvider).mockImplementationOnce(function () {
+			return constructedProvider
+		} as never)
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(constructedProvider)
+
+		const options = {
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		}
+
+		// A panel double that supports the reuse branch, so the failure below shows which
+		// branch the overlapping caller took instead of tripping over a missing member.
+		const panel = {
+			reveal: vi.fn().mockResolvedValue(undefined),
+			onDidChangeViewState: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
+			onDidDispose: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
+			webview: { postMessage: vi.fn().mockResolvedValue(true) },
+			dispose: vi.fn(),
+		}
+		vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as never)
+		const first = openClineInNewTab({ ...options })
+		// Let the first call create and track the panel, then block on its provider.
+		await vi.waitFor(() => expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1))
+
+		const second = openClineInNewTab({ ...options })
+		rejectCreation(new Error("webview initialization failed"))
+
+		// Both callers joined the one creation, so both see its failure; the overlapping caller
+		// never revealed a panel whose provider was still initializing.
+		await expect(first).rejects.toThrow("webview initialization failed")
+		await expect(second).rejects.toThrow("webview initialization failed")
+		expect(constructedProvider.postMessageToWebview).not.toHaveBeenCalledWith({
+			type: "action",
+			action: "didBecomeVisible",
+		})
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
+	})
 })
