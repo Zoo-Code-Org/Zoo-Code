@@ -1,6 +1,4 @@
 {
-	"title": "Modi",
-	"done": "Fatto",
 	"modes": {
 		"title": "Modalità",
 		"createNewMode": "Crea nuova modalità",
@@ -53,9 +51,7 @@
 	},
 	"exportMode": {
 		"title": "Esporta modalità",
-		"description": "Esporta questa modalità in un file YAML con tutte le regole incluse per una facile condivisione con altri.",
-		"export": "Esporta modalità",
-		"exporting": "Esportazione..."
+		"export": "Esporta modalità"
 	},
 	"importMode": {
 		"selectLevel": "Scegli dove importare questa modalità:",
@@ -81,7 +77,6 @@
 		"title": "Prompt di sistema (modalità {{modeName}})"
 	},
 	"supportPrompts": {
-		"title": "Prompt di supporto",
 		"resetPrompt": "Ripristina il prompt {{promptType}} ai valori predefiniti",
 		"prompt": "Prompt",
 		"enhance": {
@@ -93,11 +88,6 @@
 			"testEnhancement": "Testa miglioramento",
 			"includeTaskHistory": "Includi cronologia attività come contesto",
 			"includeTaskHistoryDescription": "Quando abilitato, gli ultimi 10 messaggi della conversazione corrente verranno inclusi come contesto durante il miglioramento dei prompt, aiutando a generare suggerimenti più rilevanti e consapevoli del contesto."
-		},
-		"condense": {
-			"apiConfiguration": "Configurazione API per la condensazione del contesto",
-			"apiConfigDescription": "Seleziona quale configurazione API utilizzare per le operazioni di condensazione del contesto. Lascia deselezionato per utilizzare la configurazione attiva corrente.",
-			"useCurrentConfig": "Usa la configurazione API currently selezionata"
 		},
 		"types": {
 			"ENHANCE": {
@@ -196,7 +186,6 @@
 		"title": "Elimina modalità",
 		"message": "Sei sicuro di voler eliminare la modalità \"{{modeName}}\"?",
 		"rulesFolder": "Questa modalità ha una cartella di regole in {{folderPath}} che verrà eliminata.",
-		"descriptionNoRules": "Sei sicuro di voler eliminare questa modalità personalizzata?",
 		"confirm": "Elimina",
 		"cancel": "Annulla"
 	}

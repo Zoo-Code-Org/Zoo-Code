@@ -19,7 +19,7 @@ const registerTerminalAction = (
 	promptType: TerminalActionPromptType,
 ) => {
 	context.subscriptions.push(
-		vscode.commands.registerCommand(getTerminalCommand(command), async (args: any) => {
+		vscode.commands.registerCommand(getTerminalCommand(command), async (args?: { selection?: string }) => {
 			let content = args?.selection
 
 			if (!content || content === "") {
