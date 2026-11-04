@@ -3138,6 +3138,7 @@ describe("updateSettings with the display settings", () => {
 	const save = (updatedSettings: Record<string, unknown>) =>
 		webviewMessageHandler(mockClineProvider, { type: "updateSettings", updatedSettings })
 
+describe("webviewMessageHandler - non-portable settings keys", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 	})
@@ -3316,5 +3317,24 @@ describe("updateSettings with the display settings", () => {
 
 		expect(mockClineProvider.log).not.toHaveBeenCalled()
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("constructor", "x")
+	it("refuses viewStates while applying the portable keys of the same payload", async () => {
+		// The per-view selections and the claim token that binds them are minted by the host, and the
+		// settings-file path already refuses them. A posted updateSettings is the same untrusted input,
+		// so writing them straight into the shared store would let a webview choose which persisted view
+		// entry - and with which identity - it owns.
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: {
+				viewStates: { "some-view": { claimToken: "webview-minted", mode: "code", updatedAt: 1 } },
+				customInstructions: "carry on",
+			},
+		})
+
+		const writtenKeys = vi.mocked(mockClineProvider.contextProxy.setValue).mock.calls.map((call) => String(call[0]))
+		expect(writtenKeys).not.toContain("viewStates")
+		expect(writtenKeys).toContain("customInstructions")
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Ignoring non-portable settings key viewStates"),
+		)
 	})
 })
