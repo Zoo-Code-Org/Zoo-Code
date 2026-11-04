@@ -1459,6 +1459,39 @@ describe("openClineInNewTab initialization failure", () => {
 		resolveSpy.mockRestore()
 		disposeSpy.mockRestore()
 	})
+
+	it("closes the panel and keeps the initialization error when provider disposal rejects", async () => {
+		const initError = new Error("init failed")
+		const teardownError = new Error("provider teardown failed")
+		const resolveSpy = vi.spyOn(ClineProvider.prototype, "resolveWebviewView").mockRejectedValue(initError)
+		const disposeSpy = vi.spyOn(ClineProvider.prototype, "dispose").mockRejectedValue(teardownError)
+
+		const thrown = await openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		}).catch((error: unknown) => error)
+
+		// A rejected teardown must not become the error the caller sees: the
+		// initialization failure is the root cause, and the teardown failure is reported
+		// with it instead of replacing it.
+		expect(thrown).toBe(initError)
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+			expect.stringContaining(
+				"[openClineInNewTab] provider disposal failed after initialization failure: provider teardown failed (initialization error: init failed)",
+			),
+		)
+
+		// A rejected provider teardown must not leave the blank tab either: the panel
+		// is disposed on this path too, and the half-registered panel stays dropped.
+		const panel = (vscode.window.createWebviewPanel as Mock).mock.results[0].value
+		expect(panel.dispose).toHaveBeenCalledTimes(1)
+		expect(__getLiveTabPanelCountForTests()).toBe(0)
+		expect(getPanel()).toBeUndefined()
+
+		resolveSpy.mockRestore()
+		disposeSpy.mockRestore()
+	})
 	it("creates a fresh tab when the shared in-flight creation resolves to a disposed provider", async () => {
 		let releaseInitialization: () => void = () => {}
 		const initializationGate = new Promise<void>((resolve) => {

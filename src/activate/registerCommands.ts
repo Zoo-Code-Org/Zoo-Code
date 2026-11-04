@@ -382,6 +382,23 @@ export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
 	}
 }
 
+// Both disposals on the initialization-failure path are best-effort: neither may
+// become the error the caller receives, because the initialization failure is the
+// root cause. A rejected cleanup is therefore logged with the error it follows
+// instead of being thrown over it.
+const logInitFailureCleanupError = (
+	what: string,
+	cleanupError: unknown,
+	initError: unknown,
+	outputChannel: vscode.OutputChannel,
+): void => {
+	const reason = cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+	const cause = initError instanceof Error ? initError.message : String(initError)
+	outputChannel.appendLine(
+		`[openClineInNewTab] ${what} failed after initialization failure: ${reason} (initialization error: ${cause})`,
+	)
+}
+
 // The unserialized tab-creation body. Only openClineInNewTab may call it,
 // after it has stored the shared in-flight promise.
 const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTracker }: OpenClineInNewTabOptions) => {
@@ -509,11 +526,24 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 		if (tabPanel === newPanel) {
 			setPanel(undefined, "tab")
 		}
-		await tabProvider.dispose()
-		// The provider's own dispose path does not own this panel: without disposing it
-		// the failed tab stays open as a blank, non-functional surface, and the next
-		// "Open in editor" creates a second panel next to it.
-		newPanel.dispose()
+		try {
+			await tabProvider.dispose()
+		} catch (disposeError) {
+			// A rejected provider teardown is not why initialization broke: it is logged
+			// with the initialization error beside it, and the initialization error keeps
+			// propagating so the root cause is not replaced by teardown noise.
+			logInitFailureCleanupError("provider disposal", disposeError, error, outputChannel)
+		} finally {
+			try {
+				// The provider's own dispose path does not own this panel: without disposing
+				// it the failed tab stays open as a blank, non-functional surface, and the
+				// next "Open in editor" creates a second panel next to it. It has to happen on
+				// the rejected path too, or a failed provider teardown leaves the blank tab.
+				newPanel.dispose()
+			} catch (panelError) {
+				logInitFailureCleanupError("panel disposal", panelError, error, outputChannel)
+			}
+		}
 		throw error
 	}
 
