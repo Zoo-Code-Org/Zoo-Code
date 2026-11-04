@@ -529,6 +529,62 @@ describe("PoeHandler", () => {
 			addSpy.mockRestore()
 			removeSpy.mockRestore()
 		})
+		it("removes the external abort listener when the stream fails mid-request", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const controller = new AbortController()
+			const addSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+			mockStreamText.mockReturnValueOnce({
+				fullStream: (async function* () {
+					yield { type: "text-delta", text: "partial" }
+					throw new Error("stream exploded")
+				})(),
+				usage: Promise.resolve(undefined),
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], metadata)
+			const first = await generator.next()
+			expect(first.value).toMatchObject({ type: "text", text: "partial" })
+			// The failure path must detach the listener as well: removal that only ran on the
+			// successful completion path would leak one listener per failed request.
+			await expect(generator.next()).rejects.toThrow("Poe streaming error: stream exploded")
+
+			const registeredListener = addSpy.mock.calls[0]?.[1] as EventListener | undefined
+			expect(registeredListener).toBeDefined()
+			expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+			addSpy.mockRestore()
+			removeSpy.mockRestore()
+		})
+		it("removes the external abort listener when the caller closes the stream early", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const controller = new AbortController()
+			const addSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+			mockStreamText.mockReturnValueOnce({
+				fullStream: (async function* () {
+					yield { type: "text-delta", text: "first" }
+					yield { type: "text-delta", text: "never consumed" }
+				})(),
+				usage: Promise.resolve(undefined),
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], metadata)
+			const first = await generator.next()
+			expect(first.value).toMatchObject({ type: "text", text: "first" })
+			// Closing the generator (the caller stopped consuming, e.g. an abort in the task) must
+			// still run the detach: a leaked listener would retain this request controller forever.
+			await generator.return(undefined)
+
+			const registeredListener = addSpy.mock.calls[0]?.[1] as EventListener | undefined
+			expect(registeredListener).toBeDefined()
+			expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+			addSpy.mockRestore()
+			removeSpy.mockRestore()
+		})
 		it("rejects with AbortError when the external signal aborts during request creation", async () => {
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
 			const controller = new AbortController()
@@ -846,35 +902,47 @@ describe("PoeHandler", () => {
 			expect(callArgs.abortSignal).not.toBe(controller.signal)
 		})
 
-		it("completePrompt rejects with TimeoutError when the per-request timeout expires before the response", async () => {
-			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
-			// Emulate a slow response: the generation settles only once the merged abort
-			// signal (which embeds the per-request timeout) fires.
-			mockGenerateText.mockImplementationOnce(async (args: { abortSignal?: AbortSignal }) => {
-				await new Promise<void>((resolve) => {
-					if (args.abortSignal?.aborted) {
-						resolve()
-					} else {
-						args.abortSignal?.addEventListener("abort", () => resolve(), { once: true })
+		it.each(["a late result", "an AbortError rejection"] as const)(
+			"completePrompt rejects with TimeoutError when the per-request timeout expires before %s settles",
+			async (settleMode: string) => {
+				const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+				// Emulate a slow response: the generation settles only once the merged abort
+				// signal (which embeds the per-request timeout) fires.
+				mockGenerateText.mockImplementationOnce(async (args: { abortSignal?: AbortSignal }) => {
+					await new Promise<void>((resolve) => {
+						if (args.abortSignal?.aborted) {
+							resolve()
+						} else {
+							args.abortSignal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					if (settleMode === "an AbortError rejection") {
+						// The AI SDK rejects with its own abort error once the signal fires: the provider
+						// must classify it by the cause that fired first (the timeout), not by the shape
+						// the SDK reported.
+						const abortError = new Error("The operation was aborted")
+						abortError.name = "AbortError"
+						throw abortError
 					}
+					return { text: "late response" }
 				})
-				return { text: "late response" }
-			})
 
-			const promise = handler.completePrompt("test prompt", { timeoutMs: 30 })
-			const callArgs = mockGenerateText.mock.calls[0][0] as { abortSignal?: AbortSignal }
-			// The per-request timeout is embedded in the abort signal passed to the SDK...
-			expect(callArgs.abortSignal).toBeInstanceOf(AbortSignal)
+				const promise = handler.completePrompt("test prompt", { timeoutMs: 30 })
+				const callArgs = mockGenerateText.mock.calls[0][0] as { abortSignal?: AbortSignal }
+				// The per-request timeout is embedded in the abort signal passed to the SDK...
+				expect(callArgs.abortSignal).toBeInstanceOf(AbortSignal)
 
-			// ...and when it fires before the response settles, the provider rejects with the
-			// distinct TimeoutError instead of returning the late result (a timeout is not a
-			// caller cancellation). It is not captured as a provider failure.
-			await expect(promise).rejects.toMatchObject({
-				name: "TimeoutError",
-				message: "The Poe completion request timed out",
-			})
-			expect(mockCaptureException).not.toHaveBeenCalled()
-		})
+				// ...and when it fires before the response settles, the provider rejects with the
+				// distinct TimeoutError instead of returning the late result or reporting the SDK
+				// abort shape (a timeout is not a caller cancellation). It is not captured as a
+				// provider failure either way.
+				await expect(promise).rejects.toMatchObject({
+					name: "TimeoutError",
+					message: "The Poe completion request timed out",
+				})
+				expect(mockCaptureException).not.toHaveBeenCalled()
+			},
+		)
 
 		it("completePrompt rejects with AbortError when the external signal aborts mid-flight", async () => {
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })

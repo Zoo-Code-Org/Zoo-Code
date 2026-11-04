@@ -33,7 +33,8 @@ import type {
 	ModelCacheScope,
 } from "../index"
 import { getModels, getModelsFromCache } from "./fetchers/modelCache"
-import { createAbortError, mergeAbortSignalAndTimeout } from "./utils/abort-signal"
+import { bridgeExternalAbortSignal, createAbortError, mergeAbortSignalAndTimeout } from "./utils/abort-signal"
+import { createTimeoutError } from "./utils/request-timeout"
 import { getPoeModels } from "./fetchers/poe"
 
 const DEFAULT_THINKING_BUDGET = 8192
@@ -95,31 +96,19 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		// Per-request AbortController: external aborts cancel the in-flight AI SDK request
-		// (the AI SDK aborts the underlying fetch when its abortSignal fires).
-		const controller = new AbortController()
-
-		// Bridge the external abort signal into the per-request controller:
-		// - pre-aborted guard: abort immediately when the signal is already aborted
-		// - { once: true }: the listener removes itself after the first abort
-		// - explicit removal in finally: the listener must not outlive a request that
-		//   completes (or fails) without being aborted
-		const externalAbortSignal = metadata?.abortSignal
-		let removeExternalAbortListener: (() => void) | undefined
-		if (externalAbortSignal) {
-			if (externalAbortSignal.aborted) {
-				controller.abort()
-			} else {
-				const onExternalAbort = () => controller.abort()
-				// Stryker disable next-line ObjectLiteral,BooleanLiteral: an AbortSignal fires its "abort" event at most once and the finally block removes this listener explicitly, so the once flag is unobservable
-				externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
-				removeExternalAbortListener = () => externalAbortSignal.removeEventListener("abort", onExternalAbort)
-			}
-		}
+		// Bridge the external abort signal into a per-request signal: the AI SDK aborts the
+		// underlying fetch when it fires. The shared bridge owns the pre-aborted guard, the
+		// listener bookkeeping and the detach handle, so this provider reads like
+		// anthropic.ts / xai.ts / minimax.ts instead of re-implementing the same bridge.
+		// dispose() must run in finally: the listener lives on the caller's long-lived signal
+		// and must not outlive a request that completes, fails, or exits early.
+		const { signal: abortSignal, dispose: removeExternalAbortListener } = bridgeExternalAbortSignal(
+			metadata?.abortSignal,
+		)
 
 		try {
 			// The request was already aborted before we started: fail fast without calling the API.
-			if (controller.signal.aborted) {
+			if (abortSignal?.aborted) {
 				throw createAbortError("Poe")
 			}
 
@@ -179,12 +168,12 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 					tools: aiSdkTools,
 					toolChoice: mapToolChoice(metadata?.tool_choice as any),
 					...(Object.keys(providerOptions).length > 0 && { providerOptions }),
-					abortSignal: controller.signal,
+					abortSignal,
 				})
 			} catch (error) {
 				// Aborted requests are user-initiated: surface them as AbortError instead of
 				// a completion error.
-				if (controller.signal.aborted) {
+				if (abortSignal?.aborted) {
 					throw createAbortError("Poe")
 				}
 				const errorMessage = error instanceof Error ? error.message : String(error)
@@ -198,7 +187,7 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 				for await (const part of result.fullStream) {
 					for (const chunk of processAiSdkStreamPart(part)) {
 						// Stop yielding once cancelled: a late chunk must not reach the caller.
-						if (controller.signal.aborted) {
+						if (abortSignal?.aborted) {
 							// Stryker disable next-line StringLiteral: this error is only thrown while the signal is already aborted, and the catch below rethrows the canonical abort error, so the message built here is never observable
 							throw createAbortError("Poe")
 						}
@@ -207,13 +196,13 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 				}
 
 				// Stop yielding once cancelled: do not await usage after the request was aborted.
-				if (controller.signal.aborted) {
+				if (abortSignal?.aborted) {
 					// Stryker disable next-line StringLiteral: this error is only thrown while the signal is already aborted, and the catch below rethrows the canonical abort error, so the message built here is never observable
 					throw createAbortError("Poe")
 				}
 				const usage = await result.usage
 				// Usage may resolve while the request is already aborted: reject instead of yielding it.
-				if (controller.signal.aborted) {
+				if (abortSignal?.aborted) {
 					// Stryker disable next-line StringLiteral: this error is only thrown while the signal is already aborted, and the catch below rethrows the canonical abort error, so the message built here is never observable
 					throw createAbortError("Poe")
 				}
@@ -231,7 +220,7 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 			} catch (error) {
 				// Aborted requests are user-initiated: surface them as AbortError instead of
 				// a completion error.
-				if (controller.signal.aborted) {
+				if (abortSignal?.aborted) {
 					throw createAbortError("Poe")
 				}
 				const errorMessage = error instanceof Error ? error.message : String(error)
@@ -241,7 +230,10 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 				throw new Error(`Poe streaming error: ${errorMessage}`)
 			}
 		} finally {
-			removeExternalAbortListener?.()
+			// Detach on every exit path - completion, failure, abort, or the caller closing the
+			// generator. The listener lives on the caller's long-lived signal and would outlive this
+			// request otherwise.
+			removeExternalAbortListener()
 		}
 	}
 
@@ -252,11 +244,8 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 		// is NOT applied here, matching the pre-PR behavior of this method.
 		const callerAbortSignal = options?.abortSignal
 		const mergedAbortSignal = mergeAbortSignalAndTimeout(callerAbortSignal, options?.timeoutMs)
-		const timeoutError = () => {
-			const error = new Error("The Poe completion request timed out")
-			error.name = "TimeoutError"
-			return error
-		}
+		// The shared timeout error keeps the series contract (name TimeoutError, distinct from the
+		// abort contract) instead of a provider-local closure, as mistral.ts and gemini.ts do.
 		// The merged signal keeps the FIRST abort reason. A timeout that fires before the caller
 		// aborts must stay a TimeoutError even if the caller signal aborts before the late result
 		// settles, so classify by the signal's reason rather than the caller signal's later state.
@@ -275,7 +264,7 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 				// Classify by the first abort cause: a timeout that fired first stays a TimeoutError
 				// even if the caller signal aborted before the late result settled.
 				if (abortedByTimeout()) {
-					throw timeoutError()
+					throw createTimeoutError("Poe", "completion request")
 				}
 				throw createAbortError("Poe")
 			}
@@ -287,7 +276,7 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 			// without a telemetry capture.
 			if (mergedAbortSignal?.aborted) {
 				if (abortedByTimeout()) {
-					throw timeoutError()
+					throw createTimeoutError("Poe", "completion request")
 				}
 				throw createAbortError("Poe")
 			}
