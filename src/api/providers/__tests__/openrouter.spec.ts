@@ -533,6 +533,82 @@ describe("OpenRouterHandler", () => {
 
 			expect(handler.getModel().info.maxTokens).toBe(111)
 		})
+
+		it("takes model capabilities from the newest catalog and endpoint limits from the endpoint", async () => {
+			// The endpoint cache copies supportsReasoningEffort and supportedParameters off the catalog
+			// that was current when the endpoints were fetched, and endpoint records survive a lookup
+			// that returned none, so a retained record's capabilities can be older than the catalog.
+			// The provider's own limits must not be dragged along with them.
+			const { getModels } = await import("../fetchers/modelCache")
+			const catalogRecord: ModelInfo = {
+				...openRouterDefaultModelInfo,
+				maxTokens: 9999,
+				supportsReasoningEffort: ["low", "high"],
+				supportedParameters: ["temperature", "reasoning"],
+			}
+			const endpointRecord: ModelInfo = {
+				...openRouterDefaultModelInfo,
+				maxTokens: 4096,
+				contextWindow: 131072,
+				description: "Provider X endpoint",
+				supportsReasoningEffort: ["minimal"],
+				supportedParameters: ["max_tokens"],
+			}
+			vitest.mocked(getModels).mockResolvedValueOnce({ "anthropic/claude-sonnet-4": catalogRecord })
+			mockGetModelEndpoints.mockResolvedValueOnce({ "provider-x": endpointRecord })
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-sonnet-4",
+					openRouterSpecificProvider: "provider-x",
+				}),
+			)
+
+			await handler.fetchModel()
+
+			const info = handler.getModel().info
+			expect(info.supportsReasoningEffort).toEqual(["low", "high"])
+			expect(info.supportedParameters).toEqual(["temperature", "reasoning"])
+			// Provider-specific limits and metadata still come from the endpoint record.
+			expect(info.maxTokens).toBe(4096)
+			expect(info.contextWindow).toBe(131072)
+			expect(info.description).toBe("Provider X endpoint")
+			// The capability list is a copy: rendering or a later fetch must not write through to the
+			// catalog record the shared model cache also holds.
+			info.supportedParameters?.push("include_reasoning")
+			expect(catalogRecord.supportedParameters).toEqual(["temperature", "reasoning"])
+		})
+
+		it("keeps the endpoint's capability copy when the catalog has no entry for the model", async () => {
+			// A catalog miss must not leave the selected provider without capabilities: the endpoint
+			// record is the only record there is, so it is used as is.
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockResolvedValueOnce({})
+			const endpointRecord: ModelInfo = {
+				...openRouterDefaultModelInfo,
+				maxTokens: 4096,
+				description: "Provider X endpoint",
+				supportsReasoningEffort: ["minimal"],
+				supportedParameters: ["max_tokens"],
+			}
+			mockGetModelEndpoints.mockResolvedValueOnce({ "provider-x": endpointRecord })
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-sonnet-4",
+					openRouterSpecificProvider: "provider-x",
+				}),
+			)
+
+			await handler.fetchModel()
+
+			const info = handler.getModel().info
+			expect(info.supportsReasoningEffort).toEqual(["minimal"])
+			expect(info.supportedParameters).toEqual(["max_tokens"])
+			expect(info.maxTokens).toBe(4096)
+		})
 	})
 
 	describe("applyOpenRouterMoonshotK3Profile", () => {

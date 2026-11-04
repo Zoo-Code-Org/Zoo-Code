@@ -699,9 +699,25 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		const id = this.options.openRouterModelId ?? openRouterDefaultModelId
 		let info = this.models[id] ?? openRouterDefaultModelInfo
 
-		// If a specific provider is requested, use the endpoint for that provider.
-		if (this.options.openRouterSpecificProvider && this.endpoints[this.options.openRouterSpecificProvider]) {
-			info = this.endpoints[this.options.openRouterSpecificProvider]
+		const specificProvider = this.options.openRouterSpecificProvider
+		const endpoint = specificProvider ? this.endpoints[specificProvider] : undefined
+
+		// The endpoint record is what OpenRouter reported for the selected provider - its limits,
+		// pricing and description - so those keep coming from it. Its two capability fields are a copy
+		// taken off whichever catalog was current when the endpoints were fetched
+		// (src/api/providers/fetchers/modelEndpointCache.ts:74-79), and an endpoint record is only ever
+		// replaced by a lookup that actually returned records, so a retained one can predate several
+		// catalog publications. Model-level capabilities therefore follow the newest catalog entry when
+		// the model has one, and fall back to the endpoint's copy on a catalog miss.
+		if (endpoint) {
+			const model = this.models[id]
+			info = model
+				? {
+						...endpoint,
+						supportsReasoningEffort: model.supportsReasoningEffort,
+						supportedParameters: model.supportedParameters ? [...model.supportedParameters] : undefined,
+					}
+				: endpoint
 		}
 
 		// Re-apply the Moonshot K3 profile at consumption time: model records are
