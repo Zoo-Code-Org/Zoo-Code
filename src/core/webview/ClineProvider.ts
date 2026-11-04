@@ -1075,6 +1075,44 @@ export class ClineProvider
 				}
 			}
 
+			// The profile name can move during the load window: the settings above were resolved for the
+			// name the persisted record pinned, so when a different name was reapplied mid-load (a
+			// profile switch while this view was starting) they must be re-resolved for the name the
+			// view actually holds - getState() pairs the two and createTask hands that pair to the new
+			// task, which also records the name. Dropping the settings instead is not safe: the view
+			// would fall back to shared settings that can belong to another profile.
+			// Only a name that moved inside the load window needs a re-resolve: a pin that already
+			// held this value before the load started is stale and the persisted record stays
+			// authoritative for both the name and its settings.
+			const reappliedProfileName =
+				!Object.is(preLoadBuffer.currentApiConfigName, postLoadBuffer.currentApiConfigName) &&
+				typeof postLoadBuffer.currentApiConfigName === "string" &&
+				postLoadBuffer.currentApiConfigName !== persisted?.currentApiConfigName &&
+				Object.is(preLoadBuffer.apiConfiguration, postLoadBuffer.apiConfiguration)
+					? postLoadBuffer.currentApiConfigName
+					: undefined
+
+			if (reappliedProfileName) {
+				try {
+					const { name: _name, ...reappliedSettings } = await this.providerSettingsManager.getProfile({
+						name: reappliedProfileName,
+					})
+					mergedState.apiConfiguration = reappliedSettings as ProviderSettings
+				} catch (error) {
+					// The reapplied name no longer resolves: keep the name and let the view fall back to
+					// the shared store rather than pairing it with a different profile's settings.
+					this.log(
+						`[loadViewState] Unable to resolve API profile '${reappliedProfileName}' reapplied during the load for viewId ${this.viewId}: ${error instanceof Error ? error.message : String(error)}`,
+					)
+					delete mergedState.apiConfiguration
+				}
+
+				if (this.viewStateId !== loadedForViewId) {
+					this.log(`[loadViewState] Discarding stale state for superseded view id ${loadedForViewId}`)
+					return
+				}
+			}
+
 			this.viewLocalState = mergedState
 			this.log(`[loadViewState] Loaded state for viewId ${this.viewId}`)
 		} catch (error) {
@@ -3693,19 +3731,31 @@ export class ClineProvider
 			// settings into their overlays first.
 			await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(name)
 
-			await Promise.all([
-				this.contextProxy.setValue("listApiConfigMeta", listApiConfigMeta),
-				// Route through setValue so the in-memory viewLocalState buffer tracks the
-				// activated profile: a plain ContextProxy write would leave a stale loaded
-				// currentApiConfigName shadowing the new value in getValues().
-				this.setValue("currentApiConfigName", name),
-				this.contextProxy.setProviderSettings(providerSettings),
-				// setProviderSettings writes the shared store directly, bypassing the
-				// view-local mutation path: clear this view's buffered apiConfiguration
-				// overlay (if any) so a stale loaded profile cannot keep shadowing the
-				// new settings in getState().
-				this._saveViewLocalStateFromMutation({ apiConfiguration: undefined }),
-			])
+			try {
+				await Promise.all([
+					this.contextProxy.setValue("listApiConfigMeta", listApiConfigMeta),
+					// Route through setValue so the in-memory viewLocalState buffer tracks the
+					// activated profile: a plain ContextProxy write would leave a stale loaded
+					// currentApiConfigName shadowing the new value in getValues().
+					this.setValue("currentApiConfigName", name),
+					this.contextProxy.setProviderSettings(providerSettings),
+					// setProviderSettings writes the shared store directly, bypassing the
+					// view-local mutation path: clear this view's buffered apiConfiguration
+					// overlay (if any) so a stale loaded profile cannot keep shadowing the
+					// new settings in getState().
+					this._saveViewLocalStateFromMutation({ apiConfiguration: undefined }),
+				])
+			} catch (error) {
+				// The manager has already written the activated profile, so the caller keeps the
+				// switch and delivers its pending message now. The task must run the activated
+				// profile's settings: without this rebuild the handler still belongs to the profile
+				// the task started on, and the message goes out on that handler in the new mode.
+				this.updateTaskApiHandlerIfNeeded(providerSettings, {
+					forceRebuild: true,
+					expectedCurrentTaskId: options?.expectedCurrentTaskId,
+				})
+				throw error
+			}
 
 			// Other live views may have buffered this profile's settings earlier;
 			// refresh them so their getState() cannot report the activated profile's

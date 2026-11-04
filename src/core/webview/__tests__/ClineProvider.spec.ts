@@ -4708,27 +4708,73 @@ describe("ClineProvider", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
 			await provider.saveViewState("currentApiConfigName", "cfg-a")
-			const load = provider["setViewStateId"]("stable-sidebar-view")
+			let flipped = false
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (args) => {
+				const name = "name" in args ? args.name : undefined
+				if (name === "cfg-a" && !flipped) {
+					flipped = true
+					// Only the profile name changes while the lookup is in flight.
+					await provider.saveViewState("currentApiConfigName", "cfg-b")
+				}
+				return Object.assign({} as Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>, {
+					name,
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: name === "cfg-a" ? "model-x" : "model-y",
+				})
+			})
 
-			// Let the stalled lookup begin so the in-flight mutation and the resolver
-			// target the pending promise rather than the initial no-op.
-			await vi.waitFor(() => expect(getProfileSpy).toHaveBeenCalledTimes(1))
-			// The profile name changes while the lookup is in flight; the load still
-			// resolves the name persisted at load start.
-			await provider.saveViewState("currentApiConfigName", "cfg-b")
+			await provider["setViewStateId"]("stable-sidebar-view")
 
-			resolveProfile({ name: "cfg-a", apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-x" })
-			await load
-
-			// The in-flight selection wins over the loaded state.
+			// The in-flight selection wins over the loaded state, and the settings follow it:
+			// getState() pairs this view pin with this overlay and createTask hands that pair to the new
+			// task, which records the same name - pairing cfg-b with cfg-a settings would run the new task
+			// on a profile the view does not pin. Dropping the settings is not safe either: the view would
+			// fall back to shared settings that can belong to a third profile.
 			expect(provider["viewLocalState"].currentApiConfigName).toBe("cfg-b")
 			expect(provider["viewLocalState"].apiConfiguration).toEqual({
 				apiProvider: providerIdentifiers.openrouter,
-				openRouterModelId: "model-x",
+				openRouterModelId: "model-y",
 			})
 			expect(provider["viewLocalState"]).not.toHaveProperty("mode")
+			expect(provider.providerSettingsManager.getProfile).toHaveBeenCalledWith({ name: "cfg-b" })
+			await provider.dispose()
+		})
+		it("drops the loaded settings when a rename during the load no longer resolves", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider.saveViewState("currentApiConfigName", "cfg-a")
+			const logSpy = vi.spyOn(provider, "log")
+			let flipped = false
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (args) => {
+				const name = "name" in args ? args.name : undefined
+				if (name === "cfg-a" && !flipped) {
+					flipped = true
+					await provider.saveViewState("currentApiConfigName", "gone-profile")
+				}
+				if (name === "gone-profile") {
+					throw new Error("profile deleted")
+				}
+				return Object.assign({} as Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>, {
+					name,
+					id: `${name}-id`,
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "model-x",
+				})
+			})
+
+			await provider["setViewStateId"]("stable-sidebar-view")
+
+			// The reapplied name is what the view holds, so it stays; only the settings that no longer
+			// belong to it are dropped, and the view falls back to the shared store for them.
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("gone-profile")
+			expect(provider["viewLocalState"]).not.toHaveProperty("apiConfiguration")
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Unable to resolve API profile 'gone-profile'"))
 			await provider.dispose()
 		})
 

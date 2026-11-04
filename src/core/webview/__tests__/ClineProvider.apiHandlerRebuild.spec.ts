@@ -1017,6 +1017,46 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledWith({ name: "ask-profile" })
 		})
 
+		test("rebuilds the task API handler when the shared write fails after activation", async () => {
+			const mockTask = new Task({
+				...defaultTaskOptions,
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4",
+				},
+			})
+			await provider.addClineToStack(mockTask)
+			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue("ask-id")
+			provider["providerSettingsManager"].listConfig = vi
+				.fn()
+				.mockResolvedValue([{ name: "ask-profile", id: "ask-id", apiProvider: providerIdentifiers.openrouter }])
+			provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue({
+				name: "ask-profile",
+				id: "ask-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			provider["providerSettingsManager"].activateProfile = vi.fn().mockResolvedValue({
+				name: "ask-profile",
+				id: "ask-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			// The manager has already written the activated profile when the shared provider-settings
+			// write rejects, so the switch stands and the caller delivers its pending message now.
+			vi.spyOn(provider.contextProxy, "setProviderSettings").mockRejectedValueOnce(
+				new Error("shared write failed"),
+			)
+
+			await expect(provider.handleModeSwitch("ask" as Mode, undefined)).rejects.toThrow("shared write failed")
+
+			// The task must run the profile the activation committed rather than the one it started on:
+			// the rebuild happens before the failure surfaces instead of being skipped by it.
+			expect(mockTask.updateApiConfiguration).toHaveBeenCalledWith(
+				expect.objectContaining({ openRouterModelId: "openai/gpt-4.1-mini" }),
+			)
+		})
+
 		test("calls updateApiConfiguration when provider/model unchanged but settings differ (explicit profile switch)", async () => {
 			const mockTask = new Task({
 				...defaultTaskOptions,
