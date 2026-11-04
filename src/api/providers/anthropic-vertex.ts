@@ -15,6 +15,7 @@ import { ApiHandlerOptions } from "../../shared/api"
 
 import { ApiStream } from "../transform/stream"
 import { addCacheBreakpoints } from "../transform/caching/vertex"
+import { cacheControl, resolveCacheTtl } from "../transform/caching/ttl"
 import { getModelParams } from "../transform/model-params"
 import { filterNonAnthropicBlocks } from "../transform/anthropic-filter"
 import { getAnthropicProviderReasoning } from "../transform/reasoning"
@@ -79,6 +80,9 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 
 		const { supportsPromptCache } = info
 
+		// One TTL for the whole request (ADR-0006 I4).
+		const cacheTtl = resolveCacheTtl(this.options, info)
+
 		// Filter out non-Anthropic blocks (reasoning, thoughtSignature, etc.) before sending to the API
 		const sanitizedMessages = filterNonAnthropicBlocks(messages)
 
@@ -116,9 +120,9 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 			thinking,
 			// Cache the system prompt if caching is enabled.
 			system: supportsPromptCache
-				? [{ text: systemPrompt, type: "text" as const, cache_control: { type: "ephemeral" } }]
+				? [{ text: systemPrompt, type: "text" as const, cache_control: cacheControl(cacheTtl) }]
 				: systemPrompt,
-			messages: supportsPromptCache ? addCacheBreakpoints(sanitizedMessages) : sanitizedMessages,
+			messages: supportsPromptCache ? addCacheBreakpoints(sanitizedMessages, cacheTtl) : sanitizedMessages,
 			stream: true,
 			...nativeToolParams,
 		} as Anthropic.Messages.MessageCreateParamsStreaming
@@ -143,7 +147,11 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 			for await (const chunk of stream) {
 				switch (chunk.type) {
 					case "message_start": {
-						const usage = chunk.message!.usage
+						const usage = chunk.message.usage
+
+						// Per-TTL breakdown of the write total; absent when the provider
+						// does not report it, leaving the split at 0.
+						const cacheWrite1hTokens = usage.cache_creation?.ephemeral_1h_input_tokens
 
 						// `output_tokens_details.thinking_tokens` decomposes the billed
 						// output into internal reasoning tokens; surfaced for per-turn
@@ -153,21 +161,22 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 							inputTokens: usage.input_tokens || 0,
 							outputTokens: usage.output_tokens || 0,
 							cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
+							cacheWrite1hTokens: cacheWrite1hTokens || undefined,
 							cacheReadTokens: usage.cache_read_input_tokens || undefined,
 							...(typeof usage.output_tokens_details?.thinking_tokens === "number"
-								? { reasoningTokens: usage.output_tokens_details!.thinking_tokens }
+								? { reasoningTokens: usage.output_tokens_details.thinking_tokens }
 								: {}),
 						}
 
 						break
 					}
 					case "message_delta": {
-						const deltaThinkingTokens = chunk.usage!.output_tokens_details?.thinking_tokens
+						const deltaThinkingTokens = chunk.usage.output_tokens_details?.thinking_tokens
 
 						yield {
 							type: "usage",
 							inputTokens: 0,
-							outputTokens: chunk.usage!.output_tokens || 0,
+							outputTokens: chunk.usage.output_tokens || 0,
 							...(typeof deltaThinkingTokens === "number"
 								? { reasoningTokens: deltaThinkingTokens }
 								: {}),
@@ -176,17 +185,17 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 						break
 					}
 					case "content_block_start": {
-						switch (chunk.content_block!.type) {
+						switch (chunk.content_block.type) {
 							case "text": {
-								if (chunk.index! > 0) {
+								if (chunk.index > 0) {
 									yield { type: "text", text: "\n" }
 								}
 
-								yield { type: "text", text: chunk.content_block!.text }
+								yield { type: "text", text: chunk.content_block.text }
 								break
 							}
 							case "thinking": {
-								if (chunk.index! > 0) {
+								if (chunk.index > 0) {
 									yield { type: "reasoning", text: "\n" }
 								}
 
@@ -198,8 +207,8 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 								yield {
 									type: "tool_call_partial",
 									index: chunk.index,
-									id: chunk.content_block!.id,
-									name: chunk.content_block!.name,
+									id: chunk.content_block.id,
+									name: chunk.content_block.name,
 									arguments: undefined,
 								}
 								break
@@ -209,9 +218,9 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 						break
 					}
 					case "content_block_delta": {
-						switch (chunk.delta!.type) {
+						switch (chunk.delta.type) {
 							case "text_delta": {
-								yield { type: "text", text: chunk.delta!.text }
+								yield { type: "text", text: chunk.delta.text }
 								break
 							}
 							case "thinking_delta": {
@@ -270,6 +279,10 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 					inputPrice: tier.inputPrice,
 					outputPrice: tier.outputPrice,
 					cacheWritesPrice: tier.cacheWritesPrice,
+					// Carry the tier's own TTL rate; the entry-level one was derived from
+					// the 200K input price and would halve a 1M-context 1h write.
+					cacheWritesPrice1h: tier.cacheWritesPrice1h ?? info.cacheWritesPrice1h,
+					cacheWritesPrice12h: tier.cacheWritesPrice12h ?? info.cacheWritesPrice12h,
 					cacheReadsPrice: tier.cacheReadsPrice,
 				}
 			}
@@ -313,11 +326,12 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 		try {
 			const {
 				id,
-				info: { supportsPromptCache },
+				info,
 				temperature,
 				maxTokens = ANTHROPIC_DEFAULT_MAX_TOKENS,
 				reasoning: thinking,
 			} = this.getModel()
+			const { supportsPromptCache } = info
 
 			const params = {
 				model: id,
@@ -328,7 +342,13 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 					{
 						role: "user",
 						content: supportsPromptCache
-							? [{ type: "text" as const, text: prompt, cache_control: { type: "ephemeral" } }]
+							? [
+									{
+										type: "text" as const,
+										text: prompt,
+										cache_control: cacheControl(resolveCacheTtl(this.options, info)),
+									},
+								]
 							: prompt,
 					},
 				],

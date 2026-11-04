@@ -32,7 +32,7 @@ import type {
 	CompletePromptOptions,
 	ModelCacheScope,
 } from "../index"
-import { getModelsFromCache } from "./fetchers/modelCache"
+import { getModels, getModelsFromCache } from "./fetchers/modelCache"
 import { getPoeModels } from "./fetchers/poe"
 
 const DEFAULT_THINKING_BUDGET = 8192
@@ -57,6 +57,22 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
 		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
 		return getPoeModels(options.apiKey, options.baseUrl, ...fetchOpts)
+	}
+
+	async ensureModelFetched(signal?: AbortSignal): Promise<void> {
+		await this.ensureCatalogLoaded(async () => {
+			const models = await getModels(
+				{
+					provider: providerIdentifiers.poe,
+					apiKey: this.options.poeApiKey,
+					baseUrl: this.options.poeBaseUrl,
+				},
+				this,
+			)
+			// getModels() does not cache an empty response, so an empty catalog must
+			// stay retryable instead of being memoized as a successful load.
+			return Object.keys(models).length > 0
+		}, signal)
 	}
 
 	override getModel() {
