@@ -333,7 +333,11 @@ describe("KimiCodeHandler", () => {
 		const first = await gen.next()
 
 		expect(first.value).toEqual({ type: "text", text: "hi" })
-		expect(createCompletion).toHaveBeenCalledWith(expect.anything(), { signal: controller.signal })
+		expect(createCompletion).toHaveBeenCalledWith(expect.anything(), { signal: expect.any(AbortSignal) })
+		// toHaveBeenCalledWith compares an AbortSignal structurally, so any fresh signal
+		// would satisfy the shape above. setAbortSignal forwards the caller's signal, so
+		// pin the identity of the one this controller owns.
+		expect(createCompletion.mock.calls[0]?.[1]?.signal).toBe(controller.signal)
 	})
 
 	it("rejects before any request when the createMessage abort signal is already aborted", async () => {
@@ -401,7 +405,11 @@ describe("KimiCodeHandler", () => {
 
 		await handler.fetchModels({ provider: providerIdentifiers.kimiCode, apiKey: "key", signal: controller.signal })
 
-		expect(mockGetKimiCodeModels).toHaveBeenCalledWith("key", { signal: controller.signal })
+		expect(mockGetKimiCodeModels).toHaveBeenCalledWith("key", { signal: expect.any(AbortSignal) })
+		// Identity, not structural equality: only this controller's signal can cancel
+		// the catalog fetch, and a fresh signal would pass the shape check above.
+		const discoveryCall = mockGetKimiCodeModels.mock.calls[0] as [string, { signal?: AbortSignal }] | undefined
+		expect(discoveryCall?.[1]?.signal).toBe(controller.signal)
 	})
 
 	it("prefers the explicit model-cache signal over options.signal", async () => {
@@ -414,7 +422,10 @@ describe("KimiCodeHandler", () => {
 			cacheSignal,
 		)
 
-		expect(mockGetKimiCodeModels).toHaveBeenCalledWith("key", { signal: cacheSignal })
+		expect(mockGetKimiCodeModels).toHaveBeenCalledWith("key", { signal: expect.any(AbortSignal) })
+		// The signal that wins must be the cache signal itself, not a fresh equivalent.
+		const cacheCall = mockGetKimiCodeModels.mock.calls[0] as [string, { signal?: AbortSignal }] | undefined
+		expect(cacheCall?.[1]?.signal).toBe(cacheSignal)
 	})
 
 	it("retries model discovery on a later request when the caller aborts during discovery", async () => {
