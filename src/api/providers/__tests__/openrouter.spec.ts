@@ -415,6 +415,124 @@ describe("OpenRouterHandler", () => {
 			await handler.fetchModel()
 			expect(handler.getModel().info.maxTokens).toBe(333)
 		})
+
+		it("publishes endpoint records even when the model catalog came back empty", async () => {
+			// A catalog miss must not discard endpoint data: the endpoint lookup carries the
+			// pricing and limits for the selected provider, and getModel() prefers the endpoint
+			// record over the (now missing) catalog entry.
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockResolvedValueOnce({})
+			mockGetModelEndpoints.mockResolvedValueOnce({
+				"provider-x": { ...openRouterDefaultModelInfo, maxTokens: 444 },
+			})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-sonnet-4",
+					openRouterSpecificProvider: "provider-x",
+				}),
+			)
+
+			await handler.fetchModel()
+
+			expect(handler.getModel().info.maxTokens).toBe(444)
+		})
+
+		it("does not let an older endpoint answer replace a newer one when both catalogs are empty", async () => {
+			// With no models to publish, the model sequence never advances, so endpoint ordering
+			// needs its own sequence: without it the slower, older lookup would overwrite the
+			// endpoint records the newer lookup already installed.
+			const { getModels } = await import("../fetchers/modelCache")
+			const mockedGetModels = vitest.mocked(getModels)
+			mockedGetModels.mockResolvedValueOnce({}).mockResolvedValueOnce({})
+
+			let releaseFirst!: () => void
+			let releaseSecond!: () => void
+			const firstGate = new Promise<void>((resolve) => {
+				releaseFirst = resolve
+			})
+			const secondGate = new Promise<void>((resolve) => {
+				releaseSecond = resolve
+			})
+			mockGetModelEndpoints
+				.mockImplementationOnce(async () => {
+					await firstGate
+					return { "provider-x": { ...openRouterDefaultModelInfo, maxTokens: 111 } }
+				})
+				.mockImplementationOnce(async () => {
+					await secondGate
+					return { "provider-x": { ...openRouterDefaultModelInfo, maxTokens: 222 } }
+				})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-sonnet-4",
+					openRouterSpecificProvider: "provider-x",
+				}),
+			)
+
+			const first = handler.fetchModel()
+			const second = handler.fetchModel()
+
+			releaseSecond()
+			await second
+			releaseFirst()
+			await first
+
+			expect(handler.getModel().info.maxTokens).toBe(222)
+		})
+
+		it("keeps an older endpoint answer when a newer lookup publishes models without endpoints", async () => {
+			// The endpoint sequence advances only when endpoints publish, so a newer lookup that
+			// failed its endpoint fetch must not freeze the ordering: the older lookup's successful
+			// endpoint records may still arrive afterwards and must be published.
+			const { getModels } = await import("../fetchers/modelCache")
+			const mockedGetModels = vitest.mocked(getModels)
+
+			let releaseFirst!: () => void
+			let releaseSecond!: () => void
+			const firstGate = new Promise<void>((resolve) => {
+				releaseFirst = resolve
+			})
+			const secondGate = new Promise<void>((resolve) => {
+				releaseSecond = resolve
+			})
+			mockedGetModels
+				.mockImplementationOnce(async () => {
+					await firstGate
+					return {}
+				})
+				.mockImplementationOnce(async () => {
+					await secondGate
+					return { "anthropic/claude-sonnet-4": { ...openRouterDefaultModelInfo, maxTokens: 555 } }
+				})
+			mockGetModelEndpoints
+				.mockImplementationOnce(async () => {
+					await firstGate
+					return { "provider-x": { ...openRouterDefaultModelInfo, maxTokens: 111 } }
+				})
+				.mockResolvedValueOnce({})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-sonnet-4",
+					openRouterSpecificProvider: "provider-x",
+				}),
+			)
+
+			const first = handler.fetchModel()
+			const second = handler.fetchModel()
+
+			releaseSecond()
+			await second
+			releaseFirst()
+			await first
+
+			expect(handler.getModel().info.maxTokens).toBe(111)
+		})
 	})
 
 	describe("applyOpenRouterMoonshotK3Profile", () => {

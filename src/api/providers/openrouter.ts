@@ -150,6 +150,11 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 	// publishes when it is newer than what was published, so an older lookup that settles first is
 	// not dropped just because a newer one has started.
 	private publishedModelSequence = 0
+	// Sequence of the newest lookup whose endpoint records were published. Endpoints keep their own
+	// ordering because they publish even when the model catalog came back empty; sharing the model
+	// sequence would let an older lookup overwrite newer endpoint records whenever both lookups
+	// returned an empty catalog, since the model sequence only advances when models publish.
+	private publishedEndpointSequence = 0
 
 	constructor(options: ApiHandlerOptions) {
 		super()
@@ -675,12 +680,16 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		if (sequence > this.publishedModelSequence && Object.keys(models).length > 0) {
 			this.publishedModelSequence = sequence
 			this.models = models
-			// The endpoint lookup answers an empty map when the request failed. Publishing that would
-			// drop the endpoint records (pricing, limits) a previous successful lookup installed, so
-			// only a non-empty answer replaces them.
-			if (Object.keys(endpoints).length > 0) {
-				this.endpoints = endpoints
-			}
+		}
+
+		// Endpoints are ordered by their own sequence for the same reason, and they publish even when
+		// the model catalog came back empty: a catalog miss must not discard a successful endpoint
+		// answer, whose records carry the pricing and limits for the selected provider. The endpoint
+		// lookup answers an empty map when its request failed, and publishing that would drop the
+		// records a previous successful lookup installed, so only a non-empty answer replaces them.
+		if (sequence > this.publishedEndpointSequence && Object.keys(endpoints).length > 0) {
+			this.publishedEndpointSequence = sequence
+			this.endpoints = endpoints
 		}
 
 		return this.getModel()
