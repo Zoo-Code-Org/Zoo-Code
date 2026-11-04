@@ -1504,11 +1504,11 @@ describe("loadProfiles", () => {
 				listConfig: async () => [{ id: "bad" }, { id: "good" }],
 				getProfile: (params: { id: string }) => {
 					if (params.id === "bad") throw new Error("unreadable")
-					return Promise.resolve({ apiProvider: "openrouter" } as never)
+					return Promise.resolve({ apiProvider: "x" } as never)
 				},
 			}
 			await expect(loadProfilesWithActive(partly)).resolves.toMatchObject({
-				profiles: [{ apiProvider: "openrouter" }],
+				profiles: [{ apiProvider: "x" }],
 			})
 			expect(vi.getTimerCount()).toBe(0)
 		})
