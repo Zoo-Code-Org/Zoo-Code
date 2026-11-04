@@ -252,6 +252,29 @@ function removeTaskEventListeners(listeners: WeakMap<Task, Array<() => void>>, t
 		listeners.delete(task)
 	}
 }
+/**
+ * How a host-minted view-state claim reached the webview that has to carry it back.
+ *
+ * - `delivered`: the launched webview accepted the post.
+ * - `queued`: the durable entry carries the token and the post is held for the next
+ *   `webviewDidLaunch`, when the renderer has a listener that can receive it.
+ * - `dropped`: the provider was disposed, so nothing will post it again.
+ * - `none`: this operation minted no claim.
+ */
+export type ViewStateClaimDelivery = "delivered" | "queued" | "dropped" | "none"
+
+/**
+ * Result of a durable view-state write: whether anything was stored, and what happened to
+ * the claim the write minted. A save that stored an entry whose claim never reached the
+ * webview is a partial success, and `claim` is how the caller can see it.
+ */
+export type ViewStatePersistenceResult = { persisted: boolean; claim: ViewStateClaimDelivery }
+
+/**
+ * Result of registering a stable view id: whether the id was adopted, and what happened to
+ * the claim this registration minted or re-affirmed.
+ */
+export type ViewStateRegistrationResult = { adopted: boolean; claim: ViewStateClaimDelivery }
 
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
@@ -724,13 +747,16 @@ export class ClineProvider
 	}
 
 	/** Persist the non-secret selections through the serialized write queue. */
-	private async savePersistedViewState(values: Partial<PersistedViewState>): Promise<void> {
+	private async savePersistedViewState(values: Partial<PersistedViewState>): Promise<ViewStatePersistenceResult> {
 		// Capture the id at change time: a write belongs to the view that was active
 		// when the change was made, even if a newer id is registered while it is queued.
 		const viewStateId = this.viewStateId
 		const generation = this.viewStateGeneration
 		// Set by the queued write when it had to mint a claim, delivered after it lands.
 		let mintedClaimToken: string | undefined
+		// Set once the queued write reaches the storage call: a write the queue dropped before
+		// its turn must not be reported as persisted.
+		let storedEntry = false
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 			if (!this.isViewStateGenerationLive(generation)) {
 				// The queue advanced after this view was disposed: the entry belongs to a view
@@ -783,6 +809,7 @@ export class ClineProvider
 			}
 
 			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			storedEntry = true
 
 			if (!this.isViewStateGenerationLive(generation)) {
 				// The view went away while the write was in flight: the selections are durable,
@@ -801,12 +828,26 @@ export class ClineProvider
 		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
 		await write
 
+		if (!storedEntry) {
+			// The queue dropped this write before it reached storage: nothing was persisted, so
+			// nothing about a claim may be reported as settled either.
+			return { persisted: false, claim: "none" }
+		}
+
 		// Delivered only once the durable write landed: a webview must never hold a claim the
 		// host did not store, or the next launch would present a token the entry cannot match.
 		// A provider disposed in the meantime has no webview left to deliver it to.
 		if (mintedClaimToken && this.isViewStateGenerationLive(generation)) {
-			await this.postViewStateClaimToWebview(viewStateId, mintedClaimToken)
+			return {
+				persisted: true,
+				claim: await this.postViewStateClaimToWebview(viewStateId, mintedClaimToken),
+			}
 		}
+
+		// The entry is durable and carries a token this webview has never been handed. Report
+		// that explicitly: a save that silently resolves while its claim is undelivered is the
+		// persistence-integrity gap this result exists to make visible.
+		return { persisted: true, claim: mintedClaimToken ? "dropped" : "none" }
 	}
 
 	/**
@@ -869,18 +910,34 @@ export class ClineProvider
 	 *
 	 * Awaited rather than fired and forgotten: the entry already carries this claim once the write
 	 * lands, so a view that never receives it would be missing an identity the host believes it
-	 * holds. Every delivery failure is reported - no webview attached, the post rejected, or the
-	 * webview resolving the post as not delivered - and the exact claim is queued for the next
-	 * attach instead of dropped. The post itself stays the single place that records the
-	 * webview-out diagnostic.
+	 * holds. Posts are gated on `isViewLaunched`: the renderer attaches its message listener during
+	 * `webviewDidLaunch`, and the Webview API allows an earlier message to be lost even when
+	 * postMessage resolves true. Every non-delivery is reported - renderer not launched, the post
+	 * rejected, or the webview resolving the post as not delivered - and the exact claim is queued
+	 * for the next `webviewDidLaunch` instead of dropped. The post itself stays the single place
+	 * that records the webview-out diagnostic.
 	 */
-	private async postViewStateClaimToWebview(viewStateId: string, claimToken: string): Promise<boolean> {
-		if (!this.view || this._disposed) {
+	private async postViewStateClaimToWebview(
+		viewStateId: string,
+		claimToken: string,
+	): Promise<ViewStateClaimDelivery> {
+		if (this._disposed) {
+			this.log(
+				`[viewStateClaim] Claim for ${viewStateId} dropped for view ${this.viewId}: the provider is disposed.`,
+			)
+			return "dropped"
+		}
+
+		if (!this.view || !this.isViewLaunched) {
+			// Held rather than posted. The renderer only attaches its message listener once the
+			// webview launches, and the Webview API permits a message posted before that to be lost
+			// while postMessage still resolves true - which would delete a claim the webview never
+			// saw. Queuing keeps the exact token for the webviewDidLaunch flush.
 			this.pendingViewStateClaims.set(viewStateId, claimToken)
 			this.log(
-				`[viewStateClaim] Claim for ${viewStateId} not delivered to view ${this.viewId}: no webview attached.`,
+				`[viewStateClaim] Claim for ${viewStateId} not delivered to view ${this.viewId}: the webview has not launched yet.`,
 			)
-			return false
+			return "queued"
 		}
 
 		let delivered: boolean
@@ -894,7 +951,7 @@ export class ClineProvider
 			const reason = error instanceof Error ? error.message : String(error)
 			this.pendingViewStateClaims.set(viewStateId, claimToken)
 			this.log(`[viewStateClaim] Delivery for ${viewStateId} to view ${this.viewId} failed: ${reason}`)
-			return false
+			return "queued"
 		}
 
 		if (!delivered) {
@@ -904,21 +961,22 @@ export class ClineProvider
 			this.log(
 				`[viewStateClaim] Claim for ${viewStateId} not delivered to view ${this.viewId}: the webview rejected the message.`,
 			)
-			return false
+			return "queued"
 		}
 
 		this.pendingViewStateClaims.delete(viewStateId)
-		return true
+		return "delivered"
 	}
 
 	/**
-	 * Re-delivers the claims this view minted that no webview accepted yet, called when a webview
-	 * attaches. Each queued entry keeps the exact token the durable entry stores, so a webview that
-	 * missed a delivery still gets the identity it has to present on the next launch; an entry that
-	 * fails again is re-queued for the next attach.
+	 * Flushes the claims this view minted that no webview accepted yet. Called from the
+	 * `webviewDidLaunch` handler, once the renderer has attached its message listener, and a no-op
+	 * until then: posting before that can be lost. Each queued entry keeps the exact token the
+	 * durable entry stores, so a webview that missed a delivery still gets the identity it has to
+	 * present on the next launch; an entry that fails again is re-queued for the next launch.
 	 */
-	private async deliverPendingViewStateClaims(): Promise<void> {
-		if (this._disposed || !this.view || this.pendingViewStateClaims.size === 0) {
+	public async deliverPendingViewStateClaims(): Promise<void> {
+		if (this._disposed || !this.view || !this.isViewLaunched || this.pendingViewStateClaims.size === 0) {
 			return
 		}
 
@@ -1003,7 +1061,10 @@ export class ClineProvider
 	}
 
 	/** Register the stable view id and load its persisted selections; a claim must match. */
-	public async setViewStateId(viewStateId: string | undefined, presentedClaim?: string): Promise<void> {
+	public async setViewStateId(
+		viewStateId: string | undefined,
+		presentedClaim?: string,
+	): Promise<ViewStateRegistrationResult> {
 		// The webview generates this id on purpose - it has to survive a webview reload,
 		// which recreates the view on both sides - so the host cannot mint it instead.
 		// What the host owns is which view may hold a given persisted key, so everything
@@ -1012,7 +1073,7 @@ export class ClineProvider
 			// A crafted postMessage can carry any JSON value here even though the message
 			// type declares a string; the persisted key must stay a string.
 			this.log(`[setViewStateId] Ignoring a non-string viewStateId for view ${this.viewId}.`)
-			return
+			return { adopted: false, claim: "none" }
 		}
 
 		const normalizedViewStateId = viewStateId.trim().replace(/[^A-Za-z0-9_-]/g, "_")
@@ -1032,7 +1093,7 @@ export class ClineProvider
 			// entry under a name that looks like an inherited member.
 			normalizedViewStateId === "__proto__"
 		) {
-			return
+			return { adopted: false, claim: "none" }
 		}
 
 		// Bound the key: the webview generates a UUID, so a much longer value is not a
@@ -1041,7 +1102,7 @@ export class ClineProvider
 			this.log(
 				`[setViewStateId] Ignoring an oversized viewStateId (${normalizedViewStateId.length} chars) for view ${this.viewId}.`,
 			)
-			return
+			return { adopted: false, claim: "none" }
 		}
 
 		const claimant = ClineProvider.getAllInstances().find(
@@ -1055,13 +1116,18 @@ export class ClineProvider
 			this.log(
 				`[setViewStateId] Refusing viewStateId ${normalizedViewStateId} for view ${this.viewId}: already claimed by live view ${claimant.viewId}.`,
 			)
-			return
+			return { adopted: false, claim: "none" }
 		}
 
 		// Claim binding, checked before any re-key or load so a refused registration can
 		// neither read nor mutate a persisted entry. Read fresh from storage rather than
 		// through the ContextProxy cache: a security check must not trust a stale copy.
 		const persistedEntry = this.getPersistedViewStates({ fresh: true })[normalizedViewStateId]
+
+		// What became of the claim this registration mints or re-affirms. A refused registration
+		// never reaches a claim, and an adopted one whose claim is still queued is not the same
+		// outcome as one the webview received, so both are reported to the caller.
+		let claimDelivery: ViewStateClaimDelivery = "none"
 
 		if (persistedEntry) {
 			const storedClaim = persistedEntry.claimToken
@@ -1080,10 +1146,10 @@ export class ClineProvider
 					this.log(
 						`[setViewStateId] Refusing viewStateId ${normalizedViewStateId} for view ${this.viewId}: bound concurrently by another registration.`,
 					)
-					return
+					return { adopted: false, claim: "none" }
 				}
 
-				await this.postViewStateClaimToWebview(normalizedViewStateId, reboundClaim)
+				claimDelivery = await this.postViewStateClaimToWebview(normalizedViewStateId, reboundClaim)
 				this.log(
 					`[setViewStateId] Re-bound claim-less viewStates entry ${normalizedViewStateId} for view ${this.viewId}: unbound selections were not loaded.`,
 				)
@@ -1094,7 +1160,7 @@ export class ClineProvider
 				this.log(
 					`[setViewStateId] Refusing viewStateId ${normalizedViewStateId} for view ${this.viewId}: claim missing or mismatched.`,
 				)
-				return
+				return { adopted: false, claim: "none" }
 			}
 		}
 
@@ -1116,7 +1182,11 @@ export class ClineProvider
 			// A registration whose view was disposed mid-flight must not deliver a claim to
 			// a webview that is no longer there.
 			if (adoptedClaim && this.isViewStateGenerationLive(generation)) {
-				await this.postViewStateClaimToWebview(this.viewStateId, adoptedClaim)
+				claimDelivery = await this.postViewStateClaimToWebview(this.viewStateId, adoptedClaim)
+			} else if (adoptedClaim) {
+				// The view was disposed mid-registration: the binding is durable but this provider
+				// will not post the claim again.
+				claimDelivery = "dropped"
 			}
 
 			// Registration is what loads this view's own persisted selections.
@@ -1129,6 +1199,8 @@ export class ClineProvider
 			this.viewStateId = previousViewStateId
 			throw error
 		}
+
+		return { adopted: true, claim: claimDelivery }
 	}
 
 	/**
@@ -1732,17 +1804,10 @@ export class ClineProvider
 			this.webviewDisposables,
 		)
 
-		// A claim minted while no webview was attached, or while its post was rejected, is delivered
-		// now that this view exists: the durable entry already carries that token, and the webview
-		// cannot present an identity the host never handed it. A failed retry must not fail
-		// initialization, so it is contained here.
-		try {
-			await this.deliverPendingViewStateClaims()
-		} catch (error) {
-			this.log(
-				`[viewStateClaim] Retrying pending claims for view ${this.viewId} failed: ${error instanceof Error ? error.message : String(error)}`,
-			)
-		}
+		// Queued claims are deliberately not posted here. The renderer attaches its message listener
+		// only when it launches, and the Webview API allows a message posted before that to be lost
+		// while postMessage still resolves true. The webviewDidLaunch handler flushes the queue once
+		// a listener exists to receive it.
 
 		if (inTabMode) {
 			setPanel(webviewView, "tab")
@@ -6030,10 +6095,12 @@ export class ClineProvider
 	public async saveViewState<K extends keyof PersistedViewStateValues>(
 		key: K,
 		value: PersistedViewStateValues[K] | undefined,
-	): Promise<void> {
-		await this._saveViewLocalStateFromMutation({ [key]: value } as ViewLocalStateValues)
+	): Promise<ViewStatePersistenceResult> {
+		const persistence = await this._saveViewLocalStateFromMutation({ [key]: value } as ViewLocalStateValues)
 
 		this.log(`[saveViewState] Saved ${String(key)} for viewId ${this.viewId}`)
+
+		return persistence
 	}
 
 	/**
@@ -6043,9 +6110,11 @@ export class ClineProvider
 	 */
 	private async _saveViewLocalStateFromMutation(
 		values: Partial<RooCodeSettings> & Partial<ExtensionState>,
-	): Promise<void> {
-		await this._persistViewLocalStateFromMutation(values)
+	): Promise<ViewStatePersistenceResult> {
+		const persistence = await this._persistViewLocalStateFromMutation(values)
 		this._updateViewLocalStateFromMutation(values)
+
+		return persistence
 	}
 
 	/**
@@ -6111,7 +6180,7 @@ export class ClineProvider
 	 */
 	private async _persistViewLocalStateFromMutation(
 		values: Partial<RooCodeSettings> & Partial<ExtensionState>,
-	): Promise<void> {
+	): Promise<ViewStatePersistenceResult> {
 		const persistedValues: Partial<PersistedViewState> = {}
 
 		if ("mode" in values) {
@@ -6123,8 +6192,11 @@ export class ClineProvider
 		}
 
 		if ("mode" in persistedValues || "currentApiConfigName" in persistedValues) {
-			await this.savePersistedViewState(persistedValues)
+			return this.savePersistedViewState(persistedValues)
 		}
+
+		// Nothing in this mutation belongs to the durable record, so there was nothing to write.
+		return { persisted: false, claim: "none" }
 	}
 
 	/** Load non-secret persisted selections; in-flight buffer edits are reapplied on top. */

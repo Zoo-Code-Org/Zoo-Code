@@ -128,6 +128,8 @@ const mockClineProvider = {
 	},
 	log: vi.fn(),
 	postStateToWebview: vi.fn(),
+	// The webviewDidLaunch handler flushes claims the provider queued before the renderer launched.
+	deliverPendingViewStateClaims: vi.fn().mockResolvedValue(undefined),
 	resolveWebviewThemeFixtureProbe: vi.fn(),
 	getCurrentTask: vi.fn(),
 	getTaskWithId: vi.fn(),
@@ -2801,6 +2803,24 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		// state must reflect that, not "disabled" from the stale, slower first message.
 		const calls = vi.mocked(TelemetryService.instance.updateTelemetryState).mock.calls
 		expect(calls.at(-1)).toEqual([true])
+	})
+
+	// Review follow-up on the attach-time claim retry: a claim minted before the renderer launched is
+	// held by the provider, because a message posted before the webview attaches its listener can be
+	// lost while postMessage still resolves true. The flush therefore belongs to webviewDidLaunch, and
+	// it has to run only after isViewLaunched is set - flushing earlier would post back into the window
+	// the gate exists to close.
+	it("flushes the provider's pending view-state claims on webviewDidLaunch, after isViewLaunched is set", async () => {
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([])
+		let launchedWhenFlushed: boolean | undefined
+		vi.mocked(mockClineProvider.deliverPendingViewStateClaims).mockImplementationOnce(async () => {
+			launchedWhenFlushed = mockClineProvider.isViewLaunched
+		})
+
+		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch" })
+
+		expect(mockClineProvider.deliverPendingViewStateClaims).toHaveBeenCalledTimes(1)
+		expect(launchedWhenFlushed).toBe(true)
 	})
 
 	// CodeRabbit follow-up on the finding #12 fix: webviewDidLaunch's telemetry init read state
