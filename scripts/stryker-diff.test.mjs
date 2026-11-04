@@ -5,6 +5,8 @@ import os from "node:os"
 import path from "node:path"
 import { describe, it } from "node:test"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import { runInNewContext } from "node:vm"
+import { parse as parseYaml } from "yaml"
 
 import {
 	MAX_CHANGED_LINES,
@@ -59,7 +61,8 @@ describe("mutation testing workflow", () => {
 		assert.ok(!workflow.includes("repository: ${{ github.event.pull_request.head.repo.full_name }}"))
 		assert.ok(!workflow.includes("ref: ${{ github.event.pull_request.head.sha }}"))
 		assert.ok(workflow.includes("HEAD_SHA: ${{ github.sha }}"))
-		assert.ok(!workflow.includes("HEAD_SHA: ${{ github.event.pull_request.head.sha }}"))
+		assert.ok(workflow.includes("PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}"))
+		assert.ok(!workflow.includes("                  HEAD_SHA: ${{ github.event.pull_request.head.sha }}"))
 		assert.ok(workflow.includes('BASE_SHA="$(git rev-parse "$HEAD_SHA^1")"'))
 		assert.ok(!workflow.includes("github.event.pull_request.base.sha"))
 		assert.ok(workflow.includes("steps.mutation_report.outputs.artifact-url"))
@@ -999,6 +1002,40 @@ describe("report evaluation", () => {
 	})
 })
 
+describe("focused test reporting", () => {
+	const row = {
+		id: "core",
+		root: "packages/core",
+		reportPath: "reports/mutation/core/mutation.html",
+		changedLines: 1,
+		valid: 1,
+		killed: 1,
+		timeout: 0,
+		survived: 0,
+		noCoverage: 0,
+	}
+	for (const [result, expected] of [
+		["Passed", "Selected test file names were not recorded in the mutation report."],
+		["Advisory findings", "Selected test file names were not recorded in the mutation report."],
+		["No mutants generated", "No mutants were generated; selected test file names were not recorded."],
+		[
+			"Advisory incomplete",
+			"The mutation run was incomplete; selected test file names were not recorded. See Advisory findings for the failure.",
+		],
+	]) {
+		it(`reports missing test metadata accurately for ${result}`, () => {
+			const summary = formatSummary([{ ...row, result, testFiles: [] }], [])
+			assert.ok(summary.includes(`- **core** (cwd \`packages/core\`): ${expected}`))
+			assert.equal(summary.includes("run was incomplete"), result === "Advisory incomplete")
+		})
+	}
+	it("lists recorded test files even when a later mutation phase fails", () => {
+		const summary = formatSummary([{ ...row, result: "Advisory incomplete", testFiles: ["src/value.test.ts"] }], [])
+		assert.ok(summary.includes("- **core** (cwd `packages/core`): `src/value.test.ts`"))
+		assert.ok(!summary.includes("test file names were not recorded"))
+	})
+})
+
 describe("PR comment file", () => {
 	const headSha = "d".repeat(40)
 	const manifest = { baseSha: "c".repeat(40), headSha }
@@ -1035,6 +1072,31 @@ describe("PR comment file", () => {
 		assert.ok(comment.includes("| 4 | Survived | BooleanLiteral | false |"))
 		assert.ok(comment.includes("### Resolve a mutation gap"))
 		assert.ok(comment.includes("### Advisory findings"))
+	})
+
+	it("uses the PR head for provenance while retaining the merge SHA for reproduction", () => {
+		const previous = process.env.PR_HEAD_SHA
+		const prHead = "a".repeat(40)
+		process.env.PR_HEAD_SHA = prHead
+		try {
+			const comment = formatPrComment([advisoryRow], [], manifest)
+			assert.ok(comment.includes(`head:${prHead} blocking:1`))
+			assert.ok(comment.includes(`--head ${manifest.headSha}`))
+		} finally {
+			if (previous === undefined) delete process.env.PR_HEAD_SHA
+			else process.env.PR_HEAD_SHA = previous
+		}
+	})
+
+	it("falls back to the analyzed SHA when PR_HEAD_SHA is empty", () => {
+		const previous = process.env.PR_HEAD_SHA
+		process.env.PR_HEAD_SHA = ""
+		try {
+			assert.ok(formatPrComment([], [], manifest).includes(`head:${headSha} blocking:0`))
+		} finally {
+			if (previous === undefined) delete process.env.PR_HEAD_SHA
+			else process.env.PR_HEAD_SHA = previous
+		}
 	})
 
 	it("counts zero survivors for clean runs", () => {
@@ -1118,7 +1180,11 @@ describe("mutation PR comment workflow", () => {
 		const workflow = readCommentWorkflow()
 
 		assert.ok(workflow.includes("permissions:\n    contents: read"))
-		assert.ok(workflow.includes("        permissions:\n            actions: read\n        outputs:"))
+		assert.ok(
+			workflow.includes(
+				"        permissions:\n            actions: read\n            pull-requests: read\n        outputs:",
+			),
+		)
 		assert.ok(
 			workflow.includes("        permissions:\n            actions: read\n            pull-requests: write"),
 		)
@@ -1135,7 +1201,7 @@ describe("mutation PR comment workflow", () => {
 		assert.ok(workflow.includes("pr.head?.sha === run.head_sha"))
 		assert.ok(workflow.includes("pr_number: ${{ fromJSON(needs.resolve.outputs.pr_numbers) }}"))
 		assert.ok(workflow.includes("PR_NUMBER: ${{ matrix.pr_number }}"))
-		assert.ok(workflow.includes("listArtifactsForWorkflowRun"))
+		assert.ok(workflow.includes("GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts"))
 	})
 
 	it("validates the artifact as untrusted data before using it as a comment body", () => {
@@ -1173,5 +1239,378 @@ describe("mutation PR comment workflow", () => {
 		assert.ok(script.includes(`export const PR_COMMENT_FILENAME = "${PR_COMMENT_FILENAME}"`))
 		assert.ok(workflow.includes(`mutation-report/${PR_COMMENT_FILENAME}`))
 		assert.ok(script.includes("path.join(reportRoot, PR_COMMENT_FILENAME)"))
+	})
+})
+
+// Execute the exact trusted inline script, rather than a copy of its logic.
+// Loading a helper from the PR checkout would execute untrusted code with a write token.
+describe("mutation comment execution", () => {
+	it("authenticates the artifact download from the triggering workflow run", () => {
+		const workflow = parseYaml(
+			fs.readFileSync(path.join(repositoryRoot, ".github/workflows/mutation-pr-comment.yml"), "utf8"),
+		)
+		const download = workflow.jobs.comment.steps.find((step) => step.name === "Download mutation report artifact")
+		assert.equal(download.with["github-token"], "${{ github.token }}")
+		assert.equal(download.with["run-id"], "${{ github.event.workflow_run.id }}")
+		assert.equal(download.with.name, "changed-code-mutation-report")
+	})
+
+	const head = "a".repeat(40)
+	const marker = PR_COMMENT_MARKER
+	const report = (content = "src/value.ts:4 Survived", counts = "blocking:1 advisories:0", sha = head) =>
+		`${marker}\n<!-- zoo-code-mutation-report head:${sha} ${counts} -->\n\n${content}`
+
+	async function execute({
+		raw = report(),
+		currentHead = head,
+		state = "open",
+		existing,
+		size,
+		unreadable = false,
+	} = {}) {
+		const workflow = parseYaml(
+			fs.readFileSync(path.join(repositoryRoot, ".github/workflows/mutation-pr-comment.yml"), "utf8"),
+		)
+		const script = workflow.jobs.comment.steps.find((step) => step.name === "Update pull request comment").with
+			.script
+		const writes = []
+		const warnings = []
+		const github = {
+			rest: {
+				pulls: { get: async () => ({ data: { state, head: { sha: currentHead } } }) },
+				issues: {
+					listComments: () => {},
+					createComment: async (value) => writes.push({ operation: "create", ...value }),
+					updateComment: async (value) => writes.push({ operation: "update", ...value }),
+				},
+			},
+			paginate: async () =>
+				existing ? [{ id: 123, user: { login: "github-actions[bot]" }, body: existing }] : [],
+		}
+		await runInNewContext(`(async () => {${script}\n})()`, {
+			github,
+			context: { repo: { owner: "Zoo-Code-Org", repo: "Zoo-Code" } },
+			process: { env: { PR_NUMBER: "2293", HEAD_SHA: head, TRIGGERING_RUN_URL: "https://github.com/run/1" } },
+			core: { info: () => {}, warning: (message) => warnings.push(message) },
+			require: (name) => {
+				assert.equal(name, "fs")
+				return {
+					statSync: () => {
+						if (unreadable) throw new Error("missing artifact")
+						return { size: size ?? Buffer.byteLength(raw) }
+					},
+					readFileSync: () => raw,
+				}
+			},
+		})
+		return { writes, warnings }
+	}
+
+	it("publishes a matching PR head even when the analyzed merge SHA differs", async () => {
+		const previous = process.env.PR_HEAD_SHA
+		process.env.PR_HEAD_SHA = head
+		let raw
+		try {
+			raw = formatPrComment([], ["example advisory"], { headSha: "b".repeat(40) })
+		} finally {
+			if (previous === undefined) delete process.env.PR_HEAD_SHA
+			else process.env.PR_HEAD_SHA = previous
+		}
+		const { writes } = await execute({ raw })
+		assert.equal(writes.length, 1)
+		assert.equal(writes[0].operation, "create")
+		assert.ok(writes[0].body.includes("example advisory"))
+	})
+
+	for (const [name, options] of [
+		["wrong marker", { raw: report().replace(marker, "wrong") }],
+		["malformed counts", { raw: report("text", "blocking:no advisories:0") }],
+		["merge SHA instead of PR head", { raw: report("text", undefined, "b".repeat(40)) }],
+		["oversized artifact", { size: 1024 * 1024 + 1 }],
+		["missing artifact", { unreadable: true }],
+		["outdated head", { currentHead: "c".repeat(40) }],
+		["closed PR", { state: "closed" }],
+	]) {
+		it(`leaves an existing comment intact for ${name}`, async () => {
+			const { writes } = await execute({ ...options, existing: marker })
+			assert.equal(writes.length, 0)
+		})
+	}
+
+	it("updates the existing bot comment and skips an identical write", async () => {
+		const { writes } = await execute({ existing: marker })
+		assert.equal(writes[0].operation, "update")
+		assert.equal(writes[0].comment_id, 123)
+		assert.equal((await execute({ existing: writes[0].body })).writes.length, 0)
+	})
+
+	it("keeps counts visible and collapses the safely escaped report by default", async () => {
+		const { writes } = await execute({ raw: report("</details><img src=x>", "blocking:3 advisories:2") })
+		const body = writes[0].body
+		assert.ok(body.includes("| Surviving / uncovered mutants | Advisories |\n| ---: | ---: |\n| 3 | 2 |"))
+		assert.ok(body.indexOf("| 3 | 2 |") < body.indexOf("<details>"))
+		assert.ok(body.includes("<details>\n<summary>Details: mutants, guidance, and reproduction</summary>\n\n"))
+		assert.ok(body.includes("<p>&lt;/details&gt;&lt;img src=x&gt;</p>\n\n</details>"))
+		assert.equal(body.match(/<details>/g).length, 1)
+		assert.equal(body.match(/<\/details>/g).length, 1)
+		assert.ok(!body.includes("<details open"))
+	})
+
+	it("clears existing survivors after a clean run without creating a new clean comment", async () => {
+		const raw = report("clean", "blocking:0 advisories:0")
+		assert.equal((await execute({ raw })).writes.length, 0)
+		const { writes } = await execute({ raw, existing: marker })
+		assert.equal(writes.length, 1)
+		assert.ok(writes[0].body.includes("No mutants survived"))
+		assert.ok(!writes[0].body.includes("<details>"))
+	})
+
+	it("escapes hostile prose and keeps mentions and links inactive", async () => {
+		const hostile = "@someone\n![image](https://example.org/track)\n<a>link</a>\n```\n" + marker + "\r\u0000end"
+		const { writes } = await execute({ raw: report(hostile) })
+		const body = writes[0].body
+		assert.ok(
+			body.includes("<p><code>@someone ![image](https://example.org/track) &lt;a&gt;link&lt;/a&gt;</code></p>"),
+		)
+		assert.ok(body.includes("<pre><code>end</code></pre>"))
+		assert.equal(body.split(marker).length, 2)
+		assert.ok(!body.includes("\r"))
+		assert.ok(!body.includes("\u0000"))
+	})
+
+	it("renders headings, focused tests, guidance, and report paths as prose", async () => {
+		const content = [
+			"### Focused tests",
+			"",
+			"- **core** (cwd `packages/core`): the mutation run did not complete far enough to report its selected tests.",
+			"",
+			"### All surviving and uncovered mutants",
+			"",
+			"This summary lists every advisory mutant.",
+			"",
+			"### core",
+			"",
+			"#### `packages/core/src/value.ts`",
+			"",
+			"### Resolve a mutation gap",
+			"",
+			"Add or strengthen a focused test that fails under the mutation.",
+			"",
+			"```ts",
+			"const result = condition ? value : fallback",
+			"```",
+			"",
+			"### Reproduce locally",
+			"",
+			"From a full checkout containing both commits:",
+			"",
+			"```bash",
+			"pnpm install --frozen-lockfile",
+			"node scripts/stryker-diff.mjs ci --base abc --head def",
+			"```",
+			"",
+			"### Mutation reports",
+			"",
+			"- **core:** `reports/mutation/core/mutation.html`",
+			"",
+			"### Advisory findings",
+			"",
+			"- Example advisory",
+			"  continued here",
+		].join("\n")
+		const { writes } = await execute({ raw: report(content) })
+		const body = writes[0].body
+		assert.ok(body.includes("<h3>Focused tests</h3>"))
+		assert.ok(body.includes("<li><strong>core</strong> (cwd <code>packages/core</code>):"))
+		assert.ok(body.includes("<h4><code>packages/core/src/value.ts</code></h4>"))
+		assert.ok(body.includes("<h3>Resolve a mutation gap</h3>"))
+		assert.ok(body.includes("<p>Add or strengthen a focused test that fails under the mutation.</p>"))
+		assert.ok(
+			body.includes('<pre><code class="language-ts">const result = condition ? value : fallback</code></pre>'),
+		)
+		assert.ok(
+			body.includes(
+				'<pre><code class="language-bash">pnpm install --frozen-lockfile\nnode scripts/stryker-diff.mjs ci --base abc --head def</code></pre>',
+			),
+		)
+		assert.ok(body.includes("<li><strong>core:</strong> <code>reports/mutation/core/mutation.html</code></li>"))
+		assert.ok(body.includes("<li>Example advisory continued here</li>"))
+		assert.equal(body.match(/<pre>/g).length, 2)
+	})
+
+	for (const [opener, closer] of [
+		["```", "```"],
+		["````", "````"],
+		["~~~", "~~~"],
+		["```", ""],
+	]) {
+		it(`keeps table syntax literal inside code fences ${opener}/${closer || "unclosed"}`, async () => {
+			const content = [opener, "| Value |", "| --- |", "| </code><img> |", closer].join("\n")
+			const { writes } = await execute({ raw: report(content) })
+			assert.ok(writes[0].body.includes("<pre><code>| Value |\n| --- |\n| &lt;/code&gt;&lt;img&gt; |"))
+			assert.ok(!writes[0].body.includes("<table>"))
+			assert.ok(!writes[0].body.includes("<img>"))
+		})
+	}
+
+	for (const text of [
+		"@someone",
+		"https://example.org",
+		"www.example.org",
+		"[link](/path)",
+		"**@someone**",
+		"`<img src=x>`",
+	]) {
+		it(`keeps unsafe inline content inert: ${text}`, async () => {
+			const { writes } = await execute({ raw: report("### " + text + "\n\n- " + text) })
+			assert.ok(writes[0].body.includes("<code>"))
+			assert.ok(!writes[0].body.includes("<a "))
+			assert.ok(!writes[0].body.includes("<img "))
+		})
+	}
+
+	it("renders summary and survivor tables with literal escaped cell contents", async () => {
+		const content = [
+			"## Changed-code mutation testing",
+			"",
+			"| Package | Changed executable lines | Valid | Killed | Timeout | Survived | No coverage | Result |",
+			"| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+			"| core | 1 | 1 | 0 | 0 | 1 | 0 | Advisory findings |",
+			"",
+			"#### `packages/core/src/value.ts`",
+			"",
+			"| Line | Status | Mutator | Replacement |",
+			"| ---: | --- | --- | --- |",
+			"| 4 | Survived | BooleanLiteral | a \\| b & </code><img src=x> @someone ![image](https://example.org) ``` |",
+		].join("\n")
+		const { writes } = await execute({ raw: report(content) })
+		const body = writes[0].body
+		assert.equal(body.match(/<table>/g).length, 2)
+		assert.ok(body.includes("<th><code>Package</code></th>"))
+		assert.ok(body.includes("<td><code>core</code></td>"))
+		assert.ok(body.includes("<td><code>4</code></td>"))
+		assert.ok(
+			body.includes(
+				"a | b &amp; &lt;/code&gt;&lt;img src=x&gt; @someone ![image](https://example.org) ```</code>",
+			),
+		)
+		assert.ok(!body.includes("<img"))
+	})
+
+	for (const content of ["| Value |\n| invalid |\n| @someone |", "| One | Two |\n| --- |\n| @someone |"]) {
+		it(`keeps malformed table syntax literal: ${content.split("\n")[0]}`, async () => {
+			const { writes } = await execute({ raw: report(content) })
+			assert.ok(writes[0].body.includes("<p>"))
+			assert.ok(!writes[0].body.includes("<table>"))
+		})
+	}
+
+	it("bounds a large paragraph without emitting incomplete HTML", async () => {
+		const { writes } = await execute({ raw: report("@someone\n".repeat(10000)) })
+		assert.ok(writes[0].body.length < 65536)
+		assert.ok(writes[0].body.includes("[truncated -"))
+		assert.ok(writes[0].body.endsWith("</details>\n"))
+	})
+
+	it("truncates large tables between rows and closes their HTML structure", async () => {
+		const content = "| Line | Replacement |\n| ---: | --- |\n" + "| 1 | & <img> @someone |\n".repeat(10000)
+		const { writes } = await execute({ raw: report(content) })
+		const body = writes[0].body
+		assert.ok(body.length < 65536)
+		assert.ok(body.includes("</tbody></table>\n\n[truncated -"))
+		assert.equal(body.match(/<tr>/g).length, body.match(/<\/tr>/g).length)
+		assert.ok(!body.includes("<img>"))
+	})
+})
+
+// Resolve uses the same trusted workflow source as the comment execution tests.
+describe("mutation target resolution execution", () => {
+	const head = "a".repeat(40)
+	async function execute({
+		pullRequests = [],
+		candidates = [],
+		event = "pull_request",
+		artifacts = [{ id: 42, name: "changed-code-mutation-report", expired: false }],
+	} = {}) {
+		const workflow = parseYaml(
+			fs.readFileSync(path.join(repositoryRoot, ".github/workflows/mutation-pr-comment.yml"), "utf8"),
+		)
+		const outputs = {}
+		const queries = []
+		await runInNewContext(`(async () => {${workflow.jobs.resolve.steps[0].with.script}\n})()`, {
+			context: {
+				repo: { owner: "Zoo-Code-Org", repo: "Zoo-Code" },
+				payload: {
+					workflow_run: {
+						id: 99,
+						event,
+						pull_requests: pullRequests,
+						head_sha: head,
+						head_branch: "feature",
+						head_repository: { owner: { login: "fork-owner" } },
+					},
+				},
+			},
+			core: {
+				info: () => {},
+				setOutput: (name, value) => {
+					outputs[name] = value
+				},
+			},
+			github: {
+				request: async (route, query) => {
+					assert.equal(route, "GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts")
+					assert.equal(query.run_id, 99)
+					return { data: { artifacts } }
+				},
+				rest: {
+					pulls: { list: () => {} },
+				},
+				paginate: async (_method, query) => {
+					queries.push(query)
+					return candidates
+				},
+			},
+		})
+		return { outputs, queries }
+	}
+
+	it("uses event PR numbers without querying fork candidates", async () => {
+		const { outputs, queries } = await execute({ pullRequests: [{ number: 2293 }, { number: 2293 }] })
+		assert.equal(outputs.pr_numbers, "[2293]")
+		assert.equal(outputs.artifact_id, "42")
+		assert.equal(queries.length, 0)
+	})
+
+	for (const [name, sha, repository, expected] of [
+		["matching fork", head, "Zoo-Code-Org/Zoo-Code", "[2293]"],
+		["wrong head", "b".repeat(40), "Zoo-Code-Org/Zoo-Code", "[]"],
+		["wrong base repository", head, "other/repo", "[]"],
+	]) {
+		it(`resolves ${name} with an exact owner, branch, SHA, and base match`, async () => {
+			const { outputs, queries } = await execute({
+				candidates: [{ number: 2293, head: { sha }, base: { repo: { full_name: repository } } }],
+			})
+			assert.equal(outputs.pr_numbers, expected)
+			assert.equal(queries[0].head, "fork-owner:feature")
+			assert.equal(queries[0].state, "open")
+		})
+	}
+
+	for (const [name, artifacts] of [
+		["missing", []],
+		["expired", [{ id: 42, name: "changed-code-mutation-report", expired: true }]],
+		["unrelated", [{ id: 42, name: "other-report", expired: false }]],
+	]) {
+		it(`skips comment publication for ${name} artifacts`, async () => {
+			assert.equal((await execute({ artifacts })).outputs.artifact_id, "")
+		})
+	}
+
+	it("ignores non-PR runs", async () => {
+		const { outputs, queries } = await execute({ event: "merge_group" })
+		assert.equal(outputs.pr_numbers, "[]")
+		assert.equal(outputs.artifact_id, "")
+		assert.equal(queries.length, 0)
 	})
 })

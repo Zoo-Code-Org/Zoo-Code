@@ -595,9 +595,13 @@ export function formatSummary(rows, advisories, manifest = {}) {
 			if (row.testFiles?.length > 0) {
 				lines.push(`- **${row.id}** (cwd \`${cwd}\`): ${row.testFiles.map((file) => `\`${file}\``).join(", ")}`)
 			} else {
-				lines.push(
-					`- **${row.id}** (cwd \`${cwd}\`): the mutation run did not complete far enough to report its selected tests; use the exact reproduction command below.`,
-				)
+				const detail =
+					row.result === "Advisory incomplete"
+						? "The mutation run was incomplete; selected test file names were not recorded. See Advisory findings for the failure."
+						: row.result === "No mutants generated"
+							? "No mutants were generated; selected test file names were not recorded."
+							: "Selected test file names were not recorded in the mutation report."
+				lines.push(`- **${row.id}** (cwd \`${cwd}\`): ${detail}`)
 			}
 		}
 	}
@@ -668,7 +672,8 @@ export function formatSummary(rows, advisories, manifest = {}) {
 }
 
 export function formatPrComment(rows, advisories, manifest) {
-	const headSha = manifest?.headSha
+	// Analysis uses the merge commit; comment provenance uses the PR head.
+	const headSha = process.env.PR_HEAD_SHA || manifest?.headSha
 	if (!headSha || !/^[0-9a-f]{40}$/i.test(headSha)) return undefined
 	const blocking = rows.reduce((total, row) => total + (row.blocking?.length ?? 0), 0)
 	return [
