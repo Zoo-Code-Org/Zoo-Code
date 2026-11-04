@@ -2171,9 +2171,11 @@ export class DiffViewProvider {
 	 * @param content - Content to write to the file
 	 * @param openFile - Whether to show the file in editor (false = open in memory only for diagnostics)
 	 * @param writeKind - Guarded-write kind that selects the S4a guard for this publish.
-	 *   Defaults to "create" because this method always publishes a complete file
-	 *   content: an unobserved target may only be created when absent, and an
-	 *   observed target must still carry the current observation token.
+	 *   The caller names it: only the consumer knows whether it created a file or
+	 *   replaced one it had read. "create" is for a target the publish brings into
+	 *   being; "update" is a full-file replacement of an existing target and "edit" a
+	 *   targeted change to one, both of which the guard authorizes from the
+	 *   observation this method records for this.originalContent below.
 	 * @returns Result of the save operation including any new problems detected
 	 */
 	async saveDirectly(
@@ -2208,6 +2210,21 @@ export class DiffViewProvider {
 			throw new Error("Cannot guard the write: the owning task is no longer available")
 		}
 		await createDirectoriesForFile(absolutePath)
+		// The guard decides from the observation registry, and a direct save has no preview
+		// to authorize it: the consumer built `content` from bytes it read outside this class
+		// and hands them over as `originalContent`. Bracket that read here - stat, compare the
+		// target's current bytes against the basis bytes, stat again - and record what it
+		// authorized before publishing. Both sides agreeing on one token AND the target still
+		// holding exactly the basis bytes means this publish replaces content the consumer saw in
+		// full, which is what a complete observation claims. Anything else - the file moved
+		// during the bracket, or the target no longer matches what the content was built from -
+		// means the publish rests on a slice of something else, so the observation stays partial
+		// and the completeness gate refuses a full-file replacement until the model re-reads.
+		// "create" is left alone: an absent target needs no authorization, and a target that is
+		// already there must be refused as unobserved rather than quietly overwritten.
+		if (writeKind !== "create" && this.originalContent !== undefined) {
+			await this.observeDirectSaveBasis(task, absolutePath)
+		}
 		const landedToken = await guardedWrite(task, relPath, content, writeKind, completeOverride)
 		if (landedToken !== undefined) {
 			// The guard read this token back under its own lock: the bytes at the
@@ -2277,5 +2294,34 @@ export class DiffViewProvider {
 			userEdits: undefined,
 			finalContent: content,
 		}
+	}
+
+	/**
+	 * Record what a direct (no-preview) publish is authorized against.
+	 *
+	 * A direct save publishes bytes the consumer assembled from a file it read itself, so
+	 * nothing in this class has yet told the guard what that read covered. Bracket it: stat
+	 * the target, read it, stat it again. When the two stats agree and the target still holds
+	 * exactly the bytes the content was built from, the publish replaces content the consumer
+	 * saw whole, and the observation may claim completeness. When they disagree - the file
+	 * moved under the read, or it is no longer the basis - the publish rests on a slice of
+	 * something else: the observation is written with the current token but incomplete, so a
+	 * full-file publish is refused and the model has to re-read. A target that cannot be
+	 * bracketed at all is left unobserved, which the guard also refuses.
+	 */
+	private async observeDirectSaveBasis(task: Task, absolutePath: string): Promise<void> {
+		const before = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+		const currentBytes = await fs.readFile(absolutePath, "utf8").catch(() => undefined)
+		const after = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+		if (after === undefined || currentBytes === undefined) {
+			// Nothing to authorize against: the target vanished or could not be read, so the
+			// guard is left to refuse rather than adopt a claim about bytes nobody observed.
+			return
+		}
+		const basisIsTheCurrentContent =
+			before !== undefined &&
+			versionTokenOfStat(before) === versionTokenOfStat(after) &&
+			currentBytes === this.originalContent
+		task.observationRegistry.observe(absolutePath, versionTokenOfStat(after), basisIsTheCurrentContent)
 	}
 }

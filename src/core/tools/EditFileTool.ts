@@ -443,6 +443,9 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 					isNewFile,
 					diagnosticsEnabled,
 					writeDelayMs,
+					// The kind follows what this tool did to the target: a new file is
+					// created, an existing one is replaced in full from the content it read.
+					isNewFile ? "create" : "update",
 				)
 			} else {
 				// Call saveChanges to update the DiffViewProvider properties

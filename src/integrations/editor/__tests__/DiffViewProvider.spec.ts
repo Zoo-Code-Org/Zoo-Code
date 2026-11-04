@@ -1408,15 +1408,55 @@ describe("DiffViewProvider", () => {
 			await diffViewProvider.open("observed.ts")
 
 			expect(mockTask.observationRegistry.has(`${mockCwd}/observed.ts`)).toBe(false)
-			// The accepted save is a full-file replacement, so an unobserved target still
-			// fails closed instead of publishing content built on a preview that could not
-			// be tied to a version token.
+			// A direct save brackets its own basis read now: stat, read, stat, and the observation it
+			// records carries the token of that bracket. The refusal is therefore a compare-and-swap
+			// miss against the version the bracket recorded - still fail closed, still nothing
+			// written - rather than the blanket "was not read" refusal, because the bytes were read
+			// here, just not tie-ably to the preview this session opened.
 			await expect(
 				diffViewProvider.saveDirectly("observed.ts", "new content", false, false, 0, "update"),
-			).rejects.toThrow(
-				"File already exists at observed.ts and was not read before this write -- read the file first, then retry.",
-			)
+			).rejects.toThrow(/Stale version -- the file changed since you read it/)
 		})
+		it("saveDirectly records a complete observation for the bytes its content was built from", async () => {
+			// A direct save has no preview to authorize it, so it brackets the basis read it was
+			// handed: stat, compare the target against originalContent, stat again. All three agree
+			// here, so the publish replaces content the consumer saw in full and may claim
+			// completeness - which is what lets the guard's compare-and-swap authorize it.
+			mockTask.observationRegistry.clear()
+			diffViewProvider.originalContent = "basis content"
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("basis content")
+			vi.mocked(computeVersionToken).mockResolvedValue(versionTokenOfStat(previewStats))
+
+			await expect(
+				diffViewProvider.saveDirectly("basis.ts", "replacement content", false, false, 0, "update"),
+			).resolves.toMatchObject({ finalContent: "replacement content" })
+
+			const observation = mockTask.observationRegistry.get(`${mockCwd}/basis.ts`)
+			expect(observation?.version).toBe(versionTokenOfStat(previewStats))
+			expect(observation?.complete).toBe(true)
+		})
+
+		it("saveDirectly records only a partial observation when the target is not the basis", async () => {
+			// The consumer built its content from bytes the target no longer holds. The bracket still
+			// records the current version, but it cannot claim completeness for bytes nobody read, so
+			// the observation stays partial and the completeness gate refuses the full-file
+			// replacement instead of publishing over somebody else's write.
+			mockTask.observationRegistry.clear()
+			diffViewProvider.originalContent = "basis content the consumer built on"
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("someone else's content")
+
+			await expect(
+				diffViewProvider.saveDirectly("basis.ts", "replacement content", false, false, 0, "update"),
+			).rejects.toThrow(/only partially read/)
+
+			expect(safeWriteText).not.toHaveBeenCalled()
+			const observation = mockTask.observationRegistry.get(`${mockCwd}/basis.ts`)
+			expect(observation?.version).toBe(versionTokenOfStat(previewStats))
+			expect(observation?.complete).toBe(false)
+		})
+
 		it("open() observes the empty placeholder of a new file so the accepted save can be guarded", async () => {
 			const mockEditor = mockTextEditor(`${mockCwd}/brand-new.ts`)
 			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
