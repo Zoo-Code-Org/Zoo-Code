@@ -13,6 +13,7 @@ import {
 	resolveLockKey,
 	safeWriteText,
 	StagingPathError,
+	stagingNameIsStillOurs,
 } from "../safeWriteText"
 
 // Full mock for fs/promises — all methods are vi.fn() stubs
@@ -682,6 +683,31 @@ describe("safeWriteText", () => {
 				false,
 			)
 			// The commit itself still happened: temp -> link path.
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), path.resolve(targetPath))
+		})
+
+		it("retainedTarget over a symbolic link takes no content backup of the referent", async () => {
+			// A retained publish target is the name the caller handed over, exactly like a
+			// publish-over-link write: when that name is a link entry, copyFile would back up the
+			// referent's bytes and a rollback rename would replace the LINK with a regular file of
+			// outside content, so no content backup may be taken.
+			const targetPath = "/tmp/test-dir/retained-link.json"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.closeSync).mockReturnValue(undefined)
+
+			await expect(
+				safeWriteText(targetPath, "new data", { backup: true, retainedTarget: true, platform: "linux" }),
+			).resolves.toBeUndefined()
+
+			expect(fs.copyFile).not.toHaveBeenCalled()
+			expect(vi.mocked(fs.unlink).mock.calls.some((call) => String(call[0]).includes("safeWriteText.bak_"))).toBe(
+				false,
+			)
+			expect(vi.mocked(fs.rename).mock.calls.some((call) => String(call[0]).includes("safeWriteText.bak_"))).toBe(
+				false,
+			)
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), path.resolve(targetPath))
 		})
 
@@ -2270,5 +2296,27 @@ describe("windows ACL failure leaves no unauthorized content", () => {
 		})
 
 		await expect(safeWriteText(targetPath, "new data", { platform: "win32" })).rejects.toThrow(DaclRestoreError)
+	})
+})
+
+// The failed-write cleanup must not delete a staging name another principal replaced: once an
+// identity check fails, the bytes behind that name are somebody else's.
+describe("stagingNameIsStillOurs", () => {
+	const identity = (ino: number, dev = 7) => ({ dev: BigInt(dev), ino: BigInt(ino) })
+
+	it("keeps the cleanup when this write never validated an identity", () => {
+		expect(stagingNameIsStillOurs(identity(11), null)).toBe(true)
+	})
+
+	it("keeps the cleanup while the name still reports the validated identity", () => {
+		expect(stagingNameIsStillOurs(identity(11), identity(11))).toBe(true)
+	})
+
+	it("refuses the cleanup when the name now points at a different file", () => {
+		expect(stagingNameIsStillOurs(identity(12), identity(11))).toBe(false)
+	})
+
+	it("refuses the cleanup when the name is gone or unreadable", () => {
+		expect(stagingNameIsStillOurs(null, identity(11))).toBe(false)
 	})
 })

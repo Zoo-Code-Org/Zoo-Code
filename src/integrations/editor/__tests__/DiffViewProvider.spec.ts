@@ -913,6 +913,38 @@ describe("DiffViewProvider", () => {
 			expect(closedTabs).toEqual([ownTab])
 		})
 
+		it.skipIf(process.platform !== "win32")(
+			"closes the tab when the drive-letter casing differs from the resolved target",
+			async () => {
+				// Uri.fsPath reports a lowercase drive letter while this provider's absolutePath keeps
+				// the casing the workspace handed it (the Desktop fallback can supply the uppercase
+				// spelling). An exact string compare misses this provider's own tab on Windows, and a
+				// rejected save then leaves the tab open over the discarded buffer.
+				const ownTab = {
+					input: {
+						constructor: { name: "TabInputTextDiff" },
+						original: { scheme: DIFF_VIEW_URI_SCHEME },
+						modified: { fsPath: "c:\\work\\zoo\\test.ts" },
+					},
+					isDirty: false,
+				}
+				Object.setPrototypeOf(ownTab.input, vscode.TabInputTextDiff.prototype)
+				Object.defineProperty(vscode.window.tabGroups, "all", {
+					get: () => [{ tabs: [ownTab] }],
+					configurable: true,
+				})
+				const closedTabs: unknown[] = []
+				vi.mocked(vscode.window.tabGroups.close).mockImplementation((tab) => {
+					closedTabs.push(tab)
+					return Promise.resolve(true)
+				})
+
+				await diffViewProvider["closeOwnDiffView"]("C:\\work\\zoo\\test.ts")
+
+				expect(closedTabs).toEqual([ownTab])
+			},
+		)
+
 		it("leaves another task's tab when the same basename sits in another directory", async () => {
 			// Two tasks can edit files with the same name. Matching by basename alone
 			// would close the other task's clean tab, so the tab's own URI has to decide.

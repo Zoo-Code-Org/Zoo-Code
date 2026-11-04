@@ -500,6 +500,22 @@ function _carriedTargetMode(targetPath: string): number | undefined {
 	}
 }
 
+/**
+ * Whether this write may still remove the staging name it created. An identity check can fail
+ * because another principal replaced the entry, and then the bytes behind that name are theirs:
+ * unlinking by name would delete a file this write never owned. A write that never validated an
+ * identity has no evidence of a swap and keeps the cleanup it has always performed. Exported for
+ * the cleanup test; call sites keep it inside the failure handler.
+ */
+export function stagingNameIsStillOurs(
+	current: { dev: number | bigint; ino: number | bigint } | null,
+	validated: { dev: number | bigint; ino: number | bigint } | null,
+): boolean {
+	if (current === null) return false
+	if (validated === null) return true
+	return current.ino === validated.ino && current.dev === validated.dev
+}
+
 export async function safeWriteText(
 	filePath: string,
 	content: string | Uint8Array,
@@ -800,7 +816,8 @@ export async function safeWriteText(
 					// path itself and is a symbolic link, take no content backup - and then
 					// nothing can be renamed back over the link either.
 					const backupTargetIsLink =
-						options?.publishOverLink === true && (await fs.lstat(targetPath)).isSymbolicLink()
+						(options?.publishOverLink === true || options?.retainedTarget === true) &&
+						(await fs.lstat(targetPath)).isSymbolicLink()
 					if (!backupTargetIsLink) {
 						backupPath = _tempName(dirPath, "safeWriteText.bak")
 						// Copy, never move. Renaming the target away leaves the canonical path absent for
@@ -1044,7 +1061,10 @@ export async function safeWriteText(
 		// published bytes at the target, and a cleanup that deleted them would turn a
 		// reported failure into data loss. The staging name is removed only while this
 		// write still owns it (the rename did not complete).
-		if (!stagingCommitted) {
+		if (
+			!stagingCommitted &&
+			stagingNameIsStillOurs(await fs.lstat(tempPath).catch(() => null), validatedStagingIdentity)
+		) {
 			try {
 				await fs.unlink(tempPath).catch(() => {})
 			} catch {

@@ -1514,7 +1514,7 @@ export class DiffViewProvider {
 					// for the same file.
 					return (
 						tab.input.original.scheme === DIFF_VIEW_URI_SCHEME &&
-						path.resolve(tab.input.modified.fsPath) === target
+						arePathsEqual(tab.input.modified.fsPath, target)
 					)
 				}
 				// A diff tab for a file that was already open is identified by its label
@@ -1524,7 +1524,7 @@ export class DiffViewProvider {
 				const uri = (tab.input as { uri?: { fsPath?: string } })?.uri
 				return (
 					typeof uri?.fsPath === "string" &&
-					path.resolve(uri.fsPath) === target &&
+					arePathsEqual(uri.fsPath, target) &&
 					typeof tab.label === "string" &&
 					tab.label.startsWith(`${path.basename(target)}: ${DIFF_VIEW_LABEL_CHANGES}`)
 				)
