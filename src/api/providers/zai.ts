@@ -128,14 +128,13 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 		}
 
-		try {
-			return await this.client.chat.completions.create(
-				params as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
-				requestOptions,
-			)
-		} catch (error) {
-			throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
-		}
+		// Creation errors are normalized once by the base createMessage; wrapping them here
+		// too doubled the prefix ("Z.ai completion error: Z.ai completion error: ...") and
+		// logged every thinking-path failure twice.
+		return await this.client.chat.completions.create(
+			params as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+			requestOptions,
+		)
 	}
 
 	private getReasoningSettings(info: ModelInfo) {

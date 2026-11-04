@@ -703,6 +703,61 @@ describe("ZAiHandler", () => {
 			expect(result.message).toBe("The Z.ai request was aborted")
 		})
 
+		it("createMessage should wrap a non-abort thinking-path creation failure exactly once", async () => {
+			const thinkingHandler = new ZAiHandler({
+				apiModelId: "glm-4.7",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			// The thinking override used to normalize the failure itself and the base
+			// createMessage normalized it again on top: doubled prefix, doubled log line.
+			mockCreate.mockRejectedValueOnce(new Error("boom"))
+			const errorLog = vitest.spyOn(console, "error").mockImplementation(() => {})
+
+			const result = await captureError(
+				(async () => {
+					for await (const _ of thinkingHandler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+
+			try {
+				expect(result.message).toBe("Z.ai completion error: boom")
+				expect(errorLog).toHaveBeenCalledTimes(1)
+			} finally {
+				errorLog.mockRestore()
+			}
+		})
+
+		it("createMessage should normalize an abort error raised during stream iteration on the thinking path", async () => {
+			const thinkingHandler = new ZAiHandler({
+				apiModelId: "glm-4.7",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			mockCreate.mockImplementationOnce(() =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "partial" } }] }
+					throw new APIUserAbortError()
+				})(),
+			)
+
+			const result = await captureError(
+				(async () => {
+					for await (const _ of thinkingHandler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+
+			// The thinking path inherits stream iteration from the base provider; a
+			// mid-stream abort must normalize to the Task.ts contract shape.
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("The Z.ai request was aborted")
+			expect(result.message.endsWith("aborted")).toBe(true)
+		})
+
 		it("completePrompt should pass the abort signal through to the client", async () => {
 			const controller = new AbortController()
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
