@@ -518,16 +518,16 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				this.emit(RooCodeEventName.TaskSpawned, task.taskId, childTaskId)
 			})
 
-			task.on(RooCodeEventName.TaskDelegated as any, (childTaskId: string) => {
-				;(this.emit as any)(RooCodeEventName.TaskDelegated, task.taskId, childTaskId)
+			task.on(RooCodeEventName.TaskDelegated, (childTaskId: string) => {
+				this.emit(RooCodeEventName.TaskDelegated, task.taskId, childTaskId)
 			})
 
-			task.on(RooCodeEventName.TaskDelegationCompleted as any, (childTaskId: string, summary: string) => {
-				;(this.emit as any)(RooCodeEventName.TaskDelegationCompleted, task.taskId, childTaskId, summary)
+			task.on(RooCodeEventName.TaskDelegationCompleted, (childTaskId: string, summary: string) => {
+				this.emit(RooCodeEventName.TaskDelegationCompleted, task.taskId, childTaskId, summary)
 			})
 
-			task.on(RooCodeEventName.TaskDelegationResumed as any, (childTaskId: string) => {
-				;(this.emit as any)(RooCodeEventName.TaskDelegationResumed, task.taskId, childTaskId)
+			task.on(RooCodeEventName.TaskDelegationResumed, (childTaskId: string) => {
+				this.emit(RooCodeEventName.TaskDelegationResumed, task.taskId, childTaskId)
 			})
 
 			// Task Execution
@@ -569,13 +569,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 		// Delegation events are emitted by the provider, not by individual task instances.
 		provider.on(RooCodeEventName.TaskDelegated, (parentTaskId, childTaskId) => {
-			;(this.emit as any)(RooCodeEventName.TaskDelegated, parentTaskId, childTaskId)
+			this.emit(RooCodeEventName.TaskDelegated, parentTaskId, childTaskId)
 		})
 		provider.on(RooCodeEventName.TaskDelegationCompleted, (parentTaskId, childTaskId, summary) => {
-			;(this.emit as any)(RooCodeEventName.TaskDelegationCompleted, parentTaskId, childTaskId, summary)
+			this.emit(RooCodeEventName.TaskDelegationCompleted, parentTaskId, childTaskId, summary)
 		})
 		provider.on(RooCodeEventName.TaskDelegationResumed, (parentTaskId, childTaskId) => {
-			;(this.emit as any)(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
+			this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
 		})
 	}
 

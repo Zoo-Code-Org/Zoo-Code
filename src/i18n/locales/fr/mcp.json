@@ -1,6 +1,5 @@
 {
 	"errors": {
-		"invalid_settings_format": "Format JSON des paramètres MCP invalide. Veuillez vous assurer que vos paramètres suivent le format JSON correct.",
 		"invalid_settings_syntax": "Format JSON des paramètres MCP invalide. Veuillez vérifier le syntaxe de votre fichier de paramètres.",
 		"invalid_settings_validation": "Format de paramètres MCP invalide : {{errorMessages}}",
 		"create_json": "Échec de la création ou de l'ouverture de .roo/mcp.json : {{error}}",
@@ -18,11 +17,6 @@
 		"server_connected": "Serveur MCP {{serverName}} connecté",
 		"server_deleted": "Serveur MCP supprimé : {{serverName}}",
 		"server_not_found": "Serveur \"{{serverName}}\" introuvable dans la configuration",
-		"global_servers_active": "Serveurs MCP globaux actifs : {{mcpServers}}",
-		"project_servers_active": "Serveurs MCP de projet actifs : {{mcpServers}}",
-		"already_refreshing": "Les serveurs MCP sont déjà en cours de rafraîchissement.",
-		"refreshing_all": "Rafraîchissement de tous les serveurs MCP...",
-		"all_refreshed": "Tous les serveurs MCP ont été rafraîchis.",
 		"project_config_deleted": "Fichier de configuration MCP du projet supprimé. Tous les serveurs MCP du projet ont été déconnectés."
 	},
 	"oauth": {
@@ -39,7 +33,6 @@
 		},
 		"flow": {
 			"authenticating": "Le serveur MCP \"{{name}}\" requiert une authentification",
-			"waitingForBrowser": "Finalise la connexion dans ton navigateur...",
 			"clickAuthenticate": "Le serveur MCP \"{{name}}\" attend une authentification.",
 			"dismissedHint": "Notification ignorée — annule et reconnecte le serveur pour t'authentifier.",
 			"authenticateButton": "Authentifier",

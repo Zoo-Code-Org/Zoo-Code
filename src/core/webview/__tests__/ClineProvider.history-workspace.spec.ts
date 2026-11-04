@@ -11,6 +11,7 @@ import { TaskRegistry } from "../../task/TaskRegistry"
 import { TaskHistoryStore } from "../../task-persistence/TaskHistoryStore"
 import * as taskMessages from "../../task-persistence/taskMessages"
 import { GlobalFileNames } from "../../../shared/globalFileNames"
+import { DiagnosticsRecorder } from "../../../services/diagnostics/recorder"
 
 const historyItem = (workspace: string): HistoryItem => ({
 	id: "task-1602",
@@ -28,6 +29,8 @@ const historyItem = (workspace: string): HistoryItem => ({
 const createProvider = (workspace: string) => {
 	const provider = Object.create(ClineProvider.prototype) as ClineProvider
 	Object.defineProperty(provider, "currentWorkspacePath", { value: workspace, writable: true })
+	// Object.create skips field initializers; showTaskWithId records navigation diagnostics.
+	Object.defineProperty(provider, "diagnosticsRecorder", { value: new DiagnosticsRecorder(200) })
 	return provider
 }
 
