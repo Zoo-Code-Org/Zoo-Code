@@ -47,11 +47,11 @@ Zoo Code s'appuie sur les fondations créées par Roo Code et continue de les en
 - **Des workflows de terminal et d'édition plus fiables** — correctifs pour les fins prématurées de commandes dans le terminal, les conditions de concurrence liées à l'état des tâches, la gestion du contexte, l'édition de diff et l'utilisation d'outils propres aux providers.
 - **Davantage de contrôle sur ton espace de travail** — gestion des règles, restrictions MCP par mode, contrôle des chemins multi-root, options de raisonnement des modèles et actions de vérification des modifications à la fin d'une tâche.
 
-## Nouveautés de la v3.92.0
+## Nouveautés de la v3.94.0
 
-- ✨ **Choix de modèle plus rapide et meilleure prise en charge des modèles :** Change de modèle depuis la zone de saisie du chat. Utilise Claude Haiku 5.5 sur Amazon Bedrock, bénéficie de capacités Kimi K3 plus précises sur OpenRouter et profite des limites corrigées de Gemini 4 Argon sur Vercel AI Gateway.
-- 🧭 **Workflows de terminal, d'édition, de chat et à distance plus fiables :** Choisis de réduire la sortie des commandes par défaut, obtiens des erreurs d'édition plus claires, garde les lignes de raisonnement et d'API visibles et évite les problèmes de démarrage et de proxy dans les espaces de travail distants.
-- 🔌 **Marketplace MCP enrichi :** Connecte Zoo Code à AnySearch, Mailtea et Tradehand via le marketplace MCP.
+- ✨ **Prise en charge plus large des modèles et fournisseurs :** Utilise Claude Haiku 5.5 via Anthropic, envoie des images aux modèles VS Code LM compatibles, ajuste la température pour les modèles OpenCode Go Responses et annule les requêtes proprement chez plus de fournisseurs.
+- 🔐 **MCP OAuth plus flexible :** Configure des paramètres statiques de client OAuth, utilise des chemins de callback personnalisés, découvre les détails d'authentification dans `WWW-Authenticate` et vois les échecs de callback avant de réessayer.
+- 🧭 **Chats et longues sessions plus fluides :** Renomme les tâches dans l'historique, glisse des fichiers dans le chat sans maintenir Shift, réduis la mémoire conservée pendant les longues sessions et garde stables les liens de sous-tâches et les webviews remplacés.
 
 ## Que peut faire Zoo Code pour VOUS ?
 
