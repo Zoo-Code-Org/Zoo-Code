@@ -72,8 +72,17 @@ const SETTING_WRITE_TIMEOUT_MS = 15_000
 /** Keys with a write whose caller gave up but whose store has not settled. */
 const staleKeys = new Set<AppearanceSettingKey>()
 
-const queuedSettingWrite = (key: AppearanceSettingKey, write: () => Promise<unknown>): Promise<void> => {
-	if (staleKeys.has(key)) {
+/**
+ * `behindStale`: the write is a rollback that was asked for while the key's store is still outstanding. It is not
+ * refused: it waits its turn behind that store, without a timeout, and runs when the store has settled, before any
+ * write that comes after it.
+ */
+const queuedSettingWrite = (
+	key: AppearanceSettingKey,
+	write: () => Promise<unknown>,
+	behindStale = false,
+): Promise<void> => {
+	if (staleKeys.has(key) && !behindStale) {
 		return Promise.reject(new Error(`An earlier write of ${key} has not finished yet`))
 	}
 
@@ -92,11 +101,13 @@ const queuedSettingWrite = (key: AppearanceSettingKey, write: () => Promise<unkn
 	}
 
 	return new Promise<void>((resolve, reject) => {
-		const timer = setTimeout(() => {
-			gaveUp = true
-			if (started) staleKeys.add(key)
-			reject(new Error(`Writing ${key} did not finish in ${SETTING_WRITE_TIMEOUT_MS / 1000} seconds`))
-		}, SETTING_WRITE_TIMEOUT_MS)
+		const timer = behindStale
+			? undefined
+			: setTimeout(() => {
+					gaveUp = true
+					if (started) staleKeys.add(key)
+					reject(new Error(`Writing ${key} did not finish in ${SETTING_WRITE_TIMEOUT_MS / 1000} seconds`))
+				}, SETTING_WRITE_TIMEOUT_MS)
 
 		void prior.then(() => {
 			// Its caller has given up before it started: it is dropped, and the next write may go ahead.
@@ -189,11 +200,24 @@ export const undoSettingWrite = async (contextProxy: ContextProxy, write: Settin
 	else lastWriteOfSetting.delete(key)
 	unlinkSettingWrite(write)
 
-	await queuedSettingWrite(key, async () => {
+	const restore = async () => {
 		if (contextProxy.getValue(key as keyof RooCodeSettings) === write.wrote) {
 			await contextProxy.setValue(key as keyof RooCodeSettings, write.previous as never)
 		}
-	})
+	}
+
+	if (staleKeys.has(key)) {
+		// The store of this write (or of an earlier one of the key) is still outstanding and may yet land, after the
+		// caller was told it failed. The rollback is attached to that store: it is queued now, behind it, so it runs
+		// when the store has settled and before any write that comes after, which are refused until then. Nobody
+		// waits for it (the store may never settle), and a newer write cannot have been stored in between.
+		void queuedSettingWrite(key, restore, true).catch((error: unknown) =>
+			console.error(`Failed to restore setting "${key}" after a write that timed out:`, error),
+		)
+		return
+	}
+
+	await queuedSettingWrite(key, restore)
 }
 
 /**

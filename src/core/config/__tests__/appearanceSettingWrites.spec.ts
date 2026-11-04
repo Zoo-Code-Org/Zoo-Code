@@ -231,6 +231,71 @@ describe("appearanceSettingWrites", () => {
 			expect(vi.getTimerCount()).toBe(0)
 		})
 
+		it("restores the previous value when the store of a rolled-back write lands after the timeout", async () => {
+			const { proxy, landLate } = deferredProxy()
+			const save = beginSettingWrite("interfaceFontScale", 100, 120)
+			const saveFailed = expect(performSettingWrite(proxy, save)).rejects.toThrow("did not finish")
+			await vi.advanceTimersByTimeAsync(15_000)
+			await saveFailed
+
+			// The save reported failure, so it is rolled back; its store has not settled yet.
+			await undoSettingWrite(proxy, save) // returns at once: nobody waits for the store
+			expect(stored.get("interfaceFontScale")).toBe(100)
+			const newer = beginSettingWrite("interfaceFontScale", 100, 150)
+			await expect(performSettingWrite(proxy, newer)).rejects.toThrow("has not finished yet")
+
+			landLate()
+			await vi.advanceTimersByTimeAsync(0)
+
+			// The store landed, and the rollback that was waiting behind it put the value back.
+			expect(stored.get("interfaceFontScale")).toBe(100)
+			expect(settingWriteBookkeepingSize().queuedKeys).toBe(0)
+			await undoSettingWrite(proxy, newer)
+		})
+
+		it("runs a deferred rollback before a write made after the store has settled, and does not undo that write", async () => {
+			const { proxy, landLate } = deferredProxy()
+			const save = beginSettingWrite("interfaceFontScale", 100, 120)
+			const saveFailed = expect(performSettingWrite(proxy, save)).rejects.toThrow("did not finish")
+			await vi.advanceTimersByTimeAsync(15_000)
+			await saveFailed
+			await undoSettingWrite(proxy, save)
+
+			landLate()
+			// A write made as soon as the store has settled queues behind the rollback.
+			await vi.advanceTimersByTimeAsync(0)
+			const newer = beginSettingWrite("interfaceFontScale", 100, 150)
+			await performSettingWrite(proxy, newer)
+			finishSettingWrites([newer])
+
+			expect(stored.get("interfaceFontScale")).toBe(150)
+		})
+
+		it("leaves the value alone when the store that timed out fails in the end", async () => {
+			const failLate: Array<() => void> = []
+			const proxy = {
+				getValue: (key: string) => stored.get(key),
+				setValue: vi.fn(
+					() =>
+						new Promise<void>((_resolve, reject) => {
+							failLate.push(() => reject(new Error("storage unavailable")))
+						}),
+				),
+			} as unknown as ContextProxy
+			const save = beginSettingWrite("interfaceFontScale", 100, 120)
+			const saveFailed = expect(performSettingWrite(proxy, save)).rejects.toThrow("did not finish")
+			await vi.advanceTimersByTimeAsync(15_000)
+			await saveFailed
+			await undoSettingWrite(proxy, save)
+
+			failLate.forEach((fail) => fail())
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(stored.get("interfaceFontScale")).toBe(100)
+			expect(proxy.setValue).toHaveBeenCalledTimes(1) // nothing was stored, so nothing was put back
+			expect(settingWriteBookkeepingSize().queuedKeys).toBe(0)
+		})
+
 		it("drops a write whose caller gave up before it started, so it never lands later", async () => {
 			const { proxy, landLate } = deferredProxy()
 			const first = beginSettingWrite("interfaceFontScale", 100, 120) // the store that hangs
