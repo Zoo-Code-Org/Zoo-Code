@@ -4739,6 +4739,102 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("releases a disposed provider's tombstone once no live eviction list guards it", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-tombstone-release")
+			await provider["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
+			await provider["clearPersistedViewState"]()
+			expect(ClineProvider["clearedViewStateIds"].has("stable-tombstone-release")).toBe(true)
+
+			await provider.dispose()
+
+			// The entry is gone from durable storage, so no later activation group can evict it and
+			// nothing consults the tombstone: it must not outlive the provider that wrote it, or the
+			// shared set grows for as long as the host runs.
+			expect(ClineProvider["clearedViewStateIds"].has("stable-tombstone-release")).toBe(false)
+			expect(ClineProvider["clearedViewStateIdsWithoutOwner"].has("stable-tombstone-release")).toBe(false)
+		})
+
+		it("keeps a tombstone an in-flight eviction list guards and drops it when the next group lets go", async () => {
+			const owner = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const guardedProvider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await owner["setViewStateId"]("stable-tombstone-guarded")
+			await owner["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
+			await owner["clearPersistedViewState"]()
+
+			// Another view is mid-activation and its eviction list names the id, so its rollback still
+			// has to see the tombstone: dropping it here would resurrect an intentional clear.
+			guardedProvider["prunedViewIdsDuringActivation"].push("stable-tombstone-guarded")
+
+			await owner.dispose()
+
+			expect(ClineProvider["clearedViewStateIds"].has("stable-tombstone-guarded")).toBe(true)
+			expect(ClineProvider["clearedViewStateIdsWithoutOwner"].has("stable-tombstone-guarded")).toBe(true)
+
+			// The next activation group is where the previous group's eviction list is let go, and that
+			// is when the orphaned tombstone is dropped.
+			guardedProvider["prunedViewIdsDuringActivation"] = []
+			guardedProvider["_snapshotProfileActivationState"]()
+
+			expect(ClineProvider["clearedViewStateIds"].has("stable-tombstone-guarded")).toBe(false)
+			expect(ClineProvider["clearedViewStateIdsWithoutOwner"].has("stable-tombstone-guarded")).toBe(false)
+
+			await guardedProvider.dispose()
+		})
+
+		it("lifts the tombstone of a deletion whose durable write failed", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-tombstone-failed-write")
+			await provider["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
+
+			const originalUpdate = mockContext.globalState.update
+			mockContext.globalState.update = vi.fn().mockImplementation((key: string) => {
+				if (key === "viewStates") {
+					return Promise.reject(new Error("storage unavailable"))
+				}
+				return Promise.resolve()
+			})
+
+			// The queued write clears the entry's only field, so it tombstones the id before the
+			// durable write it rides on fails.
+			await expect(provider["savePersistedViewState"]({ mode: undefined })).rejects.toThrow("storage unavailable")
+			mockContext.globalState.update = originalUpdate
+
+			// Storage never dropped the entry, so the tombstone has to go back with the write: an id
+			// that is still persisted must stay restorable by an activation rollback.
+			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({
+				"stable-tombstone-failed-write": { mode: "architect", updatedAt: 1 },
+			})
+			expect(ClineProvider["clearedViewStateIds"].has("stable-tombstone-failed-write")).toBe(false)
+			expect(ClineProvider["clearedViewStateIdsWithoutOwner"].has("stable-tombstone-failed-write")).toBe(false)
+
+			await provider.dispose()
+		})
+
 		it("should roll back the shared write when setValue per-view persistence fails", async () => {
 			const provider = new ClineProvider(
 				mockContext,

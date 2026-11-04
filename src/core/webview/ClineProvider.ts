@@ -327,12 +327,23 @@ export class ClineProvider
 	private static persistedViewStateWriteQueue: Promise<void> = Promise.resolve()
 
 	/**
-	 * View ids whose durable entry a queued write intentionally removed
-	 * (unpin, clear, or re-key move). Activation rollback treats these as
-	 * tombstones and never resurrects a tracked eviction the clear has
-	 * since deleted; a write that lands an entry lifts its tombstone.
+	 * View ids whose durable entry a queued write intentionally removed (unpin or clear).
+	 * Activation rollback treats these as tombstones and never resurrects a tracked eviction
+	 * the clear has since deleted; a write that lands an entry lifts its tombstone.
+	 *
+	 * A tombstone is only ever consulted for an id in some provider's current
+	 * prunedViewIdsDuringActivation list, and that list is rebuilt at the start of every
+	 * activation group, so the set has a natural bound: each provider records the tombstones it
+	 * added and releases them once no live group guards the id. A tombstone that a live group
+	 * still guards is handed to clearedViewStateIdsWithoutOwner and drained by the next group,
+	 * which keeps the set from growing for as long as the host runs.
 	 */
 	private static clearedViewStateIds = new Set<string>()
+	/**
+	 * Tombstones whose provider was disposed while an activation group still guarded the id.
+	 * Drained by the next activation group, once no live pruned-eviction list names them.
+	 */
+	private static clearedViewStateIdsWithoutOwner = new Set<string>()
 	private webviewDisposables: vscode.Disposable[] = []
 	private pendingThemeFixtureProbes = new Map<
 		string,
@@ -518,6 +529,10 @@ export class ClineProvider
 	 * can actually read.
 	 */
 	private pendingViewState: Partial<PersistedViewState> | undefined
+	/**
+	 * The tombstones this instance added to the shared set, so dispose can release them.
+	 */
+	private addedClearedViewStateIds = new Set<string>()
 
 	/**
 	 * Local state buffer for this specific view instance.
@@ -812,13 +827,19 @@ export class ClineProvider
 				}
 			}
 
-			if (!next.mode && !next.currentApiConfigName) {
+			// The tombstone transition rides on this write, so it is provisional until the write
+			// lands: the catch below puts it back, or a rollback would treat an entry that durable
+			// storage still holds as an intentional clear.
+			const tombstoneTransition: "added" | "lifted" | undefined =
+				next.mode || next.currentApiConfigName ? "lifted" : "added"
+
+			if (tombstoneTransition === "added") {
 				delete states[viewStateId]
-				ClineProvider.clearedViewStateIds.add(viewStateId)
+				this._rememberClearedViewStateId(viewStateId)
 			} else {
 				next.updatedAt = values.updatedAt ?? Date.now()
 				states[viewStateId] = next
-				ClineProvider.clearedViewStateIds.delete(viewStateId)
+				this._forgetClearedViewStateId(viewStateId)
 			}
 
 			const pruned = this.prunePersistedViewStates(states)
@@ -830,6 +851,15 @@ export class ClineProvider
 			try {
 				await this.contextProxy.setValue("viewStates", pruned)
 			} catch (error) {
+				// Undo the provisional tombstone transition first: a failed write means storage is
+				// unchanged, and leaving the transition in place would either hide an entry that is
+				// still persisted behind an intentional clear or resurrect one the clear did delete.
+				if (tombstoneTransition === "added") {
+					this._forgetClearedViewStateId(viewStateId)
+				} else if (tombstoneTransition === "lifted") {
+					this._rememberClearedViewStateId(viewStateId)
+				}
+
 				// updateGlobalState applies the new map to the in-memory cache before
 				// the durable write, so a rejected write leaves the cache claiming an
 				// entry that never reached disk. Restore the cache to the value durable
@@ -863,7 +893,7 @@ export class ClineProvider
 				// The tombstone is recorded only after the durable delete lands: a rejected write
 				// leaves the entry in storage, and tombstoning an id that is still persisted would
 				// let a later activation rollback skip a pin that pruning had evicted.
-				ClineProvider.clearedViewStateIds.add(viewStateId)
+				this._rememberClearedViewStateId(viewStateId)
 			} catch (error) {
 				// updateGlobalState applies the new map to the in-memory cache before
 				// the durable write, so a rejected write leaves the cache missing an
@@ -946,6 +976,65 @@ export class ClineProvider
 	 * Keeps only the most recently updated entries of the persisted view states map,
 	 * bounded by MAX_PERSISTED_VIEW_STATES so the global key cannot grow unboundedly.
 	 */
+	/**
+	 * Records a tombstone in the shared set and under this instance, so its lifetime is bounded by
+	 * the provider that wrote it rather than by the life of the host.
+	 */
+	private _rememberClearedViewStateId(viewStateId: string): void {
+		ClineProvider.clearedViewStateIds.add(viewStateId)
+		this.addedClearedViewStateIds.add(viewStateId)
+	}
+
+	/** Lifts a tombstone from the shared set and from this instance's record of them. */
+	private _forgetClearedViewStateId(viewStateId: string): void {
+		ClineProvider.clearedViewStateIds.delete(viewStateId)
+		this.addedClearedViewStateIds.delete(viewStateId)
+	}
+
+	/**
+	 * Whether any live provider's current pruned-eviction list still names this id. That list is the
+	 * only consumer of the tombstone set, and it is rebuilt at the start of every activation group,
+	 * so an id no live list names cannot affect a rollback now or in a later group: storage no
+	 * longer holds the entry, so nothing can evict it again, and a write that re-lands the entry
+	 * lifts the tombstone itself.
+	 */
+	private static _tombstoneIsGuarded(viewStateId: string): boolean {
+		for (const instance of ClineProvider.activeInstances) {
+			if (instance.prunedViewIdsDuringActivation.includes(viewStateId)) {
+				return true
+			}
+		}
+		return false
+	}
+
+	/**
+	 * Releases the tombstones this instance added. Anything a live group still guards is handed to
+	 * the ownerless set, which the next activation group drains once nothing guards it.
+	 */
+	private _releaseClearedViewStateIds(): void {
+		for (const viewStateId of this.addedClearedViewStateIds) {
+			if (ClineProvider._tombstoneIsGuarded(viewStateId)) {
+				ClineProvider.clearedViewStateIdsWithoutOwner.add(viewStateId)
+			} else {
+				ClineProvider.clearedViewStateIds.delete(viewStateId)
+			}
+		}
+		this.addedClearedViewStateIds.clear()
+	}
+
+	/**
+	 * Drops the ownerless tombstones that no live pruned-eviction list guards any more. Runs at the
+	 * start of an activation group, which is the point where the last group's eviction list is let go.
+	 */
+	private static _drainUnguardedClearedViewStateIds(): void {
+		for (const viewStateId of [...ClineProvider.clearedViewStateIdsWithoutOwner]) {
+			if (!ClineProvider._tombstoneIsGuarded(viewStateId)) {
+				ClineProvider.clearedViewStateIds.delete(viewStateId)
+				ClineProvider.clearedViewStateIdsWithoutOwner.delete(viewStateId)
+			}
+		}
+	}
+
 	private prunePersistedViewStates(states: Record<string, PersistedViewState>): Record<string, PersistedViewState> {
 		return Object.fromEntries(
 			Object.entries(states)
@@ -1569,6 +1658,9 @@ export class ClineProvider
 		this.taskHistoryStore.dispose()
 		this.log("Disposed all disposables")
 		ClineProvider.activeInstances.delete(this)
+		// Tombstones this provider wrote are no longer its responsibility. Done after leaving
+		// activeInstances so this provider's own eviction list cannot keep its tombstone guarded.
+		this._releaseClearedViewStateIds()
 		this.diagnosticsRequestBroker.dispose()
 
 		// Clean up any event listeners attached to this provider
@@ -2862,6 +2954,9 @@ export class ClineProvider
 	private _snapshotProfileActivationState(): ProfileActivationSnapshot {
 		// The rollback may only restore entries this activation's own writes evict.
 		this.prunedViewIdsDuringActivation = []
+		// This group is the point at which the previous group's eviction list is let go, so it is
+		// also where tombstones that nothing guards any more are dropped.
+		ClineProvider._drainUnguardedClearedViewStateIds()
 		// Capture only the provider-settings keys. getValues() returns the whole
 		// global state, and restoring that copy would write unrelated keys
 		// (viewStates, mode, taskHistory, ...) back over changes that legitimately
