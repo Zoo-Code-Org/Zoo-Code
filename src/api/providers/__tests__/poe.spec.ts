@@ -812,8 +812,10 @@ describe("PoeHandler", () => {
 			let mergedSignal: AbortSignal | undefined
 			mockGenerateText.mockImplementationOnce(async (args: { abortSignal?: AbortSignal }) => {
 				mergedSignal = args.abortSignal
-				// Let the 20 ms timeout fire first, then abort the caller, then settle late.
-				await new Promise<void>((resolve) => setTimeout(resolve, 40))
+				// Poll the observable condition rather than sleeping a fixed 40 ms: the merged signal aborting IS
+				// the 20 ms per-request timeout firing. Only then does the caller abort and the SDK settle
+				// late, so the ordering the test is about is pinned instead of timed.
+				await vi.waitFor(() => expect(mergedSignal?.aborted).toBe(true))
 				callerController.abort()
 				return { text: "late result" }
 			})
