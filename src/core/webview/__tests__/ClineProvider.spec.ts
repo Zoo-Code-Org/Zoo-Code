@@ -2952,6 +2952,30 @@ describe("ClineProvider", () => {
 				expect(mockWebviewPanel.webview.html).toBe(html)
 			})
 
+			test("tracks the tab view-state subscription in the same list the sidebar uses", async () => {
+				const viewStateDisposable = { dispose: vi.fn() }
+				vi.mocked(mockWebviewPanel.onDidChangeViewState).mockReturnValue(viewStateDisposable)
+				const messageDisposable = { dispose: vi.fn() }
+				vi.mocked(mockWebviewPanel.webview.onDidReceiveMessage).mockReturnValue(messageDisposable)
+				const focusDisposable = { dispose: vi.fn() }
+				provider.webviewFocusTracker.init = vi.fn().mockReturnValue(focusDisposable)
+				const configDisposable = { dispose: vi.fn() }
+				vi.mocked(vscode.workspace.onDidChangeConfiguration).mockReturnValue(configDisposable)
+
+				await provider.resolveWebviewView(mockWebviewPanel)
+
+				// The tab branch records its onDidChangeViewState subscription in the provider's one
+				// disposable list, like every other registration; there is no second per-surface bookkeeping
+				// left to keep it alive.
+				expect(provider["webviewDisposables"]).toContain(viewStateDisposable)
+				expect(viewStateDisposable.dispose).not.toHaveBeenCalled()
+
+				await provider.dispose()
+
+				expect(viewStateDisposable.dispose).toHaveBeenCalledOnce()
+				expect(provider["webviewDisposables"]).toEqual([])
+			})
+
 			test.each([false, true])(
 				"replaces the tab host without disposing its provider or task (interrupted: %s)",
 				async (interrupted) => {
