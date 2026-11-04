@@ -1028,17 +1028,34 @@ describe("getProviderQuotas", () => {
 		expect(fetchSpy).toHaveBeenCalledTimes(1)
 	})
 
-	it("rejects at once with an already-aborted signal, without keeping a request alive", async () => {
+	it("rejects at once with an already-aborted signal, and asks no provider", async () => {
+		const copilot = await import("../copilotQuota")
 		const fetchSpy = vi.fn(() => new Promise<Response>(() => {}))
 		const controller = new AbortController()
 		controller.abort()
+		vi.mocked(copilot.getGitHubCopilotQuota).mockClear()
+
 		await expect(
 			getProviderQuotas(
-				[{ apiProvider: providerIdentifiers.openrouter, openRouterApiKey: "sk" } as never],
+				[
+					{ apiProvider: providerIdentifiers.openrouter, openRouterApiKey: "sk" } as never,
+					{ apiProvider: providerIdentifiers.githubCopilot } as never,
+				],
 				{ signal: controller.signal },
 				fetchSpy,
 			),
 		).rejects.toMatchObject({ name: "AbortError" })
+
+		expect(fetchSpy).not.toHaveBeenCalled()
+		expect(copilot.getGitHubCopilotQuota).not.toHaveBeenCalled()
+		// Nothing was left in flight for the next caller to join.
+		const next = vi.fn(async () => new Response(JSON.stringify({ data: { limit: 10, limit_remaining: 5 } })))
+		await getProviderQuotas(
+			[{ apiProvider: providerIdentifiers.openrouter, openRouterApiKey: "sk" } as never],
+			{},
+			next,
+		)
+		expect(next).toHaveBeenCalledTimes(1)
 	})
 
 	it("shares one request between concurrent callers for the same credentials", async () => {

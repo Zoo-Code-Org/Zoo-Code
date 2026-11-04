@@ -791,6 +791,10 @@ export async function getProviderQuotas(
 	}: { force?: boolean; signal?: AbortSignal; activeProfileId?: string } = {},
 	fetchImpl: Fetch = fetch,
 ): Promise<ProviderQuota[]> {
+	// A request that was cancelled before it started sends nothing: no provider is asked, and no request is left
+	// running that nobody waits for.
+	if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
+
 	const connected = new Set(profiles.map((p) => p.apiProvider).filter(Boolean) as string[])
 
 	const tasks: Promise<ProviderQuota>[] = []
