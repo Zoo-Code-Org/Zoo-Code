@@ -374,7 +374,7 @@ describe("extension.ts", () => {
 		const getAll = vi.mocked(ClineProvider.getAllInstances)
 		const post = vi.mocked(provider.postMessageToWebview)
 		getAll.mockReturnValue([provider, provider])
-		post.mockRejectedValueOnce(new Error("delivery failed")).mockResolvedValue(undefined)
+		post.mockRejectedValueOnce(new Error("delivery failed")).mockResolvedValue(true)
 		try {
 			const { activate } = await import("../extension")
 			await activate(mockContext)
