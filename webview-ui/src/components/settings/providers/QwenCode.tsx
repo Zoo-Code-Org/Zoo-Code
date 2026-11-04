@@ -29,7 +29,7 @@ export const QwenCode: React.FC<QwenCodeProps> = ({ apiConfiguration, setApiConf
 		<div className="flex flex-col gap-4">
 			<div>
 				<VSCodeTextField
-					value={apiConfiguration?.qwenCodeOauthPath || ""}
+					value={apiConfiguration.qwenCodeOauthPath || ""}
 					className="w-full mt-1"
 					type="text"
 					onInput={handleInputChange}

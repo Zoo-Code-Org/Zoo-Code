@@ -102,6 +102,7 @@ import type { ApiHandlerOptions } from "../../../shared/api"
 import { clearAllMocks } from "../../../test-utils/reset"
 import { checkContextWindowExceededError } from "../../../core/context/context-management/context-error-handling"
 import { collectStream } from "../../../test-utils/stream"
+import { flushMacrotasks } from "../../../test-utils/timers"
 
 /** The stable typings this extension builds against predate image parts, so reach them by name. */
 const dataPart = () =>
@@ -119,7 +120,7 @@ const mockLanguageModelChat = {
 }
 
 describe("connectGitHubCopilot", () => {
-	beforeEach(() => vi.clearAllMocks())
+	beforeEach(() => clearAllMocks())
 
 	it("authenticates through VS Code and selects only Copilot models", async () => {
 		vi.mocked(vscode.authentication.getSession).mockResolvedValue({
@@ -413,7 +414,7 @@ describe("Copilot model capabilities", () => {
 	}
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		mockLanguageModelChat.countTokens.mockResolvedValue(10)
 		mockLanguageModelChat.sendRequest.mockImplementation(async () => ({
 			stream: (async function* () {
@@ -753,13 +754,13 @@ describe("GitHubCopilotHandler", () => {
 					() => (settled = true),
 					() => (settled = true),
 				)
-				await new Promise((resolve) => setTimeout(resolve, 0))
+				await flushMacrotasks()
 				expect(settled).toBe(false)
 				expect(source.cancel).not.toHaveBeenCalled()
 
 				controller.abort()
 
-				await expect(pendingRead).rejects.toThrow("Request cancelled by user")
+				await expect(pendingRead).rejects.toThrow("The VS Code LM request was aborted")
 				expect(source.cancel).toHaveBeenCalled()
 			} finally {
 				handler.dispose()
@@ -921,7 +922,7 @@ describe("GitHubCopilotHandler", () => {
 
 				controller.abort()
 
-				await expect(request).rejects.toThrow("Request cancelled by user")
+				await expect(request).rejects.toThrow("The VS Code LM request was aborted")
 				expect(source.cancel).toHaveBeenCalled()
 				expect(mockLanguageModelChat.sendRequest).not.toHaveBeenCalled()
 			} finally {
@@ -945,7 +946,7 @@ describe("GitHubCopilotHandler", () => {
 							abortSignal: controller.signal,
 						}),
 					),
-				).rejects.toThrow("Request cancelled by user")
+				).rejects.toThrow("The VS Code LM request was aborted")
 				const source = vi.mocked(vscode.CancellationTokenSource).mock.results.at(-1)?.value
 				expect(source.cancel).toHaveBeenCalled()
 				expect(mockLanguageModelChat.sendRequest).not.toHaveBeenCalled()
@@ -968,7 +969,7 @@ describe("GitHubCopilotHandler", () => {
 							abortSignal: controller.signal,
 						}),
 					),
-				).rejects.toThrow("Request cancelled by user")
+				).rejects.toThrow("The VS Code LM request was aborted")
 				expect(source.cancel).toHaveBeenCalled()
 				// Any count that did start saw an already-cancelled token.
 				for (const [, token] of mockLanguageModelChat.countTokens.mock.calls) {
@@ -1114,7 +1115,10 @@ describe("GitHubCopilotHandler", () => {
 				expect(source.cancel).toHaveBeenCalledOnce()
 
 				release()
-				await pending
+				// The unit's abort contract: content that raced the cancellation is
+				// not surfaced; the aborted completion rejects with the canonical
+				// abort error instead of resolving with late text.
+				await expect(pending).rejects.toThrow("The VS Code LM request was aborted")
 			} finally {
 				handler.dispose()
 			}
@@ -1192,7 +1196,7 @@ describe("GitHubCopilotHandler", () => {
 			const handler = new GitHubCopilotHandler(defaultOptions)
 			try {
 				await expect(handler.completePrompt("x", { abortSignal: controller.signal })).rejects.toThrow(
-					"Operation cancelled",
+					"The VS Code LM request was aborted",
 				)
 			} finally {
 				handler.dispose()
@@ -1319,7 +1323,7 @@ describe("getGitHubCopilotModels", () => {
 		...overrides,
 	})
 
-	beforeEach(() => vi.clearAllMocks())
+	beforeEach(() => clearAllMocks())
 
 	it("describes each model by identity and by the capabilities the host reports", async () => {
 		vi.mocked(vscode.lm.selectChatModels).mockResolvedValue([
