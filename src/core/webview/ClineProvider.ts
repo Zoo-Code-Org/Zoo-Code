@@ -430,9 +430,9 @@ export class ClineProvider
 	/**
 	 * The shared mode map as it was when this window opened. Modes this window has not changed
 	 * resolve against it, so another window's later selection cannot reach this window's tasks
-	 * (including delegated subtasks).
+	 * (including delegated subtasks). `undefined` when the map could not be read.
 	 */
-	private initialModeConfigIds: Promise<Record<string, string>> = Promise.resolve({})
+	private initialModeConfigIds: Promise<Record<string, string> | undefined> = Promise.resolve({})
 
 	constructor(
 		readonly context: vscode.ExtensionContext,
@@ -2169,22 +2169,46 @@ export class ClineProvider
 	private captureInitialModeConfigIds(): void {
 		this.initialModeConfigIds = this.providerSettingsManager.getModeConfigIds().catch((error) => {
 			this.log(`Failed to snapshot mode profile choices: ${error instanceof Error ? error.message : error}`)
-			return {}
+			return undefined
 		})
 	}
 
+	/**
+	 * Resolve the profile id for `mode` from this window's own view: its explicit choices, then the
+	 * shared map as it was when the window opened. Modes absent from both resolve to `undefined`, so
+	 * callers keep this window's current profile instead of one another window saved later. A cached
+	 * id whose profile no longer exists (e.g. after a reset) is dropped in favour of the shared map,
+	 * which is also used when the opening snapshot could not be read.
+	 */
 	private async getModeConfigId(mode: Mode): Promise<string | undefined> {
-		return (
-			this.localModeConfigIds.get(mode) ??
-			(await this.initialModeConfigIds)[mode] ??
-			// Modes created after this window opened have no snapshot entry.
-			(await this.providerSettingsManager.getModeConfigId(mode))
-		)
+		const localId = this.localModeConfigIds.get(mode)
+		const initialIds = localId === undefined ? await this.initialModeConfigIds : undefined
+		if (localId === undefined && initialIds === undefined) {
+			return this.providerSettingsManager.getModeConfigId(mode)
+		}
+		const cachedId = localId ?? initialIds?.[mode]
+		if (cachedId === undefined) return undefined
+
+		const profiles = await this.providerSettingsManager.listConfig()
+		if (profiles.some(({ id }) => id === cachedId)) return cachedId
+
+		if (localId !== undefined) this.localModeConfigIds.delete(mode)
+		return this.providerSettingsManager.getModeConfigId(mode)
 	}
 
 	private async setModeConfig(mode: Mode, id: string): Promise<void> {
+		const previousId = this.localModeConfigIds.get(mode)
 		this.localModeConfigIds.set(mode, id)
-		await this.providerSettingsManager.setModeConfig(mode, id)
+		try {
+			await this.providerSettingsManager.setModeConfig(mode, id)
+		} catch (error) {
+			// Keep this window consistent with the shared map the failed write left unchanged.
+			if (this.localModeConfigIds.get(mode) === id) {
+				if (previousId === undefined) this.localModeConfigIds.delete(mode)
+				else this.localModeConfigIds.set(mode, previousId)
+			}
+			throw error
+		}
 	}
 
 	/**

@@ -560,7 +560,7 @@ describe("ClineProvider", () => {
 		)
 		// Most tests stub providerSettingsManager and expect it to be consulted for mode profiles,
 		// so start without the snapshot the real manager would take of the seeded mode map.
-		provider["initialModeConfigIds"] = Promise.resolve({})
+		provider["initialModeConfigIds"] = Promise.resolve(undefined)
 
 		defaultTaskOptions = {
 			provider,
@@ -4481,33 +4481,41 @@ describe("ClineProvider", () => {
 		expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
 	})
 
-	it("prefers this window's mode profile over one another window saved in shared storage", async () => {
-		await provider.resolveWebviewView(mockWebviewView)
+	describe("mode profile choices", () => {
+		const existingProfiles = (...ids: string[]) =>
+			vi
+				.spyOn(provider.providerSettingsManager, "listConfig")
+				.mockResolvedValue(ids.map((id) => ({ name: `${id}-name`, id })))
 
-		const manager = provider.providerSettingsManager
-		vi.spyOn(manager, "getModeConfigId").mockResolvedValue("other-window-id")
-		vi.spyOn(manager, "setModeConfig").mockResolvedValue(undefined)
+		it("prefers this window's mode profile over one another window saved in shared storage", async () => {
+			const manager = provider.providerSettingsManager
+			existingProfiles("this-window-id", "other-window-id")
+			vi.spyOn(manager, "getModeConfigId").mockResolvedValue("other-window-id")
+			vi.spyOn(manager, "setModeConfig").mockResolvedValue(undefined)
 
-		await provider["setModeConfig"]("code", "this-window-id")
+			await provider["setModeConfig"]("code", "this-window-id")
 
-		expect(manager.setModeConfig).toHaveBeenCalledWith("code", "this-window-id")
-		await expect(provider["getModeConfigId"]("code")).resolves.toBe("this-window-id")
-		// A mode this window never chose still falls back to the shared value.
-		await expect(provider["getModeConfigId"]("architect")).resolves.toBe("other-window-id")
-	})
+			expect(manager.setModeConfig).toHaveBeenCalledWith("code", "this-window-id")
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("this-window-id")
+		})
 
-	describe("mode profile snapshot", () => {
 		it("keeps the choice this window opened with when another window changes the shared value", async () => {
 			provider["initialModeConfigIds"] = Promise.resolve({ architect: "opened-with-id" })
-			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("other-window-id")
+			existingProfiles("opened-with-id", "other-window-id")
+			const sharedLookup = vi
+				.spyOn(provider.providerSettingsManager, "getModeConfigId")
+				.mockResolvedValue("other-window-id")
 
 			await expect(provider["getModeConfigId"]("architect")).resolves.toBe("opened-with-id")
-			// A mode created after this window opened has no snapshot entry, so the shared value applies.
-			await expect(provider["getModeConfigId"]("new-custom-mode")).resolves.toBe("other-window-id")
+			// A mode absent when this window opened keeps this window's current profile instead of
+			// one another window saved for it later.
+			await expect(provider["getModeConfigId"]("new-custom-mode")).resolves.toBeUndefined()
+			expect(sharedLookup).not.toHaveBeenCalled()
 		})
 
 		it("prefers an explicit local choice over the snapshot", async () => {
 			provider["initialModeConfigIds"] = Promise.resolve({ architect: "opened-with-id" })
+			existingProfiles("opened-with-id", "chosen-id")
 			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
 
 			await provider["setModeConfig"]("architect", "chosen-id")
@@ -4524,6 +4532,34 @@ describe("ClineProvider", () => {
 			await expect(provider["getModeConfigId"]("architect")).resolves.toBe("shared-id")
 		})
 
+		it("drops a local choice whose profile was removed and falls back to the shared mapping", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({})
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("shared-id")
+			await provider["setModeConfig"]("code", "removed-id")
+			// Another window reset or deleted the profile this window chose.
+			existingProfiles("shared-id")
+
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("shared-id")
+			expect(provider["localModeConfigIds"].has("code")).toBe(false)
+		})
+
+		it("restores the previous local choice when the shared write fails", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({})
+			existingProfiles("first-id", "second-id")
+			const sharedWrite = vi.spyOn(provider.providerSettingsManager, "setModeConfig")
+			sharedWrite.mockResolvedValueOnce(undefined)
+			await provider["setModeConfig"]("code", "first-id")
+
+			sharedWrite.mockRejectedValueOnce(new Error("write failed"))
+			await expect(provider["setModeConfig"]("code", "second-id")).rejects.toThrow("write failed")
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("first-id")
+
+			sharedWrite.mockRejectedValueOnce(new Error("write failed"))
+			await expect(provider["setModeConfig"]("architect", "second-id")).rejects.toThrow("write failed")
+			await expect(provider["getModeConfigId"]("architect")).resolves.toBeUndefined()
+		})
+
 		it("drops local choices and re-reads the mapping when state is reset", async () => {
 			const { t } = await import("../../../i18n")
 			vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)
@@ -4535,6 +4571,7 @@ describe("ClineProvider", () => {
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigIds").mockResolvedValue({ code: "reset-id" })
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			existingProfiles("removed-profile-id", "reset-id")
 			await provider["setModeConfig"]("code", "removed-profile-id")
 
 			await provider.resetState()
