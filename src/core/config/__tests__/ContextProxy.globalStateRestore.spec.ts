@@ -1,0 +1,127 @@
+// vitest core/config/__tests__/ContextProxy.globalStateRestore.spec.ts
+
+import * as vscode from "vscode"
+
+import { makeEventEmitter, makeExtensionContext, makeUri } from "../../../test-utils/vscode"
+import { ContextProxy, isPassThroughStateKey } from "../ContextProxy"
+
+vi.mock("vscode", () => ({
+	Uri: {
+		file: vi.fn((path: string) => ({ path })),
+	},
+	ExtensionMode: {
+		Development: 1,
+		Production: 2,
+		Test: 3,
+	},
+}))
+
+// Storage failures are correlated in the real world - a full disk or an unavailable store makes
+// every write fail at once - so the interesting case is two writes in flight together, where the
+// value an older write would restore is itself something storage never accepted.
+describe("ContextProxy globalState cache restore", () => {
+	const KEY = "currentApiConfigName"
+
+	const setup = (persisted: string) => {
+		const store = new Map<string, unknown>([[KEY, persisted]])
+		let storageWorks = true
+
+		// Plain functions rather than vi.fn for the memento doubles: vitest's Mock wrapper
+		// instantiates a generic signature at its call-site type, which drops the genericity
+		// Memento.get and Secrets.get are declared with, and nothing here asserts on spies.
+		// The store read carries one widening cast to come back as T, the same shape
+		// makeWorkspaceConfiguration uses for its own generic get.
+		const mockGlobalState = {
+			get<T>(key: string, defaultValue?: T): T | undefined {
+				return (store.get(key) as T | undefined) ?? defaultValue
+			},
+			keys(): string[] {
+				return [...store.keys()]
+			},
+			setKeysForSync(_keys: readonly string[]): void {},
+			async update(key: string, value: unknown): Promise<void> {
+				if (!storageWorks) {
+					throw new Error("storage unavailable")
+				}
+				store.set(key, value)
+			},
+		}
+		const mockSecrets = {
+			async get(key: string): Promise<string | undefined> {
+				return key === KEY ? undefined : "test-secret"
+			},
+			async store(_key: string, _value: string): Promise<void> {},
+			async delete(_key: string): Promise<void> {},
+			onDidChange: makeEventEmitter<{ key: string }>().event,
+		}
+		// The assembled context carries one double assertion: the fixture supplies the storage and
+		// log URIs and a packageJSON shim that a real extension context carries as class-backed
+		// members, and no typed shape in the vscode module describes this fixture in full.
+		// AGENTS.md allows a double assertion as a last resort when a comment explains why, and
+		// makeExtensionContext assembles its own return value the same way.
+		const context = {
+			...makeExtensionContext({
+				globalState: mockGlobalState,
+				secrets: mockSecrets,
+				extensionUri: makeUri("/test/extension"),
+				extensionPath: "/test/extension",
+				extensionMode: vscode.ExtensionMode.Development,
+			}),
+			globalStorageUri: makeUri("/test/storage"),
+			logUri: makeUri("/test/logs"),
+			extension: { packageJSON: { version: "1.0.0" } },
+		} as unknown as vscode.ExtensionContext
+		return { proxy: new ContextProxy(context), store, setStorageWorks: (works: boolean) => (storageWorks = works) }
+	}
+	it("only restores for keys the cache actually owns", () => {
+		// Guards the tests below: if this key were passed straight through to storage, the cache
+		// would never participate in a rejection and a restore assertion would pass for the wrong
+		// reason.
+		expect(isPassThroughStateKey(KEY)).toBe(false)
+	})
+
+	it.each(["A settles first", "B settles first"])(
+		"keeps the cache on the persisted value when two overlapping writes both reject (%s)",
+		async (_order: string) => {
+			const { proxy, store, setStorageWorks } = setup("X")
+			await proxy.initialize()
+			setStorageWorks(false)
+
+			const writeA = Promise.resolve(proxy.updateGlobalState(KEY, "a"))
+			const writeB = Promise.resolve(proxy.updateGlobalState(KEY, "b"))
+
+			const settle = async (first: Promise<unknown>, second: Promise<unknown>) => {
+				await expect(first).rejects.toThrow("storage unavailable")
+				await expect(second).rejects.toThrow("storage unavailable")
+			}
+
+			if (_order === "A settles first") {
+				await settle(writeA, writeB)
+			} else {
+				await settle(writeB, writeA)
+			}
+
+			// Write B owns the current generation, so B is the only write allowed to restore. If
+			// it restored the cache content it found - write A's value - the cache would advertise
+			// 'a' while storage still holds 'X', which is the stale-cache state this guard exists
+			// to prevent.
+			expect(proxy.getGlobalState(KEY)).toBe("X")
+			expect(store.get(KEY)).toBe("X")
+		},
+	)
+
+	it("restores the value storage last confirmed rather than the value before the failed write", async () => {
+		const { proxy, store, setStorageWorks } = setup("X")
+		await proxy.initialize()
+
+		await Promise.resolve(proxy.updateGlobalState(KEY, "confirmed"))
+		expect(store.get(KEY)).toBe("confirmed")
+
+		setStorageWorks(false)
+		const failing = Promise.resolve(proxy.updateGlobalState(KEY, "rejected"))
+		await expect(failing).rejects.toThrow("storage unavailable")
+
+		expect(proxy.getGlobalState(KEY)).toBe("confirmed")
+		expect(store.get(KEY)).toBe("confirmed")
+	})
+})

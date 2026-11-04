@@ -46,9 +46,13 @@ export class ContextProxy {
 
 	private stateCache: GlobalState
 	private secretCache: SecretState
-	// Per-key write generations: a rejected write may only restore the cache while it is
-	// still the newest write for that key, so a newer write is never clobbered.
-	private stateWriteGenerations = new Map<GlobalStateKey, number>()
+	// Per-key write state. A rejected write may only restore the cache while it is still the
+	// newest write for that key, so a newer write is never clobbered - and what it restores is
+	// the last value storage confirmed for that key, not whatever the cache happened to hold
+	// when this write started. Two writes can be in flight at once, so write B's previous
+	// cached value may be write A's still-unconfirmed value; restoring that instead would
+	// leave the cache advertising a value storage never accepted.
+	private stateWrites = new Map<GlobalStateKey, { generation: number; confirmed: unknown }>()
 	private _isInitialized = false
 
 	constructor(context: vscode.ExtensionContext) {
@@ -67,6 +71,9 @@ export class ContextProxy {
 			try {
 				// Revert to original assignment
 				this.stateCache[key] = this.originalContext.globalState.get(key)
+				// Whatever storage handed back is, by definition, the value storage last
+				// confirmed for this key, so a later rejection can restore it.
+				this.stateWrites.set(key, { generation: 0, confirmed: this.stateCache[key] })
 			} catch (error) {
 				logger.error(`Error loading global ${key}: ${error instanceof Error ? error.message : String(error)}`)
 			}
@@ -371,19 +378,38 @@ export class ContextProxy {
 			return this.originalContext.globalState.update(key, value)
 		}
 
-		const previousCachedValue = this.stateCache[key]
-		const generation = (this.stateWriteGenerations.get(key) ?? 0) + 1
-		this.stateWriteGenerations.set(key, generation)
+		const prior = this.stateWrites.get(key)
+		const generation = (prior?.generation ?? 0) + 1
+		// Carry the last storage-confirmed value forward across the write: the cache's current
+		// content is not evidence that storage accepted it.
+		this.stateWrites.set(key, { generation, confirmed: prior?.confirmed })
 		this.stateCache[key] = value
 
-		return Promise.resolve(this.originalContext.globalState.update(key, value)).catch((error: unknown) => {
-			// Restore only while this write still owns the cache: a newer write may have
-			// replaced the value (even with the same value) before this rejection surfaced.
-			if (this.stateWriteGenerations.get(key) === generation) {
-				this.stateCache[key] = previousCachedValue
-			}
-			throw error
-		})
+		return Promise.resolve(this.originalContext.globalState.update(key, value))
+			.then((result) => {
+				// Storage accepted this value, so it becomes what a later rejection of this
+				// generation may restore. A newer write that already replaced the entry is
+				// left alone.
+				const entry = this.stateWrites.get(key)
+				if (entry?.generation === generation) {
+					entry.confirmed = value
+				}
+				return result
+			})
+			.catch((error: unknown) => {
+				// Restore only while this write still owns the cache: a newer write may have
+				// replaced the value (even with the same value) before this rejection surfaced.
+				const entry = this.stateWrites.get(key)
+				if (entry?.generation === generation) {
+					// The one widening cast here: this map is keyed by GlobalStateKey, so its
+					// value type is the union over every key, while the assignment needs the
+					// type of this key. Everything written into the map is either this key's
+					// own value or the value storage loaded for this key, so the narrowing is
+					// real and not assumed.
+					this.stateCache[key] = entry.confirmed as GlobalState[K]
+				}
+				throw error
+			})
 	}
 
 	private getAllGlobalState(): GlobalState {

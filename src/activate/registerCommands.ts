@@ -511,7 +511,7 @@ const createTabPanelUnlocked = async ({
 		newPanel.onDidDispose(
 			() => {
 				if (tabPanel === newPanel) {
-				// A recovery may already have installed a replacement panel.
+					// A recovery may already have installed a replacement panel.
 					setPanel(undefined, "tab")
 				}
 			},

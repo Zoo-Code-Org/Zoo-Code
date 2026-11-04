@@ -1091,6 +1091,36 @@ describe("ProviderSettingsManager", () => {
 				"Config with ID 'missing-id' not found",
 			)
 		})
+		it("resolves a known id lookup to the profile that owns it", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						default: { config: {}, id: "default" },
+						named: {
+							apiProvider: providerIdentifiers.anthropic,
+							id: "known-id",
+						},
+					},
+				}),
+			)
+
+			const profile = await providerSettingsManager.getProfile({ id: "known-id" })
+
+			// The two reject cases above would still pass if getProfile refused every id. This is
+			// the accept path through the same public entry point, and it pins exactly what the
+			// mode mapping and deleteProviderProfile consume: the id, the name the id was found
+			// under, and the settings themselves.
+			// A deliberately non-empty config: an empty one is normalized away by load(), so
+			// asserting on it would not prove the settings themselves come back.
+			// Settings, not just identity: an empty config is normalized away by load(), so the
+			// setting is carried in the fixture the way the sibling cases do.
+			expect(profile).toMatchObject({
+				id: "known-id",
+				name: "named",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+		})
 
 		it("should throw error if secrets storage fails", async () => {
 			mockSecrets.get.mockResolvedValue(
