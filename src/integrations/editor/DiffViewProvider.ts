@@ -124,6 +124,10 @@ export class DiffViewProvider {
 	 */
 	private sessionFinalizationClaimed = false
 	private finalizationInFlight: Promise<void> | undefined
+	// A session transition that has been reserved but not yet claimed. open() writes this
+	// synchronously, before its first await, so a reset() arriving in the gap joins the
+	// transition instead of finalizing underneath a session that is still starting.
+	private sessionStartInFlight: Promise<void> | undefined
 	// Counts the teardown passes this provider has actually run; a caller that awaited an
 	// in-flight pass does not count. A save uses it to tell its own post-publish cleanup apart
 	// from a teardown a cancellation or disposal started underneath it: once any teardown has
@@ -227,6 +231,21 @@ export class DiffViewProvider {
 		// be joined by the new session's first save, skipping that save's own cleanup.
 		// Serialize: the prior finalization and teardown settle before this session claims
 		// the provider.
+		// Reserve the transition before the first await. Everything below is claimed only after
+		// these promises settle, so a reset() that lands in between has to join the reservation:
+		// otherwise the interleaving is open() suspending on the previous session's cleanup,
+		// reset() running its whole teardown and finishing, and open() resuming to claim isEditing,
+		// listeners and a deferred scroll timer that no live session owns.
+		// The reservation settles only when the transition ends, not when the previous session's cleanup
+		// does, so a reset() that joins it finalizes a session whose claiming is finished instead of
+		// running against fields open() has not written yet. Every exit from the transition settles
+		// it: the openDiffEditor failure path and the end of open() below are the two exits this
+		// transition has today.
+		let settleSessionStart: () => void = () => {}
+		const startReservation = new Promise<void>((resolve) => {
+			settleSessionStart = resolve
+		})
+		this.sessionStartInFlight = startReservation
 		await this.finalizationInFlight?.catch(() => {})
 		await this.teardownInFlight?.catch(() => {})
 		this.relPath = relPath
@@ -418,6 +437,9 @@ export class DiffViewProvider {
 			// revertChanges() to undo, so the unapproved file (and the directories made for
 			// it) would stay on disk: undo that part of the open here.
 			await this.undoPartialOpen(absolutePath)
+			// The transition ended without claiming a session: release the reservation.
+			this.sessionStartInFlight = undefined
+			settleSessionStart()
 			this.isEditing = false
 			this.createdDirs = []
 			this.placeholderVersion = undefined
@@ -498,6 +520,11 @@ export class DiffViewProvider {
 				}
 			}
 		})
+		// The session is claimed and its listeners are registered, so the reservation has done its job.
+		// A later reset() joining a settled reservation is a no-op; releasing only keeps the field honest
+		// about what is still in flight.
+		this.sessionStartInFlight = undefined
+		settleSessionStart()
 	}
 
 	/**
@@ -2084,6 +2111,14 @@ export class DiffViewProvider {
 	async reset(): Promise<void> {
 		if (this.sessionFinalizationClaimed) {
 			return
+		}
+		// Join a session transition that was reserved but has not finished claiming. open() writes
+		// this before its first await; waiting for it means this finalization sees the session that
+		// is starting and tears down what that session actually set up, instead of clearing fields
+		// open() claims after it. A reservation that already settled is a no-op to join.
+		const starting = this.sessionStartInFlight
+		if (starting !== undefined) {
+			await starting.catch(() => {})
 		}
 		if (this.finalizationInFlight) {
 			// Join the attempt already running instead of starting a second teardown.

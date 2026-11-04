@@ -1457,6 +1457,49 @@ describe("DiffViewProvider", () => {
 			expect(observation?.complete).toBe(false)
 		})
 
+		it("a reset() landing during open() joins the reserved session transition", async () => {
+			// The row's interleaving: open() suspends while the previous session's cleanup settles, and
+			// a reset() arrives in that gap. open() reserves the transition before its first await, so
+			// the finalization waits for the session that is starting and tears down what that session
+			// actually set up. Without the reservation the teardown runs and finishes first, and open()
+			// resumes to claim a session no live owner exists for. The gate pins open() inside its
+			// reservation, so the interleaving is the one under test and not a race the harness
+			// happens to lose.
+			const mockEditor = mockTextEditor(`${mockCwd}/raced.ts`)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/raced.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			diffViewProvider.editType = "modify"
+			let releaseGate: () => void = () => {}
+			const gate = new Promise<void>((resolve) => {
+				releaseGate = resolve
+			})
+			diffViewProvider["teardownInFlight"] = gate
+			diffViewProvider["sessionFinalizationClaimed"] = false
+
+			const opening = diffViewProvider.open("raced.ts")
+			await Promise.resolve()
+			const resetting = diffViewProvider.reset()
+			await Promise.resolve()
+			releaseGate()
+
+			await Promise.all([opening, resetting])
+
+			// The leak this ordering prevents is a preview observation a finished teardown never
+			// withdraws because it had not been recorded yet: left behind, it authorizes a later
+			// targeted edit for a file the model never read in a session nobody owns. Joining the
+			// reservation makes the finalization see the session that started, so its own withdrawal
+			// hook covers that session's entry.
+			expect(mockTask.observationRegistry.has(`${mockCwd}/raced.ts`)).toBe(false)
+			expect(diffViewProvider["sessionStartInFlight"]).toBeUndefined()
+			expect(diffViewProvider.isEditing).toBe(false)
+		})
+
 		it("open() observes the empty placeholder of a new file so the accepted save can be guarded", async () => {
 			const mockEditor = mockTextEditor(`${mockCwd}/brand-new.ts`)
 			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
