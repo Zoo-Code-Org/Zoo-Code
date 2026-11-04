@@ -2079,6 +2079,63 @@ describe("ReadFileTool", () => {
 				expect(mockTask.observationRegistry!.size).toBe(0)
 			})
 
+			it("drops the stale observation when the version-token lookup fails after an earlier successful read", async () => {
+				// Warm-state companion to the cold test above, which starts from an empty
+				// registry. Here the registry already holds a token from a previous read of
+				// the same path, so the failed lookup has to drop it: otherwise the write
+				// guard keeps comparing against a token that no longer describes the file.
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				const okStats = {
+					isDirectory: () => false,
+					dev: BigInt(1),
+					ino: BigInt(2),
+					size: BigInt(300),
+					mtimeNs: BigInt(4_000_000_000n),
+					ctimeNs: BigInt(5_000_000_000n),
+					// Cast: the mock only implements the members the tool and versionToken read.
+				} as unknown as Stats
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+
+				// Each read stats the path twice: once to rule out a directory and once for
+				// the version token. Only the token lookup is made to fail.
+				let statCalls = 0
+				let failTokenLookup = false
+				mockedFsStat.mockImplementation(async () => {
+					statCalls++
+					if (failTokenLookup && statCalls % 2 === 0) {
+						throw new Error("EACCES")
+					}
+					return okStats
+				})
+
+				// Seed: a successful read records an observation for the resolved path.
+				await readFileTool.execute({ path: "existing.ts" }, mockTask as unknown as Task, callbacks)
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [observedPath, observedVersion] = observeSpy.mock.calls[0]
+				expect(reg.get(observedPath)?.version).toBe(observedVersion)
+
+				// The next read of the same path loses its token lookup.
+				failTokenLookup = true
+				await readFileTool.execute({ path: "existing.ts" }, mockTask as unknown as Task, callbacks)
+
+				// The read itself still succeeded: content is preserved, no failure flag.
+				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
+				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("existing.ts"))
+				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("content"))
+
+				// The failed lookup observed nothing and dropped the stale entry.
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				expect(reg.get(observedPath)).toBeUndefined()
+				expect(reg.size).toBe(0)
+			})
+
 			it("a failed version-token lookup on a legacy read keeps the result and leaves the registry empty", async () => {
 				const mockTask = createMockTask({
 					observationRegistry: new ObservationRegistry(),
@@ -2128,6 +2185,75 @@ describe("ReadFileTool", () => {
 
 				// The failed token lookup never observes: the registry stays empty.
 				expect(mockTask.observationRegistry!.size).toBe(0)
+			})
+
+			it("drops the stale observation when a legacy read loses its version token after an earlier successful read", async () => {
+				// Warm-state companion on the legacy multi-file path, for the same reason as
+				// the native case above: the entry from the first read must not survive a
+				// token lookup that failed on the second.
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				const okStats = {
+					isDirectory: () => false,
+					dev: BigInt(1),
+					ino: BigInt(2),
+					size: BigInt(300),
+					mtimeNs: BigInt(4_000_000_000n),
+					ctimeNs: BigInt(5_000_000_000n),
+					// Cast: the mock only implements the members the tool and versionToken read.
+				} as unknown as Stats
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue("legacy content")
+				// The legacy path slices the raw content through readWithSlice.
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | legacy content",
+					returnedLines: 1,
+					totalLines: 1,
+					wasTruncated: false,
+					includedRanges: [[1, 1]],
+				})
+
+				// Each read stats the path twice: once to rule out a directory and once for
+				// the version token. Only the token lookup is made to fail.
+				let statCalls = 0
+				let failTokenLookup = false
+				mockedFsStat.mockImplementation(async () => {
+					statCalls++
+					if (failTokenLookup && statCalls % 2 === 0) {
+						throw new Error("EACCES")
+					}
+					return okStats
+				})
+
+				// Typed legacy (pre-refactor) params: the multi-file format with the
+				// _legacyFormat discriminant (see LegacyReadFileParams).
+				const legacyParams: LegacyReadFileParams = {
+					files: [{ path: "legacy.ts" }],
+					_legacyFormat: true,
+				}
+
+				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [observedPath, observedVersion] = observeSpy.mock.calls[0]
+				expect(observedPath).toContain("legacy.ts")
+				expect(reg.get(observedPath)?.version).toBe(observedVersion)
+
+				failTokenLookup = true
+				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
+
+				// The legacy read still succeeded: content is preserved, no failure flag.
+				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
+				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("legacy.ts"))
+				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("legacy content"))
+
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				expect(reg.get(observedPath)).toBeUndefined()
+				expect(reg.size).toBe(0)
 			})
 
 			it("records an observation for legacy-format reads of existing files", async () => {
