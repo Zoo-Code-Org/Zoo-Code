@@ -17,18 +17,10 @@ describe("nextSaveRequestId", () => {
 		vi.resetModules()
 		const afterReload = (await import("../saveRequestId")).nextSaveRequestId()
 
-		// Both are the first save of their load, so only the part that is different on every load tells them apart.
+		// Both are the first save of their load, so only the part that is different on every load tells them apart
+		// (with the counter alone they would be equal).
 		expect(beforeReload.endsWith("-1")).toBe(true)
 		expect(afterReload.endsWith("-1")).toBe(true)
 		expect(afterReload).not.toBe(beforeReload)
-	})
-
-	it("would repeat without the part that differs per load", async () => {
-		// The reason the part exists: with the counter alone, the first save after a reload has the first save's id.
-		const counterOnly = () => {
-			let counter = 0
-			return () => `settings-save-${++counter}`
-		}
-		expect(counterOnly()()).toBe(counterOnly()())
 	})
 })

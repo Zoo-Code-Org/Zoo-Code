@@ -391,7 +391,7 @@ describe("appearanceSettingWrites", () => {
 			await performSettingWrite(proxy, write)
 			const settled = vi.fn()
 
-			await undoSettingWrite(proxy, write, settled)
+			await undoSettingWrite(proxy, write, { onDeferredSettled: settled })
 
 			expect(settled).not.toHaveBeenCalled()
 			expect(stored.get("interfaceFontScale")).toBe(100)
