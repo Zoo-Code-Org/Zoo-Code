@@ -3,6 +3,7 @@ import { telemetryClient } from "@src/utils/TelemetryClient"
 import { withTranslation, WithTranslation } from "react-i18next"
 import { enhanceErrorWithSourceMaps } from "@src/utils/sourceMapUtils"
 import { EXTERNAL_LINKS } from "@src/constants/externalLinks"
+import { recordDiagnosticsError } from "@src/utils/diagnostics"
 
 type ErrorProps = {
 	children: React.ReactNode
@@ -36,6 +37,7 @@ class ErrorBoundary extends Component<ErrorProps, ErrorState> {
 	}
 
 	async componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+		recordDiagnosticsError("errorBoundary", error)
 		const componentStack = errorInfo.componentStack || ""
 		const enhancedError = await enhanceErrorWithSourceMaps(error, componentStack)
 
