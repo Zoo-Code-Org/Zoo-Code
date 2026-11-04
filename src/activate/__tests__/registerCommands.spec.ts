@@ -1049,6 +1049,32 @@ describe("openClineInNewTab", () => {
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
 	})
 
+	it("gives each overlapping forced call its own provider", async () => {
+		// startNewTask({ newTab: true }) forces a new tab because it has just closed the editors.
+		// Two of those overlapping must not join the same creation: sharing one provider would make
+		// both callers evict and re-create the task on the same webview and lose the first task.
+		const first = openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+			forceNew: true,
+		})
+		const second = openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+			forceNew: true,
+		})
+
+		const [firstProvider, secondProvider] = await Promise.all([first, second])
+
+		const ctor = vi.mocked(ClineProvider)
+		expect(ctor.mock.instances.length).toBe(2)
+		expect(firstProvider).toBe(ctor.mock.instances[0])
+		expect(secondProvider).toBe(ctor.mock.instances[1])
+		expect(firstProvider).not.toBe(secondProvider)
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
+	})
 	it("shares one in-flight creation when openInNewTab and popoutButtonClicked start before it resolves", async () => {
 		// Defer the first creation at ContextProxy.getInstance so both command
 		// handlers can start while the creation is still in flight.

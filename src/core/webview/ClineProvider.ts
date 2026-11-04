@@ -5468,6 +5468,43 @@ export class ClineProvider
 		this.viewLocalState = {}
 	}
 
+	/**
+	 * Clears the per-view `mode` override of every live view that pinned `slug`.
+	 *
+	 * Deleting a custom mode only moves the acting view to the default mode. A sibling that
+	 * pinned the deleted slug still holds it in its own overlay and in its own durable
+	 * viewStates entry, so that view's getState() reports a mode that no longer exists and any
+	 * task it creates writes that slug into its history. Only overrides that name the deleted
+	 * slug are cleared - a sibling serving another mode keeps its own - and each affected view
+	 * gets its own postStateToWebview, the same fan-out resetState() uses. The acting view is
+	 * the caller's business: its reset goes through setValue, which updates its own overlay.
+	 */
+	async clearViewLocalModeForDeletedSlug(slug: string): Promise<void> {
+		for (const instance of ClineProvider.getAllInstances()) {
+			if (instance === this) {
+				continue
+			}
+
+			// Direct private access: compile-time safe across sibling instances.
+			if (instance.viewLocalState.mode !== slug) {
+				continue
+			}
+
+			try {
+				await instance._saveViewLocalStateFromMutation({ mode: undefined })
+			} catch (error) {
+				instance.log(
+					`[clearViewLocalModeForDeletedSlug] Failed to clear the mode override for '${slug}': ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+				continue
+			}
+
+			await instance.postStateToWebview()
+		}
+	}
+
 	// dev
 
 	async resetState() {

@@ -121,6 +121,8 @@ const mockClineProvider = {
 	},
 	// The per-view write path; deleteCustomMode routes its mode reset through it.
 	setValue: vi.fn(),
+	// deleteCustomMode also clears the same slug out of every other live view's per-view state.
+	clearViewLocalModeForDeletedSlug: vi.fn().mockResolvedValue(undefined),
 	contextProxy: {
 		context: {
 			extensionPath: "/mock/extension/path",
@@ -1772,6 +1774,27 @@ describe("webviewMessageHandler - deleteCustomMode", () => {
 		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
 	})
 
+	it("clears the deleted mode out of every other live view's per-view state", async () => {
+		const slug = "test-sibling-mode"
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([
+			{ name: "Test Sibling Mode", slug, roleDefinition: "Test Role", groups: [] } as ModeConfig,
+		])
+		vi.mocked(fsUtils.fileExistsAtPath).mockResolvedValue(false)
+		vi.mocked(mockClineProvider.customModesManager.deleteCustomMode).mockResolvedValue(undefined)
+		vi.mocked(mockClineProvider.setValue).mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, { type: "deleteCustomMode", slug })
+
+		// The acting view moves to the default through setValue above. That write does not reach
+		// a sibling that pinned the slug: its getState() would keep reporting a deleted mode and a
+		// task created there would store it, so the handler fans the clear out after its own write.
+		expect(mockClineProvider.setValue).toHaveBeenCalledWith("mode", defaultModeSlug)
+		expect(mockClineProvider.clearViewLocalModeForDeletedSlug).toHaveBeenCalledWith(slug)
+		expect(
+			vi.mocked(mockClineProvider.clearViewLocalModeForDeletedSlug).mock.invocationCallOrder[0],
+		).toBeGreaterThan(vi.mocked(mockClineProvider.setValue).mock.invocationCallOrder[0])
+	})
+
 	it("should delete a global mode and its rules folder", async () => {
 		const slug = "test-global-mode"
 		const homeDir = os.homedir()
@@ -2685,7 +2708,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		expect(order).toEqual(["repoint", "delete"])
 	})
 
-	it("points the shared selection at the renamed profile when the activation fails", async () => {
+	it("restores the pre-rename profile when the activation after a rename fails", async () => {
 		provider.providerSettingsManager = {
 			hasConfig: vi.fn().mockResolvedValue(false),
 			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
@@ -2702,10 +2725,35 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
 		})
 
-		// The rename is committed at this point (new record stored, old name deleted), so
-		// activation's own rollback restores the deleted old name: the shared selection has
-		// to be re-pointed at the stored record instead.
-		expect(mockClineProvider.setValue).toHaveBeenCalledWith("currentApiConfigName", "new-profile")
+		// The rename committed (new record stored, old name deleted) and the failed activation's
+		// own rollback already put the shared selection, the shared settings, this view's pin and
+		// this view's overlay back on old-profile. Writing newName to the shared selection there
+		// would pair that name with settings belonging to another profile, so the handler restores
+		// the record the rename deleted, pulls the views back to it with that record, and drops the
+		// record this rename authored. Every pair stays a pair.
+		expect(mockClineProvider.providerSettingsManager.saveConfig).toHaveBeenCalledWith(
+			"old-profile",
+			expect.objectContaining({ id: "profile-id" }),
+		)
+		expect(provider.repointViewLocalStateAfterProfileRename).toHaveBeenLastCalledWith(
+			"new-profile",
+			"old-profile",
+			expect.objectContaining({ id: "profile-id" }),
+		)
+		expect(mockClineProvider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("new-profile")
+		// The rename legitimately deletes old-profile before the activation runs, so the ordering is
+		// the assertion that matters: restoring the record before that delete would let the delete
+		// undo the restore and leave the selection naming a missing profile again.
+		const deleteOldCall = vi
+			.mocked(mockClineProvider.providerSettingsManager.deleteConfig)
+			.mock.calls.findIndex(([name]) => name === "old-profile")
+		const restoreOldCall = vi
+			.mocked(mockClineProvider.providerSettingsManager.saveConfig)
+			.mock.calls.findIndex(([name]) => name === "old-profile")
+		expect(restoreOldCall).toBeGreaterThan(deleteOldCall)
+		// The fallback must not move the shared selection on its own, and it must not resurrect a
+		// delete of the name it just restored.
+		expect(mockClineProvider.setValue).not.toHaveBeenCalledWith("currentApiConfigName", expect.anything())
 	})
 	it("leaves another rename's record alone when its own compensation runs", async () => {
 		provider.providerSettingsManager = {

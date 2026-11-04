@@ -321,7 +321,12 @@ export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
 	// is in flight — openInNewTab and popoutButtonClicked both dispatch
 	// through here — awaits it instead of creating a second panel: exactly
 	// one panel is created and every caller receives the same provider.
-	if (pendingTabPanelCreation) {
+	// A forced call must not join somebody else's in-flight creation. forceNew means
+	// "this caller has just closed the editors and needs its own provider", so two
+	// overlapping startNewTask({ newTab: true }) calls must each get a distinct provider:
+	// sharing one would make both evict and re-create the task on the same webview. The
+	// non-forced callers - the title-bar reveal buttons - keep reusing the pending panel.
+	if (pendingTabPanelCreation && !options.forceNew) {
 		return pendingTabPanelCreation
 	}
 

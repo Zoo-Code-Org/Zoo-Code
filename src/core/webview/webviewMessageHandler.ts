@@ -2591,18 +2591,24 @@ export const webviewMessageHandler = async (
 					// Re-activate to update the global settings related to the
 					// currently activated provider profile. The rename has already committed by
 					// now (the new record is stored, the old name is deleted, and every live
-					// view was re-pointed), and activateProviderProfile restores the selection
-					// it replaced - which is the deleted oldName. Point the shared selection at
-					// the stored newName instead, so the failure cannot leave consumers
-					// resolving a profile that no longer exists.
+					// view was re-pointed). If that activation fails its own rollback puts the
+					// shared selection, the shared settings, this view's pin and this view's
+					// overlay back on oldName - the record this rename just deleted. Re-pointing
+					// the selection at newName would pair that name with settings that still
+					// belong to another profile, so the failure completes the rollback instead:
+					// restore the record this rename deleted, re-point the views at it with the
+					// record they were pinned to, and drop the record this rename authored. Every
+					// pair stays a pair, and nothing points at a name that does not resolve.
 					try {
 						await provider.activateProviderProfile({ name: newName })
 					} catch (error) {
 						try {
-							await provider.setValue("currentApiConfigName", newName)
-						} catch (selectionError) {
+							await provider.providerSettingsManager.saveConfig(oldName, previousRecord)
+							await provider.repointViewLocalStateAfterProfileRename(newName, oldName, previousRecord)
+							await removeOwnRenameRecord()
+						} catch (rollbackError) {
 							provider.log(
-								`Rename activation failed and the shared selection could not be re-pointed at '${newName}': ${JSON.stringify(selectionError, Object.getOwnPropertyNames(selectionError), 2)}`,
+								`Rename activation failed and the pre-rename state could not be restored: ${JSON.stringify(rollbackError, Object.getOwnPropertyNames(rollbackError), 2)}`,
 							)
 						}
 						throw error
@@ -2848,6 +2854,12 @@ export const webviewMessageHandler = async (
 				// task created there) while the shared store says default.
 				await provider.setValue("mode", defaultModeSlug)
 				await provider.postStateToWebview()
+
+				// Sibling views are not covered by the write above: a view that pinned the deleted
+				// slug still holds it in its own per-view state, so its getState() reports a mode
+				// that no longer exists and any task created there stores it. Clear only the
+				// overrides that name the deleted slug, with the same fan-out resetState() uses.
+				await provider.clearViewLocalModeForDeletedSlug(message.slug)
 			}
 			break
 		case "exportMode":

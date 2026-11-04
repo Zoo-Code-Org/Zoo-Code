@@ -5642,6 +5642,58 @@ describe("ClineProvider", () => {
 				await provider.dispose()
 			}
 		})
+		it("clears only the live views whose per-view mode names the deleted slug", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const pinned = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const other = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const viewStates = () => mockContext.globalState.get("viewStates") as Record<string, { mode?: string }>
+			try {
+				await pinned["setViewStateId"]("pinned-view")
+				await other["setViewStateId"]("other-view")
+				// Both views pin a mode in their own overlay and in their own durable entry.
+				await pinned["_saveViewLocalStateFromMutation"]({ mode: "deleted-mode" })
+				await other["_saveViewLocalStateFromMutation"]({ mode: "another-mode" })
+				vi.spyOn(pinned, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(other, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+				await provider.clearViewLocalModeForDeletedSlug("deleted-mode")
+
+				// The view that pinned the deleted slug loses the override in both layers, so its
+				// getState() and any task it creates fall back to the default mode.
+				expect(pinned["viewLocalState"].mode).toBeUndefined()
+				expect(viewStates()["pinned-view"]?.mode).toBeUndefined()
+				expect(pinned.postStateToWebview).toHaveBeenCalledTimes(1)
+				// A view serving another mode keeps its own override and is not disturbed.
+				expect(other["viewLocalState"].mode).toBe("another-mode")
+				expect(viewStates()["other-view"]?.mode).toBe("another-mode")
+				expect(other.postStateToWebview).not.toHaveBeenCalled()
+				// The acting view is the caller's business: its reset goes through setValue.
+				expect(provider.postStateToWebview).not.toHaveBeenCalled()
+			} finally {
+				await pinned.dispose()
+				await other.dispose()
+				await provider.dispose()
+			}
+		})
 		it("does not re-point a pinned sibling's task that follows another profile when its profile is deleted", async () => {
 			// Defensive: the doubles in this suite can leave console writes pending
 			// at worker teardown.
