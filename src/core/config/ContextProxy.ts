@@ -35,7 +35,7 @@ export class SettingsWriteError extends Error {
 	constructor(
 		readonly committed: string[],
 		readonly failed: string[],
-		readonly cause: unknown,
+		override readonly cause: unknown,
 	) {
 		super(
 			`Could not store ${failed.join(", ")}${committed.length > 0 ? ` (stored: ${committed.join(", ")})` : ""}: ${
