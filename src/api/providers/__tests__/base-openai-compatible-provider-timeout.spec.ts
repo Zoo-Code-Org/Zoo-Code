@@ -139,7 +139,13 @@ describe("BaseOpenAiCompatibleProvider Timeout Configuration", () => {
 		let requestSignal: AbortSignal | undefined
 		mockCreate.mockImplementation(async (_params: unknown, config: { signal?: AbortSignal }) => {
 			requestSignal = config.signal
-			await new Promise((resolve) => setTimeout(resolve, 20))
+			// Poll the condition the classification depends on - the merged timeout signal firing -
+			// instead of sleeping a fixed interval that merely happens to outlast the 5 ms timeout.
+			await vitest.waitFor(() => {
+				if (!requestSignal?.aborted) {
+					throw new Error("the merged timeout signal has not fired yet")
+				}
+			})
 			throw new openai.APIUserAbortError()
 		})
 
